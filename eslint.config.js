@@ -31,7 +31,13 @@ const restrictImports = (...patterns) => ({
 });
 
 export default defineConfig([
-  globalIgnores(["node_modules/", "eslint.config.js"]),
+  globalIgnores([
+    "node_modules/",
+    "out/",
+    "app/desktop/src-tauri/target/",
+    "app/desktop/src-tauri/gen/",
+    "eslint.config.js",
+  ]),
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,
   {
@@ -42,6 +48,7 @@ export default defineConfig([
           "./tsconfig.core.json",
           "./tsconfig.tools.json",
           "./tsconfig.test.json",
+          "./tsconfig.ui.json",
         ],
         tsconfigRootDir: import.meta.dirname,
       },
@@ -71,6 +78,7 @@ export default defineConfig([
       "engine/story/**/*.ts",
       "engine/sdk/**/*.ts",
       "engine/prep/**/*.ts",
+      "engine/shell/**/*.ts",
     ],
     rules: restrictImports(
       engineMustNotImport,
@@ -81,6 +89,7 @@ export default defineConfig([
   {
     files: [
       "plugins/systems/*/core/**/*.ts",
+      "plugins/systems/*/ui/**/*.ts",
       "tests/fixtures/system-d6/**/*.ts",
     ],
     rules: restrictImports(systemMustNotImport, nodeImports),

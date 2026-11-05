@@ -1,6 +1,6 @@
 # Technical Design: Re-roll
 
-**Status:** Draft for review. Build steps 1 to 3 are complete, and a first slice of step 4 is playable from the command line. There's no UI yet.
+**Status:** Draft for review. Build steps 1 to 3 are complete, a first slice of step 4 is playable from the command line, and the importer handles spells. There's no UI yet.
 **Checked:** 5 November 2026. Package versions came from the npm registry that day.
 
 ## 1. Goal and assumptions
@@ -136,7 +136,7 @@ export interface ModelClient {
 }
 ```
 
-The UI runs through `tauri dev` from the start, so there's no separate browser storage to build. This means a Rust toolchain is needed for development, but not for playing.
+The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `private/` through a read-only endpoint on the dev server. Both keep saves in the webview's own storage for now, so the file scopes stay limited to the two content folders.
 
 ## 4. Plugin system
 
@@ -313,7 +313,8 @@ Every system must emit these events, so that prep, the director and companions c
 |---|---|
 | `checkResolved` | A check finished, with its outcome key |
 | `actorDowned` / `actorDefeated` | Someone is out of the fight, or gone for good |
-| `encounterStarted` / `encounterEnded` | A fight or similar conflict began or finished |
+| `encounterStarted` / `encounterEnded` | A fight or similar conflict began or finished. An optional outcome says `defeat` or `flee`, and with none it was won |
+| `clueRevealed` | The player learned a secret's clue, with its text. The engine emits this one, when a `reveal` effect fires |
 | `levelGained` | A character advanced |
 | `itemGained` / `itemLost` | Something changed hands |
 | `gmOpportunity` | The rules say the GM may now act |
@@ -327,12 +328,13 @@ These are generic concepts, and the engine has no knowledge of any particular ad
 
 | Concept | Purpose |
 |---|---|
-| **Scene** | Text, art and choices. A scene with no choices is an ending |
-| **Condition** | Flags, attitudes and clocks, combined with `all` or `any`, plus predicates registered by the system |
-| **Story effect** | Engine effects: `setFlag`, `goto`, `advanceClock`, `adjustAttitude`, `startEncounter`, `reveal`. Everything else is a namespaced system effect |
+| **Scene** | Text, art and choices. A scene with no choices is an ending. Optional `textVariants` replace the text when their condition holds, and the first match wins |
+| **Condition** | Flags, attitudes, clocks and resources (`atLeast`, `atMost` or both), scenes `visited`, combined with `all` or `any`, plus predicates registered by the system |
+| **Story effect** | Engine effects: `setFlag`, `goto`, `advanceClock`, `adjustAttitude`, `adjustResource`, `startEncounter`, `reveal`. Everything else is a namespaced system effect |
+| **Resource** | A named party number such as gold, declared with its starting value under `resources` in `adventure.yaml`. It can't go below 0, so a choice that costs something checks the price with a condition first |
 | **NPC** | Motives, knowledge, attitude, and a system-specific stat reference |
 | **Faction and clock** | Goals that advance with time and player choices, with effects at set thresholds |
-| **Secret** | Hidden truth with several clues and unlock conditions, so one failed roll can't end the story |
+| **Secret** | Hidden truth with several clues and unlock conditions, so one failed roll can't end the story. A `reveal` shows the player the clue for the current scene, or the first clue if this scene has none, and never the truth |
 | **Variant** | Seed-chosen alternatives, such as who the spy is |
 | **Beat** | Event in the director's pool, with conditions and a weight |
 
@@ -352,7 +354,29 @@ A scene's `check` and `results` are the only part tied to rules. The system's sc
           - { kind: goto, scene: ambush-surprised }
 ```
 
-Scene checks are made by the player's character. Branching on how an encounter ended, such as capture or retreat, isn't built yet: a run either continues after a win or ends on a defeat.
+Scene checks are made by the player's character.
+
+**Encounter outcomes.** An encounter can branch on how it ends, using three optional lists of story effects. These keys belong to the story, and the rest of the entry goes to the system's encounter schema:
+
+```yaml
+- id: rearguard
+  monsters:
+    - { monster: "srd52:monster/goblin-warrior", count: 3 }
+  onVictory: [{ kind: setFlag, flag: road-clear }]
+  onDefeat: [{ kind: goto, scene: captured }]
+  onFlee: [{ kind: goto, scene: back-at-camp }]
+```
+
+| Ending | With the list | Without it |
+|---|---|---|
+| **Win** | The choice's remaining effects run, then `onVictory`. Its `goto` replaces the choice's own | The choice's remaining effects run |
+| **Party down, player's character alive** | `onDefeat` runs and the choice's remaining effects are dropped | The run ends in defeat |
+| **Fleeing** | The player can flee on their turn. `onFlee` runs and the choice's remaining effects are dropped | Fleeing isn't offered |
+| **Player's character dead** | The run ends in defeat | The run ends in defeat |
+
+An outcome with no `goto` leaves the party in the current scene. The engine tells the system what's allowed through the third argument of `startEncounter`, `{ canFlee, defeatContinues }`, and the system reports the ending as an `encounterEnded` outcome, keeping `partyDefeated` for a loss the run can't survive. A system with no such rules can ignore the argument.
+
+**Party scaling and rests** are the D&D plugin's. An encounter's optional `forPartySize` says how big a party its monster counts were written for, and each count scales to the living party when the fight starts, rounded and never below 1. The plugin's `shortRest` effect spends hit dice between fights.
 
 **The director** is a plain function that picks the next beat from the eligible ones, using the seed and current state. It also answers `gmOpportunity` events. If an adventure has no eligible beats, the base story continues as written.
 
@@ -707,13 +731,23 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 
 ### 8.12 What step 4 has built so far
 
-**Content:** four level 1 pregens (Fighter, Rogue, Cleric and Wizard), three monsters, and enough of the SRD to support them. The adventures can also bring their own monsters, as the Goblin Chief does.
+**Content:** four level 1 pregens, and Fighter, Rogue, Cleric and Wizard from level 1 to 5 with one subclass each, three species, three monsters, and enough of the SRD to support them. The adventures can also bring their own monsters, as the Goblin Chief does.
 
 | Automation | Content |
 |---|---|
-| `full` | Weapon attacks, Second Wind, Fire Bolt, Sacred Flame, Cure Wounds, Healing Word, Bless, Fireball |
+| `full` | Weapon attacks, Extra Attack, Second Wind, Fire Bolt, Sacred Flame, Cure Wounds, Healing Word, Bless, Fireball |
 | `partial` | Sneak Attack, Shield (no Magic Missile immunity), Magic Missile (all darts strike one target) |
 | `text` | Fighting Style, Weapon Mastery, Expertise, Thieves' Cant, Spellcasting, Divine Order, Ritual Adept, Arcane Recovery, species traits, origin feats, Sleep |
+
+**Characters run through the engine's decision system too** (`core/character.ts`, `core/rest.ts`), so the terminal and the UI need nothing of their own:
+- **Creation:** the player takes a pregen or creates a character: class, species, background, the standard array one score at a time, the background increase, then the level's choices one pick at a time. Gear is picked automatically.
+- **In-progress choices live in frames** on the stack, with `awaitDecision`, so a save mid-creation resumes in place and the state schema gains nothing but `xp`. The finished character arrives as the existing `characterChosen` event.
+- **What a level asks for** comes from `levelChoices`. A class can state `choices`, and imported classes don't, so the rest is read from the level's grants (a name ending `-subclass`, `-ability-score-improvement`, `-fighting-style` or `-epic-boon`) and how `scaling.cantrips`, `scaling.preparedSpells` and `scaling.weaponMastery` change. A stated choice replaces an inferred one with the same id. The same convention reads Extra Attack and Pact Magic from their names.
+- **Levelling:** the story decides. `dnd5.5e:awardXp` adds XP, and `dnd5.5e:levelUp` is a milestone that awards whatever reaches the next level, so one number drives both. Hit points use the fixed value (half the die plus one), and a higher Constitution raises every earlier level too. Content can stop short of level 20, and characters then stay where they are.
+- **Rests:** `dnd5.5e:shortRest` lets the player spend Hit Dice one at a time, and `dnd5.5e:longRest` restores HP, Hit Dice and slots, clears temporary HP and removes one level of Exhaustion. Features recharge from their `resources` data, and Pact Magic slots return on a Short Rest.
+- **Companions** get their personality from `rollCompanions` and their character from the same steps the player answers, answered by policy with the world dice, so each run differs. They favor their class's abilities and spells that do something in play, avoid repeating a class, and level whenever the player does.
+
+**To finish this for an imported book,** parse it again with `npm run import -- parse`. That adds what older imports lack: each class's skill list (until then, any two skills), Martial weapon limits such as the Rogue's (`martialWeaponProperties`, until then all Martial weapons), and the new `subclasses` kind (until then the subclass choice is skipped).
 
 **Combat runs through the engine's decision system.** Initiative and turns are handled entirely by the plugin, and simple code-based tactics play monsters and companions: heal an ally below half HP, otherwise attack the weakest enemy. Companions use cantrips and weapons, but don't spend spell slots to attack.
 
@@ -721,11 +755,11 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 
 **Deliberately cut for now, each with a `shortcut:` comment where it applies:**
 - **No positions:** there's no grid, movement or Opportunity Attacks, and everyone in a fight can reach everyone. Areas hit all enemies, and Sneak Attack treats any living ally as nearby.
-- **Character building:** you choose from pregens, as character creation and levels above 1 aren't built. XP isn't tracked.
-- **Spell rules:** no upcasting at runtime, cantrip scaling, spell preparation or the one-spell-slot-per-turn rule.
-- **Other rules:** no multiclassing, rests, weapon mastery effects or armor training limits. Conditions and forced movement are stored in data but do nothing yet.
+- **Character building:** no multiclassing, swapping prepared spells, feat prerequisites, feat ability increases other than Ability Score Improvement, or starting gear from the class tables. Expertise, Eldritch Invocations, species lineages and other options with no choice data stay as text. Companions' classes don't follow their personalities.
+- **Spell rules:** no upcasting at runtime, cantrip scaling, swapping prepared spells or the one-spell-slot-per-turn rule. A spell can use a higher slot, but gains nothing from it.
+- **Other rules:** no Arcane Recovery, weapon mastery effects or armor training limits. Unarmored Defense and most imported features are text only. Conditions and forced movement are stored in data but do nothing yet.
 - **Using Heroic Inspiration:** an adventure can grant and check it, but it can't be spent on a reroll yet.
-- **Recovery after a fight:** anyone down but not dead gets back up with 1 HP, until rests exist. HP otherwise carries over between fights.
+- **Recovery after a fight:** anyone down but not dead gets back up with 1 HP, since an adventure doesn't have to offer a rest. HP otherwise carries over between fights.
 - **Branded IDs:** content IDs are checked strings, not per-kind branded types as section 4.4 planned.
 
 ## 9. Saves
@@ -785,15 +819,32 @@ Prep needs some secrets to write good foreshadowing, so a job's prompt only gets
 
 ## 11. Book importer
 
-`engine/tools/import` turns text from your own books into private data plugins. The steps are generic, and the target schemas come from the system's `importSchemas`:
+The importer turns the owner's saved book pages and PDFs into private plugins under `private/`, which git ignores, with no manual review. It never logs in to or downloads from D&D Beyond. Whether exporting fits D&D Beyond's terms is the owner's call.
 
-1. Takes a local text file you provide.
-2. Splits it into individual entries.
-3. The model drafts each one in the plugin format, with `automation` set to `text` by default and raised only if it encodes cleanly.
-4. The checker validates each entry and writes a review report.
-5. Results go to `private/`, marked `reviewed: false` until you approve them.
+**How each kind of content gets in**
 
-The same tool can draft the `plugins/rules/srd52` plugin from the SRD PDF. I didn't find a structured SRD 5.2 dataset in a brief search, so this makes the SRD the first real test of the importer, using openly licensed text.
+| Content | Method |
+|---|---|
+| Monsters, classes, subclasses, features, species, backgrounds, feats, equipment, magic items, roll tables, lookups, traps, hazards, poisons, bastions, companions | Code parses the HTML with `npm run import -- parse`, and `approve` creates the private plugin |
+| Spell facts and text | Code. A spell whose text matches a reviewed SRD spell reuses its mechanics |
+| Spell and class feature mechanics that code can't read | Claude agents encode them, then code checks them. They write mechanics only, and code copies the book's wording |
+| Adventures | Agents write the scene graph in their own words, and `tests/tools/fill-read-aloud.ts` copies read-aloud text |
+| Reference library | `npm run import -- library` writes each book's sections and an index to `private/library/` |
+| Images | `pdfimages` from local PDFs to `private/assets/`, matched to monsters and scenes by page |
+
+Leaving out `--encodings` on `draft` uses the local model instead, which is free but slower and less accurate.
+
+**Rules when re-importing**
+- Never run `approve --all` on PHB features or spells: their mechanics exist only in the approved files.
+- Parse subclasses and backgrounds with `--requires phb`.
+- A book's plugin id can't match an adventure's, so book plugins use a `-rules` suffix in that case.
+- Older-edition content is marked and kept out of the character builder by default.
+
+### 11.1 Accuracy
+
+An independent audit checked 145 encoded spells and 120 monsters against their own text: 12.4% of spells and 16.7% of monsters were wrong in play. The monster parser's systematic errors and the spell errors the engine can now express were then fixed, but the audit wasn't re-run, so current rates are unmeasured. `private/audit/mechanics-audit.md` holds the list. Local model encodings were worse, at about a quarter wrong among those it accepted.
+
+**Known gaps:** the extra parsing since the audit is unaudited, including the 2014-format books. Monster matches and scene art are by page and unchecked by eye. Many monster abilities and most class features above the priority list stay text only. Sage Advice errata aren't applied.
 
 ## 12. Testing
 
@@ -827,8 +878,8 @@ A failed bot run prints its seed and input list, so any failure can be reproduce
 2. **Prep test (three runs done, awaiting your read):** generate an overlay from a sample log using a model that fits in 16 GB. Judge quality and speed. **If this fails, the design needs rethinking, so it comes early.** See section 16.
 3. **Engine kernel and story runtime (done):** turn loop, seeded dice, replay test and test bot, all running against the fixture system. Not included yet: companion loyalty triggers, levels and items, prep digests built from the log, and a smarter director.
 4. **D&D plugin core (first slice done):** derived stats, damage pipeline and frames, with both adventures copied to `plugins/adventures` in D&D form and playable from the command line. See section 8.12.
-5. **Levels 1–5 content:** all classes and the monsters they meet, with the importer tested on SRD text.
-6. **UI:** the engine shell in Tauri, then the D&D sheet and PixiJS combat grid in the plugin.
+5. **Levels 1–5 content (importer started):** all classes and the monsters they meet. The importer's spell path is built and tested on SRD text, and other kinds of content come next.
+6. **UI (first slice done):** the engine shell, in a browser and in Tauri, with the sheet and combat data from `plugins/systems/dnd5.5e/ui`. The PixiJS combat grid waits for positions in the engine.
 7. **Full loop:** play, prep, play. Then package the app with `llama-server` as a Tauri sidecar.
 8. **Your books:** import, review and expand automation over time.
 
@@ -837,8 +888,7 @@ Daggerheart would come after this as a new plugin in `plugins/systems/daggerhear
 ## 15. Open questions and risks
 
 **Questions for you**
-1. Your books are on D&D Beyond, and the importer reads local text files you provide. How will you get their text into those files?
-2. Which book or adventure should come first after the two samples? I suggest Lost Mine, as it's much shorter than Phandelver and Below.
+1. Which book or adventure should come first after the two samples? I suggest Lost Mine, as it's much shorter than Phandelver and Below.
 
 **Confirmed in steps 1 to 3:** the TSConfig layout, `.ts` imports and `#sdk` work in Node, `tsc` and Vitest, and Zod's optional fields work with `exactOptionalPropertyTypes`. `defineSystem` keeps engine payloads opaque, with one commented cast at the boundary.
 
@@ -855,6 +905,7 @@ Daggerheart would come after this as a new plugin in `plugins/systems/daggerhear
 | The system interface is shaped by one real system and a paper check | Daggerheart may still need SDK changes | The fixture system and section 5.1 reduce this but can't remove it. Version the SDK and expect some change |
 | Encoding content is larger than estimated | Delays full-book support | `automation` levels let content work partly from the start |
 | Effect vocabulary can't express enough | More `partial` content | Grow it from real content, and track coverage in `check-pack` |
+| Wrong mechanics pass the importer's checks | Bad rules in the game | Claude encodes instead of the local model, code checks every encoding, and uncertain spells stay text only |
 | Prep doesn't anticipate what you do | Falls back to plainer base text | Prepare situations rather than plots, and add a short prep at natural breaks |
 | `typescript-eslint` falls behind TypeScript | Stuck on 6.0 for longer | No real harm: 6.0 is enough for this project |
 

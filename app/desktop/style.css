@@ -1,0 +1,450 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f4ef;
+  --panel: #ffffff;
+  --ink: #23211c;
+  --muted: #5f5b52;
+  --line: #d8d3c7;
+  --accent: #7a3b12;
+  --accent-ink: #ffffff;
+  --active: #f3e6d6;
+  --error: #a4231b;
+  --good: #2c6b3a;
+  font:
+    17px/1.5 Georgia,
+    "Times New Roman",
+    serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17161a;
+    --panel: #211f24;
+    --ink: #ece8df;
+    --muted: #a9a498;
+    --line: #3b3840;
+    --accent: #e0a36f;
+    --accent-ink: #1a1408;
+    --active: #33291f;
+    --error: #ff8f85;
+    --good: #84d094;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+#app {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 16px 48px;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  margin: 0;
+}
+
+h1 {
+  font-size: 1.3rem;
+}
+
+h2 {
+  font-size: 1.4rem;
+}
+
+h3 {
+  font-size: 0.8rem;
+  font-family: system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 24px;
+  margin-bottom: 8px;
+}
+
+/* Stays in view, because keyboard focus scrolls the page down to the options. */
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+}
+
+.notice:empty {
+  display: none;
+}
+
+.bar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.notice {
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  color: var(--good);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.notice.error {
+  color: var(--error);
+}
+
+button {
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 14px;
+  min-height: 44px;
+  cursor: pointer;
+  text-align: left;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Headings only take focus so the next Tab starts in the right place. */
+[tabindex="-1"]:focus-visible {
+  outline: none;
+}
+
+.bar-actions button {
+  padding: 6px 12px;
+  font-size: 0.9rem;
+  font-family: system-ui, sans-serif;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.menu {
+  max-width: 560px;
+  margin-top: 16px;
+}
+
+.menu h2 + .options {
+  margin-bottom: 32px;
+}
+
+.game {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 32px;
+  margin-top: 16px;
+}
+
+/* A focused option must not end up hidden under the sticky header. */
+html {
+  scroll-padding-top: 88px;
+}
+
+.scene-text {
+  font-size: 1.15rem;
+  margin: 12px 0;
+}
+
+.prompt {
+  margin: 16px 0 0;
+  font-weight: bold;
+}
+
+.prompt:empty,
+.scene-text:empty {
+  display: none;
+}
+
+.ending {
+  padding: 16px;
+  margin: 16px 0;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+
+.ending h3 {
+  margin-top: 0;
+  font-family: inherit;
+  font-size: 1.3rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--accent);
+}
+
+.ending[data-ending="defeat"] h3 {
+  color: var(--error);
+}
+
+.initiative {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.initiative li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.initiative li:first-child {
+  border-top: 0;
+}
+
+.initiative li.active {
+  background: var(--active);
+}
+
+.who {
+  font-weight: bold;
+}
+
+.side,
+.details {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.details {
+  grid-column: 1 / -1;
+}
+
+.log {
+  list-style: none;
+  margin: 0;
+  padding: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.92rem;
+}
+
+.log li {
+  padding: 2px 0;
+}
+
+.log li.scene {
+  margin-top: 8px;
+  font-style: italic;
+}
+
+.about {
+  margin-top: 24px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.sheet h2 {
+  margin-top: 8px;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+  text-align: right;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.art {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  margin: 12px 0;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
+.initiative li.has-art {
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+}
+
+.has-art .portrait {
+  grid-row: span 2;
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.has-art .details {
+  grid-column: 2 / -1;
+}
+
+/* Without its picture a row goes back to being text only. */
+.has-art:not(:has(.portrait)) {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+}
+
+.has-art:not(:has(.portrait)) .details {
+  grid-column: 1 / -1;
+}
+
+.search {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 8px 12px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.row,
+.option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.row > :only-child,
+.option > :only-child {
+  grid-column: 1 / -1;
+}
+
+.option-detail {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 0.92rem;
+  white-space: pre-line;
+  background: var(--panel);
+  border-left: 3px solid var(--accent);
+}
+
+.option-group {
+  margin-top: 12px;
+}
+
+summary {
+  min-height: 32px;
+  cursor: pointer;
+  font-family: system-ui, sans-serif;
+  font-size: 0.9rem;
+}
+
+.option-group > summary {
+  font-weight: bold;
+}
+
+.meta,
+.log-actor {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.log-actor {
+  font-family: system-ui, sans-serif;
+}
+
+.saves {
+  margin: 24px 0;
+}
+
+.sheet-detail {
+  margin-top: 4px;
+}
+
+.sheet-detail p {
+  margin: 4px 0 8px;
+  font-size: 0.85rem;
+  white-space: pre-line;
+}
+
+.book {
+  margin-top: 16px;
+}
+
+.book-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 24px;
+  margin-top: 12px;
+}
+
+.book-contents {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 75vh;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.book-contents button {
+  min-height: 36px;
+  padding: 4px 8px;
+  font-size: 0.9rem;
+}
+
+.book-text {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .game,
+  .book-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .book-contents {
+    max-height: 40vh;
+  }
+}

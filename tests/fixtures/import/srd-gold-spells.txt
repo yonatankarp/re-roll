@@ -1,0 +1,130 @@
+Bless
+
+Level 1 Enchantment (Cleric, Paladin)
+Casting Time: Action
+Range: 30 feet
+
+113
+
+System Reference Document 5.2
+
+Components: V, S, M (a Holy Symbol worth 5+ GP)
+Duration: Concentration, up to 1 minute
+
+You bless up to three creatures within range. Whenever a target makes an attack roll or a saving throw
+before the spell ends, the target adds 1d4 to the attack roll or save.
+Using a Higher-Level Spell Slot. You can target
+one additional creature for each spell slot level
+above 1.
+
+Cure Wounds
+
+Level 1 Abjuration (Bard, Cleric, Druid, Paladin,
+Ranger)
+Casting Time: Action
+Range: Touch
+Components: V, S
+Duration: Instantaneous
+
+A creature you touch regains a number of Hit Points
+equal to 2d8 plus your spellcasting ability modifier.
+Using a Higher-Level Spell Slot. The healing increases by 2d8 for each spell slot level above 1.
+
+Fireball
+
+Level 3 Evocation (Sorcerer, Wizard)
+
+Casting Time: Action
+Range: 150 feet
+Components: V, S, M (a ball of bat guano and sulfur)
+Duration: Instantaneous
+
+A bright streak flashes from you to a point you
+choose within range and then blossoms with a
+low roar into a fiery explosion. Each creature in a
+20-foot-radius Sphere centered on that point makes
+a Dexterity saving throw, taking 8d6 Fire damage
+on a failed save or half as much damage on a successful one.
+Flammable objects in the area that aren’t being
+worn or carried start burning.
+Using a Higher-Level Spell Slot. The damage increases by 1d6 for each spell slot level above 3.
+
+Fire Bolt
+
+Evocation Cantrip (Sorcerer, Wizard)
+Casting Time: Action
+Range: 120 feet
+Components: V, S
+Duration: Instantaneous
+
+You hurl a mote of fire at a creature or an object
+within range. Make a ranged spell attack against the
+target. On a hit, the target takes 1d10 Fire damage.
+A flammable object hit by this spell starts burning if
+it isn’t being worn or carried.
+Cantrip Upgrade. The damage increases by 1d10
+when you reach levels 5 (2d10), 11 (3d10), and 17
+(4d10).
+
+Healing Word
+
+Level 1 Abjuration (Bard, Cleric, Druid)
+Casting Time: Bonus Action
+Range: 60 feet
+Components: V
+Duration: Instantaneous
+
+A creature of your choice that you can see within
+range regains Hit Points equal to 2d4 plus your
+spellcasting ability modifier.
+Using a Higher-Level Spell Slot. The healing increases by 2d4 for each spell slot level above 1.
+
+Magic Missile
+
+Level 1 Evocation (Sorcerer, Wizard)
+Casting Time: Action
+Range: 120 feet
+Components: V, S
+Duration: Instantaneous
+
+You create three glowing darts of magical force.
+Each dart strikes a creature of your choice that you
+can see within range. A dart deals 1d4 + 1 Force
+damage to its target. The darts all strike simultaneously, and you can direct them to hit one creature or
+several.
+Using a Higher-Level Spell Slot. The spell creates
+one more dart for each spell slot level above 1.
+
+Sacred Flame
+
+Evocation Cantrip (Cleric)
+Casting Time: Action
+Range: 60 feet
+Components: V, S
+Duration: Instantaneous
+
+Flame-like radiance descends on a creature that you
+can see within range. The target must succeed on
+a Dexterity saving throw or take 1d8 Radiant damage. The target gains no benefit from Half Cover or
+Three-Quarters Cover for this save.
+Cantrip Upgrade. The damage increases by 1d8
+when you reach levels 5 (2d8), 11 (3d8), and 17
+(4d8).
+
+Shield
+
+Level 1 Abjuration (Sorcerer, Wizard)
+
+Casting Time: Reaction, which you take when you are
+hit by an attack roll or targeted by the Magic Missile
+spell
+Range: Self
+Components: V, S
+Duration: 1 round
+
+An imperceptible barrier of magical force protects
+you. Until the start of your next turn, you have a +5
+
+bonus to AC, including against the triggering attack,
+and you take no damage from Magic Missile.
+

@@ -1,4 +1,4 @@
-import { type PrepJob, REVIEW_SYSTEM } from "./jobs.ts";
+import { REVIEW_SYSTEM, type RunnableJob } from "./jobs.ts";
 import type { ModelClient } from "./model.ts";
 
 export const MAX_ATTEMPTS = 3;
@@ -18,7 +18,7 @@ export interface AttemptRecord {
 }
 
 export interface JobResult {
-  readonly job: PrepJob;
+  readonly job: RunnableJob;
   readonly status: "written" | "fallback";
   readonly output: unknown;
   readonly attempts: readonly AttemptRecord[];
@@ -33,7 +33,7 @@ function parseJson(text: string): unknown {
 }
 
 function findProblems(
-  job: PrepJob,
+  job: RunnableJob,
   text: string,
 ): { problems: string[]; output?: unknown } {
   const value = parseJson(text);
@@ -63,7 +63,7 @@ function findProblems(
 
 // Model failures fall back to base text, but a failed connection throws, so prep can stop and report it.
 export async function runJob(
-  job: PrepJob,
+  job: RunnableJob,
   client: ModelClient,
   options: { readonly seed: number; readonly temperature: number },
 ): Promise<JobResult> {
@@ -94,8 +94,9 @@ export async function runJob(
     const reviews: ReviewRecord[] = [];
     if (problems.length === 0) {
       for (const review of job.reviews) {
+        if (review.applies?.(output) === false) continue;
         const verdict = await client.complete({
-          system: REVIEW_SYSTEM,
+          system: review.system ?? REVIEW_SYSTEM,
           prompt: review.prompt(response.text),
           schema: review.schema,
           maxTokens: 250,

@@ -67,6 +67,19 @@ export const ConditionSchema = z.enum([
 
 export const AutomationSchema = z.enum(["full", "partial", "text"]);
 
+const WeaponPropertySchema = z.enum([
+  "ammunition",
+  "finesse",
+  "heavy",
+  "light",
+  "loading",
+  "range",
+  "reach",
+  "thrown",
+  "twoHanded",
+  "versatile",
+]);
+
 export const DiceSchema = z
   .string()
   .regex(/^[1-9][0-9]*d[1-9][0-9]*$/, "must look like 2d6");
@@ -89,6 +102,8 @@ export type Formula = z.infer<typeof FormulaSchema>;
 
 export const AmountSchema = z.strictObject({
   dice: DiceSchema.optional(),
+  diceCount: z.string().optional(), // a scaling key holding the number of dice, such as sneakAttackD6
+  dieSize: z.string().optional(), // a scaling key holding the die size, such as martialArtsDie
   bonus: FormulaSchema.optional(),
 });
 export type Amount = z.infer<typeof AmountSchema>;
@@ -99,7 +114,8 @@ export const DamageSchema = z.strictObject({
 });
 export type Damage = z.infer<typeof DamageSchema>;
 
-const RollTargetSchema = z.enum(["attacks", "saves", "checks"]);
+// "attacksAgainst" sits on the creature being attacked, as with Faerie Fire or Blur.
+const RollFlagSchema = z.enum(["attacks", "saves", "checks", "attacksAgainst"]);
 
 export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -107,8 +123,17 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     to: z.enum(["ac", "attacks", "saves", "checks"]),
     amount: AmountSchema,
   }),
-  z.strictObject({ kind: z.literal("advantage"), on: RollTargetSchema }),
-  z.strictObject({ kind: z.literal("disadvantage"), on: RollTargetSchema }),
+  // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
+  z.strictObject({
+    kind: z.literal("advantage"),
+    on: RollFlagSchema,
+    once: z.boolean().optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("disadvantage"),
+    on: RollFlagSchema,
+    once: z.boolean().optional(),
+  }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
     kind: z.literal("vulnerability"),
@@ -116,14 +141,44 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("immunity"), damage: DamageTypeSchema }),
   z.strictObject({ kind: z.literal("acFormula"), formula: FormulaSchema }),
+  // Damage at the start or end of the bearer's turn, such as Moonbeam or Searing Smite.
+  z.strictObject({
+    kind: z.literal("lingeringDamage"),
+    when: z.enum(["turnStart", "turnEnd"]),
+    damage: z.array(DamageSchema).min(1),
+    save: z
+      .strictObject({
+        ability: AbilitySchema,
+        dc: FormulaSchema,
+        onSuccess: z.enum(["half", "none", "full"]).default("half"),
+        endsEffect: z.boolean().default(false), // a successful save ends the effect
+      })
+      .optional(),
+    once: z.boolean().default(false), // fires one time and then ends, as with Acid Arrow
+  }),
+  // Extra damage on a hit. "bearer" means whoever has the effect deals it (Divine Favor);
+  // "caster" means the effect's caster deals it when hitting whoever has the effect (Hex).
+  z.strictObject({
+    kind: z.literal("hitDamage"),
+    dealtBy: z.enum(["bearer", "caster"]),
+    weaponOnly: z.boolean().default(false),
+    damage: DamageSchema,
+  }),
+  // A flat increase to a weapon's own damage, optionally only with one ability, such as Rage.
+  z.strictObject({
+    kind: z.literal("damageBonus"),
+    amount: AmountSchema,
+    ability: AbilitySchema.optional(),
+  }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
 
 export const DurationSchema = z.union([
   z.literal("instantaneous"),
   z.strictObject({ concentration: z.literal(true), minutes: z.number() }),
-  z.strictObject({ until: z.literal("yourNextTurnStart") }),
+  z.strictObject({ until: z.enum(["yourNextTurnStart", "yourNextTurnEnd"]) }),
   z.strictObject({ minutes: z.number() }),
+  z.strictObject({ text: z.string().min(1) }), // not tracked by the rules, such as Until dispelled
 ]);
 export type Duration = z.infer<typeof DurationSchema>;
 
@@ -134,6 +189,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("applyCondition"),
     condition: ConditionSchema,
     duration: DurationSchema,
+    repeatSave: z.boolean().default(false), // the target repeats the save at the end of each of its turns
+    endsOnDamage: z.boolean().default(false),
   }),
   z.strictObject({
     kind: z.literal("removeCondition"),
@@ -150,6 +207,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     direction: z.enum(["away", "toward"]),
   }),
   z.strictObject({ kind: z.literal("note"), text: z.string() }),
+  z.strictObject({ kind: z.literal("extraAction") }), // Action Surge
+  // Lessens the hit that triggered a reaction, such as Uncanny Dodge or Deflect Attacks.
+  z.strictObject({
+    kind: z.literal("reduceDamage"),
+    halve: z.boolean().default(false),
+    amount: AmountSchema.optional(),
+  }),
 ]);
 export type LeafEffect = z.infer<typeof LeafEffectSchema>;
 
@@ -200,6 +264,7 @@ export const TargetingSchema = z.union([
     creatures: z.number().int().min(1),
     range: RangeSchema,
     side: SideSchema,
+    creatureTypes: z.array(z.string()).optional(), // only these lowercase types can be targeted
   }),
   z.strictObject({
     area: z.strictObject({
@@ -208,6 +273,7 @@ export const TargetingSchema = z.union([
     }),
     range: RangeSchema,
     side: SideSchema,
+    creatureTypes: z.array(z.string()).optional(),
   }),
 ]);
 export type Targeting = z.infer<typeof TargetingSchema>;
@@ -216,10 +282,13 @@ export const ActivationSchema = z.strictObject({
   cost: z.array(CostSchema),
   trigger: z
     .strictObject({
-      hitByAttack: z.literal(true),
+      hitByAttack: z.literal(true).optional(),
       targetedBySpell: z.string().optional(),
+      // Taken right after hitting with a weapon, as with the smite spells.
+      afterHit: z.enum(["weapon", "meleeWeapon"]).optional(),
     })
     .optional(),
+  projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
 });
@@ -230,9 +299,19 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("extraDamage"),
     dice: DiceSchema,
+    diceCount: z.string().optional(), // a class scaling key that replaces the number of dice
+    dieSize: z.string().optional(), // a class scaling key that replaces the die size
     // shortcut: "ally" means any living ally, since there are no positions until the grid in step 6.
     when: z.enum(["advantage", "advantageOrAlly"]),
     oncePerTurn: z.boolean().default(false),
+  }),
+  z.strictObject({ kind: z.literal("packTactics") }),
+  z.strictObject({ kind: z.literal("undeadFortitude") }),
+  z.strictObject({ kind: z.literal("magicResistance") }),
+  // Attacks per Attack action, such as Extra Attack.
+  z.strictObject({
+    kind: z.literal("multiattack"),
+    attacks: z.number().int().min(2),
   }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
@@ -292,6 +371,8 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+export type ChoiceDef = z.infer<typeof ChoiceDefSchema>;
+
 const ClassLevelSchema = z.strictObject({
   level: z.number().int().min(1).max(20),
   grants: z.array(ContentIdSchema).default([]),
@@ -306,12 +387,26 @@ export const ClassSchema = ContentEntrySchema.extend({
   primaryAbilities: z.array(AbilitySchema).min(1),
   savingThrows: z.array(AbilitySchema),
   weapons: z.array(z.enum(["simple", "martial"])),
+  // When set, only Martial weapons with one of these properties count, as for a Rogue or Monk.
+  martialWeaponProperties: z.array(WeaponPropertySchema).min(1).optional(),
   armor: z.array(z.enum(["light", "medium", "heavy", "shield"])),
   spellcasting: z.strictObject({ ability: AbilitySchema }).optional(),
+  // Spells the class's own chapter names, for a class newer than the books that print them.
+  spellList: z.array(ContentIdSchema).optional(),
   // shortcut: fewer than 20 levels are allowed while content is being added, require 20 once step 5 is done.
   levels: z.array(ClassLevelSchema).min(1),
 }).strict();
 export type ClassDef = z.infer<typeof ClassSchema>;
+
+// Same level structure as a class, and each level's grants apply at that level of the parent class.
+export const SubclassSchema = ContentEntrySchema.extend({
+  name: z.string().min(1),
+  class: ContentIdSchema,
+  // Printed for the 2014 rules, whose levels don't line up with these classes, so character creation doesn't offer it.
+  edition: z.literal("2014").optional(),
+  levels: z.array(ClassLevelSchema).min(1),
+}).strict();
+export type Subclass = z.infer<typeof SubclassSchema>;
 
 export const SpeciesSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
@@ -334,11 +429,25 @@ export type Background = z.infer<typeof BackgroundSchema>;
 
 export const FeatSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
-  category: z.enum(["origin", "general", "fightingStyle", "epicBoon"]),
+  category: z.enum([
+    "origin",
+    "general",
+    "fightingStyle",
+    "epicBoon",
+    "darkGift",
+    "dragonmark",
+    "racial",
+  ]),
   text: z.string().min(1),
   grants: z.array(ContentIdSchema).default([]),
 }).strict();
 export type Feat = z.infer<typeof FeatSchema>;
+
+const ScaleStepSchema = z.union([
+  z.strictObject({ addDice: DiceSchema }),
+  z.strictObject({ addTargets: z.number().int().min(1) }),
+]);
+export type ScaleStep = z.infer<typeof ScaleStepSchema>;
 
 export const SpellSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
@@ -364,12 +473,11 @@ export const SpellSchema = ContentEntrySchema.extend({
   activation: ActivationSchema.optional(),
   upcast: z
     .strictObject({
-      perSlotLevel: z.union([
-        z.strictObject({ addDice: DiceSchema }),
-        z.strictObject({ addTargets: z.number().int().min(1) }),
-      ]),
+      perSlotLevel: ScaleStepSchema,
     })
     .optional(),
+  // Added once per step at character levels 5, 11 and 17.
+  cantrip: z.strictObject({ perTier: ScaleStepSchema }).optional(),
 }).strict();
 export type Spell = z.infer<typeof SpellSchema>;
 
@@ -378,23 +486,20 @@ const ItemBaseSchema = ContentEntrySchema.extend({ name: z.string().min(1) });
 export const WeaponSchema = ItemBaseSchema.extend({
   type: z.literal("weapon"),
   category: z.enum(["simple", "martial"]),
-  damage: z.strictObject({ dice: DiceSchema, type: DamageTypeSchema }),
-  properties: z
-    .array(
-      z.enum([
-        "ammunition",
-        "finesse",
-        "heavy",
-        "light",
-        "loading",
-        "range",
-        "reach",
-        "thrown",
-        "twoHanded",
-        "versatile",
-      ]),
-    )
-    .default([]),
+  // A few weapons, like the Blowgun, deal a flat number instead of rolling.
+  damage: z
+    .strictObject({
+      dice: DiceSchema.optional(),
+      flat: z.number().int().min(1).optional(),
+      type: DamageTypeSchema,
+    })
+    .refine(
+      (damage) => (damage.dice === undefined) !== (damage.flat === undefined),
+      {
+        message: "needs either dice or a flat number",
+      },
+    ),
+  properties: z.array(WeaponPropertySchema).default([]),
   mastery: z.enum([
     "cleave",
     "graze",
@@ -422,9 +527,81 @@ const ShieldItemSchema = ItemBaseSchema.extend({
   bonus: z.number().int(),
 }).strict();
 
+// In copper pieces, so prices compare without converting coins.
+const CostCpSchema = z.number().int().min(0);
+
 const GearSchema = ItemBaseSchema.extend({
   type: z.literal("gear"),
   text: z.string().optional(),
+  category: z
+    .enum([
+      "adventuring",
+      "ammunition",
+      "explosive",
+      "focus",
+      "mount",
+      "pack",
+      "tack",
+      "treasure",
+      "vehicle",
+    ])
+    .optional(),
+  costCp: CostCpSchema.optional(),
+}).strict();
+
+const ToolSchema = ItemBaseSchema.extend({
+  type: z.literal("tool"),
+  ability: AbilitySchema,
+  text: z.string().min(1),
+  costCp: CostCpSchema.optional(),
+}).strict();
+
+const RaritySchema = z.enum([
+  "common",
+  "uncommon",
+  "rare",
+  "veryRare",
+  "legendary",
+  "artifact",
+]);
+
+const MagicBonusSchema = z.strictObject({
+  to: z.enum(["attack", "damage", "ac", "savingThrows", "spellAttack"]),
+  amount: z.number().int().min(1),
+});
+
+// Numbers read from the book's text. The engine doesn't apply them yet, so `automation` says what actually happens.
+const MagicItemSchema = ItemBaseSchema.extend({
+  type: z.literal("magicItem"),
+  category: z.enum([
+    "armor",
+    "potion",
+    "ring",
+    "rod",
+    "scroll",
+    "staff",
+    "wand",
+    "weapon",
+    "wondrousItem",
+  ]),
+  rarity: z.union([RaritySchema, z.literal("varies")]),
+  attunement: z.boolean(),
+  attunementBy: z.string().min(1).optional(),
+  text: z.string().min(1),
+  automation: AutomationSchema,
+  bonuses: z.array(MagicBonusSchema).min(1).optional(),
+  // Set when one entry covers several rarities, such as +1, +2 or +3.
+  variants: z
+    .array(
+      z.strictObject({
+        rarity: RaritySchema,
+        name: z.string().min(1).optional(),
+        bonuses: z.array(MagicBonusSchema).min(1).optional(),
+        healing: AmountSchema.optional(),
+      }),
+    )
+    .min(1)
+    .optional(),
 }).strict();
 
 export const ItemSchema = z.discriminatedUnion("type", [
@@ -432,6 +609,8 @@ export const ItemSchema = z.discriminatedUnion("type", [
   ArmorSchema,
   ShieldItemSchema,
   GearSchema,
+  ToolSchema,
+  MagicItemSchema,
 ]);
 export type Item = z.infer<typeof ItemSchema>;
 
@@ -445,25 +624,62 @@ const AbilityScoresSchema = z.strictObject({
 });
 export type AbilityScores = z.infer<typeof AbilityScoresSchema>;
 
+// A creature whose numbers depend on who brought it, such as a summoned spirit, so it isn't a monster yet.
+export const CompanionSchema = ContentEntrySchema.extend({
+  name: z.string().min(1),
+  size: z
+    .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
+    .optional(),
+  ac: z.string().min(1), // as printed, because it's a formula
+  hp: z.string().min(1), // as printed, because it's a formula
+  speed: z.string().min(1),
+  abilities: AbilityScoresSchema,
+  text: z.string().min(1),
+}).strict();
+export type Companion = z.infer<typeof CompanionSchema>;
+
 export const MonsterSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
   ac: z.number().int(),
   hp: z.number().int().min(1),
-  speed: z.number().int(),
+  speed: z.number().int(), // walking
+  speeds: z // every speed in the stat block, when it has more than walking
+    .strictObject({
+      walk: z.number().int(),
+      fly: z.number().int().optional(),
+      swim: z.number().int().optional(),
+      climb: z.number().int().optional(),
+      burrow: z.number().int().optional(),
+    })
+    .optional(),
+  size: z
+    .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
+    .optional(),
   abilities: AbilityScoresSchema,
   proficiency: z.number().int(),
   saves: z.array(AbilitySchema).default([]),
   initiative: z.number().int(),
+  creatureType: z.string().optional(), // lowercase, such as undead
   features: z.array(ContentIdSchema).default([]),
   passives: z.array(PassiveSchema).default([]),
   multiattack: z.number().int().min(1).default(1),
   actions: z
     .array(
-      z.strictObject({ name: z.string().min(1), activation: ActivationSchema }),
+      z.strictObject({
+        name: z.string().min(1),
+        recharge: z.number().int().min(2).max(6).optional(), // ready again on this d6 roll or higher
+        activation: ActivationSchema,
+      }),
     )
-    .min(1),
+    .default([]), // empty when nothing it does can be automated, as for a creature that only has traits
+  text: z.string().optional(), // the stat block as printed, for reading
 }).strict();
 export type Monster = z.infer<typeof MonsterSchema>;
+
+const AbilityIncreaseSchema = z.partialRecord(
+  AbilitySchema,
+  z.number().int().min(1).max(2),
+);
 
 const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("skills"), values: z.array(SkillSchema) }),
@@ -479,16 +695,25 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
     kind: z.literal("weaponMastery"),
     values: z.array(ContentIdSchema),
   }),
+  z.strictObject({
+    kind: z.literal("subclass"),
+    values: z.array(ContentIdSchema).length(1),
+  }),
+  z.strictObject({
+    kind: z.literal("feats"),
+    values: z.array(ContentIdSchema),
+  }),
+  z.strictObject({
+    kind: z.literal("abilities"),
+    increases: AbilityIncreaseSchema,
+  }),
 ]);
 
 export const CharacterBuildSchema = z.strictObject({
   baseAbilities: AbilityScoresSchema,
   speciesId: ContentIdSchema,
   backgroundId: ContentIdSchema,
-  backgroundIncrease: z.partialRecord(
-    AbilitySchema,
-    z.number().int().min(1).max(2),
-  ),
+  backgroundIncrease: AbilityIncreaseSchema,
   levels: z
     .array(
       z.strictObject({
@@ -518,6 +743,8 @@ export const EncounterSchema = z.strictObject({
       }),
     )
     .min(1),
+  // The party size the counts were written for. Counts scale to the party that actually shows up.
+  forPartySize: z.number().int().min(1).optional(),
 });
 
 export const CheckSchema = z.union([
@@ -525,3 +752,114 @@ export const CheckSchema = z.union([
   z.strictObject({ ability: AbilitySchema, dc: z.number().int() }),
 ]);
 export type Check = z.infer<typeof CheckSchema>;
+
+// A random table from a book. Each row covers the die results min to max, and its cells line up with `columns`.
+export const RollTableSchema = ContentEntrySchema.extend({
+  name: z.string().min(1),
+  die: z.string().regex(/^\d*d\d+$/), // such as d100 or 2d6
+  columns: z.array(z.string()).min(1), // the headings of the columns after the die roll
+  rows: z
+    .array(
+      z.strictObject({
+        min: z.number().int().min(1),
+        max: z.number().int().min(1),
+        cells: z.array(z.string()),
+      }),
+    )
+    .min(1),
+  source: z.string().min(1),
+})
+  .strict()
+  .superRefine((table, context) => {
+    for (const [index, row] of table.rows.entries()) {
+      if (row.min > row.max || row.cells.length !== table.columns.length) {
+        context.addIssue({
+          code: "custom",
+          message: `row ${String(index + 1)} doesn't fit the table`,
+        });
+      }
+    }
+  });
+export type RollTable = z.infer<typeof RollTableSchema>;
+
+// A table looked up by a printed key, such as a Challenge Rating band or a theme, rather than rolled on.
+export const LookupTableSchema = ContentEntrySchema.extend({
+  name: z.string().min(1),
+  keyedBy: z.string().min(1), // the heading of the key column
+  columns: z.array(z.string()).min(1), // the headings of the columns after the key
+  rows: z
+    .array(
+      z.strictObject({ key: z.string().min(1), cells: z.array(z.string()) }),
+    )
+    .min(1),
+  source: z.string().min(1),
+}).strict();
+export type LookupTable = z.infer<typeof LookupTableSchema>;
+
+// A Bastion's special facility or event, for reading. Nothing runs Bastion turns yet.
+export const BastionEntrySchema = ContentEntrySchema.extend({
+  name: z.string().min(1),
+  type: z.enum(["facility", "event"]),
+  level: z.number().int().min(1).optional(), // the level a facility becomes available at
+  prerequisite: z.string().optional(),
+  order: z.string().optional(), // the order a facility's hirelings can carry out
+  text: z.string().min(1),
+}).strict();
+export type BastionEntry = z.infer<typeof BastionEntrySchema>;
+
+const LevelBandSchema = z.strictObject({
+  min: z.number().int().min(1),
+  max: z.number().int().min(1),
+});
+
+// Traps and hazards share one shape. `text` is the printed entry as plain text, copied by code.
+const DangerShape = {
+  name: z.string().min(1),
+  severity: z.enum(["nuisance", "deadly"]),
+  levels: z.array(LevelBandSchema).min(1), // the character levels it is meant for
+  trigger: z.string().optional(),
+  duration: z.string().optional(),
+  // How the numbers change with character level, one row per band of the book's scaling table.
+  scaling: z
+    .array(
+      z.strictObject({
+        levels: LevelBandSchema,
+        dc: z.number().int().optional(),
+        damage: z.string().optional(), // as printed, such as "22 (4d10)"
+        values: z.record(z.string(), z.string()), // every column of the row
+      }),
+    )
+    .default([]),
+  dcs: z.array(z.number().int()), // every DC in the text, in order
+  text: z.string().min(1),
+};
+export const TrapSchema = ContentEntrySchema.extend(DangerShape).strict();
+export type Trap = z.infer<typeof TrapSchema>;
+export const HazardSchema = ContentEntrySchema.extend(DangerShape).strict();
+export type Hazard = z.infer<typeof HazardSchema>;
+
+export const PoisonSchema = ContentEntrySchema.extend({
+  name: z.string().min(1),
+  costGp: z.number().int().min(0),
+  delivery: z.enum(["contact", "ingested", "inhaled", "injury"]),
+  dc: z.number().int().optional(), // the first save DC in the text
+  text: z.string().min(1),
+}).strict();
+export type Poison = z.infer<typeof PoisonSchema>;
+
+// XP an encounter may be worth per character, by character level. Nothing reads this yet.
+export const EncounterBudgetSchema = ContentEntrySchema.extend({
+  name: z.string().min(1),
+  source: z.string().min(1),
+  rows: z
+    .array(
+      z.strictObject({
+        level: z.number().int().min(1).max(20),
+        low: z.number().int().min(0),
+        moderate: z.number().int().min(0),
+        high: z.number().int().min(0),
+      }),
+    )
+    .min(1),
+}).strict();
+export type EncounterBudget = z.infer<typeof EncounterBudgetSchema>;

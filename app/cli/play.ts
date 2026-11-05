@@ -58,7 +58,15 @@ function describe(event: GameEvent): string | null {
     case "encounterStarted":
       return "\nA fight breaks out!";
     case "encounterEnded":
-      return "The fight is over.";
+      return event.outcome === "flee"
+        ? "You get away."
+        : event.outcome === "defeat"
+          ? "The fight is lost."
+          : "The fight is over.";
+    case "clueRevealed":
+      return `You learn something: ${event.text}`;
+    case "resourceAdjusted":
+      return `${event.resource}: ${String(event.value)}`;
     case "actorDowned":
       return `${nameOf(event.actor)} is down!`;
     case "actorDefeated":

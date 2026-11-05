@@ -30,6 +30,8 @@ const RngStateSchema = z.tuple([
   z.number().int(),
 ]);
 
+const EncounterOutcomeSchema = z.enum(["victory", "defeat", "flee"]);
+
 export const StoryStateSchema = z.strictObject({
   scene: z.string().nullable(),
   flags: z.record(z.string(), z.boolean()),
@@ -39,6 +41,10 @@ export const StoryStateSchema = z.strictObject({
   firedBeats: z.array(z.string()),
   variants: z.record(z.string(), z.string()),
   ended: z.enum(["ending", "deadEnd", "defeat"]).nullable(),
+  // Optional because saves made before these existed must still load.
+  visits: z.record(z.string(), z.number().int()).optional(),
+  encounterOutcome: EncounterOutcomeSchema.optional(),
+  resources: z.record(z.string(), z.number().int()).optional(),
 });
 export type StoryState = Readonly<z.infer<typeof StoryStateSchema>>;
 
@@ -72,7 +78,12 @@ const NARRATIVE_EVENTS = [
   event("actorDowned", { actor: z.string() }),
   event("actorDefeated", { actor: z.string() }),
   event("encounterStarted", { encounter: z.string() }),
-  event("encounterEnded", { encounter: z.string() }),
+  // With no outcome, the encounter was won.
+  event("encounterEnded", {
+    encounter: z.string(),
+    outcome: EncounterOutcomeSchema.optional(),
+  }),
+  event("clueRevealed", { secret: z.string(), text: z.string() }),
   event("levelGained", { actor: z.string() }),
   event("itemGained", { actor: z.string(), item: z.string() }),
   event("itemLost", { actor: z.string(), item: z.string() }),
@@ -94,6 +105,7 @@ const ENGINE_EVENTS = [
   event("flagSet", { flag: z.string(), value: z.boolean() }),
   event("clockAdvanced", { clock: z.string(), value: z.number().int() }),
   event("attitudeAdjusted", { npc: z.string(), value: z.number().int() }),
+  event("resourceAdjusted", { resource: z.string(), value: z.number().int() }),
   event("secretRevealed", { secret: z.string() }),
   event("beatFired", { beat: z.string() }),
   event("adventureEnded", { reason: z.enum(["ending", "deadEnd", "defeat"]) }),

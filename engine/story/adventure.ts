@@ -16,16 +16,36 @@ const AssetPathSchema = z
     },
   );
 
+const hasBound = (bounds: { atLeast?: unknown; atMost?: unknown }): boolean =>
+  bounds.atLeast !== undefined || bounds.atMost !== undefined;
+const NEEDS_BOUND = { message: "needs atLeast or atMost" };
+
 const ConditionLeafSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("flag"),
     flag: SlugSchema,
     is: z.boolean().default(true),
   }),
+  z
+    .strictObject({
+      kind: z.literal("clock"),
+      clock: SlugSchema,
+      atLeast: z.number().int().optional(),
+      atMost: z.number().int().optional(),
+    })
+    .refine(hasBound, NEEDS_BOUND),
+  z
+    .strictObject({
+      kind: z.literal("resource"),
+      resource: SlugSchema,
+      atLeast: z.number().int().optional(),
+      atMost: z.number().int().optional(),
+    })
+    .refine(hasBound, NEEDS_BOUND),
   z.strictObject({
-    kind: z.literal("clock"),
-    clock: SlugSchema,
-    atLeast: z.number().int(),
+    kind: z.literal("visited"),
+    scene: SlugSchema,
+    atLeast: z.number().int().min(1).default(1),
   }),
   z.strictObject({
     kind: z.literal("attitude"),
@@ -62,6 +82,11 @@ export const StoryEffectSchema = z.discriminatedUnion("kind", [
     npc: SlugSchema,
     by: z.number().int(),
   }),
+  z.strictObject({
+    kind: z.literal("adjustResource"),
+    resource: SlugSchema,
+    by: z.number().int(),
+  }),
   z.strictObject({ kind: z.literal("startEncounter"), encounter: SlugSchema }),
   z.strictObject({ kind: z.literal("reveal"), secret: SlugSchema }),
   z.strictObject({
@@ -87,10 +112,21 @@ const CheckChoiceSchema = z.strictObject({
 const SceneSchema = z.strictObject({
   id: SlugSchema,
   text: z.string().min(1),
+  // The first whose condition holds replaces the text.
+  textVariants: z
+    .array(z.strictObject({ when: ConditionSchema, text: z.string().min(1) }))
+    .default([]),
   art: AssetPathSchema.optional(),
   choices: z
     .array(z.union([DirectChoiceSchema, CheckChoiceSchema]))
     .default([]),
+});
+
+// These keys are the story's. Whatever else an encounter holds goes to the system's schema.
+const EncounterOutcomesSchema = z.looseObject({
+  onVictory: z.array(StoryEffectSchema).min(1).optional(),
+  onDefeat: z.array(StoryEffectSchema).min(1).optional(),
+  onFlee: z.array(StoryEffectSchema).min(1).optional(),
 });
 
 const NpcSchema = z.strictObject({
@@ -155,15 +191,24 @@ const BeatSchema = z.strictObject({
 
 const AdventureInfoSchema = z.strictObject({
   title: z.string().min(1),
+  levels: z.string().min(1).optional(), // shown in the menu, such as "1-3"
   startScene: SlugSchema,
+  resources: z.record(SlugSchema, z.number().int().min(0)).optional(),
 });
 
 export type StoryEffect = z.infer<typeof StoryEffectSchema>;
 export type Condition = z.infer<typeof ConditionSchema>;
 
+export interface EncounterOutcomes {
+  readonly onVictory?: readonly StoryEffect[] | undefined;
+  readonly onDefeat?: readonly StoryEffect[] | undefined;
+  readonly onFlee?: readonly StoryEffect[] | undefined;
+}
+
 export interface Adventure {
   readonly title: string;
   readonly startScene: string;
+  readonly resources?: Readonly<Record<string, number>> | undefined;
   readonly scenes: readonly z.infer<typeof SceneSchema>[];
   readonly npcs: readonly z.infer<typeof NpcSchema>[];
   readonly factions: readonly z.infer<typeof FactionSchema>[];
@@ -171,6 +216,7 @@ export interface Adventure {
   readonly variants: readonly z.infer<typeof VariantSchema>[];
   readonly beats: readonly z.infer<typeof BeatSchema>[];
   readonly encounters: readonly { readonly id: string }[];
+  readonly encounterOutcomes: Readonly<Record<string, EncounterOutcomes>>; // only those that declare one
 }
 
 export const STORY_FILES = [
@@ -252,13 +298,30 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
 
   const contentReferences: string[] = [];
   const encounters: { readonly id: string }[] = [];
+  const encounterOutcomes: Record<string, EncounterOutcomes> = {};
   const rawEncounters = documents.get("encounters") ?? [];
   if (Array.isArray(rawEncounters)) {
     (rawEncounters as unknown[]).forEach((item, index) => {
-      const result = system.encounters.parse(item);
+      const outcomes = EncounterOutcomesSchema.safeParse(item);
+      if (!outcomes.success) {
+        issues.push(
+          ...zodIssues(
+            pluginId,
+            fileName("encounters"),
+            outcomes.error,
+            String(index),
+          ),
+        );
+        return;
+      }
+      const { onVictory, onDefeat, onFlee, ...rules } = outcomes.data;
+      const result = system.encounters.parse(rules);
       if (result.ok) {
         encounters.push(result.entry);
         contentReferences.push(...result.references);
+        if (onVictory || onDefeat || onFlee) {
+          encounterOutcomes[result.entry.id] = { onVictory, onDefeat, onFlee };
+        }
       } else {
         issues.push(
           ...zodIssues(
@@ -280,6 +343,9 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
   uniqueIds("factions", factions);
   const secretIds = uniqueIds("secrets", secrets);
   const encounterIds = uniqueIds("encounters", encounters);
+  const resourceIds = new Set(
+    Object.keys((info.success ? info.data.resources : undefined) ?? {}),
+  );
   uniqueIds("variants", variants);
   uniqueIds("beats", beats);
 
@@ -308,6 +374,9 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
           break;
         case "adjustAttitude":
           need(file, npcIds, effect.npc, "NPC");
+          break;
+        case "adjustResource":
+          need(file, resourceIds, effect.resource, "resource");
           break;
         case "startEncounter":
           need(file, encounterIds, effect.encounter, "encounter");
@@ -360,6 +429,12 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
           break;
         case "clock":
           need(file, clockIds, leaf.clock, "clock");
+          break;
+        case "resource":
+          need(file, resourceIds, leaf.resource, "resource");
+          break;
+        case "visited":
+          need(file, sceneIds, leaf.scene, "scene");
           break;
         case "attitude":
           need(file, npcIds, leaf.npc, "NPC");
@@ -424,8 +499,16 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
   const variantEffects = variants.flatMap((variant) =>
     variant.options.flatMap((option) => option.effects),
   );
+  const outcomeEffects = Object.values(encounterOutcomes).flatMap(
+    ({ onVictory = [], onDefeat = [], onFlee = [] }) => [
+      ...onVictory,
+      ...onDefeat,
+      ...onFlee,
+    ],
+  );
   checkEffects("factions", clockEffects);
   checkEffects("variants", variantEffects);
+  checkEffects("encounters", outcomeEffects);
 
   for (const clock of clocks) {
     for (const { value } of clock.at) {
@@ -457,6 +540,7 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
     if (scene.art && !assetPaths.has(scene.art)) {
       report("scenes", `scene "${scene.id}": missing asset "${scene.art}"`);
     }
+    for (const { when } of scene.textVariants) checkCondition("scenes", when);
     const targets: string[] = [];
     for (const choice of scene.choices) {
       checkCondition("scenes", choice.when);
@@ -493,6 +577,7 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
       ...beats.map((beat) => beat.scene),
       ...gotos(clockEffects),
       ...gotos(variantEffects),
+      ...gotos(outcomeEffects),
     ];
     const reachable = new Set<string>();
     const queue = [...entryPoints];
@@ -527,6 +612,7 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
         variants,
         beats,
         encounters,
+        encounterOutcomes,
       }
     : null;
   return { adventure, issues, contentReferences };

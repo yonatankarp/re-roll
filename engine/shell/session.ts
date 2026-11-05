@@ -1,0 +1,508 @@
+import { parse } from "yaml";
+import { z } from "zod";
+import {
+  type Decision,
+  type GameEvent,
+  type GameState,
+  isNamespacedEvent,
+  isNarrativeEvent,
+} from "../kernel/events.ts";
+import { formatIssue } from "../kernel/issues.ts";
+import { type Registry, loadRun, scanPlugins } from "../kernel/loader.ts";
+import { type LogEntry, createSave, loadSave } from "../kernel/save.ts";
+import type { Storage } from "../kernel/storage.ts";
+import { sceneText } from "../story/runtime.ts";
+import type { GameSystem } from "../kernel/system.ts";
+import {
+  type RunContext,
+  applyEvent,
+  createRunContext,
+  pendingDecision,
+  startRun,
+  step,
+} from "../kernel/turn.ts";
+import type {
+  CombatView,
+  OptionGroup,
+  SheetView,
+  SystemUi,
+} from "./system-ui.ts";
+
+// Everything the page does to the game, with no DOM, so tests can play through the same code.
+
+const SAVES = "saves";
+// Saves have a strict format with no clock in it, so the times live beside them.
+const SAVE_TIMES = `${SAVES}/times`;
+const ASSETS = "private/assets";
+const LIBRARY = "private/library";
+const IMAGE_FILE = /\.(png|jpe?g|webp|gif)$/i;
+const BARE_NAME = /^[^/\\]+$/;
+
+export interface LogLine {
+  readonly kind: "scene" | "event";
+  readonly text: string;
+  readonly actor?: string | null;
+}
+
+export interface GameView {
+  readonly title: string;
+  readonly scene: string | null;
+  readonly sceneArt: string | null; // a content path, for imageUrl
+  readonly endingName: string | null;
+  readonly optionGroups: readonly OptionGroup[];
+  readonly monsterArt: Readonly<Record<string, string>>; // by combatant id
+  readonly decision: Decision | null;
+  readonly combat: CombatView | null;
+  readonly sheet: SheetView | null;
+  readonly log: readonly LogLine[];
+  readonly ended: GameState["story"]["ended"];
+  readonly playerDied: boolean;
+  readonly about: string;
+  readonly attributions: readonly string[];
+  readonly warnings: readonly string[];
+}
+
+export interface AdventureChoice {
+  readonly id: string;
+  readonly title: string;
+  readonly source: "shipped" | "private";
+  readonly levels: string | null;
+}
+
+export interface SaveChoice {
+  readonly path: string;
+  readonly label: string;
+  readonly adventure: string;
+  readonly savedAt: string | null;
+}
+
+export interface BookSection {
+  readonly heading: string;
+  readonly depth: number;
+  readonly file: string;
+}
+
+interface Current {
+  readonly adventure: string;
+  readonly seed: string;
+  readonly root: string;
+  readonly registry: Registry;
+  readonly run: RunContext;
+  readonly ui: SystemUi;
+  readonly log: LogEntry[];
+  readonly lines: LogLine[];
+  state: GameState;
+  warnings: readonly string[];
+}
+
+const SaveHeaderSchema = z.object({ adventure: z.string() });
+const AdventureInfoSchema = z.object({
+  title: z.string(),
+  levels: z.string().optional(),
+});
+const SaveInfoSchema = z.object({
+  adventure: z.string(),
+  seed: z.string(),
+  log: z.array(z.unknown()),
+});
+const SaveTimesSchema = z.record(z.string(), z.string());
+const ArtIndexSchema = z.array(
+  z.object({ file: z.string(), monster: z.string().optional() }),
+);
+const BookIndexSchema = z.object({
+  title: z.string(),
+  entries: z.array(z.object({ path: z.array(z.string()), file: z.string() })),
+});
+
+// "Goblin Warrior", "goblin-warrior" and "srd52:monster/goblin-warrior" all find the same picture.
+function artKey(name: string): string {
+  return (name.split("/").pop() ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function endingName(id: string): string {
+  const words = id.replace(/-/g, " ");
+  return `${words[0]?.toUpperCase() ?? ""}${words.slice(1)}`;
+}
+
+function narrate(
+  run: RunContext,
+  ui: SystemUi,
+  from: GameState | null,
+  events: readonly GameEvent[],
+): { readonly state: GameState | null; readonly lines: readonly LogLine[] } {
+  let state = from;
+  const lines: LogLine[] = [];
+  for (const event of events) {
+    if (event.kind === "runStarted") {
+      state = event.state;
+      continue;
+    }
+    if (state === null) throw new Error("The log has no run start");
+    if (isNarrativeEvent(event) || isNamespacedEvent(event)) {
+      const text = ui.describe(event, state.system, run);
+      if (text !== null) {
+        lines.push({
+          kind: "event",
+          text,
+          actor: ui.actorOf(event, state.system),
+        });
+      }
+    }
+    state = applyEvent(run, state, event);
+    // Scene text is chosen after the event, so a "visited" variant counts this visit.
+    if (event.kind === "sceneEntered") {
+      const scene = run.adventure.scenes.find(
+        (item) => item.id === event.scene,
+      );
+      if (scene) {
+        lines.push({ kind: "scene", text: sceneText(run, state, scene) });
+      }
+    }
+  }
+  return { state, lines };
+}
+
+export interface GameDependencies {
+  readonly storage: Storage & {
+    readonly remove?: (path: string) => Promise<void>;
+  };
+  readonly roots: readonly string[];
+  readonly systems: readonly GameSystem[];
+  readonly uis: readonly SystemUi[];
+  readonly imageUrl?: (path: string) => string | Promise<string | null>;
+}
+
+export function createGame({
+  storage,
+  roots,
+  systems,
+  uis,
+  imageUrl,
+}: GameDependencies) {
+  let current: Current | null = null;
+  let monsterArt: ReadonlyMap<string, string> = new Map();
+
+  // Art is optional and still being extracted, so a bad index only loses its pictures.
+  const loadArt = async (): Promise<void> => {
+    const found = new Map<string, string>();
+    try {
+      const entries = await storage.list(ASSETS);
+      for (const { path } of entries) {
+        if (!/^private\/assets\/[^/]+\/index\.json$/.test(path)) continue;
+        const folder = path.slice(0, -"/index.json".length);
+        const parsed = ArtIndexSchema.safeParse(
+          JSON.parse((await storage.read(path)) ?? "null"),
+        );
+        for (const { file, monster } of parsed.data ?? []) {
+          if (monster && BARE_NAME.test(file)) {
+            found.set(artKey(monster), `${folder}/${file}`);
+          }
+        }
+      }
+    } catch {
+      // Nothing to show is the same as no art at all.
+    }
+    monsterArt = found;
+  };
+
+  const readSaveTimes = async (): Promise<Record<string, string>> => {
+    const text = await storage.read(SAVE_TIMES);
+    if (text === null) return {};
+    try {
+      return SaveTimesSchema.parse(JSON.parse(text));
+    } catch {
+      return {};
+    }
+  };
+
+  const open = async (adventure: string) => {
+    const catalog = await scanPlugins(storage, roots);
+    const loaded = await loadRun(storage, catalog, systems, [adventure]);
+    if (!loaded.ok) {
+      throw new Error(loaded.issues.map(formatIssue).join("\n"));
+    }
+    const { registry } = loaded;
+    const ui = uis.find((item) => item.systemId === registry.system.id);
+    if (!ui) throw new Error(`No UI for the ${registry.system.id} system`);
+    await loadArt();
+    return {
+      registry,
+      ui,
+      root: catalog.plugins.get(adventure)?.root ?? "",
+      run: createRunContext(registry, adventure),
+    };
+  };
+
+  const active = (): Current => {
+    if (!current) throw new Error("No game is running");
+    return current;
+  };
+
+  const write = async (game: Current, name: string): Promise<string> => {
+    const path = `${SAVES}/${game.adventure}-${name}.json`;
+    await storage.replaceAtomically(
+      path,
+      JSON.stringify(
+        createSave(game.registry, game.adventure, game.seed, game.log),
+      ),
+    );
+    const times = await readSaveTimes();
+    times[path] = new Date().toISOString();
+    await storage.replaceAtomically(SAVE_TIMES, JSON.stringify(times));
+    return path;
+  };
+
+  // One file per run, so starting again never overwrites an earlier run.
+  // A failed autosave must not stop play, so the player is told and carries on.
+  const autosave = async (game: Current): Promise<void> => {
+    try {
+      await write(game, `${game.seed}-autosave`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      game.warnings = [`Autosave failed: ${reason}`];
+    }
+  };
+
+  return {
+    async listAdventures(): Promise<readonly AdventureChoice[]> {
+      const catalog = await scanPlugins(storage, roots);
+      const adventures: AdventureChoice[] = [];
+      for (const plugin of catalog.plugins.values()) {
+        if (plugin.manifest.kind !== "adventure") continue;
+        const text = await storage.read(`${plugin.root}/adventure.yaml`);
+        const info = AdventureInfoSchema.safeParse(parse(text ?? ""));
+        adventures.push({
+          id: plugin.manifest.id,
+          title: info.success ? info.data.title : plugin.manifest.id,
+          source: plugin.manifest.distribution,
+          levels: info.data?.levels ?? null,
+        });
+      }
+      return adventures.sort((a, b) => (a.title < b.title ? -1 : 1));
+    },
+
+    async listSaves(): Promise<readonly SaveChoice[]> {
+      const entries = await storage.list(SAVES);
+      const times = await readSaveTimes();
+      const adventures = await this.listAdventures();
+      const saves: SaveChoice[] = [];
+      for (const { path } of entries) {
+        if (!path.endsWith(".json")) continue;
+        const name = path.slice(SAVES.length + 1, -".json".length);
+        let info: z.infer<typeof SaveInfoSchema> | undefined;
+        try {
+          info = SaveInfoSchema.safeParse(
+            JSON.parse((await storage.read(path)) ?? "null"),
+          ).data;
+        } catch {
+          info = undefined;
+        }
+        // A broken save still gets listed, so it can be deleted.
+        if (!info) {
+          saves.push({ path, label: name, adventure: "", savedAt: null });
+          continue;
+        }
+        const { adventure, seed, log } = info;
+        const title =
+          adventures.find((item) => item.id === adventure)?.title ?? adventure;
+        const savedAt = times[path] ?? null;
+        const when = savedAt
+          ? new Date(savedAt).toLocaleString(undefined, {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })
+          : `run ${seed}`;
+        const kind = path.endsWith(`-${seed}-autosave.json`)
+          ? "Autosave"
+          : "Saved";
+        saves.push({
+          path,
+          label: `${title}: ${kind}, ${when}, ${String(log.length)} steps`,
+          adventure,
+          savedAt,
+        });
+      }
+      // Oldest saves have no time, and go last.
+      return saves.sort(
+        (a, b) =>
+          (b.savedAt ?? "").localeCompare(a.savedAt ?? "") ||
+          b.path.localeCompare(a.path),
+      );
+    },
+
+    async deleteSave(path: string): Promise<void> {
+      if (!storage.remove) throw new Error("Saves can't be deleted here");
+      await storage.remove(path);
+      const times = await readSaveTimes();
+      await storage.replaceAtomically(
+        SAVE_TIMES,
+        JSON.stringify(
+          Object.fromEntries(
+            Object.entries(times).filter(([key]) => key !== path),
+          ),
+        ),
+      );
+    },
+
+    // The owner's local copy, so it is only ever read through the local content route.
+    async listBooks(): Promise<readonly string[]> {
+      const entries = await storage.list(LIBRARY).catch(() => []);
+      return entries.flatMap(
+        ({ path }) =>
+          /^private\/library\/([^/]+)\/index\.json$/.exec(path)?.[1] ?? [],
+      );
+    },
+
+    async openBook(
+      id: string,
+    ): Promise<{ title: string; sections: readonly BookSection[] }> {
+      if (!BARE_NAME.test(id)) throw new Error("That isn't a book");
+      const text = await storage.read(`${LIBRARY}/${id}/index.json`);
+      if (text === null) throw new Error(`There is no book called ${id}`);
+      const book = BookIndexSchema.parse(JSON.parse(text));
+      return {
+        title: book.title,
+        sections: book.entries.map(({ path, file }) => ({
+          heading: path[path.length - 1] ?? file,
+          depth: path.length,
+          file,
+        })),
+      };
+    },
+
+    async readSection(id: string, file: string): Promise<string> {
+      if (!BARE_NAME.test(id) || !BARE_NAME.test(file)) {
+        throw new Error("That isn't part of a book");
+      }
+      return (await storage.read(`${LIBRARY}/${id}/${file}`)) ?? "";
+    },
+
+    imageUrl(path: string): string | Promise<string | null> | null {
+      return imageUrl ? imageUrl(path) : null;
+    },
+
+    async start(adventure: string, seed: string): Promise<void> {
+      const { registry, ui, run, root } = await open(adventure);
+      const started = startRun(run, seed);
+      const game: Current = {
+        adventure,
+        seed,
+        root,
+        registry,
+        run,
+        ui,
+        state: started.state,
+        log: [{ input: { kind: "start" }, events: started.events }],
+        lines: [...narrate(run, ui, null, started.events).lines],
+        warnings: [],
+      };
+      current = game;
+      await autosave(game);
+    },
+
+    async answer(optionId: string): Promise<void> {
+      const game = active();
+      const decision = pendingDecision(game.run, game.state);
+      if (!decision) throw new Error("No decision is waiting");
+      const input = {
+        kind: "answer",
+        decisionId: decision.id,
+        optionId,
+      } as const;
+      const outcome = step(game.run, game.state, input);
+      if (!outcome.ok) throw new Error(outcome.error);
+      game.lines.push(
+        ...narrate(game.run, game.ui, game.state, outcome.events).lines,
+      );
+      game.state = outcome.state;
+      game.log.push({ input, events: outcome.events });
+      game.warnings = [];
+      await autosave(game);
+    },
+
+    // Each save gets its own file. Only a run's own autosave is ever overwritten.
+    async save(name: string): Promise<string> {
+      return write(active(), name);
+    },
+
+    async load(path: string): Promise<void> {
+      const text = await storage.read(path);
+      if (text === null) throw new Error(`There is no save at ${path}`);
+      let header: unknown;
+      try {
+        header = JSON.parse(text);
+      } catch {
+        throw new Error("The save file isn't valid JSON");
+      }
+      const parsed = SaveHeaderSchema.safeParse(header);
+      if (!parsed.success) throw new Error("The save file names no adventure");
+      const { adventure } = parsed.data;
+      const { registry, ui, run, root } = await open(adventure);
+      const loaded = loadSave(text, registry, run);
+      if (!loaded.ok) throw new Error(loaded.error);
+      const log = loaded.save.log as readonly LogEntry[];
+      current = {
+        adventure,
+        seed: loaded.save.seed,
+        root,
+        registry,
+        run,
+        ui,
+        state: loaded.state,
+        log: [...log],
+        lines: [
+          ...narrate(
+            run,
+            ui,
+            null,
+            log.flatMap((entry) => entry.events),
+          ).lines,
+        ],
+        warnings: loaded.warnings,
+      };
+    },
+
+    view(): GameView {
+      const { run, ui, state, lines, registry, warnings, root } = active();
+      const currentScene = run.adventure.scenes.find(
+        (item) => item.id === state.story.scene,
+      );
+      const decision = pendingDecision(run, state);
+      const combat = ui.combat(state.system, run);
+      const pictures: Record<string, string> = {};
+      for (const actor of combat?.combatants ?? []) {
+        const art = actor.monster && monsterArt.get(artKey(actor.monster));
+        if (art) pictures[actor.id] = art;
+      }
+      return {
+        title: run.adventure.title,
+        scene: currentScene ? sceneText(run, state, currentScene) : null,
+        sceneArt:
+          currentScene?.art && IMAGE_FILE.test(currentScene.art)
+            ? `${root}/${currentScene.art}`
+            : null,
+        endingName:
+          state.story.ended === "ending" && currentScene
+            ? endingName(currentScene.id)
+            : null,
+        decision,
+        optionGroups: decision
+          ? ui.optionGroups(decision, state.system, run)
+          : [],
+        monsterArt: pictures,
+        combat,
+        sheet: ui.sheet(state.system, run),
+        log: [...lines],
+        ended: state.story.ended,
+        playerDied: ui.playerDied(state.system),
+        about: ui.about,
+        attributions: registry.plugins.flatMap(
+          (plugin) => plugin.attribution ?? [],
+        ),
+        warnings,
+      };
+    },
+  };
+}
+
+export type Game = ReturnType<typeof createGame>;

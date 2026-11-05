@@ -13,12 +13,42 @@
           "srd52:feature/second-wind",
           "srd52:feature/weapon-mastery",
         ]
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from:
+            [
+              acrobatics,
+              animalHandling,
+              athletics,
+              history,
+              insight,
+              intimidation,
+              persuasion,
+              perception,
+              survival,
+            ]
+      scaling: { secondWind: 2, weaponMastery: 3 }
+    - level: 2
+      grants: ["srd52:feature/action-surge", "srd52:feature/tactical-mind"]
+      scaling: { secondWind: 2, weaponMastery: 3 }
+    - level: 3
+      grants: ["srd52:feature/fighter-subclass"]
+      scaling: { secondWind: 2, weaponMastery: 3 }
+    - level: 4
+      grants: ["srd52:feature/ability-score-improvement"]
+      scaling: { secondWind: 3, weaponMastery: 4 }
+    - level: 5
+      grants: ["srd52:feature/extra-attack", "srd52:feature/tactical-shift"]
+      scaling: { secondWind: 3, weaponMastery: 4 }
 - id: "srd52:class/rogue"
   name: Rogue
   hitDie: d8
   primaryAbilities: [dex]
   savingThrows: [dex, int]
   weapons: [simple, martial]
+  martialWeaponProperties: [finesse, light]
   armor: [light]
   levels:
     - level: 1
@@ -29,6 +59,36 @@
           "srd52:feature/thieves-cant",
           "srd52:feature/weapon-mastery",
         ]
+      choices:
+        - kind: skills
+          id: skills
+          count: 4
+          from:
+            [
+              acrobatics,
+              athletics,
+              deception,
+              insight,
+              intimidation,
+              investigation,
+              perception,
+              persuasion,
+              sleightOfHand,
+              stealth,
+            ]
+      scaling: { sneakAttackD6: 1, weaponMastery: 2 }
+    - level: 2
+      grants: ["srd52:feature/cunning-action"]
+      scaling: { sneakAttackD6: 1, weaponMastery: 2 }
+    - level: 3
+      grants: ["srd52:feature/rogue-subclass", "srd52:feature/steady-aim"]
+      scaling: { sneakAttackD6: 2, weaponMastery: 2 }
+    - level: 4
+      grants: ["srd52:feature/ability-score-improvement"]
+      scaling: { sneakAttackD6: 2, weaponMastery: 2 }
+    - level: 5
+      grants: ["srd52:feature/cunning-strike", "srd52:feature/uncanny-dodge"]
+      scaling: { sneakAttackD6: 3, weaponMastery: 2 }
 - id: "srd52:class/cleric"
   name: Cleric
   hitDie: d8
@@ -40,7 +100,29 @@
   levels:
     - level: 1
       grants: ["srd52:feature/spellcasting", "srd52:feature/divine-order"]
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from: [history, insight, medicine, persuasion, religion]
       slots: [2]
+      scaling: { cantrips: 3, preparedSpells: 4 }
+    - level: 2
+      grants: ["srd52:feature/channel-divinity"]
+      slots: [3]
+      scaling: { channelDivinity: 2, cantrips: 3, preparedSpells: 5 }
+    - level: 3
+      grants: ["srd52:feature/cleric-subclass"]
+      slots: [4, 2]
+      scaling: { channelDivinity: 2, cantrips: 3, preparedSpells: 6 }
+    - level: 4
+      grants: ["srd52:feature/ability-score-improvement"]
+      slots: [4, 3]
+      scaling: { channelDivinity: 2, cantrips: 4, preparedSpells: 7 }
+    - level: 5
+      grants: ["srd52:feature/sear-undead"]
+      slots: [4, 3, 2]
+      scaling: { channelDivinity: 2, cantrips: 4, preparedSpells: 9 }
 - id: "srd52:class/wizard"
   name: Wizard
   hitDie: d6
@@ -57,4 +139,35 @@
           "srd52:feature/ritual-adept",
           "srd52:feature/arcane-recovery",
         ]
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from:
+            [
+              arcana,
+              history,
+              insight,
+              investigation,
+              medicine,
+              nature,
+              religion,
+            ]
       slots: [2]
+      scaling: { cantrips: 3, preparedSpells: 4 }
+    - level: 2
+      grants: ["srd52:feature/scholar"]
+      slots: [3]
+      scaling: { cantrips: 3, preparedSpells: 5 }
+    - level: 3
+      grants: ["srd52:feature/wizard-subclass"]
+      slots: [4, 2]
+      scaling: { cantrips: 3, preparedSpells: 6 }
+    - level: 4
+      grants: ["srd52:feature/ability-score-improvement"]
+      slots: [4, 3]
+      scaling: { cantrips: 4, preparedSpells: 7 }
+    - level: 5
+      grants: ["srd52:feature/memorize-spell"]
+      slots: [4, 3, 2]
+      scaling: { cantrips: 4, preparedSpells: 9 }

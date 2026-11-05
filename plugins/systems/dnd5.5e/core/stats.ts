@@ -1,7 +1,8 @@
 import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
-import type { Actor } from "./state.ts";
+import { type Actor, hasCondition } from "./state.ts";
 import {
+  DAMAGE_TYPES,
   ABILITIES,
   type Ability,
   type AbilityScores,
@@ -10,16 +11,25 @@ import {
   ArmorSchema,
   BackgroundSchema,
   ClassSchema,
+  type Damage,
   type DamageType,
   FeatSchema,
   type Feature,
   FeatureSchema,
   type Formula,
+  type LeafEffect,
   ItemSchema,
   MonsterSchema,
+  type Modifier,
+  type Monster,
   type Passive,
+  type Resolution,
+  type ScaleStep,
   type Skill,
   SpeciesSchema,
+  SubclassSchema,
+  type Subclass,
+  type CharacterBuild,
   type Spell,
   SpellSchema,
   WeaponSchema,
@@ -49,6 +59,7 @@ export interface KnownAction {
   readonly name: string;
   readonly activation: Activation;
   readonly spellLevel: number | null;
+  readonly upcast?: Spell["upcast"];
 }
 
 export interface Stats {
@@ -67,19 +78,61 @@ export interface Stats {
   readonly passives: readonly Passive[];
   readonly actions: readonly KnownAction[];
   readonly multiattack: number;
+  // For a monster with a printed Multiattack: the attacks each chosen action makes.
+  readonly routines: Readonly<Record<string, readonly string[]>> | null;
+  readonly creatureType: string | undefined; // lowercase
   readonly initiative: number;
   readonly scaling: Readonly<Record<string, number>>;
+  readonly features: readonly string[];
+  readonly resourceDefs: Feature["resources"];
+  readonly pactMagic: boolean; // slots come back on a Short Rest
+}
+
+export function passiveModifiers(
+  passives: readonly Passive[],
+): readonly Modifier[] {
+  return passives.flatMap((passive) =>
+    passive.kind === "modifier" ? [passive.modifier] : [],
+  );
 }
 
 function bestAc(
   actor: Actor,
   abilities: AbilityScores,
-  context: { armorBases: readonly number[]; flatBonus: number },
+  context: {
+    armorBases: readonly number[];
+    flatBonus: number;
+    passives: readonly Passive[];
+  },
 ): number {
   const dex = abilityModifier(abilities.dex);
   // Only one way of calculating AC applies at a time, so the best one is used.
   const bases = [10 + dex, ...context.armorBases];
-  let bonus = context.flatBonus;
+  const fixed = passiveModifiers(context.passives);
+  // shortcut: Mage Armor's and Unarmored Defense's rule about not wearing armor isn't checked, since the best calculation wins anyway.
+  for (const modifier of [
+    ...actor.activeEffects.map((effect) => effect.modifier),
+    ...fixed,
+  ]) {
+    if (modifier.kind !== "acFormula") continue;
+    const { base, add } = modifier.formula;
+    bases.push(
+      add.reduce(
+        (total, term) =>
+          term.kind === "abilityMod"
+            ? total + abilityModifier(abilities[term.ability])
+            : total,
+        base,
+      ),
+    );
+  }
+  let bonus = fixed.reduce(
+    (total, modifier) =>
+      modifier.kind === "bonus" && modifier.to === "ac"
+        ? total + (modifier.amount.bonus?.base ?? 0)
+        : total,
+    context.flatBonus,
+  );
   const seen = new Set<string>();
   for (const effect of actor.activeEffects) {
     const { modifier } = effect;
@@ -138,8 +191,11 @@ export function weaponActivation(
       damage: [
         {
           amount: {
-            dice: weapon.damage.dice,
-            bonus: { base: 0, add: [{ kind: "abilityMod", ability }] },
+            ...(weapon.damage.dice ? { dice: weapon.damage.dice } : {}),
+            bonus: {
+              base: weapon.damage.flat ?? 0,
+              add: [{ kind: "abilityMod", ability }],
+            },
           },
           type: weapon.damage.type,
         },
@@ -150,6 +206,41 @@ export function weaponActivation(
   };
 }
 
+// Ability scores after every increase, never above 20.
+export function buildAbilities(build: CharacterBuild): AbilityScores {
+  const abilities = { ...build.baseAbilities };
+  const increases = [
+    build.backgroundIncrease,
+    ...build.levels.flatMap((entry) =>
+      entry.answers.flatMap((answer) =>
+        answer.kind === "abilities" ? [answer.increases] : [],
+      ),
+    ),
+  ];
+  for (const increase of increases) {
+    for (const ability of ABILITIES) {
+      abilities[ability] = Math.min(
+        20,
+        abilities[ability] + (increase[ability] ?? 0),
+      );
+    }
+  }
+  return abilities;
+}
+
+// Imported features are only text, so the attacks a character gets are read from the feature's name.
+function passiveAttacks(passives: readonly Passive[]): readonly number[] {
+  return passives.flatMap((passive) =>
+    passive.kind === "multiattack" ? [passive.attacks] : [],
+  );
+}
+
+function attacksFrom(featureId: string): number {
+  if (featureId.endsWith("three-extra-attacks")) return 4;
+  if (featureId.endsWith("two-extra-attacks")) return 3;
+  return featureId.endsWith("extra-attack") ? 2 : 1;
+}
+
 function characterStats(actor: Actor, access: ContentAccess): Stats {
   if (actor.source.kind !== "character" || !actor.source.build) {
     throw new Error(`${actor.id} has no character build`);
@@ -158,13 +249,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const background = lookup(access, BackgroundSchema, build.backgroundId);
   const species = lookup(access, SpeciesSchema, build.speciesId);
 
-  const abilities = { ...build.baseAbilities };
-  for (const ability of ABILITIES) {
-    abilities[ability] = Math.min(
-      20,
-      abilities[ability] + (build.backgroundIncrease[ability] ?? 0),
-    );
-  }
+  const abilities = buildAbilities(build);
 
   const level = build.levels.length;
   const classLevels: Record<string, number> = {};
@@ -175,6 +260,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   for (const id of feat.grants) featureIds.add(id);
   let scaling: Record<string, number> = {};
   let slots: readonly number[] = [];
+  let subclass: Subclass | null = null;
 
   // shortcut: spell slots come from the last class level, so multiclass slot tables need adding with multiclassing.
   for (const entry of build.levels) {
@@ -197,8 +283,22 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         for (const spell of answer.values) knownSpells.add(spell);
       } else if (answer.kind === "features") {
         for (const id of answer.values) featureIds.add(id);
+      } else if (answer.kind === "feats") {
+        for (const id of answer.values) {
+          for (const grant of lookup(access, FeatSchema, id).grants) {
+            featureIds.add(grant);
+          }
+        }
+      } else if (answer.kind === "subclass") {
+        const [id = ""] = answer.values;
+        subclass = lookup(access, SubclassSchema, id);
       }
     }
+    const subclassLevel: Subclass["levels"][number] | undefined =
+      subclass?.levels.find((item) => item.level === classLevel);
+    for (const id of subclassLevel?.grants ?? []) featureIds.add(id);
+    scaling = { ...scaling, ...subclassLevel?.scaling };
+    if (subclassLevel?.slots.length) slots = subclassLevel.slots;
   }
 
   const [firstLevel] = build.levels;
@@ -237,12 +337,20 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
 
   for (const spellId of knownSpells) {
     const spell: Spell = lookup(access, SpellSchema, spellId);
-    if (spell.activation) {
+    if (spell.activation && doesSomething(spell.activation.resolution)) {
       actions.push({
         id: `spell:${spellId}`,
         name: spell.name,
-        activation: spell.activation,
+        activation:
+          spell.level === 0 && spell.cantrip
+            ? scaleActivation(
+                spell.activation,
+                spell.cantrip.perTier,
+                cantripTier(level),
+              )
+            : spell.activation,
         spellLevel: spell.level,
+        upcast: spell.upcast,
       });
     }
   }
@@ -253,18 +361,35 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     level,
     classLevels,
     maxHp,
-    ac: bestAc(actor, abilities, { armorBases, flatBonus }),
+    ac: bestAc(actor, abilities, {
+      armorBases,
+      flatBonus,
+      passives: fromFeatures.passives,
+    }),
     speed: species.speed,
     savingThrows: firstClass.savingThrows,
     skills: [...skills],
     spellAbility: firstClass.spellcasting?.ability ?? null,
     slots,
     resources: {},
-    passives: fromFeatures.passives,
+    passives: fromFeatures.passives.map((passive) =>
+      passive.kind === "extraDamage"
+        ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
+        : passive,
+    ),
     actions,
-    multiattack: 1,
+    multiattack: Math.max(
+      ...[...featureIds].map(attacksFrom),
+      ...passiveAttacks(fromFeatures.passives),
+      1,
+    ),
+    routines: null,
+    creatureType: species.creatureType.toLowerCase(),
     initiative: abilityModifier(abilities.dex),
     scaling,
+    features: [...featureIds],
+    resourceDefs: fromFeatures.resources,
+    pactMagic: [...featureIds].some((id) => id.endsWith("pact-magic")),
   };
   return {
     ...partial,
@@ -275,6 +400,83 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       ]),
     ),
   };
+}
+
+const COUNT_WORDS: Readonly<Record<string, number>> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+};
+
+// Reads the printed routine, so "one Bite attack and three other attacks, using Claw or Tail" is what happens.
+// An attack the sentence doesn't name is a separate action, made once.
+function multiattackRoutines(
+  monster: Monster,
+): Readonly<Record<string, readonly string[]>> | null {
+  const sentence = monster.text
+    ?.replace(/\s+/g, " ")
+    .match(/Multiattack(?: \([^)]*\))?\.? (.*?\.)(?: |$)/)?.[1];
+  if (!sentence) return null;
+  const count = monster.multiattack;
+  const numbers = Object.keys(COUNT_WORDS).join("|");
+  const attacks = monster.actions.flatMap(({ name, activation }, index) =>
+    activation.resolution.kind === "attack" &&
+    activation.cost.length === 1 &&
+    activation.cost[0] === "action"
+      ? [{ id: `monster:${String(index)}`, name }]
+      : [],
+  );
+  const named = (name: string, before = ""): RegExp =>
+    new RegExp(
+      `\\b${before}${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+      "i",
+    );
+  // "one Claws attack and one Tail attack, or it makes two Hurl Flame attacks" prints two routines to choose from.
+  const clauses = sentence
+    .split(new RegExp(`,? or (?:it makes )?(?=(?:${numbers})\\b)`, "i"))
+    .map((clause) => {
+      const fixed = attacks.flatMap(({ id, name }) => {
+        const word = clause.match(named(name, `(${numbers}) `))?.[1];
+        return Array<string>(COUNT_WORDS[word?.toLowerCase() ?? ""] ?? 0).fill(
+          id,
+        );
+      });
+      const free = attacks
+        .filter(
+          ({ id, name }) => !fixed.includes(id) && named(name).test(clause),
+        )
+        .map(({ id }) => id);
+      return { fixed, free };
+    });
+  return Object.fromEntries(
+    attacks.map(({ id }) => {
+      const clause = clauses.find(
+        ({ fixed, free }) => fixed.includes(id) || free.includes(id),
+      );
+      if (!clause) return [id, [id]];
+      const { fixed, free } = clause;
+      if (fixed.includes(id) && free.length === 0) return [id, fixed];
+      const room = count - fixed.length;
+      // "using Pike or Longbow in any combination", or "two Greatsword or Heavy Crossbow attacks": the chosen one repeats.
+      if (fixed.length === 0 || room <= 0) {
+        return [id, fixed.includes(id) ? fixed : Array<string>(count).fill(id)];
+      }
+      const start = Math.max(0, free.indexOf(id));
+      return [
+        id,
+        [
+          ...fixed,
+          ...Array.from(
+            { length: room },
+            (_, index) => free[(start + index) % free.length] ?? id,
+          ),
+        ],
+      ];
+    }),
+  );
 }
 
 function monsterStats(actor: Actor, access: ContentAccess): Stats {
@@ -292,13 +494,20 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
     ac: bestAc(actor, monster.abilities, {
       armorBases: [monster.ac],
       flatBonus: 0,
+      passives: [...monster.passives, ...fromFeatures.passives],
     }),
     speed: monster.speed,
     savingThrows: monster.saves,
     skills: [],
     spellAbility: null,
     slots: [],
-    resources: {},
+    resources: Object.fromEntries(
+      monster.actions.flatMap((action) =>
+        action.activation.cost.flatMap((cost) =>
+          typeof cost === "object" ? [[cost.resource, 1]] : [],
+        ),
+      ),
+    ),
     passives: [...monster.passives, ...fromFeatures.passives],
     actions: [
       ...monster.actions.map((action, index) => ({
@@ -309,13 +518,45 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
       })),
       ...fromFeatures.actions,
     ],
-    multiattack: monster.multiattack,
+    multiattack: Math.max(
+      monster.multiattack,
+      ...passiveAttacks([...monster.passives, ...fromFeatures.passives]),
+    ),
+    routines: multiattackRoutines(monster),
+    creatureType: monster.creatureType?.toLowerCase(),
     initiative: monster.initiative,
     scaling: {},
+    features: monster.features,
+    resourceDefs: fromFeatures.resources,
+    pactMagic: false,
   };
 }
 
 // Calculated on demand and never stored, so stats can't drift out of step with choices or gear.
+// Forced movement needs the grid, and Deafened and Grappled have no effect without positions or hearing rules,
+// so a spell that only does those would waste a slot. Drop this filter when the grid arrives.
+export function doesSomething(resolution: Resolution): boolean {
+  if ("damage" in resolution && resolution.damage.length > 0) return true;
+  const effects =
+    resolution.kind === "automatic"
+      ? resolution.effects
+      : resolution.kind === "attack"
+        ? [...resolution.onHit, ...resolution.onMiss]
+        : [...resolution.onFail, ...resolution.onSuccess];
+  return effects.some(
+    (effect) =>
+      effect.kind === "heal" ||
+      effect.kind === "tempHp" ||
+      effect.kind === "modifier" ||
+      effect.kind === "removeCondition" ||
+      effect.kind === "extraAction" ||
+      effect.kind === "reduceDamage" ||
+      (effect.kind === "applyCondition" &&
+        effect.condition !== "deafened" &&
+        effect.condition !== "grappled"),
+  );
+}
+
 export function deriveStats(actor: Actor, access: ContentAccess): Stats {
   return actor.source.kind === "monster"
     ? monsterStats(actor, access)
@@ -376,19 +617,133 @@ export function rollDiceNotation(
   return total;
 }
 
+// A scaling key can replace the number of dice (sneakAttackD6) or the die size (martialArtsDie).
+export function scaledDice(
+  source: {
+    readonly dice?: string | undefined;
+    readonly diceCount?: string | undefined;
+    readonly dieSize?: string | undefined;
+  },
+  scaling: Readonly<Record<string, number>>,
+): string | undefined {
+  if (!source.dice) return undefined;
+  const [count = "0", sides = "0"] = source.dice.split("d");
+  return `${String(scaling[source.diceCount ?? ""] ?? count)}d${String(scaling[source.dieSize ?? ""] ?? sides)}`;
+}
+
+function cantripTier(level: number): number {
+  return level >= 17 ? 3 : level >= 11 ? 2 : level >= 5 ? 1 : 0;
+}
+
+// Adds dice to every amount that uses the same die, which covers "both types of damage" and leaves
+// Ice Storm's d6 cold alone when only its d10 bludgeoning scales.
+function addDice(amount: Amount, add: string, times: number): Amount {
+  const [addCount = "0", addSides] = add.split("d");
+  const [count = "0", sides] = (amount.dice ?? "").split("d");
+  return sides === addSides
+    ? {
+        ...amount,
+        dice: `${String(Number(count) + Number(addCount) * times)}d${sides ?? ""}`,
+      }
+    : amount;
+}
+
+export function scaleActivation(
+  activation: Activation,
+  step: ScaleStep,
+  times: number,
+): Activation {
+  if (times <= 0) return activation;
+  if ("addTargets" in step) {
+    const more = step.addTargets * times;
+    const { projectiles, targeting } = activation;
+    if (projectiles !== undefined) {
+      return { ...activation, projectiles: projectiles + more };
+    }
+    return "creatures" in targeting
+      ? {
+          ...activation,
+          targeting: { ...targeting, creatures: targeting.creatures + more },
+        }
+      : activation;
+  }
+  const damage = (list: readonly Damage[]): Damage[] =>
+    list.map((item) => ({
+      ...item,
+      amount: addDice(item.amount, step.addDice, times),
+    }));
+  const effects = (list: readonly LeafEffect[]): LeafEffect[] =>
+    list.map((effect) => {
+      if (effect.kind === "heal" || effect.kind === "tempHp") {
+        return {
+          ...effect,
+          amount: addDice(effect.amount, step.addDice, times),
+        };
+      }
+      return effect.kind === "modifier" &&
+        effect.modifier.kind === "lingeringDamage"
+        ? {
+            ...effect,
+            modifier: {
+              ...effect.modifier,
+              damage: damage(effect.modifier.damage),
+            },
+          }
+        : effect;
+    });
+  const { resolution } = activation;
+  switch (resolution.kind) {
+    case "automatic":
+      return {
+        ...activation,
+        resolution: {
+          ...resolution,
+          damage: damage(resolution.damage),
+          effects: effects(resolution.effects),
+        },
+      };
+    case "attack":
+      return {
+        ...activation,
+        resolution: {
+          ...resolution,
+          damage: damage(resolution.damage),
+          onHit: effects(resolution.onHit),
+          onMiss: effects(resolution.onMiss),
+        },
+      };
+    case "save":
+      return {
+        ...activation,
+        resolution: {
+          ...resolution,
+          damage: damage(resolution.damage),
+          onFail: effects(resolution.onFail),
+          onSuccess: effects(resolution.onSuccess),
+        },
+      };
+    default:
+      return resolution satisfies never;
+  }
+}
+
 export function rollAmount(
   amount: Amount,
   stats: Stats,
   dice: Dice,
   diceMultiplier = 1,
 ): number {
-  const rolled = amount.dice
-    ? rollDiceNotation(amount.dice, dice, diceMultiplier)
+  const notation = scaledDice(amount, stats.scaling);
+  const rolled = notation
+    ? rollDiceNotation(notation, dice, diceMultiplier)
     : 0;
   return rolled + (amount.bonus ? evaluateFormula(amount.bonus, stats) : 0);
 }
 
-export function damageResponses(actor: Actor): {
+export function damageResponses(
+  actor: Actor,
+  access: ContentAccess,
+): {
   readonly adjustments: readonly number[];
   readonly resistances: readonly DamageType[];
   readonly vulnerabilities: readonly DamageType[];
@@ -397,7 +752,12 @@ export function damageResponses(actor: Actor): {
   const resistances: DamageType[] = [];
   const vulnerabilities: DamageType[] = [];
   const immunities: DamageType[] = [];
-  for (const { modifier } of actor.activeEffects) {
+  // Petrified gives Resistance to all damage.
+  if (hasCondition(actor, "petrified")) resistances.push(...DAMAGE_TYPES);
+  for (const modifier of [
+    ...actor.activeEffects.map((effect) => effect.modifier),
+    ...passiveModifiers(deriveStats(actor, access).passives),
+  ]) {
     if (modifier.kind === "resistance") resistances.push(modifier.damage);
     if (modifier.kind === "vulnerability")
       vulnerabilities.push(modifier.damage);

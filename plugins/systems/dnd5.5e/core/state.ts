@@ -1,7 +1,9 @@
 import { ContentIdSchema, type SystemEvent } from "#sdk";
 import { z } from "zod";
 import {
+  AbilitySchema,
   CharacterBuildSchema,
+  ConditionSchema,
   DamageTypeSchema,
   ModifierSchema,
 } from "./schemas.ts";
@@ -11,8 +13,25 @@ export const NS = "dnd5.5e";
 const ActiveEffectSchema = z.strictObject({
   sourceId: z.string(),
   casterId: z.string(),
-  modifier: ModifierSchema,
-  ends: z.enum(["concentration", "casterNextTurn"]),
+  modifier: z.union([
+    ModifierSchema,
+    z.strictObject({
+      kind: z.literal("condition"),
+      condition: ConditionSchema,
+    }),
+  ]),
+  // "casterNextTurnEnd" becomes "casterTurnEnd" when the caster's next turn starts, and ends with that turn.
+  ends: z.enum([
+    "concentration",
+    "casterNextTurn",
+    "casterNextTurnEnd",
+    "casterTurnEnd",
+    "spellDuration",
+  ]),
+  repeatSave: z
+    .strictObject({ ability: AbilitySchema, dc: z.number().int() })
+    .optional(),
+  endsOnDamage: z.boolean().optional(),
 });
 export type ActiveEffect = z.infer<typeof ActiveEffectSchema>;
 
@@ -48,6 +67,7 @@ const ActorSchema = z.strictObject({
   activeEffects: z.array(ActiveEffectSchema),
   concentratingOn: z.string().nullable(),
   inventory: z.array(ContentIdSchema),
+  xp: z.number().int().optional(), // only the player's is tracked, and the party levels together
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -59,6 +79,8 @@ export const StateSchema = z.strictObject({
       order: z.array(z.string()),
       index: z.number().int(),
       round: z.number().int(),
+      canFlee: z.boolean().optional(),
+      defeatContinues: z.boolean().optional(),
     })
     .nullable(),
 });
@@ -71,10 +93,27 @@ const CharacterChosenSchema = z.strictObject({
   inventory: z.array(ContentIdSchema),
   hp: z.number().int(),
 });
+const CharacterAdvancedSchema = z.strictObject({
+  actor: z.string(),
+  entry: CharacterBuildSchema.shape.levels.element,
+  hp: z.number().int(),
+});
+const XpAwardedSchema = z.strictObject({
+  actor: z.string(),
+  amount: z.number().int(),
+});
+const RestedSchema = z.strictObject({
+  actor: z.string(),
+  rest: z.enum(["short", "long"]),
+  maxHp: z.number().int(),
+  resourcesSpent: z.record(z.string(), z.number().int()),
+});
 const CombatStartedSchema = z.strictObject({
   encounter: z.string(),
   monsters: z.array(ActorSchema),
   order: z.array(z.string()),
+  canFlee: z.boolean().optional(),
+  defeatContinues: z.boolean().optional(),
 });
 const ActorOnlySchema = z.strictObject({ actor: z.string() });
 const BudgetSpentSchema = z.strictObject({
@@ -82,6 +121,10 @@ const BudgetSpentSchema = z.strictObject({
   kind: z.enum(["action", "bonusAction", "reaction"]),
 });
 const ResourceSpentSchema = z.strictObject({
+  actor: z.string(),
+  resource: z.string(),
+});
+const ResourceRestoredSchema = z.strictObject({
   actor: z.string(),
   resource: z.string(),
 });
@@ -109,6 +152,14 @@ const EffectAddedSchema = z.strictObject({
   actor: z.string(),
   effect: ActiveEffectSchema,
 });
+const EffectEndedSchema = z.strictObject({
+  actor: z.string(),
+  sourceId: z.string(),
+});
+const ConditionRemovedSchema = z.strictObject({
+  actor: z.string(),
+  condition: ConditionSchema,
+});
 const ConcentrationStartedSchema = z.strictObject({
   actor: z.string(),
   spell: z.string(),
@@ -129,16 +180,23 @@ const RollReportSchema = z.strictObject({
 
 export const EVENT_SCHEMAS = {
   [`${NS}:characterChosen`]: CharacterChosenSchema,
+  [`${NS}:characterAdvanced`]: CharacterAdvancedSchema,
+  [`${NS}:xpAwarded`]: XpAwardedSchema,
+  [`${NS}:rested`]: RestedSchema,
   [`${NS}:combatStarted`]: CombatStartedSchema,
   [`${NS}:combatEnded`]: z.strictObject({}),
   [`${NS}:turnAdvanced`]: z.strictObject({}),
   [`${NS}:budgetSpent`]: BudgetSpentSchema,
+  [`${NS}:actionRegained`]: ActorOnlySchema,
   [`${NS}:resourceSpent`]: ResourceSpentSchema,
+  [`${NS}:resourceRestored`]: ResourceRestoredSchema,
   [`${NS}:oncePerTurnUsed`]: OncePerTurnSchema,
   [`${NS}:damaged`]: DamagedSchema,
   [`${NS}:healed`]: HealedSchema,
   [`${NS}:tempHpGained`]: TempHpSchema,
   [`${NS}:effectAdded`]: EffectAddedSchema,
+  [`${NS}:effectEnded`]: EffectEndedSchema,
+  [`${NS}:conditionRemoved`]: ConditionRemovedSchema,
   [`${NS}:concentrationStarted`]: ConcentrationStartedSchema,
   [`${NS}:concentrationEnded`]: ActorOnlySchema,
   [`${NS}:deathSaveRolled`]: DeathSaveSchema,
@@ -171,6 +229,26 @@ export function freshActor(
     concentratingOn: null,
   };
 }
+
+type Condition = z.infer<typeof ConditionSchema>;
+
+export function hasCondition(
+  actor: Actor,
+  ...conditions: readonly Condition[]
+): boolean {
+  return actor.activeEffects.some(
+    ({ modifier }) =>
+      modifier.kind === "condition" && conditions.includes(modifier.condition),
+  );
+}
+
+export const INCAPACITATING: readonly Condition[] = [
+  "incapacitated",
+  "paralyzed",
+  "petrified",
+  "stunned",
+  "unconscious",
+];
 
 export function isDown(actor: Actor): boolean {
   return actor.hp <= 0;
@@ -216,16 +294,25 @@ function advanceTurn(state: DndState): DndState {
     if (next && !isDead(next) && !isStable(next)) break;
   }
   const nextId = combat.order[index] ?? "";
+  const endingId = combat.order[combat.index];
   const actors = Object.fromEntries(
     Object.entries(state.actors).map(([id, actor]) => [
       id,
       {
         ...actor,
         // A "until your next turn" effect ends when its caster's turn comes round.
-        activeEffects: actor.activeEffects.filter(
-          (effect) =>
-            effect.ends !== "casterNextTurn" || effect.casterId !== nextId,
-        ),
+        activeEffects: actor.activeEffects
+          .filter(
+            (effect) =>
+              (effect.ends !== "casterNextTurn" ||
+                effect.casterId !== nextId) &&
+              (effect.ends !== "casterTurnEnd" || effect.casterId !== endingId),
+          )
+          .map((effect) =>
+            effect.ends === "casterNextTurnEnd" && effect.casterId === nextId
+              ? { ...effect, ends: "casterTurnEnd" as const }
+              : effect,
+          ),
         ...(id === nextId
           ? {
               budget: { action: true, bonusAction: true, reaction: true },
@@ -267,7 +354,7 @@ function endCombat(state: DndState): DndState {
           concentratingOn: null,
           budget: { action: true, bonusAction: true, reaction: true },
           usedThisTurn: [],
-          // shortcut: everyone downed but not dead gets back up, until rests exist.
+          // shortcut: everyone downed but not dead gets back up, since an adventure doesn't have to offer a rest.
           hp: actor.hp <= 0 && !isDead(actor) ? 1 : actor.hp,
           deathSaves: isDead(actor)
             ? actor.deathSaves
@@ -292,6 +379,10 @@ function applyDamage(
     wasDown && remaining > 0 && actor.side === "party" ? (critical ? 2 : 1) : 0;
   return {
     ...actor,
+    activeEffects:
+      amount > 0
+        ? actor.activeEffects.filter((effect) => !effect.endsOnDamage)
+        : actor.activeEffects,
     tempHp: actor.tempHp - absorbed,
     hp,
     deathSaves: {
@@ -335,6 +426,45 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         hp: data.hp,
       }));
     }
+    case `${NS}:characterAdvanced`: {
+      const data = payload(CharacterAdvancedSchema, event);
+      return updateActor(state, data.actor, (actor) => {
+        if (actor.source.kind !== "character" || !actor.source.build) {
+          throw new Error(`${actor.id} has no character build`);
+        }
+        const { build } = actor.source;
+        return {
+          ...actor,
+          source: {
+            kind: "character",
+            build: { ...build, levels: [...build.levels, data.entry] },
+          },
+          hp: data.hp,
+        };
+      });
+    }
+    case `${NS}:xpAwarded`: {
+      const data = payload(XpAwardedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        xp: (actor.xp ?? 0) + data.amount,
+      }));
+    }
+    case `${NS}:rested`: {
+      const data = payload(RestedSchema, event);
+      return updateActor(state, data.actor, (actor) =>
+        data.rest === "short"
+          ? { ...actor, resourcesSpent: data.resourcesSpent }
+          : {
+              ...actor,
+              resourcesSpent: data.resourcesSpent,
+              hp: data.maxHp,
+              tempHp: 0,
+              deathSaves: { successes: 0, failures: 0 },
+              exhaustion: Math.max(0, actor.exhaustion - 1),
+            },
+      );
+    }
     case `${NS}:combatStarted`: {
       const data = payload(CombatStartedSchema, event);
       return {
@@ -347,6 +477,8 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
           order: data.order,
           index: 0,
           round: 1,
+          ...(data.canFlee ? { canFlee: true } : {}),
+          ...(data.defeatContinues ? { defeatContinues: true } : {}),
         },
       };
     }
@@ -361,6 +493,12 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         budget: { ...actor.budget, [data.kind]: false },
       }));
     }
+    case `${NS}:actionRegained`:
+      return updateActor(
+        state,
+        payload(ActorOnlySchema, event).actor,
+        (actor) => ({ ...actor, budget: { ...actor.budget, action: true } }),
+      );
     case `${NS}:resourceSpent`: {
       const data = payload(ResourceSpentSchema, event);
       return updateActor(state, data.actor, (actor) => ({
@@ -369,6 +507,17 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
           ...actor.resourcesSpent,
           [data.resource]: (actor.resourcesSpent[data.resource] ?? 0) + 1,
         },
+      }));
+    }
+    case `${NS}:resourceRestored`: {
+      const data = payload(ResourceRestoredSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        resourcesSpent: Object.fromEntries(
+          Object.entries(actor.resourcesSpent).filter(
+            ([resource]) => resource !== data.resource,
+          ),
+        ),
       }));
     }
     case `${NS}:oncePerTurnUsed`: {
@@ -405,6 +554,26 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         activeEffects: [...actor.activeEffects, data.effect],
+      }));
+    }
+    case `${NS}:effectEnded`: {
+      const data = payload(EffectEndedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        activeEffects: actor.activeEffects.filter(
+          (effect) => effect.sourceId !== data.sourceId,
+        ),
+      }));
+    }
+    case `${NS}:conditionRemoved`: {
+      const data = payload(ConditionRemovedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        activeEffects: actor.activeEffects.filter(
+          ({ modifier }) =>
+            modifier.kind !== "condition" ||
+            modifier.condition !== data.condition,
+        ),
       }));
     }
     case `${NS}:concentrationStarted`: {

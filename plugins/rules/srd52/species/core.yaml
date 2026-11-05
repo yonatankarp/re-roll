@@ -5,3 +5,17 @@
   size: medium
   speed: 30
   traits: ["srd52:feature/human-traits"]
+- id: "srd52:species/dwarf"
+  name: Dwarf
+  text: "Raised from the earth in ages past, Dwarves are as tough as the stone they shape."
+  creatureType: Humanoid
+  size: medium
+  speed: 30
+  traits: ["srd52:feature/dwarf-traits"]
+- id: "srd52:species/elf"
+  name: Elf
+  text: "Long-lived and touched by the Feywild, Elves rest in a trance instead of sleep."
+  creatureType: Humanoid
+  size: medium
+  speed: 30
+  traits: ["srd52:feature/elf-traits"]

@@ -5,5 +5,7 @@
     "engine/tools/**/*.ts",
     "engine/platform/node/**/*.ts",
     "app/**/*.ts"
-  ]
+  ],
+  "exclude": ["app/desktop/**"],
+  "files": ["app/desktop/vite.config.ts"]
 }

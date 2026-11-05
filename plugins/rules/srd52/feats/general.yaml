@@ -1,0 +1,36 @@
+- {
+    id: "srd52:feat/ability-score-improvement",
+    name: Ability Score Improvement,
+    category: general,
+    text: "Increase one ability score by 2, or two ability scores by 1, up to 20. Repeatable.",
+  }
+- {
+    id: "srd52:feat/grappler",
+    name: Grappler,
+    category: general,
+    text: "Increase Strength or Dexterity by 1, and you grapple and punch more effectively.",
+  }
+- {
+    id: "srd52:feat/archery",
+    name: Archery,
+    category: fightingStyle,
+    text: "You gain a +2 bonus to attack rolls with Ranged weapons.",
+  }
+- {
+    id: "srd52:feat/defense",
+    name: Defense,
+    category: fightingStyle,
+    text: "While wearing armor, you gain a +1 bonus to Armor Class.",
+  }
+- {
+    id: "srd52:feat/great-weapon-fighting",
+    name: Great Weapon Fighting,
+    category: fightingStyle,
+    text: "Treat any 1 or 2 on a two-handed weapon's damage die as a 3.",
+  }
+- {
+    id: "srd52:feat/two-weapon-fighting",
+    name: Two-Weapon Fighting,
+    category: fightingStyle,
+    text: "Add your ability modifier to the damage of the extra attack from a Light weapon.",
+  }

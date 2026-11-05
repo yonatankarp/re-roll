@@ -12,38 +12,87 @@ import {
 import { z } from "zod";
 import {
   AttackSchema,
+  CREATE_CHARACTER,
+  AfterHitSchema,
   ConcentrationSchema,
   type Context,
   HitSchema,
+  LingeringSchema,
   ReactionSchema,
+  SmiteSchema,
   TakeActionSchema,
   choosePolicy,
   nextDndDecision,
   runAfterAction,
+  runAfterHit,
   runAfterReaction,
+  runAfterTurnStart,
   runApplyHit,
   runAttackRoll,
   runCheckCombatEnd,
   runConcentrationSave,
   runEndTurn,
+  runFinishTurn,
+  runLingeringTick,
+  runProjectile,
   runRecheckHit,
+  runSmite,
   runTakeAction,
   startCombat,
 } from "./combat.ts";
+import {
+  parseClassesFromHtml,
+  parseFeaturesFromHtml,
+  parseSubclassesFromHtml,
+} from "./import/classes.ts";
+import { parseCompanionsFromHtml } from "./import/companions.ts";
+import { parseEquipmentFromHtml } from "./import/equipment.ts";
+import { parseMonstersFromHtml } from "./import/monsters.ts";
+import {
+  parseBackgroundsFromHtml,
+  parseFeatsFromHtml,
+  parseSpeciesFromHtml,
+} from "./import/origins.ts";
+import { spellImportKind } from "./import/spells.ts";
+import {
+  parseBudgetsFromHtml,
+  parseHazardsFromHtml,
+  parsePoisonsFromHtml,
+  parseTablesFromHtml,
+  parseTrapsFromHtml,
+  parseBastionsFromHtml,
+  parseLookupsFromHtml,
+} from "./import/tables.ts";
+import {
+  beginCreation,
+  buildCompanion,
+  characterEffects,
+  characterFrames,
+} from "./character.ts";
+import { restEffects, restFrames } from "./rest.ts";
 import { rollD20 } from "./rules.ts";
 import {
   BackgroundSchema,
   CheckSchema,
   ClassSchema,
+  CompanionSchema,
+  EncounterBudgetSchema,
   EncounterSchema,
   FeatSchema,
   FeatureSchema,
+  HazardSchema,
   ItemSchema,
   MonsterSchema,
+  LookupTableSchema,
+  BastionEntrySchema,
+  PoisonSchema,
   PregenSchema,
+  RollTableSchema,
   SKILL_ABILITIES,
   SpeciesSchema,
   SpellSchema,
+  SubclassSchema,
+  TrapSchema,
 } from "./schemas.ts";
 import {
   type Actor,
@@ -65,9 +114,20 @@ function buildReferences(pregen: z.infer<typeof PregenSchema>): string[] {
     ...pregen.build.levels.flatMap((level) => [
       level.classId,
       ...level.answers.flatMap((answer) =>
-        answer.kind === "skills" ? [] : answer.values,
+        answer.kind === "skills" || answer.kind === "abilities"
+          ? []
+          : answer.values,
       ),
     ]),
+  ];
+}
+
+function levelReferences(level: z.infer<typeof ClassSchema>["levels"][number]) {
+  return [
+    ...level.grants,
+    ...level.choices.flatMap((choice) =>
+      choice.kind === "option" ? choice.from : [],
+    ),
   ];
 }
 
@@ -101,7 +161,18 @@ export const dnd55e = defineSystem<DndState>({
     classes: contentKind({
       idPrefix: "class",
       schema: ClassSchema,
-      references: (item) => item.levels.flatMap((level) => level.grants),
+      references: (item) => [
+        ...(item.spellList ?? []),
+        ...item.levels.flatMap(levelReferences),
+      ],
+    }),
+    subclasses: contentKind({
+      idPrefix: "subclass",
+      schema: SubclassSchema,
+      references: (item) => [
+        item.class,
+        ...item.levels.flatMap(levelReferences),
+      ],
     }),
     species: contentKind({
       idPrefix: "species",
@@ -133,6 +204,14 @@ export const dnd55e = defineSystem<DndState>({
       schema: MonsterSchema,
       references: (item) => item.features,
     }),
+    companions: contentKind({ idPrefix: "companion", schema: CompanionSchema }),
+    tables: contentKind({ idPrefix: "table", schema: RollTableSchema }),
+    lookups: contentKind({ idPrefix: "lookup", schema: LookupTableSchema }),
+    bastions: contentKind({ idPrefix: "bastion", schema: BastionEntrySchema }),
+    traps: contentKind({ idPrefix: "trap", schema: TrapSchema }),
+    hazards: contentKind({ idPrefix: "hazard", schema: HazardSchema }),
+    poisons: contentKind({ idPrefix: "poison", schema: PoisonSchema }),
+    budgets: contentKind({ idPrefix: "budget", schema: EncounterBudgetSchema }),
     pregens: contentKind({
       idPrefix: "pregen",
       schema: PregenSchema,
@@ -145,6 +224,25 @@ export const dnd55e = defineSystem<DndState>({
     references: (encounter) => encounter.monsters.map((entry) => entry.monster),
   }),
   outcomes: { keys: ["success", "failure"] },
+  importKinds: { spells: spellImportKind },
+  htmlParsers: {
+    monsters: parseMonstersFromHtml,
+    classes: parseClassesFromHtml,
+    subclasses: parseSubclassesFromHtml,
+    features: parseFeaturesFromHtml,
+    species: parseSpeciesFromHtml,
+    backgrounds: parseBackgroundsFromHtml,
+    feats: parseFeatsFromHtml,
+    equipment: parseEquipmentFromHtml,
+    companions: parseCompanionsFromHtml,
+    tables: parseTablesFromHtml,
+    lookups: parseLookupsFromHtml,
+    bastions: parseBastionsFromHtml,
+    traps: parseTrapsFromHtml,
+    hazards: parseHazardsFromHtml,
+    poisons: parsePoisonsFromHtml,
+    budgets: parseBudgetsFromHtml,
+  },
   stateSchema: StateSchema,
   eventSchemas: EVENT_SCHEMAS,
   storyEffects: {
@@ -154,6 +252,8 @@ export const dnd55e = defineSystem<DndState>({
         events: [dndEvent(`${NS}:inspirationGranted`, { actor: PLAYER_ACTOR })],
       }),
     }),
+    ...characterEffects,
+    ...restEffects,
   },
   storyPredicates: {
     [`${NS}:hasInspiration`]: storyPredicate({
@@ -166,6 +266,7 @@ export const dnd55e = defineSystem<DndState>({
     [`${NS}:characterChosen`]: frameHandler({
       schema: CharacterChosenPayload,
       run: ({ answer }, context: SystemContext<DndState>) => {
+        if (answer === CREATE_CHARACTER) return beginCreation();
         const pregen = lookup(context, PregenSchema, answer);
         const actor = characterActor(
           PLAYER_ACTOR,
@@ -186,6 +287,8 @@ export const dnd55e = defineSystem<DndState>({
         };
       },
     }),
+    ...characterFrames,
+    ...restFrames,
     [`${NS}:takeAction`]: frameHandler({
       schema: TakeActionSchema,
       run: runTakeAction,
@@ -193,6 +296,27 @@ export const dnd55e = defineSystem<DndState>({
     [`${NS}:attackRoll`]: frameHandler({
       schema: AttackSchema,
       run: runAttackRoll,
+    }),
+    [`${NS}:projectile`]: frameHandler({
+      schema: AttackSchema,
+      run: runProjectile,
+    }),
+    [`${NS}:afterHit`]: frameHandler({
+      schema: AfterHitSchema,
+      run: runAfterHit,
+    }),
+    [`${NS}:smite`]: frameHandler({ schema: SmiteSchema, run: runSmite }),
+    [`${NS}:lingeringTick`]: frameHandler({
+      schema: LingeringSchema,
+      run: runLingeringTick,
+    }),
+    [`${NS}:finishTurn`]: frameHandler({
+      schema: EmptyPayload,
+      run: (_payload, context: Context) => runFinishTurn(context),
+    }),
+    [`${NS}:afterTurnStart`]: frameHandler({
+      schema: EmptyPayload,
+      run: (_payload, context: Context) => runAfterTurnStart(context),
     }),
     [`${NS}:afterReaction`]: frameHandler({
       schema: ReactionSchema,
@@ -222,8 +346,8 @@ export const dnd55e = defineSystem<DndState>({
   },
   createRun: ({ actors, dice, content, contentIds }) => {
     const access = { content, contentIds };
-    const pool = contentIds().filter((id) => id.includes(":pregen/"));
     const state: Record<string, Actor> = {};
+    const takenClasses = new Set<string>();
     for (const { id, name, role } of actors) {
       if (role === "player") {
         state[id] = freshActor({
@@ -235,11 +359,12 @@ export const dnd55e = defineSystem<DndState>({
           inventory: [],
         });
       } else {
-        const [pregenId] = pool.splice(dice.below(pool.length), 1);
-        if (pregenId === undefined) {
-          throw new Error("There are too few pregens for the party");
+        const companion = buildCompanion(id, name, takenClasses, access, dice);
+        state[id] = companion;
+        if (companion.source.kind === "character") {
+          const classId = companion.source.build?.levels[0]?.classId;
+          if (classId !== undefined) takenClasses.add(classId);
         }
-        state[id] = characterActor(id, name, pregenId, access);
       }
     }
     return { actors: state, combat: null };
@@ -279,8 +404,8 @@ export const dnd55e = defineSystem<DndState>({
       ],
     };
   },
-  startEncounter: (encounter, context) =>
-    startCombat(EncounterSchema.parse(encounter), context),
+  startEncounter: (encounter, context, options) =>
+    startCombat(EncounterSchema.parse(encounter), context, options),
   applyEvent: applyDndEvent,
   nextDecision: nextDndDecision,
   decidePolicy: choosePolicy,

@@ -37,6 +37,10 @@ const ResolveChoiceSchema = z.object({
 });
 const ApplyEffectsSchema = z.object({ effects: z.array(StoryEffectSchema) });
 const EnterSceneSchema = z.object({ scene: z.string() });
+const AfterEncounterSchema = z.object({
+  encounter: z.string(),
+  effects: z.array(StoryEffectSchema),
+});
 
 // Each system may only emit the shared narrative events and events under its own name.
 export function assertOwnEvents(
@@ -71,6 +75,7 @@ export function initialStory(adventure: Adventure): StoryState {
     firedBeats: [],
     variants: {},
     ended: null,
+    ...(adventure.resources ? { resources: adventure.resources } : {}),
   };
 }
 
@@ -90,6 +95,18 @@ export function enterSceneFrame(scene: string): Frame {
 
 export const DIRECTOR_FRAME: Frame = { kind: "story:director", payload: {} };
 
+function inBounds(
+  value: number,
+  bounds: {
+    readonly atLeast?: number | undefined;
+    readonly atMost?: number | undefined;
+  },
+): boolean {
+  return (
+    value >= (bounds.atLeast ?? value) && value <= (bounds.atMost ?? value)
+  );
+}
+
 function evaluateLeaf(
   leaf: Exclude<Condition, { all: unknown } | { any: unknown }>,
   run: RunContext,
@@ -100,7 +117,11 @@ function evaluateLeaf(
     case "flag":
       return (story.flags[leaf.flag] ?? false) === leaf.is;
     case "clock":
-      return (story.clocks[leaf.clock] ?? 0) >= leaf.atLeast;
+      return inBounds(story.clocks[leaf.clock] ?? 0, leaf);
+    case "resource":
+      return inBounds(story.resources?.[leaf.resource] ?? 0, leaf);
+    case "visited":
+      return (story.visits?.[leaf.scene] ?? 0) >= leaf.atLeast;
     case "attitude":
       return (story.attitudes[leaf.npc] ?? 0) >= leaf.atLeast;
     case "system": {
@@ -134,6 +155,17 @@ function findScene(run: RunContext, id: string) {
   return scene;
 }
 
+export function sceneText(
+  run: RunContext,
+  state: GameState,
+  scene: Adventure["scenes"][number],
+): string {
+  const variant = scene.textVariants.find(({ when }) =>
+    evaluateCondition(when, run, state),
+  );
+  return variant?.text ?? scene.text;
+}
+
 export type StoryDecision =
   | { readonly kind: "decision"; readonly decision: Decision }
   | { readonly kind: "ended"; readonly reason: "ending" | "deadEnd" };
@@ -159,7 +191,7 @@ export function storyDecision(
     decision: {
       id: `scene:${scene.id}`,
       actor: PLAYER_ACTOR,
-      prompt: scene.text,
+      prompt: sceneText(run, state, scene),
       options,
       resume: { kind: "story:resolveChoice", payload: { scene: scene.id } },
     },
@@ -272,18 +304,66 @@ function runApplyEffects(
         (item) => item.id === effect.encounter,
       );
       if (!encounter) throw new Error(`Unknown encounter ${effect.encounter}`);
-      const result = run.system.startEncounter(encounter, context);
+      const outcomes = run.adventure.encounterOutcomes[encounter.id];
+      const result = run.system.startEncounter(encounter, context, {
+        canFlee: outcomes?.onFlee !== undefined,
+        defeatContinues: outcomes?.onDefeat !== undefined,
+      });
       assertOwnEvents(run, result.events);
       return {
         events: result.events ?? [],
-        frames: [...(result.frames ?? []), ...remaining],
+        frames: [
+          ...(result.frames ?? []),
+          ...(outcomes
+            ? [
+                {
+                  kind: "story:afterEncounter",
+                  payload: { encounter: encounter.id, effects: rest },
+                },
+              ]
+            : remaining),
+        ],
       };
     }
-    case "reveal":
+    case "adjustResource":
       return {
-        events: [{ kind: "secretRevealed", secret: effect.secret }],
+        events: [
+          {
+            kind: "resourceAdjusted",
+            resource: effect.resource,
+            // A party can't owe, so an adventure checks the price with a condition first.
+            value: Math.max(
+              0,
+              (state.story.resources?.[effect.resource] ?? 0) + effect.by,
+            ),
+          },
+        ],
         frames: remaining,
       };
+    case "reveal": {
+      const secret = run.adventure.secrets.find(
+        (item) => item.id === effect.secret,
+      );
+      if (!secret) throw new Error(`Unknown secret ${effect.secret}`);
+      const clue =
+        secret.clues.find((item) => item.scene === state.story.scene) ??
+        secret.clues[0];
+      return {
+        events: [
+          { kind: "secretRevealed", secret: secret.id },
+          ...(clue
+            ? [
+                {
+                  kind: "clueRevealed" as const,
+                  secret: secret.id,
+                  text: clue.text,
+                },
+              ]
+            : []),
+        ],
+        frames: remaining,
+      };
+    }
     case "system": {
       const definition = run.system.storyEffects[effect.effect];
       if (!definition) throw new Error(`Unknown effect ${effect.effect}`);
@@ -296,6 +376,26 @@ function runApplyEffects(
     }
     default:
       return effect satisfies never;
+  }
+}
+
+// What the choice planned next assumes a win, so only a win carries on with it,
+// merged so that the outcome's goto replaces the choice's own.
+function runAfterEncounter(
+  run: RunContext,
+  state: GameState,
+  { encounter, effects }: z.infer<typeof AfterEncounterSchema>,
+): StoryResult {
+  const outcomes = run.adventure.encounterOutcomes[encounter];
+  switch (state.story.encounterOutcome) {
+    case "defeat":
+      return { frames: [effectsFrame(outcomes?.onDefeat ?? [])] };
+    case "flee":
+      return { frames: [effectsFrame(outcomes?.onFlee ?? [])] };
+    default:
+      return {
+        frames: [effectsFrame([...effects, ...(outcomes?.onVictory ?? [])])],
+      };
   }
 }
 
@@ -350,6 +450,12 @@ export function runStoryFrame(
         state,
         dice,
         ApplyEffectsSchema.parse(frame.payload).effects,
+      );
+    case "story:afterEncounter":
+      return runAfterEncounter(
+        run,
+        state,
+        AfterEncounterSchema.parse(frame.payload),
       );
     case "story:enterScene":
       return {

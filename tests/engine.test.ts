@@ -24,12 +24,13 @@ import {
 import {
   type RunContext,
   type StepResult,
+  applyEvent,
   createRunContext,
   pendingDecision,
   startRun,
   step,
 } from "../engine/kernel/turn.ts";
-import type { GameSystem } from "../engine/kernel/system.ts";
+import type { EncounterOptions, GameSystem } from "../engine/kernel/system.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 import { playRun, testAdventure } from "../engine/tools/bot.ts";
 import { d6System } from "./fixtures/system-d6/index.ts";
@@ -980,4 +981,390 @@ describe("the test bot", () => {
       expect(replay.log).toStrictEqual(played.log);
     },
   );
+});
+
+function fightsEndWith(
+  outcome: "defeat" | "flee" | null,
+  seen: EncounterOptions[] = [],
+): GameSystem {
+  return defineSystem<TurnsState>({
+    ...(turnsSystem as unknown as Parameters<
+      typeof defineSystem<TurnsState>
+    >[0]),
+    id: "ending",
+    eventSchemas: {},
+    frames: {},
+    startEncounter: (encounter, _context, options) => {
+      seen.push(options);
+      const { id } = z.object({ id: z.string() }).parse(encounter);
+      return {
+        events: [
+          { kind: "encounterStarted", encounter: id },
+          {
+            kind: "encounterEnded",
+            encounter: id,
+            ...(outcome ? { outcome } : {}),
+          },
+        ],
+      };
+    },
+  });
+}
+
+const replaysExactly = (run: RunContext): void => {
+  expect(testAdventure(run, { runs: 20, maxDecisions: 300 }).failures).toEqual(
+    [],
+  );
+};
+
+describe("encounter outcomes", () => {
+  const SCENES = `
+- id: start
+  text: Start.
+  choices:
+    - label: Fight
+      effects:
+        - { kind: startEncounter, encounter: fight }
+        - { kind: setFlag, flag: won }
+        - { kind: goto, scene: safe }
+- { id: safe, text: Safe. }
+- { id: captured, text: Captured. }
+- { id: fled, text: Fled. }
+`;
+  const ALL_OUTCOMES = `
+- id: fight
+  onDefeat: [{ kind: goto, scene: captured }]
+  onFlee: [{ kind: setFlag, flag: ran }, { kind: goto, scene: fled }]
+`;
+
+  it.each([
+    ["defeat", "captured", undefined, undefined],
+    ["flee", "fled", undefined, true],
+    [null, "safe", true, undefined],
+  ] as const)(
+    "after %s goes to %s, and the choice's plans only survive a win",
+    async (outcome, scene, won, ran) => {
+      const { run } = await loadInline(
+        { "encounters.yaml": ALL_OUTCOMES, "scenes.yaml": SCENES },
+        fightsEndWith(outcome),
+      );
+      const result = choose(run, startRun(run, "s"), "0");
+      expect(result.state.story.scene).toBe(scene);
+      expect(result.state.story.ended).toBe("ending");
+      expect(result.state.story.flags.won).toBe(won);
+      expect(result.state.story.flags.ran).toBe(ran);
+      replaysExactly(run);
+    },
+  );
+
+  it("lets onVictory add to the choice's effects, and its goto wins", async () => {
+    const { run } = await loadInline(
+      {
+        "encounters.yaml":
+          "- { id: fight, onVictory: [{ kind: setFlag, flag: bold }, { kind: goto, scene: praised }] }\n",
+        "scenes.yaml": SCENES.replace(
+          "- { id: captured, text: Captured. }\n- { id: fled, text: Fled. }\n",
+          "- { id: praised, text: Praised. }\n",
+        ),
+      },
+      fightsEndWith(null),
+    );
+    const result = choose(run, startRun(run, "s"), "0");
+    expect(result.state.story.scene).toBe("praised");
+    expect(result.state.story.flags).toEqual({ won: true, bold: true });
+    replaysExactly(run);
+  });
+
+  it("tells the system what the encounter allows", async () => {
+    const seen: EncounterOptions[] = [];
+    const { run } = await loadInline(
+      {
+        "encounters.yaml": ALL_OUTCOMES,
+        "scenes.yaml": SCENES,
+      },
+      fightsEndWith("flee", seen),
+    );
+    choose(run, startRun(run, "s"), "0");
+    expect(seen).toEqual([{ canFlee: true, defeatContinues: true }]);
+  });
+
+  it("changes nothing for an encounter with no outcomes", async () => {
+    const seen: EncounterOptions[] = [];
+    const scenes = SCENES.replace(
+      "- { id: captured, text: Captured. }\n- { id: fled, text: Fled. }\n",
+      "",
+    );
+    const { run } = await loadInline(
+      { "encounters.yaml": "- { id: fight }\n", "scenes.yaml": scenes },
+      fightsEndWith(null, seen),
+    );
+    const result = choose(run, startRun(run, "s"), "0");
+    expect(seen).toEqual([{ canFlee: false, defeatContinues: false }]);
+    expect(result.state.story.scene).toBe("safe");
+    expect(
+      result.events.flatMap((event) =>
+        event.kind === "framePushed" ? [event.frame.kind] : [],
+      ),
+    ).not.toContain("story:afterEncounter");
+  });
+
+  it("clears an old outcome when a later fight is won", async () => {
+    const { run } = await loadInline(
+      {
+        "encounters.yaml": ALL_OUTCOMES,
+        "scenes.yaml": SCENES,
+      },
+      fightsEndWith("flee"),
+    );
+    const fled = choose(run, startRun(run, "s"), "0");
+    expect(fled.state.story.encounterOutcome).toBe("flee");
+    const later = applyEvent(run, fled.state, {
+      kind: "encounterEnded",
+      encounter: "fight",
+    });
+    expect(later.story.encounterOutcome).toBe("victory");
+  });
+
+  it("checks an outcome's effects, and counts its goto as a way into a scene", async () => {
+    await expect(
+      loadInline(
+        {
+          "encounters.yaml":
+            "- { id: fight, onDefeat: [{ kind: goto, scene: nope }] }\n",
+          "scenes.yaml": "- { id: start, text: Start. }\n",
+        },
+        fightsEndWith(null),
+      ),
+    ).rejects.toThrow("unknown scene");
+    await expect(
+      loadInline(
+        {
+          "encounters.yaml": "- { id: fight, onFlee: [] }\n",
+          "scenes.yaml": "- { id: start, text: Start. }\n",
+        },
+        fightsEndWith(null),
+      ),
+    ).rejects.toThrow("onFlee");
+    // captured and fled are only reachable through the outcomes.
+    await expect(
+      loadInline(
+        { "encounters.yaml": ALL_OUTCOMES, "scenes.yaml": SCENES },
+        fightsEndWith(null),
+      ),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe("scene text variants", () => {
+  const SCENES = `
+- id: start
+  text: First time.
+  textVariants:
+    - { when: { kind: flag, flag: warned }, text: Warned. }
+    - { when: { kind: visited, scene: start, atLeast: 2 }, text: Back again. }
+  choices:
+    - { label: Loop, effects: [{ kind: goto, scene: start }] }
+    - label: Warn
+      effects: [{ kind: setFlag, flag: warned }, { kind: goto, scene: start }]
+    - { label: Leave, effects: [{ kind: goto, scene: end }] }
+- { id: end, text: End. }
+`;
+
+  it("uses the first variant that holds, including on a return visit", async () => {
+    const { run } = await loadInline({ "scenes.yaml": SCENES });
+    const first = startRun(run, "s");
+    expect(first.pending?.prompt).toBe("First time.");
+    const back = choose(run, first, "0");
+    expect(back.state.story.visits?.start).toBe(2);
+    expect(back.pending?.prompt).toBe("Back again.");
+    expect(choose(run, back, "1").pending?.prompt).toBe("Warned.");
+    replaysExactly(run);
+  });
+
+  it("keeps the same prompt after a save and load", async () => {
+    const { registry, run } = await loadInline({ "scenes.yaml": SCENES });
+    const first = startRun(run, "s");
+    const back = choose(run, first, "0");
+    const save = createSave(registry, "inline", "s", [
+      { input: { kind: "start" }, events: first.events },
+      {
+        input: { kind: "answer", decisionId: "scene:start", optionId: "0" },
+        events: back.events,
+      },
+    ]);
+    const loaded = loadSave(JSON.stringify(save), registry, run);
+    if (!loaded.ok) throw new Error(loaded.error);
+    expect(pendingDecision(run, loaded.state)?.prompt).toBe("Back again.");
+  });
+
+  it("checks a variant's condition when the adventure loads", async () => {
+    await expect(
+      loadInline({
+        "scenes.yaml": `
+- id: start
+  text: Start.
+  textVariants: [{ when: { kind: visited, scene: nope }, text: Again. }]
+`,
+      }),
+    ).rejects.toThrow("unknown scene");
+  });
+});
+
+describe("showing secrets", () => {
+  const FILES = {
+    "secrets.yaml": `
+- id: pact
+  truth: The elder pays the goblins.
+  clues:
+    - { scene: end, text: The horses wear the brand. }
+    - { scene: start, text: The granary is half empty. }
+`,
+    "scenes.yaml": `
+- id: start
+  text: Start.
+  choices:
+    - { label: Look, effects: [{ kind: reveal, secret: pact }, { kind: goto, scene: middle }] }
+    - { label: Move, effects: [{ kind: goto, scene: middle }] }
+- id: middle
+  text: Middle.
+  choices:
+    - { label: Look, effects: [{ kind: reveal, secret: pact }, { kind: goto, scene: end }] }
+- { id: end, text: End. }
+`,
+  };
+
+  it("shows the clue found in this scene, never the truth", async () => {
+    const { run } = await loadInline(FILES);
+    const result = choose(run, startRun(run, "s"), "0");
+    expect(result.events).toContainEqual({
+      kind: "clueRevealed",
+      secret: "pact",
+      text: "The granary is half empty.",
+    });
+    expect(JSON.stringify(result.events)).not.toContain("pays the goblins");
+    expect(result.state.story.revealed).toEqual(["pact"]);
+    replaysExactly(run);
+  });
+
+  it("falls back to the first clue when this scene has none", async () => {
+    const { run } = await loadInline(FILES);
+    const middle = choose(run, startRun(run, "s"), "1");
+    expect(choose(run, middle, "0").events).toContainEqual({
+      kind: "clueRevealed",
+      secret: "pact",
+      text: "The horses wear the brand.",
+    });
+  });
+});
+
+describe("clock conditions", () => {
+  const scenes = (when: string): string => `
+- id: start
+  text: Start.
+  choices:
+    - { label: Tick, effects: [{ kind: advanceClock, clock: dread }, { kind: goto, scene: start }] }
+    - { label: Calm, when: ${when}, effects: [{ kind: goto, scene: end }] }
+    - { label: Leave, effects: [{ kind: goto, scene: end }] }
+- { id: end, text: End. }
+`;
+  const FACTIONS =
+    "- { id: f, name: F, goal: G, clocks: [{ id: dread, label: Dread, max: 5 }] }\n";
+  const labels = (result: StepResult): readonly string[] =>
+    result.pending?.options.map((option) => option.label) ?? [];
+
+  it("supports atMost, alone or with atLeast", async () => {
+    const { run } = await loadInline({
+      "factions.yaml": FACTIONS,
+      "scenes.yaml": scenes(
+        "{ kind: clock, clock: dread, atLeast: 1, atMost: 1 }",
+      ),
+    });
+    const zero = startRun(run, "s");
+    expect(labels(zero)).not.toContain("Calm");
+    const one = choose(run, zero, "0");
+    expect(labels(one)).toContain("Calm");
+    expect(labels(choose(run, one, "0"))).not.toContain("Calm");
+    replaysExactly(run);
+  });
+
+  it("needs a bound", async () => {
+    await expect(
+      loadInline({
+        "factions.yaml": FACTIONS,
+        "scenes.yaml": scenes("{ kind: clock, clock: dread }"),
+      }),
+    ).rejects.toThrow("needs atLeast or atMost");
+  });
+});
+
+describe("party resources", () => {
+  const SCENES = `
+- id: start
+  text: Start.
+  choices:
+    - label: Pay 300
+      when: { kind: resource, resource: gold, atLeast: 300 }
+      effects:
+        - { kind: adjustResource, resource: gold, by: -300 }
+        - { kind: goto, scene: start }
+    - label: Beg
+      when: { kind: resource, resource: gold, atMost: 99 }
+      effects: [{ kind: adjustResource, resource: gold, by: -500 }, { kind: goto, scene: end }]
+    - { label: Leave, effects: [{ kind: goto, scene: end }] }
+- { id: end, text: End. }
+`;
+  const load = (resources = 400) =>
+    loadInline({
+      "adventure.yaml": `title: Inline\nstartScene: start\nresources: { gold: ${String(resources)} }\n`,
+      "scenes.yaml": SCENES,
+    });
+
+  it("starts where the adventure says, costs something, and can't go below zero", async () => {
+    const { run } = await load();
+    const start = startRun(run, "s");
+    expect(start.state.story.resources).toEqual({ gold: 400 });
+    expect(start.pending?.options.map(({ label }) => label)).toEqual([
+      "Pay 300",
+      "Leave",
+    ]);
+    const paid = choose(run, start, "0");
+    expect(paid.events).toContainEqual({
+      kind: "resourceAdjusted",
+      resource: "gold",
+      value: 100,
+    });
+    expect(paid.pending?.options.map(({ label }) => label)).toEqual(["Leave"]);
+
+    const { run: broke } = await load(50);
+    const after = choose(broke, startRun(broke, "s"), "1");
+    expect(after.state.story.resources).toEqual({ gold: 0 });
+    replaysExactly(run);
+  });
+
+  it("leaves adventures without resources alone", async () => {
+    const { run } = await loadFixture("haunted-house");
+    expect("resources" in startRun(run, "s").state.story).toBe(false);
+  });
+
+  it("rejects a resource the adventure doesn't declare", async () => {
+    await expect(loadInline({ "scenes.yaml": SCENES })).rejects.toThrow(
+      "unknown resource",
+    );
+  });
+
+  it("survives a save and load along with the other story state", async () => {
+    const { registry, run } = await load();
+    const start = startRun(run, "s");
+    const paid = choose(run, start, "0");
+    const save = createSave(registry, "inline", "s", [
+      { input: { kind: "start" }, events: start.events },
+      {
+        input: { kind: "answer", decisionId: "scene:start", optionId: "0" },
+        events: paid.events,
+      },
+    ]);
+    const loaded = loadSave(JSON.stringify(save), registry, run);
+    if (!loaded.ok) throw new Error(loaded.error);
+    expect(loaded.state).toStrictEqual(paid.state);
+  });
 });

@@ -20,8 +20,20 @@
     - label: Drive them off
       effects:
         - { kind: startEncounter, encounter: rearguard }
-        - { kind: goto, scene: safe-road }
+        - { kind: system, effect: "dnd5.5e:levelUp", args: {} }
+        - { kind: goto, scene: camp }
 - id: village
   text: The elder listens, then asks who will walk the road next.
+- id: camp
+  text: With the goblins scattered, you make camp in the pines and tend your wounds.
+  choices:
+    - label: Take an hour's rest and move on
+      effects:
+        - { kind: system, effect: "dnd5.5e:shortRest", args: {} }
+        - { kind: goto, scene: safe-road }
+    - label: Sleep through the night
+      effects:
+        - { kind: system, effect: "dnd5.5e:longRest", args: {} }
+        - { kind: goto, scene: safe-road }
 - id: safe-road
   text: The road is quiet again, for now.

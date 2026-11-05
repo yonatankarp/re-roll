@@ -27,6 +27,20 @@
           attack: { type: weapon, flatBonus: 4 }
           damage:
             [{ amount: { dice: 1d6, bonus: { base: 2 } }, type: piercing }]
+    # Nimble Escape, as Hide. Disengage does nothing without a map.
+    # shortcut: the Stealth check is a plain Dexterity roll, and hiding lasts until this goblin's next turn rather than its next attack, until skills can be rolled here.
+    - name: Nimble Escape
+      activation:
+        cost: [bonusAction]
+        targeting: { self: true }
+        resolution:
+          kind: save
+          ability: dex
+          dc: { base: 15 }
+          onSuccess:
+            - kind: applyCondition
+              condition: invisible
+              duration: { until: yourNextTurnStart }
 - id: "srd52:monster/goblin-boss"
   name: Goblin Boss
   ac: 17

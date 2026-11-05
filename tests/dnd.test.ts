@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import { listAdventures, loadAdventure } from "../app/cli/load-adventure.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { GameState } from "../engine/kernel/events.ts";
+import type { Registry } from "../engine/kernel/loader.ts";
 import { createSave, loadSave, replayInputs } from "../engine/kernel/save.ts";
+import {
+  type StoryFile,
+  validateAdventure,
+} from "../engine/story/adventure.ts";
 import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
 import { checkPlugins } from "../engine/tools/check-pack.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
@@ -18,9 +23,15 @@ import {
   runApplyHit,
   runAttackRoll,
   runCheckCombatEnd,
+  runEndTurn,
   runRecheckHit,
   runTakeAction,
+  shortRestEvents,
+  startCombat,
+  effectEnds,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
+import { ResolutionSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import { doesSomething } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import {
   concentrationDc,
   finalDamage,
@@ -525,6 +536,168 @@ describe("life and death in combat", () => {
     expect(result.events).toEqual([{ kind: "partyDefeated" }]);
   });
 
+  it("lets the party survive a lost fight only when the encounter plans for it", async () => {
+    const run = await goblin();
+    const base = fightState(run, { hp: 0 });
+    const ally = base.actors.ally;
+    if (!ally || !base.combat) throw new Error("No fight");
+    const lost: DndState = {
+      ...base,
+      actors: { ...base.actors, ally: { ...ally, hp: 0 } },
+    };
+    expect(runCheckCombatEnd(makeContext(run, lost)).events).toEqual([
+      { kind: "partyDefeated" },
+    ]);
+    const planned: DndState = {
+      ...lost,
+      combat: { ...base.combat, defeatContinues: true },
+    };
+    expect(runCheckCombatEnd(makeContext(run, planned)).events).toEqual([
+      { kind: "encounterEnded", encounter: "fight", outcome: "defeat" },
+      dndEvent(`${NS}:combatEnded`, {}),
+    ]);
+  });
+
+  it("ends the run when the player dies, whatever the encounter planned", async () => {
+    const run = await goblin();
+    const base = fightState(run, {
+      hp: 0,
+      deathSaves: { successes: 0, failures: 3 },
+    });
+    if (!base.combat) throw new Error("No fight");
+    const state: DndState = {
+      ...base,
+      combat: { ...base.combat, defeatContinues: true, canFlee: true },
+    };
+    expect(runCheckCombatEnd(makeContext(run, state)).events).toEqual([
+      { kind: "partyDefeated" },
+    ]);
+  });
+
+  it("offers fleeing only to the player, and only when the encounter allows it", async () => {
+    const run = await goblin();
+    const base = fightState(run);
+    if (!base.combat) throw new Error("No fight");
+    const optionsFor = (state: DndState): readonly string[] =>
+      nextDndDecision(state, run)?.options.map((option) => option.id) ?? [];
+    expect(optionsFor(base)).not.toContain("flee");
+
+    const allowed: DndState = {
+      ...base,
+      combat: { ...base.combat, canFlee: true },
+    };
+    expect(optionsFor(allowed)).toContain("flee");
+    expect(optionsFor(allowed).at(-1)).toBe("pass");
+    expect(
+      optionsFor({
+        ...allowed,
+        combat: { ...base.combat, canFlee: true, index: 2 },
+      }),
+    ).not.toContain("flee");
+
+    const { events = [] } = runTakeAction(
+      { actor: PLAYER_ACTOR, answer: "flee" },
+      makeContext(run, allowed),
+    );
+    expect(events).toEqual([
+      { kind: "encounterEnded", encounter: "fight", outcome: "flee" },
+      dndEvent(`${NS}:combatEnded`, {}),
+    ]);
+  });
+
+  it("drops an attack still queued when the fight has already ended", async () => {
+    const run = await goblin();
+    const over: DndState = { ...fightState(run), combat: null };
+    expect(
+      runAttackRoll(
+        { attacker: "gone", actionId: "monster:0", target: PLAYER_ACTOR },
+        makeContext(run, over),
+      ),
+    ).toEqual({});
+  });
+
+  it("scales monster counts to the living party when an encounter asks", async () => {
+    const run = await goblin();
+    const state = fightState(run); // two living party members
+    const monster = "srd52:monster/goblin-warrior";
+    const count = (written: number, forPartySize?: number): number => {
+      const { events = [] } = startCombat(
+        {
+          id: "e",
+          monsters: [{ monster, count: written }],
+          ...(forPartySize ? { forPartySize } : {}),
+        },
+        makeContext(run, state),
+        { canFlee: false, defeatContinues: false },
+      );
+      const started = events.find(
+        (event) => event.kind === `${NS}:combatStarted`,
+      );
+      if (!started || !("payload" in started)) throw new Error("No combat");
+      return (started.payload.monsters as readonly unknown[]).length;
+    };
+    expect(count(4)).toBe(4);
+    expect(count(4, 4)).toBe(2);
+    expect(count(1, 8)).toBe(1); // always at least one
+    expect(count(3, 2)).toBe(3);
+    expect(count(2, 1)).toBe(4);
+  });
+
+  it("heals with hit dice on a short rest, which run out", async () => {
+    const run = await goblin();
+    const rest = (state: DndState, seed: string): readonly SystemEvent[] =>
+      shortRestEvents(makeContext(run, state, seed));
+    const base = fightState(run, { hp: 1 });
+    const hurt: DndState = {
+      actors: Object.fromEntries(
+        Object.entries(base.actors).filter(([, item]) => item.side === "party"),
+      ),
+      combat: null,
+    };
+    const player = hurt.actors[PLAYER_ACTOR];
+    const ally = hurt.actors.ally;
+    if (!player || !ally) throw new Error("No party");
+    const max = deriveStats(ally, run).maxHp;
+    const state: DndState = {
+      ...hurt,
+      actors: { ...hurt.actors, ally: { ...ally, hp: max } },
+    };
+
+    const events = rest(state, "a");
+    expect(events.map((event) => event.kind)).toEqual([
+      `${NS}:resourceSpent`,
+      `${NS}:healed`,
+    ]);
+    const after = events.reduce(applyDndEvent, state);
+    expect(after.actors[PLAYER_ACTOR]?.hp).toBeGreaterThan(1);
+    expect(after.actors[PLAYER_ACTOR]?.resourcesSpent.hitDice).toBe(1);
+    expect(after.actors.ally?.hp).toBe(max);
+
+    // A level 1 character has one die, so a second rest gives nothing.
+    const hurtAgain: DndState = {
+      ...after,
+      actors: {
+        ...after.actors,
+        [PLAYER_ACTOR]: { ...player, hp: 1, resourcesSpent: { hitDice: 1 } },
+      },
+    };
+    expect(rest(hurtAgain, "b")).toEqual([]);
+
+    // The dead don't rest.
+    const dead: DndState = {
+      ...state,
+      actors: {
+        ...state.actors,
+        [PLAYER_ACTOR]: {
+          ...player,
+          hp: 0,
+          deathSaves: { successes: 0, failures: 3 },
+        },
+      },
+    };
+    expect(rest(dead, "c")).toEqual([]);
+  });
+
   it("carries on when a companion dies but the player lives", async () => {
     const run = await goblin();
     const base = fightState(run);
@@ -781,7 +954,8 @@ describe("playing a D&D adventure", () => {
     const started = startRun(run, "choose");
     expect(started.pending?.id).toBe("dnd5.5e:chooseCharacter");
     expect(started.state.story.scene).toBeNull();
-    expect(started.pending?.options).toHaveLength(4);
+    expect(started.pending?.options).toHaveLength(5);
+    expect(started.pending?.options.at(-1)?.id).toBe("create");
 
     const chosen = step(run, started.state, {
       kind: "answer",
@@ -815,6 +989,7 @@ describe("playing a D&D adventure", () => {
       expect(report.failures).toEqual([]);
       expect(report.unvisitedScenes).toEqual([]);
     },
+    30_000, // many full playthroughs, which also run alongside other test files
   );
 
   it("keeps state as plain JSON that passes its schema at every step", async () => {
@@ -857,7 +1032,7 @@ describe("playing a D&D adventure", () => {
     }
     expect(wins).toBeGreaterThan(0);
     expect(defeats).toBeGreaterThan(0);
-  });
+  }, 30_000); // many full playthroughs, which also run alongside other test files
 
   it("clears monsters and the combat when a fight is won", async () => {
     const run = await goblin();
@@ -913,6 +1088,361 @@ describe("playing a D&D adventure", () => {
   });
 
   it("lists adventures through the command-line helper", async () => {
-    expect(await listAdventures()).toEqual(["goblin-ambush", "haunted-house"]);
+    // arrayContaining, since a machine may also hold private adventures.
+    expect(await listAdventures()).toEqual(
+      expect.arrayContaining(["goblin-ambush", "haunted-house"]),
+    );
   });
+});
+
+describe("spell effects without a map", () => {
+  const save = (onFail: readonly unknown[]) =>
+    ResolutionSchema.parse({
+      kind: "save",
+      ability: "wis",
+      dc: { add: [] },
+      onFail,
+    });
+  const charmed = {
+    kind: "applyCondition",
+    condition: "charmed",
+    duration: "instantaneous",
+  };
+
+  it("leaves out a spell that would only waste its slot", () => {
+    expect(
+      doesSomething(
+        save([{ kind: "forcedMove", feet: 10, direction: "away" }]),
+      ),
+    ).toBe(false);
+    expect(doesSomething(save([{ ...charmed, condition: "deafened" }]))).toBe(
+      false,
+    );
+    expect(doesSomething(save([charmed]))).toBe(true);
+  });
+
+  it("keeps a spell with at least one working effect", () => {
+    expect(
+      doesSomething(
+        save([
+          { kind: "forcedMove", feet: 5, direction: "away" },
+          { kind: "tempHp", amount: { dice: "1d4" } },
+        ]),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps a timed effect past the caster's next turn", () => {
+    expect(effectEnds({ minutes: 60 })).toBe("spellDuration");
+    expect(effectEnds({ text: "Until dispelled" })).toBe("spellDuration");
+    expect(effectEnds({ concentration: true, minutes: 1 })).toBe(
+      "concentration",
+    );
+    expect(effectEnds({ until: "yourNextTurnStart" })).toBe("casterNextTurn");
+  });
+});
+
+describe("conditions in combat", () => {
+  const goblinIn = (state: DndState): Actor => {
+    const actor = state.actors.goblin;
+    if (!actor) throw new Error("No goblin");
+    return actor;
+  };
+
+  const condition = (
+    name: "paralyzed" | "blinded" | "poisoned",
+    extra: Partial<Actor["activeEffects"][number]> = {},
+  ): Actor["activeEffects"][number] => ({
+    sourceId: "spell:test",
+    casterId: "goblin",
+    modifier: { kind: "condition", condition: name },
+    ends: "spellDuration",
+    ...extra,
+  });
+
+  async function fight(player: Partial<Actor> = {}) {
+    const run = await goblin();
+    const state: DndState = {
+      actors: {
+        [PLAYER_ACTOR]: pregenActor(run, "fighter", {
+          id: PLAYER_ACTOR,
+          hp: 12,
+          ...player,
+        }),
+        goblin: freshActor({
+          id: "goblin",
+          name: "Goblin",
+          side: "enemy",
+          source: {
+            kind: "monster",
+            statBlockId: "srd52:monster/goblin-warrior",
+          },
+          hp: 10,
+          inventory: [],
+        }),
+      },
+      combat: {
+        encounter: "fight",
+        order: [PLAYER_ACTOR, "goblin"],
+        index: 0,
+        round: 1,
+      },
+    };
+    const context = (seed: string) => ({
+      state,
+      dice: createDice(rngFromSeed(seed)),
+      content: run.content,
+      contentIds: run.contentIds,
+    });
+    return { run, state, context };
+  }
+
+  it("leaves an Incapacitated actor nothing to do but end the turn", async () => {
+    const { run, state } = await fight({
+      activeEffects: [condition("paralyzed")],
+    });
+    expect(nextDndDecision(state, run)?.options.map((o) => o.id)).toEqual([
+      "pass",
+    ]);
+  });
+
+  it("makes melee hits on a Paralyzed target critical", async () => {
+    const { run, state, context } = await fight({
+      activeEffects: [condition("paralyzed")],
+    });
+    const attack = deriveStats(goblinIn(state), run).actions.find(
+      (action) => action.activation.resolution.kind === "attack",
+    );
+    expect(attack).toBeDefined();
+    let hits = 0;
+    for (let seed = 0; seed < 30; seed += 1) {
+      const frames =
+        runAttackRoll(
+          {
+            attacker: "goblin",
+            actionId: attack?.id ?? "",
+            target: PLAYER_ACTOR,
+          },
+          context(String(seed)),
+        ).frames ?? [];
+      for (const item of frames) {
+        if (item.kind.endsWith(":applyHit")) {
+          hits += 1;
+          expect(item.payload).toMatchObject({ critical: true });
+        }
+      }
+    }
+    expect(hits).toBeGreaterThan(0);
+  });
+
+  it("gives attackers Disadvantage while Blinded, seen as lower hit rates", async () => {
+    const hitsWith = async (effects: Actor["activeEffects"]) => {
+      const { run, state, context } = await fight();
+      const goblinActor = goblinIn(state);
+      const blinded: DndState = {
+        ...state,
+        actors: {
+          ...state.actors,
+          goblin: { ...goblinActor, activeEffects: effects },
+        },
+      };
+      const attack = deriveStats(goblinActor, run).actions.find(
+        (action) => action.activation.resolution.kind === "attack",
+      );
+      let hits = 0;
+      for (let seed = 0; seed < 300; seed += 1) {
+        const report = runAttackRoll(
+          {
+            attacker: "goblin",
+            actionId: attack?.id ?? "",
+            target: PLAYER_ACTOR,
+          },
+          { ...context(String(seed)), state: blinded },
+        );
+        if ((report.frames ?? []).length > 0) hits += 1;
+      }
+      return hits;
+    };
+    expect(await hitsWith([condition("blinded")])).toBeLessThan(
+      await hitsWith([]),
+    );
+  });
+
+  it("repeats a save at the end of the target's turn and ends the effect on a success", async () => {
+    const easy = await fight({
+      activeEffects: [
+        condition("paralyzed", { repeatSave: { ability: "wis", dc: -50 } }),
+      ],
+    });
+    const passed = runEndTurn(easy.context("a")).events ?? [];
+    expect(passed.map((event) => event.kind)).toEqual([
+      "dnd5.5e:effectEnded",
+      "dnd5.5e:turnAdvanced",
+    ]);
+
+    const hard = await fight({
+      activeEffects: [
+        condition("blinded", { repeatSave: { ability: "wis", dc: 99 } }),
+      ],
+    });
+    const failed = runEndTurn(hard.context("a")).events ?? [];
+    expect(failed.map((event) => event.kind)).toEqual(["dnd5.5e:turnAdvanced"]);
+  });
+
+  it("removes an effect that ends on damage when the target is hurt", async () => {
+    const { state } = await fight({
+      activeEffects: [
+        condition("blinded", { endsOnDamage: true }),
+        condition("poisoned"),
+      ],
+    });
+    const after = applyDndEvent(
+      state,
+      dndEvent("dnd5.5e:damaged", {
+        actor: PLAYER_ACTOR,
+        amount: 1,
+        type: "fire",
+        critical: false,
+        massive: false,
+      }),
+    );
+    expect(after.actors[PLAYER_ACTOR]?.activeEffects).toHaveLength(1);
+  });
+
+  it("uses an armor formula when it beats the current AC", async () => {
+    const { run, state } = await fight();
+    const wizardLike = goblinIn(state);
+    const base = deriveStats(wizardLike, run).ac;
+    const raised = deriveStats(
+      {
+        ...wizardLike,
+        activeEffects: [
+          {
+            sourceId: "spell:barkskin",
+            casterId: "goblin",
+            modifier: { kind: "acFormula", formula: { base: 30, add: [] } },
+            ends: "spellDuration",
+          },
+        ],
+      },
+      run,
+    ).ac;
+    expect(base).toBeLessThan(30);
+    expect(raised).toBe(30);
+  });
+});
+
+describe("encounter outcomes in real fights", () => {
+  async function outcomesRun(): Promise<{
+    run: RunContext;
+    registry: Registry;
+  }> {
+    const { registry, run } = await loadAdventure("goblin-ambush");
+    const { adventure, issues } = validateAdventure({
+      pluginId: "outcomes",
+      system: run.system,
+      fileName: (file) => file,
+      assetPaths: new Set(),
+      documents: new Map<StoryFile, unknown>([
+        ["adventure", { title: "Outcomes", startScene: "start" }],
+        [
+          "encounters",
+          [
+            {
+              id: "brawl",
+              monsters: [{ monster: "srd52:monster/goblin-warrior", count: 4 }],
+              forPartySize: 4,
+              onDefeat: [{ kind: "goto", scene: "captured" }],
+              onFlee: [{ kind: "goto", scene: "fled" }],
+            },
+          ],
+        ],
+        [
+          "scenes",
+          [
+            {
+              id: "start",
+              text: "Start.",
+              choices: [
+                {
+                  label: "Fight",
+                  effects: [
+                    { kind: "startEncounter", encounter: "brawl" },
+                    { kind: "setFlag", flag: "won" },
+                    { kind: "goto", scene: "camp" },
+                  ],
+                },
+              ],
+            },
+            {
+              id: "camp",
+              text: "Camp.",
+              choices: [
+                {
+                  label: "Rest",
+                  effects: [
+                    { kind: "system", effect: `${NS}:shortRest`, args: {} },
+                    { kind: "goto", scene: "road" },
+                  ],
+                },
+              ],
+            },
+            { id: "road", text: "Road." },
+            { id: "captured", text: "Captured." },
+            { id: "fled", text: "Fled." },
+          ],
+        ],
+      ]),
+    });
+    if (!adventure || issues.length > 0)
+      throw new Error(JSON.stringify(issues));
+    return { registry, run: { ...run, adventure } };
+  }
+
+  it("branches on how the fight ended and never after the player dies", async () => {
+    const { run } = await outcomesRun();
+    const seen: Record<string, number> = {};
+    for (let index = 0; index < 80; index += 1) {
+      const played = playRun(run, `outcome-${String(index)}`, {
+        maxDecisions: 800,
+      });
+      const { story } = played.state;
+      const dnd = systemState(played.state);
+      const key = played.outcome === "defeat" ? "dead" : (story.scene ?? "");
+      seen[key] = (seen[key] ?? 0) + 1;
+
+      if (played.outcome === "defeat") {
+        const player = dnd.actors[PLAYER_ACTOR];
+        if (!player) throw new Error("No player");
+        expect(isDead(player)).toBe(true);
+      } else {
+        expect(played.outcome).toBe("ending");
+        expect(dnd.combat).toBeNull();
+        expect(
+          Object.values(dnd.actors).every((actor) => actor.side === "party"),
+        ).toBe(true);
+        expect(story.flags.won).toBe(story.scene === "road" ? true : undefined);
+      }
+    }
+    expect(seen.fled).toBeGreaterThan(0);
+    expect(seen.captured).toBeGreaterThan(0);
+    expect(seen.road).toBeGreaterThan(0);
+  }, 30_000);
+
+  it("replays exactly, from inputs and from a save", async () => {
+    const { registry, run } = await outcomesRun();
+    const report = testAdventure(run, { runs: 40, maxDecisions: 800 });
+    expect(report.failures).toEqual([]);
+
+    const played = playRun(run, "outcome-save", { maxDecisions: 800 });
+    const save = createSave(
+      registry,
+      "goblin-ambush",
+      "outcome-save",
+      played.log,
+    );
+    const loaded = loadSave(JSON.stringify(save), registry, run);
+    if (!loaded.ok) throw new Error(loaded.error);
+    expect(loaded.state).toStrictEqual(played.state);
+  }, 30_000);
 });

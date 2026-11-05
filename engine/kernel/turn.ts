@@ -52,10 +52,17 @@ export function applyEvent(
   state: GameState,
   event: GameEvent,
 ): GameState {
-  if (isNarrativeEvent(event) || isNamespacedEvent(event)) {
-    return { ...state, system: run.system.applyEvent(state.system, event) };
-  }
   const { story } = state;
+  if (isNarrativeEvent(event) || isNamespacedEvent(event)) {
+    return {
+      ...state,
+      system: run.system.applyEvent(state.system, event),
+      story:
+        event.kind === "encounterEnded"
+          ? { ...story, encounterOutcome: event.outcome ?? "victory" }
+          : story,
+    };
+  }
   switch (event.kind) {
     case "runStarted":
       return event.state;
@@ -66,7 +73,17 @@ export function applyEvent(
     case "framePopped":
       return { ...state, stack: state.stack.slice(0, -1) };
     case "sceneEntered":
-      return { ...state, story: { ...story, scene: event.scene } };
+      return {
+        ...state,
+        story: {
+          ...story,
+          scene: event.scene,
+          visits: {
+            ...story.visits,
+            [event.scene]: (story.visits?.[event.scene] ?? 0) + 1,
+          },
+        },
+      };
     case "flagSet":
       return {
         ...state,
@@ -89,6 +106,14 @@ export function applyEvent(
         story: {
           ...story,
           attitudes: { ...story.attitudes, [event.npc]: event.value },
+        },
+      };
+    case "resourceAdjusted":
+      return {
+        ...state,
+        story: {
+          ...story,
+          resources: { ...story.resources, [event.resource]: event.value },
         },
       };
     case "secretRevealed":

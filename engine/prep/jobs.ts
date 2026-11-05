@@ -36,7 +36,9 @@ export type SessionDigest = z.infer<typeof SessionDigestSchema>;
 export type JobKind = "scene" | "conversation" | "banter" | "rumor";
 
 export interface PrepReview {
-  readonly name: "consistency" | "spoiler";
+  readonly name: "consistency" | "spoiler" | "mechanics";
+  readonly system?: string;
+  readonly applies?: (answer: unknown) => boolean;
   readonly prompt: (answer: string) => string;
   readonly schema: Readonly<Record<string, unknown>>;
   readonly ifUnreadable: "pass" | "reject";
@@ -47,9 +49,9 @@ export interface PrepReview {
   ) => string | null | undefined;
 }
 
-export interface PrepJob {
+export interface RunnableJob {
   readonly id: string;
-  readonly kind: JobKind;
+  readonly kind: string;
   readonly system: string;
   readonly prompt: string;
   readonly schema: Readonly<Record<string, unknown>>;
@@ -58,6 +60,10 @@ export interface PrepJob {
   readonly reviews: readonly PrepReview[];
   readonly fallback: unknown;
   readonly maxTokens: number;
+}
+
+export interface PrepJob extends RunnableJob {
+  readonly kind: JobKind;
 }
 
 const STAY = "stay";

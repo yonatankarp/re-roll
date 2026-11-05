@@ -1,10 +1,10 @@
 - id: "srd52:feature/second-wind"
   name: Second Wind
-  text: "As a Bonus Action, regain Hit Points equal to 1d10 plus your Fighter level. Usable twice between rests."
+  text: "As a Bonus Action, regain Hit Points equal to 1d10 plus your Fighter level. You regain one use on a Short Rest, and all on a Long Rest."
   automation: full
   resources:
     - id: second-wind
-      max: { base: 2 }
+      max: { add: [{ kind: scaling, key: secondWind }] }
       recharge:
         - { on: shortRest, amount: 1 }
         - { on: longRest, amount: all }
@@ -21,10 +21,14 @@
                 { add: [{ kind: classLevel, class: "srd52:class/fighter" }] }
 - id: "srd52:feature/sneak-attack"
   name: Sneak Attack
-  text: "Once per turn, deal an extra 1d6 damage to a creature you hit with Advantage, or when an ally is near it."
+  text: "Once per turn, deal extra damage to a creature you hit with Advantage, or when an ally is near it. It starts at 1d6 and grows with your Rogue level."
   automation: partial
   passives:
-    - { kind: extraDamage, dice: 1d6, when: advantageOrAlly, oncePerTurn: true }
+    - kind: extraDamage
+      dice: 1d6
+      diceCount: sneakAttackD6
+      when: advantageOrAlly
+      oncePerTurn: true
 
 - id: "srd52:feature/fighting-style"
   name: Fighting Style
@@ -84,4 +88,139 @@
 - id: "srd52:feature/magic-initiate"
   name: Magic Initiate
   text: "You learn two cantrips and one level 1 spell from a chosen list."
+  automation: text
+
+- id: "srd52:feature/dwarf-traits"
+  name: Dwarf Traits
+  text: "Darkvision, Dwarven Resilience, Dwarven Toughness and Stonecunning."
+  automation: text
+
+- id: "srd52:feature/elf-traits"
+  name: Elf Traits
+  text: "Darkvision, Elven Lineage, Fey Ancestry, Keen Senses and Trance."
+  automation: text
+
+- id: "srd52:feature/ability-score-improvement"
+  name: Ability Score Improvement
+  text: "You gain the Ability Score Improvement feat or another feat you qualify for."
+  automation: text
+
+- id: "srd52:feature/extra-attack"
+  name: Extra Attack
+  text: "You can attack twice instead of once whenever you take the Attack action."
+  automation: full
+
+- id: "srd52:feature/action-surge"
+  name: Action Surge
+  text: "Once between rests, you can take one additional action on your turn."
+  automation: text
+
+- id: "srd52:feature/tactical-mind"
+  name: Tactical Mind
+  text: "You can spend a use of Second Wind to add 1d10 to a failed ability check."
+  automation: text
+
+- id: "srd52:feature/fighter-subclass"
+  name: Fighter Subclass
+  text: "You gain a Fighter subclass of your choice."
+  automation: text
+
+- id: "srd52:feature/tactical-shift"
+  name: Tactical Shift
+  text: "When you use Second Wind, you can move up to half your Speed without provoking Opportunity Attacks."
+  automation: text
+
+- id: "srd52:feature/improved-critical"
+  name: Improved Critical
+  text: "Your weapon attacks score a Critical Hit on a roll of 19 or 20."
+  automation: text
+
+- id: "srd52:feature/remarkable-athlete"
+  name: Remarkable Athlete
+  text: "You have Advantage on Initiative rolls and Strength (Athletics) checks."
+  automation: text
+
+- id: "srd52:feature/cunning-action"
+  name: Cunning Action
+  text: "You can Dash, Disengage or Hide as a Bonus Action."
+  automation: text
+
+- id: "srd52:feature/rogue-subclass"
+  name: Rogue Subclass
+  text: "You gain a Rogue subclass of your choice."
+  automation: text
+
+- id: "srd52:feature/steady-aim"
+  name: Steady Aim
+  text: "As a Bonus Action, give yourself Advantage on your next attack if you haven't moved this turn."
+  automation: text
+
+- id: "srd52:feature/cunning-strike"
+  name: Cunning Strike
+  text: "You can trade Sneak Attack dice for effects when you hit, such as poisoning or tripping the target."
+  automation: text
+
+- id: "srd52:feature/uncanny-dodge"
+  name: Uncanny Dodge
+  text: "When an attacker you can see hits you, you can use your Reaction to halve the damage."
+  automation: text
+
+- id: "srd52:feature/fast-hands"
+  name: Fast Hands
+  text: "You can use Cunning Action for Sleight of Hand, thieves' tools or a Magic item."
+  automation: text
+
+- id: "srd52:feature/second-story-work"
+  name: Second-Story Work
+  text: "You gain a Climb Speed, and you can jump farther using Dexterity."
+  automation: text
+
+- id: "srd52:feature/channel-divinity"
+  name: Channel Divinity
+  text: "You can channel divine energy for effects such as Divine Spark and Turn Undead."
+  automation: text
+
+- id: "srd52:feature/cleric-subclass"
+  name: Cleric Subclass
+  text: "You gain a Cleric subclass of your choice."
+  automation: text
+
+- id: "srd52:feature/sear-undead"
+  name: Sear Undead
+  text: "When you use Turn Undead, you can deal Radiant damage to the Undead that fail the save."
+  automation: text
+
+- id: "srd52:feature/disciple-of-life"
+  name: Disciple of Life
+  text: "Your healing spells restore additional Hit Points based on the slot used."
+  automation: text
+
+- id: "srd52:feature/preserve-life"
+  name: Preserve Life
+  text: "As a Magic action, use Channel Divinity to divide healing among Bloodied creatures near you."
+  automation: text
+
+- id: "srd52:feature/scholar"
+  name: Scholar
+  text: "You gain Expertise in one of your scholarly skills, such as Arcana or History."
+  automation: text
+
+- id: "srd52:feature/wizard-subclass"
+  name: Wizard Subclass
+  text: "You gain a Wizard subclass of your choice."
+  automation: text
+
+- id: "srd52:feature/memorize-spell"
+  name: Memorize Spell
+  text: "When you finish a Short Rest, you can swap one prepared spell for another in your spellbook."
+  automation: text
+
+- id: "srd52:feature/evocation-savant"
+  name: Evocation Savant
+  text: "You add two Evocation spells to your spellbook for free, and another with each new spell level."
+  automation: text
+
+- id: "srd52:feature/potent-cantrip"
+  name: Potent Cantrip
+  text: "A creature that saves against your damaging cantrip still takes half its damage."
   automation: text

@@ -1,0 +1,25 @@
+- id: "srd52:subclass/champion"
+  name: Champion
+  class: "srd52:class/fighter"
+  levels:
+    - level: 3
+      grants:
+        ["srd52:feature/improved-critical", "srd52:feature/remarkable-athlete"]
+- id: "srd52:subclass/thief"
+  name: Thief
+  class: "srd52:class/rogue"
+  levels:
+    - level: 3
+      grants: ["srd52:feature/fast-hands", "srd52:feature/second-story-work"]
+- id: "srd52:subclass/life-domain"
+  name: Life Domain
+  class: "srd52:class/cleric"
+  levels:
+    - level: 3
+      grants: ["srd52:feature/disciple-of-life", "srd52:feature/preserve-life"]
+- id: "srd52:subclass/evoker"
+  name: Evoker
+  class: "srd52:class/wizard"
+  levels:
+    - level: 3
+      grants: ["srd52:feature/evocation-savant", "srd52:feature/potent-cantrip"]

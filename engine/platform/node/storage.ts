@@ -20,7 +20,9 @@ function isInside(root: string, target: string): boolean {
   return target === root || target.startsWith(root + sep);
 }
 
-export async function createNodeStorage(rootPath: string): Promise<Storage> {
+export async function createNodeStorage(
+  rootPath: string,
+): Promise<Storage & { readBytes(path: string): Promise<Buffer | null> }> {
   const root = await realpath(rootPath);
 
   const locate = (path: string): string => {
@@ -45,6 +47,18 @@ export async function createNodeStorage(rootPath: string): Promise<Storage> {
       try {
         await assertRealPathInside(target, path);
         return await readFile(target, "utf8");
+      } catch (error) {
+        if (isMissing(error)) return null;
+        throw error;
+      }
+    },
+
+    // For images, which the text read would corrupt.
+    async readBytes(path) {
+      const target = locate(path);
+      try {
+        await assertRealPathInside(target, path);
+        return await readFile(target);
       } catch (error) {
         if (isMissing(error)) return null;
         throw error;

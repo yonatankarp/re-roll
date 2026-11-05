@@ -175,6 +175,70 @@ export interface ContentAccess {
   readonly contentIds: () => readonly string[];
 }
 
+export interface ImportSource {
+  readonly name: string;
+  readonly slug: string;
+  readonly text: string; // the whole entry as found, used to spot changes between runs
+  readonly data: unknown; // what the system's own code parsed from the text
+  readonly problem: string | null; // set when the entry can't be used
+}
+
+// An entry that code parsed entirely from a saved book page, with no model involved.
+export interface ParsedImport {
+  readonly slug: string;
+  readonly entry: unknown;
+  readonly notes: readonly string[];
+}
+
+// A second model pass that compares accepted mechanics with the source text.
+export interface ImportVerification {
+  readonly system: string;
+  readonly schema: Readonly<Record<string, unknown>>;
+  readonly applies: (draft: unknown) => boolean;
+  readonly prompt: (answer: string, source: ImportSource) => string;
+  // Returns a problem, null for a pass, or undefined when the verdict can't be read.
+  readonly judge: (
+    verdict: unknown,
+    source: ImportSource,
+  ) => string | null | undefined;
+}
+
+// How a system turns one kind of book text into content. Code does as much as it can,
+// and the model only fills in what code can't work out on its own.
+export interface ImportKind {
+  readonly idPrefix: string;
+  readonly split: (text: string) => readonly ImportSource[];
+  readonly systemPrompt: string;
+  readonly prompt: (source: ImportSource) => string;
+  readonly modelSchema: Readonly<Record<string, unknown>>;
+  readonly maxTokens: number;
+  readonly validate: (
+    value: unknown,
+    source: ImportSource,
+  ) => z.ZodSafeParseResult<unknown>;
+  // True when a reviewed entry has the same text, so its mechanics are reused and the model isn't asked.
+  readonly matchesReference: (
+    source: ImportSource,
+    reference: unknown,
+  ) => boolean;
+  readonly verification: ImportVerification;
+  readonly build: (args: {
+    readonly source: ImportSource;
+    readonly draft: unknown;
+    readonly reference: unknown;
+    readonly pluginId: string;
+    readonly knownIds: readonly string[];
+  }) => { readonly entry: unknown; readonly notes: readonly string[] };
+}
+
+// What the adventure has planned for the ways an encounter can end.
+export interface EncounterOptions {
+  readonly canFlee: boolean; // offer the player a way out mid-fight
+  // Losing without the player's character dying ends the encounter with outcome "defeat",
+  // and otherwise it's partyDefeated. The character dying is always partyDefeated.
+  readonly defeatContinues: boolean;
+}
+
 export interface SystemDefinition<S> {
   readonly id: string;
   readonly version: string;
@@ -196,9 +260,21 @@ export interface SystemDefinition<S> {
   readonly startEncounter: (
     encounter: unknown,
     context: SystemContext<S>,
+    options: EncounterOptions,
   ) => SystemResult;
   readonly applyEvent: (state: S, event: SystemEvent) => S;
   readonly nextDecision: (state: S, access: ContentAccess) => Decision | null;
+  readonly importKinds?: Readonly<Record<string, ImportKind>>; // keyed by content folder
+  readonly htmlParsers?: Readonly<
+    Record<
+      string,
+      (
+        html: string,
+        pluginId: string,
+        knownIds?: readonly string[], // what other plugins hold, so a book can refer to their classes and feats
+      ) => readonly ParsedImport[]
+    >
+  >; // keyed by content folder
   readonly decidePolicy: (
     decision: Decision,
     context: SystemContext<S>,
