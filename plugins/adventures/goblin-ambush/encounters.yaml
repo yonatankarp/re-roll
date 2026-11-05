@@ -1,0 +1,7 @@
+- id: roadside
+  monsters:
+    - { monster: "srd52:monster/goblin-warrior", count: 2 }
+- id: rearguard
+  monsters:
+    - { monster: "srd52:monster/goblin-warrior", count: 1 }
+    - { monster: "goblin-ambush:monster/chief", count: 1 }

@@ -1,0 +1,85 @@
+- id: "srd52:pregen/fighter"
+  name: Human Fighter
+  build:
+    baseAbilities: { str: 15, dex: 13, con: 14, int: 8, wis: 12, cha: 10 }
+    speciesId: "srd52:species/human"
+    backgroundId: "srd52:background/soldier"
+    backgroundIncrease: { str: 2, con: 1 }
+    levels:
+      - classId: "srd52:class/fighter"
+        hitPointGain: 10
+        answers: [{ kind: skills, values: [perception, survival] }]
+  equipment:
+    ["srd52:item/longsword", "srd52:item/chain-mail", "srd52:item/shield"]
+
+- id: "srd52:pregen/rogue"
+  name: Human Rogue
+  build:
+    baseAbilities: { str: 8, dex: 15, con: 13, int: 12, wis: 14, cha: 10 }
+    speciesId: "srd52:species/human"
+    backgroundId: "srd52:background/criminal"
+    backgroundIncrease: { dex: 2, con: 1 }
+    levels:
+      - classId: "srd52:class/rogue"
+        hitPointGain: 8
+        answers:
+          [
+            {
+              kind: skills,
+              values: [perception, acrobatics, deception, investigation],
+            },
+          ]
+  equipment:
+    ["srd52:item/shortsword", "srd52:item/shortbow", "srd52:item/leather-armor"]
+
+- id: "srd52:pregen/cleric"
+  name: Human Cleric
+  build:
+    baseAbilities: { str: 13, dex: 10, con: 14, int: 8, wis: 15, cha: 12 }
+    speciesId: "srd52:species/human"
+    backgroundId: "srd52:background/acolyte"
+    backgroundIncrease: { wis: 2, cha: 1 }
+    levels:
+      - classId: "srd52:class/cleric"
+        hitPointGain: 8
+        answers:
+          [
+            { kind: skills, values: [medicine, persuasion] },
+            {
+              kind: spells,
+              values:
+                [
+                  "srd52:spell/sacred-flame",
+                  "srd52:spell/cure-wounds",
+                  "srd52:spell/healing-word",
+                  "srd52:spell/bless",
+                ],
+            },
+          ]
+  equipment: ["srd52:item/mace", "srd52:item/scale-mail", "srd52:item/shield"]
+
+- id: "srd52:pregen/wizard"
+  name: Human Wizard
+  build:
+    baseAbilities: { str: 8, dex: 14, con: 13, int: 15, wis: 12, cha: 10 }
+    speciesId: "srd52:species/human"
+    backgroundId: "srd52:background/sage"
+    backgroundIncrease: { int: 2, con: 1 }
+    levels:
+      - classId: "srd52:class/wizard"
+        hitPointGain: 6
+        answers:
+          [
+            { kind: skills, values: [investigation, perception] },
+            {
+              kind: spells,
+              values:
+                [
+                  "srd52:spell/fire-bolt",
+                  "srd52:spell/magic-missile",
+                  "srd52:spell/shield",
+                  "srd52:spell/sleep",
+                ],
+            },
+          ]
+  equipment: ["srd52:item/quarterstaff", "srd52:item/dagger"]

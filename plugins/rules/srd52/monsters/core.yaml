@@ -1,0 +1,74 @@
+- id: "srd52:monster/goblin-warrior"
+  name: Goblin Warrior
+  ac: 15
+  hp: 10
+  speed: 30
+  abilities: { str: 8, dex: 15, con: 10, int: 10, wis: 8, cha: 8 }
+  proficiency: 2
+  initiative: 2
+  passives:
+    - { kind: extraDamage, dice: 1d4, when: advantage }
+  actions:
+    - name: Scimitar
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 5, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 4 }
+          damage:
+            [{ amount: { dice: 1d6, bonus: { base: 2 } }, type: slashing }]
+    - name: Shortbow
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 80, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 4 }
+          damage:
+            [{ amount: { dice: 1d6, bonus: { base: 2 } }, type: piercing }]
+- id: "srd52:monster/goblin-boss"
+  name: Goblin Boss
+  ac: 17
+  hp: 21
+  speed: 30
+  abilities: { str: 10, dex: 15, con: 10, int: 10, wis: 8, cha: 10 }
+  proficiency: 2
+  initiative: 2
+  multiattack: 2
+  actions:
+    - name: Scimitar
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 5, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 4 }
+          damage:
+            [{ amount: { dice: 1d6, bonus: { base: 2 } }, type: slashing }]
+    - name: Shortbow
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 80, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 4 }
+          damage:
+            [{ amount: { dice: 1d6, bonus: { base: 2 } }, type: piercing }]
+- id: "srd52:monster/commoner"
+  name: Commoner
+  ac: 10
+  hp: 4
+  speed: 30
+  abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 }
+  proficiency: 2
+  initiative: 0
+  actions:
+    - name: Club
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 5, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 2 }
+          damage: [{ amount: { dice: 1d4 }, type: bludgeoning }]

@@ -1,0 +1,32 @@
+- {
+    id: "srd52:background/soldier",
+    name: Soldier,
+    abilities: [str, dex, con],
+    feat: "srd52:feat/savage-attacker",
+    skills: [athletics, intimidation],
+    tool: Gaming Set,
+  }
+- {
+    id: "srd52:background/criminal",
+    name: Criminal,
+    abilities: [dex, con, int],
+    feat: "srd52:feat/alert",
+    skills: [sleightOfHand, stealth],
+    tool: Thieves' Tools,
+  }
+- {
+    id: "srd52:background/acolyte",
+    name: Acolyte,
+    abilities: [int, wis, cha],
+    feat: "srd52:feat/magic-initiate",
+    skills: [insight, religion],
+    tool: Calligrapher's Supplies,
+  }
+- {
+    id: "srd52:background/sage",
+    name: Sage,
+    abilities: [con, int, wis],
+    feat: "srd52:feat/magic-initiate",
+    skills: [arcana, history],
+    tool: Calligrapher's Supplies,
+  }

@@ -1,0 +1,182 @@
+- id: "srd52:spell/fire-bolt"
+  name: Fire Bolt
+  level: 0
+  school: evocation
+  classes: ["srd52:class/wizard"]
+  castingTime: Action
+  range: 120 feet
+  components: V, S
+  duration: instantaneous
+  text: "Make a ranged spell attack. On a hit, the target takes 1d10 Fire damage."
+  automation: full
+  activation:
+    cost: [action]
+    targeting: { creatures: 1, range: 120, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 1d10 }, type: fire }]
+- id: "srd52:spell/sacred-flame"
+  name: Sacred Flame
+  level: 0
+  school: evocation
+  classes: ["srd52:class/cleric"]
+  castingTime: Action
+  range: 60 feet
+  components: V, S
+  duration: instantaneous
+  text: "A creature must succeed on a Dexterity save or take 1d8 Radiant damage."
+  automation: full
+  activation:
+    cost: [action]
+    targeting: { creatures: 1, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 1d8 }, type: radiant }]
+- id: "srd52:spell/cure-wounds"
+  name: Cure Wounds
+  level: 1
+  school: abjuration
+  classes: ["srd52:class/cleric"]
+  castingTime: Action
+  range: Touch
+  components: V, S
+  duration: instantaneous
+  text: "A creature you touch regains 2d8 plus your spellcasting modifier in Hit Points."
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: heal,
+            amount: { dice: 2d8, bonus: { add: [{ kind: spellMod }] } },
+          }
+  upcast: { perSlotLevel: { addDice: 2d8 } }
+- id: "srd52:spell/healing-word"
+  name: Healing Word
+  level: 1
+  school: abjuration
+  classes: ["srd52:class/cleric"]
+  castingTime: Bonus Action
+  range: 60 feet
+  components: V
+  duration: instantaneous
+  text: "A creature you can see regains 2d4 plus your spellcasting modifier in Hit Points."
+  automation: full
+  activation:
+    cost: [bonusAction, slot]
+    targeting: { creatures: 1, range: 60, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: heal,
+            amount: { dice: 2d4, bonus: { add: [{ kind: spellMod }] } },
+          }
+  upcast: { perSlotLevel: { addDice: 2d4 } }
+- id: "srd52:spell/bless"
+  name: Bless
+  level: 1
+  school: enchantment
+  classes: ["srd52:class/cleric"]
+  castingTime: Action
+  range: 30 feet
+  components: V, S, M
+  duration: { concentration: true, minutes: 1 }
+  text: "Up to three creatures add 1d4 to their attack rolls and saving throws."
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 3, range: 30, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            duration: { concentration: true, minutes: 1 },
+            modifier: { kind: bonus, to: attacks, amount: { dice: 1d4 } },
+          }
+        - {
+            kind: modifier,
+            duration: { concentration: true, minutes: 1 },
+            modifier: { kind: bonus, to: saves, amount: { dice: 1d4 } },
+          }
+  upcast: { perSlotLevel: { addTargets: 1 } }
+- id: "srd52:spell/shield"
+  name: Shield
+  level: 1
+  school: abjuration
+  classes: ["srd52:class/wizard"]
+  castingTime: Reaction
+  range: Self
+  components: V, S
+  duration: { until: yourNextTurnStart }
+  text: "As a Reaction when hit, gain +5 AC until your next turn, including against the triggering attack."
+  automation: partial
+  activation:
+    cost: [reaction, slot]
+    trigger: { hitByAttack: true, targetedBySpell: "srd52:spell/magic-missile" }
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: modifier,
+            duration: { until: yourNextTurnStart },
+            modifier: { kind: bonus, to: ac, amount: { bonus: { base: 5 } } },
+          }
+        - { kind: note, text: Magic Missile immunity is not yet automated }
+- id: "srd52:spell/magic-missile"
+  name: Magic Missile
+  level: 1
+  school: evocation
+  classes: ["srd52:class/wizard"]
+  castingTime: Action
+  range: 120 feet
+  components: V, S
+  duration: instantaneous
+  text: "Three darts each deal 1d4 + 1 Force damage. Here they all strike one target."
+  automation: partial
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: 120, side: enemy }
+    resolution:
+      kind: automatic
+      damage: [{ amount: { dice: 3d4, bonus: { base: 3 } }, type: force }]
+- id: "srd52:spell/fireball"
+  name: Fireball
+  level: 3
+  school: evocation
+  classes: ["srd52:class/wizard"]
+  castingTime: Action
+  range: 150 feet
+  components: V, S, M
+  duration: instantaneous
+  text: "Each creature in a 20-foot-radius Sphere makes a Dexterity save, taking 8d6 Fire damage, or half on a success."
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 20 }, range: 150, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 8d6 }, type: fire }]
+      onSuccessDamage: half
+  upcast: { perSlotLevel: { addDice: 1d6 } }
+- id: "srd52:spell/sleep"
+  name: Sleep
+  level: 1
+  school: enchantment
+  classes: ["srd52:class/wizard"]
+  castingTime: Action
+  range: 60 feet
+  components: V, S, M
+  duration: { concentration: true, minutes: 1 }
+  text: "Creatures in a 5-foot-radius Sphere may fall asleep. Not yet automated."
+  automation: text

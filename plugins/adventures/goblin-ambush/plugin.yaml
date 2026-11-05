@@ -1,0 +1,8 @@
+id: goblin-ambush
+kind: adventure
+version: 1.0.0
+sdk: ^1
+system: dnd5.5e@^1
+requires:
+  - { plugin: srd52, version: ^1 }
+distribution: shipped

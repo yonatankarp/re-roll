@@ -1,0 +1,11 @@
+- id: the-house
+  name: The House
+  goal: Keep whoever enters from ever leaving.
+  clocks:
+    - id: rising-dread
+      label: Rising dread
+      max: 3
+      at:
+        - value: 3
+          effects:
+            - { kind: goto, scene: doors-seal }

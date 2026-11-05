@@ -21,6 +21,7 @@ export interface RunContext {
   readonly system: GameSystem;
   readonly adventure: Adventure;
   readonly content: (id: string) => ContentEntry | undefined;
+  readonly contentIds: () => readonly string[];
 }
 
 export interface StoryResult {
@@ -195,6 +196,7 @@ function runResolveChoice(
     state: state.system,
     dice,
     content: run.content,
+    contentIds: run.contentIds,
   });
   assertOwnEvents(run, result.events);
   return {
@@ -221,7 +223,12 @@ function runApplyEffects(
     rest.length > 0
       ? [{ kind: "story:applyEffects", payload: { effects: rest } }]
       : [];
-  const context = { state: state.system, dice, content: run.content };
+  const context = {
+    state: state.system,
+    dice,
+    content: run.content,
+    contentIds: run.contentIds,
+  };
 
   switch (effect.kind) {
     case "setFlag":

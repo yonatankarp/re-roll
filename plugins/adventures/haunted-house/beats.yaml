@@ -1,0 +1,6 @@
+- id: footsteps
+  scene: footsteps-above
+  when:
+    any:
+      - { kind: clock, clock: rising-dread, atLeast: 1 }
+      - { kind: system, predicate: "dnd5.5e:hasInspiration", args: {} }

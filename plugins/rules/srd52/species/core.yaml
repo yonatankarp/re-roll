@@ -1,0 +1,7 @@
+- id: "srd52:species/human"
+  name: Human
+  text: "Found throughout the multiverse, Humans are as varied as they are adaptable."
+  creatureType: Humanoid
+  size: medium
+  speed: 30
+  traits: ["srd52:feature/human-traits"]

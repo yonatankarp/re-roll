@@ -38,7 +38,7 @@ export const StoryStateSchema = z.strictObject({
   revealed: z.array(z.string()),
   firedBeats: z.array(z.string()),
   variants: z.record(z.string(), z.string()),
-  ended: z.enum(["ending", "deadEnd"]).nullable(),
+  ended: z.enum(["ending", "deadEnd", "defeat"]).nullable(),
 });
 export type StoryState = Readonly<z.infer<typeof StoryStateSchema>>;
 
@@ -77,6 +77,7 @@ const NARRATIVE_EVENTS = [
   event("itemGained", { actor: z.string(), item: z.string() }),
   event("itemLost", { actor: z.string(), item: z.string() }),
   event("gmOpportunity", {}),
+  event("partyDefeated", {}),
 ] as const;
 
 const ENGINE_EVENTS = [
@@ -95,7 +96,7 @@ const ENGINE_EVENTS = [
   event("attitudeAdjusted", { npc: z.string(), value: z.number().int() }),
   event("secretRevealed", { secret: z.string() }),
   event("beatFired", { beat: z.string() }),
-  event("adventureEnded", { reason: z.enum(["ending", "deadEnd"]) }),
+  event("adventureEnded", { reason: z.enum(["ending", "deadEnd", "defeat"]) }),
 ] as const;
 
 const NarrativeEventSchema = z.discriminatedUnion("kind", [

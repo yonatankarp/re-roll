@@ -1,0 +1,80 @@
+- {
+    id: "srd52:item/longsword",
+    name: Longsword,
+    type: weapon,
+    category: martial,
+    damage: { dice: 1d8, type: slashing },
+    properties: [versatile],
+    mastery: sap,
+  }
+- {
+    id: "srd52:item/shortsword",
+    name: Shortsword,
+    type: weapon,
+    category: martial,
+    damage: { dice: 1d6, type: piercing },
+    properties: [finesse, light],
+    mastery: vex,
+  }
+- {
+    id: "srd52:item/shortbow",
+    name: Shortbow,
+    type: weapon,
+    category: simple,
+    damage: { dice: 1d6, type: piercing },
+    properties: [ammunition, twoHanded],
+    mastery: vex,
+  }
+- {
+    id: "srd52:item/mace",
+    name: Mace,
+    type: weapon,
+    category: simple,
+    damage: { dice: 1d6, type: bludgeoning },
+    properties: [],
+    mastery: sap,
+  }
+- {
+    id: "srd52:item/quarterstaff",
+    name: Quarterstaff,
+    type: weapon,
+    category: simple,
+    damage: { dice: 1d6, type: bludgeoning },
+    properties: [versatile],
+    mastery: topple,
+  }
+- {
+    id: "srd52:item/dagger",
+    name: Dagger,
+    type: weapon,
+    category: simple,
+    damage: { dice: 1d4, type: piercing },
+    properties: [finesse, light, thrown],
+    mastery: nick,
+  }
+- {
+    id: "srd52:item/chain-mail",
+    name: Chain Mail,
+    type: armor,
+    armorType: heavy,
+    base: 16,
+    addDex: false,
+  }
+- {
+    id: "srd52:item/leather-armor",
+    name: Leather Armor,
+    type: armor,
+    armorType: light,
+    base: 11,
+    addDex: true,
+  }
+- {
+    id: "srd52:item/scale-mail",
+    name: Scale Mail,
+    type: armor,
+    armorType: medium,
+    base: 14,
+    addDex: true,
+    maxDex: 2,
+  }
+- { id: "srd52:item/shield", name: Shield, type: shield, bonus: 2 }

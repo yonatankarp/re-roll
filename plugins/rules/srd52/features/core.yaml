@@ -1,0 +1,87 @@
+- id: "srd52:feature/second-wind"
+  name: Second Wind
+  text: "As a Bonus Action, regain Hit Points equal to 1d10 plus your Fighter level. Usable twice between rests."
+  automation: full
+  resources:
+    - id: second-wind
+      max: { base: 2 }
+      recharge:
+        - { on: shortRest, amount: 1 }
+        - { on: longRest, amount: all }
+  activations:
+    - cost: [bonusAction, { resource: second-wind }]
+      targeting: { self: true }
+      resolution:
+        kind: automatic
+        effects:
+          - kind: heal
+            amount:
+              dice: 1d10
+              bonus:
+                { add: [{ kind: classLevel, class: "srd52:class/fighter" }] }
+- id: "srd52:feature/sneak-attack"
+  name: Sneak Attack
+  text: "Once per turn, deal an extra 1d6 damage to a creature you hit with Advantage, or when an ally is near it."
+  automation: partial
+  passives:
+    - { kind: extraDamage, dice: 1d6, when: advantageOrAlly, oncePerTurn: true }
+
+- id: "srd52:feature/fighting-style"
+  name: Fighting Style
+  text: "You gain a Fighting Style feat of your choice."
+  automation: text
+
+- id: "srd52:feature/weapon-mastery"
+  name: Weapon Mastery
+  text: "You can use the mastery properties of chosen weapons."
+  automation: text
+
+- id: "srd52:feature/expertise"
+  name: Expertise
+  text: "You gain Expertise in two skills you are proficient in."
+  automation: text
+
+- id: "srd52:feature/thieves-cant"
+  name: Thieves' Cant
+  text: "You know Thieves' Cant and one other language."
+  automation: text
+
+- id: "srd52:feature/spellcasting"
+  name: Spellcasting
+  text: "You can cast the spells you have prepared using your spell slots."
+  automation: text
+
+- id: "srd52:feature/divine-order"
+  name: Divine Order
+  text: "You dedicate yourself to a sacred role of your choice."
+  automation: text
+
+- id: "srd52:feature/ritual-adept"
+  name: Ritual Adept
+  text: "You can cast spells in your spellbook as Rituals."
+  automation: text
+
+- id: "srd52:feature/arcane-recovery"
+  name: Arcane Recovery
+  text: "You can recover some spell slots when you finish a Short Rest."
+  automation: text
+
+- id: "srd52:feature/human-traits"
+  name: Human Traits
+  text: "Resourceful, Skillful and Versatile."
+  automation: text
+
+- id: "srd52:feature/savage-attacker"
+  name: Savage Attacker
+  text: "Once per turn, roll a weapon's damage dice twice and use either roll."
+  automation: text
+
+- id: "srd52:feature/alert"
+  name: Alert
+  text: "Add your Proficiency Bonus to Initiative, and you may swap Initiative with an ally."
+  automation: text
+
+- id: "srd52:feature/magic-initiate"
+  name: Magic Initiate
+  text: "You learn two cantrips and one level 1 spell from a chosen list."
+  automation: text

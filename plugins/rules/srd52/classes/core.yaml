@@ -1,0 +1,60 @@
+- id: "srd52:class/fighter"
+  name: Fighter
+  hitDie: d10
+  primaryAbilities: [str, dex]
+  savingThrows: [str, con]
+  weapons: [simple, martial]
+  armor: [light, medium, heavy, shield]
+  levels:
+    - level: 1
+      grants:
+        [
+          "srd52:feature/fighting-style",
+          "srd52:feature/second-wind",
+          "srd52:feature/weapon-mastery",
+        ]
+- id: "srd52:class/rogue"
+  name: Rogue
+  hitDie: d8
+  primaryAbilities: [dex]
+  savingThrows: [dex, int]
+  weapons: [simple, martial]
+  armor: [light]
+  levels:
+    - level: 1
+      grants:
+        [
+          "srd52:feature/expertise",
+          "srd52:feature/sneak-attack",
+          "srd52:feature/thieves-cant",
+          "srd52:feature/weapon-mastery",
+        ]
+- id: "srd52:class/cleric"
+  name: Cleric
+  hitDie: d8
+  primaryAbilities: [wis]
+  savingThrows: [wis, cha]
+  weapons: [simple]
+  armor: [light, medium, shield]
+  spellcasting: { ability: wis }
+  levels:
+    - level: 1
+      grants: ["srd52:feature/spellcasting", "srd52:feature/divine-order"]
+      slots: [2]
+- id: "srd52:class/wizard"
+  name: Wizard
+  hitDie: d6
+  primaryAbilities: [int]
+  savingThrows: [int, wis]
+  weapons: [simple]
+  armor: []
+  spellcasting: { ability: int }
+  levels:
+    - level: 1
+      grants:
+        [
+          "srd52:feature/spellcasting",
+          "srd52:feature/ritual-adept",
+          "srd52:feature/arcane-recovery",
+        ]
+      slots: [2]

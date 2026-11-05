@@ -739,6 +739,40 @@ describe("a turn-based system with interrupts", () => {
   });
 });
 
+describe("party defeat", () => {
+  it("ends the run instead of carrying on to the choice's next scene", async () => {
+    const defeating = defineSystem<TurnsState>({
+      ...(turnsSystem as unknown as Parameters<
+        typeof defineSystem<TurnsState>
+      >[0]),
+      id: "defeating",
+      eventSchemas: {},
+      frames: {},
+      startEncounter: () => ({ events: [{ kind: "partyDefeated" }] }),
+    });
+    const { run } = await loadInline(
+      {
+        "encounters.yaml": "- { id: fight }\n",
+        "scenes.yaml": `
+- id: start
+  text: Start.
+  choices:
+    - label: Fight
+      effects:
+        - { kind: startEncounter, encounter: fight }
+        - { kind: goto, scene: end }
+- { id: end, text: End. }
+`,
+      },
+      defeating,
+    );
+    const result = choose(run, startRun(run, "s"), "0");
+    expect(result.state.story.ended).toBe("defeat");
+    expect(result.state.story.scene).toBe("start");
+    expect(result.pending).toBeNull();
+  });
+});
+
 describe("saves", () => {
   async function savedRun() {
     const fixture = await loadFixture("haunted-house");

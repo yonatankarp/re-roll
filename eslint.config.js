@@ -100,6 +100,10 @@ export default defineConfig([
           property: "random",
           message: "Use the seeded dice in game state.",
         },
+        {
+          property: "localeCompare",
+          message: "Sort order can differ between JavaScript engines.",
+        },
       ],
     },
   },

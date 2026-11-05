@@ -1,4 +1,5 @@
 import type { GameSystem } from "#sdk";
+import { dnd55e } from "../plugins/systems/dnd5.5e/core/index.ts";
 
-// The one static list of system plugins. dnd5.5e is added here in build step 4.
-export const systems: readonly GameSystem[] = [];
+// The one static list of system plugins.
+export const systems: readonly GameSystem[] = [dnd55e];

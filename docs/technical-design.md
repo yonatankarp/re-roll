@@ -1,6 +1,6 @@
 # Technical Design: Re-roll
 
-**Status:** Draft for review. Build steps 1 to 3 are complete, and the game isn't playable yet: there's no D&D plugin or UI.
+**Status:** Draft for review. Build steps 1 to 3 are complete, and a first slice of step 4 is playable from the command line. There's no UI yet.
 **Checked:** 5 November 2026. Package versions came from the npm registry that day.
 
 ## 1. Goal and assumptions
@@ -78,8 +78,8 @@ plugins/
       plugin.yaml
       classes/ subclasses/ species/ backgrounds/ feats/ spells/ equipment/ monsters/
   adventures/
-    goblin-ambush/         Data plugin, original sample (moves here in step 4)
-    haunted-house/         Data plugin, original sample (moves here in step 4)
+    goblin-ambush/         Data plugin, original sample using dnd5.5e
+    haunted-house/         Data plugin, original sample using dnd5.5e
 
 private/                   Your book plugins, same structure, excluded from git
   rules/ adventures/
@@ -91,7 +91,7 @@ app/
 
 tests/fixtures/
   system-d6/               Tiny test-only rule system (section 12)
-  rules/ adventures/       Data plugins for it, including both samples until step 4
+  rules/ adventures/       Data plugins for it. These d6 copies keep proving the engine works with any rule system
 ```
 
 `app/` is the only place that imports both the engine and system plugins. It passes them to the engine, so the engine never refers to a plugin by name.
@@ -220,7 +220,7 @@ export const dnd55e = defineSystem({
   resolveCheck,         // returns an outcome key, events and frames
   startEncounter,
   applyEvent,           // the only place system state changes
-  nextDecision,         // whose decision comes next, if anyone's
+  nextDecision,         // whose decision comes next, if anyone's, with read access to content
   decidePolicy,         // non-player decisions, without a model
   // Still to come: describeFacts for prep, glossary, and importSchemas for the book importer.
 });
@@ -317,6 +317,7 @@ Every system must emit these events, so that prep, the director and companions c
 | `levelGained` | A character advanced |
 | `itemGained` / `itemLost` | Something changed hands |
 | `gmOpportunity` | The rules say the GM may now act |
+| `partyDefeated` | The party has lost. The engine ends the run instead of continuing to the choice's next scene |
 
 Systems may emit any further events under their own namespace. Those are saved and replayed, but the engine doesn't interpret them.
 
@@ -350,6 +351,8 @@ A scene's `check` and `results` are the only part tied to rules. The system's sc
         failure:
           - { kind: goto, scene: ambush-surprised }
 ```
+
+Scene checks are made by the player's character. Branching on how an encounter ended, such as capture or retreat, isn't built yet: a run either continues after a win or ends on a defeat.
 
 **The director** is a plain function that picks the next beat from the eligible ones, using the seed and current state. It also answers `gmOpportunity` events. If an adventure has no eligible beats, the base story continues as written.
 
@@ -702,6 +705,29 @@ Multiclass spell slots are computed using the SRD's multiclass table, and Pact M
 
 The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamage` and `dnd5.5e:concentrationSave`. These model chains such as an attack triggering *Shield*, then damage triggering a Concentration save, or movement triggering an Opportunity Attack.
 
+### 8.12 What step 4 has built so far
+
+**Content:** four level 1 pregens (Fighter, Rogue, Cleric and Wizard), three monsters, and enough of the SRD to support them. The adventures can also bring their own monsters, as the Goblin Chief does.
+
+| Automation | Content |
+|---|---|
+| `full` | Weapon attacks, Second Wind, Fire Bolt, Sacred Flame, Cure Wounds, Healing Word, Bless, Fireball |
+| `partial` | Sneak Attack, Shield (no Magic Missile immunity), Magic Missile (all darts strike one target) |
+| `text` | Fighting Style, Weapon Mastery, Expertise, Thieves' Cant, Spellcasting, Divine Order, Ritual Adept, Arcane Recovery, species traits, origin feats, Sleep |
+
+**Combat runs through the engine's decision system.** Initiative and turns are handled entirely by the plugin, and simple code-based tactics play monsters and companions: heal an ally below half HP, otherwise attack the weakest enemy. Companions use cantrips and weapons, but don't spend spell slots to attack.
+
+**Dying:** the SRD's death saves, Stable at three successes, and Massive Damage all apply. **If the player's character dies, the run ends, even if companions win the fight.** That's a design choice, because the story follows the player, and could change once there's a way to carry on with another character.
+
+**Deliberately cut for now, each with a `shortcut:` comment where it applies:**
+- **No positions:** there's no grid, movement or Opportunity Attacks, and everyone in a fight can reach everyone. Areas hit all enemies, and Sneak Attack treats any living ally as nearby.
+- **Character building:** you choose from pregens, as character creation and levels above 1 aren't built. XP isn't tracked.
+- **Spell rules:** no upcasting at runtime, cantrip scaling, spell preparation or the one-spell-slot-per-turn rule.
+- **Other rules:** no multiclassing, rests, weapon mastery effects or armor training limits. Conditions and forced movement are stored in data but do nothing yet.
+- **Using Heroic Inspiration:** an adventure can grant and check it, but it can't be spent on a reroll yet.
+- **Recovery after a fight:** anyone down but not dead gets back up with 1 HP, until rests exist. HP otherwise carries over between fights.
+- **Branded IDs:** content IDs are checked strings, not per-kind branded types as section 4.4 planned.
+
 ## 9. Saves
 
 ```ts
@@ -800,7 +826,7 @@ A failed bot run prints its seed and input list, so any failure can be reproduce
 1. **Foundations (done):** tooling, the SDK, the plugin loader and `check-pack`, with the fixture system and two tiny original adventures kept in `tests/fixtures`.
 2. **Prep test (three runs done, awaiting your read):** generate an overlay from a sample log using a model that fits in 16 GB. Judge quality and speed. **If this fails, the design needs rethinking, so it comes early.** See section 16.
 3. **Engine kernel and story runtime (done):** turn loop, seeded dice, replay test and test bot, all running against the fixture system. Not included yet: companion loyalty triggers, levels and items, prep digests built from the log, and a smarter director.
-4. **D&D plugin core:** derived stats, damage pipeline and frames, then both adventures converted to it, moved to `plugins/adventures` and playable from the command line.
+4. **D&D plugin core (first slice done):** derived stats, damage pipeline and frames, with both adventures copied to `plugins/adventures` in D&D form and playable from the command line. See section 8.12.
 5. **Levels 1–5 content:** all classes and the monsters they meet, with the importer tested on SRD text.
 6. **UI:** the engine shell in Tauri, then the D&D sheet and PixiJS combat grid in the plugin.
 7. **Full loop:** play, prep, play. Then package the app with `llama-server` as a Tauri sidecar.

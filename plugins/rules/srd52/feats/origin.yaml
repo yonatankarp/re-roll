@@ -1,0 +1,21 @@
+- {
+    id: "srd52:feat/savage-attacker",
+    name: Savage Attacker,
+    category: origin,
+    text: "Roll weapon damage twice once per turn.",
+    grants: ["srd52:feature/savage-attacker"],
+  }
+- {
+    id: "srd52:feat/alert",
+    name: Alert,
+    category: origin,
+    text: "Add your Proficiency Bonus to Initiative.",
+    grants: ["srd52:feature/alert"],
+  }
+- {
+    id: "srd52:feat/magic-initiate",
+    name: Magic Initiate,
+    category: origin,
+    text: "Learn two cantrips and one level 1 spell.",
+    grants: ["srd52:feature/magic-initiate"],
+  }

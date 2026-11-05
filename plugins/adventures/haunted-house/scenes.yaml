@@ -1,0 +1,35 @@
+- id: hallway
+  text: The hallway smells of cold ash and old roses.
+  art: assets/hallway.txt
+  choices:
+    - label: Try the cellar door
+      effects:
+        - { kind: advanceClock, clock: rising-dread }
+        - { kind: goto, scene: cellar-door }
+    - label: Talk to the caretaker
+      when: { kind: attitude, npc: caretaker, atLeast: -1 }
+      effects:
+        - { kind: adjustAttitude, npc: caretaker, by: 1 }
+        - { kind: reveal, secret: buried-letter }
+        - { kind: system, effect: "dnd5.5e:grantInspiration", args: {} }
+        - { kind: goto, scene: cellar-door }
+- id: cellar-door
+  text: The door is warm to the touch, and something knocks back.
+  choices:
+    - label: "[Athletics] Force the lock"
+      check: { skill: athletics, dc: 13 }
+      results:
+        success:
+          - { kind: goto, scene: escape }
+        failure:
+          - { kind: advanceClock, clock: rising-dread, by: 3 }
+- id: footsteps-above
+  text: Slow footsteps cross the floor above, though the house has no upstairs.
+  choices:
+    - label: Keep moving
+      effects:
+        - { kind: goto, scene: cellar-door }
+- id: doors-seal
+  text: Every door in the house clicks shut at once.
+- id: escape
+  text: Cold air and starlight hit you as you stumble out onto Mere Lane.

@@ -39,7 +39,12 @@ export function createRunContext(
 ): RunContext {
   const adventure: Adventure | undefined = registry.adventure(adventureId);
   if (!adventure) throw new Error(`Adventure "${adventureId}" is not loaded`);
-  return { system: registry.system, adventure, content: registry.content };
+  return {
+    system: registry.system,
+    adventure,
+    content: registry.content,
+    contentIds: registry.contentIds,
+  };
 }
 
 export function applyEvent(
@@ -116,7 +121,7 @@ function waitingDecision(run: RunContext, state: GameState): Decision | null {
     return AwaitPayloadSchema.parse(top.payload).decision;
   }
   if (top && !isStoryFrame(top)) return null;
-  return run.system.nextDecision(state.system);
+  return run.system.nextDecision(state.system, run);
 }
 
 export function pendingDecision(
@@ -200,6 +205,9 @@ function settle(
     for (const frame of [...frames].reverse()) {
       recorded.push({ kind: "framePushed", frame });
     }
+    if (produced.some((item) => item.kind === "partyDefeated")) {
+      recorded.push({ kind: "adventureEnded", reason: "defeat" });
+    }
     emit(recorded);
   };
 
@@ -207,6 +215,7 @@ function settle(
     state: current.system,
     dice,
     content: run.content,
+    contentIds: run.contentIds,
   });
 
   for (let work = 0; work < MAX_WORK_PER_STEP; work += 1) {
@@ -274,12 +283,17 @@ export function startRun(run: RunContext, seed: string): StepResult {
   }
   const partyIds = [PLAYER_ACTOR, ...profiles.map((profile) => profile.id)];
   const system = run.system.createRun({
-    actors: partyIds.map((id) => ({
-      id,
-      role: id === PLAYER_ACTOR ? "player" : "companion",
-    })),
+    actors: [
+      { id: PLAYER_ACTOR, name: "You", role: "player" as const },
+      ...profiles.map((profile) => ({
+        id: profile.id,
+        name: profile.name,
+        role: "companion" as const,
+      })),
+    ],
     dice: world,
     content: run.content,
+    contentIds: run.contentIds,
   });
 
   const variants: Record<string, string> = {};

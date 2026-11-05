@@ -13,6 +13,7 @@ export {
   storyPredicate,
 } from "../kernel/system.ts";
 export type {
+  ContentAccess,
   ContentEntry,
   ContentKind,
   EncounterEntry,

@@ -5,7 +5,7 @@ import { type RunContext, startRun, step } from "../kernel/turn.ts";
 
 export interface BotRun {
   readonly seed: string;
-  readonly outcome: "ending" | "deadEnd" | "tooLong";
+  readonly outcome: "ending" | "deadEnd" | "defeat" | "tooLong";
   readonly inputs: readonly Input[];
   readonly log: readonly LogEntry[];
   readonly state: GameState;
@@ -76,6 +76,7 @@ export interface BotReport {
   readonly runs: number;
   readonly failures: readonly BotFailure[];
   readonly endings: Readonly<Record<string, number>>;
+  readonly defeats: number;
   readonly unvisitedScenes: readonly string[];
 }
 
@@ -93,6 +94,7 @@ export function testAdventure(
 ): BotReport {
   const failures: BotFailure[] = [];
   const endings: Record<string, number> = {};
+  let defeats = 0;
   const visited = new Set<string>();
 
   for (let index = 0; index < options.runs; index += 1) {
@@ -107,7 +109,9 @@ export function testAdventure(
       const lastScene = result.state.story.scene ?? "none";
       endings[lastScene] = (endings[lastScene] ?? 0) + 1;
 
-      if (result.outcome !== "ending") {
+      // A party can lose a fight, so a defeat is a valid way for a run to end.
+      if (result.outcome === "defeat") defeats += 1;
+      if (result.outcome !== "ending" && result.outcome !== "defeat") {
         failures.push({
           seed,
           problem: `${result.outcome} at scene ${lastScene}`,
@@ -135,6 +139,7 @@ export function testAdventure(
     runs: options.runs,
     failures,
     endings,
+    defeats,
     unvisitedScenes: run.adventure.scenes
       .map((scene) => scene.id)
       .filter((scene) => !visited.has(scene)),

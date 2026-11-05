@@ -1,0 +1,27 @@
+- id: road
+  text: Two dead horses block the trail, and the crows have not touched them.
+  choices:
+    - label: "[Perception] Check the treeline"
+      check: { skill: perception, dc: 12 }
+      results:
+        success:
+          - { kind: setFlag, flag: spotted-ambush }
+          - { kind: system, effect: "dnd5.5e:grantInspiration", args: {} }
+          - { kind: goto, scene: fight }
+        failure:
+          - { kind: startEncounter, encounter: roadside }
+          - { kind: goto, scene: fight }
+    - label: Turn back and warn the village
+      effects:
+        - { kind: goto, scene: village }
+- id: fight
+  text: Arrows hiss out of the pines as more goblins rush the road.
+  choices:
+    - label: Drive them off
+      effects:
+        - { kind: startEncounter, encounter: rearguard }
+        - { kind: goto, scene: safe-road }
+- id: village
+  text: The elder listens, then asks who will walk the road next.
+- id: safe-road
+  text: The road is quiet again, for now.

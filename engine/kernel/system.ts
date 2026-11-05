@@ -94,6 +94,7 @@ export interface SystemContext<S> {
   readonly state: S;
   readonly dice: Dice;
   readonly content: (id: string) => ContentEntry | undefined;
+  readonly contentIds: () => readonly string[];
 }
 
 // Handlers report what happened and never change state, so saves can replay them.
@@ -161,10 +162,17 @@ export function awaitDecision(decision: Decision): Frame {
 export interface RunSetup {
   readonly actors: readonly {
     readonly id: string;
+    readonly name: string;
     readonly role: "player" | "companion";
   }[];
   readonly dice: Dice;
   readonly content: (id: string) => ContentEntry | undefined;
+  readonly contentIds: () => readonly string[];
+}
+
+export interface ContentAccess {
+  readonly content: (id: string) => ContentEntry | undefined;
+  readonly contentIds: () => readonly string[];
 }
 
 export interface SystemDefinition<S> {
@@ -190,7 +198,7 @@ export interface SystemDefinition<S> {
     context: SystemContext<S>,
   ) => SystemResult;
   readonly applyEvent: (state: S, event: SystemEvent) => S;
-  readonly nextDecision: (state: S) => Decision | null;
+  readonly nextDecision: (state: S, access: ContentAccess) => Decision | null;
   readonly decidePolicy: (
     decision: Decision,
     context: SystemContext<S>,

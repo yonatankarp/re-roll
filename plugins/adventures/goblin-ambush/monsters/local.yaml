@@ -1,0 +1,18 @@
+- id: "goblin-ambush:monster/chief"
+  name: Goblin Chief
+  ac: 15
+  hp: 15
+  speed: 30
+  abilities: { str: 10, dex: 15, con: 10, int: 10, wis: 8, cha: 10 }
+  proficiency: 2
+  initiative: 2
+  actions:
+    - name: Scimitar
+      activation:
+        cost: [action]
+        targeting: { creatures: 1, range: 5, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: weapon, flatBonus: 4 }
+          damage:
+            [{ amount: { dice: 1d6, bonus: { base: 2 } }, type: slashing }]
