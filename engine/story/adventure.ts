@@ -39,13 +39,13 @@ const ConditionLeafSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const ConditionSchema = z.union([
+export const ConditionSchema = z.union([
   ConditionLeafSchema,
   z.strictObject({ all: z.array(ConditionLeafSchema).min(1) }),
   z.strictObject({ any: z.array(ConditionLeafSchema).min(1) }),
 ]);
 
-const StoryEffectSchema = z.discriminatedUnion("kind", [
+export const StoryEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("setFlag"),
     flag: SlugSchema,
@@ -96,6 +96,7 @@ const SceneSchema = z.strictObject({
 const NpcSchema = z.strictObject({
   id: SlugSchema,
   name: z.string().min(1),
+  pronouns: z.string().min(1),
   motive: z.string().min(1),
   attitude: z.number().int().default(0),
   knows: z.array(SlugSchema).default([]),
@@ -138,7 +139,7 @@ const VariantSchema = z.strictObject({
     .array(
       z.strictObject({
         id: SlugSchema,
-        weight: z.number().positive().default(1),
+        weight: z.number().int().positive().default(1),
         effects: z.array(StoryEffectSchema).min(1),
       }),
     )
@@ -149,7 +150,7 @@ const BeatSchema = z.strictObject({
   id: SlugSchema,
   scene: SlugSchema,
   when: ConditionSchema.optional(),
-  weight: z.number().positive().default(1),
+  weight: z.number().int().positive().default(1),
 });
 
 const AdventureInfoSchema = z.strictObject({
@@ -157,8 +158,8 @@ const AdventureInfoSchema = z.strictObject({
   startScene: SlugSchema,
 });
 
-type StoryEffect = z.infer<typeof StoryEffectSchema>;
-type Condition = z.infer<typeof ConditionSchema>;
+export type StoryEffect = z.infer<typeof StoryEffectSchema>;
+export type Condition = z.infer<typeof ConditionSchema>;
 
 export interface Adventure {
   readonly title: string;
@@ -315,7 +316,7 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
           need(file, secretIds, effect.secret, "secret");
           break;
         case "system": {
-          const schema = system.storyEffects[effect.effect];
+          const schema = system.storyEffects[effect.effect]?.schema;
           if (!schema) {
             report(
               file,
@@ -364,7 +365,7 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
           need(file, npcIds, leaf.npc, "NPC");
           break;
         case "system": {
-          const schema = system.storyPredicates[leaf.predicate];
+          const schema = system.storyPredicates[leaf.predicate]?.schema;
           if (!schema) {
             report(
               file,

@@ -5,6 +5,7 @@ import {
   type StoryFile,
   validateAdventure,
 } from "../story/adventure.ts";
+import { hashText } from "./dice.ts";
 import { type Issue, zodIssues } from "./issues.ts";
 import { type PluginManifest, PluginManifestSchema } from "./manifest.ts";
 import { satisfiesCaret } from "./semver.ts";
@@ -53,6 +54,7 @@ export interface Registry {
   readonly system: GameSystem;
   readonly plugins: readonly PluginManifest[]; // in load order
   readonly contentIds: () => readonly string[];
+  readonly pluginHash: (pluginId: string) => string | undefined;
   readonly content: (id: string) => ContentEntry | undefined; // follows replacements
   readonly adventure: (pluginId: string) => Adventure | undefined;
 }
@@ -198,7 +200,7 @@ function resolveOrder(
     }
     state.set(id, "visiting");
     const dependencies = [...record.manifest.requires].sort((a, b) =>
-      a.plugin.localeCompare(b.plugin),
+      a.plugin < b.plugin ? -1 : a.plugin > b.plugin ? 1 : 0,
     );
     for (const { plugin, version } of dependencies) {
       const dependency = catalog.plugins.get(plugin);
@@ -502,6 +504,17 @@ export async function loadRun(
 
   if (issues.length > 0) return { ok: false, issues };
 
+  // shortcut: only YAML is hashed, so a changed image won't warn. Hash assets if art ever affects saves.
+  const hashes = new Map<string, string>();
+  for (const record of order) {
+    const parts: string[] = [];
+    for (const file of [...record.files].sort()) {
+      if (extensionOf(file) !== YAML) continue;
+      parts.push(file, (await storage.read(`${record.root}/${file}`)) ?? "");
+    }
+    hashes.set(record.manifest.id, hashText(parts.join("\0")));
+  }
+
   const content = new Map<string, ContentEntry>();
   for (const [id, { entry }] of entries) {
     if (!aliases.has(id)) content.set(id, deepFreeze(entry));
@@ -514,6 +527,7 @@ export async function loadRun(
       system,
       plugins: Object.freeze(order.map((record) => record.manifest)),
       contentIds: () => [...content.keys()].sort(),
+      pluginHash: (pluginId: string) => hashes.get(pluginId),
       content: (id: string) => {
         const resolved = resolve(id);
         return resolved === null ? undefined : content.get(resolved);

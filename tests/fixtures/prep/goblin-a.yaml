@@ -1,0 +1,38 @@
+run: goblin-a
+adventure: goblin-ambush
+session: 2
+player:
+  name: Wren
+  pronouns: they/them
+  description: A wandering mapmaker who took this road for the pay.
+visitedScenes: [road, fight]
+nextScene: village
+npc: elder
+foreshadow: goblin-pact
+facts:
+  - The party spotted the ambush from the treeline before any arrows flew.
+  - Sera flanked the goblins and cut down their chief's standard-bearer.
+  - The goblin chief escaped into the pines with an arrow in his shoulder.
+  - The party found the village's brand on the dead horses and took a piece of harness as proof.
+attitudes: { elder: 0 }
+companions:
+  - {
+      id: sera,
+      name: Sera,
+      pronouns: she/her,
+      personality: Sharp-tongued ex-soldier who trusts nobody.,
+      goal: Hunt down the goblin chief.,
+      loyalty: 2,
+    }
+  - {
+      id: tobin,
+      name: Tobin,
+      pronouns: he/him,
+      personality: Cheerful young healer who hates violence.,
+      goal: See the road safe for his family's wagons.,
+      loyalty: 3,
+    }
+expectedMentions:
+  - [chief, standard]
+  - [harness, brand, horses]
+  - [pines, arrow, shoulder]

@@ -534,7 +534,7 @@ describe("adventures", () => {
     const files = adventureFiles("a", {
       "encounters.yaml": '- { id: fight, foes: ["a:foe/nope"] }\n',
       "npcs.yaml":
-        '- { id: n, name: N, motive: M, statsId: "a:foe/also-nope" }\n',
+        '- { id: n, name: N, pronouns: they/them, motive: M, statsId: "a:foe/also-nope" }\n',
     });
     const errors = await errorsOf(files, ["a"]);
     expect(errors).toContain('unknown reference "a:foe/nope"');

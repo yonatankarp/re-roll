@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { Dice } from "./dice.ts";
+import type { Decision, Frame, JsonObject, SystemEvent } from "./events.ts";
 import {
   CARET_RANGE_PATTERN,
   VERSION_PATTERN,
@@ -88,7 +90,84 @@ export interface SystemOutcomes {
   readonly groups?: Readonly<Record<string, readonly string[]>>;
 }
 
-export interface GameSystem {
+export interface SystemContext<S> {
+  readonly state: S;
+  readonly dice: Dice;
+  readonly content: (id: string) => ContentEntry | undefined;
+}
+
+// Handlers report what happened and never change state, so saves can replay them.
+export interface SystemResult {
+  readonly events?: readonly SystemEvent[];
+  readonly frames?: readonly Frame[]; // the first one listed runs first
+}
+
+export interface StoryEffectDef<S> {
+  readonly schema: z.ZodType;
+  readonly apply: (args: unknown, context: SystemContext<S>) => SystemResult;
+}
+
+export interface StoryPredicateDef<S> {
+  readonly schema: z.ZodType;
+  readonly evaluate: (args: unknown, state: S) => boolean;
+}
+
+export interface FrameDef<S> {
+  readonly run: (
+    payload: JsonObject,
+    context: SystemContext<S>,
+  ) => SystemResult;
+}
+
+export function storyEffect<A, S>(definition: {
+  readonly schema: z.ZodType<A>;
+  readonly apply: (args: A, context: SystemContext<S>) => SystemResult;
+}): StoryEffectDef<S> {
+  return {
+    schema: definition.schema,
+    apply: (args, context) =>
+      definition.apply(definition.schema.parse(args), context),
+  };
+}
+
+export function storyPredicate<A, S>(definition: {
+  readonly schema: z.ZodType<A>;
+  readonly evaluate: (args: A, state: S) => boolean;
+}): StoryPredicateDef<S> {
+  return {
+    schema: definition.schema,
+    evaluate: (args, state) =>
+      definition.evaluate(definition.schema.parse(args), state),
+  };
+}
+
+export function frameHandler<P, S>(definition: {
+  readonly schema: z.ZodType<P>;
+  readonly run: (payload: P, context: SystemContext<S>) => SystemResult;
+}): FrameDef<S> {
+  return {
+    run: (payload, context) =>
+      definition.run(definition.schema.parse(payload), context),
+  };
+}
+
+export const AWAIT_FRAME = "kernel:await";
+
+// Suspends play until the decision is answered. A save at this point resumes exactly here.
+export function awaitDecision(decision: Decision): Frame {
+  return { kind: AWAIT_FRAME, payload: { decision } };
+}
+
+export interface RunSetup {
+  readonly actors: readonly {
+    readonly id: string;
+    readonly role: "player" | "companion";
+  }[];
+  readonly dice: Dice;
+  readonly content: (id: string) => ContentEntry | undefined;
+}
+
+export interface SystemDefinition<S> {
   readonly id: string;
   readonly version: string;
   readonly sdk: string;
@@ -96,27 +175,51 @@ export interface GameSystem {
   readonly checkSchema: z.ZodType;
   readonly encounters: EncounterKind;
   readonly outcomes: SystemOutcomes;
-  readonly storyEffects: Readonly<Record<string, z.ZodType>>;
-  readonly storyPredicates: Readonly<Record<string, z.ZodType>>;
+  readonly stateSchema: z.ZodType<S>;
+  readonly eventSchemas: Readonly<Record<string, z.ZodType>>; // payload of each namespaced event
+  readonly storyEffects: Readonly<Record<string, StoryEffectDef<S>>>;
+  readonly storyPredicates: Readonly<Record<string, StoryPredicateDef<S>>>;
+  readonly frames: Readonly<Record<string, FrameDef<S>>>;
+  readonly createRun: (setup: RunSetup) => S;
+  readonly resolveCheck: (
+    check: unknown,
+    context: SystemContext<S>,
+  ) => SystemResult & { readonly outcome: string };
+  readonly startEncounter: (
+    encounter: unknown,
+    context: SystemContext<S>,
+  ) => SystemResult;
+  readonly applyEvent: (state: S, event: SystemEvent) => S;
+  readonly nextDecision: (state: S) => Decision | null;
+  readonly decidePolicy: (
+    decision: Decision,
+    context: SystemContext<S>,
+  ) => string;
 }
 
-function assertNamespaced(system: GameSystem, names: readonly string[]): void {
+// What the engine sees: the system's state type is opaque to it.
+export type GameSystem = SystemDefinition<unknown>;
+
+function assertNamespaced(id: string, names: readonly string[]): void {
   for (const name of names) {
-    if (!name.startsWith(`${system.id}:`)) {
+    if (!name.startsWith(`${id}:`)) {
       throw new Error(
-        `System ${system.id}: "${name}" must be namespaced as ${system.id}:name`,
+        `System ${id}: "${name}" must be namespaced as ${id}:name`,
       );
     }
   }
 }
 
+const RESERVED_IDS = new Set(["kernel", "story"]);
+
 // A broken system is a programming error, so it fails at startup rather than reporting issues.
-export function defineSystem(system: GameSystem): GameSystem {
+export function defineSystem<S>(system: SystemDefinition<S>): GameSystem {
   const fail = (message: string): never => {
     throw new Error(`System ${system.id}: ${message}`);
   };
 
   if (!PLUGIN_ID_PATTERN.test(system.id)) fail("invalid id");
+  if (RESERVED_IDS.has(system.id)) fail("this id is reserved");
   if (!VERSION_PATTERN.test(system.version)) fail("version must be x.y.z");
   if (!CARET_RANGE_PATTERN.test(system.sdk)) fail("sdk must be a caret range");
   if (!satisfiesCaret(SDK_VERSION, system.sdk))
@@ -139,8 +242,15 @@ export function defineSystem(system: GameSystem): GameSystem {
       fail(`content folder "${folder}" is reserved`);
   }
 
-  assertNamespaced(system, Object.keys(system.storyEffects));
-  assertNamespaced(system, Object.keys(system.storyPredicates));
+  for (const names of [
+    system.storyEffects,
+    system.storyPredicates,
+    system.frames,
+    system.eventSchemas,
+  ]) {
+    assertNamespaced(system.id, Object.keys(names));
+  }
 
-  return Object.freeze(system);
+  // The engine only ever hands a system back state that system produced, or that passed its stateSchema.
+  return Object.freeze(system) as unknown as GameSystem;
 }

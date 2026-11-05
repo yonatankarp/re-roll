@@ -47,7 +47,14 @@ export default defineConfig([
       },
     },
     rules: {
-      "@typescript-eslint/switch-exhaustiveness-check": "error",
+      "@typescript-eslint/switch-exhaustiveness-check": [
+        "error",
+        { considerDefaultExhaustiveForUnions: true },
+      ],
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_" },
+      ],
       "@typescript-eslint/restrict-template-expressions": [
         "error",
         { allowNumber: false },
@@ -63,6 +70,7 @@ export default defineConfig([
       "engine/kernel/**/*.ts",
       "engine/story/**/*.ts",
       "engine/sdk/**/*.ts",
+      "engine/prep/**/*.ts",
     ],
     rules: restrictImports(
       engineMustNotImport,

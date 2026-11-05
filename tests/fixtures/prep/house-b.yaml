@@ -1,0 +1,38 @@
+run: house-b
+adventure: haunted-house
+session: 2
+player:
+  name: Ash
+  pronouns: they/them
+  description: A debt collector sent to Mere Lane about an unpaid bill.
+visitedScenes: [hallway, footsteps-above]
+nextScene: cellar-door
+npc: caretaker
+foreshadow: buried-letter
+facts:
+  - Lys broke a window to get in, and Mrs. Hale caught her going through the drawers.
+  - Mrs. Hale threatened to fetch the constable and locked herself in the kitchen.
+  - Footsteps crossed a floor that does not exist, and half the candles went out at once.
+  - Oren is shaken and wants to leave before the dread gets worse.
+attitudes: { caretaker: -3 }
+companions:
+  - {
+      id: oren,
+      name: Oren,
+      pronouns: he/him,
+      personality: Soft-spoken gravedigger with a morbid sense of humor.,
+      goal: Lay the dead of Mere Lane to rest.,
+      loyalty: 0,
+    }
+  - {
+      id: lys,
+      name: Lys,
+      pronouns: she/her,
+      personality: Reckless thief who talks when she is scared.,
+      goal: Find whatever is worth stealing.,
+      loyalty: 1,
+    }
+expectedMentions:
+  - [window, drawers]
+  - [constable, kitchen]
+  - [footsteps, candle]

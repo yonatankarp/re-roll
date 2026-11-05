@@ -1,5 +1,6 @@
 - id: caretaker
   name: Mrs. Hale
+  pronouns: she/her
   motive: Keep the cellar locked until the winter is over.
   attitude: -1
   knows: [buried-letter]

@@ -1,0 +1,6 @@
+- id: elder
+  name: Elder Maren
+  pronouns: she/her
+  motive: Keep the road closed so that no outsider sees what the village is hiding.
+  attitude: 0
+  knows: [goblin-pact]

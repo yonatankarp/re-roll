@@ -1,6 +1,6 @@
 # Technical Design: Re-roll
 
-**Status:** Draft for review. Build step 1 is complete, and the game isn't playable yet.
+**Status:** Draft for review. Build steps 1 to 3 are complete, and the game isn't playable yet: there's no D&D plugin or UI.
 **Checked:** 5 November 2026. Package versions came from the npm registry that day.
 
 ## 1. Goal and assumptions
@@ -132,7 +132,7 @@ export interface Storage {
 }
 
 export interface ModelClient {
-  complete(request: ModelRequest): Promise<string>;
+  complete(request: ModelRequest): Promise<ModelResponse>; // text, finish reason, tokens, duration
 }
 ```
 
@@ -206,25 +206,23 @@ export const dnd55e = defineSystem({
     spells: contentKind({ idPrefix: "spell", schema: SpellSchema }),
     /* ... */
   },
-  stateSchema: SystemStateSchema,    // actors and run-level state
+  stateSchema: SystemStateSchema,    // actors and run-level state, checked when a save loads
+  eventSchemas: { "dnd5.5e:damaged": DamagedSchema },
   checkSchema: CheckSchema,          // what a scene's check looks like
   encounters: encounterKind({ schema: EncounterSchema }),
   outcomes: { keys: ["success", "failure"] },
 
-  storyEffects: { "dnd5.5e:awardXp": awardXpEffect },   // schema plus handler
-  storyPredicates: { "dnd5.5e:partyHasClass": partyHasClass },
-  frames: { "dnd5.5e:resolveAttack": resolveAttack /* ... */ },
+  storyEffects: { "dnd5.5e:awardXp": storyEffect({ schema, apply }) },
+  storyPredicates: { "dnd5.5e:partyHasClass": storyPredicate({ schema, evaluate }) },
+  frames: { "dnd5.5e:resolveAttack": frameHandler({ schema, run }) },
 
-  createRun,            // starting system state
-  createCharacter,      // creation flow, also used for companions
-  resolveCheck,         // returns an outcome key and events
+  createRun,            // starting state, including the party's characters
+  resolveCheck,         // returns an outcome key, events and frames
   startEncounter,
-  applyEvent,
+  applyEvent,           // the only place system state changes
   nextDecision,         // whose decision comes next, if anyone's
   decidePolicy,         // non-player decisions, without a model
-  describeFacts,        // facts about actors for prep
-  glossary,             // terminology and tone for prep prompts
-  importSchemas,        // non-recursive schemas for the book importer
+  // Still to come: describeFacts for prep, glossary, and importSchemas for the book importer.
 });
 ```
 
@@ -271,9 +269,8 @@ export interface GameState {
   readonly partyIds: readonly ActorId[];
   readonly companions: Readonly<Record<ActorId, CompanionProfile>>;
   readonly stack: readonly Frame[];
-  readonly story: StoryState;       // flags, clocks, attitudes, revealed secrets, variants
-  readonly clock: GameTime;
-  readonly system: OpaquePayload;   // checked by the system's stateSchema on load
+  readonly story: StoryState;       // scene, flags, clocks, attitudes, secrets, beats, variants, ending
+  readonly system: unknown;         // opaque to the engine, checked by the system's stateSchema on load
 }
 ```
 
@@ -289,7 +286,7 @@ export function step(
 ): { readonly state: GameState; readonly events: readonly GameEvent[] };
 ```
 
-**One code path for state:** handlers decide what happens and return events, and the new state is always `events.reduce(applyEvent, state)`. Live play and loading a save therefore can't drift apart.
+**One code path for state:** handlers decide what happens and return events, and the new state is always `events.reduce(applyEvent, state)`. Live play and loading a save therefore can't drift apart. This includes bookkeeping: dice results, pushed and popped frames, and the whole starting state are all events.
 
 **Pending work is data.** Rules often interrupt each other, and callbacks or async code would break saving and replay. So the engine keeps a stack of frames with namespaced kinds, and the owning handler processes each one:
 
@@ -801,8 +798,8 @@ A failed bot run prints its seed and input list, so any failure can be reproduce
 ## 14. Build order
 
 1. **Foundations (done):** tooling, the SDK, the plugin loader and `check-pack`, with the fixture system and two tiny original adventures kept in `tests/fixtures`.
-2. **Prep test:** generate an overlay from a sample log using a model that fits in 16 GB. Judge quality and speed. **If this fails, the design needs rethinking, so it comes early.**
-3. **Engine kernel and story runtime:** turn loop, seeded dice, replay test and test bot, all running against the fixture system.
+2. **Prep test (three runs done, awaiting your read):** generate an overlay from a sample log using a model that fits in 16 GB. Judge quality and speed. **If this fails, the design needs rethinking, so it comes early.** See section 16.
+3. **Engine kernel and story runtime (done):** turn loop, seeded dice, replay test and test bot, all running against the fixture system. Not included yet: companion loyalty triggers, levels and items, prep digests built from the log, and a smarter director.
 4. **D&D plugin core:** derived stats, damage pipeline and frames, then both adventures converted to it, moved to `plugins/adventures` and playable from the command line.
 5. **Levels 1–5 content:** all classes and the monsters they meet, with the importer tested on SRD text.
 6. **UI:** the engine shell in Tauri, then the D&D sheet and PixiJS combat grid in the plugin.
@@ -814,14 +811,13 @@ Daggerheart would come after this as a new plugin in `plugins/systems/daggerhear
 ## 15. Open questions and risks
 
 **Questions for you**
-1. What format are your books in? This decides the importer's input.
+1. Your books are on D&D Beyond, and the importer reads local text files you provide. How will you get their text into those files?
 2. Which book or adventure should come first after the two samples? I suggest Lost Mine, as it's much shorter than Phandelver and Below.
 
-**Confirmed in step 1:** the TSConfig layout, `.ts` imports and `#sdk` work in Node, `tsc` and Vitest, and Zod's optional fields work with `exactOptionalPropertyTypes`.
+**Confirmed in steps 1 to 3:** the TSConfig layout, `.ts` imports and `#sdk` work in Node, `tsc` and Vitest, and Zod's optional fields work with `exactOptionalPropertyTypes`. `defineSystem` keeps engine payloads opaque, with one commented cast at the boundary.
 
 **Things still to verify**
 - `.ts` imports and the `#sdk` subpath also work through Vite, in step 6.
-- `defineSystem` can keep engine payloads opaque once it has runtime slots, in step 3.
 - The type sketches here compile. They illustrate the design and haven't been run, and some helper schemas such as `TargetingSchema` are named but not yet defined.
 - The Tauri app can call `llama-server` on localhost and run it as a sidecar.
 
@@ -835,6 +831,43 @@ Daggerheart would come after this as a new plugin in `plugins/systems/daggerhear
 | Effect vocabulary can't express enough | More `partial` content | Grow it from real content, and track coverage in `check-pack` |
 | Prep doesn't anticipate what you do | Falls back to plainer base text | Prepare situations rather than plots, and add a short prep at natural breaks |
 | `typescript-eslint` falls behind TypeScript | Stuck on 6.0 for longer | No real harm: 6.0 is enough for this project |
+
+## 16. Prep test results
+
+**First run, 5 November 2026:** Gemma 4 12B Q4_0 (7.2 GB, Apache 2.0) on `llama-server` 0.8.0, with four hand-written session histories and four jobs each. These are development numbers from a 32 GB M2 Max with other apps competing for the GPU.
+
+| Measure | Result |
+|---|---|
+| Jobs ending valid | 16 of 16, using 21 model calls |
+| Retries | All 5 were answers over a length limit, and all 4 rumors went over on the first try |
+| Schema constraint | No invalid output in 22 calls, but this doesn't prove the constraint is enforced |
+| Time | About 45 seconds per job, or 3 minutes per four-job pack. Unreliable, because other apps were using the machine |
+
+**What worked:** each run clearly reflects its own history, and companion banter is the strongest output.
+
+**Problems found by reading the text**
+- **Character facts drift between jobs:** the elder is a man in the scene text and a woman in the conversation, because the scene job isn't told about the NPC.
+- **Companion voice can flip:** Sera calls the retreat cowardice in the history, then defends cowardice as survival in her banter.
+- **Scene links don't make sense yet:** dialogue options can lead back to scenes the party has already finished, because jobs don't know what comes next.
+- **No player character:** options and text sometimes address companions as if they were the players.
+- **Paraphrased spoilers get through:** one rumor all but gives the secret away, and the spoiler-term check can't catch this, as section 10.2 predicted.
+- **Invented details can contradict clues:** a rumor says the village is hoarding grain, while a clue says the granary is half empty.
+
+**Later runs**
+
+| Run | Change | Result |
+|---|---|---|
+| 2 | Told each job about the player and NPC, limited options to reachable scenes, and added reviews | The writing improved, but all 16 jobs fell back. The consistency review rejected text while saying it found no violations |
+| 3 | The consistency review now passes by default and must quote the words at fault, which code verifies. It also sees the scene's own text | 15 of 16 jobs written. One rumor kept running too long and got cut off, so it used no text |
+
+**Limits of run 3**
+- **Reviews may be too lenient now:** neither review rejected anything, so this run doesn't show that they catch real errors. The spoiler review did catch one real leak in run 2.
+- **Invented details remain:** Elder Maren is shown "sketches of the trap" that the history never mentions.
+- **Near-spoilers remain:** one rumor has timber hauled to the cellar, close to the secret without naming anyone.
+
+**Speed and memory:** about 54 seconds per job including reviews, or 3.6 minutes per four-job pack, with Godot competing for the machine. At that rate, a 30-job session pack takes about 27 minutes here. All 49 layers run on the GPU, using about 8.5 GB of buffers.
+
+**Not yet tested:** a real 16 GB machine, writing quality with a smaller model, and longer campaigns.
 
 ## Sources
 

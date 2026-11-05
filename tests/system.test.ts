@@ -40,12 +40,18 @@ describe("defineSystem", () => {
     ],
     [
       "an unnamespaced effect",
-      { storyEffects: { gainLuck: z.unknown() } },
+      {
+        storyEffects: { gainLuck: { schema: z.unknown(), apply: () => ({}) } },
+      },
       "namespaced",
     ],
     [
       "an unnamespaced predicate",
-      { storyPredicates: { hasLuck: z.unknown() } },
+      {
+        storyPredicates: {
+          hasLuck: { schema: z.unknown(), evaluate: () => true },
+        },
+      },
       "namespaced",
     ],
   ])("rejects %s", (_name, override, message) => {
