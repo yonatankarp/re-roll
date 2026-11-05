@@ -1,0 +1,4 @@
+- id: goblin-ambush:foe/chief
+  name: Goblin chief
+  menace: 5
+  trick: d6-base:trick/dirty-fighting

@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2023"], "types": [] },
+  "include": [
+    "engine/kernel/**/*.ts",
+    "engine/story/**/*.ts",
+    "engine/sdk/**/*.ts",
+    "plugins/systems/*/core/**/*.ts",
+    "tests/fixtures/system-d6/**/*.ts"
+  ]
+}

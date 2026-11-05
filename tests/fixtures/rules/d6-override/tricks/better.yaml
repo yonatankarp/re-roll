@@ -1,0 +1,3 @@
+- id: d6-override:trick/nasty-fighting
+  replaces: d6-base:trick/dirty-fighting
+  name: Nasty fighting

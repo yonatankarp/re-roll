@@ -1,0 +1,9 @@
+- id: ghost-mood
+  options:
+    - id: mournful
+      effects:
+        - { kind: setFlag, flag: ghost-mournful }
+    - id: furious
+      weight: 2
+      effects:
+        - { kind: setFlag, flag: ghost-furious }

@@ -1,0 +1,2 @@
+- id: roadside
+  foes: [d6-base:foe/goblin, goblin-ambush:foe/chief]

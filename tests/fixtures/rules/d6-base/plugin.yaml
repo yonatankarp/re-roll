@@ -1,0 +1,6 @@
+id: d6-base
+kind: rules
+version: 1.0.0
+sdk: ^1
+system: d6@^1
+distribution: shipped

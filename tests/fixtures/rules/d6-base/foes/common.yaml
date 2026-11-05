@@ -1,0 +1,7 @@
+- id: d6-base:foe/goblin
+  name: Goblin
+  menace: 2
+  trick: d6-base:trick/dirty-fighting
+- id: d6-base:foe/ghost
+  name: Ghost
+  menace: 4

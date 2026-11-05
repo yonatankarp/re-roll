@@ -1,0 +1,8 @@
+id: d6-override
+kind: rules
+version: 1.0.0
+sdk: ^1
+system: d6@^1
+requires:
+  - { plugin: d6-base, version: ^1 }
+distribution: shipped

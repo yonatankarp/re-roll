@@ -1,0 +1,10 @@
+- id: footsteps
+  scene: footsteps-above
+  when:
+    {
+      all:
+        [
+          { kind: clock, clock: rising-dread, atLeast: 1 },
+          { kind: system, predicate: "d6:hasLuck", args: { atLeast: 1 } },
+        ],
+    }

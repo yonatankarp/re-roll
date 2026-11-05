@@ -1,0 +1,6 @@
+- id: caretaker
+  name: Mrs. Hale
+  motive: Keep the cellar locked until the winter is over.
+  attitude: -1
+  knows: [buried-letter]
+  statsId: d6-base:foe/ghost
