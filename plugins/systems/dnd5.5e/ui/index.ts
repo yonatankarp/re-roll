@@ -5,7 +5,13 @@ import {
   type SystemEvent,
 } from "#sdk";
 import { z } from "zod";
-import { ABILITIES, type Amount, type Damage } from "../core/schemas.ts";
+import {
+  ABILITIES,
+  type Amount,
+  type Damage,
+  SKILL_ABILITIES,
+  type Skill,
+} from "../core/schemas.ts";
 import {
   type Actor,
   type DndState,
@@ -18,11 +24,14 @@ import {
 import {
   type KnownAction,
   type Stats,
-  abilityModifier,
+  attackBonus,
+  checkBonus,
   deriveStats,
   evaluateFormula,
   modifierFor,
+  saveBonus,
   scaledDice,
+  spellModifier,
   spellSaveDc,
 } from "../core/stats.ts";
 
@@ -52,17 +61,12 @@ function damageText(damage: readonly Damage[], stats: Stats): string {
     .join(" plus ");
 }
 
-// shortcut: base numbers only, leaving out passive modifiers and upcast dice, until combat.ts exports its own.
+// shortcut: flat numbers only, leaving out dice bonuses such as Bless and upcast dice.
 function actionNumbers(action: KnownAction, stats: Stats): string {
   const { resolution } = action.activation;
   switch (resolution.kind) {
     case "attack": {
-      const { attack } = resolution;
-      const ability =
-        attack.type === "spell" ? stats.spellAbility : attack.ability;
-      const bonus =
-        attack.flatBonus ??
-        stats.proficiency + (ability ? modifierFor(stats, ability) : 0);
+      const bonus = attackBonus(resolution, stats);
       return `${signed(bonus)} to hit, ${damageText(resolution.damage, stats)} damage on a hit.`;
     }
     case "save": {
@@ -172,19 +176,30 @@ function actorOf(event: SystemEvent, rawState: unknown): string | null {
   return id ? (state.actors[id]?.name ?? null) : null;
 }
 
-function classRows(player: Actor, stats: Stats, access: ContentAccess) {
-  const { source } = player;
+const ABILITY_NAMES = {
+  str: "Strength",
+  dex: "Dexterity",
+  con: "Constitution",
+  int: "Intelligence",
+  wis: "Wisdom",
+  cha: "Charisma",
+} as const;
+
+function nameOf(access: ContentAccess, id: string): string {
+  return NamedSchema.safeParse(access.content(id)).data?.name ?? id;
+}
+
+// "sleightOfHand" becomes "Sleight of Hand".
+function skillName(skill: string): string {
+  const spaced = skill.replace(/([A-Z])/g, " $1").replace(" Of ", " of ");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+function hitDiceLeft(player: Actor, access: ContentAccess): string {
   const levels =
-    source.kind === "character" ? (source.build?.levels ?? []) : [];
-  const name = (id: string): string =>
-    NamedSchema.safeParse(access.content(id)).data?.name ?? id;
-  const classes = Object.entries(stats.classLevels)
-    .map(([id, level]) => `${name(id)} ${String(level)}`)
-    .join(", ");
-  const subclasses = levels
-    .flatMap((level) => level.answers)
-    .flatMap((answer) => (answer.kind === "subclass" ? answer.values : []))
-    .map(name);
+    player.source.kind === "character"
+      ? (player.source.build?.levels ?? [])
+      : [];
   const spent = player.resourcesSpent[HIT_DICE_RESOURCE] ?? 0;
   // Dice are spent in level order, as core/rest.ts does.
   const dice = new Map<string, number>();
@@ -193,19 +208,36 @@ function classRows(player: Actor, stats: Stats, access: ContentAccess) {
       ?.hitDie;
     if (die) dice.set(die, (dice.get(die) ?? 0) + 1);
   }
-  const hitDice = [...dice]
-    .map(([die, count]) => `${String(count)}${die}`)
-    .join(" + ");
-  return [
-    { label: "Class", value: classes },
-    ...(subclasses.length > 0
-      ? [{ label: "Subclass", value: subclasses.join(", ") }]
-      : []),
-    {
-      label: "Hit Dice",
-      value: `${hitDice || "none"} of ${String(stats.level)} left`,
-    },
-  ];
+  return (
+    [...dice].map(([die, count]) => `${String(count)}${die}`).join(" + ") ||
+    "none"
+  );
+}
+
+function pips(left: number, max: number): string {
+  return "●".repeat(Math.max(0, left)) + "○".repeat(Math.max(0, max - left));
+}
+
+// The short numbers for an action, next to its name.
+function actionSummary(action: KnownAction, stats: Stats): string {
+  const { resolution } = action.activation;
+  switch (resolution.kind) {
+    case "attack":
+      return [
+        signed(attackBonus(resolution, stats)),
+        damageText(resolution.damage, stats),
+      ]
+        .filter(Boolean)
+        .join(", ");
+    case "save":
+      return `DC ${String(
+        action.spellLevel === null
+          ? evaluateFormula(resolution.dc, stats)
+          : spellSaveDc(stats),
+      )} ${resolution.ability.toUpperCase()}`;
+    case "automatic":
+      return damageText(resolution.damage, stats);
+  }
 }
 
 // Effects and concentration store ids such as "spell:srd52:spell/bless", which also name the content.
@@ -235,99 +267,159 @@ function sheet(rawState: unknown, access: ContentAccess) {
   const player = StateSchema.parse(rawState).actors[PLAYER_ACTOR];
   // There are no stats to show until the player has chosen a character.
   if (player?.source.kind !== "character" || !player.source.build) return null;
+  const { build } = player.source;
   const stats = deriveStats(player, access);
+  const subclasses = build.levels
+    .flatMap((level) => level.answers)
+    .flatMap((answer) => (answer.kind === "subclass" ? answer.values : []))
+    .map((id) => nameOf(access, id));
+  const classes = Object.entries(stats.classLevels)
+    .map(([id, level]) => `${nameOf(access, id)} ${String(level)}`)
+    .join(" / ");
+  const effects = [
+    ...new Set(
+      player.activeEffects
+        .filter(({ modifier }) => modifier.kind !== "condition")
+        .map(({ sourceId }) => sourceName(access, sourceId)),
+    ),
+  ];
+  const status = statusOf(player);
+  const perception =
+    10 + checkBonus(stats, player, { ability: "wis", skill: "perception" });
+  const spells = stats.actions.filter((action) => action.spellLevel !== null);
+  const actionRow = (action: KnownAction) => ({
+    label: action.name,
+    value: actionSummary(action, stats),
+    detail: actionDetail(action, stats, access),
+  });
   return {
     title: player.name,
+    subtitle: [
+      `${nameOf(access, build.speciesId)} ${classes}`,
+      ...(subclasses.length > 0 ? [subclasses.join(", ")] : []),
+      nameOf(access, build.backgroundId),
+      `Level ${String(stats.level)}, ${String(player.xp ?? 0)} XP`,
+    ].join(" · "),
+    tags: [
+      ...(status ? [status] : []),
+      ...conditionsOf(player),
+      ...(player.exhaustion > 0
+        ? [`exhaustion ${String(player.exhaustion)}`]
+        : []),
+      ...(player.concentratingOn
+        ? [`concentrating on ${sourceName(access, player.concentratingOn)}`]
+        : []),
+      ...effects,
+    ],
     sections: [
       {
-        title: "Abilities",
-        rows: ABILITIES.map((ability) => ({
-          label: ability.toUpperCase(),
-          value: `${String(stats.abilities[ability])} (${signed(abilityModifier(stats.abilities[ability]))})`,
-        })),
-      },
-      {
-        title: "Status",
+        title: "Combat",
+        layout: "boxes" as const,
+        pinned: true,
         rows: [
-          { label: "Level", value: String(stats.level) },
-          { label: "XP", value: String(player.xp ?? 0) },
-          ...classRows(player, stats, access),
-          { label: "AC", value: String(stats.ac) },
+          { label: "Armor Class", value: String(stats.ac) },
           {
-            label: "HP",
-            value: `${String(player.hp)} of ${String(stats.maxHp)}`,
+            label: "Hit Points",
+            value: String(player.hp),
+            note:
+              `of ${String(stats.maxHp)}` +
+              (player.tempHp > 0 ? `, +${String(player.tempHp)} temp` : ""),
           },
-          { label: "Temp HP", value: String(player.tempHp) },
-          { label: "Speed", value: `${String(stats.speed)} ft` },
+          { label: "Speed", value: String(stats.speed), note: "feet" },
+          { label: "Initiative", value: signed(stats.initiative) },
           { label: "Proficiency", value: signed(stats.proficiency) },
           {
-            label: "Conditions",
-            value: conditionsOf(player).join(", ") || "none",
-          },
-          {
-            label: "Concentrating",
-            value: player.concentratingOn
-              ? sourceName(access, player.concentratingOn)
-              : "no",
-          },
-          {
-            label: "Active effects",
-            value:
-              [
-                ...new Set(
-                  player.activeEffects.map(({ sourceId }) =>
-                    sourceName(access, sourceId),
-                  ),
-                ),
-              ].join(", ") || "none",
+            label: "Hit Dice",
+            value: hitDiceLeft(player, access),
+            note: `of ${String(stats.level)}`,
           },
         ],
       },
       {
-        title: "Spell slots",
-        rows: stats.slots.flatMap((max, index) => {
-          const level = String(index + 1);
-          const spent = player.resourcesSpent[`slot:${level}`] ?? 0;
-          return max > 0
-            ? [
-                {
-                  label: `Level ${level}`,
-                  value: `${String(max - spent)} of ${String(max)}`,
-                },
-              ]
-            : [];
-        }),
+        title: "Abilities",
+        layout: "boxes" as const,
+        pinned: true,
+        rows: ABILITIES.map((ability) => ({
+          label: ability.toUpperCase(),
+          value: signed(modifierFor(stats, ability)),
+          note: String(stats.abilities[ability]),
+        })),
+      },
+      {
+        title: "Saving throws",
+        layout: "marks" as const,
+        rows: ABILITIES.map((ability) => ({
+          label: ABILITY_NAMES[ability],
+          value: signed(saveBonus(stats, ability)),
+          marked: stats.savingThrows.includes(ability),
+        })),
+      },
+      {
+        title: "Skills",
+        layout: "marks" as const,
+        rows: [
+          ...Object.entries(SKILL_ABILITIES).map(([skill, ability]) => ({
+            label: skillName(skill),
+            value: signed(
+              checkBonus(stats, player, { ability, skill: skill as Skill }),
+            ),
+            note: ability.toUpperCase(),
+            marked: stats.skills.includes(skill as Skill),
+          })),
+        ],
+      },
+      {
+        title: "Senses",
+        rows: [{ label: "Passive Perception", value: String(perception) }],
+      },
+      {
+        title: "Attacks and actions",
+        pinned: true,
+        rows: stats.actions
+          .filter((action) => action.spellLevel === null)
+          .map(actionRow),
+      },
+      {
+        title: "Spellcasting",
+        pinned: true,
+        rows: stats.spellAbility
+          ? [
+              {
+                label: "Ability",
+                value: ABILITY_NAMES[stats.spellAbility],
+              },
+              { label: "Save DC", value: String(spellSaveDc(stats)) },
+              {
+                label: "Attack",
+                value: signed(stats.proficiency + spellModifier(stats)),
+              },
+              ...stats.slots.flatMap((max, index) => {
+                const level = String(index + 1);
+                const spent = player.resourcesSpent[`slot:${level}`] ?? 0;
+                return max > 0
+                  ? [
+                      {
+                        label: `Level ${level} slots`,
+                        value: pips(max - spent, max),
+                      },
+                    ]
+                  : [];
+              }),
+            ]
+          : [],
+      },
+      {
+        title: "Cantrips",
+        rows: spells.filter((action) => action.spellLevel === 0).map(actionRow),
       },
       {
         title: "Spells",
-        rows: stats.actions.flatMap((action) =>
-          action.spellLevel === null
-            ? []
-            : [
-                {
-                  label: action.name,
-                  value:
-                    action.spellLevel === 0
-                      ? "cantrip"
-                      : `level ${String(action.spellLevel)}`,
-                  detail: actionDetail(action, stats, access),
-                },
-              ],
-        ),
-      },
-      {
-        title: "Known actions",
-        rows: stats.actions.flatMap((action) =>
-          action.spellLevel === null
-            ? [
-                {
-                  label: action.name,
-                  value: "",
-                  detail: actionDetail(action, stats, access),
-                },
-              ]
-            : [],
-        ),
+        rows: spells
+          .filter((action) => (action.spellLevel ?? 0) > 0)
+          .map((action) => ({
+            ...actionRow(action),
+            label: `${action.name} (${String(action.spellLevel)})`,
+          })),
       },
       {
         title: "Features",

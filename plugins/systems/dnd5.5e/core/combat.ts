@@ -35,6 +35,7 @@ import {
 import {
   type KnownAction,
   type Stats,
+  attackBonus,
   damageResponses,
   deriveStats,
   evaluateFormula,
@@ -43,6 +44,7 @@ import {
   passiveModifiers,
   rollAmount,
   rollDiceNotation,
+  saveBonus,
   scaleActivation,
 } from "./stats.ts";
 
@@ -637,13 +639,9 @@ function rollSave(
       hasFlag(target, "disadvantage", "saves", stats) ||
       (ability === "dex" && hasCondition(target, "restrained")),
   });
-  const proficiency = stats.savingThrows.includes(ability)
-    ? stats.proficiency
-    : 0;
   const total =
     roll.natural +
-    modifierFor(stats, ability) +
-    proficiency +
+    saveBonus(stats, ability) +
     rollBonus(target, "saves", context);
   return total >= dc;
 }
@@ -992,24 +990,6 @@ function isMelee(action: KnownAction): boolean {
     "creatures" in targeting &&
     (targeting.range === "touch" ||
       (typeof targeting.range === "number" && targeting.range <= 5))
-  );
-}
-
-function attackBonus(
-  resolution: Extract<Resolution, { kind: "attack" }>,
-  stats: Stats,
-): number {
-  const { attack } = resolution;
-  if (attack.flatBonus !== undefined) return attack.flatBonus;
-  if (attack.type === "spell") {
-    return (
-      stats.proficiency +
-      (stats.spellAbility ? modifierFor(stats, stats.spellAbility) : 0)
-    );
-  }
-  return (
-    stats.proficiency +
-    (attack.ability ? modifierFor(stats, attack.ability) : 0)
   );
 }
 

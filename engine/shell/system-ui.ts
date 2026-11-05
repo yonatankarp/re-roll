@@ -4,13 +4,20 @@ import type { ContentAccess } from "../kernel/system.ts";
 // What a system's ui folder gives the shell: plain data, so the shell knows no rules
 // and the system needs no DOM code. Matched by shape, so plugins never import this file.
 
+export interface SheetRow {
+  readonly label: string;
+  readonly value: string;
+  readonly detail?: string; // opened on demand
+  readonly note?: string; // a small line under the value, in boxes and marks
+  readonly marked?: boolean; // such as proficient, in marks
+}
+
 export interface SheetSection {
   readonly title: string;
-  readonly rows: readonly {
-    readonly label: string;
-    readonly value: string;
-    readonly detail?: string; // opened on demand
-  }[];
+  readonly rows: readonly SheetRow[];
+  // list: label and value; boxes: tiles with a large value; marks: a dot, a value and a label.
+  readonly layout?: "list" | "boxes" | "marks";
+  readonly pinned?: boolean; // also shown in the side panel, not only the full sheet
 }
 
 export interface OptionView {
@@ -26,6 +33,8 @@ export interface OptionGroup {
 
 export interface SheetView {
   readonly title: string;
+  readonly subtitle?: string;
+  readonly tags?: readonly string[]; // such as conditions
   readonly sections: readonly SheetSection[];
 }
 

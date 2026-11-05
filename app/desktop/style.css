@@ -160,7 +160,7 @@ button:hover {
 
 .game {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 32px;
   margin-top: 16px;
 }
@@ -402,6 +402,160 @@ summary {
   margin: 4px 0 8px;
   font-size: 0.85rem;
   white-space: pre-line;
+}
+
+.sheet-head h2 {
+  margin: 8px 0 0;
+}
+
+.sheet-subtitle {
+  margin: 2px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tags li {
+  padding: 1px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font-family: system-ui, sans-serif;
+  font-size: 0.75rem;
+}
+
+.boxes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.box-label {
+  font-family: system-ui, sans-serif;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.box-value {
+  font-size: 1.4rem;
+  font-weight: bold;
+  line-height: 1.2;
+}
+
+.box-note {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.marks {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9rem;
+}
+
+.marks li {
+  display: grid;
+  grid-template-columns: 12px 2.5em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.mark {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+}
+
+.marks .marked .mark {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.mark-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.mark-note {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.sheet-detail summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sheet-value {
+  color: var(--muted);
+  text-align: right;
+}
+
+.open-sheet {
+  width: 100%;
+  margin-top: 16px;
+}
+
+.sheet-dialog {
+  width: min(1100px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 16px 24px 24px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.sheet-dialog::backdrop {
+  background: rgb(0 0 0 / 50%);
+}
+
+.dialog-close {
+  position: sticky;
+  top: 0;
+  float: right;
+}
+
+.full .boxes {
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+}
+
+.full .sheet-sections {
+  columns: 3 260px;
+  column-gap: 32px;
+}
+
+.full .sheet-sections > section {
+  break-inside: avoid;
+}
+
+/* Combat and abilities run across the full width, like the top of a paper sheet. */
+.full .sheet-sections > section:has(.boxes) {
+  column-span: all;
 }
 
 .book {

@@ -571,6 +571,38 @@ export function spellModifier(stats: Stats): number {
   return stats.spellAbility ? modifierFor(stats, stats.spellAbility) : 0;
 }
 
+// The flat parts of a roll's bonus, shared by the rolls and the character sheet.
+export function attackBonus(
+  resolution: Extract<Resolution, { kind: "attack" }>,
+  stats: Stats,
+): number {
+  const { attack } = resolution;
+  if (attack.flatBonus !== undefined) return attack.flatBonus;
+  const ability = attack.type === "spell" ? stats.spellAbility : attack.ability;
+  return stats.proficiency + (ability ? modifierFor(stats, ability) : 0);
+}
+
+export function saveBonus(stats: Stats, ability: Ability): number {
+  return (
+    modifierFor(stats, ability) +
+    (stats.savingThrows.includes(ability) ? stats.proficiency : 0)
+  );
+}
+
+export function checkBonus(
+  stats: Stats,
+  actor: Actor,
+  check: { readonly ability: Ability; readonly skill?: Skill },
+): number {
+  const proficient =
+    check.skill !== undefined && stats.skills.includes(check.skill);
+  return (
+    modifierFor(stats, check.ability) +
+    (proficient ? stats.proficiency : 0) -
+    2 * actor.exhaustion
+  );
+}
+
 export function spellSaveDc(stats: Stats): number {
   return 8 + stats.proficiency + spellModifier(stats);
 }

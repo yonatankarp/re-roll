@@ -215,6 +215,15 @@ describe("playing through the shell's session", () => {
     expect(sheet?.sections.map((section) => section.title)).toContain(
       "Abilities",
     );
+    const skills = sheet?.sections.find(
+      (section) => section.title === "Skills",
+    );
+    expect(skills?.layout).toBe("marks");
+    expect(skills?.rows).toHaveLength(18);
+    expect(skills?.rows.some((row) => row.marked)).toBe(true);
+    expect(
+      sheet?.sections.filter((section) => section.pinned).map((s) => s.title),
+    ).toEqual(expect.arrayContaining(["Combat", "Abilities"]));
 
     let savedPath: string | null = null;
     for (let count = 0; count < 500 && game.view().decision; count += 1) {

@@ -1,5 +1,10 @@
 import type { Game, GameView } from "./session.ts";
-import type { CombatView, OptionView, SheetView } from "./system-ui.ts";
+import type {
+  CombatView,
+  OptionView,
+  SheetSection,
+  SheetView,
+} from "./system-ui.ts";
 
 // The whole page, drawn from the plain data in GameView. Knows nothing about any rule system.
 
@@ -91,41 +96,129 @@ function detailsRow(label: string, value: string, detail: string): HTMLElement {
   return el(
     "details",
     { class: "sheet-detail" },
-    el("summary", { text: value ? `${label} (${value})` : label }),
+    el(
+      "summary",
+      {},
+      el("span", { text: label }),
+      ...(value ? [el("span", { class: "sheet-value", text: value })] : []),
+    ),
     el("p", { text: detail }),
   );
 }
 
-function renderSheet(sheet: SheetView): HTMLElement {
-  return el(
-    "section",
-    { class: "sheet-body" },
-    el("h2", { text: sheet.title }),
-    ...sheet.sections
-      .filter((section) => section.rows.length > 0)
-      .map((section) =>
+function renderSection(section: SheetSection): HTMLElement {
+  const heading = el("h3", { text: section.title });
+  switch (section.layout) {
+    case "boxes":
+      return el(
+        "section",
+        {},
+        heading,
         el(
-          "section",
-          {},
-          el("h3", { text: section.title }),
-          el(
-            "dl",
-            {},
-            ...section.rows.flatMap((row) =>
-              row.detail
-                ? []
-                : [
-                    el("dt", { text: row.label }),
-                    el("dd", { text: row.value }),
-                  ],
+          "div",
+          { class: "boxes" },
+          ...section.rows.map((row) =>
+            el(
+              "div",
+              { class: "box" },
+              el("span", { class: "box-label", text: row.label }),
+              el("span", { class: "box-value", text: row.value }),
+              ...(row.note
+                ? [el("span", { class: "box-note", text: row.note })]
+                : []),
             ),
           ),
+        ),
+      );
+    case "marks":
+      return el(
+        "section",
+        {},
+        heading,
+        el(
+          "ul",
+          { class: "marks" },
+          ...section.rows.map((row) => {
+            const dot = el("span", { class: "mark" });
+            dot.setAttribute("aria-label", row.marked ? "proficient" : "");
+            return el(
+              "li",
+              { class: row.marked ? "marked" : "" },
+              dot,
+              el("span", { class: "mark-value", text: row.value }),
+              el("span", { text: row.label }),
+              ...(row.note
+                ? [el("span", { class: "mark-note", text: row.note })]
+                : []),
+            );
+          }),
+        ),
+      );
+    default: // a plain list
+      return el(
+        "section",
+        {},
+        heading,
+        el(
+          "dl",
+          {},
           ...section.rows.flatMap((row) =>
-            row.detail ? [detailsRow(row.label, row.value, row.detail)] : [],
+            row.detail
+              ? []
+              : [el("dt", { text: row.label }), el("dd", { text: row.value })],
           ),
         ),
-      ),
+        ...section.rows.flatMap((row) =>
+          row.detail ? [detailsRow(row.label, row.value, row.detail)] : [],
+        ),
+      );
+  }
+}
+
+// The side panel shows the pinned sections; the full sheet shows them all.
+function renderSheet(sheet: SheetView, full: boolean): HTMLElement {
+  return el(
+    "section",
+    { class: full ? "sheet-body full" : "sheet-body" },
+    el(
+      "header",
+      { class: "sheet-head" },
+      el("h2", { text: sheet.title }),
+      ...(sheet.subtitle
+        ? [el("p", { class: "sheet-subtitle", text: sheet.subtitle })]
+        : []),
+      ...(sheet.tags && sheet.tags.length > 0
+        ? [
+            el(
+              "ul",
+              { class: "tags" },
+              ...sheet.tags.map((tag) => el("li", { text: tag })),
+            ),
+          ]
+        : []),
+    ),
+    el(
+      "div",
+      { class: "sheet-sections" },
+      ...sheet.sections
+        .filter((section) => section.rows.length > 0)
+        .filter((section) => full || section.pinned)
+        .map(renderSection),
+    ),
   );
+}
+
+// A redraw must not close what the player has opened to read.
+function replaceKeepingOpen(container: HTMLElement, ...nodes: Node[]): void {
+  const opened = new Set(
+    [...container.querySelectorAll("details[open] > summary")].map(
+      (item) => item.textContent,
+    ),
+  );
+  container.replaceChildren(...nodes);
+  for (const item of container.querySelectorAll("details")) {
+    item.open = opened.has(item.querySelector("summary")?.textContent ?? "");
+  }
 }
 
 function endingOf(view: GameView): {
@@ -458,6 +551,21 @@ export function mountShell(root: HTMLElement, game: Game): void {
     log.setAttribute("aria-label", "What has happened so far");
     log.tabIndex = 0;
     const sheet = el("aside", { class: "sheet" });
+    const sheetPanel = el("div");
+    const fullSheet = el("div");
+    const sheetDialog = el(
+      "dialog",
+      { class: "sheet-dialog" },
+      el("form", { class: "dialog-close" }, el("button", { text: "Close" })),
+      fullSheet,
+    );
+    sheetDialog.querySelector("form")?.setAttribute("method", "dialog");
+    sheetDialog.setAttribute("aria-label", "Character sheet");
+    const openSheet = button("Full character sheet", () => {
+      sheetDialog.showModal();
+    });
+    openSheet.className = "open-sheet";
+    sheet.append(sheetPanel, openSheet, sheetDialog);
     const about = el("details", { class: "about" });
 
     actions.replaceChildren(
@@ -593,18 +701,15 @@ export function mountShell(root: HTMLElement, game: Game): void {
       linesShown = view.log.length;
       log.scrollTop = log.scrollHeight;
 
-      // A redraw must not close what the player has opened to read.
-      const opened = new Set(
-        [...sheet.querySelectorAll("details[open] > summary")].map(
-          (item) => item.textContent,
-        ),
+      replaceKeepingOpen(
+        sheetPanel,
+        ...(view.sheet ? [renderSheet(view.sheet, false)] : []),
       );
-      sheet.replaceChildren(...(view.sheet ? [renderSheet(view.sheet)] : []));
-      for (const item of sheet.querySelectorAll("details")) {
-        item.open = opened.has(
-          item.querySelector("summary")?.textContent ?? "",
-        );
-      }
+      replaceKeepingOpen(
+        fullSheet,
+        ...(view.sheet ? [renderSheet(view.sheet, true)] : []),
+      );
+      openSheet.hidden = !view.sheet;
       about.replaceChildren(
         el("summary", { text: "About" }),
         el("p", { text: `Re-roll. ${view.about}` }),

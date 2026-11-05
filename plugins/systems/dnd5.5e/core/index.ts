@@ -104,7 +104,7 @@ import {
   dndEvent,
   freshActor,
 } from "./state.ts";
-import { deriveStats, lookup, modifierFor } from "./stats.ts";
+import { checkBonus, deriveStats, lookup } from "./stats.ts";
 
 function buildReferences(pregen: z.infer<typeof PregenSchema>): string[] {
   return [
@@ -377,16 +377,16 @@ export const dnd55e = defineSystem<DndState>({
     const stats = deriveStats(player, context);
     const ability =
       "skill" in parsed ? SKILL_ABILITIES[parsed.skill] : parsed.ability;
-    const proficient = "skill" in parsed && stats.skills.includes(parsed.skill);
     const roll = rollD20(context.dice, {
       advantage: false,
       disadvantage: false,
     });
     const total =
       roll.natural +
-      modifierFor(stats, ability) +
-      (proficient ? stats.proficiency : 0) -
-      2 * player.exhaustion;
+      checkBonus(stats, player, {
+        ability,
+        ...("skill" in parsed ? { skill: parsed.skill } : {}),
+      });
     const success = total >= parsed.dc;
     return {
       outcome: success ? "success" : "failure",
