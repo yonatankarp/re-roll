@@ -79,6 +79,7 @@ export interface BoardUpdate {
 
 export interface Board {
   readonly update: (update: BoardUpdate) => void;
+  readonly settled?: () => Promise<void>; // once what it was given has finished playing
 }
 
 export interface SystemUi {

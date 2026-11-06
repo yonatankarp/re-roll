@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run",
+    "test": "vitest run --exclude '.claude/**'",
     "check-pack": "node app/cli/check-pack.ts",
     "check-pack:fixtures": "node tests/check-fixtures.ts",
     "prep:eval": "node tests/prep-eval.ts",

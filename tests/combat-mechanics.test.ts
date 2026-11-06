@@ -25,6 +25,7 @@ import {
   distanceFeet,
   placeSides,
 } from "../plugins/systems/dnd5.5e/core/grid.ts";
+import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 import {
   ClassSchema,
   MonsterSchema,
@@ -2138,6 +2139,32 @@ describe("the 5-foot grid", () => {
     expect(damageOf(burned.events, "a").length).toBe(1);
     expect(damageOf(burned.events, "b").length).toBe(1);
     expect(damageOf(burned.events, "c")).toEqual([]);
+  });
+
+  it("tells the board which squares a Fireball would cover", async () => {
+    const run = arenaRun(await base(), {});
+    const state = onGrid(
+      at(hero(run, { spells: ["fireball"] }), 0, 0),
+      at(monster("a"), 6, 6),
+    );
+    const board = dndUi.combat(state, run)?.board;
+    const squares = board?.areas[`spell:${spell("fireball")}|@a`];
+    expect(squares).toContainEqual([6, 6]);
+    expect(squares).toContainEqual([10, 10]);
+    expect(squares).not.toContainEqual([11, 11]);
+    expect(squares).not.toContainEqual([0, 0]);
+  });
+
+  it("warns the board which moves give an Opportunity Attack, with the route", async () => {
+    const run = arenaRun(await base(), {});
+    const state = onGrid(at(hero(run), 0, 0), at(monster("a"), 1, 0));
+    const board = dndUi.combat(state, run)?.board;
+    const away = board?.moves.find((move) => move.x === 0 && move.y === 4);
+    const near = board?.moves.find((move) => move.x === 0 && move.y === 1);
+    expect(away?.provokes).toBe(1);
+    expect(away?.path).toHaveLength(4);
+    expect(away?.path.at(-1)).toEqual([0, 4]);
+    expect(near?.provokes).toBe(0);
   });
 
   it("walks a monster into reach before it attacks", async () => {

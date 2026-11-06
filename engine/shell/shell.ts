@@ -651,6 +651,7 @@ export function mountShell(
     );
 
     let linesShown = 0;
+    let tickerShown = 0; // the latest ticker update, so a stale one never lands
     const draw = (): void => {
       const view = game.view();
       const factory = boards[view.system];
@@ -841,14 +842,20 @@ export function mountShell(
       log.scrollTop = log.scrollHeight;
       const news = added.filter((line) => line.kind === "event").slice(-3);
       if (!firstDraw && news.length > 0) {
-        ticker.replaceChildren(
-          ...news.map((line, index) => {
-            const item = el("li", { text: line.text });
-            item.style.setProperty("--i", String(index));
-            return item;
-          }),
-        );
-        enter(ticker);
+        // The words wait for the board to finish showing what they describe.
+        const shown = ++tickerShown;
+        ticker.replaceChildren();
+        void (board?.settled?.() ?? Promise.resolve()).then(() => {
+          if (shown !== tickerShown) return;
+          ticker.replaceChildren(
+            ...news.map((line, index) => {
+              const item = el("li", { text: line.text });
+              item.style.setProperty("--i", String(index));
+              return item;
+            }),
+          );
+          enter(ticker);
+        });
       }
 
       hud.hidden = !view.sheet;

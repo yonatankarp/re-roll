@@ -71,8 +71,13 @@ export function reachableSquares(
   grid: Grid,
   blocked: ReadonlySet<string>,
   occupied: ReadonlySet<string>,
-): readonly { readonly square: Square; readonly feet: number }[] {
+): readonly {
+  readonly square: Square;
+  readonly feet: number;
+  readonly path: readonly Square[]; // the squares walked through, ending on this one
+}[] {
   const cost = new Map<string, number>([[squareKey(start), 0]]);
+  const from = new Map<string, Square>();
   const queue: Square[] = [start];
   for (let next = queue.shift(); next; next = queue.shift()) {
     const spent = cost.get(squareKey(next)) ?? 0;
@@ -93,6 +98,7 @@ export function reachableSquares(
           continue;
         }
         cost.set(key, spent + SQUARE_FEET);
+        from.set(key, next);
         queue.push(square);
       }
     }
@@ -101,7 +107,16 @@ export function reachableSquares(
     .filter(([key, spent]) => spent > 0 && !occupied.has(key))
     .flatMap(([key, spent]) => {
       const square = parseSquare(key);
-      return square ? [{ square, feet: spent }] : [];
+      if (!square) return [];
+      const path: Square[] = [];
+      for (
+        let at: Square | undefined = square;
+        at;
+        at = from.get(squareKey(at))
+      ) {
+        path.unshift(at);
+      }
+      return [{ square, feet: spent, path: path.slice(1) }];
     });
 }
 

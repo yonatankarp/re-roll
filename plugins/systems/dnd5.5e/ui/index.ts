@@ -5,7 +5,8 @@ import {
   type SystemEvent,
 } from "#sdk";
 import { z } from "zod";
-import { moveSquares } from "../core/combat.ts";
+import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
+import { inArea } from "../core/grid.ts";
 import { dndCue } from "./cues.ts";
 import {
   ABILITIES,
@@ -453,12 +454,53 @@ function combat(rawState: unknown, access: ContentAccess) {
   const moves =
     player && order[index] === PLAYER_ACTOR
       ? moveSquares(player, state, deriveStats(player, access)).map(
-          ({ square, feet }) => ({ ...square, feet }),
+          ({ square, feet, path }) => ({
+            ...square,
+            feet,
+            path: path.map(({ x, y }) => [x, y] as const),
+            provokes: provokers(player, square, state, access).length,
+          }),
         )
       : [];
+  // How far each creature's melee reaches, for shading the squares it threatens.
+  const reach = Object.fromEntries(
+    order.flatMap((id) => {
+      const actor = state.actors[id];
+      const feet = actor && !isDown(actor) ? meleeReachOf(actor, access) : null;
+      return feet === null ? [] : [[id, feet]];
+    }),
+  );
+  // The squares each of the player's area spells would cover, by option: aimed at a creature, or around them.
+  const grid = state.combat.grid;
+  const areas: Record<string, (readonly [number, number])[]> = {};
+  if (player && grid && order[index] === PLAYER_ACTOR) {
+    for (const action of deriveStats(player, access).actions) {
+      const { targeting } = action.activation;
+      if (!("area" in targeting)) continue;
+      const { shape, radius } = targeting.area;
+      const aims =
+        shape === "emanation"
+          ? [{ key: "all", at: player.position }]
+          : order.flatMap((id) => {
+              const aim = state.actors[id];
+              return aim ? [{ key: `@${id}`, at: aim.position }] : [];
+            });
+      for (const { key, at } of aims) {
+        const covered: (readonly [number, number])[] = [];
+        for (let y = 0; y < grid.height; y += 1) {
+          for (let x = 0; x < grid.width; x += 1) {
+            if (inArea(shape, radius, player.position, at, { x, y })) {
+              covered.push([x, y]);
+            }
+          }
+        }
+        areas[`${action.id}|${key}`] = covered;
+      }
+    }
+  }
   return {
     round,
-    board: { moves },
+    board: { moves, reach, areas },
     combatants: order.flatMap((id, position) => {
       const actor = state.actors[id];
       if (!actor) return [];

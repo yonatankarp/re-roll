@@ -34,6 +34,7 @@ export default defineConfig([
   globalIgnores([
     "node_modules/",
     "out/",
+    ".claude/", // other sessions' worktrees, each checked in its own folder
     "app/desktop/src-tauri/target/",
     "app/desktop/src-tauri/gen/",
     "eslint.config.js",

@@ -3,8 +3,9 @@ import { StateSchema } from "../core/state.ts";
 import type { DndCue } from "./cues.ts";
 
 // The combat board: tokens on a 5-foot grid over the scene's picture, animated from cues one at a time.
-// Clicking a token or a square answers the same options the list below offers, so the board is a
-// shortcut, hidden from screen readers, and never the only way to do something.
+// Clicking a token or a square, or moving a cursor with the arrow keys and pressing Enter, answers the
+// same options the list below offers, so the board is a shortcut and never the only way to do something.
+// Its animations only show what the journal says in words.
 // Matched by shape with engine/shell, which plugins never import.
 
 interface Combatant {
@@ -81,12 +82,22 @@ interface Move {
   readonly x: number;
   readonly y: number;
   readonly feet: number;
+  readonly path: readonly (readonly [number, number])[];
+  readonly provokes: number; // how many enemies get an Opportunity Attack
 }
 
-function movesOf(update: BoardUpdate | null): readonly Move[] {
-  const extra = update?.combat?.board as
-    { moves?: readonly Move[] } | undefined;
-  return extra?.moves ?? [];
+interface BoardExtra {
+  readonly moves?: readonly Move[];
+  readonly reach?: Readonly<Record<string, number>>; // melee reach in feet, by creature
+  // The squares an area spell would cover, by its option id without the slot level.
+  readonly areas?: Readonly<
+    Record<string, readonly (readonly [number, number])[]>
+  >;
+}
+
+// Written by this plugin's own combat view in ui/index.ts, so its shape is known.
+function extraOf(update: BoardUpdate | null): BoardExtra {
+  return update?.combat?.board ?? {};
 }
 
 const DAMAGE_COLORS: Record<string, string> = {
@@ -126,15 +137,35 @@ function initials(name: string): string {
 export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   injectStyle();
   const board = el("div", "dnd-board");
-  board.setAttribute("aria-hidden", "true");
+  // An application role passes the arrow keys to the board rather than to a screen reader's own navigation.
+  board.setAttribute("role", "application");
+  board.setAttribute("aria-roledescription", "battle map");
+  board.setAttribute(
+    "aria-label",
+    "Battle map. Arrow keys move the cursor, Enter acts on its square, Escape closes a menu.",
+  );
+  board.tabIndex = 0;
+  const said = el("div", "dnd-said"); // read out by screen readers, not shown
+  said.setAttribute("aria-live", "polite");
+  const cursorBox = el("div", "dnd-cursor");
+  let cursor: { x: number; y: number } | null = null;
   const field = el("div", "dnd-field");
   const banner = el("div", "dnd-banner");
   const hint = el("div", "dnd-hint", "Click to skip");
   const cells = el("div", "dnd-cells");
+  const SVG = "http://www.w3.org/2000/svg";
+  const route = document.createElementNS(SVG, "svg");
+  route.classList.add("dnd-route");
+  route.setAttribute("preserveAspectRatio", "none");
+  const line = document.createElementNS(SVG, "polyline");
+  route.append(line);
+  const reachZone = el("div", "dnd-reach");
+  reachZone.hidden = true;
+  const blast = el("div", "dnd-blast");
   const menu = el("div", "dnd-menu");
   menu.hidden = true;
-  field.append(cells);
-  board.append(field, banner, hint, menu);
+  field.append(reachZone, blast, cells, route, cursorBox);
+  board.append(field, banner, hint, menu, said);
   slot.append(board);
   slot.hidden = true;
 
@@ -170,6 +201,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     const item = target.closest<HTMLElement>(".dnd-menu button");
     if (item?.dataset.option) {
       closeMenu();
+      board.focus(); // the menu button goes away, so focus stays on the map
       host.answer(item.dataset.option);
     } else if (cell?.dataset.option) {
       answerCell(cell);
@@ -331,6 +363,8 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   // click or drag does it; while the list is already asking where to, it answers that.
   const showCells = (): void => {
     cells.replaceChildren();
+    line.setAttribute("points", "");
+    reachZone.hidden = true;
     if (!grid) return;
     const options = playerOptions();
     const asked = options.flatMap((option) => {
@@ -342,26 +376,125 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
               y: Number(match[2]),
               label: option.label,
               steps: [option.id],
+              provokes: 0,
+              path: [],
             },
           ]
         : [];
     });
     const offered = options.some((option) => option.id === MOVE)
-      ? movesOf(latest).map((move) => ({
+      ? (extraOf(latest).moves ?? []).map((move) => ({
           ...move,
-          label: `${String(move.feet)} ft`,
+          label:
+            move.provokes > 0
+              ? `${String(move.feet)} ft, gives an Opportunity Attack`
+              : `${String(move.feet)} ft`,
           steps: [MOVE, `${String(move.x)},${String(move.y)}`],
         }))
       : [];
     for (const square of asked.length > 0 ? asked : offered) {
-      const cell = el("div", asked.length > 0 ? "dnd-cell" : "dnd-cell soft");
+      const risky = square.provokes > 0;
+      const cell = el(
+        "div",
+        `dnd-cell${asked.length > 0 ? "" : " soft"}${risky ? " risky" : ""}`,
+      );
       cell.dataset.option = square.steps.join(" ");
+      cell.dataset.path = square.path
+        .map(([x, y]) => `${String(x)},${String(y)}`)
+        .join(" ");
       cell.title = square.label;
       cell.style.left = `${String((square.x / grid.width) * 100)}%`;
       cell.style.top = `${String((square.y / grid.height) * 100)}%`;
+      cell.dataset.x = String(square.x);
+      cell.dataset.y = String(square.y);
       cells.append(cell);
     }
   };
+
+  // The dashed route to a square the player is pointing at, from where they stand.
+  const showRoute = (cell: HTMLElement | null): void => {
+    const me = tokens.get(PLAYER_ACTOR);
+    const steps = cell?.dataset.path;
+    if (!grid || !cell || me?.x == null || me.y === null || !steps) {
+      line.setAttribute("points", "");
+      return;
+    }
+    route.setAttribute(
+      "viewBox",
+      `0 0 ${String(grid.width)} ${String(grid.height)}`,
+    );
+    line.setAttribute(
+      "points",
+      [`${String(me.x)},${String(me.y)}`, ...steps.split(" ")]
+        .map((point) => {
+          const [x = 0, y = 0] = point.split(",").map(Number);
+          return `${String(x + 0.5)},${String(y + 0.5)}`;
+        })
+        .join(" "),
+    );
+    route.classList.toggle("risky", cell.classList.contains("risky"));
+  };
+
+  // The squares a creature can hit in melee, while the pointer rests on it.
+  const showReach = (id: string | null): void => {
+    const token = id ? tokens.get(id) : undefined;
+    const feet = id ? extraOf(latest).reach?.[id] : undefined;
+    if (
+      !grid ||
+      token?.x == null ||
+      token.y === null ||
+      !feet ||
+      id === PLAYER_ACTOR
+    ) {
+      reachZone.hidden = true;
+      return;
+    }
+    const squares = feet / 5;
+    const left = Math.max(0, token.x - squares);
+    const top = Math.max(0, token.y - squares);
+    const right = Math.min(grid.width, token.x + squares + 1);
+    const bottom = Math.min(grid.height, token.y + squares + 1);
+    reachZone.style.left = `${String((left / grid.width) * 100)}%`;
+    reachZone.style.top = `${String((top / grid.height) * 100)}%`;
+    reachZone.style.width = `${String(((right - left) / grid.width) * 100)}%`;
+    reachZone.style.height = `${String(((bottom - top) / grid.height) * 100)}%`;
+    reachZone.hidden = false;
+  };
+
+  // Pointing at an area spell in a menu lights the squares it would cover.
+  const showArea = (optionId: string | null): void => {
+    blast.replaceChildren();
+    if (!grid || !optionId) return;
+    const key = optionId.split(SEPARATOR).slice(0, 2).join(SEPARATOR);
+    for (const [x, y] of extraOf(latest).areas?.[key] ?? []) {
+      const square = el("div", "dnd-blast-square");
+      square.style.left = `${String((x / grid.width) * 100)}%`;
+      square.style.top = `${String((y / grid.height) * 100)}%`;
+      blast.append(square);
+    }
+  };
+  menu.addEventListener("pointerover", (event) => {
+    showArea(
+      (event.target as HTMLElement).closest<HTMLElement>("button")?.dataset
+        .option ?? null,
+    );
+  });
+  menu.addEventListener("pointerleave", () => {
+    showArea(null);
+  });
+  menu.addEventListener("focusin", (event) => {
+    showArea((event.target as HTMLElement).dataset.option ?? null);
+  });
+
+  field.addEventListener("pointerover", (event) => {
+    const target = event.target as HTMLElement;
+    showRoute(target.closest<HTMLElement>(".dnd-cell"));
+    showReach(target.closest<HTMLElement>(".dnd-token")?.dataset.id ?? null);
+  });
+  field.addEventListener("pointerleave", () => {
+    showRoute(null);
+    showReach(null);
+  });
 
   const answerCell = (cell: HTMLElement): void => {
     const steps = (cell.dataset.option ?? "").split(" ").filter(Boolean);
@@ -386,13 +519,16 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       token.classList.add("dragging");
       token.style.translate = `${String(dx)}px ${String(dy)}px`;
       for (const cell of cells.children) cell.classList.remove("hover");
-      cellAt(event)?.classList.add("hover");
+      const under = cellAt(event);
+      under?.classList.add("hover");
+      showRoute(under);
     };
     const up = (event: PointerEvent): void => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       token.classList.remove("dragging");
       token.style.translate = "";
+      showRoute(null);
       if (!moving) return;
       dragged = true;
       const cell = cellAt(event);
@@ -441,7 +577,108 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
 
   const closeMenu = (): void => {
     menu.hidden = true;
+    showArea(null);
   };
+
+  // "C4" for the third column of the fourth row, as the move list names squares.
+  const squareName = (x: number, y: number): string =>
+    `${String.fromCharCode(65 + (x % 26))}${String(y + 1)}`;
+
+  const tokenAt = (x: number, y: number): [string, Token] | undefined =>
+    [...tokens].find(([, token]) => token.x === x && token.y === y);
+
+  const cellNodeAt = (x: number, y: number): HTMLElement | undefined =>
+    [...cells.querySelectorAll<HTMLElement>(".dnd-cell")].find(
+      (cell) => cell.dataset.x === String(x) && cell.dataset.y === String(y),
+    );
+
+  // Puts the cursor on a square, shows what pointing there would, and says what's there.
+  const placeCursor = (x: number, y: number): void => {
+    if (!grid) return;
+    cursor = {
+      x: Math.max(0, Math.min(grid.width - 1, x)),
+      y: Math.max(0, Math.min(grid.height - 1, y)),
+    };
+    cursorBox.style.left = `${String((cursor.x / grid.width) * 100)}%`;
+    cursorBox.style.top = `${String((cursor.y / grid.height) * 100)}%`;
+    const found = tokenAt(cursor.x, cursor.y);
+    const cell = cellNodeAt(cursor.x, cursor.y);
+    showRoute(cell ?? null);
+    showReach(found?.[0] ?? null);
+    const name = squareName(cursor.x, cursor.y);
+    if (found) {
+      const [id, token] = found;
+      const who = token.node.querySelector(".dnd-name")?.textContent ?? id;
+      said.textContent = `${name}: ${who}, ${String(Math.max(0, token.hp))} of ${String(token.maxHp)} HP.`;
+    } else {
+      said.textContent = cell
+        ? `${name}: ${cell.title}.`
+        : `${name}: out of reach.`;
+    }
+  };
+
+  // Focus says where the cursor is, starting on the player's own square.
+  board.addEventListener("focus", () => {
+    if (!grid) return;
+    const me = tokens.get(PLAYER_ACTOR);
+    placeCursor(cursor?.x ?? me?.x ?? 0, cursor?.y ?? me?.y ?? 0);
+  });
+
+  const STEPS: Readonly<Record<string, readonly [number, number]>> = {
+    ArrowUp: [0, -1],
+    ArrowDown: [0, 1],
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+  };
+
+  board.addEventListener("keydown", (event) => {
+    const inMenu = (event.target as HTMLElement).closest(".dnd-menu");
+    if (inMenu) {
+      const buttons = [...menu.querySelectorAll<HTMLElement>("button")];
+      const at = buttons.indexOf(event.target as HTMLElement);
+      if (event.key === "Escape") {
+        closeMenu();
+        board.focus();
+      } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        const step = event.key === "ArrowDown" ? 1 : -1;
+        buttons[(at + step + buttons.length) % buttons.length]?.focus();
+      } else {
+        return;
+      }
+      event.preventDefault();
+      return;
+    }
+    if (event.target !== board) return;
+    if (
+      playing &&
+      (event.key === "Enter" || event.key === " " || event.key === "Escape")
+    ) {
+      skipping = true;
+      wake?.();
+      event.preventDefault();
+      return;
+    }
+    const step = STEPS[event.key];
+    if (step && grid) {
+      const from = cursor ?? { x: 0, y: 0 };
+      placeCursor(from.x + step[0], from.y + step[1]);
+      event.preventDefault();
+    } else if ((event.key === "Enter" || event.key === " ") && cursor) {
+      event.preventDefault();
+      const found = tokenAt(cursor.x, cursor.y);
+      const cell = cellNodeAt(cursor.x, cursor.y);
+      if (found) {
+        openMenu(found[0], found[1].node);
+        const first = menu.querySelector<HTMLElement>("button");
+        if (first && !menu.hidden) first.focus();
+        else said.textContent = "Nothing to do there.";
+      } else if (cell) {
+        answerCell(cell);
+      }
+    } else if (event.key === "Escape") {
+      closeMenu();
+    }
+  });
 
   // Values, arrivals and removals wait until the queue is done, so they don't spoil what's playing.
   const sync = (update: BoardUpdate, settle: boolean): void => {
@@ -737,9 +974,18 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     skipping = false;
     board.classList.remove("playing");
     if (latest) sync(latest, true);
+    for (const done of waiting.splice(0)) done();
   };
 
+  const waiting: (() => void)[] = [];
+
   return {
+    // Resolves once everything queued so far has played, so the shell can hold back text that would spoil it.
+    settled(): Promise<void> {
+      return playing || queue.length > 0
+        ? new Promise((resolve) => waiting.push(resolve))
+        : Promise.resolve();
+    },
     update(update: BoardUpdate): void {
       latest = update;
       sync(update, !playing && update.cues.length === 0);
@@ -989,6 +1235,64 @@ const BOARD_CSS = `
 .dnd-cell.soft {
   background: rgb(255 211 107 / 4%);
   border-color: transparent;
+}
+.dnd-cell.risky { background: rgb(224 83 63 / 6%); }
+.dnd-cell.risky:hover, .dnd-cell.risky.hover { background: rgb(224 83 63 / 40%); }
+.dnd-route {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.dnd-route polyline {
+  fill: none;
+  stroke: #ffd36b;
+  stroke-width: 3;
+  stroke-dasharray: 6 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.dnd-route.risky polyline { stroke: #ff6a55; }
+.dnd-blast { position: absolute; inset: 0; pointer-events: none; }
+.dnd-blast-square {
+  position: absolute;
+  width: calc(100% / var(--cols));
+  height: calc(100% / var(--rows));
+  background: rgb(255 140 60 / 38%);
+  box-shadow: inset 0 0 0 1px rgb(255 190 120 / 55%);
+}
+.dnd-cursor {
+  position: absolute;
+  display: none;
+  width: calc(100% / var(--cols));
+  height: calc(100% / var(--rows));
+  box-sizing: border-box;
+  border: 3px solid #fff;
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px #000;
+  pointer-events: none;
+  z-index: 5;
+}
+.dnd-board:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.dnd-board:focus-visible .gridded .dnd-cursor { display: block; }
+.dnd-said {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.dnd-reach {
+  position: absolute;
+  box-sizing: border-box;
+  background: rgb(224 83 63 / 14%);
+  border: 2px dashed rgb(224 83 63 / 60%);
+  border-radius: 6px;
+  pointer-events: none;
 }
 .dnd-token.dragging {
   z-index: 7;

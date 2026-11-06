@@ -187,7 +187,7 @@ export function moveSquares(
   actor: Actor,
   state: DndState,
   stats: Stats,
-): readonly { readonly square: Square; readonly feet: number }[] {
+): ReturnType<typeof reachableSquares> {
   const grid = state.combat?.grid;
   if (!grid || !actor.position) return [];
   const others = Object.values(state.actors).filter(
@@ -1125,8 +1125,55 @@ export function runProjectile(
 
 const MoveSchema = z.object({ actor: z.string(), answer: z.string() });
 
-// Leaving an enemy's reach gives it an Opportunity Attack, made before the move, so falling stops it.
+// The longest melee reach a creature has, or null if it has no melee attack.
+export function meleeReachOf(
+  actor: Actor,
+  access: ContentAccess,
+): number | null {
+  const reaches = deriveStats(actor, access).actions.flatMap((action) => {
+    const reach = meleeReach(action);
+    return reach !== null &&
+      action.activation.resolution.kind === "attack" &&
+      !action.activation.trigger &&
+      action.spellLevel === null
+      ? [reach]
+      : [];
+  });
+  return reaches.length > 0 ? Math.max(...reaches) : null;
+}
+
+// Enemies that get an Opportunity Attack if the actor moves to `to`, and the attack each would make.
 // shortcut: only where the move starts and ends counts, not every square on the way.
+export function provokers(
+  actor: Actor,
+  to: Square,
+  state: DndState,
+  access: ContentAccess,
+): readonly { readonly foe: Actor; readonly melee: KnownAction }[] {
+  return enemies(state, actor).flatMap((foe) => {
+    if (
+      !foe.budget.reaction ||
+      isDown(foe) ||
+      hasCondition(foe, ...INCAPACITATING)
+    ) {
+      return [];
+    }
+    const melee = deriveStats(foe, access).actions.find((item) => {
+      const reach = meleeReach(item);
+      return (
+        reach !== null &&
+        item.activation.resolution.kind === "attack" &&
+        !item.activation.trigger &&
+        item.spellLevel === null &&
+        distanceFeet(actor.position, foe.position) <= reach &&
+        distanceFeet(to, foe.position) > reach
+      );
+    });
+    return melee ? [{ foe, melee }] : [];
+  });
+}
+
+// Leaving an enemy's reach gives it an Opportunity Attack, made before the move, so falling stops it.
 export function runMove(
   payload: z.infer<typeof MoveSchema>,
   context: Context,
@@ -1141,26 +1188,7 @@ export function runMove(
   if (!step) throw new Error(`${actor.name} can't reach ${payload.answer}`);
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];
-  for (const foe of enemies(state, actor)) {
-    if (
-      !foe.budget.reaction ||
-      isDown(foe) ||
-      hasCondition(foe, ...INCAPACITATING)
-    ) {
-      continue;
-    }
-    const melee = deriveStats(foe, context).actions.find((item) => {
-      const reach = meleeReach(item);
-      return (
-        reach !== null &&
-        item.activation.resolution.kind === "attack" &&
-        !item.activation.trigger &&
-        item.spellLevel === null &&
-        distanceFeet(actor.position, foe.position) <= reach &&
-        distanceFeet(to, foe.position) > reach
-      );
-    });
-    if (!melee) continue;
+  for (const { foe, melee } of provokers(actor, to, state, context)) {
     events.push(
       dndEvent(`${NS}:budgetSpent`, { actor: foe.id, kind: "reaction" }),
     );
