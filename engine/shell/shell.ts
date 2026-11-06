@@ -32,6 +32,30 @@ function button(label: string, onClick: () => void): HTMLButtonElement {
   return node;
 }
 
+// The player's sound setting, kept between visits. Storage can be blocked, which leaves sound on.
+const SOUND_KEY = "re-roll:sound";
+let soundOn = ((): boolean => {
+  try {
+    return localStorage.getItem(SOUND_KEY) !== "off";
+  } catch {
+    return true;
+  }
+})();
+
+function soundToggle(): HTMLButtonElement {
+  const node = button("Sound", () => {
+    soundOn = !soundOn;
+    node.setAttribute("aria-pressed", String(soundOn));
+    try {
+      localStorage.setItem(SOUND_KEY, soundOn ? "on" : "off");
+    } catch {
+      // Not remembered, but still applies for now.
+    }
+  });
+  node.setAttribute("aria-pressed", String(soundOn));
+  return node;
+}
+
 // A picture that is missing or won't load shows nothing at all.
 function picture(
   game: Game,
@@ -622,6 +646,7 @@ export function mountShell(
     actions.replaceChildren(
       hud,
       journal,
+      soundToggle(),
       button("Save", () => {
         act(async () => {
           const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -657,6 +682,7 @@ export function mountShell(
       if (factory && !board) {
         board = factory(combatGridSlot, {
           imageUrl: (path) => game.imageUrl(path),
+          sound: () => soundOn,
           answer: (...optionIds) => {
             act(async () => {
               for (const optionId of optionIds) await game.answer(optionId);

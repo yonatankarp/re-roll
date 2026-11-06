@@ -66,6 +66,7 @@ export interface BoardHost {
   readonly imageUrl: (path: string) => string | Promise<string | null> | null;
   // Several ids answer the decisions that follow one another, such as Move and then a square.
   readonly answer: (...optionIds: readonly string[]) => void;
+  readonly sound?: () => boolean; // whether the player has sound on
 }
 
 export interface BoardUpdate {

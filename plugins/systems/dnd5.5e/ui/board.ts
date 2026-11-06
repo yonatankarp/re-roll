@@ -1,6 +1,7 @@
 import { PLAYER_ACTOR } from "#sdk";
 import { StateSchema } from "../core/state.ts";
 import type { DndCue } from "./cues.ts";
+import { cueSound } from "./sound.ts";
 
 // The combat board: tokens on a 5-foot grid over the scene's picture, animated from cues one at a time.
 // Clicking a token or a square answers the same options the list below offers, so the board is a
@@ -42,6 +43,7 @@ interface BoardUpdate {
 interface BoardHost {
   readonly imageUrl: (path: string) => string | Promise<string | null> | null;
   readonly answer: (...optionIds: readonly string[]) => void;
+  readonly sound?: () => boolean;
 }
 
 interface Token {
@@ -540,6 +542,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   };
 
   const play = async (cue: DndCue): Promise<void> => {
+    if (!fast() && host.sound?.() === true) cueSound(cue);
     const ms = PACE[cue.kind];
     switch (cue.kind) {
       case "start":
