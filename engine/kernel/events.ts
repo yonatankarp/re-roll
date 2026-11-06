@@ -154,7 +154,10 @@ export function isNamespacedEvent(item: GameEvent): item is NamespacedEvent {
 }
 
 export const InputSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("start") }),
+  z.strictObject({
+    kind: z.literal("start"),
+    settings: z.record(z.string(), z.string()).optional(), // the system's settings, such as difficulty
+  }),
   z.strictObject({
     kind: z.literal("answer"),
     decisionId: z.string(),

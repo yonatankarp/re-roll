@@ -353,6 +353,72 @@ export function mountShell(
       });
   };
 
+  // Before a new game: the choices its system asks for, such as difficulty, then Begin.
+  const showSetup = async (adventure: {
+    readonly id: string;
+    readonly title: string;
+  }): Promise<void> => {
+    const settings = await game.settingsFor(adventure.id);
+    const begin = (chosen: Readonly<Record<string, string>>): void => {
+      act(async () => {
+        await game.start(adventure.id, crypto.randomUUID().slice(0, 8), chosen);
+        showGame();
+      });
+    };
+    if (settings.length === 0) {
+      begin({});
+      return;
+    }
+    const chosen: Record<string, string> = Object.fromEntries(
+      settings.map((setting) => [setting.id, setting.default]),
+    );
+    const heading = el("h2", { text: adventure.title });
+    heading.tabIndex = -1;
+    const groups = settings.map((setting) => {
+      const cards = setting.options.map((option) => {
+        const card = button("", () => {
+          chosen[setting.id] = option.id;
+          for (const other of cards) {
+            other.setAttribute("aria-checked", String(other === card));
+          }
+        });
+        card.className = "setting-card";
+        card.setAttribute("role", "radio");
+        card.setAttribute(
+          "aria-checked",
+          String(option.id === setting.default),
+        );
+        card.append(
+          el("strong", { text: option.label }),
+          el("span", { text: option.detail }),
+        );
+        return card;
+      });
+      const group = el("div", { class: "setting-cards" }, ...cards);
+      group.setAttribute("role", "radiogroup");
+      group.setAttribute("aria-label", setting.label);
+      return el(
+        "section",
+        { class: "setting" },
+        el("h3", { text: setting.label }),
+        group,
+      );
+    });
+    const go = button("Begin the adventure", () => {
+      begin({ ...chosen });
+    });
+    go.className = "begin";
+    actions.replaceChildren(
+      button("Menu", () => {
+        act(showMenu);
+      }),
+    );
+    screen.replaceChildren(
+      el("section", { class: "setup" }, heading, ...groups, go),
+    );
+    focusNext = heading;
+  };
+
   const showMenu = async (): Promise<void> => {
     actions.replaceChildren();
     const [adventures, saves, books] = await Promise.all([
@@ -371,10 +437,7 @@ export function mountShell(
       // Saves are sorted newest first, so the first match is the one to resume.
       const latest = saves.find((save) => save.adventure === adventure.id);
       const start = button(adventure.title, () => {
-        act(async () => {
-          await game.start(adventure.id, crypto.randomUUID().slice(0, 8));
-          showGame();
-        });
+        act(() => showSetup(adventure));
       });
       if (adventure.levels) {
         start.append(

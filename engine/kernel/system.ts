@@ -159,7 +159,20 @@ export function awaitDecision(decision: Decision): Frame {
   return { kind: AWAIT_FRAME, payload: { decision } };
 }
 
+// A choice the player makes when starting a game, such as difficulty, kept with the run.
+export interface SystemSetting {
+  readonly id: string;
+  readonly label: string;
+  readonly options: readonly {
+    readonly id: string;
+    readonly label: string;
+    readonly detail: string;
+  }[];
+  readonly default: string;
+}
+
 export interface RunSetup {
+  readonly settings: Readonly<Record<string, string>>; // one valid option per declared setting
   readonly actors: readonly {
     readonly id: string;
     readonly name: string;
@@ -252,6 +265,7 @@ export interface SystemDefinition<S> {
   readonly storyEffects: Readonly<Record<string, StoryEffectDef<S>>>;
   readonly storyPredicates: Readonly<Record<string, StoryPredicateDef<S>>>;
   readonly frames: Readonly<Record<string, FrameDef<S>>>;
+  readonly settings?: readonly SystemSetting[];
   readonly createRun: (setup: RunSetup) => S;
   readonly resolveCheck: (
     check: unknown,
@@ -279,6 +293,9 @@ export interface SystemDefinition<S> {
     decision: Decision,
     context: SystemContext<S>,
   ) => string;
+  // Decisions decidePolicy can also make well for the player, such as a combat turn. The test bot
+  // uses this to play like a sensible person rather than at random.
+  readonly tactical?: (decision: Decision) => boolean;
 }
 
 // What the engine sees: the system's state type is opaque to it.

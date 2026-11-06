@@ -578,13 +578,28 @@ function concentrationFrame(target: Actor, amount: number): readonly Frame[] {
 }
 
 // Reports the damage, and whatever follows from it, as events.
-export function damageEvents(
+// The difficulty setting scales the damage the party takes, and only that, so the books' monsters keep
+// their numbers: Story takes a third of it, Hard adds half again.
+const DAMAGE_TO_PARTY = { story: 1 / 3, normal: 1, hard: 1.5 } as const;
+
+function scaledForParty(
   target: Actor,
   amount: number,
+  state: DndState,
+): number {
+  if (target.side !== "party" || amount <= 0) return amount;
+  const factor = DAMAGE_TO_PARTY[state.difficulty ?? "normal"];
+  return Math.max(1, Math.round(amount * factor));
+}
+
+export function damageEvents(
+  target: Actor,
+  rolled: number,
   type: Damage["type"],
   critical: boolean,
   context: Context,
 ): SystemEvent[] {
+  const amount = scaledForParty(target, rolled, context.state);
   if (amount <= 0) return [];
   // Damage left over after reaching 0 HP kills a character if it's at least their maximum.
   const remaining = amount - target.tempHp - Math.max(0, target.hp);
@@ -651,7 +666,7 @@ function dealEvents(
       events.push(event);
       if (state.actors[target.id]) state = applyDndEvent(state, event);
     }
-    dealt += Math.max(0, amount);
+    dealt += Math.max(0, scaledForParty(target, amount, context.state));
   }
   return { events, dealt };
 }
@@ -2143,6 +2158,16 @@ export function choosePolicy(decision: Decision, context: Context): string {
     return square ? squareKey(square) : STAY;
   }
   const stats = deriveStats(actor, context);
+  // Only the player is offered flight. Run when the enemies left clearly outlast the party.
+  if (decision.options.some((option) => option.id === FLEE)) {
+    const standing = (list: readonly Actor[]): number =>
+      list
+        .filter((item) => !isDown(item))
+        .reduce((sum, item) => sum + item.hp, 0);
+    if (standing(enemies(state, actor)) > 3 * standing(allies(state, actor))) {
+      return FLEE;
+    }
+  }
   const parsed = decision.options.flatMap((option) => {
     const [actionId = "", targetId = "", slot] = option.id.split(SEPARATOR);
     const action = stats.actions.find((item) => item.id === actionId);

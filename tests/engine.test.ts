@@ -123,15 +123,16 @@ describe("starting a run", () => {
     expect(moods).toEqual(new Set(["mournful", "furious"]));
   });
 
-  it("builds a party of the player and two companions", async () => {
+  it("builds a party of four: the player and three companions", async () => {
     const { run } = await loadFixture("goblin-ambush");
     const { state } = startRun(run, "party");
     expect(state.partyIds).toEqual([
       PLAYER_ACTOR,
       "companion-1",
       "companion-2",
+      "companion-3",
     ]);
-    expect(Object.keys(state.companions)).toHaveLength(2);
+    expect(Object.keys(state.companions)).toHaveLength(3);
   });
 
   it("applies the chosen variant's effects before the first scene", async () => {

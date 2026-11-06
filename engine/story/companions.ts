@@ -47,7 +47,8 @@ const CANDIDATES: readonly Omit<CompanionProfile, "id" | "loyalty">[] = [
   },
 ];
 
-export const COMPANION_COUNT = 2;
+// The books' encounters are written for a party of four.
+export const COMPANION_COUNT = 3;
 
 export function rollCompanions(dice: Dice): readonly CompanionProfile[] {
   const pool = [...CANDIDATES];

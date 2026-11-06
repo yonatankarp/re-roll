@@ -158,7 +158,7 @@ export function replayInputs(
   const [first, ...rest] = inputs;
   if (first?.kind !== "start")
     throw new Error("A replay must begin with start");
-  const started = startRun(run, seed);
+  const started = startRun(run, seed, first.settings);
   let { state } = started;
   const log: LogEntry[] = [{ input: first, events: started.events }];
 

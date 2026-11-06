@@ -95,7 +95,11 @@ const ActorSchema = z.strictObject({
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
+export const DIFFICULTIES = ["story", "normal", "hard"] as const;
+
 export const StateSchema = z.strictObject({
+  // Chosen when the game starts. Missing in saves from before there was a choice, which played as normal.
+  difficulty: z.enum(DIFFICULTIES).optional(),
   actors: z.record(z.string(), ActorSchema),
   combat: z
     .strictObject({
@@ -404,7 +408,7 @@ function endCombat(state: DndState): DndState {
         },
       ]),
   );
-  return { actors, combat: null };
+  return { ...state, actors, combat: null };
 }
 
 function applyDamage(
@@ -514,6 +518,7 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         ...Object.fromEntries(data.monsters.map((item) => [item.id, item])),
       };
       return {
+        ...state,
         actors: Object.fromEntries(
           Object.entries(actors).map(([id, actor]) => [
             id,

@@ -300,7 +300,30 @@ function settle(
   );
 }
 
-export function startRun(run: RunContext, seed: string): StepResult {
+// Each declared setting takes the chosen option when it is one, and its default otherwise.
+export function resolveSettings(
+  run: RunContext,
+  chosen: Readonly<Record<string, string>> = {},
+): Readonly<Record<string, string>> {
+  return Object.fromEntries(
+    (run.system.settings ?? []).map((setting) => {
+      const value = chosen[setting.id];
+      return [
+        setting.id,
+        value !== undefined &&
+        setting.options.some((option) => option.id === value)
+          ? value
+          : setting.default,
+      ];
+    }),
+  );
+}
+
+export function startRun(
+  run: RunContext,
+  seed: string,
+  settings: Readonly<Record<string, string>> = {},
+): StepResult {
   const world = createDice(rngFromSeed(`${seed}:world`));
   const profiles = rollCompanions(world);
   if (profiles.length !== COMPANION_COUNT) {
@@ -308,6 +331,7 @@ export function startRun(run: RunContext, seed: string): StepResult {
   }
   const partyIds = [PLAYER_ACTOR, ...profiles.map((profile) => profile.id)];
   const system = run.system.createRun({
+    settings: resolveSettings(run, settings),
     actors: [
       { id: PLAYER_ACTOR, name: "You", role: "player" as const },
       ...profiles.map((profile) => ({

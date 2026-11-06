@@ -193,6 +193,25 @@ describe("playing through the shell's session", () => {
     await game.answer(option.id);
   }
 
+  it("starts with the chosen difficulty and keeps it through a save and a restart", async () => {
+    const game = newGame();
+    const settings = await game.settingsFor("goblin-ambush");
+    expect(settings.map((setting) => setting.id)).toEqual(["difficulty"]);
+    await game.start("goblin-ambush", "difficulty-test", {
+      difficulty: "story",
+    });
+    const difficulty = (): unknown =>
+      (game.view().systemState as { difficulty?: string }).difficulty;
+    expect(difficulty()).toBe("story");
+    const path = await game.save("difficulty");
+    await game.start("goblin-ambush", "other", { difficulty: "hard" });
+    expect(difficulty()).toBe("hard");
+    await game.load(path);
+    expect(difficulty()).toBe("story");
+    await game.restart("again");
+    expect(difficulty()).toBe("story");
+  });
+
   it("lists the adventures by title", async () => {
     const adventures = await newGame().listAdventures();
     expect(adventures.map((item) => item.id).sort()).toEqual([

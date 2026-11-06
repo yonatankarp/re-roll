@@ -12,12 +12,13 @@ import { type Registry, loadRun, scanPlugins } from "../kernel/loader.ts";
 import { type LogEntry, createSave, loadSave } from "../kernel/save.ts";
 import type { Storage } from "../kernel/storage.ts";
 import { sceneText } from "../story/runtime.ts";
-import type { GameSystem } from "../kernel/system.ts";
+import type { GameSystem, SystemSetting } from "../kernel/system.ts";
 import {
   type RunContext,
   applyEvent,
   createRunContext,
   pendingDecision,
+  resolveSettings,
   startRun,
   step,
 } from "../kernel/turn.ts";
@@ -271,7 +272,18 @@ export function createGame({
     }
   };
 
-  const open = async (adventure: string) => {
+  // The setup screen opens an adventure to ask its settings, and starting it right after reuses that.
+  let prepared: {
+    readonly adventure: string;
+    readonly opened: ReturnType<typeof openFresh>;
+  } | null = null;
+  const open = (adventure: string): ReturnType<typeof openFresh> => {
+    const reuse = prepared?.adventure === adventure ? prepared.opened : null;
+    prepared = null;
+    return reuse ?? openFresh(adventure);
+  };
+
+  const openFresh = async (adventure: string) => {
     const catalog = await scanPlugins(storage, roots);
     const loaded = await loadRun(storage, catalog, systems, [adventure]);
     if (!loaded.ok) {
@@ -437,14 +449,34 @@ export function createGame({
       return imageUrl ? imageUrl(path) : null;
     },
 
-    // The same adventure again from its first scene, with fresh dice. The old run's autosave stays.
+    // The same adventure again from its first scene, with fresh dice and the same settings.
     async restart(seed: string): Promise<void> {
-      await this.start(active().adventure, seed);
+      const game = active();
+      const [first] = game.log;
+      const settings =
+        first?.input.kind === "start" ? first.input.settings : undefined;
+      await this.start(game.adventure, seed, settings);
     },
 
-    async start(adventure: string, seed: string): Promise<void> {
+    // What the adventure's system asks before a game starts, such as difficulty.
+    async settingsFor(adventure: string): Promise<readonly SystemSetting[]> {
+      const opened = openFresh(adventure);
+      prepared = { adventure, opened };
+      const { run } = await opened;
+      return run.system.settings ?? [];
+    },
+
+    async start(
+      adventure: string,
+      seed: string,
+      settings?: Readonly<Record<string, string>>,
+    ): Promise<void> {
       const { registry, ui, run, root } = await open(adventure);
-      const started = startRun(run, seed);
+      const chosen = settings ? resolveSettings(run, settings) : undefined;
+      const started = startRun(run, seed, chosen);
+      const start = chosen
+        ? { kind: "start" as const, settings: { ...chosen } }
+        : { kind: "start" as const };
       const game: Current = {
         adventure,
         seed,
@@ -453,7 +485,7 @@ export function createGame({
         run,
         ui,
         state: started.state,
-        log: [{ input: { kind: "start" }, events: started.events }],
+        log: [{ input: start, events: started.events }],
         ...narrated(narrate(run, ui, null, started.events)),
         warnings: [],
       };

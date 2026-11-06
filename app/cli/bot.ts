@@ -1,8 +1,15 @@
 import { testAdventure } from "../../engine/tools/bot.ts";
 import { listAdventures, loadAdventure } from "./load-adventure.ts";
 
-const RUNS = Number(process.argv[2] ?? 500);
-const ONLY = process.argv[3]; // one adventure's id, or all of them
+// npm run bot -- [runs] [adventure] [--smart] [--difficulty=story|normal|hard]
+const flags = process.argv.slice(2).filter((arg) => arg.startsWith("--"));
+const args = process.argv.slice(2).filter((arg) => !arg.startsWith("--"));
+const SMART = flags.includes("--smart"); // play fights sensibly, to measure difficulty
+const DIFFICULTY = flags
+  .find((flag) => flag.startsWith("--difficulty="))
+  ?.slice("--difficulty=".length);
+const RUNS = Number(args[0] ?? 500);
+const ONLY = args[1]; // one adventure's id, or all of them
 const MAX_DECISIONS = 500;
 
 for (const adventure of (await listAdventures()).filter(
@@ -12,6 +19,8 @@ for (const adventure of (await listAdventures()).filter(
   const report = testAdventure(run, {
     runs: RUNS,
     maxDecisions: MAX_DECISIONS,
+    smart: SMART,
+    ...(DIFFICULTY ? { settings: { difficulty: DIFFICULTY } } : {}),
   });
   console.log(`${adventure}: ${String(report.runs)} runs`);
   console.log(`  Final scenes: ${JSON.stringify(report.endings)}`);

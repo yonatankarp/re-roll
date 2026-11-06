@@ -15,6 +15,7 @@ import {
   type Context,
   MOVE,
   choosePolicy,
+  damageEvents,
   effectEnds,
   nextDndDecision,
   runAttackRoll,
@@ -2180,5 +2181,87 @@ describe("the 5-foot grid", () => {
     expect(
       distanceFeet(actor(walked.state, "a").position, { x: 0, y: 5 }),
     ).toBe(5);
+  });
+});
+
+describe("difficulty helpers", () => {
+  it("builds a pregen on the fullest class of its name when two books have one", async () => {
+    const run = await base();
+    const wizard = ClassSchema.parse(run.content("srd52:class/wizard"));
+    const [first] = wizard.levels;
+    if (!first) throw new Error("The wizard has no levels");
+    // A second book's Wizard whose id sorts first, as the Handbook's does before the SRD's.
+    const unsorted = arenaRun(run, {
+      "a-book:class/wizard": {
+        ...wizard,
+        id: "a-book:class/wizard",
+        levels: Array.from({ length: 20 }, (_, index) => ({
+          ...first,
+          level: index + 1,
+        })),
+      },
+    });
+    // The real loader sorts content ids, so the test does too.
+    const fuller = {
+      ...unsorted,
+      contentIds: () => [...unsorted.contentIds()].sort(),
+    };
+    const chosen = fuller.system.frames[`${NS}:characterChosen`]?.run(
+      { answer: "srd52:pregen/wizard" },
+      contextOf(fuller, { actors: {}, combat: null }, HIGH),
+    );
+    const event = chosen?.events?.find(
+      (item) => item.kind === `${NS}:characterChosen`,
+    );
+    const build = (event && "payload" in event ? event.payload : {}) as {
+      build?: { levels: readonly { classId: string }[] };
+    };
+    expect(build.build?.levels.map((level) => level.classId)).toEqual([
+      "a-book:class/wizard",
+    ]);
+  });
+
+  it("flees a fight the party clearly can't win, when fleeing is offered", async () => {
+    const run = arenaRun(await base(), {});
+    const state = fight(
+      hero(run, { hp: 5 }),
+      monster("a", "srd52:monster/dummy", 500),
+    );
+    const fleeing: DndState = state.combat
+      ? { ...state, combat: { ...state.combat, canFlee: true } }
+      : state;
+    const decision = nextDndDecision(fleeing, run);
+    if (!decision) throw new Error("No decision");
+    expect(choosePolicy(decision, contextOf(run, fleeing, HIGH))).toBe("flee");
+  });
+});
+
+describe("the difficulty setting", () => {
+  it("cuts the damage the party takes to a third on Story and adds half on Hard", async () => {
+    const run = arenaRun(await base(), {});
+    const party = hero(run);
+    const foe = monster("a");
+    const taken = (difficulty: "story" | "normal" | "hard", target: Actor) =>
+      damageEvents(
+        target,
+        10,
+        "slashing",
+        false,
+        contextOf(run, { ...fight(party, foe), difficulty }, HIGH),
+      ).map((event) => ("payload" in event ? event.payload.amount : 0));
+    expect(taken("story", party)).toEqual([3]);
+    expect(taken("normal", party)).toEqual([10]);
+    expect(taken("hard", party)).toEqual([15]);
+    expect(taken("story", foe)).toEqual([10]); // monsters take what the dice say
+  });
+
+  it("keeps the difficulty through the start and end of a fight", async () => {
+    const run = arenaRun(await base(), {});
+    const state: DndState = {
+      ...fight(hero(run), monster("a")),
+      difficulty: "story",
+    };
+    const ended = applyDndEvent(state, dndEvent(`${NS}:combatEnded`, {}));
+    expect(ended.difficulty).toBe("story");
   });
 });

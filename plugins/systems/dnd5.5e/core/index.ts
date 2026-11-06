@@ -78,6 +78,7 @@ import { rollD20 } from "./rules.ts";
 import {
   BackgroundSchema,
   CheckSchema,
+  type CharacterBuild,
   ClassSchema,
   CompanionSchema,
   EncounterBudgetSchema,
@@ -100,6 +101,7 @@ import {
 } from "./schemas.ts";
 import {
   type Actor,
+  DIFFICULTIES,
   type DndState,
   EVENT_SCHEMAS,
   NS,
@@ -135,6 +137,29 @@ function levelReferences(level: z.infer<typeof ClassSchema>["levels"][number]) {
   ];
 }
 
+// A pregen names a class from its own book. When a fuller book with a class of the same name is loaded
+// too, that class takes its place, as it does in character creation, so the character can level past
+// where the first book stops (the SRD's classes end at level 5).
+function pregenBuild(pregenId: string, access: ContentAccess): CharacterBuild {
+  const { build } = lookup(access, PregenSchema, pregenId);
+  const classIds = access.contentIds().filter((id) => id.includes(":class/"));
+  const fullest = (classId: string): string => {
+    const { name } = lookup(access, ClassSchema, classId);
+    // Content ids are sorted, and character creation also takes the first class of each name.
+    return (
+      classIds.find((id) => lookup(access, ClassSchema, id).name === name) ??
+      classId
+    );
+  };
+  return {
+    ...build,
+    levels: build.levels.map((level) => ({
+      ...level,
+      classId: fullest(level.classId),
+    })),
+  };
+}
+
 function characterActor(
   id: string,
   name: string,
@@ -146,7 +171,7 @@ function characterActor(
     id,
     name,
     side: "party",
-    source: { kind: "character", build: pregen.build },
+    source: { kind: "character", build: pregenBuild(pregenId, access) },
     hp: 1,
     inventory: pregen.equipment,
   });
@@ -283,7 +308,7 @@ export const dnd55e = defineSystem<DndState>({
             dndEvent(`${NS}:characterChosen`, {
               actor: PLAYER_ACTOR,
               name: pregen.name,
-              build: pregen.build,
+              build: pregenBuild(answer, context),
               inventory: pregen.equipment,
               hp: actor.hp,
             }),
@@ -353,7 +378,32 @@ export const dnd55e = defineSystem<DndState>({
       run: (_payload, context: Context) => runEndTurn(context),
     }),
   },
-  createRun: ({ actors, dice, content, contentIds }) => {
+  settings: [
+    {
+      id: "difficulty",
+      label: "Difficulty",
+      default: "normal",
+      options: [
+        {
+          id: "story",
+          label: "Story",
+          detail:
+            "Your party takes a third of the damage. For enjoying the story.",
+        },
+        {
+          id: "normal",
+          label: "Normal",
+          detail: "The book as written.",
+        },
+        {
+          id: "hard",
+          label: "Hard",
+          detail: "Your party takes half as much damage again.",
+        },
+      ],
+    },
+  ],
+  createRun: ({ settings, actors, dice, content, contentIds }) => {
     const access = { content, contentIds };
     const state: Record<string, Actor> = {};
     const takenClasses = new Set<string>();
@@ -376,7 +426,14 @@ export const dnd55e = defineSystem<DndState>({
         }
       }
     }
-    return { actors: state, combat: null };
+    const difficulty = DIFFICULTIES.find(
+      (item) => item === settings.difficulty,
+    );
+    return {
+      ...(difficulty ? { difficulty } : {}),
+      actors: state,
+      combat: null,
+    };
   },
   // Scene checks are made by the player's character.
   resolveCheck: (check, context) => {
@@ -418,4 +475,6 @@ export const dnd55e = defineSystem<DndState>({
   applyEvent: applyDndEvent,
   nextDecision: nextDndDecision,
   decidePolicy: choosePolicy,
+  tactical: (decision) =>
+    /^dnd5\.5e:(turn|moveTo|reaction|afterHit|deathSave):/.test(decision.id),
 });

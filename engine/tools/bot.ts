@@ -19,14 +19,18 @@ export function playRun(
   options: {
     readonly maxDecisions: number;
     readonly onState?: (state: GameState) => void;
+    // Plays the player's fights with the system's own tactics, as a sensible person would. Story choices stay random.
+    readonly smart?: boolean;
+    readonly settings?: Readonly<Record<string, string>>;
   },
 ): BotRun {
   const dice = createDice(rngFromSeed(`${seed}:bot`));
-  const started = startRun(run, seed);
-  const inputs: Input[] = [{ kind: "start" }];
-  const log: LogEntry[] = [
-    { input: { kind: "start" }, events: started.events },
-  ];
+  const started = startRun(run, seed, options.settings);
+  const start: Input = options.settings
+    ? { kind: "start", settings: { ...options.settings } }
+    : { kind: "start" };
+  const inputs: Input[] = [start];
+  const log: LogEntry[] = [{ input: start, events: started.events }];
   const scenes = new Set<string>();
   let { state, pending } = started;
   options.onState?.(state);
@@ -39,7 +43,17 @@ export function playRun(
   noteScenes(started.events);
 
   for (let count = 0; pending && count < options.maxDecisions; count += 1) {
-    const option = pending.options[dice.below(pending.options.length)];
+    const option =
+      options.smart && run.system.tactical?.(pending)
+        ? {
+            id: run.system.decidePolicy(pending, {
+              state: state.system,
+              dice,
+              content: run.content,
+              contentIds: run.contentIds,
+            }),
+          }
+        : pending.options[dice.below(pending.options.length)];
     if (!option) throw new Error(`${pending.id} has no options`);
     const input: Input = {
       kind: "answer",
@@ -90,6 +104,8 @@ export function testAdventure(
     readonly runs: number;
     readonly maxDecisions: number;
     readonly seedPrefix?: string;
+    readonly smart?: boolean;
+    readonly settings?: Readonly<Record<string, string>>;
   },
 ): BotReport {
   const failures: BotFailure[] = [];
@@ -103,6 +119,8 @@ export function testAdventure(
     try {
       const result = playRun(run, seed, {
         maxDecisions: options.maxDecisions,
+        ...(options.smart ? { smart: true } : {}),
+        ...(options.settings ? { settings: options.settings } : {}),
       });
       ({ inputs } = result);
       for (const scene of result.scenes) visited.add(scene);
