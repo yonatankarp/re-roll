@@ -207,10 +207,10 @@ describe("playing through the shell's session", () => {
   it("plays a fight, saves mid-fight, loads and reaches an end", async () => {
     const game = newGame();
     await game.start("goblin-ambush", "desktop-test-1");
-    expect(game.view().sheet).toBeNull();
+    expect(game.view().sheets).toEqual([]);
     await chooseCharacter(game, "Fighter");
 
-    const sheet = game.view().sheet;
+    const [sheet, companion] = game.view().sheets;
     expect(sheet?.title).toContain("Fighter");
     expect(sheet?.sections.map((section) => section.title)).toContain(
       "Abilities",
@@ -224,6 +224,10 @@ describe("playing through the shell's session", () => {
     expect(
       sheet?.sections.filter((section) => section.pinned).map((s) => s.title),
     ).toEqual(expect.arrayContaining(["Combat", "Abilities"]));
+
+    expect(companion?.sections.map((section) => section.title)).toContain(
+      "Abilities",
+    );
 
     let savedPath: string | null = null;
     for (let count = 0; count < 500 && game.view().decision; count += 1) {

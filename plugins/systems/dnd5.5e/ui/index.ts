@@ -11,6 +11,7 @@ import { dndCue } from "./cues.ts";
 import {
   ABILITIES,
   type Amount,
+  type CharacterBuild,
   type Damage,
   SKILL_ABILITIES,
   type Skill,
@@ -266,11 +267,24 @@ function signed(value: number): string {
   return value < 0 ? String(value) : `+${String(value)}`;
 }
 
-function sheet(rawState: unknown, access: ContentAccess) {
-  const player = StateSchema.parse(rawState).actors[PLAYER_ACTOR];
-  // There are no stats to show until the player has chosen a character.
-  if (player?.source.kind !== "character" || !player.source.build) return null;
-  const { build } = player.source;
+// The player first, then the companions; none until the player has chosen a character.
+function sheets(rawState: unknown, access: ContentAccess) {
+  const { actors } = StateSchema.parse(rawState);
+  const player = actors[PLAYER_ACTOR];
+  if (player?.source.kind !== "character" || !player.source.build) return [];
+  return [
+    player,
+    ...Object.values(actors).filter((actor) => actor.id !== PLAYER_ACTOR),
+  ].flatMap((actor) =>
+    actor.side === "party" &&
+    actor.source.kind === "character" &&
+    actor.source.build
+      ? [sheetOf(actor, actor.source.build, access)]
+      : [],
+  );
+}
+
+function sheetOf(player: Actor, build: CharacterBuild, access: ContentAccess) {
   const stats = deriveStats(player, access);
   const subclasses = build.levels
     .flatMap((level) => level.answers)
@@ -296,6 +310,7 @@ function sheet(rawState: unknown, access: ContentAccess) {
     detail: actionDetail(action, stats, access),
   });
   return {
+    id: player.id,
     title: player.name,
     subtitle: [
       `${nameOf(access, build.speciesId)} ${classes}`,
@@ -662,7 +677,7 @@ export const dndUi = {
   cue: dndCue,
   systemId: "dnd5.5e",
   about: "Compatible with fifth edition.",
-  sheet,
+  sheets,
   combat,
   describe,
   actorOf,
