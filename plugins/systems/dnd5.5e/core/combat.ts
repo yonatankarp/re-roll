@@ -15,14 +15,17 @@ import {
   distanceFeet,
   inArea,
   parseSquare,
+  placeOnMap,
   placeSides,
   rangeFeet,
   reachableSquares,
   squareKey,
+  wallKeys,
 } from "./grid.ts";
 import { concentrationDc, finalDamage, halved, rollD20 } from "./rules.ts";
 import type {
   Ability,
+  Battlemap,
   Damage,
   Duration,
   LeafEffect,
@@ -197,12 +200,18 @@ export function moveSquares(
     new Set(
       list.flatMap((item) => (item.position ? [squareKey(item.position)] : [])),
     );
+  const walls = state.combat?.walls ?? [];
   return reachableSquares(
     actor.position,
     speedLeft(actor, stats),
     grid,
-    keys(others.filter((item) => item.side !== actor.side && !isDown(item))),
-    keys(others),
+    new Set([
+      ...keys(
+        others.filter((item) => item.side !== actor.side && !isDown(item)),
+      ),
+      ...walls,
+    ]),
+    new Set([...keys(others), ...walls]),
   );
 }
 
@@ -429,6 +438,7 @@ export function startCombat(
       readonly count: number;
     }[];
     readonly forPartySize?: number | undefined;
+    readonly battlemap?: Battlemap | undefined;
   },
   context: Context,
   { canFlee, defeatContinues }: EncounterOptions,
@@ -468,10 +478,35 @@ export function startCombat(
   const order = rolled
     .sort((a, b) => b.total - a.total || a.position - b.position)
     .map((item) => item.id);
-  const { grid, positions } = placeSides(
-    party.map((actor) => actor.id),
-    monsters.map((actor) => actor.id),
-  );
+  const { battlemap } = encounter;
+  const walls = battlemap ? wallKeys(battlemap.walls) : [];
+  const toSquare = ([x, y]: readonly [number, number]): Square => ({ x, y });
+  const { grid, positions } = battlemap
+    ? ((): ReturnType<typeof placeSides> => {
+        const mapGrid = { width: battlemap.columns, height: battlemap.rows };
+        const taken = new Set(walls);
+        return {
+          grid: mapGrid,
+          positions: {
+            ...placeOnMap(
+              party.map((actor) => actor.id),
+              battlemap.party.map(toSquare),
+              mapGrid,
+              taken,
+            ),
+            ...placeOnMap(
+              monsters.map((actor) => actor.id),
+              battlemap.monsters.map(toSquare),
+              mapGrid,
+              taken,
+            ),
+          },
+        };
+      })()
+    : placeSides(
+        party.map((actor) => actor.id),
+        monsters.map((actor) => actor.id),
+      );
 
   return {
     events: [
@@ -482,6 +517,17 @@ export function startCombat(
         order,
         grid,
         positions,
+        ...(battlemap
+          ? {
+              walls: [...walls],
+              map: {
+                image: battlemap.image,
+                imageWidth: battlemap.imageWidth,
+                imageHeight: battlemap.imageHeight,
+                crop: battlemap.crop,
+              },
+            }
+          : {}),
         ...(canFlee ? { canFlee } : {}),
         ...(defeatContinues ? { defeatContinues } : {}),
       }),

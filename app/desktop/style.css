@@ -1202,3 +1202,103 @@ button:active {
     width: 28px;
   }
 }
+
+/* The game's menu: a small dropdown under the top bar. */
+.game-menu {
+  position: relative;
+}
+
+.game-menu > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid rgb(201 173 106 / 45%);
+  border-radius: 6px;
+  color: var(--leather-ink);
+  font-family: var(--font-caps);
+  letter-spacing: 0.03em;
+}
+
+.game-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.game-menu > summary::after {
+  content: "\25BE";
+  margin-left: 6px;
+}
+
+.game-menu-items {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 35%);
+  animation: rise 0.18s ease both;
+}
+
+.game-menu-items button,
+.top .game-menu-items button {
+  color: var(--ink);
+  background: var(--panel);
+  border-color: var(--line);
+  font-family: var(--font-body);
+  letter-spacing: 0;
+  text-align: left;
+}
+
+.game-menu-items .bar-actions button[aria-pressed="false"],
+.game-menu-items button[aria-pressed="false"] {
+  text-decoration: none;
+  opacity: 1;
+}
+
+.ending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* "Saved" fades in after each autosave, then away. */
+.saved {
+  align-self: center;
+  color: #c9ad6a;
+  font: 0.85rem var(--font-caps);
+  letter-spacing: 0.03em;
+  opacity: 0;
+}
+
+.saved.enter {
+  animation: saved-flash 1.8s ease both;
+}
+
+@keyframes saved-flash {
+  15%,
+  70% {
+    opacity: 1;
+  }
+}
+
+.continue {
+  margin-bottom: 28px;
+}
+
+.continue button {
+  width: 100%;
+  padding: 14px 18px;
+  font-size: 1.1rem;
+  border-color: var(--accent);
+  box-shadow:
+    inset 4px 0 0 var(--accent),
+    0 2px 8px rgb(60 40 10 / 20%);
+}

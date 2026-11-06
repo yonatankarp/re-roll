@@ -1,6 +1,6 @@
 import type { ContentAccess, SystemEvent } from "#sdk";
 import { EVENT_SCHEMAS, StateSchema } from "../core/state.ts";
-import { deriveStats } from "../core/stats.ts";
+import { deriveStats, evaluateFormula, scaledDice } from "../core/stats.ts";
 
 // Plain data for the combat board to animate, one per event worth showing. No DOM here, so tests can check it.
 
@@ -35,6 +35,13 @@ export type DndCue =
       readonly total: number;
       readonly ac: number;
       readonly hit: boolean;
+      readonly style: "melee" | "ranged" | "spell";
+      readonly damage: string; // the dice it rolls on a hit, such as "1d8+3"
+    }
+  | {
+      readonly kind: "deathSave";
+      readonly actor: string;
+      readonly natural: number;
     }
   | {
       readonly kind: "check";
@@ -65,6 +72,43 @@ export type DndCue =
 
 function hpOf(state: unknown, actor: string): number {
   return StateSchema.parse(state).actors[actor]?.hp ?? 0;
+}
+
+// How an attack looks: a weapon swing, a shot or a spell, and the damage dice it rolls.
+function attackLook(
+  state: unknown,
+  actorId: string,
+  label: string,
+  access: ContentAccess,
+): { readonly style: "melee" | "ranged" | "spell"; readonly damage: string } {
+  const actor = StateSchema.parse(state).actors[actorId];
+  if (!actor) return { style: "melee", damage: "" };
+  const stats = deriveStats(actor, access);
+  const action = stats.actions.find((item) => item.name === label);
+  if (!action) return { style: "melee", damage: "" };
+  const { targeting, resolution } = action.activation;
+  const range = "range" in targeting ? targeting.range : "touch";
+  const style =
+    action.spellLevel !== null
+      ? "spell"
+      : range === "touch" || range === "self" || range <= 10
+        ? "melee"
+        : "ranged";
+  const damage =
+    "damage" in resolution
+      ? resolution.damage
+          .map(({ amount }) => {
+            const dice = scaledDice(amount, stats.scaling);
+            const bonus = amount.bonus
+              ? evaluateFormula(amount.bonus, stats)
+              : 0;
+            if (!dice) return String(bonus);
+            if (bonus === 0) return dice;
+            return `${dice}${bonus > 0 ? "+" : ""}${String(bonus)}`;
+          })
+          .join(" + ")
+      : "";
+  return { style, damage };
 }
 
 export function dndCue(
@@ -140,7 +184,14 @@ export function dndCue(
             total: roll.total,
             ac: roll.target,
             hit: roll.success,
+            ...attackLook(after, roll.actor, roll.label, access),
           };
+    }
+    case "dnd5.5e:deathSaveRolled": {
+      const save = EVENT_SCHEMAS["dnd5.5e:deathSaveRolled"].parse(
+        event.payload,
+      );
+      return { kind: "deathSave", actor: save.actor, natural: save.natural };
     }
     case "dnd5.5e:damaged": {
       const hurt = EVENT_SCHEMAS["dnd5.5e:damaged"].parse(event.payload);

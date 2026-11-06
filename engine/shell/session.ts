@@ -51,6 +51,8 @@ export interface GameView {
   readonly endingName: string | null;
   readonly optionGroups: readonly OptionGroup[];
   readonly monsterArt: Readonly<Record<string, string>>; // by combatant id
+  readonly tokenArt: Readonly<Record<string, TokenArt>>; // by combatant id, with its face
+  readonly adventureRoot: string; // where the adventure's own pictures are
   readonly decision: Decision | null;
   readonly combat: CombatView | null;
   readonly sheets: readonly SheetView[]; // the player's first
@@ -111,9 +113,24 @@ const SaveInfoSchema = z.object({
   log: z.array(z.unknown()),
 });
 const SaveTimesSchema = z.record(z.string(), z.string());
+const FaceSchema = z.object({
+  x: z.number(), // the face's centre, as a share of the picture's width
+  y: z.number(), // and of its height
+  size: z.number(), // the face's width, as a share of the picture's width
+});
 const ArtIndexSchema = z.array(
-  z.object({ file: z.string(), monster: z.string().optional() }),
+  z.object({
+    file: z.string(),
+    monster: z.string().optional(),
+    subjects: z.array(z.string()).optional(), // other names it can stand for, such as "dwarf cleric"
+    face: FaceSchema.optional(),
+  }),
 );
+
+export interface TokenArt {
+  readonly path: string;
+  readonly face?: z.infer<typeof FaceSchema>;
+}
 const BookIndexSchema = z.object({
   title: z.string(),
   entries: z.array(z.object({ path: z.array(z.string()), file: z.string() })),
@@ -122,6 +139,12 @@ const BookIndexSchema = z.object({
 // "Goblin Warrior", "goblin-warrior" and "srd52:monster/goblin-warrior" all find the same picture.
 function artKey(name: string): string {
   return (name.split("/").pop() ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function stableIndex(id: string, count: number): number {
+  let hash = 0;
+  for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return count > 0 ? hash % count : 0;
 }
 
 function endingName(id: string): string {
@@ -203,10 +226,13 @@ export function createGame({
 }: GameDependencies) {
   let current: Current | null = null;
   let monsterArt: ReadonlyMap<string, string> = new Map();
+  // Every picture each name can use, so party members who share a look don't all share one face.
+  let tokenArt: ReadonlyMap<string, readonly TokenArt[]> = new Map();
 
   // Art is optional and still being extracted, so a bad index only loses its pictures.
   const loadArt = async (): Promise<void> => {
     const found = new Map<string, string>();
+    const tokens = new Map<string, TokenArt[]>();
     try {
       const entries = await storage.list(ASSETS);
       for (const { path } of entries) {
@@ -215,9 +241,16 @@ export function createGame({
         const parsed = ArtIndexSchema.safeParse(
           JSON.parse((await storage.read(path)) ?? "null"),
         );
-        for (const { file, monster } of parsed.data ?? []) {
-          if (monster && BARE_NAME.test(file)) {
-            found.set(artKey(monster), `${folder}/${file}`);
+        for (const { file, monster, subjects, face } of parsed.data ?? []) {
+          if (!BARE_NAME.test(file)) continue;
+          const art = { path: `${folder}/${file}`, ...(face ? { face } : {}) };
+          if (monster) found.set(artKey(monster), art.path);
+          for (const name of [
+            ...(monster ? [monster] : []),
+            ...(subjects ?? []),
+          ]) {
+            const key = artKey(name);
+            tokens.set(key, [...(tokens.get(key) ?? []), art]);
           }
         }
       }
@@ -225,6 +258,7 @@ export function createGame({
       // Nothing to show is the same as no art at all.
     }
     monsterArt = found;
+    tokenArt = tokens;
   };
 
   const readSaveTimes = async (): Promise<Record<string, string>> => {
@@ -403,6 +437,11 @@ export function createGame({
       return imageUrl ? imageUrl(path) : null;
     },
 
+    // The same adventure again from its first scene, with fresh dice. The old run's autosave stays.
+    async restart(seed: string): Promise<void> {
+      await this.start(active().adventure, seed);
+    },
+
     async start(adventure: string, seed: string): Promise<void> {
       const { registry, ui, run, root } = await open(adventure);
       const started = startRun(run, seed);
@@ -493,9 +532,19 @@ export function createGame({
       const decision = pendingDecision(run, state);
       const combat = ui.combat(state.system, run);
       const pictures: Record<string, string> = {};
+      const tokens: Record<string, TokenArt> = {};
       for (const actor of combat?.combatants ?? []) {
         const art = actor.monster && monsterArt.get(artKey(actor.monster));
         if (art) pictures[actor.id] = art;
+        // The first of its looks with a picture, picked by id among several, so it's the same every time.
+        for (const look of actor.looks ?? []) {
+          const options = tokenArt.get(artKey(look)) ?? [];
+          const chosen = options[stableIndex(actor.id, options.length)];
+          if (chosen) {
+            tokens[actor.id] = chosen;
+            break;
+          }
+        }
       }
       return {
         title: run.adventure.title,
@@ -513,6 +562,8 @@ export function createGame({
           ? ui.optionGroups(decision, state.system, run)
           : [],
         monsterArt: pictures,
+        tokenArt: tokens,
+        adventureRoot: root,
         combat,
         sheets: ui.sheets(state.system, run),
         log: [...lines],

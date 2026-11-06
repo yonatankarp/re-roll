@@ -156,6 +156,7 @@ export function cueSound(cue: DndCue): void {
       if (!cue.hit) missSound(0.38);
       return;
     case "check":
+    case "deathSave":
       diceSound();
       return;
     case "damage":

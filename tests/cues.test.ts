@@ -49,6 +49,8 @@ describe("combat board cues", () => {
       total: 21,
       ac: 15,
       hit: true,
+      style: "melee", // the attacker isn't in this state, so it falls back to a swing with no dice
+      damage: "",
     });
 
     const damage = dndCue(

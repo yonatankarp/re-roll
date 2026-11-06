@@ -733,8 +733,104 @@ export const PregenSchema = ContentEntrySchema.extend({
 }).strict();
 export type Pregen = z.infer<typeof PregenSchema>;
 
+const MapSquareSchema = z.tuple([
+  z.number().int().min(0),
+  z.number().int().min(0),
+]);
+
+// A fight on a book's battle map: the part of the picture it happens on, cut to whole squares,
+// with the walls and where each side starts.
+export const BattlemapSchema = z
+  .strictObject({
+    image: z.string().min(1), // inside the adventure plugin, such as assets/p048-79.png
+    imageWidth: z.number().int().min(1),
+    imageHeight: z.number().int().min(1),
+    crop: z.strictObject({
+      x: z.number().int().min(0),
+      y: z.number().int().min(0),
+      width: z.number().int().min(1),
+      height: z.number().int().min(1),
+    }),
+    columns: z.number().int().min(2).max(60),
+    rows: z.number().int().min(2).max(60),
+    walls: z.array(z.string()), // one per row: "#" blocked, "." open
+    party: z.array(MapSquareSchema).min(1),
+    monsters: z.array(MapSquareSchema).min(1),
+  })
+  .superRefine((map, context) => {
+    const fail = (message: string): void => {
+      context.addIssue({ code: "custom", message });
+    };
+    const { crop } = map;
+    if (
+      crop.x + crop.width > map.imageWidth ||
+      crop.y + crop.height > map.imageHeight
+    ) {
+      fail("The crop runs past the edge of the image");
+    }
+    if (map.walls.length !== map.rows) {
+      fail(
+        `walls has ${String(map.walls.length)} rows, not ${String(map.rows)}`,
+      );
+    }
+    map.walls.forEach((row, index) => {
+      if (row.length !== map.columns) {
+        fail(
+          `walls row ${String(index)} has ${String(row.length)} squares, not ${String(map.columns)}`,
+        );
+      }
+    });
+    const open = ([x, y]: readonly [number, number]): boolean =>
+      x < map.columns && y < map.rows && map.walls[y]?.[x] !== "#";
+    for (const [side, squares] of [
+      ["party", map.party],
+      ["monsters", map.monsters],
+    ] as const) {
+      for (const square of squares) {
+        if (!open(square)) {
+          fail(
+            `A ${side} start, ${square.join(",")}, is off the map or in a wall`,
+          );
+        }
+      }
+    }
+    // The party must be able to walk to within reach of a monster.
+    const [first] = map.party;
+    if (!first || !open(first)) return;
+    const reached = new Set([first.join(",")]);
+    const queue: (readonly [number, number])[] = [first];
+    for (let next = queue.shift(); next; next = queue.shift()) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        for (let dy = -1; dy <= 1; dy += 1) {
+          const square = [next[0] + dx, next[1] + dy] as const;
+          const key = square.join(",");
+          if (
+            square[0] < 0 ||
+            square[1] < 0 ||
+            reached.has(key) ||
+            !open(square)
+          ) {
+            continue;
+          }
+          reached.add(key);
+          queue.push(square);
+        }
+      }
+    }
+    const reachable = map.monsters.some(([x, y]) =>
+      [-1, 0, 1].some((dx) =>
+        [-1, 0, 1].some((dy) =>
+          reached.has(`${String(x + dx)},${String(y + dy)}`),
+        ),
+      ),
+    );
+    if (!reachable) fail("The party can't walk to any monster's start");
+  });
+export type Battlemap = z.infer<typeof BattlemapSchema>;
+
 export const EncounterSchema = z.strictObject({
   id: z.string().min(1),
+  battlemap: BattlemapSchema.optional(),
   monsters: z
     .array(
       z.strictObject({

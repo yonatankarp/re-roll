@@ -2,9 +2,12 @@ import { testAdventure } from "../../engine/tools/bot.ts";
 import { listAdventures, loadAdventure } from "./load-adventure.ts";
 
 const RUNS = Number(process.argv[2] ?? 500);
+const ONLY = process.argv[3]; // one adventure's id, or all of them
 const MAX_DECISIONS = 500;
 
-for (const adventure of await listAdventures()) {
+for (const adventure of (await listAdventures()).filter(
+  (id) => ONLY === undefined || id === ONLY,
+)) {
   const { run } = await loadAdventure(adventure);
   const report = testAdventure(run, {
     runs: RUNS,

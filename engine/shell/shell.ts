@@ -44,6 +44,7 @@ let soundOn = ((): boolean => {
 
 function soundToggle(): HTMLButtonElement {
   const node = button("Sound", () => {
+    node.textContent = soundOn ? "Sound: off" : "Sound: on";
     soundOn = !soundOn;
     node.setAttribute("aria-pressed", String(soundOn));
     try {
@@ -53,6 +54,7 @@ function soundToggle(): HTMLButtonElement {
     }
   });
   node.setAttribute("aria-pressed", String(soundOn));
+  node.textContent = soundOn ? "Sound: on" : "Sound: off";
   return node;
 }
 
@@ -322,6 +324,14 @@ export function mountShell(
     notice.classList.toggle("error", isError);
   };
 
+  // A click anywhere outside the game's menu closes it, as a menu does.
+  let currentMenu: HTMLDetailsElement | null = null;
+  document.addEventListener("click", (event) => {
+    if (currentMenu?.open && !currentMenu.contains(event.target as Node)) {
+      currentMenu.open = false;
+    }
+  });
+
   // Redrawing removes the button that had focus, so keyboard play needs it put somewhere new.
   let focusNext: HTMLElement | null = null;
 
@@ -445,10 +455,28 @@ export function mountShell(
       return el("div", { class: "row" }, load, remove);
     };
 
+    // Saves come newest first, so the first is the game to carry on with.
+    const [newest] = saves;
+    const carryOn = newest
+      ? [
+          el(
+            "section",
+            { class: "continue" },
+            el("h2", { text: "Continue" }),
+            button(newest.label, () => {
+              act(async () => {
+                await game.load(newest.path);
+                showGame();
+              });
+            }),
+          ),
+        ]
+      : [];
     screen.replaceChildren(
       el(
         "section",
         { class: "menu" },
+        ...carryOn,
         heading,
         filter,
         ...groups,
@@ -647,21 +675,57 @@ export function mountShell(
       log.scrollTop = log.scrollHeight;
     });
 
-    actions.replaceChildren(
-      hud,
-      journal,
-      soundToggle(),
-      button("Save", () => {
-        act(async () => {
-          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-          const path = await game.save(stamp);
-          say(`Saved as ${path}.`);
-        });
-      }),
-      button("Menu", () => {
-        act(showMenu);
-      }),
+    const restart = (): void => {
+      act(async () => {
+        await game.restart(crypto.randomUUID().slice(0, 8));
+        showGame();
+      });
+    };
+    // Restarting throws away progress since the last save, so it takes a second press.
+    let restartArmed = false;
+    const restartButton = button("Restart adventure", () => {
+      if (!restartArmed) {
+        restartArmed = true;
+        restartButton.textContent = "Really restart?";
+        return;
+      }
+      restart();
+    });
+    const gameMenu = el(
+      "details",
+      { class: "game-menu" },
+      el("summary", { text: "Menu" }),
+      el(
+        "div",
+        { class: "game-menu-items" },
+        button("Save game", () => {
+          gameMenu.open = false;
+          act(async () => {
+            const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+            const path = await game.save(stamp);
+            say(`Saved as ${path}.`);
+          });
+        }),
+        restartButton,
+        soundToggle(),
+        button("Main menu", () => {
+          act(showMenu);
+        }),
+      ),
     );
+    gameMenu.addEventListener("toggle", () => {
+      restartArmed = false;
+      restartButton.textContent = "Restart adventure";
+    });
+    currentMenu = gameMenu;
+    // Every choice is saved as it's made; this says so without getting in the way.
+    const saved = el("span", { class: "saved", text: "✓ Saved" });
+    saved.setAttribute("role", "status");
+    const flashSaved = (): void => {
+      if (game.view().warnings.length > 0) return; // a failed autosave shows its own warning
+      enter(saved);
+    };
+    actions.replaceChildren(saved, hud, journal, gameMenu);
     const stage = el(
       "main",
       { class: "play" },
@@ -692,6 +756,7 @@ export function mountShell(
             act(async () => {
               for (const optionId of optionIds) await game.answer(optionId);
               draw();
+              flashSaved();
               // Played on the map, so the page stays put rather than jumping to the buttons.
               focusNext = null;
             });
@@ -703,6 +768,8 @@ export function mountShell(
         decision: view.decision,
         combat: view.combat,
         art: view.monsterArt,
+        tokens: view.tokenArt,
+        assetRoot: view.adventureRoot,
         sceneArt: view.sceneArt,
         cues: view.cues.slice(cuesShown ?? view.cues.length),
       });
@@ -732,9 +799,14 @@ export function mountShell(
           ? [
               endTitle,
               ...(end.text ? [el("p", { text: end.text })] : []),
-              button("Back to the menu", () => {
-                act(showMenu);
-              }),
+              el(
+                "div",
+                { class: "ending-actions" },
+                button("Play again", restart),
+                button("Back to the menu", () => {
+                  act(showMenu);
+                }),
+              ),
             ]
           : []),
       );
@@ -779,6 +851,7 @@ export function mountShell(
             act(async () => {
               await game.answer(option.id);
               draw();
+              flashSaved();
             });
           }),
         );

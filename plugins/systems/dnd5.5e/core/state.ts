@@ -43,6 +43,18 @@ const GridSchema = z.strictObject({
   width: z.number().int(),
   height: z.number().int(),
 });
+// The picture a fight is drawn on, when its encounter has a battle map.
+const FightMapSchema = z.strictObject({
+  image: z.string(),
+  imageWidth: z.number().int(),
+  imageHeight: z.number().int(),
+  crop: z.strictObject({
+    x: z.number().int(),
+    y: z.number().int(),
+    width: z.number().int(),
+    height: z.number().int(),
+  }),
+});
 
 const ActorSchema = z.strictObject({
   id: z.string(),
@@ -94,6 +106,8 @@ export const StateSchema = z.strictObject({
       canFlee: z.boolean().optional(),
       defeatContinues: z.boolean().optional(),
       grid: GridSchema.optional(),
+      walls: z.array(z.string()).optional(), // squares no one can enter, as "x,y"
+      map: FightMapSchema.optional(),
     })
     .nullable(),
 });
@@ -129,6 +143,8 @@ const CombatStartedSchema = z.strictObject({
   defeatContinues: z.boolean().optional(),
   grid: GridSchema.optional(),
   positions: z.record(z.string(), SquareSchema).optional(),
+  walls: z.array(z.string()).optional(),
+  map: FightMapSchema.optional(),
 });
 const MovedSchema = z.strictObject({
   actor: z.string(),
@@ -512,6 +528,8 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
           ...(data.canFlee ? { canFlee: true } : {}),
           ...(data.defeatContinues ? { defeatContinues: true } : {}),
           ...(data.grid ? { grid: data.grid } : {}),
+          ...(data.walls ? { walls: data.walls } : {}),
+          ...(data.map ? { map: data.map } : {}),
         },
       };
     }

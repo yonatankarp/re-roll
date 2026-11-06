@@ -54,6 +54,7 @@ export interface CombatantView {
   readonly concentration: string | null;
   readonly status: string | null; // such as dying or dead
   readonly monster: string | null; // the name to find its picture by
+  readonly looks?: readonly string[]; // names to find its token picture by, best first
 }
 
 export interface CombatView {
@@ -75,6 +76,10 @@ export interface BoardUpdate {
   readonly decision: Decision | null; // the board may answer it, as the option list does
   readonly combat: CombatView | null;
   readonly art: Readonly<Record<string, string>>; // by combatant id
+  readonly tokens: Readonly<
+    Record<string, { readonly path: string; readonly face?: unknown }>
+  >; // by combatant id, with where the face is
+  readonly assetRoot: string; // where the adventure's own pictures are, such as a battle map
   readonly sceneArt: string | null;
   readonly cues: readonly unknown[]; // only those since the last update
 }

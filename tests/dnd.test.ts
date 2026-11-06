@@ -30,7 +30,10 @@ import {
   startCombat,
   effectEnds,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
-import { ResolutionSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import {
+  BattlemapSchema,
+  ResolutionSchema,
+} from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import { doesSomething } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import {
   concentrationDc,
@@ -641,6 +644,74 @@ describe("life and death in combat", () => {
     expect(count(1, 8)).toBe(1); // always at least one
     expect(count(3, 2)).toBe(3);
     expect(count(2, 1)).toBe(4);
+  });
+
+  it("starts a fight on its battle map, with walls that block the way", async () => {
+    const run = await goblin();
+    const state = fightState(run);
+    const battlemap = BattlemapSchema.parse({
+      image: "assets/map.png",
+      imageWidth: 500,
+      imageHeight: 400,
+      crop: { x: 0, y: 0, width: 500, height: 400 },
+      columns: 5,
+      rows: 4,
+      walls: ["..#..", "..#..", "..#..", "....."],
+      party: [[0, 0]],
+      monsters: [[4, 0]],
+    });
+    const { events = [] } = startCombat(
+      {
+        id: "e",
+        monsters: [{ monster: "srd52:monster/goblin-warrior", count: 2 }],
+        battlemap,
+      },
+      makeContext(run, state),
+      { canFlee: false, defeatContinues: false },
+    );
+    const started = events.find(
+      (event) => event.kind === `${NS}:combatStarted`,
+    );
+    if (!started || !("payload" in started)) throw new Error("No combat");
+    const payload = started.payload as {
+      positions: Record<string, { x: number; y: number }>;
+      walls: readonly string[];
+      grid: { width: number; height: number };
+    };
+    expect(payload.grid).toEqual({ width: 5, height: 4 });
+    expect(payload.positions[PLAYER_ACTOR]).toEqual({ x: 0, y: 0 });
+    expect(payload.walls).toContain("2,1");
+    // Everyone gets a square of their own, and nobody stands in a wall.
+    const squares = Object.values(payload.positions).map(
+      ({ x, y }) => `${String(x)},${String(y)}`,
+    );
+    expect(new Set(squares).size).toBe(squares.length);
+    for (const square of squares) expect(payload.walls).not.toContain(square);
+  });
+
+  it("rejects a battle map that starts someone in a wall or can't be crossed", () => {
+    const map = {
+      image: "assets/map.png",
+      imageWidth: 300,
+      imageHeight: 300,
+      crop: { x: 0, y: 0, width: 300, height: 300 },
+      columns: 3,
+      rows: 3,
+      walls: ["...", "###", "..."],
+      party: [[0, 0]],
+      monsters: [[0, 2]],
+    };
+    expect(BattlemapSchema.safeParse(map).success).toBe(false); // the wall cuts them apart
+    expect(
+      BattlemapSchema.safeParse({ ...map, walls: ["...", "##.", "..."] })
+        .success,
+    ).toBe(true);
+    expect(
+      BattlemapSchema.safeParse({
+        ...map,
+        walls: ["#..", "...", "..."],
+      }).success,
+    ).toBe(false); // the party starts in a wall
   });
 
   it("heals with hit dice on a short rest, which run out", async () => {

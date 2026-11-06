@@ -157,3 +157,63 @@ export function inArea(
     }
   }
 }
+
+// A battle map's walls, from one string per row: "#" is blocked, anything else is open.
+export function wallKeys(rows: readonly string[]): readonly string[] {
+  return rows.flatMap((row, y) =>
+    row
+      .split("") // map rows are plain ASCII
+      .flatMap((cell, x) => (cell === "#" ? [squareKey({ x, y })] : [])),
+  );
+}
+
+// Puts each creature on its listed square, and any extra on the nearest open square to the last one listed.
+export function placeOnMap(
+  ids: readonly string[],
+  starts: readonly Square[],
+  grid: Grid,
+  taken: Set<string>,
+): Record<string, Square> {
+  const positions: Record<string, Square> = {};
+  for (const [index, id] of ids.entries()) {
+    const listed = starts[index];
+    const square =
+      listed && !taken.has(squareKey(listed))
+        ? listed
+        : nearestOpen(starts.at(-1) ?? { x: 0, y: 0 }, grid, taken);
+    if (!square) continue; // shortcut: a creature with no room left stays off the map, and can reach everyone
+    positions[id] = square;
+    taken.add(squareKey(square));
+  }
+  return positions;
+}
+
+function nearestOpen(
+  from: Square,
+  grid: Grid,
+  taken: ReadonlySet<string>,
+): Square | null {
+  const seen = new Set([squareKey(from)]);
+  const queue = [from];
+  for (let next = queue.shift(); next; next = queue.shift()) {
+    if (!taken.has(squareKey(next))) return next;
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        const square = { x: next.x + dx, y: next.y + dy };
+        const key = squareKey(square);
+        if (
+          square.x < 0 ||
+          square.y < 0 ||
+          square.x >= grid.width ||
+          square.y >= grid.height ||
+          seen.has(key)
+        ) {
+          continue;
+        }
+        seen.add(key);
+        queue.push(square);
+      }
+    }
+  }
+  return null;
+}

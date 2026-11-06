@@ -1,7 +1,7 @@
 import { PLAYER_ACTOR } from "#sdk";
 import { StateSchema } from "../core/state.ts";
 import type { DndCue } from "./cues.ts";
-import { cueSound } from "./sound.ts";
+import { cueSound, diceSound } from "./sound.ts";
 
 // The combat board: tokens on a 5-foot grid over the scene's picture, animated from cues one at a time.
 // Clicking a token or a square, or moving a cursor with the arrow keys and pressing Enter, answers the
@@ -37,8 +37,43 @@ interface BoardUpdate {
     readonly board?: unknown; // from this plugin's combat view: where the player can move
   } | null;
   readonly art: Readonly<Record<string, string>>;
+  readonly tokens: Readonly<Record<string, TokenArt>>;
+  readonly assetRoot: string;
   readonly sceneArt: string | null;
   readonly cues: readonly unknown[];
+}
+
+interface Face {
+  readonly x: number;
+  readonly y: number;
+  readonly size: number;
+}
+
+interface TokenArt {
+  readonly path: string;
+  readonly face?: unknown; // a Face, from the picture index
+}
+
+interface FightMap {
+  readonly image: string;
+  readonly imageWidth: number;
+  readonly imageHeight: number;
+  readonly crop: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
+}
+
+function faceOf(art: TokenArt): Face | null {
+  const face = art.face as Partial<Face> | undefined;
+  return typeof face?.x === "number" &&
+    typeof face.y === "number" &&
+    typeof face.size === "number" &&
+    face.size > 0
+    ? (face as Face)
+    : null;
 }
 
 interface BoardHost {
@@ -65,7 +100,7 @@ const PACE: Record<DndCue["kind"], number> = {
   start: 1100,
   end: 1300,
   turn: 250,
-  attack: 900,
+  attack: 1100,
   check: 1300,
   damage: 650,
   heal: 650,
@@ -73,7 +108,11 @@ const PACE: Record<DndCue["kind"], number> = {
   status: 550,
   cast: 450,
   move: 450,
+  deathSave: 900,
 };
+
+// A d20 drawn flat: an outline, its top face and the edges that meet there.
+const D20 = `<svg viewBox="0 0 100 100" aria-hidden="true"><polygon class="d20-body" points="50,3 93,27 93,73 50,97 7,73 7,27"/><polygon class="d20-face" points="50,22 76,66 24,66"/><path class="d20-edge" d="M50,3 50,22 M93,27 76,66 M93,73 76,66 M50,97 50,66 M7,73 24,66 M7,27 24,66 M50,22 93,27 M50,22 7,27 M24,66 50,97 76,66"/></svg>`;
 
 const SQUARE = /^(\d+),(\d+)$/; // a move option's id
 const SEPARATOR = "|"; // between an option id's action, target and slot
@@ -92,6 +131,7 @@ interface BoardExtra {
   readonly moves?: readonly Move[];
   readonly reach?: Readonly<Record<string, number>>; // melee reach in feet, by creature
   // The squares an area spell would cover, by its option id without the slot level.
+  readonly map?: FightMap | null; // the book's battle map, when the encounter has one
   readonly areas?: Readonly<
     Record<string, readonly (readonly [number, number])[]>
   >;
@@ -127,6 +167,13 @@ function sideOf(actor: Combatant): "enemy" | "party" {
   return actor.side.toLowerCase() === "enemy" ? "enemy" : "party";
 }
 
+function artFor(update: BoardUpdate, id: string): TokenArt | null {
+  const token = update.tokens[id];
+  if (token) return token;
+  const path = update.art[id];
+  return path ? { path } : null;
+}
+
 function initials(name: string): string {
   return name
     .split(/\s+/)
@@ -154,6 +201,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   const field = el("div", "dnd-field");
   const banner = el("div", "dnd-banner");
   const hint = el("div", "dnd-hint", "Click to skip");
+  const caption = el("div", "dnd-caption"); // who is doing what, during an attack
   const cells = el("div", "dnd-cells");
   const SVG = "http://www.w3.org/2000/svg";
   const route = document.createElementNS(SVG, "svg");
@@ -167,7 +215,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   const menu = el("div", "dnd-menu");
   menu.hidden = true;
   field.append(reachZone, blast, cells, route, cursorBox);
-  board.append(field, banner, hint, menu, said);
+  board.append(field, banner, caption, hint, menu, said);
   slot.append(board);
   slot.hidden = true;
 
@@ -189,6 +237,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   // While cues play, a click skips them. Otherwise it picks a token or a square.
   board.addEventListener("click", (event) => {
     if (playing) {
+      if (throwNow) {
+        throwNow();
+        return;
+      }
       skipping = true;
       wake?.();
       return;
@@ -263,18 +315,31 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     token.node.classList.toggle("down", hp <= 0);
   };
 
-  const setArt = (token: Token, path: string | null): void => {
+  // A picture fills the token; with a known face, the face fills it instead of the top of the picture.
+  const setArt = (token: Token, art: TokenArt | null): void => {
+    const path = art?.path ?? null;
     if (path === token.art) return;
     token.art = path;
-    if (!path) return;
+    if (!art || !path) return;
+    const face = faceOf(art);
     void Promise.resolve(host.imageUrl(path)).then((url) => {
       if (!url || token.art !== path) return;
       const image = document.createElement("img");
       image.alt = "";
-      image.src = url;
       image.addEventListener("error", () => {
         image.remove();
       });
+      if (face) {
+        image.classList.add("framed");
+        image.addEventListener("load", () => {
+          const wide = 100 / face.size; // the picture's width, as a share of the token's
+          const tall = (wide * image.naturalHeight) / image.naturalWidth;
+          image.style.width = `${String(wide)}%`;
+          image.style.left = `${String(50 - face.x * wide)}%`;
+          image.style.top = `${String(50 - face.y * tall)}%`;
+        });
+      }
+      image.src = url;
       token.disc.replaceChildren(image);
     });
   };
@@ -324,10 +389,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   // On the grid when there is one; otherwise enemies across the top and the party along the bottom.
   const layout = (): void => {
     if (grid) {
-      field.style.setProperty(
-        "--sq",
-        `${String(field.clientWidth / grid.width)}px`,
-      );
+      const square = field.clientWidth / grid.width;
+      field.style.setProperty("--sq", `${String(square)}px`);
+      // Names under small tokens run into each other; hovering a token still shows its name.
+      field.classList.toggle("tight", square < 60);
       field.style.aspectRatio = `${String(grid.width)} / ${String(grid.height)}`;
       field.style.setProperty("--cols", String(grid.width));
       field.style.setProperty("--rows", String(grid.height));
@@ -651,6 +716,11 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       return;
     }
     if (event.target !== board) return;
+    if (playing && throwNow && (event.key === "Enter" || event.key === " ")) {
+      throwNow();
+      event.preventDefault();
+      return;
+    }
     if (
       playing &&
       (event.key === "Enter" || event.key === " " || event.key === "Escape")
@@ -684,11 +754,25 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
 
   // Values, arrivals and removals wait until the queue is done, so they don't spoil what's playing.
   const sync = (update: BoardUpdate, settle: boolean): void => {
-    if (update.sceneArt !== sceneArt) {
-      sceneArt = update.sceneArt;
+    // The book's battle map when the fight has one, cut to the fight's squares; otherwise the scene's picture.
+    const map = extraOf(update).map ?? null;
+    const backdrop = map ? `${update.assetRoot}/${map.image}` : update.sceneArt;
+    if (backdrop !== sceneArt) {
+      sceneArt = backdrop;
       field.style.backgroundImage = "";
-      if (sceneArt) {
-        const path = sceneArt;
+      field.classList.toggle("mapped", map !== null);
+      if (map) {
+        const { crop, imageWidth, imageHeight } = map;
+        const across = (start: number, size: number, whole: number): string =>
+          whole > size ? `${String((start / (whole - size)) * 100)}%` : "0%";
+        field.style.backgroundSize = `${String((imageWidth / crop.width) * 100)}% ${String((imageHeight / crop.height) * 100)}%`;
+        field.style.backgroundPosition = `${across(crop.x, crop.width, imageWidth)} ${across(crop.y, crop.height, imageHeight)}`;
+      } else {
+        field.style.backgroundSize = "";
+        field.style.backgroundPosition = "";
+      }
+      if (backdrop) {
+        const path = backdrop;
         void Promise.resolve(host.imageUrl(path)).then((url) => {
           if (url && sceneArt === path) {
             field.style.backgroundImage = `url("${url}")`;
@@ -706,7 +790,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       // While cues play, the start cue brings everyone in as the fight began.
       if (isNew && !settle) continue;
       const token = tokenFor(actor);
-      setArt(token, update.art[actor.id] ?? null);
+      setArt(token, artFor(update, actor.id));
       token.maxHp = actor.maxHp;
       if (settle) {
         token.x = actors[actor.id]?.position?.x ?? null;
@@ -748,38 +832,177 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     banner.classList.remove("shown");
   };
 
-  // A d20 that tumbles through numbers before landing on the roll.
-  const rollDie = async (
-    anchor: HTMLElement,
+  // The player throws their own dice: the die waits for a click, Enter or Space.
+  let throwNow: (() => void) | null = null;
+  const waitForThrow = (prompt: HTMLElement): Promise<void> =>
+    fast()
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+          prompt.classList.add("waiting");
+          board.classList.add("awaiting");
+          throwNow = () => {
+            throwNow = null;
+            prompt.classList.remove("waiting");
+            board.classList.remove("awaiting");
+            if (host.sound?.() === true) diceSound();
+            resolve();
+          };
+        });
+
+  // Where a token's centre is, in the board's own pixels.
+  const centreOf = (node: HTMLElement): { x: number; y: number } => {
+    const box = board.getBoundingClientRect();
+    const at = node.getBoundingClientRect();
+    return {
+      x: at.left - box.left + at.width / 2,
+      y: at.top - box.top + at.height / 2,
+    };
+  };
+
+  // A d20 tumbles from one point to another and lands on the roll. Yours waits for you to throw it.
+  const throwD20 = async (
+    start: { x: number; y: number },
+    to: { x: number; y: number },
     natural: number,
-    caption: string,
-    big: boolean,
+    note: string,
+    mine: boolean,
   ): Promise<HTMLElement> => {
-    const die = el("div", big ? "dnd-die big" : "dnd-die");
-    const face = el("span", "", "20");
-    die.append(face, el("small", "", caption));
-    anchor.append(die);
+    let from = start;
+    const die = el("div", mine ? "dnd-throw mine" : "dnd-throw");
+    die.innerHTML = D20;
+    const face = el("span", "dnd-throw-number", "20");
+    const label = el("small", "dnd-throw-note", mine ? "Click to roll" : "");
+    die.append(face, label);
+    board.append(die);
+    const place = (point: { x: number; y: number }): void => {
+      die.style.left = `${String(point.x)}px`;
+      die.style.top = `${String(point.y)}px`;
+    };
+    if (mine && !fast()) {
+      const box = board.getBoundingClientRect();
+      from = { x: box.width / 2, y: box.height / 2 };
+      place(from);
+      await waitForThrow(die);
+      label.textContent = "";
+    }
+    place(to);
     if (!fast()) {
-      die.animate(
+      const dx = from.x - to.x;
+      const dy = from.y - to.y;
+      const at = (x: number, y: number, turn: number, size: number): string =>
+        `translate(calc(-50% + ${String(x)}px), calc(-50% + ${String(y)}px)) rotate(${String(turn)}deg) scale(${String(size)})`;
+      const tumble = die.animate(
         [
-          { transform: "translate(-50%, 0) rotate(-200deg) scale(0.3)" },
-          { transform: "translate(-50%, 0) rotate(0) scale(1)" },
+          { transform: at(dx, dy, 0, 1.3) },
+          { transform: at(dx * 0.45, dy * 0.45 - 60, 400, 1.15), offset: 0.45 },
+          { transform: at(dx * 0.12, dy * 0.12, 640, 1), offset: 0.8 },
+          { transform: at(0, -14, 700, 1), offset: 0.9 },
+          { transform: at(0, 0, 720, 1) },
         ],
-        { duration: 450, easing: "cubic-bezier(.2,1.4,.4,1)" },
+        { duration: mine ? 1100 : 750, easing: "cubic-bezier(.3,.7,.4,1)" },
       );
-      for (let tick = 0; tick < 6 && !fast(); tick += 1) {
+      for (let tick = 0; tick < (mine ? 14 : 8) && !fast(); tick += 1) {
         face.textContent = String(1 + Math.floor(Math.random() * 20));
-        await wait(55);
+        await wait(mine ? 70 : 80);
       }
+      await tumble.finished.catch(() => undefined);
     }
     face.textContent = String(natural);
+    label.textContent = note;
     die.classList.toggle("crit", natural === 20);
     die.classList.toggle("fumble", natural === 1);
     return die;
   };
 
+  // A swing at the target, a shot flying to it, or a spell streaking to it.
+  const strike = async (
+    attacker: Token,
+    target: Token,
+    style: "melee" | "ranged" | "spell",
+  ): Promise<void> => {
+    if (fast()) return;
+    const from = centreOf(attacker.node);
+    const to = centreOf(target.node);
+    if (style === "melee") {
+      const dx = (to.x - from.x) * 0.45;
+      const dy = (to.y - from.y) * 0.45;
+      attacker.node.animate(
+        [
+          { transform: "translate(-50%, -50%)" },
+          {
+            transform: `translate(calc(-50% + ${String(dx)}px), calc(-50% + ${String(dy)}px)) scale(1.12)`,
+          },
+          { transform: "translate(-50%, -50%)" },
+        ],
+        { duration: 380, easing: "ease-in-out" },
+      );
+      await wait(170);
+      const slash = el("div", "dnd-slash");
+      slash.style.left = `${String(to.x)}px`;
+      slash.style.top = `${String(to.y)}px`;
+      board.append(slash);
+      await slash
+        .animate(
+          [
+            {
+              transform: "translate(-50%, -50%) rotate(-70deg) scale(0.6)",
+              opacity: 0,
+            },
+            {
+              transform: "translate(-50%, -50%) rotate(10deg) scale(1.1)",
+              opacity: 1,
+              offset: 0.5,
+            },
+            {
+              transform: "translate(-50%, -50%) rotate(40deg) scale(1.2)",
+              opacity: 0,
+            },
+          ],
+          { duration: 320, easing: "ease-out" },
+        )
+        .finished.catch(() => undefined);
+      slash.remove();
+      return;
+    }
+    const shot = el("div", style === "spell" ? "dnd-bolt" : "dnd-arrow");
+    const angle = (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI;
+    shot.style.left = `${String(from.x)}px`;
+    shot.style.top = `${String(from.y)}px`;
+    board.append(shot);
+    await shot
+      .animate(
+        [
+          { transform: `translate(-50%, -50%) rotate(${String(angle)}deg)` },
+          {
+            transform: `translate(calc(-50% + ${String(to.x - from.x)}px), calc(-50% + ${String(to.y - from.y)}px)) rotate(${String(angle)}deg)`,
+          },
+        ],
+        { duration: style === "spell" ? 420 : 300, easing: "ease-in" },
+      )
+      .finished.catch(() => undefined);
+    shot.remove();
+  };
+
+  const showCaption = (text: string): void => {
+    caption.textContent = text;
+    caption.classList.toggle("shown", text !== "");
+  };
+
+  // The damage dice the last attack rolls, kept until its damage arrives.
+  let pendingDamage: {
+    readonly target: string;
+    readonly dice: string;
+    readonly mine: boolean;
+  } | null = null;
+
   const play = async (cue: DndCue): Promise<void> => {
-    if (!fast() && host.sound?.() === true) cueSound(cue);
+    // The player's own roll makes its sound when they throw it, not before.
+    const ownRoll =
+      (cue.kind === "attack" ||
+        cue.kind === "check" ||
+        cue.kind === "deathSave") &&
+      cue.actor === PLAYER_ACTOR;
+    if (!fast() && !ownRoll && host.sound?.() === true) cueSound(cue);
     const ms = PACE[cue.kind];
     switch (cue.kind) {
       case "start":
@@ -793,7 +1016,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
           });
           token.x = actor.x;
           token.y = actor.y;
-          setArt(token, latest?.art[actor.id] ?? null);
+          setArt(token, latest ? artFor(latest, actor.id) : null);
         }
         layout();
         slot.hidden = false;
@@ -829,23 +1052,25 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         const attacker = tokens.get(cue.actor);
         const target = tokens.get(cue.target);
         if (!attacker || !target) return;
-        const from = attacker.node.getBoundingClientRect();
-        const to = target.node.getBoundingClientRect();
-        const dx = (to.left - from.left) * 0.4;
-        const dy = (to.top - from.top) * 0.4;
-        animate(
-          attacker.node,
-          [
-            { transform: "translate(-50%, -50%)" },
-            {
-              transform: `translate(calc(-50% + ${String(dx)}px), calc(-50% + ${String(dy)}px)) scale(1.08)`,
-            },
-            { transform: "translate(-50%, -50%)" },
-          ],
-          { duration: 420, easing: "ease-in-out" },
+        const nameOf = (token: Token, id: string): string =>
+          token.node.querySelector(".dnd-name")?.textContent ?? id;
+        const mine = cue.actor === PLAYER_ACTOR;
+        showCaption(
+          `${nameOf(attacker, cue.actor)} attacks ${nameOf(target, cue.target)} with ${cue.label}`,
         );
-        const die = await rollDie(attacker.node, cue.natural, cue.label, false);
-        await wait(180);
+        attacker.node.classList.add("acting");
+        target.node.classList.add("targeted");
+        const from = centreOf(attacker.node);
+        const to = centreOf(target.node);
+        const die = await throwD20(
+          from,
+          { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 },
+          cue.natural,
+          `${String(cue.total)} vs AC ${String(cue.ac)}`,
+          mine,
+        );
+        await wait(mine ? 350 : 200);
+        await strike(attacker, target, cue.style);
         float(
           target,
           cue.hit ? (cue.natural === 20 ? "CRIT!" : "HIT") : "MISS",
@@ -862,20 +1087,45 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
             { duration: 260, easing: "ease-out" },
           );
         }
-        await wait(ms - 400);
+        pendingDamage =
+          cue.hit && cue.damage
+            ? { target: cue.target, dice: cue.damage, mine }
+            : null;
+        await wait(Math.max(200, ms - 900));
+        die.remove();
+        attacker.node.classList.remove("acting");
+        target.node.classList.remove("targeted");
+        showCaption("");
+        return;
+      }
+      case "deathSave": {
+        const token = tokens.get(cue.actor);
+        if (!token) return;
+        const at = centreOf(token.node);
+        const die = await throwD20(
+          at,
+          { x: at.x, y: at.y - 50 },
+          cue.natural,
+          cue.natural >= 10 ? "Death save: success" : "Death save: failure",
+          cue.actor === PLAYER_ACTOR,
+        );
+        await wait(ms);
         die.remove();
         return;
       }
       case "check": {
         slot.hidden = false;
         board.classList.add("checking");
-        const die = await rollDie(
-          board,
+        const box = board.getBoundingClientRect();
+        const middle = { x: box.width / 2, y: Math.max(110, box.height / 2) };
+        const die = await throwD20(
+          { x: middle.x - 120, y: middle.y + 40 },
+          middle,
           cue.natural,
-          `${cue.label}: ${String(cue.total)} vs DC ${String(cue.dc)}`,
-          true,
+          `${cue.label.charAt(0).toUpperCase()}${cue.label.slice(1)}: ${String(cue.total)} vs DC ${String(cue.dc)}`,
+          cue.actor === PLAYER_ACTOR,
         );
-        die.classList.add(cue.success ? "pass" : "fail");
+        die.classList.add("big", cue.success ? "pass" : "fail");
         await wait(ms - 300);
         die.remove();
         board.classList.remove("checking");
@@ -886,6 +1136,46 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         const token = tokens.get(cue.actor);
         if (!token) return;
         const color = DAMAGE_COLORS[cue.type] ?? "#ff4d4d";
+        // The damage dice, rolled where the blow lands, for the attack just shown.
+        if (pendingDamage?.target === cue.actor && !fast()) {
+          const roll = el(
+            "div",
+            "dnd-damage-dice",
+            `${pendingDamage.dice} = ${String(cue.amount)}`,
+          );
+          const at = centreOf(token.node);
+          roll.style.left = `${String(at.x)}px`;
+          roll.style.top = `${String(at.y - 40)}px`;
+          board.append(roll);
+          roll
+            .animate(
+              [
+                {
+                  transform: "translate(-50%, -50%) scale(0.5) rotate(-20deg)",
+                  opacity: 0,
+                },
+                {
+                  transform: "translate(-50%, -50%) scale(1.1) rotate(4deg)",
+                  opacity: 1,
+                  offset: 0.3,
+                },
+                {
+                  transform: "translate(-50%, -70%) scale(1)",
+                  opacity: 1,
+                  offset: 0.8,
+                },
+                { transform: "translate(-50%, -90%) scale(1)", opacity: 0 },
+              ],
+              {
+                duration: pendingDamage.mine ? 1400 : 1000,
+                easing: "ease-out",
+              },
+            )
+            .addEventListener("finish", () => {
+              roll.remove();
+            });
+        }
+        pendingDamage = null;
         token.node.style.setProperty("--flash", color);
         animate(
           token.node,
@@ -1056,15 +1346,34 @@ const BOARD_CSS = `
   border-radius: 50%;
   overflow: hidden;
   border: 3px solid #4f8fd6;
-  background: radial-gradient(circle at 35% 30%, #5b6f8c, #1f2735);
-  font-size: 1.3rem;
-  font-weight: 700;
-  box-shadow: 0 4px 10px rgb(0 0 0 / 60%);
+  /* With no picture, the token looks like a painted wooden counter with the creature's initials. */
+  background:
+    radial-gradient(circle at 35% 28%, rgb(255 255 255 / 25%), transparent 45%),
+    repeating-radial-gradient(circle at 50% 50%, rgb(0 0 0 / 0%) 0 3px, rgb(0 0 0 / 7%) 3px 4px),
+    radial-gradient(circle at 50% 60%, #45628a, #1c2638);
+  font-family: var(--font-title, Georgia), serif;
+  font-size: 1.5rem;
+  letter-spacing: 0.02em;
+  box-shadow:
+    inset 0 0 0 2px rgb(255 255 255 / 12%),
+    0 4px 10px rgb(0 0 0 / 60%);
 }
 .dnd-token[data-side="enemy"] .dnd-disc {
   border-color: #c9473b;
-  background: radial-gradient(circle at 35% 30%, #8c5b5b, #351f1f);
+  background:
+    radial-gradient(circle at 35% 28%, rgb(255 255 255 / 22%), transparent 45%),
+    repeating-radial-gradient(circle at 50% 50%, rgb(0 0 0 / 0%) 0 3px, rgb(0 0 0 / 7%) 3px 4px),
+    radial-gradient(circle at 50% 60%, #8a4a3f, #33150f);
 }
+.dnd-disc { position: relative; }
+.dnd-disc img.framed {
+  position: absolute;
+  max-width: none;
+  height: auto;
+  object-fit: fill;
+}
+/* A book's battle map shows as printed: no darkening and no second grid over its own. */
+.dnd-field.gridded.mapped::before { background: rgb(0 0 0 / 8%); }
 .dnd-disc img {
   width: 100%;
   height: 100%;
@@ -1097,6 +1406,7 @@ const BOARD_CSS = `
 .dnd-bar { top: calc(100% + 15px); }
 .dnd-hp { top: calc(100% + 22px); white-space: nowrap; }
 .gridded .dnd-hp { display: none; }
+.tight .dnd-name { display: none; }
 .gridded .dnd-name { font-size: 0.6rem; }
 .gridded .dnd-bar { top: calc(100% + 12px); width: 80%; }
 .dnd-name {
@@ -1210,10 +1520,12 @@ const BOARD_CSS = `
   transition: opacity 0.3s;
 }
 .dnd-board.playing .dnd-hint { opacity: 1; }
+.dnd-board.awaiting .dnd-hint { opacity: 0; }
 .dnd-board.playing { cursor: pointer; }
 .dnd-field.gridded {
   height: auto;
-  max-height: 72vh;
+  /* As wide as fits without the map growing taller than the screen, so its squares stay square. */
+  width: min(100%, calc(84vh * var(--cols) / var(--rows)));
   margin: 0 auto;
 }
 .dnd-field.gridded::before {
@@ -1260,6 +1572,127 @@ const BOARD_CSS = `
 }
 .dnd-route.risky polyline { stroke: #ff6a55; }
 .dnd-blast { position: absolute; inset: 0; pointer-events: none; }
+.dnd-caption {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  max-width: 90%;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: rgb(15 10 6 / 82%);
+  border: 1px solid #c9ad6a;
+  color: #f4e7c8;
+  font: 1rem var(--font-head, Georgia), serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+  z-index: 6;
+}
+.dnd-caption.shown { opacity: 1; }
+.dnd-token.acting .dnd-disc { box-shadow: 0 0 0 3px #ffd36b, 0 0 24px 6px rgb(255 211 107 / 70%); }
+.dnd-token.targeted .dnd-disc { box-shadow: 0 0 0 3px #ff6a55, 0 0 22px 6px rgb(255 106 85 / 60%); }
+.dnd-throw {
+  position: absolute;
+  z-index: 7;
+  width: 64px;
+  height: 64px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  filter: drop-shadow(0 6px 8px rgb(0 0 0 / 55%));
+}
+.dnd-throw.mine { width: 96px; height: 96px; pointer-events: auto; cursor: pointer; }
+.dnd-throw svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dnd-throw .d20-body { fill: #b3261e; stroke: #5c0f0a; stroke-width: 3; }
+.dnd-throw .d20-face { fill: #d6412f; }
+.dnd-throw .d20-edge { fill: none; stroke: rgb(255 220 200 / 45%); stroke-width: 2; }
+.dnd-throw.crit .d20-body { fill: #d9a12a; stroke: #6b4a08; }
+.dnd-throw.crit .d20-face { fill: #f2c24b; }
+.dnd-throw.fumble .d20-body { fill: #3a3a3a; stroke: #111; }
+.dnd-throw.fumble .d20-face { fill: #555; }
+.dnd-throw-number {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  transform: translate(-50%, -50%);
+  color: #fff8e8;
+  font: 700 1.3rem/1 var(--font-ui, system-ui), sans-serif;
+  text-shadow: 0 1px 2px #000;
+}
+.dnd-throw.mine .dnd-throw-number { font-size: 1.9rem; }
+.dnd-throw-note {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgb(15 10 6 / 82%);
+  color: #f4e7c8;
+  font: 0.85rem var(--font-head, Georgia), serif;
+  white-space: nowrap;
+}
+.dnd-throw-note:empty { display: none; }
+.dnd-throw.waiting { animation: dnd-beckon 1s ease-in-out infinite; }
+@keyframes dnd-beckon { 50% { transform: translate(-50%, -50%) scale(1.08) rotate(-6deg); } }
+.dnd-throw.big.pass .dnd-throw-note { background: #2c5e3a; }
+.dnd-throw.big.fail .dnd-throw-note { background: #8c2a2a; }
+.dnd-slash {
+  position: absolute;
+  z-index: 6;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  border-top: 5px solid #fff4d6;
+  border-right: 3px solid rgb(255 244 214 / 50%);
+  filter: drop-shadow(0 0 6px #ffd36b);
+  pointer-events: none;
+}
+.dnd-arrow {
+  position: absolute;
+  z-index: 6;
+  width: 34px;
+  height: 3px;
+  background: linear-gradient(to right, #6b4a2b 0 80%, #d8d8d8 80%);
+  pointer-events: none;
+}
+.dnd-arrow::after {
+  content: "";
+  position: absolute;
+  right: -6px;
+  top: -4px;
+  border-left: 8px solid #d8d8d8;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+.dnd-bolt {
+  position: absolute;
+  z-index: 6;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 25%, #c9a6ff 45%, rgb(140 90 255 / 0%) 70%);
+  box-shadow: 0 0 18px 8px rgb(170 120 255 / 60%);
+  pointer-events: none;
+}
+.dnd-damage-dice {
+  position: absolute;
+  z-index: 7;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: #fdf1dc;
+  border: 2px solid #b3261e;
+  color: #58180d;
+  font: 700 0.95rem var(--font-ui, system-ui), sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 10px rgb(0 0 0 / 40%);
+}
+
 .dnd-blast-square {
   position: absolute;
   width: calc(100% / var(--cols));

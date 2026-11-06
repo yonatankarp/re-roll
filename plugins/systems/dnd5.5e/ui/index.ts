@@ -136,8 +136,22 @@ function optionGroups(
   const stats = deriveStats(actor, access);
   const known = (id: string) =>
     stats.actions.find((item) => item.id === id.split(OPTION_SEPARATOR)[0]);
-  // A reaction or a death save offers no group worth its own heading.
   if (!decision.options.some((option) => known(option.id))) return plain;
+  // Only a full turn is grouped. A quick question, such as whether to cast Shield, stays a plain list.
+  if (!decision.id.startsWith("dnd5.5e:turn:")) {
+    return [
+      {
+        title: null,
+        options: decision.options.map((option) => {
+          const action = known(option.id);
+          return {
+            ...option,
+            detail: action ? actionDetail(action, stats, access) : null,
+          };
+        }),
+      },
+    ];
+  }
   const groups = new Map<
     string,
     { id: string; label: string; detail: string | null }[]
@@ -188,6 +202,21 @@ const ABILITY_NAMES = {
   wis: "Wisdom",
   cha: "Charisma",
 } as const;
+
+// The names a token picture can be found by, best first: a monster's own name, or a character's
+// species and class together, then each alone.
+function looksOf(actor: Actor, access: ContentAccess): readonly string[] {
+  const { source } = actor;
+  if (source.kind === "monster") {
+    return [nameOf(access, source.statBlockId), actor.name];
+  }
+  const build = source.build;
+  const classId = build?.levels[0]?.classId;
+  if (!build || !classId) return [];
+  const species = nameOf(access, build.speciesId);
+  const className = nameOf(access, classId);
+  return [`${species} ${className}`, species, className];
+}
 
 function nameOf(access: ContentAccess, id: string): string {
   return NamedSchema.safeParse(access.content(id)).data?.name ?? id;
@@ -515,7 +544,7 @@ function combat(rawState: unknown, access: ContentAccess) {
   }
   return {
     round,
-    board: { moves, reach, areas },
+    board: { moves, reach, areas, map: state.combat.map ?? null },
     combatants: order.flatMap((id, position) => {
       const actor = state.actors[id];
       if (!actor) return [];
@@ -538,6 +567,7 @@ function combat(rawState: unknown, access: ContentAccess) {
               ? (NamedSchema.safeParse(access.content(actor.source.statBlockId))
                   .data?.name ?? null)
               : null,
+          looks: looksOf(actor, access),
         },
       ];
     }),
