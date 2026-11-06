@@ -2,6 +2,7 @@ import type { DndCue } from "./cues.ts";
 
 // Short sounds for the board's cues, made with Web Audio so there are no files to load. Each is under
 // about 600 ms and starts now, so nothing waits to play after a skip. Without Web Audio nothing plays.
+// shortcut: a skip lets the current sound's last few hundred ms finish; stop its nodes if that ever grates.
 
 const VOLUME = 0.15;
 
@@ -28,7 +29,7 @@ function unlock(): void {
 }
 
 if (typeof window !== "undefined") {
-  for (const type of ["pointerdown", "keydown"]) {
+  for (const type of ["pointerdown", "click", "keydown"]) {
     window.addEventListener(type, unlock, { capture: true, passive: true });
   }
 }
