@@ -55,6 +55,10 @@ export interface GameView {
   readonly combat: CombatView | null;
   readonly sheet: SheetView | null;
   readonly log: readonly LogLine[];
+  // Plain data for the system's encounter board to animate, in order, from the start of the run.
+  readonly cues: readonly unknown[];
+  readonly system: string;
+  readonly systemState: unknown; // for the system's own board
   readonly ended: GameState["story"]["ended"];
   readonly playerDied: boolean;
   readonly about: string;
@@ -91,6 +95,7 @@ interface Current {
   readonly ui: SystemUi;
   readonly log: LogEntry[];
   readonly lines: LogLine[];
+  readonly cues: unknown[];
   state: GameState;
   warnings: readonly string[];
 }
@@ -129,9 +134,14 @@ function narrate(
   ui: SystemUi,
   from: GameState | null,
   events: readonly GameEvent[],
-): { readonly state: GameState | null; readonly lines: readonly LogLine[] } {
+): {
+  readonly state: GameState | null;
+  readonly lines: readonly LogLine[];
+  readonly cues: readonly unknown[];
+} {
   let state = from;
   const lines: LogLine[] = [];
+  const cues: unknown[] = [];
   for (const event of events) {
     if (event.kind === "runStarted") {
       state = event.state;
@@ -148,7 +158,12 @@ function narrate(
         });
       }
     }
+    const before = state;
     state = applyEvent(run, state, event);
+    if (ui.cue && (isNarrativeEvent(event) || isNamespacedEvent(event))) {
+      const cue = ui.cue(event, before.system, state.system, run);
+      if (cue !== null && cue !== undefined) cues.push(cue);
+    }
     // Scene text is chosen after the event, so a "visited" variant counts this visit.
     if (event.kind === "sceneEntered") {
       const scene = run.adventure.scenes.find(
@@ -159,7 +174,14 @@ function narrate(
       }
     }
   }
-  return { state, lines };
+  return { state, lines, cues };
+}
+
+function narrated(told: ReturnType<typeof narrate>): {
+  readonly lines: LogLine[];
+  readonly cues: unknown[];
+} {
+  return { lines: [...told.lines], cues: [...told.cues] };
 }
 
 export interface GameDependencies {
@@ -393,7 +415,7 @@ export function createGame({
         ui,
         state: started.state,
         log: [{ input: { kind: "start" }, events: started.events }],
-        lines: [...narrate(run, ui, null, started.events).lines],
+        ...narrated(narrate(run, ui, null, started.events)),
         warnings: [],
       };
       current = game;
@@ -411,9 +433,9 @@ export function createGame({
       } as const;
       const outcome = step(game.run, game.state, input);
       if (!outcome.ok) throw new Error(outcome.error);
-      game.lines.push(
-        ...narrate(game.run, game.ui, game.state, outcome.events).lines,
-      );
+      const told = narrate(game.run, game.ui, game.state, outcome.events);
+      game.lines.push(...told.lines);
+      game.cues.push(...told.cues);
       game.state = outcome.state;
       game.log.push({ input, events: outcome.events });
       game.warnings = [];
@@ -450,20 +472,21 @@ export function createGame({
         ui,
         state: loaded.state,
         log: [...log],
-        lines: [
-          ...narrate(
+        ...narrated(
+          narrate(
             run,
             ui,
             null,
             log.flatMap((entry) => entry.events),
-          ).lines,
-        ],
+          ),
+        ),
         warnings: loaded.warnings,
       };
     },
 
     view(): GameView {
-      const { run, ui, state, lines, registry, warnings, root } = active();
+      const { run, ui, state, lines, cues, registry, warnings, root } =
+        active();
       const currentScene = run.adventure.scenes.find(
         (item) => item.id === state.story.scene,
       );
@@ -493,6 +516,9 @@ export function createGame({
         combat,
         sheet: ui.sheet(state.system, run),
         log: [...lines],
+        cues: [...cues],
+        system: ui.systemId,
+        systemState: state.system,
         ended: state.story.ended,
         playerDied: ui.playerDied(state.system),
         about: ui.about,

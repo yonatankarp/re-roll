@@ -10,6 +10,7 @@ import {
 } from "../../engine/platform/tauri/storage.ts";
 import { createGame } from "../../engine/shell/session.ts";
 import { mountShell } from "../../engine/shell/shell.ts";
+import { mountDndBoard } from "../../plugins/systems/dnd5.5e/ui/board.ts";
 import { dndUi } from "../../plugins/systems/dnd5.5e/ui/index.ts";
 import { systems } from "../systems.ts";
 
@@ -28,4 +29,5 @@ mountShell(
     uis: [dndUi],
     imageUrl: isTauri() ? tauriImageUrl : contentImageUrl,
   }),
+  { [dndUi.systemId]: mountDndBoard },
 );

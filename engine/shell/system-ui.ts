@@ -1,8 +1,9 @@
 import type { Decision, SystemEvent } from "../kernel/events.ts";
 import type { ContentAccess } from "../kernel/system.ts";
 
-// What a system's ui folder gives the shell: plain data, so the shell knows no rules
-// and the system needs no DOM code. Matched by shape, so plugins never import this file.
+// What a system's ui folder gives the shell: plain data, so the shell knows no rules.
+// Only an optional board draws its own DOM, and app/ wires it in apart from SystemUi.
+// Matched by shape, so plugins never import this file.
 
 export interface SheetRow {
   readonly label: string;
@@ -10,6 +11,7 @@ export interface SheetRow {
   readonly detail?: string; // opened on demand
   readonly note?: string; // a small line under the value, in boxes and marks
   readonly marked?: boolean; // such as proficient, in marks
+  readonly meter?: number; // a share from 0 to 1, drawn as a bar in the top bar's summary
 }
 
 export interface SheetSection {
@@ -34,6 +36,7 @@ export interface OptionGroup {
 export interface SheetView {
   readonly title: string;
   readonly subtitle?: string;
+  readonly summary?: readonly SheetRow[]; // the few numbers kept in the top bar, such as HP
   readonly tags?: readonly string[]; // such as conditions
   readonly sections: readonly SheetSection[];
 }
@@ -57,6 +60,25 @@ export interface CombatView {
   readonly combatants: readonly CombatantView[];
 }
 
+// What the shell gives a board: pictures, and a way to answer the pending decision.
+export interface BoardHost {
+  readonly imageUrl: (path: string) => string | Promise<string | null> | null;
+  readonly answer: (optionId: string) => void;
+}
+
+export interface BoardUpdate {
+  readonly state: unknown;
+  readonly decision: Decision | null; // the board may answer it, as the option list does
+  readonly combat: CombatView | null;
+  readonly art: Readonly<Record<string, string>>; // by combatant id
+  readonly sceneArt: string | null;
+  readonly cues: readonly unknown[]; // only those since the last update
+}
+
+export interface Board {
+  readonly update: (update: BoardUpdate) => void;
+}
+
 export interface SystemUi {
   readonly systemId: string;
   readonly about: string;
@@ -76,4 +98,11 @@ export interface SystemUi {
     access: ContentAccess,
   ) => readonly OptionGroup[];
   readonly playerDied: (state: unknown) => boolean;
+  // Turns an event into plain data for the board to animate, given the state either side of it.
+  readonly cue?: (
+    event: SystemEvent,
+    before: unknown,
+    after: unknown,
+    access: ContentAccess,
+  ) => unknown; // null for an event with nothing to show
 }

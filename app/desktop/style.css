@@ -159,10 +159,8 @@ button:hover {
 }
 
 .game {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 32px;
-  margin-top: 16px;
+  max-width: 760px;
+  margin: 16px auto 48px;
 }
 
 /* A focused option must not end up hidden under the sticky header. */
@@ -270,10 +268,6 @@ html {
   margin-top: 24px;
   font-size: 0.8rem;
   color: var(--muted);
-}
-
-.sheet h2 {
-  margin-top: 8px;
 }
 
 dl {
@@ -515,31 +509,6 @@ summary {
   text-align: right;
 }
 
-.open-sheet {
-  width: 100%;
-  margin-top: 16px;
-}
-
-.sheet-dialog {
-  width: min(1100px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
-  padding: 16px 24px 24px;
-  color: var(--ink);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-}
-
-.sheet-dialog::backdrop {
-  background: rgb(0 0 0 / 50%);
-}
-
-.dialog-close {
-  position: sticky;
-  top: 0;
-  float: right;
-}
-
 .full .boxes {
   grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
 }
@@ -592,7 +561,6 @@ summary {
 }
 
 @media (max-width: 760px) {
-  .game,
   .book-layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 16px;
@@ -601,4 +569,273 @@ summary {
   .book-contents {
     max-height: 40vh;
   }
+}
+
+/* The game screen: one stage, with the sheet and journal in drawers. */
+
+.bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.hud {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hud-name {
+  font-weight: bold;
+}
+
+.hud-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-stat small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+
+.meter {
+  display: inline-block;
+  width: 48px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.meter i {
+  display: block;
+  height: 100%;
+  background: var(--good);
+  transition: width 0.4s ease;
+}
+
+.meter i[data-level="mid"] {
+  background: #c99a2e;
+}
+
+.meter i[data-level="low"] {
+  background: var(--error);
+}
+
+.scene-title {
+  font-size: 1.1rem;
+  color: var(--muted);
+}
+
+.scene-art img {
+  width: 100%;
+  max-height: 340px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+/* In a fight the board carries the scene's picture, and the text steps back. */
+.in-combat .scene-art {
+  display: none;
+}
+
+.in-combat .scene-text {
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.ticker {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.ticker:empty {
+  display: none;
+}
+
+.initiative-details summary {
+  color: var(--muted);
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tab {
+  font-family: system-ui, sans-serif;
+  font-size: 0.95rem;
+  border-radius: 999px;
+  padding: 8px 18px;
+}
+
+.tab.open {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.group-panel {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.option {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.option > button:first-child {
+  flex: 1;
+}
+
+.option .info {
+  min-width: 44px;
+  text-align: center;
+  font-family: Georgia, serif;
+  font-style: italic;
+  font-weight: bold;
+  color: var(--muted);
+}
+
+.option-detail {
+  flex-basis: 100%;
+}
+
+.more {
+  color: var(--muted);
+  font-style: italic;
+  text-align: center;
+}
+
+.drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(720px, 100vw);
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0 24px 24px;
+  overflow-y: auto;
+  color: var(--ink);
+  background: var(--bg);
+  border: 0;
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 32px rgb(0 0 0 / 35%);
+}
+
+.drawer::backdrop {
+  background: rgb(0 0 0 / 40%);
+}
+
+.drawer-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 0 8px;
+  background: var(--bg);
+}
+
+.drawer-head h2 {
+  margin: 0;
+}
+
+.drawer .log {
+  max-height: none;
+}
+
+/* Entrances: what changes slides in, so the eye follows it. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.drawer[open] {
+  animation: slide-in 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.drawer[open]::backdrop {
+  animation: fade 0.28s ease;
+}
+
+.scene-text.enter,
+.scene-art.enter {
+  animation: rise 0.45s ease both;
+}
+
+.options.enter > *,
+.options.enter .tabs > *,
+.options.enter > .options > * {
+  animation: rise 0.3s ease both;
+  animation-delay: calc(var(--i, 0) * 35ms);
+}
+
+.group-panel > * {
+  animation: rise 0.25s ease both;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
+
+.ticker.enter li {
+  animation: rise 0.4s ease both;
+  animation-delay: calc(var(--i, 0) * 120ms);
+}
+
+#combat-grid-slot:not([hidden]) {
+  animation: rise 0.4s ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after,
+  .drawer[open],
+  .drawer[open]::backdrop {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .hud-name {
+    display: none;
+  }
+
+  .drawer {
+    padding: 0 16px 16px;
+  }
+}
+
+.bar h1 {
+  white-space: nowrap;
 }

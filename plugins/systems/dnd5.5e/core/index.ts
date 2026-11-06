@@ -16,8 +16,10 @@ import {
   AfterHitSchema,
   ConcentrationSchema,
   type Context,
+  FinishMoveSchema,
   HitSchema,
   LingeringSchema,
+  MoveSchema,
   ReactionSchema,
   SmiteSchema,
   TakeActionSchema,
@@ -32,8 +34,10 @@ import {
   runCheckCombatEnd,
   runConcentrationSave,
   runEndTurn,
+  runFinishMove,
   runFinishTurn,
   runLingeringTick,
+  runMove,
   runProjectile,
   runRecheckHit,
   runSmite,
@@ -292,6 +296,11 @@ export const dnd55e = defineSystem<DndState>({
     [`${NS}:takeAction`]: frameHandler({
       schema: TakeActionSchema,
       run: runTakeAction,
+    }),
+    [`${NS}:move`]: frameHandler({ schema: MoveSchema, run: runMove }),
+    [`${NS}:finishMove`]: frameHandler({
+      schema: FinishMoveSchema,
+      run: runFinishMove,
     }),
     [`${NS}:attackRoll`]: frameHandler({
       schema: AttackSchema,

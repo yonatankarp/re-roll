@@ -13,6 +13,7 @@ import { AWAIT_FRAME } from "../engine/kernel/system.ts";
 import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
 import {
   type Context,
+  MOVE,
   choosePolicy,
   effectEnds,
   nextDndDecision,
@@ -20,6 +21,10 @@ import {
   runTakeAction,
   runLingeringTick,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
+import {
+  distanceFeet,
+  placeSides,
+} from "../plugins/systems/dnd5.5e/core/grid.ts";
 import {
   ClassSchema,
   MonsterSchema,
@@ -2026,5 +2031,127 @@ describe("replay", () => {
       );
     expect(once().events).toStrictEqual(once().events);
     expect(once().state).toStrictEqual(once().state);
+  });
+});
+
+describe("the 5-foot grid", () => {
+  const at = (who: Actor, x: number, y: number): Actor => ({
+    ...who,
+    position: { x, y },
+  });
+  const onGrid = (...actors: readonly Actor[]): DndState => {
+    const state = fight(...actors);
+    if (!state.combat) throw new Error("No fight");
+    return {
+      ...state,
+      combat: { ...state.combat, grid: { width: 12, height: 12 } },
+    };
+  };
+  const sword = "weapon:srd52:item/longsword";
+
+  it("starts the sides 30 feet apart", () => {
+    const { positions } = placeSides(["hero", "ally"], ["goblin"]);
+    expect(distanceFeet(positions.hero ?? null, positions.goblin ?? null)).toBe(
+      30,
+    );
+  });
+
+  it("offers a melee attack only within reach, and a move to close in", async () => {
+    const run = arenaRun(await base(), {});
+    const far = onGrid(at(hero(run), 0, 0), at(monster("a"), 5, 0));
+    const options = nextDndDecision(far, run)?.options.map((item) => item.id);
+    expect(options).not.toContain(`${sword}|a`);
+    expect(options).toContain(MOVE);
+
+    const moved = settle(
+      run,
+      far,
+      [act(PLAYER_ACTOR, MOVE)],
+      HIGH,
+      () => "4,0",
+    );
+    expect(actor(moved.state, PLAYER_ACTOR).position).toEqual({ x: 4, y: 0 });
+    expect(actor(moved.state, PLAYER_ACTOR).moved).toBe(20);
+    expect(
+      nextDndDecision(moved.state, run)?.options.map((item) => item.id),
+    ).toContain(`${sword}|a`);
+  });
+
+  it("can't move further than its speed", async () => {
+    const run = arenaRun(await base(), {});
+    const state = onGrid(at(hero(run), 0, 0), at(monster("a"), 11, 11));
+    const [decision] = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, MOVE)],
+      HIGH,
+      () => "stay",
+    ).decisions;
+    const squares = (decision?.options ?? []).flatMap((item) => {
+      const [x, y] = item.id.split(",").map(Number);
+      return x === undefined || y === undefined ? [] : [{ x, y }];
+    });
+    expect(squares.length).toBeGreaterThan(0);
+    for (const square of squares) {
+      expect(distanceFeet({ x: 0, y: 0 }, square)).toBeLessThanOrEqual(30);
+    }
+  });
+
+  it("gives an enemy an Opportunity Attack when the hero leaves its reach", async () => {
+    const run = arenaRun(await base(), {});
+    const state = onGrid(at(hero(run), 0, 0), at(monster("a"), 1, 0));
+    const left = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, MOVE)],
+      HIGH,
+      () => "0,4",
+    );
+    expect(actor(left.state, "a").budget.reaction).toBe(false);
+    expect(damageOf(left.events, PLAYER_ACTOR).length).toBe(1);
+    expect(actor(left.state, PLAYER_ACTOR).position).toEqual({ x: 0, y: 4 });
+
+    const stayed = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, MOVE)],
+      HIGH,
+      () => "0,1",
+    );
+    expect(damageOf(stayed.events, PLAYER_ACTOR)).toEqual([]);
+  });
+
+  it("catches only the creatures near where a Fireball is aimed", async () => {
+    const run = arenaRun(await base(), {});
+    const state = onGrid(
+      at(hero(run, { spells: ["fireball"] }), 0, 0),
+      at(monster("a"), 6, 6),
+      at(monster("b"), 7, 7),
+      at(monster("c"), 11, 0),
+    );
+    const cast = `spell:${spell("fireball")}|@a`;
+    expect(
+      nextDndDecision(state, run)?.options.find((item) => item.id === cast)
+        ?.label,
+    ).toContain("catches 2");
+    const burned = settle(run, state, [act(PLAYER_ACTOR, cast)], LOW);
+    expect(damageOf(burned.events, "a").length).toBe(1);
+    expect(damageOf(burned.events, "b").length).toBe(1);
+    expect(damageOf(burned.events, "c")).toEqual([]);
+  });
+
+  it("walks a monster into reach before it attacks", async () => {
+    const run = arenaRun(await base(), {});
+    const state = onGrid(at(monster("a"), 0, 0), at(hero(run), 0, 5));
+    const decision = nextDndDecision(state, run);
+    if (!decision) throw new Error("No decision");
+    const context = contextOf(run, state, HIGH);
+    expect(choosePolicy(decision, context)).toBe(MOVE);
+    const walked = settle(run, state, [act("a", MOVE)], HIGH, (asked) =>
+      choosePolicy(asked, contextOf(run, state, HIGH)),
+    );
+    expect(
+      distanceFeet(actor(walked.state, "a").position, { x: 0, y: 5 }),
+    ).toBe(5);
   });
 });

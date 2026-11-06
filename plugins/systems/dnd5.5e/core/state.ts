@@ -35,6 +35,15 @@ const ActiveEffectSchema = z.strictObject({
 });
 export type ActiveEffect = z.infer<typeof ActiveEffectSchema>;
 
+const SquareSchema = z.strictObject({
+  x: z.number().int(),
+  y: z.number().int(),
+});
+const GridSchema = z.strictObject({
+  width: z.number().int(),
+  height: z.number().int(),
+});
+
 const ActorSchema = z.strictObject({
   id: z.string(),
   name: z.string(),
@@ -68,6 +77,9 @@ const ActorSchema = z.strictObject({
   concentratingOn: z.string().nullable(),
   inventory: z.array(ContentIdSchema),
   xp: z.number().int().optional(), // only the player's is tracked, and the party levels together
+  // Where the creature stands in a fight, null outside one. Saves from before the grid have none.
+  position: SquareSchema.nullable().default(null),
+  moved: z.number().int().default(0), // feet moved this turn
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -81,6 +93,7 @@ export const StateSchema = z.strictObject({
       round: z.number().int(),
       canFlee: z.boolean().optional(),
       defeatContinues: z.boolean().optional(),
+      grid: GridSchema.optional(),
     })
     .nullable(),
 });
@@ -114,6 +127,13 @@ const CombatStartedSchema = z.strictObject({
   order: z.array(z.string()),
   canFlee: z.boolean().optional(),
   defeatContinues: z.boolean().optional(),
+  grid: GridSchema.optional(),
+  positions: z.record(z.string(), SquareSchema).optional(),
+});
+const MovedSchema = z.strictObject({
+  actor: z.string(),
+  to: SquareSchema,
+  feet: z.number().int(),
 });
 const ActorOnlySchema = z.strictObject({ actor: z.string() });
 const BudgetSpentSchema = z.strictObject({
@@ -186,6 +206,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:combatStarted`]: CombatStartedSchema,
   [`${NS}:combatEnded`]: z.strictObject({}),
   [`${NS}:turnAdvanced`]: z.strictObject({}),
+  [`${NS}:moved`]: MovedSchema,
   [`${NS}:budgetSpent`]: BudgetSpentSchema,
   [`${NS}:actionRegained`]: ActorOnlySchema,
   [`${NS}:resourceSpent`]: ResourceSpentSchema,
@@ -227,6 +248,8 @@ export function freshActor(
     resourcesSpent: {},
     activeEffects: [],
     concentratingOn: null,
+    position: null,
+    moved: 0,
   };
 }
 
@@ -317,6 +340,7 @@ function advanceTurn(state: DndState): DndState {
           ? {
               budget: { action: true, bonusAction: true, reaction: true },
               usedThisTurn: [],
+              moved: 0,
             }
           : {}),
       },
@@ -354,6 +378,8 @@ function endCombat(state: DndState): DndState {
           concentratingOn: null,
           budget: { action: true, bonusAction: true, reaction: true },
           usedThisTurn: [],
+          position: null,
+          moved: 0,
           // shortcut: everyone downed but not dead gets back up, since an adventure doesn't have to offer a rest.
           hp: actor.hp <= 0 && !isDead(actor) ? 1 : actor.hp,
           deathSaves: isDead(actor)
@@ -467,11 +493,17 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
     }
     case `${NS}:combatStarted`: {
       const data = payload(CombatStartedSchema, event);
+      const actors = {
+        ...state.actors,
+        ...Object.fromEntries(data.monsters.map((item) => [item.id, item])),
+      };
       return {
-        actors: {
-          ...state.actors,
-          ...Object.fromEntries(data.monsters.map((item) => [item.id, item])),
-        },
+        actors: Object.fromEntries(
+          Object.entries(actors).map(([id, actor]) => [
+            id,
+            { ...actor, position: data.positions?.[id] ?? null, moved: 0 },
+          ]),
+        ),
         combat: {
           encounter: data.encounter,
           order: data.order,
@@ -479,6 +511,7 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
           round: 1,
           ...(data.canFlee ? { canFlee: true } : {}),
           ...(data.defeatContinues ? { defeatContinues: true } : {}),
+          ...(data.grid ? { grid: data.grid } : {}),
         },
       };
     }
@@ -486,6 +519,14 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
       return endCombat(state);
     case `${NS}:turnAdvanced`:
       return advanceTurn(state);
+    case `${NS}:moved`: {
+      const data = payload(MovedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        position: data.to,
+        moved: actor.moved + data.feet,
+      }));
+    }
     case `${NS}:budgetSpent`: {
       const data = payload(BudgetSpentSchema, event);
       return updateActor(state, data.actor, (actor) => ({

@@ -10,6 +10,16 @@ import {
   awaitDecision,
 } from "#sdk";
 import { z } from "zod";
+import {
+  type Square,
+  distanceFeet,
+  inArea,
+  parseSquare,
+  placeSides,
+  rangeFeet,
+  reachableSquares,
+  squareKey,
+} from "./grid.ts";
 import { concentrationDc, finalDamage, halved, rollD20 } from "./rules.ts";
 import type {
   Ability,
@@ -58,6 +68,9 @@ const DEATH_SAVE = "deathSave";
 const SEPARATOR = "|";
 const ALL = "all"; // an area takes everyone, and projectiles go for the lowest HP
 const DECLINE = "decline";
+export const MOVE = "move";
+const STAY = "stay";
+const AIM = "@"; // an area aimed at a creature: "@" and its id
 
 function actorOf(state: DndState, id: string): Actor {
   const actor = state.actors[id];
@@ -141,6 +154,63 @@ function enemies(state: DndState, actor: Actor): readonly Actor[] {
 }
 
 // A spell can use a slot of its own level or higher, which is also how Pact Magic casts low spells.
+// The feet a melee action reaches, or null for a ranged one.
+function meleeReach(action: KnownAction): number | null {
+  const { targeting } = action.activation;
+  if (!("creatures" in targeting)) return null;
+  const feet = rangeFeet(targeting.range);
+  return feet > 0 && feet <= 10 ? feet : null;
+}
+
+// Whether an action can reach this creature from where the actor stands. For an area, the creature is
+// what it's aimed at: a sphere's centre must be in range, and a cone or line must reach it.
+function reaches(action: KnownAction, actor: Actor, target: Actor): boolean {
+  const { targeting } = action.activation;
+  if ("self" in targeting) return true;
+  const distance = distanceFeet(actor.position, target.position);
+  if ("area" in targeting && targeting.range === "self") {
+    return distance <= targeting.area.radius;
+  }
+  return distance <= rangeFeet(targeting.range);
+}
+
+function within5(a: Actor, b: Actor): boolean {
+  return distanceFeet(a.position, b.position) <= 5;
+}
+
+function speedLeft(actor: Actor, stats: Stats): number {
+  const held = hasCondition(actor, "grappled", "restrained", ...INCAPACITATING);
+  return held || !actor.position ? 0 : Math.max(0, stats.speed - actor.moved);
+}
+
+function moveSquares(
+  actor: Actor,
+  state: DndState,
+  stats: Stats,
+): readonly { readonly square: Square; readonly feet: number }[] {
+  const grid = state.combat?.grid;
+  if (!grid || !actor.position) return [];
+  const others = Object.values(state.actors).filter(
+    (item) => item.id !== actor.id && item.position && !isDead(item),
+  );
+  const keys = (list: readonly Actor[]): Set<string> =>
+    new Set(
+      list.flatMap((item) => (item.position ? [squareKey(item.position)] : [])),
+    );
+  return reachableSquares(
+    actor.position,
+    speedLeft(actor, stats),
+    grid,
+    keys(others.filter((item) => item.side !== actor.side && !isDown(item))),
+    keys(others),
+  );
+}
+
+// "C7" for the third column of the seventh row, as on a battle map.
+export function squareName(square: Square): string {
+  return `${String.fromCharCode(65 + (square.x % 26))}${String(square.y + 1)}`;
+}
+
 function slotToSpend(
   action: KnownAction,
   actor: Actor,
@@ -258,10 +328,28 @@ function turnOptions(
             (item) => !isDown(item) && !charmers.has(item.id),
           )
         : allies(state, actor),
-    ).filter((item) => fitsType(item, targeting, access));
-    if (targeting.creatureTypes && candidates.length === 0) continue;
-    if ("area" in targeting || targeting.creatures > 1) {
-      // shortcut: with no positions until step 6, an area or multi-target choice takes everyone it can.
+    )
+      .filter((item) => fitsType(item, targeting, access))
+      .filter((item) => reaches(action, actor, item));
+    if (candidates.length === 0) continue;
+    const aimed =
+      "area" in targeting &&
+      targeting.area.shape !== "emanation" &&
+      actor.position !== null;
+    if (aimed) {
+      for (const target of candidates) {
+        const caught = resolveTargets(`${AIM}${target.id}`, action, actor, {
+          state,
+          content: access.content,
+          contentIds: access.contentIds,
+        }).length;
+        add(
+          `${AIM}${target.id}`,
+          `${action.name} at ${target.name} (catches ${String(caught)})`,
+        );
+      }
+    } else if ("area" in targeting || targeting.creatures > 1) {
+      // shortcut: a multi-target spell takes everyone it can reach rather than letting the caster pick.
       add(ALL, action.name);
     } else {
       for (const target of candidates) {
@@ -275,7 +363,13 @@ function turnOptions(
       }
     }
   }
-  // shortcut: fleeing always works and costs nothing, until the grid in step 6 can give it opportunity attacks.
+  if (moveSquares(actor, state, stats).length > 0) {
+    options.push({
+      id: MOVE,
+      label: `Move (${String(speedLeft(actor, stats))} ft left)`,
+    });
+  }
+  // shortcut: fleeing always works and costs nothing, as if the party always found a way off the map.
   if (actor.id === PLAYER_ACTOR && state.combat?.canFlee) {
     options.push({ id: FLEE, label: "Flee the fight" });
   }
@@ -319,7 +413,7 @@ export function nextDndDecision(
     };
   }
   return {
-    id: `${NS}:turn:${actorId}:${String(combat.round)}:${actor.budget.action ? "a" : ""}${actor.budget.bonusAction ? "b" : ""}`,
+    id: `${NS}:turn:${actorId}:${String(combat.round)}:${actor.budget.action ? "a" : ""}${actor.budget.bonusAction ? "b" : ""}${String(actor.moved)}`,
     actor: actorId,
     prompt: `Round ${String(combat.round)}: ${actor.name}'s turn (${String(actor.hp)} HP).`,
     options: turnOptions(actor, state, access),
@@ -374,6 +468,10 @@ export function startCombat(
   const order = rolled
     .sort((a, b) => b.total - a.total || a.position - b.position)
     .map((item) => item.id);
+  const { grid, positions } = placeSides(
+    party.map((actor) => actor.id),
+    monsters.map((actor) => actor.id),
+  );
 
   return {
     events: [
@@ -382,6 +480,8 @@ export function startCombat(
         encounter: encounter.id,
         monsters,
         order,
+        grid,
+        positions,
         ...(canFlee ? { canFlee } : {}),
         ...(defeatContinues ? { defeatContinues } : {}),
       }),
@@ -650,21 +750,34 @@ function resolveTargets(
   answerTarget: string,
   action: KnownAction,
   actor: Actor,
-  context: Context,
+  context: ContentAccess & { readonly state: DndState },
 ): readonly Actor[] {
   const { state } = context;
   const { targeting } = action.activation;
   if ("self" in targeting) return [actor];
-  const chosen = answerTarget === ALL ? [] : [actorOf(state, answerTarget)];
-  const pool = (
+  const side = (
     targeting.side === "enemy" ? enemies(state, actor) : allies(state, actor)
-  ).filter(
-    (item) =>
-      !isDead(item) &&
-      fitsType(item, targeting, context) &&
-      !chosen.includes(item),
+  ).filter((item) => !isDead(item) && fitsType(item, targeting, context));
+  if ("area" in targeting) {
+    const { shape, radius } = targeting.area;
+    const aim = answerTarget.startsWith(AIM)
+      ? state.actors[answerTarget.slice(AIM.length)]
+      : undefined;
+    // shortcut: an area catches only the side it's aimed at, as if every caster placed it with care.
+    return side.filter((item) =>
+      inArea(
+        shape,
+        radius,
+        actor.position,
+        aim?.position ?? actor.position,
+        item.position,
+      ),
+    );
+  }
+  const chosen = answerTarget === ALL ? [] : [actorOf(state, answerTarget)];
+  const pool = side.filter(
+    (item) => !chosen.includes(item) && reaches(action, actor, item),
   );
-  if ("area" in targeting) return chosen.length > 0 ? chosen : pool;
   // A higher slot can add targets to a single-target spell, and they go to the weakest after the one chosen.
   return [...chosen, ...[...pool].sort((a, b) => a.hp - b.hp)].slice(
     0,
@@ -881,6 +994,32 @@ export function runTakeAction(
   }
 
   if (payload.answer === PASS) return { frames: [frame("endTurn", {})] };
+  if (payload.answer === MOVE) {
+    // Squares next to the nearest enemy come first, as the likeliest choice.
+    const foes = enemies(state, actor).filter((item) => !isDown(item));
+    const nearest = (square: Square): number =>
+      Math.min(...foes.map((foe) => distanceFeet(square, foe.position)));
+    const squares = [
+      ...moveSquares(actor, state, deriveStats(actor, context)),
+    ].sort((a, b) => nearest(a.square) - nearest(b.square) || a.feet - b.feet);
+    return {
+      frames: [
+        awaitDecision({
+          id: `${NS}:moveTo:${actor.id}:${String(actor.moved)}`,
+          actor: actor.id,
+          prompt: `Where does ${actor.name} move?`,
+          options: [
+            ...squares.map(({ square, feet }) => ({
+              id: squareKey(square),
+              label: `${squareName(square)} (${String(feet)} ft)`,
+            })),
+            { id: STAY, label: "Stay where you are" },
+          ],
+          resume: frame("move", { actor: actor.id }),
+        }),
+      ],
+    };
+  }
   if (payload.answer === FLEE) return { events: combatEnded(state, "flee") };
 
   const [actionId = "", targetId = "", slot] = payload.answer.split(SEPARATOR);
@@ -984,6 +1123,98 @@ export function runProjectile(
   return { events, frames: concentrationFrame(target, dealt) };
 }
 
+const MoveSchema = z.object({ actor: z.string(), answer: z.string() });
+
+// Leaving an enemy's reach gives it an Opportunity Attack, made before the move, so falling stops it.
+// shortcut: only where the move starts and ends counts, not every square on the way.
+export function runMove(
+  payload: z.infer<typeof MoveSchema>,
+  context: Context,
+): SystemResult {
+  const { state } = context;
+  const actor = actorOf(state, payload.actor);
+  const to = parseSquare(payload.answer);
+  if (payload.answer === STAY || !to) return {};
+  const step = moveSquares(actor, state, deriveStats(actor, context)).find(
+    ({ square }) => squareKey(square) === payload.answer,
+  );
+  if (!step) throw new Error(`${actor.name} can't reach ${payload.answer}`);
+  const events: SystemEvent[] = [];
+  const frames: Frame[] = [];
+  for (const foe of enemies(state, actor)) {
+    if (
+      !foe.budget.reaction ||
+      isDown(foe) ||
+      hasCondition(foe, ...INCAPACITATING)
+    ) {
+      continue;
+    }
+    const melee = deriveStats(foe, context).actions.find((item) => {
+      const reach = meleeReach(item);
+      return (
+        reach !== null &&
+        item.activation.resolution.kind === "attack" &&
+        !item.activation.trigger &&
+        item.spellLevel === null &&
+        distanceFeet(actor.position, foe.position) <= reach &&
+        distanceFeet(to, foe.position) > reach
+      );
+    });
+    if (!melee) continue;
+    events.push(
+      dndEvent(`${NS}:budgetSpent`, { actor: foe.id, kind: "reaction" }),
+    );
+    frames.push(
+      frame("attackRoll", {
+        attacker: foe.id,
+        actionId: melee.id,
+        target: actor.id,
+      }),
+    );
+  }
+  return {
+    events,
+    frames: [
+      ...frames,
+      frame("finishMove", {
+        actor: actor.id,
+        x: to.x,
+        y: to.y,
+        feet: step.feet,
+      }),
+      CHECK_END,
+    ],
+  };
+}
+
+const FinishMoveSchema = z.object({
+  actor: z.string(),
+  x: z.number(),
+  y: z.number(),
+  feet: z.number(),
+});
+
+export function runFinishMove(
+  payload: z.infer<typeof FinishMoveSchema>,
+  context: Context,
+): SystemResult {
+  const actor = context.state.actors[payload.actor];
+  if (!context.state.combat || !actor || isDown(actor) || isDead(actor)) {
+    return {};
+  }
+  return {
+    events: [
+      dndEvent(`${NS}:moved`, {
+        actor: actor.id,
+        to: { x: payload.x, y: payload.y },
+        feet: payload.feet,
+      }),
+    ],
+  };
+}
+
+export { FinishMoveSchema, MoveSchema };
+
 function isMelee(action: KnownAction): boolean {
   const { targeting } = action.activation;
   return (
@@ -1058,16 +1289,26 @@ export function runAttackRoll(
   }
   const stats = deriveStats(attacker, context);
   const targetStats = deriveStats(target, context);
-  // shortcut: with no positions, any other ally who can act counts as within 5 feet for Pack Tactics.
   const packed =
     hasPassive(stats, "packTactics") &&
     allies(state, attacker).some(
       (item) =>
         item.id !== attacker.id &&
         !isDown(item) &&
-        !hasCondition(item, ...INCAPACITATING),
+        !hasCondition(item, ...INCAPACITATING) &&
+        within5(item, target),
     );
-  // shortcut: with no positions until step 6, every attack counts as close enough for Prone's Advantage.
+  const close = within5(attacker, target);
+  // A ranged attack is harder with an enemy standing next to the attacker.
+  const crowded =
+    meleeReach(action) === null &&
+    enemies(state, attacker).some(
+      (item) =>
+        !isDown(item) &&
+        !hasCondition(item, ...INCAPACITATING) &&
+        within5(item, attacker),
+    );
+  const proneFar = hasCondition(target, "prone") && !close;
   const advantage =
     packed ||
     hasFlag(attacker, "advantage", "attacks", stats) ||
@@ -1078,12 +1319,14 @@ export function runAttackRoll(
       "blinded",
       "paralyzed",
       "petrified",
-      "prone",
       "restrained",
       "stunned",
       "unconscious",
-    );
+    ) ||
+    (hasCondition(target, "prone") && close);
   const disadvantage =
+    crowded ||
+    proneFar ||
     hasFlag(attacker, "disadvantage", "attacks", stats) ||
     hasFlag(target, "disadvantage", "attacksAgainst", targetStats) ||
     hasCondition(
@@ -1270,7 +1513,8 @@ export function runApplyHit(
     const key = `extra:${String(index)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return;
     const allyPresent = allies(state, attacker).some(
-      (item) => item.id !== attacker.id && !isDown(item),
+      (item) =>
+        item.id !== attacker.id && !isDown(item) && within5(item, target),
     );
     const applies =
       passive.when === "advantage"
@@ -1771,6 +2015,47 @@ function hpFraction(actor: Actor, context: Context): number {
 }
 
 // Simple, predictable tactics, so non-player characters never need a model: heal, attack the weakest, react when it helps.
+// Where a creature should step to: within reach of the nearest foe it can hurt, by the shortest walk.
+// Null when no square gets it any closer than it is.
+function stepToward(actor: Actor, context: Context): Square | null {
+  const { state } = context;
+  const stats = deriveStats(actor, context);
+  if (!actor.position) return null;
+  const offensive = stats.actions.filter(
+    (action) =>
+      !action.activation.trigger &&
+      "side" in action.activation.targeting &&
+      action.activation.targeting.side === "enemy" &&
+      canAfford(action, actor, stats),
+  );
+  if (offensive.length === 0) return null;
+  const reach = Math.max(
+    ...offensive.map((action) => {
+      const { targeting } = action.activation;
+      return "area" in targeting && targeting.range === "self"
+        ? targeting.area.radius
+        : "range" in targeting
+          ? rangeFeet(targeting.range)
+          : 0;
+    }),
+  );
+  const foes = enemies(state, actor).filter(
+    (item) => !isDown(item) && item.position,
+  );
+  const gap = (from: Square | null): number =>
+    Math.min(
+      ...foes.map((foe) =>
+        Math.max(0, distanceFeet(from, foe.position) - reach),
+      ),
+    );
+  if (foes.length === 0) return null;
+  const now = gap(actor.position);
+  const best = [...moveSquares(actor, state, stats)].sort(
+    (a, b) => gap(a.square) - gap(b.square) || a.feet - b.feet,
+  )[0];
+  return best && gap(best.square) < now ? best.square : null;
+}
+
 export function choosePolicy(decision: Decision, context: Context): string {
   const { state } = context;
   const [first] = decision.options;
@@ -1779,6 +2064,10 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (decision.id.startsWith(`${NS}:deathSave:`)) return first.id;
 
   const actor = actorOf(state, decision.actor);
+  if (decision.id.startsWith(`${NS}:moveTo:`)) {
+    const square = stepToward(actor, context);
+    return square ? squareKey(square) : STAY;
+  }
   const stats = deriveStats(actor, context);
   const parsed = decision.options.flatMap((option) => {
     const [actionId = "", targetId = "", slot] = option.id.split(SEPARATOR);
@@ -1909,6 +2198,14 @@ export function choosePolicy(decision: Decision, context: Context): string {
           attackRoutine(a.action, actor, stats).length,
     )[0];
   if (attack) return attack.option.id;
+  // Nothing in reach yet: walk closer while there's still an action to use when it gets there.
+  if (
+    actor.budget.action &&
+    decision.options.some((option) => option.id === MOVE) &&
+    stepToward(actor, context)
+  ) {
+    return MOVE;
+  }
   const lastResort = areas.find(
     ({ action: { activation } }) =>
       "damage" in activation.resolution &&

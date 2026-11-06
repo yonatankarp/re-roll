@@ -54,7 +54,9 @@ The engine contains no game rules and no adventure content. **Everything specifi
 | `eslint` | 10.14.0 | `@fast-check/vitest` | 0.5.0 |
 | `zod` | 4.6.7 | `yaml` | 2.9.1 |
 | `prettier` | 3.9.10 | `vite` | 8.3.6 |
-| `pixi.js` (D&D combat grid only) | 8.22.0 | `@tauri-apps/cli` | 2.12.4 |
+| `@tauri-apps/cli` | 2.12.4 | | |
+
+The D&D combat board is drawn with the DOM and CSS animations rather than PixiJS: a grid of a few dozen squares doesn't need WebGL, it saves a dependency, and pictures from the content folders work as plain images.
 
 ## 3. Architecture and layout
 
@@ -72,7 +74,7 @@ plugins/
   systems/
     dnd5.5e/            Code plugin: the D&D 5.5e rules
       core/                Schemas, rules, combat, character building, AI policies
-      ui/                  Character sheet, PixiJS combat grid
+      ui/                  Character sheet, combat board (DOM and CSS)
   rules/
     srd52/                 Data plugin for dnd5.5e
       plugin.yaml
@@ -249,12 +251,12 @@ Every slot must make sense for both systems. If a Daggerheart cell had to say "n
 | Damage | Subtract after Resistance and Vulnerability | Compare to thresholds, then mark 1, 2 or 3 HP |
 | Recovery | Short and Long Rests | Downtime moves during a rest |
 | Advancement | XP thresholds and class levels | Level-up advancement choices |
-| Encounter UI | PixiJS grid | Range band view, built by that plugin |
+| Encounter UI | Grid board | Range band view, built by that plugin |
 
 **What this changed in the engine**
 - **Outcomes aren't pass or fail.** Each system declares its own keys, and scenes branch on them. A system can also declare groups, such as `success` covering `successHope` and `successFear`, so writers aren't forced to handle every case.
 - **The engine has no concept of turns.** It only asks `nextDecision`, which covers both initiative and spotlight.
-- **The grid belongs to the D&D plugin.** The engine shell only provides space for a system's encounter view.
+- **The grid belongs to the D&D plugin.** The engine shell only provides space for a system's encounter view: `app/` passes `mountShell` a board for each system id, and the shell hands it the view, the pending decision and the cues since its last update. A system's `cue` turns each event into plain data to animate, so the board is the only system code that touches the DOM.
 - **HP isn't an engine concept.** Damage and health stay entirely inside each system.
 - **Clocks stay in the engine.** Daggerheart's countdowns map onto them directly, which suggests that the concept is general enough.
 - **The director doubles as the GM.** It answers `gmOpportunity` events, which handles Daggerheart's GM moves without a new mechanism.
@@ -754,7 +756,7 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 **Dying:** the SRD's death saves, Stable at three successes, and Massive Damage all apply. **If the player's character dies, the run ends, even if companions win the fight.** That's a design choice, because the story follows the player, and could change once there's a way to carry on with another character.
 
 **Deliberately cut for now, each with a `shortcut:` comment where it applies:**
-- **No positions:** there's no grid, movement or Opportunity Attacks, and everyone in a fight can reach everyone. Areas hit all enemies, and Sneak Attack treats any living ally as nearby.
+- **The grid is plain:** no walls, difficult terrain, cover or creature sizes, and the party always starts along one edge with the enemies 30 feet away. An Opportunity Attack checks only where a move starts and ends, an area catches only the side it's aimed at, flanking doesn't exist, and fleeing always works. Monsters and companions walk straight at the nearest foe they can hurt.
 - **Character building:** no multiclassing, swapping prepared spells, feat prerequisites, feat ability increases other than Ability Score Improvement, or starting gear from the class tables. Expertise, Eldritch Invocations, species lineages and other options with no choice data stay as text. Companions' classes don't follow their personalities.
 - **Spell rules:** no upcasting at runtime, cantrip scaling, swapping prepared spells or the one-spell-slot-per-turn rule. A spell can use a higher slot, but gains nothing from it.
 - **Other rules:** no Arcane Recovery, weapon mastery effects or armor training limits. Unarmored Defense and most imported features are text only. Conditions and forced movement are stored in data but do nothing yet.
@@ -879,7 +881,7 @@ A failed bot run prints its seed and input list, so any failure can be reproduce
 3. **Engine kernel and story runtime (done):** turn loop, seeded dice, replay test and test bot, all running against the fixture system. Not included yet: companion loyalty triggers, levels and items, prep digests built from the log, and a smarter director.
 4. **D&D plugin core (first slice done):** derived stats, damage pipeline and frames, with both adventures copied to `plugins/adventures` in D&D form and playable from the command line. See section 8.12.
 5. **Levels 1–5 content (importer started):** all classes and the monsters they meet. The importer's spell path is built and tested on SRD text, and other kinds of content come next.
-6. **UI (first slice done):** the engine shell, in a browser and in Tauri, with the sheet and combat data from `plugins/systems/dnd5.5e/ui`. The PixiJS combat grid waits for positions in the engine.
+6. **UI (first slice done):** the engine shell, in a browser and in Tauri, with the sheet and combat data from `plugins/systems/dnd5.5e/ui`, and the D&D combat board: tokens on a 5-foot grid over the scene's picture, animated dice, hits, damage and movement, and clicking a token or square to act.
 7. **Full loop:** play, prep, play. Then package the app with `llama-server` as a Tauri sidecar.
 8. **Your books:** import, review and expand automation over time.
 

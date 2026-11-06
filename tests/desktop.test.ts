@@ -250,6 +250,9 @@ describe("playing through the shell's session", () => {
 
     expect(savedPath).not.toBeNull();
     const end = game.view();
+    expect(end.cues.map((cue) => (cue as { kind: string }).kind)).toEqual(
+      expect.arrayContaining(["start", "turn", "attack", "damage", "end"]),
+    );
     expect(end.decision).toBeNull();
     expect(end.ended).not.toBeNull();
     expect(end.log.some((line) => line.text.includes("Goblin"))).toBe(true);

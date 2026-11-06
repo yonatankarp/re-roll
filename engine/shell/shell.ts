@@ -1,5 +1,7 @@
 import type { Game, GameView } from "./session.ts";
 import type {
+  Board,
+  BoardHost,
   CombatView,
   OptionView,
   SheetSection,
@@ -7,6 +9,9 @@ import type {
 } from "./system-ui.ts";
 
 // The whole page, drawn from the plain data in GameView. Knows nothing about any rule system.
+
+// A system's own encounter view, such as a combat board, keyed by system id. It draws its own DOM in the slot.
+export type BoardFactory = (slot: HTMLElement, host: BoardHost) => Board;
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -208,6 +213,14 @@ function renderSheet(sheet: SheetView, full: boolean): HTMLElement {
   );
 }
 
+// A bar from 0 to 1, such as hit points left.
+function meter(share: number): HTMLElement {
+  const fill = el("i");
+  fill.style.width = `${String(Math.round(Math.max(0, Math.min(1, share)) * 100))}%`;
+  fill.dataset.level = share > 0.5 ? "high" : share > 0.25 ? "mid" : "low";
+  return el("span", { class: "meter" }, fill);
+}
+
 // A redraw must not close what the player has opened to read.
 function replaceKeepingOpen(container: HTMLElement, ...nodes: Node[]): void {
   const opened = new Set(
@@ -254,7 +267,11 @@ function endingOf(view: GameView): {
   }
 }
 
-export function mountShell(root: HTMLElement, game: Game): void {
+export function mountShell(
+  root: HTMLElement,
+  game: Game,
+  boards: Readonly<Record<string, BoardFactory>> = {},
+): void {
   const notice = el("p", { class: "notice" });
   notice.setAttribute("role", "status");
   const screen = el("div", { class: "screen" }, el("p", { text: "Loading…" }));
@@ -532,43 +549,79 @@ export function mountShell(root: HTMLElement, game: Game): void {
     focusNext = heading;
   };
 
+  // A side drawer: the character sheet or the journal, opened from the top bar so the stage stays clear.
+  const drawer = (label: string, ...content: Node[]): HTMLDialogElement => {
+    const close = el("button", { text: "Close" });
+    const node = el(
+      "dialog",
+      { class: "drawer" },
+      el(
+        "header",
+        { class: "drawer-head" },
+        el("h2", { text: label }),
+        el("form", {}, close),
+      ),
+      ...content,
+    );
+    node.querySelector("form")?.setAttribute("method", "dialog");
+    node.setAttribute("aria-label", label);
+    // A click on the dimmed page beside the drawer closes it.
+    node.addEventListener("click", (event) => {
+      if (event.target === node) node.close();
+    });
+    return node;
+  };
+
+  // Restarts a CSS entrance animation on a node that stays in the page.
+  const enter = (node: HTMLElement): void => {
+    node.classList.remove("enter");
+    node.getBoundingClientRect(); // a reflow, so the animation starts again
+    node.classList.add("enter");
+  };
+
   const showGame = (): void => {
-    const title = el("h2");
+    const title = el("h2", { class: "scene-title" });
     title.tabIndex = -1;
     const sceneArt = el("div", { class: "scene-art" });
     let artShown: string | null = null;
     const scene = el("p", { class: "scene-text" });
+    let sceneShown: string | null = null;
     const ending = el("section", { class: "ending" });
     const combat = el("div");
-    // The PixiJS combat grid mounts here once the engine tracks positions (section 3 of the design).
     const combatGridSlot = el("div");
     combatGridSlot.id = "combat-grid-slot";
     combatGridSlot.hidden = true;
+    let board: Board | null = null;
+    let cuesShown: number | null = null; // null until the first draw, which shows a loaded game as it stands
+    // The newest lines of the journal, under the board, so the latest result is visible without the whole log.
+    const ticker = el("ol", { class: "ticker" });
+    ticker.setAttribute("aria-hidden", "true");
     const prompt = el("p", { class: "prompt" });
     const options = el("div", { class: "options" });
+    let decisionShown: string | null = null;
+    let openGroup: string | null = null;
+    let showAll = false;
     const log = el("ol", { class: "log" });
     log.setAttribute("role", "log");
     log.setAttribute("aria-label", "What has happened so far");
     log.tabIndex = 0;
-    const sheet = el("aside", { class: "sheet" });
-    const sheetPanel = el("div");
-    const fullSheet = el("div");
-    const sheetDialog = el(
-      "dialog",
-      { class: "sheet-dialog" },
-      el("form", { class: "dialog-close" }, el("button", { text: "Close" })),
-      fullSheet,
-    );
-    sheetDialog.querySelector("form")?.setAttribute("method", "dialog");
-    sheetDialog.setAttribute("aria-label", "Character sheet");
-    const openSheet = button("Full character sheet", () => {
-      sheetDialog.showModal();
-    });
-    openSheet.className = "open-sheet";
-    sheet.append(sheetPanel, openSheet, sheetDialog);
     const about = el("details", { class: "about" });
+    const fullSheet = el("div");
+    const sheetDrawer = drawer("Character", fullSheet);
+    const journalDrawer = drawer("Journal", log, about);
+    const hud = button("", () => {
+      sheetDrawer.showModal();
+    });
+    hud.className = "hud";
+    hud.setAttribute("aria-label", "Open the character sheet");
+    const journal = button("Journal", () => {
+      journalDrawer.showModal();
+      log.scrollTop = log.scrollHeight;
+    });
 
     actions.replaceChildren(
+      hud,
+      journal,
       button("Save", () => {
         act(async () => {
           const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -580,40 +633,63 @@ export function mountShell(root: HTMLElement, game: Game): void {
         act(showMenu);
       }),
     );
+    const stage = el(
+      "main",
+      { class: "play" },
+      title,
+      sceneArt,
+      scene,
+      ending,
+      combatGridSlot,
+      ticker,
+      combat,
+      prompt,
+      options,
+    );
     screen.replaceChildren(
-      el(
-        "div",
-        { class: "game" },
-        el(
-          "main",
-          { class: "play" },
-          title,
-          sceneArt,
-          scene,
-          ending,
-          combat,
-          combatGridSlot,
-          prompt,
-          options,
-          el("h3", { text: "Story so far" }),
-          log,
-          about,
-        ),
-        sheet,
-      ),
+      el("div", { class: "game" }, stage, sheetDrawer, journalDrawer),
     );
 
     let linesShown = 0;
     const draw = (): void => {
       const view = game.view();
+      const factory = boards[view.system];
+      if (factory && !board) {
+        board = factory(combatGridSlot, {
+          imageUrl: (path) => game.imageUrl(path),
+          answer: (optionId) => {
+            act(async () => {
+              await game.answer(optionId);
+              draw();
+            });
+          },
+        });
+      }
+      board?.update({
+        state: view.systemState,
+        decision: view.decision,
+        combat: view.combat,
+        art: view.monsterArt,
+        sceneArt: view.sceneArt,
+        cues: view.cues.slice(cuesShown ?? view.cues.length),
+      });
+      const firstDraw = cuesShown === null;
+      cuesShown = view.cues.length;
+      stage.classList.toggle("in-combat", view.combat !== null);
+
       title.textContent = view.title;
-      scene.textContent = view.scene;
+      if (view.scene !== sceneShown) {
+        sceneShown = view.scene;
+        scene.textContent = view.scene;
+        if (!firstDraw) enter(scene);
+      }
       // Only touched on a change, so staying in a scene doesn't reload its picture.
       if (view.sceneArt !== artShown) {
         artShown = view.sceneArt;
         sceneArt.replaceChildren(
           ...(view.sceneArt ? [picture(game, view.sceneArt, "", "art")] : []),
         );
+        if (!firstDraw) enter(sceneArt);
       }
       const end = endingOf(view);
       const endTitle = el("h3", { text: end?.title ?? "" });
@@ -631,16 +707,38 @@ export function mountShell(root: HTMLElement, game: Game): void {
       );
       ending.hidden = !end;
       ending.dataset.ending = view.ended ?? "";
-      combat.replaceChildren(
-        ...(view.combat
-          ? [renderCombat(game, view.combat, view.monsterArt)]
+      // With a board showing the fight, the written turn order folds away until it's wanted.
+      const order = view.combat
+        ? renderCombat(game, view.combat, view.monsterArt)
+        : null;
+      replaceKeepingOpen(
+        combat,
+        ...(order
+          ? [
+              board
+                ? el(
+                    "details",
+                    { class: "initiative-details" },
+                    el("summary", { text: "Turn order and conditions" }),
+                    order,
+                  )
+                : order,
+            ]
           : []),
       );
 
       const { decision } = view;
       prompt.textContent =
         decision && decision.prompt !== view.scene ? decision.prompt : "";
-      const optionRow = (option: OptionView): HTMLElement => {
+      const fresh = (decision?.id ?? null) !== decisionShown;
+      if (fresh) {
+        decisionShown = decision?.id ?? null;
+        showAll = false;
+        const titled = view.optionGroups.filter((group) => group.title);
+        // A single group of actions opens by itself; with several, the player picks one.
+        openGroup = titled.length === 1 ? (titled[0]?.title ?? null) : null;
+      }
+      const optionRow = (option: OptionView, index: number): HTMLElement => {
         const row = el(
           "div",
           { class: "option" },
@@ -651,65 +749,125 @@ export function mountShell(root: HTMLElement, game: Game): void {
             });
           }),
         );
+        row.style.setProperty("--i", String(index));
         if (option.detail) {
           const info = el("p", { class: "option-detail", text: option.detail });
           info.hidden = true;
-          const toggle = button("Details", () => {
+          const toggle = button("i", () => {
             info.hidden = !info.hidden;
             toggle.setAttribute("aria-expanded", String(!info.hidden));
           });
+          toggle.className = "info";
           toggle.setAttribute("aria-expanded", "false");
           toggle.setAttribute("aria-label", `Details of ${option.label}`);
           row.append(toggle, info);
         }
         return row;
       };
+      // A long list shows its first few and its last, such as "Stay where you are", until asked for the rest.
+      const trimmed = (list: readonly OptionView[]): HTMLElement[] => {
+        if (showAll || list.length <= 7) return list.map(optionRow);
+        const last = list.at(-1);
+        const more = button(`More choices (${String(list.length - 6)})`, () => {
+          showAll = true;
+          draw();
+          options.querySelectorAll<HTMLElement>(".option > button")[5]?.focus();
+        });
+        more.className = "more";
+        return [
+          ...list.slice(0, 5).map(optionRow),
+          more,
+          ...(last ? [optionRow(last, 6)] : []),
+        ];
+      };
+      const tabs = view.optionGroups.filter((group) => group.title !== null);
+      const chosen = tabs.find((group) => group.title === openGroup);
       options.replaceChildren(
-        ...view.optionGroups.map((group) => {
-          if (group.title === null) {
-            return el(
-              "div",
-              { class: "options" },
-              ...group.options.map(optionRow),
-            );
-          }
-          const node = el(
-            "details",
-            { class: "option-group" },
-            el("summary", { text: group.title }),
-            el("div", { class: "options" }, ...group.options.map(optionRow)),
-          );
-          node.open = true;
-          return node;
-        }),
-      );
-
-      log.append(
-        ...view.log
-          .slice(linesShown)
-          .map((line) =>
-            el(
-              "li",
-              { class: line.kind },
-              ...(line.actor && !line.text.startsWith(line.actor)
-                ? [el("span", { class: "log-actor", text: `${line.actor}: ` })]
-                : []),
-              document.createTextNode(line.text),
-            ),
+        ...view.optionGroups
+          .filter((group) => group.title === null)
+          .map((group) =>
+            el("div", { class: "options" }, ...trimmed(group.options)),
           ),
+        ...(tabs.length > 0
+          ? [
+              el(
+                "div",
+                { class: "tabs" },
+                ...tabs.map((group) => {
+                  const name = group.title ?? "";
+                  const tab = button(name, () => {
+                    openGroup = openGroup === name ? null : name;
+                    draw();
+                    // The redraw replaced this button, so focus goes to its replacement.
+                    [...options.querySelectorAll<HTMLElement>(".tab")]
+                      .find((item) => item.textContent === name)
+                      ?.focus();
+                  });
+                  tab.className = name === openGroup ? "tab open" : "tab";
+                  tab.setAttribute("aria-expanded", String(name === openGroup));
+                  return tab;
+                }),
+              ),
+            ]
+          : []),
+        ...(chosen
+          ? [
+              el(
+                "div",
+                { class: "options group-panel" },
+                ...trimmed(chosen.options),
+              ),
+            ]
+          : []),
+      );
+      if (fresh && !firstDraw) enter(options);
+
+      const added = view.log.slice(linesShown);
+      log.append(
+        ...added.map((line) =>
+          el(
+            "li",
+            { class: line.kind },
+            ...(line.actor && !line.text.startsWith(line.actor)
+              ? [el("span", { class: "log-actor", text: `${line.actor}: ` })]
+              : []),
+            document.createTextNode(line.text),
+          ),
+        ),
       );
       linesShown = view.log.length;
       log.scrollTop = log.scrollHeight;
+      const news = added.filter((line) => line.kind === "event").slice(-3);
+      if (!firstDraw && news.length > 0) {
+        ticker.replaceChildren(
+          ...news.map((line, index) => {
+            const item = el("li", { text: line.text });
+            item.style.setProperty("--i", String(index));
+            return item;
+          }),
+        );
+        enter(ticker);
+      }
 
-      replaceKeepingOpen(
-        sheetPanel,
-        ...(view.sheet ? [renderSheet(view.sheet, false)] : []),
-      );
+      hud.hidden = !view.sheet;
+      if (view.sheet) {
+        hud.replaceChildren(
+          el("span", { class: "hud-name", text: view.sheet.title }),
+          ...(view.sheet.summary ?? []).map((row) =>
+            el(
+              "span",
+              { class: "hud-stat" },
+              el("small", { text: row.label }),
+              document.createTextNode(` ${row.value}`),
+              ...(row.meter === undefined ? [] : [meter(row.meter)]),
+            ),
+          ),
+        );
+      }
       replaceKeepingOpen(
         fullSheet,
         ...(view.sheet ? [renderSheet(view.sheet, true)] : []),
       );
-      openSheet.hidden = !view.sheet;
       about.replaceChildren(
         el("summary", { text: "About" }),
         el("p", { text: `Re-roll. ${view.about}` }),

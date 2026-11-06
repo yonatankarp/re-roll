@@ -5,6 +5,7 @@ import {
   type SystemEvent,
 } from "#sdk";
 import { z } from "zod";
+import { dndCue } from "./cues.ts";
 import {
   ABILITIES,
   type Amount,
@@ -300,6 +301,14 @@ function sheet(rawState: unknown, access: ContentAccess) {
       nameOf(access, build.backgroundId),
       `Level ${String(stats.level)}, ${String(player.xp ?? 0)} XP`,
     ].join(" · "),
+    summary: [
+      {
+        label: "HP",
+        value: `${String(player.hp)}/${String(stats.maxHp)}`,
+        meter: stats.maxHp > 0 ? player.hp / stats.maxHp : 0,
+      },
+      { label: "AC", value: String(stats.ac) },
+    ],
     tags: [
       ...(status ? [status] : []),
       ...conditionsOf(player),
@@ -598,6 +607,7 @@ function playerDied(rawState: unknown): boolean {
 }
 
 export const dndUi = {
+  cue: dndCue,
   systemId: "dnd5.5e",
   about: "Compatible with fifth edition.",
   sheet,
