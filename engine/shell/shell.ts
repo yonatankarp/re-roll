@@ -657,10 +657,12 @@ export function mountShell(
       if (factory && !board) {
         board = factory(combatGridSlot, {
           imageUrl: (path) => game.imageUrl(path),
-          answer: (optionId) => {
+          answer: (...optionIds) => {
             act(async () => {
-              await game.answer(optionId);
+              for (const optionId of optionIds) await game.answer(optionId);
               draw();
+              // Played on the map, so the page stays put rather than jumping to the buttons.
+              focusNext = null;
             });
           },
         });

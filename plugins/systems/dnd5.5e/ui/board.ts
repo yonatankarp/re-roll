@@ -32,6 +32,7 @@ interface BoardUpdate {
   } | null;
   readonly combat: {
     readonly combatants: readonly Combatant[];
+    readonly board?: unknown; // from this plugin's combat view: where the player can move
   } | null;
   readonly art: Readonly<Record<string, string>>;
   readonly sceneArt: string | null;
@@ -40,7 +41,7 @@ interface BoardUpdate {
 
 interface BoardHost {
   readonly imageUrl: (path: string) => string | Promise<string | null> | null;
-  readonly answer: (optionId: string) => void;
+  readonly answer: (...optionIds: readonly string[]) => void;
 }
 
 interface Token {
@@ -74,6 +75,19 @@ const PACE: Record<DndCue["kind"], number> = {
 const SQUARE = /^(\d+),(\d+)$/; // a move option's id
 const SEPARATOR = "|"; // between an option id's action, target and slot
 const AIM = "@"; // an area aimed at a creature
+const MOVE = "move"; // the turn option that asks where to go
+
+interface Move {
+  readonly x: number;
+  readonly y: number;
+  readonly feet: number;
+}
+
+function movesOf(update: BoardUpdate | null): readonly Move[] {
+  const extra = update?.combat?.board as
+    { moves?: readonly Move[] } | undefined;
+  return extra?.moves ?? [];
+}
 
 const DAMAGE_COLORS: Record<string, string> = {
   fire: "#ff7a2f",
@@ -146,6 +160,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       wake?.();
       return;
     }
+    if (dragged) {
+      dragged = false;
+      return;
+    }
     const target = event.target as HTMLElement;
     const cell = target.closest<HTMLElement>(".dnd-cell");
     const token = target.closest<HTMLElement>(".dnd-token");
@@ -154,7 +172,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       closeMenu();
       host.answer(item.dataset.option);
     } else if (cell?.dataset.option) {
-      host.answer(cell.dataset.option);
+      answerCell(cell);
     } else if (token?.dataset.id) {
       openMenu(token.dataset.id, token);
     } else {
@@ -309,27 +327,93 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       ? latest.decision.options
       : [];
 
-  // Squares the player can move to, while the list is asking where to.
+  // Where the player can walk. On the turn itself a square answers Move and then the square, so one
+  // click or drag does it; while the list is already asking where to, it answers that.
   const showCells = (): void => {
     cells.replaceChildren();
     if (!grid) return;
-    for (const option of playerOptions()) {
+    const options = playerOptions();
+    const asked = options.flatMap((option) => {
       const match = SQUARE.exec(option.id);
-      if (!match) continue;
-      const cell = el("div", "dnd-cell");
-      cell.dataset.option = option.id;
-      cell.title = option.label;
-      cell.style.left = `${String((Number(match[1]) / grid.width) * 100)}%`;
-      cell.style.top = `${String((Number(match[2]) / grid.height) * 100)}%`;
+      return match
+        ? [
+            {
+              x: Number(match[1]),
+              y: Number(match[2]),
+              label: option.label,
+              steps: [option.id],
+            },
+          ]
+        : [];
+    });
+    const offered = options.some((option) => option.id === MOVE)
+      ? movesOf(latest).map((move) => ({
+          ...move,
+          label: `${String(move.feet)} ft`,
+          steps: [MOVE, `${String(move.x)},${String(move.y)}`],
+        }))
+      : [];
+    for (const square of asked.length > 0 ? asked : offered) {
+      const cell = el("div", asked.length > 0 ? "dnd-cell" : "dnd-cell soft");
+      cell.dataset.option = square.steps.join(" ");
+      cell.title = square.label;
+      cell.style.left = `${String((square.x / grid.width) * 100)}%`;
+      cell.style.top = `${String((square.y / grid.height) * 100)}%`;
       cells.append(cell);
     }
+  };
+
+  const answerCell = (cell: HTMLElement): void => {
+    const steps = (cell.dataset.option ?? "").split(" ").filter(Boolean);
+    if (steps.length > 0) host.answer(...steps);
+  };
+
+  // Dragging the player's token onto a lit square walks it there.
+  let dragged = false;
+  field.addEventListener("pointerdown", (down) => {
+    const token = (down.target as HTMLElement).closest<HTMLElement>(
+      ".dnd-token",
+    );
+    if (playing || token?.dataset.id !== PLAYER_ACTOR || !cells.firstChild) {
+      return;
+    }
+    let moving = false;
+    const move = (event: PointerEvent): void => {
+      const dx = event.clientX - down.clientX;
+      const dy = event.clientY - down.clientY;
+      if (!moving && Math.hypot(dx, dy) < 6) return;
+      moving = true;
+      token.classList.add("dragging");
+      token.style.translate = `${String(dx)}px ${String(dy)}px`;
+      for (const cell of cells.children) cell.classList.remove("hover");
+      cellAt(event)?.classList.add("hover");
+    };
+    const up = (event: PointerEvent): void => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      token.classList.remove("dragging");
+      token.style.translate = "";
+      if (!moving) return;
+      dragged = true;
+      const cell = cellAt(event);
+      if (cell) answerCell(cell);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+
+  const cellAt = (event: PointerEvent): HTMLElement | null => {
+    const found = document
+      .elementsFromPoint(event.clientX, event.clientY)
+      .find((item) => item.classList.contains("dnd-cell"));
+    return found instanceof HTMLElement ? found : null;
   };
 
   // The options aimed at a token, or for the player's own token, the ones aimed at nobody in particular.
   const openMenu = (id: string, anchor: HTMLElement): void => {
     const own = id === PLAYER_ACTOR;
     const options = playerOptions().filter((option) => {
-      if (SQUARE.test(option.id)) return false;
+      if (SQUARE.test(option.id) || option.id === MOVE) return false;
       const target = option.id.split(SEPARATOR)[1];
       if (target === id || target === `${AIM}${id}`) return true;
       return own && (target === undefined || target === "all");
@@ -901,7 +985,18 @@ const BOARD_CSS = `
   border: 1px solid rgb(255 211 107 / 35%);
   cursor: pointer;
 }
-.dnd-cell:hover { background: rgb(255 211 107 / 45%); }
+.dnd-cell:hover, .dnd-cell.hover { background: rgb(255 211 107 / 45%); }
+.dnd-cell.soft {
+  background: rgb(255 211 107 / 4%);
+  border-color: transparent;
+}
+.dnd-token.dragging {
+  z-index: 7;
+  pointer-events: none;
+  transition: none;
+  filter: drop-shadow(0 8px 12px rgb(0 0 0 / 60%));
+}
+.dnd-board:not(.playing) .dnd-token[data-id="player"] { cursor: grab; touch-action: none; }
 .dnd-board:not(.playing) .dnd-token { cursor: pointer; }
 .dnd-menu {
   position: absolute;

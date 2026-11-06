@@ -183,7 +183,7 @@ function speedLeft(actor: Actor, stats: Stats): number {
   return held || !actor.position ? 0 : Math.max(0, stats.speed - actor.moved);
 }
 
-function moveSquares(
+export function moveSquares(
   actor: Actor,
   state: DndState,
   stats: Stats,

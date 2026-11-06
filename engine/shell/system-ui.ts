@@ -57,13 +57,15 @@ export interface CombatantView {
 
 export interface CombatView {
   readonly round: number;
+  readonly board?: unknown; // read only by the system's own board, such as where the player can move
   readonly combatants: readonly CombatantView[];
 }
 
 // What the shell gives a board: pictures, and a way to answer the pending decision.
 export interface BoardHost {
   readonly imageUrl: (path: string) => string | Promise<string | null> | null;
-  readonly answer: (optionId: string) => void;
+  // Several ids answer the decisions that follow one another, such as Move and then a square.
+  readonly answer: (...optionIds: readonly string[]) => void;
 }
 
 export interface BoardUpdate {

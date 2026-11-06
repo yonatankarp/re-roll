@@ -5,6 +5,7 @@ import {
   type SystemEvent,
 } from "#sdk";
 import { z } from "zod";
+import { moveSquares } from "../core/combat.ts";
 import { dndCue } from "./cues.ts";
 import {
   ABILITIES,
@@ -447,8 +448,17 @@ function combat(rawState: unknown, access: ContentAccess) {
   const state = StateSchema.parse(rawState);
   if (!state.combat) return null;
   const { order, index, round } = state.combat;
+  // Where the player can walk this turn, so the board can move them with one click.
+  const player = state.actors[PLAYER_ACTOR];
+  const moves =
+    player && order[index] === PLAYER_ACTOR
+      ? moveSquares(player, state, deriveStats(player, access)).map(
+          ({ square, feet }) => ({ ...square, feet }),
+        )
+      : [];
   return {
     round,
+    board: { moves },
     combatants: order.flatMap((id, position) => {
       const actor = state.actors[id];
       if (!actor) return [];
