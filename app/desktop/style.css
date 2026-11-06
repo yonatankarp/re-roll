@@ -1,33 +1,129 @@
-:root {
-  color-scheme: light dark;
-  --bg: #f6f4ef;
-  --panel: #ffffff;
-  --ink: #23211c;
-  --muted: #5f5b52;
-  --line: #d8d3c7;
-  --accent: #7a3b12;
-  --accent-ink: #ffffff;
-  --active: #f3e6d6;
-  --error: #a4231b;
-  --good: #2c6b3a;
-  font:
-    17px/1.5 Georgia,
-    "Times New Roman",
-    serif;
+/* Solbera's CC BY-SA 4.0 recreations of the fifth edition book fonts, credited in fonts/LICENSE and About. */
+@font-face {
+  font-family: "Bookinsanity";
+  src: url("./fonts/bookinsanity.otf") format("opentype");
+  font-display: swap;
 }
 
+@font-face {
+  font-family: "Bookinsanity";
+  src: url("./fonts/bookinsanity-bold.otf") format("opentype");
+  font-weight: bold;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Bookinsanity";
+  src: url("./fonts/bookinsanity-italic.otf") format("opentype");
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Bookinsanity";
+  src: url("./fonts/bookinsanity-bold-italic.otf") format("opentype");
+  font-weight: bold;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Mr Eaves Small Caps";
+  src: url("./fonts/mr-eaves-small-caps.otf") format("opentype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Nodesto Caps Condensed";
+  src: url("./fonts/nodesto-caps-condensed.otf") format("opentype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Scaly Sans";
+  src: url("./fonts/scaly-sans.otf") format("opentype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Scaly Sans";
+  src: url("./fonts/scaly-sans-bold.otf") format("opentype");
+  font-weight: bold;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Scaly Sans Caps";
+  src: url("./fonts/scaly-sans-caps.otf") format("opentype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Scaly Sans Caps";
+  src: url("./fonts/scaly-sans-caps-bold.otf") format("opentype");
+  font-weight: bold;
+  font-display: swap;
+}
+
+/* A Player's Handbook page: parchment, deep red headings and gold rules. */
+:root {
+  color-scheme: light dark;
+  --bg: #eee5ce;
+  --panel: #fbf6e9;
+  --ink: #221b12;
+  --muted: #5e5240;
+  --line: #c9ad6a;
+  --accent: #58180d;
+  --accent-ink: #fbf6e9;
+  --active: #f2e2bf;
+  --error: #9c2b1b;
+  --good: #2c5e3a;
+  --rule: #922610;
+  --leather: #2b1d14;
+  --leather-ink: #eee5ce;
+  --font-body: "Bookinsanity", Georgia, "Times New Roman", serif;
+  --font-head: "Mr Eaves Small Caps", Georgia, serif;
+  --font-title: "Nodesto Caps Condensed", Georgia, serif;
+  --font-ui: "Scaly Sans", system-ui, sans-serif;
+  --font-caps: "Scaly Sans Caps", system-ui, sans-serif;
+  --paper:
+    radial-gradient(
+      ellipse at 20% 10%,
+      rgb(255 250 235 / 70%),
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse at 85% 90%,
+      rgb(201 173 106 / 22%),
+      transparent 55%
+    ),
+    radial-gradient(circle at 60% 40%, rgb(255 255 255 / 25%), transparent 40%);
+  font: 17px/1.5 var(--font-body);
+}
+
+/* A dim dungeon, with parchment-coloured ink and gold headings. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #17161a;
-    --panel: #211f24;
-    --ink: #ece8df;
-    --muted: #a9a498;
-    --line: #3b3840;
-    --accent: #e0a36f;
+    --bg: #17130f;
+    --panel: #241d16;
+    --ink: #ede3cc;
+    --muted: #b3a688;
+    --line: #5a4630;
+    --accent: #e0b062;
     --accent-ink: #1a1408;
-    --active: #33291f;
-    --error: #ff8f85;
-    --good: #84d094;
+    --active: #3a2c1c;
+    --error: #ff8f7a;
+    --good: #8fce9b;
+    --rule: #b8452c;
+    --leather: #0f0c09;
+    --leather-ink: #ede3cc;
+    --paper:
+      radial-gradient(ellipse at 20% 0%, rgb(224 176 98 / 8%), transparent 60%),
+      radial-gradient(
+        ellipse at 90% 100%,
+        rgb(146 38 16 / 10%),
+        transparent 55%
+      );
   }
 }
 
@@ -37,7 +133,10 @@
 
 body {
   margin: 0;
-  background: var(--bg);
+  min-height: 100vh;
+  overflow-x: clip; /* the full-width top bar is measured against the viewport, scrollbar included */
+  background: var(--paper), var(--bg);
+  background-attachment: fixed;
   color: var(--ink);
 }
 
@@ -55,30 +154,36 @@ h3 {
 }
 
 h1 {
-  font-size: 1.3rem;
+  font: 1.9rem/1 var(--font-title);
+  letter-spacing: 0.02em;
+  color: var(--leather-ink);
 }
 
 h2 {
-  font-size: 1.4rem;
+  font: 1.7rem/1.1 var(--font-head);
+  color: var(--accent);
 }
 
 h3 {
-  font-size: 0.8rem;
-  font-family: system-ui, sans-serif;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
+  font: 1.15rem/1.2 var(--font-head);
+  color: var(--accent);
   margin-top: 24px;
   margin-bottom: 8px;
+  padding-bottom: 2px;
+  border-bottom: 2px solid var(--line);
 }
 
 /* Stays in view, because keyboard focus scrolls the page down to the options. */
 .top {
   position: sticky;
   top: 0;
-  z-index: 1;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
+  z-index: 2;
+  background: var(--leather);
+  color: var(--leather-ink);
+  border-bottom: 3px solid var(--line);
+  /* The bar runs edge to edge while its contents stay in the page column. */
+  margin-inline: calc(50% - 50vw);
+  padding-inline: calc(50vw - 50%);
 }
 
 .bar {
@@ -139,7 +244,7 @@ button:hover {
 .bar-actions button {
   padding: 6px 12px;
   font-size: 0.9rem;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-ui);
 }
 
 .bar-actions button[aria-pressed="false"] {
@@ -371,7 +476,7 @@ dd {
 summary {
   min-height: 32px;
   cursor: pointer;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-ui);
   font-size: 0.9rem;
 }
 
@@ -386,7 +491,7 @@ summary {
 }
 
 .log-actor {
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-ui);
 }
 
 .saves {
@@ -426,7 +531,7 @@ summary {
   padding: 1px 8px;
   border: 1px solid var(--accent);
   border-radius: 999px;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-ui);
   font-size: 0.75rem;
 }
 
@@ -449,7 +554,7 @@ summary {
 }
 
 .box-label {
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-ui);
   font-size: 0.65rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -678,7 +783,7 @@ summary {
 }
 
 .tab {
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-ui);
   font-size: 0.95rem;
   border-radius: 999px;
   padding: 8px 18px;
@@ -710,7 +815,7 @@ summary {
 .option .info {
   min-width: 44px;
   text-align: center;
-  font-family: Georgia, serif;
+  font-family: var(--font-head);
   font-style: italic;
   font-weight: bold;
   color: var(--muted);
@@ -843,4 +948,257 @@ summary {
 
 .bar h1 {
   white-space: nowrap;
+}
+
+/* The book look, layered over the layout above. */
+
+button {
+  font-family: var(--font-body);
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: 0 1px 2px rgb(60 40 10 / 15%);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    transform 0.15s;
+}
+
+button:hover {
+  border-color: var(--accent);
+  box-shadow:
+    inset 4px 0 0 var(--accent),
+    0 2px 6px rgb(60 40 10 / 20%);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.top button,
+.bar-actions button {
+  color: var(--leather-ink);
+  background: transparent;
+  border-color: rgb(201 173 106 / 45%);
+  box-shadow: none;
+  font-family: var(--font-caps);
+  letter-spacing: 0.03em;
+}
+
+.top button:hover,
+.bar-actions button:hover {
+  border-color: var(--line);
+  background: rgb(201 173 106 / 12%);
+  box-shadow: none;
+}
+
+.hud-name {
+  font: 1.05rem var(--font-head);
+}
+
+.hud-stat small {
+  color: #c9ad6a; /* gold on the leather bar, in both themes */
+}
+
+.menu h2,
+.drawer-head h2 {
+  font: 2rem/1 var(--font-title);
+  color: var(--accent);
+}
+
+.scene-title {
+  font: 1.25rem/1.2 var(--font-head);
+  color: var(--accent);
+  border-bottom: 2px solid var(--line);
+  padding-bottom: 4px;
+}
+
+.scene-text {
+  display: flow-root; /* keeps the drop cap from pushing the next line aside */
+  font-size: 1.2rem;
+  line-height: 1.6;
+}
+
+/* A drop cap opens each scene, as a chapter does in the books. */
+.play:not(.in-combat) .scene-text::first-letter {
+  float: left;
+  margin: 0.08em 0.08em 0 0;
+  font: 3.4rem/0.8 var(--font-title);
+  color: var(--accent);
+}
+
+.prompt {
+  font: 1.3rem/1.2 var(--font-head);
+  color: var(--accent);
+  font-weight: normal;
+}
+
+.ticker {
+  font-style: italic;
+}
+
+.option > button:first-child {
+  font-size: 1.05rem;
+}
+
+.option .info {
+  font-family: var(--font-head);
+  font-style: normal;
+  font-size: 1.1rem;
+}
+
+.tab {
+  font-family: var(--font-head);
+  font-size: 1.15rem;
+  padding: 6px 18px;
+}
+
+.tab.open {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: none;
+}
+
+/* Action panels and stat boxes look like the books' stat blocks: tinted paper between gold bars. */
+.group-panel,
+.box,
+.ending {
+  background: #fdf1dc;
+  border: 1px solid #d4b97f;
+  box-shadow: 0 2px 6px rgb(60 40 10 / 18%);
+}
+
+.group-panel {
+  border-top: 4px solid #e69a28;
+  border-bottom: 4px solid #e69a28;
+  border-radius: 4px;
+}
+
+.box-label,
+.tags li,
+.mark-note {
+  font-family: var(--font-caps);
+}
+
+.box-value {
+  font-family: var(--font-head);
+  color: var(--accent);
+  font-weight: normal;
+}
+
+.sheet-head h2 {
+  font: 2.2rem/1 var(--font-title);
+}
+
+/* The tapered red rule that runs under a stat block's name. */
+.sheet-head::after {
+  content: "";
+  display: block;
+  height: 4px;
+  margin-top: 8px;
+  background: linear-gradient(to right, var(--rule), transparent);
+}
+
+.tags li {
+  border-color: var(--rule);
+  color: var(--accent);
+}
+
+.ending {
+  border-color: var(--rule);
+}
+
+.ending h3 {
+  font: 2rem/1 var(--font-title);
+  border: 0;
+}
+
+.drawer {
+  background: var(--paper), var(--bg);
+  border-left: 4px solid var(--line);
+}
+
+.drawer-head {
+  background: var(--bg);
+  border-bottom: 2px solid var(--line);
+}
+
+.log {
+  background: #fdf1dc;
+  border-color: #d4b97f;
+}
+
+.log li.scene {
+  color: var(--accent);
+}
+
+.adventure-group h3 {
+  margin-top: 28px;
+}
+
+.search {
+  font: inherit;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+/* The battle map sits in a dark wooden frame with a gold edge. */
+.dnd-board {
+  border: 6px solid #4a3220;
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 2px var(--line),
+    0 8px 24px rgb(40 25 10 / 40%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .group-panel,
+  .box,
+  .ending,
+  .log {
+    background: #2c2319;
+    border-color: #5a4630;
+  }
+
+  .group-panel {
+    border-top-color: #a8701e;
+    border-bottom-color: #a8701e;
+  }
+
+  .dnd-board {
+    border-color: #2a1d12;
+  }
+}
+
+/* On a phone the pinned top bar stays to one or two short rows. */
+@media (max-width: 520px) {
+  h1 {
+    font-size: 1.4rem;
+  }
+
+  .bar {
+    gap: 8px;
+    padding: 8px 0;
+  }
+
+  .bar-actions {
+    gap: 4px;
+  }
+
+  .bar-actions button {
+    min-height: 36px;
+    padding: 4px 8px;
+    font-size: 0.8rem;
+  }
+
+  .hud {
+    gap: 6px;
+  }
+
+  .meter {
+    width: 28px;
+  }
 }

@@ -1044,7 +1044,7 @@ const BOARD_CSS = `
   height: var(--disc);
   transition: left 0.4s ease, top 0.4s ease, filter 0.4s, opacity 0.4s;
   color: #f4efe4;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-ui, system-ui), sans-serif;
   text-shadow: 0 1px 2px #000;
 }
 .dnd-disc {
@@ -1128,7 +1128,7 @@ const BOARD_CSS = `
   top: -6px;
   left: 50%;
   transform: translate(-50%, 0);
-  font: 800 1.3rem/1 system-ui, sans-serif;
+  font: 800 1.3rem/1 var(--font-ui, system-ui), sans-serif;
   white-space: nowrap;
   pointer-events: none;
   text-shadow: 0 2px 4px #000, 0 0 8px #000;
@@ -1159,7 +1159,7 @@ const BOARD_CSS = `
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
   background: linear-gradient(160deg, #f1e3c4, #b99a62);
   color: #2a1d0b;
-  font: 800 1.05rem/1 system-ui, sans-serif;
+  font: 800 1.05rem/1 var(--font-ui, system-ui), sans-serif;
   text-shadow: none;
 }
 .dnd-die small {
@@ -1192,7 +1192,7 @@ const BOARD_CSS = `
   background: rgb(10 8 6 / 80%);
   border: 1px solid #ffd36b;
   color: #ffd36b;
-  font: 700 1.6rem/1.2 Georgia, serif;
+  font: 700 1.6rem/1.2 var(--font-title, Georgia), serif;
   letter-spacing: 0.03em;
   white-space: nowrap;
   opacity: 0;
@@ -1204,7 +1204,7 @@ const BOARD_CSS = `
   position: absolute;
   right: 8px;
   bottom: 6px;
-  font: 0.7rem system-ui, sans-serif;
+  font: 0.7rem var(--font-ui, system-ui), sans-serif;
   color: rgb(255 255 255 / 55%);
   opacity: 0;
   transition: opacity 0.3s;
@@ -1324,7 +1324,7 @@ const BOARD_CSS = `
   min-height: 32px;
   padding: 4px 10px;
   text-align: left;
-  font: 0.85rem system-ui, sans-serif;
+  font: 0.85rem var(--font-ui, system-ui), sans-serif;
 }
 @media (max-width: 520px) {
   .gridded .dnd-name { display: none; }

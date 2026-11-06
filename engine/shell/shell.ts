@@ -295,6 +295,7 @@ export function mountShell(
   root: HTMLElement,
   game: Game,
   boards: Readonly<Record<string, BoardFactory>> = {},
+  credits: readonly string[] = [], // the app's own, such as for its fonts
 ): void {
   const notice = el("p", { class: "notice" });
   notice.setAttribute("role", "status");
@@ -943,6 +944,7 @@ export function mountShell(
         el("summary", { text: "About" }),
         el("p", { text: `Re-roll. ${view.about}` }),
         ...view.attributions.map((text) => el("p", { text })),
+        ...credits.map((text) => el("p", { text })),
       );
       if (view.warnings.length > 0) say(view.warnings.join(" "), true);
 

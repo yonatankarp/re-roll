@@ -58,6 +58,8 @@ The engine contains no game rules and no adventure content. **Everything specifi
 
 The D&D combat board is drawn with the DOM and CSS animations rather than PixiJS: a grid of a few dozen squares doesn't need WebGL, it saves a dependency, and pictures from the content folders work as plain images.
 
+The app looks like a fifth edition book page. Its fonts are Solbera's CC BY-SA 4.0 recreations of the book fonts (Bookinsanity, Mr Eaves Small Caps, Nodesto Caps Condensed and Scaly Sans), bundled unchanged in `app/desktop/fonts` with their licence and credited in About, because the desktop app can't load fonts from the web and the original fonts are commercial.
+
 ## 3. Architecture and layout
 
 ```text
