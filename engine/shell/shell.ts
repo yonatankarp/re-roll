@@ -607,6 +607,9 @@ export function mountShell(
     log.tabIndex = 0;
     const about = el("details", { class: "about" });
     const fullSheet = el("div");
+    // One panel per party member, kept between redraws so each keeps its own open sections.
+    const sheetPanels = new Map<string, HTMLElement>();
+    let sheetShown: string | null = null; // null for the player's
     const sheetDrawer = drawer("Character", fullSheet);
     const journalDrawer = drawer("Journal", log, about);
     const hud = button("", () => {
@@ -851,11 +854,12 @@ export function mountShell(
         enter(ticker);
       }
 
-      hud.hidden = !view.sheet;
-      if (view.sheet) {
+      const [playerSheet] = view.sheets;
+      hud.hidden = !playerSheet;
+      if (playerSheet) {
         hud.replaceChildren(
-          el("span", { class: "hud-name", text: view.sheet.title }),
-          ...(view.sheet.summary ?? []).map((row) =>
+          el("span", { class: "hud-name", text: playerSheet.title }),
+          ...(playerSheet.summary ?? []).map((row) =>
             el(
               "span",
               { class: "hud-stat" },
@@ -866,9 +870,41 @@ export function mountShell(
           ),
         );
       }
-      replaceKeepingOpen(
-        fullSheet,
-        ...(view.sheet ? [renderSheet(view.sheet, true)] : []),
+      const shown =
+        view.sheets.find((item) => item.id === sheetShown) ?? playerSheet;
+      const panels = view.sheets.map((item) => {
+        const panel = sheetPanels.get(item.id) ?? el("div");
+        sheetPanels.set(item.id, panel);
+        replaceKeepingOpen(panel, renderSheet(item, true));
+        panel.hidden = item !== shown;
+        return panel;
+      });
+      fullSheet.replaceChildren(
+        ...(view.sheets.length > 1
+          ? [
+              el(
+                "div",
+                { class: "tabs" },
+                ...view.sheets.map((item) => {
+                  const tab = button(item.title, () => {
+                    sheetShown = item.id;
+                    draw();
+                    // The redraw replaced this button, so focus goes to its replacement.
+                    fullSheet
+                      .querySelector<HTMLElement>(
+                        `.tab[data-id="${CSS.escape(item.id)}"]`,
+                      )
+                      ?.focus();
+                  });
+                  tab.className = item === shown ? "tab open" : "tab";
+                  tab.dataset.id = item.id;
+                  tab.setAttribute("aria-pressed", String(item === shown));
+                  return tab;
+                }),
+              ),
+            ]
+          : []),
+        ...panels,
       );
       about.replaceChildren(
         el("summary", { text: "About" }),

@@ -53,7 +53,7 @@ export interface GameView {
   readonly monsterArt: Readonly<Record<string, string>>; // by combatant id
   readonly decision: Decision | null;
   readonly combat: CombatView | null;
-  readonly sheet: SheetView | null;
+  readonly sheets: readonly SheetView[]; // the player's first
   readonly log: readonly LogLine[];
   // Plain data for the system's encounter board to animate, in order, from the start of the run.
   readonly cues: readonly unknown[];
@@ -514,7 +514,7 @@ export function createGame({
           : [],
         monsterArt: pictures,
         combat,
-        sheet: ui.sheet(state.system, run),
+        sheets: ui.sheets(state.system, run),
         log: [...lines],
         cues: [...cues],
         system: ui.systemId,

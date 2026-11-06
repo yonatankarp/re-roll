@@ -34,6 +34,7 @@ export interface OptionGroup {
 }
 
 export interface SheetView {
+  readonly id: string; // the actor it shows
   readonly title: string;
   readonly subtitle?: string;
   readonly summary?: readonly SheetRow[]; // the few numbers kept in the top bar, such as HP
@@ -84,7 +85,11 @@ export interface Board {
 export interface SystemUi {
   readonly systemId: string;
   readonly about: string;
-  readonly sheet: (state: unknown, access: ContentAccess) => SheetView | null;
+  // The player's first, then the rest of the party; empty until the player has a character.
+  readonly sheets: (
+    state: unknown,
+    access: ContentAccess,
+  ) => readonly SheetView[];
   readonly combat: (state: unknown, access: ContentAccess) => CombatView | null;
   // Called with the state from just before the event, so a monster that leaves with it still has a name.
   readonly describe: (
