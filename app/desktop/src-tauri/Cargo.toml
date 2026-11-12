@@ -1,9 +1,9 @@
 [package]
 name = "re-roll"
-version = "0.1.0"
 license = "GPL-3.0-or-later"
 edition = "2021"
 publish = false
+# No version here: tauri.conf.json takes package.json's, so it is set in one place.
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

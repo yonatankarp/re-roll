@@ -12,8 +12,10 @@ import {
 import { createTauriSaves } from "../../engine/platform/tauri/saves.ts";
 import {
   createTauriReader,
+  openContentFolder,
   tauriImageUrl,
 } from "../../engine/platform/tauri/storage.ts";
+import { offerContentFolder } from "../../engine/shell/content-folder.ts";
 import { createGame } from "../../engine/shell/session.ts";
 import { mountShell } from "../../engine/shell/shell.ts";
 import { mountDndBoard } from "../../plugins/systems/dnd5.5e/ui/board.ts";
@@ -52,6 +54,13 @@ function browserSaves(): SaveStore {
     };
   }
 }
+
+if (isTauri()) offerContentFolder(openContentFolder);
+
+// Narration reads faster with WASM threads, which need cross-origin isolation, and keeps its model in the Cache API.
+console.info(
+  `Secure context: ${String(isSecureContext)}, cross-origin isolated: ${String(crossOriginIsolated)}, Cache API: ${String(typeof caches !== "undefined")}`,
+);
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("The page has no #app element");

@@ -161,7 +161,7 @@ export interface ModelClient {
 }
 ```
 
-The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `books/` through a read-only endpoint on the dev server. Both keep saves in the webview's own storage for now, so the file scopes stay limited to the two content folders (section 9).
+The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `books/` through a read-only endpoint on the dev server. A built desktop app has no checkout: it reads the shipped plugins from its bundled resources, and the player's own from a content folder in its app data, laid out like `books/` (see the README). Both keep saves in the webview's own storage for now, so the file scopes stay limited to the two content folders (section 9).
 
 One exception to "only `engine/platform` touches the network": the narration worker in `engine/shell` downloads the Kokoro-82M model from Hugging Face on first use, and the Tauri CSP allows only that host (section 7.2).
 
@@ -1014,7 +1014,7 @@ Without an adventure it lists them. Saves go under `<dir>/saves`, which defaults
 
 - **Attribution:** plugins carry their own `attribution`, and the About screen shows it for every loaded plugin.
 - **SRD 5.2:** the `srd52` plugin must use the exact attribution statement from the SRD's legal page, and no other credit to Wizards. The game may say "compatible with fifth edition" or "5E compatible". `dnd5.5e` is the internal plugin ID, so any public wording should use one of those two phrases.
-- **Book plugins:** stay in `books/`, excluded from git. The release build is meant to fail if it finds a `distribution: private` plugin, but that check isn't built yet.
+- **Book plugins:** stay in `books/`, excluded from git. `npm run desktop:build` fails if a `distribution: private` plugin, a `books/` path or a symlink would be bundled (`npm run check-bundle`, see [release.md](release.md)).
 - **Source material:** data plugins come from copies you own. The engine won't include an importer for sites that host unlicensed copies.
 - **Daggerheart:** treat its content as private until the license is checked. [The license page](https://darringtonpress.com/license) describes permitted formats and approved virtual tabletops, but doesn't address standalone software. It also lists SRD 2.0 and license 2.0 from August 2026, while I read SRD 1.0, so the mechanics need rechecking before that plugin is built.
 

@@ -1,12 +1,14 @@
 {
   "identifier": "content",
-  "description": "Read-only access to files, and joining their paths. The paths are set in main.rs.",
+  "description": "Read-only access to files and joining their paths (the paths are set in main.rs), the content roots, and opening the player's content folder.",
   "windows": ["main"],
   "permissions": [
     "fs:allow-read-text-file",
     "fs:allow-read-file",
     "fs:allow-read-dir",
     "fs:allow-exists",
-    "core:path:allow-join"
+    "core:path:allow-join",
+    "allow-content-roots",
+    "allow-open-content-folder"
   ]
 }

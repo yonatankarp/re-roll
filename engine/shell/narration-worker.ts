@@ -64,6 +64,8 @@ const VOICE_URLS: Readonly<Record<string, string>> = {
 
 // The pinned commit is also in the cache key, so copies fetched from main before aren't reused.
 hub.remotePathTemplate = KOKORO_PATH_TEMPLATE;
+// Without the Cache API the model is downloaded again each launch, rather than failing to load.
+hub.useBrowserCache = typeof caches !== "undefined";
 let downloaded: (percent: number) => void = () => undefined;
 globalThis.fetch = kokoroFetch(fetch.bind(globalThis), {
   voiceUrl: (voice) => VOICE_URLS[voice],

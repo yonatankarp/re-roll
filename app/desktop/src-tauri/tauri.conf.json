@@ -1,12 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Re-roll",
+  "version": "../../../package.json",
   "identifier": "app.re-roll.desktop",
   "build": {
     "devUrl": "http://127.0.0.1:5199",
     "frontendDist": "../../../out/desktop",
     "beforeDevCommand": "npm run ui",
-    "beforeBuildCommand": "npm run ui:build"
+    "beforeBuildCommand": "npm run ui:build && npm run check-bundle"
   },
   "app": {
     "windows": [
@@ -19,11 +20,20 @@
       }
     ],
     "security": {
+      "headers": {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp"
+      },
       "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' ipc: http://ipc.localhost blob: https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/ https://*.cdn.hf.co; img-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": "all",
+    "resources": {
+      "../../../plugins/adventures/": "plugins/adventures/",
+      "../../../plugins/rules/": "plugins/rules/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

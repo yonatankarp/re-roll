@@ -24,6 +24,8 @@ npm run desktop   # the same game in the Tauri window
 npm run play      # play in the terminal, without the UI
 ```
 
+`npm run desktop:build` bundles the desktop app for the OS it runs on. [docs/release.md](docs/release.md) covers what a bundle holds, the check that keeps private content out, and the plan for signing and updates.
+
 `npm run ui` uses a fixed port. To run a second copy, pass another one: `npm run ui -- --port 5200`.
 
 `npm run play -- <adventure>` starts an adventure, and with no arguments it lists them. Section 12 of the design doc has its options and the scripted JSON mode.
@@ -50,7 +52,27 @@ Two adventures ship with the game, both original and built on the SRD 5.2 rules 
 
 Content from books you own goes in a `books/` folder at the root of your checkout. It is git-ignored here, and the game reads it beside `plugins/`. Keep it as its own private git repository if you want history, and never commit it to this one. Plugins there carry `distribution: private`, which means they aren't redistributable.
 
+The built desktop app has no checkout, so it reads your plugins from its content folder instead. **Open content folder** on the main menu shows it. It has the same `adventures`, `rules`, `assets` and `library` folders as `books/`, so copy a plugin into the matching one and reopen the menu. The folder is `plugins` inside the app's data folder:
+
+- **macOS:** `~/Library/Application Support/app.re-roll.desktop/plugins`
+- **Windows:** `%APPDATA%\app.re-roll.desktop\plugins`
+- **Linux:** `~/.local/share/app.re-roll.desktop/plugins`
+
+`npm run desktop` still reads `plugins/` and `books/` from your checkout.
+
 `npm run import` turns your saved book pages into plugins under `books/`. Its subcommands are `parse`, `library`, `extract`, `split`, `draft` and `approve`, and section 11 of the design doc explains them. `npm run narrate -- <adventure>` reads a `books/` adventure's scenes aloud once and keeps the clips beside it. Scenes without a clip are read in the app as they play.
+
+### Narration on each OS
+
+Scenes without a made-ahead clip are read in the app by Kokoro-82M, on WebGPU when the webview has it, or else on the CPU in WASM. The model comes from Hugging Face on first use. The app sends `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers, so WASM can use several threads where the webview allows it. At start it logs whether the page is cross-origin isolated and whether the Cache API is there. Without the Cache API the model is downloaded again each launch, but narration still works.
+
+|             | Webview             | WASM threads                                                                                                       | Model cache                                     |
+| ----------- | ------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| **macOS**   | WKWebView           | No. The page is cross-origin isolated, but WebKit gives the app no `SharedArrayBuffer`, so WASM runs on one thread | Yes, the Cache API works on `tauri://localhost` |
+| **Windows** | WebView2 (Chromium) | Expected, not yet checked                                                                                          | Expected, not yet checked                       |
+| **Linux**   | WebKitGTK           | Not yet checked. It has no WebGPU by default, so narration always runs in WASM                                     | Not yet checked                                 |
+
+The macOS row was checked on a release build on macOS 27 (Apple silicon). There the narrator read on WebGPU, so it took the 330 MB model, and one WASM thread only matters on a Mac without WebGPU. The model was downloaded once and read from the Cache API after a relaunch.
 
 ## Saves
 

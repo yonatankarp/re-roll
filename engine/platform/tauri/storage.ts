@@ -1,34 +1,35 @@
 import { invoke } from "@tauri-apps/api/core";
 import { join } from "@tauri-apps/api/path";
 import { exists, readDir, readFile, readTextFile } from "@tauri-apps/plugin-fs";
+import { imageCache, isNotFound } from "./files.ts";
 import type { StorageEntry } from "../../kernel/storage.ts";
 import { parseContentPath } from "../browser/content-path.ts";
 import type { ContentReader } from "../browser/storage.ts";
 
-const urls = new Map<string, Promise<string | null>>();
-let rootPath: Promise<string> | undefined;
-const root = (): Promise<string> =>
-  (rootPath ??= invoke<string>("content_root"));
+// Where "plugins" and "books" are on disk, set by src-tauri/src/main.rs. A built app's "books" is the player's content folder.
+let rootPaths: Promise<Readonly<Record<string, string>>> | undefined;
+const roots = (): Promise<Readonly<Record<string, string>>> =>
+  (rootPaths ??= invoke("content_roots"));
 
 // The same allowlist as the dev route, checked here too so the fs scope isn't the only guard.
 // join() uses the platform's separator, since Windows' canonical \\?\ root doesn't take "/".
 async function fullPath(path: string): Promise<string> {
-  if (!parseContentPath(path))
-    throw new Error(`${path} is outside the content folders`);
-  return join(await root(), ...path.split("/"));
+  const content = parseContentPath(path);
+  if (!content) throw new Error(`${path} is outside the content folders`);
+  const root = (await roots())[content.folder];
+  if (root === undefined) throw new Error(`${path} has no folder on disk`);
+  return join(root, ...(content.rest ? content.rest.split("/") : []));
 }
 
-// Kept for the life of the page, so a redraw reuses the same image.
+// Shows the player's content folder in the OS's file manager.
+export function openContentFolder(): Promise<void> {
+  return invoke("open_content_folder");
+}
+
+// Scene art runs to 20 MB a picture, so only the newest pictures are kept, and a redraw reuses them.
+const images = imageCache(256 * 1024 * 1024);
 export function tauriImageUrl(path: string): Promise<string | null> {
-  let url = urls.get(path);
-  if (!url) {
-    url = fullPath(path)
-      .then((full) => readFile(full))
-      .then((bytes) => URL.createObjectURL(new Blob([bytes])))
-      .catch(() => null);
-    urls.set(path, url);
-  }
-  return url;
+  return images(path, async () => readFile(await fullPath(path)));
 }
 
 // Tauri's own file access. The app's scope (src-tauri/src/main.rs) limits it to plugins/ and the book folders the game reads.
@@ -46,8 +47,13 @@ export function createTauriReader(): ContentReader {
 
   return {
     async read(path) {
-      const full = await fullPath(path);
-      return (await exists(full)) ? readTextFile(full) : null;
+      // One call rather than exists() and a read, as opening an adventure reads thousands of files.
+      try {
+        return await readTextFile(await fullPath(path));
+      } catch (error) {
+        if (isNotFound(error)) return null;
+        throw error;
+      }
     },
     async list(prefix) {
       if (!(await exists(await fullPath(prefix)))) return [];

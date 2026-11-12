@@ -24,6 +24,11 @@ export default defineConfig({
     port: 5199,
     strictPort: true,
     cors: false,
+    // The same cross-origin isolation as tauri.conf.json, so the narrator's WASM can use threads in dev too.
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
     fs: {
       // The default allows the whole repo, which would serve books/ around the endpoint's checks.
       allow: ["app/desktop", "engine", "plugins/systems", "node_modules"].map(

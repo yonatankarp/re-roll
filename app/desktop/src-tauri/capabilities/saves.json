@@ -3,7 +3,6 @@
   "description": "Reading and writing saves. The commands (main.rs) reach only bare file names in app_data_dir()/saves, so this is the app's whole write scope.",
   "windows": ["main"],
   "permissions": [
-    "allow-content-root",
     "allow-save-read",
     "allow-save-write",
     "allow-save-list",
