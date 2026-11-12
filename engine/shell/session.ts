@@ -49,6 +49,9 @@ const SAVES = "saves";
 const SAVE_TIMES = `${SAVES}/times`;
 // What each save's card shows. Kept apart from the times, which older builds still read as plain strings.
 const SAVE_DETAILS = `${SAVES}/details`;
+const AUTOSAVE = "-autosave";
+const AUTOSAVE_END = `${AUTOSAVE}.json`;
+const AUTOSAVES_KEPT = 5; // the current run's included
 const ASSETS = "books/assets";
 const LIBRARY = "books/library";
 const IMAGE_FILE = /\.(png|jpe?g|webp|gif)$/i;
@@ -587,8 +590,13 @@ export function createGame({
     await storage.replaceAtomically(SAVE_DETAILS, JSON.stringify(all));
   };
 
+  const savePath = (game: Current, name: string): string =>
+    `${SAVES}/${game.adventure}-${name}.json`;
+  const autosavePath = (game: Current): string =>
+    savePath(game, `${game.seed}${AUTOSAVE}`);
+
   const write = async (game: Current, name: string): Promise<string> => {
-    const path = `${SAVES}/${game.adventure}-${name}.json`;
+    const path = savePath(game, name);
     await storage.replaceAtomically(
       path,
       JSON.stringify(
@@ -602,11 +610,46 @@ export function createGame({
     return path;
   };
 
+  const removeSave = async (path: string): Promise<void> => {
+    if (!storage.remove) throw new Error("Saves can't be deleted here");
+    await storage.remove(path);
+    for (const [record, read] of [
+      [SAVE_TIMES, readSaveTimes],
+      [SAVE_DETAILS, readSaveDetails],
+    ] as const) {
+      const entries = Object.entries(await read());
+      await storage.replaceAtomically(
+        record,
+        JSON.stringify(
+          Object.fromEntries(entries.filter(([key]) => key !== path)),
+        ),
+      );
+    }
+  };
+
+  // Every run leaves an autosave, so only the newest few are kept. Manual saves are never pruned.
+  // Run when a run starts, the only time a new autosave appears.
+  const pruneAutosaves = async (game: Current): Promise<void> => {
+    if (!storage.remove) return;
+    try {
+      const times = await readSaveTimes();
+      const own = autosavePath(game);
+      const old = (await storage.list(SAVES))
+        .map(({ path }) => path)
+        .filter((path) => path.endsWith(AUTOSAVE_END) && path !== own)
+        .sort((a, b) => (times[b] ?? "").localeCompare(times[a] ?? ""))
+        .slice(AUTOSAVES_KEPT - 1);
+      for (const path of old) await removeSave(path);
+    } catch (error) {
+      console.warn("Couldn't prune old autosaves", error);
+    }
+  };
+
   // One file per run, so starting again never overwrites an earlier run.
   // A failed autosave must not stop play, so the player is told and carries on.
   const autosave = async (game: Current): Promise<void> => {
     try {
-      await write(game, `${game.seed}-autosave`);
+      await write(game, `${game.seed}${AUTOSAVE}`);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       game.warnings = [`Autosave failed: ${reason}`];
@@ -738,22 +781,7 @@ export function createGame({
       );
     },
 
-    async deleteSave(path: string): Promise<void> {
-      if (!storage.remove) throw new Error("Saves can't be deleted here");
-      await storage.remove(path);
-      for (const [record, read] of [
-        [SAVE_TIMES, readSaveTimes],
-        [SAVE_DETAILS, readSaveDetails],
-      ] as const) {
-        const entries = Object.entries(await read());
-        await storage.replaceAtomically(
-          record,
-          JSON.stringify(
-            Object.fromEntries(entries.filter(([key]) => key !== path)),
-          ),
-        );
-      }
-    },
+    deleteSave: removeSave,
 
     // The owner's local copy, so it is only ever read through the local content route.
     async listBooks(): Promise<readonly string[]> {
@@ -834,6 +862,7 @@ export function createGame({
       };
       current = game;
       await autosave(game);
+      await pruneAutosaves(game);
     },
 
     async answer(optionId: string): Promise<void> {
