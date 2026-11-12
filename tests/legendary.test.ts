@@ -376,10 +376,11 @@ describe("Legendary Resistance", () => {
       kinds.push(events.map((event) => event.kind.replace(`${NS}:`, "")));
       for (const event of events) state = applyDndEvent(state, event);
     }
+    // Each save is recorded for the roll history before Legendary Resistance can turn it.
     expect(kinds).toEqual([
-      ["legendaryResistanceUsed"],
-      ["legendaryResistanceUsed"],
-      ["effectAdded"],
+      ["saveRolled", "legendaryResistanceUsed"],
+      ["saveRolled", "legendaryResistanceUsed"],
+      ["saveRolled", "effectAdded"],
     ]);
     const chiefNow = state.actors.chief;
     if (!chiefNow) throw new Error("missing");
