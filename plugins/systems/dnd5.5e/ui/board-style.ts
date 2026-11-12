@@ -87,7 +87,7 @@ const BOARD_CSS = `
 /* A book's battle map shows as printed: no darkening and no second grid over its own. */
 .dnd-field.gridded.mapped::before { background: rgb(0 0 0 / 8%); }
 /* With no picture, a parchment battle mat ruled in ink, and no darkening. */
-.dnd-board:has(> .plain) { background: #e9dcbc; }
+.dnd-board:has(.dnd-field.plain) { background: #e9dcbc; }
 .dnd-field.plain {
   background: radial-gradient(circle at 50% 45%, #f1e6c9, #e9dcbc 60%, #dccb9f);
 }
@@ -151,6 +151,22 @@ const BOARD_CSS = `
   pointer-events: none;
 }
 .dnd-token[data-level="mid"] .dnd-ring { --hp-color: #e3b341; }
+/* A foe's ring starts bone-white rather than green, so allies and foes differ in more than hue. */
+.dnd-token[data-side="enemy"][data-level="high"] .dnd-ring { --hp-color: #ece3cf; }
+/* A foe also carries a dark diamond under its token: a shape, for players who can't tell red from green. */
+.dnd-foe {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--disc) * -0.08);
+  width: max(9px, calc(var(--disc) * 0.2));
+  height: max(9px, calc(var(--disc) * 0.2));
+  box-sizing: border-box;
+  transform: translateX(-50%) rotate(45deg);
+  border: 2px solid #ece3cf;
+  background: #3a120c;
+  pointer-events: none;
+}
+.dnd-token[data-side="party"] .dnd-foe { display: none; }
 .dnd-token[data-level="low"] .dnd-ring { --hp-color: #e0533f; }
 .dnd-token.down .dnd-ring { opacity: 0; }
 /* The name, HP and conditions, on hover or under the keyboard cursor. */
@@ -193,8 +209,17 @@ const BOARD_CSS = `
 .dnd-float.damage.crit { color: #ffd84d; font-size: 1.8rem; }
 .dnd-float.heal { color: #6dff9b; }
 .dnd-float.hit { color: #ffd36b; font-size: 1rem; }
-.dnd-float.miss { color: #d8d4cc; font-size: 1rem; }
-.dnd-float.status { color: #c9b3ff; font-size: 0.9rem; text-transform: capitalize; }
+.dnd-float.miss { color: #ece6da; font-size: 1rem; }
+.dnd-float.status { color: #d9caff; font-size: 0.9rem; text-transform: capitalize; }
+/* Words, unlike the big numbers, sit on a dark pill so they read on parchment and light maps. */
+.dnd-float.hit,
+.dnd-float.miss,
+.dnd-float.status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(20 12 6 / 85%);
+  text-shadow: none;
+}
 .dnd-float.legendary {
   padding: 2px 10px;
   border: 1px solid #ffd36b;
@@ -267,14 +292,17 @@ const BOARD_CSS = `
   position: absolute;
   right: 8px;
   bottom: 6px;
+  /* A dark pill, so it reads on parchment, a light map or a dark one. */
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(20 12 6 / 80%);
   font: 0.8rem var(--font-ui, system-ui), sans-serif;
-  color: rgb(255 255 255 / 80%);
-  text-shadow: 0 1px 2px #000;
+  color: #f4e7c8;
   opacity: 0;
   transition: opacity 0.3s;
+  pointer-events: none;
 }
 .dnd-board.playing .dnd-hint { opacity: 1; }
-.dnd-field.plain ~ .dnd-hint { color: rgb(60 40 10 / 85%); text-shadow: none; }
 .dnd-board.awaiting .dnd-hint { opacity: 0; }
 .dnd-board.playing { cursor: pointer; }
 .dnd-field.gridded {
@@ -286,7 +314,32 @@ const BOARD_CSS = `
   margin: 0 auto;
 }
 /* The frame fits the grid, so no dark bands run beside a narrow map. */
-.dnd-board:has(> .gridded) { width: fit-content; max-width: 100%; margin-inline: auto; }
+.dnd-board:has(.dnd-field.gridded) { width: fit-content; max-width: 100%; margin-inline: auto; }
+/* A zoomed map scrolls inside its frame to pan. */
+.dnd-view { max-width: 100%; }
+.dnd-board.zoomed .dnd-view { overflow: auto; overscroll-behavior: contain; }
+/* Zoom, under the frame so it covers no square, for a battle map; hidden for a check or a plain fight. */
+.dnd-zoom {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin: -4px 0 8px;
+}
+.dnd-board:not(:has(.dnd-field.gridded)) + .dnd-zoom,
+.dnd-board.checking + .dnd-zoom { display: none; }
+.dnd-zoom button {
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #c9ad6a;
+  border-radius: 6px;
+  background: rgb(20 12 6 / 85%);
+  color: #f4e7c8;
+  font: 600 0.95rem/1 var(--font-ui, system-ui), sans-serif;
+  cursor: pointer;
+}
+.dnd-zoom button:disabled { opacity: 0.45; cursor: default; }
+.dnd-zoom button:focus-visible { outline: 2px solid #ffd36b; outline-offset: 2px; }
 .dnd-field.gridded::before {
   background:
     linear-gradient(rgb(0 0 0 / 30%), rgb(0 0 0 / 45%)),

@@ -57,6 +57,11 @@ function browserSaves(): SaveStore {
 
 if (isTauri()) offerContentFolder(openContentFolder);
 
+// A promise nobody awaits, such as a board cue, says what broke rather than failing silently.
+window.addEventListener("unhandledrejection", (event) => {
+  console.error("Unhandled rejection", event.reason);
+});
+
 // Narration reads faster with WASM threads, which need cross-origin isolation, and keeps its model in the Cache API.
 console.info(
   `Secure context: ${String(isSecureContext)}, cross-origin isolated: ${String(crossOriginIsolated)}, Cache API: ${String(typeof caches !== "undefined")}`,

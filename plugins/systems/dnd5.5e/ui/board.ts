@@ -1,8 +1,12 @@
 import { PLAYER_ACTOR } from "#sdk";
 import { AIM, parseOption } from "../core/combat/ids.ts";
-import { StateSchema } from "../core/state.ts";
 import type { BoardHost, BoardUpdate, ShellUpdate } from "./board-data.ts";
-import { type BoardContext, el, extraOf } from "./board-context.ts";
+import {
+  type BoardContext,
+  el,
+  extraOf,
+  showCaption,
+} from "./board-context.ts";
 import { placeCursor, wireInput } from "./board-input.ts";
 import {
   closeMenu,
@@ -11,6 +15,8 @@ import {
   showPickBar,
 } from "./board-overlays.ts";
 import { play } from "./board-playback.ts";
+import { wireZoom } from "./board-zoom.ts";
+import { parseState } from "./parse-state.ts";
 import { injectStyle } from "./board-style.ts";
 import {
   artFor,
@@ -66,7 +72,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   const pickBar = el("div", "dnd-pickbar");
   pickBar.hidden = true;
   field.append(ground, reachZone, blast, cells, route, routeCost, cursorBox);
-  board.append(field, banner, caption, hint, menu, pickBar, said);
+  // The map's window: it scrolls when the map is zoomed in, while what's over the map stays put.
+  const view = el("div", "dnd-view");
+  view.append(field);
+  board.append(view, banner, caption, hint, menu, pickBar, said);
   slot.append(board);
   slot.hidden = true;
   const ctx: BoardContext = {
@@ -105,18 +114,21 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     throwNow: null,
     pendingDamage: null,
     waiting: [],
+    fitMap: () => undefined,
   };
   new ResizeObserver(() => {
     layout(ctx);
   }).observe(field);
   wireInput(ctx);
+  slot.append(wireZoom(ctx, view));
 
   // Values, arrivals and removals wait until the queue is done, so they don't spoil what's playing.
   const sync = (update: BoardUpdate, settle: boolean): void => {
     // The book's battle map when the fight has one, cut to the fight's squares; otherwise the scene's picture.
     const map = extraOf(update).map ?? null;
     const backdrop = map ? `${update.assetRoot}/${map.image}` : update.sceneArt;
-    if (backdrop !== ctx.sceneArt) {
+    // A fight still playing keeps its map; a new one gets its own before its start cue plays.
+    if (backdrop !== ctx.sceneArt && (settle || ctx.tokens.size === 0)) {
       ctx.sceneArt = backdrop;
       field.style.backgroundImage = "";
       field.classList.toggle("mapped", map !== null);
@@ -157,9 +169,9 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       ctx.cursorHome = true;
     }
     ctx.decisionSeen = decision;
-    const parsed = StateSchema.safeParse(update.state);
-    const actors = parsed.success ? parsed.data.actors : {};
-    if (settle) ctx.grid = parsed.data?.combat?.grid ?? null;
+    const state = parseState(update.state);
+    const actors = state.actors;
+    if (settle) ctx.grid = state.combat?.grid ?? null;
     const present = new Set<string>();
     for (const actor of update.combat?.combatants ?? []) {
       present.add(actor.id);
@@ -234,14 +246,34 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     board.classList.add("playing");
     cells.replaceChildren();
     closeMenu(ctx);
-    for (let cue = ctx.queue.shift(); cue; cue = ctx.queue.shift()) {
-      await play(ctx, cue);
+    try {
+      for (let cue = ctx.queue.shift(); cue; cue = ctx.queue.shift()) {
+        // A cue that breaks is skipped, so the rest still play and the choices come back.
+        await play(ctx, cue).catch((error: unknown) => {
+          console.error("A board cue failed", cue, error);
+          // Clears what a cue leaves showing while it plays.
+          showCaption(ctx, "");
+          ctx.throwNow = null;
+          board.classList.remove("checking", "awaiting");
+          slot.classList.remove("dnd-overlay");
+          for (const node of board.querySelectorAll(".dnd-throw")) {
+            node.remove();
+          }
+          for (const token of ctx.tokens.values()) {
+            token.node.classList.remove("acting", "targeted");
+          }
+        });
+      }
+    } finally {
+      ctx.playing = false;
+      ctx.skipping = false;
+      board.classList.remove("playing");
+      try {
+        if (ctx.latest) sync(ctx.latest, true);
+      } finally {
+        for (const done of ctx.waiting.splice(0)) done();
+      }
     }
-    ctx.playing = false;
-    ctx.skipping = false;
-    board.classList.remove("playing");
-    if (ctx.latest) sync(ctx.latest, true);
-    for (const done of ctx.waiting.splice(0)) done();
   };
 
   return {

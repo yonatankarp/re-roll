@@ -266,7 +266,8 @@ describe("playing through the shell's session", () => {
     expect(after.rolls.at(-1)?.math).toMatch(/^\d+ [+−] \d+ = \d+ vs DC 13$/);
 
     await game.undo();
-    expect(game.view()).toEqual(before);
+    // A told-again log has no cues for the board to replay.
+    expect({ ...game.view(), cues: [] }).toEqual({ ...before, cues: [] });
     // The autosave forgets the choice too, so loading it doesn't bring it back.
     const autosave = (await game.listSaves()).find((save) => save.current);
     if (!autosave) throw new Error("No autosave");
@@ -416,7 +417,8 @@ describe("playing through the shell's session", () => {
         const before = game.view();
         await firstOption(game); // moves on, so the load has something to undo
         await game.load(savedPath);
-        expect(game.view()).toEqual(before);
+        expect(game.view().cues).toEqual([]);
+        expect({ ...game.view(), cues: [] }).toEqual({ ...before, cues: [] });
         expect((await game.listSaves()).map((save) => save.path)).toContain(
           savedPath,
         );

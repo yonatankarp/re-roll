@@ -2101,12 +2101,14 @@ button:active {
 
 /* A wide window puts the fight's choices in a column beside the map, so neither scrolls off. */
 @media (min-width: 960px) {
+  /* A fight takes the whole window, since the map's size is what the fight needs most. */
+  #app:has(.play.in-combat),
   .game:has(> .play.in-combat) {
-    max-width: 1080px;
+    max-width: none;
   }
 
   .play.in-combat {
-    --map-reserve: 230px; /* the top bar, the scene title and its line, and the frame */
+    --map-reserve: 260px; /* the top bar, the scene title and its line, the frame and the zoom buttons */
     display: grid;
     grid-template-columns: minmax(0, 1fr) 300px;
     column-gap: 24px;
