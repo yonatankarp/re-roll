@@ -192,4 +192,34 @@ describe("autosaves", () => {
     expect(card()?.character).toBe(listed?.character);
     expect(store.getItem("saves/times")).toBeNull();
   });
+
+  it("read an older record's ended run from its save, and remember it", async () => {
+    const store = memoryStore();
+    const storage = withSaveFiles(
+      await createNodeStorage(process.cwd()),
+      storeFiles(store),
+    );
+    const options = { storage, roots: ["plugins"], systems, uis: [dndUi] };
+    await createGame(options).start("goblin-ambush", "over");
+    const path = "saves/goblin-ambush-over-autosave.json";
+    // As a record from before `ended` existed, for a run that ended.
+    const details = JSON.parse(
+      store.getItem("saves/details") ?? "{}",
+    ) as Record<string, Record<string, unknown>>;
+    delete details[path]?.ended;
+    store.setItem("saves/details", JSON.stringify(details));
+    const save = JSON.parse(store.getItem(path) ?? "{}") as {
+      log: { events: unknown[] }[];
+    };
+    save.log[0]?.events.push({ kind: "adventureEnded", reason: "defeat" });
+    store.setItem(path, JSON.stringify(save));
+
+    const [listed] = await createGame(options).listSaves();
+    expect(listed?.ended).toBe(true);
+    const kept = JSON.parse(store.getItem("saves/details") ?? "{}") as Record<
+      string,
+      { ended?: boolean }
+    >;
+    expect(kept[path]?.ended).toBe(true);
+  });
 });

@@ -44,7 +44,7 @@ export async function showMenu(ctx: ShellContext): Promise<void> {
       },
       latest
         ? {
-            label: latest.label,
+            label: [latest.title, whereOf(latest)].filter(Boolean).join(", "),
             go: () => {
               ctx.resume(latest);
             },
@@ -140,12 +140,16 @@ export function resume(ctx: ShellContext, save: SaveChoice): void {
   );
 }
 
+// Who and where, as the save's card reads: "Sera, Fighter · Level 2 · 9 HP · The Old Road".
+function whereOf(save: SaveChoice): string {
+  return [saveHeading(save), save.scene].filter(Boolean).join(" · ");
+}
+
 function continueButton(
   ctx: ShellContext,
   save: SaveChoice,
 ): HTMLButtonElement {
-  const who = saveHeading(save);
-  const where = [who, save.scene].filter(Boolean).join(" · ");
+  const where = whereOf(save);
   const go = button("", () => {
     ctx.resume(save);
   });
