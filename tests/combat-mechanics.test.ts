@@ -1520,6 +1520,16 @@ describe("monster Multiattack routines and area choices", () => {
     ]);
   });
 
+  it("has the ranged copy of a Melee or Ranged attack follow the melee routine", async () => {
+    const sentence = "The beast makes two Spear attacks.";
+    const names = ["Spear", "Spear (ranged)"];
+    expect(await routineOf(names, 2, sentence, 0)).toEqual(["Spear", "Spear"]);
+    expect(await routineOf(names, 2, sentence, 1)).toEqual([
+      "Spear (ranged)",
+      "Spear (ranged)",
+    ]);
+  });
+
   it("keeps a printed choice of two routines apart", async () => {
     const sentence =
       "The devil makes one Claws attack and one Tail attack, or it makes two Hurl Flame attacks.";
