@@ -1347,6 +1347,7 @@ describe("conditions in combat", () => {
     });
     const passed = runEndTurn(easy.context("a")).events ?? [];
     expect(passed.map((event) => event.kind)).toEqual([
+      "dnd5.5e:saveRolled",
       "dnd5.5e:effectEnded",
       "dnd5.5e:turnAdvanced",
     ]);
@@ -1357,7 +1358,10 @@ describe("conditions in combat", () => {
       ],
     });
     const failed = runEndTurn(hard.context("a")).events ?? [];
-    expect(failed.map((event) => event.kind)).toEqual(["dnd5.5e:turnAdvanced"]);
+    expect(failed.map((event) => event.kind)).toEqual([
+      "dnd5.5e:saveRolled",
+      "dnd5.5e:turnAdvanced",
+    ]);
   });
 
   it("removes an effect that ends on damage when the target is hurt", async () => {

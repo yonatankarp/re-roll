@@ -245,6 +245,15 @@ const RollReportSchema = z.strictObject({
   success: z.boolean(),
   label: z.string(),
 });
+// A saving throw, recorded only for the roll history: the outcome lives in the events that follow it.
+const SaveRolledSchema = z.strictObject({
+  actor: z.string(),
+  ability: AbilitySchema,
+  natural: z.number().int(),
+  total: z.number().int(),
+  dc: z.number().int(),
+  success: z.boolean(),
+});
 
 export const EVENT_SCHEMAS = {
   [`${NS}:characterChosen`]: CharacterChosenSchema,
@@ -271,6 +280,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:concentrationEnded`]: ActorOnlySchema,
   [`${NS}:deathSaveRolled`]: DeathSaveSchema,
   [`${NS}:rollReported`]: RollReportSchema,
+  [`${NS}:saveRolled`]: SaveRolledSchema,
   [`${NS}:inspirationGranted`]: ActorOnlySchema,
   [`${NS}:treasureFound`]: TreasureFoundSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
