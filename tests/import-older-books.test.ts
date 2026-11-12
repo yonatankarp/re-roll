@@ -10,6 +10,7 @@ import { parseMonstersFromHtml } from "../plugins/systems/dnd5.5e/core/import/mo
 import { parseFeatsFromHtml } from "../plugins/systems/dnd5.5e/core/import/origins.ts";
 import {
   parseDuration,
+  spellImportKind,
   spellTextFromHtml,
   splitSpells,
 } from "../plugins/systems/dnd5.5e/core/import/spells.ts";
@@ -503,23 +504,48 @@ describe("2014-format books", () => {
     expect(entryOf(feats, "mossy-luck")).toMatchObject({ category: "racial" });
   });
 
-  it("turns spells into plain text with no classes in the header", () => {
+  it("turns spells into plain text with the classes from their spell lists", () => {
     const [burst, spark] = splitSpells(spellTextFromHtml(olderPage));
     expect(burst?.problem).toBeNull();
     expect(burst?.data).toMatchObject({
       name: "Moss Burst",
       level: 3,
       school: "evocation",
-      classNames: [],
+      classNames: ["Bard", "Wizard"],
       ritual: true,
     });
-    expect(burst?.text).toContain("2014 rules. Spell lists: Bard, Wizard.");
+    expect(burst?.text).toContain("2014 rules.");
     expect(spark?.data).toMatchObject({
       level: 0,
       school: "evocation",
-      classNames: [],
+      classNames: ["Wizard"],
     });
-    expect(spark?.text).toContain("2014 rules. Spell lists: Wizard.");
+  });
+
+  it("reads a 1 action casting time, so the spell can be cast and picked", () => {
+    const [burst] = splitSpells(spellTextFromHtml(olderPage));
+    if (!burst) throw new Error("no spell");
+    const built = spellImportKind.build({
+      source: burst,
+      draft: {
+        encoding: {
+          targeting: { creatures: 1, range: 30, side: "enemy" },
+          resolution: {
+            kind: "save",
+            ability: "dex",
+            dc: { add: [{ kind: "spellSaveDc" }] },
+            damage: [{ amount: { dice: "2d6" }, type: "acid" }],
+          },
+        },
+      },
+      reference: undefined,
+      pluginId: "older-book",
+      knownIds: ["phb:class/bard", "phb:class/wizard"],
+    });
+    expect(built.entry).toMatchObject({
+      classes: ["phb:class/bard", "phb:class/wizard"],
+      activation: { cost: ["action", "slot"] },
+    });
   });
 
   it("keeps a duration it can't model as text", () => {

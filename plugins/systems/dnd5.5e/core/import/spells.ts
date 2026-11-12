@@ -198,8 +198,8 @@ const OLDER_HEADER =
 const capitalized = (word: string): string =>
   `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`;
 
-// 2014 books print "3rd-level enchantment" and keep each class's spell list in a section of its own. The classes stay
-// out of the header, so these spells never join a class's choices here, and the last line says where they came from.
+// 2014 books print "3rd-level enchantment" and keep each class's spell list in a section of its own. The classes from
+// those lists go into the header as a newer book prints them, and the last line says where the spell came from.
 function olderSpellText(
   html: string,
   headings: readonly {
@@ -247,11 +247,11 @@ function olderSpellText(
       [
         heading.name,
         level
-          ? `Level ${level} ${capitalized(levelSchool ?? "")} ()`
-          : `${capitalized(cantripSchool ?? "")} Cantrip ()`,
+          ? `Level ${level} ${capitalized(levelSchool ?? "")} (${lists.join(", ")})`
+          : `${capitalized(cantripSchool ?? "")} Cantrip (${lists.join(", ")})`,
         ritual ? `${casting} or Ritual` : casting,
         ...rest,
-        `2014 rules.${lists.length > 0 ? ` Spell lists: ${lists.join(", ")}.` : ""}`,
+        "2014 rules.",
       ].join("\n"),
     ];
   });
@@ -527,8 +527,12 @@ export function sourceProblems(
   return problems;
 }
 
+// 2014 books print "1 action" and "1 reaction, which you take when …".
+const castingOf = (facts: SpellFacts): string =>
+  facts.castingTime.toLowerCase().replace(/^1\s+/, "");
+
 function costFor(facts: SpellFacts): Activation["cost"] | null {
-  const casting = facts.castingTime.toLowerCase();
+  const casting = castingOf(facts);
   const slot = facts.level > 0 ? (["slot"] as const) : [];
   if (casting.startsWith("bonus action")) return ["bonusAction", ...slot];
   if (casting.startsWith("reaction")) return ["reaction", ...slot];
@@ -682,7 +686,7 @@ export const spellImportKind: ImportKind = {
 
     const encoded = DraftSchema.safeParse(draft).data?.encoding ?? null;
     const cost = costFor(facts);
-    const casting = facts.castingTime.toLowerCase();
+    const casting = castingOf(facts);
     const isReaction = casting.startsWith("reaction");
     const reactsToHit = casting.includes("hit by an attack");
     // The engine has no trigger for this, so the spell could otherwise be cast without the hit.
