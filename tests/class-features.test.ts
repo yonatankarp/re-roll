@@ -287,6 +287,17 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
     settle(run, used, [attack("a", "monster:0", PLAYER_ACTOR)], theirs);
     expect(theirs.d20s()).toBe(2);
 
+    // A fight that ends on the barbarian's turn leaves the use spent until a rest.
+    const rested = settle(
+      run,
+      { ...used, combat: null },
+      [{ kind: `${NS}:finishRest`, payload: { rest: "short" } }],
+      dice(),
+    ).state;
+    expect(
+      actorIn(rested, PLAYER_ACTOR).resourcesSpent["reckless-attack"],
+    ).toBeUndefined();
+
     const next = settle(run, used, [endTurn], dice()).state;
     expect(
       actorIn(next, PLAYER_ACTOR).resourcesSpent["reckless-attack"],
@@ -464,6 +475,12 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
           )
         : false;
     expect(picked).toBe(true);
+  });
+
+  it("Unarmored Movement adds the class table's speed", () => {
+    const speed = (level: number) =>
+      deriveStats(hero("monk", level), run).speed;
+    expect(speed(2)).toBe(speed(1) + 10);
   });
 
   it("Flurry of Blows makes two unarmed strikes for a Focus Point", () => {

@@ -40,7 +40,10 @@ export function onceEnded(
 }
 
 // Resources that come back every turn, such as Reckless Attack's once a turn. Given back as the bearer's turn ends,
-// which is the same as at the start of its next one, since nothing between can spend them.
+// which is the same as at the start of its next one, since nothing between can spend them. Any rest gives back one
+// left spent when a fight ended on the bearer's turn.
+// shortcut: a fight started with no rest after that one begins with the use still spent; reset it in startCombat
+// once a hook there is free of the sessions changing it.
 export function turnRecharge(actor: Actor, context: Context): SystemEvent[] {
   const stats = deriveStats(actor, context);
   return stats.resourceDefs.flatMap(({ id, recharge }) =>
