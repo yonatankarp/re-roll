@@ -1,19 +1,18 @@
 import { NARRATOR_VOICES } from "../story/narration.ts";
 import { ambiencePlayer } from "./ambience.ts";
+import { setMasterVolume } from "./audio.ts";
+import { narrator } from "./narration.ts";
 import {
+  type SettingsStore,
   type SoundSettings,
   loadSettings,
   saveSettings,
-  setMasterVolume,
-} from "./audio.ts";
-import { narrator } from "./narration.ts";
+} from "./sound-settings.ts";
 import type { GameView } from "./session.ts";
 
 // The game's sound: a "Sound…" entry for the game menu that opens a small panel (volume,
 // ambience, effects, narration, voice), the narrator's controls for under the scene text, and an
 // update to call on each redraw, which picks the ambience and starts or stops the narrator.
-
-let settings = loadSettings();
 
 function field(label: string, input: HTMLElement): HTMLLabelElement {
   const row = document.createElement("label");
@@ -23,6 +22,7 @@ function field(label: string, input: HTMLElement): HTMLLabelElement {
 
 export function soundControls(
   clipUrl: (path: string) => string | Promise<string | null> | null,
+  store?: SettingsStore,
 ): {
   readonly menuItem: HTMLButtonElement;
   readonly dialog: HTMLDialogElement;
@@ -32,6 +32,8 @@ export function soundControls(
   readonly update: (view: GameView) => void;
   readonly follow: (camp: HTMLDialogElement) => void; // campfire sound while it's open
 } {
+  let settings = loadSettings(store);
+  setMasterVolume(settings.volume);
   const ambience = ambiencePlayer();
   let view: GameView | null = null;
   let camping = false;
@@ -73,7 +75,7 @@ export function soundControls(
 
   const change = (next: Partial<SoundSettings>): void => {
     settings = { ...settings, ...next };
-    saveSettings(settings);
+    saveSettings(settings, store);
     setMasterVolume(settings.volume);
     apply();
   };
