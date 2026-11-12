@@ -412,28 +412,64 @@ describe("multiclass spellcasting", () => {
     });
   });
 
-  it("counts half and third casters from their own slot rows", () => {
-    // A Paladin 5 is caster level 3 and an Eldritch Knight 3 is caster level 1.
+  it("counts half and third casters as the multiclass rules do", () => {
+    const full = (level: number, slots: readonly number[]) => ({
+      slots,
+      level,
+      subclass: false,
+    });
+    // A Paladin 5 is caster level 3, and an Eldritch Knight 4 (two level 1 slots, then three) is 1.
     expect(
       multiclassSlots([
-        { slots: [4, 2], level: 5 },
-        { slots: [2], level: 3 },
+        { slots: [4, 2], level: 5, subclass: false },
+        { slots: [3], level: 4, subclass: true },
       ]),
     ).toEqual([4, 3]);
-    // Wizard 11 and Cleric 1: rows 11 and 12 are the same, and the class level picks 11.
+    // Wizard 11 and Cleric 1 make 12: rows 11 and 12 are the same, and the class level says which.
     expect(
-      multiclassSlots([
-        { slots: [4, 3, 3, 3, 2, 1], level: 11 },
-        { slots: [2], level: 1 },
-      ]),
-    ).toEqual([4, 3, 3, 3, 2, 1]);
-    // One casting class, or Pact Magic, keeps the class's own slots.
-    expect(multiclassSlots([{ slots: [4, 2], level: 3 }])).toBeNull();
-    expect(
-      multiclassSlots([
-        { slots: [1], level: 1 },
-        { slots: [2], level: 1 },
-      ]),
-    ).toBeNull();
+      multiclassSlots([full(11, [4, 3, 3, 3, 2, 1]), full(1, [2])]),
+    ).toEqual([4, 3, 3, 3, 2, 1]); // not 13's level 7 slot
+    // One casting class, or a row that isn't on the table, keeps the class's own slots.
+    expect(multiclassSlots([full(3, [4, 2])])).toBeNull();
+    expect(multiclassSlots([full(1, [1]), full(1, [2])])).toBeNull();
+  });
+
+  it("keeps a Warlock's Pact Magic out of the multiclass table", async () => {
+    const run = await goblin();
+    // Pact Magic at level 1 only, with two slots at level 2, as a Warlock's are printed.
+    const warlock = {
+      id: "test:class/warlock",
+      name: "Warlock",
+      hitDie: "d8",
+      primaryAbilities: ["cha"],
+      savingThrows: ["wis", "cha"],
+      weapons: ["simple"],
+      armor: ["light"],
+      spellcasting: { ability: "cha" },
+      levels: [
+        { level: 1, grants: ["test:feature/pact-magic"], slots: [1] },
+        { level: 2, slots: [2] },
+      ],
+    };
+    const actor = pregen(run, "srd52:pregen/wizard");
+    if (actor.source.kind !== "character" || !actor.source.build) {
+      throw new Error("The wizard pregen has no build");
+    }
+    const build = {
+      ...actor.source.build,
+      levels: [wizard, wizard, warlock.id, warlock.id].map(level),
+    };
+    const pactMagic = {
+      id: "test:feature/pact-magic",
+      name: "Pact Magic",
+      text: "Slots that come back on a Short Rest.",
+      automation: "text",
+    };
+    const stats = deriveStats(
+      { ...actor, source: { kind: "character", build } },
+      withContent(run, [warlock, pactMagic]),
+    );
+    expect(stats.slots).toEqual([2]); // the last class's own, not caster level 3's
+    expect(stats.pactMagic).toBe(true);
   });
 });

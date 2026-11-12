@@ -39,7 +39,7 @@ import {
   type Weapon,
 } from "./schemas.ts";
 import { featureRules, grantedSpells } from "./feature-rules.ts";
-import { multiclassSlots } from "./multiclass.ts";
+import { type Caster, multiclassSlots } from "./multiclass.ts";
 
 // Content is frozen once loaded, so each entry is checked against a schema only once.
 const parsed = new WeakMap<object, Map<z.ZodType, unknown>>();
@@ -278,6 +278,8 @@ function attacksFrom(featureId: string): number {
   return featureId.endsWith("extra-attack") ? 2 : 1;
 }
 
+const isPactMagic = (id: string): boolean => id.endsWith("pact-magic");
+
 function characterStats(actor: Actor, access: ContentAccess): Stats {
   if (actor.source.kind !== "character" || !actor.source.build) {
     throw new Error(`${actor.id} has no character build`);
@@ -297,8 +299,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   for (const id of feat.grants) featureIds.add(id);
   let scaling: Record<string, number> = {};
   let slots: readonly number[] = [];
-  const casters: Record<string, { slots: readonly number[]; level: number }> =
-    {};
+  const casters: Record<string, Caster> = {};
   let subclass: Subclass | null = null;
   const featIds = new Set<string>();
 
@@ -342,9 +343,17 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     const own = subclassLevel?.slots.length
       ? subclassLevel.slots
       : levelData.slots;
-    if (own.length > 0) {
-      slots = own;
-      casters[entry.classId] = { slots: own, level: classLevel };
+    if (own.length > 0) slots = own;
+    // Pact Magic, granted at a Warlock's first level, isn't Spellcasting and keeps out of the multiclass table.
+    const pact = definition.levels.some((item) =>
+      item.grants.some(isPactMagic),
+    );
+    if (own.length > 0 && !pact) {
+      casters[entry.classId] = {
+        slots: own,
+        level: classLevel,
+        subclass: own !== levelData.slots,
+      };
     }
   }
   slots = multiclassSlots(Object.values(casters)) ?? slots;
@@ -525,7 +534,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     scaling,
     features: [...featureIds],
     resourceDefs: fromFeatures.resources,
-    pactMagic: [...featureIds].some((id) => id.endsWith("pact-magic")),
+    pactMagic: [...featureIds].some(isPactMagic),
     untrainedArmor,
     exhaustion: actor.exhaustion,
     itemBonuses: magic,

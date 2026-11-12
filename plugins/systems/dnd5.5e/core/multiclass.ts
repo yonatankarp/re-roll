@@ -22,29 +22,33 @@ const MULTICLASS_SLOTS: readonly (readonly number[])[] = [
   [4, 3, 3, 3, 3, 2, 2, 1, 1],
 ];
 
-// A class's own slot row is a row of the full caster's table, whose number is that class's caster level:
-// a Paladin 5 has the row of caster level 3, an Eldritch Knight 3 the row of caster level 1.
-// Some rows repeat (11-12, 13-14, 15-16), and only a full caster reaches them, whose caster level is its class level.
-function casterLevel(row: readonly number[], classLevel: number): number {
-  const first = MULTICLASS_SLOTS.findIndex(
-    (full) => full.join() === row.join(),
-  );
-  const last = MULTICLASS_SLOTS.findLastIndex(
-    (full) => full.join() === row.join(),
-  );
-  return first < 0 ? 0 : Math.max(first, Math.min(classLevel - 1, last)) + 1;
+const sameRow = (a: readonly number[], b: readonly number[]): boolean =>
+  a.join() === b.join();
+
+// A full caster's row is the table's row for its class level. Slots from a subclass (Eldritch Knight, Arcane
+// Trickster) count a third of the class level, rounded down, and any other class (Paladin, Ranger) half, rounded up.
+function casterLevel(caster: Caster): number {
+  const { slots, level, subclass } = caster;
+  if (!MULTICLASS_SLOTS.some((full) => sameRow(full, slots))) return 0;
+  if (subclass) return Math.floor(level / 3);
+  const full = MULTICLASS_SLOTS[level - 1];
+  return full && sameRow(full, slots) ? level : Math.ceil(level / 2);
+}
+
+export interface Caster {
+  readonly slots: readonly number[]; // the class's own slots at its level
+  readonly level: number;
+  readonly subclass: boolean; // the slots come from its subclass
 }
 
 // Slots from two or more classes with Spellcasting add their caster levels on the table above. With one
-// casting class, or a row that isn't on it (such as Pact Magic), there's no multiclass table to use.
+// casting class, or a row that isn't on it, there's no multiclass table to use. Pact Magic isn't Spellcasting,
+// so the caller leaves a Warlock out.
 // shortcut: Pact Magic and another class's slots don't make two pools, add one with Warlock multiclassing.
 export function multiclassSlots(
-  casters: readonly {
-    readonly slots: readonly number[];
-    readonly level: number;
-  }[],
+  casters: readonly Caster[],
 ): readonly number[] | null {
-  const levels = casters.map((item) => casterLevel(item.slots, item.level));
+  const levels = casters.map(casterLevel);
   if (levels.length < 2 || levels.some((level) => level === 0)) return null;
   const total = Math.min(
     MULTICLASS_SLOTS.length,
