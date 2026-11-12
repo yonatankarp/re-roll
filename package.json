@@ -27,7 +27,8 @@
     "desktop:build": "tauri build --no-bundle",
     "import": "node app/cli/import.ts",
     "import:eval": "node tests/import-eval.ts",
-    "narrate": "node app/cli/narrate.ts"
+    "narrate": "node app/cli/narrate.ts",
+    "class-features": "node tests/class-features.ts"
   },
   "devDependencies": {
     "@fast-check/vitest": "0.5.0",

@@ -75,6 +75,7 @@ import {
 } from "./character.ts";
 import { gearEffects, gearFrames } from "./gear.ts";
 import { availableRests, restEffects, restFrames } from "./rest.ts";
+import { InspirationSchema, runInspiration } from "./class-rules.ts";
 import { rollD20 } from "./rules.ts";
 import {
   BackgroundSchema,
@@ -351,6 +352,10 @@ export const dnd55e = defineSystem<DndState>({
       run: runAfterHit,
     }),
     [`${NS}:smite`]: frameHandler({ schema: SmiteSchema, run: runSmite }),
+    [`${NS}:inspiration`]: frameHandler({
+      schema: InspirationSchema,
+      run: runInspiration,
+    }),
     [`${NS}:lingeringTick`]: frameHandler({
       schema: LingeringSchema,
       run: runLingeringTick,
@@ -488,5 +493,7 @@ export const dnd55e = defineSystem<DndState>({
   rests: availableRests,
   decidePolicy: choosePolicy,
   tactical: (decision) =>
-    /^dnd5\.5e:(turn|moveTo|reaction|afterHit|deathSave):/.test(decision.id),
+    /^dnd5\.5e:(turn|moveTo|reaction|afterHit|inspiration|deathSave):/.test(
+      decision.id,
+    ),
 });
