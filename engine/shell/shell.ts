@@ -787,6 +787,7 @@ export function mountShell(
     const prompt = el("p", { class: "prompt" });
     const card = el("section", { class: "decision-card" });
     card.setAttribute("role", "status"); // a find is news, read out as it appears
+    card.hidden = true; // until a card comes
     const options = el("div", { class: "options" });
     let decisionShown: string | null = null;
     let openGroup: string | null = null;
