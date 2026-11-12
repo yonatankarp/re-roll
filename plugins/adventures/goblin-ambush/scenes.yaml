@@ -1,4 +1,5 @@
 - id: road
+  title: The Old Road
   text: Two dead horses block the trail, and the crows have not touched them.
   choices:
     - label: "[Perception] Check the treeline"
@@ -18,6 +19,7 @@
       effects:
         - { kind: goto, scene: village }
 - id: fight
+  title: Ambush
   text: Arrows hiss out of the pines as more goblins rush the road.
   rest: false # no time to stop with goblins charging
   choices:
@@ -27,8 +29,10 @@
         - { kind: system, effect: "dnd5.5e:levelUp", args: {} }
         - { kind: goto, scene: camp }
 - id: village
+  title: Back to the Village
   text: The elder listens, then asks who will walk the road next.
 - id: camp
+  title: Camp in the Pines
   text: With the goblins scattered, you make camp in the pines and tend your wounds.
   choices:
     - label: Take an hour's rest and move on
@@ -40,4 +44,5 @@
         - { kind: system, effect: "dnd5.5e:longRest", args: {} }
         - { kind: goto, scene: safe-road }
 - id: safe-road
+  title: The Road Is Safe
   text: The road is quiet again, for now.

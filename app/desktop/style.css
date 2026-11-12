@@ -203,16 +203,32 @@ h3 {
   gap: 8px;
 }
 
+/* A message hangs from the bar's underside, so it never changes the bar's height.
+   Its colours are the light ones, which read on the leather in either scheme. */
 .notice {
-  margin: 0 0 8px;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 0;
+  /* The page column's gutter: #app is at most 1080px wide, with 16px padding. */
+  padding: 6px max(16px, calc(50vw - 524px)) 8px;
   font-size: 0.9rem;
-  color: var(--good);
+  cursor: default;
+  background: var(--leather);
+  border-bottom: 3px solid var(--line);
+  box-shadow: 0 6px 12px rgb(0 0 0 / 20%);
   white-space: pre-line;
   overflow-wrap: anywhere;
+  animation: fade 0.2s ease;
 }
 
-.notice.error {
-  color: var(--error);
+.top .notice {
+  color: #8fce9b;
+}
+
+.top .notice.error {
+  color: #ff8f7a;
 }
 
 button {
@@ -934,9 +950,10 @@ summary {
 
 /* A moment above the choices, such as treasure found: a card that rises, then each find in turn. */
 .decision-card {
+  position: relative;
+  overflow: hidden;
   margin: 16px 0 0;
   padding: 12px 18px 14px;
-  max-width: 28rem;
   background: var(--panel);
   border: 1px solid var(--line);
   border-top: 3px solid var(--rule);
@@ -948,9 +965,25 @@ summary {
 }
 
 .decision-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 6px;
   font: 1.6rem/1 var(--font-title);
   color: var(--accent);
+}
+
+.card-icon {
+  font-size: 1.3rem;
+}
+
+.card-footer {
+  margin: 8px 0 0;
+  padding-top: 6px;
+  border-top: 2px solid var(--line);
+  font: 0.95rem var(--font-ui);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .decision-card ul {
@@ -972,6 +1005,28 @@ summary {
   animation: rise 0.45s ease both;
 }
 
+/* A glint of gold that sweeps across once as the card arrives. */
+.decision-card.enter::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgb(255 214 120 / 55%) 50%,
+    transparent 65%
+  );
+  transform: translateX(-100%);
+  animation: glint 0.9s 0.3s ease-out both;
+}
+
+@keyframes glint {
+  to {
+    transform: translateX(100%);
+  }
+}
+
 .decision-card.enter li {
   animation: rise 0.35s ease both;
   animation-delay: calc(0.25s + var(--i, 0) * 140ms);
@@ -988,6 +1043,11 @@ summary {
   font: 0.8rem var(--font-ui);
 }
 
+.row-option:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -996,6 +1056,11 @@ summary {
   .drawer[open]::backdrop {
     animation: none !important;
     transition: none !important;
+  }
+
+  /* Only fades, with no movement, so it still shows; without it "Saved" would never appear. */
+  .saved.enter {
+    animation: saved-flash 1.8s ease both !important;
   }
 }
 
@@ -1320,6 +1385,17 @@ button:active {
   text-align: left;
 }
 
+.game-menu-items button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.game-menu-items kbd {
+  font: 0.8rem var(--font-ui);
+  color: var(--muted);
+}
+
 .game-menu-items .bar-actions button[aria-pressed="false"],
 .game-menu-items button[aria-pressed="false"] {
   text-decoration: none;
@@ -1449,6 +1525,26 @@ button:active {
   animation-delay: calc(var(--i, 0) * 40ms);
 }
 
+.save-adventure {
+  font: 0.9rem var(--font-ui);
+  color: var(--muted);
+}
+
+.save-when {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.save-current {
+  padding: 0 8px;
+  border-radius: 999px;
+  font: 0.75rem/1.6 var(--font-caps);
+  letter-spacing: 0.03em;
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
 .save-open {
   display: flex;
   gap: 14px;
@@ -1502,9 +1598,26 @@ button:active {
 
 /* The campfire: a rest between scenes, offered from the top bar. */
 .campfire-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 44px;
-  font-size: 1.1rem;
   line-height: 1;
+}
+
+.campfire-button svg {
+  color: var(--leather-ink);
+}
+
+/* Kept in the bar while there's no rest to take, so nothing shifts when one comes. */
+.top .campfire-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.top .campfire-button:disabled:hover {
+  border-color: rgb(201 173 106 / 45%);
+  background: transparent;
 }
 
 .campfire {
@@ -1527,6 +1640,12 @@ button:active {
 .campfire[open],
 .campfire[open]::backdrop {
   animation: fade 0.8s ease;
+}
+
+/* Breaking camp fades out as slowly as the camp faded in. */
+.campfire.closing,
+.campfire.closing::backdrop {
+  animation: fade 0.8s ease reverse both;
 }
 
 .campfire-fire {
@@ -1552,6 +1671,35 @@ button:active {
   display: grid;
   gap: 8px;
   margin-top: 16px;
+}
+
+.campfire .options button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.campfire .options small {
+  font: 0.85rem var(--font-ui);
+  color: var(--muted);
+}
+
+/* "Not now": a quiet way out, not a third choice. */
+.campfire .quiet {
+  margin-top: 12px;
+  color: var(--leather-ink);
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-align: center;
+}
+
+.campfire .quiet:hover {
+  border-color: transparent;
+  box-shadow: none;
+  opacity: 0.8;
 }
 
 .campfire-body > * {

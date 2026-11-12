@@ -212,6 +212,7 @@ export function availableRests(state: DndState): readonly RestOption[] {
     {
       id: "short",
       label: `Short rest (${String(REST_HOURS.short)} hour)`,
+      detail: "Spend Hit Dice to heal",
       effect: `${NS}:shortRest`,
     },
     ...(since === undefined || since >= DAY_HOURS
@@ -219,6 +220,7 @@ export function availableRests(state: DndState): readonly RestOption[] {
           {
             id: "long",
             label: `Long rest (${String(REST_HOURS.long)} hours)`,
+            detail: "Restore HP, Hit Dice and spell slots",
             effect: `${NS}:longRest`,
           },
         ]

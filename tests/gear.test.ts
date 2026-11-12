@@ -22,6 +22,7 @@ import {
   dndEvent,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 import { memoryStorage } from "./memory-storage.ts";
 
 const POTION = "srd52:item/potion-of-healing";
@@ -297,6 +298,51 @@ describe("items in a fight", () => {
       ).actions.find((item) => item.id === `item:${SCROLL}`);
     expect(read(wizard)?.activation.cost).toEqual(["action"]);
     expect(read(fighter)).toBeUndefined();
+  });
+
+  it("says a read scroll crumbles, and a drunk potion doesn't", async () => {
+    const { run } = await loadAdventure("goblin-ambush");
+    const state = dnd(play(await storyRun([]), "srd52:pregen/wizard").state);
+    const used = (item: string) =>
+      dndUi.describe(
+        dndEvent(`${NS}:itemUsed`, { actor: PLAYER_ACTOR, item }),
+        state,
+        run,
+      );
+    expect(used(SCROLL)).toMatch(/, and it crumbles to dust\.$/);
+    expect(used(POTION)).not.toContain("crumbles");
+  });
+
+  it("marks gear the character can't use, and shows when gear can change", async () => {
+    const { run } = await loadAdventure("goblin-ambush");
+    const state = dnd(play(await storyRun([]), "srd52:pregen/wizard").state);
+    const wizard = playerOf(state);
+    const carrying: DndState = {
+      ...state,
+      actors: {
+        ...state.actors,
+        [PLAYER_ACTOR]: {
+          ...wizard,
+          inventory: [...wizard.inventory, SCALE, SCROLL],
+          stowed: [...(wizard.stowed ?? []), SCALE],
+        },
+      },
+    };
+    const [sheet] = dndUi.sheets(carrying, run);
+    const gear = sheet?.sections.find(
+      (section) => section.title === "Equipment",
+    );
+    const row = (name: string) =>
+      gear?.rows.find((item) => item.label.startsWith(name));
+    expect(row("Scale Mail")).toMatchObject({
+      label: "Scale Mail (can't use)",
+      option: { label: "Equip", hint: "Change gear during a rest" },
+    });
+    expect(row("Spell Scroll")?.label).not.toContain("can't use");
+    // Near the top, right after the combat numbers.
+    expect(sheet?.sections.map((section) => section.title).slice(0, 2)).toEqual(
+      ["Combat", "Equipment"],
+    );
   });
 });
 

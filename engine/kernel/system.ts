@@ -263,6 +263,7 @@ export interface EncounterOptions {
 export interface RestOption {
   readonly id: string;
   readonly label: string;
+  readonly detail?: string; // one line on what it gives back, such as "Spend Hit Dice"
   readonly effect: string;
 }
 

@@ -1,4 +1,5 @@
 - id: hallway
+  title: The Hallway
   text: The hallway smells of cold ash and old roses.
   art: assets/hallway.txt
   choices:
@@ -14,6 +15,7 @@
         - { kind: system, effect: "dnd5.5e:grantInspiration", args: {} }
         - { kind: goto, scene: cellar-door }
 - id: cellar-door
+  title: The Cellar Door
   text: The door is warm to the touch, and something knocks back.
   choices:
     - label: "[Athletics] Force the lock"
@@ -24,12 +26,15 @@
         failure:
           - { kind: advanceClock, clock: rising-dread, by: 3 }
 - id: footsteps-above
+  title: Footsteps Above
   text: Slow footsteps cross the floor above, though the house has no upstairs.
   choices:
     - label: Keep moving
       effects:
         - { kind: goto, scene: cellar-door }
 - id: doors-seal
+  title: The Doors Seal
   text: Every door in the house clicks shut at once.
 - id: escape
+  title: Escape
   text: Cold air and starlight hit you as you stumble out onto Mere Lane.

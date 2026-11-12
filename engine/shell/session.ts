@@ -12,6 +12,7 @@ import { type Registry, loadRun, scanPlugins } from "../kernel/loader.ts";
 import { type LogEntry, createSave, loadSave } from "../kernel/save.ts";
 import type { Storage } from "../kernel/storage.ts";
 import { REST_OPTION_PREFIX, sceneText } from "../story/runtime.ts";
+import type { Adventure } from "../story/adventure.ts";
 import type { GameSystem, SystemSetting } from "../kernel/system.ts";
 import {
   type RunContext,
@@ -52,6 +53,7 @@ export interface LogLine {
 export interface GameView {
   readonly title: string;
   readonly scene: string | null;
+  readonly sceneTitle: string | null; // a name for the scene, such as for the window title
   readonly sceneArt: string | null; // a content path, for imageUrl
   readonly endingName: string | null;
   readonly optionGroups: readonly OptionGroup[];
@@ -90,7 +92,13 @@ export interface SaveChoice {
   readonly title: string;
   readonly kind: "autosave" | "manual";
   readonly when: string | null; // savedAt, for people
+  readonly ago: string | null; // savedAt from now, such as "2 min ago"
   readonly steps: number;
+  readonly current: boolean; // the autosave of the run being played
+  // Who is playing, such as "Human Wizard", and the first number the system sums them up with, such as "6/8 HP".
+  readonly character: string | null;
+  readonly characterKind: string | null; // such as "Human Wizard", when the name doesn't already say it
+  readonly health: string | null;
   // Missing on saves made before these were recorded, until the save is next loaded.
   readonly scene: string | null;
   readonly level: number | null;
@@ -136,6 +144,10 @@ const SaveDetailsSchema = z.record(
     level: z.number().nullable(),
     settings: z.array(z.string()),
     art: z.string().nullable(),
+    // Added later, so older records have none, and a record without them must still parse.
+    character: z.string().nullable().optional(),
+    characterKind: z.string().nullable().optional(),
+    health: z.string().nullable().optional(),
   }),
 );
 type SaveDetails = z.infer<typeof SaveDetailsSchema>[string];
@@ -173,9 +185,59 @@ function stableIndex(id: string, count: number): number {
   return count > 0 ? hash % count : 0;
 }
 
-function endingName(id: string): string {
-  const words = id.replace(/-/g, " ");
+// The scene's own title, or its id made readable for one that has none.
+function sceneTitle(scene: Adventure["scenes"][number]): string {
+  if (scene.title) return scene.title;
+  const words = scene.id.replace(/-/g, " ");
   return `${words[0]?.toUpperCase() ?? ""}${words.slice(1)}`;
+}
+
+export function stepsText(count: number): string {
+  return `${String(count)} ${count === 1 ? "step" : "steps"}`;
+}
+
+// How long ago, such as "2 min ago", or null after a week, when the date itself says more.
+function agoText(savedAt: string, now: number): string | null {
+  const seconds = Math.max(0, (now - Date.parse(savedAt)) / 1000);
+  if (Number.isNaN(seconds) || seconds >= 7 * 86400) return null;
+  if (seconds < 60) return "just now";
+  const format = new Intl.RelativeTimeFormat(undefined, { style: "short" });
+  if (seconds < 3600) return format.format(-Math.floor(seconds / 60), "minute");
+  if (seconds < 86400)
+    return format.format(-Math.floor(seconds / 3600), "hour");
+  return format.format(-Math.floor(seconds / 86400), "day");
+}
+
+// What came back between two looks at the party, such as over a rest: per member whose sheet changed,
+// a line per change, such as "Hit Points 7 → 12 of 12". Keyed by section too, since the same label,
+// such as a weapon, can sit in two sections with different values.
+export function sheetChanges(
+  before: readonly SheetView[],
+  after: readonly SheetView[],
+): { readonly title: string; readonly changes: readonly string[] }[] {
+  const key = (sheet: SheetView, section: string, label: string): string =>
+    `${sheet.id}\u0000${section}\u0000${label}`;
+  const was = new Map<string, string>();
+  for (const sheet of before) {
+    for (const section of sheet.sections) {
+      for (const row of section.rows) {
+        was.set(key(sheet, section.title, row.label), row.value);
+      }
+    }
+  }
+  return after.flatMap((sheet) => {
+    const changes = sheet.sections.flatMap((section) =>
+      section.rows.flatMap((row) => {
+        const old = was.get(key(sheet, section.title, row.label));
+        return old === undefined || old === row.value
+          ? []
+          : [
+              `${row.label} ${old} → ${row.value}${row.note ? ` ${row.note}` : ""}`,
+            ];
+      }),
+    );
+    return changes.length > 0 ? [{ title: sheet.title, changes }] : [];
+  });
 }
 
 function narrate(
@@ -345,9 +407,15 @@ export function createGame({
     const [first] = log;
     const chosen =
       first?.input.kind === "start" ? (first.input.settings ?? {}) : {};
+    const [sheet] = ui.sheets(state.system, run);
+    const [health] = sheet?.summary ?? [];
     return {
-      scene: scene ? endingName(scene.id) : null,
-      level: ui.sheets(state.system, run)[0]?.level ?? null,
+      scene: scene ? sceneTitle(scene) : null,
+      level: sheet?.level ?? null,
+      character: sheet?.title ?? null,
+      characterKind:
+        sheet?.kind && sheet.kind !== sheet.title ? sheet.kind : null,
+      health: health ? `${health.value} ${health.label}` : null,
       settings: (run.system.settings ?? []).flatMap((setting) => {
         const option = setting.options.find(
           (item) => item.id === chosen[setting.id],
@@ -419,6 +487,7 @@ export function createGame({
       const times = await readSaveTimes();
       const allDetails = await readSaveDetails();
       const adventures = await this.listAdventures();
+      const now = Date.now();
       const saves: SaveChoice[] = [];
       for (const { path } of entries) {
         if (!path.endsWith(".json")) continue;
@@ -444,8 +513,12 @@ export function createGame({
           level: details?.level ?? null,
           settings: details?.settings ?? [],
           art: details?.art ?? null,
+          character: details?.character ?? null,
+          characterKind: details?.characterKind ?? null,
+          health: details?.health ?? null,
           savedAt,
           when,
+          ago: savedAt ? agoText(savedAt, now) : null,
         };
         // A broken save still gets listed, so it can be deleted.
         if (!info) {
@@ -457,6 +530,7 @@ export function createGame({
             title: name,
             kind: "manual",
             steps: 0,
+            current: false,
           });
           continue;
         }
@@ -469,11 +543,15 @@ export function createGame({
         saves.push({
           ...bare,
           path,
-          label: `${title}: ${kind === "autosave" ? "Autosave" : "Saved"}, ${when ?? `run ${seed}`}, ${String(log.length)} steps`,
+          label: `${title}: ${kind === "autosave" ? "Autosave" : "Saved"}, ${when ?? `run ${seed}`}, ${stepsText(log.length)}`,
           adventure,
           title,
           kind,
           steps: log.length,
+          current:
+            kind === "autosave" &&
+            current?.adventure === adventure &&
+            current.seed === seed,
         });
       }
       // Oldest saves have no time, and go last.
@@ -646,7 +724,8 @@ export function createGame({
       // A save from before cards had details gets them now, so its card shows them next time.
       // The game is already loaded, so a failure here only leaves the card bare.
       try {
-        if ((await readSaveDetails())[path] === undefined) {
+        // Details from before the character was recorded are written again too.
+        if ((await readSaveDetails())[path]?.character === undefined) {
           await writeDetails(path, detailsOf(game));
         }
       } catch {
@@ -685,13 +764,14 @@ export function createGame({
       return {
         title: run.adventure.title,
         scene: currentScene ? sceneText(run, state, currentScene) : null,
+        sceneTitle: currentScene ? sceneTitle(currentScene) : null,
         sceneArt:
           currentScene?.art && IMAGE_FILE.test(currentScene.art)
             ? `${root}/${currentScene.art}`
             : null,
         endingName:
           state.story.ended === "ending" && currentScene
-            ? endingName(currentScene.id)
+            ? sceneTitle(currentScene)
             : null,
         decision,
         optionGroups: choices
@@ -702,7 +782,14 @@ export function createGame({
           : null,
         rests: (decision?.options ?? [])
           .filter((option) => isRest(option.id))
-          .map((option) => ({ ...option, detail: null })),
+          .map((option) => ({
+            ...option,
+            detail:
+              run.system
+                .rests?.(state.system)
+                .find((rest) => `${REST_OPTION_PREFIX}${rest.id}` === option.id)
+                ?.detail ?? null,
+          })),
         monsterArt: pictures,
         tokenArt: tokens,
         adventureRoot: root,

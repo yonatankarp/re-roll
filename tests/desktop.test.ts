@@ -23,7 +23,7 @@ import {
   createContentReader,
   withSaves,
 } from "../engine/platform/browser/storage.ts";
-import { createGame } from "../engine/shell/session.ts";
+import { createGame, sheetChanges } from "../engine/shell/session.ts";
 import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 
 function serve(root: string): Promise<{ server: Server; url: string }> {
@@ -391,7 +391,16 @@ describe("playing through the shell's session", () => {
         settings: ["Hard"],
         savedAt: new Date(clock).toISOString(),
       });
-      expect(newest?.scene).toBeTruthy();
+      expect(newest).toMatchObject({
+        scene: "The Old Road",
+        character: "Human Fighter",
+        characterKind: null, // the pregen's name already says it
+        ago: "just now",
+        current: false,
+      });
+      expect(newest?.health).toMatch(/^\d+\/\d+ HP$/);
+      expect(newest?.label).toMatch(/, \d+ steps$/);
+      expect(saves.find((save) => save.path === autosave)?.current).toBe(true);
       // Builds from before save cards read the times as plain strings, so they stay that way.
       const times: unknown = JSON.parse(store.getItem("saves/times") ?? "{}");
       expect(
@@ -432,6 +441,18 @@ describe("playing through the shell's session", () => {
           "saves/goblin-ambush-dated.json": "2026-01-01T00:00:00.000Z",
         }),
       );
+      // Details as cards first recorded them, before the character was kept.
+      store.setItem(
+        "saves/details",
+        JSON.stringify({
+          "saves/goblin-ambush-undated.json": {
+            scene: "Road",
+            level: 1,
+            settings: [],
+            art: null,
+          },
+        }),
+      );
       const game = gameOn(store);
 
       const before = await game.listSaves();
@@ -444,7 +465,9 @@ describe("playing through the shell's session", () => {
         scene: null,
         level: null,
         kind: "manual",
+        character: null,
       });
+      expect(before[1]).toMatchObject({ scene: "Road", character: null });
 
       await game.load("saves/goblin-ambush-dated.json");
       expect(game.view().sheets[0]?.title).toBeTruthy();
@@ -529,6 +552,44 @@ describe("playing through the shell's session", () => {
     expect(choices.some((option) => option.id.startsWith("rest:"))).toBe(false);
     await game.answer("rest:long");
     expect(game.view().rests).toEqual([]);
+  });
+
+  it("finds nothing to recover after resting at full health", async () => {
+    for (const rest of ["rest:short", "rest:long"]) {
+      const game = newGame();
+      await game.start("goblin-ambush", "desktop-test-1");
+      await chooseCharacter(game, "Wizard");
+      const before = game.view().sheets;
+      const scene = game.view().decision?.id;
+      await game.answer(rest);
+      // The rest's own questions, as the camp answers them, until the scene's choice is back.
+      for (let count = 0; count < 10; count += 1) {
+        const { decision } = game.view();
+        if (!decision || decision.id === scene) break;
+        const option =
+          decision.options.find((item) => /^(Finish|Done)/.test(item.label)) ??
+          decision.options[0];
+        if (!option) break;
+        await game.answer(option.id);
+      }
+      expect(sheetChanges(before, game.view().sheets)).toEqual([]);
+    }
+  });
+
+  it("tells sheet rows apart by section when comparing them", () => {
+    const sheet = (hp: string) => ({
+      id: "player",
+      title: "Merric",
+      sections: [
+        { title: "Combat", rows: [{ label: "Hit Points", value: hp }] },
+        { title: "Attacks", rows: [{ label: "Dagger", value: "+4" }] },
+        { title: "Equipment", rows: [{ label: "Dagger", value: "Equipped" }] },
+      ],
+    });
+    expect(sheetChanges([sheet("3")], [sheet("3")])).toEqual([]);
+    expect(sheetChanges([sheet("3")], [sheet("8")])).toEqual([
+      { title: "Merric", changes: ["Hit Points 3 → 8"] },
+    ]);
   });
 
   it("groups a character's combat options and explains them", async () => {

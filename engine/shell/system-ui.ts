@@ -12,14 +12,21 @@ export interface SheetRow {
   readonly note?: string; // a small line under the value, in boxes and marks
   readonly marked?: boolean; // such as proficient, in marks
   readonly meter?: number; // a share from 0 to 1, drawn as a bar in the top bar's summary
-  // A choice of the pending decision this row can make, such as equipping an item, shown only while it's offered.
-  readonly option?: { readonly id: string; readonly label: string };
+  // A choice of the pending decision this row can make, such as equipping an item. With a hint, it's
+  // shown disabled while not offered, and the hint says when it will be, such as "Change gear during a rest".
+  readonly option?: {
+    readonly id: string;
+    readonly label: string;
+    readonly hint?: string;
+  };
 }
 
 // A short moment shown above a decision's choices, such as treasure just found.
 export interface DecisionCard {
   readonly title: string;
   readonly lines: readonly string[];
+  readonly icon?: string; // a glyph beside the title, such as a coin
+  readonly footer?: string; // a closing line, such as the purse after the find
 }
 
 export interface SheetSection {
@@ -46,7 +53,9 @@ export interface SheetView {
   readonly title: string;
   readonly subtitle?: string;
   readonly level?: number; // shown on save cards
-  readonly summary?: readonly SheetRow[]; // the few numbers kept in the top bar, such as HP
+  readonly kind?: string; // what the character is, such as "Human Wizard", shown on save cards
+  // The few numbers kept in the top bar, such as HP. The first also goes on save cards.
+  readonly summary?: readonly SheetRow[];
   readonly tags?: readonly string[]; // such as conditions
   readonly sections: readonly SheetSection[];
 }
