@@ -379,7 +379,7 @@ export function tacticOptions(
   for (const foe of foes) {
     options.push({
       id: `${STUDY}${SEP}${foe.id}`,
-      label: `Study ${foe.name} (${studySkill(foe, access)})`,
+      label: `Study ${foe.name} (${capitalized(studySkill(foe, access))})`,
     });
   }
   if (friends.length > 0) {
@@ -446,6 +446,10 @@ const STUDY_SKILLS: Readonly<Record<string, Skill>> = {
   fiend: "religion",
   undead: "religion",
 };
+
+function capitalized(word: string): string {
+  return `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+}
 
 function studySkill(target: Actor, access: ContentAccess): Skill {
   return (
