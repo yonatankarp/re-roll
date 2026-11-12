@@ -65,4 +65,21 @@ describe("a multiattack's other actions", () => {
       ),
     ).toEqual([]);
   });
+
+  it("takes only the routine that names the attack chosen", () => {
+    const coiler = monster(
+      "The coiler makes one Bite attack and uses Squeeze, or it makes two Tail attacks and uses Hiss.",
+    );
+    expect(multiattackUses(coiler, "Bite")).toEqual(["monster:1"]);
+    expect(multiattackUses(coiler, "Bite (ranged)")).toEqual(["monster:1"]);
+    expect(multiattackUses(coiler, "Tail")).toEqual(["monster:2"]);
+    expect(multiattackUses(coiler, "Claw")).toEqual([]);
+    // A routine that names no attack goes with any.
+    expect(
+      multiattackUses(
+        monster("The coiler makes two attacks and uses Hiss."),
+        "Bite",
+      ),
+    ).toEqual(["monster:2"]);
+  });
 });

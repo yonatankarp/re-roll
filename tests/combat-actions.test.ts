@@ -94,9 +94,67 @@ function dummy(id: string, fields: Readonly<Record<string, unknown>> = {}) {
   };
 }
 
+// Bites, then squeezes: a grapple with an escape DC, and Restrained and damage each turn until it ends.
+const COILER = dummy("test:monster/coiler", {
+  text: [
+    "Actions",
+    "Multiattack. The coiler makes one Bite attack and uses Squeeze.",
+    "Bite. Melee Attack Roll: +4, reach 5 ft. Hit: 3 (1d6) Piercing damage.",
+    "Squeeze. Strength Saving Throw: DC 14, one creature within 10 feet. Failure: The target has the Grappled condition (escape DC 15).",
+  ].join("\n"),
+  actions: [
+    {
+      name: "Squeeze",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 10, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "str",
+          dc: { base: 14 },
+          onFail: [
+            {
+              kind: "applyCondition",
+              condition: "grappled",
+              duration: { minutes: 1 },
+            },
+            {
+              kind: "applyCondition",
+              condition: "restrained",
+              duration: { minutes: 1 },
+            },
+            {
+              kind: "modifier",
+              modifier: {
+                kind: "lingeringDamage",
+                when: "turnStart",
+                damage: [{ amount: { dice: "1d6" }, type: "bludgeoning" }],
+              },
+              duration: { minutes: 1 },
+            },
+          ],
+        },
+      },
+    },
+    {
+      name: "Bite",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "weapon", flatBonus: 4 },
+          damage: [{ amount: { dice: "1d6" }, type: "piercing" }],
+        },
+      },
+    },
+  ],
+});
+
 function arena(base: RunContext): RunContext {
   const content: Record<string, unknown> = {
     "test:monster/dummy": dummy("test:monster/dummy"),
+    "test:monster/coiler": COILER,
     "test:monster/giant": dummy("test:monster/giant", { size: "huge" }),
     ...Object.fromEntries(WEAPONS.map((item) => [item.id, item])),
   };
@@ -866,6 +924,48 @@ describe("tactics", () => {
     if (!decision) throw new Error("No decision");
     expect(tacticalPolicy(decision, contextOf(run, first, LOW))).toBe(
       "tactic:offhand|foe|weapon:srd52:item/dagger",
+    );
+  });
+});
+
+describe("monster grapples and multiattacks", () => {
+  it("takes the action a Multiattack also uses after its attacks", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("coiler", [6, 5], "test:monster/coiler"),
+    ]);
+    const { state: after, events } = settle(
+      run,
+      state,
+      [act("coiler", "monster:1|player")],
+      LOW,
+    );
+    expect(rolls(events)[0]?.against).toBe(PLAYER_ACTOR);
+    expect(payloadOf(events, "saveRolled")).toMatchObject({ dc: 14 });
+    const hero = who(after, PLAYER_ACTOR);
+    expect(hasCondition(hero, "grappled", "restrained")).toBe(true);
+    // Squeezing on its own doesn't bite as well.
+    const alone = settle(run, state, [act("coiler", "monster:0|player")], LOW);
+    expect(rolls(alone.events)).toEqual([]);
+  });
+
+  it("picks the attack that brings the other action over that action alone", async () => {
+    const run = await base();
+    const state = fight([
+      monster("coiler", [6, 5], "test:monster/coiler"),
+      fighter(run, { at: [5, 5] }),
+    ]);
+    const decision = run.system.nextDecision(state, {
+      content: run.content,
+      contentIds: run.contentIds,
+    });
+    if (!decision) throw new Error("No turn decision");
+    expect(decision.options.map((option) => option.id)).toContain(
+      "monster:0|player",
+    );
+    expect(tacticalPolicy(decision, contextOf(run, state, LOW))).toBe(
+      "monster:1|player",
     );
   });
 });

@@ -4,6 +4,7 @@ import {
   evaluateFormula,
   immuneToCondition,
   type KnownAction,
+  lookup,
   rollAmount,
   saveBonus,
 } from "../stats.ts";
@@ -30,7 +31,9 @@ import {
   type Damage,
   type Duration,
   type LeafEffect,
+  MonsterSchema,
 } from "../schemas.ts";
+import { multiattackUses } from "../multiattack-uses.ts";
 import { dropToOneEvents, traitSaveAdvantage } from "../trait-rules.ts";
 import { dodging } from "../tactics.ts";
 import { AIM, ALL } from "./ids.ts";
@@ -564,10 +567,43 @@ export function resolveAction(
           );
         }
       }
+      frames.push(...multiattackFrames(action, actor, targets[0], context));
       break;
     }
     default:
       resolution satisfies never;
   }
   return { events, frames };
+}
+
+// A monster's Multiattack can also use another action, as "makes one Bite attack and uses Constrict" does:
+// the ids of those its attack brings.
+export function multiattackExtras(
+  action: KnownAction,
+  actor: Actor,
+  context: ContentAccess,
+): readonly string[] {
+  if (
+    actor.source.kind !== "monster" ||
+    action.activation.resolution.kind !== "attack" ||
+    !action.id.startsWith("monster:") ||
+    !action.activation.cost.includes("action")
+  ) {
+    return [];
+  }
+  const monster = lookup(context, MonsterSchema, actor.source.statBlockId);
+  return multiattackUses(monster, action.name);
+}
+
+// Those actions, taken once the attacks are done.
+function multiattackFrames(
+  action: KnownAction,
+  actor: Actor,
+  target: Actor | undefined,
+  context: Context,
+): Frame[] {
+  if (!target) return [];
+  return multiattackExtras(action, actor, context).map((actionId) =>
+    frame("useAction", { actor: actor.id, actionId, target: target.id }),
+  );
 }

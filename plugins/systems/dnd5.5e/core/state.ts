@@ -55,6 +55,7 @@ export const FRAME_KINDS = [
   "shortRestStep",
   "smite",
   "takeAction",
+  "useAction",
   "useItem",
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
