@@ -531,7 +531,11 @@ function applyDamage(
     tempHp: actor.tempHp - absorbed,
     hp,
     deathSaves: {
-      ...actor.deathSaves,
+      // Damage ends being Stable, so death saves start again; a dying creature keeps its successes.
+      successes:
+        hitWhileDown > 0 && actor.deathSaves.successes >= 3
+          ? 0
+          : actor.deathSaves.successes,
       // Massive damage kills outright, which three failures also represent.
       failures: massive ? 3 : actor.deathSaves.failures + hitWhileDown,
     },
