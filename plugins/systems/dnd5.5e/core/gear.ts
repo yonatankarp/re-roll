@@ -125,7 +125,7 @@ export function gearOptions(
 }
 
 // The pack after a change: putting on armor or a shield stows the one worn before.
-function changed(
+export function changed(
   actor: Actor,
   answer: string,
   access: ContentAccess,

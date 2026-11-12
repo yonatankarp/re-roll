@@ -9,9 +9,10 @@ import {
 } from "./grid.ts";
 import { coverBonus, coverFor, difficultSquares } from "./sight.ts";
 import { type Decision } from "#sdk";
-import { ADD, AIM_AREA, BACK, CONFIRM, nextPick } from "./targeting.ts";
+import { ADD, AIM_AREA, BACK, CONFIRM, nextPick, PICK } from "./targeting.ts";
 import { chooseBossAction, FLEE } from "./legendary.ts";
 import { DECLINE, MOVE, parseOption, STAY } from "./combat/ids.ts";
+import { changed, gearOptions } from "./gear.ts";
 import {
   actorOf,
   aimsFor,
@@ -29,6 +30,7 @@ import {
 } from "./combat/queries.ts";
 import { AimSchema, PickSchema } from "./combat/actions.ts";
 import { multiattackExtras } from "./combat/effects.ts";
+import { AVERAGE, makeJudge } from "./worth.ts";
 
 // How companions and monsters choose in a fight, and how the bot plays the player.
 
@@ -137,15 +139,145 @@ export function stepToward(actor: Actor, context: Context): Square | null {
   return ranked[0]?.square ?? null;
 }
 
-// Picks targets one at a time as a sensible caster would, then casts.
-function pickPolicy(
-  decision: Decision,
+function heals(action: KnownAction): boolean {
+  return (
+    action.activation.resolution.kind === "automatic" &&
+    action.activation.resolution.effects.some((item) => item.kind === "heal")
+  );
+}
+
+function slotsLeft(
+  actor: Actor,
+  stats: ReturnType<typeof deriveStats>,
+): number {
+  return stats.slots.reduce(
+    (total, count, index) =>
+      total +
+      Math.max(
+        0,
+        count - (actor.resourcesSpent[`slot:${String(index + 1)}`] ?? 0),
+      ),
+    0,
+  );
+}
+
+function leavesOf(action: KnownAction) {
+  const { resolution } = action.activation;
+  return resolution.kind === "automatic"
+    ? resolution.effects
+    : resolution.kind === "save"
+      ? resolution.onFail
+      : resolution.onHit;
+}
+
+function concentrates(action: KnownAction): boolean {
+  return leavesOf(action).some(
+    (item) =>
+      "duration" in item &&
+      typeof item.duration === "object" &&
+      "concentration" in item.duration,
+  );
+}
+
+// Whether something the actor concentrates on is still on anyone, so a new Concentration spell would end it.
+function holdingConcentration(actor: Actor, context: Context): boolean {
+  const spell = actor.concentratingOn;
+  return (
+    spell !== null &&
+    Object.values(context.state.actors).some(
+      (item) =>
+        !isDown(item) &&
+        item.activeEffects.some(
+          (effect) => effect.sourceId === spell && effect.casterId === actor.id,
+        ),
+    )
+  );
+}
+
+interface Parsed {
+  readonly option: Decision["options"][number];
+  readonly action: KnownAction;
+  readonly targetId: string;
+  readonly slot: string | undefined;
+}
+
+// A party member's turn, played as a sensible player would: every choice is weighed by worth.ts, and the
+// Action and Bonus Action are planned together, as only one of them may spend a spell slot in a turn.
+// Null when nothing is worth doing.
+function partyChoice(
+  parsed: readonly Parsed[],
   actor: Actor,
   context: Context,
-): string {
-  const { actionId, slot, picked } = PickSchema.omit({ answer: true }).parse(
-    decision.resume.payload,
+): string | null {
+  const judge = makeJudge(context, actor);
+  const stats = deriveStats(actor, context);
+  const fresh = actor.budget.action && actor.budget.bonusAction;
+  // A healer keeps its last slot to bring someone back.
+  const lastSlot =
+    slotsLeft(actor, stats) <= 1 &&
+    stats.actions.some(
+      (action) => (action.spellLevel ?? 0) > 0 && heals(action),
+    );
+  const holding = holdingConcentration(actor, context);
+  // A caster about to drop gets more from damage now than from a spell it won't keep.
+  const shaky = actor.hp < 0.4 * stats.maxHp;
+  const scored = parsed.flatMap((item) => {
+    const { action, targetId, slot } = item;
+    if (action.activation.trigger) return [];
+    const slotted = action.activation.cost.includes("slot");
+    if (slotted && (!fresh || (lastSlot && !heals(action)))) return [];
+    const lasting = concentrates(action);
+    if (lasting && holding) return [];
+    // Choosing targets one by one must find someone, or the choice would only come back here.
+    if (
+      targetId === PICK &&
+      pickNext(actor, action.id, slot, [], context) === null
+    ) {
+      return [];
+    }
+    const worth =
+      judge.worth(actor, action.id, targetId, slot) *
+      (lasting && shaky ? 0.5 : 1);
+    return worth > 0 ? [{ ...item, worth, slotted }] : [];
+  });
+  const best = (
+    list: readonly (typeof scored)[number][],
+  ): (typeof scored)[number] | undefined =>
+    [...list].sort((a, b) => b.worth - a.worth)[0];
+  const costs = (
+    item: (typeof scored)[number],
+    cost: "action" | "bonusAction",
+  ) => item.action.activation.cost.includes(cost);
+  const actions = scored.filter((item) => costs(item, "action"));
+  const bonuses = scored.filter((item) => costs(item, "bonusAction"));
+  const others = scored.filter(
+    (item) => !costs(item, "action") && !costs(item, "bonusAction"),
   );
+  const free = best(others);
+  if (free) return free.option.id;
+  if (!fresh) return best(scored)?.option.id ?? null;
+  // Either the Action spends the slot or the Bonus Action does, never both.
+  const plans = [
+    [best(actions), best(bonuses.filter((item) => !item.slotted))],
+    [best(actions.filter((item) => !item.slotted)), best(bonuses)],
+  ] as const;
+  const total = ([main, bonus]: (typeof plans)[number]): number =>
+    (main?.worth ?? 0) + (bonus?.worth ?? 0);
+  const [main, bonus] =
+    total(plans[0]) >= total(plans[1]) ? plans[0] : plans[1];
+  // The slot first, so the other half can't take it; otherwise the Bonus Action, such as a mark, before the Attack.
+  if (main?.slotted) return main.option.id;
+  return (bonus ?? main)?.option.id ?? null;
+}
+
+// Who a sensible caster adds next, or null when it should cast.
+function pickNext(
+  actor: Actor,
+  actionId: string,
+  slot: string | undefined,
+  picked: readonly string[],
+  context: Context,
+): string | null {
   const slotLevel = slotLevelFor(actor, actionId, slot, context);
   const action = findAction(actor, actionId, context, slotLevel);
   const { projectiles, resolution } = action.activation;
@@ -159,13 +291,25 @@ function pickPolicy(
           0,
         )
       : 0;
-  const next = nextPick(
+  return nextPick(
     inReach(action, actor, context.state, context),
     picked,
     targetCount(findAction(actor, actionId, context), slotLevel),
     projectiles !== undefined,
     { sourceId: spellSource(action), perHit },
   );
+}
+
+// Picks targets one at a time as a sensible caster would, then casts.
+function pickPolicy(
+  decision: Decision,
+  actor: Actor,
+  context: Context,
+): string {
+  const { actionId, slot, picked } = PickSchema.omit({ answer: true }).parse(
+    decision.resume.payload,
+  );
+  const next = pickNext(actor, actionId, slot, picked, context);
   if (next !== null) return `${ADD}${next}`;
   return decision.options.some((option) => option.id === CONFIRM)
     ? CONFIRM
@@ -232,30 +376,32 @@ export function choosePolicy(decision: Decision, context: Context): string {
       : [];
   });
 
-  const heals = (action: KnownAction): boolean =>
-    action.activation.resolution.kind === "automatic" &&
-    action.activation.resolution.effects.some((item) => item.kind === "heal");
-
   // Slots go on fights that need them: the enemies left must outlast the caster's own HP, and a healer keeps its last slot.
   const foesHp = enemies(state, actor)
     .filter((item) => !isDown(item))
     .reduce((total, item) => total + item.hp, 0);
-  const slotsLeft = stats.slots.reduce(
-    (total, count, index) =>
-      total +
-      Math.max(
-        0,
-        count - (actor.resourcesSpent[`slot:${String(index + 1)}`] ?? 0),
-      ),
-    0,
-  );
   const healer = stats.actions.some(
     (action) => (action.spellLevel ?? 0) > 0 && heals(action),
   );
-  const spendsSlot = foesHp > stats.maxHp && slotsLeft > (healer ? 1 : 0);
+  const spendsSlot =
+    foesHp > stats.maxHp && slotsLeft(actor, stats) > (healer ? 1 : 0);
 
   if (decision.id.startsWith(`${NS}:afterHit:`)) {
     return spendsSlot ? first.id : DECLINE;
+  }
+
+  // The party plays by worth. Monsters keep the simple rules below, so the books' fights stay as hard as written.
+  if (actor.side === "party" && decision.id.startsWith(`${NS}:turn:`)) {
+    const chosen = partyChoice(parsed, actor, context);
+    if (chosen) return chosen;
+    if (
+      actor.budget.action &&
+      decision.options.some((option) => option.id === MOVE) &&
+      stepToward(actor, context)
+    ) {
+      return MOVE;
+    }
+    return decision.options.at(-1)?.id ?? first.id;
   }
 
   const wounded = parsed
@@ -395,4 +541,60 @@ export function choosePolicy(decision: Decision, context: Context): string {
   });
   if (extra) return extra.option.id;
   return decision.options.at(-1)?.id ?? first.id;
+}
+
+// Between fights, as a careful player: spend Hit Dice while hurt, put on what makes the character better (more
+// AC, a harder-hitting weapon, a magic item to attune), and never take off what it wears. Only the bot asks.
+const GEAR_STEP = /^dnd5\.5e:(shortRest|gear|found):/;
+
+export function isGearDecision(decision: Decision): boolean {
+  return GEAR_STEP.test(decision.id);
+}
+
+export function gearPolicy(decision: Decision, context: Context): string {
+  const actor = actorOf(context.state, decision.actor);
+  const ids = new Set(decision.options.map((option) => option.id));
+  const better = decision.options.find(({ id }) =>
+    improves(actor, id, context),
+  );
+  if (decision.id.startsWith(`${NS}:shortRest:`)) {
+    if (ids.has("spend") && actor.hp < deriveStats(actor, context).maxHp) {
+      return "spend";
+    }
+    const worthChanging = gearOptions(actor, context).some(({ id }) =>
+      improves(actor, id, context),
+    );
+    return worthChanging && ids.has("gear") ? "gear" : "finish";
+  }
+  return better?.id ?? "done";
+}
+
+// The best a character's weapons deal on a hit, on average.
+function bestWeaponHit(actor: Actor, context: Context): number {
+  const stats = deriveStats(actor, context);
+  return Math.max(
+    0,
+    ...stats.actions.flatMap(({ id, activation: { resolution } }) =>
+      id.startsWith("weapon:") && resolution.kind === "attack"
+        ? [
+            resolution.damage.reduce(
+              (total, { amount }) => total + rollAmount(amount, stats, AVERAGE),
+              0,
+            ),
+          ]
+        : [],
+    ),
+  );
+}
+
+function improves(actor: Actor, answer: string, context: Context): boolean {
+  if (answer.startsWith("attune:")) return true;
+  if (!answer.startsWith("equip:")) return false;
+  const after = { ...actor, ...changed(actor, answer, context) };
+  const ac = (item: Actor): number => deriveStats(item, context).ac;
+  return (
+    ac(after) > ac(actor) ||
+    (ac(after) === ac(actor) &&
+      bestWeaponHit(after, context) > bestWeaponHit(actor, context))
+  );
 }
