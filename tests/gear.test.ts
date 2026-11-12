@@ -354,7 +354,9 @@ describe("checking loot", () => {
     const root = "plugins/rules/srd52";
     for (const name of await readdir(root, { recursive: true })) {
       if (name.endsWith(".yaml")) {
-        files[`${root}/${name}`] = await readFile(`${root}/${name}`, "utf8");
+        // readdir gives "\\" separators on Windows, and storage paths always use "/".
+        const file = `${root}/${name.replaceAll("\\", "/")}`;
+        files[file] = await readFile(file, "utf8");
       }
     }
     const adventure = "plugins/adventures/loot-test";

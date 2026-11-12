@@ -1489,7 +1489,8 @@ async function readAllSrd(): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
   for (const entry of entries) {
     if (!entry.isFile()) continue;
-    const path = `${entry.parentPath}/${entry.name}`;
+    // readdir gives "\\" separators on Windows, and storage paths always use "/".
+    const path = `${entry.parentPath}/${entry.name}`.replaceAll("\\", "/");
     files[path] = await readFile(path, "utf8");
   }
   return files;
