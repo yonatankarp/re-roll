@@ -9,3 +9,5 @@ app/desktop/src-tauri/gen/
 books
 .env*
 coverage/
+test-results/
+playwright-report/

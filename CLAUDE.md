@@ -7,6 +7,7 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - Node 26 comes from nvm and isn't on the default PATH. Prefix commands with `PATH="$HOME/.nvm/versions/node/v26.13.0/bin:$PATH"`.
 - Before you call work done, run `npm test`, `npm run lint` and `npm run typecheck` (four tsc projects), and make sure all three pass.
 - `npm run ui` serves the game at http://127.0.0.1:5199/ with `strictPort`. A second checkout or worktree needs `npm run ui -- --port <other>`.
+- `npm run test:ui` is a Playwright smoke test in Chromium against its own `npm run ui` on a free port. CI runs it as the `ui` job. Run `npx playwright install chromium` first if Playwright's browser isn't cached yet.
 - `npm run bot -- [runs] [adventure] [--smart] [--rests] [--avoid-endings] [--difficulty=story|normal|hard]` plays adventures to measure balance. `--smart` fights and builds characters with the system's tactics, `--rests` rests whenever a scene allows, and `--avoid-endings` skips story choices that end the adventure while others remain. The targets are Story at or under about 25% defeats and Normal at 15–45%.
 - `npm run play` plays in text without the UI.
 - `npm run narrate -- <adventure> [--voice=…]` reads a book adventure's scenes aloud once with Kokoro-82M (needs `ffmpeg`), into its `narration/` folder. Run it from the main checkout, since a worktree's `private/` is only a copy. Clips missing there are read in the app.
