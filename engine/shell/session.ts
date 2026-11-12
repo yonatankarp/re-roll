@@ -32,8 +32,10 @@ import type {
 // Everything the page does to the game, with no DOM, so tests can play through the same code.
 
 const SAVES = "saves";
-// Saves have a strict format with no clock in it, so the times and card details live beside them.
+// Saves have a strict format with no clock in it, so the times live beside them.
 const SAVE_TIMES = `${SAVES}/times`;
+// What each save's card shows. Kept apart from the times, which older builds still read as plain strings.
+const SAVE_DETAILS = `${SAVES}/details`;
 const ASSETS = "private/assets";
 const LIBRARY = "private/library";
 const IMAGE_FILE = /\.(png|jpe?g|webp|gif)$/i;
@@ -122,23 +124,17 @@ const SaveInfoSchema = z.object({
   seed: z.string(),
   log: z.array(z.unknown()),
 });
-const SaveDetailsSchema = z.object({
-  savedAt: z.string().optional(),
-  scene: z.string().nullable().optional(),
-  level: z.number().nullable().optional(),
-  settings: z.array(z.string()).optional(),
-  art: z.string().nullable().optional(),
-});
-type SaveDetails = z.infer<typeof SaveDetailsSchema>;
-// Before save cards, each entry was only the time it was saved.
-const SaveTimesSchema = z.record(
+const SaveTimesSchema = z.record(z.string(), z.string());
+const SaveDetailsSchema = z.record(
   z.string(),
-  z
-    .union([z.string(), SaveDetailsSchema])
-    .transform((entry) =>
-      typeof entry === "string" ? { savedAt: entry } : entry,
-    ),
+  z.object({
+    scene: z.string().nullable(),
+    level: z.number().nullable(),
+    settings: z.array(z.string()),
+    art: z.string().nullable(),
+  }),
 );
+type SaveDetails = z.infer<typeof SaveDetailsSchema>[string];
 const FaceSchema = z.object({
   x: z.number(), // the face's centre, as a share of the picture's width
   y: z.number(), // and of its height
@@ -287,15 +283,21 @@ export function createGame({
     tokenArt = tokens;
   };
 
-  const readSaveTimes = async (): Promise<Record<string, SaveDetails>> => {
-    const text = await storage.read(SAVE_TIMES);
+  // A missing or broken record only loses what the cards show, never the saves.
+  const readRecord = async <T>(
+    path: string,
+    schema: z.ZodType<Record<string, T>>,
+  ): Promise<Record<string, T>> => {
+    const text = await storage.read(path);
     if (text === null) return {};
     try {
-      return SaveTimesSchema.parse(JSON.parse(text));
+      return schema.parse(JSON.parse(text));
     } catch {
       return {};
     }
   };
+  const readSaveTimes = () => readRecord(SAVE_TIMES, SaveTimesSchema);
+  const readSaveDetails = () => readRecord(SAVE_DETAILS, SaveDetailsSchema);
 
   // The setup screen opens an adventure to ask its settings, and starting it right after reuses that.
   let prepared: {
@@ -359,9 +361,9 @@ export function createGame({
     path: string,
     details: SaveDetails,
   ): Promise<void> => {
-    const times = await readSaveTimes();
-    times[path] = { ...times[path], ...details };
-    await storage.replaceAtomically(SAVE_TIMES, JSON.stringify(times));
+    const all = await readSaveDetails();
+    all[path] = details;
+    await storage.replaceAtomically(SAVE_DETAILS, JSON.stringify(all));
   };
 
   const write = async (game: Current, name: string): Promise<string> => {
@@ -372,10 +374,10 @@ export function createGame({
         createSave(game.registry, game.adventure, game.seed, game.log),
       ),
     );
-    await writeDetails(path, {
-      savedAt: new Date().toISOString(),
-      ...detailsOf(game),
-    });
+    const times = await readSaveTimes();
+    times[path] = new Date().toISOString();
+    await storage.replaceAtomically(SAVE_TIMES, JSON.stringify(times));
+    await writeDetails(path, detailsOf(game));
     return path;
   };
 
@@ -411,6 +413,7 @@ export function createGame({
     async listSaves(): Promise<readonly SaveChoice[]> {
       const entries = await storage.list(SAVES);
       const times = await readSaveTimes();
+      const allDetails = await readSaveDetails();
       const adventures = await this.listAdventures();
       const saves: SaveChoice[] = [];
       for (const { path } of entries) {
@@ -424,8 +427,8 @@ export function createGame({
         } catch {
           info = undefined;
         }
-        const details = times[path] ?? {};
-        const savedAt = details.savedAt ?? null;
+        const details = allDetails[path];
+        const savedAt = times[path] ?? null;
         const when = savedAt
           ? new Date(savedAt).toLocaleString(undefined, {
               dateStyle: "medium",
@@ -433,10 +436,10 @@ export function createGame({
             })
           : null;
         const bare = {
-          scene: details.scene ?? null,
-          level: details.level ?? null,
-          settings: details.settings ?? [],
-          art: details.art ?? null,
+          scene: details?.scene ?? null,
+          level: details?.level ?? null,
+          settings: details?.settings ?? [],
+          art: details?.art ?? null,
           savedAt,
           when,
         };
@@ -480,15 +483,18 @@ export function createGame({
     async deleteSave(path: string): Promise<void> {
       if (!storage.remove) throw new Error("Saves can't be deleted here");
       await storage.remove(path);
-      const times = await readSaveTimes();
-      await storage.replaceAtomically(
-        SAVE_TIMES,
-        JSON.stringify(
-          Object.fromEntries(
-            Object.entries(times).filter(([key]) => key !== path),
+      for (const [record, read] of [
+        [SAVE_TIMES, readSaveTimes],
+        [SAVE_DETAILS, readSaveDetails],
+      ] as const) {
+        const entries = Object.entries(await read());
+        await storage.replaceAtomically(
+          record,
+          JSON.stringify(
+            Object.fromEntries(entries.filter(([key]) => key !== path)),
           ),
-        ),
-      );
+        );
+      }
     },
 
     // The owner's local copy, so it is only ever read through the local content route.
@@ -634,9 +640,13 @@ export function createGame({
       };
       current = game;
       // A save from before cards had details gets them now, so its card shows them next time.
-      const times = await readSaveTimes();
-      if (times[path]?.scene === undefined) {
-        await writeDetails(path, detailsOf(game)).catch(() => undefined);
+      // The game is already loaded, so a failure here only leaves the card bare.
+      try {
+        if ((await readSaveDetails())[path] === undefined) {
+          await writeDetails(path, detailsOf(game));
+        }
+      } catch {
+        // Tried again on the next load.
       }
     },
 

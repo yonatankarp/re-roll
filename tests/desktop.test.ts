@@ -364,7 +364,8 @@ describe("playing through the shell's session", () => {
     it("keeps manual saves beside the autosave, newest first, and Continue takes the newest", async () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       tick();
-      const game = gameOn(memorySaves());
+      const store = memorySaves();
+      const game = gameOn(store);
       await game.start("goblin-ambush", "slots", { difficulty: "hard" });
       tick();
       await chooseCharacter(game, "Fighter");
@@ -391,6 +392,13 @@ describe("playing through the shell's session", () => {
         savedAt: new Date(clock).toISOString(),
       });
       expect(newest?.scene).toBeTruthy();
+      // Builds from before save cards read the times as plain strings, so they stay that way.
+      const times: unknown = JSON.parse(store.getItem("saves/times") ?? "{}");
+      expect(
+        Object.values(times as object).every(
+          (time) => typeof time === "string",
+        ),
+      ).toBe(true);
 
       // Continue loads the first save in the list, which an answer's autosave then replaces.
       tick();
