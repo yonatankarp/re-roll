@@ -74,6 +74,7 @@ export interface SheetSection {
   readonly rows: readonly SheetRow[];
   // list: label and value; boxes: tiles with a large value; marks: a dot, a value and a label.
   readonly layout?: "list" | "boxes" | "marks";
+  readonly mark?: string; // what a marked row is, read aloud in marks, such as "proficient"
   readonly pinned?: boolean; // also shown in the side panel, not only the full sheet
 }
 
@@ -105,18 +106,15 @@ export interface CombatantView {
   readonly name: string;
   readonly side: string;
   readonly active: boolean;
-  readonly hp: number;
-  readonly maxHp: number;
-  readonly tempHp: number;
-  readonly conditions: readonly string[];
-  readonly concentration: string | null;
-  readonly status: string | null; // such as dying or dead
+  readonly details: readonly string[]; // written by the system, shown beside the name in the turn order
+  readonly status: string | null; // a word for being out of the fight, such as dying, which the top bar shows
   readonly monster: string | null; // the name to find its picture by
   readonly looks?: readonly string[]; // names to find its token picture by, best first
 }
 
 export interface CombatView {
-  readonly round: number;
+  readonly title: string; // over the turn order, such as "Initiative, round 2"
+  readonly listName: string; // the folded turn order's name beside a board, such as "Turn order and conditions"
   readonly board?: unknown; // read only by the system's own board, such as where the player can move
   readonly combatants: readonly CombatantView[];
 }

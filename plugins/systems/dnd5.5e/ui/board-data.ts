@@ -4,15 +4,20 @@ import type { DndCue } from "./cues.ts";
 
 // What the board is given. These match engine/shell's types by shape, since plugins never import it.
 
+// A combatant as the shell's combat view gives it.
 export interface Combatant {
   readonly id: string;
   readonly name: string;
   readonly side: string;
   readonly active: boolean;
+  readonly status: string | null;
+}
+
+// What the board reads of a creature's health, from this plugin's own board data.
+export interface Vitals {
   readonly hp: number;
   readonly maxHp: number;
   readonly conditions: readonly string[];
-  readonly status: string | null;
 }
 
 export interface Option {
@@ -92,4 +97,5 @@ export interface BoardExtra {
   readonly shapes?: Readonly<Record<string, AreaTargeting>>; // the player's area actions, by id
   readonly cover?: Readonly<Record<string, number>>; // +2 or +5 against the player, by creature
   readonly terrain?: Terrain | null; // the battle map's ground, cover and light
+  readonly vitals?: Readonly<Record<string, Vitals>>; // by creature
 }

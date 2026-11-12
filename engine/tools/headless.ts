@@ -6,7 +6,7 @@ import type { CombatView, DecisionCard } from "../shell/system-ui.ts";
 // What counts as on screen mirrors engine/shell/shell.ts: the option list, the campfire's rests, and the
 // buttons on the sheet of whoever the decision is for.
 
-export const SCREEN_VERSION = 1;
+export const SCREEN_VERSION = 2;
 
 export interface Choice {
   readonly n: number; // 1-based, as numbered on this screen
@@ -152,10 +152,10 @@ export function screenText(screen: Screen): string {
     );
   }
   if (screen.combat) {
-    out.push(`\nRound ${String(screen.combat.round)}`);
+    out.push(`\n${screen.combat.title}`);
     for (const actor of screen.combat.combatants) {
       out.push(
-        `  ${actor.active ? ">" : " "} ${actor.name} (${actor.side}) ${String(actor.hp)}/${String(actor.maxHp)} HP${actor.status ? `, ${actor.status}` : ""}${actor.conditions.length > 0 ? `, ${actor.conditions.join(", ")}` : ""}`,
+        `  ${actor.active ? ">" : " "} ${actor.name} (${actor.side})${actor.details.length > 0 ? ` ${actor.details.join(", ")}` : ""}`,
       );
     }
   }

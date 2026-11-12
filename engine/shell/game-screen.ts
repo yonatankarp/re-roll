@@ -374,7 +374,7 @@ export function showGame(ctx: ShellContext): void {
               ? el(
                   "details",
                   { class: "initiative-details" },
-                  el("summary", { text: "Turn order and conditions" }),
+                  el("summary", { text: view.combat?.listName ?? "" }),
                   order,
                 )
               : order,

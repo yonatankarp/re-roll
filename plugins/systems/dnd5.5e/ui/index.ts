@@ -620,6 +620,7 @@ function sheetOf(
       {
         title: "Saving throws",
         layout: "marks" as const,
+        mark: "proficient",
         rows: ABILITIES.map((ability) => ({
           label: ABILITY_NAMES[ability],
           value: signed(saveBonus(stats, ability)),
@@ -629,6 +630,7 @@ function sheetOf(
       {
         title: "Skills",
         layout: "marks" as const,
+        mark: "proficient",
         rows: [
           ...Object.entries(SKILL_ABILITIES).map(([skill, ability]) => ({
             label: skillName(skill),
@@ -751,8 +753,18 @@ function combat(rawState: unknown, access: ContentAccess) {
         })
       : [],
   );
+  // The conditions shown on a creature, with what's left of a legendary resistance.
+  const conditionsHere = (actor: Actor): string[] => [
+    ...conditionsOf(actor),
+    ...(legendOf(actor, access).legendaryResistance
+      ? [
+          `Legendary Resistance (${String(resistancesLeft(actor, access, state))} left)`,
+        ]
+      : []),
+  ];
   return {
-    round,
+    title: `Initiative, round ${String(round)}`,
+    listName: "Turn order and conditions",
     board: {
       moves,
       reach,
@@ -760,31 +772,46 @@ function combat(rawState: unknown, access: ContentAccess) {
       cover,
       terrain: state.combat.terrain ?? null,
       map: state.combat.map ?? null,
+      vitals: Object.fromEntries(
+        order.flatMap((id) => {
+          const actor = state.actors[id];
+          return actor
+            ? [
+                [
+                  id,
+                  {
+                    hp: actor.hp,
+                    maxHp: deriveStats(actor, access).maxHp,
+                    conditions: conditionsHere(actor),
+                  },
+                ],
+              ]
+            : [];
+        }),
+      ),
     } satisfies BoardExtra,
     combatants: order.flatMap((id, position) => {
       const actor = state.actors[id];
       if (!actor) return [];
+      const status = statusOf(actor);
       return [
         {
           id,
           name: actor.name,
           side: actor.side === "party" ? "Ally" : "Enemy",
           active: position === index,
-          hp: actor.hp,
-          maxHp: deriveStats(actor, access).maxHp,
-          tempHp: actor.tempHp,
-          conditions: [
-            ...conditionsOf(actor),
-            ...(legendOf(actor, access).legendaryResistance
+          details: [
+            `HP ${String(actor.hp)} of ${String(deriveStats(actor, access).maxHp)}`,
+            ...(actor.tempHp > 0 ? [`${String(actor.tempHp)} temp HP`] : []),
+            ...(status ? [status] : []),
+            ...conditionsHere(actor),
+            ...(actor.concentratingOn
               ? [
-                  `Legendary Resistance (${String(resistancesLeft(actor, access, state))} left)`,
+                  `concentrating on ${sourceName(access, actor.concentratingOn)}`,
                 ]
               : []),
           ],
-          concentration: actor.concentratingOn
-            ? sourceName(access, actor.concentratingOn)
-            : null,
-          status: statusOf(actor),
+          status,
           monster:
             actor.source.kind === "monster"
               ? (NamedSchema.safeParse(access.content(actor.source.statBlockId))

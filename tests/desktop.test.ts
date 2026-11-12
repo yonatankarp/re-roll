@@ -466,7 +466,7 @@ describe("playing through the shell's session", () => {
           view.combat.combatants.filter((actor) => actor.active),
         ).toHaveLength(1);
         for (const actor of view.combat.combatants) {
-          expect(actor.maxHp).toBeGreaterThan(0);
+          expect(actor.details[0]).toMatch(/^HP -?\d+ of [1-9]/);
         }
         savedPath = await game.save("mid-fight");
         const before = game.view();

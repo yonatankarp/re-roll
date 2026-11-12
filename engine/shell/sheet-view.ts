@@ -17,20 +17,11 @@ export function renderCombat(
   return el(
     "section",
     { class: "combat" },
-    el("h3", { text: `Initiative, round ${String(combat.round)}` }),
+    el("h3", { text: combat.title }),
     el(
       "ol",
       { class: "initiative" },
       ...combat.combatants.map((actor) => {
-        const details = [
-          `HP ${String(actor.hp)} of ${String(actor.maxHp)}`,
-          ...(actor.tempHp > 0 ? [`${String(actor.tempHp)} temp HP`] : []),
-          ...(actor.status ? [actor.status] : []),
-          ...actor.conditions,
-          ...(actor.concentration
-            ? [`concentrating on ${actor.concentration}`]
-            : []),
-        ];
         const portrait = art[actor.id];
         const item = el(
           "li",
@@ -45,7 +36,7 @@ export function renderCombat(
             text: `${actor.active ? "▶\uFE0E " : ""}${actor.name}`, // drawn as text, never as an emoji
           }),
           el("span", { class: "side", text: actor.side }),
-          el("span", { class: "details", text: details.join(" · ") }),
+          el("span", { class: "details", text: actor.details.join(" · ") }),
         );
         if (actor.active) item.setAttribute("aria-current", "true");
         return item;
@@ -114,7 +105,10 @@ function renderSection(
           { class: "marks" },
           ...section.rows.map((row) => {
             const dot = el("span", { class: "mark" });
-            dot.setAttribute("aria-label", row.marked ? "proficient" : "");
+            dot.setAttribute(
+              "aria-label",
+              row.marked ? (section.mark ?? "") : "",
+            );
             return el(
               "li",
               { class: row.marked ? "marked" : "" },
