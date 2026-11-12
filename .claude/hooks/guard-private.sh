@@ -49,7 +49,13 @@ main=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/n
 main="${main%/.git}"
 target=$(resolve "$file")
 named=$(resolve "$file" lexical)
-for checkout in "$root" ${main:+"$main"}; do
+checkouts=("$root" ${main:+"$main"})
+# And the worktree the path is in, which may have no books/ link of its own yet.
+worktrees=$(resolve "${main:-$root}/.claude/worktrees" lexical)
+case "$named" in
+  "$worktrees"/*/*) rest="${named#"$worktrees"/}"; checkouts+=("$worktrees/${rest%%/*}") ;;
+esac
+for checkout in "${checkouts[@]}"; do
   # private/ is a link to books/ in older checkouts, so it's caught by name, not by where it leads.
   case "$named/" in
     "$(resolve "$checkout/private" lexical)"/*) block "private/ is now books/; write to books/ instead." ;;
