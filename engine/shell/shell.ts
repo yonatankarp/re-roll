@@ -1127,9 +1127,11 @@ export function mountShell(
           panel,
           renderSheet(item, true, (row) => {
             const { option } = row;
-            if (!option || !decision?.options.some((o) => o.id === option.id)) {
-              return [];
-            }
+            // Only on the sheet of whoever the decision is for, so a companion's row can't answer for the player.
+            const offered =
+              decision?.actor === item.id &&
+              decision.options.some((o) => o.id === option?.id);
+            if (!option || !offered) return [];
             const pick = button(option.label, () => {
               act(async () => {
                 await game.answer(option.id);
