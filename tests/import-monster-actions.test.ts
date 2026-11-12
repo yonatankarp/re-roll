@@ -204,7 +204,7 @@ describe("monster actions aimed only at a creature with a condition", () => {
 });
 
 describe("gated actions outside the action list", () => {
-  it("leaves a gated legendary action as text, since its targets aren't checked", () => {
+  it("reads a gated legendary action, as its targets are checked", () => {
     const [parsed] = parseMonstersFromHtml(
       block(
         "Test Caster",
@@ -218,8 +218,13 @@ describe("gated actions outside the action list", () => {
       ),
       "my-book",
     );
-    expect(MonsterSchema.parse(parsed?.entry).legendary).toBeUndefined();
-    expect(parsed?.notes).toContain("not automated: legendary action Stomp");
+    expect(
+      MonsterSchema.parse(parsed?.entry).legendary?.actions[0]?.activation
+        ?.targeting,
+    ).toMatchObject({ targetConditions: ["prone"] });
+    expect(parsed?.notes).not.toContain(
+      "not automated: legendary action Stomp",
+    );
   });
 });
 

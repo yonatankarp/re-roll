@@ -16,6 +16,7 @@ import {
   type Context,
   combatEnded,
   enemies,
+  fitsType,
   moveSquares,
   provokers,
   reaches,
@@ -225,6 +226,7 @@ function targetOptions(
     .filter(
       (foe) =>
         !isDown(foe) &&
+        fitsType(foe, targeting, context) &&
         (reaches(lead, actor, foe) ||
           distanceFeet(actor.position, foe.position) <= range + steps),
     )
