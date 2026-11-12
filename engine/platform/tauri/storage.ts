@@ -18,7 +18,7 @@ export function tauriImageUrl(path: string): Promise<string | null> {
   return url;
 }
 
-// Tauri's own file access. The app's scope (src-tauri/src/main.rs) limits it to plugins/ and private/.
+// Tauri's own file access. The app's scope (src-tauri/src/main.rs) limits it to plugins/ and books/.
 export function createTauriReader(): ContentReader {
   const root = invoke<string>("content_root");
 

@@ -123,13 +123,13 @@ export async function createNodeStorage(
 }
 
 const SAVES = "saves";
-const PRIVATE = "private";
+const PRIVATE = "books";
 
 function under(folder: string, path: string): boolean {
   return path === folder || path.startsWith(`${folder}/`);
 }
 
-// For playing from Node: content is read-only, saves live in their own folder, and a symlinked private/
+// For playing from Node: content is read-only, saves live in their own folder, and a symlinked books/
 // (such as a worktree's link to the main checkout) is read through its real folder.
 export async function createPlayStorage(
   contentRoot: string,
@@ -143,7 +143,7 @@ export async function createPlayStorage(
   const privateDir = await realpath(join(contentRoot, PRIVATE)).catch(
     () => null,
   );
-  // shortcut: assumes the link's target is itself named private, as in the main checkout; map paths if that changes.
+  // shortcut: assumes the link's target is itself named books, as in the main checkout; map paths if that changes.
   const owner = privateDir
     ? await createNodeStorage(dirname(privateDir))
     : content;

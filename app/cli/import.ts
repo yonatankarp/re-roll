@@ -16,9 +16,9 @@ import { spellTextFromHtml } from "../../plugins/systems/dnd5.5e/core/import/spe
 import { systems } from "../systems.ts";
 import { PLUGIN_ROOTS } from "./load-adventure.ts";
 
-// Text and images from your own books stay under private/, which git ignores.
-//   npm run import -- split --kind spells --input private/sources/spells.txt
-//   npm run import -- draft --plugin my-book --kind spells --input private/sources/spells.txt
+// Text and images from your own books stay under books/, which git ignores.
+//   npm run import -- split --kind spells --input books/sources/spells.txt
+//   npm run import -- draft --plugin my-book --kind spells --input books/sources/spells.txt
 //   npm run import -- approve --plugin my-book --kind spells --all
 
 const USAGE = `Usage:
@@ -55,7 +55,7 @@ if (command === "library") {
     process.exit(2);
   }
   const library = buildLibrary(await readFile(values.input, "utf8"));
-  const root = `private/library/${id}`;
+  const root = `books/library/${id}`;
   await rm(root, { recursive: true, force: true });
   await mkdir(root, { recursive: true });
   for (const [file, text] of library.files) {
@@ -182,7 +182,7 @@ if (command === "parse") {
   console.log(`Invalid: ${String(summary.invalid.length)}`);
   console.log(`Duplicates: ${String(summary.duplicates.length)}`);
   console.log(
-    `Report: private/import/${values.plugin}/${folder}/report.md (keep this private, as it quotes your book)`,
+    `Report: books/import/${values.plugin}/${folder}/report.md (keep this private, as it quotes your book)`,
   );
 } else if (command === "approve") {
   const slugs = values.all ? "all" : values.slugs?.split(",");

@@ -124,20 +124,20 @@ describe("createPlayStorage", () => {
     const repo = join(base, "repo");
     const owner = join(base, "owner");
     await mkdir(join(repo, "plugins"), { recursive: true });
-    await mkdir(join(owner, "private"), { recursive: true });
+    await mkdir(join(owner, "books"), { recursive: true });
     await writeFile(join(repo, "plugins", "a.txt"), "shipped");
-    await writeFile(join(owner, "private", "b.txt"), "book");
-    await symlink(join(owner, "private"), join(repo, "private"));
+    await writeFile(join(owner, "books", "b.txt"), "book");
+    await symlink(join(owner, "books"), join(repo, "books"));
     const storage = await createPlayStorage(repo, join(base, "play"));
 
     expect(await storage.read("plugins/a.txt")).toBe("shipped");
-    expect(await storage.read("private/b.txt")).toBe("book");
-    expect(await storage.list("private")).toEqual([
-      { path: "private/b.txt", symlink: false },
+    expect(await storage.read("books/b.txt")).toBe("book");
+    expect(await storage.list("books")).toEqual([
+      { path: "books/b.txt", symlink: false },
     ]);
-    await expect(
-      storage.replaceAtomically("private/b.txt", "x"),
-    ).rejects.toThrow("read-only");
+    await expect(storage.replaceAtomically("books/b.txt", "x")).rejects.toThrow(
+      "read-only",
+    );
     await expect(storage.remove("plugins/a.txt")).rejects.toThrow("read-only");
 
     await storage.replaceAtomically("saves/one.json", "{}");
@@ -146,8 +146,6 @@ describe("createPlayStorage", () => {
     ).toBe("{}");
     await storage.remove("saves/one.json");
     expect(await storage.read("saves/one.json")).toBeNull();
-    expect(await readFile(join(owner, "private", "b.txt"), "utf8")).toBe(
-      "book",
-    );
+    expect(await readFile(join(owner, "books", "b.txt"), "utf8")).toBe("book");
   });
 });

@@ -143,9 +143,9 @@ describe("plugin selection", () => {
   it("reports duplicate plugin ids across roots", async () => {
     const storage = memoryStorage({
       "plugins/rules/a/plugin.yaml": manifest("a"),
-      "private/rules/a/plugin.yaml": manifest("a"),
+      "books/rules/a/plugin.yaml": manifest("a"),
     });
-    const catalog = await scanPlugins(storage, ["plugins", "private"]);
+    const catalog = await scanPlugins(storage, ["plugins", "books"]);
     expect(catalog.issues[0]?.message).toContain("duplicate plugin id");
   });
 

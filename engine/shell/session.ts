@@ -44,8 +44,8 @@ const SAVES = "saves";
 const SAVE_TIMES = `${SAVES}/times`;
 // What each save's card shows. Kept apart from the times, which older builds still read as plain strings.
 const SAVE_DETAILS = `${SAVES}/details`;
-const ASSETS = "private/assets";
-const LIBRARY = "private/library";
+const ASSETS = "books/assets";
+const LIBRARY = "books/library";
 const IMAGE_FILE = /\.(png|jpe?g|webp|gif)$/i;
 const BARE_NAME = /^[^/\\]+$/;
 
@@ -428,7 +428,7 @@ export function createGame({
     try {
       const entries = await storage.list(ASSETS);
       for (const { path } of entries) {
-        if (!/^private\/assets\/[^/]+\/index\.json$/.test(path)) continue;
+        if (!/^books\/assets\/[^/]+\/index\.json$/.test(path)) continue;
         const folder = path.slice(0, -"/index.json".length);
         const parsed = ArtIndexSchema.safeParse(
           JSON.parse((await storage.read(path)) ?? "null"),
@@ -701,7 +701,7 @@ export function createGame({
       const entries = await storage.list(LIBRARY).catch(() => []);
       return entries.flatMap(
         ({ path }) =>
-          /^private\/library\/([^/]+)\/index\.json$/.exec(path)?.[1] ?? [],
+          /^books\/library\/([^/]+)\/index\.json$/.exec(path)?.[1] ?? [],
       );
     },
 

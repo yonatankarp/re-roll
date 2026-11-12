@@ -32,7 +32,7 @@ mountShell(
       isTauri() ? createTauriReader() : createContentReader(),
       localStorage,
     ),
-    roots: ["plugins", "private"],
+    roots: ["plugins", "books"],
     systems,
     uis: [dndUi],
     imageUrl: isTauri() ? tauriImageUrl : contentImageUrl,

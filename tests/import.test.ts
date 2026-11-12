@@ -846,7 +846,7 @@ describe("parsing a monster stat block", () => {
       slugs: "all",
       requires: [{ plugin: "srd52", version: "^1" }],
     });
-    const report = await checkPlugins(storage, ["plugins", "private"], systems);
+    const report = await checkPlugins(storage, ["plugins", "books"], systems);
     expect(report.issues).toEqual([]);
     expect(report.checked).toContain("my-book");
   });
@@ -988,8 +988,7 @@ describe("drafting", () => {
     );
     expect(summary).toMatchObject({ total: 1, written: 1, encoded: 1 });
     const text =
-      (await storage.read("private/import/my-book/spells/fire-bolt.yaml")) ??
-      "";
+      (await storage.read("books/import/my-book/spells/fire-bolt.yaml")) ?? "";
     expect(text).toContain("id: my-book:spell/fire-bolt");
     expect(text).toContain("automation: partial");
     expect(text).toContain("- srd52:class/wizard");
@@ -1090,9 +1089,8 @@ describe("drafting", () => {
     expect(same.client.requests).toHaveLength(0);
     expect(same.summary).toMatchObject({ encoded: 1, reused: 1 });
     const text =
-      (await same.storage.read(
-        "private/import/my-book/spells/fire-bolt.yaml",
-      )) ?? "";
+      (await same.storage.read("books/import/my-book/spells/fire-bolt.yaml")) ??
+      "";
     expect(text).toContain("automation: full");
     expect(text).toContain("mechanics reused from srd52:spell/fire-bolt");
 
@@ -1113,8 +1111,7 @@ describe("drafting", () => {
     };
     const { storage } = await draft(scripted([withBonus, NO_DIFFERENCES]));
     const text =
-      (await storage.read("private/import/my-book/spells/fire-bolt.yaml")) ??
-      "";
+      (await storage.read("books/import/my-book/spells/fire-bolt.yaml")) ?? "";
     expect(text).not.toContain("flatBonus");
     expect(text).not.toContain("ability: cha");
   });
@@ -1134,8 +1131,7 @@ describe("drafting", () => {
     expect(client.requests).toHaveLength(3);
     expect(summary).toMatchObject({ encoded: 0, textOnly: 1 });
     const text =
-      (await storage.read("private/import/my-book/spells/fire-bolt.yaml")) ??
-      "";
+      (await storage.read("books/import/my-book/spells/fire-bolt.yaml")) ?? "";
     expect(text).toContain("automation: text");
     expect(text).not.toContain("activation:");
     expect(text).toContain("mechanics rejected");
@@ -1234,7 +1230,7 @@ describe("approving drafts", () => {
 
   it("keeps unapproved drafts out of the game", async () => {
     const storage = await drafted();
-    const catalog = await scanPlugins(storage, ["plugins", "private"]);
+    const catalog = await scanPlugins(storage, ["plugins", "books"]);
     expect([...catalog.plugins.keys()]).not.toContain("my-book");
     expect(catalog.issues).toEqual([]);
   });
@@ -1251,14 +1247,12 @@ describe("approving drafts", () => {
     });
     expect(result).toEqual({ approved: ["fire-bolt"], missing: [] });
 
-    const report = await checkPlugins(storage, ["plugins", "private"], systems);
+    const report = await checkPlugins(storage, ["plugins", "books"], systems);
     expect(report.issues).toEqual([]);
     expect(report.checked).toContain("my-book");
 
-    const catalog = await scanPlugins(storage, ["plugins", "private"]);
-    expect(catalog.plugins.get("my-book")?.manifest.distribution).toBe(
-      "private",
-    );
+    const catalog = await scanPlugins(storage, ["plugins", "books"]);
+    expect(catalog.plugins.get("my-book")?.manifest.distribution).toBe("private");
     const loaded: LoadResult = await loadRun(storage, catalog, systems, [
       "my-book",
     ]);
@@ -1656,7 +1650,7 @@ describe("parsing a character book page", () => {
       html: page,
     });
     expect(
-      await storage.read("private/import/my-book/features/warden-roots.yaml"),
+      await storage.read("books/import/my-book/features/warden-roots.yaml"),
     ).toContain("status: textOnly");
   });
 });

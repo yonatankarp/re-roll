@@ -369,7 +369,7 @@ export function auditClass(
 export async function bookRun(): Promise<{ run: RunContext; book: string }> {
   const saves = await mkdtemp(join(tmpdir(), "class-audit-"));
   const storage = await createPlayStorage(process.cwd(), saves);
-  const catalog = await scanPlugins(storage, ["plugins", "private"]);
+  const catalog = await scanPlugins(storage, ["plugins", "books"]);
   for (const book of ["phb", "srd52"]) {
     if (!catalog.plugins.has(book)) continue;
     const loaded = await loadRun(storage, catalog, systems, [

@@ -2,10 +2,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { createNodeStorage } from "./storage.ts";
 
-// The dev server's read-only window onto plugins/ and private/, for a browser that can't read files.
+// The dev server's read-only window onto plugins/ and books/, for a browser that can't read files.
 
 export const CONTENT_ROUTE = "/__content";
-const CONTENT_FOLDERS = ["plugins", "private"];
+const CONTENT_FOLDERS = ["plugins", "books"];
 
 // No SVG: opened directly it could run scripts on this origin.
 const IMAGE_TYPES: Readonly<Record<string, string>> = {
@@ -27,7 +27,7 @@ export function parseContentPath(path: string): ContentPath | null {
   if (path.includes("\\") || path.includes("\0")) return null;
   const [folder = "", ...rest] = path.split("/");
   if (!CONTENT_FOLDERS.includes(folder)) return null;
-  // Hidden names are never content, and private/ is its own git repo, so its .git must stay unreachable.
+  // Hidden names are never content, and books/ is its own git repo, so its .git must stay unreachable.
   if (rest.some((part) => part === "" || part.startsWith("."))) return null;
   return { folder, rest: rest.join("/") };
 }
@@ -55,7 +55,7 @@ function send(
   response.end(body);
 }
 
-// A name that resolves to 127.0.0.1 could otherwise read private/ from another site (DNS rebinding).
+// A name that resolves to 127.0.0.1 could otherwise read books/ from another site (DNS rebinding).
 function isLocalHost(host: string | undefined): boolean {
   const name = host?.replace(/:\d+$/, "");
   return name === "127.0.0.1" || name === "localhost";
@@ -67,7 +67,7 @@ export function contentEndpoint(repoRoot: string) {
     try {
       return await createNodeStorage(join(repoRoot, folder));
     } catch (error) {
-      if (isMissing(error)) return null; // private/ is optional
+      if (isMissing(error)) return null; // books/ is optional
       throw error;
     }
   };

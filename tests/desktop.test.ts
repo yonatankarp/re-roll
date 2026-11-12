@@ -61,7 +61,7 @@ function memorySaves(): SaveStore {
 describe("parseContentPath", () => {
   it.each([
     ["plugins/rules/a.yaml", "plugins", "rules/a.yaml"],
-    ["private/rules/a.yaml", "private", "rules/a.yaml"],
+    ["books/rules/a.yaml", "books", "rules/a.yaml"],
     ["plugins", "plugins", ""],
   ])("allows %s", (path, folder, rest) => {
     expect(parseContentPath(path)).toEqual({ folder, rest });
@@ -74,15 +74,15 @@ describe("parseContentPath", () => {
     "saves/a.json",
     "pluginsX/a.yaml",
     "plugins/../package.json",
-    "plugins/rules/../../private/a",
+    "plugins/rules/../../books/a",
     "plugins/./a.yaml",
     "plugins//a.yaml",
     "plugins/a/",
     "plugins\\..\\package.json",
     "..\\plugins",
     "plugins/a\0.yaml",
-    "private/.git/config",
-    "private/rules/.hidden.yaml",
+    "books/.git/config",
+    "books/rules/.hidden.yaml",
   ])("refuses %j", (path) => {
     expect(parseContentPath(path)).toBeNull();
   });
@@ -123,8 +123,8 @@ describe("the content endpoint", () => {
 
   it("treats a missing private folder as empty", async () => {
     const reader = createContentReader(url);
-    expect(await reader.read("private/a.yaml")).toBeNull();
-    expect(await reader.list("private/rules")).toEqual([]);
+    expect(await reader.read("books/a.yaml")).toBeNull();
+    expect(await reader.list("books/rules")).toEqual([]);
   });
 
   it("refuses paths outside the folders, and says nothing about them", async () => {
@@ -315,7 +315,7 @@ describe("playing through the shell's session", () => {
       storage: withSaves(
         {
           read: (path) =>
-            path === "private/assets/book/index.json"
+            path === "books/assets/book/index.json"
               ? Promise.resolve(
                   JSON.stringify([
                     { file: "cover.jpg", cover: ["haunted-house"] },
@@ -324,9 +324,9 @@ describe("playing through the shell's session", () => {
                 )
               : content.read(path),
           list: (prefix) =>
-            prefix === "private/assets"
+            prefix === "books/assets"
               ? Promise.resolve([
-                  { path: "private/assets/book/index.json", symlink: false },
+                  { path: "books/assets/book/index.json", symlink: false },
                 ])
               : content.list(prefix),
         },
@@ -341,18 +341,18 @@ describe("playing through the shell's session", () => {
     );
     // A cover that isn't a picture is dropped, so that adventure shows its plate.
     expect(covers).toEqual({
-      "haunted-house": "private/assets/book/cover.jpg",
+      "haunted-house": "books/assets/book/cover.jpg",
       "goblin-ambush": null,
     });
   });
 
   // Runs only where the owner's books are present.
-  it.skipIf(!existsSync("private/adventures"))(
+  it.skipIf(!existsSync("books/adventures"))(
     "finds a cover for every adventure from the books",
     async () => {
       const adventures = await createGame({
         storage: withSaves(createContentReader(url), memorySaves()),
-        roots: ["plugins", "private"],
+        roots: ["plugins", "books"],
         systems,
         uis: [dndUi],
       }).listAdventures();
@@ -624,7 +624,7 @@ describe("playing through the shell's session", () => {
       storage: withSaves(
         {
           read: (path) =>
-            path === "private/assets/book/index.json"
+            path === "books/assets/book/index.json"
               ? Promise.resolve(
                   JSON.stringify([
                     { file: "a.png", monster: "goblin-warrior" },
@@ -633,9 +633,9 @@ describe("playing through the shell's session", () => {
                 )
               : content.read(path),
           list: (prefix) =>
-            prefix === "private/assets"
+            prefix === "books/assets"
               ? Promise.resolve([
-                  { path: "private/assets/book/index.json", symlink: false },
+                  { path: "books/assets/book/index.json", symlink: false },
                 ])
               : content.list(prefix),
         },
@@ -654,7 +654,7 @@ describe("playing through the shell's session", () => {
     }
     // Every Goblin Warrior gets the picture, and the path that climbs out of its folder is dropped.
     expect(new Set(Object.values(game.view().monsterArt))).toEqual(
-      new Set(["private/assets/book/a.png"]),
+      new Set(["books/assets/book/a.png"]),
     );
     await game.start("haunted-house", "desktop-test-1");
     // Its only art is a text file, which must never reach an <img>.

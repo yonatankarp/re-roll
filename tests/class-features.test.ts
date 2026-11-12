@@ -184,7 +184,7 @@ function turnOptions(run: RunContext, state: DndState): readonly string[] {
   return nextDndDecision(state, run)?.options.map((item) => item.id) ?? [];
 }
 
-const PHB = existsSync("private/rules/phb");
+const PHB = existsSync("books/rules/phb");
 
 describe.skipIf(!PHB)("signature class features in a fight", () => {
   let run: RunContext;

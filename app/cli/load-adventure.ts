@@ -8,7 +8,7 @@ import { type RunContext, createRunContext } from "../../engine/kernel/turn.ts";
 import { createNodeStorage } from "../../engine/platform/node/storage.ts";
 import { systems } from "../systems.ts";
 
-export const PLUGIN_ROOTS = ["plugins", "private"] as const;
+export const PLUGIN_ROOTS = ["plugins", "books"] as const;
 
 export async function listAdventures(): Promise<readonly string[]> {
   const storage = await createNodeStorage(process.cwd());

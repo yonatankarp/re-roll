@@ -251,7 +251,7 @@ describe("headless play of goblin-ambush", () => {
 });
 
 // Random choices from what is on screen, through every adventure, so a state no player could get past fails.
-// Book adventures are git-ignored in private/, so they only run where it exists.
+// Book adventures are git-ignored in books/, so they only run where it exists.
 describe("headless random play of every adventure", async () => {
   const lister = await driver();
   const adventures = await lister.listAdventures();
@@ -302,7 +302,7 @@ describe("headless random play of every adventure", async () => {
   );
 
   it
-    .skipIf(!existsSync("private") || books.length === 0)
+    .skipIf(!existsSync("books") || books.length === 0)
     .each(
       books.length > 0
         ? books.map((item) => item.id)

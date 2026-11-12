@@ -85,7 +85,7 @@ plugins/
     goblin-ambush/         Data plugin, original sample using dnd5.5e
     haunted-house/         Data plugin, original sample using dnd5.5e
 
-private/                   Your book plugins, same structure, excluded from git
+books/                   Your book plugins, same structure, excluded from git
   rules/ adventures/
 
 app/
@@ -140,7 +140,7 @@ export interface ModelClient {
 }
 ```
 
-The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `private/` through a read-only endpoint on the dev server. Both keep saves in the webview's own storage for now, so the file scopes stay limited to the two content folders.
+The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `books/` through a read-only endpoint on the dev server. Both keep saves in the webview's own storage for now, so the file scopes stay limited to the two content folders.
 
 ## 4. Plugin system
 
@@ -174,7 +174,7 @@ attribution: >-
 
 ### 4.3 Loading
 
-1. Scan `plugins/` and `private/`, plus a user plugin folder in the packaged app.
+1. Scan `plugins/` and `books/`, plus a user plugin folder in the packaged app.
 2. Parse each `plugin.yaml` with Zod, and check that its SDK and system versions match.
 3. Sort by dependency, and reject missing dependencies and cycles.
 4. A run uses one system. The loader refuses to mix plugins from different systems.
@@ -825,7 +825,7 @@ Prep needs some secrets to write good foreshadowing, so a job's prompt only gets
 
 ## 11. Book importer
 
-The importer turns the owner's saved book pages and PDFs into private plugins under `private/`, which git ignores, with no manual review. It never logs in to or downloads from D&D Beyond. Whether exporting fits D&D Beyond's terms is the owner's call.
+The importer turns the owner's saved book pages and PDFs into private plugins under `books/`, which git ignores, with no manual review. It never logs in to or downloads from D&D Beyond. Whether exporting fits D&D Beyond's terms is the owner's call.
 
 **How each kind of content gets in**
 
@@ -835,8 +835,8 @@ The importer turns the owner's saved book pages and PDFs into private plugins un
 | Spell facts and text | Code. A spell whose text matches a reviewed SRD spell reuses its mechanics |
 | Spell and class feature mechanics that code can't read | Claude agents encode them, then code checks them. They write mechanics only, and code copies the book's wording |
 | Adventures | Agents write the scene graph in their own words, and `tests/tools/fill-read-aloud.ts` copies read-aloud text |
-| Reference library | `npm run import -- library` writes each book's sections and an index to `private/library/` |
-| Images | `pdfimages` from local PDFs to `private/assets/`, matched to monsters and scenes by page |
+| Reference library | `npm run import -- library` writes each book's sections and an index to `books/library/` |
+| Images | `pdfimages` from local PDFs to `books/assets/`, matched to monsters and scenes by page |
 
 Leaving out `--encodings` on `draft` uses the local model instead, which is free but slower and less accurate.
 
@@ -848,7 +848,7 @@ Leaving out `--encodings` on `draft` uses the local model instead, which is free
 
 ### 11.1 Accuracy
 
-An independent audit checked 145 encoded spells and 120 monsters against their own text: 12.4% of spells and 16.7% of monsters were wrong in play. The monster parser's systematic errors and the spell errors the engine can now express were then fixed, but the audit wasn't re-run, so current rates are unmeasured. `private/audit/mechanics-audit.md` holds the list. Local model encodings were worse, at about a quarter wrong among those it accepted.
+An independent audit checked 145 encoded spells and 120 monsters against their own text: 12.4% of spells and 16.7% of monsters were wrong in play. The monster parser's systematic errors and the spell errors the engine can now express were then fixed, but the audit wasn't re-run, so current rates are unmeasured. `books/audit/mechanics-audit.md` holds the list. Local model encodings were worse, at about a quarter wrong among those it accepted.
 
 **Known gaps:** the extra parsing since the audit is unaudited, including the 2014-format books. Monster matches and scene art are by page and unchecked by eye. Many monster abilities and most class features above the priority list stay text only. Sage Advice errata aren't applied.
 
@@ -884,7 +884,7 @@ The bot plays at the engine level, so it can't see what the page shows. Headless
 - an option the decision offers that nothing shows;
 - no decision, before the story has ended.
 
-`tests/headless.test.ts` plays `goblin-ambush` through a fight with a move and an attack, treasure, equipping from the sheet, buying and selling at Tam's camp, a rest, a save and load, an ending and a restart. It also plays random on-screen choices through every adventure. Book adventures run only where `private/` exists.
+`tests/headless.test.ts` plays `goblin-ambush` through a fight with a move and an attack, treasure, equipping from the sheet, buying and selling at Tam's camp, a rest, a save and load, an ending and a restart. It also plays random on-screen choices through every adventure. Book adventures run only where `books/` exists.
 
 **The CLI** plays an adventure from a terminal:
 
@@ -893,7 +893,7 @@ npm run play -- <adventure> [--seed=N] [--difficulty=story|normal|hard] [--saves
 npm run play -- --load=<n|path> [--saves=dir] [--script=file.json|-]
 ```
 
-Without an adventure it lists them. Saves go under `<dir>/saves`, which defaults to the current folder. Every step autosaves to `saves/<adventure>-<seed>-autosave.json`. Starting the same seed again replaces that autosave, so `--load` resumes a run, by its number in the save list (newest first) or its path. Content is read-only, and a symlinked `private/`, such as a worktree's link to the main checkout, is read through its real folder.
+Without an adventure it lists them. Saves go under `<dir>/saves`, which defaults to the current folder. Every step autosaves to `saves/<adventure>-<seed>-autosave.json`. Starting the same seed again replaces that autosave, so `--load` resumes a run, by its number in the save list (newest first) or its path. Content is read-only, and a symlinked `books/`, such as a worktree's link to the main checkout, is read through its real folder.
 
 - **Interactive** prints the screen and numbered choices. It reads a number or label, or `act <ids…>`, `save [name]`, `saves`, `load <n|path>`, `delete <n|path>`, `restart [seed]`, `json` or `quit`.
 - **Scripted** (`--script`) reads a JSON array from a file, or one JSON command per line from stdin with `-`, so an agent can read each screen before it sends the next command. A command is a choice: a JSON number is its `n`, and a string is its id or else its label, never a number, since story options have ids such as `"0"`. Or it is or one of `{"choose": ref}`, `{"act": [ids]}`, `{"save": name}`, `{"saves": true}`, `{"load": ref}`, `{"delete": ref}` and `{"restart": seed|null}`. Each command prints one JSON line: `{version, step, command, result?, screen}`. Step 0 is the start. The screen has `version`, `title`, `scene`, `lines` (the log since the last action), `card`, `decision`, `actor`, `prompt`, `choices` (each with `n`, `id`, `label`, `where`, `group` and `detail`), `combat` (its `board` holds the squares to move to), `party`, `ended`, `endingName`, `playerDied`, `warnings` and `problems`. A failed command prints `{version, step, command, error, screen}`, where the screen is the game as it now stands, since an `act` may have answered some of its ids. A file script stops there with status 1. From stdin, play carries on and the exit status is 1 at the end. A failed start or load prints `{version, step: 0, command, error}` and exits with status 1. Any change to that shape bumps `version`.
@@ -902,7 +902,7 @@ Without an adventure it lists them. Saves go under `<dir>/saves`, which defaults
 
 - **Attribution:** plugins carry their own `attribution`, and the About screen shows it for every loaded plugin.
 - **SRD 5.2:** the `srd52` plugin must use the exact attribution statement from the SRD's legal page, and no other credit to Wizards. The game may say "compatible with fifth edition" or "5E compatible". `dnd5.5e` is the internal plugin ID, so any public wording should use one of those two phrases.
-- **Book plugins:** stay in `private/`, excluded from git. The release build fails if it finds a `distribution: private` plugin.
+- **Book plugins:** stay in `books/`, excluded from git. The release build fails if it finds a `distribution: private` plugin.
 - **Source material:** data plugins come from copies you own. The engine won't include an importer for sites that host unlicensed copies.
 - **Daggerheart:** treat its content as private until the license is checked. [The license page](https://darringtonpress.com/license) describes permitted formats and approved virtual tabletops, but doesn't address standalone software. It also lists SRD 2.0 and license 2.0 from August 2026, while I read SRD 1.0, so the mechanics need rechecking before that plugin is built.
 

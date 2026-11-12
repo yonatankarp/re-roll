@@ -9,7 +9,7 @@ const repoRoot = resolve(import.meta.dirname, "../..");
 
 export default defineConfig({
   root: import.meta.dirname,
-  // Nothing is copied into the build, so private/ can only ever reach the page through the endpoint.
+  // Nothing is copied into the build, so books/ can only ever reach the page through the endpoint.
   publicDir: false,
   clearScreen: false,
   // Found only when the narrator's worker first starts, which would reload the page mid-game.
@@ -25,11 +25,18 @@ export default defineConfig({
     strictPort: true,
     cors: false,
     fs: {
-      // The default allows the whole repo, which would serve private/ around the endpoint's checks.
+      // The default allows the whole repo, which would serve books/ around the endpoint's checks.
       allow: ["app/desktop", "engine", "plugins/systems", "node_modules"].map(
         (folder) => resolve(repoRoot, folder),
       ),
-      deny: [".env", ".env.*", "*.{crt,pem}", "**/.git/**", "**/private/**"],
+      deny: [
+        ".env",
+        ".env.*",
+        "*.{crt,pem}",
+        "**/.git/**",
+        "**/books/**",
+        "**/books/**",
+      ],
     },
   },
   plugins: [
