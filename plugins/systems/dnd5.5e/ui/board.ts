@@ -1,5 +1,5 @@
 import { PLAYER_ACTOR } from "#sdk";
-import { NS, StateSchema } from "../core/state.ts";
+import { NS, StateSchema, type Terrain } from "../core/state.ts";
 import { TACTIC } from "../core/tactics.ts";
 import {
   ADD,
@@ -96,6 +96,7 @@ interface Token {
   readonly node: HTMLElement;
   readonly disc: HTMLElement;
   readonly tip: HTMLElement; // the name, HP and conditions, shown on hover or under the cursor
+  readonly shield: HTMLElement; // the cover it has against the player, shown on hover while the player can attack it
   readonly name: string;
   notes: readonly string[]; // status and conditions
   side: string;
@@ -149,6 +150,8 @@ interface BoardExtra {
   readonly reach?: Readonly<Record<string, number>>; // melee reach in feet, by creature
   readonly map?: FightMap | null; // the book's battle map, when the encounter has one
   readonly shapes?: Readonly<Record<string, AreaTargeting>>; // the player's area actions, by id
+  readonly cover?: Readonly<Record<string, number>>; // +2 or +5 against the player, by creature
+  readonly terrain?: Terrain | null; // the battle map's ground, cover and light
 }
 
 // Written by this plugin's own combat view in ui/index.ts, so its shape is known.
@@ -231,12 +234,16 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   const reachZone = el("div", "dnd-reach");
   reachZone.hidden = true;
   const blast = el("div", "dnd-blast");
+  const ground = el("div", "dnd-ground"); // difficult terrain, cover and shadow, faint under everything
+  let groundShown = "";
+  const routeCost = el("div", "dnd-route-cost");
+  routeCost.hidden = true;
   const menu = el("div", "dnd-menu");
   menu.hidden = true;
   // While choosing targets or aiming an area: how many are chosen, Cast and Back.
   const pickBar = el("div", "dnd-pickbar");
   pickBar.hidden = true;
-  field.append(reachZone, blast, cells, route, cursorBox);
+  field.append(ground, reachZone, blast, cells, route, routeCost, cursorBox);
   board.append(field, banner, caption, hint, menu, pickBar, said);
   slot.append(board);
   slot.hidden = true;
@@ -386,8 +393,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     if (existing) return existing;
     const disc = el("div", "dnd-disc", initials(actor.name));
     const tip = el("span", "dnd-tip");
+    const shield = el("span", "dnd-shield");
+    shield.hidden = true;
     const node = el("div", "dnd-token");
-    node.append(el("span", "dnd-ring"), disc, tip);
+    node.append(el("span", "dnd-ring"), disc, tip, shield);
     node.dataset.side = sideOf(actor);
     node.dataset.id = actor.id;
     field.append(node);
@@ -395,6 +404,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       node,
       disc,
       tip,
+      shield,
       name: actor.name,
       notes: [],
       side: sideOf(actor),
@@ -459,6 +469,36 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       ? latest.decision.options
       : [];
 
+  // The map's codes as faint marks: hatching for difficult terrain, an outline for cover, shade for dim light
+  // and darkness. A map that's dim or dark everywhere is shaded all over.
+  // shortcut: a dim square on a dark map shows as dark; mark it lighter when a map needs it.
+  const showGround = (terrain: Terrain | null): void => {
+    const shown = JSON.stringify([terrain, grid]);
+    if (shown === groundShown) return;
+    groundShown = shown;
+    ground.replaceChildren();
+    ground.dataset.light = terrain?.light ?? "bright";
+    if (!terrain || !grid) return;
+    const kinds = [
+      ["difficult", terrain.difficult, "Difficult terrain"],
+      ["half", terrain.half, "Half cover"],
+      ["threeQuarters", terrain.threeQuarters, "Three-quarters cover"],
+      ["dim", terrain.dim, "Dim light"],
+      ["dark", terrain.dark, "Darkness"],
+    ] as const;
+    for (const [kind, keys, name] of kinds) {
+      for (const key of keys) {
+        const match = SQUARE.exec(key);
+        if (!match) continue;
+        const square = el("div", `dnd-ground-square ${kind}`);
+        square.title = name;
+        square.style.left = `${String((Number(match[1]) / grid.width) * 100)}%`;
+        square.style.top = `${String((Number(match[2]) / grid.height) * 100)}%`;
+        ground.append(square);
+      }
+    }
+  };
+
   // Where the player can walk. On the turn itself a square answers Move and then the square, so one
   // click or drag does it; while the list is already asking where to, it answers that.
   const showCells = (): void => {
@@ -478,6 +518,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
               steps: [option.id],
               provokes: 0,
               path: [],
+              feet: Number(/(\d+) ft/.exec(option.label)?.[1] ?? 0),
             },
           ]
         : [];
@@ -503,6 +544,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         .map(([x, y]) => `${String(x)},${String(y)}`)
         .join(" ");
       cell.title = square.label;
+      cell.dataset.feet = String(square.feet);
       cell.style.left = `${String((square.x / grid.width) * 100)}%`;
       cell.style.top = `${String((square.y / grid.height) * 100)}%`;
       cell.dataset.x = String(square.x);
@@ -529,9 +571,17 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   const showRoute = (cell: HTMLElement | null): void => {
     const me = tokens.get(PLAYER_ACTOR);
     const steps = cell?.dataset.path;
+    routeCost.hidden = true;
     if (!grid || !cell || me?.x == null || me.y === null || !steps) {
       line.setAttribute("points", "");
       return;
+    }
+    // What the walk costs, counting difficult terrain double, next to where it ends.
+    if (cell.dataset.feet && cell.dataset.feet !== "0") {
+      routeCost.textContent = `${cell.dataset.feet} ft`;
+      routeCost.style.left = `${String(((Number(cell.dataset.x) + 0.5) / grid.width) * 100)}%`;
+      routeCost.style.top = `${String((Number(cell.dataset.y) / grid.height) * 100)}%`;
+      routeCost.hidden = false;
     }
     route.setAttribute(
       "viewBox",
@@ -1047,6 +1097,27 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
           token.node.remove();
           tokens.delete(id);
         }
+      }
+    }
+    if (settle) {
+      showGround(extraOf(update).terrain ?? null);
+      // The shield shows the cover a foe has while the player has something to aim at it.
+      const aimable = new Set(
+        update.decision?.actor === PLAYER_ACTOR
+          ? update.decision.options.map((option) =>
+              // An area aimed at a creature names it as "@" and its id.
+              option.id.split(SEPARATOR)[1]?.replace(AIM, ""),
+            )
+          : [],
+      );
+      for (const [id, token] of tokens) {
+        const bonus = extraOf(update).cover?.[id] ?? 0;
+        token.shield.hidden = bonus === 0 || !aimable.has(id);
+        token.shield.textContent = `+${String(bonus)}`;
+        token.shield.title =
+          bonus >= 5
+            ? "Three-quarters cover: +5 to AC and Dexterity saves"
+            : "Half cover: +2 to AC and Dexterity saves";
       }
     }
     layout();
@@ -1957,6 +2028,70 @@ const BOARD_CSS = `
 }
 .dnd-route.risky polyline { stroke: #ff6a55; }
 .dnd-blast { position: absolute; inset: 0; pointer-events: none; }
+.dnd-ground { position: absolute; inset: 0; pointer-events: none; }
+.dnd-ground[data-light="dim"] { background: rgb(8 10 30 / 22%); }
+.dnd-ground[data-light="dark"] { background: rgb(4 4 14 / 48%); }
+.dnd-ground-square {
+  position: absolute;
+  width: calc(100% / var(--cols));
+  height: calc(100% / var(--rows));
+  box-sizing: border-box;
+}
+.dnd-ground-square.difficult {
+  background: repeating-linear-gradient(-45deg, rgb(240 222 180 / 26%) 0 2px, transparent 2px 7px);
+}
+/* Cover is ringed in cream with a dark edge, so it reads on light and dark art alike. */
+.dnd-ground-square.half {
+  box-shadow: inset 0 0 0 2px rgb(255 240 205 / 55%), inset 0 0 0 3px rgb(30 18 6 / 30%);
+  border-radius: 4px;
+}
+.dnd-ground-square.threeQuarters {
+  box-shadow: inset 0 0 0 3px rgb(255 240 205 / 70%), inset 0 0 0 4px rgb(30 18 6 / 35%);
+  background: rgb(255 240 205 / 12%);
+  border-radius: 4px;
+}
+.dnd-ground-square.dim { background: rgb(8 10 30 / 26%); }
+.dnd-ground-square.dark { background: rgb(4 4 14 / 55%); }
+.plain .dnd-ground-square.difficult {
+  background: repeating-linear-gradient(-45deg, rgb(110 70 10 / 28%) 0 2px, transparent 2px 7px);
+}
+.plain .dnd-ground-square.half { box-shadow: inset 0 0 0 2px rgb(110 70 10 / 35%); }
+.plain .dnd-ground-square.threeQuarters { box-shadow: inset 0 0 0 3px rgb(110 70 10 / 50%); }
+.dnd-route-cost {
+  position: absolute;
+  transform: translate(-50%, -110%);
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: rgb(15 10 6 / 85%);
+  border: 1px solid #c9ad6a;
+  color: #f4e7c8;
+  font: 600 0.75rem/1.3 var(--font-ui, system-ui), sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+}
+/* A shield with the cover a foe has against the player, on hover while picking a target. */
+.dnd-shield {
+  position: absolute;
+  right: -6px;
+  top: -6px;
+  min-width: 22px;
+  padding: 3px 3px 5px;
+  box-sizing: border-box;
+  background: #3b5f8a;
+  border: 1.5px solid #e8d7a8;
+  border-radius: 4px 4px 50% 50% / 4px 4px 60% 60%;
+  color: #fff;
+  font: 800 0.68rem/1 var(--font-ui, system-ui), sans-serif;
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+  z-index: 8;
+}
+.dnd-shield[hidden] { display: none; }
+.dnd-board:not(.playing) .dnd-token:hover .dnd-shield,
+.dnd-board:focus-visible:not(.playing) .dnd-token.cursor .dnd-shield { opacity: 1; }
 .dnd-caption {
   position: absolute;
   left: 50%;

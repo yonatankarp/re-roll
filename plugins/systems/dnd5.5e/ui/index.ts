@@ -10,6 +10,7 @@ import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
 import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
 import { foundText } from "../core/gear.ts";
+import { coverBonus, coverFor } from "../core/sight.ts";
 import { coins } from "../core/shop.ts";
 import { shop } from "./shop.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
@@ -749,6 +750,17 @@ function combat(rawState: unknown, access: ContentAccess) {
       return feet === null ? [] : [[id, feet]];
     }),
   );
+  // The cover each creature has against the player, for the shield shown while picking a target.
+  const cover = Object.fromEntries(
+    order.flatMap((id) => {
+      const actor = state.actors[id];
+      const bonus =
+        player && actor && id !== PLAYER_ACTOR
+          ? coverBonus(coverFor(state, player.position, actor, [PLAYER_ACTOR]))
+          : 0;
+      return bonus > 0 ? [[id, bonus]] : [];
+    }),
+  );
   // Each of the player's area actions, by id, so the board can outline where it lands with the rules' own geometry.
   const shapes = Object.fromEntries(
     player && order[index] === PLAYER_ACTOR
@@ -760,7 +772,14 @@ function combat(rawState: unknown, access: ContentAccess) {
   );
   return {
     round,
-    board: { moves, reach, shapes, map: state.combat.map ?? null },
+    board: {
+      moves,
+      reach,
+      shapes,
+      cover,
+      terrain: state.combat.terrain ?? null,
+      map: state.combat.map ?? null,
+    },
     combatants: order.flatMap((id, position) => {
       const actor = state.actors[id];
       if (!actor) return [];
