@@ -621,15 +621,20 @@ describe("actions anyone can take", () => {
       d20s(18, 4),
     );
     expect(rolls(atAlly.events)[0]?.natural).toBe(4);
-    // It repeats the save at the end of its turns: DC 13 against Strength +0.
+    // It escapes with its action: Athletics +0 against DC 13, and the end of its turn alone doesn't free it.
     const onFoe: DndState = {
       ...held,
       combat: held.combat && { ...held.combat, index: 2 },
     };
     const end = { kind: `${NS}:endTurn`, payload: {} };
-    const stuck = settle(run, onFoe, [end], d20s(12));
+    const waited = settle(run, onFoe, [end], HIGH);
+    expect(hasCondition(who(waited.state, "foe"), "grappled")).toBe(true);
+    const escape = "tactic:escape|player|tactic:grapple";
+    expect(optionIds(run, onFoe)).toContain(escape);
+    const stuck = settle(run, onFoe, [act("foe", escape)], d20s(12));
     expect(hasCondition(who(stuck.state, "foe"), "grappled")).toBe(true);
-    const free = settle(run, onFoe, [end], d20s(13));
+    expect(who(stuck.state, "foe").budget.action).toBe(false);
+    const free = settle(run, onFoe, [act("foe", escape)], d20s(13));
     expect(hasCondition(who(free.state, "foe"), "grappled")).toBe(false);
     // Walking away lets go.
     const left = settle(run, held, [moveTo(PLAYER_ACTOR, 3, 5)], LOW);
@@ -948,6 +953,81 @@ describe("monster grapples and multiattacks", () => {
     // Squeezing on its own doesn't bite as well.
     const alone = settle(run, state, [act("coiler", "monster:0|player")], LOW);
     expect(rolls(alone.events)).toEqual([]);
+  });
+
+  it("escapes a monster's grapple with an action against its printed DC, ending what came with it", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("coiler", [6, 5], "test:monster/coiler"),
+    ]);
+    const squeezed = settle(
+      run,
+      state,
+      [act("coiler", "monster:0|player")],
+      LOW,
+    ).state;
+    // Back to the hero's turn.
+    const held: DndState = {
+      ...squeezed,
+      combat: squeezed.combat && { ...squeezed.combat, index: 0 },
+    };
+    expect(sources(who(held, PLAYER_ACTOR))).toEqual([
+      "monster:0",
+      "monster:0",
+      "monster:0",
+    ]);
+    const escape = "tactic:escape|coiler|monster:0";
+    const decision = run.system.nextDecision(held, {
+      content: run.content,
+      contentIds: run.contentIds,
+    });
+    expect(
+      decision?.options.find((option) => option.id === escape)?.label,
+    ).toBe("Escape coiler grapple (Athletics or Acrobatics, DC 15)");
+    const stuck = settle(run, held, [act(PLAYER_ACTOR, escape)], LOW);
+    expect(hasCondition(who(stuck.state, PLAYER_ACTOR), "grappled")).toBe(true);
+    const free = settle(run, held, [act(PLAYER_ACTOR, escape)], HIGH);
+    expect(sources(who(free.state, PLAYER_ACTOR))).toEqual([]);
+    expect(rolls(free.events)[0]).toMatchObject({ target: 15 });
+    // Restrained and squeezed each turn, the AI spends its action getting out.
+    if (!decision) throw new Error("No turn decision");
+    expect(tacticalPolicy(decision, contextOf(run, held, LOW))).toBe(escape);
+  });
+
+  it("ends a grapple when the grappler is Incapacitated or ends up out of its reach", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("coiler", [6, 5], "test:monster/coiler"),
+    ]);
+    const held = settle(
+      run,
+      state,
+      [act("coiler", "monster:0|player")],
+      LOW,
+    ).state;
+    const check = { kind: `${NS}:checkCombatEnd`, payload: {} };
+    const after = (event: SystemEvent) =>
+      who(
+        settle(run, applyDndEvent(held, event), [check], LOW).state,
+        PLAYER_ACTOR,
+      );
+    const stunned = dndEvent(`${NS}:effectAdded`, {
+      actor: "coiler",
+      effect: {
+        sourceId: "test",
+        casterId: "player",
+        modifier: { kind: "condition", condition: "stunned" },
+        ends: "spellDuration",
+      },
+    });
+    expect(sources(after(stunned))).toEqual([]);
+    const moved = (x: number) =>
+      dndEvent(`${NS}:moved`, { actor: "coiler", to: { x, y: 5 }, feet: 0 });
+    // Squeeze reaches 10 feet.
+    expect(hasCondition(after(moved(7)), "grappled", "restrained")).toBe(true);
+    expect(sources(after(moved(8)))).toEqual([]);
   });
 
   it("picks the attack that brings the other action over that action alone", async () => {

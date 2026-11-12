@@ -26,6 +26,7 @@ import {
   within5,
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
+import { escapeDc, grapplesOn } from "./combat/grapple.ts";
 import { type Square, distanceFeet, squareKey } from "./grid.ts";
 import { FLEE } from "./legendary.ts";
 import { finalDamage, rollD20 } from "./rules.ts";
@@ -72,7 +73,7 @@ import {
 } from "./tactics.ts";
 
 // The 2024 actions anyone can take in a fight besides attacking and casting (Dash, Disengage, Dodge, Help,
-// Hide, Ready, Search, Study, Grapple, Shove, standing up), the off-hand attack of a second Light weapon,
+// Hide, Ready, Search, Study, Grapple, Shove, standing up, escaping a grapple), the off-hand attack of a second Light weapon,
 // and the weapon masteries. Each is an option of the turn decision, so a save replays it like any other.
 
 const DASH = `${TACTIC}dash`;
@@ -86,6 +87,7 @@ const GRAPPLE = GRAPPLE_SOURCE;
 const SHOVE = `${TACTIC}shove`;
 const READY = `${TACTIC}ready`;
 const STAND = `${TACTIC}stand`;
+const ESCAPE = `${TACTIC}escape`;
 export const OFFHAND = `${TACTIC}offhand`;
 const OFFHAND_USED = "offhand";
 const NICK_USED = `${MASTERY}nick`;
@@ -360,6 +362,13 @@ export function tacticOptions(
   });
   if (foes.some((foe) => hasTactic(foe, "hidden"))) {
     options.push({ id: SEARCH, label: "Search for hidden foes (Perception)" });
+  }
+  for (const grapple of grapplesOn(actor)) {
+    const grappler = state.actors[grapple.casterId];
+    options.push({
+      id: encodeOption(ESCAPE, grapple.casterId, grapple.sourceId),
+      label: `Escape ${grappler?.name ?? "the"} grapple (Athletics or Acrobatics, DC ${String(escapeDc(grapple, state, access))})`,
+    });
   }
   if (!full) return options;
   options.push({
@@ -656,8 +665,7 @@ export function runTactic(
       };
     }
     case GRAPPLE: {
-      // shortcut: the grappled creature repeats the save at the end of its turns rather than spending its
-      // action on an escape check, and the grapple holds even if the grappler is Incapacitated.
+      // The grappled creature escapes with its action; combat/grapple.ts ends the grapple on its own.
       const held = needTarget();
       const dc = saveDc(stats, "str");
       const ability = betterSave(held, context);
@@ -675,9 +683,41 @@ export function runTactic(
                   actor.id,
                   { kind: "condition", condition: "grappled" },
                   "spellDuration",
-                  { repeatSave: { ability, dc } },
                 ),
               ]),
+        ],
+        frames: done,
+      };
+    }
+    case ESCAPE: {
+      // An Athletics or Acrobatics check, whichever is better, against the grapple's escape DC.
+      const grapple = grapplesOn(actor).find(
+        (item) => item.sourceId === detail && item.casterId === targetId,
+      );
+      if (!grapple) throw new Error(`${actor.id} isn't held by ${targetId}`);
+      const athletics =
+        checkBonus(stats, actor, { ability: "str", skill: "athletics" }) >=
+        checkBonus(stats, actor, { ability: "dex", skill: "acrobatics" });
+      const rolled = check(
+        actor,
+        athletics ? "athletics" : "acrobatics",
+        athletics ? "str" : "dex",
+        escapeDc(grapple, state, context),
+        () => `Escape (${athletics ? "Athletics" : "Acrobatics"})`,
+        context,
+      );
+      return {
+        events: [
+          spend("action"),
+          ...rolled.events,
+          ...(rolled.success
+            ? [
+                dndEvent(`${NS}:effectEnded`, {
+                  actor: actor.id,
+                  sourceId: grapple.sourceId,
+                }),
+              ]
+            : []),
         ],
         frames: done,
       };
@@ -759,7 +799,7 @@ const AfterMoveSchema = z.object({
   y: z.number(),
 });
 
-// A grapple ends when the grappler walks away, and a readied attack goes off at a foe stepping into reach.
+// A readied attack goes off at a foe stepping into reach. A grapple the move breaks ends in combat/grapple.ts.
 // shortcut: a grappler doesn't drag the grappled creature along, and a readied attack fires on its own.
 export function runAfterMove(
   payload: z.infer<typeof AfterMoveSchema>,
@@ -771,16 +811,6 @@ export function runAfterMove(
   const from = { x: payload.x, y: payload.y };
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];
-  for (const held of Object.values(state.actors)) {
-    const holds = held.activeEffects.some(
-      (item) => item.sourceId === GRAPPLE && item.casterId === mover.id,
-    );
-    if (holds && distanceFeet(mover.position, held.position) > 5) {
-      events.push(
-        dndEvent(`${NS}:effectEnded`, { actor: held.id, sourceId: GRAPPLE }),
-      );
-    }
-  }
   for (const foe of enemies(state, mover)) {
     const [ready] = tacticsOf(foe, "ready");
     if (!ready?.action || !foe.budget.reaction || isDown(foe)) continue;
@@ -1003,8 +1033,9 @@ function dashTarget(actor: Actor, context: Context): Square | null {
   );
 }
 
-// The system's tactics, with these actions: stand up first, take the off-hand attack, walk on after a Dash,
-// and spend an action that would otherwise go unused on a Search, a Dash toward the foe or a Dodge.
+// The system's tactics, with these actions: stand up first, escape a grapple that does more than hold, take
+// the off-hand attack, walk on after a Dash, and spend an action that would otherwise go unused on an escape,
+// a Search, a Dash toward the foe or a Dodge.
 // Grapple, Shove, Help, Hide, Study and Ready are never picked: here each costs a whole action that an
 // attack or spell uses better. Disengage would need a step away from foes, which stepToward never takes.
 export function tacticalPolicy(decision: Decision, context: Context): string {
@@ -1022,6 +1053,19 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   }
   const ids = new Set(decision.options.map((option) => option.id));
   if (ids.has(STAND)) return STAND;
+  const escapes = decision.options.filter((option) =>
+    option.id.startsWith(encodeOption(ESCAPE, "")),
+  );
+  // Restrained, swallowed up or crushed each turn "until the grapple ends".
+  const crushing = escapes.find(({ id }) => {
+    const source = parseOption(id)[2];
+    return mover?.activeEffects.some(
+      ({ sourceId, modifier }) =>
+        sourceId === source &&
+        (modifier.kind !== "condition" || modifier.condition !== "grappled"),
+    );
+  });
+  if (crushing) return crushing.id;
   const chosen = choosePolicy(
     {
       ...decision,
@@ -1044,6 +1088,8 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
     return MOVE;
   }
   const foes = standing(enemies(state, actor));
+  const [escape] = escapes;
+  if (escape) return escape.id;
   if (ids.has(SEARCH)) return SEARCH;
   if (ids.has(DASH) && !ids.has(MOVE) && foes.length > 0) return DASH;
   if (ids.has(DODGE) && foes.some((foe) => within5(foe, actor))) return DODGE;

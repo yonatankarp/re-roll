@@ -39,10 +39,20 @@ import {
   currentActor,
 } from "./queries.ts";
 import { concentrationFrame, dealEvents, rollSave } from "./effects.ts";
+import { releasedGrapples } from "./grapple.ts";
 
 // The turn order: ending a fight, lingering effects, and the start and end of each turn.
 
+// Run after nearly every step of a fight, so it's also where grapples whose grappler fell or moved away end.
 export function runCheckCombatEnd(context: Context): SystemResult {
+  const released = releasedGrapples(context.state, context);
+  const result = fightOver(context);
+  return released.length > 0
+    ? { ...result, events: [...released, ...(result.events ?? [])] }
+    : result;
+}
+
+function fightOver(context: Context): SystemResult {
   const { state } = context;
   if (!state.combat) return {};
   const fighters = state.combat.order.map((id) => actorOf(state, id));
