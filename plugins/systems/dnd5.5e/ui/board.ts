@@ -11,6 +11,16 @@ import {
   REMOVE,
   covers,
 } from "../core/targeting.ts";
+import type {
+  BoardExtra,
+  BoardHost,
+  BoardUpdate,
+  Combatant,
+  Face,
+  Option,
+  ShellUpdate,
+  TokenArt,
+} from "./board-data.ts";
 import type { DndCue } from "./cues.ts";
 import { cueSound, diceSound, setEffectsVolume } from "./sound.ts";
 
@@ -18,64 +28,6 @@ import { cueSound, diceSound, setEffectsVolume } from "./sound.ts";
 // Clicking a token or a square, or moving a cursor with the arrow keys and pressing Enter, answers the
 // same options the list below offers, so the board is a shortcut and never the only way to do something.
 // Its animations only show what the journal says in words.
-// Matched by shape with engine/shell, which plugins never import.
-
-interface Combatant {
-  readonly id: string;
-  readonly name: string;
-  readonly side: string;
-  readonly active: boolean;
-  readonly hp: number;
-  readonly maxHp: number;
-  readonly conditions: readonly string[];
-  readonly status: string | null;
-}
-
-interface Option {
-  readonly id: string;
-  readonly label: string;
-}
-
-interface BoardUpdate {
-  readonly state: unknown;
-  readonly decision: {
-    readonly id: string;
-    readonly actor: string;
-    readonly options: readonly Option[];
-  } | null;
-  readonly combat: {
-    readonly combatants: readonly Combatant[];
-    readonly board?: unknown; // from this plugin's combat view: where the player can move
-  } | null;
-  readonly art: Readonly<Record<string, string>>;
-  readonly tokens: Readonly<Record<string, TokenArt>>;
-  readonly assetRoot: string;
-  readonly sceneArt: string | null;
-  readonly cues: readonly unknown[];
-}
-
-interface Face {
-  readonly x: number;
-  readonly y: number;
-  readonly size: number;
-}
-
-interface TokenArt {
-  readonly path: string;
-  readonly face?: unknown; // a Face, from the picture index
-}
-
-interface FightMap {
-  readonly image: string;
-  readonly imageWidth: number;
-  readonly imageHeight: number;
-  readonly crop: {
-    readonly x: number;
-    readonly y: number;
-    readonly width: number;
-    readonly height: number;
-  };
-}
 
 function faceOf(art: TokenArt): Face | null {
   const face = art.face as Partial<Face> | undefined;
@@ -85,13 +37,6 @@ function faceOf(art: TokenArt): Face | null {
     face.size > 0
     ? (face as Face)
     : null;
-}
-
-interface BoardHost {
-  readonly imageUrl: (path: string) => string | Promise<string | null> | null;
-  readonly answer: (...optionIds: readonly string[]) => void;
-  readonly sound?: () => boolean;
-  readonly volume?: () => number;
 }
 
 interface Token {
@@ -134,24 +79,6 @@ const D20 = `<svg viewBox="0 0 100 100" aria-hidden="true"><polygon class="d20-b
 const FADE: KeyframeAnimationOptions = { duration: 250, easing: "ease-out" };
 const MARKED = ["dodging", "hidden"] as const; // conditions drawn on the token itself
 
-interface Move {
-  readonly x: number;
-  readonly y: number;
-  readonly feet: number;
-  readonly path: readonly (readonly [number, number])[];
-  readonly provokes: number; // how many enemies get an Opportunity Attack
-}
-
-interface BoardExtra {
-  readonly moves?: readonly Move[];
-  readonly reach?: Readonly<Record<string, number>>; // melee reach in feet, by creature
-  readonly map?: FightMap | null; // the book's battle map, when the encounter has one
-  readonly shapes?: Readonly<Record<string, AreaTargeting>>; // the player's area actions, by id
-  readonly cover?: Readonly<Record<string, number>>; // +2 or +5 against the player, by creature
-  readonly terrain?: Terrain | null; // the battle map's ground, cover and light
-}
-
-// Written by this plugin's own combat view in ui/index.ts, so its shape is known.
 function extraOf(update: BoardUpdate | null): BoardExtra {
   return update?.combat?.board ?? {};
 }
@@ -1670,10 +1597,12 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         ? new Promise((resolve) => waiting.push(resolve))
         : Promise.resolve();
     },
-    update(update: BoardUpdate): void {
+    update(received: ShellUpdate): void {
+      // This plugin's own ui/index.ts and ui/cues.ts wrote the parts the shell leaves unknown.
+      const update = received as BoardUpdate;
       latest = update;
       sync(update, !playing && update.cues.length === 0);
-      queue.push(...(update.cues as DndCue[]));
+      queue.push(...update.cues);
       if (!playing && queue.length > 0) void run();
     },
   };

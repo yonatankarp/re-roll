@@ -15,6 +15,7 @@ import { coverBonus, coverFor } from "../core/sight.ts";
 import { coins } from "../core/shop.ts";
 import { shop } from "./shop.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
+import type { BoardExtra } from "./board-data.ts";
 import { dndCue } from "./cues.ts";
 import {
   ABILITIES,
@@ -776,7 +777,7 @@ function combat(rawState: unknown, access: ContentAccess) {
       cover,
       terrain: state.combat.terrain ?? null,
       map: state.combat.map ?? null,
-    },
+    } satisfies BoardExtra,
     combatants: order.flatMap((id, position) => {
       const actor = state.actors[id];
       if (!actor) return [];
