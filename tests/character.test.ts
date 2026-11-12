@@ -32,6 +32,7 @@ import {
 import {
   type CharacterBuild,
   ClassSchema,
+  FeatSchema,
   FeatureSchema,
   ItemSchema,
   PregenSchema,
@@ -481,6 +482,34 @@ describe("levelling up", () => {
       10, 6, 6, 6, 6,
     ]);
     expectReplays(run, registry, "fighter", whole);
+  });
+
+  it("raises one ability by 1 for a feat whose Ability Score Increase says so", async () => {
+    const run = withContent(
+      storyRun(await goblin(), [[levelUp], [levelUp], [levelUp]]),
+      [
+        FeatSchema.parse({
+          id: "test:feat/hardy",
+          name: "Hardy",
+          category: "general",
+          text: "Test.",
+          abilityIncrease: ["con", "wis"],
+        }),
+      ],
+    );
+    const plan: Plan = [
+      ...FIGHTER.filter(([pattern]) => !String(pattern).includes(":feat")),
+      [/:feat-0$/, "test:feat/hardy"],
+      [/:feat:increase$/, "con:1"],
+    ];
+    const { state, asked } = drive(run, "hardy", plan);
+    expect(
+      asked
+        .find((item) => item.id === "dnd5.5e:build:player:4:feat:increase")
+        ?.options.map((option) => option.id),
+    ).toEqual(["con:1", "wis:1"]);
+    // 14, plus 1 from the background and 1 from the feat.
+    expect(deriveStats(actorIn(state), run).abilities.con).toBe(16);
   });
 
   it("takes a wizard from 1 to 5, with slots and prepared spells", async () => {

@@ -959,12 +959,24 @@ describe("parsing a monster stat block", () => {
           },
         },
         { name: "Wing", activation: { targeting: { range: 60 } } },
+        {
+          name: "Dust Cloud",
+          recharge: 5,
+          activation: {
+            targeting: { area: { shape: "cone", radius: 15 } },
+            resolution: {
+              ability: "dex",
+              dc: { base: 12 },
+              damage: [{ amount: { dice: "2d6" }, type: "poison" }],
+              onSuccessDamage: "half",
+            },
+          },
+        },
       ],
     });
     expect(older?.notes).toEqual([
       "not automated: Dusty",
       "partial: Bite: left out a condition in older wording",
-      "not automated: Dust Cloud (Recharge 5–6)",
     ]);
   });
 
@@ -1602,6 +1614,7 @@ describe("parsing a character book page", () => {
     <h3 class="with-metadata">Boon of Bark</h3>
     <p><em>Epic Boon Feat (Prerequisite: Level 19+)</em></p>
     <p>Your bark is thick.</p>
+    <p><strong><em>Ability Score Increase.</em></strong> Increase your Wisdom or Constitution score by 1, to a maximum of 30.</p>
     <h1>Chapter 6: Equipment</h1>
     <table><caption><h3>Weapons</h3></caption><thead>
       <tr><th>Name</th><th>Damage</th><th>Properties</th><th>Mastery</th><th>Weight</th><th>Cost</th></tr>
@@ -1793,6 +1806,10 @@ describe("parsing a character book page", () => {
       ["Boon of Bark", "epicBoon"],
     ]);
     expect(parsed[1]?.text).toContain("Level 19+");
+    expect(parsed.map((feat) => feat.abilityIncrease)).toEqual([
+      undefined,
+      ["con", "wis"],
+    ]);
   });
 
   it("reads weapons and armor, including a weapon with flat damage", () => {
