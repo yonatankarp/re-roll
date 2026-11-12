@@ -193,6 +193,44 @@ const GULPER = dummy("test:monster/gulper", {
   ],
 });
 
+// A claw whose hit brings a save against paralysis, on its own source.
+const CLAWER = dummy("test:monster/clawer", {
+  actions: [
+    {
+      name: "Claw",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "weapon", flatBonus: 4 },
+          damage: [{ amount: { dice: "1d4" }, type: "slashing" }],
+          onHit: [
+            {
+              kind: "applyCondition",
+              condition: "grappled",
+              duration: { minutes: 1 },
+            },
+          ],
+          onHitSave: {
+            ability: "con",
+            dc: { base: 10 },
+            onFail: [
+              {
+                kind: "applyCondition",
+                condition: "paralyzed",
+                duration: { minutes: 1 },
+                repeatSave: true,
+              },
+            ],
+            exempt: ["undead"],
+          },
+        },
+      },
+    },
+  ],
+});
+
 // Bites, then sprays a cone that the Multiattack has to aim.
 const SPITTER = dummy("test:monster/spitter", {
   text: "Actions\nMultiattack. The spitter makes one Club attack and uses Spray.",
@@ -224,6 +262,7 @@ function arena(base: RunContext): RunContext {
     "test:monster/coiler": COILER,
     "test:monster/spitter": SPITTER,
     "test:monster/gulper": GULPER,
+    "test:monster/clawer": CLAWER,
     "test:monster/giant": dummy("test:monster/giant", { size: "huge" }),
     ...Object.fromEntries(WEAPONS.map((item) => [item.id, item])),
   };
@@ -1253,6 +1292,77 @@ describe("monster grapples and multiattacks", () => {
       hasCondition(who(freed, PLAYER_ACTOR), "blinded", "restrained"),
     ).toBe(false);
     expect(hasCondition(who(freed, PLAYER_ACTOR), "prone")).toBe(true);
+  });
+
+  it("rolls the save a hit brings, keeping its effects apart from the hit's grapple", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("clawer", [6, 5], "test:monster/clawer"),
+    ]);
+    const { state: after } = settle(
+      run,
+      { ...state, combat: state.combat && { ...state.combat, index: 1 } },
+      [act("clawer", "monster:0|player")],
+      d20s(19, 1),
+    );
+    const hero = who(after, PLAYER_ACTOR);
+    expect(hasCondition(hero, "grappled", "paralyzed")).toBe(true);
+    expect(sources(hero).sort()).toEqual(["monster:0", "monster:0:save"]);
+    // Saving at the end of its turn ends the paralysis and leaves the grapple.
+    const saved = settle(
+      run,
+      { ...after, combat: after.combat && { ...after.combat, index: 0 } },
+      [{ kind: `${NS}:endTurn`, payload: {} }],
+      HIGH,
+    ).state;
+    expect(sources(who(saved, PLAYER_ACTOR))).toEqual(["monster:0"]);
+  });
+
+  it("gives Disadvantage only on rolls with the ability an effect names", async () => {
+    const run = await base();
+    const weakened = applyDndEvent(
+      fight([fighter(run, { at: [5, 5] })]),
+      dndEvent(`${NS}:effectAdded`, {
+        actor: PLAYER_ACTOR,
+        effect: {
+          sourceId: "test",
+          casterId: "foe",
+          modifier: { kind: "disadvantage", on: "saves", ability: "str" },
+          ends: "spellDuration",
+        },
+      }),
+    );
+    const hero = who(weakened, PLAYER_ACTOR);
+    const context = contextOf(run, weakened, d20s(15, 2, 15, 2));
+    expect(rollSave(hero, "str", 10, context).saved).toBe(false);
+    expect(rollSave(hero, "dex", 10, context).saved).toBe(true);
+  });
+
+  it("turns a condition into its second failure when the repeat save fails", async () => {
+    const run = await base();
+    const start = applyDndEvent(
+      fight([fighter(run, { at: [5, 5] }), monster("gazer", [9, 5])]),
+      dndEvent(`${NS}:effectAdded`, {
+        actor: PLAYER_ACTOR,
+        effect: {
+          sourceId: "monster:0",
+          casterId: "gazer",
+          modifier: { kind: "condition", condition: "restrained" },
+          ends: "spellDuration",
+          repeatSave: { ability: "con", dc: 12 },
+          secondFailure: { condition: "petrified", ends: "spellDuration" },
+        },
+      }),
+    );
+    const end = [{ kind: `${NS}:endTurn`, payload: {} }];
+    const failed = who(settle(run, start, end, LOW).state, PLAYER_ACTOR);
+    expect(hasCondition(failed, "restrained")).toBe(false);
+    expect(hasCondition(failed, "petrified")).toBe(true);
+    expect(failed.activeEffects[0]?.repeatSave).toBeUndefined();
+    expect(
+      sources(who(settle(run, start, end, HIGH).state, PLAYER_ACTOR)),
+    ).toEqual([]);
   });
 
   it("aims an area a Multiattack uses where it catches the most foes", async () => {

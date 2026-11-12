@@ -21,6 +21,7 @@ import {
   damageResponses,
   deriveStats,
   evaluateFormula,
+  immuneToCondition,
   lookup,
   rollAmount,
 } from "../stats.ts";
@@ -235,12 +236,40 @@ export function runFinishTurn(context: Context): SystemResult {
           events,
         );
     if (resisted) events.push(resisted);
-    if (rolled.saved || resisted) {
+    const worse = (
+      target.activeEffects.find(
+        (item) =>
+          item.sourceId === sourceId &&
+          item.casterId === casterId &&
+          item.secondFailure,
+      ) ?? effect
+    ).secondFailure;
+    if (rolled.saved || resisted || worse) {
       events.push(
         dndEvent(`${NS}:effectEnded`, {
           actor: target.id,
           sourceId,
           casterId,
+        }),
+      );
+    }
+    // A second failure leaves the worse condition instead, with no more saves.
+    if (
+      worse &&
+      !rolled.saved &&
+      !resisted &&
+      !immuneToCondition(deriveStats(target, context), worse.condition)
+    ) {
+      events.push(
+        dndEvent(`${NS}:effectAdded`, {
+          actor: target.id,
+          effect: {
+            sourceId,
+            casterId,
+            modifier: { kind: "condition", condition: worse.condition },
+            ends: worse.ends,
+            ...(worse.endsOnDamage ? { endsOnDamage: true } : {}),
+          },
         }),
       );
     }

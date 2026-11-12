@@ -274,6 +274,7 @@ export function leafEvents(
               casterId: caster.id,
               modifier: effect.modifier,
               ends: effectEnds(effect.duration),
+              ...(effect.repeatSave && save ? { repeatSave: save } : {}),
               ...swallowed,
             },
           }),
@@ -290,8 +291,21 @@ export function leafEvents(
               casterId: caster.id,
               modifier: { kind: "condition", condition: effect.condition },
               ends: effectEnds(effect.duration),
-              ...(effect.repeatSave && save ? { repeatSave: save } : {}),
+              ...((effect.repeatSave || effect.secondFailure) && save
+                ? { repeatSave: save }
+                : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
+              ...(effect.secondFailure && save
+                ? {
+                    secondFailure: {
+                      condition: effect.secondFailure.condition,
+                      ends: effectEnds(effect.secondFailure.duration),
+                      ...(effect.secondFailure.endsOnDamage
+                        ? { endsOnDamage: true }
+                        : {}),
+                    },
+                  }
+                : {}),
               ...swallowed,
             },
           }),
@@ -350,12 +364,12 @@ export function rollSave(
   const stats = deriveStats(target, context);
   const roll = rollD20(context.dice, {
     advantage:
-      hasFlag(target, "advantage", "saves", stats) ||
+      hasFlag(target, "advantage", "saves", stats, ability) ||
       (magical && hasPassive(stats, "magicResistance")) ||
       (ability === "dex" && dodging(target)) ||
       traitSaveAdvantage(stats, ability, conditions),
     disadvantage:
-      hasFlag(target, "disadvantage", "saves", stats) ||
+      hasFlag(target, "disadvantage", "saves", stats, ability) ||
       (ability === "dex" && hasCondition(target, "restrained")),
   });
   const total =

@@ -174,9 +174,9 @@ function check(
 } {
   const stats = deriveStats(actor, context);
   const roll = rollD20(context.dice, {
-    advantage: hasFlag(actor, "advantage", "checks", stats),
+    advantage: hasFlag(actor, "advantage", "checks", stats, ability),
     disadvantage:
-      hasFlag(actor, "disadvantage", "checks", stats) ||
+      hasFlag(actor, "disadvantage", "checks", stats, ability) ||
       hasCondition(actor, "poisoned", "frightened"),
   });
   const total =

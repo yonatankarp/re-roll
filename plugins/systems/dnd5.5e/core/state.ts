@@ -75,6 +75,14 @@ export const TACTICS = [
   "slowed",
 ] as const;
 
+const EndsSchema = z.enum([
+  "concentration",
+  "casterNextTurn",
+  "casterNextTurnEnd",
+  "casterTurnEnd",
+  "spellDuration",
+]);
+
 const ActiveEffectSchema = z.strictObject({
   sourceId: z.string(),
   casterId: z.string(),
@@ -93,19 +101,21 @@ const ActiveEffectSchema = z.strictObject({
     }),
   ]),
   // "casterNextTurnEnd" becomes "casterTurnEnd" when the caster's next turn starts, and ends with that turn.
-  ends: z.enum([
-    "concentration",
-    "casterNextTurn",
-    "casterNextTurnEnd",
-    "casterTurnEnd",
-    "spellDuration",
-  ]),
+  ends: EndsSchema,
   repeatSave: z
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
   endsOnDamage: z.boolean().optional(),
   // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
   swallowed: z.boolean().optional(),
+  // The condition a failed repeat save leaves instead of this one (combat/turn.ts).
+  secondFailure: z
+    .strictObject({
+      condition: ConditionSchema,
+      ends: EndsSchema,
+      endsOnDamage: z.boolean().optional(),
+    })
+    .optional(),
 });
 export type ActiveEffect = z.infer<typeof ActiveEffectSchema>;
 

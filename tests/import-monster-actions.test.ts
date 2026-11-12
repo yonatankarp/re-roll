@@ -576,4 +576,95 @@ describe("monster actions read in round 4", () => {
       },
     });
   });
+  it("reads a save a hit brings, its creature gate, and a condition lasting as another does", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Claw",
+        "Melee Attack Roll: +4, reach 5 ft. Hit: 5 (1d6 + 2) Slashing damage. If the target is a creature that isn’t an Undead or elf, it is subjected to the following effect. Constitution Saving Throw: DC 10. Failure: The target has the Poisoned condition and repeats the save at the end of each of its turns, ending the effect on itself on a success. While Poisoned, the target has the Stunned condition.",
+      )}${entry(
+        "Sting",
+        "Melee Attack Roll: +4, reach 5 ft. Hit: 5 (1d6 + 2) Poison damage. If this damage reduces the target to 0 Hit Points, it has the Poisoned condition for 1 hour. While Poisoned, the target also has the Paralyzed condition.",
+      )}`,
+    );
+    expect(byName(monster, "Claw")?.activation.resolution).toMatchObject({
+      onHit: [],
+      onHitSave: {
+        ability: "con",
+        dc: { base: 10 },
+        exempt: ["undead", "elf"],
+        onFail: [
+          { condition: "poisoned", duration: { minutes: 1 }, repeatSave: true },
+          { condition: "stunned", duration: { minutes: 1 }, repeatSave: true },
+        ],
+      },
+    });
+    // The Poisoned it would last as is left out, so it is too.
+    expect(byName(monster, "Sting")?.activation.resolution).toMatchObject({
+      onHit: [],
+    });
+  });
+
+  it("reads Disadvantage on one ability's D20 Tests and a damage penalty, saved against each turn", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Sap Breath",
+        "Strength Saving Throw: DC 15, each creature in a 30-foot Cone. Failure: The target has Disadvantage on Strength-based D20 Tests and subtracts 2 (1d4) from its damage rolls. It repeats the save at the end of each of its turns, ending the effect on itself on a success.",
+      )}`,
+    );
+    const onFail = byName(monster, "Sap Breath")?.activation.resolution;
+    expect(onFail).toMatchObject({
+      onFail: [
+        {
+          modifier: { kind: "disadvantage", on: "attacks", ability: "str" },
+          repeatSave: true,
+        },
+        { modifier: { kind: "disadvantage", on: "saves", ability: "str" } },
+        { modifier: { kind: "disadvantage", on: "checks", ability: "str" } },
+        {
+          modifier: {
+            kind: "damageBonus",
+            amount: { dice: "1d4" },
+            subtract: true,
+          },
+          repeatSave: true,
+        },
+      ],
+    });
+  });
+
+  it("turns a condition into a worse one on a failed repeat save", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Stone Gaze",
+        "Constitution Saving Throw: DC 12, each creature in a 30-foot Cone. First Failure: The target has the Restrained condition and repeats the save at the end of its next turn if it is still Restrained, ending the effect on itself on a success. Second Failure: The target has the Petrified condition instead of the Restrained condition.",
+      )}${entry(
+        "Drowse Breath",
+        "Constitution Saving Throw: DC 12, each creature in a 15-foot Cone. Failure: The target has the Incapacitated condition until the end of its next turn, at which point it repeats the save. Second Failure: The target has the Unconscious condition for 1 minute. This effect ends for the target if it takes damage.",
+      )}`,
+    );
+    expect(byName(monster, "Stone Gaze")?.activation.resolution).toMatchObject({
+      onFail: [
+        {
+          condition: "restrained",
+          repeatSave: true,
+          secondFailure: { condition: "petrified" },
+        },
+      ],
+    });
+    expect(
+      byName(monster, "Drowse Breath")?.activation.resolution,
+    ).toMatchObject({
+      onFail: [
+        {
+          condition: "incapacitated",
+          repeatSave: true,
+          secondFailure: {
+            condition: "unconscious",
+            duration: { minutes: 1 },
+            endsOnDamage: true,
+          },
+        },
+      ],
+    });
+  });
 });
