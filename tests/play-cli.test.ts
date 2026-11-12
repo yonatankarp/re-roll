@@ -30,7 +30,8 @@ async function play(
   ];
   const result = await run(process.execPath, args).then(
     ({ stdout }) => ({ code: 0, stdout }),
-    (error: { code: number; stdout: string }) => error,
+    // execFile rejects with the exit code and output on a non-zero exit.
+    (error: unknown) => error as { code: number; stdout: string },
   );
   const lines = result.stdout
     .trim()

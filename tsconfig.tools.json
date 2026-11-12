@@ -7,5 +7,5 @@
     "app/**/*.ts"
   ],
   "exclude": ["app/desktop/**"],
-  "files": ["app/desktop/vite.config.ts"]
+  "files": ["app/desktop/vite.config.ts", "vitest.config.ts"]
 }

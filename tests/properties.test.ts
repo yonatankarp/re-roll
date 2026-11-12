@@ -39,7 +39,9 @@ describe("reachableSquares", () => {
     "steps to adjacent open squares, 5 feet each within the budget, never ending on anyone",
     (width, height, feet, rawStart, blockedList, occupiedList) => {
       const start = { x: rawStart.x % width, y: rawStart.y % height };
-      const blocked = new Set(blockedList.filter((k) => k !== squareKey(start)));
+      const blocked = new Set(
+        blockedList.filter((k) => k !== squareKey(start)),
+      );
       const occupied = new Set(occupiedList);
       const reached = reachableSquares(
         start,
