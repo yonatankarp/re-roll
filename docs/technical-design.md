@@ -70,7 +70,7 @@ engine/                    Knows no game rules and no adventure
   sdk/                     The only part of the engine plugins may import
   shell/                   App UI: scene view, choices, saves, plugin list
   platform/                Storage and ModelClient for node/ and tauri/
-  tools/                   check-pack, test bot, book importer logic
+  tools/                   check-pack, test bot, headless play driver, book importer logic
 
 plugins/
   systems/
@@ -860,6 +860,7 @@ An independent audit checked 145 encoded spells and 120 monsters against their o
 | Replay test | Same seed and inputs always produce the same events and final state |
 | `check-pack` | Broken references, unreachable scenes, uncovered outcomes, code in data plugins, automation coverage |
 | Test bot | Each adventure can be finished, with no dead ends or crashes across many seeds |
+| Headless play | The game layer the UI uses offers every choice a decision has, and only those, through whole adventures |
 | Second adventure | The engine is adventure-agnostic: it must work with no engine change |
 | **Fixture system** | The engine is system-agnostic: a tiny test-only rule system runs a story with no engine change |
 | Prep evaluation | You read generated overlays and judge them, as automated checks can't measure writing quality |
@@ -867,6 +868,32 @@ An independent audit checked 145 encoded spells and 120 monsters against their o
 **The fixture system** lives in `tests/fixtures/system-d6`. It rolls one d6 with three outcome keys and has no turn order, HP or grid. It isn't a copy of any published game. Because it's so unlike D&D, any D&D assumption that creeps into the engine breaks a test straight away, rather than being discovered when Daggerheart is built.
 
 A failed bot run prints its seed and input list, so any failure can be reproduced exactly.
+
+### Headless play
+
+The bot plays at the engine level, so it can't see what the page shows. Headless play goes through `createGame` in `engine/shell/session.ts`, the same game layer as the UI, with no DOM. `engine/tools/headless.ts` has the driver, and `app/cli/headless-game.ts` wires it to Node storage, the systems and their UIs.
+
+**What counts as on screen** mirrors `shell.ts`. It is the option list, the campfire's rests, and the row buttons on the sheet of whoever the decision is for, such as Equip. The driver chooses by a choice's number, id or label, and refuses anything that isn't on screen. `act(...ids)` answers ids one after another, as the combat board does, such as `move` then `3,4`. The board itself is only a shortcut: token menus offer the list's own options, and every square it lights is offered once Move is chosen. Dice are rolled inside each answer, so rolling means choosing the option, such as a check or a death save. The board's throw is only animation. Saves, the save list, loading, deleting and restarting are the session's own.
+
+**Stuck states** are reported with every screen as `problems`:
+
+- a decision that shows no choice, or only rests;
+- a choice shown that the decision doesn't offer;
+- an option the decision offers that nothing shows;
+- no decision, before the story has ended.
+
+`tests/headless.test.ts` plays `goblin-ambush` through a fight with a move and an attack, treasure, equipping from the sheet, a rest, a save and load, an ending and a restart. It also plays random on-screen choices through every adventure. Book adventures run only where `private/` exists.
+
+**The CLI** plays an adventure from a terminal:
+
+```sh
+npm run play -- <adventure> [--seed=N] [--difficulty=story|normal|hard] [--saves=dir] [--script=file.json|-]
+```
+
+Without an adventure it lists them. Saves go under `<dir>/saves`, which defaults to the current folder. Content is read-only, and a symlinked `private/`, such as a worktree's link to the main checkout, is read through its real folder.
+
+- **Interactive** prints the screen and numbered choices. It reads a number or label, or `act <ids…>`, `save [name]`, `saves`, `load <n|path>`, `delete <n|path>`, `restart [seed]`, `json` or `quit`.
+- **Scripted** (`--script`) reads a JSON array from a file, or one JSON command per line from stdin with `-`, so an agent can read each screen before it sends the next command. A command is a choice's number, id or label, or one of `{"choose": ref}`, `{"act": [ids]}`, `{"save": name}`, `{"saves": true}`, `{"load": ref}`, `{"delete": ref}` and `{"restart": seed|null}`. Each command prints one JSON line: `{version, step, command, result?, screen}`. Step 0 is the start. The screen has `version`, `title`, `scene`, `lines` (the log since the last action), `card`, `decision`, `actor`, `prompt`, `choices` (each with `n`, `id`, `label`, `where`, `group` and `detail`), `combat` (its `board` holds the squares to move to), `party`, `ended`, `endingName`, `playerDied`, `warnings` and `problems`. A failed command prints `{version, step, command, error}` and exits with status 1. Any change to that shape bumps `version`.
 
 ## 13. Legal and licensing
 
