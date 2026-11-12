@@ -14,6 +14,7 @@ import {
   isDead,
   isDown,
   NS,
+  frame,
 } from "../state.ts";
 import { treasure } from "../gear.ts";
 import {
@@ -35,7 +36,6 @@ import {
   combatEnded,
   type Context,
   currentActor,
-  frame,
 } from "./queries.ts";
 import { concentrationFrame, dealEvents, rollSave } from "./effects.ts";
 

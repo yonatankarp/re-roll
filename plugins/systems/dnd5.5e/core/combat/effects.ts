@@ -16,6 +16,7 @@ import {
   INCAPACITATING,
   isDead,
   NS,
+  frame,
 } from "../state.ts";
 import {
   type ContentAccess,
@@ -45,7 +46,6 @@ import {
   type Context,
   enemies,
   fitsType,
-  frame,
   hasFlag,
   hasPassive,
   reaches,

@@ -1,4 +1,4 @@
-import { ContentIdSchema, type SystemEvent } from "#sdk";
+import { ContentIdSchema, type Frame, type SystemEvent } from "#sdk";
 import { z } from "zod";
 import {
   AbilitySchema,
@@ -10,6 +10,58 @@ import {
 } from "./schemas.ts";
 
 export const NS = "dnd5.5e";
+
+// Every frame kind the plugin registers, without its namespace. Saves store them, so none is ever renamed;
+// a test checks this list against the handlers index.ts registers.
+export const FRAME_KINDS = [
+  "advanceParty",
+  "advanceTurn",
+  "afterAction",
+  "afterHit",
+  "afterMove",
+  "afterReaction",
+  "afterTurnStart",
+  "aimArea",
+  "applyHit",
+  "attackRoll",
+  "buildAnswer",
+  "buildStep",
+  "characterChosen",
+  "checkCombatEnd",
+  "companionsSpend",
+  "concentrationSave",
+  "endTurn",
+  "escape",
+  "finishMove",
+  "finishRest",
+  "finishTurn",
+  "gearAnswer",
+  "gearStep",
+  "inspiration",
+  "lairAction",
+  "lairTurn",
+  "legendaryAction",
+  "legendaryTurn",
+  "lingeringTick",
+  "masteryHit",
+  "masteryMiss",
+  "move",
+  "pickTargets",
+  "projectile",
+  "recheckHit",
+  "shopAnswer",
+  "shopStep",
+  "shortRestAnswer",
+  "shortRestStep",
+  "smite",
+  "takeAction",
+  "useItem",
+] as const;
+export type FrameKind = (typeof FRAME_KINDS)[number];
+
+export function frame(kind: FrameKind, payload: Frame["payload"] = {}): Frame {
+  return { kind: `${NS}:${kind}`, payload };
+}
 export const LEGENDARY_USE = "legendary";
 export const LEGENDARY_RESISTANCE = "legendaryResistance";
 

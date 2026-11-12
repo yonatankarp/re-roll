@@ -46,6 +46,7 @@ import {
   hasCondition,
   isDead,
   isDown,
+  frame,
 } from "./state.ts";
 import {
   type KnownAction,
@@ -91,13 +92,6 @@ const NICK_USED = `${MASTERY}nick`;
 const CLEAVE_USED = `${MASTERY}cleave`;
 const HIDE_DC = 15;
 const STUDY_DC = 15;
-
-function frame(
-  kind: string,
-  payload: Readonly<Record<string, unknown>>,
-): Frame {
-  return { kind: `${NS}:${kind}`, payload };
-}
 
 const CHECK_END = frame("checkCombatEnd", {});
 

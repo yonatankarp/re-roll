@@ -8,6 +8,7 @@ import {
   isDead,
   isDown,
   NS,
+  frame,
 } from "../state.ts";
 import { ALL, DECLINE, parseOption } from "./ids.ts";
 import { behindTotalCover, coverBonus, coverFor, seeing } from "../sight.ts";
@@ -46,7 +47,6 @@ import {
   type Context,
   enemies,
   findAction,
-  frame,
   hasFlag,
   hasPassive,
   isMelee,

@@ -17,7 +17,7 @@ import {
   PASS,
   STAY,
 } from "./ids.ts";
-import { type Actor, dndEvent, isDown, NS } from "../state.ts";
+import { type Actor, dndEvent, isDown, NS, frame } from "../state.ts";
 import { distanceFeet, type Square, squareKey } from "../grid.ts";
 import { deriveStats } from "../stats.ts";
 import { FLEE, runFlee } from "../legendary.ts";
@@ -39,7 +39,6 @@ import {
   type Context,
   enemies,
   findAction,
-  frame,
   inReach,
   moveSquares,
   slotLevelFor,

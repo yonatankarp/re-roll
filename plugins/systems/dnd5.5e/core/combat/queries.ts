@@ -1,9 +1,4 @@
-import {
-  type ContentAccess,
-  type Frame,
-  type SystemContext,
-  type SystemEvent,
-} from "#sdk";
+import { type ContentAccess, type SystemContext, type SystemEvent } from "#sdk";
 import {
   type Actor,
   dndEvent,
@@ -13,6 +8,7 @@ import {
   isDead,
   isDown,
   NS,
+  frame,
 } from "../state.ts";
 import {
   deriveStats,
@@ -44,13 +40,6 @@ export function actorOf(state: DndState, id: string): Actor {
   const actor = state.actors[id];
   if (!actor) throw new Error(`Unknown actor ${id}`);
   return actor;
-}
-
-export function frame(
-  kind: string,
-  payload: Readonly<Record<string, unknown>>,
-): Frame {
-  return { kind: `${NS}:${kind}`, payload };
 }
 
 export const CHECK_END = frame("checkCombatEnd", {});

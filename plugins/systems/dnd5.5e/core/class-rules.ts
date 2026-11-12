@@ -1,5 +1,4 @@
 import {
-  type Frame,
   PLAYER_ACTOR,
   type SystemContext,
   type SystemEvent,
@@ -7,7 +6,7 @@ import {
   awaitDecision,
 } from "#sdk";
 import { z } from "zod";
-import { type Actor, type DndState, NS, dndEvent } from "./state.ts";
+import { type Actor, type DndState, NS, dndEvent, frame } from "./state.ts";
 import { type Stats, deriveStats } from "./stats.ts";
 
 // Rules that class features and Heroic Inspiration need in a fight, kept apart from the combat flow in combat.ts.
@@ -16,13 +15,6 @@ type Context = SystemContext<DndState>;
 
 export const REROLL = "reroll";
 const DECLINE = "decline";
-
-function frame(
-  kind: string,
-  payload: Readonly<Record<string, unknown>>,
-): Frame {
-  return { kind: `${NS}:${kind}`, payload };
-}
 
 // An effect like Guiding Bolt's or Bardic Inspiration's lasts only until the next attack roll it applies to.
 export function onceEnded(

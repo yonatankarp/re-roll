@@ -37,6 +37,7 @@ import {
   hasCondition,
   isDead,
   isDown,
+  frame,
 } from "./state.ts";
 import { type KnownAction, deriveStats } from "./stats.ts";
 
@@ -47,13 +48,6 @@ const WAIT = "wait";
 const LEGENDARY_PREFIX = "legendary:";
 const LAIR_PREFIX = "lair:";
 const OFF_MAP = { x: -1000, y: -1000 }; // where a fleeing creature heads, out of everyone's reach
-
-function frame(
-  kind: string,
-  payload: Readonly<Record<string, unknown>>,
-): Frame {
-  return { kind: `${NS}:${kind}`, payload };
-}
 
 const LegendSchema = MonsterSchema.pick({
   legendary: true,

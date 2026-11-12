@@ -1,5 +1,4 @@
 import {
-  type Frame,
   PLAYER_ACTOR,
   type RestOption,
   type SystemContext,
@@ -17,6 +16,7 @@ import {
   REST_HOURS,
   dndEvent,
   isDead,
+  frame,
 } from "./state.ts";
 import { HIT_DICE } from "./combat/ids.ts";
 import { gearOptions } from "./gear.ts";
@@ -34,13 +34,6 @@ type Context = SystemContext<DndState>;
 const SPEND = "spend";
 const GEAR = "gear";
 const FINISH = "finish";
-
-function frame(
-  kind: string,
-  payload: Readonly<Record<string, unknown>> = {},
-): Frame {
-  return { kind: `${NS}:${kind}`, payload };
-}
 
 function party(state: DndState): readonly Actor[] {
   return Object.values(state.actors).filter(

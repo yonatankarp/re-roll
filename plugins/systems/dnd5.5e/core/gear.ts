@@ -1,6 +1,5 @@
 import {
   type ContentAccess,
-  type Frame,
   PLAYER_ACTOR,
   type SystemContext,
   type SystemResult,
@@ -18,6 +17,7 @@ import {
   dndEvent,
   equipped,
   without,
+  frame,
 } from "./state.ts";
 import { lookup } from "./stats.ts";
 
@@ -25,13 +25,6 @@ type Context = SystemContext<DndState>;
 
 const DONE = "done";
 const WORN_TYPES = new Set(["weapon", "armor", "shield"]);
-
-function frame(
-  kind: string,
-  payload: Readonly<Record<string, unknown>>,
-): Frame {
-  return { kind: `${NS}:${kind}`, payload };
-}
 
 function player(state: DndState): Actor {
   const actor = state.actors[PLAYER_ACTOR];

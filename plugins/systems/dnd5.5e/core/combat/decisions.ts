@@ -5,6 +5,7 @@ import {
   INCAPACITATING,
   isDown,
   NS,
+  frame,
 } from "../state.ts";
 import { type ContentAccess, type Decision, PLAYER_ACTOR } from "#sdk";
 import {
@@ -22,7 +23,6 @@ import { PregenSchema } from "../schemas.ts";
 import {
   actorOf,
   canAfford,
-  frame,
   inReach,
   moveSquares,
   slotToSpend,

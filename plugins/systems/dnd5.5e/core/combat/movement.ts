@@ -8,6 +8,7 @@ import {
   isDead,
   isDown,
   NS,
+  frame,
 } from "../state.ts";
 import {
   type ContentAccess,
@@ -25,7 +26,6 @@ import {
   CHECK_END,
   type Context,
   enemies,
-  frame,
   meleeReach,
   moveSquares,
 } from "./queries.ts";
