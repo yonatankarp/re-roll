@@ -207,11 +207,16 @@ function conditionsIn(text: string, left: string[]): LeafEffect[] {
     // "which is no longer Grappled", or "and the Grappled condition ends": swallowing replaces the grapple.
     const released = [
       ...stated.matchAll(
-        /\bno longer (Grappled)\b|\bthe (Grappled) condition ends\b/g,
+        /\bno longer (Grappled)\b|\bthe (Grappled) condition ends\b|\bisn[’']t (Grappled)\b/g,
       ),
     ].map((match) => ({
       kind: "removeCondition" as const,
-      condition: (match[1] ?? match[2] ?? "").toLowerCase() as Condition,
+      condition: (
+        match[1] ??
+        match[2] ??
+        match[3] ??
+        ""
+      ).toLowerCase() as Condition,
     }));
     return [
       ...released,
@@ -249,18 +254,24 @@ function conditionsIn(text: string, left: string[]): LeafEffect[] {
 }
 
 const STATE_LEAD =
-  /^\s*While (?:swallowed|engulfed|trapped|grafted)(?: in this way)?,\s*/i;
+  /^\s*While (?:swallowed|engulfed|trapped|grafted|Restrained)(?: in this way)?,\s*/i;
 
 // "… takes 10 (3d6) Acid damage at the start of each of the monster's turns" while swallowed. shortcut: it ticks on the
 // bearer's own turn rather than the monster's, which is one turn's difference at most.
 function ongoingDamage(text: string, left: string[]): LeafEffect[] {
   const effects = sentencesOf(text).flatMap((sentence): LeafEffect[] => {
     const stated = sentence.replace(STATE_LEAD, "");
+    const amount = `(?:\\d+ \\(\\d+d\\d+(?:\\s*[+−–-]\\s*\\d+)?\\)|\\d+) (?:${TYPES}) damage`;
     const match = new RegExp(
-      `^(.*?)\\btakes? ((?:\\d+ \\(\\d+d\\d+(?:\\s*[+−–-]\\s*\\d+)?\\)|\\d+) (?:${TYPES}) damage) at the (start|end) of each of [^.]*?\\bturns\\b`,
+      `^(.*?)\\btakes? (${amount}(?: plus ${amount})*) at the (start|end) of each of [^.]*?\\bturns\\b`,
       "i",
     ).exec(stated);
-    if (!match || limitOn(match[1] ?? "")) return [];
+    // "has Total Cover against attacks … outside the worm" is part of being swallowed, not a condition on the damage.
+    const lead = (match?.[1] ?? "").replace(
+      /\bhas (?:Total|Half|Three-Quarters) Cover against [^,]*/gi,
+      "",
+    );
+    if (!match || limitOn(lead)) return [];
     const damage = damageIn(match[2] ?? "", []);
     return damage.length > 0
       ? [
@@ -285,6 +296,31 @@ function ongoingDamage(text: string, left: string[]): LeafEffect[] {
     }
   }
   return effects;
+}
+
+// "The toad swallows a Medium or smaller target it is grappling. While swallowed, …": no roll, and only a creature
+// the monster is grappling can be chosen.
+function parseSwallow(text: string, left: string[]): ParsedAction | null {
+  const [first = "", ...rest] = sentencesOf(text);
+  const swallows = new RegExp(
+    `^The [^.]*? swallows (?:a|one) (?:${HERO_SIZES} )?(?:target|creature) (?:it is grappling|Grappled by [^.]*)\\.$`,
+    "i",
+  );
+  if (!swallows.test(first)) return null;
+  const after = rest.join(" ");
+  const effects = [...conditionsIn(after, left), ...ongoingDamage(after, left)];
+  if (!effects.some((effect) => effect.kind === "removeCondition")) {
+    return null;
+  }
+  return {
+    targeting: {
+      creatures: 1,
+      range: 5,
+      side: "enemy",
+      targetConditions: ["grappled"],
+    },
+    resolution: { kind: "automatic", damage: [], effects },
+  };
 }
 
 interface ParsedAction {
@@ -979,7 +1015,10 @@ function parseBlock(
       let optionText = secondPass
         ? withFirstChosenType(option.text, left)
         : option.text;
-      let parsed = parseAttack(optionText, left) ?? parseSave(optionText, left);
+      let parsed =
+        parseAttack(optionText, left) ??
+        parseSave(optionText, left) ??
+        parseSwallow(optionText, left);
       // "Acid or Necrotic damage (its choice)" is read as the first type when nothing else could be.
       if (!parsed && !secondPass) {
         const retry: string[] = [];

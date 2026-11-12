@@ -529,3 +529,51 @@ describe("monster actions read in round 3", () => {
     });
   });
 });
+
+describe("monster actions read in round 4", () => {
+  it("swallows with Total Cover and two damage types each turn", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Gobble",
+        "Strength Saving Throw: DC 16, one Large or smaller creature Grappled by the caster. Failure: The target is swallowed, and the Grappled condition ends. A swallowed creature has the Blinded and Restrained conditions, has Total Cover against attacks and other effects outside the caster, and takes 7 (2d6) Acid damage plus 3 (1d6) Cold damage at the start of each of the caster’s turns.",
+      )}`,
+    );
+    expect(byName(monster, "Gobble")?.activation.resolution).toMatchObject({
+      onFail: [
+        { kind: "removeCondition", condition: "grappled" },
+        { condition: "blinded" },
+        { condition: "restrained" },
+        {
+          modifier: {
+            kind: "lingeringDamage",
+            damage: [
+              { amount: { dice: "2d6" }, type: "acid" },
+              { amount: { dice: "1d6" }, type: "cold" },
+            ],
+          },
+        },
+      ],
+    });
+  });
+
+  it("swallows a creature it is grappling with no roll", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Gulp",
+        "The caster swallows a Medium or smaller target it is grappling. While swallowed, the target isn’t Grappled but has the Blinded and Restrained conditions. In addition, the target takes 4 (1d8) Acid damage at the end of each of the caster’s turns.",
+      )}`,
+    );
+    expect(byName(monster, "Gulp")?.activation).toMatchObject({
+      targeting: { creatures: 1, targetConditions: ["grappled"] },
+      resolution: {
+        kind: "automatic",
+        effects: [
+          { kind: "removeCondition", condition: "grappled" },
+          { condition: "blinded" },
+          { condition: "restrained" },
+          { modifier: { kind: "lingeringDamage", when: "turnEnd" } },
+        ],
+      },
+    });
+  });
+});

@@ -151,6 +151,48 @@ const COILER = dummy("test:monster/coiler", {
   ],
 });
 
+// Swallows a creature it's grappling, and lets it out after 10 damage from inside in one turn.
+const GULPER = dummy("test:monster/gulper", {
+  text: [
+    "Actions",
+    "Gulp. Strength Saving Throw: DC 14, one creature Grappled by the gulper. Failure: The target is swallowed, and the Grappled condition ends.",
+    "If the gulper takes 10 damage or more on a single turn from a creature inside it, the gulper must succeed on a DC 12 Constitution saving throw at the end of that turn or regurgitate all swallowed creatures, each of which falls in a space within 5 feet of the gulper and has the Prone condition.",
+  ].join("\n"),
+  actions: [
+    {
+      name: "Gulp",
+      activation: {
+        cost: ["action"],
+        targeting: {
+          creatures: 1,
+          range: 5,
+          side: "enemy",
+          targetConditions: ["grappled"],
+        },
+        resolution: {
+          kind: "save",
+          ability: "str",
+          dc: { base: 14 },
+          onFail: [
+            { kind: "removeCondition", condition: "grappled" },
+            {
+              kind: "applyCondition",
+              condition: "blinded",
+              duration: { minutes: 1 },
+            },
+            {
+              kind: "applyCondition",
+              condition: "restrained",
+              duration: { minutes: 1 },
+            },
+          ],
+        },
+      },
+    },
+    ...(dummy("x").actions as unknown[]),
+  ],
+});
+
 // Bites, then sprays a cone that the Multiattack has to aim.
 const SPITTER = dummy("test:monster/spitter", {
   text: "Actions\nMultiattack. The spitter makes one Club attack and uses Spray.",
@@ -181,6 +223,7 @@ function arena(base: RunContext): RunContext {
     "test:monster/dummy": dummy("test:monster/dummy"),
     "test:monster/coiler": COILER,
     "test:monster/spitter": SPITTER,
+    "test:monster/gulper": GULPER,
     "test:monster/giant": dummy("test:monster/giant", { size: "huge" }),
     ...Object.fromEntries(WEAPONS.map((item) => [item.id, item])),
   };
@@ -1120,6 +1163,96 @@ describe("monster grapples and multiattacks", () => {
       LOW,
     ).state;
     expect(sources(who(gone, PLAYER_ACTOR))).toEqual([]);
+  });
+
+  it("lets a swallowed creature hit only its swallower, and out on enough damage or the swallower dropping", async () => {
+    const run = await base();
+    const start = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("gulper", [6, 5], "test:monster/gulper"),
+      monster("near", [4, 5]),
+    ]);
+    const grappled = applyDndEvent(
+      start,
+      dndEvent(`${NS}:effectAdded`, {
+        actor: PLAYER_ACTOR,
+        effect: {
+          sourceId: "monster:1",
+          casterId: "gulper",
+          modifier: { kind: "condition", condition: "grappled" },
+          ends: "spellDuration",
+        },
+      }),
+    );
+    const gulped = settle(
+      run,
+      {
+        ...grappled,
+        combat: grappled.combat && { ...grappled.combat, index: 1 },
+      },
+      [act("gulper", "monster:0|player")],
+      LOW,
+    ).state;
+    const inside = who(gulped, PLAYER_ACTOR);
+    expect(hasCondition(inside, "grappled")).toBe(false);
+    expect(inside.activeEffects.every((e) => e.swallowed)).toBe(true);
+    // It carries the hero off, and the foe beside the hero is outside.
+    const moved = applyDndEvent(
+      { ...gulped, combat: gulped.combat && { ...gulped.combat, index: 0 } },
+      dndEvent(`${NS}:moved`, {
+        actor: "gulper",
+        to: { x: 12, y: 5 },
+        feet: 0,
+      }),
+    );
+    const options = optionIds(run, moved);
+    expect(options).toContain(`${LONGSWORD}|gulper`);
+    expect(options).not.toContain(`${LONGSWORD}|near`);
+    // A critical hit from inside does 10 or more, and the gulper fails its save at the end of the turn.
+    const hit = settle(
+      run,
+      moved,
+      [act(PLAYER_ACTOR, `${LONGSWORD}|gulper`)],
+      HIGH,
+    );
+    expect(who(hit.state, "gulper").insideDamage).toBeGreaterThanOrEqual(10);
+    const out = settle(
+      run,
+      hit.state,
+      [{ kind: `${NS}:endTurn`, payload: {} }],
+      LOW,
+    ).state;
+    const hero = who(out, PLAYER_ACTOR);
+    expect(hasCondition(hero, "blinded", "restrained")).toBe(false);
+    expect(hasCondition(hero, "prone")).toBe(true);
+    expect(
+      Math.max(
+        Math.abs((hero.position?.x ?? 0) - 12),
+        Math.abs((hero.position?.y ?? 0) - 5),
+      ),
+    ).toBe(1);
+    expect(who(out, "gulper").insideDamage).toBe(0);
+    // A swallower that drops lets the creature out too.
+    const dead = applyDndEvent(
+      gulped,
+      dndEvent(`${NS}:damaged`, {
+        actor: "gulper",
+        amount: 999,
+        type: "fire",
+        critical: false,
+        massive: false,
+      }),
+    );
+    const freed = settle(
+      run,
+      dead,
+      [{ kind: `${NS}:checkCombatEnd`, payload: {} }],
+      LOW,
+    ).state;
+    expect(
+      hasCondition(who(freed, PLAYER_ACTOR), "blinded", "restrained"),
+    ).toBe(false);
+    expect(hasCondition(who(freed, PLAYER_ACTOR), "prone")).toBe(true);
   });
 
   it("aims an area a Multiattack uses where it catches the most foes", async () => {

@@ -12,6 +12,7 @@ import {
 } from "../state.ts";
 import { ALL, DECLINE, parseOption } from "./ids.ts";
 import { behindTotalCover, coverBonus, coverFor, seeing } from "../sight.ts";
+import { insideDamageEvents } from "./swallow.ts";
 import {
   awaitDecision,
   type SystemEvent,
@@ -481,6 +482,7 @@ export function runApplyHit(
   );
   events.push(
     ...dealt.events,
+    ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
   );
   return {

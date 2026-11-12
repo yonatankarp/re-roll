@@ -41,6 +41,7 @@ import { inArea, parseSquare } from "../grid.ts";
 import { caughtBy } from "../targeting.ts";
 import { behindTotalCover, coverBonus, coverFor } from "../sight.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
+import { insideDamageEvents } from "./swallow.ts";
 import {
   actorOf,
   allies,
@@ -234,6 +235,13 @@ export function leafEvents(
 ): SystemEvent[] {
   const stats = deriveStats(caster, context);
   const events: SystemEvent[] = [];
+  // Taking the target out of a grapple and into the caster swallows it (combat/swallow.ts).
+  const swallowed = effects.some(
+    (effect) =>
+      effect.kind === "removeCondition" && effect.condition === "grappled",
+  )
+    ? { swallowed: true }
+    : {};
   for (const effect of effects) {
     switch (effect.kind) {
       case "heal": {
@@ -266,6 +274,7 @@ export function leafEvents(
               casterId: caster.id,
               modifier: effect.modifier,
               ends: effectEnds(effect.duration),
+              ...swallowed,
             },
           }),
         );
@@ -283,6 +292,7 @@ export function leafEvents(
               ends: effectEnds(effect.duration),
               ...(effect.repeatSave && save ? { repeatSave: save } : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
+              ...swallowed,
             },
           }),
         );
@@ -480,7 +490,10 @@ export function resolveAction(
       false,
       context,
     );
-    events.push(...result.events);
+    events.push(
+      ...result.events,
+      ...insideDamageEvents(actor, target, result.dealt),
+    );
     frames.push(...concentrationFrame(target, result.dealt));
   };
 

@@ -104,6 +104,8 @@ const ActiveEffectSchema = z.strictObject({
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
   endsOnDamage: z.boolean().optional(),
+  // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
+  swallowed: z.boolean().optional(),
 });
 export type ActiveEffect = z.infer<typeof ActiveEffectSchema>;
 
@@ -177,6 +179,8 @@ const ActorSchema = z.strictObject({
   // Where the creature stands in a fight, null outside one. Saves from before the grid have none.
   position: SquareSchema.nullable().default(null),
   moved: z.number().int().default(0), // feet moved this turn
+  // Damage taken this turn from creatures it has swallowed. Missing until there is some.
+  insideDamage: z.number().int().optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -328,6 +332,10 @@ const EffectEndedSchema = z.strictObject({
   sourceId: z.string(),
   casterId: z.string().optional(),
 });
+const DamagedFromInsideSchema = z.strictObject({
+  actor: z.string(), // the swallower
+  amount: z.number().int(),
+});
 const ConditionRemovedSchema = z.strictObject({
   actor: z.string(),
   condition: ConditionSchema,
@@ -396,6 +404,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:resourceRestored`]: ResourceRestoredSchema,
   [`${NS}:oncePerTurnUsed`]: OncePerTurnSchema,
   [`${NS}:damaged`]: DamagedSchema,
+  [`${NS}:damagedFromInside`]: DamagedFromInsideSchema,
   [`${NS}:healed`]: HealedSchema,
   [`${NS}:tempHpGained`]: TempHpSchema,
   [`${NS}:effectAdded`]: EffectAddedSchema,
@@ -536,6 +545,8 @@ function advanceTurn(state: DndState): DndState {
       id,
       {
         ...actor,
+        // Damage from inside counts within a single turn.
+        ...(actor.insideDamage ? { insideDamage: 0 } : {}),
         // A "until your next turn" effect ends when its caster's turn comes round.
         activeEffects: actor.activeEffects
           .filter(
@@ -807,6 +818,13 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) =>
         applyDamage(actor, data.amount, data.critical, data.massive),
       );
+    }
+    case `${NS}:damagedFromInside`: {
+      const data = payload(DamagedFromInsideSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        insideDamage: (actor.insideDamage ?? 0) + data.amount,
+      }));
     }
     case `${NS}:healed`: {
       const data = payload(HealedSchema, event);

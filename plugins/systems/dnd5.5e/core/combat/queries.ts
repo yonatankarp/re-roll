@@ -28,6 +28,7 @@ import {
 import { speedOf } from "../tactics.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
 import { encodeOption } from "./ids.ts";
+import { swallowerOf } from "./swallow.ts";
 import { type Targeting } from "../schemas.ts";
 import { bossAction } from "../legendary.ts";
 import { aimScore, aimSquares, caughtBy } from "../targeting.ts";
@@ -128,6 +129,9 @@ export function reaches(
 ): boolean {
   const { targeting } = action.activation;
   if ("self" in targeting) return true;
+  // From inside a swallower, it's the one creature within reach.
+  const inside = swallowerOf(actor);
+  if (inside !== undefined) return inside === target.id;
   const distance = distanceFeet(actor.position, target.position);
   if ("area" in targeting && targeting.range === "self") {
     return distance <= targeting.area.radius;

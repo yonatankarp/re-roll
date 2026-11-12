@@ -344,7 +344,7 @@ export function placeOnMap(
   return positions;
 }
 
-function nearestOpen(
+export function nearestOpen(
   from: Square,
   grid: Grid,
   taken: ReadonlySet<string>,
