@@ -106,6 +106,8 @@ export interface SystemResult {
 export interface StoryEffectDef<S> {
   readonly schema: z.ZodType;
   readonly apply: (args: unknown, context: SystemContext<S>) => SystemResult;
+  // Content ids the arguments name, checked when the adventure loads.
+  readonly references?: (args: unknown) => readonly string[];
 }
 
 export interface StoryPredicateDef<S> {
@@ -123,11 +125,16 @@ export interface FrameDef<S> {
 export function storyEffect<A, S>(definition: {
   readonly schema: z.ZodType<A>;
   readonly apply: (args: A, context: SystemContext<S>) => SystemResult;
+  readonly references?: (args: A) => readonly string[];
 }): StoryEffectDef<S> {
+  const { references } = definition;
   return {
     schema: definition.schema,
     apply: (args, context) =>
       definition.apply(definition.schema.parse(args), context),
+    ...(references
+      ? { references: (args) => references(definition.schema.parse(args)) }
+      : {}),
   };
 }
 

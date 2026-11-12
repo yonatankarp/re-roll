@@ -78,3 +78,32 @@
     maxDex: 2,
   }
 - { id: "srd52:item/shield", name: Shield, type: shield, bonus: 2 }
+- id: "srd52:item/potion-of-healing"
+  name: Potion of Healing
+  type: magicItem
+  category: potion
+  rarity: common
+  attunement: false
+  text: A vial of red liquid. Drinking it takes a Bonus Action and heals 2d4 + 2 Hit Points.
+  automation: full
+  healing: { dice: 2d4, bonus: { base: 2 } }
+- id: "srd52:item/ring-of-protection"
+  name: Ring of Protection
+  type: magicItem
+  category: ring
+  rarity: rare
+  attunement: true
+  text: While attuned and wearing it, you have +1 to Armor Class and saving throws.
+  automation: partial
+  bonuses:
+    - { to: ac, amount: 1 }
+    - { to: savingThrows, amount: 1 }
+- id: "srd52:item/spell-scroll-magic-missile"
+  name: Spell Scroll (Magic Missile)
+  type: magicItem
+  category: scroll
+  rarity: common
+  attunement: false
+  text: Reading it casts Magic Missile without a spell slot, and the scroll crumbles to dust.
+  automation: partial
+  spell: "srd52:spell/magic-missile"

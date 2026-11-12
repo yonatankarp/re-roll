@@ -73,6 +73,7 @@ import {
   characterEffects,
   characterFrames,
 } from "./character.ts";
+import { gearEffects, gearFrames } from "./gear.ts";
 import { restEffects, restFrames } from "./rest.ts";
 import { rollD20 } from "./rules.ts";
 import {
@@ -227,7 +228,12 @@ export const dnd55e = defineSystem<DndState>({
       schema: SpellSchema,
       references: (item) => item.classes,
     }),
-    equipment: contentKind({ idPrefix: "item", schema: ItemSchema }),
+    equipment: contentKind({
+      idPrefix: "item",
+      schema: ItemSchema,
+      references: (item) =>
+        item.type === "magicItem" && item.spell ? [item.spell] : [],
+    }),
     monsters: contentKind({
       idPrefix: "monster",
       schema: MonsterSchema,
@@ -250,7 +256,10 @@ export const dnd55e = defineSystem<DndState>({
   checkSchema: CheckSchema,
   encounters: encounterKind({
     schema: EncounterSchema,
-    references: (encounter) => encounter.monsters.map((entry) => entry.monster),
+    references: (encounter) => [
+      ...encounter.monsters.map((entry) => entry.monster),
+      ...(encounter.loot?.items ?? []),
+    ],
   }),
   outcomes: { keys: ["success", "failure"] },
   importKinds: { spells: spellImportKind },
@@ -283,6 +292,7 @@ export const dnd55e = defineSystem<DndState>({
     }),
     ...characterEffects,
     ...restEffects,
+    ...gearEffects,
   },
   storyPredicates: {
     [`${NS}:hasInspiration`]: storyPredicate({
@@ -318,6 +328,7 @@ export const dnd55e = defineSystem<DndState>({
     }),
     ...characterFrames,
     ...restFrames,
+    ...gearFrames,
     [`${NS}:takeAction`]: frameHandler({
       schema: TakeActionSchema,
       run: runTakeAction,

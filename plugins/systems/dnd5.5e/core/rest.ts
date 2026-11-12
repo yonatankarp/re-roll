@@ -11,6 +11,7 @@ import {
 import { z } from "zod";
 import { type Actor, type DndState, NS, dndEvent, isDead } from "./state.ts";
 import { HIT_DICE, shortRestEvents } from "./combat.ts";
+import { gearOptions } from "./gear.ts";
 import { ClassSchema } from "./schemas.ts";
 import {
   type Stats,
@@ -23,6 +24,7 @@ import {
 type Context = SystemContext<DndState>;
 
 const SPEND = "spend";
+const GEAR = "gear";
 const FINISH = "finish";
 
 function frame(
@@ -78,7 +80,13 @@ function runShortRestStep(context: Context): SystemResult {
   const player = context.state.actors[PLAYER_ACTOR];
   if (!player) throw new Error("The player has no character");
   const stats = deriveStats(player, context);
-  if (!canSpend(player, stats)) return { frames: [frame("companionsSpend")] };
+  const spend = canSpend(player, stats);
+  // A Short Rest is also the time to attune to a magic item or put on found gear. Worn gear alone, which
+  // could only be stowed, isn't worth asking about.
+  const gear = gearOptions(player, context).some(
+    (option) => !option.id.startsWith("stow:"),
+  );
+  if (!spend && !gear) return { frames: [frame("companionsSpend")] };
   const left = stats.level - (player.resourcesSpent[HIT_DICE] ?? 0);
   return {
     frames: [
@@ -87,8 +95,17 @@ function runShortRestStep(context: Context): SystemResult {
         actor: player.id,
         prompt: `You rest with ${String(player.hp)} of ${String(stats.maxHp)} HP and ${String(left)} Hit Dice left.`,
         options: [
-          { id: SPEND, label: `Spend a Hit Die (${nextDie(player, context)})` },
+          ...(spend
+            ? [
+                {
+                  id: SPEND,
+                  label: `Spend a Hit Die (${nextDie(player, context)})`,
+                },
+              ]
+            : []),
           { id: FINISH, label: "Finish resting" },
+          // Last, so a player who always takes the first choice still finishes the rest.
+          ...(gear ? [{ id: GEAR, label: "Change gear" }] : []),
         ],
         resume: frame("shortRestAnswer"),
       }),
@@ -102,6 +119,11 @@ function runShortRestAnswer(
   { answer }: z.infer<typeof AnswerSchema>,
   context: Context,
 ): SystemResult {
+  if (answer === GEAR) {
+    return {
+      frames: [frame("gearStep", { step: 0 }), frame("shortRestStep")],
+    };
+  }
   if (answer !== SPEND) return { frames: [frame("companionsSpend")] };
   const player = context.state.actors[PLAYER_ACTOR];
   if (!player) throw new Error("The player has no character");

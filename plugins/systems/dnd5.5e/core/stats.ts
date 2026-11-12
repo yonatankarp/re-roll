@@ -1,6 +1,6 @@
 import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
-import { type Actor, hasCondition } from "./state.ts";
+import { type Actor, equipped, hasCondition } from "./state.ts";
 import {
   DAMAGE_TYPES,
   ABILITIES,
@@ -313,8 +313,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const armorBases: number[] = [];
   let flatBonus = 0;
   const actions: KnownAction[] = [];
-  for (const itemId of actor.inventory) {
+  const attuned = actor.attuned ?? [];
+  // One action per kind of item, so a second dagger or potion doesn't list twice.
+  for (const itemId of new Set(equipped(actor))) {
     const item = lookup(access, ItemSchema, itemId);
+    const usable = itemAction(itemId, item, access, firstClass.spellcasting);
+    if (usable) actions.push(usable);
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
       const dex = abilityModifier(abilities.dex);
@@ -329,6 +333,14 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         activation: weaponActivation(WeaponSchema.parse(item), abilities),
         spellLevel: null,
       });
+    } else if (
+      item.type === "magicItem" &&
+      (!item.attunement || attuned.includes(itemId))
+    ) {
+      // shortcut: only AC bonuses apply, not saving throw or weapon bonuses, nor a variant's own numbers.
+      for (const bonus of item.bonuses ?? []) {
+        if (bonus.to === "ac") flatBonus += bonus.amount;
+      }
     }
   }
 
@@ -399,6 +411,46 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         evaluateFormula(resource.max, partial),
       ]),
     ),
+  };
+}
+
+// A potion to drink or a scroll to read, used up once used. Their action ids start "item:", which spends the item.
+function itemAction(
+  itemId: string,
+  item: z.infer<typeof ItemSchema>,
+  access: ContentAccess,
+  spellcasting: unknown,
+): KnownAction | null {
+  if ((item.type === "gear" || item.type === "magicItem") && item.healing) {
+    return {
+      id: `item:${itemId}`,
+      name: `Drink ${item.name}`,
+      activation: {
+        cost: ["bonusAction"],
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          damage: [],
+          effects: [{ kind: "heal", amount: item.healing }],
+        },
+      },
+      spellLevel: null,
+    };
+  }
+  // shortcut: any spellcaster can read any scroll, with their own spellcasting numbers rather than the scroll's.
+  if (item.type !== "magicItem" || !item.spell || !spellcasting) return null;
+  const spell = lookup(access, SpellSchema, item.spell);
+  if (!spell.activation || !doesSomething(spell.activation.resolution)) {
+    return null;
+  }
+  return {
+    id: `item:${itemId}`,
+    name: `Read ${item.name}`,
+    activation: {
+      ...spell.activation,
+      cost: spell.activation.cost.filter((cost) => cost !== "slot"),
+    },
+    spellLevel: spell.level,
   };
 }
 

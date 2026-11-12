@@ -547,6 +547,7 @@ const GearSchema = ItemBaseSchema.extend({
     ])
     .optional(),
   costCp: CostCpSchema.optional(),
+  healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
 }).strict();
 
 const ToolSchema = ItemBaseSchema.extend({
@@ -590,6 +591,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
   text: z.string().min(1),
   automation: AutomationSchema,
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
+  healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
+  spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
   // Set when one entry covers several rarities, such as +1, +2 or +3.
   variants: z
     .array(
@@ -828,6 +831,15 @@ export const BattlemapSchema = z
   });
 export type Battlemap = z.infer<typeof BattlemapSchema>;
 
+// Coins and items the party finds, from an encounter or the treasure story effect.
+export const LootSchema = z.strictObject({
+  gold: z.number().int().min(0).default(0),
+  items: z
+    .array(ContentIdSchema.regex(/:item\//, "must be an item id"))
+    .default([]),
+});
+export type Loot = z.infer<typeof LootSchema>;
+
 export const EncounterSchema = z.strictObject({
   id: z.string().min(1),
   battlemap: BattlemapSchema.optional(),
@@ -841,6 +853,7 @@ export const EncounterSchema = z.strictObject({
     .min(1),
   // The party size the counts were written for. Counts scale to the party that actually shows up.
   forPartySize: z.number().int().min(1).optional(),
+  loot: LootSchema.optional(), // found when the party wins
 });
 
 export const CheckSchema = z.union([

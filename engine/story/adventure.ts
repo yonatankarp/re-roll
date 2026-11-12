@@ -385,15 +385,19 @@ export function validateAdventure(input: AdventureInput): AdventureResult {
           need(file, secretIds, effect.secret, "secret");
           break;
         case "system": {
-          const schema = system.storyEffects[effect.effect]?.schema;
-          if (!schema) {
+          const definition = system.storyEffects[effect.effect];
+          if (!definition) {
             report(
               file,
               `system ${system.id} has no story effect "${effect.effect}"`,
             );
           } else {
-            const args = schema.safeParse(effect.args);
-            if (!args.success) {
+            const args = definition.schema.safeParse(effect.args);
+            if (args.success) {
+              contentReferences.push(
+                ...(definition.references?.(args.data) ?? []),
+              );
+            } else {
               issues.push(
                 ...zodIssues(
                   pluginId,
