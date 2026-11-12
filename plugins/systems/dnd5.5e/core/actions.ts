@@ -9,7 +9,6 @@ import {
 import { z } from "zod";
 import {
   type Context,
-  FLEE,
   HitSchema,
   MOVE,
   PASS,
@@ -27,6 +26,7 @@ import {
   within5,
 } from "./combat.ts";
 import { type Square, distanceFeet, squareKey } from "./grid.ts";
+import { FLEE } from "./legendary.ts";
 import { finalDamage, rollD20 } from "./rules.ts";
 import {
   type Ability,
@@ -145,17 +145,21 @@ function reportedSave(
   dc: number,
   label: string,
   context: Context,
-): { readonly saved: boolean; readonly event: SystemEvent } {
-  const saved = rollSave(target, ability, dc, context);
+): { readonly saved: boolean; readonly events: readonly SystemEvent[] } {
+  // The roll for the history (and a Legendary Resistance), then the line saying what it was against.
+  const { saved, events } = rollSave(target, ability, dc, context);
   return {
     saved,
-    event: dndEvent(`${NS}:saveReported`, {
-      actor: target.id,
-      ability,
-      dc,
-      success: saved,
-      label,
-    }),
+    events: [
+      ...events,
+      dndEvent(`${NS}:saveReported`, {
+        actor: target.id,
+        ability,
+        dc,
+        success: saved,
+        label,
+      }),
+    ],
   };
 }
 
@@ -667,7 +671,7 @@ export function runTactic(
       return {
         events: [
           spend("action"),
-          save.event,
+          ...save.events,
           ...(save.saved
             ? []
             : [
@@ -707,7 +711,7 @@ export function runTactic(
             ]
           : pushEvents(actor, shoved, 5, state);
       return {
-        events: [spend("action"), save.event, ...result],
+        events: [spend("action"), ...save.events, ...result],
         frames: done,
       };
     }
@@ -911,7 +915,7 @@ export function runMasteryHit(
       );
       return {
         events: [
-          save.event,
+          ...save.events,
           ...(save.saved
             ? []
             : [

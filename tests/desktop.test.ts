@@ -13,6 +13,7 @@ import {
   it,
   vi,
 } from "vitest";
+import { BOOK_ROOTS } from "./depth.ts";
 import { systems } from "../app/systems.ts";
 import {
   CONTENT_ROUTE,
@@ -61,7 +62,10 @@ function memorySaves(): SaveStore {
 describe("parseContentPath", () => {
   it.each([
     ["plugins/rules/a.yaml", "plugins", "rules/a.yaml"],
-    ["private/rules/a.yaml", "private", "rules/a.yaml"],
+    ["books/rules/a.yaml", "books", "rules/a.yaml"],
+    ["books/adventures/x/plugin.yaml", "books", "adventures/x/plugin.yaml"],
+    ["books/assets/x/index.json", "books", "assets/x/index.json"],
+    ["books/library/x/index.json", "books", "library/x/index.json"],
     ["plugins", "plugins", ""],
   ])("allows %s", (path, folder, rest) => {
     expect(parseContentPath(path)).toEqual({ folder, rest });
@@ -74,13 +78,23 @@ describe("parseContentPath", () => {
     "saves/a.json",
     "pluginsX/a.yaml",
     "plugins/../package.json",
-    "plugins/rules/../../private/a",
+    "plugins/rules/../../books/a",
     "plugins/./a.yaml",
     "plugins//a.yaml",
     "plugins/a/",
     "plugins\\..\\package.json",
     "..\\plugins",
     "plugins/a\0.yaml",
+    "books/.git/config",
+    "books/rules/.hidden.yaml",
+    // books/ is only reachable through the folders the game reads, not its importer working files.
+    "books",
+    "books/a.yaml",
+    "books/sources/spells.txt",
+    "books/import/x/report.md",
+    "books/audit/x.md",
+    "books/encodings/x.json",
+    "books/Rules/a.yaml",
   ])("refuses %j", (path) => {
     expect(parseContentPath(path)).toBeNull();
   });
@@ -95,6 +109,8 @@ describe("the content endpoint", () => {
     base = await mkdtemp(join(tmpdir(), "re-roll-"));
     await mkdir(join(base, "plugins/rules"), { recursive: true });
     await writeFile(join(base, "plugins/rules/a.yaml"), "good: true");
+    await mkdir(join(base, "plugins/rules/.git"));
+    await writeFile(join(base, "plugins/rules/.git/config"), "secret");
     await writeFile(join(base, "package.json"), "stolen");
     await symlink(join(base, "package.json"), join(base, "plugins/link.yaml"));
     ({ server, url } = await serve(base));
@@ -119,8 +135,8 @@ describe("the content endpoint", () => {
 
   it("treats a missing private folder as empty", async () => {
     const reader = createContentReader(url);
-    expect(await reader.read("private/a.yaml")).toBeNull();
-    expect(await reader.list("private/rules")).toEqual([]);
+    expect(await reader.read("books/rules/a.yaml")).toBeNull();
+    expect(await reader.list("books/rules")).toEqual([]);
   });
 
   it("refuses paths outside the folders, and says nothing about them", async () => {
@@ -221,6 +237,79 @@ describe("playing through the shell's session", () => {
     expect(difficulty()).toBe("story");
   });
 
+  const pick = async (
+    game: ReturnType<typeof newGame>,
+    label: string,
+  ): Promise<void> => {
+    const option = game
+      .view()
+      .decision?.options.find((item) => item.label.includes(label));
+    if (!option) throw new Error(`${label} isn't offered`);
+    await game.answer(option.id);
+  };
+
+  it("undoes the last choice on Story, and the same choice rolls the same dice again", async () => {
+    const game = newGame();
+    await game.start("haunted-house", "undo-test", { difficulty: "story" });
+    expect(game.view().canUndo).toBe(false); // nothing chosen yet
+    await chooseCharacter(game, "Fighter");
+    await pick(game, "Try the cellar door");
+    await pick(game, "Keep moving"); // the dread clock's beat comes first
+    const before = game.view();
+    await pick(game, "Force the lock");
+    const after = game.view();
+    expect(after.rolls.at(-1)).toMatchObject({
+      actor: "Human Fighter",
+      label: "Athletics check",
+      step: after.steps - 1,
+    });
+    expect(after.rolls.at(-1)?.math).toMatch(/^\d+ [+−] \d+ = \d+ vs DC 13$/);
+
+    await game.undo();
+    expect(game.view()).toEqual(before);
+    // The autosave forgets the choice too, so loading it doesn't bring it back.
+    const autosave = (await game.listSaves()).find((save) => save.current);
+    if (!autosave) throw new Error("No autosave");
+    await game.load(autosave.path);
+    expect(game.view().steps).toBe(before.steps);
+
+    await pick(game, "Force the lock");
+    expect(game.view().rolls).toEqual(after.rolls);
+    expect(game.view().systemState).toEqual(after.systemState);
+  });
+
+  it("offers no undo on Normal or Hard", async () => {
+    for (const difficulty of ["normal", "hard"]) {
+      const game = newGame();
+      await game.start("haunted-house", "undo-test", { difficulty });
+      await chooseCharacter(game, "Fighter");
+      expect(game.view().canUndo).toBe(false);
+      await expect(game.undo()).rejects.toThrow("doesn't allow undoing");
+    }
+  });
+
+  it("keeps the clues found as leads, and the rolls made, from the events", async () => {
+    const game = newGame();
+    await game.start("haunted-house", "leads-test");
+    await chooseCharacter(game, "Fighter");
+    expect(game.view().leads).toEqual([]);
+    await pick(game, "Talk to the caretaker");
+    const { leads, steps } = game.view();
+    expect(leads).toEqual([
+      {
+        clues: [
+          { text: "Fresh mortar dust on the caretaker's sleeves.", step: 2 },
+        ],
+      },
+    ]);
+    expect(steps).toBe(3);
+    // A save tells the same leads again.
+    const path = await game.save("leads");
+    await game.start("haunted-house", "other");
+    await game.load(path);
+    expect(game.view().leads).toEqual(leads);
+  });
+
   it("lists the adventures by title", async () => {
     const adventures = await newGame().listAdventures();
     expect(adventures.map((item) => item.id).sort()).toEqual([
@@ -238,7 +327,7 @@ describe("playing through the shell's session", () => {
       storage: withSaves(
         {
           read: (path) =>
-            path === "private/assets/book/index.json"
+            path === "books/assets/book/index.json"
               ? Promise.resolve(
                   JSON.stringify([
                     { file: "cover.jpg", cover: ["haunted-house"] },
@@ -247,9 +336,9 @@ describe("playing through the shell's session", () => {
                 )
               : content.read(path),
           list: (prefix) =>
-            prefix === "private/assets"
+            prefix === "books/assets"
               ? Promise.resolve([
-                  { path: "private/assets/book/index.json", symlink: false },
+                  { path: "books/assets/book/index.json", symlink: false },
                 ])
               : content.list(prefix),
         },
@@ -264,18 +353,18 @@ describe("playing through the shell's session", () => {
     );
     // A cover that isn't a picture is dropped, so that adventure shows its plate.
     expect(covers).toEqual({
-      "haunted-house": "private/assets/book/cover.jpg",
+      "haunted-house": "books/assets/book/cover.jpg",
       "goblin-ambush": null,
     });
   });
 
   // Runs only where the owner's books are present.
-  it.skipIf(!existsSync("private/adventures"))(
+  it.skipIf(!BOOK_ROOTS || !existsSync("books/adventures"))(
     "finds a cover for every adventure from the books",
     async () => {
       const adventures = await createGame({
         storage: withSaves(createContentReader(url), memorySaves()),
-        roots: ["plugins", "private"],
+        roots: ["plugins", "books"],
         systems,
         uis: [dndUi],
       }).listAdventures();
@@ -547,7 +636,7 @@ describe("playing through the shell's session", () => {
       storage: withSaves(
         {
           read: (path) =>
-            path === "private/assets/book/index.json"
+            path === "books/assets/book/index.json"
               ? Promise.resolve(
                   JSON.stringify([
                     { file: "a.png", monster: "goblin-warrior" },
@@ -556,9 +645,9 @@ describe("playing through the shell's session", () => {
                 )
               : content.read(path),
           list: (prefix) =>
-            prefix === "private/assets"
+            prefix === "books/assets"
               ? Promise.resolve([
-                  { path: "private/assets/book/index.json", symlink: false },
+                  { path: "books/assets/book/index.json", symlink: false },
                 ])
               : content.list(prefix),
         },
@@ -577,7 +666,7 @@ describe("playing through the shell's session", () => {
     }
     // Every Goblin Warrior gets the picture, and the path that climbs out of its folder is dropped.
     expect(new Set(Object.values(game.view().monsterArt))).toEqual(
-      new Set(["private/assets/book/a.png"]),
+      new Set(["books/assets/book/a.png"]),
     );
     await game.start("haunted-house", "desktop-test-1");
     // Its only art is a text file, which must never reach an <img>.

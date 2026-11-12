@@ -8,6 +8,7 @@ import {
 import {
   EMPTY_INDEX,
   type NarrationIndex,
+  NarrationIndexSchema,
   clipFile,
   narratedTexts,
   planNarration,
@@ -64,6 +65,27 @@ describe("scene ambience", () => {
 });
 
 describe("narration index", () => {
+  it("accepts the clip names it makes and refuses paths out of the folder", () => {
+    const clip = { scene: "s", voice: "af_heart", seconds: 1 };
+    const index = (file: string) =>
+      NarrationIndexSchema.safeParse({ version: 1, clips: { [file]: clip } })
+        .success;
+    expect(index(clipFile("af_heart", "The road is long."))).toBe(true);
+    for (const file of [
+      "../x.mp3",
+      "af_heart/../../x.mp3",
+      "/etc/x.mp3",
+      "af_heart/abc.wav",
+      "af_heart\\abc.mp3",
+      "abc.mp3",
+    ]) {
+      expect(index(file)).toBe(false);
+    }
+    expect(
+      NarrationIndexSchema.safeParse({ version: 2, clips: {} }).success,
+    ).toBe(false);
+  });
+
   const texts = [
     { scene: "start", text: "The road is long." },
     { scene: "cave", text: "Water drips." },

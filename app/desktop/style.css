@@ -825,6 +825,122 @@ summary {
   display: none;
 }
 
+/* "Why?" under the ticker: the latest choice's rolls, opened on demand. */
+.rolls-why {
+  margin-top: 2px;
+  font-size: 0.9rem;
+}
+
+.rolls-why summary {
+  display: inline-block;
+  color: var(--muted);
+  font-style: italic;
+  cursor: pointer;
+}
+
+.rolls-why[open] .rolls {
+  animation: rise 0.18s ease both;
+}
+
+.rolls {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.92rem;
+}
+
+.roll {
+  padding: 2px 0;
+}
+
+.roll.new-step {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.roll-who {
+  font-weight: bold;
+}
+
+.roll-math {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.roll-mark.hit {
+  color: var(--good);
+}
+
+.roll-mark.miss {
+  color: var(--rule);
+}
+
+/* The Journal's tabs: the story so far, the rolls, and the leads. */
+.journal-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+}
+
+.journal-panels > [hidden] {
+  display: none;
+}
+
+.tab.has-new::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  vertical-align: super;
+  border-radius: 50%;
+  background: var(--rule);
+}
+
+.leads {
+  display: grid;
+  gap: 10px;
+}
+
+.lead {
+  list-style: none;
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
+  border-radius: 6px;
+}
+
+.lead li {
+  padding: 3px 0;
+}
+
+.lead li.new {
+  animation: rise 0.3s ease both;
+}
+
+.new-mark {
+  margin-right: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font: 0.75rem var(--font-ui);
+  color: var(--accent-ink);
+  background: var(--rule);
+  vertical-align: 1px;
+}
+
+.rolls .empty,
+.leads .empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .initiative-details summary {
   color: var(--muted);
 }
@@ -2041,4 +2157,125 @@ button:active {
   font-size: 0.85rem;
   font-style: italic;
   opacity: 0.75;
+}
+
+/* A merchant's screen in place of the choices: a parchment panel of item cards under Buy and Sell tabs. */
+.options[hidden],
+.shop[hidden] {
+  display: none;
+}
+
+.shop {
+  margin-top: 16px;
+  padding: 12px 18px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--rule);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.12);
+  animation: rise 0.4s ease both;
+}
+
+.shop-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  border-bottom: 2px solid var(--line);
+  padding-bottom: 6px;
+}
+
+.shop-head h3 {
+  margin: 0;
+  font: 1.6rem/1.1 var(--font-title);
+  color: var(--accent);
+}
+
+.shop-purse {
+  margin: 0;
+  font: 1rem var(--font-ui);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.shop-purse::before {
+  content: "\1FA99  ";
+}
+
+.shop-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.shop-tab {
+  font-family: var(--font-ui);
+  font-size: 0.95rem;
+  border-radius: 999px;
+  padding: 8px 22px;
+}
+
+.shop-tab[aria-selected="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.shop-wares {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.ware {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  animation: rise 0.3s ease both;
+  animation-delay: calc(var(--i, 0) * 35ms);
+}
+
+.ware h4 {
+  margin: 0;
+  font: 1.2rem/1.1 var(--font-head);
+  color: var(--accent);
+}
+
+.ware-summary,
+.ware-note,
+.ware-none {
+  margin: 0;
+  font: 0.9rem var(--font-ui);
+  color: var(--muted);
+}
+
+.ware-note {
+  font-style: italic;
+}
+
+.ware-trade {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  font-family: var(--font-ui);
+}
+
+.ware-price {
+  font-variant-numeric: tabular-nums;
+  font-weight: bold;
+}
+
+.ware-trade:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.shop-leave {
+  margin-top: 14px;
+  width: 100%;
 }

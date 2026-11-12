@@ -20,6 +20,8 @@ import {
   HitSchema,
   LingeringSchema,
   MoveSchema,
+  PickSchema,
+  AimSchema,
   ReactionSchema,
   SmiteSchema,
   TakeActionSchema,
@@ -27,6 +29,7 @@ import {
   runAfterAction,
   runAfterHit,
   runAfterReaction,
+  runAdvanceTurn,
   runAfterTurnStart,
   runApplyHit,
   runAttackRoll,
@@ -37,6 +40,8 @@ import {
   runFinishTurn,
   runLingeringTick,
   runMove,
+  runPickTargets,
+  runAimArea,
   runProjectile,
   runRecheckHit,
   runSmite,
@@ -85,7 +90,10 @@ import {
   characterFrames,
 } from "./character.ts";
 import { gearEffects, gearFrames } from "./gear.ts";
+import { legendaryFrames, surpriseEffects } from "./legendary.ts";
+import { shopEffects, shopFrames } from "./shop.ts";
 import { availableRests, restEffects, restFrames } from "./rest.ts";
+import { InspirationSchema, runInspiration } from "./class-rules.ts";
 import { rollD20 } from "./rules.ts";
 import {
   BackgroundSchema,
@@ -304,6 +312,8 @@ export const dnd55e = defineSystem<DndState>({
     ...characterEffects,
     ...restEffects,
     ...gearEffects,
+    ...surpriseEffects,
+    ...shopEffects,
   },
   storyPredicates: {
     [`${NS}:hasInspiration`]: storyPredicate({
@@ -340,6 +350,12 @@ export const dnd55e = defineSystem<DndState>({
     ...characterFrames,
     ...restFrames,
     ...gearFrames,
+    ...legendaryFrames,
+    [`${NS}:advanceTurn`]: frameHandler({
+      schema: EmptyPayload,
+      run: (_payload, context: Context) => runAdvanceTurn(context),
+    }),
+    ...shopFrames,
     [`${NS}:takeAction`]: frameHandler({
       schema: TakeActionSchema,
       run: (payload, context: Context) =>
@@ -360,6 +376,11 @@ export const dnd55e = defineSystem<DndState>({
       run: runMasteryMiss,
     }),
     [`${NS}:move`]: frameHandler({ schema: MoveSchema, run: runMove }),
+    [`${NS}:pickTargets`]: frameHandler({
+      schema: PickSchema,
+      run: runPickTargets,
+    }),
+    [`${NS}:aimArea`]: frameHandler({ schema: AimSchema, run: runAimArea }),
     [`${NS}:finishMove`]: frameHandler({
       schema: FinishMoveSchema,
       run: runFinishMove,
@@ -377,6 +398,10 @@ export const dnd55e = defineSystem<DndState>({
       run: runAfterHit,
     }),
     [`${NS}:smite`]: frameHandler({ schema: SmiteSchema, run: runSmite }),
+    [`${NS}:inspiration`]: frameHandler({
+      schema: InspirationSchema,
+      run: runInspiration,
+    }),
     [`${NS}:lingeringTick`]: frameHandler({
       schema: LingeringSchema,
       run: runLingeringTick,
@@ -428,7 +453,8 @@ export const dnd55e = defineSystem<DndState>({
           id: "story",
           label: "Story",
           detail:
-            "Your party takes a third of the damage. For enjoying the story.",
+            "Your party takes a third of the damage, and you can undo your last choice. For enjoying the story.",
+          undo: true,
         },
         {
           id: "normal",
@@ -485,7 +511,8 @@ export const dnd55e = defineSystem<DndState>({
       "skill" in parsed ? SKILL_ABILITIES[parsed.skill] : parsed.ability;
     const roll = rollD20(context.dice, {
       advantage: false,
-      disadvantage: false,
+      disadvantage:
+        stats.untrainedArmor && (ability === "str" || ability === "dex"),
     });
     const total =
       roll.natural +
@@ -518,5 +545,7 @@ export const dnd55e = defineSystem<DndState>({
   rests: availableRests,
   decidePolicy: tacticalPolicy,
   tactical: (decision) =>
-    /^dnd5\.5e:(turn|moveTo|reaction|afterHit|deathSave):/.test(decision.id),
+    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave):/.test(
+      decision.id,
+    ),
 });

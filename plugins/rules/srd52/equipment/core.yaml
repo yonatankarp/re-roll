@@ -1,6 +1,8 @@
 - {
     id: "srd52:item/longsword",
     name: Longsword,
+    costCp: 1500,
+    weightLb: 3,
     type: weapon,
     category: martial,
     damage: { dice: 1d8, type: slashing },
@@ -10,6 +12,8 @@
 - {
     id: "srd52:item/shortsword",
     name: Shortsword,
+    costCp: 1000,
+    weightLb: 2,
     type: weapon,
     category: martial,
     damage: { dice: 1d6, type: piercing },
@@ -19,6 +23,8 @@
 - {
     id: "srd52:item/shortbow",
     name: Shortbow,
+    costCp: 2500,
+    weightLb: 2,
     type: weapon,
     category: simple,
     damage: { dice: 1d6, type: piercing },
@@ -28,6 +34,8 @@
 - {
     id: "srd52:item/mace",
     name: Mace,
+    costCp: 500,
+    weightLb: 4,
     type: weapon,
     category: simple,
     damage: { dice: 1d6, type: bludgeoning },
@@ -37,6 +45,8 @@
 - {
     id: "srd52:item/quarterstaff",
     name: Quarterstaff,
+    costCp: 20,
+    weightLb: 4,
     type: weapon,
     category: simple,
     damage: { dice: 1d6, type: bludgeoning },
@@ -46,6 +56,8 @@
 - {
     id: "srd52:item/dagger",
     name: Dagger,
+    costCp: 200,
+    weightLb: 1,
     type: weapon,
     category: simple,
     damage: { dice: 1d4, type: piercing },
@@ -55,14 +67,19 @@
 - {
     id: "srd52:item/chain-mail",
     name: Chain Mail,
+    costCp: 7500,
+    weightLb: 55,
     type: armor,
     armorType: heavy,
     base: 16,
     addDex: false,
+    strength: 13,
   }
 - {
     id: "srd52:item/leather-armor",
     name: Leather Armor,
+    costCp: 1000,
+    weightLb: 10,
     type: armor,
     armorType: light,
     base: 11,
@@ -71,15 +88,26 @@
 - {
     id: "srd52:item/scale-mail",
     name: Scale Mail,
+    costCp: 5000,
+    weightLb: 45,
     type: armor,
     armorType: medium,
     base: 14,
     addDex: true,
     maxDex: 2,
   }
-- { id: "srd52:item/shield", name: Shield, type: shield, bonus: 2 }
+- {
+    id: "srd52:item/shield",
+    name: Shield,
+    costCp: 1000,
+    weightLb: 6,
+    type: shield,
+    bonus: 2,
+  }
 - id: "srd52:item/potion-of-healing"
   name: Potion of Healing
+  costCp: 5000
+  weightLb: 0.5
   type: magicItem
   category: potion
   rarity: common

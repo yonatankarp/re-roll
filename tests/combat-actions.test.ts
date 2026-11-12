@@ -380,12 +380,12 @@ describe("actions anyone can take", () => {
     expect(rolls(plain.events)[0]?.natural).toBe(20);
 
     const hero = who(dodged, PLAYER_ACTOR);
-    expect(rollSave(hero, "dex", 15, contextOf(run, dodged, d20s(1, 20)))).toBe(
-      true,
-    );
-    expect(rollSave(hero, "str", 15, contextOf(run, dodged, d20s(1, 20)))).toBe(
-      false,
-    );
+    expect(
+      rollSave(hero, "dex", 15, contextOf(run, dodged, d20s(1, 20))).saved,
+    ).toBe(true);
+    expect(
+      rollSave(hero, "str", 15, contextOf(run, dodged, d20s(1, 20))).saved,
+    ).toBe(false);
     expect(sources(who(nextTurn(nextTurn(dodged)), PLAYER_ACTOR))).toEqual([]);
   });
 

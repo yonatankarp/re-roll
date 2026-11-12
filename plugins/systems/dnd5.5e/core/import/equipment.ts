@@ -17,6 +17,7 @@ import { plainText, slugOf } from "./spells.ts";
 function parseWeapon(
   cells: readonly string[],
   category: string,
+  columns: readonly string[],
   pluginId: string,
 ): ParsedImport {
   const [name = "", damage = "", properties = "", mastery = ""] =
@@ -39,6 +40,7 @@ function parseWeapon(
         : { dice, type: type.toLowerCase() },
       properties: listed.map((item) => camelCase(item.split("(")[0] ?? "")),
       mastery: mastery.toLowerCase(),
+      ...costAndWeight(cells, columns),
     },
   };
 }
@@ -46,12 +48,17 @@ function parseWeapon(
 function parseArmor(
   cells: readonly string[],
   armorType: string,
+  columns: readonly string[],
   pluginId: string,
 ): ParsedImport {
   const [name = "", ac = "", strength = "", stealth = ""] =
     cells.map(plainText);
   const slug = slugOf(name);
-  const common = { id: `${pluginId}:item/${slug}`, name };
+  const common = {
+    id: `${pluginId}:item/${slug}`,
+    name,
+    ...costAndWeight(cells, columns),
+  };
   const bonus = /^\+(\d+)/.exec(ac)?.[1];
   if (bonus) {
     return {
@@ -61,9 +68,10 @@ function parseArmor(
     };
   }
   const maxDex = /\(max (\d+)\)/.exec(ac)?.[1];
+  const minStrength = /^Str (\d+)/.exec(strength)?.[1];
   return {
     slug,
-    notes: [strength, stealth]
+    notes: [stealth]
       .filter((item) => item !== "—")
       .map((item) => `not held: ${item}`),
     entry: {
@@ -73,6 +81,7 @@ function parseArmor(
       base: Number(/^\d+/.exec(ac)?.[0]),
       addDex: ac.includes("Dex modifier"),
       ...(maxDex ? { maxDex: Number(maxDex) } : {}),
+      ...(minStrength ? { strength: Number(minStrength) } : {}),
     },
   };
 }
@@ -80,20 +89,22 @@ function parseArmor(
 // Single-cell rows in these tables head a group, such as Simple Melee Weapons or Light Armor.
 function groupedRows<T>(
   table: string | undefined,
-  read: (cells: readonly string[], group: string) => T,
+  read: (
+    cells: readonly string[],
+    group: string,
+    columns: readonly string[],
+  ) => T,
 ): readonly T[] {
   let group = "";
-  return rowsOf(table ?? "")
-    .slice(1)
-    .flatMap((cells) => {
-      if (cells.length === 1) {
-        group = (
-          /^\w+/.exec(plainText(cells[0] ?? ""))?.[0] ?? ""
-        ).toLowerCase();
-        return [];
-      }
-      return [read(cells, group)];
-    });
+  const [header = [], ...rows] = rowsOf(table ?? "");
+  const columns = header.map(plainText);
+  return rows.flatMap((cells) => {
+    if (cells.length === 1) {
+      group = (/^\w+/.exec(plainText(cells[0] ?? ""))?.[0] ?? "").toLowerCase();
+      return [];
+    }
+    return [read(cells, group, columns)];
+  });
 }
 
 const COPPER_PER_COIN: Readonly<Record<string, number>> = {
@@ -111,6 +122,26 @@ function priced(cost: string): { readonly costCp?: number } {
   return match?.[1] && coin
     ? { costCp: Number(match[1].replaceAll(",", "")) * coin }
     : {};
+}
+
+// Pounds, as "3 lb." or "1/2 lb."; empty for "—".
+function weighed(weight: string): { readonly weightLb?: number } {
+  const match = /^([\d,]+)(?:\/(\d+))? lb\.$/.exec(weight);
+  return match?.[1]
+    ? {
+        weightLb: Number(match[1].replaceAll(",", "")) / Number(match[2] ?? 1),
+      }
+    : {};
+}
+
+// The Cost and Weight columns, found by name since the tables order them differently.
+function costAndWeight(
+  cells: readonly string[],
+  columns: readonly string[],
+): { readonly costCp?: number; readonly weightLb?: number } {
+  const at = (name: string): string =>
+    plainText(cells[columns.findIndex((item) => item.startsWith(name))] ?? "");
+  return { ...priced(at("Cost")), ...weighed(at("Weight")) };
 }
 
 const GEAR_TABLES: Readonly<Record<string, string>> = {
@@ -151,6 +182,7 @@ function gearEntry(
   cost: string,
   lines: readonly string[],
   pluginId: string,
+  weight = "",
 ): ParsedImport {
   const text = lines.filter(Boolean).join("\n");
   return {
@@ -162,6 +194,7 @@ function gearEntry(
       type: "gear",
       category,
       ...priced(cost),
+      ...weighed(weight),
       ...(text ? { text } : {}),
     },
   };
@@ -206,6 +239,7 @@ function parseGearTable(
         printed[costAt] ?? "",
         [...facts, descriptions.get(short) ?? ""],
         pluginId,
+        printed[columns.indexOf("Weight")] ?? "",
       ),
     ];
   });
@@ -260,6 +294,7 @@ function parseTools(
           ability: abilitiesIn(/Ability: (\w+)/.exec(text)?.[1] ?? "")[0],
           text,
           ...priced(cost),
+          ...weighed(/Weight: (\S+ lb\.)/.exec(text)?.[1] ?? ""),
         },
       };
     });
@@ -277,14 +312,14 @@ export function parseEquipmentFromHtml(
       tables.find(
         (table) => captionOf(table) === "Weapons" && table.includes("Mastery"),
       ),
-      (cells, group) => parseWeapon(cells, group, pluginId),
+      (cells, group, columns) => parseWeapon(cells, group, columns, pluginId),
     ),
     ...groupedRows(
       tables.find(
         (table) =>
           captionOf(table) === "Armor" && table.includes("Armor Class"),
       ),
-      (cells, group) => parseArmor(cells, group, pluginId),
+      (cells, group, columns) => parseArmor(cells, group, columns, pluginId),
     ),
     ...parseTools(html, headings, pluginId),
     ...tables.flatMap((table) => {

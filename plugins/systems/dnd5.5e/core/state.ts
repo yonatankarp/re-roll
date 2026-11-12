@@ -10,6 +10,8 @@ import {
 } from "./schemas.ts";
 
 export const NS = "dnd5.5e";
+export const LEGENDARY_USE = "legendary";
+export const LEGENDARY_RESISTANCE = "legendaryResistance";
 
 export const TACTICS = [
   "dodge",
@@ -116,15 +118,22 @@ const ActorSchema = z.strictObject({
 export type Actor = z.infer<typeof ActorSchema>;
 
 export const DIFFICULTIES = ["story", "normal", "hard"] as const;
+
+const SurpriseSchema = z.enum(["party", "enemies"]);
+// A fight in a monster's lair. Lair actions come just before the turn at `at` in the order: initiative 20, losing ties.
+const LairSchema = z.strictObject({ at: z.number().int() });
 export const MAX_ATTUNED = 3;
 
 export const StateSchema = z.strictObject({
   // Chosen when the game starts. Missing in saves from before there was a choice, which played as normal.
   difficulty: z.enum(DIFFICULTIES).optional(),
-  gold: z.number().int().optional(), // the party's coins, in gold pieces
+  gold: z.number().min(0).optional(), // the party's coins, in gold pieces, with copper as hundredths
+  // What each merchant has sold, by name, so limited stock stays sold on a later visit.
+  shopBought: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   actors: z.record(z.string(), ActorSchema),
   // Hours since the last Long Rest began. Missing until the first, so the first is always allowed.
   sinceLongRest: z.number().int().optional(),
+  surprise: SurpriseSchema.optional(), // set by the story for the next fight, such as after a Stealth check
   combat: z
     .strictObject({
       encounter: z.string(),
@@ -137,6 +146,7 @@ export const StateSchema = z.strictObject({
       walls: z.array(z.string()).optional(), // squares no one can enter, as "x,y"
       map: FightMapSchema.optional(),
       loot: LootSchema.optional(), // found if the party wins
+      lair: LairSchema.optional(),
     })
     .nullable(),
 });
@@ -178,6 +188,8 @@ const CombatStartedSchema = z.strictObject({
   walls: z.array(z.string()).optional(),
   map: FightMapSchema.optional(),
   loot: LootSchema.optional(),
+  surprised: SurpriseSchema.optional(),
+  lair: LairSchema.optional(),
 });
 const TreasureFoundSchema = z.strictObject({
   actor: z.string(), // who carries the items
@@ -189,6 +201,14 @@ const GearChangedSchema = z.strictObject({
   actor: z.string(),
   stowed: z.array(ContentIdSchema),
   attuned: z.array(ContentIdSchema),
+});
+const TradedSchema = z.strictObject({
+  actor: z.string(),
+  merchant: z.string(),
+  item: ContentIdSchema,
+  bought: z.boolean(), // false for sold
+  priceCp: z.number().int().min(0),
+  stowed: z.boolean(), // bought gear goes in the pack, as found gear does
 });
 const ItemUsedSchema = z.strictObject({
   actor: z.string(),
@@ -270,6 +290,28 @@ const SaveReportSchema = z.strictObject({
   label: z.string(),
 });
 
+// A saving throw, recorded only for the roll history: the outcome lives in the events that follow it.
+const SaveRolledSchema = z.strictObject({
+  actor: z.string(),
+  ability: AbilitySchema,
+  natural: z.number().int(),
+  total: z.number().int(),
+  dc: z.number().int(),
+  success: z.boolean(),
+});
+
+// `key` marks one that can't be taken again until the monster's next turn.
+const LegendaryActionTakenSchema = z.strictObject({
+  actor: z.string(),
+  name: z.string(),
+  cost: z.number().int(),
+  key: z.string().optional(),
+});
+const LairActionTakenSchema = z.strictObject({
+  actor: z.string(),
+  name: z.string(),
+});
+
 export const EVENT_SCHEMAS = {
   [`${NS}:characterChosen`]: CharacterChosenSchema,
   [`${NS}:characterAdvanced`]: CharacterAdvancedSchema,
@@ -296,10 +338,17 @@ export const EVENT_SCHEMAS = {
   [`${NS}:deathSaveRolled`]: DeathSaveSchema,
   [`${NS}:rollReported`]: RollReportSchema,
   [`${NS}:saveReported`]: SaveReportSchema,
+  [`${NS}:saveRolled`]: SaveRolledSchema,
   [`${NS}:inspirationGranted`]: ActorOnlySchema,
+  [`${NS}:inspirationSpent`]: ActorOnlySchema,
   [`${NS}:treasureFound`]: TreasureFoundSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
+  [`${NS}:legendaryActionTaken`]: LegendaryActionTakenSchema,
+  [`${NS}:legendaryResistanceUsed`]: ActorOnlySchema,
+  [`${NS}:lairActionTaken`]: LairActionTakenSchema,
+  [`${NS}:surpriseSet`]: z.strictObject({ side: SurpriseSchema }),
+  [`${NS}:traded`]: TradedSchema,
 } as const;
 
 export type EventKind = keyof typeof EVENT_SCHEMAS;
@@ -499,6 +548,7 @@ function applyDamage(
   const hp = Math.max(0, actor.hp - remaining);
   const hitWhileDown =
     wasDown && remaining > 0 && actor.side === "party" ? (critical ? 2 : 1) : 0;
+  const unsettled = hitWhileDown > 0 && isStable(actor);
   return {
     ...actor,
     activeEffects:
@@ -507,10 +557,13 @@ function applyDamage(
         : actor.activeEffects,
     tempHp: actor.tempHp - absorbed,
     hp,
+    // Becoming Stable reset both counts, so damage that ends it starts death saves from nothing.
     deathSaves: {
-      ...actor.deathSaves,
+      successes: unsettled ? 0 : actor.deathSaves.successes,
       // Massive damage kills outright, which three failures also represent.
-      failures: massive ? 3 : actor.deathSaves.failures + hitWhileDown,
+      failures: massive
+        ? 3
+        : (unsettled ? 0 : actor.deathSaves.failures) + hitWhileDown,
     },
   };
 }
@@ -600,8 +653,12 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         ...state.actors,
         ...Object.fromEntries(data.monsters.map((item) => [item.id, item])),
       };
+      // The surprise was for this fight, so it's spent now.
+      const rest = Object.fromEntries(
+        Object.entries(state).filter(([key]) => key !== "surprise"),
+      ) as Omit<DndState, "surprise">;
       return {
-        ...state,
+        ...rest,
         actors: Object.fromEntries(
           Object.entries(actors).map(([id, actor]) => [
             id,
@@ -619,6 +676,7 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
           ...(data.walls ? { walls: data.walls } : {}),
           ...(data.map ? { map: data.map } : {}),
           ...(data.loot ? { loot: data.loot } : {}),
+          ...(data.lair ? { lair: data.lair } : {}),
         },
       };
     }
@@ -748,6 +806,12 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
           heroicInspiration: true,
         }),
       );
+    case `${NS}:inspirationSpent`:
+      return updateActor(
+        state,
+        payload(ActorOnlySchema, event).actor,
+        (actor) => ({ ...actor, heroicInspiration: false }),
+      );
     case `${NS}:treasureFound`: {
       const data = payload(TreasureFoundSchema, event);
       const found = updateActor(state, data.actor, (actor) => ({
@@ -755,7 +819,10 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         inventory: [...actor.inventory, ...data.items],
         stowed: [...(actor.stowed ?? []), ...data.stowed],
       }));
-      return { ...found, gold: (state.gold ?? 0) + data.gold };
+      return {
+        ...found,
+        gold: Math.round(((state.gold ?? 0) + data.gold) * 100) / 100,
+      };
     }
     case `${NS}:gearChanged`: {
       const data = payload(GearChangedSchema, event);
@@ -765,6 +832,48 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         attuned: data.attuned,
       }));
     }
+    case `${NS}:traded`: {
+      const data = payload(TradedSchema, event);
+      const traded = updateActor(state, data.actor, (actor) => {
+        if (data.bought) {
+          return {
+            ...actor,
+            inventory: [...actor.inventory, data.item],
+            ...(data.stowed
+              ? { stowed: [...(actor.stowed ?? []), data.item] }
+              : {}),
+          };
+        }
+        // A copy in the pack goes before one worn, and attunement ends with the last copy.
+        const inventory = without(actor.inventory, [data.item]);
+        return {
+          ...actor,
+          inventory,
+          ...(actor.stowed
+            ? { stowed: without(actor.stowed, [data.item]) }
+            : {}),
+          ...(actor.attuned && !inventory.includes(data.item)
+            ? { attuned: actor.attuned.filter((id) => id !== data.item) }
+            : {}),
+        };
+      });
+      const change = (data.bought ? -data.priceCp : data.priceCp) / 100;
+      return {
+        ...traded,
+        gold: Math.round(((state.gold ?? 0) + change) * 100) / 100,
+        ...(data.bought
+          ? {
+              shopBought: {
+                ...state.shopBought,
+                [data.merchant]: [
+                  ...(state.shopBought?.[data.merchant] ?? []),
+                  data.item,
+                ],
+              },
+            }
+          : {}),
+      };
+    }
     case `${NS}:itemUsed`: {
       const data = payload(ItemUsedSchema, event);
       return updateActor(state, data.actor, (actor) => ({
@@ -772,6 +881,34 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         inventory: without(actor.inventory, [data.item]),
       }));
     }
+    // Uses are marks in usedThisTurn, which clears when the monster's own turn starts, as its uses come back.
+    case `${NS}:legendaryActionTaken`: {
+      const data = payload(LegendaryActionTakenSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        usedThisTurn: [
+          ...actor.usedThisTurn,
+          ...Array<string>(data.cost).fill(LEGENDARY_USE),
+          ...(data.key ? [data.key] : []),
+        ],
+      }));
+    }
+    case `${NS}:legendaryResistanceUsed`: {
+      const { actor: id } = payload(ActorOnlySchema, event);
+      return updateActor(state, id, (actor) => ({
+        ...actor,
+        resourcesSpent: {
+          ...actor.resourcesSpent,
+          [LEGENDARY_RESISTANCE]:
+            (actor.resourcesSpent[LEGENDARY_RESISTANCE] ?? 0) + 1,
+        },
+      }));
+    }
+    case `${NS}:surpriseSet`:
+      return {
+        ...state,
+        surprise: payload(z.strictObject({ side: SurpriseSchema }), event).side,
+      };
     default:
       return state;
   }

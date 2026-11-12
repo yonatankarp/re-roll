@@ -49,7 +49,10 @@ import {
   deriveStats,
   doesSomething,
   lookup,
+  weaponProficient,
 } from "./stats.ts";
+
+export { weaponProficient };
 
 type Context = SystemContext<DndState>;
 type LevelEntry = CharacterBuild["levels"][number];
@@ -351,16 +354,6 @@ export function levelChoices(
   ];
 }
 
-export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
-  if (!classDef.weapons.includes(weapon.category)) return false;
-  const limit = classDef.martialWeaponProperties;
-  return (
-    weapon.category !== "martial" ||
-    !limit ||
-    weapon.properties.some((property) => limit.includes(property))
-  );
-}
-
 // Each spell choice looks at every spell, and companions make many of them when a run starts.
 const parsedSpells = new WeakMap<ContentAccess["content"], readonly Spell[]>();
 
@@ -466,20 +459,25 @@ export function choiceOptions(
             ? spell.level === 0
             : spell.level >= 1 && spell.level <= choice.maxLevel),
       );
+      const works = (spell: Spell): boolean =>
+        spell.activation !== undefined &&
+        doesSomething(spell.activation.resolution);
+      // Spells the rules can't play yet stay on offer for the story, marked and listed last.
+      const sorted = [
+        ...spells.filter(works),
+        ...spells.filter((spell) => !works(spell)),
+      ];
       return {
         what: choice.maxLevel === 0 ? "a cantrip" : "a spell",
-        options: spells.map((spell) => ({
+        options: sorted.map((spell) => ({
           id: spell.id,
           label:
-            spell.level === 0
+            (spell.level === 0
               ? spell.name
-              : `${spell.name} (level ${String(spell.level)})`,
+              : `${spell.name} (level ${String(spell.level)})`) +
+            (works(spell) ? "" : " (story only)"),
         })),
-        prefer: spells.flatMap((spell) =>
-          spell.activation && doesSomething(spell.activation.resolution)
-            ? [spell.id]
-            : [],
-        ),
+        prefer: spells.filter(works).map((spell) => spell.id),
       };
     }
     case "option": {
