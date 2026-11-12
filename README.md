@@ -72,7 +72,7 @@ Scenes without a made-ahead clip are read in the app by Kokoro-82M, on WebGPU wh
 | **Windows** | WebView2 (Chromium) | Expected, not yet checked                                                                                          | Expected, not yet checked                       |
 | **Linux**   | WebKitGTK           | Not yet checked. It has no WebGPU by default, so narration always runs in WASM                                     | Not yet checked                                 |
 
-The macOS row was checked on a release build on macOS 27 (Apple silicon).
+The macOS row was checked on a release build on macOS 27 (Apple silicon). There the narrator read on WebGPU, so it took the 330 MB model, and one WASM thread only matters on a Mac without WebGPU. The model was downloaded once and read from the Cache API after a relaunch.
 
 ## Saves
 
