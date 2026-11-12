@@ -191,9 +191,14 @@ export function cueSound(cue: DndCue): void {
     case "end":
       fightEndSound();
       return;
+    case "legendary":
+    case "lair":
+      castSound();
+      return;
     case "move":
     case "turn":
     case "status":
+    case "resist":
       return;
   }
 }

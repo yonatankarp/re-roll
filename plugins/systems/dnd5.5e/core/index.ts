@@ -28,6 +28,7 @@ import {
   runAfterAction,
   runAfterHit,
   runAfterReaction,
+  runAdvanceTurn,
   runAfterTurnStart,
   runApplyHit,
   runAttackRoll,
@@ -74,6 +75,7 @@ import {
   characterFrames,
 } from "./character.ts";
 import { gearEffects, gearFrames } from "./gear.ts";
+import { legendaryFrames, surpriseEffects } from "./legendary.ts";
 import { availableRests, restEffects, restFrames } from "./rest.ts";
 import { InspirationSchema, runInspiration } from "./class-rules.ts";
 import { rollD20 } from "./rules.ts";
@@ -294,6 +296,7 @@ export const dnd55e = defineSystem<DndState>({
     ...characterEffects,
     ...restEffects,
     ...gearEffects,
+    ...surpriseEffects,
   },
   storyPredicates: {
     [`${NS}:hasInspiration`]: storyPredicate({
@@ -330,6 +333,11 @@ export const dnd55e = defineSystem<DndState>({
     ...characterFrames,
     ...restFrames,
     ...gearFrames,
+    ...legendaryFrames,
+    [`${NS}:advanceTurn`]: frameHandler({
+      schema: EmptyPayload,
+      run: (_payload, context: Context) => runAdvanceTurn(context),
+    }),
     [`${NS}:takeAction`]: frameHandler({
       schema: TakeActionSchema,
       run: runTakeAction,

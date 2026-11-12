@@ -10,6 +10,8 @@ import {
 } from "./schemas.ts";
 
 export const NS = "dnd5.5e";
+export const LEGENDARY_USE = "legendary";
+export const LEGENDARY_RESISTANCE = "legendaryResistance";
 
 const ActiveEffectSchema = z.strictObject({
   sourceId: z.string(),
@@ -100,6 +102,10 @@ const ActorSchema = z.strictObject({
 export type Actor = z.infer<typeof ActorSchema>;
 
 export const DIFFICULTIES = ["story", "normal", "hard"] as const;
+
+const SurpriseSchema = z.enum(["party", "enemies"]);
+// A fight in a monster's lair. Lair actions come just before the turn at `at` in the order: initiative 20, losing ties.
+const LairSchema = z.strictObject({ at: z.number().int() });
 export const MAX_ATTUNED = 3;
 
 export const StateSchema = z.strictObject({
@@ -109,6 +115,7 @@ export const StateSchema = z.strictObject({
   actors: z.record(z.string(), ActorSchema),
   // Hours since the last Long Rest began. Missing until the first, so the first is always allowed.
   sinceLongRest: z.number().int().optional(),
+  surprise: SurpriseSchema.optional(), // set by the story for the next fight, such as after a Stealth check
   combat: z
     .strictObject({
       encounter: z.string(),
@@ -121,6 +128,7 @@ export const StateSchema = z.strictObject({
       walls: z.array(z.string()).optional(), // squares no one can enter, as "x,y"
       map: FightMapSchema.optional(),
       loot: LootSchema.optional(), // found if the party wins
+      lair: LairSchema.optional(),
     })
     .nullable(),
 });
@@ -162,6 +170,8 @@ const CombatStartedSchema = z.strictObject({
   walls: z.array(z.string()).optional(),
   map: FightMapSchema.optional(),
   loot: LootSchema.optional(),
+  surprised: SurpriseSchema.optional(),
+  lair: LairSchema.optional(),
 });
 const TreasureFoundSchema = z.strictObject({
   actor: z.string(), // who carries the items
@@ -246,6 +256,18 @@ const RollReportSchema = z.strictObject({
   label: z.string(),
 });
 
+// `key` marks one that can't be taken again until the monster's next turn.
+const LegendaryActionTakenSchema = z.strictObject({
+  actor: z.string(),
+  name: z.string(),
+  cost: z.number().int(),
+  key: z.string().optional(),
+});
+const LairActionTakenSchema = z.strictObject({
+  actor: z.string(),
+  name: z.string(),
+});
+
 export const EVENT_SCHEMAS = {
   [`${NS}:characterChosen`]: CharacterChosenSchema,
   [`${NS}:characterAdvanced`]: CharacterAdvancedSchema,
@@ -276,6 +298,10 @@ export const EVENT_SCHEMAS = {
   [`${NS}:treasureFound`]: TreasureFoundSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
+  [`${NS}:legendaryActionTaken`]: LegendaryActionTakenSchema,
+  [`${NS}:legendaryResistanceUsed`]: ActorOnlySchema,
+  [`${NS}:lairActionTaken`]: LairActionTakenSchema,
+  [`${NS}:surpriseSet`]: z.strictObject({ side: SurpriseSchema }),
 } as const;
 
 export type EventKind = keyof typeof EVENT_SCHEMAS;
@@ -576,8 +602,12 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         ...state.actors,
         ...Object.fromEntries(data.monsters.map((item) => [item.id, item])),
       };
+      // The surprise was for this fight, so it's spent now.
+      const rest = Object.fromEntries(
+        Object.entries(state).filter(([key]) => key !== "surprise"),
+      ) as Omit<DndState, "surprise">;
       return {
-        ...state,
+        ...rest,
         actors: Object.fromEntries(
           Object.entries(actors).map(([id, actor]) => [
             id,
@@ -595,6 +625,7 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
           ...(data.walls ? { walls: data.walls } : {}),
           ...(data.map ? { map: data.map } : {}),
           ...(data.loot ? { loot: data.loot } : {}),
+          ...(data.lair ? { lair: data.lair } : {}),
         },
       };
     }
@@ -754,6 +785,34 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         inventory: without(actor.inventory, [data.item]),
       }));
     }
+    // Uses are marks in usedThisTurn, which clears when the monster's own turn starts, as its uses come back.
+    case `${NS}:legendaryActionTaken`: {
+      const data = payload(LegendaryActionTakenSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        usedThisTurn: [
+          ...actor.usedThisTurn,
+          ...Array<string>(data.cost).fill(LEGENDARY_USE),
+          ...(data.key ? [data.key] : []),
+        ],
+      }));
+    }
+    case `${NS}:legendaryResistanceUsed`: {
+      const { actor: id } = payload(ActorOnlySchema, event);
+      return updateActor(state, id, (actor) => ({
+        ...actor,
+        resourcesSpent: {
+          ...actor.resourcesSpent,
+          [LEGENDARY_RESISTANCE]:
+            (actor.resourcesSpent[LEGENDARY_RESISTANCE] ?? 0) + 1,
+        },
+      }));
+    }
+    case `${NS}:surpriseSet`:
+      return {
+        ...state,
+        surprise: payload(z.strictObject({ side: SurpriseSchema }), event).side,
+      };
     default:
       return state;
   }

@@ -9,6 +9,7 @@ import { weaponProficient } from "../core/character.ts";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
 import { foundText } from "../core/gear.ts";
 import { inArea } from "../core/grid.ts";
+import { legendOf, resistancesLeft } from "../core/legendary.ts";
 import { dndCue } from "./cues.ts";
 import {
   ABILITIES,
@@ -707,7 +708,14 @@ function combat(rawState: unknown, access: ContentAccess) {
           hp: actor.hp,
           maxHp: deriveStats(actor, access).maxHp,
           tempHp: actor.tempHp,
-          conditions: conditionsOf(actor),
+          conditions: [
+            ...conditionsOf(actor),
+            ...(legendOf(actor, access).legendaryResistance
+              ? [
+                  `Legendary Resistance (${String(resistancesLeft(actor, access, state))} left)`,
+                ]
+              : []),
+          ],
           concentration: actor.concentratingOn
             ? sourceName(access, actor.concentratingOn)
             : null,
