@@ -24,6 +24,8 @@ npm run desktop   # the same game in the Tauri window
 npm run play      # play in the terminal, without the UI
 ```
 
+`npm run desktop:build` bundles the desktop app for the OS it runs on. [docs/release.md](docs/release.md) covers what a bundle holds, the check that keeps private content out, and the plan for signing and updates.
+
 `npm run ui` uses a fixed port. To run a second copy, pass another one: `npm run ui -- --port 5200`.
 
 `npm run play -- <adventure>` starts an adventure, and with no arguments it lists them. Section 12 of the design doc has its options and the scripted JSON mode.

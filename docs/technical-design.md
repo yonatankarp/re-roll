@@ -1010,7 +1010,7 @@ Without an adventure it lists them. Saves go under `<dir>/saves`, which defaults
 
 - **Attribution:** plugins carry their own `attribution`, and the About screen shows it for every loaded plugin.
 - **SRD 5.2:** the `srd52` plugin must use the exact attribution statement from the SRD's legal page, and no other credit to Wizards. The game may say "compatible with fifth edition" or "5E compatible". `dnd5.5e` is the internal plugin ID, so any public wording should use one of those two phrases.
-- **Book plugins:** stay in `books/`, excluded from git. The release build is meant to fail if it finds a `distribution: private` plugin, but that check isn't built yet.
+- **Book plugins:** stay in `books/`, excluded from git. `npm run desktop:build` fails if a `distribution: private` plugin, a `books/` path or a symlink would be bundled (`npm run check-bundle`, see [release.md](release.md)).
 - **Source material:** data plugins come from copies you own. The engine won't include an importer for sites that host unlicensed copies.
 - **Daggerheart:** treat its content as private until the license is checked. [The license page](https://darringtonpress.com/license) describes permitted formats and approved virtual tabletops, but doesn't address standalone software. It also lists SRD 2.0 and license 2.0 from August 2026, while I read SRD 1.0, so the mechanics need rechecking before that plugin is built.
 

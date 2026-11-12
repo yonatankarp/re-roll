@@ -1,12 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Re-roll",
+  "version": "../../../package.json",
   "identifier": "app.re-roll.desktop",
   "build": {
     "devUrl": "http://127.0.0.1:5199",
     "frontendDist": "../../../out/desktop",
     "beforeDevCommand": "npm run ui",
-    "beforeBuildCommand": "npm run ui:build"
+    "beforeBuildCommand": "npm run ui:build && npm run check-bundle"
   },
   "app": {
     "windows": [

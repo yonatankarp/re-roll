@@ -18,6 +18,7 @@
     "test": "vitest run --project unit",
     "test:soak": "vitest run --project soak",
     "test:coverage": "vitest run --project unit --coverage",
+    "check-bundle": "node app/cli/check-bundle.ts",
     "check-pack": "node app/cli/check-pack.ts",
     "check-pack:fixtures": "node tests/check-fixtures.ts",
     "prep:eval": "node tests/prep-eval.ts",
