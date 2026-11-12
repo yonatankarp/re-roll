@@ -9,3 +9,4 @@ app/desktop/src-tauri/gen/
 books
 .env*
 coverage/
+!tests/fixtures/saves/

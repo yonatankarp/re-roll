@@ -466,6 +466,15 @@ function runDirector(
   return {};
 }
 
+// Every kind runStoryFrame handles, so a save can be checked at load.
+export const STORY_FRAME_KINDS: ReadonlySet<string> = new Set([
+  "story:resolveChoice",
+  "story:applyEffects",
+  "story:afterEncounter",
+  "story:enterScene",
+  "story:director",
+]);
+
 export function runStoryFrame(
   run: RunContext,
   state: GameState,
