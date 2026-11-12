@@ -50,6 +50,7 @@ export function showGame(ctx: ShellContext): void {
   combatGridSlot.id = "combat-grid-slot";
   combatGridSlot.hidden = true;
   let cuesShown: number | null = null; // null until the first draw, which shows a loaded game as it stands
+  let sceneDraws = 0; // the latest scene update, so a stale one never lands
   // The newest lines of the journal, under the board, so the latest result is visible without the whole log.
   // Read out as it changes, so hits, misses and enemy turns aren't silent.
   const ticker = el("ol", { class: "ticker" });
@@ -324,27 +325,42 @@ export function showGame(ctx: ShellContext): void {
     });
     const firstDraw = cuesShown === null;
     cuesShown = view.cues.length;
-    stage.classList.toggle("in-combat", view.combat !== null);
-    camp.update(view);
-    sound.update(view);
+    // A fight's layout comes at once, so its start plays on the map; leaving it waits like the scene.
+    if (view.combat) stage.classList.add("in-combat");
 
-    title.textContent = view.title;
-    document.title = view.sceneTitle
-      ? `${view.title} — ${view.sceneTitle}`
-      : view.title;
-    if (view.scene !== sceneShown) {
-      sceneShown = view.scene;
-      scene.textContent = view.scene;
-      if (!firstDraw) enter(scene);
-    }
-    // Only touched on a change, so staying in a scene doesn't reload its picture.
-    if (view.sceneArt !== artShown) {
-      artShown = view.sceneArt;
-      sceneArt.replaceChildren(
-        ...(view.sceneArt ? [picture(ctx.game, view.sceneArt, "", "art")] : []),
-      );
-      if (!firstDraw) enter(sceneArt);
-    }
+    // The next scene, and its narrator, wait for the board to finish the fight that leads to it.
+    const drawScene = (): void => {
+      stage.classList.toggle("in-combat", view.combat !== null);
+      camp.update(view);
+      sound.update(view);
+      title.textContent = view.title;
+      document.title = view.sceneTitle
+        ? `${view.title} — ${view.sceneTitle}`
+        : view.title;
+      if (view.scene !== sceneShown) {
+        sceneShown = view.scene;
+        scene.textContent = view.scene;
+        if (!firstDraw) enter(scene);
+      }
+      // Only touched on a change, so staying in a scene doesn't reload its picture.
+      if (view.sceneArt !== artShown) {
+        artShown = view.sceneArt;
+        sceneArt.replaceChildren(
+          ...(view.sceneArt
+            ? [picture(ctx.game, view.sceneArt, "", "art")]
+            : []),
+        );
+        if (!firstDraw) enter(sceneArt);
+      }
+    };
+    // Every later draw waits, since one without cues can still come while the board replays.
+    const shownScene = ++sceneDraws;
+    if (!firstDraw && page.board?.settled) {
+      void page.board.settled().then(() => {
+        // Not once the player has left this screen, as its title and sound would then leak out.
+        if (shownScene === sceneDraws && stage.isConnected) drawScene();
+      });
+    } else drawScene();
     drawEnding(page, view);
     // With a board showing the fight, the written turn order folds away until it's wanted.
     const order = view.combat

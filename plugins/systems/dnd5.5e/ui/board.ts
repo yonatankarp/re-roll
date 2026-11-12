@@ -116,7 +116,8 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     // The book's battle map when the fight has one, cut to the fight's squares; otherwise the scene's picture.
     const map = extraOf(update).map ?? null;
     const backdrop = map ? `${update.assetRoot}/${map.image}` : update.sceneArt;
-    if (backdrop !== ctx.sceneArt) {
+    // A fight still playing keeps its map; a new one gets its own before its start cue plays.
+    if (backdrop !== ctx.sceneArt && (settle || ctx.tokens.size === 0)) {
       ctx.sceneArt = backdrop;
       field.style.backgroundImage = "";
       field.classList.toggle("mapped", map !== null);
