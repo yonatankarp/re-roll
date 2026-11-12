@@ -85,8 +85,9 @@ interface BoardHost {
 interface Token {
   readonly node: HTMLElement;
   readonly disc: HTMLElement;
-  readonly bar: HTMLElement;
-  readonly hpText: HTMLElement;
+  readonly tip: HTMLElement; // the name, HP and conditions, shown on hover or under the cursor
+  readonly name: string;
+  notes: readonly string[]; // status and conditions
   side: string;
   x: number | null;
   y: number | null;
@@ -115,6 +116,7 @@ const PACE: Record<DndCue["kind"], number> = {
 const D20 = `<svg viewBox="0 0 100 100" aria-hidden="true"><polygon class="d20-body" points="50,3 93,27 93,73 50,97 7,73 7,27"/><polygon class="d20-face" points="50,22 76,66 24,66"/><path class="d20-edge" d="M50,3 50,22 M93,27 76,66 M93,73 76,66 M50,97 50,66 M7,73 24,66 M7,27 24,66 M50,22 93,27 M50,22 7,27 M24,66 50,97 76,66"/></svg>`;
 
 const SQUARE = /^(\d+),(\d+)$/; // a move option's id
+const FADE: KeyframeAnimationOptions = { duration: 250, easing: "ease-out" };
 const SEPARATOR = "|"; // between an option id's action, target and slot
 const AIM = "@"; // an area aimed at a creature
 const MOVE = "move"; // the turn option that asks where to go
@@ -198,10 +200,15 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   said.setAttribute("aria-live", "polite");
   const cursorBox = el("div", "dnd-cursor");
   let cursor: { x: number; y: number } | null = null;
-  const field = el("div", "dnd-field");
+  const field = el("div", "dnd-field plain"); // a parchment mat until a picture loads
   const banner = el("div", "dnd-banner");
   const hint = el("div", "dnd-hint", "Click to skip");
   const caption = el("div", "dnd-caption"); // who is doing what, during an attack
+  // The first player turn of the first fight says how the map works, until the player uses it.
+  const HOW_TO = "Click a square to move, or a foe to attack";
+  let howTo: "unseen" | "showing" | "done" = "unseen";
+  let decisionSeen: string | null = null;
+  let cursorHome = false; // the cursor goes back to the player once the board settles
   const cells = el("div", "dnd-cells");
   const SVG = "http://www.w3.org/2000/svg";
   const route = document.createElementNS(SVG, "svg");
@@ -256,11 +263,12 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     if (item?.dataset.option) {
       closeMenu();
       board.focus(); // the menu button goes away, so focus stays on the map
+      mapUsed();
       host.answer(item.dataset.option);
     } else if (cell?.dataset.option) {
       answerCell(cell);
     } else if (token?.dataset.id) {
-      openMenu(token.dataset.id, token);
+      openMenu(token.dataset.id, token, true);
     } else {
       closeMenu();
     }
@@ -305,14 +313,23 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       });
   };
 
+  const setTip = (token: Token): void => {
+    token.tip.textContent = [
+      token.name,
+      `${String(Math.max(0, token.hp))}/${String(token.maxHp)} HP`,
+      ...token.notes,
+    ].join(" · ");
+  };
+
+  // HP shows as a ring round the disc that empties as the creature is hurt.
   const setHp = (token: Token, hp: number): void => {
     token.hp = hp;
     const share = token.maxHp > 0 ? Math.max(0, hp) / token.maxHp : 0;
-    token.bar.style.width = `${String(Math.round(share * 100))}%`;
-    token.bar.dataset.level =
+    token.node.style.setProperty("--hp", String(share));
+    token.node.dataset.level =
       share > 0.5 ? "high" : share > 0.25 ? "mid" : "low";
-    token.hpText.textContent = `${String(Math.max(0, hp))}/${String(token.maxHp)}`;
     token.node.classList.toggle("down", hp <= 0);
+    setTip(token);
   };
 
   // A picture fills the token; with a known face, the face fills it instead of the top of the picture.
@@ -348,24 +365,18 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     const existing = tokens.get(actor.id);
     if (existing) return existing;
     const disc = el("div", "dnd-disc", initials(actor.name));
-    const bar = el("i", "");
-    const hpText = el("span", "dnd-hp");
+    const tip = el("span", "dnd-tip");
     const node = el("div", "dnd-token");
-    node.append(
-      disc,
-      el("span", "dnd-name", actor.name),
-      el("span", "dnd-bar"),
-      hpText,
-    );
-    node.querySelector(".dnd-bar")?.append(bar);
+    node.append(el("span", "dnd-ring"), disc, tip);
     node.dataset.side = sideOf(actor);
     node.dataset.id = actor.id;
     field.append(node);
     const token: Token = {
       node,
       disc,
-      bar,
-      hpText,
+      tip,
+      name: actor.name,
+      notes: [],
       side: sideOf(actor),
       x: null,
       y: null,
@@ -391,8 +402,6 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     if (grid) {
       const square = field.clientWidth / grid.width;
       field.style.setProperty("--sq", `${String(square)}px`);
-      // Names under small tokens run into each other; hovering a token still shows its name.
-      field.classList.toggle("tight", square < 44);
       field.style.aspectRatio = `${String(grid.width)} / ${String(grid.height)}`;
       field.style.setProperty("--cols", String(grid.width));
       field.style.setProperty("--rows", String(grid.height));
@@ -403,6 +412,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       if (grid && token.x !== null && token.y !== null) {
         token.node.style.left = `${String(((token.x + 0.5) / grid.width) * 100)}%`;
         token.node.style.top = `${String(((token.y + 0.5) / grid.height) * 100)}%`;
+        // Near an edge, the tooltip opens inwards, clear of the caption and the frame.
+        token.node.classList.toggle("high", token.y < 2);
+        token.node.classList.toggle("west", token.x < 2);
+        token.node.classList.toggle("east", token.x > grid.width - 3);
         continue;
       }
       sides.set(token.side, [...(sides.get(token.side) ?? []), token]);
@@ -476,6 +489,16 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       cell.dataset.y = String(square.y);
       cells.append(cell);
     }
+    if (playing) return; // the caption is telling what's happening
+    if (howTo === "unseen" && options.length > 0) howTo = "showing";
+    showCaption(howTo === "showing" ? HOW_TO : "");
+  };
+
+  // The player has used the map, so it needs no more explaining.
+  const mapUsed = (): void => {
+    if (howTo !== "showing") return;
+    howTo = "done";
+    showCaption("");
   };
 
   // The dashed route to a square the player is pointing at, from where they stand.
@@ -565,7 +588,9 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
 
   const answerCell = (cell: HTMLElement): void => {
     const steps = (cell.dataset.option ?? "").split(" ").filter(Boolean);
-    if (steps.length > 0) host.answer(...steps);
+    if (steps.length === 0) return;
+    mapUsed();
+    host.answer(...steps);
   };
 
   // Dragging the player's token onto a lit square walks it there.
@@ -613,7 +638,9 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   };
 
   // The options aimed at a token, or for the player's own token, the ones aimed at nobody in particular.
-  const openMenu = (id: string, anchor: HTMLElement): void => {
+  // A click on a foe with one thing to do does it; keys always get the menu, and so does your own
+  // token, whose menu can hold End your turn.
+  const openMenu = (id: string, anchor: HTMLElement, pointer = false): void => {
     const own = id === PLAYER_ACTOR;
     const options = playerOptions().filter((option) => {
       if (SQUARE.test(option.id) || option.id === MOVE) return false;
@@ -623,6 +650,13 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     });
     if (options.length === 0) {
       closeMenu();
+      return;
+    }
+    const [only] = options;
+    if (pointer && !own && only && options.length === 1) {
+      closeMenu();
+      mapUsed();
+      host.answer(only.id);
       return;
     }
     menu.replaceChildren(
@@ -672,11 +706,13 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     const cell = cellNodeAt(cursor.x, cursor.y);
     showRoute(cell ?? null);
     showReach(found?.[0] ?? null);
+    for (const token of tokens.values()) {
+      token.node.classList.toggle("cursor", token === found?.[1]);
+    }
     const name = squareName(cursor.x, cursor.y);
     if (found) {
-      const [id, token] = found;
-      const who = token.node.querySelector(".dnd-name")?.textContent ?? id;
-      said.textContent = `${name}: ${who}, ${String(Math.max(0, token.hp))} of ${String(token.maxHp)} HP.`;
+      const [, token] = found;
+      said.textContent = `${name}: ${token.name}, ${String(Math.max(0, token.hp))} of ${String(token.maxHp)} HP.`;
     } else {
       said.textContent = cell
         ? `${name}: ${cell.title}.`
@@ -732,7 +768,8 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     }
     const step = STEPS[event.key];
     if (step && grid) {
-      const from = cursor ?? { x: 0, y: 0 };
+      const me = tokens.get(PLAYER_ACTOR);
+      const from = cursor ?? { x: me?.x ?? 0, y: me?.y ?? 0 };
       placeCursor(from.x + step[0], from.y + step[1]);
       event.preventDefault();
     } else if ((event.key === "Enter" || event.key === " ") && cursor) {
@@ -761,6 +798,8 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       sceneArt = backdrop;
       field.style.backgroundImage = "";
       field.classList.toggle("mapped", map !== null);
+      // With no picture the fight is on a parchment mat, which also stands in until a picture loads.
+      field.classList.add("plain");
       if (map) {
         const { crop, imageWidth, imageHeight } = map;
         const across = (start: number, size: number, whole: number): string =>
@@ -774,12 +813,25 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       if (backdrop) {
         const path = backdrop;
         void Promise.resolve(host.imageUrl(path)).then((url) => {
-          if (url && sceneArt === path) {
+          if (!url) return;
+          // Loaded first, so a picture that fails leaves the mat rather than a black board.
+          const image = new Image();
+          image.addEventListener("load", () => {
+            if (sceneArt !== path) return;
             field.style.backgroundImage = `url("${url}")`;
-          }
+            field.classList.remove("plain");
+          });
+          image.src = url;
         });
       }
     }
+    // A new decision starts the keyboard cursor again from the player's own square.
+    const decision = update.decision?.id ?? null;
+    if (decision !== decisionSeen && update.decision?.actor === PLAYER_ACTOR) {
+      cursor = null;
+      cursorHome = true;
+    }
+    decisionSeen = decision;
     const parsed = StateSchema.safeParse(update.state);
     const actors = parsed.success ? parsed.data.actors : {};
     if (settle) grid = parsed.data?.combat?.grid ?? null;
@@ -798,9 +850,8 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         setHp(token, actor.hp);
         token.node.classList.toggle("active", actor.active);
         token.node.dataset.side = sideOf(actor);
-        token.node.title = [actor.name, actor.status, ...actor.conditions]
-          .filter(Boolean)
-          .join(", ");
+        token.notes = [actor.status ?? "", ...actor.conditions].filter(Boolean);
+        setTip(token);
       }
     }
     if (settle) {
@@ -815,6 +866,14 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     showCells();
     closeMenu();
     slot.hidden = tokens.size === 0 && !playing;
+    // While the map has focus, the cursor visibly goes back to the player's square.
+    const me = tokens.get(PLAYER_ACTOR);
+    if (cursorHome && settle) {
+      cursorHome = false;
+      if (document.activeElement === board && me) {
+        placeCursor(me.x ?? 0, me.y ?? 0);
+      }
+    }
   };
 
   const showBanner = async (text: string, ms: number): Promise<void> => {
@@ -864,6 +923,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     start: { x: number; y: number },
     to: { x: number; y: number },
     natural: number,
+    before: string, // what it's for, such as "Perception · DC 12"
     note: string,
     mine: boolean,
   ): Promise<HTMLElement> => {
@@ -871,7 +931,11 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     const die = el("div", mine ? "dnd-throw mine" : "dnd-throw");
     die.innerHTML = D20;
     const face = el("span", "dnd-throw-number", "20");
-    const label = el("small", "dnd-throw-note", mine ? "Click to roll" : "");
+    const label = el(
+      "small",
+      "dnd-throw-note",
+      mine ? `${before}: click or press Return` : "",
+    );
     die.append(face, label);
     board.append(die);
     const place = (point: { x: number; y: number }): void => {
@@ -1023,6 +1087,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         await showBanner("Roll for initiative!", ms);
         return;
       case "end": {
+        howTo = howTo === "unseen" ? "unseen" : "done";
         const enemies = [...tokens.values()].filter((t) => t.side === "enemy");
         const party = [...tokens.values()].filter((t) => t.side !== "enemy");
         const text = enemies.every((t) => t.hp <= 0)
@@ -1052,11 +1117,9 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         const attacker = tokens.get(cue.actor);
         const target = tokens.get(cue.target);
         if (!attacker || !target) return;
-        const nameOf = (token: Token, id: string): string =>
-          token.node.querySelector(".dnd-name")?.textContent ?? id;
         const mine = cue.actor === PLAYER_ACTOR;
         showCaption(
-          `${nameOf(attacker, cue.actor)} attacks ${nameOf(target, cue.target)} with ${cue.label}`,
+          `${attacker.name} attacks ${target.name} with ${cue.label}`,
         );
         attacker.node.classList.add("acting");
         target.node.classList.add("targeted");
@@ -1066,7 +1129,8 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
           from,
           { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 },
           cue.natural,
-          `${String(cue.total)} vs AC ${String(cue.ac)}`,
+          `${cue.label} · AC ${String(cue.ac)}`,
+          `${String(cue.total)} vs AC ${String(cue.ac)}: ${cue.hit ? (cue.natural === 20 ? "Critical hit" : "Hit") : "Miss"}`,
           mine,
         );
         await wait(mine ? 350 : 200);
@@ -1106,7 +1170,8 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
           at,
           { x: at.x, y: at.y - 50 },
           cue.natural,
-          cue.natural >= 10 ? "Death save: success" : "Death save: failure",
+          "Death save · DC 10",
+          `Death save: ${cue.natural >= 10 ? "Success" : "Failed"}`,
           cue.actor === PLAYER_ACTOR,
         );
         await wait(ms);
@@ -1114,21 +1179,33 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         return;
       }
       case "check": {
+        // Outside a fight the check rises over the page and fades away after, rather than pushing it about.
+        const alone = tokens.size === 0;
+        slot.classList.toggle("dnd-overlay", alone);
         slot.hidden = false;
         board.classList.add("checking");
+        if (alone) animate(slot, [{ opacity: 0 }, { opacity: 1 }], FADE);
         const box = board.getBoundingClientRect();
         const middle = { x: box.width / 2, y: Math.max(110, box.height / 2) };
+        const skill = `${cue.label.charAt(0).toUpperCase()}${cue.label.slice(1)}`;
         const die = await throwD20(
           { x: middle.x - 120, y: middle.y + 40 },
           middle,
           cue.natural,
-          `${cue.label.charAt(0).toUpperCase()}${cue.label.slice(1)}: ${String(cue.total)} vs DC ${String(cue.dc)}`,
+          `${skill} · DC ${String(cue.dc)}`,
+          `${skill} ${String(cue.total)} vs DC ${String(cue.dc)}: ${cue.success ? "Success" : "Failed"}`,
           cue.actor === PLAYER_ACTOR,
         );
         die.classList.add("big", cue.success ? "pass" : "fail");
         await wait(ms - 300);
+        if (alone && !fast()) {
+          await slot
+            .animate([{ opacity: 1 }, { opacity: 0 }], FADE)
+            .finished.catch(() => undefined);
+        }
         die.remove();
         board.classList.remove("checking");
+        slot.classList.remove("dnd-overlay");
         slot.hidden = tokens.size === 0;
         return;
       }
@@ -1374,6 +1451,17 @@ const BOARD_CSS = `
 }
 /* A book's battle map shows as printed: no darkening and no second grid over its own. */
 .dnd-field.gridded.mapped::before { background: rgb(0 0 0 / 8%); }
+/* With no picture, a parchment battle mat ruled in ink, and no darkening. */
+.dnd-board:has(> .plain) { background: #e9dcbc; }
+.dnd-field.plain {
+  background: radial-gradient(circle at 50% 45%, #f1e6c9, #e9dcbc 60%, #dccb9f);
+}
+.dnd-field.plain::before { background: none; }
+.dnd-field.gridded.plain::before {
+  background:
+    linear-gradient(to right, rgb(60 40 10 / 18%) 1px, transparent 1px) 0 0 / calc(100% / var(--cols)) 100%,
+    linear-gradient(to bottom, rgb(60 40 10 / 18%) 1px, transparent 1px) 0 0 / 100% calc(100% / var(--rows));
+}
 .dnd-disc img {
   width: 100%;
   height: 100%;
@@ -1397,42 +1485,45 @@ const BOARD_CSS = `
 @keyframes dnd-pulse { 50% { opacity: 0.3; } }
 .dnd-token.down { filter: grayscale(1) brightness(0.6); opacity: 0.7; }
 .dnd-token.down .dnd-disc { transform: rotate(-80deg) scale(0.85); transition: transform 0.4s; }
-.dnd-name, .dnd-bar, .dnd-hp {
+/* HP as a ring round the disc, emptying clockwise from the top. */
+.dnd-ring {
+  --hp-color: #4cc96a;
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: conic-gradient(var(--hp-color) calc(var(--hp, 1) * 1turn), rgb(0 0 0 / 55%) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3.5px));
+  pointer-events: none;
+}
+.dnd-token[data-level="mid"] .dnd-ring { --hp-color: #e3b341; }
+.dnd-token[data-level="low"] .dnd-ring { --hp-color: #e0533f; }
+.dnd-token.down .dnd-ring { opacity: 0; }
+/* The name, HP and conditions, on hover or under the keyboard cursor. */
+.dnd-tip {
   position: absolute;
   left: 50%;
+  bottom: calc(100% + 8px);
   transform: translateX(-50%);
-}
-.dnd-name { top: calc(100% + 1px); }
-.dnd-bar { top: calc(100% + 15px); }
-.dnd-hp { top: calc(100% + 22px); white-space: nowrap; }
-.gridded .dnd-hp { display: none; }
-.tight .dnd-name { display: none; }
-.gridded .dnd-name { font-size: 0.6rem; max-width: calc(var(--sq, 48px) * 1.5); }
-.gridded .dnd-bar { top: calc(100% + 12px); width: 80%; }
-.dnd-name {
-  max-width: 92px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgb(15 10 6 / 88%);
+  border: 1px solid #c9ad6a;
+  color: #f4e7c8;
+  font: 0.8rem/1.3 var(--font-ui, system-ui), sans-serif;
   white-space: nowrap;
-  font-size: 0.72rem;
-  font-weight: 600;
+  text-shadow: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+  z-index: 8;
 }
-.dnd-bar {
-  width: 60px;
-  height: 6px;
-  border-radius: 3px;
-  background: rgb(0 0 0 / 55%);
-  overflow: hidden;
-}
-.dnd-bar i {
-  display: block;
-  height: 100%;
-  background: #4cc96a;
-  transition: width 0.45s ease, background 0.45s;
-}
-.dnd-bar i[data-level="mid"] { background: #e3b341; }
-.dnd-bar i[data-level="low"] { background: #e0533f; }
-.dnd-hp { font-size: 0.65rem; opacity: 0.85; }
+.dnd-board:not(.playing) .dnd-token:hover .dnd-tip,
+.dnd-board:focus-visible:not(.playing) .dnd-token.cursor .dnd-tip { opacity: 1; }
+.dnd-token.high .dnd-tip { bottom: auto; top: calc(100% + 8px); }
+.dnd-token.west .dnd-tip { left: 0; transform: none; }
+.dnd-token.east .dnd-tip { left: auto; right: 0; transform: none; }
+.dnd-token:hover, .dnd-token.cursor { z-index: 7; }
 .dnd-float {
   position: absolute;
   top: -6px;
@@ -1514,27 +1605,33 @@ const BOARD_CSS = `
   position: absolute;
   right: 8px;
   bottom: 6px;
-  font: 0.7rem var(--font-ui, system-ui), sans-serif;
-  color: rgb(255 255 255 / 55%);
+  font: 0.8rem var(--font-ui, system-ui), sans-serif;
+  color: rgb(255 255 255 / 80%);
+  text-shadow: 0 1px 2px #000;
   opacity: 0;
   transition: opacity 0.3s;
 }
 .dnd-board.playing .dnd-hint { opacity: 1; }
+.dnd-field.plain ~ .dnd-hint { color: rgb(60 40 10 / 85%); text-shadow: none; }
 .dnd-board.awaiting .dnd-hint { opacity: 0; }
 .dnd-board.playing { cursor: pointer; }
 .dnd-field.gridded {
   height: auto;
-  /* As wide as fits while the map, the turn prompt and the action tabs share one screen; its squares stay square. */
-  width: min(100%, calc(max(280px, 100dvh - 400px) * var(--cols) / var(--rows)));
+  /* As wide as fits while the map and what the page keeps beside or below it share one screen; its squares
+     stay square. A length, not a share, because the frame sizes itself to the map. */
+  width: calc(max(280px, 100dvh - var(--map-reserve, 400px)) * var(--cols) / var(--rows));
+  max-width: 100%;
   margin: 0 auto;
 }
+/* The frame fits the grid, so no dark bands run beside a narrow map. */
+.dnd-board:has(> .gridded) { width: fit-content; max-width: 100%; margin-inline: auto; }
 .dnd-field.gridded::before {
   background:
     linear-gradient(rgb(0 0 0 / 30%), rgb(0 0 0 / 45%)),
     linear-gradient(to right, rgb(255 255 255 / 9%) 1px, transparent 1px) 0 0 / calc(100% / var(--cols)) 100%,
     linear-gradient(to bottom, rgb(255 255 255 / 9%) 1px, transparent 1px) 0 0 / 100% calc(100% / var(--rows));
 }
-.gridded .dnd-token { --disc: calc(var(--sq, 48px) * 0.86); }
+.gridded .dnd-token { --disc: max(32px, calc(var(--sq, 48px) * 0.78)); }
 .gridded .dnd-disc { font-size: calc(var(--sq, 48px) * 0.3); border-width: 2px; }
 .dnd-cells { position: absolute; inset: 0; }
 .dnd-cell {
@@ -1548,11 +1645,26 @@ const BOARD_CSS = `
 }
 .dnd-cell:hover, .dnd-cell.hover { background: rgb(255 211 107 / 45%); }
 .dnd-cell.soft {
-  background: rgb(255 211 107 / 4%);
-  border-color: transparent;
+  background: rgb(255 211 107 / 12%);
+  border: 1px solid rgb(255 211 107 / 30%);
 }
-.dnd-cell.risky { background: rgb(224 83 63 / 6%); }
-.dnd-cell.risky:hover, .dnd-cell.risky.hover { background: rgb(224 83 63 / 40%); }
+/* A square that gives a foe an Opportunity Attack is striped red, readable without telling colours apart. */
+.dnd-cell.risky {
+  background: repeating-linear-gradient(45deg, rgb(224 83 63 / 38%) 0 3px, transparent 3px 8px);
+  border-color: rgb(224 83 63 / 50%);
+}
+.dnd-cell.risky:hover, .dnd-cell.risky.hover { background-color: rgb(224 83 63 / 30%); }
+/* On parchment, gold vanishes, so the squares are inked in brown. */
+.plain .dnd-cell { background: rgb(150 100 20 / 22%); border-color: rgb(110 70 10 / 55%); }
+.plain .dnd-cell.soft { background: rgb(150 100 20 / 12%); border-color: rgb(110 70 10 / 35%); }
+.plain .dnd-cell:hover, .plain .dnd-cell.hover { background: rgb(150 100 20 / 38%); }
+.plain .dnd-cell.risky {
+  background: repeating-linear-gradient(45deg, rgb(170 40 20 / 40%) 0 3px, transparent 3px 8px);
+  border-color: rgb(150 35 15 / 55%);
+}
+.plain .dnd-cell.risky:hover, .plain .dnd-cell.risky.hover { background-color: rgb(170 40 20 / 22%); }
+.plain .dnd-route polyline { stroke: #7a4a08; }
+.plain .dnd-route.risky polyline { stroke: #a8261a; }
 .dnd-route {
   position: absolute;
   inset: 0;
@@ -1575,7 +1687,7 @@ const BOARD_CSS = `
 .dnd-caption {
   position: absolute;
   left: 50%;
-  bottom: 12px;
+  top: 12px;
   transform: translateX(-50%);
   max-width: 90%;
   padding: 6px 16px;
@@ -1714,6 +1826,7 @@ const BOARD_CSS = `
 }
 .dnd-board:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .dnd-board:focus-visible .gridded .dnd-cursor { display: block; }
+.dnd-board.playing .dnd-cursor { display: none !important; }
 .dnd-said {
   position: absolute;
   width: 1px;
@@ -1759,8 +1872,19 @@ const BOARD_CSS = `
   text-align: left;
   font: 0.85rem var(--font-ui, system-ui), sans-serif;
 }
+/* A check outside a fight rises over the page, rather than pushing the page about. */
+.dnd-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(20 12 4 / 45%);
+  animation: none !important;
+}
+.dnd-overlay .dnd-board { width: min(460px, 100%); margin: 0; }
 @media (max-width: 520px) {
-  .gridded .dnd-name { display: none; }
   .dnd-token { --disc: 48px; }
   .dnd-disc { font-size: 1rem; }
 }

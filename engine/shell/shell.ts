@@ -357,6 +357,26 @@ export function mountShell(
     }
   });
 
+  // Number keys pick the story's numbered choices, as a reader turns to an entry. Never in a fight,
+  // in a text field, with a drawer open or while the choices are held back.
+  document.addEventListener("keydown", (event) => {
+    const index = Number(event.key) - 1;
+    if (!/^[1-9]$/.test(event.key) || event.repeat) return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+      return;
+    if ((event.target as Element).closest("input, textarea, select")) return;
+    if (root.inert || document.querySelector("dialog[open]")) return;
+    const story = screen.querySelector<HTMLElement>(".rail > .options.story");
+    if (!story || story.closest("[inert]")) return;
+    const picks = story.querySelectorAll<HTMLElement>(
+      ".option > button:first-child",
+    );
+    const pick = picks[index];
+    if (!pick) return;
+    event.preventDefault();
+    pick.click();
+  });
+
   // Redrawing removes the button that had focus, so keyboard play needs it put somewhere new.
   let focusNext: HTMLElement | null = null;
 
@@ -722,6 +742,7 @@ export function mountShell(
     const scene = el("p", { class: "scene-text" });
     let sceneShown: string | null = null;
     const ending = el("section", { class: "ending" });
+    ending.hidden = true;
     const combat = el("div");
     const combatGridSlot = el("div");
     combatGridSlot.id = "combat-grid-slot";
@@ -731,6 +752,9 @@ export function mountShell(
     // The newest lines of the journal, under the board, so the latest result is visible without the whole log.
     const ticker = el("ol", { class: "ticker" });
     ticker.setAttribute("aria-hidden", "true");
+    // The player's level-up, set apart from the ticker as the books set off a callout.
+    const levelUp = el("p", { class: "level-up" });
+    levelUp.hidden = true;
     const prompt = el("p", { class: "prompt" });
     const card = el("section", { class: "decision-card" });
     const options = el("div", { class: "options" });
@@ -830,13 +854,20 @@ export function mountShell(
       title,
       sceneArt,
       scene,
-      ending,
       combatGridSlot,
-      ticker,
-      combat,
-      card,
-      prompt,
-      options,
+      // In a fight this is the column beside the map; otherwise it lays out as if it weren't there.
+      // The ending comes after the ticker's last lines, and beside the map when a fight ends the run.
+      el(
+        "div",
+        { class: "rail" },
+        ticker,
+        levelUp,
+        combat,
+        card,
+        prompt,
+        options,
+        ending,
+      ),
     );
     screen.replaceChildren(
       el(
@@ -906,15 +937,30 @@ export function mountShell(
       const end = endingOf(view);
       const endTitle = el("h3", { text: end?.title ?? "" });
       endTitle.tabIndex = -1;
+      const again = button("Play again", restart);
+      again.className = "begin";
+      const tally = (moment: string, one: string, many: string): string[] => {
+        const count = view.log.filter((line) => line.moment === moment).length;
+        return count > 0
+          ? [`${String(count)} ${count === 1 ? one : many}`]
+          : [];
+      };
+      const summary = [
+        ...tally("foeDefeated", "foe defeated", "foes defeated"),
+        ...tally("levelUp", "level gained", "levels gained"),
+      ].join(" · ");
       ending.replaceChildren(
         ...(end
           ? [
               endTitle,
               ...(end.text ? [el("p", { text: end.text })] : []),
+              ...(summary
+                ? [el("p", { class: "ending-tally", text: summary })]
+                : []),
               el(
                 "div",
                 { class: "ending-actions" },
-                button("Play again", restart),
+                again,
                 button("Back to the menu", () => {
                   act(showMenu);
                 }),
@@ -922,6 +968,13 @@ export function mountShell(
             ]
           : []),
       );
+      // A run that ends under a map can leave its ending below the fold, so it comes into view once
+      // the board has shown how it ended.
+      if (end && ending.hidden) {
+        void (board?.settled?.() ?? Promise.resolve()).then(() => {
+          ending.scrollIntoView({ block: "nearest" });
+        });
+      }
       ending.hidden = !end;
       ending.dataset.ending = view.ended ?? "";
       // With a board showing the fight, the written turn order folds away until it's wanted.
@@ -974,9 +1027,7 @@ export function mountShell(
       if (fresh) {
         decisionShown = decision?.id ?? null;
         showAll = false;
-        const titled = view.optionGroups.filter((group) => group.title);
-        // A single group of actions opens by itself; with several, the player picks one.
-        openGroup = titled.length === 1 ? (titled[0]?.title ?? null) : null;
+        openGroup = null;
       }
       const optionRow = (option: OptionView, index: number): HTMLElement => {
         const row = el(
@@ -994,7 +1045,7 @@ export function mountShell(
         if (option.detail) {
           const info = el("p", { class: "option-detail", text: option.detail });
           info.hidden = true;
-          const toggle = button("i", () => {
+          const toggle = button("ⓘ", () => {
             info.hidden = !info.hidden;
             toggle.setAttribute("aria-expanded", String(!info.hidden));
           });
@@ -1021,11 +1072,15 @@ export function mountShell(
           ...(last ? [optionRow(last, 6)] : []),
         ];
       };
-      const tabs = view.optionGroups.filter((group) => group.title !== null);
+      // A lone group of actions needs no tab to open it, so it lists with the rest.
+      const titled = view.optionGroups.filter((group) => group.title !== null);
+      const tabs = titled.length > 1 ? titled : [];
       const chosen = tabs.find((group) => group.title === openGroup);
+      // Outside a fight the choices read as a book's numbered entries, and number keys pick them.
+      options.classList.toggle("story", !view.combat);
       options.replaceChildren(
         ...view.optionGroups
-          .filter((group) => group.title === null)
+          .filter((group) => !tabs.includes(group))
           .map((group) =>
             el("div", { class: "options" }, ...trimmed(group.options)),
           ),
@@ -1098,13 +1153,23 @@ export function mountShell(
       );
       linesShown = view.log.length;
       log.scrollTop = log.scrollHeight;
-      const news = added.filter((line) => line.kind === "event").slice(-3);
-      if (!firstDraw && news.length > 0) {
+      const levels = added.filter((line) => line.moment === "levelUp");
+      const news = added
+        .filter((line) => line.kind === "event" && !levels.includes(line))
+        .slice(-3);
+      if (!firstDraw && (news.length > 0 || levels.length > 0)) {
         // The words wait for the board to finish showing what they describe.
         const shown = ++tickerShown;
         ticker.replaceChildren();
+        levelUp.hidden = true;
         void (board?.settled?.() ?? Promise.resolve()).then(() => {
           if (shown !== tickerShown) return;
+          levelUp.replaceChildren(
+            el("strong", { text: "Level up!" }),
+            ...levels.map((line) => el("span", { text: ` ${line.text}` })),
+          );
+          levelUp.hidden = levels.length === 0;
+          if (levels.length > 0) enter(levelUp);
           ticker.replaceChildren(
             ...news.map((line, index) => {
               const item = el("li", { text: line.text });
