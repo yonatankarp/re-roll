@@ -80,6 +80,7 @@ export interface AdventureChoice {
   readonly title: string;
   readonly source: "shipped" | "private";
   readonly levels: string | null;
+  readonly cover: string | null; // a content path, for imageUrl
 }
 
 export interface SaveChoice {
@@ -150,6 +151,7 @@ const ArtIndexSchema = z.array(
     monster: z.string().optional(),
     subjects: z.array(z.string()).optional(), // other names it can stand for, such as "dwarf cleric"
     face: FaceSchema.optional(),
+    cover: z.array(z.string()).optional(), // ids of the adventures this picture is the cover of
   }),
 );
 
@@ -254,11 +256,13 @@ export function createGame({
   let monsterArt: ReadonlyMap<string, string> = new Map();
   // Every picture each name can use, so party members who share a look don't all share one face.
   let tokenArt: ReadonlyMap<string, readonly TokenArt[]> = new Map();
+  let covers: ReadonlyMap<string, string> = new Map();
 
   // Art is optional and still being extracted, so a bad index only loses its pictures.
   const loadArt = async (): Promise<void> => {
     const found = new Map<string, string>();
     const tokens = new Map<string, TokenArt[]>();
+    const coverPaths = new Map<string, string>();
     try {
       const entries = await storage.list(ASSETS);
       for (const { path } of entries) {
@@ -267,9 +271,13 @@ export function createGame({
         const parsed = ArtIndexSchema.safeParse(
           JSON.parse((await storage.read(path)) ?? "null"),
         );
-        for (const { file, monster, subjects, face } of parsed.data ?? []) {
+        for (const { file, monster, subjects, face, cover } of parsed.data ??
+          []) {
           if (!BARE_NAME.test(file)) continue;
           const art = { path: `${folder}/${file}`, ...(face ? { face } : {}) };
+          if (IMAGE_FILE.test(file)) {
+            for (const id of cover ?? []) coverPaths.set(id, art.path);
+          }
           if (monster) found.set(artKey(monster), art.path);
           for (const name of [
             ...(monster ? [monster] : []),
@@ -285,7 +293,11 @@ export function createGame({
     }
     monsterArt = found;
     tokenArt = tokens;
+    covers = coverPaths;
   };
+  // The menu lists adventures more than once per visit, so it reuses one scan; a new run rescans.
+  let artScan: Promise<void> | null = null;
+  const scanArt = (): Promise<void> => (artScan ??= loadArt());
 
   // A missing or broken record only loses what the cards show, never the saves.
   const readRecord = async <T>(
@@ -323,7 +335,8 @@ export function createGame({
     const { registry } = loaded;
     const ui = uis.find((item) => item.systemId === registry.system.id);
     if (!ui) throw new Error(`No UI for the ${registry.system.id} system`);
-    await loadArt();
+    artScan = loadArt();
+    await artScan;
     return {
       registry,
       ui,
@@ -398,7 +411,10 @@ export function createGame({
 
   return {
     async listAdventures(): Promise<readonly AdventureChoice[]> {
-      const catalog = await scanPlugins(storage, roots);
+      const [catalog] = await Promise.all([
+        scanPlugins(storage, roots),
+        scanArt(),
+      ]);
       const adventures: AdventureChoice[] = [];
       for (const plugin of catalog.plugins.values()) {
         if (plugin.manifest.kind !== "adventure") continue;
@@ -409,6 +425,7 @@ export function createGame({
           title: info.success ? info.data.title : plugin.manifest.id,
           source: plugin.manifest.distribution,
           levels: info.data?.levels ?? null,
+          cover: covers.get(plugin.manifest.id) ?? null,
         });
       }
       return adventures.sort((a, b) => (a.title < b.title ? -1 : 1));
