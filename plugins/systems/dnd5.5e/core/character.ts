@@ -601,6 +601,36 @@ function abilityImprovementStep(
   };
 }
 
+// null when every ability it could raise is already 20.
+function plusOneStep(
+  stepKey: string,
+  key: string,
+  scores: AbilityScores,
+  from: readonly Ability[],
+  classDef: ClassDef,
+): Step | null {
+  const open = ABILITIES.filter(
+    (item) => from.includes(item) && scores[item] < 20,
+  );
+  if (open.length === 0) return null;
+  const [best] = abilityPriority(classDef).filter((item) =>
+    open.includes(item),
+  );
+  return {
+    key: stepKey,
+    prompt: "Raise one ability score by 1.",
+    options: open.map((item) => {
+      const id = encodeIncrease([[item, 1]]);
+      return { id, label: describeIncrease(id) };
+    }),
+    ...(best ? { prefer: [encodeIncrease([[best, 1]])] } : {}),
+    apply: (draft, answer) => ({
+      ...draft,
+      picks: { ...draft.picks, [key]: [answer] },
+    }),
+  };
+}
+
 function isAbilityImprovement(featId: string): boolean {
   return featId.endsWith("/ability-score-improvement");
 }
@@ -645,14 +675,32 @@ function classStep(
       }
     }
     const increaseKey = `${choice.id}:increase`;
-    if (picked.some(isAbilityImprovement) && !draft.picks[increaseKey]) {
+    if (draft.picks[increaseKey] || choice.kind !== "feat") continue;
+    const scores = () =>
+      buildAbilities(base ?? originBuild(draft, placeholderEntry(classDef)));
+    if (picked.some(isAbilityImprovement)) {
       return abilityImprovementStep(
         `${String(level)}:${increaseKey}`,
         increaseKey,
-        buildAbilities(base ?? originBuild(draft, placeholderEntry(classDef))),
+        scores(),
         classDef,
       );
     }
+    // Most feats raise one of a few abilities by 1, as their Ability Score Increase says.
+    const from = picked.flatMap(
+      (id) => lookup(access, FeatSchema, id).abilityIncrease ?? [],
+    );
+    const plusOne =
+      from.length > 0
+        ? plusOneStep(
+            `${String(level)}:${increaseKey}`,
+            increaseKey,
+            scores(),
+            from,
+            classDef,
+          )
+        : null;
+    if (plusOne) return plusOne;
   }
   return null;
 }

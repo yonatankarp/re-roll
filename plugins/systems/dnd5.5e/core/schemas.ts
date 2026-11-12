@@ -496,6 +496,7 @@ export const FeatSchema = ContentEntrySchema.extend({
   text: z.string().min(1),
   grants: z.array(ContentIdSchema).default([]),
   choices: z.array(ChoiceDefSchema).default([]), // asked when the feat is taken at character creation
+  abilityIncrease: z.array(AbilitySchema).min(1).optional(), // its Ability Score Increase: +1 to one of these
 }).strict();
 export type Feat = z.infer<typeof FeatSchema>;
 

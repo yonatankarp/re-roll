@@ -954,7 +954,7 @@ Leaving out `--encodings` on `draft` uses the local model instead, which is free
 
 **Rules when re-importing**
 - Never run `approve --all` on PHB features, feats, species or spells: their mechanics and choices exist only in the approved files.
-- Each feat grants a feature of its own text (`feature/feat-<slug>`), which holds its mechanics. A species' or feat's `choices` are asked at character creation, and a choice of lineage or ancestry picks one feature among several.
+- Each feat grants a feature of its own text (`feature/feat-<slug>`), which holds its mechanics. A species' or feat's `choices` are asked at character creation, and a choice of lineage or ancestry picks one feature among several. A feat's `abilityIncrease` lists the abilities its Ability Score Increase can raise by 1, and taking the feat asks which one.
 - Parse subclasses and backgrounds with `--requires phb`.
 - A book's plugin id can't match an adventure's, so book plugins use a `-rules` suffix in that case.
 - Older-edition content is marked and kept out of the character builder by default.
