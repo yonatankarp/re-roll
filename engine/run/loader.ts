@@ -6,17 +6,20 @@ import {
   validateAdventure,
 } from "../story/adventure.ts";
 import { NARRATION_FOLDER } from "../story/narration.ts";
-import { hashText } from "./dice.ts";
-import { type Issue, zodIssues } from "./issues.ts";
-import { type PluginManifest, PluginManifestSchema } from "./manifest.ts";
-import { satisfiesCaret } from "./semver.ts";
-import type { Storage } from "./storage.ts";
+import { hashText } from "../kernel/dice.ts";
+import { type Issue, zodIssues } from "../kernel/issues.ts";
+import {
+  type PluginManifest,
+  PluginManifestSchema,
+} from "../kernel/manifest.ts";
+import { satisfiesCaret } from "../kernel/semver.ts";
+import type { Storage } from "../kernel/storage.ts";
 import {
   type ContentEntry,
   type ContentKind,
   type GameSystem,
   SDK_VERSION,
-} from "./system.ts";
+} from "../kernel/system.ts";
 
 // An allowlist, because a denylist would miss formats such as .mjs, .wasm or a script-bearing .svg.
 const ALLOWED_EXTENSIONS = new Set([

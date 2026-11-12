@@ -9,13 +9,13 @@ import {
   loadSave,
   type LogEntry,
   replayInputs,
-} from "../engine/kernel/save.ts";
+} from "../engine/run/save.ts";
 import {
   type RunContext,
   pendingDecision,
   startRun,
   step,
-} from "../engine/kernel/turn.ts";
+} from "../engine/run/turn.ts";
 import type { StoryEffect } from "../engine/story/adventure.ts";
 import { testAdventure } from "../engine/tools/bot.ts";
 import {

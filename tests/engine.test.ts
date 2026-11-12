@@ -10,17 +10,13 @@ import { fc, test as propertyTest } from "@fast-check/vitest";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { GameState } from "../engine/kernel/events.ts";
-import {
-  type Registry,
-  loadRun,
-  scanPlugins,
-} from "../engine/kernel/loader.ts";
+import { type Registry, loadRun, scanPlugins } from "../engine/run/loader.ts";
 import {
   type LogEntry,
   createSave,
   loadSave,
   replayInputs,
-} from "../engine/kernel/save.ts";
+} from "../engine/run/save.ts";
 import {
   type RunContext,
   type StepResult,
@@ -29,7 +25,7 @@ import {
   pendingDecision,
   startRun,
   step,
-} from "../engine/kernel/turn.ts";
+} from "../engine/run/turn.ts";
 import type { EncounterOptions, GameSystem } from "../engine/kernel/system.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 import { playRun, testAdventure } from "../engine/tools/bot.ts";

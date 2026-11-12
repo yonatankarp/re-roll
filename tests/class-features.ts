@@ -7,13 +7,13 @@ import { join } from "node:path";
 import { PLAYER_ACTOR } from "#sdk";
 import { systems } from "../app/systems.ts";
 import type { GameState } from "../engine/kernel/events.ts";
-import { loadRun, scanPlugins } from "../engine/kernel/loader.ts";
+import { loadRun, scanPlugins } from "../engine/run/loader.ts";
 import {
   type RunContext,
   createRunContext,
   startRun,
   step,
-} from "../engine/kernel/turn.ts";
+} from "../engine/run/turn.ts";
 import { createPlayStorage } from "../engine/platform/node/storage.ts";
 import type { StoryEffect } from "../engine/story/adventure.ts";
 import { CREATE_CHARACTER } from "../plugins/systems/dnd5.5e/core/combat.ts";

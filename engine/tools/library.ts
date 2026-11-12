@@ -1,16 +1,21 @@
 // Turns a saved book page into one Markdown file per section, by code alone: no model reads or rewrites the text.
 
-export type LibraryKind =
-  | "setting"
-  | "npc"
-  | "location"
-  | "rules"
-  | "adventure"
-  | "monster"
-  | "spell"
-  | "item"
-  | "table"
-  | "other";
+const LIBRARY_KINDS = [
+  "setting",
+  "npc",
+  "location",
+  "rules",
+  "adventure",
+  "monster",
+  "spell",
+  "item",
+  "table",
+  "other",
+] as const;
+export type LibraryKind = (typeof LIBRARY_KINDS)[number];
+
+// The system's hook that names a section's kind from its rules wording, such as a stat block.
+export type SystemKind = (body: string) => string | null;
 
 export interface LibraryEntry {
   readonly path: readonly string[]; // heading titles from the top of the book
@@ -273,22 +278,14 @@ const PATH_KINDS: readonly (readonly [LibraryKind, RegExp])[] = [
   ],
 ];
 
-export function kindOf(path: readonly string[], body: string): LibraryKind {
-  if (
-    /\b(Armor Class|AC)\s*\d+/.test(body) &&
-    /\b(Hit Points|HP)\s*\d+/.test(body)
-  ) {
-    return "monster";
-  }
-  if (/\bCasting Time\b/.test(body) && /\bDuration\b/.test(body))
-    return "spell";
-  if (
-    /^\W*(Wondrous Item|Weapon|Armor|Potion|Ring|Rod|Staff|Wand|Scroll)\b[^\n]{0,80}\b(Common|Uncommon|Rare|Very Rare|Legendary|Artifact)\b/im.test(
-      body.slice(0, 600),
-    )
-  ) {
-    return "item";
-  }
+export function kindOf(
+  path: readonly string[],
+  body: string,
+  systemKind?: SystemKind,
+): LibraryKind {
+  const named = systemKind?.(body);
+  const known = LIBRARY_KINDS.find((kind) => kind === named);
+  if (known) return known;
   // The section's own title wins over its parents'.
   for (const near of [path.slice(-1), path.slice(-3)]) {
     const text = near.join(" / ").toLowerCase();
@@ -312,7 +309,7 @@ const slugOf = (text: string): string =>
 // Sections are cut at headings down to this level. Deeper headings stay inside their section.
 const CUT_LEVEL = 3;
 
-export function buildLibrary(html: string): Library {
+export function buildLibrary(html: string, systemKind?: SystemKind): Library {
   const { title, blocks } = blocksOf(html);
   const files = new Map<string, string>();
   const entries: LibraryEntry[] = [];
@@ -337,7 +334,7 @@ export function buildLibrary(html: string): Library {
       anchor: section.anchor,
       file,
       words: wordCount(text),
-      kind: kindOf(section.path, text),
+      kind: kindOf(section.path, text, systemKind),
     });
   };
 

@@ -4,13 +4,13 @@ import { runs } from "./depth.ts";
 import { listAdventures, loadAdventure } from "../app/cli/load-adventure.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { GameState } from "../engine/kernel/events.ts";
-import type { Registry } from "../engine/kernel/loader.ts";
-import { createSave, loadSave, replayInputs } from "../engine/kernel/save.ts";
+import type { Registry } from "../engine/run/loader.ts";
+import { createSave, loadSave, replayInputs } from "../engine/run/save.ts";
 import {
   type StoryFile,
   validateAdventure,
 } from "../engine/story/adventure.ts";
-import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
+import { type RunContext, startRun, step } from "../engine/run/turn.ts";
 import { checkPlugins } from "../engine/tools/check-pack.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 import { playRun, testAdventure } from "../engine/tools/bot.ts";

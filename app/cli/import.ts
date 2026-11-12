@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { formatIssue } from "../../engine/kernel/issues.ts";
-import { loadRun, scanPlugins } from "../../engine/kernel/loader.ts";
+import { loadRun, scanPlugins } from "../../engine/run/loader.ts";
 import { createLlamaClient } from "../../engine/platform/node/llama-client.ts";
 import { createNodeStorage } from "../../engine/platform/node/storage.ts";
 import { checkPlugins } from "../../engine/tools/check-pack.ts";
@@ -26,7 +26,7 @@ const USAGE = `Usage:
   npm run import -- split   --kind <folder> --input <file>
   npm run import -- extract --input <book.html> --output <file>
   npm run import -- draft   --plugin <id> --kind <folder> --input <file> [--system <id>] [--encodings <file>]
-  npm run import -- library --plugin <id> --input <book.html>
+  npm run import -- library --plugin <id> --input <book.html> [--system <id>]
   npm run import -- approve --plugin <id> --kind <folder> (--all | --slugs a,b,c)`;
 
 const { values, positionals } = parseArgs({
@@ -55,7 +55,10 @@ if (command === "library") {
     console.error(USAGE);
     process.exit(2);
   }
-  const library = buildLibrary(await readFile(values.input, "utf8"));
+  const library = buildLibrary(
+    await readFile(values.input, "utf8"),
+    systems.find((item) => item.id === values.system)?.libraryKind,
+  );
   const root = `books/library/${id}`;
   await rm(root, { recursive: true, force: true });
   await mkdir(root, { recursive: true });

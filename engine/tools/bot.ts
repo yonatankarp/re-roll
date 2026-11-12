@@ -1,7 +1,7 @@
 import { createDice, rngFromSeed } from "../kernel/dice.ts";
 import type { GameState, Input } from "../kernel/events.ts";
-import { type LogEntry, replayInputs } from "../kernel/save.ts";
-import { type RunContext, startRun, step } from "../kernel/turn.ts";
+import { type LogEntry, replayInputs } from "../run/save.ts";
+import { type RunContext, startRun, step } from "../run/turn.ts";
 import { REST_OPTION_PREFIX, SCENE_DECISION_PREFIX } from "../story/runtime.ts";
 
 export interface BotRun {

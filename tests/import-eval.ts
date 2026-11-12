@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { parse } from "yaml";
 import { systems } from "../app/systems.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
-import { loadRun, scanPlugins } from "../engine/kernel/loader.ts";
+import { loadRun, scanPlugins } from "../engine/run/loader.ts";
 import { createLlamaClient } from "../engine/platform/node/llama-client.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 import { importSource, splitSource } from "../engine/tools/import.ts";

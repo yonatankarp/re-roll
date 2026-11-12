@@ -297,6 +297,8 @@ export interface SystemDefinition<S> {
   // The rests the rules allow right now, offered with each scene's choices.
   readonly rests?: (state: S) => readonly RestOption[];
   readonly importKinds?: Readonly<Record<string, ImportKind>>; // keyed by content folder
+  // A book section's kind from the system's own wording, such as "monster" for a stat block, for the import library.
+  readonly libraryKind?: (body: string) => string | null;
   readonly htmlParsers?: Readonly<
     Record<
       string,

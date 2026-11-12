@@ -51,6 +51,11 @@ describe("system plugin boundaries", () => {
     }
   });
 
+  // Story and run build on the kernel, so the kernel importing either would make a cycle.
+  it("keeps engine/kernel's imports inside engine/kernel", async () => {
+    expect(await findEscapingImports("engine/kernel")).toEqual([]);
+  });
+
   it("catches a relative import into another plugin", async () => {
     const base = await mkdtemp(join(tmpdir(), "re-roll-"));
     try {

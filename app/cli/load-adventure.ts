@@ -3,8 +3,8 @@ import {
   type Registry,
   loadRun,
   scanPlugins,
-} from "../../engine/kernel/loader.ts";
-import { type RunContext, createRunContext } from "../../engine/kernel/turn.ts";
+} from "../../engine/run/loader.ts";
+import { type RunContext, createRunContext } from "../../engine/run/turn.ts";
 import { createNodeStorage } from "../../engine/platform/node/storage.ts";
 import { systems } from "../systems.ts";
 

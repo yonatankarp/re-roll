@@ -1,5 +1,5 @@
-import { loadRun, scanPlugins } from "../engine/kernel/loader.ts";
-import { createRunContext } from "../engine/kernel/turn.ts";
+import { loadRun, scanPlugins } from "../engine/run/loader.ts";
+import { createRunContext } from "../engine/run/turn.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 import { testAdventure } from "../engine/tools/bot.ts";
 import { d6System } from "./fixtures/system-d6/index.ts";

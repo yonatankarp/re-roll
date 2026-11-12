@@ -2,11 +2,7 @@ import { parse, stringify } from "yaml";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { systems } from "../app/systems.ts";
-import {
-  type LoadResult,
-  loadRun,
-  scanPlugins,
-} from "../engine/kernel/loader.ts";
+import { type LoadResult, loadRun, scanPlugins } from "../engine/run/loader.ts";
 import type { ModelClient, ModelRequest } from "../engine/prep/model.ts";
 import { checkPlugins } from "../engine/tools/check-pack.ts";
 import {

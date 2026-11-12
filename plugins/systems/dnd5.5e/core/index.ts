@@ -63,6 +63,7 @@ import {
   parseSpeciesFromHtml,
 } from "./import/origins.ts";
 import { spellImportKind } from "./import/spells.ts";
+import { libraryKindOf } from "./import/library.ts";
 import {
   parseBudgetsFromHtml,
   parseHazardsFromHtml,
@@ -272,6 +273,7 @@ export const dnd55e = defineSystem<DndState>({
   }),
   outcomes: { keys: ["success", "failure"] },
   importKinds: { spells: spellImportKind },
+  libraryKind: libraryKindOf,
   htmlParsers: {
     monsters: parseMonstersFromHtml,
     classes: parseClassesFromHtml,

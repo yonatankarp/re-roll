@@ -6,7 +6,7 @@ import {
   type Input,
   InputSchema,
   isNamespacedEvent,
-} from "./events.ts";
+} from "../kernel/events.ts";
 import type { Registry } from "./loader.ts";
 import { type RunContext, applyEvent, startRun, step } from "./turn.ts";
 

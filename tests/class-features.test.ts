@@ -10,7 +10,7 @@ import { BOOK_ROOTS } from "./depth.ts";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import type { Dice } from "../engine/kernel/dice.ts";
 import { AWAIT_FRAME } from "../engine/kernel/system.ts";
-import type { RunContext } from "../engine/kernel/turn.ts";
+import type { RunContext } from "../engine/run/turn.ts";
 import {
   type Context,
   nextDndDecision,

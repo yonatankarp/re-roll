@@ -14,8 +14,8 @@ import {
   type Registry,
   loadRun,
   scanPlugins,
-} from "../kernel/loader.ts";
-import { type LogEntry, createSave, loadSave } from "../kernel/save.ts";
+} from "../run/loader.ts";
+import { type LogEntry, createSave, loadSave } from "../run/save.ts";
 import type { Storage } from "../kernel/storage.ts";
 import { type Ambience, sceneAmbience } from "../story/ambience.ts";
 import { scenesAhead } from "../story/narration.ts";
@@ -30,7 +30,7 @@ import {
   resolveSettings,
   startRun,
   step,
-} from "../kernel/turn.ts";
+} from "../run/turn.ts";
 import type {
   CombatView,
   DecisionCard,
