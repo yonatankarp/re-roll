@@ -23,6 +23,13 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - Commit or push only when asked. Never add Co-Authored-By or other attribution lines to commits or PRs.
 - Merge session branches with `--no-ff`, naming them `refs/heads/claude/...`.
 
+## Sessions
+
+Every side session is archived when its work is done, and leaves no worktree or branch behind, locally or on the remote.
+
+- **A session that leaves nothing to merge** (a check, a review, a no-change result) archives itself as its last step.
+- **A session that leaves a branch** commits there and reports. Once the branch is merged, the session that merged it deletes the worktree (`git worktree remove`) and the branch (`git branch -d`, plus `git push origin --delete` if it was pushed), and archives the finished session.
+
 ## Platforms
 
 The game must not depend on any one OS. Don't use macOS-only (or Windows-only) features such as system voices or native-only APIs unless there is an equivalent everywhere. Prefer web platform features and bundled, cross-platform libraries. Tauri itself targets macOS, Windows and Linux.
