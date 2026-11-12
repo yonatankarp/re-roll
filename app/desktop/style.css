@@ -214,7 +214,7 @@ h3 {
   /* The page column's gutter: #app is at most 1080px wide, with 16px padding. */
   padding: 6px max(16px, calc(50vw - 524px)) 8px;
   font-size: 0.9rem;
-  cursor: default;
+  cursor: pointer; /* a click puts it away */
   background: var(--leather);
   border-bottom: 3px solid var(--line);
   box-shadow: 0 6px 12px rgb(0 0 0 / 20%);

@@ -327,6 +327,7 @@ export function mountShell(
   const notice = el("p", { class: "notice" });
   notice.setAttribute("role", "status");
   // It hangs over the page, so a click puts it away.
+  notice.title = "Click to dismiss";
   notice.addEventListener("click", () => {
     notice.textContent = "";
   });
