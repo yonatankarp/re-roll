@@ -667,4 +667,43 @@ describe("monster actions read in round 4", () => {
       ],
     });
   });
+  it("wakes only the Unconscious on damage, and reads a Restrained state's damage each turn", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Dart",
+        "Ranged Attack Roll: +5, range 30/120 ft. Hit: 5 (1d6 + 2) Piercing damage, and the target makes a saving throw. Constitution Saving Throw: DC 13. Failure: The target has the Poisoned condition for 1 hour. While Poisoned in this way, the target also has the Unconscious condition. The target wakes up if it takes damage.",
+      )}${entry(
+        "Gnaw",
+        "Dexterity Saving Throw: DC 14, one creature Grappled by the caster. Failure: The caster bites down. The target is no longer Grappled but has the Restrained condition. While Restrained in this way, the target has Half Cover against attacks and other effects not originating from the caster and takes 7 (2d6) Piercing damage at the start of each of the caster’s turns.",
+      )}`,
+    );
+    expect(byName(monster, "Dart")?.activation.resolution).toMatchObject({
+      onHitSave: {
+        onFail: [
+          {
+            condition: "poisoned",
+            duration: { minutes: 60 },
+            endsOnDamage: false,
+          },
+          {
+            condition: "unconscious",
+            duration: { minutes: 60 },
+            endsOnDamage: true,
+          },
+        ],
+      },
+    });
+    expect(byName(monster, "Gnaw")?.activation.resolution).toMatchObject({
+      onFail: [
+        { kind: "removeCondition", condition: "grappled" },
+        { condition: "restrained" },
+        {
+          modifier: {
+            kind: "lingeringDamage",
+            damage: [{ amount: { dice: "2d6" }, type: "piercing" }],
+          },
+        },
+      ],
+    });
+  });
 });

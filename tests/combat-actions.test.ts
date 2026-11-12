@@ -231,6 +231,42 @@ const CLAWER = dummy("test:monster/clawer", {
   ],
 });
 
+// Weakens one creature: Disadvantage on Strength saves and a damage penalty, saved against each turn.
+const WEAKENER = dummy("test:monster/weakener", {
+  actions: [
+    {
+      name: "Sap",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "str",
+          dc: { base: 12 },
+          onFail: [
+            {
+              kind: "modifier",
+              modifier: { kind: "disadvantage", on: "saves", ability: "str" },
+              duration: { minutes: 1 },
+              repeatSave: true,
+            },
+            {
+              kind: "modifier",
+              modifier: {
+                kind: "damageBonus",
+                amount: { dice: "1d4" },
+                subtract: true,
+              },
+              duration: { minutes: 1 },
+              repeatSave: true,
+            },
+          ],
+        },
+      },
+    },
+  ],
+});
+
 // Bites, then sprays a cone that the Multiattack has to aim.
 const SPITTER = dummy("test:monster/spitter", {
   text: "Actions\nMultiattack. The spitter makes one Club attack and uses Spray.",
@@ -263,6 +299,7 @@ function arena(base: RunContext): RunContext {
     "test:monster/spitter": SPITTER,
     "test:monster/gulper": GULPER,
     "test:monster/clawer": CLAWER,
+    "test:monster/weakener": WEAKENER,
     "test:monster/giant": dummy("test:monster/giant", { size: "huge" }),
     ...Object.fromEntries(WEAPONS.map((item) => [item.id, item])),
   };
@@ -1363,6 +1400,48 @@ describe("monster grapples and multiattacks", () => {
     expect(
       sources(who(settle(run, start, end, HIGH).state, PLAYER_ACTOR)),
     ).toEqual([]);
+  });
+
+  it("takes a damage penalty off weapon hits until a repeated save ends it", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("weakener", [6, 5], "test:monster/weakener"),
+    ]);
+    const sapped = settle(
+      run,
+      { ...state, combat: state.combat && { ...state.combat, index: 1 } },
+      [act("weakener", "monster:0|player")],
+      LOW,
+    ).state;
+    const hero = who(sapped, PLAYER_ACTOR);
+    expect(hero.activeEffects.map((e) => e.repeatSave)).toEqual([
+      { ability: "str", dc: 12 },
+      { ability: "str", dc: 12 },
+    ]);
+    const onHero = (from: DndState) => ({
+      ...from,
+      combat: from.combat && { ...from.combat, index: 0 },
+    });
+    const hit = (from: DndState) =>
+      damageTo(
+        settle(
+          run,
+          onHero(from),
+          [act(PLAYER_ACTOR, `${LONGSWORD}|weakener`)],
+          HIGH,
+        ).events,
+        "weakener",
+      )[0] ?? 0;
+    expect(hit(state) - hit(sapped)).toBe(4);
+    // One successful save at the end of the turn ends both.
+    const saved = settle(
+      run,
+      onHero(sapped),
+      [{ kind: `${NS}:endTurn`, payload: {} }],
+      HIGH,
+    ).state;
+    expect(sources(who(saved, PLAYER_ACTOR))).toEqual([]);
   });
 
   it("aims an area a Multiattack uses where it catches the most foes", async () => {

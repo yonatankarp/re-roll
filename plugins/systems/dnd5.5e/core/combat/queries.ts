@@ -137,7 +137,8 @@ export function reaches(
   if ("self" in targeting) return true;
   // From inside a swallower, it's the one creature within reach.
   const inside = swallowerOf(actor);
-  if (inside !== undefined) return inside === target.id;
+  if (inside !== undefined)
+    return inside === target.id || target.id === actor.id;
   const distance = distanceFeet(actor.position, target.position);
   if ("area" in targeting && targeting.range === "self") {
     return distance <= targeting.area.radius;
