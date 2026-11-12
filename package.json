@@ -19,6 +19,7 @@
     "test:soak": "vitest run --project soak",
     "test:coverage": "vitest run --project unit --coverage",
     "check-bundle": "node app/cli/check-bundle.ts",
+    "test:ui": "playwright test",
     "check-pack": "node app/cli/check-pack.ts",
     "check-pack:fixtures": "node tests/check-fixtures.ts",
     "prep:eval": "node tests/prep-eval.ts",
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@fast-check/vitest": "0.5.0",
+    "@playwright/test": "1.64.1",
     "@tauri-apps/api": "2.12.4",
     "@tauri-apps/cli": "2.12.4",
     "@tauri-apps/plugin-fs": "2.7.1",

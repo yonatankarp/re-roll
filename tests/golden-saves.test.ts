@@ -1,13 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { systems } from "../app/systems.ts";
-import { loadRun, scanPlugins } from "../engine/kernel/loader.ts";
-import { loadSave, migrate } from "../engine/kernel/save.ts";
-import {
-  createRunContext,
-  pendingDecision,
-  step,
-} from "../engine/kernel/turn.ts";
+import { loadRun, scanPlugins } from "../engine/run/loader.ts";
+import { loadSave, migrate } from "../engine/run/save.ts";
+import { createRunContext, pendingDecision, step } from "../engine/run/turn.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 
 // Saves written by older code, from tests/golden-saves.ts. A save (.json) is frozen: if one stops

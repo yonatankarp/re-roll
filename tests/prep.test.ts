@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { loadRun, scanPlugins } from "../engine/kernel/loader.ts";
+import { loadRun, scanPlugins } from "../engine/run/loader.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 import { type SessionDigest, planJobs } from "../engine/prep/jobs.ts";
 import type { ModelClient, ModelRequest } from "../engine/prep/model.ts";

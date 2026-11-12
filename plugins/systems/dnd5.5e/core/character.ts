@@ -1,6 +1,7 @@
 import {
   type ContentAccess,
   ContentIdSchema,
+  type Decision,
   type Dice,
   type Frame,
   PLAYER_ACTOR,
@@ -820,14 +821,18 @@ function autoPlay(
     step;
     step = nextStep(draft, base, access)
   ) {
-    const { options, prefer } = step;
-    const preferred = options.filter((item) => prefer?.includes(item.id));
-    const pool = preferred.length > 0 ? preferred : options;
-    const option = pool[dice.below(pool.length)];
-    if (!option) throw new Error(`${step.key} has no options`);
-    draft = step.apply(draft, option.id);
+    draft = step.apply(draft, pickStep(step, dice));
   }
   return draft;
+}
+
+function pickStep(step: Step, dice: Dice): string {
+  const { options, prefer } = step;
+  const preferred = options.filter((item) => prefer?.includes(item.id));
+  const pool = preferred.length > 0 ? preferred : options;
+  const option = pool[dice.below(pool.length)];
+  if (!option) throw new Error(`${step.key} has no options`);
+  return option.id;
 }
 
 function finishedCharacter(
@@ -970,6 +975,18 @@ function runBuildStep(
       }),
     ],
   };
+}
+
+// The player's build step answered as a companion's would, for the balance bot.
+export function buildPolicy(decision: Decision, context: Context): string {
+  const { actor, draft } = BuildStepSchema.parse(decision.resume.payload);
+  const step = nextStep(
+    draft,
+    actorBuild(requireActor(context.state, actor)),
+    context,
+  );
+  if (!step) throw new Error(`${decision.id} has no step`);
+  return pickStep(step, context.dice);
 }
 
 function runBuildAnswer(

@@ -1,7 +1,7 @@
 import { fc, test as property } from "@fast-check/vitest";
 import { describe, expect } from "vitest";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
-import { createSave, loadSave } from "../engine/kernel/save.ts";
+import { createSave, loadSave } from "../engine/run/save.ts";
 import { playRun } from "../engine/tools/bot.ts";
 import {
   type AreaShape,

@@ -4,13 +4,13 @@ import { runs } from "./depth.ts";
 import { listAdventures, loadAdventure } from "../app/cli/load-adventure.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { GameState } from "../engine/kernel/events.ts";
-import type { Registry } from "../engine/kernel/loader.ts";
-import { createSave, loadSave, replayInputs } from "../engine/kernel/save.ts";
+import type { Registry } from "../engine/run/loader.ts";
+import { createSave, loadSave, replayInputs } from "../engine/run/save.ts";
 import {
   type StoryFile,
   validateAdventure,
 } from "../engine/story/adventure.ts";
-import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
+import { type RunContext, startRun, step } from "../engine/run/turn.ts";
 import { checkPlugins } from "../engine/tools/check-pack.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 import { playRun, testAdventure } from "../engine/tools/bot.ts";
@@ -1115,6 +1115,33 @@ describe("playing a D&D adventure", () => {
     }
     expect(wins).toBeGreaterThan(0);
     expect(defeats).toBeGreaterThan(0);
+  }, 30_000); // many full playthroughs, which also run alongside other test files
+
+  it("plays like a player when asked: builds with the system, rests and keeps going past endings", async () => {
+    const run = await goblin();
+    const options = {
+      maxDecisions: 500,
+      smart: true,
+      rests: true,
+      avoidEndings: true,
+    };
+    const report = testAdventure(run, { ...options, runs: runs(12, 40) });
+    expect(report.failures).toEqual([]);
+    // The village ends the adventure early, and another choice is always open there.
+    expect(report.endings.village).toBeUndefined();
+
+    const answers = Array.from({ length: 12 }, (_, index) =>
+      playRun(run, `bot-${String(index)}`, options).inputs.flatMap((input) =>
+        input.kind === "answer" ? [input] : [],
+      ),
+    ).flat();
+    expect(answers.some((input) => input.optionId.startsWith("rest:"))).toBe(
+      true,
+    );
+    // Someone creates a character, and the system answers its build steps.
+    expect(
+      answers.some((input) => input.decisionId.startsWith("dnd5.5e:build:")),
+    ).toBe(true);
   }, 30_000); // many full playthroughs, which also run alongside other test files
 
   it("clears monsters and the combat when a fight is won", async () => {

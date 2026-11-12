@@ -7,10 +7,10 @@ import {
 import { describe, expect, it } from "vitest";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import { type Dice, createDice, rngFromSeed } from "../engine/kernel/dice.ts";
-import { replayInputs } from "../engine/kernel/save.ts";
+import { replayInputs } from "../engine/run/save.ts";
 import type { Input } from "../engine/kernel/events.ts";
 import { AWAIT_FRAME } from "../engine/kernel/system.ts";
-import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
+import { type RunContext, startRun, step } from "../engine/run/turn.ts";
 import {
   type Context,
   MOVE,

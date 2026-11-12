@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { loadSettings, saveSettings } from "../engine/shell/sound-settings.ts";
 import { systems } from "../app/systems.ts";
 import { guessAmbience, sceneAmbience } from "../engine/story/ambience.ts";
 import {
@@ -182,5 +183,30 @@ describe("narration index", () => {
     expect(
       planNarration(index, texts, "af_heart", (file) => onDisk.has(file)).make,
     ).toHaveLength(2);
+  });
+});
+
+describe("sound settings", () => {
+  it("are kept in the store they're given", () => {
+    const items = new Map<string, string>();
+    const store = {
+      getItem: (key: string) => items.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        items.set(key, value);
+      },
+    };
+    expect(loadSettings(store).narration).toBe(false);
+    saveSettings(
+      { ...loadSettings(store), volume: 0.3, effects: false },
+      store,
+    );
+    expect(loadSettings(store)).toMatchObject({
+      volume: 0.3,
+      effects: false,
+      // Turning effects off before ambience existed also turned ambience off.
+      ambience: true,
+    });
+    items.set("re-roll:audio", JSON.stringify({ volume: 9 }));
+    expect(loadSettings(store)).toMatchObject({ volume: 1, ambience: false });
   });
 });

@@ -10,9 +10,9 @@ import {
   type Input,
   InputSchema,
   isNamespacedEvent,
-} from "./events.ts";
+} from "../kernel/events.ts";
 import type { Registry } from "./loader.ts";
-import { AWAIT_FRAME } from "./system.ts";
+import { AWAIT_FRAME } from "../kernel/system.ts";
 import {
   type RunContext,
   applyEvent,

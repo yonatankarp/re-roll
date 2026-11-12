@@ -304,6 +304,8 @@ export interface SystemDefinition<S> {
   // Ranks a plugin when entries of the same name collide, lower first. Unset ranks all plugins alike, by id.
   // The adventure being played, and the plugins its manifest's precedence lists, still come first.
   readonly precedence?: (plugin: PluginManifest) => number;
+  // A book section's kind from the system's own wording, such as "monster" for a stat block, for the import library.
+  readonly libraryKind?: (body: string) => string | null;
   readonly htmlParsers?: Readonly<
     Record<
       string,

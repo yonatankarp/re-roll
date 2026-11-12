@@ -74,6 +74,7 @@ import {
   parseSpeciesFromHtml,
 } from "./import/origins.ts";
 import { spellImportKind } from "./import/spells.ts";
+import { libraryKindOf } from "./import/library.ts";
 import {
   parseBudgetsFromHtml,
   parseHazardsFromHtml,
@@ -86,6 +87,7 @@ import {
 import {
   beginCreation,
   buildCompanion,
+  buildPolicy,
   characterEffects,
   characterFrames,
 } from "./character.ts";
@@ -302,6 +304,7 @@ export const dnd55e = defineSystem<DndState>({
     const index = LEADING_BOOKS.indexOf(id);
     return index === -1 ? LEADING_BOOKS.length : index;
   },
+  libraryKind: libraryKindOf,
   htmlParsers: {
     monsters: parseMonstersFromHtml,
     classes: parseClassesFromHtml,
@@ -563,9 +566,13 @@ export const dnd55e = defineSystem<DndState>({
   nextDecision: (state, access) =>
     withTactics(nextDndDecision(state, access), state, access),
   rests: availableRests,
-  decidePolicy: tacticalPolicy,
+  decidePolicy: (decision, context) =>
+    decision.id.startsWith(`${NS}:build:`)
+      ? buildPolicy(decision, context)
+      : tacticalPolicy(decision, context),
+  // Building steps (class, scores, subclass, spells, feats) are made as a companion's are.
   tactical: (decision) =>
-    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave):/.test(
+    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave|build):/.test(
       decision.id,
     ),
 });

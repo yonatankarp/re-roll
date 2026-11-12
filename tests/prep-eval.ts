@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { parse } from "yaml";
 import { z } from "zod";
-import { loadRun, scanPlugins } from "../engine/kernel/loader.ts";
+import { loadRun, scanPlugins } from "../engine/run/loader.ts";
 import { createLlamaClient } from "../engine/platform/node/llama-client.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 import { SessionDigestSchema, planJobs } from "../engine/prep/jobs.ts";

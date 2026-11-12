@@ -63,6 +63,14 @@ describe("reference library", () => {
     expect(library.entries.every((e) => e.words > 0)).toBe(true);
   });
 
+  it("lets the system name a section's kind from its rules wording", () => {
+    const html = `<html><body><h1 id="Bog">Bog Lurker</h1><p>Armor Class 12</p><p>Hit Points 9</p></body></html>`;
+    expect(buildLibrary(html).entries[0]?.kind).toBe("other");
+    expect(buildLibrary(html, dnd55e.libraryKind).entries[0]?.kind).toBe(
+      "monster",
+    );
+  });
+
   it("keeps tables, quotes, emphasis and deeper headings, and drops art", () => {
     const keep = library.files.get(library.entries[1]?.file ?? "") ?? "";
     expect(keep).toContain("A **damp** keep & its cellar.");

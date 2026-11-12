@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { LoadResult } from "../engine/kernel/loader.ts";
-import { loadRun, scanPlugins } from "../engine/kernel/loader.ts";
+import type { LoadResult } from "../engine/run/loader.ts";
+import { loadRun, scanPlugins } from "../engine/run/loader.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 import { checkPlugins } from "../engine/tools/check-pack.ts";
 import { d6System } from "./fixtures/system-d6/index.ts";

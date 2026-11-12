@@ -7,15 +7,16 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - Node 26 comes from nvm and isn't on the default PATH. Prefix commands with `PATH="$HOME/.nvm/versions/node/v26.13.0/bin:$PATH"`.
 - Before you call work done, run `npm test`, `npm run lint` and `npm run typecheck` (four tsc projects), and make sure all three pass.
 - `npm run ui` serves the game at http://127.0.0.1:5199/ with `strictPort`. A second checkout or worktree needs `npm run ui -- --port <other>`.
-- `npm run bot -- [runs] [adventure] [--smart] [--difficulty=story|normal|hard]` plays adventures to measure balance. The targets are Story at or under about 25% defeats and Normal at 15–45%.
+- `npm run test:ui` is a Playwright smoke test in Chromium against its own `npm run ui` on a free port. CI runs it as the `ui` job. Run `npx playwright install chromium` first if Playwright's browser isn't cached yet.
+- `npm run bot -- [runs] [adventure] [--smart] [--rests] [--avoid-endings] [--difficulty=story|normal|hard]` plays adventures to measure balance. `--smart` fights and builds characters with the system's tactics, `--rests` rests whenever a scene allows, and `--avoid-endings` skips story choices that end the adventure while others remain. The targets are Story at or under about 25% defeats and Normal at 15–45%.
 - `npm run play` plays in text without the UI.
 - `npm run narrate -- <adventure> [--voice=…]` reads a book adventure's scenes aloud once with Kokoro-82M (needs `ffmpeg`), into its `narration/` folder. Run it from the main checkout, since a worktree's `private/` is only a copy. Clips missing there are read in the app.
-- Saves replay logged inputs (`engine/kernel/save.ts`). Every player action must go through decisions and events, never through hidden UI state.
+- Saves replay logged inputs (`engine/run/save.ts`). Every player action must go through decisions and events, never through hidden UI state.
 - Events and frames are append-only, since saves store them and load by folding them:
   - New payload fields are optional or have a default, so older saves still parse.
   - Never rename or remove an event kind or a frame kind, or reshape its payload. Add a new kind instead and keep the old handler.
   - Payloads carry outcomes (the rolled damage, the item found), never inputs that a reducer re-derives from the rules, so a rules change can't rewrite history.
-  - A change that can't follow these rules raises `SAVE_FORMAT_VERSION` and adds an entry to `migrations` in `engine/kernel/save.ts`.
+  - A change that can't follow these rules raises `SAVE_FORMAT_VERSION` and adds an entry to `migrations` in `engine/run/save.ts`.
   - The golden saves in `tests/fixtures/saves/` (`*.json`) are frozen and must keep loading. Never regenerate one to make its test pass. A snapshot (`*.state.json`) may be rewritten with `node tests/golden-saves.ts --snapshots` after you review its diff, when the state changed on purpose.
 
 ## Book content: `books/`

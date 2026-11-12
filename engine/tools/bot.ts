@@ -1,8 +1,8 @@
 import { createDice, rngFromSeed } from "../kernel/dice.ts";
 import type { GameState, Input } from "../kernel/events.ts";
-import { type LogEntry, replayInputs } from "../kernel/save.ts";
-import { type RunContext, startRun, step } from "../kernel/turn.ts";
-import { REST_OPTION_PREFIX } from "../story/runtime.ts";
+import { type LogEntry, replayInputs } from "../run/save.ts";
+import { type RunContext, startRun, step } from "../run/turn.ts";
+import { REST_OPTION_PREFIX, SCENE_DECISION_PREFIX } from "../story/runtime.ts";
 
 export interface BotRun {
   readonly seed: string;
@@ -20,8 +20,14 @@ export function playRun(
   options: {
     readonly maxDecisions: number;
     readonly onState?: (state: GameState) => void;
-    // Plays the player's fights with the system's own tactics, as a sensible person would. Story choices stay random.
+    // Plays the player's fights and builds the character with the system's own tactics, as a sensible person
+    // would. Story choices stay random.
     readonly smart?: boolean;
+    // Rests whenever a scene allows, taking the last (longest) rest offered, as a careful player does.
+    readonly rests?: boolean;
+    // Leaves a story choice that would end the adventure while another choice doesn't, so short endings
+    // don't hide how a long adventure plays.
+    readonly avoidEndings?: boolean;
     readonly settings?: Readonly<Record<string, string>>;
   },
 ): BotRun {
@@ -44,12 +50,32 @@ export function playRun(
   noteScenes(started.events);
 
   for (let count = 0; pending && count < options.maxDecisions; count += 1) {
-    // Never rests, so its runs measure the adventure as written.
-    const choices = pending.options.filter(
+    const decisionId = pending.id;
+    const answer = (optionId: string): Extract<Input, { kind: "answer" }> => ({
+      kind: "answer",
+      decisionId,
+      optionId,
+    });
+    // Without rests on it never rests, so its runs measure the adventure as written.
+    const rest = options.rests
+      ? pending.options.findLast((item) =>
+          item.id.startsWith(REST_OPTION_PREFIX),
+        )
+      : undefined;
+    let choices = pending.options.filter(
       (item) => !item.id.startsWith(REST_OPTION_PREFIX),
     );
+    if (options.avoidEndings && pending.id.startsWith(SCENE_DECISION_PREFIX)) {
+      // Steps are pure, so trying a choice changes nothing, and it sees the same dice the real one would.
+      const going = choices.filter((item) => {
+        const tried = step(run, state, answer(item.id));
+        return !tried.ok || tried.state.story.ended !== "ending";
+      });
+      if (going.length > 0) choices = going;
+    }
     const option =
-      options.smart && run.system.tactical?.(pending)
+      rest ??
+      (options.smart && run.system.tactical?.(pending)
         ? {
             id: run.system.decidePolicy(pending, {
               state: state.system,
@@ -58,13 +84,9 @@ export function playRun(
               contentIds: run.contentIds,
             }),
           }
-        : choices[dice.below(choices.length)];
+        : choices[dice.below(choices.length)]);
     if (!option) throw new Error(`${pending.id} has no options`);
-    const input: Input = {
-      kind: "answer",
-      decisionId: pending.id,
-      optionId: option.id,
-    };
+    const input = answer(option.id);
     const outcome = step(run, state, input);
     if (!outcome.ok) throw new Error(outcome.error);
     ({ state, pending } = outcome);
@@ -110,6 +132,8 @@ export function testAdventure(
     readonly maxDecisions: number;
     readonly seedPrefix?: string;
     readonly smart?: boolean;
+    readonly rests?: boolean;
+    readonly avoidEndings?: boolean;
     readonly settings?: Readonly<Record<string, string>>;
   },
 ): BotReport {
@@ -125,6 +149,8 @@ export function testAdventure(
       const result = playRun(run, seed, {
         maxDecisions: options.maxDecisions,
         ...(options.smart ? { smart: true } : {}),
+        ...(options.rests ? { rests: true } : {}),
+        ...(options.avoidEndings ? { avoidEndings: true } : {}),
         ...(options.settings ? { settings: options.settings } : {}),
       });
       ({ inputs } = result);

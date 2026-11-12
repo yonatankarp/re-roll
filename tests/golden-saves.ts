@@ -7,8 +7,8 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { Decision, GameState, Input } from "../engine/kernel/events.ts";
-import { type LogEntry, createSave, loadSave } from "../engine/kernel/save.ts";
-import { pendingDecision, startRun, step } from "../engine/kernel/turn.ts";
+import { type LogEntry, createSave, loadSave } from "../engine/run/save.ts";
+import { pendingDecision, startRun, step } from "../engine/run/turn.ts";
 
 process.env.RE_ROLL_ROOTS = "plugins"; // shipped content only: the repository is public
 const { loadAdventure } = await import("../app/cli/load-adventure.ts");

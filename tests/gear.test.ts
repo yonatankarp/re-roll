@@ -5,7 +5,7 @@ import { loadAdventure } from "../app/cli/load-adventure.ts";
 import { systems } from "../app/systems.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { GameState } from "../engine/kernel/events.ts";
-import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
+import { type RunContext, startRun, step } from "../engine/run/turn.ts";
 import type { StoryEffect } from "../engine/story/adventure.ts";
 import { checkPlugins } from "../engine/tools/check-pack.ts";
 import {

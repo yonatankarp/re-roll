@@ -1,5 +1,5 @@
 import { type Issue, formatIssue } from "../kernel/issues.ts";
-import { loadRun, scanPlugins } from "../kernel/loader.ts";
+import { loadRun, scanPlugins } from "../run/loader.ts";
 import type { Storage } from "../kernel/storage.ts";
 import type { GameSystem } from "../kernel/system.ts";
 

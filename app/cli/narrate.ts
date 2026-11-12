@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parse, stringify } from "yaml";
-import { scanPlugins } from "../../engine/kernel/loader.ts";
+import { scanPlugins } from "../../engine/run/loader.ts";
 import { createNodeStorage } from "../../engine/platform/node/storage.ts";
 import {
   KOKORO_FILES,

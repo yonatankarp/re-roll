@@ -3,6 +3,7 @@ import tseslint from "typescript-eslint";
 
 const deterministicFiles = [
   "engine/kernel/**/*.ts",
+  "engine/run/**/*.ts",
   "engine/story/**/*.ts",
   "plugins/systems/*/core/**/*.ts",
   "tests/fixtures/system-d6/**/*.ts",
@@ -77,6 +78,7 @@ export default defineConfig([
   {
     files: [
       "engine/kernel/**/*.ts",
+      "engine/run/**/*.ts",
       "engine/story/**/*.ts",
       "engine/sdk/**/*.ts",
       "engine/prep/**/*.ts",

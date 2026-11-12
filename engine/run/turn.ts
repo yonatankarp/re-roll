@@ -13,7 +13,7 @@ import {
   sceneVisit,
   storyDecision,
 } from "../story/runtime.ts";
-import { type RecordingDice, createDice, rngFromSeed } from "./dice.ts";
+import { type RecordingDice, createDice, rngFromSeed } from "../kernel/dice.ts";
 import {
   type Decision,
   DecisionSchema,
@@ -24,10 +24,10 @@ import {
   PLAYER_ACTOR,
   isNamespacedEvent,
   isNarrativeEvent,
-} from "./events.ts";
+} from "../kernel/events.ts";
 import { z } from "zod";
 import type { Registry } from "./loader.ts";
-import { AWAIT_FRAME } from "./system.ts";
+import { AWAIT_FRAME } from "../kernel/system.ts";
 
 // Far beyond any real chain of rules, so hitting it means a handler is looping.
 const MAX_WORK_PER_STEP = 10_000;

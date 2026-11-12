@@ -119,18 +119,16 @@ function traitMechanics(text: string): object {
   if (resisted) {
     return {
       automation: "full",
-      passives: resisted
-        .slice(1)
-        .flatMap((type) =>
-          type
-            ? [
-                {
-                  kind: "modifier",
-                  modifier: { kind: "resistance", damage: type.toLowerCase() },
-                },
-              ]
-            : [],
-        ),
+      passives: resisted.slice(1).flatMap((type) =>
+        type
+          ? [
+              {
+                kind: "modifier",
+                modifier: { kind: "resistance", damage: type.toLowerCase() },
+              },
+            ]
+          : [],
+      ),
     };
   }
   const tougher =

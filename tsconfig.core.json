@@ -6,6 +6,7 @@
   },
   "include": [
     "engine/kernel/**/*.ts",
+    "engine/run/**/*.ts",
     "engine/story/**/*.ts",
     "engine/prep/**/*.ts",
     "engine/sdk/**/*.ts",

@@ -2,8 +2,8 @@ import { PLAYER_ACTOR, type Decision } from "#sdk";
 import { describe, expect, it } from "vitest";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import type { GameState, Input } from "../engine/kernel/events.ts";
-import { replayInputs } from "../engine/kernel/save.ts";
-import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
+import { replayInputs } from "../engine/run/save.ts";
+import { type RunContext, startRun, step } from "../engine/run/turn.ts";
 import type { StoryEffect } from "../engine/story/adventure.ts";
 import { storyDecision } from "../engine/story/runtime.ts";
 import {

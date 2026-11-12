@@ -1,7 +1,7 @@
 import { PLAYER_ACTOR, type Decision } from "#sdk";
 import { describe, expect, it } from "vitest";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
-import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
+import { type RunContext, startRun, step } from "../engine/run/turn.ts";
 import { CREATE_CHARACTER } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import {
   type Activation,
@@ -25,6 +25,7 @@ import {
   deriveStats,
   saveBonus,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { multiclassSlots } from "../plugins/systems/dnd5.5e/core/multiclass.ts";
 
 async function goblin(): Promise<RunContext> {
   return (await loadAdventure("goblin-ambush")).run;
@@ -370,5 +371,105 @@ describe("exhaustion", () => {
     );
     expect(worn.speed).toBe(fresh.speed - 10);
     expect(worn.initiative).toBe(fresh.initiative - 4);
+  });
+});
+
+describe("multiclass spellcasting", () => {
+  const level = (classId: string) => ({
+    classId,
+    hitPointGain: 5,
+    answers: [],
+  });
+  const fighter = "srd52:class/fighter";
+  const wizard = "srd52:class/wizard";
+  const cleric = "srd52:class/cleric";
+
+  async function built(classIds: readonly string[]): Promise<Stats> {
+    const run = await goblin();
+    const actor = pregen(run, "srd52:pregen/fighter");
+    if (actor.source.kind !== "character" || !actor.source.build) {
+      throw new Error("The fighter pregen has no build");
+    }
+    const build = { ...actor.source.build, levels: classIds.map(level) };
+    return deriveStats({ ...actor, source: { kind: "character", build } }, run);
+  }
+
+  it("casts with the casting class even when it isn't the first", async () => {
+    const stats = await built([fighter, wizard]);
+    expect(stats.spellAbility).toBe("int");
+    expect(stats.slots).toEqual([2]);
+  });
+
+  it("adds caster levels from every casting class", async () => {
+    // Wizard 2 and Cleric 1 make caster level 3, and Wisdom loses to the class with more levels.
+    const stats = await built([fighter, wizard, cleric, wizard]);
+    expect(stats.slots).toEqual([4, 2]);
+    expect(stats.spellAbility).toBe("int");
+    expect(stats.classLevels).toEqual({
+      [fighter]: 1,
+      [wizard]: 2,
+      [cleric]: 1,
+    });
+  });
+
+  it("counts half and third casters as the multiclass rules do", () => {
+    const full = (level: number, slots: readonly number[]) => ({
+      slots,
+      level,
+      subclass: false,
+    });
+    // A Paladin 5 is caster level 3, and an Eldritch Knight 4 (two level 1 slots, then three) is 1.
+    expect(
+      multiclassSlots([
+        { slots: [4, 2], level: 5, subclass: false },
+        { slots: [3], level: 4, subclass: true },
+      ]),
+    ).toEqual([4, 3]);
+    // Wizard 11 and Cleric 1 make 12: rows 11 and 12 are the same, and the class level says which.
+    expect(
+      multiclassSlots([full(11, [4, 3, 3, 3, 2, 1]), full(1, [2])]),
+    ).toEqual([4, 3, 3, 3, 2, 1]); // not 13's level 7 slot
+    // One casting class, or a row that isn't on the table, keeps the class's own slots.
+    expect(multiclassSlots([full(3, [4, 2])])).toBeNull();
+    expect(multiclassSlots([full(1, [1]), full(1, [2])])).toBeNull();
+  });
+
+  it("keeps a Warlock's Pact Magic out of the multiclass table", async () => {
+    const run = await goblin();
+    // Pact Magic at level 1 only, with two slots at level 2, as a Warlock's are printed.
+    const warlock = {
+      id: "test:class/warlock",
+      name: "Warlock",
+      hitDie: "d8",
+      primaryAbilities: ["cha"],
+      savingThrows: ["wis", "cha"],
+      weapons: ["simple"],
+      armor: ["light"],
+      spellcasting: { ability: "cha" },
+      levels: [
+        { level: 1, grants: ["test:feature/pact-magic"], slots: [1] },
+        { level: 2, slots: [2] },
+      ],
+    };
+    const actor = pregen(run, "srd52:pregen/wizard");
+    if (actor.source.kind !== "character" || !actor.source.build) {
+      throw new Error("The wizard pregen has no build");
+    }
+    const build = {
+      ...actor.source.build,
+      levels: [wizard, wizard, warlock.id, warlock.id].map(level),
+    };
+    const pactMagic = {
+      id: "test:feature/pact-magic",
+      name: "Pact Magic",
+      text: "Slots that come back on a Short Rest.",
+      automation: "text",
+    };
+    const stats = deriveStats(
+      { ...actor, source: { kind: "character", build } },
+      withContent(run, [warlock, pactMagic]),
+    );
+    expect(stats.slots).toEqual([2]); // the last class's own, not caster level 3's
+    expect(stats.pactMagic).toBe(true);
   });
 });

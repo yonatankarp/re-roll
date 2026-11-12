@@ -64,8 +64,9 @@ The app looks like a fifth edition book page. Its fonts are Solbera's CC BY-SA 4
 
 ```text
 engine/                    Knows no game rules and no adventure
-  kernel/                  IDs, Storage interface, plugin loader, registry, dice, turn loop, events, saves
+  kernel/                  IDs, Storage interface, system and plugin types, dice, events. Imports nothing else in engine/
   story/                   Scenes, clocks, secrets, variants, director, companions, ambience ids, narration clip names
+  run/                     Plugin loader, registry, turn loop and saves, which tie kernel and story together
   prep/                    Session prep logic and the ModelClient interface
   sdk/                     The only part of the engine plugins may import
   shell/                   App UI. Knows no rule system:
@@ -885,7 +886,7 @@ export interface SaveFile {
 }
 ```
 
-`engine/kernel/save.ts` holds the format, `SAVE_FORMAT_VERSION` (1), loading and replay. `engine/shell/session.ts` decides when to write and how saves are listed.
+`engine/run/save.ts` holds the format, `SAVE_FORMAT_VERSION` (1), loading and replay. `engine/shell/session.ts` decides when to write and how saves are listed.
 
 - **Loading** checks the file with Zod, checks every system event against its schema, and rebuilds state by applying the recorded events, so it doesn't re-roll dice and is safe if content later changes. The shell then tells the log again (`retell`) to rebuild the story text, rolls and leads.
 - **Replay checking:** `replayInputs` runs the inputs again from the seed. The tests confirm that the same events and final state come out. This is the core determinism test.

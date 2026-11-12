@@ -2,7 +2,7 @@ import { PLAYER_ACTOR } from "#sdk";
 import { describe, expect, it } from "vitest";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import type { Dice } from "../engine/kernel/dice.ts";
-import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
+import { type RunContext, startRun, step } from "../engine/run/turn.ts";
 import {
   CREATE_CHARACTER,
   type Context,
