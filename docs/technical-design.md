@@ -191,6 +191,8 @@ sdk: ^1                      # engine SDK version it was written for
 system: dnd5.5e@^1           # the rule system it was written for
 requires: []                 # such as { plugin: srd52, version: ^1 }
 distribution: shipped        # or private
+edition: "2024"              # optional; each system says what an unset edition means
+precedence: [phb]            # adventures only: plugins whose entries win in this adventure's runs
 attribution: >-
   Credit text, shown on the About screen whenever this plugin is loaded
 ```
@@ -204,7 +206,8 @@ attribution: >-
 5. Parse each content file with the schema the system registered for that folder, reporting the file and the path within it.
 6. Apply replacements. Because IDs are namespaced, a book's version of a spell declares `replaces: srd52:spell/fireball`. It replaces the whole entry, with no deep merging, and any reference to the old ID resolves to the replacement.
 7. Resolve every reference, and report anything missing.
-8. Freeze the result into a read-only registry.
+8. Order the plugins by precedence: the adventure being played, then the plugins its `precedence` lists, then the rest by the system's `precedence` rank and ID. `contentIds()` lists entries in that order, so when two books print an entry of the same name, a system takes the first. The D&D system ranks `phb`, `monster-manual` and `dmg` first, then other books, then `srd52`, then 2014-edition books.
+9. Freeze the result into a read-only registry.
 
 **Data plugin files are untrusted input.** Asset paths must stay inside the plugin folder, and all text is rendered as text, never as HTML. The same applies to model output.
 

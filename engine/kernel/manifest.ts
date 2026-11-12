@@ -31,6 +31,10 @@ export const PluginManifestSchema = z.strictObject({
     )
     .default([]),
   distribution: z.enum(["shipped", "private"]),
+  // The edition of its system the plugin follows. Each system ranks editions, and says what an unset one means.
+  edition: z.string().optional(),
+  // Adventures only: plugins whose entries win over others of the same name in this adventure's runs, highest first.
+  precedence: z.array(PluginIdSchema).optional(),
   attribution: z.string().optional(),
 });
 

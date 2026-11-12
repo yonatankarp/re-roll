@@ -146,15 +146,15 @@ function levelReferences(level: z.infer<typeof ClassSchema>["levels"][number]) {
   ];
 }
 
-// A pregen names a class from its own book. When a fuller book with a class of the same name is loaded
-// too, that class takes its place, as it does in character creation, so the character can level past
-// where the first book stops (the SRD's classes end at level 5).
+// A pregen names a class from its own book. When a book with a class of the same name wins precedence,
+// that class takes its place, as it does in character creation, so the character can level past
+// where the SRD stops (its classes end at level 5).
 function pregenBuild(pregenId: string, access: ContentAccess): CharacterBuild {
   const { build } = lookup(access, PregenSchema, pregenId);
   const classIds = access.contentIds().filter((id) => id.includes(":class/"));
   const fullest = (classId: string): string => {
     const { name } = lookup(access, ClassSchema, classId);
-    // Content ids are sorted, and character creation also takes the first class of each name.
+    // Content ids come in precedence order, and character creation also takes the first class of each name.
     return (
       classIds.find((id) => lookup(access, ClassSchema, id).name === name) ??
       classId
@@ -186,6 +186,16 @@ function characterActor(
   });
   return { ...actor, hp: deriveStats(actor, access).maxHp };
 }
+
+// Whose entry wins when books print the same name, highest first. Books not listed rank between these and the SRD.
+const LEADING_BOOKS = ["phb", "monster-manual", "dmg"];
+// shortcut: these 2014-edition books' manifests don't set edition. Set `edition: "2014"` there and drop the list.
+const OLDER_BOOKS = new Set([
+  "basic-rules-2014",
+  "spelljammer-creatures",
+  "sword-coast-guide",
+  "xanathars-guide",
+]);
 
 const CharacterChosenPayload = z.object({ answer: z.string() });
 const ActorPayload = z.object({ actor: z.string() });
@@ -271,6 +281,13 @@ export const dnd55e = defineSystem<DndState>({
   }),
   outcomes: { keys: ["success", "failure"] },
   importKinds: { spells: spellImportKind },
+  // An unset edition means 2024, apart from the older books listed above.
+  precedence: ({ id, edition = OLDER_BOOKS.has(id) ? "2014" : "2024" }) => {
+    if (edition === "2014") return LEADING_BOOKS.length + 2;
+    if (id === "srd52") return LEADING_BOOKS.length + 1;
+    const index = LEADING_BOOKS.indexOf(id);
+    return index === -1 ? LEADING_BOOKS.length : index;
+  },
   htmlParsers: {
     monsters: parseMonstersFromHtml,
     classes: parseClassesFromHtml,

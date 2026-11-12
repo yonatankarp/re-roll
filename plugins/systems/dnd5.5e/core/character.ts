@@ -93,7 +93,7 @@ interface Step {
   readonly apply: (draft: Draft, answer: string) => Draft;
 }
 
-// shortcut: when two loaded books print the same name, the first by id wins. Use `replaces` once imports set it.
+// When two loaded books print the same name, the first in content id order wins: the run's precedence.
 function namedContent<T extends { readonly name: string }>(
   access: ContentAccess,
   kind: string,
@@ -367,9 +367,13 @@ function classSpells(access: ContentAccess, list: string): readonly Spell[] {
     parsedSpells.set(access.content, spells);
   }
   const named = ClassSchema.safeParse(access.content(list)).data?.spellList;
-  return spells.filter(
-    (spell) => spell.classes.includes(list) || named?.includes(spell.id),
-  );
+  const byName = new Map<string, Spell>();
+  // The list is applied first, as namedContent applies `offered`; then the first spell of each name wins.
+  for (const spell of spells) {
+    const listed = spell.classes.includes(list) || named?.includes(spell.id);
+    if (listed && !byName.has(spell.name)) byName.set(spell.name, spell);
+  }
+  return [...byName.values()];
 }
 
 function skillLabel(skill: string): string {
