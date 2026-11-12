@@ -8,7 +8,7 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - Before you call work done, run `npm test`, `npm run lint` and `npm run typecheck` (four tsc projects), and make sure all three pass.
 - `npm run ui` serves the game at http://127.0.0.1:5199/ with `strictPort`. A second checkout or worktree needs `npm run ui -- --port <other>`.
 - `npm run test:ui` is a Playwright smoke test in Chromium against its own `npm run ui` on a free port. CI runs it as the `ui` job. Run `npx playwright install chromium` first if Playwright's browser isn't cached yet.
-- `npm run bot -- [runs] [adventure] [--smart] [--rests] [--avoid-endings] [--difficulty=story|normal|hard]` plays adventures to measure balance. `--smart` fights and builds characters with the system's tactics, `--rests` rests whenever a scene allows, and `--avoid-endings` skips story choices that end the adventure while others remain. The targets are Story at or under about 25% defeats and Normal at 15–45%.
+- `npm run bot -- [runs] [adventure] [--smart] [--rests] [--avoid-endings] [--difficulty=story|normal|hard]` plays adventures to measure balance. `--smart` fights and builds characters with the system's tactics, `--rests` rests whenever a scene allows, and `--avoid-endings` skips story choices that end the adventure while others remain. The targets are Story at or under about 25% defeats and Normal at 15–45%, reached through the engine, tactics and difficulty settings, never by editing book content.
 - `npm run play` plays in text without the UI.
 - `npm run narrate -- <adventure> [--voice=…]` reads a book adventure's scenes aloud once with Kokoro-82M (needs `ffmpeg`), into its `narration/` folder. Run it from the main checkout, since a worktree's `books/` is only a copy. Clips missing there are read in the app.
 - Saves replay logged inputs (`engine/run/save.ts`). Every player action must go through decisions and events, never through hidden UI state.
@@ -22,6 +22,7 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 ## Book content: `books/`
 
 - `books/` holds content imported from the owner's own books. It is its own **private** git repository, ignored by this one. Commit book content only there, never to this public repository.
+- Never change what the book says. Encounters keep the book's printed monsters and counts, and levels and level-ups stay where the book puts them. Never trim or retune book content for balance; balance belongs to the engine and the difficulty settings.
 - Only write ids, names and numbers there: coordinates, counts, monster ids, `onFlee` targets. Never write book prose of your own, and never copy book text into this repository, its issues or its docs.
 - Never log in to or download from D&D Beyond.
 - A git worktree has no `books/`. To play-test, symlink `~/Projects/re-roll/books` into it, and only one session at a time may write to the same files there.
