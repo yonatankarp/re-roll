@@ -440,6 +440,14 @@ export function choiceOptions(
             ? [{ id: item.id, label: item.name }]
             : [],
         ),
+        // A companion masters the weapons it starts with, so the mastery gets used.
+        prefer: startingGear(
+          classDef,
+          buildAbilities(
+            base ?? originBuild(draft, placeholderEntry(classDef)),
+          ),
+          access,
+        ),
       };
     }
     case "spells": {

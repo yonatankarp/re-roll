@@ -94,6 +94,15 @@ import {
   saveBonus,
   scaleActivation,
 } from "./stats.ts";
+import {
+  dodging,
+  grappledAwayFrom,
+  hasTactic,
+  lightAttackEvents,
+  masteryOf,
+  revealEvents,
+  speedOf,
+} from "./tactics.ts";
 
 export type Context = SystemContext<DndState>;
 
@@ -124,7 +133,7 @@ function frame(
 
 export const CHECK_END = frame("checkCombatEnd", {});
 
-function hasFlag(
+export function hasFlag(
   actor: Actor,
   kind: "advantage" | "disadvantage",
   on: "attacks" | "saves" | "checks" | "attacksAgainst",
@@ -144,7 +153,7 @@ function hasPassive(
 }
 
 // Effects from one source count once, so casting Bless twice can't add two d4s.
-function rollBonus(
+export function rollBonus(
   actor: Actor,
   to: "attacks" | "saves" | "checks",
   context: Context,
@@ -172,7 +181,7 @@ function rollBonus(
   return total;
 }
 
-function allies(state: DndState, actor: Actor): readonly Actor[] {
+export function allies(state: DndState, actor: Actor): readonly Actor[] {
   return state.combat
     ? state.combat.order.flatMap((id) => {
         const other = actorOf(state, id);
@@ -192,7 +201,7 @@ export function enemies(state: DndState, actor: Actor): readonly Actor[] {
 
 // A spell can use a slot of its own level or higher, which is also how Pact Magic casts low spells.
 // The feet a melee action reaches, or null for a ranged one.
-function meleeReach(action: KnownAction): number | null {
+export function meleeReach(action: KnownAction): number | null {
   const { targeting } = action.activation;
   if (!("creatures" in targeting)) return null;
   const feet = rangeFeet(targeting.range);
@@ -215,13 +224,15 @@ export function reaches(
   return distance <= rangeFeet(targeting.range);
 }
 
-function within5(a: Actor, b: Actor): boolean {
+export function within5(a: Actor, b: Actor): boolean {
   return distanceFeet(a.position, b.position) <= 5;
 }
 
-function speedLeft(actor: Actor, stats: Stats): number {
+export function speedLeft(actor: Actor, stats: Stats): number {
   const held = hasCondition(actor, "grappled", "restrained", ...INCAPACITATING);
-  return held || !actor.position ? 0 : Math.max(0, stats.speed - actor.moved);
+  return held || !actor.position
+    ? 0
+    : Math.max(0, speedOf(actor, stats) - actor.moved);
 }
 
 export function moveSquares(
@@ -666,7 +677,10 @@ function payCosts(
   return events;
 }
 
-function concentrationFrame(target: Actor, amount: number): readonly Frame[] {
+export function concentrationFrame(
+  target: Actor,
+  amount: number,
+): readonly Frame[] {
   return target.concentratingOn !== null && amount > 0
     ? [
         frame("concentrationSave", {
@@ -748,7 +762,7 @@ export function damageEvents(
 }
 
 // Several hits on one target, reported in turn so each one sees the HP the last one left.
-function dealEvents(
+export function dealEvents(
   target: Actor,
   hits: readonly { readonly amount: number; readonly type: Damage["type"] }[],
   critical: boolean,
@@ -884,7 +898,7 @@ function leafEvents(
 }
 
 // The saved flag, and the roll for the history. An automatic failure rolls no die, so it has no event.
-function rollSave(
+export function rollSave(
   target: Actor,
   ability: Ability,
   dc: number,
@@ -901,7 +915,8 @@ function rollSave(
   const roll = rollD20(context.dice, {
     advantage:
       hasFlag(target, "advantage", "saves", stats) ||
-      (magical && hasPassive(stats, "magicResistance")),
+      (magical && hasPassive(stats, "magicResistance")) ||
+      (ability === "dex" && dodging(target)),
     disadvantage:
       hasFlag(target, "disadvantage", "saves", stats) ||
       (ability === "dex" && hasCondition(target, "restrained")),
@@ -1291,6 +1306,9 @@ function castAction(
   return {
     events: [
       ...payCosts(action, actor, context, slotLevel),
+      ...lightAttackEvents(actor, actionId, context),
+      // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.
+      ...(resolution.kind === "attack" ? [] : revealEvents(actor)),
       ...(result.events ?? []),
     ],
     frames: [
@@ -1457,6 +1475,7 @@ const AttackSchema = z.object({
   actionId: z.string(),
   target: z.string(),
   slotLevel: z.number().optional(),
+  noModifier: z.boolean().optional(), // an off-hand or Cleave attack, whose damage leaves out the ability modifier
 });
 
 // Who a projectile or later attack actually goes for, given who is still standing.
@@ -1536,6 +1555,7 @@ export function provokers(
   state: DndState,
   access: ContentAccess,
 ): readonly { readonly foe: Actor; readonly melee: KnownAction }[] {
+  if (hasTactic(actor, "disengage")) return [];
   return enemies(state, actor).flatMap((foe) => {
     if (
       !foe.budget.reaction ||
@@ -1596,6 +1616,9 @@ export function runMove(
         y: to.y,
         feet: step.feet,
       }),
+      ...(actor.position
+        ? [frame("afterMove", { actor: actor.id, ...actor.position })]
+        : []),
       CHECK_END,
     ],
   };
@@ -1741,6 +1764,8 @@ export function runAttackRoll(
   const disadvantage =
     crowded ||
     proneFar ||
+    dodging(target) ||
+    grappledAwayFrom(attacker, target) ||
     hasFlag(attacker, "disadvantage", "attacks", stats) ||
     hasFlag(target, "disadvantage", "attacksAgainst", targetStats) ||
     hasCondition(
@@ -1781,6 +1806,7 @@ export function runAttackRoll(
   const spent = [
     ...onceEnded(attacker, "attacks"),
     ...onceEnded(target, "attacksAgainst"),
+    ...revealEvents(attacker),
   ];
   const hit = {
     attacker: attacker.id,
@@ -1793,12 +1819,16 @@ export function runAttackRoll(
     ...(payload.slotLevel === undefined
       ? {}
       : { slotLevel: payload.slotLevel }),
+    ...(payload.noModifier ? { noModifier: true } : {}),
   };
 
   if (!hits) {
     return (
       offerInspiration(attacker, { ...payload, target: target.id }, report) ?? {
         events: [report, ...spent],
+        ...(masteryOf(attacker, action.id, context)
+          ? { frames: [frame("masteryMiss", hit)] }
+          : {}),
       }
     );
   }
@@ -1837,6 +1867,7 @@ const HitSchema = z.object({
   slotLevel: z.number().optional(),
   halve: z.boolean().optional(), // set by a reaction like Uncanny Dodge
   reduceBy: z.number().optional(), // set by a reaction like Deflect Attacks
+  noModifier: z.boolean().optional(),
 });
 
 const ReactionSchema = HitSchema.extend({ answer: z.string() });
@@ -1942,6 +1973,9 @@ export function runApplyHit(
       rollAmount(amount, stats, dice, multiplier) +
       (index === 0 && type === firstType
         ? extra + damageBonus(attacker, resolution, stats, context)
+        : 0) -
+      (index === 0 && payload.noModifier && resolution.attack.ability
+        ? Math.max(0, modifierFor(stats, resolution.attack.ability))
         : 0);
     const final = finalDamage(Math.max(0, rolled), type, responses);
     totalDealt += final;
@@ -1981,6 +2015,9 @@ export function runApplyHit(
               critical: payload.critical,
             }),
           ]
+        : []),
+      ...(masteryOf(attacker, action.id, context)
+        ? [frame("masteryHit", { ...payload, dealt: dealt.dealt })]
         : []),
       CHECK_END,
     ],
@@ -2483,7 +2520,7 @@ function hpFraction(actor: Actor, context: Context): number {
 // Simple, predictable tactics, so non-player characters never need a model: heal, attack the weakest, react when it helps.
 // Where a creature should step to: within reach of the nearest foe it can hurt, by the shortest walk.
 // Null when no square gets it any closer than it is.
-function stepToward(actor: Actor, context: Context): Square | null {
+export function stepToward(actor: Actor, context: Context): Square | null {
   const { state } = context;
   const stats = deriveStats(actor, context);
   if (!actor.position) return null;

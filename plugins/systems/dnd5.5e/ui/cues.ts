@@ -3,6 +3,11 @@ import { resistancesLeft } from "../core/legendary.ts";
 import { EVENT_SCHEMAS } from "../core/state.ts";
 import { parseState } from "./parse-state.ts";
 import { deriveStats, evaluateFormula, scaledDice } from "../core/stats.ts";
+import {
+  HIDE_SOURCE,
+  TACTIC_WORDS,
+  tacticSourceName,
+} from "../core/tactics.ts";
 
 // Plain data for the combat board to animate, one per event worth showing. No DOM here, so tests can check it.
 
@@ -230,8 +235,27 @@ export function dndCue(
       const { actor, effect } = EVENT_SCHEMAS["dnd5.5e:effectAdded"].parse(
         event.payload,
       );
-      return effect.modifier.kind === "condition"
-        ? { kind: "status", actor, text: effect.modifier.condition }
+      // Hiding floats "hidden" once, not the Invisible condition it also gives.
+      if (effect.modifier.kind === "tactic") {
+        return {
+          kind: "status",
+          actor,
+          text: TACTIC_WORDS[effect.modifier.tactic],
+        };
+      }
+      if (effect.modifier.kind === "condition") {
+        return effect.sourceId === HIDE_SOURCE
+          ? null
+          : { kind: "status", actor, text: effect.modifier.condition };
+      }
+      // Help, Sap and Vex, which leave Advantage or Disadvantage behind.
+      const named = tacticSourceName(effect.sourceId);
+      return named ? { kind: "status", actor, text: named } : null;
+    }
+    case "dnd5.5e:saveReported": {
+      const save = EVENT_SCHEMAS["dnd5.5e:saveReported"].parse(event.payload);
+      return save.success
+        ? { kind: "status", actor: save.actor, text: `resists ${save.label}` }
         : null;
     }
     case "dnd5.5e:resourceSpent": {
