@@ -19,6 +19,16 @@ export function traitSaveAdvantage(
   );
 }
 
+// The conditions a repeated save would end, so that a trait such as Fey Ancestry gives its Advantage there as well.
+// Not called yet: combat.ts's runFinishTurn should pass these as rollSave's conditions, after the cover argument.
+export function repeatSaveConditions(actor: Actor, sourceId: string): string[] {
+  return actor.activeEffects.flatMap((effect) =>
+    effect.sourceId === sourceId && effect.modifier.kind === "condition"
+      ? [effect.modifier.condition]
+      : [],
+  );
+}
+
 // Relentless Endurance: a hit that would drop the target to 0 Hit Points, without killing it outright, leaves it
 // at 1 instead and spends the trait's use. Null when it doesn't apply.
 export function dropToOneEvents(
