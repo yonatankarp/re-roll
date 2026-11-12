@@ -320,6 +320,57 @@ describe("legendary actions", () => {
     expect(named(second.events, "legendaryActionTaken")).toEqual([]);
   });
 
+  it("aims an action meant only for a creature with a condition at such creatures alone, lair actions too", async () => {
+    const stomp = {
+      cost: [],
+      targeting: {
+        creatures: 1,
+        range: 5,
+        side: "enemy",
+        targetConditions: ["prone"],
+      },
+      resolution: {
+        kind: "save",
+        ability: "dex",
+        dc: { base: 15 },
+        damage: [{ amount: { dice: "2d10" }, type: "bludgeoning" }],
+      },
+    };
+    const run = withContent(await base(), {
+      "goblin-ambush:monster/chief": boss({
+        legendary: { uses: 2, actions: [{ name: "Stomp", activation: stomp }] },
+        lairActions: [{ name: "Sinkhole", activation: stomp }],
+      }),
+    });
+    const options = (state: DndState, kind: string) => {
+      const frames =
+        run.system.frames[`${NS}:${kind}`]?.run(
+          { actor: "chief", when: "" },
+          contextOf(run, state, LOW),
+        ).frames ?? [];
+      const payload = frames[0]?.payload as { decision?: Decision } | undefined;
+      const decision = payload?.decision;
+      return (decision?.options ?? []).map((option) => option.id);
+    };
+    const standing = fight([hero(), chief()]);
+    expect(options(standing, "legendaryTurn")).toEqual([]);
+    expect(options(standing, "lairTurn")).toEqual([]);
+    const prone = applyDndEvent(standing, {
+      kind: `${NS}:effectAdded`,
+      payload: {
+        actor: PLAYER_ACTOR,
+        effect: {
+          sourceId: "test",
+          casterId: "chief",
+          modifier: { kind: "condition", condition: "prone" },
+          ends: "spellDuration",
+        },
+      },
+    });
+    expect(options(prone, "legendaryTurn")).toContain(`0|${PLAYER_ACTOR}`);
+    expect(options(prone, "lairTurn")).toContain(`0|${PLAYER_ACTOR}`);
+  });
+
   it("uses more in its lair", async () => {
     const run = withContent(await base(), {
       "goblin-ambush:monster/chief": boss(),

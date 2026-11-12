@@ -28,6 +28,7 @@ import {
   targetCount,
 } from "./combat/queries.ts";
 import { AimSchema, PickSchema } from "./combat/actions.ts";
+import { multiattackExtras } from "./combat/effects.ts";
 
 // How companions and monsters choose in a fight, and how the bot plays the player.
 
@@ -341,6 +342,10 @@ export function choosePolicy(decision: Decision, context: Context): string {
     )[0];
   if (spendsSlot && freshTurn && slotSpell) return slotSpell.option.id;
 
+  // A Multiattack that also uses Constrict is worth more than either alone.
+  const routineSize = (action: KnownAction): number =>
+    attackRoutine(action, actor, stats).length +
+    multiattackExtras(action, actor, context).length;
   const attack = parsed
     .filter(
       ({ action, target }) =>
@@ -361,8 +366,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
       (a, b) =>
         a.hidden - b.hidden ||
         (a.target?.hp ?? 0) - (b.target?.hp ?? 0) ||
-        attackRoutine(b.action, actor, stats).length -
-          attackRoutine(a.action, actor, stats).length,
+        routineSize(b.action) - routineSize(a.action),
     )[0];
   if (attack) return attack.option.id;
   // Nothing in reach yet: walk closer while there's still an action to use when it gets there.

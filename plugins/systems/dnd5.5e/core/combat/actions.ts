@@ -17,7 +17,15 @@ import {
   PASS,
   STAY,
 } from "./ids.ts";
-import { type Actor, dndEvent, isDown, NS, frame } from "../state.ts";
+import {
+  type Actor,
+  dndEvent,
+  hasCondition,
+  INCAPACITATING,
+  isDown,
+  NS,
+  frame,
+} from "../state.ts";
 import { distanceFeet, type Square, squareKey } from "../grid.ts";
 import { deriveStats } from "../stats.ts";
 import { FLEE, runFlee } from "../legendary.ts";
@@ -35,6 +43,7 @@ import { lightAttackEvents, revealEvents } from "../tactics.ts";
 import {
   actorOf,
   aimsFor,
+  canAfford,
   CHECK_END,
   type Context,
   enemies,
@@ -301,7 +310,67 @@ export function runAimArea(
   );
 }
 
+export const UseActionSchema = z.object({
+  actor: z.string(),
+  actionId: z.string(),
+  target: z.string(),
+});
+
+// An action a Multiattack uses after its attacks: at their target if it still reaches it, or else the weakest
+// creature it reaches; an area where it catches most. The attacks paid for the turn's action, so only a recharge or a use is spent here.
+export function runUseAction(
+  payload: z.infer<typeof UseActionSchema>,
+  context: Context,
+): SystemResult {
+  const { state } = context;
+  const actor = actorOf(state, payload.actor);
+  if (!state.combat || isDown(actor) || hasCondition(actor, ...INCAPACITATING))
+    return {};
+  const found = findAction(actor, payload.actionId, context);
+  const action = {
+    ...found,
+    activation: {
+      ...found.activation,
+      cost: found.activation.cost.filter((cost) => typeof cost === "object"),
+    },
+  };
+  if (!canAfford(action, actor, deriveStats(actor, context))) return {};
+  const { targeting } = action.activation;
+  const reached = inReach(action, actor, state, context);
+  // A cone, line, sphere or cube goes where it catches most; with no map, as if placed with care.
+  const [aim] =
+    "area" in targeting && targeting.area.shape !== "emanation"
+      ? aimsFor(action, actor, context)
+      : [];
+  const targets =
+    "creatures" in targeting && targeting.creatures === 1
+      ? [
+          reached.find((item) => item.id === payload.target) ??
+            [...reached].sort((a, b) => a.hp - b.hp)[0],
+        ].filter((item) => item !== undefined)
+      : aim
+        ? aim.score > 0
+          ? resolveTargets(
+              `${AIM}${squareKey(aim.square)}`,
+              action,
+              actor,
+              context,
+            )
+          : []
+        : resolveTargets(ALL, action, actor, context);
+  if (targets.length === 0) return {};
+  const result = resolveAction(action, actor, targets, context);
+  return {
+    events: [...payCosts(action, actor, context), ...(result.events ?? [])],
+    frames: [...(result.frames ?? []), CHECK_END],
+  };
+}
+
 export const actionFrames = {
+  [`${NS}:useAction`]: frameHandler({
+    schema: UseActionSchema,
+    run: runUseAction,
+  }),
   [`${NS}:pickTargets`]: frameHandler({
     schema: PickSchema,
     run: runPickTargets,

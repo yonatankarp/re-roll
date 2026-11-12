@@ -14,6 +14,7 @@ export {
   combatEnded,
   type Context,
   enemies,
+  fitsType,
   hasFlag,
   meleeReach,
   moveSquares,

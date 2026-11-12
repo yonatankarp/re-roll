@@ -94,9 +94,93 @@ function dummy(id: string, fields: Readonly<Record<string, unknown>> = {}) {
   };
 }
 
+// Bites, then squeezes: a grapple with an escape DC, and Restrained and damage each turn until it ends.
+const COILER = dummy("test:monster/coiler", {
+  text: [
+    "Actions",
+    "Multiattack. The coiler makes one Bite attack and uses Squeeze.",
+    "Bite. Melee Attack Roll: +4, reach 5 ft. Hit: 3 (1d6) Piercing damage.",
+    "Squeeze. Strength Saving Throw: DC 14, one creature within 10 feet. Failure: The target has the Grappled condition (escape DC 15).",
+  ].join("\n"),
+  actions: [
+    {
+      name: "Squeeze",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 10, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "str",
+          dc: { base: 14 },
+          onFail: [
+            {
+              kind: "applyCondition",
+              condition: "grappled",
+              duration: { minutes: 1 },
+            },
+            {
+              kind: "applyCondition",
+              condition: "restrained",
+              duration: { minutes: 1 },
+            },
+            {
+              kind: "modifier",
+              modifier: {
+                kind: "lingeringDamage",
+                when: "turnStart",
+                damage: [{ amount: { dice: "1d6" }, type: "bludgeoning" }],
+              },
+              duration: { minutes: 1 },
+            },
+          ],
+        },
+      },
+    },
+    {
+      name: "Bite",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "weapon", flatBonus: 4 },
+          damage: [{ amount: { dice: "1d6" }, type: "piercing" }],
+        },
+      },
+    },
+  ],
+});
+
+// Bites, then sprays a cone that the Multiattack has to aim.
+const SPITTER = dummy("test:monster/spitter", {
+  text: "Actions\nMultiattack. The spitter makes one Club attack and uses Spray.",
+  actions: [
+    ...(dummy("x").actions as unknown[]),
+    {
+      name: "Spray",
+      activation: {
+        cost: ["action"],
+        targeting: {
+          area: { shape: "cone", radius: 15 },
+          range: "self",
+          side: "enemy",
+        },
+        resolution: {
+          kind: "save",
+          ability: "dex",
+          dc: { base: 12 },
+          damage: [{ amount: { dice: "1d6" }, type: "acid" }],
+        },
+      },
+    },
+  ],
+});
+
 function arena(base: RunContext): RunContext {
   const content: Record<string, unknown> = {
     "test:monster/dummy": dummy("test:monster/dummy"),
+    "test:monster/coiler": COILER,
+    "test:monster/spitter": SPITTER,
     "test:monster/giant": dummy("test:monster/giant", { size: "huge" }),
     ...Object.fromEntries(WEAPONS.map((item) => [item.id, item])),
   };
@@ -563,15 +647,20 @@ describe("actions anyone can take", () => {
       d20s(18, 4),
     );
     expect(rolls(atAlly.events)[0]?.natural).toBe(4);
-    // It repeats the save at the end of its turns: DC 13 against Strength +0.
+    // It escapes with its action: Athletics +0 against DC 13, and the end of its turn alone doesn't free it.
     const onFoe: DndState = {
       ...held,
       combat: held.combat && { ...held.combat, index: 2 },
     };
     const end = { kind: `${NS}:endTurn`, payload: {} };
-    const stuck = settle(run, onFoe, [end], d20s(12));
+    const waited = settle(run, onFoe, [end], HIGH);
+    expect(hasCondition(who(waited.state, "foe"), "grappled")).toBe(true);
+    const escape = "tactic:escape|player|tactic:grapple";
+    expect(optionIds(run, onFoe)).toContain(escape);
+    const stuck = settle(run, onFoe, [act("foe", escape)], d20s(12));
     expect(hasCondition(who(stuck.state, "foe"), "grappled")).toBe(true);
-    const free = settle(run, onFoe, [end], d20s(13));
+    expect(who(stuck.state, "foe").budget.action).toBe(false);
+    const free = settle(run, onFoe, [act("foe", escape)], d20s(13));
     expect(hasCondition(who(free.state, "foe"), "grappled")).toBe(false);
     // Walking away lets go.
     const left = settle(run, held, [moveTo(PLAYER_ACTOR, 3, 5)], LOW);
@@ -867,5 +956,162 @@ describe("tactics", () => {
     expect(tacticalPolicy(decision, contextOf(run, first, LOW))).toBe(
       "tactic:offhand|foe|weapon:srd52:item/dagger",
     );
+  });
+});
+
+describe("monster grapples and multiattacks", () => {
+  it("takes the action a Multiattack also uses after its attacks", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("coiler", [6, 5], "test:monster/coiler"),
+    ]);
+    const { state: after, events } = settle(
+      run,
+      state,
+      [act("coiler", "monster:1|player")],
+      LOW,
+    );
+    expect(rolls(events)[0]?.against).toBe(PLAYER_ACTOR);
+    expect(payloadOf(events, "saveRolled")).toMatchObject({ dc: 14 });
+    const hero = who(after, PLAYER_ACTOR);
+    expect(hasCondition(hero, "grappled", "restrained")).toBe(true);
+    // Squeezing on its own doesn't bite as well.
+    const alone = settle(run, state, [act("coiler", "monster:0|player")], LOW);
+    expect(rolls(alone.events)).toEqual([]);
+  });
+
+  it("escapes a monster's grapple with an action against its printed DC, ending what came with it", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("coiler", [6, 5], "test:monster/coiler"),
+    ]);
+    const squeezed = settle(
+      run,
+      state,
+      [act("coiler", "monster:0|player")],
+      LOW,
+    ).state;
+    // Back to the hero's turn.
+    const held: DndState = {
+      ...squeezed,
+      combat: squeezed.combat && { ...squeezed.combat, index: 0 },
+    };
+    expect(sources(who(held, PLAYER_ACTOR))).toEqual([
+      "monster:0",
+      "monster:0",
+      "monster:0",
+    ]);
+    const escape = "tactic:escape|coiler|monster:0";
+    const decision = run.system.nextDecision(held, {
+      content: run.content,
+      contentIds: run.contentIds,
+    });
+    expect(
+      decision?.options.find((option) => option.id === escape)?.label,
+    ).toBe("Escape coiler's grapple (Athletics or Acrobatics, DC 15)");
+    const stuck = settle(run, held, [act(PLAYER_ACTOR, escape)], LOW);
+    expect(hasCondition(who(stuck.state, PLAYER_ACTOR), "grappled")).toBe(true);
+    const free = settle(run, held, [act(PLAYER_ACTOR, escape)], HIGH);
+    expect(sources(who(free.state, PLAYER_ACTOR))).toEqual([]);
+    expect(rolls(free.events)[0]).toMatchObject({ target: 15 });
+    // Restrained and squeezed each turn, the AI spends its action getting out.
+    if (!decision) throw new Error("No turn decision");
+    expect(tacticalPolicy(decision, contextOf(run, held, LOW))).toBe(escape);
+  });
+
+  it("ends a grapple when the grappler is Incapacitated or ends up out of its reach", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("coiler", [6, 5], "test:monster/coiler"),
+    ]);
+    const held = settle(
+      run,
+      state,
+      [act("coiler", "monster:0|player")],
+      LOW,
+    ).state;
+    const check = { kind: `${NS}:checkCombatEnd`, payload: {} };
+    const after = (event: SystemEvent) =>
+      who(
+        settle(run, applyDndEvent(held, event), [check], LOW).state,
+        PLAYER_ACTOR,
+      );
+    const stunned = dndEvent(`${NS}:effectAdded`, {
+      actor: "coiler",
+      effect: {
+        sourceId: "test",
+        casterId: "player",
+        modifier: { kind: "condition", condition: "stunned" },
+        ends: "spellDuration",
+      },
+    });
+    expect(sources(after(stunned))).toEqual([]);
+    const moved = (x: number) =>
+      dndEvent(`${NS}:moved`, { actor: "coiler", to: { x, y: 5 }, feet: 0 });
+    // Squeeze reaches 10 feet.
+    expect(hasCondition(after(moved(7)), "grappled", "restrained")).toBe(true);
+    expect(sources(after(moved(8)))).toEqual([]);
+  });
+
+  it("aims an area a Multiattack uses where it catches the most foes", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [7, 5] }),
+      fighter(run, { id: "ally", at: [8, 6] }),
+      fighter(run, { id: "behind", at: [11, 5] }),
+      monster("spitter", [9, 5], "test:monster/spitter"),
+    ]);
+    const { events } = settle(
+      run,
+      state,
+      [act("spitter", "monster:0|ally")],
+      LOW,
+    );
+    const saved = events.flatMap((event) =>
+      event.kind === `${NS}:saveRolled` && "payload" in event
+        ? [event.payload.actor]
+        : [],
+    );
+    expect(saved.sort()).toEqual(["ally", PLAYER_ACTOR]);
+  });
+
+  it("picks the attack that brings the other action over that action alone", async () => {
+    const run = await base();
+    const state = fight([
+      monster("coiler", [6, 5], "test:monster/coiler"),
+      fighter(run, { at: [5, 5] }),
+    ]);
+    const decision = run.system.nextDecision(state, {
+      content: run.content,
+      contentIds: run.contentIds,
+    });
+    if (!decision) throw new Error("No turn decision");
+    expect(decision.options.map((option) => option.id)).toContain(
+      "monster:0|player",
+    );
+    expect(tacticalPolicy(decision, contextOf(run, state, LOW))).toBe(
+      "monster:1|player",
+    );
+  });
+
+  it("gives an Opportunity Attack for walking past a foe, not only for where a move starts and ends", async () => {
+    const run = await base();
+    // Both ends are 10 feet from the foe, and every way round it passes through its reach.
+    const state = fight([fighter(run, { at: [3, 5] }), monster("foe", [5, 5])]);
+    const hero = who(state, PLAYER_ACTOR);
+    expect(provokers(hero, { x: 7, y: 5 }, state, run)).toHaveLength(1);
+    const walked = settle(run, state, [moveTo(PLAYER_ACTOR, 7, 5)], LOW);
+    expect(rolls(walked.events)[0]).toMatchObject({ actor: "foe" });
+    // Stepping round it while staying in reach provokes nothing.
+    const beside = fight([
+      fighter(run, { at: [4, 5] }),
+      monster("foe", [5, 5]),
+    ]);
+    expect(
+      provokers(who(beside, PLAYER_ACTOR), { x: 4, y: 6 }, beside, run),
+    ).toHaveLength(0);
   });
 });
