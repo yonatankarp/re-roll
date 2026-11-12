@@ -150,8 +150,12 @@ export function parseMagicItemsFromHtml(
         attunement: attunement !== null,
         ...(attunement?.[1] ? { attunementBy: attunement[1] } : {}),
         text,
-        // Nothing here is applied in play yet, so these stay readable-only however many numbers were read.
-        automation: "text",
+        // The bonuses and healing read here apply in play, but the rest of the text doesn't.
+        automation:
+          bonuses.length > 0 ||
+          variants.some((item) => item.bonuses ?? item.healing)
+            ? "partial"
+            : "text",
         ...(bonuses.length > 0 ? { bonuses } : {}),
         ...(!single && variants.length > 0 ? { variants } : {}),
       },

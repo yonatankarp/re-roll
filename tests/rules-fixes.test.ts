@@ -20,6 +20,7 @@ import {
   type Stats,
   attackBonus,
   deriveStats,
+  saveBonus,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
 
 async function goblin(): Promise<RunContext> {
@@ -196,5 +197,91 @@ describe("armor and weapon training", () => {
       run,
     );
     expect(weak.speed).toBe(strong.speed - 10);
+  });
+});
+
+describe("magic item bonuses", () => {
+  const weapon = ItemSchema.parse({
+    id: "test:item/weapon-plus",
+    name: "Weapon, +1, +2 or +3",
+    type: "magicItem",
+    category: "weapon",
+    rarity: "varies",
+    attunement: false,
+    text: "A magic weapon.",
+    automation: "partial",
+    variants: [
+      {
+        rarity: "uncommon",
+        bonuses: [
+          { to: "attack", amount: 1 },
+          { to: "damage", amount: 1 },
+        ],
+      },
+      {
+        rarity: "rare",
+        bonuses: [
+          { to: "attack", amount: 2 },
+          { to: "damage", amount: 2 },
+        ],
+      },
+    ],
+  });
+  const potions = ItemSchema.parse({
+    id: "test:item/potions-of-healing",
+    name: "Potions of Healing",
+    type: "magicItem",
+    category: "potion",
+    rarity: "varies",
+    attunement: false,
+    text: "Red potions.",
+    automation: "partial",
+    variants: [
+      { rarity: "common", healing: { dice: "2d4", bonus: { base: 2 } } },
+      { rarity: "uncommon", healing: { dice: "4d4", bonus: { base: 4 } } },
+    ],
+  });
+
+  it("adds a magic weapon's attack and damage bonus to the weapon swung", async () => {
+    const run = withContent(await goblin(), [weapon]);
+    const fighter = pregen(run, "srd52:pregen/fighter");
+    const plain = deriveStats(fighter, run);
+    const magic = deriveStats(
+      { ...fighter, inventory: [...fighter.inventory, weapon.id] },
+      run,
+    );
+    const id = "weapon:srd52:item/longsword";
+    expect(bonusOf(magic, id)).toBe(bonusOf(plain, id) + 1);
+    const swing = magic.actions.find((item) => item.id === id)?.activation;
+    expect(
+      swing?.resolution.kind === "attack" &&
+        swing.resolution.damage[0]?.amount.bonus?.base,
+    ).toBe(1);
+  });
+
+  it("adds a ring's saving throw bonus only while attuned", async () => {
+    const run = await goblin();
+    const ring = "srd52:item/ring-of-protection";
+    const fighter = pregen(run, "srd52:pregen/fighter", {
+      inventory: [ring],
+    });
+    const loose = deriveStats(fighter, run);
+    const worn = deriveStats({ ...fighter, attuned: [ring] }, run);
+    expect(saveBonus(worn, "wis")).toBe(saveBonus(loose, "wis") + 1);
+    expect(worn.ac).toBe(loose.ac + 1);
+  });
+
+  it("heals with a potion whose numbers sit on its versions", async () => {
+    const run = withContent(await goblin(), [potions]);
+    const fighter = pregen(run, "srd52:pregen/fighter", {
+      inventory: [potions.id],
+    });
+    const drink = deriveStats(fighter, run).actions.find(
+      (item) => item.id === `item:${potions.id}`,
+    );
+    expect(drink?.activation.resolution).toMatchObject({
+      kind: "automatic",
+      effects: [{ kind: "heal", amount: { dice: "2d4", bonus: { base: 2 } } }],
+    });
   });
 });

@@ -91,6 +91,10 @@ export interface Stats {
   readonly pactMagic: boolean; // slots come back on a Short Rest
   // Wearing armor without training: Disadvantage on Strength and Dexterity rolls, and no spellcasting.
   readonly untrainedArmor: boolean;
+  // From magic items worn, and attuned where they need it.
+  readonly itemBonuses: Readonly<
+    Record<"attack" | "spellAttack" | "savingThrows", number>
+  >;
 }
 
 export function passiveModifiers(
@@ -190,6 +194,7 @@ export function weaponActivation(
   weapon: Weapon,
   abilities: AbilityScores,
   proficient = true,
+  damageBonus = 0,
 ): Activation {
   const ranged = weapon.properties.includes("ammunition");
   const finesse = weapon.properties.includes("finesse");
@@ -213,7 +218,7 @@ export function weaponActivation(
           amount: {
             ...(weapon.damage.dice ? { dice: weapon.damage.dice } : {}),
             bonus: {
-              base: weapon.damage.flat ?? 0,
+              base: (weapon.damage.flat ?? 0) + damageBonus,
               add: [{ kind: "abilityMod", ability }],
             },
           },
@@ -353,11 +358,33 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ([, item]) => item.type === "armor" && abilities.str < (item.strength ?? 0),
   );
 
+  const attuned = actor.attuned ?? [];
+  const magic = {
+    ac: 0,
+    attack: 0,
+    damage: 0,
+    savingThrows: 0,
+    spellAttack: 0,
+  };
+  for (const [itemId, item] of worn) {
+    if (item.type !== "magicItem") continue;
+    if (item.attunement && !attuned.includes(itemId)) continue;
+    // shortcut: the inventory doesn't record which version of an item was found, so one with versions counts as its first.
+    for (const { to, amount } of item.bonuses ??
+      item.variants?.[0]?.bonuses ??
+      []) {
+      // shortcut: a magic weapon isn't a weapon to swing here, so its bonus goes to the weapons carried, the best one once.
+      magic[to] =
+        to === "attack" || to === "damage"
+          ? Math.max(magic[to], amount)
+          : magic[to] + amount;
+    }
+  }
+
   const armorBases: number[] = [];
-  let flatBonus = 0;
+  const flatBonus = magic.ac;
   let shield = 0;
   const actions: KnownAction[] = [];
-  const attuned = actor.attuned ?? [];
   for (const [itemId, item] of worn) {
     const usable = itemAction(
       itemId,
@@ -383,17 +410,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           weapon,
           abilities,
           classes.some((def) => weaponProficient(def, weapon)),
+          magic.damage,
         ),
         spellLevel: null,
       });
-    } else if (
-      item.type === "magicItem" &&
-      (!item.attunement || attuned.includes(itemId))
-    ) {
-      // shortcut: only AC bonuses apply, not saving throw or weapon bonuses, nor a variant's own numbers.
-      for (const bonus of item.bonuses ?? []) {
-        if (bonus.to === "ac") flatBonus += bonus.amount;
-      }
     }
   }
 
@@ -480,6 +500,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     resourceDefs: fromFeatures.resources,
     pactMagic: [...featureIds].some((id) => id.endsWith("pact-magic")),
     untrainedArmor,
+    itemBonuses: magic,
   };
   return {
     ...partial,
@@ -512,7 +533,14 @@ function itemAction(
   access: ContentAccess,
   spellcasting: unknown,
 ): KnownAction | null {
-  if ((item.type === "gear" || item.type === "magicItem") && item.healing) {
+  // shortcut: a potion with versions heals as its first, since the inventory doesn't say which was found.
+  const healing =
+    item.type === "gear"
+      ? item.healing
+      : item.type === "magicItem"
+        ? (item.healing ?? item.variants?.[0]?.healing)
+        : undefined;
+  if (healing) {
     return {
       id: `item:${itemId}`,
       name: `Drink ${item.name}`,
@@ -522,7 +550,7 @@ function itemAction(
         resolution: {
           kind: "automatic",
           damage: [],
-          effects: [{ kind: "heal", amount: item.healing }],
+          effects: [{ kind: "heal", amount: healing }],
         },
       },
       spellLevel: null,
@@ -673,6 +701,7 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
     resourceDefs: fromFeatures.resources,
     pactMagic: false,
     untrainedArmor: false,
+    itemBonuses: { attack: 0, spellAttack: 0, savingThrows: 0 },
   };
 }
 
@@ -724,13 +753,18 @@ export function attackBonus(
   if (attack.flatBonus !== undefined) return attack.flatBonus;
   const ability = attack.type === "spell" ? stats.spellAbility : attack.ability;
   const proficiency = attack.proficient === false ? 0 : stats.proficiency;
-  return proficiency + (ability ? modifierFor(stats, ability) : 0);
+  const item =
+    attack.type === "spell"
+      ? stats.itemBonuses.spellAttack
+      : stats.itemBonuses.attack;
+  return proficiency + (ability ? modifierFor(stats, ability) : 0) + item;
 }
 
 export function saveBonus(stats: Stats, ability: Ability): number {
   return (
     modifierFor(stats, ability) +
-    (stats.savingThrows.includes(ability) ? stats.proficiency : 0)
+    (stats.savingThrows.includes(ability) ? stats.proficiency : 0) +
+    stats.itemBonuses.savingThrows
   );
 }
 
