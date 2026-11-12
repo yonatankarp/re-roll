@@ -14,6 +14,7 @@ export type NarrationRequest =
       readonly id: number;
       readonly text: string;
       readonly voice: string;
+      readonly cpu: boolean; // skip WebGPU, as after a reading hung on it
     }
   | { readonly type: "cancel"; readonly id: number };
 
@@ -81,10 +82,10 @@ const reply = (
   postMessage(message, { transfer });
 };
 
-async function load(): Promise<KokoroTTS> {
+async function load(cpu: boolean): Promise<KokoroTTS> {
   const started = performance.now();
   const adapter =
-    "gpu" in navigator
+    !cpu && "gpu" in navigator
       ? await navigator.gpu.requestAdapter().catch(() => null)
       : null;
   let percent = 0;
@@ -145,10 +146,15 @@ let queue = Promise.resolve();
 // for a scene the player didn't pick, and a cancelled reading stops at its next sentence.
 const cancelled = new Set<number>();
 
-async function speak(id: number, text: string, voice: string): Promise<void> {
+async function speak(
+  id: number,
+  text: string,
+  voice: string,
+  cpu: boolean,
+): Promise<void> {
   if (cancelled.delete(id)) return;
   try {
-    model ??= load();
+    model ??= load(cpu); // a worker loads once, so the first request picks the device
     const tts = await model;
     const started = performance.now();
     let audio = 0;
@@ -184,5 +190,7 @@ addEventListener("message", (event: MessageEvent<NarrationRequest>) => {
     cancelled.add(request.id);
     return;
   }
-  queue = queue.then(() => speak(request.id, request.text, request.voice));
+  queue = queue.then(() =>
+    speak(request.id, request.text, request.voice, request.cpu),
+  );
 });
