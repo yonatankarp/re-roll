@@ -13,6 +13,7 @@ import {
   NARRATOR_VOICES,
   type NarrationClip,
   type NarrationIndex,
+  NarrationIndexSchema,
   narratedTexts,
   planNarration,
 } from "../../engine/story/narration.ts";
@@ -68,11 +69,18 @@ const { registry } = await loadAdventure(adventure);
 const story = registry.adventure(adventure);
 if (!story) fail(`${adventure} has no scenes`);
 
-let index: NarrationIndex = EMPTY_INDEX;
+let saved: string | null = null;
 try {
-  index = parse(await readFile(indexPath, "utf8")) as NarrationIndex;
+  saved = await readFile(indexPath, "utf8");
 } catch {
   // No index yet, so every clip is made.
+}
+let index: NarrationIndex = EMPTY_INDEX;
+if (saved !== null) {
+  // Stale keys are deleted below, so a key like ../x must never get that far.
+  const checked = NarrationIndexSchema.safeParse(parse(saved));
+  if (!checked.success) fail(`${indexPath} isn't a valid narration index`);
+  index = checked.data;
 }
 const sizes = new Map<string, number>();
 for (const file of Object.keys(index.clips)) {

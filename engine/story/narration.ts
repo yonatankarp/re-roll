@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { Adventure } from "./adventure.ts";
 
 // Where read-aloud clips live and how they're named, shared by the CLI that makes them ahead of
@@ -31,6 +32,16 @@ export interface NarrationIndex {
 }
 
 export const EMPTY_INDEX: NarrationIndex = { version: 1, clips: {} };
+
+// The index is read back from disk and its keys become paths to delete, so each must be a voice and a hash.
+const CLIP_FILE = /^[a-z]{2}_[a-z]+\/[0-9a-f]+\.mp3$/;
+export const NarrationIndexSchema = z.object({
+  version: z.literal(1),
+  clips: z.record(
+    z.string().regex(CLIP_FILE),
+    z.object({ scene: z.string(), voice: z.string(), seconds: z.number() }),
+  ),
+});
 
 export function normaliseText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
