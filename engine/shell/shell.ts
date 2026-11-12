@@ -1,5 +1,6 @@
 import { collapseCard, loadScreen } from "./load-screen.ts";
 import { campfire } from "./campfire.ts";
+import { contentFolderOption } from "./content-folder.ts";
 import { shopPanel } from "./shop.ts";
 import { adventureCard, adventureGrid } from "./adventure-picker.ts";
 import { soundControls } from "./sound-panel.ts";
@@ -595,6 +596,7 @@ export function mountShell(
               ),
             ]
           : []),
+        ...contentFolderOption(act),
       ),
     );
     focusNext = heading;

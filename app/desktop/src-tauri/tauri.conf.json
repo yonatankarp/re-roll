@@ -23,7 +23,12 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
+    "targets": "all",
+    "resources": {
+      "../../../plugins/adventures/": "plugins/adventures/",
+      "../../../plugins/rules/": "plugins/rules/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -161,7 +161,7 @@ export interface ModelClient {
 }
 ```
 
-The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `books/` through a read-only endpoint on the dev server. Both keep saves in the webview's own storage for now, so the file scopes stay limited to the two content folders (section 9).
+The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `books/` through a read-only endpoint on the dev server. A built desktop app has no checkout: it reads the shipped plugins from its bundled resources, and the player's own from a content folder in its app data, laid out like `books/` (see the README). Both keep saves in the webview's own storage for now, so the file scopes stay limited to the two content folders (section 9).
 
 One exception to "only `engine/platform` touches the network": the narration worker in `engine/shell` downloads the Kokoro-82M model from Hugging Face on first use, and the Tauri CSP allows only that host (section 7.2).
 

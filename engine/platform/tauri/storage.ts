@@ -6,16 +6,24 @@ import { parseContentPath } from "../browser/content-path.ts";
 import type { ContentReader } from "../browser/storage.ts";
 
 const urls = new Map<string, Promise<string | null>>();
-let rootPath: Promise<string> | undefined;
-const root = (): Promise<string> =>
-  (rootPath ??= invoke<string>("content_root"));
+// Where "plugins" and "books" are on disk, set by src-tauri/src/main.rs. A built app's "books" is the player's content folder.
+let rootPaths: Promise<Readonly<Record<string, string>>> | undefined;
+const roots = (): Promise<Readonly<Record<string, string>>> =>
+  (rootPaths ??= invoke("content_roots"));
 
 // The same allowlist as the dev route, checked here too so the fs scope isn't the only guard.
 // join() uses the platform's separator, since Windows' canonical \\?\ root doesn't take "/".
 async function fullPath(path: string): Promise<string> {
-  if (!parseContentPath(path))
-    throw new Error(`${path} is outside the content folders`);
-  return join(await root(), ...path.split("/"));
+  const content = parseContentPath(path);
+  if (!content) throw new Error(`${path} is outside the content folders`);
+  const root = (await roots())[content.folder];
+  if (root === undefined) throw new Error(`${path} has no folder on disk`);
+  return join(root, ...(content.rest ? content.rest.split("/") : []));
+}
+
+// Shows the player's content folder in the OS's file manager.
+export function openContentFolder(): Promise<void> {
+  return invoke("open_content_folder");
 }
 
 // Kept for the life of the page, so a redraw reuses the same image.

@@ -50,6 +50,14 @@ Two adventures ship with the game, both original and built on the SRD 5.2 rules 
 
 Content from books you own goes in a `books/` folder at the root of your checkout. It is git-ignored here, and the game reads it beside `plugins/`. Keep it as its own private git repository if you want history, and never commit it to this one. Plugins there carry `distribution: private`, which means they aren't redistributable.
 
+The built desktop app has no checkout, so it reads your plugins from its content folder instead. **Open content folder** on the main menu shows it. It has the same `adventures`, `rules`, `assets` and `library` folders as `books/`, so copy a plugin into the matching one and reopen the menu. The folder is `plugins` inside the app's data folder:
+
+- **macOS:** `~/Library/Application Support/app.re-roll.desktop/plugins`
+- **Windows:** `%APPDATA%\app.re-roll.desktop\plugins`
+- **Linux:** `~/.local/share/app.re-roll.desktop/plugins`
+
+`npm run desktop` still reads `plugins/` and `books/` from your checkout.
+
 `npm run import` turns your saved book pages into plugins under `books/`. Its subcommands are `parse`, `library`, `extract`, `split`, `draft` and `approve`, and section 11 of the design doc explains them. `npm run narrate -- <adventure>` reads a `books/` adventure's scenes aloud once and keeps the clips beside it. Scenes without a clip are read in the app as they play.
 
 ## Saves

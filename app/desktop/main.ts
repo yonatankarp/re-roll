@@ -8,8 +8,10 @@ import {
 } from "../../engine/platform/browser/storage.ts";
 import {
   createTauriReader,
+  openContentFolder,
   tauriImageUrl,
 } from "../../engine/platform/tauri/storage.ts";
+import { offerContentFolder } from "../../engine/shell/content-folder.ts";
 import { createGame } from "../../engine/shell/session.ts";
 import { mountShell } from "../../engine/shell/shell.ts";
 import { mountDndBoard } from "../../plugins/systems/dnd5.5e/ui/board.ts";
@@ -48,6 +50,8 @@ function browserSaves(): SaveStore {
     };
   }
 }
+
+if (isTauri()) offerContentFolder(openContentFolder);
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("The page has no #app element");

@@ -28,7 +28,7 @@
     "ui": "vite --config app/desktop/vite.config.ts",
     "ui:build": "vite build --config app/desktop/vite.config.ts",
     "desktop": "tauri dev",
-    "desktop:build": "tauri build --no-bundle",
+    "desktop:build": "tauri build",
     "import": "node app/cli/import.ts",
     "import:eval": "node tests/import-eval.ts",
     "narrate": "node app/cli/narrate.ts",
