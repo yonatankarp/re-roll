@@ -1,5 +1,6 @@
 import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
+import { carriedWeight, carryingCapacity, encumberedSpeed } from "./carry.ts";
 import { type Actor, equipped, hasCondition } from "./state.ts";
 import {
   DAMAGE_TYPES,
@@ -378,7 +379,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       flatBonus,
       passives: fromFeatures.passives,
     }),
-    speed: species.speed,
+    speed: encumberedSpeed(
+      species.speed,
+      carriedWeight(actor, access),
+      carryingCapacity(abilities.str, species.size),
+    ),
     savingThrows: firstClass.savingThrows,
     skills: [...skills],
     spellAbility: firstClass.spellcasting?.ability ?? null,

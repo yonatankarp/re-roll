@@ -105,7 +105,9 @@ export const MAX_ATTUNED = 3;
 export const StateSchema = z.strictObject({
   // Chosen when the game starts. Missing in saves from before there was a choice, which played as normal.
   difficulty: z.enum(DIFFICULTIES).optional(),
-  gold: z.number().int().optional(), // the party's coins, in gold pieces
+  gold: z.number().min(0).optional(), // the party's coins, in gold pieces, with copper as hundredths
+  // What each merchant has sold, by name, so limited stock stays sold on a later visit.
+  shopBought: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   actors: z.record(z.string(), ActorSchema),
   // Hours since the last Long Rest began. Missing until the first, so the first is always allowed.
   sinceLongRest: z.number().int().optional(),
@@ -173,6 +175,14 @@ const GearChangedSchema = z.strictObject({
   actor: z.string(),
   stowed: z.array(ContentIdSchema),
   attuned: z.array(ContentIdSchema),
+});
+const TradedSchema = z.strictObject({
+  actor: z.string(),
+  merchant: z.string(),
+  item: ContentIdSchema,
+  bought: z.boolean(), // false for sold
+  priceCp: z.number().int().min(0),
+  stowed: z.boolean(), // bought gear goes in the pack, as found gear does
 });
 const ItemUsedSchema = z.strictObject({
   actor: z.string(),
@@ -275,6 +285,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:treasureFound`]: TreasureFoundSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
+  [`${NS}:traded`]: TradedSchema,
 } as const;
 
 export type EventKind = keyof typeof EVENT_SCHEMAS;
@@ -730,7 +741,10 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         inventory: [...actor.inventory, ...data.items],
         stowed: [...(actor.stowed ?? []), ...data.stowed],
       }));
-      return { ...found, gold: (state.gold ?? 0) + data.gold };
+      return {
+        ...found,
+        gold: Math.round(((state.gold ?? 0) + data.gold) * 100) / 100,
+      };
     }
     case `${NS}:gearChanged`: {
       const data = payload(GearChangedSchema, event);
@@ -739,6 +753,48 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         stowed: data.stowed,
         attuned: data.attuned,
       }));
+    }
+    case `${NS}:traded`: {
+      const data = payload(TradedSchema, event);
+      const traded = updateActor(state, data.actor, (actor) => {
+        if (data.bought) {
+          return {
+            ...actor,
+            inventory: [...actor.inventory, data.item],
+            ...(data.stowed
+              ? { stowed: [...(actor.stowed ?? []), data.item] }
+              : {}),
+          };
+        }
+        // A copy in the pack goes before one worn, and attunement ends with the last copy.
+        const inventory = without(actor.inventory, [data.item]);
+        return {
+          ...actor,
+          inventory,
+          ...(actor.stowed
+            ? { stowed: without(actor.stowed, [data.item]) }
+            : {}),
+          ...(actor.attuned && !inventory.includes(data.item)
+            ? { attuned: actor.attuned.filter((id) => id !== data.item) }
+            : {}),
+        };
+      });
+      const change = (data.bought ? -data.priceCp : data.priceCp) / 100;
+      return {
+        ...traded,
+        gold: Math.round(((state.gold ?? 0) + change) * 100) / 100,
+        ...(data.bought
+          ? {
+              shopBought: {
+                ...state.shopBought,
+                [data.merchant]: [
+                  ...(state.shopBought?.[data.merchant] ?? []),
+                  data.item,
+                ],
+              },
+            }
+          : {}),
+      };
     }
     case `${NS}:itemUsed`: {
       const data = payload(ItemUsedSchema, event);

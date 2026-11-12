@@ -481,7 +481,14 @@ export const SpellSchema = ContentEntrySchema.extend({
 }).strict();
 export type Spell = z.infer<typeof SpellSchema>;
 
-const ItemBaseSchema = ContentEntrySchema.extend({ name: z.string().min(1) });
+// In copper pieces, so prices compare without converting coins.
+const CostCpSchema = z.number().int().min(0);
+
+const ItemBaseSchema = ContentEntrySchema.extend({
+  name: z.string().min(1),
+  costCp: CostCpSchema.optional(), // what a merchant asks; missing for "Varies" and for magic items
+  weightLb: z.number().min(0).optional(),
+});
 
 export const WeaponSchema = ItemBaseSchema.extend({
   type: z.literal("weapon"),
@@ -527,9 +534,6 @@ const ShieldItemSchema = ItemBaseSchema.extend({
   bonus: z.number().int(),
 }).strict();
 
-// In copper pieces, so prices compare without converting coins.
-const CostCpSchema = z.number().int().min(0);
-
 const GearSchema = ItemBaseSchema.extend({
   type: z.literal("gear"),
   text: z.string().optional(),
@@ -546,7 +550,6 @@ const GearSchema = ItemBaseSchema.extend({
       "vehicle",
     ])
     .optional(),
-  costCp: CostCpSchema.optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
 }).strict();
 
@@ -554,7 +557,6 @@ const ToolSchema = ItemBaseSchema.extend({
   type: z.literal("tool"),
   ability: AbilitySchema,
   text: z.string().min(1),
-  costCp: CostCpSchema.optional(),
 }).strict();
 
 const RaritySchema = z.enum([

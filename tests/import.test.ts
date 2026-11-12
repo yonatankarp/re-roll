@@ -1618,6 +1618,8 @@ describe("parsing a character book page", () => {
       damage: { dice: "1d8", type: "piercing" },
       properties: ["ammunition", "twoHanded", "versatile"],
       mastery: "slow",
+      costCp: 500,
+      weightLb: 2,
     });
     expect(item("long-twig")?.notes).toHaveLength(2);
     expect(ItemSchema.parse(item("seed-spitter")?.entry)).toMatchObject({
@@ -1633,10 +1635,14 @@ describe("parsing a character book page", () => {
       armorType: "heavy",
       base: 17,
       addDex: false,
+      costCp: 900,
+      weightLb: 60,
     });
     expect(ItemSchema.parse(item("lid")?.entry)).toMatchObject({
       type: "shield",
       bonus: 2,
+      costCp: 100,
+      weightLb: 6,
     });
   });
 
