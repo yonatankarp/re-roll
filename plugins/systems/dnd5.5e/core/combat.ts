@@ -115,17 +115,29 @@ import {
 
 export type Context = SystemContext<DndState>;
 
-export const PASS = "pass";
-export const CREATE_CHARACTER = "create";
-export const HIT_DICE = "hitDice";
-const DEATH_SAVE = "deathSave";
-const SEPARATOR = "|";
-export const ALL = "all"; // an area takes everyone, and projectiles go for the lowest HP
-const DECLINE = "decline";
-export const MOVE = "move";
-const STAY = "stay";
-const ITEM_PREFIX = "item:"; // an action that uses up the item, such as a potion
-export const AIM = "@"; // an area aimed at a square ("@x,y") or a creature ("@" and its id)
+import {
+  AIM,
+  ALL,
+  CREATE_CHARACTER,
+  DEATH_SAVE,
+  DECLINE,
+  HIT_DICE,
+  ITEM_PREFIX,
+  MOVE,
+  PASS,
+  STAY,
+  encodeOption,
+  parseOption,
+} from "./combat/ids.ts";
+
+export {
+  AIM,
+  ALL,
+  CREATE_CHARACTER,
+  HIT_DICE,
+  MOVE,
+  PASS,
+} from "./combat/ids.ts";
 
 function actorOf(state: DndState, id: string): Actor {
   const actor = state.actors[id];
@@ -316,11 +328,11 @@ function withUpcasts(
   target: string,
   label: string,
 ): { id: string; label: string }[] {
-  const id = `${action.id}${SEPARATOR}${target}`;
+  const id = encodeOption(action.id, target);
   return [
     { id, label },
     ...upcastSlots(action, actor, stats).map((slot) => ({
-      id: `${id}${SEPARATOR}${String(slot)}`,
+      id: encodeOption(id, slot),
       label: `${label} (level ${String(slot)} slot)`,
     })),
   ];
@@ -440,10 +452,11 @@ function turnOptions(
     const base = slotToSpend(action, actor, stats) ?? undefined;
     for (const slot of [undefined, ...upcastSlots(action, actor, stats)]) {
       const count = targetCount(action, slot ?? base);
-      const suffix = slot === undefined ? "" : `${SEPARATOR}${String(slot)}`;
       const note = slot === undefined ? "" : ` (level ${String(slot)} slot)`;
       const id = (target: string): string =>
-        `${action.id}${SEPARATOR}${target}${suffix}`;
+        slot === undefined
+          ? encodeOption(action.id, target)
+          : encodeOption(action.id, target, slot);
       if (count === 1 || repeats) {
         for (const target of candidates) {
           options.push({
@@ -1293,7 +1306,7 @@ export function runTakeAction(
   }
   if (payload.answer === FLEE) return runFlee(actor, context);
 
-  const [actionId = "", targetId = "", slot] = payload.answer.split(SEPARATOR);
+  const [actionId = "", targetId = "", slot] = parseOption(payload.answer);
   if (targetId === PICK) {
     return { frames: [pickFrame(actor, actionId, slot, [], context)] };
   }
@@ -1402,7 +1415,12 @@ function pickFrame(
   );
   const repeats = action.activation.projectiles !== undefined;
   return awaitDecision({
-    id: `${NS}:targets:${actor.id}:${String(state.combat?.round ?? 0)}${SEPARATOR}${actionId}${SEPARATOR}${String(count)}${SEPARATOR}${picked.join(",")}`,
+    id: encodeOption(
+      `${NS}:targets:${actor.id}:${String(state.combat?.round ?? 0)}`,
+      actionId,
+      count,
+      picked.join(","),
+    ),
     actor: actor.id,
     prompt: `${action.name}: choose ${repeats ? `where each of ${String(count)} goes` : `up to ${String(count)} targets`} (${String(picked.length)} of ${String(count)}).`,
     options: [
@@ -1461,7 +1479,10 @@ function aimFrame(
   const { targeting } = action.activation;
   const byDirection = "range" in targeting && targeting.range === "self";
   return awaitDecision({
-    id: `${NS}:aim:${actor.id}:${String(state.combat?.round ?? 0)}${SEPARATOR}${actionId}`,
+    id: encodeOption(
+      `${NS}:aim:${actor.id}:${String(state.combat?.round ?? 0)}`,
+      actionId,
+    ),
     actor: actor.id,
     prompt: `Where does ${actor.name} aim ${action.name}?`,
     options: [
@@ -2224,7 +2245,7 @@ export function runSmite(
   const { state } = context;
   const attacker = actorOf(state, payload.attacker);
   const target = actorOf(state, payload.target);
-  const [actionId = "", , slot] = payload.answer.split(SEPARATOR);
+  const [actionId = "", , slot] = parseOption(payload.answer);
   const known = findAction(attacker, actionId, context);
   const slotLevel =
     slot === undefined
@@ -2775,7 +2796,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
     return score;
   };
   const parsed = decision.options.flatMap((option) => {
-    const [actionId = "", targetId = "", slot] = option.id.split(SEPARATOR);
+    const [actionId = "", targetId = "", slot] = parseOption(option.id);
     const action = stats.actions.find((item) => item.id === actionId);
     const target = state.actors[targetId];
     const worth = action && targetId === AIM_AREA ? worthOf(action) : null;

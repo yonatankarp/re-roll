@@ -1,6 +1,8 @@
 import { PLAYER_ACTOR } from "#sdk";
 import { NS, StateSchema, type Terrain } from "../core/state.ts";
+import { STUDY } from "../core/actions.ts";
 import { TACTIC } from "../core/tactics.ts";
+import { AIM, ALL, MOVE, SQUARE, parseOption } from "../core/combat/ids.ts";
 import {
   ADD,
   type AreaTargeting,
@@ -129,13 +131,8 @@ const PACE: Record<DndCue["kind"], number> = {
 // A d20 drawn flat: an outline, its top face and the edges that meet there.
 const D20 = `<svg viewBox="0 0 100 100" aria-hidden="true"><polygon class="d20-body" points="50,3 93,27 93,73 50,97 7,73 7,27"/><polygon class="d20-face" points="50,22 76,66 24,66"/><path class="d20-edge" d="M50,3 50,22 M93,27 76,66 M93,73 76,66 M50,97 50,66 M7,73 24,66 M7,27 24,66 M50,22 93,27 M50,22 7,27 M24,66 50,97 76,66"/></svg>`;
 
-const SQUARE = /^(\d+),(\d+)$/; // a move option's id
 const FADE: KeyframeAnimationOptions = { duration: 250, easing: "ease-out" };
-const SEPARATOR = "|"; // between an option id's action, target and slot
 const MARKED = ["dodging", "hidden"] as const; // conditions drawn on the token itself
-const AIM = "@"; // an area aimed at a creature
-const MOVE = "move"; // the turn option that asks where to go
-const STUDY = `${TACTIC}study`; // repeated from core/actions.ts
 
 interface Move {
   readonly x: number;
@@ -655,11 +652,11 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
 
   // Pointing at an area spell round the player in a menu lights the squares it covers.
   const showArea = (optionId: string | null): void => {
-    const [actionId = "", target] = (optionId ?? "").split(SEPARATOR);
+    const [actionId = "", target] = parseOption(optionId ?? "");
     const targeting = extraOf(latest).shapes?.[actionId];
     const me = tokens.get(PLAYER_ACTOR);
     outline(
-      target === "all" && targeting?.area.shape === "emanation"
+      target === ALL && targeting?.area.shape === "emanation"
         ? targeting
         : null,
       me?.x == null || me.y === null ? null : { x: me.x, y: me.y },
@@ -672,7 +669,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   const aiming = (): AreaTargeting | null => {
     const id = pendingId();
     if (!id.startsWith(`${NS}:aim:`)) return null;
-    return extraOf(latest).shapes?.[id.split(SEPARATOR).at(-1) ?? ""] ?? null;
+    return extraOf(latest).shapes?.[parseOption(id).at(-1) ?? ""] ?? null;
   };
   const picking = (): boolean => pendingId().startsWith(`${NS}:targets:`);
 
@@ -732,7 +729,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       delete token.node.dataset.count;
     }
     if (pickBar.hidden) return;
-    const [, , total = "0", chosen = ""] = id.split(SEPARATOR);
+    const [, , total = "0", chosen = ""] = parseOption(id);
     const picked = chosen.split(",").filter(Boolean);
     for (const pickedId of new Set(picked)) {
       const token = tokens.get(pickedId);
@@ -851,7 +848,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     const options = playerOptions().filter((option) => {
       if (SQUARE.test(option.id) || option.id === MOVE) return false;
       if (option.id.startsWith(STUDY)) return false;
-      const target = option.id.split(SEPARATOR)[1];
+      const target = parseOption(option.id)[1];
       if (target === id || target === `${AIM}${id}`) return true;
       if (option.id.startsWith(ADD) || option.id.startsWith(REMOVE)) {
         return option.id.slice(1) === id;
@@ -1106,7 +1103,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         update.decision?.actor === PLAYER_ACTOR
           ? update.decision.options.map((option) =>
               // An area aimed at a creature names it as "@" and its id.
-              option.id.split(SEPARATOR)[1]?.replace(AIM, ""),
+              parseOption(option.id)[1]?.replace(AIM, ""),
             )
           : [],
       );

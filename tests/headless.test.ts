@@ -7,6 +7,7 @@ import { openHeadless } from "../app/cli/headless-game.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { GameView } from "../engine/shell/session.ts";
 import type { Driver, Screen } from "../engine/tools/headless.ts";
+import { MOVE } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
 import { runs } from "./depth.ts";
 
 const folders: string[] = [];
@@ -28,7 +29,6 @@ function settled(view: GameView): GameView {
   return { ...view, warnings: [] };
 }
 
-const MOVE = "move";
 const GEAR = /^(equip|stow|attune|unattune):/;
 
 describe("headless play of goblin-ambush", () => {

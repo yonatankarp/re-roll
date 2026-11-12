@@ -24,6 +24,11 @@ import {
   startCombat,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import {
+  PASS,
+  encodeOption,
+  parseOption,
+} from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
+import {
   codeKeys,
   coverBetween,
   distanceFeet,
@@ -608,6 +613,31 @@ describe("choosing targets and aiming areas", () => {
   const missile = `spell:${spell("magic-missile")}`;
   const hold = `spell:${spell("hold-person")}`;
   const fireball = `spell:${spell("fireball")}`;
+
+  it("builds turn option ids that parseOption takes apart and encodeOption puts back", async () => {
+    const run = arenaRun(await base(), {});
+    const state = fight(
+      hero(run, { spells: ["bless", "magic-missile"] }),
+      hero(run, { id: "b" }),
+      monster("x"),
+    );
+    const ids =
+      nextDndDecision(state, run)?.options.map((item) => item.id) ?? [];
+    expect(ids).toContain(encodeOption(missile, "x"));
+    expect(ids).toContain(encodeOption(missile, "x", 2));
+    expect(ids).toContain(encodeOption(bless, "pick"));
+    expect(ids).toContain(PASS);
+    const known = new Set(
+      deriveStats(actor(state, PLAYER_ACTOR), run).actions.map(
+        (item) => item.id,
+      ),
+    );
+    for (const id of ids) {
+      const parts = parseOption(id);
+      expect(encodeOption(...parts)).toBe(id);
+      if (parts.length > 1) expect(known).toContain(parts[0]);
+    }
+  });
 
   it("lets Bless pick 2 of 3 allies, take one back, and cast", async () => {
     const run = arenaRun(await base(), {});
