@@ -42,6 +42,181 @@ const BURST = "spell:test:spell/burst";
 const CHARM = "spell:test:spell/charm";
 const MEND = "spell:test:spell/mend";
 
+// A made-up warlock whose level 1 offers each invocation, and the invocations as data.
+const invocation = (name: string) => `test:feature/warlock-${name}`;
+const cha = { kind: "abilityMod", ability: "cha" };
+const INVOCATIONS: Record<string, Record<string, unknown>> = {
+  agonizing: {
+    passives: [{ kind: "cantripRider", damage: { base: 0, add: [cha] } }],
+    prerequisite: { level: 2, cantrip: "damage" },
+  },
+  repelling: {
+    passives: [
+      {
+        kind: "cantripRider",
+        attackOnly: true,
+        onHit: [{ kind: "forcedMove", feet: 10, direction: "away" }],
+      },
+    ],
+    prerequisite: { cantrip: "attack" },
+  },
+  spear: {
+    passives: [
+      {
+        kind: "cantripRider",
+        rangePerLevel: { class: "test:class/warlock", feet: 30 },
+      },
+    ],
+  },
+  armor: {
+    passives: [
+      {
+        kind: "modifier",
+        modifier: {
+          kind: "acFormula",
+          formula: { base: 13, add: [{ kind: "abilityMod", ability: "dex" }] },
+        },
+      },
+    ],
+  },
+  sight: { passives: [{ kind: "seesInDarkness", feet: 120 }] },
+  mind: { passives: [{ kind: "concentrationAdvantage" }] },
+  blade: { passives: [{ kind: "pactWeapon" }] },
+  drinker: {
+    passives: [
+      {
+        kind: "pactWeapon",
+        damage: [{ amount: { dice: "1d6" }, type: "necrotic" }],
+      },
+    ],
+    prerequisite: { features: [invocation("blade")] },
+  },
+  thirst: {
+    passives: [{ kind: "multiattack", attacks: 2 }],
+    prerequisite: { level: 5, features: [invocation("blade")] },
+  },
+  smite: {
+    resources: [
+      {
+        id: "smite",
+        max: { base: 1 },
+        recharge: [{ on: "turnStart", amount: "all" }],
+      },
+    ],
+    activations: [
+      {
+        cost: ["slot", { resource: "smite" }],
+        trigger: { afterHit: "meleeWeapon" },
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "automatic",
+          damage: [{ amount: { dice: "1d8" }, type: "force" }],
+          effects: [
+            {
+              kind: "applyCondition",
+              condition: "prone",
+              duration: { until: "yourNextTurnStart" },
+            },
+          ],
+        },
+      },
+    ],
+    upcast: { perSlotLevel: { addDice: "1d8" } },
+  },
+  vigor: {
+    activations: [
+      {
+        cost: ["action"],
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [{ kind: "tempHp", amount: { bonus: { base: 12 } } }],
+        },
+      },
+    ],
+  },
+  tome: {
+    choices: [
+      { kind: "spells", id: "tome-cantrips", count: 1, maxLevel: 0 },
+      {
+        kind: "spells",
+        id: "tome-rituals",
+        count: 1,
+        maxLevel: 1,
+        ritual: true,
+      },
+    ],
+  },
+};
+const WARLOCK = [
+  ...Object.entries(INVOCATIONS).map(([name, fields]) => ({
+    id: invocation(name),
+    name,
+    text,
+    automation: "full",
+    ...fields,
+  })),
+  {
+    id: "test:class/warlock",
+    name: "Warlock",
+    hitDie: "d8",
+    primaryAbilities: ["cha"],
+    savingThrows: ["wis", "cha"],
+    weapons: ["simple", "martial"],
+    armor: ["light"],
+    spellcasting: { ability: "cha" },
+    levels: Array.from({ length: 5 }, (_, index) => ({
+      level: index + 1,
+      grants: [],
+      choices: [
+        {
+          kind: "option",
+          id: "invocations",
+          count: 1,
+          from: Object.keys(INVOCATIONS).map(invocation),
+        },
+      ],
+      slots: index < 2 ? [1] : [0, 0, 2],
+    })),
+  },
+  {
+    id: "test:spell/blast",
+    name: "Blast",
+    level: 0,
+    school: "evocation",
+    classes: ["test:class/warlock"],
+    castingTime: "Action",
+    range: "120 feet",
+    components: "V",
+    duration: "instantaneous",
+    text,
+    automation: "full",
+    activation: {
+      cost: ["action"],
+      targeting: { creatures: 1, range: 120, side: "enemy" },
+      resolution: {
+        kind: "attack",
+        attack: { type: "spell" },
+        damage: [{ amount: { dice: "1d10" }, type: "force" }],
+      },
+    },
+  },
+  {
+    id: "test:spell/sing",
+    name: "Sing",
+    level: 1,
+    ritual: true,
+    school: "enchantment",
+    classes: ["test:class/bard"],
+    castingTime: "Action",
+    range: "Self",
+    components: "V",
+    duration: "instantaneous",
+    text,
+    automation: "text",
+  },
+];
+
 const content = [
   ...METAMAGIC.map((name) => ({
     id: option(name),
@@ -190,6 +365,7 @@ const content = [
     initiative: 0,
     actions: [],
   },
+  ...WARLOCK,
 ];
 
 function withContent(run: RunContext): RunContext {
@@ -666,5 +842,269 @@ describe("Metamagic for companions", () => {
       contentIds: run.contentIds,
     });
     expect(first).toBe(`tactic:metamagic|${option("quickened")}`);
+  });
+});
+
+function warlock(
+  level: number,
+  picks: readonly string[],
+  fields: Partial<Actor> = {},
+): Actor {
+  const actor = freshActor({
+    id: PLAYER_ACTOR,
+    name: "Warlock",
+    side: "party",
+    source: {
+      kind: "character",
+      build: {
+        baseAbilities: { str: 8, dex: 14, con: 13, int: 10, wis: 12, cha: 16 },
+        speciesId: "srd52:species/human",
+        backgroundId: "srd52:background/soldier",
+        backgroundIncrease: { cha: 2, con: 1 },
+        levels: Array.from({ length: level }, (_, index) => ({
+          classId: "test:class/warlock",
+          hitPointGain: 8,
+          answers:
+            index === 0
+              ? [
+                  { kind: "spells" as const, values: ["test:spell/blast"] },
+                  {
+                    kind: "features" as const,
+                    values: picks.map(invocation),
+                  },
+                ]
+              : [],
+        })),
+      },
+    },
+    hp: 30,
+    inventory: ["srd52:item/longsword"],
+  });
+  return { ...actor, position: { x: 0, y: 0 }, ...fields };
+}
+
+const BLAST = "spell:test:spell/blast";
+const SWORD = "weapon:srd52:item/longsword";
+const statsOf = (actor: Actor) => deriveStats(actor, run);
+const actionOf = (actor: Actor, id: string) => {
+  const action = statsOf(actor).actions.find((item) => item.id === id);
+  if (!action) throw new Error(`No ${id}`);
+  return action;
+};
+
+describe("Eldritch Invocations", () => {
+  it("Agonizing Blast adds Charisma to the damaging cantrip", () => {
+    const done = settle(
+      fight(warlock(2, ["agonizing"]), creature("a", "enemy", 2)),
+      [act(`${BLAST}|a`)],
+      dice(15),
+    );
+    // 1d10 at its highest and Charisma 18's +4.
+    expect(payloads(done.events, "damaged")[0]?.amount).toBe(14);
+  });
+
+  it("Repelling Blast pushes the creature hit 10 feet away", () => {
+    const done = settle(
+      fight(warlock(2, ["repelling"]), creature("a", "enemy", 2)),
+      [act(`${BLAST}|a`)],
+      dice(15),
+    );
+    expect(done.state.actors.a?.position).toEqual({ x: 4, y: 0 });
+  });
+
+  it("Eldritch Spear adds 30 feet of range per Warlock level", () => {
+    expect(
+      actionOf(warlock(3, ["spear"]), BLAST).activation.targeting,
+    ).toMatchObject({ range: 210 });
+  });
+
+  it("Armor of Shadows sets AC to 13 + Dexterity", () => {
+    expect(statsOf({ ...warlock(1, ["armor"]), inventory: [] }).ac).toBe(15);
+  });
+
+  it("Devil's Sight sees 120 feet through darkness", async () => {
+    const { darkvisionOf } =
+      await import("../plugins/systems/dnd5.5e/core/sight.ts");
+    expect(darkvisionOf(warlock(2, ["sight"]), run)).toBe(120);
+    expect(darkvisionOf(warlock(2, []), run)).toBe(0);
+  });
+
+  it("Eldritch Mind gives Advantage on Concentration saves", () => {
+    const save = settle(
+      fight(
+        warlock(1, ["mind"], { concentratingOn: "spell:test:spell/charm" }),
+        creature("a", "enemy", 2),
+      ),
+      [
+        {
+          kind: `${NS}:concentrationSave`,
+          payload: { actor: PLAYER_ACTOR, dc: 10 },
+        },
+      ],
+      dice(2, 19),
+    );
+    expect(payloads(save.events, "saveRolled")[0]).toMatchObject({
+      natural: 19,
+    });
+  });
+
+  it("Pact of the Blade attacks with Charisma, and Lifedrinker adds necrotic damage", () => {
+    const sword = actionOf(warlock(2, ["blade", "drinker"]), SWORD).activation
+      .resolution;
+    expect(sword.kind === "attack" && sword.attack.ability).toBe("cha");
+    expect(sword.damage.map((item) => item.type)).toEqual([
+      "slashing",
+      "necrotic",
+    ]);
+    expect(statsOf(warlock(5, ["blade", "thirst"])).multiattack).toBe(2);
+  });
+
+  it("Eldritch Smite spends a pact slot for force damage by its level, and knocks the target prone", () => {
+    const done = settle(
+      fight(warlock(5, ["blade", "smite"]), creature("a", "enemy", 1)),
+      [act(`${SWORD}|a`)],
+      dice(15),
+      [`feature:${invocation("smite")}:0|a`],
+    );
+    // A level 3 slot: 1d8 and 3d8 more, all at their highest.
+    expect(
+      payloads(done.events, "damaged").find((item) => item.type === "force")
+        ?.amount,
+    ).toBe(32);
+    const hero = playerIn(done.state);
+    expect(hero.resourcesSpent).toMatchObject({ "slot:3": 1 });
+    expect(
+      payloads(done.events, "resourceSpent").map((item) => item.resource),
+    ).toContain("smite");
+    expect(
+      done.state.actors.a?.activeEffects.some(
+        (item) =>
+          item.modifier.kind === "condition" &&
+          item.modifier.condition === "prone",
+      ),
+    ).toBe(true);
+  });
+
+  it("Fiendish Vigor gives the most Temporary Hit Points, with no slot", () => {
+    const done = settle(
+      fight(warlock(2, ["vigor"]), creature("a", "enemy", 5)),
+      [act(`feature:${invocation("vigor")}:0|${PLAYER_ACTOR}`)],
+      dice(),
+    );
+    expect(playerIn(done.state).tempHp).toBe(12);
+  });
+});
+
+describe("invocation prerequisites", () => {
+  const offered = async (base: Actor | null): Promise<readonly string[]> => {
+    const { choiceOptions } =
+      await import("../plugins/systems/dnd5.5e/core/character.ts");
+    const { ClassSchema } =
+      await import("../plugins/systems/dnd5.5e/core/schemas.ts");
+    const classDef = ClassSchema.parse(run.content("test:class/warlock"));
+    const [choice] = classDef.levels[0]?.choices ?? [];
+    if (!choice) throw new Error("No choice");
+    const build = base?.source.kind === "character" ? base.source.build : null;
+    return choiceOptions(
+      choice,
+      {
+        classId: classDef.id,
+        backgroundId: "srd52:background/soldier",
+        scores: [],
+        picks: {},
+      },
+      build,
+      classDef,
+      run,
+    ).options.map((item) => item.id.replace(invocation(""), ""));
+  };
+
+  it("leaves out what needs a higher level, another invocation or a cantrip", async () => {
+    expect(await offered(null)).toEqual([
+      "spear",
+      "armor",
+      "sight",
+      "mind",
+      "blade",
+      "smite",
+      "vigor",
+      "tome",
+    ]);
+  });
+
+  it("offers them once they're met", async () => {
+    const options = await offered(warlock(1, ["blade"]));
+    expect(options).toContain("agonizing");
+    expect(options).toContain("repelling");
+    expect(options).toContain("drinker");
+    expect(options).not.toContain("thirst");
+    expect(options).not.toContain("blade");
+  });
+});
+
+describe("an invocation's own choices", () => {
+  it("Pact of the Tome asks for a cantrip and a ritual as it's taken", async () => {
+    const { startRun, step } = await import("../engine/run/turn.ts");
+    const { CREATE_CHARACTER } =
+      await import("../plugins/systems/dnd5.5e/core/combat.ts");
+    const { SpellSchema, StateSchema } = await Promise.all([
+      import("../plugins/systems/dnd5.5e/core/schemas.ts"),
+      import("../plugins/systems/dnd5.5e/core/state.ts"),
+    ]).then(([schemas, state]) => ({ ...schemas, ...state }));
+    const scene = {
+      id: "s0",
+      text: "The end.",
+      textVariants: [],
+      rest: true,
+      choices: [],
+    };
+    const levelling = {
+      ...run,
+      adventure: { ...run.adventure, startScene: "s0", scenes: [scene] },
+    };
+    let { state, pending } = startRun(levelling, "tome");
+    const asked: Decision[] = [];
+    for (let guard = 0; pending && guard < 200; guard += 1) {
+      const decision = pending;
+      asked.push(decision);
+      const ids = decision.options.map((item) => item.id);
+      const answer = decision.id.includes("chooseCharacter")
+        ? CREATE_CHARACTER
+        : decision.id.endsWith(":class")
+          ? "test:class/warlock"
+          : ids.includes(invocation("tome"))
+            ? invocation("tome")
+            : (["test:spell/blast", "test:spell/sing"].find((id) =>
+                ids.includes(id),
+              ) ??
+              ids[0] ??
+              "");
+      const outcome = step(levelling, state, {
+        kind: "answer",
+        decisionId: decision.id,
+        optionId: answer,
+      });
+      if (!outcome.ok) throw new Error(outcome.error);
+      ({ state, pending } = outcome);
+    }
+    const rituals = asked.find((item) => item.id.includes("tome-rituals"));
+    expect(rituals?.options.map((item) => item.id)).toContain(
+      "test:spell/sing",
+    );
+    for (const { id } of rituals?.options ?? []) {
+      expect(SpellSchema.parse(run.content(id)).ritual).toBe(true);
+    }
+    expect(asked.some((item) => item.id.includes("tome-cantrips"))).toBe(true);
+    const player = StateSchema.parse(state.system).actors[PLAYER_ACTOR];
+    const answers =
+      player?.source.kind === "character"
+        ? (player.source.build?.levels[0]?.answers ?? [])
+        : [];
+    expect(
+      answers.some(
+        (item) =>
+          item.kind === "spells" && item.values.includes("test:spell/sing"),
+      ),
+    ).toBe(true);
   });
 });

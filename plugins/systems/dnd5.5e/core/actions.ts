@@ -33,7 +33,9 @@ import {
   runClassOption,
 } from "./class-options.ts";
 import { escapeDc, grapplesOn } from "./combat/grapple.ts";
-import { type Square, distanceFeet, squareKey } from "./grid.ts";
+import { type Square, distanceFeet, pushTo, squareKey } from "./grid.ts";
+
+export { pushTo };
 import { FLEE } from "./legendary.ts";
 import { finalDamage, rollD20 } from "./rules.ts";
 import {
@@ -230,36 +232,6 @@ function check(
 
 // The squares a creature is pushed through, straight away from `from`, stopping at a wall, a creature or the
 // map's edge. Null when it can't move at all, or there's no map.
-export function pushTo(
-  from: Square | null,
-  target: Actor,
-  feet: number,
-  state: DndState,
-): Square | null {
-  const grid = state.combat?.grid;
-  const start = target.position;
-  if (!grid || !from || !start) return null;
-  const dx = Math.sign(start.x - from.x);
-  const dy = Math.sign(start.y - from.y);
-  if (dx === 0 && dy === 0) return null;
-  const blocked = new Set([
-    ...(state.combat?.walls ?? []),
-    ...Object.values(state.actors).flatMap((item) =>
-      item.id !== target.id && item.position && !isDead(item)
-        ? [squareKey(item.position)]
-        : [],
-    ),
-  ]);
-  let at = start;
-  for (let pushed = 0; pushed < feet; pushed += 5) {
-    const next = { x: at.x + dx, y: at.y + dy };
-    const outside =
-      next.x < 0 || next.y < 0 || next.x >= grid.width || next.y >= grid.height;
-    if (outside || blocked.has(squareKey(next))) break;
-    at = next;
-  }
-  return at === start ? null : at;
-}
 
 // Forced movement uses none of the creature's own Speed and provokes no Opportunity Attacks.
 function pushEvents(

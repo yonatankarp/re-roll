@@ -387,6 +387,27 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Dropping to 1 Hit Point instead of 0 while the resource lasts, as with Relentless Endurance.
   z.strictObject({ kind: z.literal("dropToOne"), resource: z.string() }),
+  // Changes to the bearer's damaging cantrip that deals the most, as Agonizing, Repelling Blast or Eldritch Spear do:
+  // damage added to each roll, effects on a hit, and range for each level of a class.
+  z.strictObject({
+    kind: z.literal("cantripRider"),
+    attackOnly: z.boolean().default(false), // only a cantrip that makes an attack roll
+    damage: FormulaSchema.optional(),
+    onHit: z.array(LeafEffectSchema).default([]),
+    rangePerLevel: z
+      .strictObject({ class: ContentIdSchema, feet: z.number().int().min(1) })
+      .optional(),
+  }),
+  // Seeing through Darkness and Dim Light this far, as with Devil's Sight.
+  z.strictObject({
+    kind: z.literal("seesInDarkness"),
+    feet: z.number().int().min(5),
+  }),
+  // Melee weapons are pact weapons: trained, with Charisma when it's better, and this damage added on a hit.
+  z.strictObject({
+    kind: z.literal("pactWeapon"),
+    damage: z.array(DamageSchema).default([]),
+  }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
   z.strictObject({ kind: z.literal("concentrationAdvantage") }),
   // Attacks per Attack action, such as Extra Attack.
@@ -427,6 +448,18 @@ export const FeatureSchema = ContentEntrySchema.extend({
   perTier: ScaleStepSchema.optional(),
   // Spells it always gives, from the character level in the key.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  // Dice its slot-spending activations add for each slot level, as with Eldritch Smite.
+  upcast: z.strictObject({ perSlotLevel: ScaleStepSchema }).optional(),
+  // What taking it as a class option needs, read from its Prerequisite line: a level in the class choosing it,
+  // other features, and a known cantrip that deals damage (by an attack roll for "attack").
+  prerequisite: z
+    .strictObject({
+      level: z.number().int().min(1).max(20).optional(),
+      features: z.array(ContentIdSchema).min(1).optional(),
+      cantrip: z.enum(["damage", "attack"]).optional(),
+    })
+    .optional(),
+  choices: z.lazy(() => z.array(ChoiceDefSchema)).default([]), // asked when it's taken as a class option
 }).strict();
 export type Feature = z.infer<typeof FeatureSchema>;
 
@@ -466,6 +499,7 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     maxLevel: z.number().int().min(0).max(9),
     list: ContentIdSchema.optional(), // a class whose spell list it is; any spell when absent
     schools: z.array(SpellSchoolSchema).min(1).optional(),
+    ritual: z.boolean().optional(), // only spells with the Ritual tag
   }),
   z.strictObject({
     kind: z.literal("option"),

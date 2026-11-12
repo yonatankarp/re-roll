@@ -182,7 +182,9 @@ function actorIn(state: DndState, id: string): Actor {
 }
 
 function turnOptions(run: RunContext, state: DndState): readonly string[] {
-  return run.system.nextDecision(state, run)?.options.map((item) => item.id) ?? [];
+  return (
+    run.system.nextDecision(state, run)?.options.map((item) => item.id) ?? []
+  );
 }
 
 const PHB = BOOK_ROOTS && existsSync("books/rules/phb");
@@ -464,14 +466,14 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
     ).toBe(true);
   });
 
-  it.fails("Eldritch Invocations are picked at level-up", () => {
+  it("Eldritch Invocations are picked at level-up", () => {
     const build = hero("warlock", 1).source;
     const picked =
       build.kind === "character"
         ? (build.build?.levels[0]?.answers ?? []).some(
             (answer) =>
               answer.kind === "features" &&
-              answer.values.some((id) => id.includes("invocation")),
+              answer.values.some((id) => id.startsWith("phb:feature/warlock-")),
           )
         : false;
     expect(picked).toBe(true);

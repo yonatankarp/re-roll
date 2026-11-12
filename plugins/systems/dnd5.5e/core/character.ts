@@ -25,6 +25,7 @@ import {
   type ClassDef,
   ClassSchema,
   FeatSchema,
+  type Feature,
   FeatureSchema,
   ItemSchema,
   type Item,
@@ -324,7 +325,6 @@ function chosenSubclass(
 
 const OPTION_KEYS = /invocations|maneuvers|metamagic/i;
 
-// shortcut: an option's prerequisites are only in its text, so they aren't checked, as for feats.
 function optionFeatures(classDef: ClassDef, access: ContentAccess): string[] {
   const [plugin = "", slug = ""] = classDef.id.split(":class/");
   const granted = new Set(classDef.levels.flatMap((level) => level.grants));
@@ -575,6 +575,7 @@ export function choiceOptions(
         (spell) =>
           !had.has(spell.id) &&
           (choice.schools?.includes(spell.school) ?? true) &&
+          (!choice.ritual || spell.ritual) &&
           (choice.maxLevel === 0
             ? spell.level === 0
             : spell.level >= 1 && spell.level <= choice.maxLevel),
@@ -602,12 +603,35 @@ export function choiceOptions(
     }
     case "option": {
       const had = taken("features");
+      // The level this one makes in the class, and the cantrips known with it, for the options' prerequisites.
+      const level =
+        (base?.levels.filter((entry) => entry.classId === classDef.id).length ??
+          0) + 1;
+      const cantrips = [...taken("spells")].flatMap((id) => {
+        const spell = SpellSchema.safeParse(access.content(id)).data;
+        return spell?.level === 0 && spell.activation ? [spell.activation] : [];
+      });
+      const meets = ({ prerequisite: needs }: Feature): boolean =>
+        !needs ||
+        ((needs.level ?? 0) <= level &&
+          (needs.features ?? []).every((id) => had.has(id)) &&
+          (!needs.cantrip ||
+            cantrips.some(
+              (activation) =>
+                activation.resolution.damage.length > 0 &&
+                (needs.cantrip === "damage" ||
+                  activation.resolution.kind === "attack"),
+            )));
+      const open = choice.from.flatMap((id) => {
+        const feature = lookup(access, FeatureSchema, id);
+        return had.has(id) || !meets(feature) ? [] : [feature];
+      });
       return {
         what: "an option",
-        options: choice.from.flatMap((id) =>
-          had.has(id)
-            ? []
-            : [{ id, label: lookup(access, FeatureSchema, id).name }],
+        options: open.map((item) => ({ id: item.id, label: item.name })),
+        // A companion takes options the rules play.
+        prefer: open.flatMap((item) =>
+          item.automation === "text" ? [] : [item.id],
         ),
       };
     }
@@ -701,7 +725,18 @@ function stepChoices(
     chosenSubclass(draft.picks, base),
     access,
   );
-  const featChoices = choices.flatMap((choice) =>
+  // An option picked here, such as Pact of the Tome, asks its own choices too, under `<choice>:option<n>-`.
+  const optionChoices = choices.flatMap((choice) =>
+    choice.kind === "option"
+      ? (draft.picks[choice.id] ?? []).flatMap((id, index) =>
+          lookup(access, FeatureSchema, id).choices.map((own) => ({
+            ...own,
+            id: `${choice.id}:option${String(index)}-${own.id}`,
+          })),
+        )
+      : [],
+  );
+  const featChoices = [...choices, ...optionChoices].flatMap((choice) =>
     choice.kind === "feat"
       ? (draft.picks[choice.id] ?? []).flatMap((id, index) =>
           lookup(access, FeatSchema, id).choices.map((own) => ({
@@ -711,7 +746,12 @@ function stepChoices(
         )
       : [],
   );
-  return [...choices, ...featChoices, ...originChoices(draft, base, access)];
+  return [
+    ...choices,
+    ...optionChoices,
+    ...featChoices,
+    ...originChoices(draft, base, access),
+  ];
 }
 
 function classStep(

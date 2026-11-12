@@ -219,6 +219,12 @@ function handledByName(
   if (id.endsWith("fighting-style"))
     return working("level choice: fighting style");
   if (id.endsWith("epic-boon")) return working("level choice: epic boon");
+  if (id.endsWith("-metamagic") || id.endsWith("-eldritch-invocations")) {
+    return working("level choice: options, each with its own mechanics");
+  }
+  if (id.endsWith("-font-of-magic")) {
+    return working("turn options: spell slots to Sorcery Points and back");
+  }
   if (id.endsWith("weapon-mastery")) {
     return working("level choice: weapon masteries");
   }
@@ -270,10 +276,7 @@ const WAITING_ON: Readonly<Record<string, string>> = {
   "rogue-thieves-cant": OUT_OF_COMBAT,
   "rogue-cunning-action": "needs bonus-action Dash, Disengage and Hide",
   "rogue-cunning-strike": "needs Sneak Attack dice traded for effects",
-  "sorcerer-font-of-magic": "needs Sorcery Points turned into spell slots",
-  "sorcerer-metamagic": "needs Metamagic options picked and applied to spells",
   "sorcerer-sorcerous-restoration": SLOT_RECOVERY,
-  "warlock-eldritch-invocations": "needs invocation choices at level-up",
   "warlock-magical-cunning": SLOT_RECOVERY,
   "wizard-ritual-adept": OUT_OF_COMBAT,
   "wizard-arcane-recovery": SLOT_RECOVERY,

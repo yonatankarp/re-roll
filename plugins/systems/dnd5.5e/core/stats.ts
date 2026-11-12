@@ -41,6 +41,7 @@ import {
 import { featureRules, grantedSpells } from "./feature-rules.ts";
 import { type Caster, multiclassSlots } from "./multiclass.ts";
 import { holdsConcentration, withMetamagic } from "./metamagic.ts";
+import { withInvocations } from "./invocations.ts";
 
 // Content is frozen once loaded, so each entry is checked against a schema only once.
 const parsed = new WeakMap<object, Map<z.ZodType, unknown>>();
@@ -196,6 +197,7 @@ function collectFeatureData(
           ? scaleActivation(activation, feature.perTier, cantripTier(level))
           : activation,
         spellLevel: null,
+        ...(feature.upcast ? { upcast: feature.upcast } : {}),
       });
     });
   }
@@ -533,7 +535,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           ]
         : []),
     ],
-    actions: withMetamagic(actions, actor, abilityModifier(abilities.cha)),
+    actions: withMetamagic(
+      withInvocations(actions, fromFeatures.passives, abilities, classLevels),
+      actor,
+      abilityModifier(abilities.cha),
+    ),
     multiattack: Math.max(
       ...[...featureIds].map(attacksFrom),
       ...passiveAttacks(fromFeatures.passives),
