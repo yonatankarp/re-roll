@@ -22,6 +22,17 @@ import {
   squareKey,
   wallKeys,
 } from "./grid.ts";
+import {
+  FLEE,
+  betweenTurns,
+  bossAction,
+  chooseBossAction,
+  conditionsApplied,
+  fleeOptions,
+  lairTurns,
+  legendaryResistance,
+  runFlee,
+} from "./legendary.ts";
 import { concentrationDc, finalDamage, halved, rollD20 } from "./rules.ts";
 import type {
   Ability,
@@ -67,16 +78,15 @@ export type Context = SystemContext<DndState>;
 
 export const PASS = "pass";
 export const CREATE_CHARACTER = "create";
-const FLEE = "flee";
 export const HIT_DICE = "hitDice";
 const DEATH_SAVE = "deathSave";
 const SEPARATOR = "|";
-const ALL = "all"; // an area takes everyone, and projectiles go for the lowest HP
+export const ALL = "all"; // an area takes everyone, and projectiles go for the lowest HP
 const DECLINE = "decline";
 export const MOVE = "move";
 const STAY = "stay";
 const ITEM_PREFIX = "item:"; // an action that uses up the item, such as a potion
-const AIM = "@"; // an area aimed at a creature: "@" and its id
+export const AIM = "@"; // an area aimed at a creature: "@" and its id
 
 function actorOf(state: DndState, id: string): Actor {
   const actor = state.actors[id];
@@ -91,7 +101,7 @@ function frame(
   return { kind: `${NS}:${kind}`, payload };
 }
 
-const CHECK_END = frame("checkCombatEnd", {});
+export const CHECK_END = frame("checkCombatEnd", {});
 
 function hasFlag(
   actor: Actor,
@@ -150,7 +160,7 @@ function allies(state: DndState, actor: Actor): readonly Actor[] {
     : [];
 }
 
-function enemies(state: DndState, actor: Actor): readonly Actor[] {
+export function enemies(state: DndState, actor: Actor): readonly Actor[] {
   return state.combat
     ? state.combat.order.flatMap((id) => {
         const other = actorOf(state, id);
@@ -170,7 +180,11 @@ function meleeReach(action: KnownAction): number | null {
 
 // Whether an action can reach this creature from where the actor stands. For an area, the creature is
 // what it's aimed at: a sphere's centre must be in range, and a cone or line must reach it.
-function reaches(action: KnownAction, actor: Actor, target: Actor): boolean {
+export function reaches(
+  action: KnownAction,
+  actor: Actor,
+  target: Actor,
+): boolean {
   const { targeting } = action.activation;
   if ("self" in targeting) return true;
   const distance = distanceFeet(actor.position, target.position);
@@ -381,10 +395,7 @@ function turnOptions(
       label: `Move (${String(speedLeft(actor, stats))} ft left)`,
     });
   }
-  // shortcut: fleeing always works and costs nothing, as if the party always found a way off the map.
-  if (actor.id === PLAYER_ACTOR && state.combat?.canFlee) {
-    options.push({ id: FLEE, label: "Flee the fight" });
-  }
+  options.push(...fleeOptions(actor, state, access));
   options.push({ id: PASS, label: "End your turn" });
   return options;
 }
@@ -443,6 +454,8 @@ export function startCombat(
     readonly forPartySize?: number | undefined;
     readonly battlemap?: Battlemap | undefined;
     readonly loot?: Loot | undefined;
+    readonly lair?: boolean | undefined;
+    readonly surprise?: "party" | "enemies" | undefined;
   },
   context: Context,
   { canFlee, defeatContinues }: EncounterOptions,
@@ -473,15 +486,27 @@ export function startCombat(
     }
   }
 
+  // The story's word on surprise, such as from a Stealth check, beats the encounter's own.
+  const surprised = context.state.surprise ?? encounter.surprise;
+  const caught = { party: "party", enemies: "enemy" }[surprised ?? "party"];
   const rolled = [...party, ...monsters].map((actor, position) => ({
     id: actor.id,
     position,
-    total: context.dice.roll(20) + deriveStats(actor, context).initiative,
+    total:
+      (surprised && actor.side === caught
+        ? rollD20(context.dice, { advantage: false, disadvantage: true })
+            .natural
+        : context.dice.roll(20)) + deriveStats(actor, context).initiative,
   }));
   // Ties keep their listed order, so the result is the same on every machine.
-  const order = rolled
-    .sort((a, b) => b.total - a.total || a.position - b.position)
-    .map((item) => item.id);
+  const sorted = rolled.sort(
+    (a, b) => b.total - a.total || a.position - b.position,
+  );
+  const order = sorted.map((item) => item.id);
+  // Lair actions come on initiative count 20 and lose ties, so after everyone who rolled 20 or more.
+  const lair = encounter.lair
+    ? { at: sorted.filter((item) => item.total >= 20).length }
+    : undefined;
   const { battlemap } = encounter;
   const walls = battlemap ? wallKeys(battlemap.walls) : [];
   const toSquare = ([x, y]: readonly [number, number]): Square => ({ x, y });
@@ -535,8 +560,26 @@ export function startCombat(
         ...(canFlee ? { canFlee } : {}),
         ...(defeatContinues ? { defeatContinues } : {}),
         ...(encounter.loot ? { loot: encounter.loot } : {}),
+        ...(surprised ? { surprised } : {}),
+        ...(lair ? { lair } : {}),
       }),
     ],
+    // With nobody on 20 or more, the lair acts before anyone.
+    ...(lair?.at === 0
+      ? {
+          frames: lairTurns(
+            {
+              ...context.state,
+              actors: Object.fromEntries(
+                monsters.map((item) => [item.id, item]),
+              ),
+              combat: { encounter: encounter.id, order, index: 0, round: 1 },
+            },
+            "start",
+            context,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -812,7 +855,7 @@ function rollSave(
   return total >= dc;
 }
 
-function resolveTargets(
+export function resolveTargets(
   answerTarget: string,
   action: KnownAction,
   actor: Actor,
@@ -858,9 +901,9 @@ function findAction(
   context: Context,
   slotLevel?: number,
 ): KnownAction {
-  const action = deriveStats(actor, context).actions.find(
-    (item) => item.id === id,
-  );
+  const action =
+    deriveStats(actor, context).actions.find((item) => item.id === id) ??
+    bossAction(actor, id, context);
   if (!action) throw new Error(`${actor.id} has no action ${id}`);
   const above = (slotLevel ?? 0) - (action.spellLevel ?? 0);
   return action.upcast
@@ -900,7 +943,7 @@ function attackRoutine(
   );
 }
 
-function resolveAction(
+export function resolveAction(
   action: KnownAction,
   actor: Actor,
   targets: readonly Actor[],
@@ -989,13 +1032,23 @@ function resolveAction(
       // Damage against several targets at once is rolled once for all of them.
       const damage = rollSharedDamage(resolution.damage);
       for (const target of targets) {
-        const saved = rollSave(
+        const rolled = rollSave(
           target,
           resolution.ability,
           dc,
           context,
           action.spellLevel !== null,
         );
+        const resisted = rolled
+          ? null
+          : legendaryResistance(
+              target,
+              conditionsApplied(resolution.onFail),
+              context,
+              events,
+            );
+        if (resisted) events.push(resisted);
+        const saved = rolled || resisted !== null;
         applyRolled(target, damage, (amount) => {
           if (!saved) return amount;
           return resolution.onSuccessDamage === "half" ? halved(amount) : 0;
@@ -1086,7 +1139,7 @@ export function runTakeAction(
       ],
     };
   }
-  if (payload.answer === FLEE) return { events: combatEnded(state, "flee") };
+  if (payload.answer === FLEE) return runFlee(actor, context);
 
   const [actionId = "", targetId = "", slot] = payload.answer.split(SEPARATOR);
   const known = findAction(actor, actionId, context);
@@ -1858,7 +1911,7 @@ export function runConcentrationSave(
 
 export { ConcentrationSchema };
 
-function combatEnded(
+export function combatEnded(
   state: DndState,
   outcome?: "defeat" | "flee",
 ): SystemEvent[] {
@@ -2027,28 +2080,52 @@ export function runFinishTurn(context: Context): SystemResult {
   const actor = currentActor(state);
   const repeated = (actor?.activeEffects ?? []).flatMap((effect) =>
     actor && effect.repeatSave && !isDown(actor)
-      ? [{ actor, sourceId: effect.sourceId, save: effect.repeatSave }]
+      ? [{ actor, effect, save: effect.repeatSave }]
       : [],
   );
   const seen = new Set<string>();
-  const events = repeated.flatMap(({ actor: target, sourceId, save }) => {
-    if (seen.has(sourceId)) return [];
+  const events: SystemEvent[] = [];
+  for (const { actor: target, effect, save } of repeated) {
+    const { sourceId, modifier } = effect;
+    if (seen.has(sourceId)) continue;
     seen.add(sourceId);
-    return rollSave(
+    const saved = rollSave(
       target,
       save.ability,
       save.dc,
       context,
       sourceId.startsWith("spell:"),
-    )
-      ? [dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId })]
-      : [];
-  });
-  const finished = [
-    ...events,
-    ...(actor ? rechargeEvents(actor, context) : []),
-    dndEvent(`${NS}:turnAdvanced`, {}),
-  ];
+    );
+    const resisted = saved
+      ? null
+      : legendaryResistance(
+          target,
+          modifier.kind === "condition" ? [modifier.condition] : [],
+          context,
+          events,
+        );
+    if (resisted) events.push(resisted);
+    if (saved || resisted) {
+      events.push(
+        dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId }),
+      );
+    }
+  }
+  const ending = [...events, ...(actor ? rechargeEvents(actor, context) : [])];
+  const between = betweenTurns(state, ending, context);
+  return between.length > 0
+    ? { events: ending, frames: [...between, frame("advanceTurn", {})] }
+    : runAdvanceTurn(context, ending);
+}
+
+// The next turn begins, with its start-of-turn effects.
+export function runAdvanceTurn(
+  context: Context,
+  ending: readonly SystemEvent[] = [],
+): SystemResult {
+  const { state } = context;
+  if (!state.combat) return {};
+  const finished = [...ending, dndEvent(`${NS}:turnAdvanced`, {})];
   // Look ahead through the same events, so nothing happens at all unless the next creature has a start-of-turn effect.
   let after = state;
   for (const event of finished) after = applyDndEvent(after, event);
@@ -2172,6 +2249,9 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (!first) throw new Error(`${decision.id} has no options`);
   if (decision.id.startsWith(`${NS}:reaction:`)) return first.id;
   if (decision.id.startsWith(`${NS}:deathSave:`)) return first.id;
+  if (/^dnd5\.5e:(legendary|lair):/.test(decision.id)) {
+    return chooseBossAction(decision, context);
+  }
 
   const actor = actorOf(state, decision.actor);
   if (decision.id.startsWith(`${NS}:moveTo:`)) {

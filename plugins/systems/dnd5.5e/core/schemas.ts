@@ -641,6 +641,21 @@ export const CompanionSchema = ContentEntrySchema.extend({
 }).strict();
 export type Companion = z.infer<typeof CompanionSchema>;
 
+// One legendary action: either some of the monster's own actions, by name, or an effect of its own.
+export const LegendaryActionSchema = z
+  .strictObject({
+    name: z.string().min(1),
+    cost: z.number().int().min(1).default(1), // uses it spends
+    oncePerRound: z.boolean().default(false), // not again until the start of the monster's next turn
+    moves: z.boolean().default(false), // it may move up to half its Speed first
+    makes: z.array(z.string().min(1)).optional(), // its own actions it takes, once each, such as two Bites
+    activation: ActivationSchema.optional(),
+  })
+  .refine((item) => item.makes !== undefined || item.activation, {
+    message: "needs makes or an activation",
+  });
+export type LegendaryAction = z.infer<typeof LegendaryActionSchema>;
+
 export const MonsterSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
   ac: z.number().int(),
@@ -675,6 +690,26 @@ export const MonsterSchema = ContentEntrySchema.extend({
       }),
     )
     .default([]), // empty when nothing it does can be automated, as for a creature that only has traits
+  // Taken right after another creature's turn, spending uses that come back at the start of its own.
+  legendary: z
+    .strictObject({
+      uses: z.number().int().min(1),
+      usesInLair: z.number().int().min(1).optional(),
+      actions: z.array(LegendaryActionSchema).min(1),
+    })
+    .optional(),
+  legendaryResistance: z // turns a failed save into a success, so many times a day
+    .strictObject({
+      perDay: z.number().int().min(1),
+      inLair: z.number().int().min(1).optional(),
+    })
+    .optional(),
+  // Taken on initiative count 20, losing ties, when the encounter is in its lair.
+  lairActions: z
+    .array(
+      z.strictObject({ name: z.string().min(1), activation: ActivationSchema }),
+    )
+    .optional(),
   text: z.string().optional(), // the stat block as printed, for reading
 }).strict();
 export type Monster = z.infer<typeof MonsterSchema>;
@@ -854,6 +889,8 @@ export const EncounterSchema = z.strictObject({
   // The party size the counts were written for. Counts scale to the party that actually shows up.
   forPartySize: z.number().int().min(1).optional(),
   loot: LootSchema.optional(), // found when the party wins
+  lair: z.boolean().optional(), // fought in a monster's lair: lair actions and its "in Lair" numbers
+  surprise: z.enum(["party", "enemies"]).optional(), // the side caught unaware, which rolls initiative with disadvantage
 });
 
 export const CheckSchema = z.union([

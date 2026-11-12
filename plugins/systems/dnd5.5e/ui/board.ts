@@ -111,6 +111,9 @@ const PACE: Record<DndCue["kind"], number> = {
   cast: 450,
   move: 450,
   deathSave: 900,
+  legendary: 900,
+  resist: 900,
+  lair: 1100,
 };
 
 // A d20 drawn flat: an outline, its top face and the edges that meet there.
@@ -1092,6 +1095,14 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         layout();
         slot.hidden = false;
         await showBanner("Roll for initiative!", ms);
+        if (cue.surprised) {
+          await showBanner(
+            cue.surprised === "party"
+              ? "Surprised!"
+              : "You catch them by surprise!",
+            ms,
+          );
+        }
         return;
       case "end": {
         howTo = howTo === "unseen" ? "unseen" : "done";
@@ -1321,6 +1332,50 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         await wait(ms);
         return;
       }
+      case "legendary": {
+        const token = tokens.get(cue.actor);
+        if (!token) return;
+        showCaption(`${token.name}: legendary action, ${cue.label}`);
+        float(token, cue.label, "legendary");
+        animate(
+          token.disc,
+          [
+            { boxShadow: "0 0 0 0 #ffd36b" },
+            { boxShadow: "0 0 26px 10px #ffd36b" },
+            { boxShadow: "0 0 0 0 transparent" },
+          ],
+          { duration: 700 },
+        );
+        await wait(ms);
+        return;
+      }
+      case "resist": {
+        const token = tokens.get(cue.actor);
+        if (!token) return;
+        showCaption(
+          `${token.name} shrugs it off: Legendary Resistance (${String(cue.left)} left)`,
+        );
+        float(
+          token,
+          `Legendary Resistance (${String(cue.left)} left)`,
+          "legendary",
+        );
+        await wait(ms);
+        return;
+      }
+      case "lair": {
+        animate(
+          board,
+          [
+            { boxShadow: "inset 0 0 0 0 transparent" },
+            { boxShadow: "inset 0 0 90px 30px rgb(150 40 20 / 70%)" },
+            { boxShadow: "inset 0 0 0 0 transparent" },
+          ],
+          { duration: 900 },
+        );
+        await showBanner(`Lair action: ${cue.label}`, ms);
+        return;
+      }
       case "cast": {
         const token = tokens.get(cue.actor);
         if (!token) return;
@@ -1548,6 +1603,14 @@ const BOARD_CSS = `
 .dnd-float.hit { color: #ffd36b; font-size: 1rem; }
 .dnd-float.miss { color: #d8d4cc; font-size: 1rem; }
 .dnd-float.status { color: #c9b3ff; font-size: 0.9rem; text-transform: capitalize; }
+.dnd-float.legendary {
+  padding: 2px 10px;
+  border: 1px solid #ffd36b;
+  border-radius: 6px;
+  background: rgb(60 20 10 / 85%);
+  color: #ffd36b;
+  font: 700 0.95rem/1.2 var(--font-title, Georgia), serif;
+}
 .dnd-die {
   position: absolute;
   bottom: 100%;

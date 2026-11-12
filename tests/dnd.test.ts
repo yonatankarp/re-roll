@@ -35,6 +35,7 @@ import {
   ResolutionSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import { doesSomething } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { runEscape } from "../plugins/systems/dnd5.5e/core/legendary.ts";
 import {
   concentrationDc,
   finalDamage,
@@ -598,11 +599,18 @@ describe("life and death in combat", () => {
       }),
     ).not.toContain("flee");
 
-    const { events = [] } = runTakeAction(
+    // Nobody stands within reach here, so the run is free and ends the fight.
+    const { frames = [] } = runTakeAction(
       { actor: PLAYER_ACTOR, answer: "flee" },
       makeContext(run, allowed),
     );
-    expect(events).toEqual([
+    expect(frames.map((item) => item.kind)).toEqual([
+      `${NS}:checkCombatEnd`,
+      `${NS}:escape`,
+    ]);
+    expect(
+      runEscape({ actor: PLAYER_ACTOR }, makeContext(run, allowed)).events,
+    ).toEqual([
       { kind: "encounterEnded", encounter: "fight", outcome: "flee" },
       dndEvent(`${NS}:combatEnded`, {}),
     ]);

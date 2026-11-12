@@ -389,6 +389,121 @@ function withFirstChosenType(text: string, left: string[]): string {
   return chosen;
 }
 
+const SECTION_LINE =
+  /^(traits|actions|bonus actions|reactions|legendary actions|lair actions|mythic actions)$/i;
+const COUNT = `\\d+|${NUMBER}`;
+const countOf = (word: string): number =>
+  NUMBER_WORDS[word.toLowerCase()] ?? Number(word);
+const escaped = (text: string): string =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// "makes two Bite attacks", "makes one Rotting Fist or Channel Negative Energy attack" or "uses Dreadful Glare":
+// the monster's own actions a legendary action takes, by name. Of a choice, the first printed is taken.
+function actionsMade(
+  text: string,
+  names: readonly string[],
+  left: string[],
+): string[] {
+  const named = (phrase: string): string | undefined =>
+    names.find((name) => name.toLowerCase() === phrase.trim().toLowerCase());
+  const made: string[] = [];
+  for (const match of text.matchAll(
+    new RegExp(`\\b(${COUNT}|a|an) ([^.,;]+?) attacks?\\b`, "gi"),
+  )) {
+    const choices = (match[2] ?? "").split(/\s+or\s+/);
+    const name = choices.map(named).find(Boolean);
+    if (!name) continue;
+    if (choices.length > 1) left.push("a choice of attack");
+    const word = (match[1] ?? "").toLowerCase();
+    made.push(
+      ...Array<string>(word === "a" || word === "an" ? 1 : countOf(word)).fill(
+        name,
+      ),
+    );
+  }
+  for (const name of names) {
+    if (new RegExp(`\\buses (?:its )?${escaped(name)}\\b`, "i").test(text)) {
+      made.push(name);
+    }
+  }
+  return made;
+}
+
+// Legendary actions, Legendary Resistance and lair actions, from the stat block's paragraphs as plain text.
+// Older imports keep only that text, so the game reads them the same way at run time.
+export function legendaryOf(
+  lines: readonly string[],
+  actionNames: readonly string[],
+): { readonly fields: Record<string, unknown>; readonly notes: string[] } {
+  const fields: Record<string, unknown> = {};
+  const notes: string[] = [];
+  const legendary: unknown[] = [];
+  const lair: unknown[] = [];
+  let uses: { uses: number; usesInLair?: number } | null = null;
+  let section = "";
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (SECTION_LINE.test(line)) {
+      section = line.toLowerCase();
+      continue;
+    }
+    const resist =
+      /^Legendary Resistance \((\d+)\/Day(?:, or (\d+)\/Day in Lair)?\)/i.exec(
+        line,
+      );
+    if (resist) {
+      fields.legendaryResistance = {
+        perDay: Number(resist[1]),
+        ...(resist[2] ? { inLair: Number(resist[2]) } : {}),
+      };
+      continue;
+    }
+    if (section !== "legendary actions" && section !== "lair actions") continue;
+    const count =
+      /Legendary Action Uses:?\s*(\d+)(?:\s*\((\d+) in Lair\))?/i.exec(line) ??
+      new RegExp(`can take (${COUNT}) legendary actions`, "i").exec(line);
+    if (section === "legendary actions" && count) {
+      uses = {
+        uses: countOf(count[1] ?? "0"),
+        ...(count[2] ? { usesInLair: Number(count[2]) } : {}),
+      };
+      continue;
+    }
+    const entry = /^([^.:]{1,60})\.\s+(.+)$/s.exec(line);
+    if (!entry) continue;
+    const [, label = "", text = ""] = entry;
+    const name = label.replace(/\s*\(.*$/, "");
+    const left: string[] = [];
+    const parsed = parseSave(text, left) ?? parseAttack(text, left);
+    const activation = parsed ? { cost: [], ...parsed } : undefined;
+    if (section === "lair actions") {
+      if (activation) lair.push({ name, activation });
+      else notes.push(`not automated: lair action ${name}`);
+      continue;
+    }
+    const made = activation ? [] : actionsMade(text, actionNames, left);
+    if (!activation && made.length === 0) {
+      notes.push(`not automated: legendary action ${name}`);
+      continue;
+    }
+    for (const reason of new Set(left)) {
+      notes.push(`partial: ${name}: left out ${reason}`);
+    }
+    legendary.push({
+      name,
+      cost: Number(/\(Costs (\d+) Actions\)/i.exec(label)?.[1] ?? 1),
+      oncePerRound: /again until the start of \w+ next turn/i.test(text),
+      moves: /\bmoves? up to half \w+ Speed\b/i.test(text),
+      ...(activation ? { activation } : { makes: made }),
+    });
+  }
+  if (uses && legendary.length > 0) {
+    fields.legendary = { ...uses, actions: legendary };
+  }
+  if (lair.length > 0) fields.lairActions = lair;
+  return { fields, notes };
+}
+
 // Second pass, for a block the first pass found no action in. It's separate so that blocks which already parse don't change.
 function parseBlock(
   block: string,
@@ -448,6 +563,14 @@ function parseBlock(
     const entry = entryOf(inner);
     if (!entry) continue;
     const { label, text } = entry;
+    // legendaryOf reads these, and reports what it can't automate.
+    if (
+      section === "legendary actions" ||
+      section === "lair actions" ||
+      /^Legendary Resistance\b/i.test(label)
+    ) {
+      continue;
+    }
     if (section === "traits") {
       notes.push(`not automated: ${label}`);
       continue;
@@ -500,6 +623,11 @@ function parseBlock(
     return null;
   }
   if (actions.length === 0) notes.push("no action could be automated");
+  const legendary = legendaryOf(
+    lines,
+    actions.map((action) => (action as { readonly name: string }).name),
+  );
+  notes.push(...legendary.notes);
 
   const kind = lines.map((line) => CREATURE_KIND.exec(line)).find(Boolean);
   const speed = Number(field(/^Speed\s+(\d+)/) ?? 0);
@@ -542,6 +670,7 @@ function parseBlock(
       ),
       multiattack,
       actions,
+      ...legendary.fields,
       text: lines.join("\n"),
     },
   };

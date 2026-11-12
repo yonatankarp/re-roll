@@ -93,4 +93,65 @@ describe("combat board cues", () => {
       ),
     ).toBeNull();
   });
+
+  it("shows legendary actions, Legendary Resistance left and lair actions", () => {
+    const tyrant = {
+      ...freshActor({
+        id: "goblin",
+        name: "Tyrant",
+        side: "enemy",
+        source: { kind: "monster", statBlockId: "test:monster/tyrant" },
+        hp: 50,
+        inventory: [],
+      }),
+      resourcesSpent: { legendaryResistance: 1 },
+    };
+    const state: DndState = { ...stateWith(50), actors: { goblin: tyrant } };
+    const withLegend = {
+      content: (id: string) =>
+        id === "test:monster/tyrant"
+          ? {
+              id,
+              name: "Tyrant",
+              ac: 12,
+              hp: 50,
+              speed: 30,
+              abilities: {
+                str: 10,
+                dex: 10,
+                con: 10,
+                int: 10,
+                wis: 10,
+                cha: 10,
+              },
+              proficiency: 2,
+              initiative: 0,
+              legendaryResistance: { perDay: 3 },
+            }
+          : undefined,
+      contentIds: () => [],
+    } as ContentAccess;
+    const cue = (event: Parameters<typeof dndCue>[0]) =>
+      dndCue(event, state, state, withLegend);
+    expect(
+      cue(
+        dndEvent("dnd5.5e:legendaryActionTaken", {
+          actor: "goblin",
+          name: "Snap",
+          cost: 1,
+        }),
+      ),
+    ).toEqual({ kind: "legendary", actor: "goblin", label: "Snap" });
+    expect(
+      cue(dndEvent("dnd5.5e:legendaryResistanceUsed", { actor: "goblin" })),
+    ).toEqual({ kind: "resist", actor: "goblin", left: 2 });
+    expect(
+      cue(
+        dndEvent("dnd5.5e:lairActionTaken", {
+          actor: "goblin",
+          name: "Falling Rocks",
+        }),
+      ),
+    ).toEqual({ kind: "lair", actor: "goblin", label: "Falling Rocks" });
+  });
 });
