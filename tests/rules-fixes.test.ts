@@ -96,6 +96,25 @@ describe("death saves", () => {
     expect(hit && isStable(hit)).toBe(false);
   });
 
+  it("starts death saves afresh when a Stable creature with failures is hit", async () => {
+    const run = await goblin();
+    const stable = pregen(run, "srd52:pregen/fighter", {
+      hp: 0,
+      deathSaves: { successes: 3, failures: 2 },
+    });
+    const hit = applyDndEvent(
+      alone(stable),
+      dndEvent(`${NS}:damaged`, {
+        actor: PLAYER_ACTOR,
+        amount: 5,
+        type: "slashing",
+        critical: false,
+        massive: false,
+      }),
+    ).actors[PLAYER_ACTOR];
+    expect(hit?.deathSaves).toEqual({ successes: 0, failures: 1 });
+  });
+
   it("keeps a dying creature's successes when it is hit", async () => {
     const run = await goblin();
     const dying = pregen(run, "srd52:pregen/fighter", {
