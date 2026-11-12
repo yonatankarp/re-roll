@@ -29,6 +29,7 @@ interface BookFeature {
   readonly text: string;
   readonly level: number | null; // from the heading, which every subclass feature prints
   readonly subclass: string;
+  readonly optionOf?: string; // the "… Options" section it's listed in, such as Eldritch Invocation Options
 }
 
 interface ClassChapter {
@@ -53,6 +54,7 @@ function chapterFeatures(
   const used = new Set<string>();
   let section: "base" | "subclass" | "other" = "other";
   let subclass = "";
+  let options = "";
 
   // Only these headings split the chapter. Plain h5s, and h4s among the subclasses, stay in the text around them.
   const isBoundary = (item: Heading): boolean =>
@@ -63,6 +65,7 @@ function chapterFeatures(
 
   for (const heading of chapter) {
     if (heading.tag <= 3) {
+      options = heading.title.endsWith(" Options") ? heading.title : "";
       if (/Class Features$|^Eldritch Invocation Options$/.test(heading.title)) {
         section = "base";
       } else {
@@ -99,6 +102,7 @@ function chapterFeatures(
       text: blockText(bodyOf(html, headings, heading, isBoundary)),
       level: level === undefined ? null : Number(level),
       subclass,
+      ...(options && section === "base" ? { optionOf: options } : {}),
     });
   }
   return { features, subclassFeatures };
@@ -238,6 +242,8 @@ function skillChoice(text: string): ChoiceDef | null {
   };
 }
 
+const NUMBER_WORDS = ["one", "two", "three", "four", "five", "six"];
+
 const NOT_SCALING =
   /^(?:Level|Proficiency Bonus|Class Features|\d|Spell Slots|Slot Level)/;
 
@@ -277,6 +283,33 @@ function parseLevels(
     [...chapter.traits].find(([key]) => key.startsWith("Skill"))?.[1] ?? "",
   );
 
+  // An options list is offered as the table's matching column grows: "Eldritch Invocation Options" by "Invocations".
+  const optionChoices = [
+    ...new Set(chapter.features.flatMap((item) => item.optionOf ?? [])),
+  ].flatMap((title) => {
+    const prefix = camelCase(title.replace(/ Options$/, ""));
+    const column = columns.find(({ key }) => key.startsWith(prefix));
+    const from = chapter.features.flatMap((item) =>
+      item.optionOf === title ? [featureId(pluginId, item.slug)] : [],
+    );
+    return column ? [{ column, from }] : [];
+  });
+  const optionsAt = (rowIndex: number): ChoiceDef[] =>
+    optionChoices.flatMap(({ column, from }) => {
+      const count =
+        (column.values[rowIndex] ?? 0) - (column.values[rowIndex - 1] ?? 0);
+      return count > 0
+        ? [
+            {
+              kind: "option" as const,
+              id: column.key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`),
+              count,
+              from,
+            },
+          ]
+        : [];
+    });
+
   const levels = body.map((row, rowIndex) => {
     const grants = new Set<string>();
     for (const link of (row[featuresAt] ?? "").matchAll(
@@ -295,10 +328,14 @@ function parseLevels(
             Number(textAt(row, pactSlots)),
           ]
         : slotColumns.map((index) => Number(textAt(row, index)) || 0);
+    const choices = [
+      ...(rowIndex === 0 && skills ? [skills] : []),
+      ...optionsAt(rowIndex),
+    ];
     return {
       level: Number(textAt(row, 0)),
       grants: [...grants],
-      ...(rowIndex === 0 && skills ? { choices: [skills] } : {}),
+      ...(choices.length > 0 ? { choices } : {}),
       slots: slotsAt(slots),
       scaling: Object.fromEntries(
         columns.flatMap(({ key, values }) => {
@@ -308,6 +345,24 @@ function parseLevels(
       ),
     };
   });
+  // A Paladin's or Rogue's table has no Weapon Mastery column, so the feature's own text gives the count from its level.
+  const mastery = chapter.features.find((feature) =>
+    feature.slug.endsWith("-weapon-mastery"),
+  );
+  const from = levels.findIndex((level) =>
+    level.grants.some((id) => id.endsWith("-weapon-mastery")),
+  );
+  if (
+    mastery &&
+    from >= 0 &&
+    !columns.some(({ key }) => key === "weaponMastery")
+  ) {
+    const word = /\b(one|two|three|four|five|six) kinds?\b/i.exec(
+      mastery.text,
+    )?.[1];
+    const count = word ? NUMBER_WORDS.indexOf(word.toLowerCase()) + 1 : 2;
+    for (const level of levels.slice(from)) level.scaling.weaponMastery = count;
+  }
   if (missing.size > 0) {
     notes.push(`table links with no feature: ${[...missing].join(", ")}`);
   }
