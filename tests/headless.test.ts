@@ -24,9 +24,10 @@ afterAll(async () => {
     await rm(folder, { recursive: true, force: true });
 });
 
-// Everything but the warnings, which only say how the last step went.
+// Everything but the warnings, which only say how the last step went, and the board's cues, which a
+// told-again log doesn't replay.
 function settled(view: GameView): GameView {
-  return { ...view, warnings: [] };
+  return { ...view, warnings: [], cues: [] };
 }
 
 const GEAR = /^(equip|stow|attune|unattune):/;

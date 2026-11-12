@@ -1,6 +1,5 @@
 import { PLAYER_ACTOR } from "#sdk";
 import { AIM, parseOption } from "../core/combat/ids.ts";
-import { StateSchema } from "../core/state.ts";
 import type { BoardHost, BoardUpdate, ShellUpdate } from "./board-data.ts";
 import {
   type BoardContext,
@@ -16,6 +15,7 @@ import {
   showPickBar,
 } from "./board-overlays.ts";
 import { play } from "./board-playback.ts";
+import { parseState } from "./parse-state.ts";
 import { injectStyle } from "./board-style.ts";
 import {
   artFor,
@@ -163,9 +163,9 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       ctx.cursorHome = true;
     }
     ctx.decisionSeen = decision;
-    const parsed = StateSchema.safeParse(update.state);
-    const actors = parsed.success ? parsed.data.actors : {};
-    if (settle) ctx.grid = parsed.data?.combat?.grid ?? null;
+    const state = parseState(update.state);
+    const actors = state.actors;
+    if (settle) ctx.grid = state.combat?.grid ?? null;
     const present = new Set<string>();
     for (const actor of update.combat?.combatants ?? []) {
       present.add(actor.id);

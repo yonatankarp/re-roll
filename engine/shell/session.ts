@@ -308,6 +308,7 @@ function narrate(
   from: GameState | null,
   events: readonly GameEvent[],
   step: number, // the log entry these events belong to
+  cue = true, // false when retelling, since the board shows a told-again log as it stands
 ): {
   readonly state: GameState | null;
   readonly lines: readonly LogLine[];
@@ -353,7 +354,11 @@ function narrate(
     }
     const before = state;
     state = applyEvent(run, state, event);
-    if (ui.cue && (isNarrativeEvent(event) || isNamespacedEvent(event))) {
+    if (
+      cue &&
+      ui.cue &&
+      (isNarrativeEvent(event) || isNamespacedEvent(event))
+    ) {
       const cue = ui.cue(event, before.system, state.system, run);
       if (cue !== null && cue !== undefined) cues.push(cue);
     }
@@ -390,7 +395,7 @@ function retell(
     clues: [] as Clue[],
   };
   log.forEach((entry, step) => {
-    const part = narrate(run, ui, state, entry.events, step);
+    const part = narrate(run, ui, state, entry.events, step, false);
     state = part.state;
     told.lines.push(...part.lines);
     told.cues.push(...part.cues);
