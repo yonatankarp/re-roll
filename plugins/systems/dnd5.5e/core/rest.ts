@@ -18,7 +18,7 @@ import {
   dndEvent,
   isDead,
 } from "./state.ts";
-import { HIT_DICE, shortRestEvents } from "./combat.ts";
+import { HIT_DICE } from "./combat/ids.ts";
 import { gearOptions } from "./gear.ts";
 import { ClassSchema } from "./schemas.ts";
 import {
@@ -74,7 +74,41 @@ function spendEvents(
   ];
 }
 
-// Dice are spent in level order, so a multiclass character's dice stay in step with the combat.ts short rest.
+// Companions spend hit dice until healed. The player chooses die by die, below.
+export function shortRestEvents(
+  context: Context,
+  skip?: string,
+): SystemEvent[] {
+  return Object.values(context.state.actors).flatMap((actor) => {
+    if (actor.side !== "party" || isDead(actor) || actor.id === skip) return [];
+    if (actor.source.kind !== "character" || !actor.source.build) return [];
+    const stats = deriveStats(actor, context);
+    const events: SystemEvent[] = [];
+    let { hp } = actor;
+    for (const { classId } of actor.source.build.levels.slice(
+      actor.resourcesSpent[HIT_DICE] ?? 0,
+    )) {
+      if (hp >= stats.maxHp) break;
+      const die = lookup(context, ClassSchema, classId).hitDie;
+      const rolled = rollDiceNotation(`1${die}`, context.dice);
+      const amount = Math.min(
+        Math.max(1, rolled + modifierFor(stats, "con")),
+        stats.maxHp - hp,
+      );
+      hp += amount;
+      events.push(
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: actor.id,
+          resource: HIT_DICE,
+        }),
+        dndEvent(`${NS}:healed`, { actor: actor.id, amount, max: stats.maxHp }),
+      );
+    }
+    return events;
+  });
+}
+
+// Dice are spent in level order, so a multiclass character's dice stay in step with shortRestEvents.
 function nextDie(player: Actor, context: Context): string {
   const { source } = player;
   const spent = player.resourcesSpent[HIT_DICE] ?? 0;
