@@ -91,6 +91,7 @@ export interface Stats {
   readonly pactMagic: boolean; // slots come back on a Short Rest
   // Wearing armor without training: Disadvantage on Strength and Dexterity rolls, and no spellcasting.
   readonly untrainedArmor: boolean;
+  readonly exhaustion: number; // each level takes 2 from every d20 test and 5 feet from speed
   // From magic items worn, and attuned where they need it.
   readonly itemBonuses: Readonly<
     Record<"attack" | "spellAttack" | "savingThrows", number>
@@ -500,11 +501,18 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     resourceDefs: fromFeatures.resources,
     pactMagic: [...featureIds].some((id) => id.endsWith("pact-magic")),
     untrainedArmor,
+    exhaustion: actor.exhaustion,
     itemBonuses: magic,
   };
   return {
     ...partial,
-    speed: partial.speed + speedBonus(partial) - (tooHeavy ? 10 : 0),
+    speed: Math.max(
+      0,
+      partial.speed +
+        speedBonus(partial) -
+        (tooHeavy ? 10 : 0) -
+        5 * actor.exhaustion,
+    ),
     resources: Object.fromEntries(
       fromFeatures.resources.map((resource) => [
         resource.id,
@@ -667,7 +675,7 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
       flatBonus: 0,
       passives: [...monster.passives, ...fromFeatures.passives],
     }),
-    speed: monster.speed,
+    speed: Math.max(0, monster.speed - 5 * actor.exhaustion),
     savingThrows: monster.saves,
     skills: [],
     spellAbility: null,
@@ -701,6 +709,7 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
     resourceDefs: fromFeatures.resources,
     pactMagic: false,
     untrainedArmor: false,
+    exhaustion: actor.exhaustion,
     itemBonuses: { attack: 0, spellAttack: 0, savingThrows: 0 },
   };
 }
@@ -750,21 +759,28 @@ export function attackBonus(
   stats: Stats,
 ): number {
   const { attack } = resolution;
-  if (attack.flatBonus !== undefined) return attack.flatBonus;
+  const exhaustion = 2 * stats.exhaustion;
+  if (attack.flatBonus !== undefined) return attack.flatBonus - exhaustion;
   const ability = attack.type === "spell" ? stats.spellAbility : attack.ability;
   const proficiency = attack.proficient === false ? 0 : stats.proficiency;
   const item =
     attack.type === "spell"
       ? stats.itemBonuses.spellAttack
       : stats.itemBonuses.attack;
-  return proficiency + (ability ? modifierFor(stats, ability) : 0) + item;
+  return (
+    proficiency +
+    (ability ? modifierFor(stats, ability) : 0) +
+    item -
+    exhaustion
+  );
 }
 
 export function saveBonus(stats: Stats, ability: Ability): number {
   return (
     modifierFor(stats, ability) +
     (stats.savingThrows.includes(ability) ? stats.proficiency : 0) +
-    stats.itemBonuses.savingThrows
+    stats.itemBonuses.savingThrows -
+    2 * stats.exhaustion
   );
 }
 

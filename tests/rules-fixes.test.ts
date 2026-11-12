@@ -21,6 +21,7 @@ import {
 import {
   type Stats,
   attackBonus,
+  checkBonus,
   deriveStats,
   saveBonus,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
@@ -332,5 +333,22 @@ describe("spells at character creation", () => {
       label: "Aaa Whisper (story only)",
     });
     expect(options[0]?.label).not.toContain("story only");
+  });
+});
+
+describe("exhaustion", () => {
+  it("takes 2 per level from attacks, saves and checks, and 5 feet from speed", async () => {
+    const run = await goblin();
+    const fighter = pregen(run, "srd52:pregen/fighter");
+    const tired = { ...fighter, exhaustion: 2 };
+    const fresh = deriveStats(fighter, run);
+    const worn = deriveStats(tired, run);
+    const sword = "weapon:srd52:item/longsword";
+    expect(bonusOf(worn, sword)).toBe(bonusOf(fresh, sword) - 4);
+    expect(saveBonus(worn, "con")).toBe(saveBonus(fresh, "con") - 4);
+    expect(checkBonus(worn, tired, { ability: "str" })).toBe(
+      checkBonus(fresh, fighter, { ability: "str" }) - 4,
+    );
+    expect(worn.speed).toBe(fresh.speed - 10);
   });
 });
