@@ -74,4 +74,6 @@ Generated from `npm ls --omit=dev`. Each package's licence text ships in its own
 | yaml                            | 2.9.1                          | ISC               | github:eemeli/yaml                                     |
 | zod                             | 4.6.7                          | MIT               | https://github.com/colinhacks/zod                      |
 
+The desktop shell vendors **glib 0.18.5** (MIT) in `app/desktop/src-tauri/vendor/glib-0.18.5`, with the GHSA-wrw7-89jp-8q8g fix from glib 0.20 backported, because Tauri's Linux GTK stack still pins glib 0.18.
+
 The Rust crates used by the desktop shell are listed in `app/desktop/src-tauri/Cargo.lock`; most are MIT or Apache-2.0.

@@ -1,3 +1,4 @@
 docs/
 .claude/
 tests/fixtures/saves/
+app/desktop/src-tauri/vendor/
