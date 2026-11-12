@@ -1,6 +1,7 @@
 import type { ContentAccess, SystemEvent } from "#sdk";
 import { resistancesLeft } from "../core/legendary.ts";
-import { EVENT_SCHEMAS, StateSchema } from "../core/state.ts";
+import { EVENT_SCHEMAS } from "../core/state.ts";
+import { parseState } from "./parse-state.ts";
 import { deriveStats, evaluateFormula, scaledDice } from "../core/stats.ts";
 
 // Plain data for the combat board to animate, one per event worth showing. No DOM here, so tests can check it.
@@ -80,7 +81,7 @@ export type DndCue =
   | { readonly kind: "lair"; readonly actor: string; readonly label: string };
 
 function hpOf(state: unknown, actor: string): number {
-  return StateSchema.parse(state).actors[actor]?.hp ?? 0;
+  return parseState(state).actors[actor]?.hp ?? 0;
 }
 
 // How an attack looks: a weapon swing, a shot or a spell, and the damage dice it rolls.
@@ -90,7 +91,7 @@ function attackLook(
   label: string,
   access: ContentAccess,
 ): { readonly style: "melee" | "ranged" | "spell"; readonly damage: string } {
-  const actor = StateSchema.parse(state).actors[actorId];
+  const actor = parseState(state).actors[actorId];
   if (!actor) return { style: "melee", damage: "" };
   const stats = deriveStats(actor, access);
   const action = stats.actions.find((item) => item.name === label);
@@ -139,7 +140,7 @@ export function dndCue(
   switch (event.kind) {
     // Everyone as the fight begins, so the board doesn't show how it ends while it plays the start.
     case "dnd5.5e:combatStarted": {
-      const { actors, combat } = StateSchema.parse(after);
+      const { actors, combat } = parseState(after);
       return {
         kind: "start",
         combatants: (combat?.order ?? []).flatMap((id) => {
@@ -171,7 +172,7 @@ export function dndCue(
     case "dnd5.5e:combatEnded":
       return { kind: "end" };
     case "dnd5.5e:turnAdvanced": {
-      const { combat } = StateSchema.parse(after);
+      const { combat } = parseState(after);
       const actor = combat?.order[combat.index];
       return actor ? { kind: "turn", actor } : null;
     }
@@ -249,7 +250,7 @@ export function dndCue(
       const { actor } = EVENT_SCHEMAS["dnd5.5e:legendaryResistanceUsed"].parse(
         event.payload,
       );
-      const state = StateSchema.parse(after);
+      const state = parseState(after);
       const resisting = state.actors[actor];
       return {
         kind: "resist",

@@ -30,12 +30,12 @@ import {
   type DndState,
   EVENT_SCHEMAS,
   MAX_ATTUNED,
-  StateSchema,
   equipped,
   isDead,
   isDown,
   isStable,
 } from "../core/state.ts";
+import { parseState } from "./parse-state.ts";
 import {
   type KnownAction,
   type Stats,
@@ -135,7 +135,7 @@ function optionGroups(
   rawState: unknown,
   access: ContentAccess,
 ) {
-  const state = StateSchema.parse(rawState);
+  const state = parseState(rawState);
   const actor = state.actors[decision.actor];
   const plain = [
     {
@@ -197,7 +197,7 @@ function optionGroups(
 function actorOf(event: SystemEvent, rawState: unknown): string | null {
   // A fight starting or someone falling belongs to nobody in particular.
   if (!("payload" in event)) return null;
-  const state = StateSchema.parse(rawState);
+  const state = parseState(rawState);
   const reported =
     event.kind === "dnd5.5e:rollReported" && "payload" in event
       ? EVENT_SCHEMAS["dnd5.5e:rollReported"].parse(event.payload).actor
@@ -448,7 +448,7 @@ function carryRow(carried: number, capacity: number) {
 }
 
 function sheets(rawState: unknown, access: ContentAccess) {
-  const { actors, gold } = StateSchema.parse(rawState);
+  const { actors, gold } = parseState(rawState);
   const player = actors[PLAYER_ACTOR];
   if (player?.source.kind !== "character" || !player.source.build) return [];
   return [
@@ -670,7 +670,7 @@ function sheetOf(
 }
 
 function combat(rawState: unknown, access: ContentAccess) {
-  const state = StateSchema.parse(rawState);
+  const state = parseState(rawState);
   if (!state.combat) return null;
   const { order, index, round } = state.combat;
   // Where the player can walk this turn, so the board can move them with one click.
@@ -777,7 +777,7 @@ function roll(
   readonly success: boolean | null;
 } | null {
   if (!("payload" in event)) return null;
-  const state = StateSchema.parse(rawState);
+  const state = parseState(rawState);
   const name = (id: string): string => state.actors[id]?.name ?? id;
   switch (event.kind) {
     case "dnd5.5e:rollReported": {
@@ -845,7 +845,7 @@ function describe(
   rawState: unknown,
   access: ContentAccess,
 ): string | null {
-  const state = StateSchema.parse(rawState);
+  const state = parseState(rawState);
   const name = (id: string): string => state.actors[id]?.name ?? id;
   if (!("payload" in event)) {
     switch (event.kind) {
@@ -985,13 +985,13 @@ function card(decision: Decision, rawState: unknown, access: ContentAccess) {
         title: "Found",
         icon: "\u{1FA99}",
         lines: foundText(found.data, access),
-        footer: `Purse: ${coins(StateSchema.parse(rawState).gold ?? 0)}`,
+        footer: `Purse: ${coins(parseState(rawState).gold ?? 0)}`,
       }
     : null;
 }
 
 function playerDied(rawState: unknown): boolean {
-  const player = StateSchema.parse(rawState).actors[PLAYER_ACTOR];
+  const player = parseState(rawState).actors[PLAYER_ACTOR];
   return player !== undefined && isDead(player);
 }
 
