@@ -369,5 +369,6 @@ describe("exhaustion", () => {
       checkBonus(fresh, fighter, { ability: "str" }) - 4,
     );
     expect(worn.speed).toBe(fresh.speed - 10);
+    expect(worn.initiative).toBe(fresh.initiative - 4);
   });
 });

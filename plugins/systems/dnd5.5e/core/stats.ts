@@ -339,6 +339,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   );
 
   // shortcut: training comes from every class taken, while a multiclass really gets only some of a later class's.
+  // shortcut: a Protector cleric's or Warden druid's training isn't given, since the order chosen isn't recorded as its own feature.
   const classes = Object.keys(classLevels).map((id) =>
     lookup(access, ClassSchema, id),
   );
@@ -495,7 +496,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ),
     routines: null,
     creatureType: species.creatureType.toLowerCase(),
-    initiative: abilityModifier(abilities.dex),
+    initiative: abilityModifier(abilities.dex) - 2 * actor.exhaustion,
     scaling,
     features: [...featureIds],
     resourceDefs: fromFeatures.resources,
@@ -703,7 +704,7 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
     ),
     routines: multiattackRoutines(monster),
     creatureType: monster.creatureType?.toLowerCase(),
-    initiative: monster.initiative,
+    initiative: monster.initiative - 2 * actor.exhaustion,
     scaling: {},
     features: monster.features,
     resourceDefs: fromFeatures.resources,
