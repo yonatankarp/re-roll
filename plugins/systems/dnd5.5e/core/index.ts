@@ -23,7 +23,6 @@ import {
   ReactionSchema,
   SmiteSchema,
   TakeActionSchema,
-  choosePolicy,
   nextDndDecision,
   runAfterAction,
   runAfterHit,
@@ -44,6 +43,18 @@ import {
   runTakeAction,
   startCombat,
 } from "./combat.ts";
+import {
+  AfterMoveSchema,
+  MasteryHitSchema,
+  isTactic,
+  keepsActing,
+  runAfterMove,
+  runMasteryHit,
+  runMasteryMiss,
+  runTactic,
+  tacticalPolicy,
+  withTactics,
+} from "./actions.ts";
 import {
   parseClassesFromHtml,
   parseFeaturesFromHtml,
@@ -331,7 +342,22 @@ export const dnd55e = defineSystem<DndState>({
     ...gearFrames,
     [`${NS}:takeAction`]: frameHandler({
       schema: TakeActionSchema,
-      run: runTakeAction,
+      run: (payload, context: Context) =>
+        isTactic(payload.answer)
+          ? runTactic(payload, context)
+          : runTakeAction(payload, context),
+    }),
+    [`${NS}:afterMove`]: frameHandler({
+      schema: AfterMoveSchema,
+      run: runAfterMove,
+    }),
+    [`${NS}:masteryHit`]: frameHandler({
+      schema: MasteryHitSchema,
+      run: runMasteryHit,
+    }),
+    [`${NS}:masteryMiss`]: frameHandler({
+      schema: HitSchema,
+      run: runMasteryMiss,
     }),
     [`${NS}:move`]: frameHandler({ schema: MoveSchema, run: runMove }),
     [`${NS}:finishMove`]: frameHandler({
@@ -382,7 +408,10 @@ export const dnd55e = defineSystem<DndState>({
     }),
     [`${NS}:afterAction`]: frameHandler({
       schema: ActorPayload,
-      run: runAfterAction,
+      run: (payload, context: Context) =>
+        keepsActing(payload.actor, context)
+          ? {}
+          : runAfterAction(payload, context),
     }),
     [`${NS}:endTurn`]: frameHandler({
       schema: EmptyPayload,
@@ -484,9 +513,10 @@ export const dnd55e = defineSystem<DndState>({
   startEncounter: (encounter, context, options) =>
     startCombat(EncounterSchema.parse(encounter), context, options),
   applyEvent: applyDndEvent,
-  nextDecision: nextDndDecision,
+  nextDecision: (state, access) =>
+    withTactics(nextDndDecision(state, access), state, access),
   rests: availableRests,
-  decidePolicy: choosePolicy,
+  decidePolicy: tacticalPolicy,
   tactical: (decision) =>
     /^dnd5\.5e:(turn|moveTo|reaction|afterHit|deathSave):/.test(decision.id),
 });

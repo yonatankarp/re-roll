@@ -11,6 +11,15 @@ import {
 
 export const NS = "dnd5.5e";
 
+export const TACTICS = [
+  "dodge",
+  "disengage",
+  "dash",
+  "hidden",
+  "ready",
+  "slowed",
+] as const;
+
 const ActiveEffectSchema = z.strictObject({
   sourceId: z.string(),
   casterId: z.string(),
@@ -19,6 +28,13 @@ const ActiveEffectSchema = z.strictObject({
     z.strictObject({
       kind: z.literal("condition"),
       condition: ConditionSchema,
+    }),
+    // What an action anyone can take, such as Dodge, or a weapon mastery, leaves behind (core/tactics.ts).
+    z.strictObject({
+      kind: z.literal("tactic"),
+      tactic: z.enum(TACTICS),
+      value: z.number().int().optional(), // hidden: the Stealth total a Search must beat
+      action: z.string().optional(), // ready: the attack it makes
     }),
   ]),
   // "casterNextTurnEnd" becomes "casterTurnEnd" when the caster's next turn starts, and ends with that turn.
@@ -245,6 +261,14 @@ const RollReportSchema = z.strictObject({
   success: z.boolean(),
   label: z.string(),
 });
+// A saving throw against something other than a spell, such as a Grapple, so it shows in the log.
+const SaveReportSchema = z.strictObject({
+  actor: z.string(),
+  ability: AbilitySchema,
+  dc: z.number().int(),
+  success: z.boolean(),
+  label: z.string(),
+});
 
 export const EVENT_SCHEMAS = {
   [`${NS}:characterChosen`]: CharacterChosenSchema,
@@ -271,6 +295,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:concentrationEnded`]: ActorOnlySchema,
   [`${NS}:deathSaveRolled`]: DeathSaveSchema,
   [`${NS}:rollReported`]: RollReportSchema,
+  [`${NS}:saveReported`]: SaveReportSchema,
   [`${NS}:inspirationGranted`]: ActorOnlySchema,
   [`${NS}:treasureFound`]: TreasureFoundSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,

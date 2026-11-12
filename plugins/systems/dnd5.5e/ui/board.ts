@@ -119,6 +119,7 @@ const D20 = `<svg viewBox="0 0 100 100" aria-hidden="true"><polygon class="d20-b
 const SQUARE = /^(\d+),(\d+)$/; // a move option's id
 const FADE: KeyframeAnimationOptions = { duration: 250, easing: "ease-out" };
 const SEPARATOR = "|"; // between an option id's action, target and slot
+const MARKED = ["dodging", "hidden"] as const; // conditions drawn on the token itself
 const AIM = "@"; // an area aimed at a creature
 const MOVE = "move"; // the turn option that asks where to go
 
@@ -852,6 +853,12 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         token.node.classList.toggle("active", actor.active);
         token.node.dataset.side = sideOf(actor);
         token.notes = [actor.status ?? "", ...actor.conditions].filter(Boolean);
+        // Small marks for the two states that change how to fight a creature: Dodging and Hidden.
+        const marks = MARKED.filter((mark) => actor.conditions.includes(mark));
+        token.node.dataset.marks = marks.join(" · ");
+        for (const mark of MARKED) {
+          token.node.classList.toggle(`is-${mark}`, marks.includes(mark));
+        }
         setTip(token);
       }
     }
@@ -1491,6 +1498,25 @@ const BOARD_CSS = `
 }
 @keyframes dnd-pulse { 50% { opacity: 0.3; } }
 .dnd-token.down { filter: grayscale(1) brightness(0.6); opacity: 0.7; }
+.dnd-token.is-hidden { opacity: 0.55; }
+.dnd-token.is-dodging .dnd-disc { outline: 2px dashed rgb(207 227 255 / 85%); outline-offset: 3px; }
+.dnd-token[data-marks]:not([data-marks=""])::before {
+  content: attr(data-marks);
+  position: absolute;
+  left: 50%;
+  top: -14px;
+  transform: translateX(-50%);
+  padding: 0 5px;
+  border-radius: 6px;
+  background: rgb(40 28 18 / 85%);
+  color: #f4efe4;
+  font-size: 0.6rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-transform: capitalize;
+  pointer-events: none;
+  z-index: 2;
+}
 .dnd-token.down .dnd-disc { transform: rotate(-80deg) scale(0.85); transition: transform 0.4s; }
 /* HP as a ring round the disc, emptying clockwise from the top. */
 .dnd-ring {

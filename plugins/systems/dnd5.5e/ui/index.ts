@@ -7,6 +7,7 @@ import {
 import { z } from "zod";
 import { weaponProficient } from "../core/character.ts";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
+import { OFFHAND, isTactic } from "../core/actions.ts";
 import { foundText } from "../core/gear.ts";
 import { inArea } from "../core/grid.ts";
 import { dndCue } from "./cues.ts";
@@ -45,6 +46,11 @@ import {
   spellModifier,
   spellSaveDc,
 } from "../core/stats.ts";
+import {
+  HIDE_SOURCE,
+  TACTIC_WORDS,
+  tacticSourceName,
+} from "../core/tactics.ts";
 
 const NamedSchema = z.object({ name: z.string() });
 const TextSchema = z.object({ name: z.string(), text: z.string() });
@@ -116,6 +122,35 @@ function actionDetail(
     .join("\n\n");
 }
 
+// What each of the actions anyone can take does, shown under its option.
+const TACTIC_DETAILS: Readonly<Record<string, string>> = {
+  dash: "Gain extra movement equal to your Speed for the rest of this turn.",
+  disengage:
+    "Your movement doesn't provoke Opportunity Attacks for the rest of this turn.",
+  dodge:
+    "Until your next turn, attacks against you have Disadvantage and you have Advantage on Dexterity saving throws.",
+  hide: "A Stealth check against DC 15. On a success you're Invisible until you attack, cast a spell or a foe finds you.",
+  search:
+    "A Perception check. Each hidden foe whose Stealth total it matches is found.",
+  study:
+    "A check to recall what you know about a creature. On a DC 15 success you learn its AC and what damage it resists.",
+  help: "On a foe beside you, the next attack against it before your next turn has Advantage. On an ally, their next check has Advantage.",
+  grapple:
+    "An Unarmed Strike. The target makes a Strength or Dexterity saving throw, and on a failure it's Grappled, with Speed 0, until it escapes.",
+  shove:
+    "An Unarmed Strike. The target makes a Strength or Dexterity saving throw, and on a failure it's pushed 5 feet away or knocked Prone.",
+  ready:
+    "Hold an attack. When a foe steps into your reach before your next turn, you attack it with your Reaction.",
+  stand: "Standing up from Prone costs half your Speed.",
+  offhand:
+    "The extra attack of a second Light weapon, as a Bonus Action. It doesn't add your ability modifier to the damage.",
+};
+
+function tacticDetail(optionId: string): string | null {
+  const kind = optionId.split(OPTION_SEPARATOR)[0]?.split(":")[1] ?? "";
+  return TACTIC_DETAILS[kind] ?? null;
+}
+
 function groupOf(action: KnownAction | undefined): string {
   if (!action) return "Other";
   if (action.id.startsWith("item:")) return "Items";
@@ -166,12 +201,19 @@ function optionGroups(
   >();
   for (const option of decision.options) {
     const action = known(option.id);
-    const title = groupOf(action);
+    // Dodge, Grapple and the rest have a tab of their own, and an off-hand attack goes with the attacks.
+    const title = option.id.startsWith(OFFHAND)
+      ? "Attacks"
+      : isTactic(option.id)
+        ? "Actions"
+        : groupOf(action);
     groups.set(title, [
       ...(groups.get(title) ?? []),
       {
         ...option,
-        detail: action ? actionDetail(action, stats, access) : null,
+        detail: action
+          ? actionDetail(action, stats, access)
+          : tacticDetail(option.id),
       },
     ]);
   }
@@ -283,15 +325,25 @@ function actionSummary(action: KnownAction, stats: Stats): string {
 
 // Effects and concentration store ids such as "spell:srd52:spell/bless", which also name the content.
 function sourceName(access: ContentAccess, source: string): string {
+  const tactic = tacticSourceName(source);
+  if (tactic) return tactic;
   const id = source.replace(/^(spell|feature):/, "").replace(/:\d+$/, "");
   const named = NamedSchema.safeParse(access.content(id));
   return named.success ? named.data.name : "an effect";
 }
 
+// Hiding reads as hidden rather than the Invisible condition it gives.
 function conditionsOf(actor: Actor): string[] {
-  return actor.activeEffects.flatMap(({ modifier }) =>
-    modifier.kind === "condition" ? [modifier.condition] : [],
-  );
+  return [
+    ...new Set(
+      actor.activeEffects.flatMap(({ modifier, sourceId }) => {
+        if (modifier.kind === "tactic") return [TACTIC_WORDS[modifier.tactic]];
+        return modifier.kind === "condition" && sourceId !== HIDE_SOURCE
+          ? [modifier.condition]
+          : [];
+      }),
+    ),
+  ];
 }
 
 function statusOf(actor: Actor): string | null {
@@ -466,7 +518,10 @@ function sheetOf(
   const effects = [
     ...new Set(
       player.activeEffects
-        .filter(({ modifier }) => modifier.kind !== "condition")
+        .filter(
+          ({ modifier }) =>
+            modifier.kind !== "condition" && modifier.kind !== "tactic",
+        )
         .map(({ sourceId }) => sourceName(access, sourceId)),
     ),
   ];
@@ -822,9 +877,17 @@ function describe(
     case "dnd5.5e:effectAdded": {
       const { actor, effect } =
         EVENT_SCHEMAS["dnd5.5e:effectAdded"].parse(payload);
+      if (effect.modifier.kind === "tactic") {
+        return `${name(actor)} is ${TACTIC_WORDS[effect.modifier.tactic]}.`;
+      }
+      if (effect.sourceId === HIDE_SOURCE) return null; // the hidden line says it
       return effect.modifier.kind === "condition"
         ? `${name(actor)} is ${effect.modifier.condition}.`
         : `${name(actor)} is affected by ${sourceName(access, effect.sourceId)}.`;
+    }
+    case "dnd5.5e:saveReported": {
+      const data = EVENT_SCHEMAS["dnd5.5e:saveReported"].parse(payload);
+      return `${name(data.actor)} ${data.success ? "resists" : "fails to resist"} ${data.label} (DC ${String(data.dc)} ${ABILITY_NAMES[data.ability]} save).`;
     }
     case "dnd5.5e:effectEnded": {
       const data = EVENT_SCHEMAS["dnd5.5e:effectEnded"].parse(payload);

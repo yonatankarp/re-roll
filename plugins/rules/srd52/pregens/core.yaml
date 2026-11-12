@@ -8,7 +8,19 @@
     levels:
       - classId: "srd52:class/fighter"
         hitPointGain: 10
-        answers: [{ kind: skills, values: [perception, survival] }]
+        answers:
+          [
+            { kind: skills, values: [perception, survival] },
+            {
+              kind: weaponMastery,
+              values:
+                [
+                  "srd52:item/longsword",
+                  "srd52:item/shortsword",
+                  "srd52:item/dagger",
+                ],
+            },
+          ]
   equipment:
     ["srd52:item/longsword", "srd52:item/chain-mail", "srd52:item/shield"]
 
@@ -27,6 +39,10 @@
             {
               kind: skills,
               values: [perception, acrobatics, deception, investigation],
+            },
+            {
+              kind: weaponMastery,
+              values: ["srd52:item/shortsword", "srd52:item/shortbow"],
             },
           ]
   equipment:
