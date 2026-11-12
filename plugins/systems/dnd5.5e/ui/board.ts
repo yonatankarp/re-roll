@@ -208,6 +208,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   const HOW_TO = "Click a square to move, or a foe to attack";
   let howTo: "unseen" | "showing" | "done" = "unseen";
   let decisionSeen: string | null = null;
+  let cursorHome = false; // the cursor goes back to the player once the board settles
   const cells = el("div", "dnd-cells");
   const SVG = "http://www.w3.org/2000/svg";
   const route = document.createElementNS(SVG, "svg");
@@ -411,8 +412,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       if (grid && token.x !== null && token.y !== null) {
         token.node.style.left = `${String(((token.x + 0.5) / grid.width) * 100)}%`;
         token.node.style.top = `${String(((token.y + 0.5) / grid.height) * 100)}%`;
-        // Near the top, the tooltip opens below, clear of the caption and the frame.
+        // Near an edge, the tooltip opens inwards, clear of the caption and the frame.
         token.node.classList.toggle("high", token.y < 2);
+        token.node.classList.toggle("west", token.x < 2);
+        token.node.classList.toggle("east", token.x > grid.width - 3);
         continue;
       }
       sides.set(token.side, [...(sides.get(token.side) ?? []), token]);
@@ -765,7 +768,8 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     }
     const step = STEPS[event.key];
     if (step && grid) {
-      const from = cursor ?? { x: 0, y: 0 };
+      const me = tokens.get(PLAYER_ACTOR);
+      const from = cursor ?? { x: me?.x ?? 0, y: me?.y ?? 0 };
       placeCursor(from.x + step[0], from.y + step[1]);
       event.preventDefault();
     } else if ((event.key === "Enter" || event.key === " ") && cursor) {
@@ -823,10 +827,11 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     }
     // A new decision starts the keyboard cursor again from the player's own square.
     const decision = update.decision?.id ?? null;
-    if (decision !== decisionSeen) {
-      decisionSeen = decision;
-      if (update.decision?.actor === PLAYER_ACTOR) cursor = null;
+    if (decision !== decisionSeen && update.decision?.actor === PLAYER_ACTOR) {
+      cursor = null;
+      cursorHome = true;
     }
+    decisionSeen = decision;
     const parsed = StateSchema.safeParse(update.state);
     const actors = parsed.success ? parsed.data.actors : {};
     if (settle) grid = parsed.data?.combat?.grid ?? null;
@@ -861,6 +866,14 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     showCells();
     closeMenu();
     slot.hidden = tokens.size === 0 && !playing;
+    // While the map has focus, the cursor visibly goes back to the player's square.
+    const me = tokens.get(PLAYER_ACTOR);
+    if (cursorHome && settle) {
+      cursorHome = false;
+      if (document.activeElement === board && me) {
+        placeCursor(me.x ?? 0, me.y ?? 0);
+      }
+    }
   };
 
   const showBanner = async (text: string, ms: number): Promise<void> => {
@@ -1508,6 +1521,8 @@ const BOARD_CSS = `
 .dnd-board:not(.playing) .dnd-token:hover .dnd-tip,
 .dnd-board:focus-visible:not(.playing) .dnd-token.cursor .dnd-tip { opacity: 1; }
 .dnd-token.high .dnd-tip { bottom: auto; top: calc(100% + 8px); }
+.dnd-token.west .dnd-tip { left: 0; transform: none; }
+.dnd-token.east .dnd-tip { left: auto; right: 0; transform: none; }
 .dnd-token:hover, .dnd-token.cursor { z-index: 7; }
 .dnd-float {
   position: absolute;

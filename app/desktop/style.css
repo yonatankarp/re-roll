@@ -1464,6 +1464,8 @@ button:active {
 
 .begin:hover {
   color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 @media (prefers-color-scheme: dark) {
