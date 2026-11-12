@@ -1,11 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
+import { parseContentPath } from "../browser/content-path.ts";
 import { createNodeStorage } from "./storage.ts";
+
+export { type ContentPath, parseContentPath } from "../browser/content-path.ts";
 
 // The dev server's read-only window onto plugins/ and books/, for a browser that can't read files.
 
 export const CONTENT_ROUTE = "/__content";
-const CONTENT_FOLDERS = ["plugins", "books"];
 
 // No SVG: opened directly it could run scripts on this origin.
 const IMAGE_TYPES: Readonly<Record<string, string>> = {
@@ -16,21 +18,6 @@ const IMAGE_TYPES: Readonly<Record<string, string>> = {
   gif: "image/gif",
   mp3: "audio/mpeg", // narration clips, read through the same route as pictures
 };
-
-export interface ContentPath {
-  readonly folder: string;
-  readonly rest: string;
-}
-
-// Takes a path that has already been URL-decoded once. Returns null for anything outside the folders.
-export function parseContentPath(path: string): ContentPath | null {
-  if (path.includes("\\") || path.includes("\0")) return null;
-  const [folder = "", ...rest] = path.split("/");
-  if (!CONTENT_FOLDERS.includes(folder)) return null;
-  // Hidden names are never content, and books/ is its own git repo, so its .git must stay unreachable.
-  if (rest.some((part) => part === "" || part.startsWith("."))) return null;
-  return { folder, rest: rest.join("/") };
-}
 
 function isHidden(path: string): boolean {
   return path.split("/").some((part) => part.startsWith("."));

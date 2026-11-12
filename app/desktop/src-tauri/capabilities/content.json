@@ -1,11 +1,12 @@
 {
   "identifier": "content",
-  "description": "Read-only access to files. The paths are set in main.rs.",
+  "description": "Read-only access to files, and joining their paths. The paths are set in main.rs.",
   "windows": ["main"],
   "permissions": [
     "fs:allow-read-text-file",
     "fs:allow-read-file",
     "fs:allow-read-dir",
-    "fs:allow-exists"
+    "fs:allow-exists",
+    "core:path:allow-join"
   ]
 }

@@ -40,6 +40,7 @@ const { values, positionals } = parseArgs({
     slugs: { type: "string" },
     all: { type: "boolean", default: false },
     server: { type: "string", default: "http://127.0.0.1:8181" },
+    "allow-remote": { type: "boolean", default: false },
     encodings: { type: "string" },
     output: { type: "string" },
   },
@@ -158,7 +159,9 @@ if (command === "parse") {
     : null;
   const summary = await importSource({
     storage,
-    client: createLlamaClient(values.server),
+    client: createLlamaClient(values.server, {
+      allowRemote: values["allow-remote"],
+    }),
     system,
     pluginId: values.plugin,
     folder,

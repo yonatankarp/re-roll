@@ -63,6 +63,9 @@ describe("parseContentPath", () => {
   it.each([
     ["plugins/rules/a.yaml", "plugins", "rules/a.yaml"],
     ["books/rules/a.yaml", "books", "rules/a.yaml"],
+    ["books/adventures/x/plugin.yaml", "books", "adventures/x/plugin.yaml"],
+    ["books/assets/x/index.json", "books", "assets/x/index.json"],
+    ["books/library/x/index.json", "books", "library/x/index.json"],
     ["plugins", "plugins", ""],
   ])("allows %s", (path, folder, rest) => {
     expect(parseContentPath(path)).toEqual({ folder, rest });
@@ -84,6 +87,14 @@ describe("parseContentPath", () => {
     "plugins/a\0.yaml",
     "books/.git/config",
     "books/rules/.hidden.yaml",
+    // books/ is only reachable through the folders the game reads, not its importer working files.
+    "books",
+    "books/a.yaml",
+    "books/sources/spells.txt",
+    "books/import/x/report.md",
+    "books/audit/x.md",
+    "books/encodings/x.json",
+    "books/Rules/a.yaml",
   ])("refuses %j", (path) => {
     expect(parseContentPath(path)).toBeNull();
   });
@@ -124,7 +135,7 @@ describe("the content endpoint", () => {
 
   it("treats a missing private folder as empty", async () => {
     const reader = createContentReader(url);
-    expect(await reader.read("books/a.yaml")).toBeNull();
+    expect(await reader.read("books/rules/a.yaml")).toBeNull();
     expect(await reader.list("books/rules")).toEqual([]);
   });
 
