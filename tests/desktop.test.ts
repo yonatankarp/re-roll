@@ -13,6 +13,7 @@ import {
   it,
   vi,
 } from "vitest";
+import { BOOK_ROOTS } from "./depth.ts";
 import { systems } from "../app/systems.ts";
 import {
   CONTENT_ROUTE,
@@ -347,7 +348,7 @@ describe("playing through the shell's session", () => {
   });
 
   // Runs only where the owner's books are present.
-  it.skipIf(!existsSync("books/adventures"))(
+  it.skipIf(!BOOK_ROOTS || !existsSync("books/adventures"))(
     "finds a cover for every adventure from the books",
     async () => {
       const adventures = await createGame({

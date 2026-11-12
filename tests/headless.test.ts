@@ -7,6 +7,7 @@ import { openHeadless } from "../app/cli/headless-game.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { GameView } from "../engine/shell/session.ts";
 import type { Driver, Screen } from "../engine/tools/headless.ts";
+import { runs } from "./depth.ts";
 
 const folders: string[] = [];
 async function savesFolder(): Promise<string> {
@@ -258,7 +259,10 @@ describe("headless random play of every adventure", async () => {
   const shipped = adventures.filter((item) => item.source === "shipped");
   const books = adventures.filter((item) => item.source === "private");
   const MAX_DECISIONS = 1000;
-  const SEEDS = ["headless-0", "headless-1"];
+  const SEEDS = Array.from(
+    { length: runs(4, 8) },
+    (_, index) => `headless-${String(index)}`,
+  );
 
   const playThrough = async (
     adventure: string,
@@ -289,14 +293,15 @@ describe("headless random play of every adventure", async () => {
     return "tooLong"; // not stuck, only long
   };
 
-  it.each(shipped.map((item) => item.id))(
-    "finishes %s",
-    async (adventure) => {
-      for (const seed of SEEDS) {
-        expect(["ending", "defeat", "tooLong"]).toContain(
-          await playThrough(adventure, seed),
-        );
-      }
+  // A shipped adventure must end within MAX_DECISIONS, so an endless loop fails here.
+  it.each(
+    shipped.flatMap((item) => SEEDS.map((seed) => [item.id, seed] as const)),
+  )(
+    "finishes %s with seed %s",
+    async (adventure, seed) => {
+      expect(["ending", "defeat"]).toContain(
+        await playThrough(adventure, seed),
+      );
     },
     120_000,
   );
