@@ -283,7 +283,8 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
 
     const mine = dice();
     settle(run, used, [attack(PLAYER_ACTOR, weaponOf(barbarian), "a")], mine);
-    expect(mine.d20s()).toBe(2);
+    // Two for the attack with Advantage, and one for the target's save against the battleaxe's Topple mastery.
+    expect(mine.d20s()).toBe(3);
     const theirs = dice();
     settle(run, used, [attack("a", "monster:0", PLAYER_ACTOR)], theirs);
     expect(theirs.d20s()).toBe(2);
