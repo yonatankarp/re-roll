@@ -12,6 +12,9 @@ export default defineConfig({
   // Nothing is copied into the build, so private/ can only ever reach the page through the endpoint.
   publicDir: false,
   clearScreen: false,
+  // Found only when the narrator's worker first starts, which would reload the page mid-game.
+  optimizeDeps: { include: ["kokoro-js"] },
+  worker: { format: "es" }, // the narrator's worker is a module, and its libraries use import.meta
   build: {
     outDir: resolve(repoRoot, "out/desktop"),
     emptyOutDir: true,

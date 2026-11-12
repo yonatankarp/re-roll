@@ -1,7 +1,7 @@
 import { PLAYER_ACTOR } from "#sdk";
 import { StateSchema } from "../core/state.ts";
 import type { DndCue } from "./cues.ts";
-import { cueSound, diceSound } from "./sound.ts";
+import { cueSound, diceSound, setEffectsVolume } from "./sound.ts";
 
 // The combat board: tokens on a 5-foot grid over the scene's picture, animated from cues one at a time.
 // Clicking a token or a square, or moving a cursor with the arrow keys and pressing Enter, answers the
@@ -80,6 +80,7 @@ interface BoardHost {
   readonly imageUrl: (path: string) => string | Promise<string | null> | null;
   readonly answer: (...optionIds: readonly string[]) => void;
   readonly sound?: () => boolean;
+  readonly volume?: () => number;
 }
 
 interface Token {
@@ -844,7 +845,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
             throwNow = null;
             prompt.classList.remove("waiting");
             board.classList.remove("awaiting");
-            if (host.sound?.() === true) diceSound();
+            if (host.sound?.() === true) {
+              setEffectsVolume(host.volume?.() ?? 1);
+              diceSound();
+            }
             resolve();
           };
         });
@@ -1002,7 +1006,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         cue.kind === "check" ||
         cue.kind === "deathSave") &&
       cue.actor === PLAYER_ACTOR;
-    if (!fast() && !ownRoll && host.sound?.() === true) cueSound(cue);
+    if (!fast() && !ownRoll && host.sound?.() === true) {
+      setEffectsVolume(host.volume?.() ?? 1);
+      cueSound(cue);
+    }
     const ms = PACE[cue.kind];
     switch (cue.kind) {
       case "start":

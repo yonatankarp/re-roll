@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { type Issue, zodIssues } from "../kernel/issues.ts";
 import { ContentIdSchema, type GameSystem } from "../kernel/system.ts";
+import { AMBIENCES } from "./ambience.ts";
 
 const SlugSchema = z
   .string()
@@ -117,6 +118,8 @@ const SceneSchema = z.strictObject({
     .array(z.strictObject({ when: ConditionSchema, text: z.string().min(1) }))
     .default([]),
   art: AssetPathSchema.optional(),
+  // Unset, a guess from the text picks one (see ambience.ts); "none" keeps the scene quiet.
+  ambience: z.enum(AMBIENCES).optional(),
   rest: z.boolean().default(true), // false where the party can't stop, such as mid-chase
   choices: z
     .array(z.union([DirectChoiceSchema, CheckChoiceSchema]))

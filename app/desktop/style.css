@@ -1574,3 +1574,74 @@ button:active {
 .campfire-recovered + button {
   margin-top: 16px;
 }
+
+/* Sound: the panel from the game menu, and the narrator's controls under the scene text. */
+.sound-panel {
+  width: min(360px, calc(100vw - 32px));
+  padding: 20px 24px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 35%);
+}
+
+.sound-panel::backdrop {
+  background: rgb(20 12 4 / 45%);
+}
+
+.sound-panel[open] {
+  animation: fade 0.2s ease;
+}
+
+.sound-panel h2 {
+  margin: 0 0 12px;
+}
+
+.sound-panel label {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 36px;
+}
+
+.sound-panel .sound-volume input,
+.sound-panel .sound-voice select {
+  flex: 1;
+}
+
+.sound-note {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.sound-panel form {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.narration {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: -4px 0 12px;
+  animation: fade 0.4s ease;
+}
+
+.narration[hidden] {
+  display: none;
+}
+
+.narration button {
+  min-height: 32px;
+  padding: 2px 12px;
+  font-size: 0.9rem;
+}
+
+.narration-status {
+  font-size: 0.85rem;
+  font-style: italic;
+  opacity: 0.75;
+}

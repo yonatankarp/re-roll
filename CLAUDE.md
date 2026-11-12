@@ -9,6 +9,7 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - `npm run ui` serves the game at http://127.0.0.1:5199/ with `strictPort`. A second checkout or worktree needs `npm run ui -- --port <other>`.
 - `npm run bot -- [runs] [adventure] [--smart] [--difficulty=story|normal|hard]` plays adventures to measure balance. The targets are Story at or under about 25% defeats and Normal at 15–45%.
 - `npm run play` plays in text without the UI.
+- `npm run narrate -- <adventure> [--voice=…]` reads a private adventure's scenes aloud once with Kokoro-82M (needs `ffmpeg`), into its `narration/` folder. Run it from the main checkout, since a worktree's `private/` is only a copy. Clips missing there are read in the app.
 - Saves replay logged inputs (`engine/kernel/save.ts`). Every player action must go through decisions and events, never through hidden UI state.
 
 ## Book content: `private/`
