@@ -2,6 +2,7 @@ import { collapseCard, loadScreen } from "./load-screen.ts";
 import { campfire } from "./campfire.ts";
 import { adventureCard, adventureGrid } from "./adventure-picker.ts";
 import { soundControls } from "./sound-panel.ts";
+import { journalTabs, rollsWhy } from "./journal-tabs.ts";
 import type { Game, GameView } from "./session.ts";
 import type {
   Board,
@@ -12,6 +13,11 @@ import type {
   SheetSection,
   SheetView,
 } from "./system-ui.ts";
+
+// Shortcuts use ⌘ on a Mac and Ctrl elsewhere; the key handler takes either.
+const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+const MOD = MAC ? "⌘" : "Ctrl+";
+const MOD_ARIA = MAC ? "Meta" : "Control";
 
 // The whole page, drawn from the plain data in GameView. Knows nothing about any rule system.
 
@@ -798,10 +804,12 @@ export function mountShell(
     let sheetShown: string | null = null; // null for the player's
     const sheetTabs = el("div", { class: "tabs" });
     const sheetDrawer = drawer("Character", sheetTabs, fullSheet);
+    const journalTabsView = journalTabs(log);
+    const why = rollsWhy();
     const journalDrawer = drawer(
       "Journal",
-      el("h2", { text: "Journal" }),
-      log,
+      journalTabsView.head,
+      journalTabsView.body,
       about,
     );
     const openSheet = (): void => {
@@ -811,16 +819,17 @@ export function mountShell(
     const openJournal = (): void => {
       sheetDrawer.close();
       journalDrawer.showModal();
+      journalTabsView.update(game.view()); // open now, so the leads shown count as seen
       log.scrollTop = log.scrollHeight;
     };
     const hud = button("", openSheet);
     hud.className = "hud";
     hud.setAttribute("aria-label", "Open the character sheet");
-    hud.setAttribute("aria-keyshortcuts", "Meta+I");
-    hud.title = "Character (⌘I)";
+    hud.setAttribute("aria-keyshortcuts", `${MOD_ARIA}+I`);
+    hud.title = `Character (${MOD}I)`;
     const journal = button("Journal", openJournal);
-    journal.setAttribute("aria-keyshortcuts", "Meta+J");
-    journal.title = "Journal (⌘J)";
+    journal.setAttribute("aria-keyshortcuts", `${MOD_ARIA}+J`);
+    journal.title = `Journal (${MOD}J)`;
 
     const restart = (): void => {
       act(async () => {
@@ -852,22 +861,34 @@ export function mountShell(
       gameMenu.open = false;
       act(() => showLoad(showGame));
     };
-    // A menu item with its shortcut beside it, such as ⌘S.
+    // Takes back the last choice, where a forgiving difficulty allows it.
+    const undoChoice = (): void => {
+      if (!game.view().canUndo) return;
+      gameMenu.open = false;
+      act(async () => {
+        await game.undo();
+        showGame();
+        say("Your last choice is undone.");
+      });
+    };
+    // A menu item with its shortcut beside it, such as ⌘S, or Ctrl+S off a Mac.
     const shortcut = (
       item: HTMLButtonElement,
       key: string,
     ): HTMLButtonElement => {
-      item.setAttribute("aria-keyshortcuts", `Meta+${key}`);
-      const hint = el("kbd", { text: `⌘${key}` });
+      item.setAttribute("aria-keyshortcuts", `${MOD_ARIA}+${key}`);
+      const hint = el("kbd", { text: `${MOD}${key}` });
       hint.setAttribute("aria-hidden", "true"); // aria-keyshortcuts already says it
       item.append(hint);
       return item;
     };
+    const undoButton = shortcut(button("Undo last choice", undoChoice), "Z");
     const menuItems = el(
       "div",
       { class: "game-menu-items" },
       shortcut(button("Save game", saveGame), "S"),
       shortcut(button("Load game", loadGame), "L"),
+      undoButton,
       restartButton,
       sound.menuItem,
       button("Main menu", () => {
@@ -876,7 +897,7 @@ export function mountShell(
     );
     const gameMenu = el("details", { class: "game-menu" }, summary, menuItems);
     const items = (): HTMLElement[] => [
-      ...menuItems.querySelectorAll<HTMLElement>("button"),
+      ...menuItems.querySelectorAll<HTMLElement>("button:not([hidden])"),
     ];
     gameMenu.addEventListener("toggle", () => {
       restartArmed = false;
@@ -917,6 +938,7 @@ export function mountShell(
     const shortcuts: Readonly<Record<string, () => void>> = {
       s: saveGame,
       l: loadGame,
+      z: undoChoice,
       i: () => {
         if (sheetDrawer.open) sheetDrawer.close();
         else openSheet();
@@ -942,6 +964,7 @@ export function mountShell(
         "div",
         { class: "rail" },
         ticker,
+        why.node,
         levelUp,
         combat,
         card,
@@ -1295,6 +1318,8 @@ export function mountShell(
         ),
       );
       linesShown = view.log.length;
+      journalTabsView.update(view);
+      undoButton.hidden = !view.canUndo;
       log.scrollTop = log.scrollHeight;
       const levels = added.filter((line) => line.moment === "levelUp");
       // A card stands in for the prompt, which repeats a journal line, so the ticker leaves that line out.
@@ -1306,6 +1331,7 @@ export function mountShell(
         // The words wait for the board to finish showing what they describe.
         const shown = ++tickerShown;
         ticker.replaceChildren();
+        why.update(null);
         levelUp.hidden = true;
         void (board?.settled?.() ?? Promise.resolve()).then(() => {
           if (shown !== tickerShown) return;
@@ -1323,6 +1349,7 @@ export function mountShell(
             }),
           );
           enter(ticker);
+          why.update(view);
         });
       }
 

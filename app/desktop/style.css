@@ -825,6 +825,122 @@ summary {
   display: none;
 }
 
+/* "Why?" under the ticker: the latest choice's rolls, opened on demand. */
+.rolls-why {
+  margin-top: 2px;
+  font-size: 0.9rem;
+}
+
+.rolls-why summary {
+  display: inline-block;
+  color: var(--muted);
+  font-style: italic;
+  cursor: pointer;
+}
+
+.rolls-why[open] .rolls {
+  animation: rise 0.18s ease both;
+}
+
+.rolls {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.92rem;
+}
+
+.roll {
+  padding: 2px 0;
+}
+
+.roll.new-step {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.roll-who {
+  font-weight: bold;
+}
+
+.roll-math {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.roll-mark.hit {
+  color: var(--good);
+}
+
+.roll-mark.miss {
+  color: var(--rule);
+}
+
+/* The Journal's tabs: the story so far, the rolls, and the leads. */
+.journal-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+}
+
+.journal-panels > [hidden] {
+  display: none;
+}
+
+.tab.has-new::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  vertical-align: super;
+  border-radius: 50%;
+  background: var(--rule);
+}
+
+.leads {
+  display: grid;
+  gap: 10px;
+}
+
+.lead {
+  list-style: none;
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
+  border-radius: 6px;
+}
+
+.lead li {
+  padding: 3px 0;
+}
+
+.lead li.new {
+  animation: rise 0.3s ease both;
+}
+
+.new-mark {
+  margin-right: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font: 0.75rem var(--font-ui);
+  color: var(--accent-ink);
+  background: var(--rule);
+  vertical-align: 1px;
+}
+
+.rolls .empty,
+.leads .empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .initiative-details summary {
   color: var(--muted);
 }
