@@ -113,7 +113,7 @@ export type LoadedSave =
     }
   | { readonly ok: false; readonly error: string };
 
-function foldEvents(
+export function foldEvents(
   run: RunContext,
   log: readonly LogEntry[],
 ): GameState | null {

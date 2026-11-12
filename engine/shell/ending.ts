@@ -1,4 +1,5 @@
 import { type GameView } from "./session.ts";
+import type { OptionView } from "./system-ui.ts";
 import type { GamePage } from "./game-page.ts";
 import { button, el } from "./dom.ts";
 
@@ -78,4 +79,40 @@ export function drawEnding(page: GamePage, view: GameView): void {
   }
   page.ending.hidden = !end;
   page.ending.dataset.ending = view.ended ?? "";
+}
+
+// Asks before a story choice that ends the adventure while others carry on. Only the page asks, so
+// nothing reaches the log, and a save replays the same, until the player confirms.
+export function confirmEnding(
+  page: GamePage,
+  option: OptionView,
+  take: () => void,
+): void {
+  const keepPlaying = (): void => {
+    page.draw();
+    [...page.options.querySelectorAll<HTMLElement>(".option > button")]
+      .find((item) => item.textContent === option.label)
+      ?.focus();
+  };
+  const end = button("End the adventure here", take);
+  end.className = "begin";
+  const keep = button("Keep playing", keepPlaying);
+  const panel = el(
+    "div",
+    { class: "end-confirm" },
+    el("h3", { text: "End the adventure here?" }),
+    el("p", {
+      text: `"${option.label}" ends this adventure. Other choices carry the story on.`,
+    }),
+    el("div", { class: "ending-actions" }, end, keep),
+  );
+  panel.setAttribute("role", "alertdialog");
+  panel.setAttribute("aria-label", "End the adventure here?");
+  panel.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    keepPlaying();
+  });
+  page.options.replaceChildren(panel);
+  keep.focus();
 }

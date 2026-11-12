@@ -1,7 +1,7 @@
 import { createDice, rngFromSeed } from "../kernel/dice.ts";
 import type { GameState, Input } from "../kernel/events.ts";
 import { type LogEntry, replayInputs } from "../run/save.ts";
-import { type RunContext, startRun, step } from "../run/turn.ts";
+import { type RunContext, startRun, step, wouldEnd } from "../run/turn.ts";
 import { REST_OPTION_PREFIX, SCENE_DECISION_PREFIX } from "../story/runtime.ts";
 
 export interface BotRun {
@@ -66,11 +66,11 @@ export function playRun(
       (item) => !item.id.startsWith(REST_OPTION_PREFIX),
     );
     if (options.avoidEndings && pending.id.startsWith(SCENE_DECISION_PREFIX)) {
-      // Steps are pure, so trying a choice changes nothing, and it sees the same dice the real one would.
-      const going = choices.filter((item) => {
-        const tried = step(run, state, answer(item.id));
-        return !tried.ok || tried.state.story.ended !== "ending";
-      });
+      // Trying a choice sees the same dice the real one would.
+      const scene = pending;
+      const going = choices.filter(
+        (item) => !wouldEnd(run, state, scene, item.id),
+      );
       if (going.length > 0) choices = going;
     }
     const option =

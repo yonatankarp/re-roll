@@ -13,7 +13,7 @@ test("starts the shipped adventure and plays a turn on the map", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
   await page.getByRole("button", { name: "Begin the adventure" }).click();
-  await page.getByRole("button", { name: "Human Fighter" }).click();
+  await page.getByRole("button", { name: /^Human Fighter/ }).click();
   await page
     .getByRole("button", { name: "[Perception] Check the treeline" })
     .click();
@@ -52,6 +52,47 @@ test("starts the shipped adventure and plays a turn on the map", async ({
   await expect
     .poll(() => log.count(), { timeout: 15_000 })
     .toBeGreaterThan(before);
+
+  expect(errors).toEqual([]);
+});
+
+// Makes a character by its steps, takes one back, then asks before the story's early ending.
+test("makes a character and confirms an early ending", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
+  await page.getByRole("button", { name: "Begin the adventure" }).click();
+  await page.getByRole("button", { name: /^Create your own/ }).click();
+  const current = page.locator(".creation-steps [aria-current=step]");
+  await expect(current).toHaveText("Species");
+  await page.getByRole("button", { name: /^Human/ }).click();
+  await expect(current).toHaveText("Class");
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(current).toHaveText("Species");
+
+  // The first choice of every step, until the name.
+  const name = page.getByRole("textbox", { name: "Name" });
+  for (let picks = 0; picks < 40 && !(await name.isVisible()); picks += 1) {
+    await page.locator(".creation-pick").first().click();
+  }
+  await name.fill("Ilyra");
+  await page.getByRole("button", { name: "Begin the adventure" }).click();
+  await expect(page.getByText("You are playing Ilyra").first()).toBeVisible();
+
+  await page
+    .getByRole("button", { name: "Turn back and warn the village" })
+    .click();
+  const confirm = page.getByRole("alertdialog");
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "Keep playing" }).click();
+  await expect(confirm).toBeHidden();
+  await page
+    .getByRole("button", { name: "Turn back and warn the village" })
+    .click();
+  await page.getByRole("button", { name: "End the adventure here" }).click();
+  await expect(page.getByRole("button", { name: "Play again" })).toBeVisible();
 
   expect(errors).toEqual([]);
 });

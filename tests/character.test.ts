@@ -313,6 +313,61 @@ describe("character creation", () => {
     expect(resumed.ok).toBe(true);
   });
 
+  it("asks species first and a name last, and keeps a name the player types", async () => {
+    const run = storyRun(await goblin(), []);
+    const isName = (decision: Decision) => decision.id.endsWith(":name");
+    const { state, asked } = drive(run, "named", WIZARD, isName);
+    const builds = asked.filter((item) => item.id.includes(":build:"));
+    expect(builds.slice(0, 3).map((item) => item.id.split(":").at(-1))).toEqual(
+      ["species", "class", "background"],
+    );
+    expect(builds.every((item) => item.revisable)).toBe(true);
+    const name = pendingDecision(run, state);
+    expect(name?.options).toEqual([{ id: "Elf Wizard", label: "Elf Wizard" }]);
+    expect(name?.text?.maxLength).toBe(40);
+    const answer = (optionId: string) =>
+      step(run, state, {
+        kind: "answer",
+        decisionId: name?.id ?? "",
+        optionId,
+      });
+    for (const bad of [" Ilyra", "x".repeat(41), "Il\u0007yra", ""]) {
+      expect(answer(bad).ok).toBe(false);
+    }
+    const named = answer("Ilyra Moonwhisper");
+    if (!named.ok) throw new Error(named.error);
+    expect(actorIn(named.state).name).toBe("Ilyra Moonwhisper");
+  });
+
+  it("answers a save from before species came first in the old order", async () => {
+    const run = storyRun(await goblin(), []);
+    const { state } = drive(
+      run,
+      "legacy",
+      [[/chooseCharacter/, CREATE_CHARACTER]],
+      (decision) => decision.id.includes(":build:"),
+    );
+    // Such a save waits on the class question, with no order in its frame.
+    const legacy = structuredClone<GameState>(state);
+    const awaited = legacy.stack.at(-1)?.payload as {
+      decision: {
+        id: string;
+        options: { id: string; label: string }[];
+        resume: { payload: Record<string, unknown> };
+      };
+    };
+    delete awaited.decision.resume.payload.order;
+    awaited.decision.id = "dnd5.5e:build:player:class";
+    awaited.decision.options = [{ id: "srd52:class/wizard", label: "Wizard" }];
+    const answered = step(run, legacy, {
+      kind: "answer",
+      decisionId: "dnd5.5e:build:player:class",
+      optionId: "srd52:class/wizard",
+    });
+    if (!answered.ok) throw new Error(answered.error);
+    expect(answered.pending?.id).toBe("dnd5.5e:build:player:species");
+  });
+
   it("uses stated choices over inferred ones, and honors option choices", async () => {
     const run = withContent(await goblin(), [
       FeatureSchema.parse({

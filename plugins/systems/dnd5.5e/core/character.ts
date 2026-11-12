@@ -59,7 +59,7 @@ export { weaponProficient };
 type Context = SystemContext<DndState>;
 type LevelEntry = CharacterBuild["levels"][number];
 
-const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8] as const;
+export const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8] as const;
 // The Experience Points needed for each level, from level 1 upward.
 const XP_FOR_LEVEL = [
   0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000, 85000, 100000,
@@ -79,6 +79,7 @@ const DraftSchema = z.strictObject({
   scores: z.array(AbilitySchema), // given the standard array's values in order
   increase: z.string().optional(),
   picks: z.record(z.string(), z.array(z.string())), // choice id to what was picked so far
+  name: z.string().optional(), // what the player called the character, asked last
 });
 type Draft = z.infer<typeof DraftSchema>;
 
@@ -92,8 +93,21 @@ interface Step {
   readonly prompt: string;
   readonly options: readonly Option[];
   readonly prefer?: readonly string[]; // companions pick among these when any are on offer
+  readonly text?: { readonly label: string; readonly maxLength: number }; // the answer may be typed
   readonly apply: (draft: Draft, answer: string) => Draft;
 }
+
+const NAME_LENGTH = 40;
+const NameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(NAME_LENGTH)
+  .regex(/^\P{C}+$/u);
+
+// How a build's steps are ordered. Frames from before the order was recorded keep the old one, class first,
+// since an answer is applied to whatever step its draft asks next.
+const SPECIES_FIRST = 2;
 
 // When two loaded books print the same name, the first in content id order wins: the run's precedence.
 function namedContent<T extends { readonly name: string }>(
@@ -137,7 +151,7 @@ function encodeIncrease(
     .join(",");
 }
 
-function parseIncrease(text: string): Partial<Record<Ability, number>> {
+export function parseIncrease(text: string): Partial<Record<Ability, number>> {
   return Object.fromEntries(
     text.split(",").map((part) => {
       const [ability, amount] = part.split(":");
@@ -193,7 +207,12 @@ function backgroundIncreaseStep(
   };
 }
 
-function originStep(draft: Draft, access: ContentAccess): Step | null {
+function originStep(
+  draft: Draft,
+  access: ContentAccess,
+  speciesFirst: boolean,
+): Step | null {
+  if (speciesFirst && draft.speciesId === undefined) return speciesStep(access);
   if (draft.classId === undefined) {
     return {
       key: "class",
@@ -205,17 +224,7 @@ function originStep(draft: Draft, access: ContentAccess): Step | null {
       apply: (current, classId) => ({ ...current, classId }),
     };
   }
-  if (draft.speciesId === undefined) {
-    return {
-      key: "species",
-      prompt: "Choose your species.",
-      options: namedContent(access, "species", SpeciesSchema).map((item) => ({
-        id: item.id,
-        label: item.name,
-      })),
-      apply: (current, speciesId) => ({ ...current, speciesId }),
-    };
-  }
+  if (draft.speciesId === undefined) return speciesStep(access);
   if (draft.backgroundId === undefined) {
     return {
       key: "background",
@@ -253,6 +262,37 @@ function originStep(draft: Draft, access: ContentAccess): Step | null {
     return backgroundIncreaseStep(abilities, classDef);
   }
   return null;
+}
+
+function speciesStep(access: ContentAccess): Step {
+  return {
+    key: "species",
+    prompt: "Choose your species.",
+    options: namedContent(access, "species", SpeciesSchema).map((item) => ({
+      id: item.id,
+      label: item.name,
+    })),
+    apply: (current, speciesId) => ({ ...current, speciesId }),
+  };
+}
+
+// The last step, once everything else is chosen. The suggestion is what a character was called before names.
+function nameStep(draft: Draft, access: ContentAccess): Step | null {
+  if (draft.name !== undefined) return null;
+  const suggested = defaultName(draft, access);
+  return {
+    key: "name",
+    prompt: "What is your character's name?",
+    options: [{ id: suggested, label: suggested }],
+    text: { label: "Name", maxLength: NAME_LENGTH },
+    apply: (current, name) => ({ ...current, name: NameSchema.parse(name) }),
+  };
+}
+
+function defaultName(draft: Draft, access: ContentAccess): string {
+  const species = lookup(access, SpeciesSchema, draft.speciesId ?? "");
+  const classDef = lookup(access, ClassSchema, draft.classId ?? "");
+  return `${species.name} ${classDef.name}`;
 }
 
 function levelOf(classDef: ClassDef, level: number) {
@@ -744,9 +784,14 @@ function nextStep(
   draft: Draft,
   base: CharacterBuild | null,
   access: ContentAccess,
+  order?: number,
 ): Step | null {
+  if (base) return classStep(draft, base, access);
+  const speciesFirst = order === SPECIES_FIRST;
   return (
-    (base ? null : originStep(draft, access)) ?? classStep(draft, base, access)
+    originStep(draft, access, speciesFirst) ??
+    classStep(draft, base, access) ??
+    (speciesFirst ? nameStep(draft, access) : null)
   );
 }
 
@@ -958,6 +1003,7 @@ export function beginCreation(): SystemResult {
       frame("buildStep", {
         actor: PLAYER_ACTOR,
         draft: { scores: [], picks: {} },
+        order: SPECIES_FIRST,
       }),
     ],
   };
@@ -995,7 +1041,11 @@ function advanceEvents(
   ];
 }
 
-const BuildStepSchema = z.object({ actor: z.string(), draft: DraftSchema });
+export const BuildStepSchema = z.object({
+  actor: z.string(),
+  draft: DraftSchema,
+  order: z.literal(SPECIES_FIRST).optional(),
+});
 const BuildAnswerSchema = BuildStepSchema.extend({ answer: z.string() });
 
 function requireActor(state: DndState, id: string): Actor {
@@ -1010,7 +1060,7 @@ function runBuildStep(
 ): SystemResult {
   const actor = requireActor(context.state, payload.actor);
   const base = actorBuild(actor);
-  const step = nextStep(payload.draft, base, context);
+  const step = nextStep(payload.draft, base, context, payload.order);
   if (step) {
     return {
       frames: [
@@ -1020,15 +1070,16 @@ function runBuildStep(
           prompt: step.prompt,
           options: [...step.options],
           resume: frame("buildAnswer", payload),
+          ...(step.text ? { text: step.text } : {}),
+          // Nothing has happened yet while a character is being made, so a step can be taken back.
+          ...(base ? {} : { revisable: true as const }),
         }),
       ],
     };
   }
   if (base) return { events: advanceEvents(actor, payload.draft, context) };
 
-  const species = lookup(context, SpeciesSchema, payload.draft.speciesId ?? "");
-  const classDef = lookup(context, ClassSchema, payload.draft.classId ?? "");
-  const name = `${species.name} ${classDef.name}`;
+  const name = payload.draft.name ?? defaultName(payload.draft, context);
   const built = finishedCharacter(actor.id, name, payload.draft, context);
   const build = actorBuild(built);
   if (!build) throw new Error("A new character has no build");
@@ -1047,11 +1098,14 @@ function runBuildStep(
 
 // The player's build step answered as a companion's would, for the balance bot.
 export function buildPolicy(decision: Decision, context: Context): string {
-  const { actor, draft } = BuildStepSchema.parse(decision.resume.payload);
+  const { actor, draft, order } = BuildStepSchema.parse(
+    decision.resume.payload,
+  );
   const step = nextStep(
     draft,
     actorBuild(requireActor(context.state, actor)),
     context,
+    order,
   );
   if (!step) throw new Error(`${decision.id} has no step`);
   return pickStep(step, context.dice);
@@ -1062,13 +1116,14 @@ function runBuildAnswer(
   context: Context,
 ): SystemResult {
   const base = actorBuild(requireActor(context.state, payload.actor));
-  const step = nextStep(payload.draft, base, context);
+  const step = nextStep(payload.draft, base, context, payload.order);
   if (!step) throw new Error(`Nothing is waiting on ${payload.answer}`);
   return {
     frames: [
       frame("buildStep", {
         actor: payload.actor,
         draft: step.apply(payload.draft, payload.answer),
+        ...(payload.order === undefined ? {} : { order: payload.order }),
       }),
     ],
   };
