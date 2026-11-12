@@ -45,9 +45,10 @@ import type {
 // Everything the page does to the game, with no DOM, so tests can play through the same code.
 
 const SAVES = "saves";
-// Saves have a strict format with no clock in it, so the times live beside them.
+// Where older builds kept each save's time. Still read, so their saves keep their place in the list.
 const SAVE_TIMES = `${SAVES}/times`;
-// What each save's card shows. Kept apart from the times, which older builds still read as plain strings.
+// One record for every save: its time and what its card shows, since the save's strict format has
+// no room for either. An autosave rewrites only this and the save itself.
 const SAVE_DETAILS = `${SAVES}/details`;
 const AUTOSAVE = "-autosave";
 const AUTOSAVE_END = `${AUTOSAVE}.json`;
@@ -187,6 +188,7 @@ const SaveDetailsSchema = z.record(
     adventure: z.string().optional(),
     seed: z.string().optional(),
     steps: z.number().optional(),
+    savedAt: z.string().optional(), // older records have their time in SAVE_TIMES
   }),
 );
 type SaveDetails = z.infer<typeof SaveDetailsSchema>[string];
@@ -486,8 +488,20 @@ export function createGame({
       return {};
     }
   };
-  const readSaveTimes = () => readRecord(SAVE_TIMES, SaveTimesSchema);
-  const readSaveDetails = () => readRecord(SAVE_DETAILS, SaveDetailsSchema);
+  // Read once, since only this game writes them, so an autosave doesn't parse them again.
+  let records: Promise<{
+    readonly times: Record<string, string>;
+    readonly details: Record<string, SaveDetails>;
+  }> | null = null;
+  const readRecords = () =>
+    (records ??= Promise.all([
+      readRecord(SAVE_TIMES, SaveTimesSchema),
+      readRecord(SAVE_DETAILS, SaveDetailsSchema),
+    ]).then(([times, details]) => ({ times, details })));
+  const savedAtOf = async (path: string): Promise<string | null> => {
+    const { times, details } = await readRecords();
+    return details[path]?.savedAt ?? times[path] ?? null;
+  };
 
   // The setup screen opens an adventure to ask its settings, and starting it right after reuses that.
   let prepared: {
@@ -585,7 +599,7 @@ export function createGame({
     path: string,
     details: SaveDetails,
   ): Promise<void> => {
-    const all = await readSaveDetails();
+    const { details: all } = await readRecords();
     all[path] = details;
     await storage.replaceAtomically(SAVE_DETAILS, JSON.stringify(all));
   };
@@ -595,7 +609,13 @@ export function createGame({
   const autosavePath = (game: Current): string =>
     savePath(game, `${game.seed}${AUTOSAVE}`);
 
-  const write = async (game: Current, name: string): Promise<string> => {
+  // An autosave keeps the card it had, which the menu brings up to date (listSaves), so a turn
+  // doesn't work out the sheets. A manual save, or a run's first autosave, works out a new one.
+  const write = async (
+    game: Current,
+    name: string,
+    card: "new" | "kept",
+  ): Promise<string> => {
     const path = savePath(game, name);
     await storage.replaceAtomically(
       path,
@@ -603,27 +623,26 @@ export function createGame({
         createSave(game.registry, game.adventure, game.seed, game.log),
       ),
     );
-    const times = await readSaveTimes();
-    times[path] = new Date().toISOString();
-    await storage.replaceAtomically(SAVE_TIMES, JSON.stringify(times));
-    await writeDetails(path, detailsOf(game));
+    const kept = card === "kept" ? (await readRecords()).details[path] : null;
+    await writeDetails(path, {
+      ...(kept ?? detailsOf(game)),
+      steps: game.log.length,
+      savedAt: new Date().toISOString(),
+    });
     return path;
   };
 
   const removeSave = async (path: string): Promise<void> => {
     if (!storage.remove) throw new Error("Saves can't be deleted here");
     await storage.remove(path);
-    for (const [record, read] of [
-      [SAVE_TIMES, readSaveTimes],
-      [SAVE_DETAILS, readSaveDetails],
+    const { times, details } = await readRecords();
+    for (const [record, entries] of [
+      [SAVE_TIMES, times],
+      [SAVE_DETAILS, details],
     ] as const) {
-      const entries = Object.entries(await read());
-      await storage.replaceAtomically(
-        record,
-        JSON.stringify(
-          Object.fromEntries(entries.filter(([key]) => key !== path)),
-        ),
-      );
+      if (!(path in entries)) continue;
+      Reflect.deleteProperty(entries, path); // in place, since the records are kept in memory
+      await storage.replaceAtomically(record, JSON.stringify(entries));
     }
   };
 
@@ -632,13 +651,20 @@ export function createGame({
   const pruneAutosaves = async (game: Current): Promise<void> => {
     if (!storage.remove) return;
     try {
-      const times = await readSaveTimes();
       const own = autosavePath(game);
-      const old = (await storage.list(SAVES))
-        .map(({ path }) => path)
-        .filter((path) => path.endsWith(AUTOSAVE_END) && path !== own)
-        .sort((a, b) => (times[b] ?? "").localeCompare(times[a] ?? ""))
-        .slice(AUTOSAVES_KEPT - 1);
+      const dated = await Promise.all(
+        (await storage.list(SAVES))
+          .map(({ path }) => path)
+          .filter((path) => path.endsWith(AUTOSAVE_END) && path !== own)
+          .map(async (path) => ({
+            path,
+            savedAt: (await savedAtOf(path)) ?? "",
+          })),
+      );
+      const old = dated
+        .sort((a, b) => b.savedAt.localeCompare(a.savedAt))
+        .slice(AUTOSAVES_KEPT - 1)
+        .map(({ path }) => path);
       for (const path of old) await removeSave(path);
     } catch (error) {
       console.warn("Couldn't prune old autosaves", error);
@@ -649,7 +675,7 @@ export function createGame({
   // A failed autosave must not stop play, so the player is told and carries on.
   const autosave = async (game: Current): Promise<void> => {
     try {
-      await write(game, `${game.seed}${AUTOSAVE}`);
+      await write(game, `${game.seed}${AUTOSAVE}`, "kept");
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       game.warnings = [`Autosave failed: ${reason}`];
@@ -690,8 +716,19 @@ export function createGame({
       listed?: readonly AdventureChoice[],
     ): Promise<readonly SaveChoice[]> {
       const entries = await storage.list(SAVES);
-      const times = await readSaveTimes();
-      const allDetails = await readSaveDetails();
+      // Leaving the game for the menu is when the running game's card catches up.
+      if (current) {
+        const own = autosavePath(current);
+        const kept = (await readRecords()).details[own];
+        // Only when the autosave holds the game as it stands, so the card matches the save.
+        if (kept?.steps === current.log.length) {
+          const fresh = { ...detailsOf(current), savedAt: kept.savedAt };
+          if (JSON.stringify(fresh) !== JSON.stringify(kept)) {
+            await writeDetails(own, fresh).catch(() => undefined);
+          }
+        }
+      }
+      const allDetails = (await readRecords()).details;
       const adventures = listed ?? (await this.listAdventures());
       const now = Date.now();
       const saves: SaveChoice[] = [];
@@ -720,7 +757,7 @@ export function createGame({
             info = undefined;
           }
         }
-        const savedAt = times[path] ?? null;
+        const savedAt = await savedAtOf(path);
         const when = savedAt
           ? new Date(savedAt).toLocaleString(undefined, {
               dateStyle: "medium",
@@ -917,7 +954,7 @@ export function createGame({
 
     // Each save gets its own file. Only a run's own autosave is ever overwritten.
     async save(name: string): Promise<string> {
-      return write(active(), name);
+      return write(active(), name, "new");
     },
 
     async load(path: string): Promise<void> {
@@ -953,7 +990,7 @@ export function createGame({
       // The game is already loaded, so a failure here only leaves the card bare.
       try {
         // Details from before the steps were recorded are written again too.
-        if ((await readSaveDetails())[path]?.steps === undefined) {
+        if ((await readRecords()).details[path]?.steps === undefined) {
           await writeDetails(path, detailsOf(game));
         }
       } catch {

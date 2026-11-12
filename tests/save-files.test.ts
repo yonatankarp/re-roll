@@ -151,4 +151,45 @@ describe("autosaves", () => {
       vi.useRealTimers();
     }
   });
+
+  it("write the save and one record per answer, and the menu brings the card up to date", async () => {
+    const store = memoryStore();
+    const game = createGame({
+      storage: withSaveFiles(
+        await createNodeStorage(process.cwd()),
+        storeFiles(store),
+      ),
+      roots: ["plugins"],
+      systems,
+      uis: [dndUi],
+    });
+    await game.start("goblin-ambush", "once");
+    const path = "saves/goblin-ambush-once-autosave.json";
+    const card = () =>
+      (
+        JSON.parse(store.getItem("saves/details") ?? "{}") as Record<
+          string,
+          { steps: number; character: string | null; savedAt: string }
+        >
+      )[path];
+    expect(card()?.character).toBeNull(); // no hero chosen yet
+
+    const writes = vi.spyOn(store, "setItem");
+    const reads = vi.spyOn(store, "getItem");
+    const option = game.view().decision?.options[0]?.id;
+    if (!option) throw new Error("Nothing to choose");
+    await game.answer(option);
+    expect(writes.mock.calls.map(([key]) => key)).toEqual([
+      path,
+      "saves/details",
+    ]);
+    expect(reads).not.toHaveBeenCalled();
+    expect(card()?.steps).toBe(2);
+    expect(card()?.character).toBeNull(); // kept from before, until the menu
+
+    const listed = (await game.listSaves()).find((save) => save.current);
+    expect(listed?.character).toBeTruthy();
+    expect(card()?.character).toBe(listed?.character);
+    expect(store.getItem("saves/times")).toBeNull();
+  });
 });
