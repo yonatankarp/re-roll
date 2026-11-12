@@ -35,6 +35,7 @@ export function soundControls(
   const ambience = ambiencePlayer();
   let view: GameView | null = null;
   let camping = false;
+  let decision: string | null = null;
 
   let watch: ReturnType<typeof setInterval> | undefined;
   // Silent once the game screen has gone, such as back to the menu, which sends no update.
@@ -53,6 +54,12 @@ export function soundControls(
       !settings.ambience ? "none" : camping ? "campfire" : view.ambience,
     );
     ambience.duck(view.combat !== null || narration.speaking());
+    // Any choice stops the narrator; only a new scene starts it again.
+    const asked = view.decision?.id ?? null;
+    if (asked !== decision) {
+      decision = asked;
+      narration.stop();
+    }
     narration.show(
       settings.narration && !camping ? view.scene : null,
       view.upcoming,

@@ -19,7 +19,7 @@ export interface SoundSettings {
 const SETTINGS_KEY = "re-roll:audio";
 const EFFECTS_KEY = "re-roll:sound"; // the older on/off setting, which now means effects
 
-// Storage can be blocked, which leaves the defaults: effects on, the rest off, quiet.
+// Storage can be blocked, which leaves the defaults: effects and quiet ambience on, narration off.
 export function loadSettings(): SoundSettings {
   const defaults: SoundSettings = {
     volume: 0.7,
@@ -38,10 +38,8 @@ export function loadSettings(): SoundSettings {
         typeof saved.volume === "number"
           ? Math.min(1, Math.max(0, saved.volume))
           : defaults.volume,
-      ambience:
-        typeof saved.ambience === "boolean"
-          ? saved.ambience
-          : defaults.ambience,
+      // Someone who turned sound off before ambience existed doesn't get it unasked.
+      ambience: typeof saved.ambience === "boolean" ? saved.ambience : effects,
       effects,
       narration:
         typeof saved.narration === "boolean"
