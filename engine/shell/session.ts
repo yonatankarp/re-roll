@@ -19,7 +19,12 @@ import { type LogEntry, createSave, loadSave } from "../run/save.ts";
 import type { Storage } from "../kernel/storage.ts";
 import { type Ambience, sceneAmbience } from "../story/ambience.ts";
 import { scenesAhead } from "../story/narration.ts";
-import { REST_OPTION_PREFIX, sceneText } from "../story/runtime.ts";
+import {
+  REST_OPTION_PREFIX,
+  SCENE_DECISION_PREFIX,
+  sceneActionsHere,
+  sceneText,
+} from "../story/runtime.ts";
 import type { Adventure } from "../story/adventure.ts";
 import type { GameSystem, SystemSetting } from "../kernel/system.ts";
 import {
@@ -172,7 +177,9 @@ const AdventureInfoSchema = z.object({
 const SaveInfoSchema = z.object({
   adventure: z.string(),
   seed: z.string(),
-  log: z.array(z.unknown()),
+  log: z.array(
+    z.object({ events: z.array(z.object({ kind: z.string() })).optional() }),
+  ),
 });
 const SaveTimesSchema = z.record(z.string(), z.string());
 const SaveDetailsSchema = z.record(
@@ -756,14 +763,24 @@ export function createGame({
                 steps: details.steps,
               }
             : undefined;
-        if (!info) {
+        let ended = details?.ended;
+        // Records written before `ended` existed say nothing, so the save itself says whether its run ended.
+        if (!info || ended === undefined) {
           try {
             const save = SaveInfoSchema.safeParse(
               JSON.parse((await storage.read(path)) ?? "null"),
             ).data;
-            info = save && { ...save, steps: save.log.length };
+            info ??= save && { ...save, steps: save.log.length };
+            ended = save?.log.some((entry) =>
+              entry.events?.some((event) => event.kind === "adventureEnded"),
+            );
+            if (details && ended !== undefined) {
+              await writeDetails(path, { ...details, ended }).catch(
+                () => undefined,
+              );
+            }
           } catch {
-            info = undefined;
+            // Listed as damaged below when there's no info.
           }
         }
         const savedAt = await savedAtOf(path);
@@ -781,7 +798,7 @@ export function createGame({
           character: details?.character ?? null,
           characterKind: details?.characterKind ?? null,
           health: details?.health ?? null,
-          ended: details?.ended ?? false,
+          ended: ended ?? false,
           savedAt,
           when,
           ago: savedAt ? agoText(savedAt, now) : null,
@@ -1029,9 +1046,17 @@ export function createGame({
       );
       const decision = pendingDecision(run, state);
       const isRest = (id: string): boolean => id.startsWith(REST_OPTION_PREFIX);
+      // A scene's actions are answered from the sheet, as rests are from the campfire.
+      const actions = new Set(
+        decision?.id.startsWith(SCENE_DECISION_PREFIX)
+          ? sceneActionsHere(run, state).map((action) => action.id)
+          : [],
+      );
       const choices = decision && {
         ...decision,
-        options: decision.options.filter((option) => !isRest(option.id)),
+        options: decision.options.filter(
+          (option) => !isRest(option.id) && !actions.has(option.id),
+        ),
       };
       const combat = ui.combat(state.system, run);
       const pictures: Record<string, string> = {};

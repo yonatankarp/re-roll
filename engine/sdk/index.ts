@@ -27,6 +27,7 @@ export type {
   ImportSource,
   RunSetup,
   RestOption,
+  SceneAction,
   StoryEffectDef,
   StoryPredicateDef,
   SystemContext,

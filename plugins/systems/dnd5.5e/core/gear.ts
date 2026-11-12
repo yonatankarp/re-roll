@@ -1,6 +1,7 @@
 import {
   type ContentAccess,
   PLAYER_ACTOR,
+  type SceneAction,
   type SystemContext,
   type SystemResult,
   awaitDecision,
@@ -8,7 +9,7 @@ import {
   storyEffect,
 } from "#sdk";
 import { z } from "zod";
-import { ItemSchema, type Loot, LootSchema } from "./schemas.ts";
+import { ClassSchema, ItemSchema, type Loot, LootSchema } from "./schemas.ts";
 import {
   type Actor,
   type DndState,
@@ -19,7 +20,14 @@ import {
   without,
   frame,
 } from "./state.ts";
-import { lookup } from "./stats.ts";
+import {
+  type Stats,
+  deriveStats,
+  itemHealing,
+  lookup,
+  rollAmount,
+  weaponProficient,
+} from "./stats.ts";
 
 type Context = SystemContext<DndState>;
 
@@ -53,8 +61,34 @@ export function treasure(loot: Loot, context: Context): SystemResult {
   };
 }
 
+// Whether any of the character's classes trains them with it, or for a scroll, whether they cast spells.
+// shortcut: a multiclass character counts every class's training, not the narrower multiclass list.
+export function canUse(
+  item: z.infer<typeof ItemSchema>,
+  stats: Stats,
+  access: ContentAccess,
+): boolean {
+  const classes = Object.keys(stats.classLevels).flatMap((id) => {
+    const parsed = ClassSchema.safeParse(access.content(id));
+    return parsed.success ? [parsed.data] : [];
+  });
+  switch (item.type) {
+    case "weapon":
+      return classes.some((def) => weaponProficient(def, item));
+    case "armor":
+      return classes.some((def) => def.armor.includes(item.armorType));
+    case "shield":
+      return classes.some((def) => def.armor.includes("shield"));
+    case "magicItem":
+      return !item.spell || stats.spellAbility !== null;
+    default:
+      return true;
+  }
+}
+
 // What can be put on, taken off, attuned or let go, as during a Short Rest, which attuning takes.
-// With `found`, only putting on what was just found, so the moment stays short.
+// With `found`, only putting on what was just found, so the moment stays short. Armor and shields the
+// character isn't trained with aren't offered, as they'd only hinder; any weapon can be swung.
 export function gearOptions(
   actor: Actor,
   access: ContentAccess,
@@ -62,13 +96,15 @@ export function gearOptions(
 ): { id: string; label: string }[] {
   const worn = equipped(actor);
   const attuned = actor.attuned ?? [];
+  const stats = deriveStats(actor, access);
   return [...new Set(actor.inventory)]
     .filter((id) => !found || found.includes(id))
     .flatMap((id) => {
       const item = itemOf(access, id);
       if (WORN_TYPES.has(item.type)) {
+        const wearable = item.type === "weapon" || canUse(item, stats, access);
         return [
-          ...((actor.stowed ?? []).includes(id)
+          ...((actor.stowed ?? []).includes(id) && wearable
             ? [{ id: `equip:${id}`, label: `Equip ${item.name}` }]
             : []),
           ...(worn.includes(id) && !found
@@ -180,7 +216,94 @@ function runGearAnswer(
   };
 }
 
+// From the character sheet between a scene's choices, outside a fight: changing gear, attuning where the
+// party could rest, as attuning takes a Short Rest, and drinking a potion.
+// shortcut: attuning between choices doesn't pass the Short Rest's hour, which only the rest itself counts.
+export function sceneGearActions(
+  state: DndState,
+  access: ContentAccess,
+): SceneAction[] {
+  const actor = state.actors[PLAYER_ACTOR];
+  // Before a character is chosen there is nothing to carry.
+  if (
+    state.combat ||
+    actor?.source.kind !== "character" ||
+    !actor.source.build
+  ) {
+    return [];
+  }
+  // One choice per item, as the sheet's row has one button: putting on a spare comes before stowing.
+  const rows = new Set<string>();
+  return [
+    ...gearOptions(actor, access)
+      .filter(({ id }) => {
+        const item = id.slice(id.indexOf(":") + 1);
+        return !rows.has(item) && Boolean(rows.add(item));
+      })
+      .map(({ id, label }) => ({
+        id,
+        label,
+        effect: `${NS}:changeGear`,
+        args: { answer: id },
+        ...(/^(un)?attune:/.test(id) ? { rest: true } : {}),
+      })),
+    ...[...new Set(actor.inventory)].flatMap((id) => {
+      const item = itemOf(access, id);
+      return itemHealing(item)
+        ? [
+            {
+              id: `drink:${id}`,
+              label: `Drink ${item.name}`,
+              effect: `${NS}:drink`,
+              args: { item: id },
+            },
+          ]
+        : [];
+    }),
+  ];
+}
+
+// The healing is rolled here and carried by the event, so a later rules change can't rewrite it.
+function drink(id: string, context: Context): SystemResult {
+  const actor = player(context.state);
+  const healing = itemHealing(itemOf(context, id));
+  if (!healing || !actor.inventory.includes(id)) {
+    throw new Error(`${actor.id} has no ${id} to drink`);
+  }
+  const stats = deriveStats(actor, context);
+  const rolled = rollAmount(healing, stats, context.dice);
+  return {
+    events: [
+      dndEvent(`${NS}:healed`, {
+        actor: actor.id,
+        amount: Math.min(rolled, stats.maxHp - Math.max(actor.hp, 0)),
+        max: stats.maxHp,
+      }),
+      dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: id }),
+    ],
+  };
+}
+
 export const gearEffects = {
+  [`${NS}:changeGear`]: storyEffect({
+    schema: z.object({ answer: z.string() }),
+    apply: ({ answer }, context: Context) => {
+      const actor = player(context.state);
+      return {
+        events: [
+          dndEvent(`${NS}:gearChanged`, {
+            actor: actor.id,
+            ...changed(actor, answer, context),
+          }),
+        ],
+      };
+    },
+  }),
+  [`${NS}:drink`]: storyEffect({
+    schema: z.object({ item: z.string() }),
+    references: ({ item }) => [item],
+    apply: ({ item }, context: Context) => drink(item, context),
+  }),
   [`${NS}:treasure`]: storyEffect({
     schema: LootSchema,
     references: (loot) => loot.items,

@@ -2,7 +2,11 @@ import { createDice, rngFromSeed } from "../kernel/dice.ts";
 import type { GameState, Input } from "../kernel/events.ts";
 import { type LogEntry, replayInputs } from "../run/save.ts";
 import { type RunContext, startRun, step } from "../run/turn.ts";
-import { REST_OPTION_PREFIX, SCENE_DECISION_PREFIX } from "../story/runtime.ts";
+import {
+  REST_OPTION_PREFIX,
+  SCENE_DECISION_PREFIX,
+  sceneActionsHere,
+} from "../story/runtime.ts";
 
 export interface BotRun {
   readonly seed: string;
@@ -62,8 +66,15 @@ export function playRun(
           item.id.startsWith(REST_OPTION_PREFIX),
         )
       : undefined;
+    // Nor does it drink or change gear between choices, which the sheet offers.
+    const actions = new Set(
+      pending.id.startsWith(SCENE_DECISION_PREFIX)
+        ? sceneActionsHere(run, state).map((action) => action.id)
+        : [],
+    );
     let choices = pending.options.filter(
-      (item) => !item.id.startsWith(REST_OPTION_PREFIX),
+      (item) =>
+        !item.id.startsWith(REST_OPTION_PREFIX) && !actions.has(item.id),
     );
     if (options.avoidEndings && pending.id.startsWith(SCENE_DECISION_PREFIX)) {
       // Steps are pure, so trying a choice changes nothing, and it sees the same dice the real one would.

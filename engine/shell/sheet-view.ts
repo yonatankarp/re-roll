@@ -42,7 +42,7 @@ export function renderCombat(
             : []),
           el("span", {
             class: "who",
-            text: `${actor.active ? "▶ " : ""}${actor.name}`,
+            text: `${actor.active ? "▶\uFE0E " : ""}${actor.name}`, // drawn as text, never as an emoji
           }),
           el("span", { class: "side", text: actor.side }),
           el("span", { class: "details", text: details.join(" · ") }),

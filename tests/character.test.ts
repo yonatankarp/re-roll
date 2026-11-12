@@ -954,8 +954,11 @@ describe("rests", () => {
 });
 
 describe("resting between scenes", () => {
+  // The scene's choices and rests, leaving out the gear the sheet offers beside them.
   const options = (decision: Decision | null) =>
-    decision?.options.map((item) => item.id) ?? [];
+    decision?.options
+      .map((item) => item.id)
+      .filter((id) => /^(\d+|rest:.*)$/.test(id)) ?? [];
 
   // At the first of two plain scenes, playing the fighter pregen.
   async function atCamp(seed = "camp") {

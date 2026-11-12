@@ -59,6 +59,12 @@ const reducedMotion = (): boolean =>
   matchMedia("(prefers-reduced-motion: reduce)").matches;
 const FADE_MS = 800; // matches the 0.8s fade the camp opens with
 
+function restReason(view: GameView): string {
+  return view.combat
+    ? "There's no resting in a fight."
+    : "The party can rest once in a scene, and only where it's safe to stop.";
+}
+
 export function campfire(
   game: Game,
   act: (work: () => Promise<void>) => void,
@@ -79,6 +85,7 @@ export function campfire(
   let resting = false; // between picking a rest and its summary, when leaving would leave it half done
   let closing = false;
   dialog.addEventListener("close", () => {
+    delete dialog.dataset.notice;
     done(played);
   });
 
@@ -184,6 +191,13 @@ export function campfire(
     resting = false;
     const notNow = action("Not now", breakCamp);
     notNow.className = "quiet";
+    // With no rest to take, the camp says why, so the reason isn't only in a tooltip.
+    if (view.rests.length === 0) {
+      show("No rest now", restReason(view), notNow);
+      dialog.dataset.notice = ""; // set before opening, so the camp's sound stays off
+      dialog.showModal();
+      return;
+    }
     show(
       "Make camp",
       "The party stops to rest.",
@@ -212,11 +226,11 @@ export function campfire(
   return {
     button,
     dialog,
-    // Disabled rather than hidden, so the bar doesn't shift when rests come and go.
+    // Dimmed rather than hidden, so the bar doesn't shift when rests come and go, and still pressable to say why.
     update: (view) => {
       const none = view.rests.length === 0;
-      button.disabled = none;
-      button.title = none ? "You can rest between scenes" : "Rest";
+      button.setAttribute("aria-disabled", String(none));
+      button.title = none ? restReason(view) : "Rest";
     },
   };
 }

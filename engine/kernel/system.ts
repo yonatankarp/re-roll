@@ -272,6 +272,16 @@ export interface RestOption {
   readonly effect: string;
 }
 
+// Something the player may do between a scene's choices, such as drink a potion, from the character
+// sheet rather than the list of choices. `effect` names one of the system's story effects, given `args`.
+export interface SceneAction {
+  readonly id: string;
+  readonly label: string;
+  readonly effect: string;
+  readonly args: Readonly<Record<string, unknown>>;
+  readonly rest?: boolean; // only where the scene allows a rest, as for something that takes one
+}
+
 export interface SystemDefinition<S> {
   readonly id: string;
   readonly version: string;
@@ -300,6 +310,11 @@ export interface SystemDefinition<S> {
   readonly nextDecision: (state: S, access: ContentAccess) => Decision | null;
   // The rests the rules allow right now, offered with each scene's choices.
   readonly rests?: (state: S) => readonly RestOption[];
+  // What the player may do between the scene's choices right now, offered with them.
+  readonly sceneActions?: (
+    state: S,
+    access: ContentAccess,
+  ) => readonly SceneAction[];
   readonly importKinds?: Readonly<Record<string, ImportKind>>; // keyed by content folder
   // Ranks a plugin when entries of the same name collide, lower first. Unset ranks all plugins alike, by id.
   // The adventure being played, and the plugins its manifest's precedence lists, still come first.

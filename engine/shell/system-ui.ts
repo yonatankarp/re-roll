@@ -25,7 +25,7 @@ export interface SheetRow {
 export interface DecisionCard {
   readonly title: string;
   readonly lines: readonly string[];
-  readonly icon?: string; // a glyph beside the title, such as a coin
+  readonly icon?: string; // an inline <svg> beside the title, such as a coin, so no emoji font is needed
   readonly footer?: string; // a closing line, such as the purse after the find
 }
 

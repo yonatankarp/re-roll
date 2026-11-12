@@ -581,6 +581,16 @@ function passiveBonus(
   );
 }
 
+// What drinking it heals, for a potion such as a Potion of Healing.
+// shortcut: a potion with versions heals as its first, since the inventory doesn't say which was found.
+export function itemHealing(item: z.infer<typeof ItemSchema>) {
+  return item.type === "gear"
+    ? item.healing
+    : item.type === "magicItem"
+      ? (item.healing ?? item.variants?.[0]?.healing)
+      : undefined;
+}
+
 // A potion to drink or a scroll to read, used up once used. Their action ids start "item:", which spends the item.
 function itemAction(
   itemId: string,
@@ -588,13 +598,7 @@ function itemAction(
   access: ContentAccess,
   spellcasting: unknown,
 ): KnownAction | null {
-  // shortcut: a potion with versions heals as its first, since the inventory doesn't say which was found.
-  const healing =
-    item.type === "gear"
-      ? item.healing
-      : item.type === "magicItem"
-        ? (item.healing ?? item.variants?.[0]?.healing)
-        : undefined;
+  const healing = itemHealing(item);
   if (healing) {
     return {
       id: `item:${itemId}`,

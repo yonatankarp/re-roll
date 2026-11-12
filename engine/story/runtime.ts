@@ -9,7 +9,12 @@ import type {
   SystemEvent,
 } from "../kernel/events.ts";
 import { PLAYER_ACTOR, isNarrativeEvent } from "../kernel/events.ts";
-import type { ContentEntry, GameSystem, RestOption } from "../kernel/system.ts";
+import type {
+  ContentEntry,
+  GameSystem,
+  RestOption,
+  SceneAction,
+} from "../kernel/system.ts";
 import {
   type Adventure,
   type Condition,
@@ -187,6 +192,18 @@ function restsHere(
   return run.system.rests?.(state.system) ?? [];
 }
 
+// What the system lets the player do between this scene's choices, such as from the character sheet.
+export function sceneActionsHere(
+  run: RunContext,
+  state: GameState,
+): readonly SceneAction[] {
+  const scene = state.story.scene && findScene(run, state.story.scene);
+  if (!scene) return [];
+  return (run.system.sceneActions?.(state.system, run) ?? []).filter(
+    (action) => !action.rest || scene.rest,
+  );
+}
+
 export type StoryDecision =
   | { readonly kind: "decision"; readonly decision: Decision }
   | { readonly kind: "ended"; readonly reason: "ending" | "deadEnd" };
@@ -211,13 +228,18 @@ export function storyDecision(
     label: rest.label,
   }));
 
+  const actions = sceneActionsHere(run, state).map(({ id, label }) => ({
+    id,
+    label,
+  }));
+
   return {
     kind: "decision",
     decision: {
       id: `${SCENE_DECISION_PREFIX}${scene.id}`,
       actor: PLAYER_ACTOR,
       prompt: sceneText(run, state, scene),
-      options: [...options, ...rests],
+      options: [...options, ...rests, ...actions],
       resume: { kind: "story:resolveChoice", payload: { scene: scene.id } },
     },
   };
@@ -254,6 +276,19 @@ function runResolveChoice(
       events: [{ kind: "restTaken" }],
       frames: [
         effectsFrame([{ kind: "system", effect: rest.effect, args: {} }]),
+      ],
+    };
+  }
+  // Choices' ids are their indexes, so an action's id never names one. The scene's choices come back after it.
+  const action = sceneActionsHere(run, state).find(
+    (item) => item.id === payload.answer,
+  );
+  if (action) {
+    return {
+      frames: [
+        effectsFrame([
+          { kind: "system", effect: action.effect, args: { ...action.args } },
+        ]),
       ],
     };
   }

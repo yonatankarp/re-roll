@@ -1138,7 +1138,7 @@ summary {
 }
 
 .card-icon {
-  font-size: 1.3rem;
+  display: inline-flex;
 }
 
 .card-footer {
@@ -1841,12 +1841,12 @@ button:active {
 }
 
 /* Kept in the bar while there's no rest to take, so nothing shifts when one comes. */
-.top .campfire-button:disabled {
+.top .campfire-button[aria-disabled="true"] {
   opacity: 0.4;
   cursor: default;
 }
 
-.top .campfire-button:disabled:hover {
+.top .campfire-button[aria-disabled="true"]:hover {
   border-color: rgb(201 173 106 / 45%);
   background: transparent;
 }
