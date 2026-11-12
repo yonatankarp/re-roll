@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import {
   lstat,
   mkdir,
+  open,
   readFile,
   readdir,
   realpath,
   rename,
   rm,
-  writeFile,
 } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Storage, StorageEntry } from "../../kernel/storage.ts";
@@ -77,7 +77,14 @@ export async function createNodeStorage(
       await assertRealPathInside(folder, path);
       const temporary = join(folder, `.${randomUUID()}.tmp`);
       try {
-        await writeFile(temporary, contents, "utf8");
+        // Flushed before the rename, so a power cut leaves the old file or the new one, never an empty one.
+        const file = await open(temporary, "w");
+        try {
+          await file.writeFile(contents, "utf8");
+          await file.sync();
+        } finally {
+          await file.close();
+        }
         await rename(temporary, target);
       } catch (error) {
         await rm(temporary, { force: true });
