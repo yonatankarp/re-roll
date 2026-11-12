@@ -25,6 +25,7 @@ import {
   deriveStats,
   saveBonus,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { multiclassSlots } from "../plugins/systems/dnd5.5e/core/multiclass.ts";
 
 async function goblin(): Promise<RunContext> {
   return (await loadAdventure("goblin-ambush")).run;
@@ -370,5 +371,69 @@ describe("exhaustion", () => {
     );
     expect(worn.speed).toBe(fresh.speed - 10);
     expect(worn.initiative).toBe(fresh.initiative - 4);
+  });
+});
+
+describe("multiclass spellcasting", () => {
+  const level = (classId: string) => ({
+    classId,
+    hitPointGain: 5,
+    answers: [],
+  });
+  const fighter = "srd52:class/fighter";
+  const wizard = "srd52:class/wizard";
+  const cleric = "srd52:class/cleric";
+
+  async function built(classIds: readonly string[]): Promise<Stats> {
+    const run = await goblin();
+    const actor = pregen(run, "srd52:pregen/fighter");
+    if (actor.source.kind !== "character" || !actor.source.build) {
+      throw new Error("The fighter pregen has no build");
+    }
+    const build = { ...actor.source.build, levels: classIds.map(level) };
+    return deriveStats({ ...actor, source: { kind: "character", build } }, run);
+  }
+
+  it("casts with the casting class even when it isn't the first", async () => {
+    const stats = await built([fighter, wizard]);
+    expect(stats.spellAbility).toBe("int");
+    expect(stats.slots).toEqual([2]);
+  });
+
+  it("adds caster levels from every casting class", async () => {
+    // Wizard 2 and Cleric 1 make caster level 3, and Wisdom loses to the class with more levels.
+    const stats = await built([fighter, wizard, cleric, wizard]);
+    expect(stats.slots).toEqual([4, 2]);
+    expect(stats.spellAbility).toBe("int");
+    expect(stats.classLevels).toEqual({
+      [fighter]: 1,
+      [wizard]: 2,
+      [cleric]: 1,
+    });
+  });
+
+  it("counts half and third casters from their own slot rows", () => {
+    // A Paladin 5 is caster level 3 and an Eldritch Knight 3 is caster level 1.
+    expect(
+      multiclassSlots([
+        { slots: [4, 2], level: 5 },
+        { slots: [2], level: 3 },
+      ]),
+    ).toEqual([4, 3]);
+    // Wizard 11 and Cleric 1: rows 11 and 12 are the same, and the class level picks 11.
+    expect(
+      multiclassSlots([
+        { slots: [4, 3, 3, 3, 2, 1], level: 11 },
+        { slots: [2], level: 1 },
+      ]),
+    ).toEqual([4, 3, 3, 3, 2, 1]);
+    // One casting class, or Pact Magic, keeps the class's own slots.
+    expect(multiclassSlots([{ slots: [4, 2], level: 3 }])).toBeNull();
+    expect(
+      multiclassSlots([
+        { slots: [1], level: 1 },
+        { slots: [2], level: 1 },
+      ]),
+    ).toBeNull();
   });
 });

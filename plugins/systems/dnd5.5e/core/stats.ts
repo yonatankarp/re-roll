@@ -39,6 +39,7 @@ import {
   type Weapon,
 } from "./schemas.ts";
 import { featureRules, grantedSpells } from "./feature-rules.ts";
+import { multiclassSlots } from "./multiclass.ts";
 
 // Content is frozen once loaded, so each entry is checked against a schema only once.
 const parsed = new WeakMap<object, Map<z.ZodType, unknown>>();
@@ -296,10 +297,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   for (const id of feat.grants) featureIds.add(id);
   let scaling: Record<string, number> = {};
   let slots: readonly number[] = [];
+  const casters: Record<string, { slots: readonly number[]; level: number }> =
+    {};
   let subclass: Subclass | null = null;
   const featIds = new Set<string>();
 
-  // shortcut: spell slots come from the last class level, so multiclass slot tables need adding with multiclassing.
   for (const entry of build.levels) {
     const classLevel = (classLevels[entry.classId] ?? 0) + 1;
     classLevels[entry.classId] = classLevel;
@@ -312,7 +314,6 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
     for (const id of levelData.grants) featureIds.add(id);
     scaling = { ...scaling, ...levelData.scaling };
-    if (levelData.slots.length > 0) slots = levelData.slots;
     for (const answer of entry.answers) {
       if (answer.kind === "skills") {
         for (const skill of answer.values) skills.add(skill);
@@ -333,11 +334,20 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       }
     }
     const subclassLevel: Subclass["levels"][number] | undefined =
-      subclass?.levels.find((item) => item.level === classLevel);
+      subclass?.class === entry.classId
+        ? subclass.levels.find((item) => item.level === classLevel)
+        : undefined;
     for (const id of subclassLevel?.grants ?? []) featureIds.add(id);
     scaling = { ...scaling, ...subclassLevel?.scaling };
-    if (subclassLevel?.slots.length) slots = subclassLevel.slots;
+    const own = subclassLevel?.slots.length
+      ? subclassLevel.slots
+      : levelData.slots;
+    if (own.length > 0) {
+      slots = own;
+      casters[entry.classId] = { slots: own, level: classLevel };
+    }
   }
+  slots = multiclassSlots(Object.values(casters)) ?? slots;
 
   const [firstLevel] = build.levels;
   if (!firstLevel) throw new Error(`${actor.id} has no levels`);
@@ -353,6 +363,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const classes = Object.keys(classLevels).map((id) =>
     lookup(access, ClassSchema, id),
   );
+  // A multiclass casts with the class it has the most levels in, the first taken on a tie.
+  // shortcut: every spell uses that one ability, give each its own class's once Stats holds more than one.
+  const [caster] = classes
+    .filter((def) => def.spellcasting)
+    .sort((a, b) => (classLevels[b.id] ?? 0) - (classLevels[a.id] ?? 0));
   const trained = new Set<string>(classes.flatMap((def) => def.armor));
   for (const id of featIds) {
     if (id.endsWith("lightly-armored")) trained.add("light").add("shield");
@@ -402,7 +417,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       itemId,
       item,
       access,
-      untrainedArmor ? undefined : firstClass.spellcasting,
+      untrainedArmor ? undefined : caster?.spellcasting,
     );
     if (usable) actions.push(usable);
     if (item.type === "armor") {
@@ -475,7 +490,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ),
     savingThrows: firstClass.savingThrows,
     skills: [...skills],
-    spellAbility: firstClass.spellcasting?.ability ?? null,
+    spellAbility: caster?.spellcasting?.ability ?? null,
     slots,
     resources: {},
     passives: [
