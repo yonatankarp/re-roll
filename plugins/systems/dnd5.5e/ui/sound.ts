@@ -9,6 +9,12 @@ const VOLUME = 0.15;
 let audio: { readonly context: AudioContext; readonly out: GainNode } | null =
   null;
 let hiss: AudioBuffer | null = null; // a second of white noise, made once
+let level = 1; // the player's master volume
+
+export function setEffectsVolume(volume: number): void {
+  level = volume;
+  if (audio) audio.out.gain.value = VOLUME * level;
+}
 
 // Browsers start audio only from a gesture, so the context is made, or woken, on one.
 function unlock(): void {
@@ -16,7 +22,7 @@ function unlock(): void {
     if (!audio) {
       const context = new AudioContext();
       const out = context.createGain();
-      out.gain.value = VOLUME;
+      out.gain.value = VOLUME * level;
       out.connect(context.destination);
       audio = { context, out };
     }

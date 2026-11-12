@@ -5,6 +5,7 @@ import {
   type StoryFile,
   validateAdventure,
 } from "../story/adventure.ts";
+import { NARRATION_FOLDER } from "../story/narration.ts";
 import { hashText } from "./dice.ts";
 import { type Issue, zodIssues } from "./issues.ts";
 import { type PluginManifest, PluginManifestSchema } from "./manifest.ts";
@@ -389,7 +390,10 @@ export async function loadRun(
         continue;
       }
 
-      if (isAdventure && folder === "assets") continue;
+      // Pictures, and read-aloud clips made by npm run narrate, aren't story content.
+      if (isAdventure && (folder === "assets" || folder === NARRATION_FOLDER)) {
+        continue;
+      }
 
       const kind = system.contentKinds[folder];
       if (!kind) {
@@ -510,6 +514,8 @@ export async function loadRun(
     const parts: string[] = [];
     for (const file of [...record.files].sort()) {
       if (extensionOf(file) !== YAML) continue;
+      // Narration's index changes as clips are made, which doesn't change the story.
+      if (file.startsWith(`${NARRATION_FOLDER}/`)) continue;
       parts.push(file, (await storage.read(`${record.root}/${file}`)) ?? "");
     }
     hashes.set(record.manifest.id, hashText(parts.join("\0")));

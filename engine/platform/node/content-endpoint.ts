@@ -14,6 +14,7 @@ const IMAGE_TYPES: Readonly<Record<string, string>> = {
   jpeg: "image/jpeg",
   webp: "image/webp",
   gif: "image/gif",
+  mp3: "audio/mpeg", // narration clips, read through the same route as pictures
 };
 
 export interface ContentPath {

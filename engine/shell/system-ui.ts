@@ -87,6 +87,7 @@ export interface BoardHost {
   // Several ids answer the decisions that follow one another, such as Move and then a square.
   readonly answer: (...optionIds: readonly string[]) => void;
   readonly sound?: () => boolean; // whether the player has sound on
+  readonly volume?: () => number; // the player's master volume, 0 to 1
 }
 
 export interface BoardUpdate {

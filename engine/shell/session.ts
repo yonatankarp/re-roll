@@ -12,6 +12,8 @@ import { formatIssue } from "../kernel/issues.ts";
 import { type Registry, loadRun, scanPlugins } from "../kernel/loader.ts";
 import { type LogEntry, createSave, loadSave } from "../kernel/save.ts";
 import type { Storage } from "../kernel/storage.ts";
+import { type Ambience, sceneAmbience } from "../story/ambience.ts";
+import { scenesAhead } from "../story/narration.ts";
 import { REST_OPTION_PREFIX, sceneText } from "../story/runtime.ts";
 import type { Adventure } from "../story/adventure.ts";
 import type { GameSystem, SystemSetting } from "../kernel/system.ts";
@@ -58,6 +60,8 @@ export interface GameView {
   readonly scene: string | null;
   readonly sceneTitle: string | null; // a name for the scene, such as for the window title
   readonly sceneArt: string | null; // a content path, for imageUrl
+  readonly ambience: Ambience; // the background sound the scene asks for
+  readonly upcoming: readonly string[]; // the text of scenes the choices go to, to read ahead
   readonly endingName: string | null;
   readonly optionGroups: readonly OptionGroup[];
   readonly card: DecisionCard | null; // shown above the choices, such as treasure found
@@ -789,10 +793,16 @@ export function createGame({
           }
         }
       }
+      const text = currentScene ? sceneText(run, state, currentScene) : null;
       return {
         title: run.adventure.title,
-        scene: currentScene ? sceneText(run, state, currentScene) : null,
+        scene: text,
         sceneTitle: currentScene ? sceneTitle(currentScene) : null,
+        ambience: sceneAmbience(currentScene?.ambience, text ?? ""),
+        upcoming: scenesAhead(currentScene).flatMap((id) => {
+          const next = run.adventure.scenes.find((item) => item.id === id);
+          return next ? [sceneText(run, state, next)] : [];
+        }),
         sceneArt:
           currentScene?.art && IMAGE_FILE.test(currentScene.art)
             ? `${root}/${currentScene.art}`

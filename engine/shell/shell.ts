@@ -1,6 +1,7 @@
 import { collapseCard, loadScreen } from "./load-screen.ts";
 import { campfire } from "./campfire.ts";
 import { adventureCard, adventureGrid } from "./adventure-picker.ts";
+import { soundControls } from "./sound-panel.ts";
 import type { Game, GameView } from "./session.ts";
 import type {
   Board,
@@ -33,32 +34,6 @@ export function button(label: string, onClick: () => void): HTMLButtonElement {
   const node = el("button", { text: label });
   node.type = "button";
   node.addEventListener("click", onClick);
-  return node;
-}
-
-// The player's sound setting, kept between visits. Storage can be blocked, which leaves sound on.
-const SOUND_KEY = "re-roll:sound";
-let soundOn = ((): boolean => {
-  try {
-    return localStorage.getItem(SOUND_KEY) !== "off";
-  } catch {
-    return true;
-  }
-})();
-
-function soundToggle(): HTMLButtonElement {
-  const node = button("Sound", () => {
-    node.textContent = soundOn ? "Sound: off" : "Sound: on";
-    soundOn = !soundOn;
-    node.setAttribute("aria-pressed", String(soundOn));
-    try {
-      localStorage.setItem(SOUND_KEY, soundOn ? "on" : "off");
-    } catch {
-      // Not remembered, but still applies for now.
-    }
-  });
-  node.setAttribute("aria-pressed", String(soundOn));
-  node.textContent = soundOn ? "Sound: on" : "Sound: off";
   return node;
 }
 
@@ -789,6 +764,7 @@ export function mountShell(
     let artShown: string | null = null;
     const scene = el("p", { class: "scene-text" });
     let sceneShown: string | null = null;
+    const sound = soundControls((path) => game.imageUrl(path));
     const ending = el("section", { class: "ending" });
     ending.hidden = true;
     const combat = el("div");
@@ -893,7 +869,7 @@ export function mountShell(
       shortcut(button("Save game", saveGame), "S"),
       shortcut(button("Load game", loadGame), "L"),
       restartButton,
-      soundToggle(),
+      sound.menuItem,
       button("Main menu", () => {
         act(showMenu);
       }),
@@ -950,6 +926,7 @@ export function mountShell(
         else openJournal();
       },
     };
+    sound.follow(camp.dialog);
     actions.replaceChildren(saved, camp.button, hud, journal, gameMenu);
     const stage = el(
       "main",
@@ -957,6 +934,7 @@ export function mountShell(
       title,
       sceneArt,
       scene,
+      sound.narration,
       combatGridSlot,
       // In a fight this is the column beside the map; otherwise it lays out as if it weren't there.
       // The ending comes after the ticker's last lines, and beside the map when a fight ends the run.
@@ -980,6 +958,7 @@ export function mountShell(
         sheetDrawer,
         journalDrawer,
         camp.dialog,
+        sound.dialog,
       ),
     );
     keys = {
@@ -1012,7 +991,8 @@ export function mountShell(
       if (factory && !board) {
         board = factory(combatGridSlot, {
           imageUrl: (path) => game.imageUrl(path),
-          sound: () => soundOn,
+          sound: sound.effects,
+          volume: sound.volume,
           answer: (...optionIds) => {
             act(async () => {
               for (const optionId of optionIds) await game.answer(optionId);
@@ -1039,6 +1019,7 @@ export function mountShell(
       cuesShown = view.cues.length;
       stage.classList.toggle("in-combat", view.combat !== null);
       camp.update(view);
+      sound.update(view);
 
       title.textContent = view.title;
       document.title = view.sceneTitle
@@ -1178,7 +1159,7 @@ export function mountShell(
               card.hidden = !shownCard;
               if (shownCard && !firstDraw) {
                 enter(card);
-                if (soundOn) cardSound?.();
+                if (sound.effects()) cardSound?.();
               }
             }
           : null;

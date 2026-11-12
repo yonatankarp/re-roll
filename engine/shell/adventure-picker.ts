@@ -42,10 +42,7 @@ export function adventureCard(
   if (resume) {
     const again = button("Resume", resume.go);
     again.className = "cover-resume";
-    again.setAttribute(
-      "aria-label",
-      `Resume ${resume.label}`,
-    );
+    again.setAttribute("aria-label", `Resume ${resume.label}`);
     node.append(again);
   }
   node.dataset.title = adventure.title.toLowerCase();
