@@ -44,7 +44,7 @@ export function adventureCard(
     again.className = "cover-resume";
     again.setAttribute(
       "aria-label",
-      `Resume ${adventure.title}, ${resume.label}`,
+      `Resume ${resume.label}`,
     );
     node.append(again);
   }

@@ -111,6 +111,7 @@ const CheckChoiceSchema = z.strictObject({
 
 const SceneSchema = z.strictObject({
   id: SlugSchema,
+  title: z.string().min(1).optional(), // a short name, such as on save cards; the id stands in without one
   text: z.string().min(1),
   // The first whose condition holds replaces the text.
   textVariants: z

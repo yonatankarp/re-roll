@@ -5,6 +5,7 @@ import {
   type SystemEvent,
 } from "#sdk";
 import { z } from "zod";
+import { weaponProficient } from "../core/character.ts";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
 import { foundText } from "../core/gear.ts";
 import { inArea } from "../core/grid.ts";
@@ -13,6 +14,7 @@ import {
   ABILITIES,
   type Amount,
   type CharacterBuild,
+  ClassSchema,
   type Damage,
   ItemSchema,
   LootSchema,
@@ -302,22 +304,54 @@ function signed(value: number): string {
   return value < 0 ? String(value) : `+${String(value)}`;
 }
 
+const GEAR_HINT = "Change gear during a rest";
+
+// Whether any of the character's classes trains them with it, or for a scroll, whether they cast spells.
+// shortcut: a multiclass character counts every class's training, not the narrower multiclass list.
+function canUse(
+  item: z.infer<typeof ItemSchema>,
+  stats: Stats,
+  access: ContentAccess,
+): boolean {
+  const classes = Object.keys(stats.classLevels).flatMap((id) => {
+    const parsed = ClassSchema.safeParse(access.content(id));
+    return parsed.success ? [parsed.data] : [];
+  });
+  switch (item.type) {
+    case "weapon":
+      return classes.some((def) => weaponProficient(def, item));
+    case "armor":
+      return classes.some((def) => def.armor.includes(item.armorType));
+    case "shield":
+      return classes.some((def) => def.armor.includes("shield"));
+    case "magicItem":
+      return !item.spell || stats.spellAbility !== null;
+    default:
+      return true;
+  }
+}
+
 // The player first, then the companions; none until the player has chosen a character.
 // What the character carries, with a way to change it whenever the pending choice allows, such as on a rest.
+// Only the player changes gear, so a companion's rows have no buttons at all.
 function equipmentRows(
   actor: Actor,
   gold: number | null,
+  stats: Stats,
   access: ContentAccess,
 ) {
   const worn = equipped(actor);
   const attuned = actor.attuned ?? [];
+  const changes = actor.id === PLAYER_ACTOR;
   const items = [...new Set(actor.inventory)].flatMap((id) => {
     const parsed = ItemSchema.safeParse(access.content(id));
     if (!parsed.success) return [];
     const item = parsed.data;
     const count = actor.inventory.filter((other) => other === id).length;
     const wornCount = worn.filter((other) => other === id).length;
-    const label = count > 1 ? `${item.name} ×${String(count)}` : item.name;
+    const label =
+      (count > 1 ? `${item.name} ×${String(count)}` : item.name) +
+      (canUse(item, stats, access) ? "" : " (can't use)");
     const detail = "text" in item && item.text ? { detail: item.text } : {};
     if (
       item.type === "weapon" ||
@@ -328,10 +362,14 @@ function equipmentRows(
         {
           label,
           value: wornCount === 0 ? "In pack" : "Equipped",
-          option:
-            wornCount < count
-              ? { id: `equip:${id}`, label: "Equip" }
-              : { id: `stow:${id}`, label: "Stow" },
+          ...(changes
+            ? {
+                option:
+                  wornCount < count
+                    ? { id: `equip:${id}`, label: "Equip", hint: GEAR_HINT }
+                    : { id: `stow:${id}`, label: "Stow", hint: GEAR_HINT },
+              }
+            : {}),
           ...detail,
         },
       ];
@@ -342,9 +380,24 @@ function equipmentRows(
         {
           label,
           value: on ? "Attuned" : "Not attuned",
-          option: on
-            ? { id: `unattune:${id}`, label: "End attunement" }
-            : { id: `attune:${id}`, label: "Attune" },
+          ...(changes
+            ? {
+                option: on
+                  ? {
+                      id: `unattune:${id}`,
+                      label: "End attunement",
+                      hint: GEAR_HINT,
+                    }
+                  : {
+                      id: `attune:${id}`,
+                      label: "Attune",
+                      hint:
+                        attuned.length < MAX_ATTUNED
+                          ? GEAR_HINT
+                          : `Already attuned to ${String(MAX_ATTUNED)} items`,
+                    },
+              }
+            : {}),
           ...detail,
         },
       ];
@@ -430,6 +483,9 @@ function sheetOf(
     id: player.id,
     title: player.name,
     level: stats.level,
+    kind: `${nameOf(access, build.speciesId)} ${Object.keys(stats.classLevels)
+      .map((id) => nameOf(access, id))
+      .join(" / ")}`,
     subtitle: [
       `${nameOf(access, build.speciesId)} ${classes}`,
       ...(subclasses.length > 0 ? [subclasses.join(", ")] : []),
@@ -478,6 +534,11 @@ function sheetOf(
             note: `of ${String(stats.level)}`,
           },
         ],
+      },
+      // Near the top, so what the party carries and its gold are found without scrolling.
+      {
+        title: "Equipment",
+        rows: equipmentRows(player, gold, stats, access),
       },
       {
         title: "Abilities",
@@ -564,10 +625,6 @@ function sheetOf(
             ...actionRow(action),
             label: `${action.name} (${String(action.spellLevel)})`,
           })),
-      },
-      {
-        title: "Equipment",
-        rows: equipmentRows(player, gold, access),
       },
       {
         title: "Features",
@@ -800,7 +857,9 @@ function describe(
     }
     case "dnd5.5e:itemUsed": {
       const data = EVENT_SCHEMAS["dnd5.5e:itemUsed"].parse(payload);
-      return `${name(data.actor)} uses ${nameOf(access, data.item)}.`;
+      const item = ItemSchema.safeParse(access.content(data.item)).data;
+      const scroll = item?.type === "magicItem" && item.category === "scroll";
+      return `${name(data.actor)} uses ${nameOf(access, data.item)}${scroll ? ", and it crumbles to dust" : ""}.`;
     }
     case "dnd5.5e:gearChanged": {
       const data = EVENT_SCHEMAS["dnd5.5e:gearChanged"].parse(payload);
@@ -811,12 +870,17 @@ function describe(
   }
 }
 
-// The moment treasure is found, shown as a card above its choices.
-function card(decision: Decision, _rawState: unknown, access: ContentAccess) {
+// The moment treasure is found, shown as a card above its choices, with the purse it ends up in.
+function card(decision: Decision, rawState: unknown, access: ContentAccess) {
   if (!decision.id.startsWith("dnd5.5e:found:")) return null;
   const found = LootSchema.safeParse(decision.resume.payload.found);
   return found.success
-    ? { title: "Found", lines: foundText(found.data, access) }
+    ? {
+        title: "Found",
+        icon: "\u{1FA99}",
+        lines: foundText(found.data, access),
+        footer: `Purse: ${String(StateSchema.parse(rawState).gold ?? 0)} gp`,
+      }
     : null;
 }
 
