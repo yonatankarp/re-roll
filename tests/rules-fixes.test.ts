@@ -2,7 +2,11 @@ import { PLAYER_ACTOR } from "#sdk";
 import { describe, expect, it } from "vitest";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import type { RunContext } from "../engine/kernel/turn.ts";
-import { PregenSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import {
+  type Activation,
+  ItemSchema,
+  PregenSchema,
+} from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
   type Actor,
   type DndState,
@@ -12,6 +16,11 @@ import {
   freshActor,
   isStable,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
+import {
+  type Stats,
+  attackBonus,
+  deriveStats,
+} from "../plugins/systems/dnd5.5e/core/stats.ts";
 
 async function goblin(): Promise<RunContext> {
   return (await loadAdventure("goblin-ambush")).run;
@@ -47,6 +56,14 @@ function pregen(
     }),
     ...fields,
   };
+}
+
+function bonusOf(stats: Stats, id: string): number {
+  const action = stats.actions.find((item) => item.id === id);
+  const resolution: Activation["resolution"] | undefined =
+    action?.activation.resolution;
+  if (resolution?.kind !== "attack") throw new Error(`No attack ${id}`);
+  return attackBonus(resolution, stats);
 }
 
 function alone(actor: Actor): DndState {
@@ -95,4 +112,89 @@ describe("death saves", () => {
   });
 });
 
+describe("armor and weapon training", () => {
+  it("stops a wizard in chain mail casting, and gives Disadvantage on attacks", async () => {
+    const run = await goblin();
+    const wizard = pregen(run, "srd52:pregen/wizard");
+    const robed = deriveStats(wizard, run);
+    expect(robed.untrainedArmor).toBe(false);
+    expect(robed.actions.some((item) => item.id.startsWith("spell:"))).toBe(
+      true,
+    );
+    const armored = deriveStats(
+      {
+        ...wizard,
+        inventory: [
+          ...wizard.inventory,
+          "srd52:item/chain-mail",
+          "srd52:item/shield",
+        ],
+      },
+      run,
+    );
+    expect(armored.untrainedArmor).toBe(true);
+    expect(armored.actions.some((item) => item.id.startsWith("spell:"))).toBe(
+      false,
+    );
+    expect(armored.passives).toContainEqual({
+      kind: "modifier",
+      modifier: { kind: "disadvantage", on: "attacks" },
+    });
+    expect(armored.ac).toBe(16); // chain mail, and no shield without training
+  });
 
+  it("adds Proficiency only to weapons the class trains with", async () => {
+    const run = await goblin();
+    const wizard = pregen(run, "srd52:pregen/wizard", {
+      inventory: ["srd52:item/dagger", "srd52:item/longsword"],
+    });
+    const stats = deriveStats(wizard, run);
+    // Dex 14 for the dagger and Str 8 for the longsword.
+    expect(bonusOf(stats, "weapon:srd52:item/dagger")).toBe(2 + 2);
+    expect(bonusOf(stats, "weapon:srd52:item/longsword")).toBe(-1);
+  });
+
+  it("counts only one shield", async () => {
+    const base = await goblin();
+    const run = withContent(base, [
+      ItemSchema.parse({
+        id: "test:item/kite-shield",
+        name: "Kite Shield",
+        type: "shield",
+        bonus: 2,
+      }),
+    ]);
+    const fighter = pregen(run, "srd52:pregen/fighter");
+    expect(deriveStats(fighter, run).ac).toBe(18);
+    const twice = {
+      ...fighter,
+      inventory: [...fighter.inventory, "test:item/kite-shield"],
+    };
+    expect(deriveStats(twice, run).ac).toBe(18);
+  });
+
+  it("slows a wearer too weak for heavy armor by 10 feet", async () => {
+    const run = await goblin();
+    const fighter = pregen(run, "srd52:pregen/fighter");
+    const strong = deriveStats(fighter, run);
+    if (fighter.source.kind !== "character" || !fighter.source.build) {
+      throw new Error("No build");
+    }
+    const { build } = fighter.source;
+    const weak = deriveStats(
+      {
+        ...fighter,
+        source: {
+          kind: "character",
+          build: {
+            ...build,
+            baseAbilities: { ...build.baseAbilities, str: 8 },
+            backgroundIncrease: { con: 2, dex: 1 },
+          },
+        },
+      },
+      run,
+    );
+    expect(weak.speed).toBe(strong.speed - 10);
+  });
+});

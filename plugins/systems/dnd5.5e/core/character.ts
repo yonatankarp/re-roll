@@ -49,7 +49,10 @@ import {
   deriveStats,
   doesSomething,
   lookup,
+  weaponProficient,
 } from "./stats.ts";
+
+export { weaponProficient };
 
 type Context = SystemContext<DndState>;
 type LevelEntry = CharacterBuild["levels"][number];
@@ -349,16 +352,6 @@ export function levelChoices(
     ...stated,
     ...inferred.filter((item) => !stated.some(({ id }) => id === item.id)),
   ];
-}
-
-export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
-  if (!classDef.weapons.includes(weapon.category)) return false;
-  const limit = classDef.martialWeaponProperties;
-  return (
-    weapon.category !== "martial" ||
-    !limit ||
-    weapon.properties.some((property) => limit.includes(property))
-  );
 }
 
 // Each spell choice looks at every spell, and companions make many of them when a run starts.

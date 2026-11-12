@@ -482,7 +482,8 @@ export const dnd55e = defineSystem<DndState>({
       "skill" in parsed ? SKILL_ABILITIES[parsed.skill] : parsed.ability;
     const roll = rollD20(context.dice, {
       advantage: false,
-      disadvantage: false,
+      disadvantage:
+        stats.untrainedArmor && (ability === "str" || ability === "dex"),
     });
     const total =
       roll.natural +

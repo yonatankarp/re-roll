@@ -806,6 +806,7 @@ describe("rests", () => {
           ],
         },
       },
+      inventory: [], // the fighter's chain mail would stop a warlock casting
       resourcesSpent: { "slot:2": 2 },
     };
     const stats = deriveStats(bound, run);

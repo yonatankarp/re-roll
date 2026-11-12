@@ -31,6 +31,7 @@ import {
   SubclassSchema,
   type Subclass,
   type CharacterBuild,
+  type ClassDef,
   type Spell,
   SpellSchema,
   WeaponSchema,
@@ -88,6 +89,8 @@ export interface Stats {
   readonly features: readonly string[];
   readonly resourceDefs: Feature["resources"];
   readonly pactMagic: boolean; // slots come back on a Short Rest
+  // Wearing armor without training: Disadvantage on Strength and Dexterity rolls, and no spellcasting.
+  readonly untrainedArmor: boolean;
 }
 
 export function passiveModifiers(
@@ -173,9 +176,20 @@ function collectFeatureData(
   return { passives, actions, resources };
 }
 
+export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
+  if (!classDef.weapons.includes(weapon.category)) return false;
+  const limit = classDef.martialWeaponProperties;
+  return (
+    weapon.category !== "martial" ||
+    !limit ||
+    weapon.properties.some((property) => limit.includes(property))
+  );
+}
+
 export function weaponActivation(
   weapon: Weapon,
   abilities: AbilityScores,
+  proficient = true,
 ): Activation {
   const ranged = weapon.properties.includes("ammunition");
   const finesse = weapon.properties.includes("finesse");
@@ -189,7 +203,11 @@ export function weaponActivation(
     targeting: { creatures: 1, range: ranged ? 80 : 5, side: "enemy" },
     resolution: {
       kind: "attack",
-      attack: { type: "weapon", ability },
+      attack: {
+        type: "weapon",
+        ability,
+        ...(proficient ? {} : { proficient }),
+      },
       damage: [
         {
           amount: {
@@ -263,6 +281,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   let scaling: Record<string, number> = {};
   let slots: readonly number[] = [];
   let subclass: Subclass | null = null;
+  const featIds = new Set<string>();
 
   // shortcut: spell slots come from the last class level, so multiclass slot tables need adding with multiclassing.
   for (const entry of build.levels) {
@@ -287,6 +306,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         for (const id of answer.values) featureIds.add(id);
       } else if (answer.kind === "feats") {
         for (const id of answer.values) {
+          featIds.add(id);
           for (const grant of lookup(access, FeatSchema, id).grants) {
             featureIds.add(grant);
           }
@@ -312,14 +332,39 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     0,
   );
 
+  // shortcut: training comes from every class taken, while a multiclass really gets only some of a later class's.
+  const classes = Object.keys(classLevels).map((id) =>
+    lookup(access, ClassSchema, id),
+  );
+  const trained = new Set<string>(classes.flatMap((def) => def.armor));
+  for (const id of featIds) {
+    if (id.endsWith("lightly-armored")) trained.add("light").add("shield");
+    if (id.endsWith("moderately-armored")) trained.add("medium").add("shield");
+    if (id.endsWith("heavily-armored")) trained.add("heavy");
+  }
+  // One action per kind of item, so a second dagger or potion doesn't list twice.
+  const worn = [...new Set(equipped(actor))].map(
+    (itemId) => [itemId, lookup(access, ItemSchema, itemId)] as const,
+  );
+  const untrainedArmor = worn.some(
+    ([, item]) => item.type === "armor" && !trained.has(item.armorType),
+  );
+  const tooHeavy = worn.some(
+    ([, item]) => item.type === "armor" && abilities.str < (item.strength ?? 0),
+  );
+
   const armorBases: number[] = [];
   let flatBonus = 0;
+  let shield = 0;
   const actions: KnownAction[] = [];
   const attuned = actor.attuned ?? [];
-  // One action per kind of item, so a second dagger or potion doesn't list twice.
-  for (const itemId of new Set(equipped(actor))) {
-    const item = lookup(access, ItemSchema, itemId);
-    const usable = itemAction(itemId, item, access, firstClass.spellcasting);
+  for (const [itemId, item] of worn) {
+    const usable = itemAction(
+      itemId,
+      item,
+      access,
+      untrainedArmor ? undefined : firstClass.spellcasting,
+    );
     if (usable) actions.push(usable);
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
@@ -327,12 +372,18 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       const allowed = parsed.addDex ? Math.min(dex, parsed.maxDex ?? dex) : 0;
       armorBases.push(parsed.base + allowed);
     } else if (item.type === "shield") {
-      flatBonus += item.bonus;
+      // Only one shield is held, and it protects only with training.
+      if (trained.has("shield")) shield = Math.max(shield, item.bonus);
     } else if (item.type === "weapon") {
+      const weapon = WeaponSchema.parse(item);
       actions.push({
         id: `weapon:${itemId}`,
         name: item.name,
-        activation: weaponActivation(WeaponSchema.parse(item), abilities),
+        activation: weaponActivation(
+          weapon,
+          abilities,
+          classes.some((def) => weaponProficient(def, weapon)),
+        ),
         spellLevel: null,
       });
     } else if (
@@ -354,7 +405,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
-  for (const spellId of knownSpells) {
+  for (const spellId of untrainedArmor ? [] : knownSpells) {
     const spell: Spell = lookup(access, SpellSchema, spellId);
     if (spell.activation && doesSomething(spell.activation.resolution)) {
       actions.push({
@@ -382,7 +433,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     maxHp,
     ac: bestAc(actor, abilities, {
       armorBases,
-      flatBonus,
+      flatBonus: flatBonus + shield,
       passives: fromFeatures.passives,
     }),
     speed: encumberedSpeed(
@@ -395,11 +446,26 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     spellAbility: firstClass.spellcasting?.ability ?? null,
     slots,
     resources: {},
-    passives: fromFeatures.passives.map((passive) =>
-      passive.kind === "extraDamage"
-        ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
-        : passive,
-    ),
+    passives: [
+      ...fromFeatures.passives.map((passive) =>
+        passive.kind === "extraDamage"
+          ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
+          : passive,
+      ),
+      // Every weapon attack uses Strength or Dexterity.
+      // shortcut: a save can't be limited to Strength and Dexterity without a change in combat.ts, so saves aren't affected yet.
+      ...(untrainedArmor
+        ? [
+            {
+              kind: "modifier" as const,
+              modifier: {
+                kind: "disadvantage" as const,
+                on: "attacks" as const,
+              },
+            },
+          ]
+        : []),
+    ],
     actions,
     multiattack: Math.max(
       ...[...featureIds].map(attacksFrom),
@@ -413,10 +479,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     features: [...featureIds],
     resourceDefs: fromFeatures.resources,
     pactMagic: [...featureIds].some((id) => id.endsWith("pact-magic")),
+    untrainedArmor,
   };
   return {
     ...partial,
-    speed: partial.speed + speedBonus(partial),
+    speed: partial.speed + speedBonus(partial) - (tooHeavy ? 10 : 0),
     resources: Object.fromEntries(
       fromFeatures.resources.map((resource) => [
         resource.id,
@@ -605,6 +672,7 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
     features: monster.features,
     resourceDefs: fromFeatures.resources,
     pactMagic: false,
+    untrainedArmor: false,
   };
 }
 
@@ -655,7 +723,8 @@ export function attackBonus(
   const { attack } = resolution;
   if (attack.flatBonus !== undefined) return attack.flatBonus;
   const ability = attack.type === "spell" ? stats.spellAbility : attack.ability;
-  return stats.proficiency + (ability ? modifierFor(stats, ability) : 0);
+  const proficiency = attack.proficient === false ? 0 : stats.proficiency;
+  return proficiency + (ability ? modifierFor(stats, ability) : 0);
 }
 
 export function saveBonus(stats: Stats, ability: Ability): number {
