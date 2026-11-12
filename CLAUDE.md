@@ -1,6 +1,6 @@
 # Re-roll
 
-A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a D&D system plugin (`plugins/systems/dnd5.5e/`), adventure and rules plugins (`plugins/`), and a Vite UI that also ships as a Tauri macOS app (`app/desktop`). The design is in `docs/technical-design.md`.
+A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a D&D system plugin (`plugins/systems/dnd5.5e/`), adventure and rules plugins (`plugins/`), and a Vite UI that also ships as a cross-platform Tauri app (`app/desktop`). The design is in `docs/technical-design.md`.
 
 ## Running things
 
@@ -9,20 +9,22 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - `npm run ui` serves the game at http://127.0.0.1:5199/ with `strictPort`. A second checkout or worktree needs `npm run ui -- --port <other>`.
 - `npm run bot -- [runs] [adventure] [--smart] [--difficulty=story|normal|hard]` plays adventures to measure balance. The targets are Story at or under about 25% defeats and Normal at 15–45%.
 - `npm run play` plays in text without the UI.
-- `npm run narrate -- <adventure> [--voice=…]` reads a private adventure's scenes aloud once with Kokoro-82M (needs `ffmpeg`), into its `narration/` folder. Run it from the main checkout, since a worktree's `private/` is only a copy. Clips missing there are read in the app.
+- `npm run narrate -- <adventure> [--voice=…]` reads a book adventure's scenes aloud once with Kokoro-82M (needs `ffmpeg`), into its `narration/` folder. Run it from the main checkout, since a worktree's `private/` is only a copy. Clips missing there are read in the app.
 - Saves replay logged inputs (`engine/kernel/save.ts`). Every player action must go through decisions and events, never through hidden UI state.
 
-## Book content: `private/`
+## Book content: `books/`
 
-- `private/` holds content imported from the owner's own books. Git ignores it, it's never committed, and no backup covers it.
-- Only write ids, names and numbers there: coordinates, counts, monster ids, `onFlee` targets. Never write book prose, whether yours or copied, and never add it to git.
+- `books/` holds content imported from the owner's own books. It is its own **private** git repository, ignored by this one. Commit book content only there, never to this public repository.
+- Only write ids, names and numbers there: coordinates, counts, monster ids, `onFlee` targets. Never write book prose of your own, and never copy book text into this repository, its issues or its docs.
 - Never log in to or download from D&D Beyond.
-- A git worktree has no `private/`. To play-test, symlink `~/Projects/re-roll/private` into it, and only one session at a time may write to it.
+- A git worktree has no `books/`. To play-test, symlink `~/Projects/re-roll/books` into it, and only one session at a time may write to the same files there.
+- `private` is a temporary link to `books/` for older worktrees; new code uses `books/` only. The manifest field `distribution: private` keeps its name (it means not redistributable).
 
 ## Git
 
 - Commit or push only when asked. Never add Co-Authored-By or other attribution lines to commits or PRs.
 - Merge session branches with `--no-ff`, naming them `refs/heads/claude/...`.
+- Run `git config core.hooksPath .githooks` once per clone. The pre-commit hook runs typecheck and lint and rejects staged `books/` or `private/` paths. It needs Node on PATH, so commit with the same `PATH=…` prefix.
 
 ## Sessions
 

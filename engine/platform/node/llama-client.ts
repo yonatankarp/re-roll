@@ -13,7 +13,22 @@ const CompletionSchema = z.object({
   usage: z.object({ completion_tokens: z.number() }),
 });
 
-export function createLlamaClient(baseUrl: string): ModelClient {
+// Prompts carry book text, so a typo or a leftover LLAMA_URL mustn't send them off the machine.
+export function isLoopbackUrl(url: string): boolean {
+  if (!URL.canParse(url)) return false;
+  const { hostname } = new URL(url);
+  return ["127.0.0.1", "localhost", "[::1]"].includes(hostname);
+}
+
+export function createLlamaClient(
+  baseUrl: string,
+  { allowRemote = false } = {},
+): ModelClient {
+  if (!allowRemote && !isLoopbackUrl(baseUrl)) {
+    throw new Error(
+      `${baseUrl} isn't on this machine; pass --allow-remote to send book text there`,
+    );
+  }
   return {
     async complete(request) {
       const started = performance.now();

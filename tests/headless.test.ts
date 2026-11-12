@@ -7,6 +7,7 @@ import { openHeadless } from "../app/cli/headless-game.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { GameView } from "../engine/shell/session.ts";
 import type { Driver, Screen } from "../engine/tools/headless.ts";
+import { runs } from "./depth.ts";
 
 const folders: string[] = [];
 async function savesFolder(): Promise<string> {
@@ -47,6 +48,7 @@ describe("headless play of goblin-ambush", () => {
       equipped: false,
       rested: false,
       reloaded: false,
+      traded: false,
     };
 
     for (let count = 0; count < 200; count += 1) {
@@ -129,6 +131,31 @@ describe("headless play of goblin-ambush", () => {
         done.reloaded = true;
         continue;
       }
+      // At camp: trade with the peddler, buying the first thing on offer and selling it straight back.
+      const trade = screen.choices.find((choice) =>
+        choice.label.startsWith("Trade with Tam"),
+      );
+      if (trade && !done.traded) {
+        await play.choose(trade.n);
+        const shop = play.view().shop;
+        expect(shop?.merchant).toBe("Tam the Peddler");
+        const purse = shop?.purse;
+        const ware = shop?.buy.find((card) => card.option !== null);
+        if (!ware?.option) throw new Error("Nothing affordable at Tam's");
+        await play.act(ware.option);
+        const after = play.view().shop;
+        expect(after?.purse).not.toBe(purse);
+        const back = after?.sell.find((card) => card.item === ware.item);
+        if (!back?.option) throw new Error(`Tam won't buy ${ware.name}`);
+        await play.act(back.option);
+        expect(play.screen().lines.map((line) => line.text)).toContain(
+          `${play.view().sheets[0]?.title ?? ""} sells ${ware.name} for ${back.price}.`,
+        );
+        await play.act(after?.leave ?? "leave");
+        expect(play.view().shop).toBeNull();
+        done.traded = true;
+        continue;
+      }
       const rest = screen.choices.find((choice) => choice.where === "rest");
       if (rest && !done.rested) {
         await play.choose(rest.n);
@@ -157,6 +184,7 @@ describe("headless play of goblin-ambush", () => {
       equipped: true,
       rested: true,
       reloaded: true,
+      traded: true,
     });
     expect(done.attacked).toBeGreaterThan(0);
 
@@ -188,17 +216,53 @@ describe("headless play of goblin-ambush", () => {
     expect((await play.choose("1")).id).toBe("1");
     expect((await other.choose(1)).id).toBe("0");
   });
+
+  it("casts Bless on targets picked one by one, and a save replays them", async () => {
+    const saves = await savesFolder();
+    const play = await openHeadless(saves);
+    await play.start("goblin-ambush", { seed: "bless" });
+    await play.choose("Human Cleric");
+    const bless = "spell:srd52:spell/bless|pick";
+    for (let count = 0; count < 100; count += 1) {
+      const ids = play.screen().choices.map((choice) => choice.id);
+      if (ids.includes(bless)) break;
+      const first = play.screen().choices.find((c) => c.where === "list");
+      if (!first) throw new Error("Nothing to choose");
+      await play.choose(first.n);
+    }
+    await play.act(bless);
+    // Every ally the map would light, one click each, then Cast.
+    const adds = play
+      .screen()
+      .choices.filter((choice) => choice.id.startsWith("+"))
+      .map((choice) => choice.id);
+    expect(adds.length).toBeGreaterThan(1);
+    await play.act(...adds.slice(0, 2));
+    expect(play.screen().choices.map((c) => c.label)).toContain(
+      "Cast Bless (2 of 3)",
+    );
+    await play.act("cast");
+    expect(play.screen().decision).not.toMatch(/:targets:/);
+    const before = settled(play.view());
+    const path = await play.save("blessed");
+    const later = await openHeadless(saves);
+    await later.load(path);
+    expect(settled(later.view())).toEqual(before);
+  }, 60_000);
 });
 
 // Random choices from what is on screen, through every adventure, so a state no player could get past fails.
-// Book adventures are git-ignored in private/, so they only run where it exists.
+// Book adventures are git-ignored in books/, so they only run where it exists.
 describe("headless random play of every adventure", async () => {
   const lister = await driver();
   const adventures = await lister.listAdventures();
   const shipped = adventures.filter((item) => item.source === "shipped");
   const books = adventures.filter((item) => item.source === "private");
   const MAX_DECISIONS = 1000;
-  const SEEDS = ["headless-0", "headless-1"];
+  const SEEDS = Array.from(
+    { length: runs(4, 8) },
+    (_, index) => `headless-${String(index)}`,
+  );
 
   const playThrough = async (
     adventure: string,
@@ -229,20 +293,21 @@ describe("headless random play of every adventure", async () => {
     return "tooLong"; // not stuck, only long
   };
 
-  it.each(shipped.map((item) => item.id))(
-    "finishes %s",
-    async (adventure) => {
-      for (const seed of SEEDS) {
-        expect(["ending", "defeat", "tooLong"]).toContain(
-          await playThrough(adventure, seed),
-        );
-      }
+  // A shipped adventure must end within MAX_DECISIONS, so an endless loop fails here.
+  it.each(
+    shipped.flatMap((item) => SEEDS.map((seed) => [item.id, seed] as const)),
+  )(
+    "finishes %s with seed %s",
+    async (adventure, seed) => {
+      expect(["ending", "defeat"]).toContain(
+        await playThrough(adventure, seed),
+      );
     },
     120_000,
   );
 
   it
-    .skipIf(!existsSync("private") || books.length === 0)
+    .skipIf(!existsSync("books") || books.length === 0)
     .each(
       books.length > 0
         ? books.map((item) => item.id)

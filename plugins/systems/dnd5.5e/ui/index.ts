@@ -7,9 +7,12 @@ import {
 import { z } from "zod";
 import { weaponProficient } from "../core/character.ts";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
+import { carriedWeight, carryingCapacity } from "../core/carry.ts";
 import { foundText } from "../core/gear.ts";
-import { inArea } from "../core/grid.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
+import { coins } from "../core/shop.ts";
+import { shop } from "./shop.ts";
+import { legendOf, resistancesLeft } from "../core/legendary.ts";
 import { dndCue } from "./cues.ts";
 import {
   ABILITIES,
@@ -21,18 +24,19 @@ import {
   LootSchema,
   SKILL_ABILITIES,
   type Skill,
+  SpeciesSchema,
 } from "../core/schemas.ts";
 import {
   type Actor,
   type DndState,
   EVENT_SCHEMAS,
   MAX_ATTUNED,
-  StateSchema,
   equipped,
   isDead,
   isDown,
   isStable,
 } from "../core/state.ts";
+import { parseState } from "./parse-state.ts";
 import {
   type KnownAction,
   type Stats,
@@ -132,7 +136,7 @@ function optionGroups(
   rawState: unknown,
   access: ContentAccess,
 ) {
-  const state = StateSchema.parse(rawState);
+  const state = parseState(rawState);
   const actor = state.actors[decision.actor];
   const plain = [
     {
@@ -194,7 +198,7 @@ function optionGroups(
 function actorOf(event: SystemEvent, rawState: unknown): string | null {
   // A fight starting or someone falling belongs to nobody in particular.
   if (!("payload" in event)) return null;
-  const state = StateSchema.parse(rawState);
+  const state = parseState(rawState);
   const reported =
     event.kind === "dnd5.5e:rollReported" && "payload" in event
       ? EVENT_SCHEMAS["dnd5.5e:rollReported"].parse(event.payload).actor
@@ -340,6 +344,7 @@ function equipmentRows(
   gold: number | null,
   stats: Stats,
   access: ContentAccess,
+  capacity: number,
 ) {
   const worn = equipped(actor);
   const attuned = actor.attuned ?? [];
@@ -406,7 +411,8 @@ function equipmentRows(
     return [{ label, value: "", ...detail }];
   });
   return [
-    ...(gold === null ? [] : [{ label: "Gold", value: `${String(gold)} gp` }]),
+    ...(gold === null ? [] : [{ label: "Gold", value: coins(gold) }]),
+    carryRow(carriedWeight(actor, access), capacity),
     ...(attuned.length > 0 ||
     actor.inventory.some((id) => {
       const parsed = ItemSchema.safeParse(access.content(id));
@@ -427,8 +433,23 @@ function equipmentRows(
   ];
 }
 
+// The weight carried against what Strength allows, and what going over does to Speed.
+function carryRow(carried: number, capacity: number) {
+  const pounds = (weight: number): string =>
+    String(Math.round(weight * 10) / 10);
+  return {
+    label: "Carrying",
+    value: `${pounds(carried)} of ${pounds(capacity)} lb`,
+    ...(carried > capacity * 2
+      ? { note: "Too heavy to move" }
+      : carried > capacity
+        ? { note: "Over capacity: Speed 5 feet" }
+        : {}),
+  };
+}
+
 function sheets(rawState: unknown, access: ContentAccess) {
-  const { actors, gold } = StateSchema.parse(rawState);
+  const { actors, gold } = parseState(rawState);
   const player = actors[PLAYER_ACTOR];
   if (player?.source.kind !== "character" || !player.source.build) return [];
   return [
@@ -539,7 +560,16 @@ function sheetOf(
       // Near the top, so what the party carries and its gold are found without scrolling.
       {
         title: "Equipment",
-        rows: equipmentRows(player, gold, stats, access),
+        rows: equipmentRows(
+          player,
+          gold,
+          stats,
+          access,
+          carryingCapacity(
+            stats.abilities.str,
+            SpeciesSchema.parse(access.content(build.speciesId)).size,
+          ),
+        ),
       },
       {
         title: "Abilities",
@@ -641,7 +671,7 @@ function sheetOf(
 }
 
 function combat(rawState: unknown, access: ContentAccess) {
-  const state = StateSchema.parse(rawState);
+  const state = parseState(rawState);
   if (!state.combat) return null;
   const { order, index, round } = state.combat;
   // Where the player can walk this turn, so the board can move them with one click.
@@ -665,34 +695,6 @@ function combat(rawState: unknown, access: ContentAccess) {
       return feet === null ? [] : [[id, feet]];
     }),
   );
-  // The squares each of the player's area spells would cover, by option: aimed at a creature, or around them.
-  const grid = state.combat.grid;
-  const areas: Record<string, (readonly [number, number])[]> = {};
-  if (player && grid && order[index] === PLAYER_ACTOR) {
-    for (const action of deriveStats(player, access).actions) {
-      const { targeting } = action.activation;
-      if (!("area" in targeting)) continue;
-      const { shape, radius } = targeting.area;
-      const aims =
-        shape === "emanation"
-          ? [{ key: "all", at: player.position }]
-          : order.flatMap((id) => {
-              const aim = state.actors[id];
-              return aim ? [{ key: `@${id}`, at: aim.position }] : [];
-            });
-      for (const { key, at } of aims) {
-        const covered: (readonly [number, number])[] = [];
-        for (let y = 0; y < grid.height; y += 1) {
-          for (let x = 0; x < grid.width; x += 1) {
-            if (inArea(shape, radius, player.position, at, { x, y })) {
-              covered.push([x, y]);
-            }
-          }
-        }
-        areas[`${action.id}|${key}`] = covered;
-      }
-    }
-  }
   // The cover each creature has against the player, for the shield shown while picking a target.
   const cover = Object.fromEntries(
     order.flatMap((id) => {
@@ -704,12 +706,21 @@ function combat(rawState: unknown, access: ContentAccess) {
       return bonus > 0 ? [[id, bonus]] : [];
     }),
   );
+  // Each of the player's area actions, by id, so the board can outline where it lands with the rules' own geometry.
+  const shapes = Object.fromEntries(
+    player && order[index] === PLAYER_ACTOR
+      ? deriveStats(player, access).actions.flatMap((action) => {
+          const { targeting } = action.activation;
+          return "area" in targeting ? [[action.id, targeting]] : [];
+        })
+      : [],
+  );
   return {
     round,
     board: {
       moves,
       reach,
-      areas,
+      shapes,
       cover,
       terrain: state.combat.terrain ?? null,
       map: state.combat.map ?? null,
@@ -726,7 +737,14 @@ function combat(rawState: unknown, access: ContentAccess) {
           hp: actor.hp,
           maxHp: deriveStats(actor, access).maxHp,
           tempHp: actor.tempHp,
-          conditions: conditionsOf(actor),
+          conditions: [
+            ...conditionsOf(actor),
+            ...(legendOf(actor, access).legendaryResistance
+              ? [
+                  `Legendary Resistance (${String(resistancesLeft(actor, access, state))} left)`,
+                ]
+              : []),
+          ],
           concentration: actor.concentratingOn
             ? sourceName(access, actor.concentratingOn)
             : null,
@@ -757,12 +775,96 @@ function describeRoll(
   return `${attacker} uses ${label} on ${defender}: ${rolled} against AC ${String(target)}, ${success ? "hit" : "miss"}.`;
 }
 
+// "14 + 5 = 19 vs AC 15": the die, what was added, and what it had to reach.
+function rollMath(natural: number, total: number, against: string): string {
+  const bonus = total - natural;
+  const added =
+    bonus === 0
+      ? String(natural)
+      : `${String(natural)} ${bonus > 0 ? "+" : "−"} ${String(Math.abs(bonus))} = ${String(total)}`;
+  return `${added} vs ${against}`;
+}
+
+// One line of the roll history, from the state just before the event.
+function roll(
+  event: SystemEvent,
+  rawState: unknown,
+): {
+  readonly actor: string;
+  readonly label: string;
+  readonly math: string;
+  readonly success: boolean | null;
+} | null {
+  if (!("payload" in event)) return null;
+  const state = parseState(rawState);
+  const name = (id: string): string => state.actors[id]?.name ?? id;
+  switch (event.kind) {
+    case "dnd5.5e:rollReported": {
+      const data = EVENT_SCHEMAS["dnd5.5e:rollReported"].parse(event.payload);
+      if (data.against === "check") {
+        const what =
+          data.label in ABILITY_NAMES
+            ? ABILITY_NAMES[data.label as keyof typeof ABILITY_NAMES]
+            : skillName(data.label);
+        return {
+          actor: name(data.actor),
+          label: `${what} check`,
+          math: rollMath(data.natural, data.total, `DC ${String(data.target)}`),
+          success: data.success,
+        };
+      }
+      // A natural 1 or 20 decides an attack whatever the total, so the line says why.
+      const natural =
+        data.natural === 20 || data.natural === 1
+          ? `, natural ${String(data.natural)}`
+          : "";
+      return {
+        actor: name(data.actor),
+        label: `${data.label} → ${name(data.against)}`,
+        math: `${rollMath(data.natural, data.total, `AC ${String(data.target)}`)}${natural}`,
+        success: data.success,
+      };
+    }
+    case "dnd5.5e:saveRolled": {
+      const data = EVENT_SCHEMAS["dnd5.5e:saveRolled"].parse(event.payload);
+      return {
+        actor: name(data.actor),
+        label: `${ABILITY_NAMES[data.ability]} save`,
+        math: rollMath(data.natural, data.total, `DC ${String(data.dc)}`),
+        success: data.success,
+      };
+    }
+    case "dnd5.5e:deathSaveRolled": {
+      const data = EVENT_SCHEMAS["dnd5.5e:deathSaveRolled"].parse(
+        event.payload,
+      );
+      return {
+        actor: name(data.actor),
+        label: "Death save",
+        math: `${String(data.natural)} vs 10`,
+        success: data.natural >= 10,
+      };
+    }
+    case "dnd5.5e:damaged": {
+      const data = EVENT_SCHEMAS["dnd5.5e:damaged"].parse(event.payload);
+      return {
+        actor: name(data.actor),
+        label: "Damage taken",
+        math: `${String(data.amount)} ${data.type}${data.critical ? ", critical hit" : ""}`,
+        success: null,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 function describe(
   event: SystemEvent,
   rawState: unknown,
   access: ContentAccess,
 ): string | null {
-  const state = StateSchema.parse(rawState);
+  const state = parseState(rawState);
   const name = (id: string): string => state.actors[id]?.name ?? id;
   if (!("payload" in event)) {
     switch (event.kind) {
@@ -880,6 +982,10 @@ function describe(
       const scroll = item?.type === "magicItem" && item.category === "scroll";
       return `${name(data.actor)} uses ${nameOf(access, data.item)}${scroll ? ", and it crumbles to dust" : ""}.`;
     }
+    case "dnd5.5e:traded": {
+      const data = EVENT_SCHEMAS["dnd5.5e:traded"].parse(payload);
+      return `${name(data.actor)} ${data.bought ? "buys" : "sells"} ${nameOf(access, data.item)} for ${coins(data.priceCp / 100)}.`;
+    }
     case "dnd5.5e:gearChanged": {
       const data = EVENT_SCHEMAS["dnd5.5e:gearChanged"].parse(payload);
       return `${name(data.actor)} changes gear.`;
@@ -898,18 +1004,19 @@ function card(decision: Decision, rawState: unknown, access: ContentAccess) {
         title: "Found",
         icon: "\u{1FA99}",
         lines: foundText(found.data, access),
-        footer: `Purse: ${String(StateSchema.parse(rawState).gold ?? 0)} gp`,
+        footer: `Purse: ${coins(parseState(rawState).gold ?? 0)}`,
       }
     : null;
 }
 
 function playerDied(rawState: unknown): boolean {
-  const player = StateSchema.parse(rawState).actors[PLAYER_ACTOR];
+  const player = parseState(rawState).actors[PLAYER_ACTOR];
   return player !== undefined && isDead(player);
 }
 
 export const dndUi = {
   cue: dndCue,
+  roll,
   systemId: "dnd5.5e",
   about: "Compatible with fifth edition.",
   sheets,
@@ -918,5 +1025,6 @@ export const dndUi = {
   actorOf,
   optionGroups,
   card,
+  shop,
   playerDied,
 };

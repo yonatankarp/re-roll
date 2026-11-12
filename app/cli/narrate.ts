@@ -5,6 +5,12 @@ import { parse, stringify } from "yaml";
 import { scanPlugins } from "../../engine/kernel/loader.ts";
 import { createNodeStorage } from "../../engine/platform/node/storage.ts";
 import {
+  KOKORO_FILES,
+  KOKORO_PATH_TEMPLATE,
+  kokoroFetch,
+  sha256,
+} from "../../engine/shell/kokoro-files.ts";
+import {
   DEFAULT_VOICE,
   EMPTY_INDEX,
   KOKORO_MODEL,
@@ -13,6 +19,7 @@ import {
   NARRATOR_VOICES,
   type NarrationClip,
   type NarrationIndex,
+  NarrationIndexSchema,
   narratedTexts,
   planNarration,
 } from "../../engine/story/narration.ts";
@@ -25,7 +32,7 @@ import {
 // Reads each scene aloud once with Kokoro-82M and keeps the clips beside the adventure:
 //   npm run narrate -- <adventure> [--voice=af_heart]
 // Unchanged text is skipped; changed text is read again and its old clip removed.
-// Only for adventures under private/, since the clips are made from book text. Needs ffmpeg.
+// Only for adventures under books/, since the clips are made from book text. Needs ffmpeg.
 
 // Kokoro's phonemiser rethrows uncaught errors with its whole source, so say what went wrong plainly.
 function fail(message: string): never {
@@ -57,7 +64,7 @@ const catalog = await scanPlugins(
   PLUGIN_ROOTS,
 );
 const root = catalog.plugins.get(adventure)?.root;
-if (!root?.startsWith("private/")) {
+if (!root?.startsWith("books/")) {
   fail(
     `${adventure} isn't a private adventure here; shipped ones are read aloud in the app`,
   );
@@ -68,11 +75,18 @@ const { registry } = await loadAdventure(adventure);
 const story = registry.adventure(adventure);
 if (!story) fail(`${adventure} has no scenes`);
 
-let index: NarrationIndex = EMPTY_INDEX;
+let saved: string | null = null;
 try {
-  index = parse(await readFile(indexPath, "utf8")) as NarrationIndex;
+  saved = await readFile(indexPath, "utf8");
 } catch {
   // No index yet, so every clip is made.
+}
+let index: NarrationIndex = EMPTY_INDEX;
+if (saved !== null) {
+  // Stale keys are deleted below, so a key like ../x must never get that far.
+  const checked = NarrationIndexSchema.safeParse(parse(saved));
+  if (!checked.success) fail(`${indexPath} isn't a valid narration index`);
+  index = checked.data;
 }
 const sizes = new Map<string, number>();
 for (const file of Object.keys(index.clips)) {
@@ -128,6 +142,20 @@ for (const file of plan.stale) {
 if (plan.make.length > 0) {
   let started = performance.now();
   const { KokoroTTS, TextSplitterStream } = await import("kokoro-js");
+  // From a pinned commit, each file checked against its hash (engine/shell/kokoro-files.ts).
+  const { env: hub } = await import("@huggingface/transformers");
+  hub.remotePathTemplate = KOKORO_PATH_TEMPLATE;
+  hub.allowLocalModels = false; // its local folder would be read without a check
+  globalThis.fetch = kokoroFetch(globalThis.fetch);
+  // Node's file cache ignores the commit, so a copy cached before is checked here instead.
+  for (const [file, hash] of Object.entries(KOKORO_FILES)) {
+    const cached = join(hub.cacheDir, KOKORO_MODEL, file);
+    const bytes = await readFile(cached).catch(() => null);
+    if (bytes && (await sha256(new Uint8Array(bytes).buffer)) !== hash) {
+      console.log(`Dropping ${cached}, which doesn't match its pinned hash`);
+      await rm(cached);
+    }
+  }
   const tts = await KokoroTTS.from_pretrained(KOKORO_MODEL, {
     dtype: "q8",
     device: "cpu",

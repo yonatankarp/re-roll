@@ -168,10 +168,12 @@ function recovered(
   for (const { id, recharge } of stats.resourceDefs) {
     for (const { on, amount } of recharge) {
       // shortcut: there's no clock, so dawn comes with a Long Rest.
+      // A once-a-turn use left spent when a fight ended comes back with any rest.
       const applies =
-        rest === "short"
+        on === "turnStart" ||
+        (rest === "short"
           ? on === "shortRest"
-          : on === "longRest" || on === "dawn";
+          : on === "longRest" || on === "dawn");
       if (applies) {
         left.set(id, amount === "all" ? 0 : (left.get(id) ?? 0) - amount);
       }

@@ -1,6 +1,7 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  type SaveStore,
   contentImageUrl,
   createContentReader,
   withSaves,
@@ -22,6 +23,32 @@ const FONT_CREDIT =
   "Solbera's recreations of the fifth edition fonts, with fixes by Ryrok, Ners and LUCASTUCIOUS, " +
   "from github.com/jonathonf/solbera-dnd-fonts, under the Creative Commons Attribution-ShareAlike 4.0 licence.";
 
+// Reading localStorage throws where site storage is blocked, and then saves last only while the page is open.
+function browserSaves(): SaveStore {
+  try {
+    // Firefox with storage turned off gives null instead of throwing.
+    const store = window.localStorage as SaveStore | null;
+    if (store) return store;
+    throw new Error("localStorage is null");
+  } catch (error) {
+    console.warn("Site storage is blocked, so saves won't be kept", error);
+    const items = new Map<string, string>();
+    return {
+      get length() {
+        return items.size;
+      },
+      key: (index) => [...items.keys()][index] ?? null,
+      getItem: (key) => items.get(key) ?? null,
+      setItem: (key, value) => {
+        items.set(key, value);
+      },
+      removeItem: (key) => {
+        items.delete(key);
+      },
+    };
+  }
+}
+
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("The page has no #app element");
 
@@ -30,9 +57,9 @@ mountShell(
   createGame({
     storage: withSaves(
       isTauri() ? createTauriReader() : createContentReader(),
-      localStorage,
+      browserSaves(),
     ),
-    roots: ["plugins", "private"],
+    roots: ["plugins", "books"],
     systems,
     uis: [dndUi],
     imageUrl: isTauri() ? tauriImageUrl : contentImageUrl,

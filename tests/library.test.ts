@@ -268,7 +268,7 @@ describe("imported tables in a plugin", () => {
         requires: [{ plugin: "srd52", version: "^1" }],
       });
     }
-    const report = await checkPlugins(storage, ["plugins", "private"], systems);
+    const report = await checkPlugins(storage, ["plugins", "books"], systems);
     expect(report.issues).toEqual([]);
     expect(report.checked).toContain("tome");
   });

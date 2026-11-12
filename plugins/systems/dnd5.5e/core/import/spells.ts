@@ -298,6 +298,8 @@ export function spellTextFromHtml(html: string): string {
 const EncodedSchema = z.strictObject({
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
+  upcast: SpellSchema.shape.upcast,
+  cantrip: SpellSchema.shape.cantrip,
 });
 type Encoded = z.infer<typeof EncodedSchema>;
 
@@ -706,6 +708,15 @@ export const spellImportKind: ImportKind = {
       notes.push("mechanics dropped: casting time isn't supported yet");
     }
 
+    // Scaling comes with the mechanics it scales, from the reviewed spell or else from the encoding.
+    const scaling = reviewed?.activation
+      ? reviewed
+      : activation
+        ? encoded
+        : null;
+    const upcast = scaling?.upcast ?? reviewed?.upcast;
+    const cantrip = scaling?.cantrip ?? reviewed?.cantrip;
+
     return {
       notes,
       entry: {
@@ -722,7 +733,8 @@ export const spellImportKind: ImportKind = {
         text: facts.description || facts.name,
         automation,
         ...(activation ? { activation } : {}),
-        ...(reviewed?.upcast ? { upcast: reviewed.upcast } : {}),
+        ...(upcast ? { upcast } : {}),
+        ...(cantrip ? { cantrip } : {}),
       },
     };
   },

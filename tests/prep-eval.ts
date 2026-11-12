@@ -31,7 +31,9 @@ interface RunOutcome {
 
 const storage = await createNodeStorage(process.cwd());
 const catalog = await scanPlugins(storage, ["tests/fixtures"]);
-const client = createLlamaClient(SERVER);
+const client = createLlamaClient(SERVER, {
+  allowRemote: process.argv.includes("--allow-remote"),
+});
 
 async function evaluate(name: string): Promise<RunOutcome> {
   const text = await readFile(`tests/fixtures/prep/${name}.yaml`, "utf8");

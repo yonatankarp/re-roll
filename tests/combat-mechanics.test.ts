@@ -51,6 +51,7 @@ import {
   applyDndEvent,
   dndEvent,
   freshActor,
+  hasCondition,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import {
   damageResponses,
@@ -569,6 +570,341 @@ describe("several projectiles", () => {
   });
 });
 
+describe("choosing targets and aiming areas", () => {
+  const at = (who: Actor, x: number, y: number): Actor => ({
+    ...who,
+    position: { x, y },
+  });
+  const onGrid = (...actors: readonly Actor[]): DndState => {
+    const state = fight(...actors);
+    if (!state.combat) throw new Error("No fight");
+    return {
+      ...state,
+      combat: { ...state.combat, grid: { width: 12, height: 12 } },
+    };
+  };
+  // Answers each follow-up in turn from a list, as a player clicking would.
+  const answers =
+    (...list: string[]) =>
+    (decision: Decision): string => {
+      const next = list.shift();
+      if (next === undefined)
+        throw new Error(`Nothing left for ${decision.id}`);
+      if (!decision.options.some((option) => option.id === next)) {
+        throw new Error(`${next} isn't offered at ${decision.id}`);
+      }
+      return next;
+    };
+  const blessedIn = (events: readonly SystemEvent[]): string[] => [
+    ...new Set(
+      events.flatMap((event) =>
+        event.kind === `${NS}:effectAdded` && "payload" in event
+          ? [String(event.payload.actor)]
+          : [],
+      ),
+    ),
+  ];
+  const bless = `spell:${spell("bless")}`;
+  const missile = `spell:${spell("magic-missile")}`;
+  const hold = `spell:${spell("hold-person")}`;
+  const fireball = `spell:${spell("fireball")}`;
+
+  it("lets Bless pick 2 of 3 allies, take one back, and cast", async () => {
+    const run = arenaRun(await base(), {});
+    const state = fight(
+      hero(run, { spells: ["bless"] }),
+      hero(run, { id: "b" }),
+      hero(run, { id: "c" }),
+      monster("x"),
+    );
+    const ids = nextDndDecision(state, run)?.options.map((item) => item.id);
+    expect(ids).toContain(`${bless}|pick`);
+    expect(ids).not.toContain(`${bless}|all`);
+    const cast = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `${bless}|pick`)],
+      LOW,
+      answers("+b", "+c", "-c", `+${PLAYER_ACTOR}`, "cast"),
+    );
+    expect(blessedIn(cast.events).sort()).toEqual([PLAYER_ACTOR, "b"].sort());
+    const last = cast.decisions.at(-1);
+    expect(last?.options.find((item) => item.id === "cast")?.label).toBe(
+      "Cast Bless (2 of 3)",
+    );
+    expect(actor(cast.state, PLAYER_ACTOR).resourcesSpent).toEqual({
+      "slot:1": 1,
+    });
+  });
+
+  it("spends nothing when the caster goes back", async () => {
+    const run = arenaRun(await base(), {});
+    const state = fight(hero(run, { spells: ["bless"] }), monster("x"));
+    const backed = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `${bless}|pick`)],
+      LOW,
+      answers(`+${PLAYER_ACTOR}`, "back"),
+    );
+    expect(backed.events).toEqual([]);
+  });
+
+  it("splits Magic Missile's darts, with repeats, and casts only once all are aimed", async () => {
+    const run = arenaRun(await base(), {});
+    const state = fight(
+      hero(run, { spells: ["magic-missile"] }),
+      monster("a"),
+      monster("b"),
+    );
+    const cast = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `${missile}|pick`)],
+      LOW,
+      answers("+a", "+a", "+b", "cast"),
+    );
+    expect(
+      cast.decisions
+        .slice(0, 3)
+        .some((item) => item.options.some((o) => o.id === "cast")),
+    ).toBe(false);
+    expect(damageOf(cast.events, "a")).toEqual([2, 2]);
+    expect(damageOf(cast.events, "b")).toEqual([2]);
+  });
+
+  it("aims Eldritch Blast's beams at different foes once it has two", async () => {
+    const run = arenaRun(await base(), {});
+    const blast = `spell:${spell("eldritch-blast")}`;
+    const state = fight(
+      hero(run, { spells: ["eldritch-blast"], level: 5 }),
+      monster("a"),
+      monster("b"),
+    );
+    const ids = nextDndDecision(state, run)?.options.map((item) => item.id);
+    expect(ids).toContain(`${blast}|pick`);
+    const cast = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `${blast}|pick`)],
+      HIGH,
+      answers("+a", "+b", "cast"),
+    );
+    expect(damageOf(cast.events, "a")).toHaveLength(1);
+    expect(damageOf(cast.events, "b")).toHaveLength(1);
+  });
+
+  it("lets Hold Person cast at level 3 pick two creatures", async () => {
+    const run = arenaRun(await base(), {});
+    const state = fight(
+      hero(run, { spells: ["hold-person"], level: 3 }),
+      monster("a"),
+      monster("b"),
+      monster("c"),
+    );
+    const ids = nextDndDecision(state, run)?.options.map((item) => item.id);
+    expect(ids).toContain(`${hold}|a`);
+    expect(ids).toContain(`${hold}|pick|3`);
+    expect(ids).not.toContain(`${hold}|a|3`);
+    const cast = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `${hold}|pick|3`)],
+      LOW,
+      answers("+a", "+c", "cast"),
+    );
+    expect(hasCondition(actor(cast.state, "a"), "paralyzed")).toBe(true);
+    expect(hasCondition(actor(cast.state, "b"), "paralyzed")).toBe(false);
+    expect(hasCondition(actor(cast.state, "c"), "paralyzed")).toBe(true);
+  });
+
+  it("aims Fireball at an empty square, and burns an ally and the caster caught in it", async () => {
+    const run = arenaRun(await base(), {});
+    const state = onGrid(
+      at(hero(run, { spells: ["fireball"] }), 0, 0),
+      at(hero(run, { id: "ally" }), 4, 4),
+      at(monster("a"), 8, 8),
+      at(monster("b"), 11, 11),
+    );
+    const cast = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `${fireball}|aim`)],
+      LOW,
+      answers("8,4"),
+    );
+    const [aim] = cast.decisions;
+    expect(aim?.options.find((o) => o.id === "8,4")?.label).toBe(
+      "I5: catches a, and also Hero",
+    );
+    expect(aim?.options.find((o) => o.id === "2,2")?.label).toBe(
+      "C3: catches only your side: Hero and you",
+    );
+    // Best for the caster first: both foes and nobody of theirs.
+    expect(aim?.options[0]?.label).toMatch(/: catches a and b$/);
+    expect(damageOf(cast.events, "a")).toHaveLength(1);
+    expect(damageOf(cast.events, "ally")).toHaveLength(1);
+    expect(damageOf(cast.events, "b")).toEqual([]);
+    expect(damageOf(cast.events, PLAYER_ACTOR)).toEqual([]);
+  });
+
+  it("aims Burning Hands in one of 8 directions", async () => {
+    const run = arenaRun(await base(), {});
+    const state = onGrid(
+      at(hero(run, { spells: ["burning-hands"] }), 5, 5),
+      at(monster("a"), 6, 5),
+      at(monster("b"), 7, 5),
+      at(monster("c"), 5, 7),
+    );
+    const cast = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `spell:${spell("burning-hands")}|aim`)],
+      LOW,
+      answers("6,5"),
+    );
+    const labels = cast.decisions[0]?.options.map((o) => o.label) ?? [];
+    expect(labels).toHaveLength(9);
+    expect(labels).toContain("East: catches a and b");
+    expect(labels).toContain("South: catches c");
+    expect(damageOf(cast.events, "a")).toHaveLength(1);
+    expect(damageOf(cast.events, "b")).toHaveLength(1);
+    expect(damageOf(cast.events, "c")).toEqual([]);
+  });
+
+  it("has the AI aim clear of its allies, and skip an area that would mostly hurt its own side", async () => {
+    const run = arenaRun(await base(), {});
+    const policy = (state: DndState) => (decision: Decision) =>
+      choosePolicy(decision, contextOf(run, state, LOW));
+    const crowd = onGrid(
+      at(hero(run, { spells: ["fireball"] }), 0, 0),
+      at(hero(run, { id: "ally" }), 5, 5),
+      at(monster("a"), 9, 9),
+      at(monster("b"), 10, 10),
+      at(monster("c"), 6, 6),
+    );
+    const aimed = settle(
+      run,
+      crowd,
+      [act(PLAYER_ACTOR, `${fireball}|aim`)],
+      LOW,
+      policy(crowd),
+    );
+    expect(damageOf(aimed.events, "ally")).toEqual([]);
+    expect(damageOf(aimed.events, "a")).toHaveLength(1);
+    expect(damageOf(aimed.events, "b")).toHaveLength(1);
+
+    // Every square that would catch this foe also catches an ally beside it.
+    const close = onGrid(
+      at(hero(run, { spells: ["fireball"] }), 0, 0),
+      at(hero(run, { id: "left" }), 5, 6),
+      at(monster("a"), 6, 6),
+      at(hero(run, { id: "right" }), 7, 6),
+    );
+    const turn = nextDndDecision(close, run);
+    if (!turn) throw new Error("No turn");
+    expect(turn.options.map((o) => o.id)).toContain(`${fireball}|aim`);
+    expect(choosePolicy(turn, contextOf(run, close, LOW))).not.toContain(
+      fireball,
+    );
+  });
+
+  it("has the AI bless its allies and pile darts on whoever they can drop", async () => {
+    const run = arenaRun(await base(), {});
+    const party = fight(
+      hero(run, { spells: ["bless"] }),
+      hero(run, { id: "b" }),
+      monster("x"),
+    );
+    const blessed = settle(
+      run,
+      party,
+      [act(PLAYER_ACTOR, `${bless}|pick`)],
+      LOW,
+      (decision) => choosePolicy(decision, contextOf(run, party, LOW)),
+    );
+    expect(blessedIn(blessed.events).sort()).toEqual(
+      [PLAYER_ACTOR, "b"].sort(),
+    );
+
+    const foes = fight(
+      hero(run, { spells: ["magic-missile"] }),
+      monster("big"),
+      monster("small", "srd52:monster/dummy", 3),
+    );
+    const darts = settle(
+      run,
+      foes,
+      [act(PLAYER_ACTOR, `${missile}|pick`)],
+      LOW,
+      (decision) => choosePolicy(decision, contextOf(run, foes, LOW)),
+    );
+    expect(damageOf(darts.events, "small")).toEqual([2]);
+    expect(damageOf(darts.events, "big")).toEqual([2, 2]);
+  });
+
+  it("replays a save with chosen targets and an aimed Fireball exactly", async () => {
+    const plain = await base();
+    const pregen = PregenSchema.parse(plain.content("srd52:pregen/wizard"));
+    const [first] = pregen.build.levels;
+    if (!first) throw new Error("The pregen has no levels");
+    const run = arenaRun(plain, {
+      "srd52:pregen/wizard": {
+        ...pregen,
+        build: {
+          ...pregen.build,
+          levels: [
+            {
+              ...first,
+              answers: [
+                ...first.answers,
+                { kind: "spells", values: [spell("bless"), spell("fireball")] },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const seed = "targets";
+    let { state, pending } = startRun(run, seed);
+    const inputs: Input[] = [{ kind: "start" }];
+    const done = { bless: false, fireball: false, aimedAt: "" };
+    for (let count = 0; pending && count < 400; count += 1) {
+      const { id, options, actor: who } = pending;
+      const has = (option: string) => options.some((o) => o.id === option);
+      let chosen = options[0]?.id ?? "";
+      if (has("srd52:pregen/wizard")) chosen = "srd52:pregen/wizard";
+      else if (who === PLAYER_ACTOR && !done.bless && has(`${bless}|pick`)) {
+        chosen = `${bless}|pick`;
+      } else if (id.startsWith(`${NS}:targets:`)) {
+        chosen = options.find((o) => o.id.startsWith("+"))?.id ?? "cast";
+        if (chosen === "cast") done.bless = true;
+      } else if (
+        who === PLAYER_ACTOR &&
+        !done.fireball &&
+        has(`${fireball}|aim`)
+      ) {
+        chosen = `${fireball}|aim`;
+      } else if (id.startsWith(`${NS}:aim:`)) {
+        // Any square at all, not only one with a creature in it.
+        chosen =
+          options.find((o) => o.label.endsWith("catches nobody"))?.id ?? "";
+        done.fireball = true;
+        done.aimedAt = chosen;
+      }
+      const input: Input = { kind: "answer", decisionId: id, optionId: chosen };
+      const outcome = step(run, state, input);
+      if (!outcome.ok) throw new Error(outcome.error);
+      ({ state, pending } = outcome);
+      inputs.push(input);
+      if (done.bless && done.fireball) break;
+    }
+    expect(done).toMatchObject({ bless: true, fireball: true });
+    expect(done.aimedAt).toMatch(/^\d+,\d+$/);
+    expect(replayInputs(run, seed, inputs).state).toStrictEqual(state);
+  });
+});
+
 describe("extra damage riders", () => {
   const sword = "weapon:srd52:item/longsword";
   const hit = (
@@ -1034,6 +1370,83 @@ describe("monster traits", () => {
     };
     expect(d20sFor(dragon, "monster:0|w")).toBe(1);
   });
+
+  it("keeps a condition off a creature immune to it", async () => {
+    const shove = {
+      name: "Shove",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "weapon", flatBonus: 4 },
+          damage: [{ amount: { dice: "1d4" }, type: "bludgeoning" }],
+          onHit: [
+            {
+              kind: "applyCondition",
+              condition: "prone",
+              duration: { minutes: 1 },
+            },
+          ],
+        },
+      },
+    };
+    const run = arenaRun(await base(), {
+      ...trait("conditionImmunity", {
+        passives: [{ kind: "conditionImmunity", condition: "prone" }],
+      }),
+      "srd52:monster/bully": dummy("srd52:monster/bully", {
+        actions: [shove],
+      }),
+    });
+    const bully = {
+      ...monster("b", "srd52:monster/bully"),
+      side: "party" as const,
+    };
+    const hit = (target: Actor) =>
+      settle(
+        run,
+        fight(bully, target, hero(run)),
+        [
+          {
+            kind: `${NS}:applyHit`,
+            payload: {
+              attacker: "b",
+              actionId: "monster:0",
+              target: target.id,
+              critical: false,
+              hadAdvantage: false,
+              total: 30,
+              natural: 15,
+            },
+          },
+        ],
+        LOW,
+      );
+    expect(
+      hasCondition(actor(hit(monster("w", WOLF)).state, "w"), "prone"),
+    ).toBe(false);
+    expect(hasCondition(actor(hit(monster("o")).state, "o"), "prone")).toBe(
+      true,
+    );
+  });
+
+  it("has Regeneration heal at the start of the creature's turn, up to its maximum", async () => {
+    const run = arenaRun(
+      await base(),
+      trait("regeneration", {
+        passives: [{ kind: "regeneration", hp: 15, stoppedBy: ["fire"] }],
+      }),
+    );
+    const turn = (hp: number) =>
+      actor(
+        settle(run, fight(hero(run), monster("t", WOLF, hp)), [endTurn], LOW)
+          .state,
+        "t",
+      ).hp;
+    expect(turn(400)).toBe(415);
+    expect(turn(495)).toBe(500);
+  });
 });
 
 describe("monster Multiattack routines and area choices", () => {
@@ -1119,6 +1532,16 @@ describe("monster Multiattack routines and area choices", () => {
     expect(await routineOf(names, 2, either, 1)).toEqual([
       "Longbow",
       "Longbow",
+    ]);
+  });
+
+  it("has the ranged copy of a Melee or Ranged attack follow the melee routine", async () => {
+    const sentence = "The beast makes two Spear attacks.";
+    const names = ["Spear", "Spear (ranged)"];
+    expect(await routineOf(names, 2, sentence, 0)).toEqual(["Spear", "Spear"]);
+    expect(await routineOf(names, 2, sentence, 1)).toEqual([
+      "Spear (ranged)",
+      "Spear (ranged)",
     ]);
   });
 
@@ -2146,29 +2569,35 @@ describe("the 5-foot grid", () => {
       at(monster("b"), 7, 7),
       at(monster("c"), 11, 0),
     );
-    const cast = `spell:${spell("fireball")}|@a`;
+    const cast = `spell:${spell("fireball")}|aim`;
     expect(
-      nextDndDecision(state, run)?.options.find((item) => item.id === cast)
-        ?.label,
-    ).toContain("catches 2");
-    const burned = settle(run, state, [act(PLAYER_ACTOR, cast)], LOW);
+      nextDndDecision(state, run)?.options.map((item) => item.id),
+    ).toContain(cast);
+    const burned = settle(run, state, [act(PLAYER_ACTOR, cast)], LOW, (d) =>
+      d.id.startsWith(`${NS}:aim:`) ? "6,6" : (d.options[0]?.id ?? ""),
+    );
+    expect(
+      burned.decisions[0]?.options.find((o) => o.id === "6,6")?.label,
+    ).toBe("G7: catches a and b");
     expect(damageOf(burned.events, "a").length).toBe(1);
     expect(damageOf(burned.events, "b").length).toBe(1);
     expect(damageOf(burned.events, "c")).toEqual([]);
   });
 
-  it("tells the board which squares a Fireball would cover", async () => {
+  it("tells the board each area's shape, so it can outline where it lands", async () => {
     const run = arenaRun(await base(), {});
     const state = onGrid(
       at(hero(run, { spells: ["fireball"] }), 0, 0),
       at(monster("a"), 6, 6),
     );
-    const board = dndUi.combat(state, run)?.board;
-    const squares = board?.areas[`spell:${spell("fireball")}|@a`];
-    expect(squares).toContainEqual([6, 6]);
-    expect(squares).toContainEqual([10, 10]);
-    expect(squares).not.toContainEqual([11, 11]);
-    expect(squares).not.toContainEqual([0, 0]);
+    const board = dndUi.combat(state, run)?.board as {
+      shapes: Record<string, unknown>;
+    };
+    expect(board.shapes[`spell:${spell("fireball")}`]).toEqual({
+      area: { shape: "sphere", radius: 20 },
+      range: 150,
+      side: "enemy",
+    });
   });
 
   it("warns the board which moves give an Opportunity Attack, with the route", async () => {

@@ -152,7 +152,7 @@ describe("subclasses printed alone in a book", () => {
     expect(summary).toMatchObject({ written: 2, invalid: [] });
     expect(
       await storage.read(
-        "private/import/my-book/subclasses/monk-lantern-mage.yaml",
+        "books/import/my-book/subclasses/monk-lantern-mage.yaml",
       ),
     ).toContain("class: phb:class/monk");
   });

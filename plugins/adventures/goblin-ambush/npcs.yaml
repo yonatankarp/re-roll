@@ -5,3 +5,8 @@
   attitude: 0
   knows: [goblin-pact]
   statsId: "srd52:monster/commoner"
+- id: peddler
+  name: Tam the Peddler
+  pronouns: they/them
+  motive: Sell enough on the road to winter somewhere warm.
+  attitude: 0

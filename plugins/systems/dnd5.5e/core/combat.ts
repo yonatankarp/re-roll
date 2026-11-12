@@ -22,6 +22,17 @@ import {
   squareKey,
   wallKeys,
 } from "./grid.ts";
+import {
+  FLEE,
+  betweenTurns,
+  bossAction,
+  chooseBossAction,
+  conditionsApplied,
+  fleeOptions,
+  lairTurns,
+  legendaryResistance,
+  runFlee,
+} from "./legendary.ts";
 import { concentrationDc, finalDamage, halved, rollD20 } from "./rules.ts";
 import type {
   Ability,
@@ -44,6 +55,26 @@ import {
   terrainOf,
 } from "./sight.ts";
 import {
+  criticalFrom,
+  offerInspiration,
+  onceEnded,
+  turnRecharge,
+} from "./class-rules.ts";
+import {
+  ADD,
+  AIM_AREA,
+  BACK,
+  CONFIRM,
+  PICK,
+  aimScore,
+  aimSquares,
+  caughtBy,
+  describeCaught,
+  directionName,
+  nextPick,
+  pickOptions,
+} from "./targeting.ts";
+import {
   type Actor,
   type DndState,
   NS,
@@ -62,6 +93,7 @@ import {
   damageResponses,
   deriveStats,
   evaluateFormula,
+  immuneToCondition,
   lookup,
   modifierFor,
   passiveModifiers,
@@ -75,16 +107,15 @@ export type Context = SystemContext<DndState>;
 
 export const PASS = "pass";
 export const CREATE_CHARACTER = "create";
-const FLEE = "flee";
 export const HIT_DICE = "hitDice";
 const DEATH_SAVE = "deathSave";
 const SEPARATOR = "|";
-const ALL = "all"; // an area takes everyone, and projectiles go for the lowest HP
+export const ALL = "all"; // an area takes everyone, and projectiles go for the lowest HP
 const DECLINE = "decline";
 export const MOVE = "move";
 const STAY = "stay";
 const ITEM_PREFIX = "item:"; // an action that uses up the item, such as a potion
-const AIM = "@"; // an area aimed at a creature: "@" and its id
+export const AIM = "@"; // an area aimed at a square ("@x,y") or a creature ("@" and its id)
 
 function actorOf(state: DndState, id: string): Actor {
   const actor = state.actors[id];
@@ -99,7 +130,7 @@ function frame(
   return { kind: `${NS}:${kind}`, payload };
 }
 
-const CHECK_END = frame("checkCombatEnd", {});
+export const CHECK_END = frame("checkCombatEnd", {});
 
 function hasFlag(
   actor: Actor,
@@ -158,7 +189,7 @@ function allies(state: DndState, actor: Actor): readonly Actor[] {
     : [];
 }
 
-function enemies(state: DndState, actor: Actor): readonly Actor[] {
+export function enemies(state: DndState, actor: Actor): readonly Actor[] {
   return state.combat
     ? state.combat.order.flatMap((id) => {
         const other = actorOf(state, id);
@@ -178,7 +209,11 @@ function meleeReach(action: KnownAction): number | null {
 
 // Whether an action can reach this creature from where the actor stands. For an area, the creature is
 // what it's aimed at: a sphere's centre must be in range, and a cone or line must reach it.
-function reaches(action: KnownAction, actor: Actor, target: Actor): boolean {
+export function reaches(
+  action: KnownAction,
+  actor: Actor,
+  target: Actor,
+): boolean {
   const { targeting } = action.activation;
   if ("self" in targeting) return true;
   const distance = distanceFeet(actor.position, target.position);
@@ -318,6 +353,39 @@ export function canAfford(
   });
 }
 
+// The creatures an action can be aimed at from where the actor stands.
+function inReach(
+  action: KnownAction,
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+): readonly Actor[] {
+  const { targeting } = action.activation;
+  if ("self" in targeting) return [actor];
+  const charmers = charmersOf(actor);
+  return (
+    targeting.side === "enemy"
+      ? enemies(state, actor).filter(
+          (item) => !isDown(item) && !charmers.has(item.id),
+        )
+      : allies(state, actor)
+  )
+    .filter((item) => !isDead(item))
+    .filter((item) => fitsType(item, targeting, access))
+    .filter((item) => reaches(action, actor, item))
+    .filter((item) => !behindTotalCover(state, actor, item));
+}
+
+// How many creatures, darts or rays an action takes when cast with this slot.
+function targetCount(action: KnownAction, slot: number | undefined): number {
+  const above = (slot ?? 0) - (action.spellLevel ?? 0);
+  const activation = action.upcast
+    ? scaleActivation(action.activation, action.upcast.perSlotLevel, above)
+    : action.activation;
+  const { projectiles, targeting } = activation;
+  return projectiles ?? ("creatures" in targeting ? targeting.creatures : 1);
+}
+
 function turnOptions(
   actor: Actor,
   state: DndState,
@@ -328,10 +396,6 @@ function turnOptions(
   }
   const stats = deriveStats(actor, access);
   const options: { id: string; label: string }[] = [];
-  const charmers = charmersOf(actor);
-  const living = (list: readonly Actor[]): readonly Actor[] =>
-    list.filter((item) => !isDead(item));
-
   for (const action of stats.actions) {
     const { activation } = action;
     if (activation.trigger || !canAfford(action, actor, stats)) continue;
@@ -343,45 +407,47 @@ function turnOptions(
       add(actor.id, action.name);
       continue;
     }
-    const candidates = living(
-      targeting.side === "enemy"
-        ? enemies(state, actor).filter(
-            (item) => !isDown(item) && !charmers.has(item.id),
-          )
-        : allies(state, actor),
-    )
-      .filter((item) => fitsType(item, targeting, access))
-      .filter((item) => reaches(action, actor, item))
-      .filter((item) => !behindTotalCover(state, actor, item));
+    const candidates = inReach(action, actor, state, access);
     if (candidates.length === 0) continue;
-    const aimed =
-      "area" in targeting &&
-      targeting.area.shape !== "emanation" &&
-      actor.position !== null;
-    if (aimed) {
-      for (const target of candidates) {
-        const caught = resolveTargets(`${AIM}${target.id}`, action, actor, {
-          state,
-          content: access.content,
-          contentIds: access.contentIds,
-        }).length;
-        add(
-          `${AIM}${target.id}`,
-          `${action.name} at ${target.name} (catches ${String(caught)})`,
-        );
+    if ("area" in targeting) {
+      // On a grid an area is aimed at a square after it's chosen; without one it takes the whole side.
+      const aimed =
+        targeting.area.shape !== "emanation" && actor.position !== null;
+      add(
+        aimed ? AIM_AREA : ALL,
+        aimed ? `${action.name}: aim it` : action.name,
+      );
+      continue;
+    }
+    // Each slot can give a different number of targets: one is a click on a creature, more are chosen one by one.
+    // Darts or rays can also all go at one creature, or at the lowest HP first.
+    const repeats = activation.projectiles !== undefined;
+    const base = slotToSpend(action, actor, stats) ?? undefined;
+    for (const slot of [undefined, ...upcastSlots(action, actor, stats)]) {
+      const count = targetCount(action, slot ?? base);
+      const suffix = slot === undefined ? "" : `${SEPARATOR}${String(slot)}`;
+      const note = slot === undefined ? "" : ` (level ${String(slot)} slot)`;
+      const id = (target: string): string =>
+        `${action.id}${SEPARATOR}${target}${suffix}`;
+      if (count === 1 || repeats) {
+        for (const target of candidates) {
+          options.push({
+            id: id(target.id),
+            label: `${action.name}: ${target.name} (${String(target.hp)} HP)${note}`,
+          });
+        }
       }
-    } else if ("area" in targeting || targeting.creatures > 1) {
-      // shortcut: a multi-target spell takes everyone it can reach rather than letting the caster pick.
-      add(ALL, action.name);
-    } else {
-      for (const target of candidates) {
-        add(
-          target.id,
-          `${action.name}: ${target.name} (${String(target.hp)} HP)`,
-        );
+      if (count > 1) {
+        options.push({
+          id: id(PICK),
+          label: `${action.name}: choose ${repeats ? `where ${String(count)} go` : `up to ${String(count)} targets`}${note}`,
+        });
       }
-      if ((activation.projectiles ?? 1) > 1) {
-        add(ALL, `${action.name}: lowest HP first`);
+      if (repeats && count > 1) {
+        options.push({
+          id: id(ALL),
+          label: `${action.name}: lowest HP first${note}`,
+        });
       }
     }
   }
@@ -391,10 +457,7 @@ function turnOptions(
       label: `Move (${String(speedLeft(actor, stats))} ft left)`,
     });
   }
-  // shortcut: fleeing always works and costs nothing, as if the party always found a way off the map.
-  if (actor.id === PLAYER_ACTOR && state.combat?.canFlee) {
-    options.push({ id: FLEE, label: "Flee the fight" });
-  }
+  options.push(...fleeOptions(actor, state, access));
   options.push({ id: PASS, label: "End your turn" });
   return options;
 }
@@ -453,6 +516,8 @@ export function startCombat(
     readonly forPartySize?: number | undefined;
     readonly battlemap?: Battlemap | undefined;
     readonly loot?: Loot | undefined;
+    readonly lair?: boolean | undefined;
+    readonly surprise?: "party" | "enemies" | undefined;
   },
   context: Context,
   { canFlee, defeatContinues }: EncounterOptions,
@@ -483,15 +548,27 @@ export function startCombat(
     }
   }
 
+  // The story's word on surprise, such as from a Stealth check, beats the encounter's own.
+  const surprised = context.state.surprise ?? encounter.surprise;
+  const caught = { party: "party", enemies: "enemy" }[surprised ?? "party"];
   const rolled = [...party, ...monsters].map((actor, position) => ({
     id: actor.id,
     position,
-    total: context.dice.roll(20) + deriveStats(actor, context).initiative,
+    total:
+      (surprised && actor.side === caught
+        ? rollD20(context.dice, { advantage: false, disadvantage: true })
+            .natural
+        : context.dice.roll(20)) + deriveStats(actor, context).initiative,
   }));
   // Ties keep their listed order, so the result is the same on every machine.
-  const order = rolled
-    .sort((a, b) => b.total - a.total || a.position - b.position)
-    .map((item) => item.id);
+  const sorted = rolled.sort(
+    (a, b) => b.total - a.total || a.position - b.position,
+  );
+  const order = sorted.map((item) => item.id);
+  // Lair actions come on initiative count 20 and lose ties, so after everyone who rolled 20 or more.
+  const lair = encounter.lair
+    ? { at: sorted.filter((item) => item.total >= 20).length }
+    : undefined;
   const { battlemap } = encounter;
   const walls = battlemap ? wallKeys(battlemap.walls) : [];
   const terrain = battlemap ? terrainOf(battlemap) : null;
@@ -547,8 +624,26 @@ export function startCombat(
         ...(canFlee ? { canFlee } : {}),
         ...(defeatContinues ? { defeatContinues } : {}),
         ...(encounter.loot ? { loot: encounter.loot } : {}),
+        ...(surprised ? { surprised } : {}),
+        ...(lair ? { lair } : {}),
       }),
     ],
+    // With nobody on 20 or more, the lair acts before anyone.
+    ...(lair?.at === 0
+      ? {
+          frames: lairTurns(
+            {
+              ...context.state,
+              actors: Object.fromEntries(
+                monsters.map((item) => [item.id, item]),
+              ),
+              combat: { encounter: encounter.id, order, index: 0, round: 1 },
+            },
+            "start",
+            context,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -620,15 +715,17 @@ export function damageEvents(
   if (amount <= 0) return [];
   // Damage left over after reaching 0 HP kills a character if it's at least their maximum.
   const remaining = amount - target.tempHp - Math.max(0, target.hp);
-  if (
+  const fortitude =
     target.hp > 0 &&
     remaining >= 0 &&
     !critical &&
     type !== "radiant" &&
-    hasPassive(deriveStats(target, context), "undeadFortitude") &&
-    rollSave(target, "con", 5 + amount, context)
-  ) {
+    hasPassive(deriveStats(target, context), "undeadFortitude")
+      ? rollSave(target, "con", 5 + amount, context)
+      : null;
+  if (fortitude?.saved) {
     return [
+      ...fortitude.events,
       dndEvent(`${NS}:damaged`, {
         actor: target.id,
         amount: amount - remaining - 1,
@@ -641,6 +738,7 @@ export function damageEvents(
   const massive =
     target.side === "party" && remaining >= deriveStats(target, context).maxHp;
   const events: SystemEvent[] = [
+    ...(fortitude?.events ?? []),
     dndEvent(`${NS}:damaged`, {
       actor: target.id,
       amount,
@@ -748,6 +846,8 @@ function leafEvents(
         );
         break;
       case "applyCondition":
+        if (immuneToCondition(deriveStats(target, context), effect.condition))
+          break;
         events.push(
           dndEvent(`${NS}:effectAdded`, {
             actor: target.id,
@@ -795,6 +895,7 @@ function leafEvents(
   return events;
 }
 
+// The saved flag, and the roll for the history. An automatic failure rolls no die, so it has no event.
 function rollSave(
   target: Actor,
   ability: Ability,
@@ -802,12 +903,12 @@ function rollSave(
   context: Context,
   magical = false,
   cover = 0, // half or three-quarters cover adds to Dexterity saves
-): boolean {
+): { readonly saved: boolean; readonly events: SystemEvent[] } {
   if (
     (ability === "str" || ability === "dex") &&
     hasCondition(target, "paralyzed", "petrified", "stunned", "unconscious")
   ) {
-    return false;
+    return { saved: false, events: [] };
   }
   const stats = deriveStats(target, context);
   const roll = rollD20(context.dice, {
@@ -823,10 +924,36 @@ function rollSave(
     saveBonus(stats, ability) +
     rollBonus(target, "saves", context) +
     (ability === "dex" ? cover : 0);
-  return total >= dc;
+  const saved = total >= dc;
+  return {
+    saved,
+    events: [
+      dndEvent(`${NS}:saveRolled`, {
+        actor: target.id,
+        ability,
+        natural: roll.natural,
+        total,
+        dc,
+        success: saved,
+      }),
+    ],
+  };
 }
 
-function resolveTargets(
+// Every creature in the fight an area could catch.
+function areaPool(
+  targeting: Targeting,
+  context: ContentAccess & { readonly state: DndState },
+): readonly Actor[] {
+  return (context.state.combat?.order ?? []).flatMap((id) => {
+    const item = context.state.actors[id];
+    return item && !isDead(item) && fitsType(item, targeting, context)
+      ? [item]
+      : [];
+  });
+}
+
+export function resolveTargets(
   answerTarget: string,
   action: KnownAction,
   actor: Actor,
@@ -840,22 +967,32 @@ function resolveTargets(
   ).filter((item) => !isDead(item) && fitsType(item, targeting, context));
   if ("area" in targeting) {
     const { shape, radius } = targeting.area;
-    const aim = answerTarget.startsWith(AIM)
-      ? state.actors[answerTarget.slice(AIM.length)]
-      : undefined;
-    // shortcut: an area catches only the side it's aimed at, as if every caster placed it with care.
-    // Total cover from where it spreads keeps a creature out of it.
-    const centre =
-      aim && (shape === "sphere" || shape === "cube") ? aim : actor;
-    return side.filter(
-      (item) =>
-        inArea(
-          shape,
-          radius,
-          actor.position,
-          aim?.position ?? actor.position,
-          item.position,
-        ) && !behindTotalCover(state, centre, item),
+    // Aimed at a square ("@x,y") or a creature ("@id"), an area catches everyone in it, the caster's side too.
+    const aimedAt = answerTarget.startsWith(AIM)
+      ? answerTarget.slice(AIM.length)
+      : null;
+    const aim =
+      aimedAt === null
+        ? null
+        : (parseSquare(aimedAt) ?? state.actors[aimedAt]?.position ?? null);
+    if (aim && actor.position) {
+      // Total cover from where it spreads keeps a creature out of it.
+      const centre =
+        shape === "sphere" || shape === "cube" ? aim : actor.position;
+      return caughtBy(
+        targeting,
+        actor,
+        aim,
+        areaPool(targeting, context),
+      ).filter(
+        (item) =>
+          item.id === actor.id ||
+          coverFor(state, centre, item, [actor.id]) !== "total",
+      );
+    }
+    // Round the caster, or with no grid: only the side it's meant for, as if placed with care.
+    return side.filter((item) =>
+      inArea(shape, radius, actor.position, actor.position, item.position),
     );
   }
   const chosen = answerTarget === ALL ? [] : [actorOf(state, answerTarget)];
@@ -879,9 +1016,9 @@ function findAction(
   context: Context,
   slotLevel?: number,
 ): KnownAction {
-  const action = deriveStats(actor, context).actions.find(
-    (item) => item.id === id,
-  );
+  const action =
+    deriveStats(actor, context).actions.find((item) => item.id === id) ??
+    bossAction(actor, id, context);
   if (!action) throw new Error(`${actor.id} has no action ${id}`);
   const above = (slotLevel ?? 0) - (action.spellLevel ?? 0);
   return action.upcast
@@ -921,7 +1058,7 @@ function attackRoutine(
   );
 }
 
-function resolveAction(
+export function resolveAction(
   action: KnownAction,
   actor: Actor,
   targets: readonly Actor[],
@@ -1011,7 +1148,7 @@ function resolveAction(
       const damage = rollSharedDamage(resolution.damage);
       for (const target of targets) {
         // shortcut: cover counts from the caster, even for a sphere whose centre is elsewhere.
-        const saved = rollSave(
+        const { saved: rolledSave, events: saveEvents } = rollSave(
           target,
           resolution.ability,
           dc,
@@ -1021,6 +1158,17 @@ function resolveAction(
             coverFor(context.state, actor.position, target, [actor.id]),
           ),
         );
+        events.push(...saveEvents);
+        const resisted = rolledSave
+          ? null
+          : legendaryResistance(
+              target,
+              conditionsApplied(resolution.onFail),
+              context,
+              events,
+            );
+        if (resisted) events.push(resisted);
+        const saved = rolledSave || resisted !== null;
         applyRolled(target, damage, (amount) => {
           if (!saved) return amount;
           return resolution.onSuccessDamage === "half" ? halved(amount) : 0;
@@ -1111,26 +1259,55 @@ export function runTakeAction(
       ],
     };
   }
-  if (payload.answer === FLEE) return { events: combatEnded(state, "flee") };
+  if (payload.answer === FLEE) return runFlee(actor, context);
 
   const [actionId = "", targetId = "", slot] = payload.answer.split(SEPARATOR);
+  if (targetId === PICK) {
+    return { frames: [pickFrame(actor, actionId, slot, [], context)] };
+  }
+  if (targetId === AIM_AREA) {
+    return { frames: [aimFrame(actor, actionId, slot, context)] };
+  }
+  return castAction(actor, actionId, slot, targetId, context);
+}
+
+// The slot a cast spends: the one chosen, or else the lowest that will do.
+function slotLevelFor(
+  actor: Actor,
+  actionId: string,
+  slot: string | undefined,
+  context: Context,
+): number | undefined {
   const known = findAction(actor, actionId, context);
-  const usesSlot = known.activation.cost.includes("slot");
-  const slotLevel = !usesSlot
-    ? undefined
-    : slot === undefined
-      ? (slotToSpend(known, actor, deriveStats(actor, context)) ?? undefined)
-      : Number(slot);
+  if (!known.activation.cost.includes("slot")) return undefined;
+  return slot === undefined
+    ? (slotToSpend(known, actor, deriveStats(actor, context)) ?? undefined)
+    : Number(slot);
+}
+
+// Pays for an action and resolves it, at a target id (a creature, ALL, or an aim) or at chosen creatures.
+// Darts and rays go one each at the chosen ids, which may repeat.
+function castAction(
+  actor: Actor,
+  actionId: string,
+  slot: string | undefined,
+  target: string | readonly string[],
+  context: Context,
+): SystemResult {
+  const { state } = context;
+  const slotLevel = slotLevelFor(actor, actionId, slot, context);
   const action = findAction(actor, actionId, context, slotLevel);
+  const picked = typeof target === "string" ? null : target;
+  const targetId = typeof target === "string" ? target : ALL;
   const { projectiles, resolution } = action.activation;
   const result: SystemResult =
     projectiles !== undefined && resolution.kind !== "save"
       ? {
-          frames: Array.from({ length: projectiles }, () =>
+          frames: Array.from({ length: projectiles }, (_, index) =>
             frame(resolution.kind === "attack" ? "attackRoll" : "projectile", {
               attacker: actor.id,
               actionId,
-              target: targetId,
+              target: picked?.[index] ?? targetId,
               ...(slotLevel === undefined ? {} : { slotLevel }),
             }),
           ),
@@ -1138,7 +1315,9 @@ export function runTakeAction(
       : resolveAction(
           action,
           actor,
-          resolveTargets(targetId, action, actor, context),
+          picked
+            ? picked.map((id) => actorOf(state, id))
+            : resolveTargets(targetId, action, actor, context),
           context,
           slotLevel,
         );
@@ -1163,6 +1342,146 @@ export function runTakeAction(
     ],
   };
 }
+
+const PickSchema = z.object({
+  actor: z.string(),
+  actionId: z.string(),
+  slot: z.string().optional(),
+  picked: z.array(z.string()),
+  answer: z.string(),
+});
+
+// Asks for the next target, one at a time like a move, so every choice is in the save. Nothing is paid until the cast.
+function pickFrame(
+  actor: Actor,
+  actionId: string,
+  slot: string | undefined,
+  picked: readonly string[],
+  context: Context,
+): Frame {
+  const { state } = context;
+  const action = findAction(actor, actionId, context);
+  const count = targetCount(
+    action,
+    slotLevelFor(actor, actionId, slot, context),
+  );
+  const repeats = action.activation.projectiles !== undefined;
+  return awaitDecision({
+    id: `${NS}:targets:${actor.id}:${String(state.combat?.round ?? 0)}${SEPARATOR}${actionId}${SEPARATOR}${String(count)}${SEPARATOR}${picked.join(",")}`,
+    actor: actor.id,
+    prompt: `${action.name}: choose ${repeats ? `where each of ${String(count)} goes` : `up to ${String(count)} targets`} (${String(picked.length)} of ${String(count)}).`,
+    options: [
+      ...pickOptions(
+        action.name,
+        inReach(action, actor, state, context),
+        picked,
+        count,
+        repeats,
+      ),
+    ],
+    resume: frame("pickTargets", {
+      actor: actor.id,
+      actionId,
+      ...(slot === undefined ? {} : { slot }),
+      picked,
+    }),
+  });
+}
+
+export function runPickTargets(
+  payload: z.infer<typeof PickSchema>,
+  context: Context,
+): SystemResult {
+  const actor = actorOf(context.state, payload.actor);
+  const { actionId, slot, picked, answer } = payload;
+  if (answer === BACK) return {};
+  if (answer === CONFIRM) {
+    return castAction(actor, actionId, slot, picked, context);
+  }
+  const id = answer.slice(1);
+  const at = picked.lastIndexOf(id);
+  const next = answer.startsWith(ADD)
+    ? [...picked, id]
+    : picked.filter((_, index) => index !== at);
+  return { frames: [pickFrame(actor, actionId, slot, next, context)] };
+}
+
+const AimSchema = z.object({
+  actor: z.string(),
+  actionId: z.string(),
+  slot: z.string().optional(),
+  answer: z.string(),
+});
+
+// Asks where an area goes: any square in range, or a direction for one that starts at the caster.
+// Each option names who it would catch, the caster's side too, best first.
+function aimFrame(
+  actor: Actor,
+  actionId: string,
+  slot: string | undefined,
+  context: Context,
+): Frame {
+  const { state } = context;
+  const action = findAction(actor, actionId, context);
+  const { targeting } = action.activation;
+  const byDirection = "range" in targeting && targeting.range === "self";
+  return awaitDecision({
+    id: `${NS}:aim:${actor.id}:${String(state.combat?.round ?? 0)}${SEPARATOR}${actionId}`,
+    actor: actor.id,
+    prompt: `Where does ${actor.name} aim ${action.name}?`,
+    options: [
+      ...aimsFor(action, actor, context).map(({ square, caught }) => ({
+        id: squareKey(square),
+        label: `${byDirection && actor.position ? directionName(actor.position, square) : squareName(square)}: ${describeCaught(actor, caught)}`,
+      })),
+      { id: BACK, label: "Choose something else" },
+    ],
+    resume: frame("aimArea", {
+      actor: actor.id,
+      actionId,
+      ...(slot === undefined ? {} : { slot }),
+    }),
+  });
+}
+
+// Every square an area can be aimed at, with who it catches, the best for its caster first.
+function aimsFor(
+  action: KnownAction,
+  actor: Actor,
+  context: ContentAccess & { readonly state: DndState },
+): readonly {
+  readonly square: Square;
+  readonly caught: readonly Actor[];
+  readonly score: number;
+}[] {
+  const { targeting } = action.activation;
+  const grid = context.state.combat?.grid;
+  if (!("area" in targeting) || !grid || !actor.position) return [];
+  const pool = areaPool(targeting, context);
+  return aimSquares(targeting, actor.position, grid)
+    .map((square) => {
+      const caught = caughtBy(targeting, actor, square, pool);
+      return { square, caught, score: aimScore(targeting, actor, caught) };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+export function runAimArea(
+  payload: z.infer<typeof AimSchema>,
+  context: Context,
+): SystemResult {
+  if (payload.answer === BACK) return {};
+  const actor = actorOf(context.state, payload.actor);
+  return castAction(
+    actor,
+    payload.actionId,
+    payload.slot,
+    `${AIM}${payload.answer}`,
+    context,
+  );
+}
+
+export { AimSchema, PickSchema };
 
 export { TakeActionSchema };
 
@@ -1486,10 +1805,11 @@ export function runAttackRoll(
   const ac =
     targetStats.ac +
     coverBonus(coverFor(state, attacker.position, target, [attacker.id]));
-  const hits = roll.natural === 20 || (roll.natural !== 1 && total >= ac);
+  const critFrom = criticalFrom(stats);
+  const hits = roll.natural >= critFrom || (roll.natural !== 1 && total >= ac);
   // A hit from within 5 feet on a Paralyzed or Unconscious target is a Critical Hit.
   const critical =
-    roll.natural === 20 ||
+    roll.natural >= critFrom ||
     (hits &&
       isMelee(action) &&
       hasCondition(target, "paralyzed", "unconscious"));
@@ -1521,7 +1841,13 @@ export function runAttackRoll(
       : { slotLevel: payload.slotLevel }),
   };
 
-  if (!hits) return { events: [report, ...spent] };
+  if (!hits) {
+    return (
+      offerInspiration(attacker, { ...payload, target: target.id }, report) ?? {
+        events: [report, ...spent],
+      }
+    );
+  }
 
   const reaction = reactionFor(target, total, ac, context, critical);
   if (reaction) {
@@ -1542,19 +1868,6 @@ export function runAttackRoll(
     };
   }
   return { events: [report, ...spent], frames: [frame("applyHit", hit)] };
-}
-
-function onceEnded(
-  actor: Actor,
-  on: "attacks" | "attacksAgainst",
-): SystemEvent[] {
-  return actor.activeEffects.flatMap(({ modifier, sourceId }) =>
-    (modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
-    modifier.on === on &&
-    modifier.once
-      ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId })]
-      : [],
-  );
 }
 
 export { AttackSchema };
@@ -1894,17 +2207,24 @@ export function runConcentrationSave(
   const actor = actorOf(context.state, payload.actor);
   if (actor.concentratingOn === null) return {};
   // Being down ends Concentration outright, as does any failed save.
-  if (isDown(actor) || !rollSave(actor, "con", payload.dc, context)) {
+  const save = isDown(actor)
+    ? null
+    : rollSave(actor, "con", payload.dc, context);
+  const rolled = save?.events ?? [];
+  if (!save?.saved) {
     return {
-      events: [dndEvent(`${NS}:concentrationEnded`, { actor: actor.id })],
+      events: [
+        ...rolled,
+        dndEvent(`${NS}:concentrationEnded`, { actor: actor.id }),
+      ],
     };
   }
-  return {};
+  return { events: rolled };
 }
 
 export { ConcentrationSchema };
 
-function combatEnded(
+export function combatEnded(
   state: DndState,
   outcome?: "defeat" | "flee",
 ): SystemEvent[] {
@@ -2011,7 +2331,7 @@ export function runLingeringTick(
   if (effect?.modifier.kind !== "lingeringDamage" || isDead(target)) return {};
   const { damage, save, once } = effect.modifier;
   const stats = deriveStats(state.actors[effect.casterId] ?? target, context);
-  const saved = save
+  const { saved, events: rolled } = save
     ? rollSave(
         target,
         save.ability,
@@ -2019,7 +2339,7 @@ export function runLingeringTick(
         context,
         effect.sourceId.startsWith("spell:"),
       )
-    : false;
+    : { saved: false, events: [] };
   const scale = (amount: number): number => {
     if (!saved || save?.onSuccess === "full") return amount;
     return save?.onSuccess === "half" ? halved(amount) : 0;
@@ -2038,6 +2358,7 @@ export function runLingeringTick(
     false,
     context,
   );
+  events.unshift(...rolled);
   if (once || (saved && save?.endsEffect)) {
     events.push(
       dndEvent(`${NS}:effectEnded`, {
@@ -2073,42 +2394,85 @@ export function runFinishTurn(context: Context): SystemResult {
   const actor = currentActor(state);
   const repeated = (actor?.activeEffects ?? []).flatMap((effect) =>
     actor && effect.repeatSave && !isDown(actor)
-      ? [{ actor, sourceId: effect.sourceId, save: effect.repeatSave }]
+      ? [{ actor, effect, save: effect.repeatSave }]
       : [],
   );
   const seen = new Set<string>();
-  const events = repeated.flatMap(({ actor: target, sourceId, save }) => {
-    if (seen.has(sourceId)) return [];
+  const events: SystemEvent[] = [];
+  for (const { actor: target, effect, save } of repeated) {
+    const { sourceId, modifier } = effect;
+    if (seen.has(sourceId)) continue;
     seen.add(sourceId);
-    return rollSave(
+    const rolled = rollSave(
       target,
       save.ability,
       save.dc,
       context,
       sourceId.startsWith("spell:"),
-    )
-      ? [dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId })]
-      : [];
-  });
-  const finished = [
-    ...events,
-    ...(actor ? rechargeEvents(actor, context) : []),
-    dndEvent(`${NS}:turnAdvanced`, {}),
-  ];
+    );
+    events.push(...rolled.events);
+    const resisted = rolled.saved
+      ? null
+      : legendaryResistance(
+          target,
+          modifier.kind === "condition" ? [modifier.condition] : [],
+          context,
+          events,
+        );
+    if (resisted) events.push(resisted);
+    if (rolled.saved || resisted) {
+      events.push(
+        dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId }),
+      );
+    }
+  }
+  const ending = [...events, ...(actor ? rechargeEvents(actor, context) : [])];
+  const between = betweenTurns(state, ending, context);
+  return between.length > 0
+    ? { events: ending, frames: [...between, frame("advanceTurn", {})] }
+    : runAdvanceTurn(context, ending);
+}
+
+// The next turn begins, with its start-of-turn effects.
+export function runAdvanceTurn(
+  context: Context,
+  ending: readonly SystemEvent[] = [],
+): SystemResult {
+  const { state } = context;
+  if (!state.combat) return {};
+  const finished = [...ending, dndEvent(`${NS}:turnAdvanced`, {})];
   // Look ahead through the same events, so nothing happens at all unless the next creature has a start-of-turn effect.
   let after = state;
   for (const event of finished) after = applyDndEvent(after, event);
   const next = currentActor(after);
+  const events = [
+    ...finished,
+    ...(next ? regenerationEvents(next, context) : []),
+  ];
   const ticks = next ? lingeringFrames(next, "turnStart") : [];
   return ticks.length > 0
-    ? { events: finished, frames: [...ticks, frame("afterTurnStart", {})] }
-    : { events: finished };
+    ? { events, frames: [...ticks, frame("afterTurnStart", {})] }
+    : { events };
+}
+
+// shortcut: Regeneration isn't stopped by the damage types that should stop it, as no damage type taken is kept yet.
+function regenerationEvents(actor: Actor, context: Context): SystemEvent[] {
+  if (isDown(actor)) return [];
+  const stats = deriveStats(actor, context);
+  const hp = stats.passives.reduce(
+    (sum, passive) => sum + (passive.kind === "regeneration" ? passive.hp : 0),
+    0,
+  );
+  const amount = Math.min(hp, stats.maxHp - actor.hp);
+  return amount > 0
+    ? [dndEvent(`${NS}:healed`, { actor: actor.id, amount, max: stats.maxHp })]
+    : [];
 }
 
 // shortcut: the roll happens at the end of the monster's turn rather than the start of its next one,
 // which gives the same chance, as nothing else can change it in between.
 function rechargeEvents(actor: Actor, context: Context): SystemEvent[] {
-  if (actor.source.kind !== "monster") return [];
+  if (actor.source.kind !== "monster") return turnRecharge(actor, context);
   const monster = lookup(context, MonsterSchema, actor.source.statBlockId);
   return monster.actions.flatMap((action) => {
     if (action.recharge === undefined) return [];
@@ -2271,17 +2635,70 @@ function stepToward(actor: Actor, context: Context): Square | null {
   return ranked[0]?.square ?? null;
 }
 
+// Picks targets one at a time as a sensible caster would, then casts.
+function pickPolicy(
+  decision: Decision,
+  actor: Actor,
+  context: Context,
+): string {
+  const { actionId, slot, picked } = PickSchema.omit({ answer: true }).parse(
+    decision.resume.payload,
+  );
+  const slotLevel = slotLevelFor(actor, actionId, slot, context);
+  const action = findAction(actor, actionId, context, slotLevel);
+  const { projectiles, resolution } = action.activation;
+  const stats = deriveStats(actor, context);
+  // Average dice, for how many darts a creature takes to drop.
+  const average = { below: () => 0, roll: (sides: number) => (sides + 1) / 2 };
+  const perHit =
+    "damage" in resolution
+      ? resolution.damage.reduce(
+          (total, { amount }) => total + rollAmount(amount, stats, average),
+          0,
+        )
+      : 0;
+  const next = nextPick(
+    inReach(action, actor, context.state, context),
+    picked,
+    targetCount(findAction(actor, actionId, context), slotLevel),
+    projectiles !== undefined,
+    { sourceId: spellSource(action), perHit },
+  );
+  if (next !== null) return `${ADD}${next}`;
+  return decision.options.some((option) => option.id === CONFIRM)
+    ? CONFIRM
+    : BACK;
+}
+
 export function choosePolicy(decision: Decision, context: Context): string {
   const { state } = context;
   const [first] = decision.options;
   if (!first) throw new Error(`${decision.id} has no options`);
   if (decision.id.startsWith(`${NS}:reaction:`)) return first.id;
+  if (decision.id.startsWith(`${NS}:inspiration:`)) return first.id;
   if (decision.id.startsWith(`${NS}:deathSave:`)) return first.id;
+  if (/^dnd5\.5e:(legendary|lair):/.test(decision.id)) {
+    return chooseBossAction(decision, context);
+  }
 
   const actor = actorOf(state, decision.actor);
   if (decision.id.startsWith(`${NS}:moveTo:`)) {
     const square = stepToward(actor, context);
     return square ? squareKey(square) : STAY;
+  }
+  if (decision.id.startsWith(`${NS}:targets:`)) {
+    return pickPolicy(decision, actor, context);
+  }
+  if (decision.id.startsWith(`${NS}:aim:`)) {
+    const { actionId } = AimSchema.omit({ answer: true }).parse(
+      decision.resume.payload,
+    );
+    const [best] = aimsFor(
+      findAction(actor, actionId, context),
+      actor,
+      context,
+    );
+    return best && best.score > 0 ? squareKey(best.square) : BACK;
   }
   const stats = deriveStats(actor, context);
   // Only the player is offered flight. Run when the enemies left clearly outlast the party.
@@ -2294,11 +2711,23 @@ export function choosePolicy(decision: Decision, context: Context): string {
       return FLEE;
     }
   }
+  // An area is only aimed where it catches more foes than it costs friends.
+  const bestAim = new Map<string, number>();
+  const worthOf = (action: KnownAction): number => {
+    const known = bestAim.get(action.id);
+    if (known !== undefined) return known;
+    const score = aimsFor(action, actor, context)[0]?.score ?? 0;
+    bestAim.set(action.id, score);
+    return score;
+  };
   const parsed = decision.options.flatMap((option) => {
     const [actionId = "", targetId = "", slot] = option.id.split(SEPARATOR);
     const action = stats.actions.find((item) => item.id === actionId);
     const target = state.actors[targetId];
-    return action ? [{ option, action, target, targetId, slot }] : [];
+    const worth = action && targetId === AIM_AREA ? worthOf(action) : null;
+    return action && (worth === null || worth > 0)
+      ? [{ option, action, target, targetId, slot, worth }]
+      : [];
   });
 
   const heals = (action: KnownAction): boolean =>
@@ -2347,10 +2776,13 @@ export function choosePolicy(decision: Decision, context: Context): string {
   // A monster's area attack, such as a breath weapon, is its strongest choice while it's ready. One with no recharge
   // has to catch more than one foe to beat attacking, and one that only applies a condition waits until at least
   // half the foes are free of it, as repeating it on the rest would waste the turn.
-  const blast = areas.find(({ action }) => {
+  const blast = areas.find(({ action, worth }) => {
     const { cost, resolution } = action.activation;
     if ("damage" in resolution && resolution.damage.length > 0) {
-      return foes.length > 1 || cost.some((item) => typeof item === "object");
+      return (
+        (worth ?? foes.length) > 1 ||
+        cost.some((item) => typeof item === "object")
+      );
     }
     const applied = (
       resolution.kind === "save" ? resolution.onFail : []
