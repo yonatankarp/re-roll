@@ -176,7 +176,8 @@ export function soundControls(
     },
     follow(camp) {
       new MutationObserver(() => {
-        camping = camp.open;
+        // Not while it only says why there's no rest.
+        camping = camp.open && camp.dataset.notice === undefined;
         apply();
       }).observe(camp, { attributes: true, attributeFilter: ["open"] });
     },

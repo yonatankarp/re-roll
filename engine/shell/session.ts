@@ -19,7 +19,12 @@ import { type LogEntry, createSave, loadSave } from "../run/save.ts";
 import type { Storage } from "../kernel/storage.ts";
 import { type Ambience, sceneAmbience } from "../story/ambience.ts";
 import { scenesAhead } from "../story/narration.ts";
-import { REST_OPTION_PREFIX, sceneText } from "../story/runtime.ts";
+import {
+  REST_OPTION_PREFIX,
+  SCENE_DECISION_PREFIX,
+  sceneActionsHere,
+  sceneText,
+} from "../story/runtime.ts";
 import type { Adventure } from "../story/adventure.ts";
 import type { GameSystem, SystemSetting } from "../kernel/system.ts";
 import {
@@ -1036,9 +1041,17 @@ export function createGame({
       );
       const decision = pendingDecision(run, state);
       const isRest = (id: string): boolean => id.startsWith(REST_OPTION_PREFIX);
+      // A scene's actions are answered from the sheet, as rests are from the campfire.
+      const actions = new Set(
+        decision?.id.startsWith(SCENE_DECISION_PREFIX)
+          ? sceneActionsHere(run, state).map((action) => action.id)
+          : [],
+      );
       const choices = decision && {
         ...decision,
-        options: decision.options.filter((option) => !isRest(option.id)),
+        options: decision.options.filter(
+          (option) => !isRest(option.id) && !actions.has(option.id),
+        ),
       };
       const combat = ui.combat(state.system, run);
       const pictures: Record<string, string> = {};

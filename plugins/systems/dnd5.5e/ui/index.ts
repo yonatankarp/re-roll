@@ -5,12 +5,11 @@ import {
   type SystemEvent,
 } from "#sdk";
 import { z } from "zod";
-import { weaponProficient } from "../core/character.ts";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
 import { HIT_DICE, parseOption } from "../core/combat/ids.ts";
 import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
-import { foundText } from "../core/gear.ts";
+import { canUse, foundText } from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
 import { coins } from "../core/shop.ts";
 import { shop } from "./shop.ts";
@@ -22,7 +21,6 @@ import {
   ABILITY_NAMES,
   type Amount,
   type CharacterBuild,
-  ClassSchema,
   type Damage,
   ItemSchema,
   LootSchema,
@@ -48,6 +46,7 @@ import {
   checkBonus,
   deriveStats,
   evaluateFormula,
+  itemHealing,
   modifierFor,
   saveBonus,
   scaledDice,
@@ -351,32 +350,11 @@ function signed(value: number): string {
   return value < 0 ? String(value) : `+${String(value)}`;
 }
 
-const GEAR_HINT = "Change gear during a rest";
-
-// Whether any of the character's classes trains them with it, or for a scroll, whether they cast spells.
-// shortcut: a multiclass character counts every class's training, not the narrower multiclass list.
-function canUse(
-  item: z.infer<typeof ItemSchema>,
-  stats: Stats,
-  access: ContentAccess,
-): boolean {
-  const classes = Object.keys(stats.classLevels).flatMap((id) => {
-    const parsed = ClassSchema.safeParse(access.content(id));
-    return parsed.success ? [parsed.data] : [];
-  });
-  switch (item.type) {
-    case "weapon":
-      return classes.some((def) => weaponProficient(def, item));
-    case "armor":
-      return classes.some((def) => def.armor.includes(item.armorType));
-    case "shield":
-      return classes.some((def) => def.armor.includes("shield"));
-    case "magicItem":
-      return !item.spell || stats.spellAbility !== null;
-    default:
-      return true;
-  }
-}
+// When a row's choice is offered: between a scene's choices outside a fight, and attuning only where the
+// party could rest. Gear can also change during a rest.
+const GEAR_HINT = "Change gear between choices, outside a fight";
+const ATTUNE_HINT = "Attune where the party can rest";
+const DRINK_HINT = "Drink between choices, or on your turn in a fight";
 
 // The player first, then the companions; none until the player has chosen a character.
 // What the character carries, with a way to change it whenever the pending choice allows, such as on a rest.
@@ -397,9 +375,11 @@ function equipmentRows(
     const item = parsed.data;
     const count = actor.inventory.filter((other) => other === id).length;
     const wornCount = worn.filter((other) => other === id).length;
+    const usable = canUse(item, stats, access);
+    const wearable = usable || item.type === "weapon"; // any weapon can be swung
     const label =
       (count > 1 ? `${item.name} ×${String(count)}` : item.name) +
-      (canUse(item, stats, access) ? "" : " (can't use)");
+      (usable ? "" : " (can't use)");
     const detail = "text" in item && item.text ? { detail: item.text } : {};
     if (
       item.type === "weapon" ||
@@ -410,10 +390,11 @@ function equipmentRows(
         {
           label,
           value: wornCount === 0 ? "In pack" : "Equipped",
-          ...(changes
+          // Putting on a spare comes first, as between choices. Untrained armor isn't offered, as it would only hinder.
+          ...(changes && (wornCount > 0 || wearable)
             ? {
                 option:
-                  wornCount < count
+                  wornCount < count && wearable
                     ? { id: `equip:${id}`, label: "Equip", hint: GEAR_HINT }
                     : { id: `stow:${id}`, label: "Stow", hint: GEAR_HINT },
               }
@@ -434,14 +415,14 @@ function equipmentRows(
                   ? {
                       id: `unattune:${id}`,
                       label: "End attunement",
-                      hint: GEAR_HINT,
+                      hint: ATTUNE_HINT,
                     }
                   : {
                       id: `attune:${id}`,
                       label: "Attune",
                       hint:
                         attuned.length < MAX_ATTUNED
-                          ? GEAR_HINT
+                          ? ATTUNE_HINT
                           : `Already attuned to ${String(MAX_ATTUNED)} items`,
                     },
               }
@@ -450,7 +431,16 @@ function equipmentRows(
         },
       ];
     }
-    return [{ label, value: "", ...detail }];
+    return [
+      {
+        label,
+        value: "",
+        ...(changes && itemHealing(item)
+          ? { option: { id: `drink:${id}`, label: "Drink", hint: DRINK_HINT } }
+          : {}),
+        ...detail,
+      },
+    ];
   });
   return [
     ...(gold === null ? [] : [{ label: "Gold", value: coins(gold) }]),

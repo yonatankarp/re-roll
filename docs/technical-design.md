@@ -447,6 +447,14 @@ The D&D plugin (`availableRests` in `core/rest.ts`) allows a Short Rest at any t
 
 **Gaps:** rests don't advance adventure clocks, and a Long Rest the story triggers ignores the 24-hour rule.
 
+### 7.2 Scene actions from the sheet
+
+A scene decision also offers the system's optional `sceneActions(state, access)` (`SceneAction` in `engine/kernel/system.ts`): things the player may do between the choices, each naming a story effect and its `args`. An action marked `rest: true` is offered only on a scene that allows a rest. Answering one runs its effect through `story:applyEffects`, and the scene's choices come back without entering the scene again. The shell keeps them out of the option list, since sheet rows answer them by the same ids, and the bot never picks them.
+
+The D&D plugin (`sceneGearActions` in `core/gear.ts`) offers, outside a fight, one gear change per item (`equip:`, `stow:`), `drink:` for a healing potion, and `attune:` and `unattune:` only where the party could rest, since attuning takes a Short Rest. Drinking rolls its healing into the `healed` event and uses the potion up with `itemUsed`. Armor and shields the character isn't trained with are never offered to put on, here or in a rest's Change gear.
+
+**Gap:** attuning between choices doesn't pass the Short Rest's hour.
+
 ### 7.2 Narration and ambience
 
 **Ambience.** A scene may name an `ambience` (`wind`, `cave`, `town`, `rain`, `storm`, `campfire` or `none`). Without one, `guessAmbience` in `engine/story/ambience.ts` picks one from words in the text. `engine/shell/ambience.ts` makes each soundscape with Web Audio from looped noise, filters and random one-off sounds, so there are no sound files. A new scene crossfades, and a fight or the narrator ducks it.

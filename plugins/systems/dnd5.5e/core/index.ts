@@ -67,7 +67,7 @@ import {
   characterEffects,
   characterFrames,
 } from "./character.ts";
-import { gearEffects, gearFrames } from "./gear.ts";
+import { gearEffects, gearFrames, sceneGearActions } from "./gear.ts";
 import { legendaryFrames, surpriseEffects } from "./legendary.ts";
 import { shopEffects, shopFrames } from "./shop.ts";
 import { availableRests, restEffects, restFrames } from "./rest.ts";
@@ -485,6 +485,7 @@ export const dnd55e = defineSystem<DndState>({
   nextDecision: (state, access) =>
     withTactics(nextDndDecision(state, access), state, access),
   rests: availableRests,
+  sceneActions: sceneGearActions,
   decidePolicy: (decision, context) =>
     decision.id.startsWith(`${NS}:build:`)
       ? buildPolicy(decision, context)

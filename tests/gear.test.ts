@@ -185,17 +185,91 @@ describe("treasure and gold", () => {
 describe("equipping and attuning", () => {
   it("swaps armor and changes AC", async () => {
     const run = await storyRun([treasure(0, [SCALE])]);
-    const before = playerOf(dnd(play(run, "srd52:pregen/rogue").state));
-    expect(deriveStats(before, run).ac).toBe(14); // Leather Armor, Dex +3
+    const before = playerOf(dnd(play(run, "srd52:pregen/fighter").state));
+    expect(deriveStats(before, run).ac).toBe(18); // Chain Mail and a Shield
 
-    const { state } = play(run, "srd52:pregen/rogue", (decision) =>
+    const { state } = play(run, "srd52:pregen/fighter", (decision) =>
       decision.options.some((option) => option.id === `equip:${SCALE}`)
         ? `equip:${SCALE}`
         : undefined,
     );
     const after = playerOf(dnd(state));
-    expect(after.stowed).toEqual(["srd52:item/leather-armor"]);
-    expect(deriveStats(after, run).ac).toBe(16); // Scale Mail, Dex +2 at most
+    expect(after.stowed).toEqual(["srd52:item/chain-mail"]);
+    expect(deriveStats(after, run).ac).toBe(17); // Scale Mail, Dex +1, and the Shield
+  });
+
+  it("doesn't offer armor the character isn't trained with", async () => {
+    const run = await storyRun([treasure(0, [SCALE])]);
+    const { asked } = play(run, "srd52:pregen/rogue"); // light armor only
+    const offered = asked.flatMap((decision) =>
+      decision.options.map((option) => option.id),
+    );
+    expect(offered).not.toContain(`equip:${SCALE}`);
+  });
+
+  it("drinks and changes gear between a scene's choices, and attunes only where the party can rest", async () => {
+    const base = await storyRun([]);
+    const runAt = (rest: boolean): RunContext => ({
+      ...base,
+      adventure: {
+        ...base.adventure,
+        scenes: [
+          {
+            id: "s0",
+            text: "Onward.",
+            textVariants: [],
+            rest: true,
+            choices: [
+              {
+                label: "Go on",
+                effects: [
+                  treasure(0, [POTION, RING]),
+                  { kind: "goto", scene: "camp" },
+                ],
+              },
+            ],
+          },
+          {
+            id: "camp",
+            text: "A clearing.",
+            textVariants: [],
+            rest,
+            choices: [
+              { label: "Go on", effects: [{ kind: "goto", scene: "end" }] },
+            ],
+          },
+          ...base.adventure.scenes.filter((scene) => scene.id === "end"),
+        ],
+      },
+    });
+    const ids = (decision: Decision | undefined) =>
+      decision?.options.map((option) => option.id) ?? [];
+
+    const { state, asked } = play(
+      runAt(false),
+      "srd52:pregen/fighter",
+      (decision) =>
+        ids(decision).includes(`drink:${POTION}`)
+          ? `drink:${POTION}`
+          : undefined,
+    );
+    const camp = asked.filter((decision) => decision.id === "scene:camp");
+    expect(ids(camp[0])).toEqual(
+      expect.arrayContaining([
+        "0",
+        `drink:${POTION}`,
+        "stow:srd52:item/shield",
+      ]),
+    );
+    expect(ids(camp[0])).not.toContain(`attune:${RING}`);
+    // Drunk and used up, and the scene's choices come back without it.
+    expect(ids(camp[1])).not.toContain(`drink:${POTION}`);
+    expect(playerOf(dnd(state)).inventory).not.toContain(POTION);
+
+    const resting = play(runAt(true), "srd52:pregen/fighter", (decision) =>
+      ids(decision).includes(`attune:${RING}`) ? `attune:${RING}` : undefined,
+    );
+    expect(playerOf(dnd(resting.state)).attuned).toEqual([RING]);
   });
 
   it("drops AC and attacks for stowed gear", async () => {
@@ -323,7 +397,7 @@ describe("items in a fight", () => {
         ...state.actors,
         [PLAYER_ACTOR]: {
           ...wizard,
-          inventory: [...wizard.inventory, SCALE, SCROLL],
+          inventory: [...wizard.inventory, SCALE, SCROLL, POTION],
           stowed: [...(wizard.stowed ?? []), SCALE],
         },
       },
@@ -334,9 +408,11 @@ describe("items in a fight", () => {
     );
     const row = (name: string) =>
       gear?.rows.find((item) => item.label.startsWith(name));
-    expect(row("Scale Mail")).toMatchObject({
-      label: "Scale Mail (can't use)",
-      option: { label: "Equip", hint: "Change gear during a rest" },
+    // Not offered to put on, as it would only hinder.
+    expect(row("Scale Mail")?.label).toBe("Scale Mail (can't use)");
+    expect(row("Scale Mail")).not.toHaveProperty("option");
+    expect(row("Potion of Healing")).toMatchObject({
+      option: { id: `drink:${POTION}`, label: "Drink" },
     });
     expect(row("Spell Scroll")?.label).not.toContain("can't use");
     // Near the top, right after the combat numbers.
