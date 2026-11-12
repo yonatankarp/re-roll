@@ -1,5 +1,6 @@
 import { PLAYER_ACTOR } from "#sdk";
 import { StateSchema } from "../core/state.ts";
+import { TACTIC } from "../core/tactics.ts";
 import type { DndCue } from "./cues.ts";
 import { cueSound, diceSound, setEffectsVolume } from "./sound.ts";
 
@@ -122,6 +123,7 @@ const SEPARATOR = "|"; // between an option id's action, target and slot
 const MARKED = ["dodging", "hidden"] as const; // conditions drawn on the token itself
 const AIM = "@"; // an area aimed at a creature
 const MOVE = "move"; // the turn option that asks where to go
+const STUDY = `${TACTIC}study`; // repeated from core/actions.ts
 
 interface Move {
   readonly x: number;
@@ -644,8 +646,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   // token, whose menu can hold End your turn.
   const openMenu = (id: string, anchor: HTMLElement, pointer = false): void => {
     const own = id === PLAYER_ACTOR;
+    // Study stays in the Actions tab, so a click on a foe out of reach still does nothing.
     const options = playerOptions().filter((option) => {
       if (SQUARE.test(option.id) || option.id === MOVE) return false;
+      if (option.id.startsWith(STUDY)) return false;
       const target = option.id.split(SEPARATOR)[1];
       if (target === id || target === `${AIM}${id}`) return true;
       return own && (target === undefined || target === "all");
@@ -655,7 +659,14 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       return;
     }
     const [only] = options;
-    if (pointer && !own && only && options.length === 1) {
+    // A click attacks at once, but Help, Grapple and the like always ask first, as each spends the action.
+    if (
+      pointer &&
+      !own &&
+      only &&
+      options.length === 1 &&
+      !only.id.startsWith(TACTIC)
+    ) {
       closeMenu();
       mapUsed();
       host.answer(only.id);
