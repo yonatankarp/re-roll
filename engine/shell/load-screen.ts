@@ -12,7 +12,7 @@ export interface LoadHandlers {
 const COLLAPSE_MS = 200;
 
 // Who is playing, such as "Human Wizard · Level 1 · 6/8 HP", or null for a save from before that was kept.
-function heading(save: SaveChoice): string | null {
+export function saveHeading(save: SaveChoice): string | null {
   if (!save.character) return null;
   return [
     save.characterKind
@@ -29,7 +29,7 @@ function card(
   { load, remove }: LoadHandlers,
   showCurrent: boolean,
 ): HTMLElement {
-  const who = heading(save);
+  const who = saveHeading(save);
   // A save without a character still says its level beside its settings, as before.
   const facts = [
     ...(!who && save.level !== null ? [`Level ${String(save.level)}`] : []),
@@ -44,30 +44,47 @@ function card(
     load(save);
   });
   open.className = "save-open";
-  open.append(
-    ...(save.art ? [picture(game, save.art, "", "save-art")] : []),
-    el(
-      "span",
-      { class: "save-text" },
-      el("strong", { text: who ?? save.title }),
-      ...(who
-        ? [el("span", { class: "save-adventure", text: save.title })]
-        : []),
-      ...(save.scene ? [el("span", { text: save.scene })] : []),
-      ...(facts ? [el("span", { class: "save-facts", text: facts })] : []),
+  // A file that isn't a save can't be opened, only deleted; its name is all it has to go by.
+  if (save.damaged) {
+    open.disabled = true;
+    open.append(
       el(
         "span",
-        { class: "save-when" },
-        when,
-        ...(current
-          ? [el("span", { class: "save-current", text: "Current" })]
-          : []),
+        { class: "save-text" },
+        el("strong", { text: "Damaged save" }),
+        el("span", {
+          class: "save-facts",
+          text: `${save.label}: it can't be opened, but you can delete it.`,
+        }),
       ),
-    ),
-  );
+    );
+  } else
+    open.append(
+      ...(save.art ? [picture(game, save.art, "", "save-art")] : []),
+      el(
+        "span",
+        { class: "save-text" },
+        el("strong", { text: who ?? save.title }),
+        ...(who
+          ? [el("span", { class: "save-adventure", text: save.title })]
+          : []),
+        ...(save.scene ? [el("span", { text: save.scene })] : []),
+        ...(facts ? [el("span", { class: "save-facts", text: facts })] : []),
+        el(
+          "span",
+          { class: "save-when" },
+          when,
+          ...(current
+            ? [el("span", { class: "save-current", text: "Current" })]
+            : []),
+        ),
+      ),
+    );
   open.setAttribute(
     "aria-label",
-    `Load ${save.label}${who ? `, ${who}` : ""}${current ? ", the game in progress" : ""}`,
+    save.damaged
+      ? `Damaged save ${save.label}`
+      : `Load ${save.label}${who ? `, ${who}` : ""}${current ? ", the game in progress" : ""}`,
   );
   // A second press confirms, which also works where the webview has no confirm dialog.
   let armed = false;
@@ -130,6 +147,22 @@ export function loadScreen(
         : el("p", { class: "muted", text: "No saved games yet." }),
     ),
   };
+}
+
+// The Load screen's outline while the saves are read: its heading, and blank cards where they'll go.
+export function loadSkeleton(): HTMLElement {
+  const cards = el(
+    "ol",
+    { class: "save-cards" },
+    ...[0, 1, 2].map(() => el("li", { class: "save-card skeleton" })),
+  );
+  cards.setAttribute("aria-hidden", "true");
+  return el(
+    "section",
+    { class: "menu load" },
+    el("h2", { text: "Load a game" }),
+    cards,
+  );
 }
 
 // Folds a deleted save's card away where it was, and gives back what should take focus next:

@@ -83,6 +83,8 @@
   --rule: #922610;
   --leather: #2b1d14;
   --leather-ink: #eee5ce;
+  --callout: #fdf1dc; /* a set-apart box, such as the level-up, between gold rules */
+  --callout-rule: #e69a28;
   --font-body: "Bookinsanity", Georgia, "Times New Roman", serif;
   --font-head: "Mr Eaves Small Caps", Georgia, serif;
   --font-title: "Nodesto Caps Condensed", Georgia, serif;
@@ -120,6 +122,8 @@
     --rule: #b8452c;
     --leather: #0f0c09;
     --leather-ink: #ede3cc;
+    --callout: #2c2319;
+    --callout-rule: #a8701e;
     --paper:
       radial-gradient(ellipse at 20% 0%, rgb(224 176 98 / 8%), transparent 60%),
       radial-gradient(
@@ -767,13 +771,25 @@ summary {
   letter-spacing: 0.05em;
 }
 
+/* A dark, sunken track, so an empty bar reads as empty on the leather. */
 .meter {
   display: inline-block;
   width: 48px;
   height: 6px;
   border-radius: 3px;
-  background: var(--line);
+  background: rgb(0 0 0 / 55%);
+  box-shadow: inset 0 0 0 1px rgb(201 173 106 / 45%);
   overflow: hidden;
+}
+
+/* Out of hit points, said in words beside the empty bar. */
+.hud-down {
+  padding: 0 8px;
+  border-radius: 999px;
+  font: bold 0.75rem/1.6 var(--font-caps);
+  letter-spacing: 0.04em;
+  color: #fff;
+  background: #9c2b1b;
 }
 
 .meter i {
@@ -1327,10 +1343,21 @@ button:active {
 }
 
 .option .info {
-  font-family: var(--font-ui);
-  font-style: normal;
-  font-weight: normal;
-  font-size: 1.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The last choice, such as ending the turn, sits at the end of the tab row, one click away. */
+.tabs > .option {
+  margin-left: auto;
+}
+
+.tabs > .option > button:first-child {
+  font-family: var(--font-head);
+  font-size: 1.15rem;
+  padding: 6px 18px;
+  border-radius: 999px;
 }
 
 .tab {
@@ -1434,15 +1461,9 @@ button:active {
 @media (prefers-color-scheme: dark) {
   .group-panel,
   .box,
-  .log,
-  .level-up {
+  .log {
     background: #2c2319;
     border-color: var(--edge);
-  }
-
-  .level-up {
-    border-top-color: #a8701e;
-    border-bottom-color: #a8701e;
   }
 
   .group-panel {
@@ -1587,6 +1608,9 @@ button:active {
 }
 
 .continue button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   width: 100%;
   padding: 14px 18px;
   font-size: 1.1rem;
@@ -1594,6 +1618,17 @@ button:active {
   box-shadow:
     inset 4px 0 0 var(--accent),
     0 2px 8px rgb(60 40 10 / 20%);
+}
+
+.continue strong {
+  font: 1.35rem/1.1 var(--font-head);
+  color: var(--accent);
+}
+
+.continue span,
+.continue small {
+  font: 0.9rem var(--font-ui);
+  color: var(--muted);
 }
 
 /* Setting up a new game: one card per choice, such as difficulty. */
@@ -1604,6 +1639,19 @@ button:active {
 
 .setup h2 {
   font: 2.2rem/1 var(--font-title);
+}
+
+/* The adventure's cover, as a banner over its settings. */
+.setup-cover {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  margin-bottom: 16px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgb(40 25 10 / 25%);
+  animation: fade 0.4s ease;
 }
 
 .setting-cards {
@@ -1736,6 +1784,33 @@ button:active {
   color: var(--muted);
 }
 
+/* A file that isn't a save: shown so it can be deleted, but not pressed. */
+.save-open:disabled {
+  cursor: default;
+  border-style: dashed;
+  box-shadow: none;
+  background: transparent;
+}
+
+.save-open:disabled strong {
+  color: var(--muted);
+}
+
+/* The cards' outlines while the saves are read. */
+.save-card.skeleton {
+  height: 86px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  animation: pulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes pulse {
+  to {
+    opacity: 0.45;
+  }
+}
+
 .save-delete {
   position: absolute;
   top: 8px;
@@ -1805,8 +1880,9 @@ button:active {
 }
 
 .campfire-fire {
-  font-size: 4.5rem;
-  line-height: 1.2;
+  display: flex;
+  justify-content: center;
+  transform-origin: 50% 90%;
   filter: drop-shadow(0 0 24px rgb(255 150 40 / 70%));
   animation: flicker 1.6s ease-in-out infinite alternate;
 }
@@ -1979,9 +2055,9 @@ button:active {
 .level-up {
   margin: 12px 0;
   padding: 10px 14px;
-  background: #fdf1dc;
-  border-top: 3px solid #e69a28;
-  border-bottom: 3px solid #e69a28;
+  background: var(--callout);
+  border-top: 3px solid var(--callout-rule);
+  border-bottom: 3px solid var(--callout-rule);
   font-size: 1.05rem;
 }
 
@@ -2278,4 +2354,255 @@ button:active {
 .shop-leave {
   margin-top: 14px;
   width: 100%;
+}
+
+/* A slow step: the page dims under an open book whose page turns, so it never looks stuck. */
+.busy {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--bg) 65%, transparent);
+  cursor: progress;
+  animation: fade 0.3s ease;
+}
+
+.busy[hidden] {
+  display: none;
+}
+
+.busy p {
+  margin: 0;
+  padding: 6px 18px;
+  font: 1.3rem/1.2 var(--font-head);
+  color: var(--accent);
+  background: var(--panel);
+  border-top: 2px solid var(--line);
+  border-bottom: 2px solid var(--line);
+}
+
+.busy-cover {
+  fill: var(--accent);
+}
+
+.busy-leaf {
+  fill: var(--panel);
+  stroke: var(--edge);
+  stroke-width: 0.6;
+}
+
+.busy-turn {
+  transform-box: view-box;
+  transform-origin: 32px 20px;
+  animation: page-turn 1.4s ease-in-out infinite;
+}
+
+@keyframes page-turn {
+  0%,
+  15% {
+    transform: scaleX(1);
+  }
+
+  85%,
+  100% {
+    transform: scaleX(-1);
+  }
+}
+
+/* An error's own words, folded away under its friendly line. */
+.notice details {
+  margin-top: 4px;
+  color: var(--leather-ink);
+}
+
+.notice summary {
+  min-height: 0;
+  font-size: 0.85rem;
+}
+
+.notice pre {
+  max-height: 30vh;
+  margin: 4px 0 0;
+  overflow: auto;
+  font:
+    0.8rem/1.4 ui-monospace,
+    monospace;
+  white-space: pre-wrap;
+}
+
+.narration button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The Sound panel's controls in the book's colours rather than the system's blue. */
+.sound-panel input[type="range"] {
+  appearance: none;
+  height: 24px;
+  background: transparent;
+}
+
+.sound-panel input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+}
+
+.sound-panel input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+}
+
+.sound-panel input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 30%);
+}
+
+.sound-panel input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 30%);
+}
+
+.sound-panel input[type="checkbox"] {
+  appearance: none;
+  display: grid;
+  place-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.sound-panel input[type="checkbox"]::before {
+  content: "";
+  width: 10px;
+  height: 5px;
+  border-bottom: 2px solid var(--accent-ink);
+  border-left: 2px solid var(--accent-ink);
+  opacity: 0;
+  transform: translateY(-2px) rotate(-45deg);
+}
+
+.sound-panel input[type="checkbox"]:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.sound-panel input[type="checkbox"]:checked::before {
+  opacity: 1;
+}
+
+.sound-voice {
+  position: relative;
+}
+
+.sound-panel select {
+  appearance: none;
+  min-height: 36px;
+  padding: 6px 32px 6px 10px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.sound-voice::after {
+  content: "";
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+}
+
+/* High Contrast and other forced colours: the system's colours, with state shown by more than tint. */
+@media (forced-colors: active) {
+  :root {
+    --ink: CanvasText;
+    --muted: CanvasText;
+    --panel: Canvas;
+    --bg: Canvas;
+    --line: CanvasText;
+    --edge: ButtonBorder;
+    --accent: Highlight;
+    --accent-ink: HighlightText;
+    --callout: Canvas;
+    --callout-rule: CanvasText;
+  }
+
+  :focus-visible,
+  button:focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  button:disabled {
+    color: GrayText;
+    border-color: GrayText;
+  }
+
+  .meter {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+
+  .meter i {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+
+  .tab.open,
+  .shop-tab[aria-selected="true"],
+  .setting-card[aria-checked="true"],
+  .save-current,
+  .hud-down,
+  .save-delete.armed {
+    forced-color-adjust: none;
+    color: HighlightText;
+    background: Highlight;
+    border-color: Highlight;
+  }
+
+  .notice,
+  .busy p,
+  .group-panel,
+  .box {
+    border: 1px solid CanvasText;
+  }
+
+  .sound-panel input[type="range"],
+  .sound-panel input[type="checkbox"],
+  .sound-panel select {
+    appearance: auto;
+  }
+
+  .sound-panel input[type="checkbox"]::before,
+  .sound-voice::after {
+    display: none;
+  }
 }

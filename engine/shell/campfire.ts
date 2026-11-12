@@ -47,6 +47,14 @@ const FIRE_ICON =
   '<path d="M3.5 20.2l16.4-3.4.5 2.2-16.4 3.4zM20.5 20.2L4.1 16.8l-.5 2.2 16.4 3.4z" opacity=".75"/>' +
   "</svg>";
 
+// The camp's own fire, larger and in its colours: two flames over crossed logs.
+const CAMP_FIRE =
+  '<svg viewBox="0 0 24 24" width="84" height="84" aria-hidden="true">' +
+  '<path fill="#e8641e" d="M12 2c.6 3-1.8 4.6-3 6.6-1.4 2.3-.9 5.4 1.4 6.9-.4-1.6.1-3.1 1.6-4.4.2 1.7 1.2 2.5 2 3.4.9 1 .9 2.2.3 3 2.3-1 3.6-3.3 3.2-5.9-.4-2.6-2.2-4.1-3.3-5.6C13.4 4.6 13 3.4 12 2z"/>' +
+  '<path fill="#f7c04a" d="M12.2 9.6c.3 1.9-1.1 2.9-1.7 4.1-.7 1.4-.2 2.9 1 3.6 1.7-.3 2.8-1.7 2.5-3.4-.2-1.7-1.3-2.5-1.8-4.3z"/>' +
+  '<path fill="#6b4425" d="M3.5 20.2l16.4-3.4.5 2.2-16.4 3.4zM20.5 20.2L4.1 16.8l-.5 2.2 16.4 3.4z"/>' +
+  "</svg>";
+
 const reducedMotion = (): boolean =>
   matchMedia("(prefers-reduced-motion: reduce)").matches;
 const FADE_MS = 800; // matches the 0.8s fade the camp opens with
@@ -64,8 +72,8 @@ export function campfire(
   const body = node("div", "campfire-body");
   const dialog = node("dialog", "campfire");
   dialog.setAttribute("aria-label", "Camp");
-  const fire = node("div", "campfire-fire", "\u{1F525}");
-  fire.setAttribute("aria-hidden", "true");
+  const fire = node("div", "campfire-fire");
+  fire.innerHTML = CAMP_FIRE;
   dialog.append(fire, body);
   let played = false; // whether an answer went into the game, so "Saved" only shows when it's true
   let resting = false; // between picking a rest and its summary, when leaving would leave it half done

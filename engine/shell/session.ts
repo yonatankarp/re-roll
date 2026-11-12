@@ -129,6 +129,8 @@ export interface SaveChoice {
   readonly level: number | null;
   readonly settings: readonly string[]; // option labels, such as the difficulty
   readonly art: string | null; // a content path, for imageUrl
+  readonly ended: boolean; // the run is over, so there is nothing to continue
+  readonly damaged: boolean; // the file can't be read as a save
 }
 
 export interface BookSection {
@@ -175,6 +177,7 @@ const SaveDetailsSchema = z.record(
     character: z.string().nullable().optional(),
     characterKind: z.string().nullable().optional(),
     health: z.string().nullable().optional(),
+    ended: z.boolean().optional(),
   }),
 );
 type SaveDetails = z.infer<typeof SaveDetailsSchema>[string];
@@ -523,6 +526,7 @@ export function createGame({
     const [sheet] = ui.sheets(state.system, run);
     const [health] = sheet?.summary ?? [];
     return {
+      ended: state.story.ended !== null,
       scene: scene ? sceneTitle(scene) : null,
       level: sheet?.level ?? null,
       character: sheet?.title ?? null,
@@ -633,6 +637,7 @@ export function createGame({
           character: details?.character ?? null,
           characterKind: details?.characterKind ?? null,
           health: details?.health ?? null,
+          ended: details?.ended ?? false,
           savedAt,
           when,
           ago: savedAt ? agoText(savedAt, now) : null,
@@ -648,6 +653,7 @@ export function createGame({
             kind: "manual",
             steps: 0,
             current: false,
+            damaged: true,
           });
           continue;
         }
@@ -665,6 +671,7 @@ export function createGame({
           title,
           kind,
           steps: log.length,
+          damaged: false,
           current:
             kind === "autosave" &&
             current?.adventure === adventure &&
