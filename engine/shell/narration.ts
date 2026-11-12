@@ -34,6 +34,11 @@ const clips = new Map<string, Clip>(); // oldest first
 let loading: ((percent: number) => void) | null = null;
 let heard = 0; // when the worker last said anything
 let restarts = 0;
+let cpu = false; // after a hung reading, the CPU model for the rest of the session
+// Readings asked for while the page is hidden, sent once it's shown. WebKit slows a hidden page's
+// GPU work, and a WebGPU reading started then once hung for good. One already under way goes on,
+// so a scene being listened to from another window isn't cut off.
+const held = new Set<number>();
 
 function tell(clip: Clip): void {
   for (const listener of clip.changed) listener();
@@ -124,12 +129,27 @@ function speak(clip: Clip): void {
   jobs += 1;
   clip.job = jobs;
   working.set(jobs, clip);
-  send({ type: "speak", id: jobs, text: clip.text, voice: clip.voice });
+  if (document.hidden) held.add(jobs);
+  else
+    send({ type: "speak", id: jobs, text: clip.text, voice: clip.voice, cpu });
 }
 
-// A reading can hang, as WebGPU work did in a hidden Tauri window and stayed hung once shown.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  heard = performance.now(); // held readings count as busy only from now
+  for (const id of held) {
+    const clip = working.get(id);
+    if (clip) {
+      send({ type: "speak", id, text: clip.text, voice: clip.voice, cpu });
+    }
+  }
+  held.clear();
+});
+
+// A reading can still hang, as WebGPU work did in a hidden Tauri window and stayed hung once shown.
 // The worker reads in order, so everything after it would wait forever: a silent busy worker is
-// replaced and its readings asked for again. Time hidden doesn't count, since nothing plays then.
+// replaced, on the CPU from then on, and its readings asked for again. Time hidden doesn't count,
+// since a hidden page's work is slowed and held readings aren't sent.
 setInterval(() => {
   if (working.size === 0 || document.hidden) {
     heard = performance.now();
@@ -140,8 +160,10 @@ setInterval(() => {
   worker?.terminate();
   worker = null;
   restarts += 1;
+  cpu = true;
   const stuck = [...working.values()];
   working.clear();
+  held.clear();
   for (const clip of stuck) {
     clip.job = null;
     clip.buffers.length = 0; // read again from the start; playback carries on where it was
@@ -158,7 +180,7 @@ setInterval(() => {
 // Stops the worker reading a clip that isn't finished, and forgets the part read.
 function drop(clip: Clip): void {
   if (clip.job === null) return;
-  send({ type: "cancel", id: clip.job });
+  if (!held.delete(clip.job)) send({ type: "cancel", id: clip.job });
   working.delete(clip.job);
   clip.job = null;
   clips.delete(clip.key);
