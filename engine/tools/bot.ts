@@ -2,6 +2,7 @@ import { createDice, rngFromSeed } from "../kernel/dice.ts";
 import type { GameState, Input } from "../kernel/events.ts";
 import { type LogEntry, replayInputs } from "../kernel/save.ts";
 import { type RunContext, startRun, step } from "../kernel/turn.ts";
+import { REST_OPTION_PREFIX } from "../story/runtime.ts";
 
 export interface BotRun {
   readonly seed: string;
@@ -43,6 +44,10 @@ export function playRun(
   noteScenes(started.events);
 
   for (let count = 0; pending && count < options.maxDecisions; count += 1) {
+    // Never rests, so its runs measure the adventure as written.
+    const choices = pending.options.filter(
+      (item) => !item.id.startsWith(REST_OPTION_PREFIX),
+    );
     const option =
       options.smart && run.system.tactical?.(pending)
         ? {
@@ -53,7 +58,7 @@ export function playRun(
               contentIds: run.contentIds,
             }),
           }
-        : pending.options[dice.below(pending.options.length)];
+        : choices[dice.below(choices.length)];
     if (!option) throw new Error(`${pending.id} has no options`);
     const input: Input = {
       kind: "answer",

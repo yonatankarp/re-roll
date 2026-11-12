@@ -45,6 +45,7 @@ export const StoryStateSchema = z.strictObject({
   visits: z.record(z.string(), z.number().int()).optional(),
   encounterOutcome: EncounterOutcomeSchema.optional(),
   resources: z.record(z.string(), z.number().int()).optional(),
+  restedIn: z.string().optional(), // the scene visit the party last rested in, as "scene#visit"
 });
 export type StoryState = Readonly<z.infer<typeof StoryStateSchema>>;
 
@@ -108,6 +109,7 @@ const ENGINE_EVENTS = [
   event("resourceAdjusted", { resource: z.string(), value: z.number().int() }),
   event("secretRevealed", { secret: z.string() }),
   event("beatFired", { beat: z.string() }),
+  event("restTaken", {}),
   event("adventureEnded", { reason: z.enum(["ending", "deadEnd", "defeat"]) }),
 ] as const;
 

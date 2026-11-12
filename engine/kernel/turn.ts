@@ -10,6 +10,7 @@ import {
   enterSceneFrame,
   initialStory,
   runStoryFrame,
+  sceneVisit,
   storyDecision,
 } from "../story/runtime.ts";
 import { type RecordingDice, createDice, rngFromSeed } from "./dice.ts";
@@ -126,6 +127,8 @@ export function applyEvent(
         ...state,
         story: { ...story, firedBeats: [...story.firedBeats, event.beat] },
       };
+    case "restTaken":
+      return { ...state, story: { ...story, restedIn: sceneVisit(story) } };
     case "adventureEnded":
       return { ...state, story: { ...story, ended: event.reason } };
     default:

@@ -74,7 +74,7 @@ import {
   characterFrames,
 } from "./character.ts";
 import { gearEffects, gearFrames } from "./gear.ts";
-import { restEffects, restFrames } from "./rest.ts";
+import { availableRests, restEffects, restFrames } from "./rest.ts";
 import { rollD20 } from "./rules.ts";
 import {
   BackgroundSchema,
@@ -485,6 +485,7 @@ export const dnd55e = defineSystem<DndState>({
     startCombat(EncounterSchema.parse(encounter), context, options),
   applyEvent: applyDndEvent,
   nextDecision: nextDndDecision,
+  rests: availableRests,
   decidePolicy: choosePolicy,
   tactical: (decision) =>
     /^dnd5\.5e:(turn|moveTo|reaction|afterHit|deathSave):/.test(decision.id),

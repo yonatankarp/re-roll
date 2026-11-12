@@ -107,6 +107,8 @@ export const StateSchema = z.strictObject({
   difficulty: z.enum(DIFFICULTIES).optional(),
   gold: z.number().int().optional(), // the party's coins, in gold pieces
   actors: z.record(z.string(), ActorSchema),
+  // Hours since the last Long Rest began. Missing until the first, so the first is always allowed.
+  sinceLongRest: z.number().int().optional(),
   combat: z
     .strictObject({
       encounter: z.string(),
@@ -146,6 +148,9 @@ const RestedSchema = z.strictObject({
   maxHp: z.number().int(),
   resourcesSpent: z.record(z.string(), z.number().int()),
 });
+// Rests are the only thing that passes time, so they're the clock for the one-Long-Rest-a-day rule.
+export const REST_HOURS = { short: 1, long: 8 } as const;
+const RestFinishedSchema = z.strictObject({ rest: z.enum(["short", "long"]) });
 const CombatStartedSchema = z.strictObject({
   encounter: z.string(),
   monsters: z.array(ActorSchema),
@@ -246,6 +251,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:characterAdvanced`]: CharacterAdvancedSchema,
   [`${NS}:xpAwarded`]: XpAwardedSchema,
   [`${NS}:rested`]: RestedSchema,
+  [`${NS}:restFinished`]: RestFinishedSchema,
   [`${NS}:combatStarted`]: CombatStartedSchema,
   [`${NS}:combatEnded`]: z.strictObject({}),
   [`${NS}:turnAdvanced`]: z.strictObject({}),
@@ -555,6 +561,13 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
               exhaustion: Math.max(0, actor.exhaustion - 1),
             },
       );
+    }
+    case `${NS}:restFinished`: {
+      const { rest } = payload(RestFinishedSchema, event);
+      if (rest === "long") return { ...state, sinceLongRest: REST_HOURS.long };
+      return state.sinceLongRest === undefined
+        ? state
+        : { ...state, sinceLongRest: state.sinceLongRest + REST_HOURS.short };
     }
     case `${NS}:combatStarted`: {
       const data = payload(CombatStartedSchema, event);

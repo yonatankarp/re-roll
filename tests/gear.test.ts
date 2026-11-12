@@ -58,6 +58,7 @@ async function storyRun(effects: readonly StoryEffect[]): Promise<RunContext> {
           id: "s0",
           text: "Onward.",
           textVariants: [],
+          rest: true,
           choices: [
             {
               label: "Go on",
@@ -65,7 +66,13 @@ async function storyRun(effects: readonly StoryEffect[]): Promise<RunContext> {
             },
           ],
         },
-        { id: "end", text: "The end.", textVariants: [], choices: [] },
+        {
+          id: "end",
+          text: "The end.",
+          textVariants: [],
+          rest: true,
+          choices: [],
+        },
       ],
     },
   };

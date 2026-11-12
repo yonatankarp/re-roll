@@ -26,6 +26,7 @@ export type {
   ParsedImport,
   ImportSource,
   RunSetup,
+  RestOption,
   StoryEffectDef,
   StoryPredicateDef,
   SystemContext,
