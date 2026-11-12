@@ -112,6 +112,52 @@ function traitsIn(
   }));
 }
 
+// Mechanics only for a trait whose whole text is one of these sentences, so nothing it says is left out.
+function traitMechanics(text: string): object {
+  const resisted =
+    /^You have Resistance to (\w+) damage(?: and (\w+) damage)?\.$/.exec(text);
+  if (resisted) {
+    return {
+      automation: "full",
+      passives: resisted
+        .slice(1)
+        .flatMap((type) =>
+          type
+            ? [
+                {
+                  kind: "modifier",
+                  modifier: { kind: "resistance", damage: type.toLowerCase() },
+                },
+              ]
+            : [],
+        ),
+    };
+  }
+  const tougher =
+    /^Your Hit Point maximum increases by (\d+), and it increases by \1 again whenever you gain a level\.$/.exec(
+      text,
+    );
+  if (tougher) {
+    const level = { kind: "level" };
+    return {
+      automation: "full",
+      passives: [
+        {
+          kind: "modifier",
+          modifier: {
+            kind: "bonus",
+            to: "maxHp",
+            amount: {
+              bonus: { add: Array<object>(Number(tougher[1])).fill(level) },
+            },
+          },
+        },
+      ],
+    };
+  }
+  return { automation: "text" };
+}
+
 export function parseSpeciesTraits(
   html: string,
   pluginId: string,
@@ -126,7 +172,7 @@ export function parseSpeciesTraits(
           id: `${pluginId}:feature/${slug}`,
           name: trait.name,
           text: trait.text,
-          automation: "text",
+          ...traitMechanics(trait.text),
         },
       };
     }),
@@ -222,6 +268,8 @@ export function parseFeatsFromHtml(
         name: heading.title,
         category,
         text: blockText(bodyOf(html, headings, heading)),
+        // Its mechanics live in a feature of the same text, encoded like a class feature's.
+        grants: [`${pluginId}:feature/feat-${slug}`],
       },
     };
   };
@@ -244,4 +292,27 @@ export function parseFeatsFromHtml(
       .filter((heading) => heading.tag === 3)
       .map((heading) => feat(heading, "racial")),
   ];
+}
+
+// The feature each feat grants, printed text only, as a class feature starts out.
+export function parseFeatFeatures(
+  html: string,
+  pluginId: string,
+): readonly ParsedImport[] {
+  return parseFeatsFromHtml(html, pluginId).map(({ slug, entry }) => {
+    const { name, text } = entry as {
+      readonly name: string;
+      readonly text: string;
+    };
+    return {
+      slug: `feat-${slug}`,
+      notes: [],
+      entry: {
+        id: `${pluginId}:feature/feat-${slug}`,
+        name,
+        text,
+        automation: "text",
+      },
+    };
+  });
 }

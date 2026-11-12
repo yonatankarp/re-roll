@@ -89,6 +89,7 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("abilityMod"), ability: AbilitySchema }),
   z.strictObject({ kind: z.literal("proficiency") }),
   z.strictObject({ kind: z.literal("classLevel"), class: ContentIdSchema }),
+  z.strictObject({ kind: z.literal("level") }), // character level
   z.strictObject({ kind: z.literal("scaling"), key: z.string() }),
   z.strictObject({ kind: z.literal("spellMod") }),
   z.strictObject({ kind: z.literal("spellSaveDc") }),
@@ -122,7 +123,15 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // "once" ends the effect after the next attack roll it adds to, as with Bardic Inspiration.
   z.strictObject({
     kind: z.literal("bonus"),
-    to: z.enum(["ac", "attacks", "saves", "checks", "speed"]),
+    to: z.enum([
+      "ac",
+      "attacks",
+      "saves",
+      "checks",
+      "speed",
+      "initiative",
+      "maxHp",
+    ]),
     amount: AmountSchema,
     once: z.boolean().optional(),
   }),
@@ -327,6 +336,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("criticalRange"),
     from: z.number().int().min(2).max(19),
   }),
+  // Advantage on saving throws with these abilities, or against these conditions, as with Gnomish Cunning or Brave.
+  z.strictObject({
+    kind: z.literal("saveAdvantage"),
+    abilities: z.array(AbilitySchema).default([]),
+    conditions: z.array(ConditionSchema).default([]),
+  }),
+  // Dropping to 1 Hit Point instead of 0 while the resource lasts, as with Relentless Endurance.
+  z.strictObject({ kind: z.literal("dropToOne"), resource: z.string() }),
   // Attacks per Attack action, such as Extra Attack.
   z.strictObject({
     kind: z.literal("multiattack"),
@@ -347,6 +364,12 @@ export const ResourceDefSchema = z.strictObject({
   ),
 });
 
+const ScaleStepSchema = z.union([
+  z.strictObject({ addDice: DiceSchema }),
+  z.strictObject({ addTargets: z.number().int().min(1) }),
+]);
+export type ScaleStep = z.infer<typeof ScaleStepSchema>;
+
 export const FeatureSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
   text: z.string().min(1),
@@ -354,6 +377,10 @@ export const FeatureSchema = ContentEntrySchema.extend({
   passives: z.array(PassiveSchema).default([]),
   activations: z.array(ActivationSchema).default([]),
   resources: z.array(ResourceDefSchema).default([]),
+  // Dice added to its activations at character levels 5, 11 and 17, as a cantrip's are.
+  perTier: ScaleStepSchema.optional(),
+  // Spells it always gives, from the character level in the key.
+  spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
 }).strict();
 export type Feature = z.infer<typeof FeatureSchema>;
 
@@ -434,6 +461,7 @@ export const SpeciesSchema = ContentEntrySchema.extend({
   size: z.enum(["tiny", "small", "medium", "large"]),
   speed: z.number().int(),
   traits: z.array(ContentIdSchema).default([]),
+  choices: z.array(ChoiceDefSchema).default([]), // asked at character creation, such as a Draconic Ancestry
 }).strict();
 export type Species = z.infer<typeof SpeciesSchema>;
 
@@ -459,14 +487,9 @@ export const FeatSchema = ContentEntrySchema.extend({
   ]),
   text: z.string().min(1),
   grants: z.array(ContentIdSchema).default([]),
+  choices: z.array(ChoiceDefSchema).default([]), // asked when the feat is taken at character creation
 }).strict();
 export type Feat = z.infer<typeof FeatSchema>;
-
-const ScaleStepSchema = z.union([
-  z.strictObject({ addDice: DiceSchema }),
-  z.strictObject({ addTargets: z.number().int().min(1) }),
-]);
-export type ScaleStep = z.infer<typeof ScaleStepSchema>;
 
 export const SpellSchema = ContentEntrySchema.extend({
   name: z.string().min(1),

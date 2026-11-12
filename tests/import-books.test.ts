@@ -8,6 +8,7 @@ import { parseCompanionsFromHtml } from "../plugins/systems/dnd5.5e/core/import/
 import { parseMagicItemsFromHtml } from "../plugins/systems/dnd5.5e/core/import/magic-items.ts";
 import {
   parseBackgroundsFromHtml,
+  parseFeatFeatures,
   parseFeatsFromHtml,
   parseSpeciesFromHtml,
   parseSpeciesTraits,
@@ -17,6 +18,7 @@ import {
   splitSpells,
 } from "../plugins/systems/dnd5.5e/core/import/spells.ts";
 import { dnd55e } from "../plugins/systems/dnd5.5e/core/index.ts";
+import { FeatureSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import { memoryStorage } from "./memory-storage.ts";
 
 const stats = `<div class="stats"><table class="physical abilities-saves"><tbody>
@@ -293,6 +295,62 @@ describe("origins in other books", () => {
     expect((murky?.entry as { readonly text: string }).text).not.toContain(
       "A bog",
     );
+  });
+
+  it("gives each feat a feature of its own text to hold its mechanics", () => {
+    const [nose] = parseFeatsFromHtml(originsPage, "my-book");
+    expect(nose?.entry).toMatchObject({
+      grants: ["my-book:feature/feat-sharp-nose"],
+    });
+    const [feature] = parseFeatFeatures(originsPage, "my-book");
+    expect(feature?.entry).toEqual({
+      id: "my-book:feature/feat-sharp-nose",
+      name: "Sharp Nose",
+      text: (nose?.entry as { readonly text: string }).text,
+      automation: "text",
+    });
+  });
+
+  it("reads a trait's mechanics only when its whole text says nothing else", () => {
+    const traits = parseSpeciesTraits(
+      `<h3>Stoneling</h3><h4>Stoneling Traits</h4>
+      <div><p><strong>Creature Type:</strong> Humanoid</p></div>
+      <p><strong><em>Hard.</em></strong> You have Resistance to Acid damage and Cold damage.</p>
+      <p><strong><em>Thick.</em></strong> Your Hit Point maximum increases by 2, and it increases by 2 again whenever you gain a level.</p>
+      <p><strong><em>Odd.</em></strong> You have Resistance to Fire damage. You also glow.</p>`,
+      "my-book",
+    ).map((item) => FeatureSchema.parse(item.entry));
+    expect(traits.map((item) => [item.automation, item.passives])).toEqual([
+      [
+        "full",
+        [
+          {
+            kind: "modifier",
+            modifier: { kind: "resistance", damage: "acid" },
+          },
+          {
+            kind: "modifier",
+            modifier: { kind: "resistance", damage: "cold" },
+          },
+        ],
+      ],
+      [
+        "full",
+        [
+          {
+            kind: "modifier",
+            modifier: {
+              kind: "bonus",
+              to: "maxHp",
+              amount: {
+                bonus: { base: 0, add: [{ kind: "level" }, { kind: "level" }] },
+              },
+            },
+          },
+        ],
+      ],
+      ["text", []],
+    ]);
   });
 
   it("uses the name when a species prints nothing before its traits", () => {

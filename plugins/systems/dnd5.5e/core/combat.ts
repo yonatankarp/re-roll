@@ -46,6 +46,7 @@ import type {
 } from "./schemas.ts";
 import { ClassSchema, MonsterSchema, PregenSchema } from "./schemas.ts";
 import { treasure } from "./gear.ts";
+import { dropToOneEvents, traitSaveAdvantage } from "./trait-rules.ts";
 import {
   criticalFrom,
   offerInspiration,
@@ -723,6 +724,16 @@ export function damageEvents(
       }),
     ];
   }
+  const endured = fortitude
+    ? null
+    : dropToOneEvents(
+        target,
+        amount,
+        remaining,
+        { type, critical },
+        deriveStats(target, context),
+      );
+  if (endured) return endured;
   const massive =
     target.side === "party" && remaining >= deriveStats(target, context).maxHp;
   const events: SystemEvent[] = [
@@ -890,6 +901,7 @@ function rollSave(
   dc: number,
   context: Context,
   magical = false,
+  conditions: readonly string[] = [],
 ): { readonly saved: boolean; readonly events: SystemEvent[] } {
   if (
     (ability === "str" || ability === "dex") &&
@@ -901,7 +913,8 @@ function rollSave(
   const roll = rollD20(context.dice, {
     advantage:
       hasFlag(target, "advantage", "saves", stats) ||
-      (magical && hasPassive(stats, "magicResistance")),
+      (magical && hasPassive(stats, "magicResistance")) ||
+      traitSaveAdvantage(stats, ability, conditions),
     disadvantage:
       hasFlag(target, "disadvantage", "saves", stats) ||
       (ability === "dex" && hasCondition(target, "restrained")),
@@ -1124,6 +1137,7 @@ export function resolveAction(
           dc,
           context,
           action.spellLevel !== null,
+          conditionsApplied(resolution.onFail),
         );
         events.push(...saveEvents);
         const resisted = rolledSave

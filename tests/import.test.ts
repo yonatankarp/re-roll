@@ -1726,6 +1726,8 @@ describe("parsing a character book page", () => {
       "mossfolk-damp",
       "mossfolk-spores",
       "pebbleling-damp",
+      "feat-spark-touched",
+      "feat-boon-of-bark",
     ]);
     expect(featureText("warden-roots")).toBe(
       "Your feet take root.\nDeep Roots\nThey go down a long way.",
