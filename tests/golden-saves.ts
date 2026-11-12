@@ -1,10 +1,13 @@
 // Writes the golden saves under tests/fixtures/saves from fixed-seed runs of the shipped adventures.
-// Run it only to add a save: the committed files stand for saves players already have, and
-// tests/golden-saves.test.ts checks that today's code still loads them.
-import { mkdir, writeFile } from "node:fs/promises";
+// A save (<name>.json) stands for saves players already have, so it is only ever added, never
+// rewritten: this skips any that exist. tests/golden-saves.test.ts checks today's code still loads them.
+// With --snapshots it rewrites only each save's snapshot (<name>.state.json) by loading it, for when
+// the state's shape changed on purpose. Review that diff: the snapshot is what the save must fold to.
+import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { Decision, GameState, Input } from "../engine/kernel/events.ts";
-import { type LogEntry, createSave } from "../engine/kernel/save.ts";
+import { type LogEntry, createSave, loadSave } from "../engine/kernel/save.ts";
 import { pendingDecision, startRun, step } from "../engine/kernel/turn.ts";
 
 process.env.RE_ROLL_ROOTS = "plugins"; // shipped content only: the repository is public
@@ -53,8 +56,23 @@ const GOLDENS: readonly Golden[] = [
 
 const MAX_ANSWERS = 120;
 
+const snapshotsOnly = process.argv.includes("--snapshots");
+
 for (const golden of GOLDENS) {
   const { registry, run } = await loadAdventure(golden.adventure);
+  const savePath = `${GOLDEN_FOLDER}/${golden.name}.json`;
+  const statePath = `${GOLDEN_FOLDER}/${golden.name}.state.json`;
+  if (existsSync(savePath)) {
+    if (snapshotsOnly) {
+      const loaded = loadSave(await readFile(savePath, "utf8"), registry, run);
+      if (!loaded.ok) throw new Error(`${golden.name}: ${loaded.error}`);
+      await writeFile(statePath, `${JSON.stringify(loaded.state)}\n`);
+      console.log(`${golden.name}: snapshot rewritten`);
+    } else {
+      console.log(`${golden.name}: kept, since saves are never rewritten`);
+    }
+    continue;
+  }
   const tactics = createDice(rngFromSeed(`${SEED}:tactics`));
   const started = startRun(run, SEED);
   let state = started.state;
@@ -93,13 +111,7 @@ for (const golden of GOLDENS) {
   }
   await mkdir(GOLDEN_FOLDER, { recursive: true });
   const save = createSave(registry, golden.adventure, SEED, log);
-  await writeFile(
-    `${GOLDEN_FOLDER}/${golden.name}.json`,
-    `${JSON.stringify(save)}\n`,
-  );
-  await writeFile(
-    `${GOLDEN_FOLDER}/${golden.name}.state.json`,
-    `${JSON.stringify(state)}\n`,
-  );
+  await writeFile(savePath, `${JSON.stringify(save)}\n`);
+  await writeFile(statePath, `${JSON.stringify(state)}\n`);
   console.log(`${golden.name}: ${String(log.length)} inputs`);
 }

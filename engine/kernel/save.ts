@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { STORY_FRAME_KINDS } from "../story/runtime.ts";
+import { STORY_FRAME_PREFIX } from "../story/runtime.ts";
 import {
   type Decision,
   DecisionSchema,
@@ -202,7 +202,7 @@ function checkFrame(run: RunContext, frame: Frame): string | null {
       ? checkResume(run, awaited.data.decision)
       : "The save waits on a decision that can't be read";
   }
-  if (STORY_FRAME_KINDS.has(frame.kind)) return null;
+  if (frame.kind.startsWith(STORY_FRAME_PREFIX)) return null; // the engine's own
   const definition = run.system.frames[frame.kind];
   if (!definition)
     return `The save is in the middle of an unknown step, ${frame.kind}`;

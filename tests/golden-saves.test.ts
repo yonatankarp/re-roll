@@ -10,8 +10,10 @@ import {
 } from "../engine/kernel/turn.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 
-// Saves written by older code, from tests/golden-saves.ts. Never regenerate one to make this pass:
-// a failure means players' saves of that kind stop loading. Fix the code, or add a migration.
+// Saves written by older code, from tests/golden-saves.ts. A save (.json) is frozen: if one stops
+// loading, players' saves of that kind stop loading too, so fix the code or add a migration.
+// A snapshot (.state.json) may be rewritten with `node tests/golden-saves.ts --snapshots` when the
+// state changed shape on purpose, after reviewing its diff.
 const GOLDENS = ["mid-creation", "after-loot", "mid-combat", "mid-rest"];
 const FOLDER = "tests/fixtures/saves";
 
