@@ -2351,6 +2351,49 @@ describe("class feature building blocks", () => {
     expect(actor(turned.state, "z").activeEffects).toHaveLength(1);
     expect(actor(turned.state, "a").activeEffects).toEqual([]);
   });
+
+  it("aims a Trample-style action only at a creature with the condition it names", async () => {
+    const run = arenaRun(
+      await base(),
+      feature("srd52:feature/trample", {
+        activations: [
+          {
+            cost: ["action"],
+            targeting: {
+              creatures: 1,
+              range: 5,
+              side: "enemy",
+              targetConditions: ["prone"],
+            },
+            resolution: {
+              kind: "save",
+              ability: "dex",
+              dc: { base: 15 },
+              damage: [{ amount: { dice: "2d10" }, type: "bludgeoning" }],
+            },
+          },
+        ],
+      }),
+    );
+    const trampler = hero(run, { features: ["srd52:feature/trample"] });
+    const prone = {
+      ...monster("p"),
+      activeEffects: [
+        {
+          sourceId: "monster:0",
+          casterId: "x",
+          ends: "spellDuration" as const,
+          modifier: { kind: "condition" as const, condition: "prone" as const },
+        },
+      ],
+    };
+    const options = nextDndDecision(
+      fight(trampler, monster("a"), prone),
+      run,
+    )?.options.map((option) => option.id);
+    expect(options).toContain("feature:srd52:feature/trample:0|p");
+    expect(options).not.toContain("feature:srd52:feature/trample:0|a");
+  });
 });
 
 describe("replay", () => {

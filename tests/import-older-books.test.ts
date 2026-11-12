@@ -321,7 +321,7 @@ describe("stat blocks the parser used to skip", () => {
     },
   );
 
-  it("leaves a choice alone in a block that already has another action", () => {
+  it("reads a choice of damage type as the first, in a block with other actions too", () => {
     const [parsed] = parseMonstersFromHtml(
       block(
         "stat-block",
@@ -332,8 +332,10 @@ describe("stat blocks the parser used to skip", () => {
     );
     expect(
       MonsterSchema.parse(parsed?.entry).actions.map((item) => item.name),
-    ).toEqual(["Bite"]);
-    expect(parsed?.notes).toContain("not automated: Lash");
+    ).toEqual(["Bite", "Lash"]);
+    expect(parsed?.notes).toContain(
+      "partial: Lash: left out a choice of damage type",
+    );
   });
 
   it("keeps a creature with no automated action for reading", () => {

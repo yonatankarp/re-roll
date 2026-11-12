@@ -117,6 +117,7 @@ if (command === "parse") {
     folder,
     html: await readInput(),
     knownIds: loaded.registry.contentIds(),
+    contentOf: (id) => loaded.registry.content(id),
   });
   console.log(`Written: ${String(summary.written)}`);
   console.log(`Invalid: ${summary.invalid.join(", ") || "none"}`);

@@ -1,5 +1,6 @@
 import type { ParsedImport } from "#sdk";
 import type {
+  Condition,
   Damage,
   LeafEffect,
   Modifier,
@@ -8,6 +9,14 @@ import type {
 } from "../schemas.ts";
 import { ConditionSchema, DAMAGE_TYPES } from "../schemas.ts";
 import { dependsOnCaster, statBlocksIn } from "./book.ts";
+import {
+  type Caster,
+  castActions,
+  casterIn,
+  type SpellLookup,
+  spellcastingActions,
+  spellLookup,
+} from "./monster-spells.ts";
 import { plainText, slugOf } from "./spells.ts";
 
 const ABILITIES = {
@@ -41,6 +50,14 @@ const CREATURE_KIND =
 
 const OLDER_CONDITION =
   /\b(?:is|be) (?:knocked )?(?:blinded|charmed|deafened|frightened|grappled|incapacitated|paralyzed|petrified|poisoned|prone|restrained|stunned|unconscious)\b/;
+
+const costOf = (section: string): "action" | "bonusAction" =>
+  section === "bonus actions" ? "bonusAction" : "action";
+
+const nonNull = <T extends object>(item: T): Partial<T> =>
+  Object.fromEntries(
+    Object.entries(item).filter(([, value]) => value !== null),
+  ) as Partial<T>;
 
 const sentencesOf = (text: string): readonly string[] =>
   text.split(/(?<=\.)\s+/);
@@ -150,11 +167,24 @@ function conditionsIn(text: string, left: string[]): LeafEffect[] {
       text,
     );
   const endsOnDamage =
-    /\bends? (?:early )?(?:if|when) the target takes (?:any )?damage\b/i.test(
+    /\bends? (?:early )?(?:if|when) the target takes (?:any )?damage\b|\buntil (?:it|the target) takes (?:any )?damage\b/i.test(
       text,
     );
   return sentencesOf(text).flatMap((sentence) => {
-    const shortTerm = /until the (start|end) of [^.]*next turn/i.test(sentence);
+    // "until the end of the spy's next turn" outlasts the spy's next turn, and the end of the target's own comes before it.
+    const [, edge, whose = ""] =
+      /until the (start|end) of ([^.]*?)\s*next turn/i.exec(sentence) ?? [];
+    const until =
+      edge?.toLowerCase() === "end" &&
+      !/^(?:its|the target’s|the target's|their)$/i.test(whose)
+        ? ("yourNextTurnEnd" as const)
+        : ("yourNextTurnStart" as const);
+    // "for 10 minutes" or "for 1 hour"; with no time printed, it lasts the fight.
+    const [, count, unit = ""] =
+      /\bfor (\d+) (minute|hour)s?\b/i.exec(sentence) ?? [];
+    const minutes = count
+      ? Number(count) * (unit.toLowerCase() === "hour" ? 60 : 1)
+      : 1;
     return [
       ...sentence.matchAll(/\b(?:has|have) the (\w+) condition/g),
     ].flatMap((match) => {
@@ -172,9 +202,7 @@ function conditionsIn(text: string, left: string[]): LeafEffect[] {
         {
           kind: "applyCondition" as const,
           condition: parsed.data,
-          duration: shortTerm
-            ? { until: "yourNextTurnStart" as const }
-            : { minutes: 1 },
+          duration: edge ? { until } : { minutes },
           repeatSave,
           endsOnDamage,
         },
@@ -293,7 +321,60 @@ function targetingFor(rule: string): unknown {
   };
 }
 
+// "one creature within 5 feet that has the Prone condition", or "one creature Grappled by the chuul": only such a
+// target can be chosen. The phrase is taken out, so the rest of the clause is read as usual.
+const GATED =
+  "(?:Charmed|Frightened|Grappled|Incapacitated|Prone|Restrained|Stunned)";
+const GATES = [
+  /,?\s*(?:or )?(?:that is willing or )?(?:that|who) (?:has|have) the ((?:\w+(?:,? or |, ))*\w+) conditions?\b/i,
+  new RegExp(
+    `\\s(?:that is )?(${GATED}(?: or ${GATED})*) by (?:the |its )?[\\w’' -]+?(?=[,.(]| or | within|$)`,
+  ),
+  new RegExp(
+    `,?\\s*(?:that )?the [\\w’' -]+? (?:has (${GATED})|is (grappling))\\b`,
+  ),
+  new RegExp(`(?<=\\bone )(${GATED}) (?=creature)`),
+];
+
+function targetGate(printed: string): {
+  readonly who: string;
+  readonly conditions: readonly Condition[];
+} {
+  let who = printed;
+  const conditions: Condition[] = [];
+  for (const pattern of GATES) {
+    const gate = pattern.exec(who);
+    if (!gate) continue;
+    for (const word of (gate[1] ?? gate[2] ?? "").split(/,? or |, /)) {
+      const parsed = ConditionSchema.safeParse(
+        word.trim().toLowerCase().replace("grappling", "grappled"),
+      );
+      if (parsed.success) conditions.push(parsed.data);
+    }
+    who = who.slice(0, gate.index) + who.slice(gate.index + gate[0].length);
+  }
+  return { who, conditions };
+}
+
+const SAVE_START = new RegExp(`\\b(?=${SAVE_LABEL})`);
+
 function parseSave(text: string, left: string[]): ParsedAction | null {
+  // "The ape hurls a boulder at a point within 90 feet. Dexterity Saving Throw: …": the lead-in says where.
+  const at = text.search(SAVE_START);
+  if (at < 0) return null;
+  const lead = text.slice(0, at);
+  if (/Attack Roll|Hit:|Saving Throw/.test(lead)) return null;
+  if (/\b(?:teleports?|moves?|jumps?|leaps?|flies|charges?)\b/i.test(lead)) {
+    left.push("its movement");
+  }
+  return parseSaveFrom(text.slice(at), lead, left);
+}
+
+function parseSaveFrom(
+  text: string,
+  lead: string,
+  left: string[],
+): ParsedAction | null {
   // A worse condition on a later failure can't be tracked, so only the first stage applies.
   const firstStage = text.replace(
     /\s*(?:Second Failure|Failure by \d+ or More):.*?(?=\s*Success:|$)/s,
@@ -313,7 +394,11 @@ function parseSave(text: string, left: string[]): ParsedAction | null {
   );
   if (!ability) return null;
   // Who can be targeted at all decides the whole action, so it can't be left out as a rider.
-  const [who = ""] = sentencesOf(rule);
+  // "originating from the marauder when it appears" says where the area is, not when the action works.
+  const [printed = ""] = sentencesOf(
+    rule.replace(/(\boriginating from [^.,]*?) when [^.,]*/i, "$1"),
+  );
+  const { who, conditions } = targetGate(printed);
   if (
     limitOn(who) ||
     /\b(?:Grappled|Restrained|Prone|Incapacitated|Charmed|Stunned|Paralyzed|Unconscious)\b/.test(
@@ -322,13 +407,30 @@ function parseSave(text: string, left: string[]): ParsedAction | null {
   ) {
     return null;
   }
-  const sentences = sentencesOf(failure);
+  // "If the target has 25 Hit Points or fewer, it drops to 0 Hit Points. Otherwise, the target takes …": the damage stands.
+  const threshold =
+    /^If the (?:target|creature) has \d+ Hit Points or fewer\b[^.]*\.\s*(?:It otherwise|Otherwise,)/i;
+  if (threshold.test(failure)) left.push("a Hit Point threshold");
+  const sentences = sentencesOf(failure.replace(threshold, ""));
   const damage = damageIn(sentences[0] ?? "", left);
   noteLaterDamage(sentences, left);
   const onFail = conditionsIn(failure, left);
   if (damage.length === 0 && onFail.length === 0) return null;
+  // The lead-in gives the area or range when the save's own clause doesn't.
+  const within = /within \d+ feet/.exec(lead)?.[0];
+  const scope = !rule.replace(/[.\s]/g, "")
+    ? lead
+    : within && !/within \d+ feet/.test(rule)
+      ? `${rule} ${within}`
+      : rule;
+  const targeting = targetingFor(
+    who === printed ? scope : scope.replace(printed, who),
+  ) as Record<string, unknown>;
   return {
-    targeting: targetingFor(rule),
+    targeting:
+      conditions.length > 0 && "creatures" in targeting
+        ? { ...targeting, targetConditions: conditions }
+        : targeting,
     resolution: {
       kind: "save",
       ability,
@@ -616,6 +718,7 @@ function parseBlock(
   block: string,
   pluginId: string,
   secondPass = false,
+  spells?: SpellLookup,
 ): ParsedImport | null {
   const name = plainText(
     /<(?:h[1-6]|p class="[^"]*Stat-Block-Title[^"]*")[^>]*>([\s\S]*?)<\/(?:h[1-6]|p)>/.exec(
@@ -660,7 +763,18 @@ function parseBlock(
   const advantageDice = new Set<string>();
   let multiattack = 1;
   let section = "";
-  for (const paragraph of paragraphs) {
+  // "using the same spellcasting ability as Spellcasting" points at the block's own Spellcasting entry.
+  const proficiency = Number(field(/\b(?:PB|Proficiency Bonus) \+(\d+)/) ?? 2);
+  const blockCaster = casterIn(
+    lines.find((line) => /spellcasting ability/i.test(line)) ?? "",
+    scores,
+    proficiency,
+  );
+  const casterFor = (text: string): Caster => {
+    const own = casterIn(text, scores, proficiency);
+    return own.mod === null ? { ...blockCaster, ...nonNull(own) } : own;
+  };
+  for (const [index, paragraph] of paragraphs.entries()) {
     const attributes = paragraph[1] ?? "";
     const inner = paragraph[2] ?? "";
     if (/monster-header|Stat-Block-Heading/.test(attributes)) {
@@ -678,6 +792,35 @@ function parseBlock(
       section === "lair actions" ||
       /^Legendary Resistance\b/i.test(label)
     ) {
+      continue;
+    }
+    // Its spell lists follow it in paragraphs of their own, until the next entry.
+    if (
+      spells &&
+      /^(?:Innate )?Spellcasting\b/.test(label) &&
+      ["traits", "actions", "bonus actions"].includes(section)
+    ) {
+      const following = paragraphs.slice(index + 1);
+      const end = following.findIndex(
+        (item) =>
+          entryOf(item[2] ?? "") !== null ||
+          /monster-header|Stat-Block-Heading/.test(item[1] ?? ""),
+      );
+      const listed = spellcastingActions(
+        [
+          text,
+          ...lines.slice(
+            index + 1,
+            index + 1 + (end < 0 ? following.length : end),
+          ),
+        ].join("\n"),
+        section === "traits" ? [] : [costOf(section)],
+        casterFor(text),
+        spells,
+        notes,
+      );
+      if (listed.length === 0) notes.push(`not automated: ${label}`);
+      actions.push(...listed);
       continue;
     }
     if (section === "traits") {
@@ -705,14 +848,43 @@ function parseBlock(
     const resource = `${perDay ? "day" : "recharge"}:${slugOf(label.replace(/\s*\(.*$/, ""))}`;
     let recharge = rechargeOn; // options share one recharge, and each action holding it would roll for it
     for (const option of optionsIn(label, text)) {
-      const left: string[] = [];
-      const optionText = secondPass
+      let left: string[] = [];
+      let optionText = secondPass
         ? withFirstChosenType(option.text, left)
         : option.text;
-      const parsed =
-        parseAttack(optionText, left) ?? parseSave(optionText, left);
+      let parsed = parseAttack(optionText, left) ?? parseSave(optionText, left);
+      // "Acid or Necrotic damage (its choice)" is read as the first type when nothing else could be.
+      if (!parsed && !secondPass) {
+        const retry: string[] = [];
+        const chosen = withFirstChosenType(option.text, retry);
+        const again =
+          chosen === option.text
+            ? null
+            : (parseAttack(chosen, retry) ?? parseSave(chosen, retry));
+        if (again) {
+          parsed = again;
+          left = retry;
+          optionText = chosen;
+        }
+      }
       if (!parsed) {
-        notes.push(`not automated: ${option.name}`);
+        const cast = spells
+          ? castActions(
+              optionText,
+              {
+                cost: [costOf(section)],
+                ...(recharge ? { recharge: Number(recharge) } : {}),
+                ...(perDay ? { perDay: Number(perDay) } : {}),
+                ...(rechargeOn || perDay ? { resource } : {}),
+              },
+              casterFor(optionText),
+              spells,
+              notes,
+            )
+          : [];
+        if (cast.length === 0) notes.push(`not automated: ${option.name}`);
+        else recharge = undefined;
+        actions.push(...cast);
         continue;
       }
       const actionName = option.name.replace(/\s*\(.*$/, "");
@@ -721,7 +893,7 @@ function parseBlock(
       }
       for (const dice of parsed.advantageDice ?? []) advantageDice.add(dice);
       const cost = [
-        section === "bonus actions" ? "bonusAction" : "action",
+        costOf(section),
         ...(rechargeOn || perDay ? [{ resource }] : []),
       ];
       actions.push({
@@ -802,7 +974,7 @@ function parseBlock(
         ? { speeds: { walk: speed, ...Object.fromEntries(otherSpeeds) } }
         : {}),
       abilities: scores,
-      proficiency: Number(field(/\b(?:PB|Proficiency Bonus) \+(\d+)/) ?? 2),
+      proficiency,
       saves,
       // Older books print no initiative, which is the Dexterity modifier there.
       ...(passives.length > 0 ? { passives } : {}),
@@ -821,13 +993,18 @@ function parseBlock(
 }
 
 // Stat blocks are regular enough for code alone, so no model is needed and nothing is invented.
+// Spells come from the loaded content, so a monster's Spellcasting is only automated when they're given.
 export function parseMonstersFromHtml(
   html: string,
   pluginId: string,
+  knownIds?: readonly string[],
+  contentOf?: (id: string) => unknown,
 ): readonly ParsedImport[] {
+  const spells = spellLookup(knownIds, contentOf);
   return statBlocksIn(html).flatMap((block) => {
     const parsed =
-      parseBlock(block, pluginId) ?? parseBlock(block, pluginId, true);
+      parseBlock(block, pluginId, false, spells) ??
+      parseBlock(block, pluginId, true, spells);
     return parsed ? [parsed] : [];
   });
 }
