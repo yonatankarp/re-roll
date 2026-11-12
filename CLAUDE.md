@@ -23,6 +23,10 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - Commit or push only when asked. Never add Co-Authored-By or other attribution lines to commits or PRs.
 - Merge session branches with `--no-ff`, naming them `refs/heads/claude/...`.
 
+## Platforms
+
+The game must not depend on any one OS. Don't use macOS-only (or Windows-only) features such as system voices or native-only APIs unless there is an equivalent everywhere. Prefer web platform features and bundled, cross-platform libraries. Tauri itself targets macOS, Windows and Linux.
+
 ## UI direction
 
 - The game should feel like playing D&D, not a rules tool. Show only what the moment needs, put the rest in drawers or tabs, use transitions, and let the player act on the map by click or drag. The option list stays for keyboard players.
