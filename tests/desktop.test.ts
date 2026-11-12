@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { type Server, createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -230,6 +231,61 @@ describe("playing through the shell's session", () => {
       "The House on Mere Lane",
     );
   });
+
+  it("gives an adventure the cover its book names, and the rest the title plate", async () => {
+    const content = createContentReader(url);
+    const game = createGame({
+      storage: withSaves(
+        {
+          read: (path) =>
+            path === "private/assets/book/index.json"
+              ? Promise.resolve(
+                  JSON.stringify([
+                    { file: "cover.jpg", cover: ["haunted-house"] },
+                    { file: "notes.txt", cover: ["goblin-ambush"] },
+                  ]),
+                )
+              : content.read(path),
+          list: (prefix) =>
+            prefix === "private/assets"
+              ? Promise.resolve([
+                  { path: "private/assets/book/index.json", symlink: false },
+                ])
+              : content.list(prefix),
+        },
+        memorySaves(),
+      ),
+      roots: ["plugins"],
+      systems,
+      uis: [dndUi],
+    });
+    const covers = Object.fromEntries(
+      (await game.listAdventures()).map((item) => [item.id, item.cover]),
+    );
+    // A cover that isn't a picture is dropped, so that adventure shows its plate.
+    expect(covers).toEqual({
+      "haunted-house": "private/assets/book/cover.jpg",
+      "goblin-ambush": null,
+    });
+  });
+
+  // Runs only where the owner's books are present.
+  it.skipIf(!existsSync("private/adventures"))(
+    "finds a cover for every adventure from the books",
+    async () => {
+      const adventures = await createGame({
+        storage: withSaves(createContentReader(url), memorySaves()),
+        roots: ["plugins", "private"],
+        systems,
+        uis: [dndUi],
+      }).listAdventures();
+      for (const { id, source, cover } of adventures) {
+        // Anything without a cover gets the title plate; a book's adventure must have one.
+        if (source === "private") expect(cover, id).not.toBeNull();
+        if (cover !== null) expect(existsSync(cover), cover).toBe(true);
+      }
+    },
+  );
 
   it("plays a fight, saves mid-fight, loads and reaches an end", async () => {
     const game = newGame();

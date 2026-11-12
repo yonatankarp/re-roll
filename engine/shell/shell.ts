@@ -1,5 +1,6 @@
 import { loadScreen } from "./load-screen.ts";
 import { campfire } from "./campfire.ts";
+import { adventureCard, adventureGrid } from "./adventure-picker.ts";
 import type { Game, GameView } from "./session.ts";
 import type {
   Board,
@@ -460,33 +461,24 @@ export function mountShell(
     const row = (adventure: (typeof adventures)[number]): HTMLElement => {
       // Saves are sorted newest first, so the first match is the one to resume.
       const latest = saves.find((save) => save.adventure === adventure.id);
-      const start = button(adventure.title, () => {
-        act(() => showSetup(adventure));
-      });
-      if (adventure.levels) {
-        start.append(
-          el("span", {
-            class: "meta",
-            text: ` levels ${adventure.levels}`,
-          }),
-        );
-      }
-      const node = el("div", { class: "row" }, start);
-      if (latest) {
-        const resume = button("Resume", () => {
-          act(async () => {
-            await game.load(latest.path);
-            showGame();
-          });
-        });
-        resume.setAttribute(
-          "aria-label",
-          `Resume ${adventure.title}, ${latest.label}`,
-        );
-        node.append(resume);
-      }
-      node.dataset.title = adventure.title.toLowerCase();
-      return node;
+      return adventureCard(
+        game,
+        adventure,
+        () => {
+          act(() => showSetup(adventure));
+        },
+        latest
+          ? {
+              label: latest.label,
+              go: () => {
+                act(async () => {
+                  await game.load(latest.path);
+                  showGame();
+                });
+              },
+            }
+          : null,
+      );
     };
 
     const groups = (
@@ -502,7 +494,7 @@ export function mountShell(
               "section",
               { class: "adventure-group" },
               el("h3", { text: `${title} (${String(chosen.length)})` }),
-              el("div", { class: "options" }, ...chosen.map(row)),
+              adventureGrid(chosen.map(row)),
             ),
           ]
         : [];
@@ -510,7 +502,7 @@ export function mountShell(
     filter.addEventListener("input", () => {
       const wanted = filter.value.trim().toLowerCase();
       for (const group of groups) {
-        const rows = [...group.querySelectorAll<HTMLElement>(".row")];
+        const rows = [...group.querySelectorAll<HTMLElement>(".cover-card")];
         for (const item of rows) {
           item.hidden = !item.dataset.title?.includes(wanted);
         }
