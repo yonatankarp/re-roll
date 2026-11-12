@@ -46,6 +46,7 @@ import type {
 } from "./schemas.ts";
 import { ClassSchema, MonsterSchema, PregenSchema } from "./schemas.ts";
 import { treasure } from "./gear.ts";
+import { dropToOneEvents, traitSaveAdvantage } from "./trait-rules.ts";
 import {
   behindTotalCover,
   coverBonus,
@@ -749,6 +750,16 @@ export function damageEvents(
       }),
     ];
   }
+  const endured = fortitude
+    ? null
+    : dropToOneEvents(
+        target,
+        amount,
+        remaining,
+        { type, critical },
+        deriveStats(target, context),
+      );
+  if (endured) return endured;
   const massive =
     target.side === "party" && remaining >= deriveStats(target, context).maxHp;
   const events: SystemEvent[] = [
@@ -917,6 +928,7 @@ export function rollSave(
   context: Context,
   magical = false,
   cover = 0, // half or three-quarters cover adds to Dexterity saves
+  conditions: readonly string[] = [],
 ): { readonly saved: boolean; readonly events: SystemEvent[] } {
   if (
     (ability === "str" || ability === "dex") &&
@@ -929,7 +941,8 @@ export function rollSave(
     advantage:
       hasFlag(target, "advantage", "saves", stats) ||
       (magical && hasPassive(stats, "magicResistance")) ||
-      (ability === "dex" && dodging(target)),
+      (ability === "dex" && dodging(target)) ||
+      traitSaveAdvantage(stats, ability, conditions),
     disadvantage:
       hasFlag(target, "disadvantage", "saves", stats) ||
       (ability === "dex" && hasCondition(target, "restrained")),
@@ -1172,6 +1185,7 @@ export function resolveAction(
           coverBonus(
             coverFor(context.state, actor.position, target, [actor.id]),
           ),
+          conditionsApplied(resolution.onFail),
         );
         events.push(...saveEvents);
         const resisted = rolledSave

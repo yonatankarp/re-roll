@@ -13,7 +13,7 @@ import {
   rowsOf,
   tablesIn,
 } from "./book.ts";
-import { parseSpeciesTraits } from "./origins.ts";
+import { parseFeatFeatures, parseSpeciesTraits } from "./origins.ts";
 import {
   isStatBlockTitle,
   plainText,
@@ -724,5 +724,6 @@ export function parseFeaturesFromHtml(
       subclass.features.map((feature) => featureEntry(pluginId, feature)),
     ),
     ...parseSpeciesTraits(html, pluginId),
+    ...parseFeatFeatures(html, pluginId),
   ];
 }

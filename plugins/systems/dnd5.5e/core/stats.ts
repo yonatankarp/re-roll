@@ -167,28 +167,37 @@ function bestAc(
 function collectFeatureData(
   access: ContentAccess,
   featureIds: readonly string[],
+  level = 1,
 ): {
   passives: Passive[];
   actions: KnownAction[];
   resources: Feature["resources"];
+  spells: string[];
 } {
   const passives: Passive[] = [];
   const actions: KnownAction[] = [];
   const resources: Feature["resources"] = [];
+  const spells = featureIds.flatMap((id) => grantedSpells(id, level));
   for (const id of featureIds) {
     const feature = featureRules(lookup(access, FeatureSchema, id));
+    if ((feature.fromLevel ?? 1) > level) continue;
     passives.push(...feature.passives);
     resources.push(...feature.resources);
+    for (const [from, ids] of Object.entries(feature.spells ?? {})) {
+      if (Number(from) <= level) spells.push(...ids);
+    }
     feature.activations.forEach((activation, index) => {
       actions.push({
         id: `feature:${id}:${String(index)}`,
         name: feature.name,
-        activation,
+        activation: feature.perTier
+          ? scaleActivation(activation, feature.perTier, cantripTier(level))
+          : activation,
         spellLevel: null,
       });
     });
   }
-  return { passives, actions, resources };
+  return { passives, actions, resources, spells };
 }
 
 export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
@@ -429,12 +438,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
-  const fromFeatures = collectFeatureData(access, [...featureIds]);
+  const fromFeatures = collectFeatureData(access, [...featureIds], level);
   actions.push(...fromFeatures.actions);
-  for (const id of featureIds) {
-    for (const spellId of grantedSpells(id, level)) {
-      if (access.content(spellId)) knownSpells.add(spellId);
-    }
+  for (const spellId of fromFeatures.spells) {
+    if (access.content(spellId)) knownSpells.add(spellId);
   }
 
   for (const spellId of untrainedArmor ? [] : knownSpells) {
@@ -517,10 +524,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   };
   return {
     ...partial,
+    maxHp: partial.maxHp + passiveBonus(partial, "maxHp"),
+    initiative: partial.initiative + passiveBonus(partial, "initiative"),
     speed: Math.max(
       0,
       partial.speed +
-        speedBonus(partial) -
+        passiveBonus(partial, "speed") -
         (tooHeavy ? 10 : 0) -
         5 * actor.exhaustion,
     ),
@@ -534,10 +543,13 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
 }
 
 // shortcut: a speed bonus doesn't check the armor it needs, such as Fast Movement's.
-function speedBonus(stats: Stats): number {
+function passiveBonus(
+  stats: Stats,
+  to: "speed" | "initiative" | "maxHp",
+): number {
   return passiveModifiers(stats.passives).reduce(
     (total, modifier) =>
-      modifier.kind === "bonus" && modifier.to === "speed"
+      modifier.kind === "bonus" && modifier.to === to
         ? total +
           evaluateFormula(modifier.amount.bonus ?? { base: 0, add: [] }, stats)
         : total,
@@ -841,6 +853,9 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
         break;
       case "classLevel":
         total += stats.classLevels[term.class] ?? 0;
+        break;
+      case "level":
+        total += stats.level;
         break;
       case "scaling":
         total += stats.scaling[term.key] ?? 0;

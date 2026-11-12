@@ -354,6 +354,34 @@ export function levelChoices(
   ];
 }
 
+// What the species and the origin feats ask for, at level 1 only. Ids get a prefix so they can't meet a class's.
+function originChoices(
+  draft: Draft,
+  base: CharacterBuild | null,
+  access: ContentAccess,
+): readonly ChoiceDef[] {
+  if (base || !draft.speciesId || !draft.backgroundId) return [];
+  const prefixed = (owner: string, choices: readonly ChoiceDef[]) =>
+    choices.map((choice) => ({ ...choice, id: `${owner}-${choice.id}` }));
+  const species = prefixed(
+    "species",
+    lookup(access, SpeciesSchema, draft.speciesId).choices,
+  );
+  // A feat picked here, such as a Human's Versatile origin feat, asks its own choices too.
+  const feats = [
+    lookup(access, BackgroundSchema, draft.backgroundId).feat,
+    ...species.flatMap((choice) =>
+      choice.kind === "feat" ? (draft.picks[choice.id] ?? []) : [],
+    ),
+  ];
+  return [
+    ...species,
+    ...feats.flatMap((id, index) =>
+      prefixed(`feat${String(index)}`, lookup(access, FeatSchema, id).choices),
+    ),
+  ];
+}
+
 // Each spell choice looks at every spell, and companions make many of them when a run starts.
 const parsedSpells = new WeakMap<ContentAccess["content"], readonly Spell[]>();
 
@@ -384,9 +412,9 @@ export function choiceOptions(
   classDef: ClassDef,
   access: ContentAccess,
 ): Pick<Step, "options" | "prefer"> & { readonly what: string } {
-  const picked = draft.picks[choice.id] ?? [];
+  // Every pick so far counts, so a species' skill can't repeat the class's at level 1.
   const taken = (kind: LevelEntry["answers"][number]["kind"]) =>
-    new Set([...answered(base, kind), ...picked]);
+    new Set([...answered(base, kind), ...Object.values(draft.picks).flat()]);
   const backgroundId = base?.backgroundId ?? draft.backgroundId ?? "";
   const background = lookup(access, BackgroundSchema, backgroundId);
 
@@ -543,12 +571,10 @@ function classStep(
 ): Step | null {
   const classDef = lookup(access, ClassSchema, draft.classId ?? "");
   const level = (base?.levels.length ?? 0) + 1;
-  const choices = levelChoices(
-    classDef,
-    level,
-    chosenSubclass(draft.picks, base),
-    access,
-  );
+  const choices = [
+    ...levelChoices(classDef, level, chosenSubclass(draft.picks, base), access),
+    ...originChoices(draft, base, access),
+  ];
   for (const choice of choices) {
     const picked = draft.picks[choice.id] ?? [];
     const count = "count" in choice ? choice.count : 1;
@@ -652,7 +678,15 @@ function levelEntry(
     // The highest roll at level 1, then the fixed value: half the die plus one.
     hitPointGain: level === 1 ? sides : sides / 2 + 1,
     answers: answersOf(
-      levelChoices(classDef, level, chosenSubclass(draft.picks, base), access),
+      [
+        ...levelChoices(
+          classDef,
+          level,
+          chosenSubclass(draft.picks, base),
+          access,
+        ),
+        ...originChoices(draft, base, access),
+      ],
       draft.picks,
     ),
   });

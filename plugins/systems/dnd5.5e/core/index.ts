@@ -103,6 +103,7 @@ import {
   CompanionSchema,
   EncounterBudgetSchema,
   EncounterSchema,
+  type ChoiceDef,
   FeatSchema,
   FeatureSchema,
   HazardSchema,
@@ -149,12 +150,13 @@ function buildReferences(pregen: z.infer<typeof PregenSchema>): string[] {
 }
 
 function levelReferences(level: z.infer<typeof ClassSchema>["levels"][number]) {
-  return [
-    ...level.grants,
-    ...level.choices.flatMap((choice) =>
-      choice.kind === "option" ? choice.from : [],
-    ),
-  ];
+  return [...level.grants, ...optionReferences(level.choices)];
+}
+
+function optionReferences(choices: readonly ChoiceDef[]): readonly string[] {
+  return choices.flatMap((choice) =>
+    choice.kind === "option" ? choice.from : [],
+  );
 }
 
 // A pregen names a class from its own book. When a fuller book with a class of the same name is loaded
@@ -226,7 +228,7 @@ export const dnd55e = defineSystem<DndState>({
     species: contentKind({
       idPrefix: "species",
       schema: SpeciesSchema,
-      references: (item) => item.traits,
+      references: (item) => [...item.traits, ...optionReferences(item.choices)],
     }),
     backgrounds: contentKind({
       idPrefix: "background",
@@ -236,11 +238,12 @@ export const dnd55e = defineSystem<DndState>({
     feats: contentKind({
       idPrefix: "feat",
       schema: FeatSchema,
-      references: (item) => item.grants,
+      references: (item) => [...item.grants, ...optionReferences(item.choices)],
     }),
     features: contentKind({
       idPrefix: "feature",
       schema: FeatureSchema,
+      references: (item) => Object.values(item.spells ?? {}).flat(),
     }),
     spells: contentKind({
       idPrefix: "spell",
