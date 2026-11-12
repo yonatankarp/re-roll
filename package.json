@@ -22,6 +22,7 @@
     "prep:eval": "node tests/prep-eval.ts",
     "bot:fixtures": "node tests/bot-fixtures.ts",
     "bot": "node app/cli/bot.ts",
+    "bot:check": "node app/cli/bot.ts 200 --check",
     "play": "node app/cli/play.ts",
     "ui": "vite --config app/desktop/vite.config.ts",
     "ui:build": "vite build --config app/desktop/vite.config.ts",
