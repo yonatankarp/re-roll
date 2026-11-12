@@ -2222,6 +2222,8 @@ describe("battle map ground, cover and light", () => {
     // A map needs two rows at least, so a one-row picture gets an open one below.
     const drawn =
       rows.length > 1 ? rows : [...rows, ".".repeat(rows[0]?.length ?? 0)];
+    const y = drawn.findIndex((row) => /[^#]/.test(row));
+    const open = [drawn[y]?.search(/[^#]/) ?? 0, y];
     const map = BattlemapSchema.parse({
       image: "assets/map.png",
       imageWidth: 100,
@@ -2231,8 +2233,9 @@ describe("battle map ground, cover and light", () => {
       rows: drawn.length,
       walls: drawn,
       light,
-      party: [[0, 0]],
-      monsters: [[1, 0]],
+      // The starts only need to be open: the actors are placed by hand.
+      party: [open],
+      monsters: [open],
     });
     if (!state.combat) throw new Error("No fight");
     const terrain = terrainOf(map);
@@ -2580,6 +2583,38 @@ describe("battle map ground, cover and light", () => {
     const there = actor(walked.state, "a").position;
     expect(distanceFeet(there, { x: 0, y: 1 })).toBe(5);
     expect(there).not.toEqual({ x: 1, y: 1 });
+  });
+
+  it("walks round a long wall to get a line on a foe it can't see through it", async () => {
+    const run = archer(await base(), "archer");
+    // In bow range, but the wall runs further than one move: straight-line distance would only lead away.
+    const corridor = onMap(
+      [
+        "######",
+        ".#....",
+        ".#....",
+        ".#....",
+        ".#....",
+        ".#....",
+        ".#....",
+        ".#....",
+        ".#....",
+        ".#....",
+        "......",
+      ],
+      [at(monster("b", "srd52:monster/archer"), 0, 1), at(hero(run), 3, 1)],
+    );
+    const decision = nextDndDecision(corridor, run);
+    if (!decision) throw new Error("No decision");
+    expect(decision.options.map((item) => item.id)).not.toContain(
+      "monster:0|player",
+    );
+    const context = contextOf(run, corridor, HIGH);
+    expect(choosePolicy(decision, context)).toBe(MOVE);
+    const walked = settle(run, corridor, [act("b", MOVE)], HIGH, (asked, now) =>
+      choosePolicy(asked, contextOf(run, now, HIGH)),
+    );
+    expect(actor(walked.state, "b").position).toEqual({ x: 0, y: 7 });
   });
 
   it("goes for a foe in the open before one behind three-quarters cover", async () => {

@@ -918,8 +918,9 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       // The shield shows the cover a foe has while the player has something to aim at it.
       const aimable = new Set(
         update.decision?.actor === PLAYER_ACTOR
-          ? update.decision.options.map(
-              (option) => option.id.split(SEPARATOR)[1],
+          ? update.decision.options.map((option) =>
+              // An area aimed at a creature names it as "@" and its id.
+              option.id.split(SEPARATOR)[1]?.replace(AIM, ""),
             )
           : [],
       );
@@ -928,7 +929,9 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         token.shield.hidden = bonus === 0 || !aimable.has(id);
         token.shield.textContent = `+${String(bonus)}`;
         token.shield.title =
-          bonus >= 5 ? "Three-quarters cover: +5 AC" : "Half cover: +2 AC";
+          bonus >= 5
+            ? "Three-quarters cover: +5 to AC and Dexterity saves"
+            : "Half cover: +2 to AC and Dexterity saves";
       }
     }
     layout();

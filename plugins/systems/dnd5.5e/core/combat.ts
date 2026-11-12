@@ -2198,15 +2198,39 @@ function stepToward(actor: Actor, context: Context): Square | null {
   const foes = enemies(state, actor).filter(
     (item) => !isDown(item) && item.position,
   );
-  // A foe in range but behind total cover is as far as it would be for a melee creature: it closes in until it
-  // has a clear line.
+  // How far it is to walk from a square to a foe, round walls and through difficult terrain, ignoring
+  // creatures. On a map with no walls that's the straight distance.
+  const { grid, walls = [] } = state.combat ?? {};
+  const walkFrom = new Map<string, ReadonlyMap<string, number>>();
+  const walk = (from: Square | null, foe: Actor): number => {
+    if (!grid || walls.length === 0 || !from || !foe.position) {
+      return distanceFeet(from, foe.position);
+    }
+    let field = walkFrom.get(foe.id);
+    if (!field) {
+      field = new Map(
+        reachableSquares(
+          foe.position,
+          Infinity,
+          grid,
+          new Set(walls),
+          new Set(),
+          difficultSquares(state),
+        ).map((item) => [squareKey(item.square), item.feet]),
+      );
+      walkFrom.set(foe.id, field);
+    }
+    return field.get(squareKey(from)) ?? Infinity;
+  };
+  // In reach with a clear line is 0. Out of range, it's the walk still to go. A foe in range but behind
+  // total cover counts the whole walk, so the creature goes round the wall until it has a line.
   const gap = (from: Square | null): number =>
     Math.min(
       ...foes.map((foe) => {
         const distance = distanceFeet(from, foe.position);
-        if (distance > reach) return distance - reach;
+        if (distance > reach) return Math.max(0, walk(from, foe) - reach);
         return coverFor(state, from, foe, [actor.id]) === "total"
-          ? distance
+          ? walk(from, foe)
           : 0;
       }),
     );

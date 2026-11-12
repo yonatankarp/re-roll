@@ -230,6 +230,8 @@ function crossesAny(
 }
 
 // Whether a segment along a grid line runs between two wall squares, which is inside the wall too.
+// shortcut: past the map's edge isn't wall, so a line along the outermost edge still passes; count it as wall
+// if a book map's edge ever gives a line it shouldn't.
 function alongWalls(
   [ax, ay]: readonly [number, number],
   [bx, by]: readonly [number, number],
