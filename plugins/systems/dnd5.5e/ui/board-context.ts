@@ -9,6 +9,7 @@ import type {
   Option,
 } from "./board-data.ts";
 import type { DndCue } from "./cues.ts";
+import { dwell } from "./board-math.ts";
 
 // What every part of the board shares: its elements, which mountDndBoard makes once, and the state they
 // all read and write. State lives only here, so no part keeps a copy that could fall out of step.
@@ -93,12 +94,19 @@ function reduced(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+// The player skipped what's playing: no waits, no animations.
 export function fast(ctx: BoardContext): boolean {
+  return ctx.skipping;
+}
+
+// Nothing moves, when skipping or with reduced motion; reduced motion still shows each result in place.
+export function still(ctx: BoardContext): boolean {
   return ctx.skipping || reduced();
 }
 
 export function wait(ctx: BoardContext, ms: number): Promise<void> {
-  return fast(ctx)
+  const time = dwell(ms, ctx.skipping, reduced());
+  return time === 0
     ? Promise.resolve()
     : new Promise((resolve) => {
         const done = (): void => {
@@ -106,7 +114,7 @@ export function wait(ctx: BoardContext, ms: number): Promise<void> {
           clearTimeout(timer);
           resolve();
         };
-        const timer = setTimeout(done, ms);
+        const timer = setTimeout(done, time);
         ctx.wake = done;
       });
 }
@@ -117,7 +125,7 @@ export function animate(
   frames: Keyframe[],
   options: KeyframeAnimationOptions,
 ): void {
-  if (!fast(ctx)) node.animate(frames, options);
+  if (!still(ctx)) node.animate(frames, options);
 }
 
 export function showCaption(ctx: BoardContext, text: string): void {

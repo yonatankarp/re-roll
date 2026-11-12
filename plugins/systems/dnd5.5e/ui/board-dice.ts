@@ -4,6 +4,7 @@ import {
   type Token,
   el,
   fast,
+  still,
   wait,
 } from "./board-context.ts";
 
@@ -77,7 +78,7 @@ export async function throwD20(
     label.textContent = "";
   }
   place(to);
-  if (!fast(ctx)) {
+  if (!still(ctx)) {
     const dx = from.x - to.x;
     const dy = from.y - to.y;
     const at = (x: number, y: number, turn: number, size: number): string =>
@@ -112,7 +113,7 @@ export async function strike(
   target: Token,
   style: "melee" | "ranged" | "spell",
 ): Promise<void> {
-  if (fast(ctx)) return;
+  if (still(ctx)) return;
   const from = centreOf(ctx, attacker.node);
   const to = centreOf(ctx, target.node);
   if (style === "melee") {

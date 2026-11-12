@@ -5,6 +5,7 @@ import {
   el,
   fast,
   showCaption,
+  still,
   wait,
 } from "./board-context.ts";
 import { centreOf, strike, throwD20 } from "./board-dice.ts";
@@ -258,27 +259,40 @@ export async function play(ctx: BoardContext, cue: DndCue): Promise<void> {
         );
         const at = centreOf(ctx, token.node);
         roll.style.left = `${String(at.x)}px`;
-        roll.style.top = `${String(at.y - 40)}px`;
+        // Held still, it sits below the token so the damage number above stays readable.
+        roll.style.top = `${String(at.y + (still(ctx) ? 46 : -40))}px`;
         ctx.board.append(roll);
         roll
           .animate(
-            [
-              {
-                transform: "translate(-50%, -50%) scale(0.5) rotate(-20deg)",
-                opacity: 0,
-              },
-              {
-                transform: "translate(-50%, -50%) scale(1.1) rotate(4deg)",
-                opacity: 1,
-                offset: 0.3,
-              },
-              {
-                transform: "translate(-50%, -70%) scale(1)",
-                opacity: 1,
-                offset: 0.8,
-              },
-              { transform: "translate(-50%, -90%) scale(1)", opacity: 0 },
-            ],
+            still(ctx)
+              ? // With reduced motion the roll shows where the blow lands and fades, without moving.
+                [
+                  { transform: "translate(-50%, -50%)", opacity: 1 },
+                  {
+                    transform: "translate(-50%, -50%)",
+                    opacity: 1,
+                    offset: 0.8,
+                  },
+                  { transform: "translate(-50%, -50%)", opacity: 0 },
+                ]
+              : [
+                  {
+                    transform:
+                      "translate(-50%, -50%) scale(0.5) rotate(-20deg)",
+                    opacity: 0,
+                  },
+                  {
+                    transform: "translate(-50%, -50%) scale(1.1) rotate(4deg)",
+                    opacity: 1,
+                    offset: 0.3,
+                  },
+                  {
+                    transform: "translate(-50%, -70%) scale(1)",
+                    opacity: 1,
+                    offset: 0.8,
+                  },
+                  { transform: "translate(-50%, -90%) scale(1)", opacity: 0 },
+                ],
             {
               duration: ctx.pendingDamage.mine ? 1400 : 1000,
               easing: "ease-out",

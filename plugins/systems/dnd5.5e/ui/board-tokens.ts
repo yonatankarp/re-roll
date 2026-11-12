@@ -5,6 +5,7 @@ import {
   animate,
   el,
   fast,
+  still,
 } from "./board-context.ts";
 
 // The creatures' tokens: their pictures, HP rings and tooltips, and where they stand.
@@ -47,15 +48,24 @@ export function float(
   className: string,
 ): void {
   if (fast(ctx)) return;
+  // Held still, a float stands above any still showing on the token rather than on top of it.
+  const above = `translate(-50%, ${String(-24 - 26 * token.node.querySelectorAll(".dnd-float").length)}px)`;
   const label = el("span", `dnd-float ${className}`, text);
   token.node.append(label);
   label
     .animate(
-      [
-        { transform: "translate(-50%, 0) scale(0.6)", opacity: 0 },
-        { transform: "translate(-50%, -18px) scale(1.15)", opacity: 1 },
-        { transform: "translate(-50%, -46px) scale(1)", opacity: 0 },
-      ],
+      still(ctx)
+        ? // With reduced motion it stands above the token and fades, without rising.
+          [
+            { transform: "translate(-50%, -24px)", opacity: 1 },
+            { transform: "translate(-50%, -24px)", opacity: 1, offset: 0.8 },
+            { transform: "translate(-50%, -24px)", opacity: 0 },
+          ]
+        : [
+            { transform: "translate(-50%, 0) scale(0.6)", opacity: 0 },
+            { transform: "translate(-50%, -18px) scale(1.15)", opacity: 1 },
+            { transform: "translate(-50%, -46px) scale(1)", opacity: 0 },
+          ],
       { duration: 1000, easing: "ease-out" },
     )
     .addEventListener("finish", () => {
