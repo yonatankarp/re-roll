@@ -21,7 +21,10 @@ import {
   damageResponses,
   deriveStats,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
-import { traitSaveAdvantage } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
+import {
+  repeatSaveConditions,
+  traitSaveAdvantage,
+} from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
 
 // Made-up species, feats and traits: ids and mechanics only.
 const FIXTURES = [
@@ -321,6 +324,29 @@ describe("species traits and feats", () => {
     expect(traitSaveAdvantage(stats, "int", [])).toBe(true);
     expect(traitSaveAdvantage(stats, "con", ["poisoned"])).toBe(true);
     expect(traitSaveAdvantage(stats, "con", ["frightened"])).toBe(false);
+  });
+
+  it("finds the conditions a repeated save would end, for the same Advantage", async () => {
+    const run = await testRun();
+    const effect = (sourceId: string, condition: "poisoned" | "prone") => ({
+      sourceId,
+      casterId: "caster",
+      modifier: { kind: "condition" as const, condition },
+      ends: "spellDuration" as const,
+      repeatSave: { ability: "con" as const, dc: 12 },
+    });
+    const target = {
+      ...stoneling(1, []),
+      activeEffects: [
+        effect("monster:0", "poisoned"),
+        effect("monster:1", "prone"),
+      ],
+    };
+    const conditions = repeatSaveConditions(target, "monster:0");
+    expect(conditions).toEqual(["poisoned"]);
+    expect(
+      traitSaveAdvantage(deriveStats(target, run), "con", conditions),
+    ).toBe(true);
   });
 
   it("rolls a save with Advantage in combat when it would bring a condition the trait guards against", async () => {

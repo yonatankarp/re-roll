@@ -239,8 +239,9 @@ const namesIn = (list: string): string[] =>
     .map((item) => item.trim())
     .filter(Boolean);
 
+// Some books run one list into the next with no break, as in "…, Prestidigitation2/Day Each: …".
 const LIST =
-  /\b(At Will|Cantrips \(at will\)|(\d+)\/Day(?: Each)?|(\d)(?:st|nd|rd|th)[- ]level \((\d+) slots?\))\s*:\s*/gi;
+  /(?:\b|(?<=[a-z)]))(At Will|Cantrips \(at will\)|(\d+)\/Day(?: Each)?|(\d)(?:st|nd|rd|th)[- ]level \((\d+) slots?\))\s*:\s*/gi;
 
 // A Spellcasting entry: "At Will: …", "2/Day Each: …", or an older "1st level (4 slots): …", in one paragraph
 // or one per line. An older slot is shared by every spell of its level.

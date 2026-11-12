@@ -349,6 +349,17 @@ describe("monster spellcasting", () => {
     expect(byName(monster, "Ember Burst")).toMatchObject({ perDay: 1 });
   });
 
+  it("reads a list run into the one before it with no break", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Spellcasting",
+        "The caster casts one of the following spells, using Intelligence as the spellcasting ability (spell save DC 15): At Will: Frost Needle, Glow2/Day Each: Ember Burst",
+      )}`,
+    );
+    expect(byName(monster, "Ember Burst")).toMatchObject({ perDay: 2 });
+    expect(byName(monster, "Frost Needle")?.perDay).toBeUndefined();
+  });
+
   it("reads an action that casts one of several spells, sharing its uses", () => {
     const monster = parse(
       `${spellcasting}${header("Bonus Actions")}${entry(
@@ -401,5 +412,115 @@ describe("monster spellcasting", () => {
     );
     expect(parsed?.notes).toContain("not automated: Spellcasting");
     expect(parse(spellcasting, false).actions).toEqual([]);
+  });
+});
+
+describe("monster actions read in round 3", () => {
+  it("swallows a grappled target: blinded and restrained, with damage each turn", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Gulp",
+        "Strength Saving Throw: DC 15, one creature Grappled by the caster. Failure: The target is pulled inside and is no longer Grappled. While swallowed, the target has the Blinded and Restrained conditions. It takes 5 (2d4) Acid damage at the start of each of the caster’s turns.",
+      )}`,
+    );
+    const gulp = byName(monster, "Gulp")?.activation;
+    expect(gulp?.targeting).toMatchObject({ targetConditions: ["grappled"] });
+    expect(gulp?.resolution).toMatchObject({
+      onFail: [
+        { kind: "removeCondition", condition: "grappled" },
+        { kind: "applyCondition", condition: "blinded" },
+        { kind: "applyCondition", condition: "restrained" },
+        {
+          kind: "modifier",
+          modifier: {
+            kind: "lingeringDamage",
+            when: "turnStart",
+            damage: [{ amount: { dice: "2d4" }, type: "acid" }],
+          },
+        },
+      ],
+    });
+  });
+
+  it("reads an older save, its area from the lead-in, and an older condition", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Spark",
+        "Sparks leap from the caster toward one creature within 60 feet. The target must make a DC 13 Dexterity saving throw, taking 9 (2d8) lightning damage on a failed save, or half as much damage on a successful one.",
+      )}${entry(
+        "Wail",
+        "A shriek fills a 30-foot cone. Any creature in that area must succeed on a DC 12 Wisdom saving throw or take 7 (2d6) psychic damage and be frightened until the end of the caster’s next turn.",
+      )}`,
+    );
+    expect(byName(monster, "Spark")?.activation).toMatchObject({
+      targeting: { creatures: 1, range: 60 },
+      resolution: {
+        kind: "save",
+        ability: "dex",
+        dc: { base: 13 },
+        damage: [{ amount: { dice: "2d8" }, type: "lightning" }],
+        onSuccessDamage: "half",
+      },
+    });
+    expect(byName(monster, "Wail")?.activation).toMatchObject({
+      targeting: { area: { shape: "cone", radius: 30 } },
+      resolution: {
+        onSuccessDamage: "none",
+        onFail: [
+          { condition: "frightened", duration: { until: "yourNextTurnEnd" } },
+        ],
+      },
+    });
+  });
+
+  it("holds size limits a hero always meets, and keeps an Advantage rider out", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Lash",
+        "Melee Attack Roll: + 6, reach 10 ft. Hit: 8 (1d8 + 4) Bludgeoning damage. If the target is the caster’s size or smaller, it has the Grappled condition.",
+      )}${entry(
+        "Wrap",
+        "Melee Attack Roll: +6, reach 5 ft. Hit: 8 (1d8 + 4) Bludgeoning damage. If the target is a Medium or smaller creature and the caster had Advantage on the attack roll, the target has the Blinded condition.",
+      )}${entry(
+        "Pull",
+        "Strength Saving Throw: DC 14, one Medium or Small creature within 5 feet. Failure: The target has the Prone condition.",
+      )}`,
+    );
+    expect(byName(monster, "Lash")?.activation.resolution).toMatchObject({
+      attack: { flatBonus: 6 },
+      onHit: [{ condition: "grappled" }],
+    });
+    expect(byName(monster, "Wrap")?.activation.resolution).toMatchObject({
+      onHit: [],
+    });
+    expect(byName(monster, "Pull")?.activation.resolution).toMatchObject({
+      onFail: [{ condition: "prone" }],
+    });
+  });
+
+  it("leaves a critical-hit rider and reads an end on any damage", () => {
+    const [parsed] = parseMonstersFromHtml(
+      block(
+        "Test Caster",
+        `${header("Actions")}${entry(
+          "Jolt",
+          "Melee Attack Roll: +6, reach 5 ft. Hit: 8 (1d8 + 4) Lightning damage. Critical Hit: The target has the Stunned condition until the end of its next turn.",
+        )}${entry(
+          "Lull",
+          "Wisdom Saving Throw: DC 13, each creature in a 30-foot Emanation originating from the caster. Failure: The target has the Charmed condition for 1 minute. The effect ends on the target if it takes any damage.",
+        )}`,
+      ),
+      "my-book",
+    );
+    const monster = MonsterSchema.parse(parsed?.entry);
+    expect(byName(monster, "Jolt")?.activation.resolution).toMatchObject({
+      onHit: [],
+    });
+    expect(parsed?.notes).toContain(
+      "partial: Jolt: left out a Critical Hit rider",
+    );
+    expect(byName(monster, "Lull")?.activation.resolution).toMatchObject({
+      onFail: [{ condition: "charmed", endsOnDamage: true }],
+    });
   });
 });

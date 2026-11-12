@@ -251,6 +251,29 @@ const FIRST_PARAGRAPH =
   /^\s*(?:<figure\b[\s\S]*?<\/figure>\s*)?<p\b[^>]*>([\s\S]*?)<\/p>/;
 
 // The line under a feat's name says what it is, however a book arranges its chapters.
+const ABILITY_NAMES = {
+  str: "Strength",
+  dex: "Dexterity",
+  con: "Constitution",
+  int: "Intelligence",
+  wis: "Wisdom",
+  cha: "Charisma",
+} as const;
+
+// "Ability Score Increase. Increase your Strength or Dexterity score by 1": the abilities a feat raises by 1. One
+// "of your choice", or Resilient's one "in which you lack saving throw proficiency", is any of them.
+export function abilityIncreaseOf(
+  text: string,
+): (keyof typeof ABILITY_NAMES)[] | undefined {
+  const clause = /Ability Score Increase\.([\s\S]*?)\bby 1\b/.exec(text)?.[1];
+  if (clause === undefined) return undefined;
+  const all = Object.keys(ABILITY_NAMES) as (keyof typeof ABILITY_NAMES)[];
+  const named = all.filter((key) =>
+    new RegExp(`\\b${ABILITY_NAMES[key]}\\b`).test(clause),
+  );
+  return named.length > 0 ? named : all;
+}
+
 export function parseFeatsFromHtml(
   html: string,
   pluginId: string,
@@ -258,6 +281,8 @@ export function parseFeatsFromHtml(
   const headings = headingsIn(html);
   const feat = (heading: Heading, category: string | undefined) => {
     const slug = slugOf(heading.title);
+    const text = blockText(bodyOf(html, headings, heading));
+    const increase = abilityIncreaseOf(text);
     return {
       slug,
       notes: [],
@@ -265,9 +290,10 @@ export function parseFeatsFromHtml(
         id: `${pluginId}:feat/${slug}`,
         name: heading.title,
         category,
-        text: blockText(bodyOf(html, headings, heading)),
+        text,
         // Its mechanics live in a feature of the same text, encoded like a class feature's.
         grants: [`${pluginId}:feature/feat-${slug}`],
+        ...(increase ? { abilityIncrease: increase } : {}),
       },
     };
   };
