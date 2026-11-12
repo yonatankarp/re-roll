@@ -292,14 +292,17 @@ const BOARD_CSS = `
   position: absolute;
   right: 8px;
   bottom: 6px;
+  /* A dark pill, so it reads on parchment, a light map or a dark one. */
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(20 12 6 / 80%);
   font: 0.8rem var(--font-ui, system-ui), sans-serif;
-  color: rgb(255 255 255 / 80%);
-  text-shadow: 0 1px 2px #000;
+  color: #f4e7c8;
   opacity: 0;
   transition: opacity 0.3s;
+  pointer-events: none;
 }
 .dnd-board.playing .dnd-hint { opacity: 1; }
-.dnd-view:has(> .plain) ~ .dnd-hint { color: rgb(60 40 10 / 85%); text-shadow: none; }
 .dnd-board.awaiting .dnd-hint { opacity: 0; }
 .dnd-board.playing { cursor: pointer; }
 .dnd-field.gridded {
