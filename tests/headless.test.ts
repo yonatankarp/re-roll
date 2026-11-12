@@ -9,10 +9,13 @@ import type { GameView } from "../engine/shell/session.ts";
 import type { Driver, Screen } from "../engine/tools/headless.ts";
 
 const folders: string[] = [];
-async function driver(): Promise<Driver> {
+async function savesFolder(): Promise<string> {
   const folder = await mkdtemp(join(tmpdir(), "re-roll-headless-"));
   folders.push(folder);
-  return openHeadless(folder);
+  return folder;
+}
+async function driver(): Promise<Driver> {
+  return openHeadless(await savesFolder());
 }
 afterAll(async () => {
   for (const folder of folders)
@@ -29,7 +32,8 @@ const GEAR = /^(equip|stow|attune|unattune):/;
 
 describe("headless play of goblin-ambush", () => {
   it("plays a fight, treasure, equipping, a rest, a save and load, an ending and a restart", async () => {
-    const play = await driver();
+    const saves = await savesFolder();
+    const play = await openHeadless(saves);
     await play.start("goblin-ambush", {
       seed: "fight1",
       settings: { difficulty: "story" },
@@ -37,6 +41,7 @@ describe("headless play of goblin-ambush", () => {
     await play.choose("Human Fighter");
     const done = {
       moved: false,
+      movedAtOnce: false,
       attacked: 0,
       found: false,
       equipped: false,
@@ -69,6 +74,21 @@ describe("headless play of goblin-ambush", () => {
         done.moved = true;
         continue;
       }
+      // After attacking, the map's one-click move: Move and the square in one go.
+      if (
+        done.attacked > 0 &&
+        !done.movedAtOnce &&
+        ids.includes(MOVE) &&
+        board &&
+        board.moves.length > 0 &&
+        !screen.choices.some((choice) => choice.group === "Attacks")
+      ) {
+        const [square] = board.moves;
+        await play.act(MOVE, `${String(square?.x)},${String(square?.y)}`);
+        expect(play.screen().decision).not.toBe(screen.decision);
+        done.movedAtOnce = true;
+        continue;
+      }
       const attack = screen.choices.find(
         (choice) => choice.group === "Attacks",
       );
@@ -93,9 +113,12 @@ describe("headless play of goblin-ambush", () => {
         expect(row?.value).toBe("Equipped");
         done.equipped = true;
 
-        // A save then a load gives back the same game, replayed from its log.
+        // A save, loaded by a fresh game as a later run would, gives back the same game replayed from its log.
         const before = settled(play.view());
         const path = await play.save("mid");
+        const later = await openHeadless(saves);
+        await later.load(path);
+        expect(settled(later.view())).toEqual(before);
         await play.load(path);
         expect(settled(play.view())).toEqual(before);
         expect((await play.saves()).map((save) => save.path)).toContain(path);
@@ -128,6 +151,7 @@ describe("headless play of goblin-ambush", () => {
     expect(end.choices).toEqual([]);
     expect(done).toEqual({
       moved: true,
+      movedAtOnce: true,
       attacked: done.attacked,
       found: true,
       equipped: true,
@@ -155,6 +179,14 @@ describe("headless play of goblin-ambush", () => {
     await expect(play.act(MOVE)).rejects.toThrow("isn't one of the choices");
     await play.choose("human fighter"); // labels ignore case
     expect(play.screen().decision).toBe("scene:road");
+    await expect(play.choose(9)).rejects.toThrow("no choice 9");
+
+    // Story options have ids "0" and "1": a string is always an id, a number a place on screen.
+    const other = await driver();
+    await other.start("goblin-ambush", { seed: "refuse" });
+    await other.choose("Human Fighter");
+    expect((await play.choose("1")).id).toBe("1");
+    expect((await other.choose(1)).id).toBe("0");
   });
 });
 

@@ -10,6 +10,7 @@ import { openHeadless } from "./headless-game.ts";
 
 // Plays an adventure with no browser, through the same game layer as the app.
 // npm run play -- <adventure> [--seed=N] [--difficulty=story|normal|hard] [--saves=dir] [--script=file.json|-]
+// npm run play -- --load=<n|path> [--saves=dir] [--script=…] resumes a save, such as a run's autosave.
 // Without --script it is interactive text. With it, each command's screen is printed as one JSON line.
 
 const Ref = z.union([z.string(), z.number()]);
@@ -32,23 +33,58 @@ const [adventure] = process.argv
 const flag = (name: string): string | undefined =>
   flags.find((item) => item.startsWith(`--${name}=`))?.slice(name.length + 3);
 
+const script = flag("script");
+const resume = flag("load");
+const message = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+// Typed digits are a number on screen or in the save list; anything else is an id, label or path.
+const ref = (text: string): string | number =>
+  /^\d+$/.test(text) ? Number(text) : text;
+
 const driver = await openHeadless(flag("saves"));
-if (!adventure) {
+if (!adventure && resume === undefined) {
   for (const item of await driver.listAdventures()) {
     console.log(`${item.id}  ${item.title} (${item.source})`);
   }
   console.log(
     "Usage: npm run play -- <adventure> [--seed=N] [--difficulty=…] [--saves=dir] [--script=file.json|-]",
   );
+  console.log(
+    "       npm run play -- --load=<n|path> [--saves=dir] [--script=…]",
+  );
   process.exit(0);
 }
 
 const difficulty = flag("difficulty");
 const seed = flag("seed");
-await driver.start(adventure, {
-  ...(seed ? { seed } : {}),
-  ...(difficulty ? { settings: { difficulty } } : {}),
-});
+const settings = difficulty ? { settings: { difficulty } } : {};
+let opening: unknown;
+try {
+  if (resume !== undefined) {
+    opening = { load: ref(resume) };
+    await driver.load(ref(resume));
+  } else {
+    opening = { start: { adventure, ...(seed ? { seed } : {}), ...settings } };
+    await driver.start(adventure ?? "", {
+      ...(seed ? { seed } : {}),
+      ...settings,
+    });
+    opening = { start: { adventure, seed: driver.seed(), ...settings } };
+  }
+} catch (error) {
+  if (script === undefined) console.error(message(error));
+  else {
+    console.log(
+      JSON.stringify({
+        version: SCREEN_VERSION,
+        step: 0,
+        command: opening,
+        error: message(error),
+      }),
+    );
+  }
+  process.exit(1);
+}
 
 // What the command returns beyond the new screen, such as the save list.
 async function run(play: Driver, command: Command): Promise<unknown> {
@@ -82,17 +118,16 @@ function parseLine(line: string): Command {
     case "saves":
       return { saves: true };
     case "load":
-      return { load: arg };
+      return { load: ref(arg) };
     case "delete":
-      return { delete: arg };
+      return { delete: ref(arg) };
     case "restart":
       return { restart: arg || null };
     default:
-      return line.trim();
+      return ref(line.trim());
   }
 }
 
-const script = flag("script");
 if (script !== undefined) {
   let step = 0;
   const emit = (command: unknown, result: unknown): void => {
@@ -106,38 +141,35 @@ if (script !== undefined) {
       }),
     );
   };
-  const perform = async (raw: unknown): Promise<void> => {
+  const status = { failed: false };
+  // A failed step prints its error with the screen as it now stands, since an act may have answered part of it.
+  // A file script stops there. From stdin, the agent sees it and carries on.
+  const perform = async (raw: unknown, line?: string): Promise<void> => {
     step += 1;
+    let command = raw;
     try {
-      const command = CommandSchema.parse(raw);
-      emit(command, (await run(driver, command)) ?? undefined);
+      if (line !== undefined) command = JSON.parse(line) as unknown;
+      const parsed = CommandSchema.parse(command);
+      emit(parsed, (await run(driver, parsed)) ?? undefined);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      status.failed = true;
       console.log(
         JSON.stringify({
           version: SCREEN_VERSION,
           step,
-          command: raw,
-          error: message,
+          command: command ?? line,
+          error: message(error),
+          screen: driver.screen(),
         }),
       );
-      process.exit(1);
+      if (script !== "-") process.exit(1);
     }
   };
-  emit(
-    {
-      start: {
-        adventure,
-        seed: driver.seed(),
-        ...(difficulty ? { settings: { difficulty } } : {}),
-      },
-    },
-    undefined,
-  );
+  emit(opening, undefined);
   if (script === "-") {
     // One JSON command per line, so an agent can read each screen before sending the next.
     for await (const line of createInterface({ input: process.stdin })) {
-      if (line.trim()) await perform(JSON.parse(line) as unknown);
+      if (line.trim()) await perform(undefined, line);
     }
   } else {
     const commands = z
@@ -145,9 +177,10 @@ if (script !== undefined) {
       .parse(JSON.parse(await readFile(script, "utf8")));
     for (const command of commands) await perform(command);
   }
+  if (status.failed) process.exitCode = 1;
 } else {
   console.log(
-    `Seed ${driver.seed()}. Type a number, or: act <ids…>, save [name], saves, load <n>, delete <n>, restart [seed], json, quit.`,
+    `Seed ${driver.seed()}. Type a number or label, or: act <ids…>, save [name], saves, load <n>, delete <n>, restart [seed], json, quit.`,
   );
   console.log(screenText(driver.screen()));
   process.stdout.write("> ");

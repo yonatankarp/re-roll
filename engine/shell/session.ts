@@ -707,7 +707,20 @@ export function createGame({
         tokenArt: tokens,
         adventureRoot: root,
         combat,
-        sheets: ui.sheets(state.system, run),
+        // A row's own choice only on the decider's sheet while it's offered, so a companion's row can't answer for the player.
+        sheets: ui.sheets(state.system, run).map((sheet) => ({
+          ...sheet,
+          sections: sheet.sections.map((section) => ({
+            ...section,
+            rows: section.rows.map(({ option, ...row }) =>
+              option &&
+              sheet.id === decision?.actor &&
+              decision.options.some((item) => item.id === option.id)
+                ? { ...row, option }
+                : row,
+            ),
+          })),
+        })),
         log: [...lines],
         cues: [...cues],
         system: ui.systemId,

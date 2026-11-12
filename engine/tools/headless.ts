@@ -62,19 +62,18 @@ export function choicesOf(view: GameView): Choice[] {
       group: null,
       detail: null,
     })),
-    // As the shell does: only on the decider's own sheet, and only while the decision offers it.
+    // The view keeps a row's choice only on the decider's sheet while it's offered, as the shell shows it.
     ...view.sheets
-      .filter((sheet) => sheet.id === decision.actor)
       .flatMap((sheet) => sheet.sections.flatMap((section) => section.rows))
-      .flatMap((row) =>
-        row.option && decision.options.some((o) => o.id === row.option?.id)
+      .flatMap(({ option, label, detail }) =>
+        option
           ? [
               {
-                id: row.option.id,
-                label: `${row.option.label} ${row.label}`,
+                id: option.id,
+                label: `${option.label} ${label}`,
                 where: "sheet" as const,
                 group: null,
-                detail: row.detail ?? null,
+                detail: detail ?? null,
               },
             ]
           : [],
@@ -204,36 +203,36 @@ export function createDriver(game: Game) {
     since = view().log.length;
   };
 
-  // By its number on this screen, its id, or its label (ignoring case).
+  // A number is its place on this screen. A string is its id, or else its label (ignoring case).
+  // Never a string as a number, since story options have ids such as "0" and "1".
   const find = (ref: string | number): Choice => {
     const choices = choicesOf(view());
-    const text = String(ref).trim();
-    const byNumber = /^\d+$/.test(text)
-      ? choices.find((c) => c.n === Number(text))
-      : undefined;
-    if (byNumber) return byNumber;
-    const byId = choices.find((c) => c.id === text);
+    if (typeof ref === "number") {
+      const byNumber = choices.find((c) => c.n === ref);
+      if (byNumber) return byNumber;
+      throw new Error(`There is no choice ${String(ref)} on screen`);
+    }
+    const byId = choices.find((c) => c.id === ref);
     if (byId) return byId;
-    const byLabel = choices.filter(
-      (c) => c.label.toLowerCase() === text.toLowerCase(),
-    );
+    const text = ref.trim().toLowerCase();
+    const byLabel = choices.filter((c) => c.label.toLowerCase() === text);
     if (new Set(byLabel.map((c) => c.id)).size > 1) {
       throw new Error(
-        `"${text}" matches more than one choice; use its number or id`,
+        `"${ref}" matches more than one choice; use its number or id`,
       );
     }
     const [label] = byLabel;
     if (label) return label;
-    throw new Error(`"${text}" isn't one of the choices on screen`);
+    throw new Error(`"${ref}" isn't one of the choices on screen`);
   };
 
   const saveRef = async (ref: string | number): Promise<SaveChoice> => {
     const saves = await game.listSaves();
-    const text = String(ref);
-    const save = /^\d+$/.test(text)
-      ? saves[Number(text) - 1]
-      : saves.find((item) => item.path === text);
-    if (!save) throw new Error(`There is no save ${text}`);
+    const save =
+      typeof ref === "number"
+        ? saves[ref - 1]
+        : saves.find((item) => item.path === ref);
+    if (!save) throw new Error(`There is no save ${String(ref)}`);
     return save;
   };
 
@@ -283,7 +282,7 @@ export function createDriver(game: Game) {
       return game.save(name);
     },
     saves: () => game.listSaves(),
-    // By its number in the save list, newest first, or its path.
+    // By its number in the save list (newest first), or by its path.
     async load(ref: string | number): Promise<SaveChoice> {
       const save = await saveRef(ref);
       await game.load(save.path);
