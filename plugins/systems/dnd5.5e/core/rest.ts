@@ -199,9 +199,33 @@ function runFinishRest(
           resourcesSpent: recovered(actor.resourcesSpent, stats, rest),
         });
       }),
+      ...restInspiration(party(context.state), rest, context),
       dndEvent(`${NS}:restFinished`, { rest }),
     ],
   };
+}
+
+// shortcut: Musician inspires every ally, not a number equal to the Proficiency Bonus.
+function restInspiration(
+  members: readonly Actor[],
+  rest: "short" | "long",
+  context: Context,
+): SystemEvent[] {
+  const inspired = new Set<string>();
+  for (const actor of members) {
+    for (const passive of deriveStats(actor, context).passives) {
+      if (passive.kind !== "restInspiration" || !passive.rests.includes(rest))
+        continue;
+      for (const other of passive.allies
+        ? members.filter((item) => item.id !== actor.id)
+        : [actor]) {
+        inspired.add(other.id);
+      }
+    }
+  }
+  return [...inspired].map((actor) =>
+    dndEvent(`${NS}:inspirationGranted`, { actor }),
+  );
 }
 
 const DAY_HOURS = 24;

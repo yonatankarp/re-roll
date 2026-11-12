@@ -9,9 +9,11 @@ import {
   damageEvents,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import type { CharacterBuild } from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import { restFrames } from "../plugins/systems/dnd5.5e/core/rest.ts";
 import {
   type Actor,
   type DndState,
+  NS,
   StateSchema,
   freshActor,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
@@ -35,6 +37,8 @@ const FIXTURES = [
       "test:feature/stubborn",
       "test:feature/last-stand",
       "test:feature/spark-gift",
+      "test:feature/late-bloom",
+      "test:feature/rested",
     ],
     choices: [
       {
@@ -92,6 +96,30 @@ const FIXTURES = [
     text: "Test.",
     automation: "full",
     spells: { 1: ["srd52:spell/fire-bolt"], 3: ["srd52:spell/burning-hands"] },
+  },
+  {
+    id: "test:feature/late-bloom",
+    name: "Late Bloom",
+    text: "Test.",
+    automation: "full",
+    fromLevel: 5,
+    passives: [
+      {
+        kind: "modifier",
+        modifier: {
+          kind: "bonus",
+          to: "speed",
+          amount: { bonus: { base: 10 } },
+        },
+      },
+    ],
+  },
+  {
+    id: "test:feature/rested",
+    name: "Rested",
+    text: "Test.",
+    automation: "full",
+    passives: [{ kind: "restInspiration", rests: ["long"] }],
   },
   ...["ember", "frost"].map((kind) => ({
     id: `test:feature/${kind}-breath`,
@@ -243,6 +271,24 @@ describe("species traits and feats", () => {
         .filter((id) => id.startsWith("spell:"));
     expect(spells(1)).toEqual(["spell:srd52:spell/fire-bolt"]);
     expect(spells(3)).toContain("spell:srd52:spell/burning-hands");
+  });
+
+  it("starts a feature at its character level", async () => {
+    const run = await testRun();
+    expect(deriveStats(stoneling(4, []), run).speed).toBe(30);
+    expect(deriveStats(stoneling(5, []), run).speed).toBe(40);
+  });
+
+  it("gives Heroic Inspiration when the rest it names ends", async () => {
+    const run = await testRun();
+    const hero = stoneling(1, []);
+    const inspired = (rest: "short" | "long") =>
+      (
+        restFrames[`${NS}:finishRest`].run({ rest }, contextOf(run, hero))
+          .events ?? []
+      ).some((event) => event.kind === `${NS}:inspirationGranted`);
+    expect(inspired("long")).toBe(true);
+    expect(inspired("short")).toBe(false);
   });
 
   it("gives Advantage on saves by ability or by the condition a save would bring", async () => {

@@ -342,6 +342,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     abilities: z.array(AbilitySchema).default([]),
     conditions: z.array(ConditionSchema).default([]),
   }),
+  // Heroic Inspiration as a rest ends, for the bearer or for its allies, as with Resourceful or Musician.
+  z.strictObject({
+    kind: z.literal("restInspiration"),
+    rests: z.array(z.enum(["short", "long"])).min(1),
+    allies: z.boolean().default(false),
+  }),
   // Dropping to 1 Hit Point instead of 0 while the resource lasts, as with Relentless Endurance.
   z.strictObject({ kind: z.literal("dropToOne"), resource: z.string() }),
   // Attacks per Attack action, such as Extra Attack.
@@ -377,6 +383,7 @@ export const FeatureSchema = ContentEntrySchema.extend({
   passives: z.array(PassiveSchema).default([]),
   activations: z.array(ActivationSchema).default([]),
   resources: z.array(ResourceDefSchema).default([]),
+  fromLevel: z.number().int().min(1).max(20).optional(), // the character level it starts working at
   // Dice added to its activations at character levels 5, 11 and 17, as a cantrip's are.
   perTier: ScaleStepSchema.optional(),
   // Spells it always gives, from the character level in the key.

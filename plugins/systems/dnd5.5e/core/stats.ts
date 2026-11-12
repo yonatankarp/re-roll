@@ -180,6 +180,7 @@ function collectFeatureData(
   const spells = featureIds.flatMap((id) => grantedSpells(id, level));
   for (const id of featureIds) {
     const feature = featureRules(lookup(access, FeatureSchema, id));
+    if ((feature.fromLevel ?? 1) > level) continue;
     passives.push(...feature.passives);
     resources.push(...feature.resources);
     for (const [from, ids] of Object.entries(feature.spells ?? {})) {
