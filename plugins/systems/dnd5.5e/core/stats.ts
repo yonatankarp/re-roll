@@ -38,6 +38,9 @@ import {
 } from "./schemas.ts";
 import { featureRules, grantedSpells } from "./feature-rules.ts";
 
+// Content is frozen once loaded, so each entry is checked against a schema only once.
+const parsed = new WeakMap<object, Map<z.ZodType, unknown>>();
+
 export function lookup<T>(
   access: Pick<ContentAccess, "content">,
   schema: z.ZodType<T>,
@@ -45,7 +48,13 @@ export function lookup<T>(
 ): T {
   const entry = access.content(id);
   if (!entry) throw new Error(`Unknown content ${id}`);
-  return schema.parse(entry);
+  let bySchema = parsed.get(entry);
+  if (!bySchema) {
+    bySchema = new Map<z.ZodType, unknown>();
+    parsed.set(entry, bySchema);
+  }
+  if (!bySchema.has(schema)) bySchema.set(schema, schema.parse(entry));
+  return bySchema.get(schema) as T;
 }
 
 export function abilityModifier(score: number): number {

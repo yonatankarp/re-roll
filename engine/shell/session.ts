@@ -9,7 +9,12 @@ import {
   isNarrativeEvent,
 } from "../kernel/events.ts";
 import { formatIssue } from "../kernel/issues.ts";
-import { type Registry, loadRun, scanPlugins } from "../kernel/loader.ts";
+import {
+  type Catalog,
+  type Registry,
+  loadRun,
+  scanPlugins,
+} from "../kernel/loader.ts";
 import { type LogEntry, createSave, loadSave } from "../kernel/save.ts";
 import type { Storage } from "../kernel/storage.ts";
 import { type Ambience, sceneAmbience } from "../story/ambience.ts";
@@ -175,6 +180,10 @@ const SaveDetailsSchema = z.record(
     character: z.string().nullable().optional(),
     characterKind: z.string().nullable().optional(),
     health: z.string().nullable().optional(),
+    // Kept so the menu needn't read every whole save; older records read the save instead.
+    adventure: z.string().optional(),
+    seed: z.string().optional(),
+    steps: z.number().optional(),
   }),
 );
 type SaveDetails = z.infer<typeof SaveDetailsSchema>[string];
@@ -457,7 +466,7 @@ export function createGame({
     tokenArt = tokens;
     covers = coverPaths;
   };
-  // The menu lists adventures more than once per visit, so it reuses one scan; a new run rescans.
+  // The art is scanned once, and again when the plugins' files change.
   let artScan: Promise<void> | null = null;
   const scanArt = (): Promise<void> => (artScan ??= loadArt());
 
@@ -488,8 +497,7 @@ export function createGame({
     return reuse ?? openFresh(adventure);
   };
 
-  const openFresh = async (adventure: string) => {
-    const catalog = await scanPlugins(storage, roots);
+  const loadFresh = async (adventure: string, catalog: Catalog) => {
     const loaded = await loadRun(storage, catalog, systems, [adventure]);
     if (!loaded.ok) {
       throw new Error(loaded.issues.map(formatIssue).join("\n"));
@@ -497,14 +505,38 @@ export function createGame({
     const { registry } = loaded;
     const ui = uis.find((item) => item.systemId === registry.system.id);
     if (!ui) throw new Error(`No UI for the ${registry.system.id} system`);
-    artScan = loadArt();
-    await artScan;
     return {
       registry,
       ui,
       root: catalog.plugins.get(adventure)?.root ?? "",
-      run: createRunContext(registry, adventure),
     };
+  };
+  // The last adventure loaded, kept while the plugins' files stay the same, so Continue, Load and
+  // Restart don't load it all again. One, since a book's content is large.
+  // shortcut: keyed on file lists, so an edit inside a file is missed; key on contents if content is edited during play.
+  let loadedLast: {
+    readonly key: string;
+    readonly loading: ReturnType<typeof loadFresh>;
+  } | null = null;
+
+  const openFresh = async (adventure: string) => {
+    const catalog = await scanPlugins(storage, roots);
+    const key = JSON.stringify([
+      adventure,
+      [...catalog.plugins.values()].map(({ root, files }) => [root, files]),
+    ]);
+    if (loadedLast?.key !== key) {
+      artScan = null;
+      const loading = loadFresh(adventure, catalog);
+      const entry = { key, loading };
+      loadedLast = entry;
+      loading.catch(() => {
+        if (loadedLast === entry) loadedLast = null;
+      });
+    }
+    const { registry, ui, root } = await loadedLast.loading;
+    await scanArt();
+    return { registry, ui, root, run: createRunContext(registry, adventure) };
   };
 
   const active = (): Current => {
@@ -513,7 +545,8 @@ export function createGame({
   };
 
   // What a save's card shows, read from the game as it stands.
-  const detailsOf = ({ run, ui, state, root, log }: Current): SaveDetails => {
+  const detailsOf = (game: Current): SaveDetails => {
+    const { run, ui, state, root, log } = game;
     const scene = run.adventure.scenes.find(
       (item) => item.id === state.story.scene,
     );
@@ -523,6 +556,9 @@ export function createGame({
     const [sheet] = ui.sheets(state.system, run);
     const [health] = sheet?.summary ?? [];
     return {
+      adventure: game.adventure,
+      seed: game.seed,
+      steps: log.length,
       scene: scene ? sceneTitle(scene) : null,
       level: sheet?.level ?? null,
       character: sheet?.title ?? null,
@@ -586,8 +622,15 @@ export function createGame({
       const adventures: AdventureChoice[] = [];
       for (const plugin of catalog.plugins.values()) {
         if (plugin.manifest.kind !== "adventure") continue;
-        const text = await storage.read(`${plugin.root}/adventure.yaml`);
-        const info = AdventureInfoSchema.safeParse(parse(text ?? ""));
+        // One broken adventure only loses its title, so the menu and its saves stay reachable.
+        let info: ReturnType<typeof AdventureInfoSchema.safeParse>;
+        try {
+          const text = await storage.read(`${plugin.root}/adventure.yaml`);
+          info = AdventureInfoSchema.safeParse(parse(text ?? ""));
+        } catch (error) {
+          console.warn(`Can't read ${plugin.root}/adventure.yaml`, error);
+          info = AdventureInfoSchema.safeParse(null);
+        }
         adventures.push({
           id: plugin.manifest.id,
           title: info.success ? info.data.title : plugin.manifest.id,
@@ -599,25 +642,41 @@ export function createGame({
       return adventures.sort((a, b) => (a.title < b.title ? -1 : 1));
     },
 
-    async listSaves(): Promise<readonly SaveChoice[]> {
+    // The menu passes the adventures it already listed, so it scans once.
+    async listSaves(
+      listed?: readonly AdventureChoice[],
+    ): Promise<readonly SaveChoice[]> {
       const entries = await storage.list(SAVES);
       const times = await readSaveTimes();
       const allDetails = await readSaveDetails();
-      const adventures = await this.listAdventures();
+      const adventures = listed ?? (await this.listAdventures());
       const now = Date.now();
       const saves: SaveChoice[] = [];
       for (const { path } of entries) {
         if (!path.endsWith(".json")) continue;
         const name = path.slice(SAVES.length + 1, -".json".length);
-        let info: z.infer<typeof SaveInfoSchema> | undefined;
-        try {
-          info = SaveInfoSchema.safeParse(
-            JSON.parse((await storage.read(path)) ?? "null"),
-          ).data;
-        } catch {
-          info = undefined;
-        }
         const details = allDetails[path];
+        let info:
+          { adventure: string; seed: string; steps: number } | undefined =
+          details?.adventure !== undefined &&
+          details.seed !== undefined &&
+          details.steps !== undefined
+            ? {
+                adventure: details.adventure,
+                seed: details.seed,
+                steps: details.steps,
+              }
+            : undefined;
+        if (!info) {
+          try {
+            const save = SaveInfoSchema.safeParse(
+              JSON.parse((await storage.read(path)) ?? "null"),
+            ).data;
+            info = save && { ...save, steps: save.log.length };
+          } catch {
+            info = undefined;
+          }
+        }
         const savedAt = times[path] ?? null;
         const when = savedAt
           ? new Date(savedAt).toLocaleString(undefined, {
@@ -651,7 +710,7 @@ export function createGame({
           });
           continue;
         }
-        const { adventure, seed, log } = info;
+        const { adventure, seed, steps } = info;
         const title =
           adventures.find((item) => item.id === adventure)?.title ?? adventure;
         const kind = path.endsWith(`-${seed}-autosave.json`)
@@ -660,11 +719,11 @@ export function createGame({
         saves.push({
           ...bare,
           path,
-          label: `${title}: ${kind === "autosave" ? "Autosave" : "Saved"}, ${when ?? `run ${seed}`}, ${stepsText(log.length)}`,
+          label: `${title}: ${kind === "autosave" ? "Autosave" : "Saved"}, ${when ?? `run ${seed}`}, ${stepsText(steps)}`,
           adventure,
           title,
           kind,
-          steps: log.length,
+          steps,
           current:
             kind === "autosave" &&
             current?.adventure === adventure &&
@@ -864,8 +923,8 @@ export function createGame({
       // A save from before cards had details gets them now, so its card shows them next time.
       // The game is already loaded, so a failure here only leaves the card bare.
       try {
-        // Details from before the character was recorded are written again too.
-        if ((await readSaveDetails())[path]?.character === undefined) {
+        // Details from before the steps were recorded are written again too.
+        if ((await readSaveDetails())[path]?.steps === undefined) {
           await writeDetails(path, detailsOf(game));
         }
       } catch {

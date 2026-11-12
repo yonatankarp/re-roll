@@ -89,6 +89,24 @@ function narrationWorker(): Worker | null {
           tell(clip);
         },
       );
+      // A worker that can't load or crashes, say out of memory, never answers again, so its clips fail.
+      const fail = (event: Event): void => {
+        if (worker !== made) return;
+        console.warn(
+          `Narration worker failed: ${event instanceof ErrorEvent ? event.message : event.type}`,
+        );
+        made.terminate();
+        worker = null;
+        for (const clip of working.values()) {
+          clip.job = null;
+          clip.failed = true;
+          clips.delete(clip.key);
+          tell(clip);
+        }
+        working.clear();
+      };
+      made.addEventListener("error", fail);
+      made.addEventListener("messageerror", fail);
       heard = performance.now();
       return made;
     })();
