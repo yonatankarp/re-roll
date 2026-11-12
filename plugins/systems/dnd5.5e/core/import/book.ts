@@ -1,4 +1,4 @@
-import type { Ability } from "../schemas.ts";
+import { ABILITIES, ABILITY_NAMES, type Ability } from "../schemas.ts";
 import { plainText } from "./spells.ts";
 
 export interface Heading {
@@ -128,14 +128,9 @@ export function blockText(html: string): string {
     .join("\n");
 }
 
-const ABILITY_NAMES: Readonly<Record<string, Ability>> = {
-  Strength: "str",
-  Dexterity: "dex",
-  Constitution: "con",
-  Intelligence: "int",
-  Wisdom: "wis",
-  Charisma: "cha",
-};
+const ABILITY_BY_NAME: Readonly<Record<string, Ability>> = Object.fromEntries(
+  ABILITIES.map((ability) => [ABILITY_NAMES[ability], ability]),
+);
 
 export function abilitiesIn(text: string): readonly Ability[] {
   return [
@@ -143,7 +138,7 @@ export function abilitiesIn(text: string): readonly Ability[] {
       /Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma/g,
     ),
   ].flatMap((match) => {
-    const ability = ABILITY_NAMES[match[0]];
+    const ability = ABILITY_BY_NAME[match[0]];
     return ability ? [ability] : [];
   });
 }

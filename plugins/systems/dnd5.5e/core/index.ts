@@ -11,43 +11,19 @@ import {
 } from "#sdk";
 import { z } from "zod";
 import {
-  AttackSchema,
   CREATE_CHARACTER,
-  AfterHitSchema,
-  ConcentrationSchema,
   type Context,
-  FinishMoveSchema,
   HitSchema,
-  LingeringSchema,
-  MoveSchema,
-  PickSchema,
-  AimSchema,
-  ReactionSchema,
-  SmiteSchema,
   TakeActionSchema,
   nextDndDecision,
   runAfterAction,
-  runAfterHit,
-  runAfterReaction,
-  runAdvanceTurn,
-  runAfterTurnStart,
-  runApplyHit,
-  runAttackRoll,
-  runCheckCombatEnd,
-  runConcentrationSave,
-  runEndTurn,
-  runFinishMove,
-  runFinishTurn,
-  runLingeringTick,
-  runMove,
-  runPickTargets,
-  runAimArea,
-  runProjectile,
-  runRecheckHit,
-  runSmite,
   runTakeAction,
   startCombat,
 } from "./combat.ts";
+import { actionFrames } from "./combat/actions.ts";
+import { attackFrames } from "./combat/attack.ts";
+import { movementFrames } from "./combat/movement.ts";
+import { turnFrames } from "./combat/turn.ts";
 import {
   AfterMoveSchema,
   MasteryHitSchema,
@@ -214,7 +190,6 @@ const OLDER_BOOKS = new Set([
 
 const CharacterChosenPayload = z.object({ answer: z.string() });
 const ActorPayload = z.object({ actor: z.string() });
-const EmptyPayload = z.object({});
 
 export const dnd55e = defineSystem<DndState>({
   id: NS,
@@ -374,10 +349,10 @@ export const dnd55e = defineSystem<DndState>({
     ...restFrames,
     ...gearFrames,
     ...legendaryFrames,
-    [`${NS}:advanceTurn`]: frameHandler({
-      schema: EmptyPayload,
-      run: (_payload, context: Context) => runAdvanceTurn(context),
-    }),
+    ...actionFrames,
+    ...movementFrames,
+    ...attackFrames,
+    ...turnFrames,
     ...shopFrames,
     [`${NS}:takeAction`]: frameHandler({
       schema: TakeActionSchema,
@@ -398,61 +373,9 @@ export const dnd55e = defineSystem<DndState>({
       schema: HitSchema,
       run: runMasteryMiss,
     }),
-    [`${NS}:move`]: frameHandler({ schema: MoveSchema, run: runMove }),
-    [`${NS}:pickTargets`]: frameHandler({
-      schema: PickSchema,
-      run: runPickTargets,
-    }),
-    [`${NS}:aimArea`]: frameHandler({ schema: AimSchema, run: runAimArea }),
-    [`${NS}:finishMove`]: frameHandler({
-      schema: FinishMoveSchema,
-      run: runFinishMove,
-    }),
-    [`${NS}:attackRoll`]: frameHandler({
-      schema: AttackSchema,
-      run: runAttackRoll,
-    }),
-    [`${NS}:projectile`]: frameHandler({
-      schema: AttackSchema,
-      run: runProjectile,
-    }),
-    [`${NS}:afterHit`]: frameHandler({
-      schema: AfterHitSchema,
-      run: runAfterHit,
-    }),
-    [`${NS}:smite`]: frameHandler({ schema: SmiteSchema, run: runSmite }),
     [`${NS}:inspiration`]: frameHandler({
       schema: InspirationSchema,
       run: runInspiration,
-    }),
-    [`${NS}:lingeringTick`]: frameHandler({
-      schema: LingeringSchema,
-      run: runLingeringTick,
-    }),
-    [`${NS}:finishTurn`]: frameHandler({
-      schema: EmptyPayload,
-      run: (_payload, context: Context) => runFinishTurn(context),
-    }),
-    [`${NS}:afterTurnStart`]: frameHandler({
-      schema: EmptyPayload,
-      run: (_payload, context: Context) => runAfterTurnStart(context),
-    }),
-    [`${NS}:afterReaction`]: frameHandler({
-      schema: ReactionSchema,
-      run: runAfterReaction,
-    }),
-    [`${NS}:recheckHit`]: frameHandler({
-      schema: HitSchema,
-      run: runRecheckHit,
-    }),
-    [`${NS}:applyHit`]: frameHandler({ schema: HitSchema, run: runApplyHit }),
-    [`${NS}:concentrationSave`]: frameHandler({
-      schema: ConcentrationSchema,
-      run: runConcentrationSave,
-    }),
-    [`${NS}:checkCombatEnd`]: frameHandler({
-      schema: EmptyPayload,
-      run: (_payload, context: Context) => runCheckCombatEnd(context),
     }),
     [`${NS}:afterAction`]: frameHandler({
       schema: ActorPayload,
@@ -460,10 +383,6 @@ export const dnd55e = defineSystem<DndState>({
         keepsActing(payload.actor, context)
           ? {}
           : runAfterAction(payload, context),
-    }),
-    [`${NS}:endTurn`]: frameHandler({
-      schema: EmptyPayload,
-      run: (_payload, context: Context) => runEndTurn(context),
     }),
   },
   settings: [

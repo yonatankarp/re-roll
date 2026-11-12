@@ -7,6 +7,7 @@ import {
 import { z } from "zod";
 import { weaponProficient } from "../core/character.ts";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
+import { HIT_DICE, parseOption } from "../core/combat/ids.ts";
 import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
 import { foundText } from "../core/gear.ts";
@@ -14,9 +15,11 @@ import { coverBonus, coverFor } from "../core/sight.ts";
 import { coins } from "../core/shop.ts";
 import { shop } from "./shop.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
+import type { BoardExtra } from "./board-data.ts";
 import { dndCue } from "./cues.ts";
 import {
   ABILITIES,
+  ABILITY_NAMES,
   type Amount,
   type CharacterBuild,
   ClassSchema,
@@ -60,10 +63,6 @@ import {
 const NamedSchema = z.object({ name: z.string() });
 const TextSchema = z.object({ name: z.string(), text: z.string() });
 const HitDieSchema = z.object({ hitDie: z.string() });
-const HIT_DICE_RESOURCE = "hitDice"; // repeated from core/combat.ts, which ui code doesn't import
-
-// The separator inside an option id, repeated from core/combat.ts, which doesn't export it.
-const OPTION_SEPARATOR = "|";
 
 function contentText(access: ContentAccess, id: string) {
   const parsed = TextSchema.safeParse(access.content(id));
@@ -152,7 +151,7 @@ const TACTIC_DETAILS: Readonly<Record<string, string>> = {
 };
 
 function tacticDetail(optionId: string): string | null {
-  const kind = optionId.split(OPTION_SEPARATOR)[0]?.split(":")[1] ?? "";
+  const kind = parseOption(optionId)[0]?.split(":")[1] ?? "";
   return TACTIC_DETAILS[kind] ?? null;
 }
 
@@ -183,7 +182,7 @@ function optionGroups(
   if (actor.source.kind === "character" && !actor.source.build) return plain;
   const stats = deriveStats(actor, access);
   const known = (id: string) =>
-    stats.actions.find((item) => item.id === id.split(OPTION_SEPARATOR)[0]);
+    stats.actions.find((item) => item.id === parseOption(id)[0]);
   if (!decision.options.some((option) => known(option.id))) return plain;
   // Only a full turn is grouped. A quick question, such as whether to cast Shield, stays a plain list.
   if (!decision.id.startsWith("dnd5.5e:turn:")) {
@@ -249,15 +248,6 @@ function actorOf(event: SystemEvent, rawState: unknown): string | null {
   return id ? (state.actors[id]?.name ?? null) : null;
 }
 
-const ABILITY_NAMES = {
-  str: "Strength",
-  dex: "Dexterity",
-  con: "Constitution",
-  int: "Intelligence",
-  wis: "Wisdom",
-  cha: "Charisma",
-} as const;
-
 // The names a token picture can be found by, best first: a monster's own name, or a character's
 // species and class together, then each alone.
 function looksOf(actor: Actor, access: ContentAccess): readonly string[] {
@@ -288,7 +278,7 @@ function hitDiceLeft(player: Actor, access: ContentAccess): string {
     player.source.kind === "character"
       ? (player.source.build?.levels ?? [])
       : [];
-  const spent = player.resourcesSpent[HIT_DICE_RESOURCE] ?? 0;
+  const spent = player.resourcesSpent[HIT_DICE] ?? 0;
   // Dice are spent in level order, as core/rest.ts does.
   const dice = new Map<string, number>();
   for (const level of levels.slice(spent)) {
@@ -779,7 +769,7 @@ function combat(rawState: unknown, access: ContentAccess) {
       cover,
       terrain: state.combat.terrain ?? null,
       map: state.combat.map ?? null,
-    },
+    } satisfies BoardExtra,
     combatants: order.flatMap((id, position) => {
       const actor = state.actors[id];
       if (!actor) return [];
@@ -979,7 +969,7 @@ function describe(
       const data = EVENT_SCHEMAS["dnd5.5e:resourceSpent"].parse(payload);
       const slot = /^slot:(\d+)$/.exec(data.resource)?.[1];
       if (slot) return `${name(data.actor)} spends a level ${slot} spell slot.`;
-      return data.resource === HIT_DICE_RESOURCE
+      return data.resource === HIT_DICE
         ? `${name(data.actor)} spends a Hit Die.`
         : `${name(data.actor)} uses ${data.resource.replace(/[-_:]/g, " ")}.`;
     }

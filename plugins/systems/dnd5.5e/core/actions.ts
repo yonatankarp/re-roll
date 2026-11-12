@@ -25,6 +25,7 @@ import {
   stepToward,
   within5,
 } from "./combat.ts";
+import { encodeOption, parseOption } from "./combat/ids.ts";
 import { type Square, distanceFeet, squareKey } from "./grid.ts";
 import { FLEE } from "./legendary.ts";
 import { finalDamage, rollD20 } from "./rules.ts";
@@ -45,6 +46,7 @@ import {
   hasCondition,
   isDead,
   isDown,
+  frame,
 } from "./state.ts";
 import {
   type KnownAction,
@@ -73,13 +75,12 @@ import {
 // Hide, Ready, Search, Study, Grapple, Shove, standing up), the off-hand attack of a second Light weapon,
 // and the weapon masteries. Each is an option of the turn decision, so a save replays it like any other.
 
-const SEP = "|"; // as in combat.ts: the action, then its target
 const DASH = `${TACTIC}dash`;
 const DISENGAGE = `${TACTIC}disengage`;
 const DODGE = `${TACTIC}dodge`;
 const HIDE = HIDE_SOURCE;
 const SEARCH = `${TACTIC}search`;
-const STUDY = `${TACTIC}study`;
+export const STUDY = `${TACTIC}study`;
 const HELP = `${TACTIC}help`;
 const GRAPPLE = GRAPPLE_SOURCE;
 const SHOVE = `${TACTIC}shove`;
@@ -91,13 +92,6 @@ const NICK_USED = `${MASTERY}nick`;
 const CLEAVE_USED = `${MASTERY}cleave`;
 const HIDE_DC = 15;
 const STUDY_DC = 15;
-
-function frame(
-  kind: string,
-  payload: Readonly<Record<string, unknown>>,
-): Frame {
-  return { kind: `${NS}:${kind}`, payload };
-}
 
 const CHECK_END = frame("checkCombatEnd", {});
 
@@ -306,7 +300,7 @@ function offhandOptions(
     return standing(enemies(state, actor))
       .filter((foe) => distanceFeet(actor.position, foe.position) <= reach)
       .map((foe) => ({
-        id: `${OFFHAND}${SEP}${foe.id}${SEP}${action.id}`,
+        id: encodeOption(OFFHAND, foe.id, action.id),
         label: `Off-hand ${action.name}: ${foe.name} (${String(foe.hp)} HP)${nick ? ", with Nick" : ""}`,
       }));
   });
@@ -382,21 +376,21 @@ export function tacticOptions(
   }
   for (const foe of foes) {
     options.push({
-      id: `${STUDY}${SEP}${foe.id}`,
+      id: encodeOption(STUDY, foe.id),
       label: `Study ${foe.name} (${capitalized(studySkill(foe, access))})`,
     });
   }
   if (friends.length > 0) {
     for (const foe of near) {
       options.push({
-        id: `${HELP}${SEP}${foe.id}`,
+        id: encodeOption(HELP, foe.id),
         label: `Help an ally attack ${foe.name}`,
       });
     }
   }
   for (const friend of friends.filter((item) => within5(actor, item))) {
     options.push({
-      id: `${HELP}${SEP}${friend.id}`,
+      id: encodeOption(HELP, friend.id),
       label: `Help ${friend.name} with a check`,
     });
   }
@@ -410,26 +404,26 @@ export function tacticOptions(
     );
     if (!held) {
       options.push({
-        id: `${GRAPPLE}${SEP}${foe.id}`,
+        id: encodeOption(GRAPPLE, foe.id),
         label: `Grapple ${foe.name} (DC ${dc})`,
       });
     }
     if (!hasCondition(foe, "prone")) {
       options.push({
-        id: `${SHOVE}${SEP}${foe.id}${SEP}prone`,
+        id: encodeOption(SHOVE, foe.id, "prone"),
         label: `Shove ${foe.name} prone (DC ${dc})`,
       });
     }
     if (pushTo(actor.position, foe, 5, state)) {
       options.push({
-        id: `${SHOVE}${SEP}${foe.id}${SEP}push`,
+        id: encodeOption(SHOVE, foe.id, "push"),
         label: `Shove ${foe.name} 5 ft away (DC ${dc})`,
       });
     }
   }
   for (const action of readyable(stats)) {
     options.push({
-      id: `${READY}${SEP}${action.id}`,
+      id: encodeOption(READY, action.id),
       label: `Ready ${action.name} for a foe stepping into reach`,
     });
   }
@@ -513,7 +507,7 @@ export function runTactic(
   const { state } = context;
   const actor = state.actors[payload.actor];
   if (!actor) throw new Error(`Unknown actor ${payload.actor}`);
-  const [kind = "", targetId = "", detail = ""] = payload.answer.split(SEP);
+  const [kind = "", targetId = "", detail = ""] = parseOption(payload.answer);
   const target = state.actors[targetId];
   const stats = deriveStats(actor, context);
   const spend = (budget: "action" | "bonusAction"): SystemEvent =>
@@ -1039,11 +1033,11 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   const actor = state.actors[decision.actor];
   if (chosen !== PASS || !actor) return chosen;
   const offhand = decision.options
-    .filter((option) => option.id.startsWith(`${OFFHAND}${SEP}`))
+    .filter((option) => option.id.startsWith(encodeOption(OFFHAND, "")))
     .sort(
       (a, b) =>
-        (state.actors[a.id.split(SEP)[1] ?? ""]?.hp ?? 0) -
-        (state.actors[b.id.split(SEP)[1] ?? ""]?.hp ?? 0),
+        (state.actors[parseOption(a.id)[1] ?? ""]?.hp ?? 0) -
+        (state.actors[parseOption(b.id)[1] ?? ""]?.hp ?? 0),
     )[0];
   if (offhand) return offhand.id;
   if (hasTactic(actor, "dash") && ids.has(MOVE) && dashTarget(actor, context)) {

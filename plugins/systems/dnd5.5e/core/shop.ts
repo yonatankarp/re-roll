@@ -1,7 +1,6 @@
 import {
   type ContentAccess,
   ContentIdSchema,
-  type Frame,
   PLAYER_ACTOR,
   type SystemContext,
   type SystemResult,
@@ -11,7 +10,7 @@ import {
 } from "#sdk";
 import { z } from "zod";
 import { type Item, ItemSchema } from "./schemas.ts";
-import { type DndState, NS, dndEvent } from "./state.ts";
+import { type DndState, NS, dndEvent, frame } from "./state.ts";
 import { lookup } from "./stats.ts";
 
 type Context = SystemContext<DndState>;
@@ -32,7 +31,6 @@ export const ShopSchema = z.strictObject({
   // Percent off what the merchant asks, such as from a friendly attitude the adventure checks.
   discount: z.number().int().min(0).max(100).default(0),
 });
-export type Shop = z.infer<typeof ShopSchema>;
 export type Stock = z.infer<typeof StockSchema>;
 
 function itemOf(access: ContentAccess, id: string): Item {
@@ -89,10 +87,6 @@ export function left(
   return stock.quantity === undefined
     ? null
     : stock.quantity - sold.filter((id) => id === stock.item).length;
-}
-
-function frame(kind: string, payload: Step): Frame {
-  return { kind: `${NS}:${kind}`, payload };
 }
 
 // What the player can do now: buy what's in stock and affordable, sell what fetches coin, or leave.

@@ -7,7 +7,11 @@ import type {
   Passive,
   Resolution,
 } from "../schemas.ts";
-import { ConditionSchema, DAMAGE_TYPES } from "../schemas.ts";
+import {
+  ABILITY_NAMES as ABILITIES,
+  ConditionSchema,
+  DAMAGE_TYPES,
+} from "../schemas.ts";
 import { dependsOnCaster, statBlocksIn } from "./book.ts";
 import {
   type Caster,
@@ -19,14 +23,6 @@ import {
 } from "./monster-spells.ts";
 import { plainText, slugOf } from "./spells.ts";
 
-const ABILITIES = {
-  str: "Strength",
-  dex: "Dexterity",
-  con: "Constitution",
-  int: "Intelligence",
-  wis: "Wisdom",
-  cha: "Charisma",
-} as const;
 type AbilityKey = keyof typeof ABILITIES;
 
 const NUMBER_WORDS: Readonly<Record<string, number>> = {
@@ -291,7 +287,8 @@ function targetingFor(rule: string): unknown {
   if (area) {
     const shape = (area[2] ?? "").toLowerCase();
     return {
-      // shortcut: Cylinder has no shape of its own, and positions don't exist until step 6 anyway.
+      // shortcut: a cylinder is read as a sphere of its radius, since the grid has no height; give it a
+      // shape of its own once heights matter.
       area: {
         shape: shape === "cylinder" ? "sphere" : shape,
         radius: Number(area[1]),

@@ -10,9 +10,8 @@ import {
   storyEffect,
 } from "#sdk";
 import { z } from "zod";
+import { AIM, ALL, encodeOption, parseOption } from "./combat/ids.ts";
 import {
-  AIM,
-  ALL,
   CHECK_END,
   type Context,
   combatEnded,
@@ -38,6 +37,7 @@ import {
   hasCondition,
   isDead,
   isDown,
+  frame,
 } from "./state.ts";
 import { type KnownAction, deriveStats } from "./stats.ts";
 
@@ -45,17 +45,9 @@ import { type KnownAction, deriveStats } from "./stats.ts";
 
 export const FLEE = "flee";
 const WAIT = "wait";
-const SEPARATOR = "|";
 const LEGENDARY_PREFIX = "legendary:";
 const LAIR_PREFIX = "lair:";
 const OFF_MAP = { x: -1000, y: -1000 }; // where a fleeing creature heads, out of everyone's reach
-
-function frame(
-  kind: string,
-  payload: Readonly<Record<string, unknown>>,
-): Frame {
-  return { kind: `${NS}:${kind}`, payload };
-}
 
 const LegendSchema = MonsterSchema.pick({
   legendary: true,
@@ -218,14 +210,14 @@ function targetOptions(
 ): Decision["options"] {
   const { targeting } = lead.activation;
   if ("self" in targeting) {
-    return [{ id: `${key}${SEPARATOR}${actor.id}`, label: name }];
+    return [{ id: encodeOption(key, actor.id), label: name }];
   }
   if (
     ("area" in targeting && targeting.area.shape === "emanation") ||
     ("creatures" in targeting && targeting.creatures > 1)
   ) {
     return resolveTargets(ALL, lead, actor, context).length > 0
-      ? [{ id: `${key}${SEPARATOR}${ALL}`, label: name }]
+      ? [{ id: encodeOption(key, ALL), label: name }]
       : [];
   }
   const range = "range" in targeting ? rangeFeet(targeting.range) : 0;
@@ -237,7 +229,7 @@ function targetOptions(
           distanceFeet(actor.position, foe.position) <= range + steps),
     )
     .map((foe) => ({
-      id: `${key}${SEPARATOR}${"area" in targeting ? AIM : ""}${foe.id}`,
+      id: encodeOption(key, `${"area" in targeting ? AIM : ""}${foe.id}`),
       label: `${name}: ${foe.name} (${String(foe.hp)} HP)`,
     }));
 }
@@ -437,7 +429,7 @@ export function runLegendaryAction(
 ): SystemResult {
   const actor = context.state.actors[id];
   if (answer === WAIT || !context.state.combat || !canAct(actor)) return {};
-  const [index = "", target = ""] = answer.split(SEPARATOR);
+  const [index = "", target = ""] = parseOption(answer);
   const item = legendOf(actor, context).legendary?.actions[Number(index)];
   if (!item) throw new Error(`${id} has no legendary action ${index}`);
   const key = onceKey(Number(index));
@@ -493,7 +485,7 @@ export function runLairAction(
 ): SystemResult {
   const actor = context.state.actors[id];
   if (answer === WAIT || !context.state.combat || !actor) return {};
-  const [index = "", target = ""] = answer.split(SEPARATOR);
+  const [index = "", target = ""] = parseOption(answer);
   const key = `${LAIR_PREFIX}${index}`;
   const item = legendOf(actor, context).lairActions?.[Number(index)];
   if (!item) throw new Error(`${id} has no lair action ${index}`);
@@ -517,7 +509,7 @@ export function runLairAction(
 export function chooseBossAction(decision: Decision, context: Context): string {
   const actor = context.state.actors[decision.actor];
   const scored = decision.options.flatMap((option) => {
-    const [, target = ""] = option.id.split(SEPARATOR);
+    const [, target = ""] = parseOption(option.id);
     if (option.id === WAIT || !actor) return [];
     if (target === ALL) return [{ option, score: 1000 }];
     const foe = context.state.actors[target.replace(AIM, "")];

@@ -43,6 +43,7 @@ import {
   dndEvent,
   freshActor,
   isDead,
+  frame,
 } from "./state.ts";
 import {
   abilityModifier,
@@ -875,13 +876,6 @@ export function buildCompanion(
     dice,
   );
   return finishedCharacter(id, name, draft, access);
-}
-
-function frame(
-  kind: string,
-  payload: Readonly<Record<string, unknown>>,
-): Frame {
-  return { kind: `${NS}:${kind}`, payload };
 }
 
 export function beginCreation(): SystemResult {
