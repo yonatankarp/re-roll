@@ -16,6 +16,7 @@
         - { kind: goto, scene: village }
 - id: fight
   text: Arrows hiss out of the pines as more goblins rush the road.
+  rest: false # no time to stop with goblins charging
   choices:
     - label: Drive them off
       effects:

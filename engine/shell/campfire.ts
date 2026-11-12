@@ -35,7 +35,7 @@ function rows(sheets: readonly SheetView[]): Map<string, string> {
   return values;
 }
 
-// One line per party member whose sheet changed, such as "Hit Points 7 → 12 of 12".
+// Each party member whose sheet changed, with a line per change, such as "Hit Points 7 → 12 of 12".
 function recovered(
   before: Map<string, string>,
   after: readonly SheetView[],
@@ -53,7 +53,10 @@ function recovered(
       });
     if (changes.length === 0) return [];
     const line = node("li", "");
-    line.append(node("strong", "", sheet.title), ` ${changes.join(", ")}`);
+    line.append(
+      node("strong", "", sheet.title),
+      ...changes.map((text) => node("span", "", text)),
+    );
     return [line];
   });
 }

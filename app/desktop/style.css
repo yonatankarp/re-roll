@@ -1397,8 +1397,8 @@ button:active {
 .campfire::backdrop {
   background: radial-gradient(
     circle at 50% 40%,
-    rgb(120 60 10 / 55%),
-    rgb(8 5 2 / 92%) 60%
+    rgb(70 32 6 / 88%),
+    rgb(6 4 2 / 97%) 55%
   );
 }
 
@@ -1443,4 +1443,12 @@ button:active {
   display: grid;
   gap: 6px;
   font-variant-numeric: tabular-nums;
+}
+
+.campfire-recovered span {
+  display: block;
+}
+
+.campfire-recovered + button {
+  margin-top: 16px;
 }
