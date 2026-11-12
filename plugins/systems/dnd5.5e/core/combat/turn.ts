@@ -29,6 +29,7 @@ import { finalDamage, halved } from "../rules.ts";
 import { betweenTurns, legendaryResistance } from "../legendary.ts";
 import { turnRecharge } from "../class-rules.ts";
 import { MonsterSchema } from "../schemas.ts";
+import { repeatSaveConditions } from "../trait-rules.ts";
 import {
   actorOf,
   canAfford,
@@ -206,6 +207,8 @@ export function runFinishTurn(context: Context): SystemResult {
       save.dc,
       context,
       sourceId.startsWith("spell:"),
+      0,
+      repeatSaveConditions(target, sourceId),
     );
     events.push(...rolled.events);
     const resisted = rolled.saved

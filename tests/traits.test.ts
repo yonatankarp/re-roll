@@ -385,6 +385,48 @@ describe("species traits and feats", () => {
     expect(d20s("frightened")).toBe(1);
   });
 
+  it("gives the same Advantage to the save repeated at the end of a turn", async () => {
+    const run = await testRun();
+    const d20s = (condition: "poisoned" | "frightened") => {
+      const target = {
+        ...stoneling(1, []),
+        activeEffects: [
+          {
+            sourceId: "monster:0",
+            casterId: "foe",
+            modifier: { kind: "condition" as const, condition },
+            ends: "spellDuration" as const,
+            repeatSave: { ability: "con" as const, dc: 12 },
+          },
+        ],
+      };
+      const state: DndState = {
+        actors: { [PLAYER_ACTOR]: target },
+        combat: {
+          encounter: "arena",
+          order: [PLAYER_ACTOR],
+          index: 0,
+          round: 1,
+        },
+      };
+      let count = 0;
+      const dice: Dice = {
+        below: () => 0,
+        roll: (sides) => {
+          if (sides === 20) count += 1;
+          return 1;
+        },
+      };
+      run.system.frames[`${NS}:finishTurn`]?.run(
+        {},
+        { state, dice, content: run.content, contentIds: run.contentIds },
+      );
+      return count;
+    };
+    expect(d20s("poisoned")).toBe(2);
+    expect(d20s("frightened")).toBe(1);
+  });
+
   it("drops to 1 Hit Point instead of 0 once, then falls as usual", async () => {
     const run = await testRun();
     const hero = { ...stoneling(1, []), hp: 5 };
