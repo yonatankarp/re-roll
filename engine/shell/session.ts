@@ -4,6 +4,7 @@ import {
   type Decision,
   type GameEvent,
   type GameState,
+  PLAYER_ACTOR,
   isNamespacedEvent,
   isNarrativeEvent,
 } from "../kernel/events.ts";
@@ -47,6 +48,8 @@ export interface LogLine {
   readonly kind: "scene" | "event";
   readonly text: string;
   readonly actor?: string | null;
+  // A line worth more than the ticker: the player's level-up, or a foe defeated, which the ending counts.
+  readonly moment?: "levelUp" | "foeDefeated";
 }
 
 export interface GameView {
@@ -202,10 +205,18 @@ function narrate(
     if (isNarrativeEvent(event) || isNamespacedEvent(event)) {
       const text = ui.describe(event, state.system, run);
       if (text !== null) {
+        const moment =
+          event.kind === "levelGained" && event.actor === PLAYER_ACTOR
+            ? "levelUp"
+            : event.kind === "actorDefeated" &&
+                !state.partyIds.includes(event.actor)
+              ? "foeDefeated"
+              : undefined;
         lines.push({
           kind: "event",
           text,
           actor: ui.actorOf(event, state.system),
+          ...(moment ? { moment } : {}),
         });
       }
     }

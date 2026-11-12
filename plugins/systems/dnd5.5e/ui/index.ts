@@ -706,6 +706,15 @@ function describe(
         return `${name(event.actor)} is defeated.`;
       case "partyDefeated":
         return "The fight is lost.";
+      // Told here rather than at characterAdvanced, so the shell can mark the engine's own event.
+      case "levelGained": {
+        const actor = state.actors[event.actor];
+        const levels =
+          actor?.source.kind === "character"
+            ? (actor.source.build?.levels.length ?? null)
+            : null;
+        return `${name(event.actor)} reaches ${levels === null ? "a new level" : `level ${String(levels)}`}, with ${String(actor?.hp ?? 0)} HP.`;
+      }
       default:
         return null;
     }
@@ -717,10 +726,8 @@ function describe(
         EVENT_SCHEMAS["dnd5.5e:characterChosen"].parse(payload);
       return `You are playing the ${chosen}.`;
     }
-    case "dnd5.5e:characterAdvanced": {
-      const data = EVENT_SCHEMAS["dnd5.5e:characterAdvanced"].parse(payload);
-      return `${name(data.actor)} reaches a new level, with ${String(data.hp)} HP.`;
-    }
+    case "dnd5.5e:characterAdvanced":
+      return null; // the levelGained after it says so
     case "dnd5.5e:xpAwarded": {
       const data = EVENT_SCHEMAS["dnd5.5e:xpAwarded"].parse(payload);
       return `The party earns ${String(data.amount)} XP.`;

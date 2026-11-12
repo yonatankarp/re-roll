@@ -72,7 +72,9 @@
   --panel: #fbf6e9;
   --ink: #221b12;
   --muted: #5e5240;
-  --line: #c9ad6a;
+  --line: #c9ad6a; /* decorative rules */
+  --edge: #86693a; /* the borders of things to press, type in or read as a card */
+  --column: 760px; /* the reading column the setup and the story share */
   --accent: #58180d;
   --accent-ink: #fbf6e9;
   --active: #f2e2bf;
@@ -109,6 +111,7 @@
     --ink: #ede3cc;
     --muted: #b3a688;
     --line: #5a4630;
+    --edge: #9a7d4c;
     --accent: #e0b062;
     --accent-ink: #1a1408;
     --active: #3a2c1c;
@@ -129,6 +132,11 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* The page doesn't shift sideways when a scrollbar comes and goes. */
+html {
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -219,7 +227,7 @@ button {
   font: inherit;
   color: var(--ink);
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 6px;
   padding: 10px 14px;
   min-height: 44px;
@@ -269,7 +277,7 @@ button:hover {
 }
 
 .game {
-  max-width: 760px;
+  max-width: var(--column);
   margin: 16px auto 48px;
 }
 
@@ -294,26 +302,51 @@ html {
 }
 
 /* Held back while the board plays out what just happened; the space stays so nothing jumps. */
-.settling > .prompt,
-.settling > .options {
+.settling .rail > .prompt,
+.settling .rail > .options,
+.settling .rail > .ending {
   visibility: hidden;
 }
 
+/* The end of a run closes like a chapter: a big title, the tapered red rule and what it came to. */
 .ending {
-  padding: 16px;
-  margin: 16px 0;
-  background: var(--panel);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
+  margin: 40px 0 16px;
+  scroll-margin-bottom: 24px;
+}
+
+.in-combat .ending {
+  margin-top: 16px;
 }
 
 .ending h3 {
-  margin-top: 0;
-  font-family: inherit;
-  font-size: 1.3rem;
-  letter-spacing: 0;
-  text-transform: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font: 3rem/1 var(--font-title);
   color: var(--accent);
+}
+
+.ending h3::after {
+  content: "";
+  display: block;
+  height: 4px;
+  margin-top: 12px;
+  background: linear-gradient(to right, var(--rule), transparent);
+}
+
+.ending p {
+  font-size: 1.15rem;
+}
+
+.ending .ending-tally {
+  font: 1.3rem/1.2 var(--font-head);
+  color: var(--accent);
+}
+
+.ending-actions .begin {
+  width: auto;
+  margin-top: 0;
+  padding: 12px 28px;
 }
 
 .ending[data-ending="defeat"] h3 {
@@ -449,7 +482,7 @@ dd {
   font: inherit;
   color: var(--ink);
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 6px;
 }
 
@@ -561,7 +594,7 @@ summary {
 
 .box-label {
   font-family: var(--font-ui);
-  font-size: 0.65rem;
+  font-size: 12px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
@@ -714,7 +747,7 @@ summary {
 
 .hud-stat small {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 12px;
   letter-spacing: 0.05em;
 }
 
@@ -976,7 +1009,7 @@ summary {
   animation-delay: calc(0.25s + var(--i, 0) * 140ms);
 }
 
-.settling > .decision-card {
+.settling .rail > .decision-card {
   visibility: hidden;
 }
 
@@ -1017,7 +1050,7 @@ summary {
 button {
   font-family: var(--font-body);
   background: var(--panel);
-  border-color: var(--line);
+  border-color: var(--edge);
   box-shadow: 0 1px 2px rgb(60 40 10 / 15%);
   transition:
     border-color 0.15s,
@@ -1025,8 +1058,14 @@ button {
     transform 0.15s;
 }
 
+/* Hover only lightens; the red bar marks the button that has focus or is chosen. */
 button:hover {
-  border-color: var(--accent);
+  background: var(--active);
+  border-color: var(--edge);
+  box-shadow: 0 2px 6px rgb(60 40 10 / 20%);
+}
+
+button:focus-visible {
   box-shadow:
     inset 4px 0 0 var(--accent),
     0 2px 6px rgb(60 40 10 / 20%);
@@ -1040,7 +1079,7 @@ button:active {
 .bar-actions button {
   color: var(--leather-ink);
   background: transparent;
-  border-color: rgb(201 173 106 / 45%);
+  border-color: rgb(201 173 106 / 75%);
   box-shadow: none;
   font-family: var(--font-caps);
   letter-spacing: 0.03em;
@@ -1080,12 +1119,16 @@ button:active {
   line-height: 1.6;
 }
 
-/* A drop cap opens each scene, as a chapter does in the books. */
-.play:not(.in-combat) .scene-text::first-letter {
-  float: left;
-  margin: 0.08em 0.08em 0 0;
-  font: 3.4rem/0.8 var(--font-title);
-  color: var(--accent);
+/* A drop cap opens each scene, as a chapter does in the books. Without initial-letter a floated
+   letter overhangs one-line scenes, so those browsers go without. */
+@supports (initial-letter: 2) or (-webkit-initial-letter: 2) {
+  .play:not(.in-combat) .scene-text::first-letter {
+    -webkit-initial-letter: 2;
+    initial-letter: 2;
+    margin-right: 0.08em;
+    font-family: var(--font-title);
+    color: var(--accent);
+  }
 }
 
 .prompt {
@@ -1103,9 +1146,10 @@ button:active {
 }
 
 .option .info {
-  font-family: var(--font-head);
+  font-family: var(--font-ui);
   font-style: normal;
-  font-size: 1.1rem;
+  font-weight: normal;
+  font-size: 1.25rem;
 }
 
 .tab {
@@ -1123,10 +1167,9 @@ button:active {
 
 /* Action panels and stat boxes look like the books' stat blocks: tinted paper between gold bars. */
 .group-panel,
-.box,
-.ending {
+.box {
   background: #fdf1dc;
-  border: 1px solid #d4b97f;
+  border: 1px solid var(--edge);
   box-shadow: 0 2px 6px rgb(60 40 10 / 18%);
 }
 
@@ -1166,15 +1209,6 @@ button:active {
   color: var(--accent);
 }
 
-.ending {
-  border-color: var(--rule);
-}
-
-.ending h3 {
-  font: 2rem/1 var(--font-title);
-  border: 0;
-}
-
 .drawer {
   background: var(--paper), var(--bg);
   border-left: 4px solid var(--line);
@@ -1201,7 +1235,7 @@ button:active {
 .search {
   font: inherit;
   padding: 10px 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 6px;
   background: var(--panel);
   color: var(--ink);
@@ -1219,10 +1253,15 @@ button:active {
 @media (prefers-color-scheme: dark) {
   .group-panel,
   .box,
-  .ending,
-  .log {
+  .log,
+  .level-up {
     background: #2c2319;
-    border-color: #5a4630;
+    border-color: var(--edge);
+  }
+
+  .level-up {
+    border-top-color: #a8701e;
+    border-bottom-color: #a8701e;
   }
 
   .group-panel {
@@ -1276,7 +1315,7 @@ button:active {
   align-items: center;
   min-height: 44px;
   padding: 6px 12px;
-  border: 1px solid rgb(201 173 106 / 45%);
+  border: 1px solid rgb(201 173 106 / 75%);
   border-radius: 6px;
   color: var(--leather-ink);
   font-family: var(--font-caps);
@@ -1367,7 +1406,7 @@ button:active {
 
 /* Setting up a new game: one card per choice, such as difficulty. */
 .setup {
-  max-width: 640px;
+  max-width: var(--column);
   margin: 24px auto;
 }
 
@@ -1668,4 +1707,117 @@ button:active {
   align-self: flex-start;
   padding: 4px 12px;
   font: 0.9rem var(--font-ui);
+}
+
+/* A level-up is a callout between gold rules, not one more line in the ticker. */
+.level-up {
+  margin: 12px 0;
+  padding: 10px 14px;
+  background: #fdf1dc;
+  border-top: 3px solid #e69a28;
+  border-bottom: 3px solid #e69a28;
+  font-size: 1.05rem;
+}
+
+.level-up strong {
+  margin-right: 4px;
+  font: 1.5rem/1 var(--font-title);
+  color: var(--accent);
+}
+
+.level-up.enter {
+  animation: rise 0.45s ease both;
+}
+
+/* Story choices read as a book's numbered entries; the number is also the key that picks it. */
+.rail > .options.story {
+  counter-reset: choice;
+}
+
+.options.story .option {
+  counter-increment: choice;
+}
+
+.options.story .option > button:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.options.story .option > button:first-child::before {
+  content: counter(choice);
+  min-width: 0.7em;
+  font: 1.6rem/1 var(--font-title);
+  color: var(--rule);
+  text-align: right;
+}
+
+/* Outside a fight the rail adds nothing; its contents lay out as the stage's own. */
+.rail {
+  display: contents;
+}
+
+/* A wide window puts the fight's choices in a column beside the map, so neither scrolls off. */
+@media (min-width: 960px) {
+  .game:has(> .play.in-combat) {
+    max-width: 1080px;
+  }
+
+  .play.in-combat {
+    --map-reserve: 230px; /* the top bar, the scene title and its line, and the frame */
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    column-gap: 24px;
+  }
+
+  .play.in-combat > * {
+    grid-column: 1 / -1;
+  }
+
+  .play.in-combat > #combat-grid-slot {
+    grid-column: 1;
+  }
+
+  .play.in-combat > .rail {
+    grid-column: 2;
+    align-self: start;
+    position: sticky;
+    top: 72px;
+    display: block;
+    max-height: calc(100dvh - 88px);
+    margin: 12px -8px 0;
+    padding: 0 8px 12px; /* room for focus rings and entrances, which a scrolling box would clip */
+    overflow: auto;
+  }
+
+  .play.in-combat > .rail > :first-child {
+    margin-top: 0;
+  }
+}
+
+/* A narrow window keeps the fight's choices in a tray along the bottom, over the page. */
+@media (max-width: 959px) {
+  .play.in-combat .rail > .options:not(:empty) {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    max-height: 45dvh;
+    overflow: auto;
+    margin-inline: -16px;
+    padding: 10px 16px 12px;
+    background: var(--bg);
+    border-top: 2px solid var(--line);
+    box-shadow: 0 -6px 16px rgb(60 40 10 / 18%);
+  }
+
+  /* Side by side where they fit, so the tray covers as little of the map as it can. */
+  .play.in-combat .rail > .options > .options,
+  .play.in-combat .rail > .options > .group-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
+
+  .play.in-combat .rail > .options > :first-child {
+    margin-top: 0;
+  }
 }
