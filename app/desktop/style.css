@@ -293,6 +293,12 @@ html {
   display: none;
 }
 
+/* Held back while the board plays out what just happened; the space stays so nothing jumps. */
+.settling > .prompt,
+.settling > .options {
+  visibility: hidden;
+}
+
 .ending {
   padding: 16px;
   margin: 16px 0;
@@ -863,7 +869,8 @@ summary {
   background: var(--bg);
 }
 
-.drawer-head h2 {
+.drawer-head h2,
+.drawer-head .tabs {
   margin: 0;
 }
 
@@ -1335,6 +1342,11 @@ button:active {
 .setting-card span {
   font-size: 0.9rem;
   color: var(--muted);
+}
+
+/* No inset bar on hover, which would read as a second selection next to the checked card. */
+.setting-card:hover {
+  box-shadow: 0 2px 6px rgb(60 40 10 / 20%);
 }
 
 .setting-card[aria-checked="true"] {

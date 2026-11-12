@@ -392,7 +392,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       const square = field.clientWidth / grid.width;
       field.style.setProperty("--sq", `${String(square)}px`);
       // Names under small tokens run into each other; hovering a token still shows its name.
-      field.classList.toggle("tight", square < 60);
+      field.classList.toggle("tight", square < 44);
       field.style.aspectRatio = `${String(grid.width)} / ${String(grid.height)}`;
       field.style.setProperty("--cols", String(grid.width));
       field.style.setProperty("--rows", String(grid.height));
@@ -1407,7 +1407,7 @@ const BOARD_CSS = `
 .dnd-hp { top: calc(100% + 22px); white-space: nowrap; }
 .gridded .dnd-hp { display: none; }
 .tight .dnd-name { display: none; }
-.gridded .dnd-name { font-size: 0.6rem; }
+.gridded .dnd-name { font-size: 0.6rem; max-width: calc(var(--sq, 48px) * 1.5); }
 .gridded .dnd-bar { top: calc(100% + 12px); width: 80%; }
 .dnd-name {
   max-width: 92px;
@@ -1524,8 +1524,8 @@ const BOARD_CSS = `
 .dnd-board.playing { cursor: pointer; }
 .dnd-field.gridded {
   height: auto;
-  /* As wide as fits without the map growing taller than the screen, so its squares stay square. */
-  width: min(100%, calc(84vh * var(--cols) / var(--rows)));
+  /* As wide as fits while the map, the turn prompt and the action tabs share one screen; its squares stay square. */
+  width: min(100%, calc(max(280px, 100dvh - 400px) * var(--cols) / var(--rows)));
   margin: 0 auto;
 }
 .dnd-field.gridded::before {

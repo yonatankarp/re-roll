@@ -666,17 +666,17 @@ export function mountShell(
   };
 
   // A side drawer: the character sheet or the journal, opened from the top bar so the stage stays clear.
-  const drawer = (label: string, ...content: Node[]): HTMLDialogElement => {
+  // `head` is its heading, or for the sheet the party tabs, since the sheet names itself.
+  const drawer = (
+    label: string,
+    head: Node,
+    ...content: Node[]
+  ): HTMLDialogElement => {
     const close = el("button", { text: "Close" });
     const node = el(
       "dialog",
       { class: "drawer" },
-      el(
-        "header",
-        { class: "drawer-head" },
-        el("h2", { text: label }),
-        el("form", {}, close),
-      ),
+      el("header", { class: "drawer-head" }, head, el("form", {}, close)),
       ...content,
     );
     node.querySelector("form")?.setAttribute("method", "dialog");
@@ -726,8 +726,14 @@ export function mountShell(
     // One panel per party member, kept between redraws so each keeps its own open sections.
     const sheetPanels = new Map<string, HTMLElement>();
     let sheetShown: string | null = null; // null for the player's
-    const sheetDrawer = drawer("Character", fullSheet);
-    const journalDrawer = drawer("Journal", log, about);
+    const sheetTabs = el("div", { class: "tabs" });
+    const sheetDrawer = drawer("Character", sheetTabs, fullSheet);
+    const journalDrawer = drawer(
+      "Journal",
+      el("h2", { text: "Journal" }),
+      log,
+      about,
+    );
     const hud = button("", () => {
       sheetDrawer.showModal();
     });
@@ -808,6 +814,10 @@ export function mountShell(
 
     let linesShown = 0;
     let tickerShown = 0; // the latest ticker update, so a stale one never lands
+    let choiceShown = 0; // the same, for revealing the choices
+    // An ending takes focus on its heading, so a repeated key press can't skip past it.
+    const firstFocus = (): HTMLElement =>
+      options.querySelector("button") ?? ending.querySelector("h3") ?? title;
     const draw = (): void => {
       const view = game.view();
       const factory = boards[view.system];
@@ -826,6 +836,7 @@ export function mountShell(
           },
         });
       }
+      const cues = view.cues.slice(cuesShown ?? view.cues.length);
       board?.update({
         state: view.systemState,
         decision: view.decision,
@@ -834,7 +845,7 @@ export function mountShell(
         tokens: view.tokenArt,
         assetRoot: view.adventureRoot,
         sceneArt: view.sceneArt,
-        cues: view.cues.slice(cuesShown ?? view.cues.length),
+        cues,
       });
       const firstDraw = cuesShown === null;
       cuesShown = view.cues.length;
@@ -989,7 +1000,27 @@ export function mountShell(
             ]
           : []),
       );
-      if (fresh && !firstDraw) enter(options);
+      // The next choice waits for the board to finish, so it can't be picked under a die still to throw.
+      if (!firstDraw && board?.settled && cues.length > 0) {
+        const shownChoice = ++choiceShown;
+        prompt.inert = options.inert = true;
+        stage.classList.add("settling");
+        void board.settled().then(() => {
+          if (shownChoice !== choiceShown) return;
+          prompt.inert = options.inert = false;
+          stage.classList.remove("settling");
+          if (fresh) enter(options);
+          // Focus meant for a choice was dropped while it was inert, or sits on a board that just hid.
+          const focused = document.activeElement;
+          if (
+            !focused ||
+            focused === document.body ||
+            !focused.checkVisibility()
+          ) {
+            firstFocus().focus();
+          }
+        });
+      } else if (fresh && !firstDraw) enter(options);
 
       const added = view.log.slice(linesShown);
       log.append(
@@ -1049,33 +1080,27 @@ export function mountShell(
         panel.hidden = item !== shown;
         return panel;
       });
-      fullSheet.replaceChildren(
+      sheetTabs.replaceChildren(
         ...(view.sheets.length > 1
-          ? [
-              el(
-                "div",
-                { class: "tabs" },
-                ...view.sheets.map((item) => {
-                  const tab = button(item.title, () => {
-                    sheetShown = item.id;
-                    draw();
-                    // The redraw replaced this button, so focus goes to its replacement.
-                    fullSheet
-                      .querySelector<HTMLElement>(
-                        `.tab[data-id="${CSS.escape(item.id)}"]`,
-                      )
-                      ?.focus();
-                  });
-                  tab.className = item === shown ? "tab open" : "tab";
-                  tab.dataset.id = item.id;
-                  tab.setAttribute("aria-pressed", String(item === shown));
-                  return tab;
-                }),
-              ),
-            ]
+          ? view.sheets.map((item) => {
+              const tab = button(item.title, () => {
+                sheetShown = item.id;
+                draw();
+                // The redraw replaced this button, so focus goes to its replacement.
+                sheetTabs
+                  .querySelector<HTMLElement>(
+                    `.tab[data-id="${CSS.escape(item.id)}"]`,
+                  )
+                  ?.focus();
+              });
+              tab.className = item === shown ? "tab open" : "tab";
+              tab.dataset.id = item.id;
+              tab.setAttribute("aria-pressed", String(item === shown));
+              return tab;
+            })
           : []),
-        ...panels,
       );
+      fullSheet.replaceChildren(...panels);
       about.replaceChildren(
         el("summary", { text: "About" }),
         el("p", { text: `Re-roll. ${view.about}` }),
@@ -1084,9 +1109,11 @@ export function mountShell(
       );
       if (view.warnings.length > 0) say(view.warnings.join(" "), true);
 
-      // An ending takes focus on its heading, so a repeated key press can't skip past it.
-      focusNext =
-        options.querySelector("button") ?? ending.querySelector("h3") ?? title;
+      // While the board plays, keys go to it, so Enter throws your die.
+      focusNext = stage.classList.contains("settling")
+        ? combatGridSlot.querySelector<HTMLElement>("[tabindex]")
+        : null;
+      focusNext ??= firstFocus();
     };
     draw();
   };
