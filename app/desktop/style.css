@@ -1746,17 +1746,12 @@ button:active {
   border-bottom-color: var(--accent);
 }
 
-.creation-top {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
+.creation {
+  position: relative;
 }
 
-.creation-top .creation-steps {
-  margin: 0;
+.creation:has(> .creation-back) .creation-steps {
+  padding-right: 88px;
 }
 
 .creation-heading {
@@ -1909,6 +1904,9 @@ button:active {
 }
 
 .creation-back {
+  position: absolute;
+  top: 0;
+  right: 0;
   min-height: 36px;
   padding: 4px 14px;
   font-family: var(--font-ui);

@@ -378,18 +378,23 @@ export function startRun(
 }
 
 // Whether answering ends the adventure with one of its endings. Steps are pure, so trying one changes nothing.
+// A certain ending rolls no dice on the way: a check could go either way, and only its roll decides.
 export function wouldEnd(
   run: RunContext,
   state: GameState,
   decision: Decision,
   optionId: string,
+  certain = false,
 ): boolean {
   const tried = step(run, state, {
     kind: "answer",
     decisionId: decision.id,
     optionId,
   });
-  return tried.ok && tried.state.story.ended === "ending";
+  if (!tried.ok || tried.state.story.ended !== "ending") return false;
+  return (
+    !certain || JSON.stringify(tried.state.rng) === JSON.stringify(state.rng)
+  );
 }
 
 // Typed text is stored as it was entered, so it must already be trimmed, short enough and printable.

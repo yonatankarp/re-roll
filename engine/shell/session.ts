@@ -974,18 +974,22 @@ export function createGame({
       await autosave(game);
     },
 
-    // A story choice that ends the adventure while another would carry on, for the page to confirm first.
+    // A story choice that surely ends the adventure while another would carry on, for the page to confirm
+    // first. Only endings reached without a roll count, so whether it asks never gives a pending roll away.
     endsEarly(optionId: string): boolean {
       const { run, state } = active();
       const decision = pendingDecision(run, state);
       if (!decision?.id.startsWith(SCENE_DECISION_PREFIX)) return false;
-      const carriesOn = (id: string): boolean =>
-        id !== optionId &&
-        !id.startsWith(REST_OPTION_PREFIX) &&
-        !wouldEnd(run, state, decision, id);
+      const ends = (id: string): boolean =>
+        wouldEnd(run, state, decision, id, true);
       return (
-        wouldEnd(run, state, decision, optionId) &&
-        decision.options.some((option) => carriesOn(option.id))
+        ends(optionId) &&
+        decision.options.some(
+          (option) =>
+            option.id !== optionId &&
+            !option.id.startsWith(REST_OPTION_PREFIX) &&
+            !ends(option.id),
+        )
       );
     },
 

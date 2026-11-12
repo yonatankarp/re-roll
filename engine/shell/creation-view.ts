@@ -11,11 +11,19 @@ export function drawCreation(
   creation: CreationView,
 ): void {
   const { ctx } = page;
+  // The page is inert while it waits, so focus is handed over once it's done: to the name field, or the first card.
+  const focusStep = (): void => {
+    ctx.focusNext =
+      page.options.querySelector<HTMLElement>(
+        ".creation-name input, .creation-pick",
+      ) ?? ctx.focusNext;
+  };
   const answer = (id: string): void => {
     ctx.act(async () => {
       await ctx.game.answer(id);
       page.draw();
       page.flashSaved();
+      focusStep();
     });
   };
 
@@ -95,9 +103,6 @@ export function drawCreation(
       go,
     );
     // Typing a name is the step, so the field takes focus once it's drawn.
-    queueMicrotask(() => {
-      if (input.isConnected) input.focus();
-    });
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       answer(input.value.trim() || suggested);
@@ -123,6 +128,7 @@ export function drawCreation(
         ctx.act(async () => {
           await ctx.game.undo();
           page.draw();
+          focusStep();
         });
       })
     : null;
@@ -132,17 +138,8 @@ export function drawCreation(
     el(
       "section",
       { class: "creation" },
-      ...(steps.length > 0 || back
-        ? [
-            el(
-              "div",
-              { class: "creation-top" },
-              ...(steps.length > 0
-                ? [el("ol", { class: "creation-steps" }, ...steps)]
-                : []),
-              ...(back ? [back] : []),
-            ),
-          ]
+      ...(steps.length > 0
+        ? [el("ol", { class: "creation-steps" }, ...steps)]
         : []),
       ...(creation.heading
         ? [el("p", { class: "creation-heading", text: creation.heading })]
@@ -175,6 +172,8 @@ export function drawCreation(
             ]
           : []),
       ),
+      // Last, so a step's focus and Tab reach the choices first; it's drawn at the top.
+      ...(back ? [back] : []),
       drawer,
     ),
   );
