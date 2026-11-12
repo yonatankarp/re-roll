@@ -90,7 +90,8 @@ export function runAfterAction(
 }
 
 // One frame per source, as the same spell from two casters doesn't stack and a creature saves only once a turn.
-// shortcut: with no map, everyone a zone was cast on stays in it until the effect ends.
+// shortcut: everyone a zone was cast on stays in it until the effect ends, even after walking out of it;
+// check their square once a zone keeps where it was cast.
 function lingeringFrames(actor: Actor, when: "turnStart" | "turnEnd"): Frame[] {
   const seen = new Set<string>();
   return actor.activeEffects.flatMap(({ modifier, sourceId }) => {

@@ -52,7 +52,8 @@ export function meleeReachOf(
 }
 
 // Enemies that get an Opportunity Attack if the actor moves to `to`, and the attack each would make.
-// shortcut: only where the move starts and ends counts, not every square on the way.
+// shortcut: only where the move starts and ends counts, not every square on the way; check each square of
+// the path moveSquares already finds once a map has a corridor past a foe.
 export function provokers(
   actor: Actor,
   to: Square,

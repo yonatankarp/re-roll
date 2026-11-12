@@ -307,7 +307,8 @@ export function leafEvents(
       case "forcedMove":
       case "note":
       case "reduceDamage":
-        // shortcut: forced movement needs the grid in step 6, and a note is only for reading.
+        // shortcut: forced movement is only described, not made; move the target on the grid, as Shove's push
+        // does, once a spell needs it. A note is only for reading.
         // Reduced damage is worked out by the reaction that holds up the hit.
         break;
       default:
