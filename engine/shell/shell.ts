@@ -1078,41 +1078,59 @@ export function mountShell(
           ? decision.prompt
           : "";
       const fresh = (decision?.id ?? null) !== decisionShown;
-      if (fresh) {
-        card.replaceChildren(
-          ...(view.card
-            ? [
-                el(
-                  "h3",
-                  {},
-                  ...(view.card.icon
-                    ? [el("span", { class: "card-icon", text: view.card.icon })]
-                    : []),
-                  document.createTextNode(view.card.title),
-                ),
-                el(
-                  "ul",
-                  {},
-                  ...view.card.lines.map((line, index) => {
-                    const item = el("li", { text: line });
-                    item.style.setProperty("--i", String(index));
-                    return item;
-                  }),
-                ),
-                ...(view.card.footer
-                  ? [el("p", { class: "card-footer", text: view.card.footer })]
-                  : []),
-              ]
-            : []),
-        );
-        card.hidden = !view.card;
-      }
-      // Shown once the board has finished, so its entrance isn't spent while it's still hidden.
+      // Keyed on what it says rather than on the decision, so equipping a find from the card doesn't
+      // show it again; the purse is in the key, so a second find of the same things still shows.
+      const shownCard = view.card;
+      const cardKey = shownCard
+        ? JSON.stringify([shownCard.title, shownCard.lines, shownCard.footer])
+        : "";
+      // Filled and shown once the board has finished, so its entrance isn't spent, and its news
+      // isn't announced, while it's still hidden. The key is set only then, so a newer draw retries.
       const revealCard =
-        fresh && view.card && !firstDraw
+        cardKey !== (card.dataset.key ?? "")
           ? (): void => {
-              enter(card);
-              if (soundOn) cardSound?.();
+              card.dataset.key = cardKey;
+              card.replaceChildren(
+                ...(shownCard
+                  ? [
+                      el(
+                        "h3",
+                        {},
+                        ...(shownCard.icon
+                          ? [
+                              el("span", {
+                                class: "card-icon",
+                                text: shownCard.icon,
+                              }),
+                            ]
+                          : []),
+                        document.createTextNode(shownCard.title),
+                      ),
+                      el(
+                        "ul",
+                        {},
+                        ...shownCard.lines.map((line, index) => {
+                          const item = el("li", { text: line });
+                          item.style.setProperty("--i", String(index));
+                          return item;
+                        }),
+                      ),
+                      ...(shownCard.footer
+                        ? [
+                            el("p", {
+                              class: "card-footer",
+                              text: shownCard.footer,
+                            }),
+                          ]
+                        : []),
+                    ]
+                  : []),
+              );
+              card.hidden = !shownCard;
+              if (shownCard && !firstDraw) {
+                enter(card);
+                if (soundOn) cardSound?.();
+              }
             }
           : null;
       if (fresh) {
