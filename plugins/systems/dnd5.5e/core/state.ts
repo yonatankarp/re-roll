@@ -414,6 +414,8 @@ export const EVENT_SCHEMAS = {
   [`${NS}:lairActionTaken`]: LairActionTakenSchema,
   [`${NS}:surpriseSet`]: z.strictObject({ side: SurpriseSchema }),
   [`${NS}:traded`]: TradedSchema,
+  // A dying creature someone stabilized with the Help action: Stable, as after three successes.
+  [`${NS}:stabilized`]: ActorOnlySchema,
 } as const;
 
 export type EventKind = keyof typeof EVENT_SCHEMAS;
@@ -863,6 +865,12 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
         applyDeathSave(actor, data.natural),
       );
     }
+    case `${NS}:stabilized`:
+      return updateActor(
+        state,
+        payload(ActorOnlySchema, event).actor,
+        (actor) => ({ ...actor, deathSaves: { successes: 3, failures: 0 } }),
+      );
     case `${NS}:inspirationGranted`:
       return updateActor(
         state,

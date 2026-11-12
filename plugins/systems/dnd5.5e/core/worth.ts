@@ -83,6 +83,8 @@ export interface Judge {
   readonly horizon: number;
   // How dear a spell slot is: high in a fight the party is winning easily, near 0 in one it's losing.
   readonly slotPrice: number;
+  // Taking the Dodge action instead.
+  readonly dodgeWorth: (actor: Actor) => number;
   readonly worth: (
     actor: Actor,
     actionId: string,
@@ -108,6 +110,9 @@ const standing = (list: readonly Actor[]): Actor[] =>
 
 export function makeJudge(context: Context, side: Actor): Judge {
   const { state } = context;
+  const DAMAGE_TO_PARTY = { story: 1 / 3, normal: 1, hard: 1.5 }[
+    state.difficulty ?? "normal"
+  ];
   const stats = cached((actor) => deriveStats(actor, context));
   const responses = cached((actor) => damageResponses(actor, context));
 
@@ -328,7 +333,8 @@ export function makeJudge(context: Context, side: Actor): Judge {
             ));
       best = Math.max(best, each * spread);
     }
-    return best;
+    // The difficulty setting scales only the damage the party takes (core/combat/effects.ts).
+    return actor.side === "party" ? best : best * DAMAGE_TO_PARTY;
   };
   const threat = cached((actor) => roundDamage(actor, false));
   const freeThreat = cached((actor) => roundDamage(actor, true));
@@ -381,12 +387,25 @@ export function makeJudge(context: Context, side: Actor): Judge {
     const maxHp = stats(target).maxHp;
     const value = Math.max(threat(target), 0.5 * meanFoeThreat);
     if (isDown(target)) return value * playerWeight(target);
-    const gained = Math.min(amount, maxHp - target.hp);
-    if (gained <= 0) return 0;
+    return keepUpWorth(target, Math.min(amount, maxHp - target.hp));
+  };
+
+  // HP kept on a standing creature, by healing it or by sparing it hits.
+  function keepUpWorth(target: Actor, kept: number): number {
+    if (kept <= 0 || isDown(target)) return 0;
+    const value = Math.max(threat(target), 0.5 * meanFoeThreat);
     const risk = clamp(1.25 - target.hp / worstFoe, 0, 1);
     return (
-      (risk * value * playerWeight(target) + 0.05 * value) * (gained / maxHp)
+      (risk * value * playerWeight(target) + 0.05 * value) *
+      (kept / stats(target).maxHp)
     );
+  }
+
+  // Dodge spares about two hits in five, worth something to whoever the foes go for: the one lowest on HP.
+  const dodgeWorth = (actor: Actor): number => {
+    const lowest = Math.min(...party.map((item) => item.hp));
+    if (!actor.budget.action || actor.hp > lowest) return 0;
+    return keepUpWorth(actor, 0.4 * sum(foes, threat));
   };
 
   const rounds = (
@@ -532,6 +551,20 @@ export function makeJudge(context: Context, side: Actor): Judge {
         ) {
           return 0;
         }
+        // A boost to its own next attack is wasted once it has no Action left to attack with.
+        const { modifier } = effect;
+        const ownAttack =
+          (modifier.kind === "advantage" && modifier.on === "attacks") ||
+          (modifier.kind === "bonus" && modifier.to === "attacks");
+        if (
+          target.id === actor.id &&
+          ownAttack &&
+          !actor.budget.action &&
+          typeof effect.duration === "object" &&
+          "until" in effect.duration
+        ) {
+          return 0;
+        }
         const span = rounds(effect.duration, saved, false, false);
         return modifierWorth(effect.modifier, target, foe, span);
       }
@@ -670,5 +703,14 @@ export function makeJudge(context: Context, side: Actor): Judge {
     return gained - spent;
   };
 
-  return { context, stats, threat, freeThreat, horizon, slotPrice, worth };
+  return {
+    context,
+    stats,
+    threat,
+    freeThreat,
+    horizon,
+    slotPrice,
+    worth,
+    dodgeWorth,
+  };
 }

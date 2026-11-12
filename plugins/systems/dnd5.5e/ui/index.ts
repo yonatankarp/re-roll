@@ -1015,6 +1015,10 @@ function describe(
       const data = EVENT_SCHEMAS["dnd5.5e:deathSaveRolled"].parse(payload);
       return `${name(data.actor)} rolls a death saving throw: ${String(data.natural)}.`;
     }
+    case "dnd5.5e:stabilized": {
+      const data = EVENT_SCHEMAS["dnd5.5e:stabilized"].parse(payload);
+      return `${name(data.actor)} is stable.`;
+    }
     case "dnd5.5e:inspirationGranted": {
       const data = EVENT_SCHEMAS["dnd5.5e:inspirationGranted"].parse(payload);
       return `${name(data.actor)} gains Heroic Inspiration.`;

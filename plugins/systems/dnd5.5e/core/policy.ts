@@ -31,6 +31,10 @@ import {
 import { AimSchema, PickSchema } from "./combat/actions.ts";
 import { multiattackExtras } from "./combat/effects.ts";
 import { AVERAGE, makeJudge } from "./worth.ts";
+import { TACTIC } from "./tactics.ts";
+
+// The Dodge action (actions.ts), which the party weighs like any other choice.
+const DODGE = `${TACTIC}dodge`;
 
 // How companions and monsters choose in a fight, and how the bot plays the player.
 
@@ -206,6 +210,7 @@ interface Parsed {
 // Null when nothing is worth doing.
 function partyChoice(
   parsed: readonly Parsed[],
+  offered: Decision["options"],
   actor: Actor,
   context: Context,
 ): string | null {
@@ -238,24 +243,28 @@ function partyChoice(
     const worth =
       judge.worth(actor, action.id, targetId, slot) *
       (lasting && shaky ? 0.5 : 1);
-    return worth > 0 ? [{ ...item, worth, slotted }] : [];
+    const { cost } = action.activation;
+    const uses = cost.includes("action")
+      ? "action"
+      : cost.includes("bonusAction")
+        ? "bonusAction"
+        : "free";
+    return worth > 0 ? [{ id: item.option.id, worth, slotted, uses }] : [];
   });
-  const best = (
-    list: readonly (typeof scored)[number][],
-  ): (typeof scored)[number] | undefined =>
+  const dodge = offered.some((option) => option.id === DODGE)
+    ? judge.dodgeWorth(actor)
+    : 0;
+  if (dodge > 0) {
+    scored.push({ id: DODGE, worth: dodge, slotted: false, uses: "action" });
+  }
+  type Scored = (typeof scored)[number];
+  const best = (list: readonly Scored[]): Scored | undefined =>
     [...list].sort((a, b) => b.worth - a.worth)[0];
-  const costs = (
-    item: (typeof scored)[number],
-    cost: "action" | "bonusAction",
-  ) => item.action.activation.cost.includes(cost);
-  const actions = scored.filter((item) => costs(item, "action"));
-  const bonuses = scored.filter((item) => costs(item, "bonusAction"));
-  const others = scored.filter(
-    (item) => !costs(item, "action") && !costs(item, "bonusAction"),
-  );
-  const free = best(others);
-  if (free) return free.option.id;
-  if (!fresh) return best(scored)?.option.id ?? null;
+  const actions = scored.filter((item) => item.uses === "action");
+  const bonuses = scored.filter((item) => item.uses === "bonusAction");
+  const free = best(scored.filter((item) => item.uses === "free"));
+  if (free) return free.id;
+  if (!fresh) return best(scored)?.id ?? null;
   // Either the Action spends the slot or the Bonus Action does, never both.
   const plans = [
     [best(actions), best(bonuses.filter((item) => !item.slotted))],
@@ -266,8 +275,8 @@ function partyChoice(
   const [main, bonus] =
     total(plans[0]) >= total(plans[1]) ? plans[0] : plans[1];
   // The slot first, so the other half can't take it; otherwise the Bonus Action, such as a mark, before the Attack.
-  if (main?.slotted) return main.option.id;
-  return (bonus ?? main)?.option.id ?? null;
+  if (main?.slotted) return main.id;
+  return (bonus ?? main)?.id ?? null;
 }
 
 // Who a sensible caster adds next, or null when it should cast.
@@ -392,7 +401,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
 
   // The party plays by worth. Monsters keep the simple rules below, so the books' fights stay as hard as written.
   if (actor.side === "party" && decision.id.startsWith(`${NS}:turn:`)) {
-    const chosen = partyChoice(parsed, actor, context);
+    const chosen = partyChoice(parsed, decision.options, actor, context);
     if (chosen) return chosen;
     if (
       actor.budget.action &&

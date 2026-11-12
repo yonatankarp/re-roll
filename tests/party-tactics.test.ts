@@ -278,6 +278,70 @@ describe("how the party fights", () => {
   });
 });
 
+describe("how the party protects itself and spends free boosts", () => {
+  const decide = (run: RunContext, state: DndState): string => {
+    const decision = run.system.nextDecision(state, run);
+    if (!decision) throw new Error("No decision");
+    return run.system.decidePolicy(decision, {
+      state,
+      dice: createDice(rngFromSeed("party-tactics")),
+      content: run.content,
+      contentIds: run.contentIds,
+    });
+  };
+
+  it("Dodges when it's the one the foes will go for and one more round could drop it", async () => {
+    const run = await arena();
+    const caster = hero(run, { spells: ["fire-bolt"] });
+    const foes = ["a", "b", "c"].map((id) => monster(id, "brute", 300));
+    expect(decide(run, fight({ ...caster, hp: 3 }, ...foes))).toBe(
+      "tactic:dodge",
+    );
+    expect(decide(run, fight(caster, ...foes))).toContain("fire-bolt");
+  });
+
+  it("spends a luck point before its attack, never after", async () => {
+    const luck = "test:feature/luck";
+    const run = await arena({
+      [luck]: {
+        id: luck,
+        name: "Luck",
+        text: "Luck",
+        automation: "full",
+        resources: [{ id: "luck", max: { base: 3 }, recharge: [] }],
+        activations: [
+          {
+            cost: [{ resource: "luck" }],
+            targeting: { self: true },
+            resolution: {
+              kind: "automatic",
+              effects: [
+                {
+                  kind: "modifier",
+                  duration: { until: "yourNextTurnStart" },
+                  modifier: { kind: "advantage", on: "attacks", once: true },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    const caster = hero(run, { spells: ["fire-bolt"], features: [luck] });
+    const luckId = deriveStats(caster, run).actions.find(
+      (action) => action.name === "Luck",
+    )?.id;
+    if (!luckId) throw new Error("Luck isn't an action");
+    const foe = monster("a", "brute", 60);
+    expect(choose(run, fight(caster, foe))).toContain(luckId);
+    const attacked = {
+      ...caster,
+      budget: { ...caster.budget, action: false },
+    };
+    expect(choose(run, fight(attacked, foe))).not.toContain(luckId);
+  });
+});
+
 describe("how the bot changes gear between fights", () => {
   const fighter = (run: RunContext, stowed: readonly string[]): Actor => {
     const pregen = PregenSchema.parse(run.content("srd52:pregen/fighter"));
