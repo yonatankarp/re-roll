@@ -47,6 +47,7 @@ describe("headless play of goblin-ambush", () => {
       equipped: false,
       rested: false,
       reloaded: false,
+      traded: false,
     };
 
     for (let count = 0; count < 200; count += 1) {
@@ -129,6 +130,31 @@ describe("headless play of goblin-ambush", () => {
         done.reloaded = true;
         continue;
       }
+      // At camp: trade with the peddler, buying the first thing on offer and selling it straight back.
+      const trade = screen.choices.find((choice) =>
+        choice.label.startsWith("Trade with Tam"),
+      );
+      if (trade && !done.traded) {
+        await play.choose(trade.n);
+        const shop = play.view().shop;
+        expect(shop?.merchant).toBe("Tam the Peddler");
+        const purse = shop?.purse;
+        const ware = shop?.buy.find((card) => card.option !== null);
+        if (!ware?.option) throw new Error("Nothing affordable at Tam's");
+        await play.act(ware.option);
+        const after = play.view().shop;
+        expect(after?.purse).not.toBe(purse);
+        const back = after?.sell.find((card) => card.item === ware.item);
+        if (!back?.option) throw new Error(`Tam won't buy ${ware.name}`);
+        await play.act(back.option);
+        expect(play.screen().lines.map((line) => line.text)).toContain(
+          `${play.view().sheets[0]?.title ?? ""} sells ${ware.name} for ${back.price}.`,
+        );
+        await play.act(after?.leave ?? "leave");
+        expect(play.view().shop).toBeNull();
+        done.traded = true;
+        continue;
+      }
       const rest = screen.choices.find((choice) => choice.where === "rest");
       if (rest && !done.rested) {
         await play.choose(rest.n);
@@ -157,6 +183,7 @@ describe("headless play of goblin-ambush", () => {
       equipped: true,
       rested: true,
       reloaded: true,
+      traded: true,
     });
     expect(done.attacked).toBeGreaterThan(0);
 
