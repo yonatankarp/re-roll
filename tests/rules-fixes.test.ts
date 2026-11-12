@@ -1,11 +1,13 @@
-import { PLAYER_ACTOR } from "#sdk";
+import { PLAYER_ACTOR, type Decision } from "#sdk";
 import { describe, expect, it } from "vitest";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
-import type { RunContext } from "../engine/kernel/turn.ts";
+import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
+import { CREATE_CHARACTER } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import {
   type Activation,
   ItemSchema,
   PregenSchema,
+  SpellSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
   type Actor,
@@ -283,5 +285,52 @@ describe("magic item bonuses", () => {
       kind: "automatic",
       effects: [{ kind: "heal", amount: { dice: "2d4", bonus: { base: 2 } } }],
     });
+  });
+});
+
+describe("spells at character creation", () => {
+  it("lists a spell with no rules last, marked story only", async () => {
+    const inert = SpellSchema.parse({
+      id: "test:spell/aaa-whisper",
+      name: "Aaa Whisper",
+      level: 0,
+      school: "illusion",
+      classes: ["srd52:class/wizard"],
+      castingTime: "Action",
+      range: "Self",
+      components: "V",
+      duration: "instantaneous",
+      text: "A whisper.",
+      automation: "text",
+    });
+    const run = withContent(await goblin(), [inert]);
+    const plan: Readonly<Record<string, string>> = {
+      [`${NS}:chooseCharacter`]: CREATE_CHARACTER,
+    };
+    let { state, pending } = startRun(run, "spells");
+    let cantrips: Decision | undefined;
+    for (let count = 0; pending && !cantrips && count < 40; count += 1) {
+      const decision: Decision = pending;
+      if (decision.id.includes(":cantrips-")) {
+        cantrips = decision;
+        break;
+      }
+      const optionId = decision.id.endsWith(":class")
+        ? "srd52:class/wizard"
+        : (plan[decision.id] ?? decision.options[0]?.id ?? "");
+      const outcome = step(run, state, {
+        kind: "answer",
+        decisionId: decision.id,
+        optionId,
+      });
+      if (!outcome.ok) throw new Error(`${decision.id}: ${outcome.error}`);
+      ({ state, pending } = outcome);
+    }
+    const options = cantrips?.options ?? [];
+    expect(options.at(-1)).toMatchObject({
+      id: inert.id,
+      label: "Aaa Whisper (story only)",
+    });
+    expect(options[0]?.label).not.toContain("story only");
   });
 });

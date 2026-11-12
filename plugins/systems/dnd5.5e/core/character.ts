@@ -451,20 +451,25 @@ export function choiceOptions(
             ? spell.level === 0
             : spell.level >= 1 && spell.level <= choice.maxLevel),
       );
+      const works = (spell: Spell): boolean =>
+        spell.activation !== undefined &&
+        doesSomething(spell.activation.resolution);
+      // Spells the rules can't play yet stay on offer for the story, marked and listed last.
+      const sorted = [
+        ...spells.filter(works),
+        ...spells.filter((spell) => !works(spell)),
+      ];
       return {
         what: choice.maxLevel === 0 ? "a cantrip" : "a spell",
-        options: spells.map((spell) => ({
+        options: sorted.map((spell) => ({
           id: spell.id,
           label:
-            spell.level === 0
+            (spell.level === 0
               ? spell.name
-              : `${spell.name} (level ${String(spell.level)})`,
+              : `${spell.name} (level ${String(spell.level)})`) +
+            (works(spell) ? "" : " (story only)"),
         })),
-        prefer: spells.flatMap((spell) =>
-          spell.activation && doesSomething(spell.activation.resolution)
-            ? [spell.id]
-            : [],
-        ),
+        prefer: spells.filter(works).map((spell) => spell.id),
       };
     }
     case "option": {
