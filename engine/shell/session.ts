@@ -9,7 +9,12 @@ import {
   isNarrativeEvent,
 } from "../kernel/events.ts";
 import { formatIssue } from "../kernel/issues.ts";
-import { type Registry, loadRun, scanPlugins } from "../kernel/loader.ts";
+import {
+  type Catalog,
+  type Registry,
+  loadRun,
+  scanPlugins,
+} from "../kernel/loader.ts";
 import { type LogEntry, createSave, loadSave } from "../kernel/save.ts";
 import type { Storage } from "../kernel/storage.ts";
 import { type Ambience, sceneAmbience } from "../story/ambience.ts";
@@ -457,7 +462,7 @@ export function createGame({
     tokenArt = tokens;
     covers = coverPaths;
   };
-  // The menu lists adventures more than once per visit, so it reuses one scan; a new run rescans.
+  // The art is scanned once, and again when the plugins' files change.
   let artScan: Promise<void> | null = null;
   const scanArt = (): Promise<void> => (artScan ??= loadArt());
 
@@ -488,8 +493,7 @@ export function createGame({
     return reuse ?? openFresh(adventure);
   };
 
-  const openFresh = async (adventure: string) => {
-    const catalog = await scanPlugins(storage, roots);
+  const loadFresh = async (adventure: string, catalog: Catalog) => {
     const loaded = await loadRun(storage, catalog, systems, [adventure]);
     if (!loaded.ok) {
       throw new Error(loaded.issues.map(formatIssue).join("\n"));
@@ -497,14 +501,38 @@ export function createGame({
     const { registry } = loaded;
     const ui = uis.find((item) => item.systemId === registry.system.id);
     if (!ui) throw new Error(`No UI for the ${registry.system.id} system`);
-    artScan = loadArt();
-    await artScan;
     return {
       registry,
       ui,
       root: catalog.plugins.get(adventure)?.root ?? "",
-      run: createRunContext(registry, adventure),
     };
+  };
+  // The last adventure loaded, kept while the plugins' files stay the same, so Continue, Load and
+  // Restart don't load it all again. One, since a book's content is large.
+  // shortcut: keyed on file lists, so an edit inside a file is missed; key on contents if content is edited during play.
+  let loadedLast: {
+    readonly key: string;
+    readonly loading: ReturnType<typeof loadFresh>;
+  } | null = null;
+
+  const openFresh = async (adventure: string) => {
+    const catalog = await scanPlugins(storage, roots);
+    const key = JSON.stringify([
+      adventure,
+      [...catalog.plugins.values()].map(({ root, files }) => [root, files]),
+    ]);
+    if (loadedLast?.key !== key) {
+      artScan = null;
+      const loading = loadFresh(adventure, catalog);
+      const entry = { key, loading };
+      loadedLast = entry;
+      loading.catch(() => {
+        if (loadedLast === entry) loadedLast = null;
+      });
+    }
+    const { registry, ui, root } = await loadedLast.loading;
+    await scanArt();
+    return { registry, ui, root, run: createRunContext(registry, adventure) };
   };
 
   const active = (): Current => {
