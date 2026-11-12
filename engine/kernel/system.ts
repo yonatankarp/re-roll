@@ -6,7 +6,7 @@ import {
   VERSION_PATTERN,
   satisfiesCaret,
 } from "./semver.ts";
-import { PLUGIN_ID_PATTERN } from "./manifest.ts";
+import { PLUGIN_ID_PATTERN, type PluginManifest } from "./manifest.ts";
 
 export const SDK_VERSION = "1.0.0";
 
@@ -193,6 +193,7 @@ export interface RunSetup {
 
 export interface ContentAccess {
   readonly content: (id: string) => ContentEntry | undefined;
+  // Highest-precedence plugin first, then by id, so when two plugins name the same thing the first one wins.
   readonly contentIds: () => readonly string[];
 }
 
@@ -297,6 +298,9 @@ export interface SystemDefinition<S> {
   // The rests the rules allow right now, offered with each scene's choices.
   readonly rests?: (state: S) => readonly RestOption[];
   readonly importKinds?: Readonly<Record<string, ImportKind>>; // keyed by content folder
+  // Ranks a plugin when entries of the same name collide, lower first. Unset ranks all plugins alike, by id.
+  // The adventure being played, and the plugins its manifest's precedence lists, still come first.
+  readonly precedence?: (plugin: PluginManifest) => number;
   readonly htmlParsers?: Readonly<
     Record<
       string,

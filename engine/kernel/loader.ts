@@ -54,7 +54,8 @@ export interface Catalog {
 export interface Registry {
   readonly system: GameSystem;
   readonly plugins: readonly PluginManifest[]; // in load order
-  readonly contentIds: () => readonly string[];
+  readonly precedence: readonly string[]; // plugin ids, the one whose entries win first
+  readonly contentIds: () => readonly string[]; // in precedence order, then by id
   readonly pluginHash: (pluginId: string) => string | undefined;
   readonly content: (id: string) => ContentEntry | undefined; // follows replacements
   readonly adventure: (pluginId: string) => Adventure | undefined;
@@ -275,6 +276,45 @@ function dependencyClosure(catalog: Catalog, id: string): Set<string> {
   return closure;
 }
 
+const compareText = (a: string, b: string): number =>
+  a < b ? -1 : a > b ? 1 : 0;
+
+// The adventure being played comes first, then the plugins its manifest lists, then the rest by the system's rank and id.
+function precedenceOrder(
+  order: readonly PluginRecord[],
+  requested: readonly string[],
+  system: GameSystem,
+  issues: Issue[],
+): string[] {
+  const loaded = new Map(order.map(({ manifest }) => [manifest.id, manifest]));
+  for (const manifest of loaded.values()) {
+    if (manifest.precedence && manifest.kind !== "adventure") {
+      const message = "only an adventure can set precedence";
+      issues.push({ plugin: manifest.id, file: null, message });
+    }
+  }
+  const adventures = [...requested]
+    .sort()
+    .flatMap((id) => loaded.get(id) ?? [])
+    .filter((manifest) => manifest.kind === "adventure");
+  const first = adventures.map((manifest) => manifest.id);
+  for (const adventure of adventures) {
+    for (const id of adventure.precedence ?? []) {
+      if (loaded.has(id)) first.push(id);
+      else {
+        const message = `precedence names "${id}", which this run doesn't load`;
+        issues.push({ plugin: adventure.id, file: null, message });
+      }
+    }
+  }
+  const rank = (manifest: PluginManifest): number =>
+    system.precedence?.(manifest) ?? 0;
+  const rest = [...loaded.values()]
+    .filter((manifest) => !first.includes(manifest.id))
+    .sort((a, b) => rank(a) - rank(b) || compareText(a.id, b.id));
+  return [...new Set(first), ...rest.map((manifest) => manifest.id)];
+}
+
 const ownerOf = (id: string): string => id.slice(0, id.indexOf(":"));
 const kindPrefixOf = (id: string): string =>
   id.slice(id.indexOf(":") + 1, id.indexOf("/"));
@@ -351,6 +391,7 @@ export async function loadRun(
 
   const system = resolveSystem(order, systems, issues);
   if (!system) return { ok: false, issues };
+  const precedence = precedenceOrder(order, requested, system, issues);
 
   const entries = new Map<string, LoadedEntry>();
   const adventures = new Map<string, Adventure>();
@@ -538,13 +579,19 @@ export async function loadRun(
     if (!aliases.has(id)) content.set(id, deepFreeze(entry));
   }
   for (const adventure of adventures.values()) deepFreeze(adventure);
-  const ids = Object.freeze([...content.keys()].sort());
+  const rankOf = new Map(precedence.map((id, index) => [id, index]));
+  const rank = (id: string): number =>
+    rankOf.get(ownerOf(id)) ?? precedence.length;
+  const ids = Object.freeze(
+    [...content.keys()].sort((a, b) => rank(a) - rank(b) || compareText(a, b)),
+  );
 
   return {
     ok: true,
     registry: Object.freeze({
       system,
       plugins: Object.freeze(order.map((record) => record.manifest)),
+      precedence: Object.freeze(precedence),
       contentIds: () => ids,
       pluginHash: (pluginId: string) => hashes.get(pluginId),
       content: (id: string) => {
