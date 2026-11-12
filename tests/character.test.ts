@@ -3,8 +3,18 @@ import { describe, expect, it } from "vitest";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { GameEvent, GameState } from "../engine/kernel/events.ts";
-import { createSave, loadSave, type LogEntry } from "../engine/kernel/save.ts";
-import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
+import {
+  createSave,
+  loadSave,
+  type LogEntry,
+  replayInputs,
+} from "../engine/kernel/save.ts";
+import {
+  type RunContext,
+  pendingDecision,
+  startRun,
+  step,
+} from "../engine/kernel/turn.ts";
 import type { StoryEffect } from "../engine/story/adventure.ts";
 import { testAdventure } from "../engine/tools/bot.ts";
 import {
@@ -25,6 +35,7 @@ import {
   ItemSchema,
   PregenSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import { availableRests } from "../plugins/systems/dnd5.5e/core/rest.ts";
 import {
   type Actor,
   type DndState,
@@ -62,6 +73,7 @@ function storyRun(
     id: `s${String(index)}`,
     text: "Onward.",
     textVariants: [],
+    rest: true,
     choices: [
       {
         label: "Go on",
@@ -83,6 +95,7 @@ function storyRun(
           id: `s${String(effects.length)}`,
           text: "The end.",
           textVariants: [],
+          rest: true,
           choices: [],
         },
       ],
@@ -849,6 +862,141 @@ describe("rests", () => {
     const run = storyRun(base, [[levelUp], [short]]);
     const driven = drive(run, "rest-replay", FIGHTER);
     expectReplays(run, registry, "rest-replay", driven);
+  });
+});
+
+describe("resting between scenes", () => {
+  const options = (decision: Decision | null) =>
+    decision?.options.map((item) => item.id) ?? [];
+
+  // At the first of two plain scenes, playing the fighter pregen.
+  async function atCamp(seed = "camp") {
+    const { registry, run } = await loadAdventure("goblin-ambush");
+    const camp = storyRun(run, [[], []]);
+    const driven = drive(
+      camp,
+      seed,
+      [[/chooseCharacter/, "srd52:pregen/fighter"]],
+      (decision) => decision.id === "scene:s0",
+    );
+    return { registry, run: camp, driven };
+  }
+
+  function play(
+    run: RunContext,
+    driven: Driven,
+    decisionId: string,
+    optionId: string,
+  ): Driven {
+    const input = { kind: "answer" as const, decisionId, optionId };
+    const outcome = step(run, driven.state, input);
+    if (!outcome.ok) throw new Error(outcome.error);
+    const log = [...driven.log, { input, events: outcome.events }];
+    return {
+      state: outcome.state,
+      log,
+      events: log.flatMap((entry) => entry.events),
+      asked: outcome.pending
+        ? [...driven.asked, outcome.pending]
+        : driven.asked,
+    };
+  }
+
+  it("offers a short and a long rest beside the scene's choices", async () => {
+    const { run, driven } = await atCamp();
+    expect(options(pendingDecision(run, driven.state))).toEqual([
+      "0",
+      "rest:short",
+      "rest:long",
+    ]);
+  });
+
+  it("rests in place, once per visit to a scene", async () => {
+    const { run, driven } = await atCamp();
+    const rested = play(run, driven, "scene:s0", "rest:long");
+    expect(rested.state.story.scene).toBe("s0");
+    expect(system(rested.state).sinceLongRest).toBe(8);
+    expect(options(pendingDecision(run, rested.state))).toEqual(["0"]);
+    expect(
+      step(run, rested.state, {
+        kind: "answer",
+        decisionId: "scene:s0",
+        optionId: "rest:short",
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("allows one long rest in 24 hours, counting the hours rests pass", async () => {
+    const { run, driven } = await atCamp();
+    const rested = play(run, driven, "scene:s0", "rest:long");
+    const next = play(run, rested, "scene:s0", "0");
+    expect(next.state.story.scene).toBe("s1");
+    expect(options(pendingDecision(run, next.state))).toEqual([
+      "0",
+      "rest:short",
+    ]);
+
+    const later = play(run, next, "scene:s1", "rest:short");
+    expect(system(later.state).sinceLongRest).toBe(9);
+    const dnd = system(later.state);
+    expect(availableRests({ ...dnd, sinceLongRest: 23 })).toHaveLength(1);
+    expect(
+      availableRests({ ...dnd, sinceLongRest: 24 }).map((rest) => rest.id),
+    ).toEqual(["short", "long"]);
+  });
+
+  it("offers no rest in a fight", async () => {
+    const run = storyRun(await goblin(), [
+      [{ kind: "startEncounter", encounter: "roadside" }],
+    ]);
+    const driven = drive(
+      run,
+      "fight",
+      [[/chooseCharacter/, "srd52:pregen/fighter"]],
+      (decision) => decision.id.startsWith("dnd5.5e:turn:"),
+    );
+    const turn = pendingDecision(run, driven.state);
+    expect(turn?.id).toMatch(/^dnd5\.5e:turn:/);
+    expect(options(turn).some((id) => id.startsWith("rest:"))).toBe(false);
+    expect(availableRests(system(driven.state))).toEqual([]);
+  });
+
+  it("lets an adventure forbid resting in a scene", async () => {
+    const { run, driven } = await atCamp();
+    const noRest: RunContext = {
+      ...run,
+      adventure: {
+        ...run.adventure,
+        scenes: run.adventure.scenes.map((scene) =>
+          scene.id === "s0" ? { ...scene, rest: false } : scene,
+        ),
+      },
+    };
+    const decision = pendingDecision(noRest, driven.state);
+    expect(options(decision)).toEqual(["0"]);
+    expect(
+      step(noRest, driven.state, {
+        kind: "answer",
+        decisionId: "scene:s0",
+        optionId: "rest:long",
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("replays rests from a save and from the inputs", async () => {
+    const { registry, run, driven } = await atCamp("camp-replay");
+    let played = play(run, driven, "scene:s0", "rest:short");
+    played = play(run, played, "scene:s0", "0");
+    played = play(run, played, "scene:s1", "rest:short");
+    played = play(run, played, "scene:s1", "0");
+    expect(played.state.story.ended).toBe("ending");
+    expectReplays(run, registry, "camp-replay", played);
+    const replayed = replayInputs(
+      run,
+      "camp-replay",
+      played.log.map((entry) => entry.input),
+    );
+    expect(replayed.state).toEqual(played.state);
   });
 });
 

@@ -1,3 +1,4 @@
+import { campfire } from "./campfire.ts";
 import type { Game, GameView } from "./session.ts";
 import type {
   Board,
@@ -794,7 +795,12 @@ export function mountShell(
       if (game.view().warnings.length > 0) return; // a failed autosave shows its own warning
       enter(saved);
     };
-    actions.replaceChildren(saved, hud, journal, gameMenu);
+    const camp = campfire(game, act, () => {
+      draw();
+      flashSaved();
+      firstFocus().focus();
+    });
+    actions.replaceChildren(saved, camp.button, hud, journal, gameMenu);
     const stage = el(
       "main",
       { class: "play" },
@@ -809,7 +815,14 @@ export function mountShell(
       options,
     );
     screen.replaceChildren(
-      el("div", { class: "game" }, stage, sheetDrawer, journalDrawer),
+      el(
+        "div",
+        { class: "game" },
+        stage,
+        sheetDrawer,
+        journalDrawer,
+        camp.dialog,
+      ),
     );
 
     let linesShown = 0;
@@ -850,6 +863,7 @@ export function mountShell(
       const firstDraw = cuesShown === null;
       cuesShown = view.cues.length;
       stage.classList.toggle("in-combat", view.combat !== null);
+      camp.update(view);
 
       title.textContent = view.title;
       if (view.scene !== sceneShown) {

@@ -252,6 +252,13 @@ export interface EncounterOptions {
   readonly defeatContinues: boolean;
 }
 
+// A rest the player may call between scenes. `effect` names one of the system's story effects.
+export interface RestOption {
+  readonly id: string;
+  readonly label: string;
+  readonly effect: string;
+}
+
 export interface SystemDefinition<S> {
   readonly id: string;
   readonly version: string;
@@ -278,6 +285,8 @@ export interface SystemDefinition<S> {
   ) => SystemResult;
   readonly applyEvent: (state: S, event: SystemEvent) => S;
   readonly nextDecision: (state: S, access: ContentAccess) => Decision | null;
+  // The rests the rules allow right now, offered with each scene's choices.
+  readonly rests?: (state: S) => readonly RestOption[];
   readonly importKinds?: Readonly<Record<string, ImportKind>>; // keyed by content folder
   readonly htmlParsers?: Readonly<
     Record<

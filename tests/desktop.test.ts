@@ -388,6 +388,21 @@ describe("playing through the shell's session", () => {
     expect(await status("plugins/../package.json")).toBe(403);
   });
 
+  it("offers rests at the campfire, apart from the scene's choices", async () => {
+    const game = newGame();
+    await game.start("goblin-ambush", "desktop-test-1");
+    await chooseCharacter(game, "Fighter");
+    const view = game.view();
+    expect(view.rests.map((rest) => rest.id)).toEqual([
+      "rest:short",
+      "rest:long",
+    ]);
+    const choices = view.optionGroups.flatMap((group) => group.options);
+    expect(choices.some((option) => option.id.startsWith("rest:"))).toBe(false);
+    await game.answer("rest:long");
+    expect(game.view().rests).toEqual([]);
+  });
+
   it("groups a character's combat options and explains them", async () => {
     const game = newGame();
     await game.start("goblin-ambush", "desktop-test-1");

@@ -11,7 +11,7 @@ import { formatIssue } from "../kernel/issues.ts";
 import { type Registry, loadRun, scanPlugins } from "../kernel/loader.ts";
 import { type LogEntry, createSave, loadSave } from "../kernel/save.ts";
 import type { Storage } from "../kernel/storage.ts";
-import { sceneText } from "../story/runtime.ts";
+import { REST_OPTION_PREFIX, sceneText } from "../story/runtime.ts";
 import type { GameSystem, SystemSetting } from "../kernel/system.ts";
 import {
   type RunContext,
@@ -25,6 +25,7 @@ import {
 import type {
   CombatView,
   OptionGroup,
+  OptionView,
   SheetView,
   SystemUi,
 } from "./system-ui.ts";
@@ -51,6 +52,7 @@ export interface GameView {
   readonly sceneArt: string | null; // a content path, for imageUrl
   readonly endingName: string | null;
   readonly optionGroups: readonly OptionGroup[];
+  readonly rests: readonly OptionView[]; // offered at the campfire, apart from the choices
   readonly monsterArt: Readonly<Record<string, string>>; // by combatant id
   readonly tokenArt: Readonly<Record<string, TokenArt>>; // by combatant id, with its face
   readonly adventureRoot: string; // where the adventure's own pictures are
@@ -562,6 +564,11 @@ export function createGame({
         (item) => item.id === state.story.scene,
       );
       const decision = pendingDecision(run, state);
+      const isRest = (id: string): boolean => id.startsWith(REST_OPTION_PREFIX);
+      const choices = decision && {
+        ...decision,
+        options: decision.options.filter((option) => !isRest(option.id)),
+      };
       const combat = ui.combat(state.system, run);
       const pictures: Record<string, string> = {};
       const tokens: Record<string, TokenArt> = {};
@@ -590,9 +597,12 @@ export function createGame({
             ? endingName(currentScene.id)
             : null,
         decision,
-        optionGroups: decision
-          ? ui.optionGroups(decision, state.system, run)
+        optionGroups: choices
+          ? ui.optionGroups(choices, state.system, run)
           : [],
+        rests: (decision?.options ?? [])
+          .filter((option) => isRest(option.id))
+          .map((option) => ({ ...option, detail: null })),
         monsterArt: pictures,
         tokenArt: tokens,
         adventureRoot: root,

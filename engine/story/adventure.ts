@@ -117,6 +117,7 @@ const SceneSchema = z.strictObject({
     .array(z.strictObject({ when: ConditionSchema, text: z.string().min(1) }))
     .default([]),
   art: AssetPathSchema.optional(),
+  rest: z.boolean().default(true), // false where the party can't stop, such as mid-chase
   choices: z
     .array(z.union([DirectChoiceSchema, CheckChoiceSchema]))
     .default([]),

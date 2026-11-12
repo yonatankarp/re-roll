@@ -332,7 +332,7 @@ These are generic concepts, and the engine has no knowledge of any particular ad
 
 | Concept | Purpose |
 |---|---|
-| **Scene** | Text, art and choices. A scene with no choices is an ending. Optional `textVariants` replace the text when their condition holds, and the first match wins |
+| **Scene** | Text, art and choices. A scene with no choices is an ending. Optional `textVariants` replace the text when their condition holds, and the first match wins. Unless it sets `rest: false`, the player may also rest once per visit, from the rests the system allows (`rests`), offered as `rest:` options beside the choices |
 | **Condition** | Flags, attitudes, clocks and resources (`atLeast`, `atMost` or both), scenes `visited`, combined with `all` or `any`, plus predicates registered by the system |
 | **Story effect** | Engine effects: `setFlag`, `goto`, `advanceClock`, `adjustAttitude`, `adjustResource`, `startEncounter`, `reveal`. Everything else is a namespaced system effect |
 | **Resource** | A named party number such as gold, declared with its starting value under `resources` in `adventure.yaml`. It can't go below 0, so a choice that costs something checks the price with a condition first |

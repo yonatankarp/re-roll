@@ -1377,3 +1377,70 @@ button:active {
     background: #2c2319;
   }
 }
+
+/* The campfire: a rest between scenes, offered from the top bar. */
+.campfire-button {
+  min-width: 44px;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.campfire {
+  width: min(440px, calc(100vw - 32px));
+  padding: 24px;
+  text-align: center;
+  color: var(--leather-ink);
+  background: transparent;
+  border: 0;
+}
+
+.campfire::backdrop {
+  background: radial-gradient(
+    circle at 50% 40%,
+    rgb(120 60 10 / 55%),
+    rgb(8 5 2 / 92%) 60%
+  );
+}
+
+.campfire[open],
+.campfire[open]::backdrop {
+  animation: fade 0.8s ease;
+}
+
+.campfire-fire {
+  font-size: 4.5rem;
+  line-height: 1.2;
+  filter: drop-shadow(0 0 24px rgb(255 150 40 / 70%));
+  animation: flicker 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes flicker {
+  50% {
+    transform: scale(1.06, 0.95);
+    opacity: 0.85;
+  }
+}
+
+.campfire h2 {
+  margin: 8px 0;
+  color: var(--leather-ink);
+}
+
+.campfire .options {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.campfire-body > * {
+  animation: rise 0.4s ease both;
+}
+
+.campfire-recovered {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}

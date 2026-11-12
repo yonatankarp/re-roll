@@ -9,7 +9,7 @@ import type {
   SystemEvent,
 } from "../kernel/events.ts";
 import { PLAYER_ACTOR, isNarrativeEvent } from "../kernel/events.ts";
-import type { ContentEntry, GameSystem } from "../kernel/system.ts";
+import type { ContentEntry, GameSystem, RestOption } from "../kernel/system.ts";
 import {
   type Adventure,
   type Condition,
@@ -30,6 +30,8 @@ export interface StoryResult {
 }
 
 export const STORY_FRAME_PREFIX = "story:";
+// Rest options sit beside a scene's choices, whose ids are their indexes.
+export const REST_OPTION_PREFIX = "rest:";
 
 const ResolveChoiceSchema = z.object({
   scene: z.string(),
@@ -166,6 +168,24 @@ export function sceneText(
   return variant?.text ?? scene.text;
 }
 
+// The current visit to the current scene, as "scene#visit".
+export function sceneVisit(story: StoryState): string {
+  const scene = story.scene ?? "";
+  return `${scene}#${String(story.visits?.[scene] ?? 0)}`;
+}
+
+// One rest per visit to a scene, so resting again and again can't pass time for free.
+function restsHere(
+  run: RunContext,
+  state: GameState,
+  scene: Adventure["scenes"][number],
+): readonly RestOption[] {
+  if (!scene.rest || state.story.restedIn === sceneVisit(state.story)) {
+    return [];
+  }
+  return run.system.rests?.(state.system) ?? [];
+}
+
 export type StoryDecision =
   | { readonly kind: "decision"; readonly decision: Decision }
   | { readonly kind: "ended"; readonly reason: "ending" | "deadEnd" };
@@ -185,6 +205,10 @@ export function storyDecision(
       : [],
   );
   if (options.length === 0) return { kind: "ended", reason: "deadEnd" };
+  const rests = restsHere(run, state, scene).map((rest) => ({
+    id: `${REST_OPTION_PREFIX}${rest.id}`,
+    label: rest.label,
+  }));
 
   return {
     kind: "decision",
@@ -192,7 +216,7 @@ export function storyDecision(
       id: `scene:${scene.id}`,
       actor: PLAYER_ACTOR,
       prompt: sceneText(run, state, scene),
-      options,
+      options: [...options, ...rests],
       resume: { kind: "story:resolveChoice", payload: { scene: scene.id } },
     },
   };
@@ -220,6 +244,18 @@ function runResolveChoice(
   payload: z.infer<typeof ResolveChoiceSchema>,
 ): StoryResult {
   const scene = findScene(run, payload.scene);
+  if (payload.answer.startsWith(REST_OPTION_PREFIX)) {
+    const rest = restsHere(run, state, scene).find(
+      (item) => `${REST_OPTION_PREFIX}${item.id}` === payload.answer,
+    );
+    if (!rest) throw new Error(`No rest "${payload.answer}" is allowed here`);
+    return {
+      events: [{ kind: "restTaken" }],
+      frames: [
+        effectsFrame([{ kind: "system", effect: rest.effect, args: {} }]),
+      ],
+    };
+  }
   const choice = scene.choices[Number(payload.answer)];
   if (!choice) throw new Error(`Unknown choice ${payload.answer}`);
   if ("effects" in choice) return { frames: [effectsFrame(choice.effects)] };

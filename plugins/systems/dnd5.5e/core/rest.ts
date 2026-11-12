@@ -1,6 +1,7 @@
 import {
   type Frame,
   PLAYER_ACTOR,
+  type RestOption,
   type SystemContext,
   type SystemEvent,
   type SystemResult,
@@ -9,7 +10,14 @@ import {
   storyEffect,
 } from "#sdk";
 import { z } from "zod";
-import { type Actor, type DndState, NS, dndEvent, isDead } from "./state.ts";
+import {
+  type Actor,
+  type DndState,
+  NS,
+  REST_HOURS,
+  dndEvent,
+  isDead,
+} from "./state.ts";
 import { HIT_DICE, shortRestEvents } from "./combat.ts";
 import { ClassSchema } from "./schemas.ts";
 import {
@@ -157,16 +165,43 @@ function runFinishRest(
   context: Context,
 ): SystemResult {
   return {
-    events: party(context.state).map((actor) => {
-      const stats = deriveStats(actor, context);
-      return dndEvent(`${NS}:rested`, {
-        actor: actor.id,
-        rest,
-        maxHp: stats.maxHp,
-        resourcesSpent: recovered(actor.resourcesSpent, stats, rest),
-      });
-    }),
+    events: [
+      ...party(context.state).map((actor) => {
+        const stats = deriveStats(actor, context);
+        return dndEvent(`${NS}:rested`, {
+          actor: actor.id,
+          rest,
+          maxHp: stats.maxHp,
+          resourcesSpent: recovered(actor.resourcesSpent, stats, rest),
+        });
+      }),
+      dndEvent(`${NS}:restFinished`, { rest }),
+    ],
   };
+}
+
+const DAY_HOURS = 24;
+
+// Out of combat a Short Rest is always possible, and a Long Rest once a day.
+export function availableRests(state: DndState): readonly RestOption[] {
+  if (state.combat) return [];
+  const since = state.sinceLongRest;
+  return [
+    {
+      id: "short",
+      label: `Short rest (${String(REST_HOURS.short)} hour)`,
+      effect: `${NS}:shortRest`,
+    },
+    ...(since === undefined || since >= DAY_HOURS
+      ? [
+          {
+            id: "long",
+            label: `Long rest (${String(REST_HOURS.long)} hours)`,
+            effect: `${NS}:longRest`,
+          },
+        ]
+      : []),
+  ];
 }
 
 export const restEffects = {
