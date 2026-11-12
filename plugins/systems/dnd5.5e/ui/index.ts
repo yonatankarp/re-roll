@@ -13,6 +13,7 @@ import { canUse, foundText } from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
 import { coins } from "../core/shop.ts";
 import { shop } from "./shop.ts";
+import { creation } from "./creation.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
 import type { BoardExtra } from "./board-data.ts";
 import { dndCue } from "./cues.ts";
@@ -935,9 +936,13 @@ function describe(
   const { payload } = event;
   switch (event.kind) {
     case "dnd5.5e:characterChosen": {
-      const { name: chosen } =
+      const { name: chosen, build } =
         EVENT_SCHEMAS["dnd5.5e:characterChosen"].parse(payload);
-      return `You are playing the ${chosen}.`;
+      const kind = `${nameOf(access, build.speciesId)} ${nameOf(access, build.levels[0]?.classId ?? "")}`;
+      // A character named for what it is reads "the Human Fighter"; one with its own name says what it is.
+      return chosen === kind
+        ? `You are playing the ${chosen}.`
+        : `You are playing ${chosen}, ${/^[AEIOU]/i.test(kind) ? "an" : "a"} ${kind}.`;
     }
     case "dnd5.5e:characterAdvanced":
       return null; // the levelGained after it says so
@@ -1076,5 +1081,6 @@ export const dndUi = {
   optionGroups,
   card,
   shop,
+  creation,
   playerDied,
 };

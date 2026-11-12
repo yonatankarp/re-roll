@@ -377,6 +377,38 @@ export function startRun(
   return settle(run, state, [{ kind: "runStarted", state }]);
 }
 
+// Whether answering ends the adventure with one of its endings. Steps are pure, so trying one changes nothing.
+// A certain ending rolls no dice on the way: a check could go either way, and only its roll decides.
+export function wouldEnd(
+  run: RunContext,
+  state: GameState,
+  decision: Decision,
+  optionId: string,
+  certain = false,
+): boolean {
+  const tried = step(run, state, {
+    kind: "answer",
+    decisionId: decision.id,
+    optionId,
+  });
+  if (!tried.ok || tried.state.story.ended !== "ending") return false;
+  return (
+    !certain || JSON.stringify(tried.state.rng) === JSON.stringify(state.rng)
+  );
+}
+
+// Typed text is stored as it was entered, so it must already be trimmed, short enough and printable.
+export function typedAnswer(decision: Decision, text: string): boolean {
+  const limit = decision.text?.maxLength;
+  return (
+    limit !== undefined &&
+    text.length > 0 &&
+    text.length <= limit &&
+    text === text.trim() &&
+    !/\p{C}/u.test(text)
+  );
+}
+
 export type StepOutcome =
   | ({ readonly ok: true } & StepResult)
   | { readonly ok: false; readonly error: string };
@@ -395,7 +427,10 @@ export function step(
       error: `Expected an answer to ${decision.id}, not ${input.decisionId}`,
     };
   }
-  if (!decision.options.some((option) => option.id === input.optionId)) {
+  if (
+    !decision.options.some((option) => option.id === input.optionId) &&
+    !typedAnswer(decision, input.optionId)
+  ) {
     return { ok: false, error: `Unknown option "${input.optionId}"` };
   }
 

@@ -20,6 +20,12 @@ export const DecisionSchema = z.strictObject({
     .min(1),
   // Answering pushes this frame, with the chosen option added to its payload as "answer".
   resume: FrameSchema,
+  // The player may type the answer instead, such as a name; the options are suggestions.
+  text: z
+    .strictObject({ label: z.string(), maxLength: z.number().int().min(1) })
+    .optional(),
+  // Taking the answer back changes nothing that happened, such as a character's build, so any difficulty allows it.
+  revisable: z.literal(true).optional(),
 });
 export type Decision = Readonly<z.infer<typeof DecisionSchema>>;
 

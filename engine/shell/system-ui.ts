@@ -48,6 +48,27 @@ export interface ShopView {
   readonly leave: string; // the option that ends the visit
 }
 
+// A choice in making a character, drawn as a card: a picture if one is found, a line, and details on demand.
+export interface CreationChoice {
+  readonly id: string; // the option it answers
+  readonly label: string;
+  readonly summary?: string; // a short line under the name, such as "d12 hit die · Strength"
+  readonly detail?: string; // opened in a drawer
+  readonly looks?: readonly string[]; // names to find its picture by, best first
+}
+
+// Making or levelling up a character, shown in place of the decision's choices, one step at a time.
+export interface CreationView {
+  readonly steps: readonly {
+    readonly title: string;
+    readonly status: "done" | "current" | "todo";
+  }[];
+  readonly heading: string; // such as "Species"
+  readonly layout: "cards" | "list"; // cards for pictures and blurbs, a list for short picks such as a skill
+  readonly choices: readonly CreationChoice[];
+  readonly summary: readonly SheetRow[]; // the character so far
+}
+
 export interface SheetSection {
   readonly title: string;
   readonly rows: readonly SheetRow[];
@@ -168,6 +189,12 @@ export interface SystemUi {
     state: unknown,
     access: ContentAccess,
   ) => ShopView | null;
+  // A character's build step drawn as a step of making it, in place of its choices.
+  readonly creation?: (
+    decision: Decision,
+    state: unknown,
+    access: ContentAccess,
+  ) => CreationView | null;
   readonly playerDied: (state: unknown) => boolean;
   // Turns an event into plain data for the board to animate, given the state either side of it.
   readonly cue?: (

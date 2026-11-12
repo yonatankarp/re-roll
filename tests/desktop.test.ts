@@ -289,6 +289,61 @@ describe("playing through the shell's session", () => {
     }
   });
 
+  it("makes a character step by step, with Back on Normal only while making it", async () => {
+    const game = newGame();
+    await game.start("goblin-ambush", "creation-test", {
+      difficulty: "normal",
+    });
+    const pregens = game.view().creation;
+    expect(pregens?.choices.at(-1)?.label).toBe("Create your own");
+    expect(pregens?.choices[0]?.detail).toContain("STR");
+    await chooseCharacter(game, "Create a new character");
+
+    const species = game.view().creation;
+    expect(
+      species?.steps.find((item) => item.status === "current")?.title,
+    ).toBe("Species");
+    expect(species?.choices.map((choice) => choice.label)).toContain("Elf");
+    expect(game.view().canUndo).toBe(true); // back to the pregens
+    await chooseCharacter(game, "Elf");
+    const classes = game.view().creation;
+    expect(classes?.steps.map((item) => item.status)).toEqual([
+      "done",
+      "current",
+      "todo",
+      "todo",
+      "todo",
+      "todo",
+    ]);
+    expect(classes?.summary).toEqual([{ label: "Species", value: "Elf" }]);
+    expect(
+      classes?.choices.find((choice) => choice.label === "Wizard")?.summary,
+    ).toBe("d6 hit die · Intelligence · Spells");
+
+    await game.undo();
+    expect(game.view().decision?.id).toBe("dnd5.5e:build:player:species");
+
+    while (!game.view().decision?.text) await firstOption(game);
+    expect(game.view().creation?.choices).toEqual([]);
+    await game.answer("Ilyra");
+    expect(game.view().sheets[0]?.title).toBe("Ilyra");
+    expect(game.view().canUndo).toBe(false); // the story has begun
+  });
+
+  it("asks before a story choice that ends the adventure while another carries on", async () => {
+    const game = newGame();
+    await game.start("goblin-ambush", "ending-test");
+    await chooseCharacter(game, "Fighter");
+    const options = game.view().decision?.options ?? [];
+    const warn = options.find((item) => item.label.startsWith("Turn back"));
+    const check = options.find((item) => item.label.includes("treeline"));
+    expect(warn && game.endsEarly(warn.id)).toBe(true);
+    expect(check && game.endsEarly(check.id)).toBe(false);
+    // Only asking changes nothing.
+    expect(game.view().ended).toBe(null);
+    expect(game.view().steps).toBe(2);
+  });
+
   it("keeps the clues found as leads, and the rolls made, from the events", async () => {
     const game = newGame();
     await game.start("haunted-house", "leads-test");

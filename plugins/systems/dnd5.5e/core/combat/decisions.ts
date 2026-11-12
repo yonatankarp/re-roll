@@ -128,6 +128,7 @@ export function nextDndDecision(
       prompt: "Choose your character.",
       options,
       resume: frame("characterChosen", {}),
+      revisable: true, // so Back from making a character returns here
     };
   }
 

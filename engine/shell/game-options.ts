@@ -2,6 +2,8 @@ import type { OptionView } from "./system-ui.ts";
 import type { GameView } from "./session.ts";
 import type { GamePage } from "./game-page.ts";
 import { button, el, enter } from "./dom.ts";
+import { drawCreation } from "./creation-view.ts";
+import { confirmEnding } from "./ending.ts";
 
 // The decision waiting on the player: its prompt, a card for news such as treasure found, and its choices,
 // in tabs on a full turn.
@@ -90,11 +92,17 @@ export function drawDecision(
       "div",
       { class: "option" },
       button(option.label, () => {
-        page.ctx.act(async () => {
-          await page.ctx.game.answer(option.id);
-          page.draw();
-          page.flashSaved();
-        });
+        const take = (): void => {
+          page.ctx.act(async () => {
+            await page.ctx.game.answer(option.id);
+            page.draw();
+            page.flashSaved();
+          });
+        };
+        // A choice that ends the adventure early asks first; nothing is chosen until it's confirmed.
+        if (page.ctx.game.endsEarly(option.id))
+          confirmEnding(page, option, take);
+        else take();
       }),
     );
     row.style.setProperty("--i", String(index));
@@ -113,9 +121,12 @@ export function drawDecision(
     }
     return row;
   };
-  // A long list shows its first few and its last, such as "Stay where you are", until asked for the rest.
+  // In a fight, a long list shows its first few and its last, such as "Stay where you are", until asked
+  // for the rest. A story's choices are each a different way on, so they're never hidden.
   const trimmed = (list: readonly OptionView[]): HTMLElement[] => {
-    if (page.showAll || list.length <= 7) return list.map(optionRow);
+    if (page.showAll || list.length <= 7 || !view.combat) {
+      return list.map(optionRow);
+    }
     const last = list.at(-1);
     const more = button(`More choices (${String(list.length - 6)})`, () => {
       page.showAll = true;
@@ -154,7 +165,7 @@ export function drawDecision(
     view.optionGroups.every((group) => group.title === null);
   const chosen = tabs.find((group) => group.title === page.openGroup);
   // Outside a fight the choices read as a book's numbered entries, and number keys pick them.
-  page.options.classList.toggle("story", !view.combat);
+  page.options.classList.toggle("story", !view.combat && !view.creation);
   page.options.replaceChildren(
     ...groups
       .filter((group) => !tabs.includes(group))
@@ -202,6 +213,7 @@ export function drawDecision(
         ]
       : []),
   );
+  if (view.creation) drawCreation(page, view, view.creation);
   page.options.hidden = view.shop !== null;
   page.shop.update(view.shop);
   // The next choice waits for the board to finish, so it can't be picked under a die still to throw.

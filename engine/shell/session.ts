@@ -15,7 +15,12 @@ import {
   loadRun,
   scanPlugins,
 } from "../run/loader.ts";
-import { type LogEntry, createSave, loadSave } from "../run/save.ts";
+import {
+  type LogEntry,
+  createSave,
+  foldEvents,
+  loadSave,
+} from "../run/save.ts";
 import type { Storage } from "../kernel/storage.ts";
 import { type Ambience, sceneAmbience } from "../story/ambience.ts";
 import { scenesAhead } from "../story/narration.ts";
@@ -35,9 +40,11 @@ import {
   resolveSettings,
   startRun,
   step,
+  wouldEnd,
 } from "../run/turn.ts";
 import type {
   CombatView,
+  CreationView,
   DecisionCard,
   ShopView,
   OptionGroup,
@@ -92,6 +99,9 @@ export interface GameView {
   readonly optionGroups: readonly OptionGroup[];
   readonly card: DecisionCard | null; // shown above the choices, such as treasure found
   readonly shop: ShopView | null; // a merchant's screen, shown in place of the choices
+  // A step of making the character, shown in place of the choices, with each choice's picture by option id.
+  readonly creation: CreationView | null;
+  readonly creationArt: Readonly<Record<string, string>>;
   readonly rests: readonly OptionView[]; // offered at the campfire, apart from the choices
   readonly monsterArt: Readonly<Record<string, string>>; // by combatant id
   readonly tokenArt: Readonly<Record<string, TokenArt>>; // by combatant id, with its face
@@ -105,7 +115,7 @@ export interface GameView {
   readonly rolls: readonly RollLine[]; // from the start of the run, oldest first
   readonly leads: readonly LeadGroup[]; // the group with the newest clue first
   readonly steps: number; // inputs so far, the run's start included
-  readonly canUndo: boolean; // a forgiving setting is on and there's a choice to take back
+  readonly canUndo: boolean; // there's a choice to take back, and a forgiving setting or the choice allows it
   readonly system: string;
   readonly systemState: unknown; // for the system's own board
   readonly ended: GameState["story"]["ended"];
@@ -424,6 +434,29 @@ function undoAllowed(run: RunContext, log: readonly LogEntry[]): boolean {
       setting.options.find((option) => option.id === chosen[setting.id])
         ?.undo === true,
   );
+}
+
+// Keyed by the log's last entry, so a draw doesn't fold the whole log again.
+const takeBackMemo = new WeakMap<LogEntry, boolean>();
+
+// Whether the last choice can be taken back: a forgiving setting is on, or both what it answered and what
+// waits now are revisable, as the steps of making a character are. So Back stays inside them.
+function canTakeBack(
+  run: RunContext,
+  state: GameState,
+  log: readonly LogEntry[],
+): boolean {
+  const last = log.at(-1);
+  if (!last || log.length < 2) return false;
+  if (undoAllowed(run, log)) return true;
+  if (pendingDecision(run, state)?.revisable !== true) return false;
+  let known = takeBackMemo.get(last);
+  if (known === undefined) {
+    const before = foldEvents(run, log.slice(0, -1));
+    known = before !== null && pendingDecision(run, before)?.revisable === true;
+    takeBackMemo.set(last, known);
+  }
+  return known;
 }
 
 export interface GameDependencies {
@@ -959,14 +992,33 @@ export function createGame({
       await autosave(game);
     },
 
+    // A story choice that surely ends the adventure while another would carry on, for the page to confirm
+    // first. Only endings reached without a roll count, so whether it asks never gives a pending roll away.
+    endsEarly(optionId: string): boolean {
+      const { run, state } = active();
+      const decision = pendingDecision(run, state);
+      if (!decision?.id.startsWith(SCENE_DECISION_PREFIX)) return false;
+      const ends = (id: string): boolean =>
+        wouldEnd(run, state, decision, id, true);
+      return (
+        ends(optionId) &&
+        decision.options.some(
+          (option) =>
+            option.id !== optionId &&
+            !option.id.startsWith(REST_OPTION_PREFIX) &&
+            !ends(option.id),
+        )
+      );
+    },
+
     // Takes back the last choice by telling the log again without it. The dice live in the state,
     // so making the same choice again rolls the same numbers.
     async undo(): Promise<void> {
       const game = active();
-      if (!undoAllowed(game.run, game.log)) {
+      if (game.log.length < 2) throw new Error("There is no choice to undo");
+      if (!canTakeBack(game.run, game.state, game.log)) {
         throw new Error("This difficulty doesn't allow undoing a choice");
       }
-      if (game.log.length < 2) throw new Error("There is no choice to undo");
       const log = game.log.slice(0, -1);
       const told = retell(game.run, game.ui, log);
       if (told.state === null) throw new Error("The log has no run start");
@@ -1074,6 +1126,20 @@ export function createGame({
           }
         }
       }
+      const creation = decision
+        ? (ui.creation?.(decision, state.system, run) ?? null)
+        : null;
+      const creationArt: Record<string, string> = {};
+      for (const choice of creation?.choices ?? []) {
+        for (const look of choice.looks ?? []) {
+          const options = tokenArt.get(artKey(look)) ?? [];
+          const chosen = options[stableIndex(choice.id, options.length)];
+          if (chosen) {
+            creationArt[choice.id] = chosen.path;
+            break;
+          }
+        }
+      }
       const text = currentScene ? sceneText(run, state, currentScene) : null;
       return {
         title: run.adventure.title,
@@ -1102,6 +1168,8 @@ export function createGame({
         shop: decision
           ? (ui.shop?.(decision, state.system, run) ?? null)
           : null,
+        creation,
+        creationArt,
         rests: (decision?.options ?? [])
           .filter((option) => isRest(option.id))
           .map((option) => ({
@@ -1135,7 +1203,7 @@ export function createGame({
         rolls: [...rolls],
         leads: leadGroups(clues),
         steps: entries.length,
-        canUndo: entries.length > 1 && undoAllowed(run, entries),
+        canUndo: canTakeBack(run, state, entries),
         system: ui.systemId,
         systemState: state.system,
         ended: state.story.ended,

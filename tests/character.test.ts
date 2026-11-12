@@ -15,6 +15,7 @@ import {
   pendingDecision,
   startRun,
   step,
+  wouldEnd,
 } from "../engine/run/turn.ts";
 import type { StoryEffect } from "../engine/story/adventure.ts";
 import { testAdventure } from "../engine/tools/bot.ts";
@@ -38,6 +39,7 @@ import {
   PregenSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import { availableRests } from "../plugins/systems/dnd5.5e/core/rest.ts";
+import { creation } from "../plugins/systems/dnd5.5e/ui/creation.ts";
 import {
   type Actor,
   type DndState,
@@ -313,6 +315,61 @@ describe("character creation", () => {
     expect(resumed.ok).toBe(true);
   });
 
+  it("asks species first and a name last, and keeps a name the player types", async () => {
+    const run = storyRun(await goblin(), []);
+    const isName = (decision: Decision) => decision.id.endsWith(":name");
+    const { state, asked } = drive(run, "named", WIZARD, isName);
+    const builds = asked.filter((item) => item.id.includes(":build:"));
+    expect(builds.slice(0, 3).map((item) => item.id.split(":").at(-1))).toEqual(
+      ["species", "class", "background"],
+    );
+    expect(builds.every((item) => item.revisable)).toBe(true);
+    const name = pendingDecision(run, state);
+    expect(name?.options).toEqual([{ id: "Elf Wizard", label: "Elf Wizard" }]);
+    expect(name?.text?.maxLength).toBe(40);
+    const answer = (optionId: string) =>
+      step(run, state, {
+        kind: "answer",
+        decisionId: name?.id ?? "",
+        optionId,
+      });
+    for (const bad of [" Ilyra", "x".repeat(41), "Il\u0007yra", ""]) {
+      expect(answer(bad).ok).toBe(false);
+    }
+    const named = answer("Ilyra Moonwhisper");
+    if (!named.ok) throw new Error(named.error);
+    expect(actorIn(named.state).name).toBe("Ilyra Moonwhisper");
+  });
+
+  it("answers a save from before species came first in the old order", async () => {
+    const run = storyRun(await goblin(), []);
+    const { state } = drive(
+      run,
+      "legacy",
+      [[/chooseCharacter/, CREATE_CHARACTER]],
+      (decision) => decision.id.includes(":build:"),
+    );
+    // Such a save waits on the class question, with no order in its frame.
+    const legacy = structuredClone<GameState>(state);
+    const awaited = legacy.stack.at(-1)?.payload as {
+      decision: {
+        id: string;
+        options: { id: string; label: string }[];
+        resume: { payload: Record<string, unknown> };
+      };
+    };
+    delete awaited.decision.resume.payload.order;
+    awaited.decision.id = "dnd5.5e:build:player:class";
+    awaited.decision.options = [{ id: "srd52:class/wizard", label: "Wizard" }];
+    const answered = step(run, legacy, {
+      kind: "answer",
+      decisionId: "dnd5.5e:build:player:class",
+      optionId: "srd52:class/wizard",
+    });
+    if (!answered.ok) throw new Error(answered.error);
+    expect(answered.pending?.id).toBe("dnd5.5e:build:player:species");
+  });
+
   it("uses stated choices over inferred ones, and honors option choices", async () => {
     const run = withContent(await goblin(), [
       FeatureSchema.parse({
@@ -368,6 +425,59 @@ describe("character creation", () => {
     expect(stats.features).not.toContain("test:feature/trick-a");
     // Criminal already gives Stealth, so the one skill on offer has nothing left to ask.
     expect(asked.some((item) => item.id.includes(":skills-"))).toBe(false);
+  });
+});
+
+describe("endings", () => {
+  // A check whose failure ends the adventure, beside a plain way out.
+  function gateRun(run: RunContext): RunContext {
+    const goto = (scene: string) => [{ kind: "goto" as const, scene }];
+    const scene = (id: string, choices: unknown[]) => ({
+      id,
+      text: "A gate.",
+      textVariants: [],
+      rest: true,
+      choices,
+    });
+    return {
+      ...run,
+      adventure: {
+        ...run.adventure,
+        startScene: "gate",
+        scenes: [
+          scene("gate", [
+            {
+              label: "Climb the gate",
+              check: { skill: "athletics", dc: 15 },
+              results: { success: goto("inside"), failure: goto("end") },
+            },
+            { label: "Leave", effects: goto("end") },
+          ]),
+          scene("inside", [{ label: "Go on", effects: goto("end") }]),
+          scene("end", []),
+        ],
+      } as RunContext["adventure"],
+    };
+  }
+
+  it("counts an ending as certain only when no die decides it", async () => {
+    const run = gateRun(await goblin());
+    const rolled = new Set<boolean>();
+    for (let seed = 0; seed < 20; seed += 1) {
+      const { state } = drive(
+        run,
+        `gate-${String(seed)}`,
+        [[/chooseCharacter/, "srd52:pregen/wizard"]],
+        (decision) => decision.id.startsWith("scene:"),
+      );
+      const decision = pendingDecision(run, state);
+      if (!decision) throw new Error("No scene choice");
+      const [climb, leave] = decision.options;
+      rolled.add(wouldEnd(run, state, decision, climb?.id ?? ""));
+      expect(wouldEnd(run, state, decision, climb?.id ?? "", true)).toBe(false);
+      expect(wouldEnd(run, state, decision, leave?.id ?? "", true)).toBe(true);
+    }
+    expect(rolled).toEqual(new Set([true, false])); // the climb's roll does decide it
   });
 });
 
@@ -482,6 +592,23 @@ describe("levelling up", () => {
       10, 6, 6, 6, 6,
     ]);
     expectReplays(run, registry, "fighter", whole);
+  });
+
+  it("shows a level's picks as cards with their details, without the creation steps", async () => {
+    const run = storyRun(await goblin(), [[levelUp]]);
+    const { state } = drive(run, "level-cards", WIZARD, (decision) =>
+      decision.id.startsWith("dnd5.5e:build:player:2:"),
+    );
+    const decision = pendingDecision(run, state);
+    if (!decision) throw new Error("No level-up pick");
+    const view = creation(decision, state.system, run);
+    expect(view?.heading).toBe("Level 2");
+    expect(view?.steps).toEqual([]);
+    expect(decision.revisable).toBeUndefined();
+    const spell = view?.choices.find((choice) =>
+      choice.summary?.startsWith("Level 1"),
+    );
+    expect(spell?.detail?.length).toBeGreaterThan(0);
   });
 
   it("raises one ability by 1 for a feat whose Ability Score Increase says so", async () => {

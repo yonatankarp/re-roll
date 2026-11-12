@@ -125,7 +125,12 @@ async function winners(adventure: Readonly<Record<string, unknown>> = {}) {
     answer("dnd5.5e:chooseCharacter", "create"),
   );
   if (!created.ok) throw new Error(created.error);
-  const classes = (created.pending?.options ?? [])
+  // Species comes first, then class.
+  const species = created.pending;
+  const speciesId = species?.options[0]?.id ?? "";
+  const picked = step(run, created.state, answer(species?.id ?? "", speciesId));
+  if (!picked.ok) throw new Error(picked.error);
+  const classes = (picked.pending?.options ?? [])
     .map((option) => option.id)
     .filter((id) => id.endsWith(":class/wizard"));
 
