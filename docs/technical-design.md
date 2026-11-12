@@ -821,7 +821,7 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 
 **Deliberately cut for now, each with a `shortcut:` comment where it applies:**
 - **The grid:** no difficult terrain, cover, line of sight or creature sizes, and no flanking. An Opportunity Attack checks only where a move starts and ends.
-- **Character building:** no multiclassing, swapping prepared spells, feat prerequisites, feat ability increases other than Ability Score Improvement, or starting gear from the class tables. Expertise, Eldritch Invocations, species lineages and other options with no choice data stay as text. Companions' classes don't follow their personalities.
+- **Character building:** no multiclassing, swapping prepared spells, feat prerequisites, feat ability increases other than Ability Score Improvement, or starting gear from the class tables. Expertise, Eldritch Invocations and other options with no choice data stay as text. Companions' classes don't follow their personalities.
 - **Spell rules:** no swapping prepared spells or one-spell-slot-per-turn rule. Upcasting works for spells whose data has `upcast`, and cantrips scale by tier from their `cantrip` data.
 - **Other rules:** no Arcane Recovery, weapon mastery effects or armor training limits, and forced movement is stored in data but does nothing yet. Section 8.17 lists which class features work.
 - **Recovery after a fight:** anyone down but not dead gets back up with 1 HP, since an adventure doesn't have to offer a rest. HP otherwise carries over between fights.
@@ -941,7 +941,7 @@ The importer turns the owner's saved book pages and PDFs into private plugins un
 |---|---|
 | Monsters, classes, subclasses, features, species, backgrounds, feats, equipment, magic items, roll tables, lookups, traps, hazards, poisons, bastions, companions | Code parses the HTML with `npm run import -- parse`, and `approve` creates the private plugin |
 | Spell facts and text | Code. A spell whose text matches a reviewed SRD spell reuses its mechanics |
-| Spell and class feature mechanics that code can't read | Claude agents encode them, then code checks them. They write mechanics only, and code copies the book's wording |
+| Spell, class feature, feat and species trait mechanics that code can't read | Claude agents encode them, then code checks them. They write mechanics only, and code copies the book's wording |
 | Adventures | Agents write the scene graph in their own words, and `tests/tools/fill-read-aloud.ts` copies read-aloud text |
 | Reference library | `npm run import -- library` writes each book's sections and an index to `books/library/` |
 | Images | `pdfimages` from local PDFs to `books/assets/`, matched to monsters and scenes by page |
@@ -949,7 +949,8 @@ The importer turns the owner's saved book pages and PDFs into private plugins un
 Leaving out `--encodings` on `draft` uses the local model instead, which is free but slower and less accurate.
 
 **Rules when re-importing**
-- Never run `approve --all` on PHB features or spells: their mechanics exist only in the approved files.
+- Never run `approve --all` on PHB features, feats, species or spells: their mechanics and choices exist only in the approved files.
+- Each feat grants a feature of its own text (`feature/feat-<slug>`), which holds its mechanics. A species' or feat's `choices` are asked at character creation, and a choice of lineage or ancestry picks one feature among several.
 - Parse subclasses and backgrounds with `--requires phb`.
 - A book's plugin id can't match an adventure's, so book plugins use a `-rules` suffix in that case.
 - Older-edition content is marked and kept out of the character builder by default.
