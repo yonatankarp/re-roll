@@ -35,6 +35,7 @@ import {
   WeaponSchema,
   type Weapon,
 } from "./schemas.ts";
+import { featureRules, grantedSpells } from "./feature-rules.ts";
 
 export function lookup<T>(
   access: Pick<ContentAccess, "content">,
@@ -156,7 +157,7 @@ function collectFeatureData(
   const actions: KnownAction[] = [];
   const resources: Feature["resources"] = [];
   for (const id of featureIds) {
-    const feature = lookup(access, FeatureSchema, id);
+    const feature = featureRules(lookup(access, FeatureSchema, id));
     passives.push(...feature.passives);
     resources.push(...feature.resources);
     feature.activations.forEach((activation, index) => {
@@ -346,6 +347,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
 
   const fromFeatures = collectFeatureData(access, [...featureIds]);
   actions.push(...fromFeatures.actions);
+  for (const id of featureIds) {
+    for (const spellId of grantedSpells(id, level)) {
+      if (access.content(spellId)) knownSpells.add(spellId);
+    }
+  }
 
   for (const spellId of knownSpells) {
     const spell: Spell = lookup(access, SpellSchema, spellId);
@@ -405,6 +411,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   };
   return {
     ...partial,
+    speed: partial.speed + speedBonus(partial),
     resources: Object.fromEntries(
       fromFeatures.resources.map((resource) => [
         resource.id,
@@ -412,6 +419,18 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       ]),
     ),
   };
+}
+
+// shortcut: a speed bonus doesn't check the armor it needs, such as Fast Movement's.
+function speedBonus(stats: Stats): number {
+  return passiveModifiers(stats.passives).reduce(
+    (total, modifier) =>
+      modifier.kind === "bonus" && modifier.to === "speed"
+        ? total +
+          evaluateFormula(modifier.amount.bonus ?? { base: 0, add: [] }, stats)
+        : total,
+    0,
+  );
 }
 
 // A potion to drink or a scroll to read, used up once used. Their action ids start "item:", which spends the item.

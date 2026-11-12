@@ -118,10 +118,12 @@ export type Damage = z.infer<typeof DamageSchema>;
 const RollFlagSchema = z.enum(["attacks", "saves", "checks", "attacksAgainst"]);
 
 export const ModifierSchema = z.discriminatedUnion("kind", [
+  // "once" ends the effect after the next attack roll it adds to, as with Bardic Inspiration.
   z.strictObject({
     kind: z.literal("bonus"),
-    to: z.enum(["ac", "attacks", "saves", "checks"]),
+    to: z.enum(["ac", "attacks", "saves", "checks", "speed"]),
     amount: AmountSchema,
+    once: z.boolean().optional(),
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   z.strictObject({
@@ -308,6 +310,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("packTactics") }),
   z.strictObject({ kind: z.literal("undeadFortitude") }),
   z.strictObject({ kind: z.literal("magicResistance") }),
+  // A Critical Hit on this natural roll or higher, as with Improved Critical.
+  z.strictObject({
+    kind: z.literal("criticalRange"),
+    from: z.number().int().min(2).max(19),
+  }),
   // Attacks per Attack action, such as Extra Attack.
   z.strictObject({
     kind: z.literal("multiattack"),

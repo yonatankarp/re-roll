@@ -272,6 +272,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:deathSaveRolled`]: DeathSaveSchema,
   [`${NS}:rollReported`]: RollReportSchema,
   [`${NS}:inspirationGranted`]: ActorOnlySchema,
+  [`${NS}:inspirationSpent`]: ActorOnlySchema,
   [`${NS}:treasureFound`]: TreasureFoundSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
@@ -722,6 +723,12 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
           ...actor,
           heroicInspiration: true,
         }),
+      );
+    case `${NS}:inspirationSpent`:
+      return updateActor(
+        state,
+        payload(ActorOnlySchema, event).actor,
+        (actor) => ({ ...actor, heroicInspiration: false }),
       );
     case `${NS}:treasureFound`: {
       const data = payload(TreasureFoundSchema, event);

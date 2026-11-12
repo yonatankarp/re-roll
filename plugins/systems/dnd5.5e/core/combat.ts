@@ -36,6 +36,12 @@ import type {
 import { ClassSchema, MonsterSchema, PregenSchema } from "./schemas.ts";
 import { treasure } from "./gear.ts";
 import {
+  criticalFrom,
+  offerInspiration,
+  onceEnded,
+  turnRecharge,
+} from "./class-rules.ts";
+import {
   type Actor,
   type DndState,
   NS,
@@ -1448,10 +1454,11 @@ export function runAttackRoll(
     attackBonus(resolution, stats) +
     rollBonus(attacker, "attacks", context);
   const { ac } = targetStats;
-  const hits = roll.natural === 20 || (roll.natural !== 1 && total >= ac);
+  const critFrom = criticalFrom(stats);
+  const hits = roll.natural >= critFrom || (roll.natural !== 1 && total >= ac);
   // A hit from within 5 feet on a Paralyzed or Unconscious target is a Critical Hit.
   const critical =
-    roll.natural === 20 ||
+    roll.natural >= critFrom ||
     (hits &&
       isMelee(action) &&
       hasCondition(target, "paralyzed", "unconscious"));
@@ -1483,7 +1490,13 @@ export function runAttackRoll(
       : { slotLevel: payload.slotLevel }),
   };
 
-  if (!hits) return { events: [report, ...spent] };
+  if (!hits) {
+    return (
+      offerInspiration(attacker, { ...payload, target: target.id }, report) ?? {
+        events: [report, ...spent],
+      }
+    );
+  }
 
   const reaction = reactionFor(target, total, ac, context, critical);
   if (reaction) {
@@ -1504,19 +1517,6 @@ export function runAttackRoll(
     };
   }
   return { events: [report, ...spent], frames: [frame("applyHit", hit)] };
-}
-
-function onceEnded(
-  actor: Actor,
-  on: "attacks" | "attacksAgainst",
-): SystemEvent[] {
-  return actor.activeEffects.flatMap(({ modifier, sourceId }) =>
-    (modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
-    modifier.on === on &&
-    modifier.once
-      ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId })]
-      : [],
-  );
 }
 
 export { AttackSchema };
@@ -2062,7 +2062,7 @@ export function runFinishTurn(context: Context): SystemResult {
 // shortcut: the roll happens at the end of the monster's turn rather than the start of its next one,
 // which gives the same chance, as nothing else can change it in between.
 function rechargeEvents(actor: Actor, context: Context): SystemEvent[] {
-  if (actor.source.kind !== "monster") return [];
+  if (actor.source.kind !== "monster") return turnRecharge(actor, context);
   const monster = lookup(context, MonsterSchema, actor.source.statBlockId);
   return monster.actions.flatMap((action) => {
     if (action.recharge === undefined) return [];
@@ -2171,6 +2171,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
   const [first] = decision.options;
   if (!first) throw new Error(`${decision.id} has no options`);
   if (decision.id.startsWith(`${NS}:reaction:`)) return first.id;
+  if (decision.id.startsWith(`${NS}:inspiration:`)) return first.id;
   if (decision.id.startsWith(`${NS}:deathSave:`)) return first.id;
 
   const actor = actorOf(state, decision.actor);
