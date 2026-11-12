@@ -121,6 +121,30 @@ const FIXTURES = [
     automation: "full",
     passives: [{ kind: "restInspiration", rests: ["long"] }],
   },
+  ...(["poisoned", "frightened"] as const).map((condition) => ({
+    id: `test:feature/${condition}-gaze`,
+    name: `${condition} gaze`,
+    text: "Test.",
+    automation: "full",
+    activations: [
+      {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 60, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "con",
+          dc: { base: 30 },
+          onFail: [
+            {
+              kind: "applyCondition",
+              condition,
+              duration: { minutes: 1 },
+            },
+          ],
+        },
+      },
+    ],
+  })),
   ...["ember", "frost"].map((kind) => ({
     id: `test:feature/${kind}-breath`,
     name: `${kind} breath`,
@@ -297,6 +321,42 @@ describe("species traits and feats", () => {
     expect(traitSaveAdvantage(stats, "int", [])).toBe(true);
     expect(traitSaveAdvantage(stats, "con", ["poisoned"])).toBe(true);
     expect(traitSaveAdvantage(stats, "con", ["frightened"])).toBe(false);
+  });
+
+  it("rolls a save with Advantage in combat when it would bring a condition the trait guards against", async () => {
+    const run = await testRun();
+    const d20s = (condition: string) => {
+      const gaze = `test:feature/${condition}-gaze`;
+      const caster = { ...stoneling(1, [gaze]), id: "caster" };
+      const target = { ...stoneling(1, []), id: "a", side: "enemy" as const };
+      const state: DndState = {
+        actors: { caster, a: target },
+        combat: {
+          encounter: "arena",
+          order: ["caster", "a"],
+          index: 0,
+          round: 1,
+        },
+      };
+      let count = 0;
+      const dice: Dice = {
+        below: () => 0,
+        roll: (sides) => {
+          if (sides === 20) count += 1;
+          return 1;
+        },
+      };
+      const result = run.system.frames[`${NS}:takeAction`]?.run(
+        { actor: "caster", answer: `feature:${gaze}:0|a` },
+        { state, dice, content: run.content, contentIds: run.contentIds },
+      );
+      expect(
+        result?.events?.some((event) => event.kind === `${NS}:saveRolled`),
+      ).toBe(true);
+      return count;
+    };
+    expect(d20s("poisoned")).toBe(2);
+    expect(d20s("frightened")).toBe(1);
   });
 
   it("drops to 1 Hit Point instead of 0 once, then falls as usual", async () => {
