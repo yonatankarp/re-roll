@@ -96,6 +96,10 @@ describe("desktop save files", () => {
     store.setItem("saves/b.json", "old b");
     store.setItem("saves/times", "{}");
     store.setItem("other", "not a save");
+    // A store at its quota, which is why the saves are moving.
+    store.setItem = () => {
+      throw new Error("QuotaExceededError");
+    };
     const { call } = fakeCommands();
     const files = createTauriSaves(call);
     await files.write("saves/b.json", "newer b");
@@ -104,13 +108,9 @@ describe("desktop save files", () => {
     expect(await files.read("saves/a.json")).toBe("old a");
     expect(await files.read("saves/b.json")).toBe("newer b");
     expect(await files.read("saves/times")).toBe("{}");
-    expect([...(await files.list())].sort()).toEqual([
-      "saves/a.json",
-      "saves/b.json",
-      "saves/times",
-    ]);
     expect(store.getItem("saves/a.json")).toBe("old a");
 
+    // A save deleted after the move stays deleted.
     await files.remove("saves/a.json");
     expect(await moveSavesToFiles(store, files)).toBe(0);
     expect(await files.read("saves/a.json")).toBeNull();

@@ -109,7 +109,9 @@ export function withSaves(
   return withSaveFiles(content, storeFiles(saves));
 }
 
-const MOVED = "re-roll:saves-moved-to-files";
+// Kept with the saves, not in localStorage, which may be too full to take it. Not a .json file,
+// so the save list and pruning pass it by.
+const MOVED = `${SAVES}moved-from-localstorage`;
 
 // The desktop app kept saves in localStorage before it had a saves folder. They are copied there
 // once, never over a file, and the originals stay as a backup.
@@ -117,7 +119,7 @@ export async function moveSavesToFiles(
   from: SaveStore,
   to: SaveFiles,
 ): Promise<number> {
-  if (from.getItem(MOVED) !== null) return 0;
+  if ((await to.read(MOVED)) !== null) return 0;
   const existing = new Set(await to.list());
   let moved = 0;
   for (const path of await storeFiles(from).list()) {
@@ -126,10 +128,6 @@ export async function moveSavesToFiles(
     await to.write(path, contents);
     moved += 1;
   }
-  try {
-    from.setItem(MOVED, new Date().toISOString());
-  } catch {
-    // A full store can't take the mark, so this runs again next time and skips what it copied.
-  }
+  await to.write(MOVED, new Date().toISOString());
   return moved;
 }
