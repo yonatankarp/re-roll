@@ -36,6 +36,14 @@ import type {
 import { ClassSchema, MonsterSchema, PregenSchema } from "./schemas.ts";
 import { treasure } from "./gear.ts";
 import {
+  behindTotalCover,
+  coverBonus,
+  coverFor,
+  difficultSquares,
+  seeing,
+  terrainOf,
+} from "./sight.ts";
+import {
   type Actor,
   type DndState,
   NS,
@@ -215,6 +223,7 @@ export function moveSquares(
       ...walls,
     ]),
     new Set([...keys(others), ...walls]),
+    difficultSquares(state),
   );
 }
 
@@ -342,7 +351,8 @@ function turnOptions(
         : allies(state, actor),
     )
       .filter((item) => fitsType(item, targeting, access))
-      .filter((item) => reaches(action, actor, item));
+      .filter((item) => reaches(action, actor, item))
+      .filter((item) => !behindTotalCover(state, actor, item));
     if (candidates.length === 0) continue;
     const aimed =
       "area" in targeting &&
@@ -484,6 +494,7 @@ export function startCombat(
     .map((item) => item.id);
   const { battlemap } = encounter;
   const walls = battlemap ? wallKeys(battlemap.walls) : [];
+  const terrain = battlemap ? terrainOf(battlemap) : null;
   const toSquare = ([x, y]: readonly [number, number]): Square => ({ x, y });
   const { grid, positions } = battlemap
     ? ((): ReturnType<typeof placeSides> => {
@@ -524,6 +535,7 @@ export function startCombat(
         ...(battlemap
           ? {
               walls: [...walls],
+              ...(terrain ? { terrain } : {}),
               map: {
                 image: battlemap.image,
                 imageWidth: battlemap.imageWidth,
@@ -789,6 +801,7 @@ function rollSave(
   dc: number,
   context: Context,
   magical = false,
+  cover = 0, // half or three-quarters cover adds to Dexterity saves
 ): boolean {
   if (
     (ability === "str" || ability === "dex") &&
@@ -808,7 +821,8 @@ function rollSave(
   const total =
     roll.natural +
     saveBonus(stats, ability) +
-    rollBonus(target, "saves", context);
+    rollBonus(target, "saves", context) +
+    (ability === "dex" ? cover : 0);
   return total >= dc;
 }
 
@@ -830,19 +844,26 @@ function resolveTargets(
       ? state.actors[answerTarget.slice(AIM.length)]
       : undefined;
     // shortcut: an area catches only the side it's aimed at, as if every caster placed it with care.
-    return side.filter((item) =>
-      inArea(
-        shape,
-        radius,
-        actor.position,
-        aim?.position ?? actor.position,
-        item.position,
-      ),
+    // Total cover from where it spreads keeps a creature out of it.
+    const centre =
+      aim && (shape === "sphere" || shape === "cube") ? aim : actor;
+    return side.filter(
+      (item) =>
+        inArea(
+          shape,
+          radius,
+          actor.position,
+          aim?.position ?? actor.position,
+          item.position,
+        ) && !behindTotalCover(state, centre, item),
     );
   }
   const chosen = answerTarget === ALL ? [] : [actorOf(state, answerTarget)];
   const pool = side.filter(
-    (item) => !chosen.includes(item) && reaches(action, actor, item),
+    (item) =>
+      !chosen.includes(item) &&
+      reaches(action, actor, item) &&
+      !behindTotalCover(state, actor, item),
   );
   // A higher slot can add targets to a single-target spell, and they go to the weakest after the one chosen.
   return [...chosen, ...[...pool].sort((a, b) => a.hp - b.hp)].slice(
@@ -989,12 +1010,16 @@ function resolveAction(
       // Damage against several targets at once is rolled once for all of them.
       const damage = rollSharedDamage(resolution.damage);
       for (const target of targets) {
+        // shortcut: cover counts from the caster, even for a sphere whose centre is elsewhere.
         const saved = rollSave(
           target,
           resolution.ability,
           dc,
           context,
           action.spellLevel !== null,
+          coverBonus(
+            coverFor(context.state, actor.position, target, [actor.id]),
+          ),
         );
         applyRolled(target, damage, (amount) => {
           if (!saved) return amount;
@@ -1158,7 +1183,10 @@ function aimAt(
   if (id === ALL) {
     const charmers = charmersOf(attacker);
     return standing
-      .filter((item) => !charmers.has(item.id))
+      .filter(
+        (item) =>
+          !charmers.has(item.id) && !behindTotalCover(state, attacker, item),
+      )
       .sort((a, b) => a.hp - b.hp)[0];
   }
   const aimed = actorOf(state, id);
@@ -1412,8 +1440,15 @@ export function runAttackRoll(
         within5(item, attacker),
     );
   const proneFar = hasCondition(target, "prone") && !close;
+  // Darkness hides a creature from anyone without Darkvision in range: attacking an unseen target has
+  // Disadvantage, and a target that can't see its attacker gives Advantage.
+  const unseenTarget =
+    seeing(attacker, target.position, state, context) === "none";
+  const unseenAttacker =
+    seeing(target, attacker.position, state, context) === "none";
   const advantage =
     packed ||
+    unseenAttacker ||
     hasFlag(attacker, "advantage", "attacks", stats) ||
     hasFlag(target, "advantage", "attacksAgainst", targetStats) ||
     hasCondition(attacker, "invisible") ||
@@ -1429,6 +1464,7 @@ export function runAttackRoll(
     (hasCondition(target, "prone") && close);
   const disadvantage =
     crowded ||
+    unseenTarget ||
     proneFar ||
     hasFlag(attacker, "disadvantage", "attacks", stats) ||
     hasFlag(target, "disadvantage", "attacksAgainst", targetStats) ||
@@ -1447,7 +1483,9 @@ export function runAttackRoll(
     roll.natural +
     attackBonus(resolution, stats) +
     rollBonus(attacker, "attacks", context);
-  const { ac } = targetStats;
+  const ac =
+    targetStats.ac +
+    coverBonus(coverFor(state, attacker.position, target, [attacker.id]));
   const hits = roll.natural === 20 || (roll.natural !== 1 && total >= ac);
   // A hit from within 5 feet on a Paralyzed or Unconscious target is a Critical Hit.
   const critical =
@@ -1578,7 +1616,15 @@ export function runRecheckHit(
   payload: z.infer<typeof HitSchema>,
   context: Context,
 ): SystemResult {
-  const ac = deriveStats(actorOf(context.state, payload.target), context).ac;
+  const { state } = context;
+  const target = actorOf(state, payload.target);
+  const ac =
+    deriveStats(target, context).ac +
+    coverBonus(
+      coverFor(state, actorOf(state, payload.attacker).position, target, [
+        payload.attacker,
+      ]),
+    );
   return payload.critical || payload.total >= ac
     ? { frames: [frame("applyHit", payload)] }
     : {};
@@ -2160,10 +2206,29 @@ function stepToward(actor: Actor, context: Context): Square | null {
     );
   if (foes.length === 0) return null;
   const now = gap(actor.position);
-  const best = [...moveSquares(actor, state, stats)].sort(
-    (a, b) => gap(a.square) - gap(b.square) || a.feet - b.feet,
-  )[0];
-  return best && gap(best.square) < now ? best.square : null;
+  const squares = moveSquares(actor, state, stats);
+  const closest = Math.min(...squares.map((item) => gap(item.square)));
+  if (squares.length === 0 || closest >= now) return null;
+  // Of the squares that get it closest, the one with the most cover from its foes, off difficult terrain, nearest.
+  const difficult = difficultSquares(state);
+  const ranked = squares
+    .filter((item) => gap(item.square) === closest)
+    .map((item) => ({
+      ...item,
+      cover: foes.reduce(
+        (sum, foe) =>
+          sum +
+          coverBonus(
+            coverFor(state, foe.position, { ...actor, position: item.square }, [
+              foe.id,
+            ]),
+          ),
+        0,
+      ),
+      rough: Number(difficult.has(squareKey(item.square))),
+    }))
+    .sort((a, b) => b.cover - a.cover || a.rough - b.rough || a.feet - b.feet);
+  return ranked[0]?.square ?? null;
 }
 
 export function choosePolicy(decision: Decision, context: Context): string {
@@ -2311,8 +2376,17 @@ export function choosePolicy(decision: Decision, context: Context): string {
         !heals(action) &&
         (action.spellLevel ?? 0) === 0,
     )
+    .map((item) => ({
+      ...item,
+      // Three-quarters cover is worth going around while someone else is in the open.
+      hidden: Number(
+        item.target !== undefined &&
+          coverFor(state, actor.position, item.target, [actor.id]) === 5,
+      ),
+    }))
     .sort(
       (a, b) =>
+        a.hidden - b.hidden ||
         (a.target?.hp ?? 0) - (b.target?.hp ?? 0) ||
         attackRoutine(b.action, actor, stats).length -
           attackRoutine(a.action, actor, stats).length,

@@ -44,6 +44,16 @@ const GridSchema = z.strictObject({
   width: z.number().int(),
   height: z.number().int(),
 });
+// A battle map's ground, cover and light, as "x,y" squares. Missing in fights on plain maps and older saves.
+export const TerrainSchema = z.strictObject({
+  difficult: z.array(z.string()),
+  half: z.array(z.string()), // half cover
+  threeQuarters: z.array(z.string()),
+  dim: z.array(z.string()),
+  dark: z.array(z.string()),
+  light: z.enum(["bright", "dim", "dark"]), // everywhere else
+});
+export type Terrain = z.infer<typeof TerrainSchema>;
 // The picture a fight is drawn on, when its encounter has a battle map.
 const FightMapSchema = z.strictObject({
   image: z.string(),
@@ -119,6 +129,7 @@ export const StateSchema = z.strictObject({
       defeatContinues: z.boolean().optional(),
       grid: GridSchema.optional(),
       walls: z.array(z.string()).optional(), // squares no one can enter, as "x,y"
+      terrain: TerrainSchema.optional(),
       map: FightMapSchema.optional(),
       loot: LootSchema.optional(), // found if the party wins
     })
@@ -160,6 +171,7 @@ const CombatStartedSchema = z.strictObject({
   grid: GridSchema.optional(),
   positions: z.record(z.string(), SquareSchema).optional(),
   walls: z.array(z.string()).optional(),
+  terrain: TerrainSchema.optional(),
   map: FightMapSchema.optional(),
   loot: LootSchema.optional(),
 });
@@ -592,6 +604,7 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
           ...(data.defeatContinues ? { defeatContinues: true } : {}),
           ...(data.grid ? { grid: data.grid } : {}),
           ...(data.walls ? { walls: data.walls } : {}),
+          ...(data.terrain ? { terrain: data.terrain } : {}),
           ...(data.map ? { map: data.map } : {}),
           ...(data.loot ? { loot: data.loot } : {}),
         },

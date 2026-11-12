@@ -9,6 +9,7 @@ import { weaponProficient } from "../core/character.ts";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
 import { foundText } from "../core/gear.ts";
 import { inArea } from "../core/grid.ts";
+import { coverBonus, coverFor } from "../core/sight.ts";
 import { dndCue } from "./cues.ts";
 import {
   ABILITIES,
@@ -692,9 +693,27 @@ function combat(rawState: unknown, access: ContentAccess) {
       }
     }
   }
+  // The cover each creature has against the player, for the shield shown while picking a target.
+  const cover = Object.fromEntries(
+    order.flatMap((id) => {
+      const actor = state.actors[id];
+      const bonus =
+        player && actor && id !== PLAYER_ACTOR
+          ? coverBonus(coverFor(state, player.position, actor, [PLAYER_ACTOR]))
+          : 0;
+      return bonus > 0 ? [[id, bonus]] : [];
+    }),
+  );
   return {
     round,
-    board: { moves, reach, areas, map: state.combat.map ?? null },
+    board: {
+      moves,
+      reach,
+      areas,
+      cover,
+      terrain: state.combat.terrain ?? null,
+      map: state.combat.map ?? null,
+    },
     combatants: order.flatMap((id, position) => {
       const actor = state.actors[id];
       if (!actor) return [];

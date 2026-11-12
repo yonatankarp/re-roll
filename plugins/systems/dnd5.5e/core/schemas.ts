@@ -742,7 +742,7 @@ const MapSquareSchema = z.tuple([
 ]);
 
 // A fight on a book's battle map: the part of the picture it happens on, cut to whole squares,
-// with the walls and where each side starts.
+// with the walls, ground, cover and light, and where each side starts.
 export const BattlemapSchema = z
   .strictObject({
     image: z.string().min(1), // inside the adventure plugin, such as assets/p048-79.png
@@ -756,7 +756,12 @@ export const BattlemapSchema = z
     }),
     columns: z.number().int().min(2).max(60),
     rows: z.number().int().min(2).max(60),
-    walls: z.array(z.string()), // one per row: "#" blocked, "." open
+    // One per row: "#" wall, "." open, "~" difficult terrain, "h" half cover, "t" three-quarters cover,
+    // "d" dim light, "x" darkness.
+    walls: z.array(
+      z.string().regex(/^[#.~htdx]*$/, "uses a code other than # . ~ h t d x"),
+    ),
+    light: z.enum(["bright", "dim", "dark"]).optional(), // the light everywhere not marked d or x; bright if left out
     party: z.array(MapSquareSchema).min(1),
     monsters: z.array(MapSquareSchema).min(1),
   })

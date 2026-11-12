@@ -21,13 +21,24 @@ import {
   runAttackRoll,
   runTakeAction,
   runLingeringTick,
+  startCombat,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import {
+  codeKeys,
+  coverBetween,
   distanceFeet,
   placeSides,
+  reachableSquares,
 } from "../plugins/systems/dnd5.5e/core/grid.ts";
+import {
+  coverFor,
+  darkvisionOf,
+  seeing,
+  terrainOf,
+} from "../plugins/systems/dnd5.5e/core/sight.ts";
 import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 import {
+  BattlemapSchema,
   ClassSchema,
   MonsterSchema,
   PregenSchema,
@@ -44,6 +55,7 @@ import {
 import {
   damageResponses,
   deriveStats,
+  saveBonus,
   scaleActivation,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
 
@@ -209,7 +221,7 @@ function settle(
   start: DndState,
   frames: readonly Frame[],
   dice: Dice,
-  answer: (decision: Decision) => string = (decision) =>
+  answer: (decision: Decision, state: DndState) => string = (decision) =>
     decision.options[0]?.id ?? "",
 ): Settled {
   let state = start;
@@ -222,7 +234,10 @@ function settle(
       decisions.push(decision);
       stack.push({
         kind: decision.resume.kind,
-        payload: { ...decision.resume.payload, answer: answer(decision) },
+        payload: {
+          ...decision.resume.payload,
+          answer: answer(decision, state),
+        },
       });
       continue;
     }
@@ -2181,6 +2196,477 @@ describe("the 5-foot grid", () => {
     expect(
       distanceFeet(actor(walked.state, "a").position, { x: 0, y: 5 }),
     ).toBe(5);
+  });
+});
+
+describe("battle map ground, cover and light", () => {
+  const at = (who: Actor, x: number, y: number): Actor => ({
+    ...who,
+    position: { x, y },
+  });
+  const sword = "weapon:srd52:item/longsword";
+  const keysOf = (rows: readonly string[]) => ({
+    walls: new Set(codeKeys(rows, "#")),
+    cover: {
+      half: new Set(codeKeys(rows, "h")),
+      threeQuarters: new Set(codeKeys(rows, "t")),
+    },
+  });
+  // A fight on a map drawn as rows of codes, with the light everywhere else.
+  const onMap = (
+    rows: readonly string[],
+    actors: readonly Actor[],
+    light: "bright" | "dim" | "dark" = "bright",
+  ): DndState => {
+    const state = fight(...actors);
+    // A map needs two rows at least, so a one-row picture gets an open one below.
+    const drawn =
+      rows.length > 1 ? rows : [...rows, ".".repeat(rows[0]?.length ?? 0)];
+    const map = BattlemapSchema.parse({
+      image: "assets/map.png",
+      imageWidth: 100,
+      imageHeight: 100,
+      crop: { x: 0, y: 0, width: 100, height: 100 },
+      columns: drawn[0]?.length ?? 0,
+      rows: drawn.length,
+      walls: drawn,
+      light,
+      party: [[0, 0]],
+      monsters: [[1, 0]],
+    });
+    if (!state.combat) throw new Error("No fight");
+    const terrain = terrainOf(map);
+    return {
+      ...state,
+      combat: {
+        ...state.combat,
+        grid: { width: map.columns, height: map.rows },
+        walls: codeKeys(drawn, "#"),
+        ...(terrain ? { terrain } : {}),
+      },
+    };
+  };
+  const archer = (
+    run: RunContext,
+    id: string,
+    fields: Record<string, unknown> = {},
+  ): RunContext =>
+    arenaRun(run, {
+      [`srd52:monster/${id}`]: dummy(`srd52:monster/${id}`, {
+        actions: [
+          {
+            name: "Shortbow",
+            activation: {
+              cost: ["action"],
+              targeting: { creatures: 1, range: 30, side: "enemy" },
+              resolution: {
+                kind: "attack",
+                attack: { type: "weapon", flatBonus: 4 },
+                damage: [{ amount: { dice: "1d6" }, type: "piercing" }],
+              },
+            },
+          },
+        ],
+        ...fields,
+      }),
+    });
+  const reported = (events: readonly SystemEvent[]) =>
+    events.flatMap((event) =>
+      event.kind === `${NS}:rollReported` && "payload" in event
+        ? [event.payload as { target: number; success: boolean }]
+        : [],
+    );
+
+  it("keeps old maps valid and checks the new codes and light", () => {
+    const map = {
+      image: "assets/map.png",
+      imageWidth: 300,
+      imageHeight: 300,
+      crop: { x: 0, y: 0, width: 300, height: 300 },
+      columns: 3,
+      rows: 3,
+      walls: ["...", "##.", "..."],
+      party: [[0, 0]],
+      monsters: [[0, 2]],
+    };
+    const old = BattlemapSchema.parse(map);
+    expect(terrainOf(old)).toBeNull(); // nothing marked, so the fight is as it was
+    const marked = BattlemapSchema.parse({
+      ...map,
+      walls: ["~ht", "##d", "x.."],
+      light: "dim",
+    });
+    expect(terrainOf(marked)).toEqual({
+      difficult: ["0,0"],
+      half: ["1,0"],
+      threeQuarters: ["2,0"],
+      dim: ["2,1"],
+      dark: ["0,2"],
+      light: "dim",
+    });
+    expect(
+      BattlemapSchema.safeParse({ ...map, walls: ["..?", "##.", "..."] })
+        .success,
+    ).toBe(false);
+    expect(BattlemapSchema.safeParse({ ...map, light: "gloomy" }).success).toBe(
+      false,
+    );
+  });
+
+  it("costs double to walk through difficult terrain", () => {
+    const grid = { width: 8, height: 1 };
+    const rough = new Set(["1,0", "2,0"]);
+    const walk = reachableSquares(
+      { x: 0, y: 0 },
+      30,
+      grid,
+      new Set(),
+      new Set(),
+      rough,
+    );
+    const feet = (x: number) => walk.find((item) => item.square.x === x)?.feet;
+    expect(feet(1)).toBe(10);
+    expect(feet(2)).toBe(20);
+    expect(feet(4)).toBe(30);
+    expect(feet(5)).toBeUndefined();
+    // Around is cheaper than through when there's room.
+    const wide = reachableSquares(
+      { x: 0, y: 1 },
+      30,
+      { width: 5, height: 3 },
+      new Set(),
+      new Set(),
+      new Set(["1,1", "2,1"]),
+    );
+    const across = wide.find(
+      (item) => item.square.x === 3 && item.square.y === 1,
+    );
+    expect(across?.feet).toBe(15);
+    expect(across?.path.some((square) => square.y === 1 && square.x < 3)).toBe(
+      false,
+    );
+  });
+
+  it("works out cover from walls, cover squares and creatures in the way", () => {
+    const cover = (
+      rows: readonly string[],
+      creatures: readonly string[] = [],
+    ) => {
+      const { walls, cover: squares } = keysOf(rows);
+      return coverBetween(
+        { x: 0, y: 1 },
+        { x: 4, y: 1 },
+        walls,
+        squares,
+        new Set(creatures),
+      );
+    };
+    expect(cover([".....", ".....", "....."])).toBe(0);
+    expect(cover([".....", "..#..", "....."])).toBe(2); // a pillar, as on the DMG's grid
+    expect(cover(["..#..", "..#..", "..#.."])).toBe("total");
+    expect(cover([".....", "..h..", "....."])).toBe(2);
+    expect(cover([".....", "..t..", "....."])).toBe(5);
+    expect(cover([".....", ".....", "....."], ["2,1"])).toBe(2);
+    // Standing in a cover square gives nothing: only cover between the two counts.
+    expect(cover([".....", "....h", "....."])).toBe(0);
+    expect(
+      coverBetween(
+        { x: 0, y: 0 },
+        null,
+        new Set(),
+        keysOf([]).cover,
+        new Set(),
+      ),
+    ).toBe(0);
+  });
+
+  it("adds cover to AC against an attack, and to Dexterity saves", async () => {
+    const run = arenaRun(await base(), {});
+    const open = onMap(
+      ["....."],
+      [at(hero(run), 0, 0), at(monster("a"), 1, 0)],
+    );
+    const hit = settle(run, open, [act(PLAYER_ACTOR, `${sword}|a`)], HIGH);
+    expect(reported(hit.events)[0]?.target).toBe(10);
+
+    const shot = archer(run, "archer");
+    const behind = onMap(
+      ["..t.."],
+      [at(monster("b", "srd52:monster/archer"), 0, 0), at(hero(shot), 4, 0)],
+    );
+    const covered = settle(shot, behind, [act("b", "monster:0|player")], HIGH);
+    const ac = deriveStats(actor(behind, PLAYER_ACTOR), shot).ac;
+    expect(reported(covered.events)[0]?.target).toBe(ac + 5);
+
+    const spit = arenaRun(await base(), {
+      "srd52:monster/spitter": dummy("srd52:monster/spitter", {
+        actions: [
+          {
+            name: "Spit",
+            activation: {
+              cost: ["action"],
+              targeting: { creatures: 1, range: 30, side: "enemy" },
+              resolution: {
+                kind: "save",
+                ability: "dex",
+                dc: { base: 15 },
+                damage: [{ amount: { dice: "1d6" }, type: "acid" }],
+              },
+            },
+          },
+        ],
+      }),
+    });
+    const player = hero(spit);
+    // A roll that fails by one in the open, and passes with half cover.
+    const natural = 14 - saveBonus(deriveStats(player, spit), "dex");
+    const dice: Dice = {
+      below: () => 0,
+      roll: (sides) => (sides === 20 ? natural : 1),
+    };
+    const spat = (rows: readonly string[]) =>
+      damageOf(
+        settle(
+          spit,
+          onMap(rows, [
+            at(monster("s", "srd52:monster/spitter"), 0, 0),
+            at(player, 4, 0),
+          ]),
+          [act("s", "monster:0|player")],
+          dice,
+        ).events,
+        PLAYER_ACTOR,
+      );
+    expect(spat(["....."])).toEqual([1]);
+    expect(spat(["..h.."])).toEqual([]);
+  });
+
+  it("can't target a creature behind total cover", async () => {
+    const run = archer(await base(), "archer");
+    const state = onMap(
+      ["..#..", "..#..", "..#.."],
+      [at(monster("b", "srd52:monster/archer"), 0, 1), at(hero(run), 4, 1)],
+    );
+    const options = nextDndDecision(state, run)?.options.map((item) => item.id);
+    expect(options).not.toContain("monster:0|player");
+    const peek = onMap(
+      ["..#..", "..#..", "....."],
+      [at(monster("b", "srd52:monster/archer"), 0, 1), at(hero(run), 4, 1)],
+    );
+    expect(
+      nextDndDecision(peek, run)?.options.map((item) => item.id),
+    ).toContain("monster:0|player");
+  });
+
+  it("hides creatures in darkness from those without Darkvision", async () => {
+    const run = archer(await base(), "seer", {
+      text: "Senses Darkvision 60 ft.; Passive Perception 10",
+    });
+    const player = hero(run);
+    expect(darkvisionOf(player, run)).toBe(0); // a Human
+    const seer = monster("v", "srd52:monster/seer");
+    expect(darkvisionOf(seer, run)).toBe(60);
+    expect(darkvisionOf(monster("a"), run)).toBe(0);
+    const dwarf: Actor =
+      player.source.kind === "character" && player.source.build
+        ? {
+            ...player,
+            source: {
+              ...player.source,
+              build: {
+                ...player.source.build,
+                speciesId: "srd52:species/dwarf",
+              },
+            },
+          }
+        : player;
+    expect(darkvisionOf(dwarf, run)).toBe(60);
+
+    const dark = onMap(["....."], [at(player, 0, 0), at(seer, 1, 0)], "dark");
+    expect(seeing(player, { x: 1, y: 0 }, dark, run)).toBe("none");
+    expect(seeing(seer, { x: 0, y: 0 }, dark, run)).toBe("dim");
+    // The hero can't see the seer: Disadvantage, so two d20s and no Advantage.
+    const swing = countingD20s(HIGH);
+    const swung = settle(
+      run,
+      dark,
+      [act(PLAYER_ACTOR, `${sword}|v`)],
+      swing.dice,
+    );
+    expect(swing.d20s()).toBe(2);
+    expect(reported(swung.events)).toHaveLength(1);
+    // The seer sees the hero, who can't see it back: Advantage, from far enough not to be crowded.
+    const apart = onMap(["....."], [at(player, 0, 0), at(seer, 4, 0)], "dark");
+    const shoot = countingD20s(HIGH);
+    const shot = settle(run, apart, [act("v", "monster:0|player")], shoot.dice);
+    expect(shoot.d20s()).toBe(2);
+    expect(shot.events.some((event) => event.kind === `${NS}:damaged`)).toBe(
+      true,
+    );
+    // In bright light, one d20 each.
+    const lit = countingD20s(HIGH);
+    settle(
+      run,
+      onMap(["....."], [at(player, 0, 0), at(seer, 1, 0)]),
+      [act(PLAYER_ACTOR, `${sword}|v`)],
+      lit.dice,
+    );
+    expect(lit.d20s()).toBe(1);
+  });
+
+  it("gives Disadvantage on sight-based Perception into dim light", async () => {
+    const run = await base();
+    const player = hero(run);
+    const state = onMap(["..d.x"], [at(player, 0, 0)]);
+    expect(seeing(player, { x: 1, y: 0 }, state, run)).toBe("clear");
+    expect(seeing(player, { x: 2, y: 0 }, state, run)).toBe("dim");
+    expect(seeing(player, { x: 4, y: 0 }, state, run)).toBe("none");
+  });
+
+  it("tells the board the terrain, move costs through it and each foe's cover", async () => {
+    const run = arenaRun(await base(), {});
+    const state = onMap(
+      ["~~....", "......", "..h..."],
+      [at(hero(run), 0, 2), at(monster("a"), 4, 2)],
+    );
+    const board = dndUi.combat(state, run)?.board;
+    expect(board?.terrain?.difficult).toEqual(["0,0", "1,0"]);
+    expect(board?.cover).toEqual({ a: 2 });
+    expect(
+      board?.moves.find((move) => move.x === 0 && move.y === 0)?.feet,
+    ).toBe(15); // 5 to the diagonal, then 10 into the rough square
+    expect(
+      board?.moves.find((move) => move.x === 0 && move.y === 1)?.feet,
+    ).toBe(5);
+  });
+
+  it("steps into cover and around difficult terrain", async () => {
+    const run = archer(await base(), "archer");
+    const player = hero(run);
+    const spot = { x: 0, y: 2 };
+    // A monster closing to shoot picks a square that's behind the half wall.
+    const shooting = onMap(
+      [
+        "............",
+        "............",
+        "....h.......",
+        "............",
+        "............",
+      ],
+      [
+        at(monster("b", "srd52:monster/archer"), 11, 2),
+        at(player, spot.x, spot.y),
+      ],
+    );
+    const step = settle(run, shooting, [act("b", MOVE)], HIGH, (asked) =>
+      choosePolicy(asked, contextOf(run, shooting, HIGH)),
+    );
+    const archerNow = actor(step.state, "b");
+    expect(distanceFeet(archerNow.position, spot)).toBeLessThanOrEqual(30);
+    expect(coverFor(step.state, spot, archerNow, [PLAYER_ACTOR])).toBe(2);
+
+    // A melee monster ends beside the hero on firm ground.
+    const rough = onMap(
+      [".....", ".~...", "....."],
+      [at(monster("a"), 4, 1), at(player, 0, 1)],
+    );
+    const walked = settle(
+      arenaRun(run, {}),
+      rough,
+      [act("a", MOVE)],
+      HIGH,
+      (asked) => choosePolicy(asked, contextOf(run, rough, HIGH)),
+    );
+    const there = actor(walked.state, "a").position;
+    expect(distanceFeet(there, { x: 0, y: 1 })).toBe(5);
+    expect(there).not.toEqual({ x: 1, y: 1 });
+  });
+
+  it("goes for a foe in the open before one behind three-quarters cover", async () => {
+    const run = archer(await base(), "archer");
+    const state = onMap(
+      [".....", "..t..", "....."],
+      [
+        at(monster("b", "srd52:monster/archer"), 0, 1),
+        at(hero(run, { hp: 5 }), 4, 1),
+        at(hero(run, { id: "ally", hp: 50 }), 2, 2), // off the line through the cover
+      ],
+    );
+    const decision = nextDndDecision(state, run);
+    if (!decision) throw new Error("No decision");
+    expect(choosePolicy(decision, contextOf(run, state, HIGH))).toBe(
+      "monster:0|ally",
+    );
+  });
+
+  it("plays a whole fight on a map with cover to the end", async () => {
+    const run = archer(await base(), "archer", { hp: 12 });
+    const party = [hero(run), hero(run, { id: "ally" })];
+    const rows = ["........", "..h..t..", "...##...", "..~~~...", "........"];
+    const battlemap = BattlemapSchema.parse({
+      image: "assets/map.png",
+      imageWidth: 800,
+      imageHeight: 500,
+      crop: { x: 0, y: 0, width: 800, height: 500 },
+      columns: 8,
+      rows: 5,
+      walls: rows,
+      party: [
+        [0, 4],
+        [1, 4],
+      ],
+      monsters: [
+        [6, 0],
+        [7, 0],
+      ],
+    });
+    const started = startCombat(
+      {
+        id: "e",
+        monsters: [{ monster: "srd52:monster/archer", count: 2 }],
+        battlemap,
+      },
+      contextOf(run, fight(...party), HIGH),
+      { canFlee: false, defeatContinues: false },
+    );
+    let state = (started.events ?? []).reduce<DndState>(
+      (current, event) => applyDndEvent(current, event),
+      {
+        actors: Object.fromEntries(party.map((item) => [item.id, item])),
+        combat: null,
+      },
+    );
+    expect(state.combat?.terrain?.half).toEqual(["2,1"]);
+    const dice = createDice(rngFromSeed("cover"));
+    const events: SystemEvent[] = [];
+    for (let turn = 0; turn < 200 && state.combat; turn += 1) {
+      const decision = nextDndDecision(state, run);
+      if (!decision) break;
+      const answer = (asked: Decision, now: DndState): string =>
+        choosePolicy(asked, contextOf(run, now, dice));
+      const result = settle(
+        run,
+        state,
+        [
+          {
+            kind: decision.resume.kind,
+            payload: {
+              ...decision.resume.payload,
+              answer: answer(decision, state),
+            },
+          },
+        ],
+        dice,
+        answer,
+      );
+      events.push(...result.events);
+      state = result.state;
+    }
+    // Someone shot past the half wall or the pillar, against AC raised by cover.
+    const heroAc = deriveStats(actor(state, PLAYER_ACTOR), run).ac;
+    expect(reported(events).map((roll) => roll.target)).toContain(heroAc + 2);
+    expect(state.combat).toBeNull();
+    expect(reported(events).length).toBeGreaterThan(0);
   });
 });
 
