@@ -108,6 +108,14 @@ export interface Board {
   readonly settled?: () => Promise<void>; // once what it was given has finished playing
 }
 
+// One die roll for the roll history, such as "Sera · Longsword → Goblin · 14 + 5 = 19 vs AC 15 ✓".
+export interface RollView {
+  readonly actor: string; // who rolled, or for damage who took it, by name
+  readonly label: string; // what was rolled
+  readonly math: string; // the die, what was added, and what it had to reach
+  readonly success: boolean | null; // null when it wasn't against anything, such as damage
+}
+
 export interface SystemUi {
   readonly systemId: string;
   readonly about: string;
@@ -143,4 +151,10 @@ export interface SystemUi {
     after: unknown,
     access: ContentAccess,
   ) => unknown; // null for an event with nothing to show
+  // The event as a roll for the history, given the state from just before it; null for one that rolled nothing.
+  readonly roll?: (
+    event: SystemEvent,
+    state: unknown,
+    access: ContentAccess,
+  ) => RollView | null;
 }

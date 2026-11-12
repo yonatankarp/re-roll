@@ -31,6 +31,7 @@ import type {
   DecisionCard,
   OptionGroup,
   OptionView,
+  RollView,
   SheetView,
   SystemUi,
 } from "./system-ui.ts";
@@ -55,6 +56,16 @@ export interface LogLine {
   readonly moment?: "levelUp" | "foeDefeated";
 }
 
+// A roll, with the step of the log it came in, so the latest choice's rolls can be found.
+export interface RollLine extends RollView {
+  readonly step: number;
+}
+
+// The clues found that point to one secret, newest first. Only the clue text, never what the secret is.
+export interface LeadGroup {
+  readonly clues: readonly { readonly text: string; readonly step: number }[];
+}
+
 export interface GameView {
   readonly title: string;
   readonly scene: string | null;
@@ -75,6 +86,10 @@ export interface GameView {
   readonly log: readonly LogLine[];
   // Plain data for the system's encounter board to animate, in order, from the start of the run.
   readonly cues: readonly unknown[];
+  readonly rolls: readonly RollLine[]; // from the start of the run, oldest first
+  readonly leads: readonly LeadGroup[]; // the group with the newest clue first
+  readonly steps: number; // inputs so far, the run's start included
+  readonly canUndo: boolean; // a forgiving setting is on and there's a choice to take back
   readonly system: string;
   readonly systemState: unknown; // for the system's own board
   readonly ended: GameState["story"]["ended"];
@@ -130,6 +145,8 @@ interface Current {
   readonly log: LogEntry[];
   readonly lines: LogLine[];
   readonly cues: unknown[];
+  readonly rolls: RollLine[];
+  readonly clues: Clue[];
   state: GameState;
   warnings: readonly string[];
 }
@@ -249,20 +266,45 @@ export function sheetChanges(
   });
 }
 
+interface Clue {
+  readonly secret: string;
+  readonly text: string;
+  readonly step: number;
+}
+
+// Clues of the same secret together, the newest first in each and the group found last at the top.
+export function leadGroups(clues: readonly Clue[]): LeadGroup[] {
+  const groups = new Map<string, Clue[]>();
+  for (const clue of [...clues].reverse()) {
+    groups.set(clue.secret, [...(groups.get(clue.secret) ?? []), clue]);
+  }
+  return [...groups.values()].map((group) => ({
+    clues: group.map(({ text, step }) => ({ text, step })),
+  }));
+}
+
 function narrate(
   run: RunContext,
   ui: SystemUi,
   from: GameState | null,
   events: readonly GameEvent[],
+  step: number, // the log entry these events belong to
 ): {
   readonly state: GameState | null;
   readonly lines: readonly LogLine[];
   readonly cues: readonly unknown[];
+  readonly rolls: readonly RollLine[];
+  readonly clues: readonly Clue[];
 } {
   let state = from;
   const lines: LogLine[] = [];
   const cues: unknown[] = [];
+  const rolls: RollLine[] = [];
+  const clues: Clue[] = [];
   for (const event of events) {
+    if (event.kind === "clueRevealed") {
+      clues.push({ secret: event.secret, text: event.text, step });
+    }
     if (event.kind === "runStarted") {
       state = event.state;
       continue;
@@ -286,6 +328,10 @@ function narrate(
         });
       }
     }
+    if (ui.roll && isNamespacedEvent(event)) {
+      const rolled = ui.roll(event, state.system, run);
+      if (rolled) rolls.push({ ...rolled, step });
+    }
     const before = state;
     state = applyEvent(run, state, event);
     if (ui.cue && (isNarrativeEvent(event) || isNamespacedEvent(event))) {
@@ -302,14 +348,51 @@ function narrate(
       }
     }
   }
-  return { state, lines, cues };
+  return { state, lines, cues, rolls, clues };
 }
 
-function narrated(told: ReturnType<typeof narrate>): {
+// The whole log told again from the start, as on loading or taking back a choice.
+function retell(
+  run: RunContext,
+  ui: SystemUi,
+  log: readonly LogEntry[],
+): {
+  readonly state: GameState | null;
   readonly lines: LogLine[];
   readonly cues: unknown[];
+  readonly rolls: RollLine[];
+  readonly clues: Clue[];
 } {
-  return { lines: [...told.lines], cues: [...told.cues] };
+  let state: GameState | null = null;
+  const told = {
+    lines: [] as LogLine[],
+    cues: [] as unknown[],
+    rolls: [] as RollLine[],
+    clues: [] as Clue[],
+  };
+  log.forEach((entry, step) => {
+    const part = narrate(run, ui, state, entry.events, step);
+    state = part.state;
+    told.lines.push(...part.lines);
+    told.cues.push(...part.cues);
+    told.rolls.push(...part.rolls);
+    told.clues.push(...part.clues);
+  });
+  return { state, ...told };
+}
+
+// Whether the run's settings include a forgiving one that lets the player take back a choice.
+function undoAllowed(run: RunContext, log: readonly LogEntry[]): boolean {
+  const [first] = log;
+  const chosen = resolveSettings(
+    run,
+    first?.input.kind === "start" ? first.input.settings : undefined,
+  );
+  return (run.system.settings ?? []).some(
+    (setting) =>
+      setting.options.find((option) => option.id === chosen[setting.id])
+        ?.undo === true,
+  );
 }
 
 export interface GameDependencies {
@@ -683,9 +766,9 @@ export function createGame({
         registry,
         run,
         ui,
-        state: started.state,
         log: [{ input: start, events: started.events }],
-        ...narrated(narrate(run, ui, null, started.events)),
+        ...retell(run, ui, [{ input: start, events: started.events }]),
+        state: started.state,
         warnings: [],
       };
       current = game;
@@ -703,13 +786,43 @@ export function createGame({
       } as const;
       const outcome = step(game.run, game.state, input);
       if (!outcome.ok) throw new Error(outcome.error);
-      const told = narrate(game.run, game.ui, game.state, outcome.events);
+      const told = narrate(
+        game.run,
+        game.ui,
+        game.state,
+        outcome.events,
+        game.log.length,
+      );
       game.lines.push(...told.lines);
       game.cues.push(...told.cues);
+      game.rolls.push(...told.rolls);
+      game.clues.push(...told.clues);
       game.state = outcome.state;
       game.log.push({ input, events: outcome.events });
       game.warnings = [];
       await autosave(game);
+    },
+
+    // Takes back the last choice by telling the log again without it. The dice live in the state,
+    // so making the same choice again rolls the same numbers.
+    async undo(): Promise<void> {
+      const game = active();
+      if (!undoAllowed(game.run, game.log)) {
+        throw new Error("This difficulty doesn't allow undoing a choice");
+      }
+      if (game.log.length < 2) throw new Error("There is no choice to undo");
+      const log = game.log.slice(0, -1);
+      const told = retell(game.run, game.ui, log);
+      if (told.state === null) throw new Error("The log has no run start");
+      const undone: Current = {
+        ...game,
+        ...told,
+        state: told.state,
+        log,
+        warnings: [],
+      };
+      current = undone;
+      await autosave(undone);
     },
 
     // Each save gets its own file. Only a run's own autosave is ever overwritten.
@@ -740,16 +853,9 @@ export function createGame({
         registry,
         run,
         ui,
-        state: loaded.state,
         log: [...log],
-        ...narrated(
-          narrate(
-            run,
-            ui,
-            null,
-            log.flatMap((entry) => entry.events),
-          ),
-        ),
+        ...retell(run, ui, log),
+        state: loaded.state,
         warnings: loaded.warnings,
       };
       current = game;
@@ -766,8 +872,19 @@ export function createGame({
     },
 
     view(): GameView {
-      const { run, ui, state, lines, cues, registry, warnings, root } =
-        active();
+      const {
+        run,
+        ui,
+        state,
+        lines,
+        cues,
+        rolls,
+        clues,
+        log: entries,
+        registry,
+        warnings,
+        root,
+      } = active();
       const currentScene = run.adventure.scenes.find(
         (item) => item.id === state.story.scene,
       );
@@ -848,6 +965,10 @@ export function createGame({
         })),
         log: [...lines],
         cues: [...cues],
+        rolls: [...rolls],
+        leads: leadGroups(clues),
+        steps: entries.length,
+        canUndo: entries.length > 1 && undoAllowed(run, entries),
         system: ui.systemId,
         systemState: state.system,
         ended: state.story.ended,

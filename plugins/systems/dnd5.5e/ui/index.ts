@@ -746,6 +746,90 @@ function describeRoll(
   return `${attacker} uses ${label} on ${defender}: ${rolled} against AC ${String(target)}, ${success ? "hit" : "miss"}.`;
 }
 
+// "14 + 5 = 19 vs AC 15": the die, what was added, and what it had to reach.
+function rollMath(natural: number, total: number, against: string): string {
+  const bonus = total - natural;
+  const added =
+    bonus === 0
+      ? String(natural)
+      : `${String(natural)} ${bonus > 0 ? "+" : "−"} ${String(Math.abs(bonus))} = ${String(total)}`;
+  return `${added} vs ${against}`;
+}
+
+// One line of the roll history, from the state just before the event.
+function roll(
+  event: SystemEvent,
+  rawState: unknown,
+): {
+  readonly actor: string;
+  readonly label: string;
+  readonly math: string;
+  readonly success: boolean | null;
+} | null {
+  if (!("payload" in event)) return null;
+  const state = StateSchema.parse(rawState);
+  const name = (id: string): string => state.actors[id]?.name ?? id;
+  switch (event.kind) {
+    case "dnd5.5e:rollReported": {
+      const data = EVENT_SCHEMAS["dnd5.5e:rollReported"].parse(event.payload);
+      if (data.against === "check") {
+        const what =
+          data.label in ABILITY_NAMES
+            ? ABILITY_NAMES[data.label as keyof typeof ABILITY_NAMES]
+            : skillName(data.label);
+        return {
+          actor: name(data.actor),
+          label: `${what} check`,
+          math: rollMath(data.natural, data.total, `DC ${String(data.target)}`),
+          success: data.success,
+        };
+      }
+      // A natural 1 or 20 decides an attack whatever the total, so the line says why.
+      const natural =
+        data.natural === 20 || data.natural === 1
+          ? `, natural ${String(data.natural)}`
+          : "";
+      return {
+        actor: name(data.actor),
+        label: `${data.label} → ${name(data.against)}`,
+        math: `${rollMath(data.natural, data.total, `AC ${String(data.target)}`)}${natural}`,
+        success: data.success,
+      };
+    }
+    case "dnd5.5e:saveRolled": {
+      const data = EVENT_SCHEMAS["dnd5.5e:saveRolled"].parse(event.payload);
+      return {
+        actor: name(data.actor),
+        label: `${ABILITY_NAMES[data.ability]} save`,
+        math: rollMath(data.natural, data.total, `DC ${String(data.dc)}`),
+        success: data.success,
+      };
+    }
+    case "dnd5.5e:deathSaveRolled": {
+      const data = EVENT_SCHEMAS["dnd5.5e:deathSaveRolled"].parse(
+        event.payload,
+      );
+      return {
+        actor: name(data.actor),
+        label: "Death save",
+        math: `${String(data.natural)} vs 10`,
+        success: data.natural >= 10,
+      };
+    }
+    case "dnd5.5e:damaged": {
+      const data = EVENT_SCHEMAS["dnd5.5e:damaged"].parse(event.payload);
+      return {
+        actor: name(data.actor),
+        label: "Damage taken",
+        math: `${String(data.amount)} ${data.type}${data.critical ? ", critical hit" : ""}`,
+        success: null,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 function describe(
   event: SystemEvent,
   rawState: unknown,
@@ -899,6 +983,7 @@ function playerDied(rawState: unknown): boolean {
 
 export const dndUi = {
   cue: dndCue,
+  roll,
   systemId: "dnd5.5e",
   about: "Compatible with fifth edition.",
   sheets,

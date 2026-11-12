@@ -657,15 +657,17 @@ export function damageEvents(
   if (amount <= 0) return [];
   // Damage left over after reaching 0 HP kills a character if it's at least their maximum.
   const remaining = amount - target.tempHp - Math.max(0, target.hp);
-  if (
+  const fortitude =
     target.hp > 0 &&
     remaining >= 0 &&
     !critical &&
     type !== "radiant" &&
-    hasPassive(deriveStats(target, context), "undeadFortitude") &&
-    rollSave(target, "con", 5 + amount, context)
-  ) {
+    hasPassive(deriveStats(target, context), "undeadFortitude")
+      ? rollSave(target, "con", 5 + amount, context)
+      : null;
+  if (fortitude?.saved) {
     return [
+      ...fortitude.events,
       dndEvent(`${NS}:damaged`, {
         actor: target.id,
         amount: amount - remaining - 1,
@@ -678,6 +680,7 @@ export function damageEvents(
   const massive =
     target.side === "party" && remaining >= deriveStats(target, context).maxHp;
   const events: SystemEvent[] = [
+    ...(fortitude?.events ?? []),
     dndEvent(`${NS}:damaged`, {
       actor: target.id,
       amount,
@@ -832,18 +835,19 @@ function leafEvents(
   return events;
 }
 
+// The saved flag, and the roll for the history. An automatic failure rolls no die, so it has no event.
 function rollSave(
   target: Actor,
   ability: Ability,
   dc: number,
   context: Context,
   magical = false,
-): boolean {
+): { readonly saved: boolean; readonly events: SystemEvent[] } {
   if (
     (ability === "str" || ability === "dex") &&
     hasCondition(target, "paralyzed", "petrified", "stunned", "unconscious")
   ) {
-    return false;
+    return { saved: false, events: [] };
   }
   const stats = deriveStats(target, context);
   const roll = rollD20(context.dice, {
@@ -858,7 +862,20 @@ function rollSave(
     roll.natural +
     saveBonus(stats, ability) +
     rollBonus(target, "saves", context);
-  return total >= dc;
+  const saved = total >= dc;
+  return {
+    saved,
+    events: [
+      dndEvent(`${NS}:saveRolled`, {
+        actor: target.id,
+        ability,
+        natural: roll.natural,
+        total,
+        dc,
+        success: saved,
+      }),
+    ],
+  };
 }
 
 export function resolveTargets(
@@ -1038,14 +1055,15 @@ export function resolveAction(
       // Damage against several targets at once is rolled once for all of them.
       const damage = rollSharedDamage(resolution.damage);
       for (const target of targets) {
-        const rolled = rollSave(
+        const { saved: rolledSave, events: saveEvents } = rollSave(
           target,
           resolution.ability,
           dc,
           context,
           action.spellLevel !== null,
         );
-        const resisted = rolled
+        events.push(...saveEvents);
+        const resisted = rolledSave
           ? null
           : legendaryResistance(
               target,
@@ -1054,7 +1072,7 @@ export function resolveAction(
               events,
             );
         if (resisted) events.push(resisted);
-        const saved = rolled || resisted !== null;
+        const saved = rolledSave || resisted !== null;
         applyRolled(target, damage, (amount) => {
           if (!saved) return amount;
           return resolution.onSuccessDamage === "half" ? halved(amount) : 0;
@@ -1901,12 +1919,19 @@ export function runConcentrationSave(
   const actor = actorOf(context.state, payload.actor);
   if (actor.concentratingOn === null) return {};
   // Being down ends Concentration outright, as does any failed save.
-  if (isDown(actor) || !rollSave(actor, "con", payload.dc, context)) {
+  const save = isDown(actor)
+    ? null
+    : rollSave(actor, "con", payload.dc, context);
+  const rolled = save?.events ?? [];
+  if (!save?.saved) {
     return {
-      events: [dndEvent(`${NS}:concentrationEnded`, { actor: actor.id })],
+      events: [
+        ...rolled,
+        dndEvent(`${NS}:concentrationEnded`, { actor: actor.id }),
+      ],
     };
   }
-  return {};
+  return { events: rolled };
 }
 
 export { ConcentrationSchema };
@@ -2018,7 +2043,7 @@ export function runLingeringTick(
   if (effect?.modifier.kind !== "lingeringDamage" || isDead(target)) return {};
   const { damage, save, once } = effect.modifier;
   const stats = deriveStats(state.actors[effect.casterId] ?? target, context);
-  const saved = save
+  const { saved, events: rolled } = save
     ? rollSave(
         target,
         save.ability,
@@ -2026,7 +2051,7 @@ export function runLingeringTick(
         context,
         effect.sourceId.startsWith("spell:"),
       )
-    : false;
+    : { saved: false, events: [] };
   const scale = (amount: number): number => {
     if (!saved || save?.onSuccess === "full") return amount;
     return save?.onSuccess === "half" ? halved(amount) : 0;
@@ -2045,6 +2070,7 @@ export function runLingeringTick(
     false,
     context,
   );
+  events.unshift(...rolled);
   if (once || (saved && save?.endsEffect)) {
     events.push(
       dndEvent(`${NS}:effectEnded`, {
@@ -2089,14 +2115,15 @@ export function runFinishTurn(context: Context): SystemResult {
     const { sourceId, modifier } = effect;
     if (seen.has(sourceId)) continue;
     seen.add(sourceId);
-    const saved = rollSave(
+    const rolled = rollSave(
       target,
       save.ability,
       save.dc,
       context,
       sourceId.startsWith("spell:"),
     );
-    const resisted = saved
+    events.push(...rolled.events);
+    const resisted = rolled.saved
       ? null
       : legendaryResistance(
           target,
@@ -2105,7 +2132,7 @@ export function runFinishTurn(context: Context): SystemResult {
           events,
         );
     if (resisted) events.push(resisted);
-    if (saved || resisted) {
+    if (rolled.saved || resisted) {
       events.push(
         dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId }),
       );

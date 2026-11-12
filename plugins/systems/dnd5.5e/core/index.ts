@@ -412,7 +412,8 @@ export const dnd55e = defineSystem<DndState>({
           id: "story",
           label: "Story",
           detail:
-            "Your party takes a third of the damage. For enjoying the story.",
+            "Your party takes a third of the damage, and you can undo your last choice. For enjoying the story.",
+          undo: true,
         },
         {
           id: "normal",

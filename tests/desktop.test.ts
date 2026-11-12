@@ -225,6 +225,79 @@ describe("playing through the shell's session", () => {
     expect(difficulty()).toBe("story");
   });
 
+  const pick = async (
+    game: ReturnType<typeof newGame>,
+    label: string,
+  ): Promise<void> => {
+    const option = game
+      .view()
+      .decision?.options.find((item) => item.label.includes(label));
+    if (!option) throw new Error(`${label} isn't offered`);
+    await game.answer(option.id);
+  };
+
+  it("undoes the last choice on Story, and the same choice rolls the same dice again", async () => {
+    const game = newGame();
+    await game.start("haunted-house", "undo-test", { difficulty: "story" });
+    expect(game.view().canUndo).toBe(false); // nothing chosen yet
+    await chooseCharacter(game, "Fighter");
+    await pick(game, "Try the cellar door");
+    await pick(game, "Keep moving"); // the dread clock's beat comes first
+    const before = game.view();
+    await pick(game, "Force the lock");
+    const after = game.view();
+    expect(after.rolls.at(-1)).toMatchObject({
+      actor: "Human Fighter",
+      label: "Athletics check",
+      step: after.steps - 1,
+    });
+    expect(after.rolls.at(-1)?.math).toMatch(/^\d+ [+−] \d+ = \d+ vs DC 13$/);
+
+    await game.undo();
+    expect(game.view()).toEqual(before);
+    // The autosave forgets the choice too, so loading it doesn't bring it back.
+    const autosave = (await game.listSaves()).find((save) => save.current);
+    if (!autosave) throw new Error("No autosave");
+    await game.load(autosave.path);
+    expect(game.view().steps).toBe(before.steps);
+
+    await pick(game, "Force the lock");
+    expect(game.view().rolls).toEqual(after.rolls);
+    expect(game.view().systemState).toEqual(after.systemState);
+  });
+
+  it("offers no undo on Normal or Hard", async () => {
+    for (const difficulty of ["normal", "hard"]) {
+      const game = newGame();
+      await game.start("haunted-house", "undo-test", { difficulty });
+      await chooseCharacter(game, "Fighter");
+      expect(game.view().canUndo).toBe(false);
+      await expect(game.undo()).rejects.toThrow("doesn't allow undoing");
+    }
+  });
+
+  it("keeps the clues found as leads, and the rolls made, from the events", async () => {
+    const game = newGame();
+    await game.start("haunted-house", "leads-test");
+    await chooseCharacter(game, "Fighter");
+    expect(game.view().leads).toEqual([]);
+    await pick(game, "Talk to the caretaker");
+    const { leads, steps } = game.view();
+    expect(leads).toEqual([
+      {
+        clues: [
+          { text: "Fresh mortar dust on the caretaker's sleeves.", step: 2 },
+        ],
+      },
+    ]);
+    expect(steps).toBe(3);
+    // A save tells the same leads again.
+    const path = await game.save("leads");
+    await game.start("haunted-house", "other");
+    await game.load(path);
+    expect(game.view().leads).toEqual(leads);
+  });
+
   it("lists the adventures by title", async () => {
     const adventures = await newGame().listAdventures();
     expect(adventures.map((item) => item.id).sort()).toEqual([

@@ -255,6 +255,15 @@ const RollReportSchema = z.strictObject({
   success: z.boolean(),
   label: z.string(),
 });
+// A saving throw, recorded only for the roll history: the outcome lives in the events that follow it.
+const SaveRolledSchema = z.strictObject({
+  actor: z.string(),
+  ability: AbilitySchema,
+  natural: z.number().int(),
+  total: z.number().int(),
+  dc: z.number().int(),
+  success: z.boolean(),
+});
 
 // `key` marks one that can't be taken again until the monster's next turn.
 const LegendaryActionTakenSchema = z.strictObject({
@@ -293,6 +302,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:concentrationEnded`]: ActorOnlySchema,
   [`${NS}:deathSaveRolled`]: DeathSaveSchema,
   [`${NS}:rollReported`]: RollReportSchema,
+  [`${NS}:saveRolled`]: SaveRolledSchema,
   [`${NS}:inspirationGranted`]: ActorOnlySchema,
   [`${NS}:inspirationSpent`]: ActorOnlySchema,
   [`${NS}:treasureFound`]: TreasureFoundSchema,
