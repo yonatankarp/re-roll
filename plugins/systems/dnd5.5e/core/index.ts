@@ -75,6 +75,7 @@ import {
 import {
   beginCreation,
   buildCompanion,
+  buildPolicy,
   characterEffects,
   characterFrames,
 } from "./character.ts";
@@ -513,9 +514,13 @@ export const dnd55e = defineSystem<DndState>({
   applyEvent: applyDndEvent,
   nextDecision: nextDndDecision,
   rests: availableRests,
-  decidePolicy: choosePolicy,
+  decidePolicy: (decision, context) =>
+    decision.id.startsWith(`${NS}:build:`)
+      ? buildPolicy(decision, context)
+      : choosePolicy(decision, context),
+  // Building steps (class, scores, subclass, spells, feats) are made as a companion's are.
   tactical: (decision) =>
-    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave):/.test(
+    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave|build):/.test(
       decision.id,
     ),
 });

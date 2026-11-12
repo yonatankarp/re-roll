@@ -32,6 +32,7 @@ export interface StoryResult {
 export const STORY_FRAME_PREFIX = "story:";
 // Rest options sit beside a scene's choices, whose ids are their indexes.
 export const REST_OPTION_PREFIX = "rest:";
+export const SCENE_DECISION_PREFIX = "scene:"; // a scene's choices
 
 const ResolveChoiceSchema = z.object({
   scene: z.string(),
@@ -213,7 +214,7 @@ export function storyDecision(
   return {
     kind: "decision",
     decision: {
-      id: `scene:${scene.id}`,
+      id: `${SCENE_DECISION_PREFIX}${scene.id}`,
       actor: PLAYER_ACTOR,
       prompt: sceneText(run, state, scene),
       options: [...options, ...rests],

@@ -1,11 +1,13 @@
 import { testAdventure } from "../../engine/tools/bot.ts";
 import { listAdventures, loadAdventure } from "./load-adventure.ts";
 
-// npm run bot -- [runs] [adventure] [--smart] [--difficulty=story|normal|hard] [--check]
+// npm run bot -- [runs] [adventure] [--smart] [--rests] [--avoid-endings] [--difficulty=story|normal|hard] [--check]
 // --check plays every difficulty and fails when a defeat rate leaves its band in CHECK_BANDS.
 const flags = process.argv.slice(2).filter((arg) => arg.startsWith("--"));
 const args = process.argv.slice(2).filter((arg) => !arg.startsWith("--"));
-const SMART = flags.includes("--smart"); // play fights sensibly, to measure difficulty
+const SMART = flags.includes("--smart"); // play fights and build characters sensibly, to measure difficulty
+const RESTS = flags.includes("--rests"); // rest whenever a scene allows
+const AVOID_ENDINGS = flags.includes("--avoid-endings"); // keep going while a choice doesn't end the adventure
 const DIFFICULTY = flags
   .find((flag) => flag.startsWith("--difficulty="))
   ?.slice("--difficulty=".length);
@@ -20,7 +22,7 @@ const CHECK = flags.includes("--check");
 const CHECK_BANDS: Readonly<
   Record<string, Readonly<Record<string, readonly [number, number]>>>
 > = {
-  "goblin-ambush": { story: [0, 10], normal: [0, 15], hard: [1, 25] }, // measured 0, 2, 6
+  "goblin-ambush": { story: [0, 10], normal: [0, 15], hard: [1, 25] }, // measured 0, 1.5, 5
   "haunted-house": { story: [0, 5], normal: [0, 5], hard: [0, 5] }, // measured 0, 0, 0
 };
 
@@ -53,6 +55,8 @@ for (const adventure of (await listAdventures()).filter(
     runs: RUNS,
     maxDecisions: MAX_DECISIONS,
     smart: SMART,
+    rests: RESTS,
+    avoidEndings: AVOID_ENDINGS,
     ...(DIFFICULTY ? { settings: { difficulty: DIFFICULTY } } : {}),
   });
   console.log(`${adventure}: ${String(report.runs)} runs`);
