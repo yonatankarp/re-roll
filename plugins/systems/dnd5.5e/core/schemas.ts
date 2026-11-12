@@ -700,7 +700,6 @@ export const CompanionSchema = ContentEntrySchema.extend({
   abilities: AbilityScoresSchema,
   text: z.string().min(1),
 }).strict();
-export type Companion = z.infer<typeof CompanionSchema>;
 
 // One legendary action: either some of the monster's own actions, by name, or an effect of its own.
 export const LegendaryActionSchema = z
@@ -715,7 +714,6 @@ export const LegendaryActionSchema = z
   .refine((item) => item.makes !== undefined || item.activation, {
     message: "needs makes or an activation",
   });
-export type LegendaryAction = z.infer<typeof LegendaryActionSchema>;
 
 export const MonsterSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
@@ -831,7 +829,6 @@ export const PregenSchema = ContentEntrySchema.extend({
   build: CharacterBuildSchema,
   equipment: z.array(ContentIdSchema),
 }).strict();
-export type Pregen = z.infer<typeof PregenSchema>;
 
 const MapSquareSchema = z.tuple([
   z.number().int().min(0),
@@ -993,7 +990,6 @@ export const RollTableSchema = ContentEntrySchema.extend({
       }
     }
   });
-export type RollTable = z.infer<typeof RollTableSchema>;
 
 // A table looked up by a printed key, such as a Challenge Rating band or a theme, rather than rolled on.
 export const LookupTableSchema = ContentEntrySchema.extend({
@@ -1007,7 +1003,6 @@ export const LookupTableSchema = ContentEntrySchema.extend({
     .min(1),
   source: z.string().min(1),
 }).strict();
-export type LookupTable = z.infer<typeof LookupTableSchema>;
 
 // A Bastion's special facility or event, for reading. Nothing runs Bastion turns yet.
 export const BastionEntrySchema = ContentEntrySchema.extend({
@@ -1018,7 +1013,6 @@ export const BastionEntrySchema = ContentEntrySchema.extend({
   order: z.string().optional(), // the order a facility's hirelings can carry out
   text: z.string().min(1),
 }).strict();
-export type BastionEntry = z.infer<typeof BastionEntrySchema>;
 
 const LevelBandSchema = z.strictObject({
   min: z.number().int().min(1),
@@ -1075,4 +1069,3 @@ export const EncounterBudgetSchema = ContentEntrySchema.extend({
     )
     .min(1),
 }).strict();
-export type EncounterBudget = z.infer<typeof EncounterBudgetSchema>;

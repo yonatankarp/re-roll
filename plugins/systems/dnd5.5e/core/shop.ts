@@ -31,7 +31,6 @@ export const ShopSchema = z.strictObject({
   // Percent off what the merchant asks, such as from a friendly attitude the adventure checks.
   discount: z.number().int().min(0).max(100).default(0),
 });
-export type Shop = z.infer<typeof ShopSchema>;
 export type Stock = z.infer<typeof StockSchema>;
 
 function itemOf(access: ContentAccess, id: string): Item {
