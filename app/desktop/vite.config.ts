@@ -13,7 +13,7 @@ export default defineConfig({
   publicDir: false,
   clearScreen: false,
   // Found only when the narrator's worker first starts, which would reload the page mid-game.
-  optimizeDeps: { include: ["kokoro-js"] },
+  optimizeDeps: { include: ["kokoro-js", "@huggingface/transformers"] },
   worker: { format: "es" }, // the narrator's worker is a module, and its libraries use import.meta
   build: {
     outDir: resolve(repoRoot, "out/desktop"),

@@ -5,6 +5,12 @@ import { parse, stringify } from "yaml";
 import { scanPlugins } from "../../engine/kernel/loader.ts";
 import { createNodeStorage } from "../../engine/platform/node/storage.ts";
 import {
+  KOKORO_FILES,
+  KOKORO_PATH_TEMPLATE,
+  kokoroFetch,
+  sha256,
+} from "../../engine/shell/kokoro-files.ts";
+import {
   DEFAULT_VOICE,
   EMPTY_INDEX,
   KOKORO_MODEL,
@@ -136,6 +142,19 @@ for (const file of plan.stale) {
 if (plan.make.length > 0) {
   let started = performance.now();
   const { KokoroTTS, TextSplitterStream } = await import("kokoro-js");
+  // From a pinned commit, each file checked against its hash (engine/shell/kokoro-files.ts).
+  const { env: hub } = await import("@huggingface/transformers");
+  hub.remotePathTemplate = KOKORO_PATH_TEMPLATE;
+  globalThis.fetch = kokoroFetch(globalThis.fetch);
+  // Node's file cache ignores the commit, so a copy cached before is checked here instead.
+  for (const [file, hash] of Object.entries(KOKORO_FILES)) {
+    const cached = join(hub.cacheDir, KOKORO_MODEL, file);
+    const bytes = await readFile(cached).catch(() => null);
+    if (bytes && (await sha256(new Uint8Array(bytes).buffer)) !== hash) {
+      console.log(`Dropping ${cached}, which doesn't match its pinned hash`);
+      await rm(cached);
+    }
+  }
   const tts = await KokoroTTS.from_pretrained(KOKORO_MODEL, {
     dtype: "q8",
     device: "cpu",
