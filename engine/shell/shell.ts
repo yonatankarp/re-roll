@@ -1,11 +1,16 @@
-import { collapseCard, loadScreen } from "./load-screen.ts";
+import {
+  collapseCard,
+  loadScreen,
+  loadSkeleton,
+  saveHeading,
+} from "./load-screen.ts";
 import { campfire } from "./campfire.ts";
 import { contentFolderOption } from "./content-folder.ts";
 import { shopPanel } from "./shop.ts";
 import { adventureCard, adventureGrid } from "./adventure-picker.ts";
 import { soundControls } from "./sound-panel.ts";
 import { journalTabs, rollsWhy } from "./journal-tabs.ts";
-import type { Game, GameView } from "./session.ts";
+import type { AdventureChoice, Game, GameView, SaveChoice } from "./session.ts";
 import type {
   Board,
   BoardHost,
@@ -16,10 +21,41 @@ import type {
   SheetView,
 } from "./system-ui.ts";
 
-// Shortcuts use ⌘ on a Mac and Ctrl elsewhere; the key handler takes either.
+// Shortcuts show ⌘ on a Mac and Ctrl elsewhere; the key handler takes either, and says so.
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 const MOD = MAC ? "⌘" : "Ctrl+";
-const MOD_ARIA = MAC ? "Meta" : "Control";
+const keyshortcuts = (key: string): string => `Control+${key} Meta+${key}`;
+
+const BUSY_AFTER_MS = 300; // a step quicker than this shows no overlay, so it doesn't flicker
+const OPENING = "Opening the book…";
+const CANT_OPEN = "This adventure couldn't be opened.";
+const CANT_LOAD =
+  "This save couldn't be opened. It may be damaged, or from an older version of the adventure.";
+
+// An open book whose right page turns, for the busy overlay.
+const BOOK_ICON =
+  '<svg viewBox="0 0 64 40" width="72" height="45" aria-hidden="true">' +
+  '<path class="busy-cover" d="M1 5 32 9 63 5v31l-31 4-31-4z"/>' +
+  '<path class="busy-leaf" d="M4 7l27 4v26L4 34z"/>' +
+  '<path class="busy-leaf" d="M33 11l27-4v27l-27 3z"/>' +
+  '<path class="busy-leaf busy-turn" d="M33 11l27-4v27l-27 3z"/>' +
+  "</svg>";
+
+// A book's title as a reader would write it: a folder-style name such as "Project_Lamordia" gets
+// spaces and capitals.
+export function bookTitle(title: string): string {
+  return title.includes("_") || title === title.toLowerCase()
+    ? title
+        .replace(/_+/g, " ")
+        .replace(/(^|\s)\p{Ll}/gu, (letter) => letter.toUpperCase())
+    : title;
+}
+
+// A small "i" in a ring, for an option's details, drawn in the button's ink.
+const INFO_ICON =
+  '<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6">' +
+  '<circle cx="10" cy="10" r="8"/><path d="M10 9v5" stroke-linecap="round"/>' +
+  '<circle cx="10" cy="6" r=".6" fill="currentColor"/></svg>';
 
 // The whole page, drawn from the plain data in GameView. Knows nothing about any rule system.
 
@@ -308,14 +344,23 @@ export function mountShell(
   credits: readonly string[] = [], // the app's own, such as for its fonts
   cardSound?: () => void, // played as a card such as treasure found appears, when sound is on
 ): void {
-  const notice = el("p", { class: "notice" });
+  const notice = el("div", { class: "notice" });
   notice.setAttribute("role", "status");
-  // It hangs over the page, so a click puts it away.
+  // It hangs over the page, so a click (or Esc, for an error) puts it away, except on its details.
   notice.title = "Click to dismiss";
-  notice.addEventListener("click", () => {
-    notice.textContent = "";
+  notice.addEventListener("click", (event) => {
+    if (!(event.target as Element).closest("details")) say("");
   });
-  const screen = el("div", { class: "screen" }, el("p", { text: "Loading…" }));
+  // The busy overlay, shown when a step takes long enough to look stuck. It sits outside the inert root,
+  // so a screen reader still hears it.
+  const busyText = el("p");
+  const book = el("span", { class: "busy-book" });
+  book.innerHTML = BOOK_ICON;
+  const busy = el("div", { class: "busy" }, book, busyText);
+  busy.setAttribute("role", "status");
+  busy.hidden = true;
+  document.body.append(busy);
+  const screen = el("div", { class: "screen" });
   root.replaceChildren(
     el(
       "header",
@@ -334,10 +379,24 @@ export function mountShell(
   if (!actions) throw new Error("The page header is missing");
 
   // Errors stay until the next action; anything else clears itself, unless something newer replaced it.
+  // `detail` is the error as the game gave it, folded away under the friendly line.
   let sayTimer: ReturnType<typeof setTimeout> | undefined;
-  const say = (text: string, isError = false): void => {
+  const say = (text: string, isError = false, detail = ""): void => {
     clearTimeout(sayTimer);
-    notice.textContent = text;
+    notice.setAttribute("role", isError ? "alert" : "status");
+    notice.replaceChildren(
+      ...(text ? [el("span", { text })] : []),
+      ...(text && detail
+        ? [
+            el(
+              "details",
+              {},
+              el("summary", { text: "Details" }),
+              el("pre", { text: detail }),
+            ),
+          ]
+        : []),
+    );
     notice.classList.toggle("error", isError);
     if (text && !isError) {
       sayTimer = setTimeout(() => {
@@ -345,6 +404,20 @@ export function mountShell(
       }, 3000);
     }
   };
+
+  // Esc puts an error away first, before it means Back.
+  document.addEventListener("keydown", (event) => {
+    if (
+      event.key !== "Escape" ||
+      !notice.classList.contains("error") ||
+      !notice.hasChildNodes() ||
+      document.querySelector("dialog[open]")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    say("");
+  });
 
   // Keys for the whole page, such as Esc for Back, handled by the screen that owns them while it's shown.
   // `handle` says whether it used the key. Typing in a field and a busy page keep their keys.
@@ -397,17 +470,34 @@ export function mountShell(
   // Redrawing removes the button that had focus, so keyboard play needs it put somewhere new.
   let focusNext: HTMLElement | null = null;
 
-  // Blocks input while a step is saving, so one click can't answer two decisions.
-  const act = (work: () => Promise<void>): void => {
+  // Blocks input while a step is saving, so one click can't answer two decisions. A slow step shows
+  // `busy` after a moment; a failed one shows `failed`, with what went wrong under Details.
+  const act = (
+    work: () => Promise<void>,
+    { busy: waiting = "One moment…", failed = "" } = {},
+  ): void => {
     // Going inert drops focus, so a button that survives the work (Save) gets it back.
     const previous = document.activeElement;
     root.inert = true;
+    root.setAttribute("aria-busy", "true");
+    const slow = setTimeout(() => {
+      if (!waiting) return; // the screen draws its own placeholder
+      busyText.textContent = waiting;
+      busy.hidden = false;
+    }, BUSY_AFTER_MS);
     say("");
     work()
       .catch((error: unknown) => {
-        say(error instanceof Error ? error.message : String(error), true);
+        const message = error instanceof Error ? error.message : String(error);
+        if (failed) say(failed, true, message);
+        else if (message.includes("\n"))
+          say("Something went wrong.", true, message);
+        else say(message, true);
       })
       .finally(() => {
+        clearTimeout(slow);
+        busy.hidden = true;
+        root.removeAttribute("aria-busy");
         root.inert = false;
         if (focusNext) focusNext.focus();
         else if (previous instanceof HTMLElement) previous.focus();
@@ -416,16 +506,20 @@ export function mountShell(
   };
 
   // Before a new game: the choices its system asks for, such as difficulty, then Begin.
-  const showSetup = async (adventure: {
-    readonly id: string;
-    readonly title: string;
-  }): Promise<void> => {
+  const showSetup = async (adventure: AdventureChoice): Promise<void> => {
     const settings = await game.settingsFor(adventure.id);
     const begin = (chosen: Readonly<Record<string, string>>): void => {
-      act(async () => {
-        await game.start(adventure.id, crypto.randomUUID().slice(0, 8), chosen);
-        showGame();
-      });
+      act(
+        async () => {
+          await game.start(
+            adventure.id,
+            crypto.randomUUID().slice(0, 8),
+            chosen,
+          );
+          showGame();
+        },
+        { busy: OPENING, failed: CANT_OPEN },
+      );
     };
     if (settings.length === 0) {
       begin({});
@@ -475,9 +569,25 @@ export function mountShell(
         act(showMenu);
       }),
     );
-    screen.replaceChildren(
-      el("section", { class: "setup" }, heading, ...groups, go),
+    const setup = el(
+      "section",
+      { class: "setup" },
+      ...(adventure.cover
+        ? [picture(game, adventure.cover, "", "setup-cover")]
+        : []),
+      heading,
+      ...groups,
+      go,
     );
+    screen.replaceChildren(setup);
+    keys = {
+      owner: setup,
+      handle: (event) => {
+        if (event.key !== "Escape") return false;
+        act(showMenu);
+        return true;
+      },
+    };
     focusNext = heading;
   };
 
@@ -490,6 +600,8 @@ export function mountShell(
       listing.then((found) => game.listSaves(found)),
       game.listBooks(),
     ]);
+    // A run that has ended, or a file that isn't a save, has nothing to carry on with.
+    const playable = saves.filter((save) => !save.ended && !save.damaged);
     const heading = el("h2", { text: "Choose an adventure" });
     heading.tabIndex = -1;
     const filter = el("input", { class: "search" });
@@ -499,21 +611,21 @@ export function mountShell(
 
     const row = (adventure: (typeof adventures)[number]): HTMLElement => {
       // Saves are sorted newest first, so the first match is the one to resume.
-      const latest = saves.find((save) => save.adventure === adventure.id);
+      const latest = playable.find((save) => save.adventure === adventure.id);
       return adventureCard(
         game,
         adventure,
         () => {
-          act(() => showSetup(adventure));
+          act(() => showSetup(adventure), {
+            busy: OPENING,
+            failed: CANT_OPEN,
+          });
         },
         latest
           ? {
               label: latest.label,
               go: () => {
-                act(async () => {
-                  await game.load(latest.path);
-                  showGame();
-                });
+                resume(latest);
               },
             }
           : null,
@@ -549,20 +661,15 @@ export function mountShell(
       }
     });
 
-    // Saves come newest first, so the first is the game to carry on with.
-    const [newest] = saves;
+    // Saves come newest first, so the first is the game to carry on with. It reads as its save card does.
+    const [newest] = playable;
     const carryOn = newest
       ? [
           el(
             "section",
             { class: "continue" },
             el("h2", { text: "Continue" }),
-            button(newest.label, () => {
-              act(async () => {
-                await game.load(newest.path);
-                showGame();
-              });
-            }),
+            continueButton(newest),
           ),
         ]
       : [];
@@ -577,7 +684,7 @@ export function mountShell(
                 "div",
                 { class: "options saves" },
                 button(`Load a game (${String(saves.length)})`, () => {
-                  act(() => showLoad(showMenu));
+                  act(() => showLoad(showMenu), { busy: "" });
                 }),
               ),
             ]
@@ -602,25 +709,52 @@ export function mountShell(
     focusNext = heading;
   };
 
-  // Opened from the main menu or a game, and Back returns there.
+  const resume = (save: SaveChoice): void => {
+    act(
+      async () => {
+        await game.load(save.path);
+        showGame();
+      },
+      { busy: OPENING, failed: CANT_LOAD },
+    );
+  };
+
+  const continueButton = (save: SaveChoice): HTMLButtonElement => {
+    const who = saveHeading(save);
+    const where = [who, save.scene].filter(Boolean).join(" · ");
+    const go = button("", () => {
+      resume(save);
+    });
+    go.append(
+      el("strong", { text: save.title }),
+      ...(where ? [el("span", { text: where })] : []),
+      ...(save.ago || save.when
+        ? [el("small", { text: save.ago ?? save.when ?? "" })]
+        : []),
+    );
+    go.setAttribute(
+      "aria-label",
+      `Continue ${save.title}${where ? `, ${where}` : ""}`,
+    );
+    return go;
+  };
+
+  // Opened from the main menu or a game, and Back returns there. The cards' outlines show
+  // while the saves are read, so the screen isn't blank.
   const showLoad = async (back: () => void | Promise<void>): Promise<void> => {
-    const saves = await game.listSaves();
     const goBack = (): void => {
       act(async () => {
         await back();
       });
     };
     actions.replaceChildren(button("Back", goBack));
+    screen.replaceChildren(loadSkeleton());
+    const saves = await game.listSaves();
     const { node, heading } = loadScreen(
       game,
       saves,
       {
-        load: (save) => {
-          act(async () => {
-            await game.load(save.path);
-            showGame();
-          });
-        },
+        load: resume,
         remove: (save, card) => {
           act(async () => {
             await game.deleteSave(save.path);
@@ -649,14 +783,16 @@ export function mountShell(
         act(showMenu);
       }),
     );
-    const opened = await Promise.all(
-      books.map((id) =>
-        game
-          .openBook(id)
-          .then((book) => ({ id, title: book.title }))
-          .catch(() => null),
-      ),
-    );
+    const opened = (
+      await Promise.all(
+        books.map((id) =>
+          game
+            .openBook(id)
+            .then((book) => ({ id, title: bookTitle(book.title) }))
+            .catch(() => null),
+        ),
+      )
+    ).sort((a, b) => (a?.title ?? "").localeCompare(b?.title ?? ""));
     const heading = el("h2", { text: "Book library" });
     heading.tabIndex = -1;
     screen.replaceChildren(
@@ -671,7 +807,7 @@ export function mountShell(
             book
               ? [
                   button(book.title, () => {
-                    act(() => showBook(books, book.id));
+                    act(() => showBook(books, book.id), { busy: OPENING });
                   }),
                 ]
               : [],
@@ -695,7 +831,7 @@ export function mountShell(
         act(showMenu);
       }),
     );
-    const heading = el("h2", { text: book.title });
+    const heading = el("h2", { text: bookTitle(book.title) });
     heading.tabIndex = -1;
     const search = el("input", { class: "search" });
     search.type = "search";
@@ -784,8 +920,9 @@ export function mountShell(
     let board: Board | null = null;
     let cuesShown: number | null = null; // null until the first draw, which shows a loaded game as it stands
     // The newest lines of the journal, under the board, so the latest result is visible without the whole log.
+    // Read out as it changes, so hits, misses and enemy turns aren't silent.
     const ticker = el("ol", { class: "ticker" });
-    ticker.setAttribute("aria-hidden", "true");
+    ticker.setAttribute("aria-live", "polite");
     // The player's level-up, set apart from the ticker as the books set off a callout.
     const levelUp = el("p", { class: "level-up" });
     levelUp.hidden = true;
@@ -829,17 +966,20 @@ export function mountShell(
     const hud = button("", openSheet);
     hud.className = "hud";
     hud.setAttribute("aria-label", "Open the character sheet");
-    hud.setAttribute("aria-keyshortcuts", `${MOD_ARIA}+I`);
+    hud.setAttribute("aria-keyshortcuts", keyshortcuts("I"));
     hud.title = `Character (${MOD}I)`;
     const journal = button("Journal", openJournal);
-    journal.setAttribute("aria-keyshortcuts", `${MOD_ARIA}+J`);
+    journal.setAttribute("aria-keyshortcuts", keyshortcuts("J"));
     journal.title = `Journal (${MOD}J)`;
 
     const restart = (): void => {
-      act(async () => {
-        await game.restart(crypto.randomUUID().slice(0, 8));
-        showGame();
-      });
+      act(
+        async () => {
+          await game.restart(crypto.randomUUID().slice(0, 8));
+          showGame();
+        },
+        { busy: OPENING, failed: CANT_OPEN },
+      );
     };
     // Restarting throws away progress since the last save, so it takes a second press.
     let restartArmed = false;
@@ -863,7 +1003,7 @@ export function mountShell(
     };
     const loadGame = (): void => {
       gameMenu.open = false;
-      act(() => showLoad(showGame));
+      act(() => showLoad(showGame), { busy: "" });
     };
     // Takes back the last choice, where a forgiving difficulty allows it.
     const undoChoice = (): void => {
@@ -880,7 +1020,7 @@ export function mountShell(
       item: HTMLButtonElement,
       key: string,
     ): HTMLButtonElement => {
-      item.setAttribute("aria-keyshortcuts", `${MOD_ARIA}+${key}`);
+      item.setAttribute("aria-keyshortcuts", keyshortcuts(key));
       const hint = el("kbd", { text: `${MOD}${key}` });
       hint.setAttribute("aria-hidden", "true"); // aria-keyshortcuts already says it
       item.append(hint);
@@ -1019,6 +1159,8 @@ export function mountShell(
       },
     };
 
+    let quickQuestion = false; // a plain list of choices in a fight, such as a reaction, not a whole turn
+    let hudShown = 0; // the latest HUD update, so a stale one never lands
     let linesShown = 0;
     let tickerShown = 0; // the latest ticker update, so a stale one never lands
     let choiceShown = 0; // the same, for revealing the choices
@@ -1041,8 +1183,9 @@ export function mountShell(
               for (const optionId of optionIds) await game.answer(optionId);
               draw();
               flashSaved();
-              // Played on the map, so the page stays put rather than jumping to the buttons.
-              focusNext = null;
+              // Played on the map, so the page stays put rather than jumping to the buttons,
+              // unless a quick question, such as a reaction, now waits there.
+              if (!quickQuestion) focusNext = null;
             });
           },
         });
@@ -1227,11 +1370,12 @@ export function mountShell(
         if (option.detail) {
           const info = el("p", { class: "option-detail", text: option.detail });
           info.hidden = true;
-          const toggle = button("ⓘ", () => {
+          const toggle = button("", () => {
             info.hidden = !info.hidden;
             toggle.setAttribute("aria-expanded", String(!info.hidden));
           });
           toggle.className = "info";
+          toggle.innerHTML = INFO_ICON;
           toggle.setAttribute("aria-expanded", "false");
           toggle.setAttribute("aria-label", `Details of ${option.label}`);
           row.append(toggle, info);
@@ -1254,14 +1398,32 @@ export function mountShell(
           ...(last ? [optionRow(last, 6)] : []),
         ];
       };
+      // With the actions in tabs, the last choice, such as ending the turn, stays one click away beside them.
+      const tabbed =
+        view.optionGroups.filter((group) => group.title !== null).length > 1;
+      const lastId = tabbed ? decision?.options.at(-1)?.id : undefined;
+      const lastOption = view.optionGroups
+        .flatMap((group) => group.options)
+        .find((option) => option.id === lastId);
+      const groups = view.optionGroups
+        .map((group) => ({
+          ...group,
+          options: group.options.filter((option) => option !== lastOption),
+        }))
+        .filter((group) => group.options.length > 0);
       // A lone group of actions needs no tab to open it, so it lists with the rest.
-      const titled = view.optionGroups.filter((group) => group.title !== null);
+      const titled = groups.filter((group) => group.title !== null);
       const tabs = titled.length > 1 ? titled : [];
+      quickQuestion =
+        fresh &&
+        view.combat !== null &&
+        decision !== null &&
+        view.optionGroups.every((group) => group.title === null);
       const chosen = tabs.find((group) => group.title === openGroup);
       // Outside a fight the choices read as a book's numbered entries, and number keys pick them.
       options.classList.toggle("story", !view.combat);
       options.replaceChildren(
-        ...view.optionGroups
+        ...groups
           .filter((group) => !tabs.includes(group))
           .map((group) =>
             el("div", { class: "options" }, ...trimmed(group.options)),
@@ -1276,15 +1438,21 @@ export function mountShell(
                   const tab = button(name, () => {
                     openGroup = openGroup === name ? null : name;
                     draw();
-                    // The redraw replaced this button, so focus goes to its replacement.
-                    [...options.querySelectorAll<HTMLElement>(".tab")]
-                      .find((item) => item.textContent === name)
-                      ?.focus();
+                    // Focus goes into the panel just opened, or back to the replaced tab when it closed.
+                    (openGroup
+                      ? options.querySelector<HTMLElement>(
+                          ".group-panel .option > button",
+                        )
+                      : [...options.querySelectorAll<HTMLElement>(".tab")].find(
+                          (item) => item.textContent === name,
+                        )
+                    )?.focus();
                   });
                   tab.className = name === openGroup ? "tab open" : "tab";
                   tab.setAttribute("aria-expanded", String(name === openGroup));
                   return tab;
                 }),
+                ...(lastOption ? [optionRow(lastOption, tabs.length)] : []),
               ),
             ]
           : []),
@@ -1303,6 +1471,7 @@ export function mountShell(
       // The next choice waits for the board to finish, so it can't be picked under a die still to throw.
       if (!firstDraw && board?.settled && cues.length > 0) {
         const shownChoice = ++choiceShown;
+        const quick = quickQuestion;
         prompt.inert = options.inert = true;
         stage.classList.add("settling");
         void board.settled().then(() => {
@@ -1314,6 +1483,7 @@ export function mountShell(
           // Focus meant for a choice was dropped while it was inert, or sits on a board that just hid.
           const focused = document.activeElement;
           if (
+            quick ||
             !focused ||
             focused === document.body ||
             !focused.checkVisibility()
@@ -1345,10 +1515,19 @@ export function mountShell(
       log.scrollTop = log.scrollHeight;
       const levels = added.filter((line) => line.moment === "levelUp");
       // A card stands in for the prompt, which repeats a journal line, so the ticker leaves that line out.
-      const news = added
+      const events = added
         .filter((line) => line.kind === "event" && !levels.includes(line))
-        .filter((line) => !(view.card && line.text === decision?.prompt))
-        .slice(-3);
+        .filter((line) => !(view.card && line.text === decision?.prompt));
+      // A fight has more to tell; the player's own latest result stays, even when allies act after it.
+      const limit = view.combat ? 5 : 3;
+      const own = events.findLast(
+        (line) => line.actor && line.actor === view.sheets[0]?.title,
+      );
+      const latest = events.slice(-limit);
+      const news =
+        own && !latest.includes(own)
+          ? [own, ...events.slice(1 - limit)]
+          : latest;
       if (!firstDraw && (news.length > 0 || levels.length > 0)) {
         // The words wait for the board to finish showing what they describe.
         const shown = ++tickerShown;
@@ -1377,10 +1556,22 @@ export function mountShell(
 
       const [playerSheet] = view.sheets;
       hud.hidden = !playerSheet;
-      if (playerSheet) {
+      // The bar shows what the board has shown, so a hit doesn't land on the HP before the die does.
+      const drawHud = (): void => {
+        if (!playerSheet) return;
+        const summary = playerSheet.summary ?? [];
+        // Out of hit points: the fight's own word for it, such as dying, or "Down" outside one.
+        const status = view.combat?.combatants.find(
+          (actor) => actor.id === playerSheet.id,
+        )?.status;
+        const down = status
+          ? status.charAt(0).toUpperCase() + status.slice(1)
+          : summary[0]?.meter === 0
+            ? "Down"
+            : null;
         hud.replaceChildren(
           el("span", { class: "hud-name", text: playerSheet.title }),
-          ...(playerSheet.summary ?? []).map((row) =>
+          ...summary.map((row) =>
             el(
               "span",
               { class: "hud-stat" },
@@ -1389,8 +1580,15 @@ export function mountShell(
               ...(row.meter === undefined ? [] : [meter(row.meter)]),
             ),
           ),
+          ...(down ? [el("span", { class: "hud-down", text: down })] : []),
         );
-      }
+      };
+      const shownHud = ++hudShown;
+      if (!firstDraw && board?.settled && cues.length > 0) {
+        void board.settled().then(() => {
+          if (shownHud === hudShown) drawHud();
+        });
+      } else drawHud();
       const shown =
         view.sheets.find((item) => item.id === sheetShown) ?? playerSheet;
       const panels = view.sheets.map((item) => {

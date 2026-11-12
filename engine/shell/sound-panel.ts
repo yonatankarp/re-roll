@@ -151,6 +151,10 @@ export function soundControls(
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog) dialog.close();
   });
+  // The menu item folded away with its menu, so focus goes back to the menu's own button.
+  dialog.addEventListener("close", () => {
+    menuItem.closest("details")?.querySelector("summary")?.focus();
+  });
 
   const menuItem = document.createElement("button");
   menuItem.type = "button";

@@ -12,6 +12,12 @@ import type { NarrationReply, NarrationRequest } from "./narration-worker.ts";
 // a new scene or a choice stops it, and it never moves the story on. If no voice can be had,
 // the controls hide for that scene rather than fall back to a robotic one.
 
+// The narrator's play and pause marks, drawn in the button's ink rather than as text glyphs.
+const PLAY_ICON =
+  '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" fill="currentColor"><path d="M2.5 1.5v9l8-4.5z"/></svg>';
+const PAUSE_ICON =
+  '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" fill="currentColor"><path d="M2.5 1.5h2.5v9H2.5zM7 1.5h2.5v9H7z"/></svg>';
+
 const KEPT = 12; // clips kept in memory, so going back or reading ahead isn't wasted
 const STALL_MS = 120_000; // a busy worker silent this long is stuck; one long sentence on a slow CPU can take a minute
 const RESTARTS = 2; // then a stuck reading is given up, and its scene isn't read
@@ -306,11 +312,13 @@ export function narrator(
       !reading.paused &&
       reading.source === null &&
       !reading.clip.done;
-    play.textContent = speaking()
-      ? "❚❚ Pause"
+    const label = speaking()
+      ? "Pause"
       : reading?.paused
-        ? "▶ Resume"
-        : "▶ Read aloud";
+        ? "Resume"
+        : "Read aloud";
+    play.innerHTML = speaking() ? PAUSE_ICON : PLAY_ICON;
+    play.append(label);
     play.disabled = waiting;
     skip.hidden = reading === null;
     if (!waiting) status.textContent = "";
