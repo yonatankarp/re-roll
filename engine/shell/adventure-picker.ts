@@ -1,5 +1,5 @@
 import type { AdventureChoice, Game } from "./session.ts";
-import { button, el, picture } from "./shell.ts";
+import { button, el, picture } from "./dom.ts";
 
 // The main menu's adventures, one book cover each. The title plate sits under the cover,
 // so an adventure with no cover, or one that won't load, still shows a designed card.

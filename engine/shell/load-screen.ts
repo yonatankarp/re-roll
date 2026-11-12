@@ -1,5 +1,5 @@
 import { type Game, type SaveChoice, stepsText } from "./session.ts";
-import { button, el, picture } from "./shell.ts";
+import { button, el, picture } from "./dom.ts";
 
 // The Load screen: one card per save, newest first, each with its own Delete.
 
