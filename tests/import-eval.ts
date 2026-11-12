@@ -58,7 +58,9 @@ const selected = new Set(
 const started = performance.now();
 const summary = await importSource({
   storage,
-  client: createLlamaClient(SERVER),
+  client: createLlamaClient(SERVER, {
+    allowRemote: process.argv.includes("--allow-remote"),
+  }),
   system: dnd55e,
   pluginId: PLUGIN,
   folder: "spells",
