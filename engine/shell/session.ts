@@ -24,6 +24,7 @@ import {
 } from "../kernel/turn.ts";
 import type {
   CombatView,
+  DecisionCard,
   OptionGroup,
   SheetView,
   SystemUi,
@@ -51,6 +52,7 @@ export interface GameView {
   readonly sceneArt: string | null; // a content path, for imageUrl
   readonly endingName: string | null;
   readonly optionGroups: readonly OptionGroup[];
+  readonly card: DecisionCard | null; // shown above the choices, such as treasure found
   readonly monsterArt: Readonly<Record<string, string>>; // by combatant id
   readonly tokenArt: Readonly<Record<string, TokenArt>>; // by combatant id, with its face
   readonly adventureRoot: string; // where the adventure's own pictures are
@@ -593,6 +595,9 @@ export function createGame({
         optionGroups: decision
           ? ui.optionGroups(decision, state.system, run)
           : [],
+        card: decision
+          ? (ui.card?.(decision, state.system, run) ?? null)
+          : null,
         monsterArt: pictures,
         tokenArt: tokens,
         adventureRoot: root,

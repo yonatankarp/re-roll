@@ -4,6 +4,7 @@ import type {
   BoardHost,
   CombatView,
   OptionView,
+  SheetRow,
   SheetSection,
   SheetView,
 } from "./system-ui.ts";
@@ -123,7 +124,15 @@ function renderCombat(
   );
 }
 
-function detailsRow(label: string, value: string, detail: string): HTMLElement {
+// A sheet row's own choice, such as Equip, as a button while the pending decision offers it.
+type RowOption = (row: SheetRow) => Node[];
+
+function detailsRow(
+  label: string,
+  value: string,
+  detail: string,
+  extra: Node[] = [],
+): HTMLElement {
   return el(
     "details",
     { class: "sheet-detail" },
@@ -132,12 +141,16 @@ function detailsRow(label: string, value: string, detail: string): HTMLElement {
       {},
       el("span", { text: label }),
       ...(value ? [el("span", { class: "sheet-value", text: value })] : []),
+      ...extra,
     ),
     el("p", { text: detail }),
   );
 }
 
-function renderSection(section: SheetSection): HTMLElement {
+function renderSection(
+  section: SheetSection,
+  rowOption: RowOption,
+): HTMLElement {
   const heading = el("h3", { text: section.title });
   switch (section.layout) {
     case "boxes":
@@ -196,18 +209,27 @@ function renderSection(section: SheetSection): HTMLElement {
           ...section.rows.flatMap((row) =>
             row.detail
               ? []
-              : [el("dt", { text: row.label }), el("dd", { text: row.value })],
+              : [
+                  el("dt", { text: row.label }),
+                  el("dd", { text: row.value }, ...rowOption(row)),
+                ],
           ),
         ),
         ...section.rows.flatMap((row) =>
-          row.detail ? [detailsRow(row.label, row.value, row.detail)] : [],
+          row.detail
+            ? [detailsRow(row.label, row.value, row.detail, rowOption(row))]
+            : [],
         ),
       );
   }
 }
 
 // The side panel shows the pinned sections; the full sheet shows them all.
-function renderSheet(sheet: SheetView, full: boolean): HTMLElement {
+function renderSheet(
+  sheet: SheetView,
+  full: boolean,
+  rowOption: RowOption = () => [],
+): HTMLElement {
   return el(
     "section",
     { class: full ? "sheet-body full" : "sheet-body" },
@@ -234,7 +256,7 @@ function renderSheet(sheet: SheetView, full: boolean): HTMLElement {
       ...sheet.sections
         .filter((section) => section.rows.length > 0)
         .filter((section) => full || section.pinned)
-        .map(renderSection),
+        .map((section) => renderSection(section, rowOption)),
     ),
   );
 }
@@ -713,6 +735,7 @@ export function mountShell(
     const ticker = el("ol", { class: "ticker" });
     ticker.setAttribute("aria-hidden", "true");
     const prompt = el("p", { class: "prompt" });
+    const card = el("section", { class: "decision-card" });
     const options = el("div", { class: "options" });
     let decisionShown: string | null = null;
     let openGroup: string | null = null;
@@ -805,6 +828,7 @@ export function mountShell(
       combatGridSlot,
       ticker,
       combat,
+      card,
       prompt,
       options,
     );
@@ -907,9 +931,32 @@ export function mountShell(
       );
 
       const { decision } = view;
+      // A card says what the prompt would, so it stands in for it.
       prompt.textContent =
-        decision && decision.prompt !== view.scene ? decision.prompt : "";
+        decision && decision.prompt !== view.scene && !view.card
+          ? decision.prompt
+          : "";
       const fresh = (decision?.id ?? null) !== decisionShown;
+      const cardShown = card.dataset.title;
+      card.replaceChildren(
+        ...(view.card
+          ? [
+              el("h3", { text: view.card.title }),
+              el(
+                "ul",
+                {},
+                ...view.card.lines.map((line, index) => {
+                  const item = el("li", { text: line });
+                  item.style.setProperty("--i", String(index));
+                  return item;
+                }),
+              ),
+            ]
+          : []),
+      );
+      card.hidden = !view.card;
+      card.dataset.title = view.card?.title ?? "";
+      if (view.card && cardShown !== view.card.title) enter(card);
       if (fresh) {
         decisionShown = decision?.id ?? null;
         showAll = false;
@@ -1076,7 +1123,29 @@ export function mountShell(
       const panels = view.sheets.map((item) => {
         const panel = sheetPanels.get(item.id) ?? el("div");
         sheetPanels.set(item.id, panel);
-        replaceKeepingOpen(panel, renderSheet(item, true));
+        replaceKeepingOpen(
+          panel,
+          renderSheet(item, true, (row) => {
+            const { option } = row;
+            if (!option || !decision?.options.some((o) => o.id === option.id)) {
+              return [];
+            }
+            const pick = button(option.label, () => {
+              act(async () => {
+                await game.answer(option.id);
+                draw();
+                flashSaved();
+              });
+            });
+            pick.className = "row-option";
+            pick.setAttribute("aria-label", `${option.label} ${row.label}`);
+            // Inside a row's summary, the button shouldn't also open the row.
+            pick.addEventListener("click", (event) => {
+              event.preventDefault();
+            });
+            return [pick];
+          }),
+        );
         panel.hidden = item !== shown;
         return panel;
       });

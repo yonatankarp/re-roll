@@ -12,6 +12,14 @@ export interface SheetRow {
   readonly note?: string; // a small line under the value, in boxes and marks
   readonly marked?: boolean; // such as proficient, in marks
   readonly meter?: number; // a share from 0 to 1, drawn as a bar in the top bar's summary
+  // A choice of the pending decision this row can make, such as equipping an item, shown only while it's offered.
+  readonly option?: { readonly id: string; readonly label: string };
+}
+
+// A short moment shown above a decision's choices, such as treasure just found.
+export interface DecisionCard {
+  readonly title: string;
+  readonly lines: readonly string[];
 }
 
 export interface SheetSection {
@@ -111,6 +119,11 @@ export interface SystemUi {
     state: unknown,
     access: ContentAccess,
   ) => readonly OptionGroup[];
+  readonly card?: (
+    decision: Decision,
+    state: unknown,
+    access: ContentAccess,
+  ) => DecisionCard | null;
   readonly playerDied: (state: unknown) => boolean;
   // Turns an event into plain data for the board to animate, given the state either side of it.
   readonly cue?: (
