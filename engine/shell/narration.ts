@@ -13,6 +13,8 @@ import type { NarrationReply, NarrationRequest } from "./narration-worker.ts";
 // the controls hide for that scene rather than fall back to a robotic one.
 
 const KEPT = 12; // clips kept in memory, so going back or reading ahead isn't wasted
+const STALL_MS = 120_000; // a busy worker silent this long is stuck; one long sentence on a slow CPU can take a minute
+const RESTARTS = 2; // then a stuck reading is given up, and its scene isn't read
 
 interface Clip {
   readonly key: string;
@@ -20,6 +22,8 @@ interface Clip {
   done: boolean;
   failed: boolean;
   job: number | null; // the worker's reading of it, while that's under way
+  readonly text: string; // as sent to the worker, to send again after a restart
+  readonly voice: string;
   readonly changed: Set<() => void>;
 }
 
@@ -28,6 +32,8 @@ let jobs = 0;
 const working = new Map<number, Clip>();
 const clips = new Map<string, Clip>(); // oldest first
 let loading: ((percent: number) => void) | null = null;
+let heard = 0; // when the worker last said anything
+let restarts = 0;
 
 function tell(clip: Clip): void {
   for (const listener of clip.changed) listener();
@@ -44,6 +50,7 @@ function narrationWorker(): Worker | null {
         "message",
         (event: MessageEvent<NarrationReply>) => {
           const reply = event.data;
+          heard = performance.now();
           if (reply.type === "loading") {
             loading?.(reply.percent);
             return;
@@ -82,6 +89,7 @@ function narrationWorker(): Worker | null {
           tell(clip);
         },
       );
+      heard = performance.now();
       return made;
     })();
     return worker;
@@ -93,6 +101,41 @@ function narrationWorker(): Worker | null {
 function send(request: NarrationRequest): void {
   narrationWorker()?.postMessage(request);
 }
+
+function speak(clip: Clip): void {
+  jobs += 1;
+  clip.job = jobs;
+  working.set(jobs, clip);
+  send({ type: "speak", id: jobs, text: clip.text, voice: clip.voice });
+}
+
+// A reading can hang, as WebGPU work did in a hidden Tauri window and stayed hung once shown.
+// The worker reads in order, so everything after it would wait forever: a silent busy worker is
+// replaced and its readings asked for again. Time hidden doesn't count, since nothing plays then.
+setInterval(() => {
+  if (working.size === 0 || document.hidden) {
+    heard = performance.now();
+    return;
+  }
+  if (performance.now() - heard < STALL_MS) return;
+  console.warn("Narration worker stopped answering, so it was restarted");
+  worker?.terminate();
+  worker = null;
+  restarts += 1;
+  const stuck = [...working.values()];
+  working.clear();
+  for (const clip of stuck) {
+    clip.job = null;
+    clip.buffers.length = 0; // read again from the start; playback carries on where it was
+    if (restarts <= RESTARTS) {
+      speak(clip);
+    } else {
+      clip.failed = true;
+      clips.delete(clip.key);
+      tell(clip);
+    }
+  }
+}, 5000);
 
 // Stops the worker reading a clip that isn't finished, and forgets the part read.
 function drop(clip: Clip): void {
@@ -141,6 +184,8 @@ function obtain(
     done: false,
     failed: false,
     job: null,
+    text: normaliseText(text),
+    voice,
     changed: new Set(),
   };
   clips.set(key, clip);
@@ -154,10 +199,7 @@ function obtain(
         clip.buffers.push(recorded);
         clip.done = true;
       } else if (clips.get(key) === clip && narrationWorker()) {
-        jobs += 1;
-        clip.job = jobs;
-        working.set(jobs, clip);
-        send({ type: "speak", id: jobs, text: normaliseText(text), voice });
+        speak(clip);
         return;
       } else {
         clip.failed = true;
