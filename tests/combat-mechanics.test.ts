@@ -658,6 +658,27 @@ describe("choosing targets and aiming areas", () => {
     expect(damageOf(cast.events, "b")).toEqual([2]);
   });
 
+  it("aims Eldritch Blast's beams at different foes once it has two", async () => {
+    const run = arenaRun(await base(), {});
+    const blast = `spell:${spell("eldritch-blast")}`;
+    const state = fight(
+      hero(run, { spells: ["eldritch-blast"], level: 5 }),
+      monster("a"),
+      monster("b"),
+    );
+    const ids = nextDndDecision(state, run)?.options.map((item) => item.id);
+    expect(ids).toContain(`${blast}|pick`);
+    const cast = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `${blast}|pick`)],
+      HIGH,
+      answers("+a", "+b", "cast"),
+    );
+    expect(damageOf(cast.events, "a")).toHaveLength(1);
+    expect(damageOf(cast.events, "b")).toHaveLength(1);
+  });
+
   it("lets Hold Person cast at level 3 pick two creatures", async () => {
     const run = arenaRun(await base(), {});
     const state = fight(
