@@ -63,16 +63,37 @@ const sentencesOf = (text: string): readonly string[] =>
   text.split(/(?<=\.)\s+/);
 
 // Every hero is Small or Medium, so a limit of Medium or smaller, or anything larger, always holds.
+const HERO_SIZES =
+  "(?:(?:Medium|Large|Huge|Gargantuan) or smaller|Medium or Small|Small or Medium)\\b";
 const withoutSizeLimits = (text: string): string =>
   text
+    // "If the target is a Medium or smaller creature, it …" holds; "… and the monster had Advantage" keeps its "if".
     .replace(
-      /\b(?:if )?(?:the )?(?:target|it) is (?:a )?(?:Medium|Large|Huge|Gargantuan) or smaller(?: creature)?,?/gi,
+      new RegExp(
+        `\\bif (?:the )?(?:target|it) is (?:a )?${HERO_SIZES}(?!(?: creature)? and\\b)(?: creature)?,?`,
+        "gi",
+      ),
       "",
     )
     .replace(
-      /\b(?:Medium|Large|Huge|Gargantuan) or smaller (creatures?)\b/gi,
-      "$1",
-    );
+      new RegExp(
+        `\\b(?:the )?(?:target|it) is (?:a )?${HERO_SIZES}(?: creature)?`,
+        "gi",
+      ),
+      "",
+    )
+    .replace(new RegExp(`\\b${HERO_SIZES} (creatures?)\\b`, "gi"), "$1");
+
+const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
+
+// "the monster's size or smaller" holds for every hero when the monster is Medium or larger.
+const withOwnSize = (text: string, size: string | undefined): string =>
+  SIZES.indexOf(size ?? "") >= SIZES.indexOf("medium")
+    ? text.replace(
+        /\bis (?:the [^,.]*?[’']s|its) size or smaller\b/gi,
+        "is Medium or smaller",
+      )
+    : text;
 
 // Why part of an effect only applies sometimes, in our own words so that a note never quotes the book.
 function limitOn(text: string): string | null {
@@ -167,7 +188,7 @@ function conditionsIn(text: string, left: string[]): LeafEffect[] {
       text,
     );
   const endsOnDamage =
-    /\bends? (?:early )?(?:if|when) the target takes (?:any )?damage\b|\buntil (?:it|the target) takes (?:any )?damage\b/i.test(
+    /\bends? (?:early )?(?:on the target )?(?:if|when) (?:the target|it) takes (?:any )?damage\b|\buntil (?:it|the target) takes (?:any )?damage\b/i.test(
       text,
     );
   return sentencesOf(text).flatMap((sentence) => {
@@ -185,30 +206,89 @@ function conditionsIn(text: string, left: string[]): LeafEffect[] {
     const minutes = count
       ? Number(count) * (unit.toLowerCase() === "hour" ? 60 : 1)
       : 1;
+    // "While swallowed, a creature has …" describes the state the failure itself caused.
+    const stated = sentence.replace(STATE_LEAD, "");
+    // "which is no longer Grappled", or "and the Grappled condition ends": swallowing replaces the grapple.
+    const released = [
+      ...stated.matchAll(
+        /\bno longer (Grappled)\b|\bthe (Grappled) condition ends\b/g,
+      ),
+    ].map((match) => ({
+      kind: "removeCondition" as const,
+      condition: (match[1] ?? match[2] ?? "").toLowerCase() as Condition,
+    }));
     return [
-      ...sentence.matchAll(/\b(?:has|have) the (\w+) condition/g),
-    ].flatMap((match) => {
-      const parsed = ConditionSchema.safeParse(match[1]?.toLowerCase());
-      if (!parsed.success) return [];
-      const [after = ""] = sentence
-        .slice(match.index + match[0].length)
-        .split(/,|\band\b/);
-      const limit = limitOn(sentence.slice(0, match.index)) ?? limitOn(after);
-      if (limit) {
-        left.push(limit);
-        return [];
-      }
-      return [
-        {
+      ...released,
+      // "has the Blinded condition", or "has the Blinded and Restrained conditions".
+      ...[
+        ...stated.matchAll(
+          /\b(?:has|have) the ((?:\w+(?:,? and |, ))*\w+) conditions?\b/g,
+        ),
+      ].flatMap((match) => {
+        const [after = ""] = stated
+          .slice(match.index + match[0].length)
+          .split(/,|\band\b/);
+        const limit = limitOn(stated.slice(0, match.index)) ?? limitOn(after);
+        const conditions = (match[1] ?? "")
+          .split(/,? and |, /)
+          .flatMap((word) => {
+            const parsed = ConditionSchema.safeParse(word.toLowerCase());
+            return parsed.success ? [parsed.data] : [];
+          });
+        if (conditions.length === 0) return [];
+        if (limit) {
+          left.push(limit);
+          return [];
+        }
+        return conditions.map((condition) => ({
           kind: "applyCondition" as const,
-          condition: parsed.data,
+          condition,
           duration: edge ? { until } : { minutes },
           repeatSave,
           endsOnDamage,
-        },
-      ];
-    });
+        }));
+      }),
+    ];
   });
+}
+
+const STATE_LEAD =
+  /^\s*While (?:swallowed|engulfed|trapped|grafted)(?: in this way)?,\s*/i;
+
+// "… takes 10 (3d6) Acid damage at the start of each of the monster's turns" while swallowed. shortcut: it ticks on the
+// bearer's own turn rather than the monster's, which is one turn's difference at most.
+function ongoingDamage(text: string, left: string[]): LeafEffect[] {
+  const effects = sentencesOf(text).flatMap((sentence): LeafEffect[] => {
+    const stated = sentence.replace(STATE_LEAD, "");
+    const match = new RegExp(
+      `^(.*?)\\btakes? ((?:\\d+ \\(\\d+d\\d+(?:\\s*[+−–-]\\s*\\d+)?\\)|\\d+) (?:${TYPES}) damage) at the (start|end) of each of [^.]*?\\bturns\\b`,
+      "i",
+    ).exec(stated);
+    if (!match || limitOn(match[1] ?? "")) return [];
+    const damage = damageIn(match[2] ?? "", []);
+    return damage.length > 0
+      ? [
+          {
+            kind: "modifier",
+            modifier: {
+              kind: "lingeringDamage",
+              when: match[3]?.toLowerCase() === "end" ? "turnEnd" : "turnStart",
+              damage,
+              once: false,
+            },
+            duration: { minutes: 1 },
+          },
+        ]
+      : [];
+  });
+  // What would have been left out is now in.
+  if (effects.length > 0) {
+    for (let at = left.indexOf("an ongoing effect"); at >= 0;) {
+      left.splice(at, 1);
+      at = left.indexOf("an ongoing effect");
+    }
+  }
+  return effects;
 }
 
 interface ParsedAction {
@@ -220,7 +300,7 @@ interface ParsedAction {
 
 function parseAttack(text: string, left: string[]): ParsedAction | null {
   const match =
-    /^(?:Melee or Ranged|Melee|Ranged)(?: Weapon| Spell)? Attack(?: Roll)?:\s*([+−-]?\d+)/.exec(
+    /^(?:Melee or Ranged|Melee|Ranged)(?: Weapon| Spell)? Attack(?: Roll)?:\s*([+−-]?\s?\d+)/.exec(
       text,
     );
   if (!match) return null;
@@ -231,8 +311,10 @@ function parseAttack(text: string, left: string[]): ParsedAction | null {
   if (/saving throw/i.test(afterHit)) left.push("a nested save");
   // Older books say "is grappled", which has no duration or end this parser can read reliably.
   if (OLDER_CONDITION.test(afterHit)) left.push("a condition in older wording");
+  // "Critical Hit: …" only happens on a critical, which onHit can't tell apart.
+  if (/\bCritical Hit:/.test(afterHit)) left.push("a Critical Hit rider");
   const [hit = ""] = afterHit.split(
-    new RegExp(`(?=${SAVE_LABEL}|(?:Hit or )?Miss:)`),
+    new RegExp(`(?=${SAVE_LABEL}|(?:Hit or )?Miss:|Critical Hit:)`),
   );
   const sentences = sentencesOf(hit);
   const advantageDice: string[] = [];
@@ -263,7 +345,9 @@ function parseAttack(text: string, left: string[]): ParsedAction | null {
       kind: "attack",
       attack: {
         type: "weapon",
-        flatBonus: Number((match[1] ?? "0").replace("−", "-")),
+        flatBonus: Number(
+          (match[1] ?? "0").replace("−", "-").replace(/\s/g, ""),
+        ),
       },
       // shortcut: the schema needs a damage entry, so a hit that only grapples deals 0, which raises no damage event.
       damage:
@@ -358,7 +442,48 @@ function targetGate(printed: string): {
 
 const SAVE_START = new RegExp(`\\b(?=${SAVE_LABEL})`);
 
-function parseSave(text: string, left: string[]): ParsedAction | null {
+const ABILITY_NAMES = Object.values(ABILITIES).join("|");
+const OLDER_SAVE = new RegExp(
+  `^(.*?)\\b((?:[Ee]ach|[Tt]he|[Aa]ny)\\b[^.]*?|\\bit) must (?:make|succeed on) a DC (\\d+) (${ABILITY_NAMES}) saving throw,?\\s*(.*)$`,
+  "s",
+);
+const OLDER_CONDITIONS = new RegExp(
+  `,?\\s*(?:and )?(?:be|is) (?:knocked )?(${ConditionSchema.options.join("|")})\\b`,
+  "gi",
+);
+const capitalised = (word: string): string =>
+  `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`;
+
+// Older books: "The target must make a DC 13 Dexterity saving throw, taking 9 (2d8) fire damage on a failed
+// save, or half as much damage on a successful one", or "… must succeed on … or take … and be stunned". It's put
+// in the newer shape, which the rest of the parser reads.
+function newerSave(text: string): string {
+  const match = OLDER_SAVE.exec(text);
+  if (!match) return text;
+  const [, lead = "", who = "", dc = "", ability = "", rest = ""] = match;
+  const taking =
+    /^taking (.*?) on a failed save(?:,? or (half as much damage|[^.]*?) on a successful one)?\.?(?:\s+(.*))?$/s.exec(
+      rest,
+    );
+  const or = /^or (?:take )?(.*)$/s.exec(rest);
+  const failure = taking
+    ? `${taking[1] ?? ""}.${taking[3] ? ` ${taking[3]}` : ""}`
+    : (or?.[1] ?? "");
+  if (!failure) return text;
+  // "The target" or "Any creature in that area" points back at the lead-in, which says where.
+  const rule = /\d/.test(who) ? who : "";
+  const success = /^half/i.test(taking?.[2] ?? "")
+    ? " Success: Half damage."
+    : "";
+  return `${lead}${ability} Saving Throw: DC ${dc}, ${rule}. Failure: ${failure.replace(
+    OLDER_CONDITIONS,
+    (_, condition: string) =>
+      `, and the target has the ${capitalised(condition)} condition`,
+  )}${success}`;
+}
+
+function parseSave(input: string, left: string[]): ParsedAction | null {
+  const text = SAVE_START.test(input) ? input : newerSave(input);
   // "The ape hurls a boulder at a point within 90 feet. Dexterity Saving Throw: …": the lead-in says where.
   const at = text.search(SAVE_START);
   if (at < 0) return null;
@@ -414,7 +539,10 @@ function parseSaveFrom(
   const sentences = sentencesOf(failure.replace(threshold, ""));
   const damage = damageIn(sentences[0] ?? "", left);
   noteLaterDamage(sentences, left);
-  const onFail = conditionsIn(failure, left);
+  const onFail = [
+    ...conditionsIn(failure, left),
+    ...ongoingDamage(failure, left),
+  ];
   if (damage.length === 0 && onFail.length === 0) return null;
   // The lead-in gives the area or range when the save's own clause doesn't.
   const within = /within \d+ feet/.exec(lead)?.[0];
@@ -760,6 +888,8 @@ function parseBlock(
   });
 
   const slug = slugOf(name);
+  const kind = lines.map((line) => CREATURE_KIND.exec(line)).find(Boolean);
+  const size = kind?.[1]?.toLowerCase();
   const actions: unknown[] = [];
   const notes: string[] = [];
   const passives = defencesOf(lines);
@@ -850,7 +980,7 @@ function parseBlock(
     const perDay = /\((\d+)\/Day\b/.exec(label)?.[1];
     const resource = `${perDay ? "day" : "recharge"}:${slugOf(label.replace(/\s*\(.*$/, ""))}`;
     let recharge = rechargeOn; // options share one recharge, and each action holding it would roll for it
-    for (const option of optionsIn(label, text)) {
+    for (const option of optionsIn(label, withOwnSize(text, size))) {
       let left: string[] = [];
       let optionText = secondPass
         ? withFirstChosenType(option.text, left)
@@ -947,7 +1077,6 @@ function parseBlock(
       oncePerTurn: false,
     });
   }
-  const kind = lines.map((line) => CREATURE_KIND.exec(line)).find(Boolean);
   const speed = Number(field(/^Speed\s+(\d+)/) ?? 0);
   const otherSpeeds = [
     ...(lines.find((line) => line.startsWith("Speed")) ?? "").matchAll(
@@ -966,7 +1095,7 @@ function parseBlock(
       name,
       ...(kind
         ? {
-            size: (kind[1] ?? "").toLowerCase(),
+            size,
             creatureType: (kind[2] ?? "").toLowerCase(),
           }
         : {}),
