@@ -1252,7 +1252,9 @@ describe("approving drafts", () => {
     expect(report.checked).toContain("my-book");
 
     const catalog = await scanPlugins(storage, ["plugins", "books"]);
-    expect(catalog.plugins.get("my-book")?.manifest.distribution).toBe("private");
+    expect(catalog.plugins.get("my-book")?.manifest.distribution).toBe(
+      "private",
+    );
     const loaded: LoadResult = await loadRun(storage, catalog, systems, [
       "my-book",
     ]);
