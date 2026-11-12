@@ -117,7 +117,6 @@ impl<'a> VariantStrIter<'a> {
 
     fn impl_get(&self, i: usize) -> &'a str {
         unsafe {
-            // Backported from glib 0.20 (GHSA-wrw7-89jp-8q8g): the C call writes through this pointer, so it must be &mut.
             let mut p: *mut libc::c_char = std::ptr::null_mut();
             let s = b"&s\0";
             ffi::g_variant_get_child(

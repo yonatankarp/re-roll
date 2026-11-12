@@ -13,7 +13,6 @@ tauri = { version = "2", features = [] }
 tauri-plugin-fs = "2"
 dunce = "1"
 
-# glib 0.18 comes from Tauri's Linux GTK stack, which pins it. This copy carries the fix glib 0.20 made for
-# GHSA-wrw7-89jp-8q8g (an unsound out-pointer in VariantStrIter). Drop it when Tauri moves to glib 0.20 or later.
+# glib 0.18.5 with the RUSTSEC-2024-0429 fix backported (Linux only); see patches/README.md.
 [patch.crates-io]
-glib = { path = "vendor/glib-0.18.5" }
+glib = { path = "patches/glib-0.18.5" }
