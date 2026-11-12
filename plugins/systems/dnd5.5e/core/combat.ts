@@ -2198,33 +2198,49 @@ function stepToward(actor: Actor, context: Context): Square | null {
   const foes = enemies(state, actor).filter(
     (item) => !isDown(item) && item.position,
   );
+  // A foe in range but behind total cover is as far as it would be for a melee creature: it closes in until it
+  // has a clear line.
   const gap = (from: Square | null): number =>
     Math.min(
-      ...foes.map((foe) =>
-        Math.max(0, distanceFeet(from, foe.position) - reach),
-      ),
+      ...foes.map((foe) => {
+        const distance = distanceFeet(from, foe.position);
+        if (distance > reach) return distance - reach;
+        return coverFor(state, from, foe, [actor.id]) === "total"
+          ? distance
+          : 0;
+      }),
     );
   if (foes.length === 0) return null;
   const now = gap(actor.position);
-  const squares = moveSquares(actor, state, stats);
-  const closest = Math.min(...squares.map((item) => gap(item.square)));
+  const gaps = new Map(
+    moveSquares(actor, state, stats).map((item) => [item, gap(item.square)]),
+  );
+  const squares = [...gaps.keys()];
+  const closest = Math.min(...gaps.values());
   if (squares.length === 0 || closest >= now) return null;
-  // Of the squares that get it closest, the one with the most cover from its foes, off difficult terrain, nearest.
+  // Of the squares that get it closest, the one off difficult terrain and nearest. One that fights from range
+  // also wants the most cover from its foes; a melee creature is going up to them anyway.
   const difficult = difficultSquares(state);
+  const ranged = reach > 10;
   const ranked = squares
-    .filter((item) => gap(item.square) === closest)
+    .filter((item) => gaps.get(item) === closest)
     .map((item) => ({
       ...item,
-      cover: foes.reduce(
-        (sum, foe) =>
-          sum +
-          coverBonus(
-            coverFor(state, foe.position, { ...actor, position: item.square }, [
-              foe.id,
-            ]),
-          ),
-        0,
-      ),
+      cover: ranged
+        ? foes.reduce(
+            (sum, foe) =>
+              sum +
+              coverBonus(
+                coverFor(
+                  state,
+                  foe.position,
+                  { ...actor, position: item.square },
+                  [foe.id],
+                ),
+              ),
+            0,
+          )
+        : 0,
       rough: Number(difficult.has(squareKey(item.square))),
     }))
     .sort((a, b) => b.cover - a.cover || a.rough - b.rough || a.feet - b.feet);

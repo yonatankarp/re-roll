@@ -1771,11 +1771,15 @@ const BOARD_CSS = `
 .dnd-ground-square.difficult {
   background: repeating-linear-gradient(-45deg, rgb(240 222 180 / 26%) 0 2px, transparent 2px 7px);
 }
-.dnd-ground-square.half { box-shadow: inset 0 0 0 2px rgb(240 222 180 / 30%); border-radius: 3px; }
+/* Cover is ringed in cream with a dark edge, so it reads on light and dark art alike. */
+.dnd-ground-square.half {
+  box-shadow: inset 0 0 0 2px rgb(255 240 205 / 55%), inset 0 0 0 3px rgb(30 18 6 / 30%);
+  border-radius: 4px;
+}
 .dnd-ground-square.threeQuarters {
-  box-shadow: inset 0 0 0 3px rgb(240 222 180 / 45%);
-  background: rgb(240 222 180 / 8%);
-  border-radius: 3px;
+  box-shadow: inset 0 0 0 3px rgb(255 240 205 / 70%), inset 0 0 0 4px rgb(30 18 6 / 35%);
+  background: rgb(255 240 205 / 12%);
+  border-radius: 4px;
 }
 .dnd-ground-square.dim { background: rgb(8 10 30 / 26%); }
 .dnd-ground-square.dark { background: rgb(4 4 14 / 55%); }
