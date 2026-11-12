@@ -1056,6 +1056,72 @@ describe("monster grapples and multiattacks", () => {
     expect(sources(after(moved(8)))).toEqual([]);
   });
 
+  it("keeps two coilers' grapples apart, so one letting go leaves the other's", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("coiler", [6, 5], "test:monster/coiler"),
+      monster("coiler2", [4, 5], "test:monster/coiler"),
+    ]);
+    const first = settle(
+      run,
+      state,
+      [act("coiler", "monster:0|player")],
+      LOW,
+    ).state;
+    const both = settle(
+      run,
+      { ...first, combat: first.combat && { ...first.combat, index: 2 } },
+      [act("coiler2", "monster:0|player")],
+      LOW,
+    ).state;
+    const held: DndState = {
+      ...both,
+      combat: both.combat && { ...both.combat, index: 0 },
+    };
+    const decision = run.system.nextDecision(held, {
+      content: run.content,
+      contentIds: run.contentIds,
+    });
+    const escapes = (decision?.options ?? [])
+      .map((option) => option.id)
+      .filter((id) => id.startsWith("tactic:escape"));
+    expect(escapes).toEqual([
+      "tactic:escape|coiler|monster:0",
+      "tactic:escape|coiler2|monster:0",
+    ]);
+    // Escaping one keeps the other's grapple, Restrained and squeeze.
+    const free = settle(
+      run,
+      held,
+      [act(PLAYER_ACTOR, "tactic:escape|coiler|monster:0")],
+      HIGH,
+    ).state;
+    const hero = who(free, PLAYER_ACTOR);
+    expect(hasCondition(hero, "grappled", "restrained")).toBe(true);
+    expect(new Set(hero.activeEffects.map((e) => e.casterId))).toEqual(
+      new Set(["coiler2"]),
+    );
+    // The other one dropping releases its grapple too.
+    const check = { kind: `${NS}:checkCombatEnd`, payload: {} };
+    const gone = settle(
+      run,
+      applyDndEvent(
+        free,
+        dndEvent(`${NS}:damaged`, {
+          actor: "coiler2",
+          amount: 999,
+          type: "fire",
+          critical: false,
+          massive: false,
+        }),
+      ),
+      [check],
+      LOW,
+    ).state;
+    expect(sources(who(gone, PLAYER_ACTOR))).toEqual([]);
+  });
+
   it("aims an area a Multiattack uses where it catches the most foes", async () => {
     const run = await base();
     const state = fight([

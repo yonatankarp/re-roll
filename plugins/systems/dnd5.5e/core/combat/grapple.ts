@@ -16,16 +16,18 @@ import { MonsterSchema } from "../schemas.ts";
 // Grapples: the DC to escape one, and when one ends on its own. A grapple is the effect that holds a
 // creature, and every rider "until the grapple ends" shares its source, so ending that source ends them all.
 
-// One effect per grapple holding this creature.
+// One effect per grapple holding this creature. Two monsters of one kind share the action's source, so a grapple
+// is its grappler and source together.
 export function grapplesOn(actor: Actor): readonly ActiveEffect[] {
   const seen = new Set<string>();
   return actor.activeEffects.filter((effect) => {
-    const { modifier, sourceId } = effect;
+    const { modifier, sourceId, casterId } = effect;
     if (modifier.kind !== "condition" || modifier.condition !== "grappled") {
       return false;
     }
-    if (seen.has(sourceId)) return false;
-    seen.add(sourceId);
+    const key = `${casterId}|${sourceId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
@@ -94,6 +96,7 @@ export function releasedGrapples(
             dndEvent(`${NS}:effectEnded`, {
               actor: held.id,
               sourceId: grapple.sourceId,
+              casterId: grapple.casterId,
             }),
           ];
     });

@@ -321,9 +321,12 @@ const EffectAddedSchema = z.strictObject({
   actor: z.string(),
   effect: ActiveEffectSchema,
 });
+// With casterId, only that caster's effects from the source end, so one of two snakes letting go leaves the other's
+// grapple. Older saves have none, and ended every caster's.
 const EffectEndedSchema = z.strictObject({
   actor: z.string(),
   sourceId: z.string(),
+  casterId: z.string().optional(),
 });
 const ConditionRemovedSchema = z.strictObject({
   actor: z.string(),
@@ -833,7 +836,9 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         activeEffects: actor.activeEffects.filter(
-          (effect) => effect.sourceId !== data.sourceId,
+          (effect) =>
+            effect.sourceId !== data.sourceId ||
+            (data.casterId !== undefined && effect.casterId !== data.casterId),
         ),
       }));
     }

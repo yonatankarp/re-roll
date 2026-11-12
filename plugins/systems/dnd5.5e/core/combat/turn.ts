@@ -208,9 +208,10 @@ export function runFinishTurn(context: Context): SystemResult {
   const seen = new Set<string>();
   const events: SystemEvent[] = [];
   for (const { actor: target, effect, save } of repeated) {
-    const { sourceId, modifier } = effect;
-    if (seen.has(sourceId)) continue;
-    seen.add(sourceId);
+    const { sourceId, casterId, modifier } = effect;
+    // Each caster's effect is saved against on its own, as two snakes' grapples are two grapples.
+    if (seen.has(`${casterId}|${sourceId}`)) continue;
+    seen.add(`${casterId}|${sourceId}`);
     const rolled = rollSave(
       target,
       save.ability,
@@ -232,7 +233,11 @@ export function runFinishTurn(context: Context): SystemResult {
     if (resisted) events.push(resisted);
     if (rolled.saved || resisted) {
       events.push(
-        dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId }),
+        dndEvent(`${NS}:effectEnded`, {
+          actor: target.id,
+          sourceId,
+          casterId,
+        }),
       );
     }
   }
