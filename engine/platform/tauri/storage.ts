@@ -35,6 +35,7 @@ export function tauriImageUrl(path: string): Promise<string | null> {
 export function createTauriReader(): ContentReader {
   const walk = async (folder: string, found: StorageEntry[]): Promise<void> => {
     for (const item of await readDir(await fullPath(folder))) {
+      if (item.name.startsWith(".")) continue; // never content, as in the dev route
       const path = `${folder}/${item.name}`;
       // Symlinks are reported rather than followed, matching the Node storage.
       if (item.isSymlink) found.push({ path, symlink: true });
