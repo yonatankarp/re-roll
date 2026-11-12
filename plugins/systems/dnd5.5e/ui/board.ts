@@ -15,6 +15,7 @@ import {
   showPickBar,
 } from "./board-overlays.ts";
 import { play } from "./board-playback.ts";
+import { wireZoom } from "./board-zoom.ts";
 import { parseState } from "./parse-state.ts";
 import { injectStyle } from "./board-style.ts";
 import {
@@ -71,7 +72,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   const pickBar = el("div", "dnd-pickbar");
   pickBar.hidden = true;
   field.append(ground, reachZone, blast, cells, route, routeCost, cursorBox);
-  board.append(field, banner, caption, hint, menu, pickBar, said);
+  // The map's window: it scrolls when the map is zoomed in, while what's over the map stays put.
+  const view = el("div", "dnd-view");
+  view.append(field);
+  board.append(view, banner, caption, hint, menu, pickBar, said);
   slot.append(board);
   slot.hidden = true;
   const ctx: BoardContext = {
@@ -110,11 +114,13 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     throwNow: null,
     pendingDamage: null,
     waiting: [],
+    fitMap: () => undefined,
   };
   new ResizeObserver(() => {
     layout(ctx);
   }).observe(field);
   wireInput(ctx);
+  slot.append(wireZoom(ctx, view));
 
   // Values, arrivals and removals wait until the queue is done, so they don't spoil what's playing.
   const sync = (update: BoardUpdate, settle: boolean): void => {

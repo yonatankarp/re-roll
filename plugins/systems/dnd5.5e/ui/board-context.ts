@@ -75,6 +75,7 @@ export interface BoardState {
     readonly mine: boolean;
   } | null;
   readonly waiting: (() => void)[];
+  fitMap: () => void; // zooms a battle map back out to fit its frame
 }
 
 export type BoardContext = BoardDom & BoardState;

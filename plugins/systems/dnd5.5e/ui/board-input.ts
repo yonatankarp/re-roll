@@ -120,6 +120,10 @@ export function placeCursor(ctx: BoardContext, x: number, y: number): void {
   };
   ctx.cursorBox.style.left = `${String((ctx.cursor.x / ctx.grid.width) * 100)}%`;
   ctx.cursorBox.style.top = `${String((ctx.cursor.y / ctx.grid.height) * 100)}%`;
+  // On a zoomed map the view pans to keep the cursor in sight.
+  if (ctx.board.classList.contains("zoomed")) {
+    ctx.cursorBox.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
   const found = tokenAt(ctx, ctx.cursor.x, ctx.cursor.y);
   const cell = cellNodeAt(ctx, ctx.cursor.x, ctx.cursor.y);
   if (aiming(ctx)) showAim(ctx, aimCellFor(ctx, ctx.cursor));

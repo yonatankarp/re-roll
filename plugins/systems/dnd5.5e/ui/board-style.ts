@@ -87,7 +87,7 @@ const BOARD_CSS = `
 /* A book's battle map shows as printed: no darkening and no second grid over its own. */
 .dnd-field.gridded.mapped::before { background: rgb(0 0 0 / 8%); }
 /* With no picture, a parchment battle mat ruled in ink, and no darkening. */
-.dnd-board:has(> .plain) { background: #e9dcbc; }
+.dnd-board:has(.dnd-field.plain) { background: #e9dcbc; }
 .dnd-field.plain {
   background: radial-gradient(circle at 50% 45%, #f1e6c9, #e9dcbc 60%, #dccb9f);
 }
@@ -299,7 +299,7 @@ const BOARD_CSS = `
   transition: opacity 0.3s;
 }
 .dnd-board.playing .dnd-hint { opacity: 1; }
-.dnd-field.plain ~ .dnd-hint { color: rgb(60 40 10 / 85%); text-shadow: none; }
+.dnd-view:has(> .plain) ~ .dnd-hint { color: rgb(60 40 10 / 85%); text-shadow: none; }
 .dnd-board.awaiting .dnd-hint { opacity: 0; }
 .dnd-board.playing { cursor: pointer; }
 .dnd-field.gridded {
@@ -311,7 +311,32 @@ const BOARD_CSS = `
   margin: 0 auto;
 }
 /* The frame fits the grid, so no dark bands run beside a narrow map. */
-.dnd-board:has(> .gridded) { width: fit-content; max-width: 100%; margin-inline: auto; }
+.dnd-board:has(.dnd-field.gridded) { width: fit-content; max-width: 100%; margin-inline: auto; }
+/* A zoomed map scrolls inside its frame to pan. */
+.dnd-view { max-width: 100%; }
+.dnd-board.zoomed .dnd-view { overflow: auto; overscroll-behavior: contain; }
+/* Zoom, under the frame so it covers no square, for a battle map; hidden for a check or a plain fight. */
+.dnd-zoom {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin: -4px 0 8px;
+}
+.dnd-board:not(:has(.dnd-field.gridded)) + .dnd-zoom,
+.dnd-board.checking + .dnd-zoom { display: none; }
+.dnd-zoom button {
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #c9ad6a;
+  border-radius: 6px;
+  background: rgb(20 12 6 / 85%);
+  color: #f4e7c8;
+  font: 600 0.95rem/1 var(--font-ui, system-ui), sans-serif;
+  cursor: pointer;
+}
+.dnd-zoom button:disabled { opacity: 0.45; cursor: default; }
+.dnd-zoom button:focus-visible { outline: 2px solid #ffd36b; outline-offset: 2px; }
 .dnd-field.gridded::before {
   background:
     linear-gradient(rgb(0 0 0 / 30%), rgb(0 0 0 / 45%)),

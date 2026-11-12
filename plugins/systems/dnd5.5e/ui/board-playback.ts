@@ -91,6 +91,7 @@ export async function play(ctx: BoardContext, cue: DndCue): Promise<void> {
   switch (cue.kind) {
     case "start":
       ctx.grid = cue.grid;
+      ctx.fitMap();
       for (const actor of cue.combatants) {
         const token = tokenFor(ctx, {
           ...actor,
