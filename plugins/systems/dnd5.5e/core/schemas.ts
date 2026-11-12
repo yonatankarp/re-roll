@@ -96,7 +96,11 @@ export const DiceSchema = z
 const FormulaTermSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("abilityMod"), ability: AbilitySchema }),
   z.strictObject({ kind: z.literal("proficiency") }),
-  z.strictObject({ kind: z.literal("classLevel"), class: ContentIdSchema }),
+  z.strictObject({
+    kind: z.literal("classLevel"),
+    class: ContentIdSchema,
+    half: z.boolean().optional(), // rounded down, as for Rally
+  }),
   z.strictObject({ kind: z.literal("level") }), // character level
   z.strictObject({ kind: z.literal("scaling"), key: z.string() }),
   z.strictObject({ kind: z.literal("spellMod") }),
@@ -448,6 +452,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
   perTier: ScaleStepSchema.optional(),
   // Spells it always gives, from the character level in the key.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  // Its damage is added to a hit's, so it takes that hit's damage type, as a Battle Master maneuver's die does.
+  hitType: z.literal(true).optional(),
   // Dice its slot-spending activations add for each slot level, as with Eldritch Smite.
   upcast: z.strictObject({ perSlotLevel: ScaleStepSchema }).optional(),
   // What taking it as a class option needs, read from its Prerequisite line: a level in the class choosing it,

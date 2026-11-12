@@ -217,6 +217,152 @@ const WARLOCK = [
   },
 ];
 
+// A made-up fighter whose level 3 subclass grants every maneuver here, with its dice as subclass scaling.
+const maneuver = (name: string) =>
+  `test:feature/fighter-master-maneuver-${name}`;
+const SUPERIORITY = "test:feature/fighter-master-superiority";
+const superiorityDie = { dice: "1d8", dieSize: "superiorityDie" };
+const dieDamage = [{ amount: superiorityDie, type: "bludgeoning" }];
+const spendDie = { resource: "superiority-dice" };
+const strDc = {
+  base: 8,
+  add: [{ kind: "proficiency" }, { kind: "abilityMod", ability: "str" }],
+};
+const afterHit = (resolution: unknown) => ({
+  cost: [spendDie],
+  trigger: { afterHit: "weapon" },
+  targeting: { creatures: 1, range: 120, side: "enemy" },
+  resolution,
+});
+const MANEUVERS: Record<string, Record<string, unknown>> = {
+  trip: {
+    hitType: true,
+    activations: [
+      afterHit({
+        kind: "save",
+        ability: "str",
+        dc: strDc,
+        damage: dieDamage,
+        onSuccessDamage: "full",
+        onFail: [
+          {
+            kind: "applyCondition",
+            condition: "prone",
+            duration: { until: "yourNextTurnStart" },
+          },
+        ],
+      }),
+    ],
+  },
+  pushing: {
+    hitType: true,
+    activations: [
+      afterHit({
+        kind: "save",
+        ability: "str",
+        dc: strDc,
+        damage: dieDamage,
+        onSuccessDamage: "full",
+        onFail: [{ kind: "forcedMove", feet: 15, direction: "away" }],
+      }),
+    ],
+  },
+  feinting: {
+    activations: [
+      {
+        cost: ["bonusAction", spendDie],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "modifier",
+              modifier: { kind: "advantage", on: "attacksAgainst", once: true },
+              duration: { until: "yourNextTurnStart" },
+            },
+          ],
+        },
+      },
+    ],
+  },
+  rally: {
+    activations: [
+      {
+        cost: ["bonusAction", spendDie],
+        targeting: { creatures: 1, range: 30, side: "ally" },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "tempHp",
+              amount: {
+                ...superiorityDie,
+                bonus: {
+                  base: 0,
+                  add: [
+                    {
+                      kind: "classLevel",
+                      class: "test:class/fighter",
+                      half: true,
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      },
+    ],
+  },
+  "precision-attack": {},
+};
+const FIGHTER = [
+  ...Object.entries(MANEUVERS).map(([name, fields]) => ({
+    id: maneuver(name),
+    name,
+    text,
+    automation: "full",
+    ...fields,
+  })),
+  {
+    id: SUPERIORITY,
+    name: "Superiority",
+    text,
+    automation: "partial",
+    resources: [
+      {
+        id: "superiority-dice",
+        max: { add: [{ kind: "scaling", key: "superiorityDice" }] },
+        recharge: [{ on: "shortRest", amount: "all" }],
+      },
+    ],
+  },
+  {
+    id: "test:class/fighter",
+    name: "Fighter",
+    hitDie: "d10",
+    primaryAbilities: ["str"],
+    savingThrows: ["str", "con"],
+    weapons: ["simple", "martial"],
+    armor: ["light", "medium", "heavy", "shield"],
+    levels: Array.from({ length: 10 }, (_, index) => ({ level: index + 1 })),
+  },
+  {
+    id: "test:subclass/master",
+    name: "Master",
+    class: "test:class/fighter",
+    levels: [
+      {
+        level: 3,
+        grants: [SUPERIORITY, ...Object.keys(MANEUVERS).map(maneuver)],
+        scaling: { superiorityDice: 4, superiorityDie: 8 },
+      },
+      { level: 7, scaling: { superiorityDice: 5 } },
+      { level: 10, scaling: { superiorityDie: 10 } },
+    ],
+  },
+];
+
 const content = [
   ...METAMAGIC.map((name) => ({
     id: option(name),
@@ -366,6 +512,7 @@ const content = [
     actions: [],
   },
   ...WARLOCK,
+  ...FIGHTER,
 ];
 
 function withContent(run: RunContext): RunContext {
@@ -1106,5 +1253,123 @@ describe("an invocation's own choices", () => {
           item.kind === "spells" && item.values.includes("test:spell/sing"),
       ),
     ).toBe(true);
+  });
+});
+
+function fighter(level: number, fields: Partial<Actor> = {}): Actor {
+  const actor = freshActor({
+    id: PLAYER_ACTOR,
+    name: "Fighter",
+    side: "party",
+    source: {
+      kind: "character",
+      build: {
+        baseAbilities: { str: 16, dex: 14, con: 13, int: 10, wis: 12, cha: 8 },
+        speciesId: "srd52:species/human",
+        backgroundId: "srd52:background/soldier",
+        backgroundIncrease: { str: 2, con: 1 },
+        levels: Array.from({ length: level }, (_, index) => ({
+          classId: "test:class/fighter",
+          hitPointGain: 10,
+          answers:
+            index === 2
+              ? [
+                  {
+                    kind: "subclass" as const,
+                    values: ["test:subclass/master"],
+                  },
+                ]
+              : [],
+        })),
+      },
+    },
+    hp: 40,
+    inventory: ["srd52:item/longsword"],
+  });
+  return { ...actor, position: { x: 0, y: 0 }, ...fields };
+}
+
+describe("Battle Master maneuvers", () => {
+  it("gains Superiority Dice and a bigger die as the subclass says", () => {
+    expect(statsOf(fighter(3)).resources["superiority-dice"]).toBe(4);
+    expect(statsOf(fighter(7)).resources["superiority-dice"]).toBe(5);
+    expect(statsOf(fighter(10)).scaling.superiorityDie).toBe(10);
+  });
+
+  it("Trip Attack adds the die to the hit, in the weapon's damage type", () => {
+    const done = settle(
+      fight(fighter(3), creature("a", "enemy", 1)),
+      [act(`${SWORD}|a`)],
+      dice(15),
+      [`feature:${maneuver("trip")}:0|a`],
+    );
+    const damaged = payloads(done.events, "damaged");
+    // The longsword's 1d8 + 4 is 12, then the d8 die at its highest, also slashing.
+    expect(damaged.map((item) => [item.amount, item.type])).toEqual([
+      [12, "slashing"],
+      [8, "slashing"],
+    ]);
+    expect(
+      payloads(done.events, "resourceSpent").map((item) => item.resource),
+    ).toContain("superiority-dice");
+  });
+
+  it("Pushing Attack pushes a creature that fails 15 feet away", () => {
+    // The hit on 15, then the save fails on 2.
+    const done = settle(
+      fight(fighter(3), creature("a", "enemy", 1)),
+      [act(`${SWORD}|a`)],
+      dice(15, 8, 8, 2),
+      [`feature:${maneuver("pushing")}:0|a`],
+    );
+    expect(done.state.actors.a?.position).toEqual({ x: 4, y: 0 });
+  });
+
+  it("Rally gives an ally the die plus half the Fighter level as Temporary Hit Points", () => {
+    const done = settle(
+      fight(
+        fighter(7),
+        creature("ally", "party", 1),
+        creature("a", "enemy", 5),
+      ),
+      [act(`feature:${maneuver("rally")}:0|ally`)],
+      dice(),
+    );
+    expect(done.state.actors.ally?.tempHp).toBe(8 + 3);
+  });
+
+  it("Feinting Attack gives Advantage on the next attack at the creature", () => {
+    const done = settle(
+      fight(fighter(3), creature("a", "enemy", 1)),
+      [act(`feature:${maneuver("feinting")}:0|a`)],
+      dice(),
+    );
+    expect(
+      done.state.actors.a?.activeEffects.some(
+        (item) =>
+          item.modifier.kind === "advantage" &&
+          item.modifier.on === "attacksAgainst",
+      ),
+    ).toBe(true);
+    expect(playerIn(done.state).budget.bonusAction).toBe(false);
+  });
+
+  it("Precision Attack adds the die to a miss it can turn into a hit", () => {
+    // AC 10: a 3 + 6 is 9, one short, and the d8 die comes up 6.
+    const done = settle(
+      fight(fighter(3), creature("a", "enemy", 1)),
+      [act(`${SWORD}|a`)],
+      dice(3, 6),
+      ["use", "decline"],
+    );
+    expect(done.decisions[0]?.id).toBe(`${NS}:precision:${PLAYER_ACTOR}`);
+    expect(payloads(done.events, "damaged")[0]?.type).toBe("slashing");
+    // A natural 1 misses whatever is added, so nothing is asked.
+    const far = settle(
+      fight(fighter(3), creature("a", "enemy", 1)),
+      [act(`${SWORD}|a`)],
+      dice(1),
+    );
+    expect(far.decisions).toEqual([]);
   });
 });

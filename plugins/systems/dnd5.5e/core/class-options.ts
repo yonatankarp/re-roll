@@ -368,6 +368,9 @@ export function classOptionPolicy(
   const { state } = context;
   const actor = state.actors[decision.actor];
   if (!actor) return null;
+  if (decision.id.startsWith(`${NS}:precision:`)) {
+    return decision.options[0]?.id ?? null;
+  }
   if (decision.id.startsWith(`${NS}:metamagic:`)) {
     const stats = deriveStats(actor, context);
     const spell = (id: string) =>

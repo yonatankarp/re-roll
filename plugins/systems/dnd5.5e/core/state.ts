@@ -49,6 +49,7 @@ export const FRAME_KINDS = [
   "metamagicSpent",
   "move",
   "pickTargets",
+  "precision",
   "projectile",
   "recheckHit",
   "shopAnswer",

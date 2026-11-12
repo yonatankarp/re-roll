@@ -76,6 +76,7 @@ export interface KnownAction {
   readonly activation: Activation;
   readonly spellLevel: number | null;
   readonly upcast?: Spell["upcast"];
+  readonly hitType?: true; // its damage takes the type of the hit it adds to, as a maneuver's die does
 }
 
 export interface Stats {
@@ -198,6 +199,7 @@ function collectFeatureData(
           : activation,
         spellLevel: null,
         ...(feature.upcast ? { upcast: feature.upcast } : {}),
+        ...(feature.hitType ? { hitType: true as const } : {}),
       });
     });
   }
@@ -890,7 +892,9 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
         total += stats.proficiency;
         break;
       case "classLevel":
-        total += stats.classLevels[term.class] ?? 0;
+        total += Math.floor(
+          (stats.classLevels[term.class] ?? 0) / (term.half ? 2 : 1),
+        );
         break;
       case "level":
         total += stats.level;
