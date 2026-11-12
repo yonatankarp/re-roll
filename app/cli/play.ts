@@ -1,183 +1,219 @@
-import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { z } from "zod";
-import type {
-  Decision,
-  GameEvent,
-  GameState,
-} from "../../engine/kernel/events.ts";
 import {
-  type LogEntry,
-  type SaveFile,
-  createSave,
-  loadSave,
-} from "../../engine/kernel/save.ts";
-import { pendingDecision, startRun, step } from "../../engine/kernel/turn.ts";
-import { createNodeStorage } from "../../engine/platform/node/storage.ts";
-import { listAdventures, loadAdventure } from "./load-adventure.ts";
+  SCREEN_VERSION,
+  type Driver,
+  screenText,
+} from "../../engine/tools/headless.ts";
+import { openHeadless } from "./headless-game.ts";
 
-// A plain text way to play before the UI exists: npm run play -- <adventure> [seed]
-// Using the same adventure and seed again resumes that run from its save.
+// Plays an adventure with no browser, through the same game layer as the app.
+// npm run play -- <adventure> [--seed=N] [--difficulty=story|normal|hard] [--saves=dir] [--script=file.json|-]
+// npm run play -- --load=<n|path> [--saves=dir] [--script=…] resumes a save, such as a run's autosave.
+// Without --script it is interactive text. With it, each command's screen is printed as one JSON line.
 
-const [adventure, seedArgument] = process.argv.slice(2);
-if (!adventure) {
-  console.log(`Adventures: ${(await listAdventures()).join(", ")}`);
-  console.log("Usage: npm run play -- <adventure> [seed]");
-  process.exit(0);
-}
+const Ref = z.union([z.string(), z.number()]);
+const CommandSchema = z.union([
+  Ref, // a choice on screen: its number, id or label
+  z.object({ choose: Ref }).strict(),
+  z.object({ act: z.array(z.string()).min(1) }).strict(), // option ids in turn, as the map sends them
+  z.object({ save: z.string().min(1) }).strict(),
+  z.object({ saves: z.literal(true) }).strict(),
+  z.object({ load: Ref }).strict(), // a number in the save list, or a path
+  z.object({ delete: Ref }).strict(),
+  z.object({ restart: z.string().nullable() }).strict(), // a new seed, or null for a random one
+]);
+type Command = z.infer<typeof CommandSchema>;
 
-const seed = seedArgument ?? randomUUID();
-const savePath = `saves/${adventure}-${seed}.json`;
-const storage = await createNodeStorage(process.cwd());
-const { registry, run } = await loadAdventure(adventure);
+const flags = process.argv.slice(2).filter((arg) => arg.startsWith("--"));
+const [adventure] = process.argv
+  .slice(2)
+  .filter((arg) => !arg.startsWith("--"));
+const flag = (name: string): string | undefined =>
+  flags.find((item) => item.startsWith(`--${name}=`))?.slice(name.length + 3);
 
-const ActorNamesSchema = z.object({
-  actors: z.record(z.string(), z.object({ name: z.string() })),
-});
-const knownNames = new Map<string, string>();
+const script = flag("script");
+const resume = flag("load");
+const message = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+// Typed digits are a number on screen or in the save list; anything else is an id, label or path.
+const ref = (text: string): string | number =>
+  /^\d+$/.test(text) ? Number(text) : text;
 
-// Monsters leave the state when a fight ends, so names are remembered as they appear.
-function learnNames(system: unknown): void {
-  const parsed = ActorNamesSchema.safeParse(system);
-  if (!parsed.success) return;
-  for (const [id, { name }] of Object.entries(parsed.data.actors)) {
-    knownNames.set(id, name);
+const driver = await openHeadless(flag("saves"));
+if (!adventure && resume === undefined) {
+  for (const item of await driver.listAdventures()) {
+    console.log(`${item.id}  ${item.title} (${item.source})`);
   }
-}
-
-function nameOf(id: unknown): string {
-  return knownNames.get(String(id)) ?? String(id);
-}
-
-function describe(event: GameEvent): string | null {
-  switch (event.kind) {
-    case "sceneEntered":
-      return `\n--- ${event.scene} ---`;
-    case "checkResolved":
-      return `Result: ${event.outcome}.`;
-    case "encounterStarted":
-      return "\nA fight breaks out!";
-    case "encounterEnded":
-      return event.outcome === "flee"
-        ? "You get away."
-        : event.outcome === "defeat"
-          ? "The fight is lost."
-          : "The fight is over.";
-    case "clueRevealed":
-      return `You learn something: ${event.text}`;
-    case "resourceAdjusted":
-      return `${event.resource}: ${String(event.value)}`;
-    case "actorDowned":
-      return `${nameOf(event.actor)} is down!`;
-    case "actorDefeated":
-      return `${nameOf(event.actor)} is defeated.`;
-    case "adventureEnded":
-      return `\nThe adventure is over (${event.reason}).`;
-    case "partyDefeated":
-      return "\nYour party has fallen.";
-    default:
-      if ("payload" in event && event.kind.endsWith(":rollReported")) {
-        const { label, natural, total, target, success } = event.payload;
-        return `${String(label)}: rolled ${String(natural)}, total ${String(total)} against ${String(target)}, ${success === true ? "success" : "failure"}.`;
-      }
-      if ("payload" in event && event.kind.endsWith(":damaged")) {
-        const { actor, amount, type } = event.payload;
-        return `${nameOf(actor)} takes ${String(amount)} ${String(type)} damage.`;
-      }
-      if ("payload" in event && event.kind.endsWith(":healed")) {
-        const { actor, amount } = event.payload;
-        return `${nameOf(actor)} regains ${String(amount)} HP.`;
-      }
-      return null;
-  }
-}
-
-function report(events: readonly GameEvent[]): void {
-  for (const event of events) {
-    if ("payload" in event && event.kind.endsWith(":combatStarted")) {
-      learnNames({
-        actors: Object.fromEntries(
-          z
-            .array(z.object({ id: z.string(), name: z.string() }))
-            .parse(event.payload.monsters)
-            .map(({ id, name }) => [id, { name }]),
-        ),
-      });
-    }
-    const line = describe(event);
-    if (line !== null) console.log(line);
-  }
-}
-
-function ask(decision: Decision): void {
-  console.log(`\n${decision.prompt}`);
-  decision.options.forEach((option, index) => {
-    console.log(`  ${String(index + 1)}. ${option.label}`);
-  });
-  process.stdout.write("> ");
-}
-
-async function persist(log: readonly LogEntry[]): Promise<void> {
-  const save: SaveFile = createSave(registry, adventure ?? "", seed, log);
-  await storage.replaceAtomically(savePath, JSON.stringify(save));
-}
-
-const log: LogEntry[] = [];
-let state: GameState;
-let pending: Decision | null;
-
-const existing = await storage.read(savePath);
-if (existing !== null) {
-  const loaded = loadSave(existing, registry, run);
-  if (!loaded.ok) throw new Error(loaded.error);
-  for (const warning of loaded.warnings) console.warn(`Warning: ${warning}`);
-  log.push(...(loaded.save.log as readonly LogEntry[]));
-  ({ state } = loaded);
-  learnNames(state.system);
-  pending = pendingDecision(run, state);
-  console.log(`Resuming ${savePath}`);
-} else {
-  const started = startRun(run, seed);
-  ({ state, pending } = started);
-  log.push({ input: { kind: "start" }, events: started.events });
-  learnNames(state.system);
-  report(started.events);
-  await persist(log);
-}
-
-if (!pending) {
   console.log(
-    `This run has already ended (${state.story.ended ?? "unknown"}).`,
+    "Usage: npm run play -- <adventure> [--seed=N] [--difficulty=…] [--saves=dir] [--script=file.json|-]",
+  );
+  console.log(
+    "       npm run play -- --load=<n|path> [--saves=dir] [--script=…]",
   );
   process.exit(0);
 }
-ask(pending);
 
-const lines = createInterface({ input: process.stdin });
-for await (const line of lines) {
-  // Always set here: the loop stops as soon as nothing is waiting.
-  const decision = pendingDecision(run, state);
-  if (!decision) break;
-  const option = decision.options[Number(line.trim()) - 1];
-  if (!option) {
-    console.log("Please enter one of the numbers above.");
-    process.stdout.write("> ");
-    continue;
+const difficulty = flag("difficulty");
+const seed = flag("seed");
+const settings = difficulty ? { settings: { difficulty } } : {};
+let opening: unknown;
+try {
+  if (resume !== undefined) {
+    opening = { load: ref(resume) };
+    await driver.load(ref(resume));
+  } else {
+    opening = { start: { adventure, ...(seed ? { seed } : {}), ...settings } };
+    await driver.start(adventure ?? "", {
+      ...(seed ? { seed } : {}),
+      ...settings,
+    });
+    opening = { start: { adventure, seed: driver.seed(), ...settings } };
   }
-  const input = {
-    kind: "answer",
-    decisionId: decision.id,
-    optionId: option.id,
-  } as const;
-  const outcome = step(run, state, input);
-  if (!outcome.ok) throw new Error(outcome.error);
-  ({ state } = outcome);
-  learnNames(state.system);
-  log.push({ input, events: outcome.events });
-  report(outcome.events);
-  await persist(log);
-  if (!outcome.pending) break;
-  ask(outcome.pending);
+} catch (error) {
+  if (script === undefined) console.error(message(error));
+  else {
+    console.log(
+      JSON.stringify({
+        version: SCREEN_VERSION,
+        step: 0,
+        command: opening,
+        error: message(error),
+      }),
+    );
+  }
+  process.exit(1);
 }
-lines.close();
-console.log(`\nSaved to ${savePath}`);
+
+// What the command returns beyond the new screen, such as the save list.
+async function run(play: Driver, command: Command): Promise<unknown> {
+  if (typeof command === "string" || typeof command === "number") {
+    return play.choose(command);
+  }
+  if ("choose" in command) return play.choose(command.choose);
+  if ("act" in command) return play.act(...command.act);
+  if ("save" in command) return { path: await play.save(command.save) };
+  if ("saves" in command) {
+    return (await play.saves()).map((save, index) => ({
+      n: index + 1,
+      ...save,
+    }));
+  }
+  if ("load" in command) return play.load(command.load);
+  if ("delete" in command) return play.deleteSave(command.delete);
+  await play.restart(command.restart ?? undefined);
+  return { seed: play.seed() };
+}
+
+// Interactive words, as the same commands a script uses.
+function parseLine(line: string): Command {
+  const [word = "", ...rest] = line.trim().split(/\s+/);
+  const arg = rest.join(" ");
+  switch (word.toLowerCase()) {
+    case "act":
+      return { act: rest };
+    case "save":
+      return { save: arg || new Date().toISOString().replace(/[:.]/g, "-") };
+    case "saves":
+      return { saves: true };
+    case "load":
+      return { load: ref(arg) };
+    case "delete":
+      return { delete: ref(arg) };
+    case "restart":
+      return { restart: arg || null };
+    default:
+      return ref(line.trim());
+  }
+}
+
+if (script !== undefined) {
+  let step = 0;
+  const emit = (command: unknown, result: unknown): void => {
+    console.log(
+      JSON.stringify({
+        version: SCREEN_VERSION,
+        step,
+        command,
+        ...(result === undefined ? {} : { result }),
+        screen: driver.screen(),
+      }),
+    );
+  };
+  const status = { failed: false };
+  // A failed step prints its error with the screen as it now stands, since an act may have answered part of it.
+  // A file script stops there. From stdin, the agent sees it and carries on.
+  const perform = async (raw: unknown, line?: string): Promise<void> => {
+    step += 1;
+    let command = raw;
+    try {
+      if (line !== undefined) command = JSON.parse(line) as unknown;
+      const parsed = CommandSchema.parse(command);
+      emit(parsed, (await run(driver, parsed)) ?? undefined);
+    } catch (error) {
+      status.failed = true;
+      console.log(
+        JSON.stringify({
+          version: SCREEN_VERSION,
+          step,
+          command: command ?? line,
+          error: message(error),
+          screen: driver.screen(),
+        }),
+      );
+      if (script !== "-") process.exit(1);
+    }
+  };
+  emit(opening, undefined);
+  if (script === "-") {
+    // One JSON command per line, so an agent can read each screen before sending the next.
+    for await (const line of createInterface({ input: process.stdin })) {
+      if (line.trim()) await perform(undefined, line);
+    }
+  } else {
+    const commands = z
+      .array(z.unknown())
+      .parse(JSON.parse(await readFile(script, "utf8")));
+    for (const command of commands) await perform(command);
+  }
+  if (status.failed) process.exitCode = 1;
+} else {
+  console.log(
+    `Seed ${driver.seed()}. Type a number or label, or: act <ids…>, save [name], saves, load <n>, delete <n>, restart [seed], json, quit.`,
+  );
+  console.log(screenText(driver.screen()));
+  process.stdout.write("> ");
+  for await (const line of createInterface({ input: process.stdin })) {
+    const text = line.trim();
+    if (text === "quit") break;
+    if (text === "json") {
+      console.log(JSON.stringify(driver.screen(), null, 2));
+    } else if (text) {
+      try {
+        const command = parseLine(text);
+        const result = await run(driver, command);
+        if (typeof command === "object" && "save" in command) {
+          console.log(
+            `Saved to ${z.object({ path: z.string() }).parse(result).path}`,
+          );
+        } else if (typeof command === "object" && "delete" in command) {
+          console.log("Deleted.");
+        } else if (Array.isArray(result)) {
+          for (const save of z
+            .array(
+              z.object({ n: z.number(), label: z.string(), path: z.string() }),
+            )
+            .parse(result)) {
+            console.log(`  ${String(save.n)}. ${save.label}  (${save.path})`);
+          }
+        } else {
+          console.log(screenText(driver.screen()));
+        }
+      } catch (error) {
+        console.log(error instanceof Error ? error.message : String(error));
+      }
+    }
+    process.stdout.write("> ");
+  }
+}

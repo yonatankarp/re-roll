@@ -11,7 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { scanPlugins } from "../engine/kernel/loader.ts";
-import { createNodeStorage } from "../engine/platform/node/storage.ts";
+import {
+  createNodeStorage,
+  createPlayStorage,
+} from "../engine/platform/node/storage.ts";
 
 describe("createNodeStorage", () => {
   let base: string;
@@ -102,6 +105,49 @@ describe("createNodeStorage", () => {
     ]);
     expect(catalog.issues.map((issue) => issue.message)).toContain(
       "symlinks are not allowed",
+    );
+  });
+});
+
+describe("createPlayStorage", () => {
+  let base: string;
+
+  beforeEach(async () => {
+    base = await mkdtemp(join(tmpdir(), "re-roll-"));
+  });
+
+  afterEach(async () => {
+    await rm(base, { recursive: true, force: true });
+  });
+
+  it("reads a symlinked private folder, writes only saves, and removes them", async () => {
+    const repo = join(base, "repo");
+    const owner = join(base, "owner");
+    await mkdir(join(repo, "plugins"), { recursive: true });
+    await mkdir(join(owner, "private"), { recursive: true });
+    await writeFile(join(repo, "plugins", "a.txt"), "shipped");
+    await writeFile(join(owner, "private", "b.txt"), "book");
+    await symlink(join(owner, "private"), join(repo, "private"));
+    const storage = await createPlayStorage(repo, join(base, "play"));
+
+    expect(await storage.read("plugins/a.txt")).toBe("shipped");
+    expect(await storage.read("private/b.txt")).toBe("book");
+    expect(await storage.list("private")).toEqual([
+      { path: "private/b.txt", symlink: false },
+    ]);
+    await expect(
+      storage.replaceAtomically("private/b.txt", "x"),
+    ).rejects.toThrow("read-only");
+    await expect(storage.remove("plugins/a.txt")).rejects.toThrow("read-only");
+
+    await storage.replaceAtomically("saves/one.json", "{}");
+    expect(
+      await readFile(join(base, "play", "saves", "one.json"), "utf8"),
+    ).toBe("{}");
+    await storage.remove("saves/one.json");
+    expect(await storage.read("saves/one.json")).toBeNull();
+    expect(await readFile(join(owner, "private", "b.txt"), "utf8")).toBe(
+      "book",
     );
   });
 });

@@ -20,9 +20,14 @@ function isInside(root: string, target: string): boolean {
   return target === root || target.startsWith(root + sep);
 }
 
+export type NodeStorage = Storage & {
+  readBytes(path: string): Promise<Buffer | null>;
+  remove(path: string): Promise<void>;
+};
+
 export async function createNodeStorage(
   rootPath: string,
-): Promise<Storage & { readBytes(path: string): Promise<Buffer | null> }> {
+): Promise<NodeStorage> {
   const root = await realpath(rootPath);
 
   const locate = (path: string): string => {
@@ -80,6 +85,16 @@ export async function createNodeStorage(
       }
     },
 
+    async remove(path) {
+      const target = locate(path);
+      try {
+        await assertRealPathInside(target, path);
+        await rm(target);
+      } catch (error) {
+        if (!isMissing(error)) throw error;
+      }
+    },
+
     async list(prefix) {
       const start = locate(prefix);
       const found: StorageEntry[] = [];
@@ -104,5 +119,46 @@ export async function createNodeStorage(
       }
       return found.sort((a, b) => a.path.localeCompare(b.path));
     },
+  };
+}
+
+const SAVES = "saves";
+const PRIVATE = "private";
+
+function under(folder: string, path: string): boolean {
+  return path === folder || path.startsWith(`${folder}/`);
+}
+
+// For playing from Node: content is read-only, saves live in their own folder, and a symlinked private/
+// (such as a worktree's link to the main checkout) is read through its real folder.
+export async function createPlayStorage(
+  contentRoot: string,
+  savesRoot: string,
+): Promise<Storage & { remove(path: string): Promise<void> }> {
+  const content = await createNodeStorage(contentRoot);
+  await mkdir(savesRoot, { recursive: true });
+  // The saves folder's parent, so paths keep their saves/ prefix.
+  await mkdir(join(savesRoot, SAVES), { recursive: true });
+  const saves = await createNodeStorage(savesRoot);
+  const privateDir = await realpath(join(contentRoot, PRIVATE)).catch(
+    () => null,
+  );
+  // shortcut: assumes the link's target is itself named private, as in the main checkout; map paths if that changes.
+  const owner = privateDir
+    ? await createNodeStorage(dirname(privateDir))
+    : content;
+  const source = (path: string) =>
+    under(SAVES, path) ? saves : under(PRIVATE, path) ? owner : content;
+  const readOnly = (path: string) =>
+    Promise.reject(new Error(`${path} is read-only`));
+  return {
+    read: (path) => source(path).read(path),
+    list: (prefix) => source(prefix).list(prefix),
+    replaceAtomically: (path, contents) =>
+      under(SAVES, path)
+        ? saves.replaceAtomically(path, contents)
+        : readOnly(path),
+    remove: (path) =>
+      under(SAVES, path) ? saves.remove(path) : readOnly(path),
   };
 }
