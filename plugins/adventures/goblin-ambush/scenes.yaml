@@ -33,7 +33,7 @@
   text: The elder listens, then asks who will walk the road next.
 - id: camp
   title: Camp in the Pines
-  text: With the goblins scattered, you make camp in the pines and tend your wounds.
+  text: With the goblins scattered, you make camp in the pines and tend your wounds. A peddler's mule is tethered by the fire.
   choices:
     - label: Take an hour's rest and move on
       effects:
@@ -43,6 +43,48 @@
       effects:
         - { kind: system, effect: "dnd5.5e:longRest", args: {} }
         - { kind: goto, scene: safe-road }
+    # A friendly peddler knocks a fifth off every price.
+    - label: Trade with Tam the peddler
+      when: { kind: attitude, npc: peddler, atMost: 0 }
+      effects:
+        - kind: system
+          effect: "dnd5.5e:shop"
+          args:
+            merchant: Tam the Peddler
+            stock:
+              - { item: "srd52:item/potion-of-healing", quantity: 3 }
+              - { item: "srd52:item/dagger" }
+              - { item: "srd52:item/shortsword" }
+              - { item: "srd52:item/shortbow" }
+              - { item: "srd52:item/leather-armor" }
+              - { item: "srd52:item/shield" }
+    - label: Trade with Tam, who now gives you a friend's price
+      when: { kind: attitude, npc: peddler, atLeast: 1 }
+      effects:
+        - kind: system
+          effect: "dnd5.5e:shop"
+          args:
+            discount: 20
+            merchant: Tam the Peddler
+            stock:
+              - { item: "srd52:item/potion-of-healing", quantity: 3 }
+              - { item: "srd52:item/dagger" }
+              - { item: "srd52:item/shortsword" }
+              - { item: "srd52:item/shortbow" }
+              - { item: "srd52:item/leather-armor" }
+              - { item: "srd52:item/shield" }
+    - label: "[Persuasion] Share road stories with Tam"
+      when:
+        all:
+          - { kind: attitude, npc: peddler, atMost: 0 }
+          - { kind: flag, flag: told-tam-stories, is: false }
+      check: { skill: persuasion, dc: 10 }
+      results:
+        success:
+          - { kind: adjustAttitude, npc: peddler, by: 1 }
+          - { kind: setFlag, flag: told-tam-stories }
+        failure:
+          - { kind: setFlag, flag: told-tam-stories }
 - id: safe-road
   title: The Road Is Safe
   text: The road is quiet again, for now.

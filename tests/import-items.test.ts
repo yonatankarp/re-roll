@@ -204,6 +204,7 @@ describe("importing items from a book page", () => {
       type: "tool",
       ability: "dex",
       costCp: 5000,
+      weightLb: 8,
     });
     expect(parsed("game-board")).toMatchObject({
       type: "tool",
@@ -219,6 +220,7 @@ describe("importing items from a book page", () => {
       type: "gear",
       category: "adventuring",
       costCp: 50,
+      weightLb: 1,
       text: "Weight: 1 lb.\nIt leaks.",
     });
     expect(parsed("hiker-s-pack")).toMatchObject({
@@ -249,6 +251,7 @@ describe("importing items from a book page", () => {
     expect(parsed("pop-nut")).toMatchObject({
       category: "explosive",
       costCp: 2,
+      weightLb: 1,
       text: "Weight: 1 lb.",
     });
   });

@@ -76,6 +76,7 @@ import {
 } from "./character.ts";
 import { gearEffects, gearFrames } from "./gear.ts";
 import { legendaryFrames, surpriseEffects } from "./legendary.ts";
+import { shopEffects, shopFrames } from "./shop.ts";
 import { availableRests, restEffects, restFrames } from "./rest.ts";
 import { InspirationSchema, runInspiration } from "./class-rules.ts";
 import { rollD20 } from "./rules.ts";
@@ -297,6 +298,7 @@ export const dnd55e = defineSystem<DndState>({
     ...restEffects,
     ...gearEffects,
     ...surpriseEffects,
+    ...shopEffects,
   },
   storyPredicates: {
     [`${NS}:hasInspiration`]: storyPredicate({
@@ -338,6 +340,7 @@ export const dnd55e = defineSystem<DndState>({
       schema: EmptyPayload,
       run: (_payload, context: Context) => runAdvanceTurn(context),
     }),
+    ...shopFrames,
     [`${NS}:takeAction`]: frameHandler({
       schema: TakeActionSchema,
       run: runTakeAction,
