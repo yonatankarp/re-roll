@@ -1048,6 +1048,13 @@ function describe(
   }
 }
 
+// A gold coin with a rim and a crown mark, drawn rather than an emoji, which differs by OS.
+const COIN_ICON =
+  '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">' +
+  '<circle cx="12" cy="12" r="10" fill="#b8862b"/>' +
+  '<circle cx="12" cy="12" r="7.6" fill="#e2b546" stroke="#8a6014" stroke-width="1"/>' +
+  '<path d="M8 15h8l1-6-3 2.4L12 8l-2 3.4L7 9z" fill="#8a6014"/></svg>';
+
 // The moment treasure is found, shown as a card above its choices, with the purse it ends up in.
 function card(decision: Decision, rawState: unknown, access: ContentAccess) {
   if (!decision.id.startsWith("dnd5.5e:found:")) return null;
@@ -1055,7 +1062,7 @@ function card(decision: Decision, rawState: unknown, access: ContentAccess) {
   return found.success
     ? {
         title: "Found",
-        icon: "\u{1FA99}",
+        icon: COIN_ICON,
         lines: foundText(found.data, access),
         footer: `Purse: ${coins(parseState(rawState).gold ?? 0)}`,
       }

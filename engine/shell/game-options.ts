@@ -12,6 +12,13 @@ const INFO_ICON =
   '<circle cx="10" cy="10" r="8"/><path d="M10 9v5" stroke-linecap="round"/>' +
   '<circle cx="10" cy="6" r=".6" fill="currentColor"/></svg>';
 
+// The system's own markup, as the shell's icons are, so the card looks the same on every OS.
+function cardIcon(svg: string): HTMLElement {
+  const icon = el("span", { class: "card-icon" });
+  icon.innerHTML = svg;
+  return icon;
+}
+
 export function drawDecision(
   page: GamePage,
   view: GameView,
@@ -43,14 +50,7 @@ export function drawDecision(
                   el(
                     "h3",
                     {},
-                    ...(shownCard.icon
-                      ? [
-                          el("span", {
-                            class: "card-icon",
-                            text: shownCard.icon,
-                          }),
-                        ]
-                      : []),
+                    ...(shownCard.icon ? [cardIcon(shownCard.icon)] : []),
                     document.createTextNode(shownCard.title),
                   ),
                   el(

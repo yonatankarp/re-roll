@@ -1138,7 +1138,7 @@ summary {
 }
 
 .card-icon {
-  font-size: 1.3rem;
+  display: inline-flex;
 }
 
 .card-footer {
