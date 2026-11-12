@@ -968,4 +968,22 @@ describe("monster grapples and multiattacks", () => {
       "monster:1|player",
     );
   });
+
+  it("gives an Opportunity Attack for walking past a foe, not only for where a move starts and ends", async () => {
+    const run = await base();
+    // Both ends are 10 feet from the foe, and every way round it passes through its reach.
+    const state = fight([fighter(run, { at: [3, 5] }), monster("foe", [5, 5])]);
+    const hero = who(state, PLAYER_ACTOR);
+    expect(provokers(hero, { x: 7, y: 5 }, state, run)).toHaveLength(1);
+    const walked = settle(run, state, [moveTo(PLAYER_ACTOR, 7, 5)], LOW);
+    expect(rolls(walked.events)[0]).toMatchObject({ actor: "foe" });
+    // Stepping round it while staying in reach provokes nothing.
+    const beside = fight([
+      fighter(run, { at: [4, 5] }),
+      monster("foe", [5, 5]),
+    ]);
+    expect(
+      provokers(who(beside, PLAYER_ACTOR), { x: 4, y: 6 }, beside, run),
+    ).toHaveLength(0);
+  });
 });

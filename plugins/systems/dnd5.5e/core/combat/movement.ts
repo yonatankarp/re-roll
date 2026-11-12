@@ -51,9 +51,33 @@ export function meleeReachOf(
   return reaches.length > 0 ? Math.max(...reaches) : null;
 }
 
-// Enemies that get an Opportunity Attack if the actor moves to `to`, and the attack each would make.
-// shortcut: only where the move starts and ends counts, not every square on the way; check each square of
-// the path moveSquares already finds once a map has a corridor past a foe.
+// The board asks about every square it can walk to, so the walks are found once per actor and state.
+const walks = new WeakMap<
+  Actor,
+  WeakMap<DndState, ReadonlyMap<string, readonly Square[]>>
+>();
+function walksOf(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+): ReadonlyMap<string, readonly Square[]> {
+  const byState = walks.get(actor) ?? new WeakMap();
+  walks.set(actor, byState);
+  const found =
+    byState.get(state) ??
+    new Map(
+      moveSquares(actor, state, deriveStats(actor, access)).map(
+        ({ square, path }) => [squareKey(square), path],
+      ),
+    );
+  byState.set(state, found);
+  return found;
+}
+
+// Enemies that get an Opportunity Attack if the actor moves to `to`, and the attack each would make: any foe
+// whose reach some step of the walk leaves. Off the grid (fleeing), only where it starts and ends counts.
+// shortcut: the walk is the cheapest one moveSquares finds, not the one that provokes fewest; let a move
+// choose its path once the board lets the player draw one.
 export function provokers(
   actor: Actor,
   to: Square,
@@ -61,6 +85,8 @@ export function provokers(
   access: ContentAccess,
 ): readonly { readonly foe: Actor; readonly melee: KnownAction }[] {
   if (hasTactic(actor, "disengage")) return [];
+  const walked = walksOf(actor, state, access).get(squareKey(to)) ?? [to];
+  const steps = [actor.position, ...walked];
   return enemies(state, actor).flatMap((foe) => {
     if (
       !foe.budget.reaction ||
@@ -69,6 +95,13 @@ export function provokers(
     ) {
       return [];
     }
+    const leaves = (reach: number): boolean =>
+      steps.some(
+        (square, index) =>
+          index + 1 < steps.length &&
+          distanceFeet(square, foe.position) <= reach &&
+          distanceFeet(steps[index + 1] ?? null, foe.position) > reach,
+      );
     const melee = deriveStats(foe, access).actions.find((item) => {
       const reach = meleeReach(item);
       return (
@@ -76,8 +109,7 @@ export function provokers(
         item.activation.resolution.kind === "attack" &&
         !item.activation.trigger &&
         item.spellLevel === null &&
-        distanceFeet(actor.position, foe.position) <= reach &&
-        distanceFeet(to, foe.position) > reach
+        leaves(reach)
       );
     });
     return melee ? [{ foe, melee }] : [];
