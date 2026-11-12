@@ -151,10 +151,36 @@ const COILER = dummy("test:monster/coiler", {
   ],
 });
 
+// Bites, then sprays a cone that the Multiattack has to aim.
+const SPITTER = dummy("test:monster/spitter", {
+  text: "Actions\nMultiattack. The spitter makes one Club attack and uses Spray.",
+  actions: [
+    ...(dummy("x").actions as unknown[]),
+    {
+      name: "Spray",
+      activation: {
+        cost: ["action"],
+        targeting: {
+          area: { shape: "cone", radius: 15 },
+          range: "self",
+          side: "enemy",
+        },
+        resolution: {
+          kind: "save",
+          ability: "dex",
+          dc: { base: 12 },
+          damage: [{ amount: { dice: "1d6" }, type: "acid" }],
+        },
+      },
+    },
+  ],
+});
+
 function arena(base: RunContext): RunContext {
   const content: Record<string, unknown> = {
     "test:monster/dummy": dummy("test:monster/dummy"),
     "test:monster/coiler": COILER,
+    "test:monster/spitter": SPITTER,
     "test:monster/giant": dummy("test:monster/giant", { size: "huge" }),
     ...Object.fromEntries(WEAPONS.map((item) => [item.id, item])),
   };
@@ -984,7 +1010,7 @@ describe("monster grapples and multiattacks", () => {
     });
     expect(
       decision?.options.find((option) => option.id === escape)?.label,
-    ).toBe("Escape coiler grapple (Athletics or Acrobatics, DC 15)");
+    ).toBe("Escape coiler's grapple (Athletics or Acrobatics, DC 15)");
     const stuck = settle(run, held, [act(PLAYER_ACTOR, escape)], LOW);
     expect(hasCondition(who(stuck.state, PLAYER_ACTOR), "grappled")).toBe(true);
     const free = settle(run, held, [act(PLAYER_ACTOR, escape)], HIGH);
@@ -1028,6 +1054,28 @@ describe("monster grapples and multiattacks", () => {
     // Squeeze reaches 10 feet.
     expect(hasCondition(after(moved(7)), "grappled", "restrained")).toBe(true);
     expect(sources(after(moved(8)))).toEqual([]);
+  });
+
+  it("aims an area a Multiattack uses where it catches the most foes", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [7, 5] }),
+      fighter(run, { id: "ally", at: [8, 6] }),
+      fighter(run, { id: "behind", at: [11, 5] }),
+      monster("spitter", [9, 5], "test:monster/spitter"),
+    ]);
+    const { events } = settle(
+      run,
+      state,
+      [act("spitter", "monster:0|ally")],
+      LOW,
+    );
+    const saved = events.flatMap((event) =>
+      event.kind === `${NS}:saveRolled` && "payload" in event
+        ? [event.payload.actor]
+        : [],
+    );
+    expect(saved.sort()).toEqual(["ally", PLAYER_ACTOR]);
   });
 
   it("picks the attack that brings the other action over that action alone", async () => {

@@ -367,7 +367,7 @@ export function tacticOptions(
     const grappler = state.actors[grapple.casterId];
     options.push({
       id: encodeOption(ESCAPE, grapple.casterId, grapple.sourceId),
-      label: `Escape ${grappler?.name ?? "the"} grapple (Athletics or Acrobatics, DC ${String(escapeDc(grapple, state, access))})`,
+      label: `Escape ${grappler ? `${grappler.name}'s` : "the"} grapple (Athletics or Acrobatics, DC ${String(escapeDc(grapple, state, access))})`,
     });
   }
   if (!full) return options;

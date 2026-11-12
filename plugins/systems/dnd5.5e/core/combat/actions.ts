@@ -317,7 +317,7 @@ export const UseActionSchema = z.object({
 });
 
 // An action a Multiattack uses after its attacks: at their target if it still reaches it, or else the weakest
-// creature it reaches. The attacks paid for the turn's action, so only a recharge or a use is spent here.
+// creature it reaches; an area where it catches most. The attacks paid for the turn's action, so only a recharge or a use is spent here.
 export function runUseAction(
   payload: z.infer<typeof UseActionSchema>,
   context: Context,
@@ -337,13 +337,27 @@ export function runUseAction(
   if (!canAfford(action, actor, deriveStats(actor, context))) return {};
   const { targeting } = action.activation;
   const reached = inReach(action, actor, state, context);
+  // A cone, line, sphere or cube goes where it catches most; with no map, as if placed with care.
+  const [aim] =
+    "area" in targeting && targeting.area.shape !== "emanation"
+      ? aimsFor(action, actor, context)
+      : [];
   const targets =
     "creatures" in targeting && targeting.creatures === 1
       ? [
           reached.find((item) => item.id === payload.target) ??
             [...reached].sort((a, b) => a.hp - b.hp)[0],
         ].filter((item) => item !== undefined)
-      : resolveTargets(ALL, action, actor, context);
+      : aim
+        ? aim.score > 0
+          ? resolveTargets(
+              `${AIM}${squareKey(aim.square)}`,
+              action,
+              actor,
+              context,
+            )
+          : []
+        : resolveTargets(ALL, action, actor, context);
   if (targets.length === 0) return {};
   const result = resolveAction(action, actor, targets, context);
   return {
