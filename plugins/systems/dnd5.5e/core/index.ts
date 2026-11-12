@@ -73,6 +73,7 @@ import { legendaryFrames, surpriseEffects } from "./legendary.ts";
 import { shopEffects, shopFrames } from "./shop.ts";
 import { availableRests, restEffects, restFrames } from "./rest.ts";
 import { InspirationSchema, runInspiration } from "./class-rules.ts";
+import { classOptionFrames } from "./class-options.ts";
 import { rollD20 } from "./rules.ts";
 import {
   BackgroundSchema,
@@ -355,6 +356,7 @@ export const dnd55e = defineSystem<DndState>({
     ...attackFrames,
     ...turnFrames,
     ...shopFrames,
+    ...classOptionFrames,
     [`${NS}:takeAction`]: frameHandler({
       schema: TakeActionSchema,
       run: (payload, context: Context) =>
@@ -496,7 +498,7 @@ export const dnd55e = defineSystem<DndState>({
   // Building steps (class, scores, subclass, spells, feats) are made as a companion's are, and a rest's
   // Hit Dice and gear as a careful player would.
   tactical: (decision) =>
-    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave|build):/.test(
+    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave|build|metamagic):/.test(
       decision.id,
     ) || isGearDecision(decision),
 });

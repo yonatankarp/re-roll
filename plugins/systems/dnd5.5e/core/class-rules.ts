@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import { type Actor, type DndState, NS, dndEvent, frame } from "./state.ts";
 import { type Stats, deriveStats } from "./stats.ts";
+import { seekingReroll } from "./metamagic.ts";
 
 // Rules that class features and Heroic Inspiration need in a fight, kept apart from the combat flow in combat.ts.
 
@@ -63,12 +64,20 @@ const AttackPayload = z.object({
   slotLevel: z.number().int().optional(),
 });
 
+// Seeking Spell rerolls a missed spell attack first, and then Heroic Inspiration may.
 // shortcut: Heroic Inspiration rerolls only the player's missed attack rolls, not saves or checks.
 export function offerInspiration(
   attacker: Actor,
   payload: z.infer<typeof AttackPayload>,
   report: SystemEvent,
 ): SystemResult | null {
+  const seeking = seekingReroll(attacker, payload.actionId);
+  if (seeking) {
+    return {
+      events: [report, ...seeking],
+      frames: [frame("attackRoll", payload)],
+    };
+  }
   if (attacker.id !== PLAYER_ACTOR || !attacker.heroicInspiration) return null;
   return {
     events: [report],

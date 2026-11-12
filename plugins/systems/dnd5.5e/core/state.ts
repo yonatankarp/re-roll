@@ -45,6 +45,8 @@ export const FRAME_KINDS = [
   "lingeringTick",
   "masteryHit",
   "masteryMiss",
+  "metamagic",
+  "metamagicSpent",
   "move",
   "pickTargets",
   "projectile",
@@ -73,6 +75,7 @@ export const TACTICS = [
   "hidden",
   "ready",
   "slowed",
+  "metamagic", // a Metamagic option waiting for its spell, or Extended Spell's hold on Concentration (metamagic.ts)
 ] as const;
 
 const EndsSchema = z.enum([
@@ -97,7 +100,7 @@ const ActiveEffectSchema = z.strictObject({
       kind: z.literal("tactic"),
       tactic: z.enum(TACTICS),
       value: z.number().int().optional(), // hidden: the Stealth total a Search must beat
-      action: z.string().optional(), // ready: the attack it makes
+      action: z.string().optional(), // ready: the attack it makes; metamagic: the spell it changes
     }),
   ]),
   // "casterNextTurnEnd" becomes "casterTurnEnd" when the caster's next turn starts, and ends with that turn.
@@ -310,6 +313,7 @@ const ResourceSpentSchema = z.strictObject({
 const ResourceRestoredSchema = z.strictObject({
   actor: z.string(),
   resource: z.string(),
+  amount: z.number().int().min(1).optional(), // only so many uses, as Font of Magic gives; all when missing
 });
 const OncePerTurnSchema = z.strictObject({
   actor: z.string(),
@@ -812,9 +816,11 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         resourcesSpent: Object.fromEntries(
-          Object.entries(actor.resourcesSpent).filter(
-            ([resource]) => resource !== data.resource,
-          ),
+          Object.entries(actor.resourcesSpent).flatMap(([resource, spent]) => {
+            if (resource !== data.resource) return [[resource, spent]];
+            const left = spent - (data.amount ?? spent);
+            return left > 0 ? [[resource, left]] : [];
+          }),
         ),
       }));
     }

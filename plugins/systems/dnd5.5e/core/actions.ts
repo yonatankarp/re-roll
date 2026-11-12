@@ -26,6 +26,12 @@ import {
   within5,
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
+import {
+  classOptionPolicy,
+  classOptions,
+  isClassOption,
+  runClassOption,
+} from "./class-options.ts";
 import { escapeDc, grapplesOn } from "./combat/grapple.ts";
 import { type Square, distanceFeet, squareKey } from "./grid.ts";
 import { FLEE } from "./legendary.ts";
@@ -351,6 +357,7 @@ export function tacticOptions(
     });
   }
   options.push(...offhandOptions(actor, state, access, stats));
+  options.push(...classOptions(actor, state, access));
   if (!actor.budget.action) return options;
   // Everyone else's turns are played by tacticalPolicy, so they're offered only what it can pick, which also
   // spares working out every Study and Shove on every monster's turn.
@@ -537,6 +544,7 @@ export function runTactic(
   const { state } = context;
   const actor = state.actors[payload.actor];
   if (!actor) throw new Error(`Unknown actor ${payload.actor}`);
+  if (isClassOption(payload.answer)) return runClassOption(payload, context);
   const [kind = "", targetId = "", detail = ""] = parseOption(payload.answer);
   const target = state.actors[targetId];
   const stats = deriveStats(actor, context);
@@ -1091,6 +1099,8 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
     const square = dashTarget(mover, context);
     if (square) return squareKey(square);
   }
+  const classOption = classOptionPolicy(decision, context);
+  if (classOption !== null) return classOption;
   if (!decision.id.startsWith(`${NS}:turn:`)) {
     return choosePolicy(decision, context);
   }

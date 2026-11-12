@@ -115,6 +115,7 @@ export const AmountSchema = z.strictObject({
   diceCount: z.string().optional(), // a scaling key holding the number of dice, such as sneakAttackD6
   dieSize: z.string().optional(), // a scaling key holding the die size, such as martialArtsDie
   bonus: FormulaSchema.optional(),
+  reroll: z.number().int().min(1).optional(), // dice rolled again once when below average, as with Empowered Spell
 });
 export type Amount = z.infer<typeof AmountSchema>;
 
@@ -277,7 +278,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
         ability: AbilitySchema,
         dc: FormulaSchema,
         damage: z.array(DamageSchema).default([]),
-        onSuccessDamage: z.enum(["half", "none"]).default("none"),
+        onSuccessDamage: z.enum(["half", "none", "full"]).default("none"),
         onFail: LeafEffectsSchema,
         onSuccess: LeafEffectsSchema,
         exempt: z.array(z.string()).optional(),
@@ -289,7 +290,8 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     ability: AbilitySchema,
     dc: FormulaSchema,
     damage: z.array(DamageSchema).default([]),
-    onSuccessDamage: z.enum(["half", "none"]).default("none"),
+    // "full" deals the damage either way, and the save is only for its effects, as with Trip Attack.
+    onSuccessDamage: z.enum(["half", "none", "full"]).default("none"),
     onFail: LeafEffectsSchema,
     onSuccess: LeafEffectsSchema,
   }),
@@ -385,6 +387,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Dropping to 1 Hit Point instead of 0 while the resource lasts, as with Relentless Endurance.
   z.strictObject({ kind: z.literal("dropToOne"), resource: z.string() }),
+  // Advantage on saves to keep Concentration, as with Eldritch Mind.
+  z.strictObject({ kind: z.literal("concentrationAdvantage") }),
   // Attacks per Attack action, such as Extra Attack.
   z.strictObject({
     kind: z.literal("multiattack"),

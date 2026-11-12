@@ -601,11 +601,12 @@ function nestedSave(
     target,
     save.damage.flatMap(({ amount, type }) => {
       const total = rollAmount(amount, stats, context.dice);
-      const scaled = !rolled.saved
-        ? total
-        : save.onSuccessDamage === "half"
-          ? halved(total)
-          : 0;
+      const scaled =
+        !rolled.saved || save.onSuccessDamage === "full"
+          ? total
+          : save.onSuccessDamage === "half"
+            ? halved(total)
+            : 0;
       return scaled > 0
         ? [{ amount: finalDamage(scaled, type, responses), type }]
         : [];
@@ -761,7 +762,7 @@ export function runConcentrationSave(
   // Being down ends Concentration outright, as does any failed save.
   const save = isDown(actor)
     ? null
-    : rollSave(actor, "con", payload.dc, context);
+    : rollSave(actor, "con", payload.dc, context, false, 0, ["concentration"]);
   const rolled = save?.events ?? [];
   if (!save?.saved) {
     return {

@@ -55,6 +55,7 @@ import {
   targetCount,
 } from "./queries.ts";
 import { payCosts, resolveAction, resolveTargets } from "./effects.ts";
+import { keepsHidden, metamagicCast } from "../metamagic.ts";
 
 // Taking an action on a turn: casting it, choosing its targets one by one, or aiming its area.
 
@@ -166,11 +167,14 @@ function castAction(
       ...payCosts(action, actor, context, slotLevel),
       ...lightAttackEvents(actor, actionId, context),
       // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.
-      ...(resolution.kind === "attack" ? [] : revealEvents(actor)),
+      ...(resolution.kind === "attack" || keepsHidden(actor, actionId)
+        ? []
+        : revealEvents(actor)),
       ...(result.events ?? []),
     ],
     frames: [
       ...(result.frames ?? []),
+      ...metamagicCast(actor, actionId),
       // Used up once its darts or rolls are done, since they look the action up again.
       ...(actionId.startsWith(ITEM_PREFIX)
         ? [

@@ -182,7 +182,7 @@ function actorIn(state: DndState, id: string): Actor {
 }
 
 function turnOptions(run: RunContext, state: DndState): readonly string[] {
-  return nextDndDecision(state, run)?.options.map((item) => item.id) ?? [];
+  return run.system.nextDecision(state, run)?.options.map((item) => item.id) ?? [];
 }
 
 const PHB = BOOK_ROOTS && existsSync("books/rules/phb");
@@ -454,14 +454,12 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
     ).toBe("beast");
   });
 
-  it.fails("Metamagic spends Sorcery Points on a spell", () => {
-    const stats = deriveStats(hero("sorcerer", 2), run);
+  it("Metamagic is offered in a fight, with 2 Sorcery Points at level 2", () => {
+    const sorcerer = hero("sorcerer", 2);
+    expect(deriveStats(sorcerer, run).resources["sorcery-points"]).toBe(2);
     expect(
-      stats.actions.some((action) =>
-        action.activation.cost.some(
-          (cost) =>
-            typeof cost === "object" && cost.resource === "sorcery-points",
-        ),
+      turnOptions(run, fight(sorcerer, monster("a"))).some((id) =>
+        id.startsWith("tactic:metamagic|"),
       ),
     ).toBe(true);
   });

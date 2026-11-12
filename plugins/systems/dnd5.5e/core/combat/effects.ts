@@ -5,9 +5,11 @@ import {
   immuneToCondition,
   type KnownAction,
   lookup,
+  modifierFor,
   rollAmount,
   saveBonus,
 } from "../stats.ts";
+import { metamagicSaves } from "../metamagic.ts";
 import {
   type Actor,
   applyDndEvent,
@@ -354,6 +356,7 @@ export function rollSave(
   magical = false,
   cover = 0, // half or three-quarters cover adds to Dexterity saves
   conditions: readonly string[] = [],
+  disadvantage = false, // from the caster, as with Heightened Spell
 ): { readonly saved: boolean; readonly events: SystemEvent[] } {
   if (
     (ability === "str" || ability === "dex") &&
@@ -369,6 +372,7 @@ export function rollSave(
       (ability === "dex" && dodging(target)) ||
       traitSaveAdvantage(stats, ability, conditions),
     disadvantage:
+      disadvantage ||
       hasFlag(target, "disadvantage", "saves", stats, ability) ||
       (ability === "dex" && hasCondition(target, "restrained")),
   });
@@ -540,19 +544,28 @@ export function resolveAction(
       const dc = evaluateFormula(resolution.dc, stats);
       // Damage against several targets at once is rolled once for all of them.
       const damage = rollSharedDamage(resolution.damage);
+      const { spared, heightened } = metamagicSaves(
+        action,
+        actor,
+        targets,
+        modifierFor(stats, "cha"),
+      );
       for (const target of targets) {
         // shortcut: cover counts from the caster, even for a sphere whose centre is elsewhere.
-        const { saved: rolledSave, events: saveEvents } = rollSave(
-          target,
-          resolution.ability,
-          dc,
-          context,
-          action.spellLevel !== null,
-          coverBonus(
-            coverFor(context.state, actor.position, target, [actor.id]),
-          ),
-          conditionsApplied(resolution.onFail),
-        );
+        const { saved: rolledSave, events: saveEvents } = spared.has(target.id)
+          ? { saved: true, events: [] }
+          : rollSave(
+              target,
+              resolution.ability,
+              dc,
+              context,
+              action.spellLevel !== null,
+              coverBonus(
+                coverFor(context.state, actor.position, target, [actor.id]),
+              ),
+              conditionsApplied(resolution.onFail),
+              heightened === target.id,
+            );
         events.push(...saveEvents);
         const resisted = rolledSave
           ? null
@@ -565,8 +578,10 @@ export function resolveAction(
         if (resisted) events.push(resisted);
         const saved = rolledSave || resisted !== null;
         applyRolled(target, damage, (amount) => {
-          if (!saved) return amount;
-          return resolution.onSuccessDamage === "half" ? halved(amount) : 0;
+          if (!saved || resolution.onSuccessDamage === "full") return amount;
+          return resolution.onSuccessDamage === "half" && !spared.has(target.id)
+            ? halved(amount)
+            : 0;
         });
         events.push(
           ...leafEvents(

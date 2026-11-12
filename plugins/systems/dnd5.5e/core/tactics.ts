@@ -132,6 +132,7 @@ export const TACTIC_WORDS: Readonly<Record<Tactic, string>> = {
   hidden: "hidden",
   ready: "ready to strike",
   slowed: "slowed",
+  metamagic: "shaping a spell",
 };
 
 // "Help" for tactic:help, "Sap" for mastery:sap.
