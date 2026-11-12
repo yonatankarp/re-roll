@@ -280,6 +280,29 @@ function chosenSubclass(
   );
 }
 
+const OPTION_KEYS = /invocations|maneuvers|metamagic/i;
+
+// shortcut: an option's prerequisites are only in its text, so they aren't checked, as for feats.
+function optionFeatures(classDef: ClassDef, access: ContentAccess): string[] {
+  const [plugin = "", slug = ""] = classDef.id.split(":class/");
+  const granted = new Set(classDef.levels.flatMap((level) => level.grants));
+  for (const id of access.contentIds()) {
+    if (!id.includes(":subclass/")) continue;
+    const subclass = SubclassSchema.safeParse(access.content(id)).data;
+    if (subclass?.class !== classDef.id) continue;
+    for (const level of subclass.levels) {
+      for (const grant of level.grants) granted.add(grant);
+    }
+  }
+  const prefix = `${plugin}:feature/${slug}-`;
+  return access
+    .contentIds()
+    .filter(
+      (id) =>
+        id.startsWith(prefix) && !granted.has(id) && !id.endsWith("-options"),
+    );
+}
+
 // What a level asks for. A class can state this in `choices`. Imported classes don't, so the rest is read from
 // what the level grants and how its table changes. A stated choice replaces an inferred one with the same id.
 export function levelChoices(
@@ -321,6 +344,19 @@ export function levelChoices(
       id: "weapon-mastery",
       count: gained("weaponMastery"),
     });
+  }
+  // Older imports state no option choice, so the class's own features that no level grants are the options.
+  for (const key of Object.keys(data.scaling)) {
+    if (!OPTION_KEYS.test(key) || gained(key) === 0) continue;
+    const from = optionFeatures(classDef, access);
+    if (from.length > 0) {
+      inferred.push({
+        kind: "option",
+        id: key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`),
+        count: gained(key),
+        from,
+      });
+    }
   }
   if (gained("cantrips") > 0) {
     inferred.push({

@@ -276,8 +276,10 @@ export async function importParsed(request: {
   readonly folder: string;
   readonly html: string;
   readonly knownIds?: readonly string[];
+  readonly contentOf?: (id: string) => unknown;
 }): Promise<ParsedSummary> {
-  const { storage, system, pluginId, folder, html, knownIds } = request;
+  const { storage, system, pluginId, folder, html, knownIds, contentOf } =
+    request;
   assertSafeName("plugin id", pluginId);
   assertSafeName("content folder", folder);
   const parser = system.htmlParsers?.[folder];
@@ -291,7 +293,12 @@ export async function importParsed(request: {
   const duplicates: string[] = [];
   let written = 0;
   let notAutomated = 0;
-  for (const { slug, entry, notes } of parser(html, pluginId, knownIds)) {
+  for (const { slug, entry, notes } of parser(
+    html,
+    pluginId,
+    knownIds,
+    contentOf,
+  )) {
     if (seen.has(slug)) {
       duplicates.push(slug);
       continue;

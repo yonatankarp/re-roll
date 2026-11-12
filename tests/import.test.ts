@@ -790,10 +790,6 @@ describe("parsing a monster stat block", () => {
       ),
     ],
     [
-      "only a grappled creature can be targeted",
-      saveOn("one creature Grappled by the beast.", "7 (2d6) Piercing damage."),
-    ],
-    [
       "its main damage needs a charge",
       "<em>Melee Attack Roll:</em> +5, reach 5 ft. <em>Hit:</em> If the beast moved 20+ feet, the target takes 7 (2d6) Piercing damage and has the Prone condition.",
     ],

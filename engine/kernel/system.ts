@@ -308,6 +308,7 @@ export interface SystemDefinition<S> {
         html: string,
         pluginId: string,
         knownIds?: readonly string[], // what other plugins hold, so a book can refer to their classes and feats
+        contentOf?: (id: string) => unknown, // and what those entries say, such as the spells a monster casts
       ) => readonly ParsedImport[]
     >
   >; // keyed by content folder

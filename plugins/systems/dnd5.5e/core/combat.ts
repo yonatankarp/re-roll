@@ -342,7 +342,10 @@ function fitsType(
   targeting: Targeting,
   access: ContentAccess,
 ): boolean {
-  if ("self" in targeting || !targeting.creatureTypes) return true;
+  if ("self" in targeting) return true;
+  const gate = "targetConditions" in targeting && targeting.targetConditions;
+  if (gate && !hasCondition(item, ...gate)) return false;
+  if (!targeting.creatureTypes) return true;
   return targeting.creatureTypes.includes(
     deriveStats(item, access).creatureType ?? "",
   );
