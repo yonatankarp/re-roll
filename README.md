@@ -69,4 +69,4 @@ The game shows every loaded plugin's attribution in About, in the Journal drawer
 
 ## Licence
 
-To be decided. There is no licence file yet. The fonts and the SRD content keep their own licences, listed above.
+Re-roll is licensed under the GNU General Public License, version 3 or later (`GPL-3.0-or-later`); see [`LICENSE`](LICENSE). The narrator uses eSpeak NG, which is GPL-3.0-or-later too. Third-party work and its licences are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). The fonts and the SRD content keep their own licences, listed above. Your own book content is data you load locally, not part of this program, and stays yours.
