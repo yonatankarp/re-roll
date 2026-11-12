@@ -1,5 +1,6 @@
 import { PLAYER_ACTOR, type Decision, type SystemEvent } from "#sdk";
 import { describe, expect, it } from "vitest";
+import { runs } from "./depth.ts";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { GameEvent, GameState } from "../engine/kernel/events.ts";
@@ -1066,7 +1067,10 @@ describe("the dynamic party", () => {
 
   it("plays whole adventures with created characters and bot choices", async () => {
     const { run } = await loadAdventure("goblin-ambush");
-    const report = testAdventure(run, { runs: 40, maxDecisions: 800 });
+    const report = testAdventure(run, {
+      runs: runs(10, 40),
+      maxDecisions: 800,
+    });
     expect(report.failures).toEqual([]);
     expect(report.unvisitedScenes).toEqual([]);
   }, 30_000);

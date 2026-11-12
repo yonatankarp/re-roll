@@ -6,6 +6,7 @@ import {
   type SystemEvent,
 } from "#sdk";
 import { beforeAll, describe, expect, it } from "vitest";
+import { BOOK_ROOTS } from "./depth.ts";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import type { Dice } from "../engine/kernel/dice.ts";
 import { AWAIT_FRAME } from "../engine/kernel/system.ts";
@@ -184,7 +185,7 @@ function turnOptions(run: RunContext, state: DndState): readonly string[] {
   return nextDndDecision(state, run)?.options.map((item) => item.id) ?? [];
 }
 
-const PHB = existsSync("books/rules/phb");
+const PHB = BOOK_ROOTS && existsSync("books/rules/phb");
 
 describe.skipIf(!PHB)("signature class features in a fight", () => {
   let run: RunContext;

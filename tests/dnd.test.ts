@@ -1,5 +1,6 @@
 import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
 import { describe, expect, it } from "vitest";
+import { runs } from "./depth.ts";
 import { listAdventures, loadAdventure } from "../app/cli/load-adventure.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { GameState } from "../engine/kernel/events.ts";
@@ -1064,7 +1065,10 @@ describe("playing a D&D adventure", () => {
     "finishes %s across many seeds, replaying exactly",
     async (adventure) => {
       const { run } = await loadAdventure(adventure);
-      const report = testAdventure(run, { runs: 120, maxDecisions: 500 });
+      const report = testAdventure(run, {
+        runs: runs(20, 120),
+        maxDecisions: 500,
+      });
       expect(report.failures).toEqual([]);
       expect(report.unvisitedScenes).toEqual([]);
     },
@@ -1073,7 +1077,7 @@ describe("playing a D&D adventure", () => {
 
   it("keeps state as plain JSON that passes its schema at every step", async () => {
     const run = await goblin();
-    for (let index = 0; index < 25; index += 1) {
+    for (let index = 0; index < runs(5, 25); index += 1) {
       playRun(run, `json-${String(index)}`, {
         maxDecisions: 500,
         onState: (state) => {
@@ -1115,7 +1119,7 @@ describe("playing a D&D adventure", () => {
 
   it("clears monsters and the combat when a fight is won", async () => {
     const run = await goblin();
-    for (let index = 0; index < 120; index += 1) {
+    for (let index = 0; index < runs(30, 120); index += 1) {
       const played = playRun(run, `clear-${String(index)}`, {
         maxDecisions: 500,
       });
@@ -1514,7 +1518,10 @@ describe("encounter outcomes in real fights", () => {
 
   it("replays exactly, from inputs and from a save", async () => {
     const { registry, run } = await outcomesRun();
-    const report = testAdventure(run, { runs: 40, maxDecisions: 800 });
+    const report = testAdventure(run, {
+      runs: runs(10, 40),
+      maxDecisions: 800,
+    });
     expect(report.failures).toEqual([]);
 
     const played = playRun(run, "outcome-save", { maxDecisions: 800 });
