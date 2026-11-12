@@ -27,10 +27,13 @@ export function parseContentPath(path: string): ContentPath | null {
   if (path.includes("\\") || path.includes("\0")) return null;
   const [folder = "", ...rest] = path.split("/");
   if (!CONTENT_FOLDERS.includes(folder)) return null;
-  if (rest.some((part) => part === "" || part === "." || part === "..")) {
-    return null;
-  }
+  // Hidden names are never content, and private/ is its own git repo, so its .git must stay unreachable.
+  if (rest.some((part) => part === "" || part.startsWith("."))) return null;
   return { folder, rest: rest.join("/") };
+}
+
+function isHidden(path: string): boolean {
+  return path.split("/").some((part) => part.startsWith("."));
 }
 
 function isMissing(error: unknown): boolean {
@@ -109,10 +112,12 @@ export function contentEndpoint(repoRoot: string) {
           200,
           "application/json",
           JSON.stringify(
-            entries.map((entry) => ({
-              ...entry,
-              path: `${folder}/${entry.path}`,
-            })),
+            entries
+              .filter((entry) => !isHidden(entry.path))
+              .map((entry) => ({
+                ...entry,
+                path: `${folder}/${entry.path}`,
+              })),
           ),
         );
       } else {

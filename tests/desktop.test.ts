@@ -81,6 +81,8 @@ describe("parseContentPath", () => {
     "plugins\\..\\package.json",
     "..\\plugins",
     "plugins/a\0.yaml",
+    "private/.git/config",
+    "private/rules/.hidden.yaml",
   ])("refuses %j", (path) => {
     expect(parseContentPath(path)).toBeNull();
   });
@@ -95,6 +97,8 @@ describe("the content endpoint", () => {
     base = await mkdtemp(join(tmpdir(), "re-roll-"));
     await mkdir(join(base, "plugins/rules"), { recursive: true });
     await writeFile(join(base, "plugins/rules/a.yaml"), "good: true");
+    await mkdir(join(base, "plugins/rules/.git"));
+    await writeFile(join(base, "plugins/rules/.git/config"), "secret");
     await writeFile(join(base, "package.json"), "stolen");
     await symlink(join(base, "package.json"), join(base, "plugins/link.yaml"));
     ({ server, url } = await serve(base));
