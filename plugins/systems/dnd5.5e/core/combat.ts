@@ -36,6 +36,20 @@ import type {
 import { ClassSchema, MonsterSchema, PregenSchema } from "./schemas.ts";
 import { treasure } from "./gear.ts";
 import {
+  ADD,
+  AIM_AREA,
+  BACK,
+  CONFIRM,
+  PICK,
+  aimScore,
+  aimSquares,
+  caughtBy,
+  describeCaught,
+  directionName,
+  nextPick,
+  pickOptions,
+} from "./targeting.ts";
+import {
   type Actor,
   type DndState,
   NS,
@@ -76,7 +90,7 @@ const DECLINE = "decline";
 export const MOVE = "move";
 const STAY = "stay";
 const ITEM_PREFIX = "item:"; // an action that uses up the item, such as a potion
-const AIM = "@"; // an area aimed at a creature: "@" and its id
+const AIM = "@"; // an area aimed at a square ("@x,y") or a creature ("@" and its id)
 
 function actorOf(state: DndState, id: string): Actor {
   const actor = state.actors[id];
@@ -309,6 +323,38 @@ export function canAfford(
   });
 }
 
+// The creatures an action can be aimed at from where the actor stands.
+function inReach(
+  action: KnownAction,
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+): readonly Actor[] {
+  const { targeting } = action.activation;
+  if ("self" in targeting) return [actor];
+  const charmers = charmersOf(actor);
+  return (
+    targeting.side === "enemy"
+      ? enemies(state, actor).filter(
+          (item) => !isDown(item) && !charmers.has(item.id),
+        )
+      : allies(state, actor)
+  )
+    .filter((item) => !isDead(item))
+    .filter((item) => fitsType(item, targeting, access))
+    .filter((item) => reaches(action, actor, item));
+}
+
+// How many creatures, darts or rays an action takes when cast with this slot.
+function targetCount(action: KnownAction, slot: number | undefined): number {
+  const above = (slot ?? 0) - (action.spellLevel ?? 0);
+  const activation = action.upcast
+    ? scaleActivation(action.activation, action.upcast.perSlotLevel, above)
+    : action.activation;
+  const { projectiles, targeting } = activation;
+  return projectiles ?? ("creatures" in targeting ? targeting.creatures : 1);
+}
+
 function turnOptions(
   actor: Actor,
   state: DndState,
@@ -319,10 +365,6 @@ function turnOptions(
   }
   const stats = deriveStats(actor, access);
   const options: { id: string; label: string }[] = [];
-  const charmers = charmersOf(actor);
-  const living = (list: readonly Actor[]): readonly Actor[] =>
-    list.filter((item) => !isDead(item));
-
   for (const action of stats.actions) {
     const { activation } = action;
     if (activation.trigger || !canAfford(action, actor, stats)) continue;
@@ -334,44 +376,47 @@ function turnOptions(
       add(actor.id, action.name);
       continue;
     }
-    const candidates = living(
-      targeting.side === "enemy"
-        ? enemies(state, actor).filter(
-            (item) => !isDown(item) && !charmers.has(item.id),
-          )
-        : allies(state, actor),
-    )
-      .filter((item) => fitsType(item, targeting, access))
-      .filter((item) => reaches(action, actor, item));
+    const candidates = inReach(action, actor, state, access);
     if (candidates.length === 0) continue;
-    const aimed =
-      "area" in targeting &&
-      targeting.area.shape !== "emanation" &&
-      actor.position !== null;
-    if (aimed) {
-      for (const target of candidates) {
-        const caught = resolveTargets(`${AIM}${target.id}`, action, actor, {
-          state,
-          content: access.content,
-          contentIds: access.contentIds,
-        }).length;
-        add(
-          `${AIM}${target.id}`,
-          `${action.name} at ${target.name} (catches ${String(caught)})`,
-        );
+    if ("area" in targeting) {
+      // On a grid an area is aimed at a square after it's chosen; without one it takes the whole side.
+      const aimed =
+        targeting.area.shape !== "emanation" && actor.position !== null;
+      add(
+        aimed ? AIM_AREA : ALL,
+        aimed ? `${action.name}: aim it` : action.name,
+      );
+      continue;
+    }
+    // Each slot can give a different number of targets: one is a click on a creature, more are chosen one by one.
+    // Darts or rays can also all go at one creature, or at the lowest HP first.
+    const repeats = activation.projectiles !== undefined;
+    const base = slotToSpend(action, actor, stats) ?? undefined;
+    for (const slot of [undefined, ...upcastSlots(action, actor, stats)]) {
+      const count = targetCount(action, slot ?? base);
+      const suffix = slot === undefined ? "" : `${SEPARATOR}${String(slot)}`;
+      const note = slot === undefined ? "" : ` (level ${String(slot)} slot)`;
+      const id = (target: string): string =>
+        `${action.id}${SEPARATOR}${target}${suffix}`;
+      if (count === 1 || repeats) {
+        for (const target of candidates) {
+          options.push({
+            id: id(target.id),
+            label: `${action.name}: ${target.name} (${String(target.hp)} HP)${note}`,
+          });
+        }
       }
-    } else if ("area" in targeting || targeting.creatures > 1) {
-      // shortcut: a multi-target spell takes everyone it can reach rather than letting the caster pick.
-      add(ALL, action.name);
-    } else {
-      for (const target of candidates) {
-        add(
-          target.id,
-          `${action.name}: ${target.name} (${String(target.hp)} HP)`,
-        );
+      if (count > 1) {
+        options.push({
+          id: id(PICK),
+          label: `${action.name}: choose ${repeats ? `where ${String(count)} go` : `up to ${String(count)} targets`}${note}`,
+        });
       }
-      if ((activation.projectiles ?? 1) > 1) {
-        add(ALL, `${action.name}: lowest HP first`);
+      if (repeats && count > 1) {
+        options.push({
+          id: id(ALL),
+          label: `${action.name}: lowest HP first${note}`,
+        });
       }
     }
   }
@@ -812,6 +857,19 @@ function rollSave(
   return total >= dc;
 }
 
+// Every creature in the fight an area could catch.
+function areaPool(
+  targeting: Targeting,
+  context: ContentAccess & { readonly state: DndState },
+): readonly Actor[] {
+  return (context.state.combat?.order ?? []).flatMap((id) => {
+    const item = context.state.actors[id];
+    return item && !isDead(item) && fitsType(item, targeting, context)
+      ? [item]
+      : [];
+  });
+}
+
 function resolveTargets(
   answerTarget: string,
   action: KnownAction,
@@ -826,18 +884,20 @@ function resolveTargets(
   ).filter((item) => !isDead(item) && fitsType(item, targeting, context));
   if ("area" in targeting) {
     const { shape, radius } = targeting.area;
-    const aim = answerTarget.startsWith(AIM)
-      ? state.actors[answerTarget.slice(AIM.length)]
-      : undefined;
-    // shortcut: an area catches only the side it's aimed at, as if every caster placed it with care.
+    // Aimed at a square ("@x,y") or a creature ("@id"), an area catches everyone in it, the caster's side too.
+    const aimedAt = answerTarget.startsWith(AIM)
+      ? answerTarget.slice(AIM.length)
+      : null;
+    const aim =
+      aimedAt === null
+        ? null
+        : (parseSquare(aimedAt) ?? state.actors[aimedAt]?.position ?? null);
+    if (aim && actor.position) {
+      return caughtBy(targeting, actor, aim, areaPool(targeting, context));
+    }
+    // Round the caster, or with no grid: only the side it's meant for, as if placed with care.
     return side.filter((item) =>
-      inArea(
-        shape,
-        radius,
-        actor.position,
-        aim?.position ?? actor.position,
-        item.position,
-      ),
+      inArea(shape, radius, actor.position, actor.position, item.position),
     );
   }
   const chosen = answerTarget === ALL ? [] : [actorOf(state, answerTarget)];
@@ -1089,23 +1149,52 @@ export function runTakeAction(
   if (payload.answer === FLEE) return { events: combatEnded(state, "flee") };
 
   const [actionId = "", targetId = "", slot] = payload.answer.split(SEPARATOR);
+  if (targetId === PICK) {
+    return { frames: [pickFrame(actor, actionId, slot, [], context)] };
+  }
+  if (targetId === AIM_AREA) {
+    return { frames: [aimFrame(actor, actionId, slot, context)] };
+  }
+  return castAction(actor, actionId, slot, targetId, context);
+}
+
+// The slot a cast spends: the one chosen, or else the lowest that will do.
+function slotLevelFor(
+  actor: Actor,
+  actionId: string,
+  slot: string | undefined,
+  context: Context,
+): number | undefined {
   const known = findAction(actor, actionId, context);
-  const usesSlot = known.activation.cost.includes("slot");
-  const slotLevel = !usesSlot
-    ? undefined
-    : slot === undefined
-      ? (slotToSpend(known, actor, deriveStats(actor, context)) ?? undefined)
-      : Number(slot);
+  if (!known.activation.cost.includes("slot")) return undefined;
+  return slot === undefined
+    ? (slotToSpend(known, actor, deriveStats(actor, context)) ?? undefined)
+    : Number(slot);
+}
+
+// Pays for an action and resolves it, at a target id (a creature, ALL, or an aim) or at chosen creatures.
+// Darts and rays go one each at the chosen ids, which may repeat.
+function castAction(
+  actor: Actor,
+  actionId: string,
+  slot: string | undefined,
+  target: string | readonly string[],
+  context: Context,
+): SystemResult {
+  const { state } = context;
+  const slotLevel = slotLevelFor(actor, actionId, slot, context);
   const action = findAction(actor, actionId, context, slotLevel);
+  const picked = typeof target === "string" ? null : target;
+  const targetId = typeof target === "string" ? target : ALL;
   const { projectiles, resolution } = action.activation;
   const result: SystemResult =
     projectiles !== undefined && resolution.kind !== "save"
       ? {
-          frames: Array.from({ length: projectiles }, () =>
+          frames: Array.from({ length: projectiles }, (_, index) =>
             frame(resolution.kind === "attack" ? "attackRoll" : "projectile", {
               attacker: actor.id,
               actionId,
-              target: targetId,
+              target: picked?.[index] ?? targetId,
               ...(slotLevel === undefined ? {} : { slotLevel }),
             }),
           ),
@@ -1113,7 +1202,9 @@ export function runTakeAction(
       : resolveAction(
           action,
           actor,
-          resolveTargets(targetId, action, actor, context),
+          picked
+            ? picked.map((id) => actorOf(state, id))
+            : resolveTargets(targetId, action, actor, context),
           context,
           slotLevel,
         );
@@ -1138,6 +1229,146 @@ export function runTakeAction(
     ],
   };
 }
+
+const PickSchema = z.object({
+  actor: z.string(),
+  actionId: z.string(),
+  slot: z.string().optional(),
+  picked: z.array(z.string()),
+  answer: z.string(),
+});
+
+// Asks for the next target, one at a time like a move, so every choice is in the save. Nothing is paid until the cast.
+function pickFrame(
+  actor: Actor,
+  actionId: string,
+  slot: string | undefined,
+  picked: readonly string[],
+  context: Context,
+): Frame {
+  const { state } = context;
+  const action = findAction(actor, actionId, context);
+  const count = targetCount(
+    action,
+    slotLevelFor(actor, actionId, slot, context),
+  );
+  const repeats = action.activation.projectiles !== undefined;
+  return awaitDecision({
+    id: `${NS}:targets:${actor.id}:${String(state.combat?.round ?? 0)}${SEPARATOR}${actionId}${SEPARATOR}${String(count)}${SEPARATOR}${picked.join(",")}`,
+    actor: actor.id,
+    prompt: `${action.name}: choose ${repeats ? `where each of ${String(count)} goes` : `up to ${String(count)} targets`} (${String(picked.length)} of ${String(count)}).`,
+    options: [
+      ...pickOptions(
+        action.name,
+        inReach(action, actor, state, context),
+        picked,
+        count,
+        repeats,
+      ),
+    ],
+    resume: frame("pickTargets", {
+      actor: actor.id,
+      actionId,
+      ...(slot === undefined ? {} : { slot }),
+      picked,
+    }),
+  });
+}
+
+export function runPickTargets(
+  payload: z.infer<typeof PickSchema>,
+  context: Context,
+): SystemResult {
+  const actor = actorOf(context.state, payload.actor);
+  const { actionId, slot, picked, answer } = payload;
+  if (answer === BACK) return {};
+  if (answer === CONFIRM) {
+    return castAction(actor, actionId, slot, picked, context);
+  }
+  const id = answer.slice(1);
+  const at = picked.lastIndexOf(id);
+  const next = answer.startsWith(ADD)
+    ? [...picked, id]
+    : picked.filter((_, index) => index !== at);
+  return { frames: [pickFrame(actor, actionId, slot, next, context)] };
+}
+
+const AimSchema = z.object({
+  actor: z.string(),
+  actionId: z.string(),
+  slot: z.string().optional(),
+  answer: z.string(),
+});
+
+// Asks where an area goes: any square in range, or a direction for one that starts at the caster.
+// Each option names who it would catch, the caster's side too, best first.
+function aimFrame(
+  actor: Actor,
+  actionId: string,
+  slot: string | undefined,
+  context: Context,
+): Frame {
+  const { state } = context;
+  const action = findAction(actor, actionId, context);
+  const { targeting } = action.activation;
+  const byDirection = "range" in targeting && targeting.range === "self";
+  return awaitDecision({
+    id: `${NS}:aim:${actor.id}:${String(state.combat?.round ?? 0)}${SEPARATOR}${actionId}`,
+    actor: actor.id,
+    prompt: `Where does ${actor.name} aim ${action.name}?`,
+    options: [
+      ...aimsFor(action, actor, context).map(({ square, caught }) => ({
+        id: squareKey(square),
+        label: `${byDirection && actor.position ? directionName(actor.position, square) : squareName(square)}: ${describeCaught(actor, caught)}`,
+      })),
+      { id: BACK, label: "Choose something else" },
+    ],
+    resume: frame("aimArea", {
+      actor: actor.id,
+      actionId,
+      ...(slot === undefined ? {} : { slot }),
+    }),
+  });
+}
+
+// Every square an area can be aimed at, with who it catches, the best for its caster first.
+function aimsFor(
+  action: KnownAction,
+  actor: Actor,
+  context: ContentAccess & { readonly state: DndState },
+): readonly {
+  readonly square: Square;
+  readonly caught: readonly Actor[];
+  readonly score: number;
+}[] {
+  const { targeting } = action.activation;
+  const grid = context.state.combat?.grid;
+  if (!("area" in targeting) || !grid || !actor.position) return [];
+  const pool = areaPool(targeting, context);
+  return aimSquares(targeting, actor.position, grid)
+    .map((square) => {
+      const caught = caughtBy(targeting, actor, square, pool);
+      return { square, caught, score: aimScore(targeting, actor, caught) };
+    })
+    .sort((a, b) => b.score - a.score);
+}
+
+export function runAimArea(
+  payload: z.infer<typeof AimSchema>,
+  context: Context,
+): SystemResult {
+  if (payload.answer === BACK) return {};
+  const actor = actorOf(context.state, payload.actor);
+  return castAction(
+    actor,
+    payload.actionId,
+    payload.slot,
+    `${AIM}${payload.answer}`,
+    context,
+  );
+}
+
+export { AimSchema, PickSchema };
 
 export { TakeActionSchema };
 
@@ -2166,6 +2397,41 @@ function stepToward(actor: Actor, context: Context): Square | null {
   return best && gap(best.square) < now ? best.square : null;
 }
 
+// Picks targets one at a time as a sensible caster would, then casts.
+function pickPolicy(
+  decision: Decision,
+  actor: Actor,
+  context: Context,
+): string {
+  const { actionId, slot, picked } = PickSchema.omit({ answer: true }).parse(
+    decision.resume.payload,
+  );
+  const slotLevel = slotLevelFor(actor, actionId, slot, context);
+  const action = findAction(actor, actionId, context, slotLevel);
+  const { projectiles, resolution } = action.activation;
+  const stats = deriveStats(actor, context);
+  // Average dice, for how many darts a creature takes to drop.
+  const average = { below: () => 0, roll: (sides: number) => (sides + 1) / 2 };
+  const perHit =
+    "damage" in resolution
+      ? resolution.damage.reduce(
+          (total, { amount }) => total + rollAmount(amount, stats, average),
+          0,
+        )
+      : 0;
+  const next = nextPick(
+    inReach(action, actor, context.state, context),
+    picked,
+    targetCount(findAction(actor, actionId, context), slotLevel),
+    projectiles !== undefined,
+    { sourceId: spellSource(action), perHit },
+  );
+  if (next !== null) return `${ADD}${next}`;
+  return decision.options.some((option) => option.id === CONFIRM)
+    ? CONFIRM
+    : BACK;
+}
+
 export function choosePolicy(decision: Decision, context: Context): string {
   const { state } = context;
   const [first] = decision.options;
@@ -2178,6 +2444,20 @@ export function choosePolicy(decision: Decision, context: Context): string {
     const square = stepToward(actor, context);
     return square ? squareKey(square) : STAY;
   }
+  if (decision.id.startsWith(`${NS}:targets:`)) {
+    return pickPolicy(decision, actor, context);
+  }
+  if (decision.id.startsWith(`${NS}:aim:`)) {
+    const { actionId } = AimSchema.omit({ answer: true }).parse(
+      decision.resume.payload,
+    );
+    const [best] = aimsFor(
+      findAction(actor, actionId, context),
+      actor,
+      context,
+    );
+    return best && best.score > 0 ? squareKey(best.square) : BACK;
+  }
   const stats = deriveStats(actor, context);
   // Only the player is offered flight. Run when the enemies left clearly outlast the party.
   if (decision.options.some((option) => option.id === FLEE)) {
@@ -2189,11 +2469,23 @@ export function choosePolicy(decision: Decision, context: Context): string {
       return FLEE;
     }
   }
+  // An area is only aimed where it catches more foes than it costs friends.
+  const bestAim = new Map<string, number>();
+  const worthOf = (action: KnownAction): number => {
+    const known = bestAim.get(action.id);
+    if (known !== undefined) return known;
+    const score = aimsFor(action, actor, context)[0]?.score ?? 0;
+    bestAim.set(action.id, score);
+    return score;
+  };
   const parsed = decision.options.flatMap((option) => {
     const [actionId = "", targetId = "", slot] = option.id.split(SEPARATOR);
     const action = stats.actions.find((item) => item.id === actionId);
     const target = state.actors[targetId];
-    return action ? [{ option, action, target, targetId, slot }] : [];
+    const worth = action && targetId === AIM_AREA ? worthOf(action) : null;
+    return action && (worth === null || worth > 0)
+      ? [{ option, action, target, targetId, slot, worth }]
+      : [];
   });
 
   const heals = (action: KnownAction): boolean =>
@@ -2242,10 +2534,13 @@ export function choosePolicy(decision: Decision, context: Context): string {
   // A monster's area attack, such as a breath weapon, is its strongest choice while it's ready. One with no recharge
   // has to catch more than one foe to beat attacking, and one that only applies a condition waits until at least
   // half the foes are free of it, as repeating it on the rest would waste the turn.
-  const blast = areas.find(({ action }) => {
+  const blast = areas.find(({ action, worth }) => {
     const { cost, resolution } = action.activation;
     if ("damage" in resolution && resolution.damage.length > 0) {
-      return foes.length > 1 || cost.some((item) => typeof item === "object");
+      return (
+        (worth ?? foes.length) > 1 ||
+        cost.some((item) => typeof item === "object")
+      );
     }
     const applied = (
       resolution.kind === "save" ? resolution.onFail : []
