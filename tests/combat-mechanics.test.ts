@@ -1355,6 +1355,83 @@ describe("monster traits", () => {
     };
     expect(d20sFor(dragon, "monster:0|w")).toBe(1);
   });
+
+  it("keeps a condition off a creature immune to it", async () => {
+    const shove = {
+      name: "Shove",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "weapon", flatBonus: 4 },
+          damage: [{ amount: { dice: "1d4" }, type: "bludgeoning" }],
+          onHit: [
+            {
+              kind: "applyCondition",
+              condition: "prone",
+              duration: { minutes: 1 },
+            },
+          ],
+        },
+      },
+    };
+    const run = arenaRun(await base(), {
+      ...trait("conditionImmunity", {
+        passives: [{ kind: "conditionImmunity", condition: "prone" }],
+      }),
+      "srd52:monster/bully": dummy("srd52:monster/bully", {
+        actions: [shove],
+      }),
+    });
+    const bully = {
+      ...monster("b", "srd52:monster/bully"),
+      side: "party" as const,
+    };
+    const hit = (target: Actor) =>
+      settle(
+        run,
+        fight(bully, target, hero(run)),
+        [
+          {
+            kind: `${NS}:applyHit`,
+            payload: {
+              attacker: "b",
+              actionId: "monster:0",
+              target: target.id,
+              critical: false,
+              hadAdvantage: false,
+              total: 30,
+              natural: 15,
+            },
+          },
+        ],
+        LOW,
+      );
+    expect(
+      hasCondition(actor(hit(monster("w", WOLF)).state, "w"), "prone"),
+    ).toBe(false);
+    expect(hasCondition(actor(hit(monster("o")).state, "o"), "prone")).toBe(
+      true,
+    );
+  });
+
+  it("has Regeneration heal at the start of the creature's turn, up to its maximum", async () => {
+    const run = arenaRun(
+      await base(),
+      trait("regeneration", {
+        passives: [{ kind: "regeneration", hp: 15, stoppedBy: ["fire"] }],
+      }),
+    );
+    const turn = (hp: number) =>
+      actor(
+        settle(run, fight(hero(run), monster("t", WOLF, hp)), [endTurn], LOW)
+          .state,
+        "t",
+      ).hp;
+    expect(turn(400)).toBe(415);
+    expect(turn(495)).toBe(500);
+  });
 });
 
 describe("monster Multiattack routines and area choices", () => {
@@ -1440,6 +1517,16 @@ describe("monster Multiattack routines and area choices", () => {
     expect(await routineOf(names, 2, either, 1)).toEqual([
       "Longbow",
       "Longbow",
+    ]);
+  });
+
+  it("has the ranged copy of a Melee or Ranged attack follow the melee routine", async () => {
+    const sentence = "The beast makes two Spear attacks.";
+    const names = ["Spear", "Spear (ranged)"];
+    expect(await routineOf(names, 2, sentence, 0)).toEqual(["Spear", "Spear"]);
+    expect(await routineOf(names, 2, sentence, 1)).toEqual([
+      "Spear (ranged)",
+      "Spear (ranged)",
     ]);
   });
 

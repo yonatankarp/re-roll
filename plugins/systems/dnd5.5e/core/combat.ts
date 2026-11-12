@@ -85,6 +85,7 @@ import {
   damageResponses,
   deriveStats,
   evaluateFormula,
+  immuneToCondition,
   lookup,
   modifierFor,
   passiveModifiers,
@@ -833,6 +834,8 @@ function leafEvents(
         );
         break;
       case "applyCondition":
+        if (immuneToCondition(deriveStats(target, context), effect.condition))
+          break;
         events.push(
           dndEvent(`${NS}:effectAdded`, {
             actor: target.id,
@@ -2388,10 +2391,28 @@ export function runAdvanceTurn(
   let after = state;
   for (const event of finished) after = applyDndEvent(after, event);
   const next = currentActor(after);
+  const events = [
+    ...finished,
+    ...(next ? regenerationEvents(next, context) : []),
+  ];
   const ticks = next ? lingeringFrames(next, "turnStart") : [];
   return ticks.length > 0
-    ? { events: finished, frames: [...ticks, frame("afterTurnStart", {})] }
-    : { events: finished };
+    ? { events, frames: [...ticks, frame("afterTurnStart", {})] }
+    : { events };
+}
+
+// shortcut: Regeneration isn't stopped by the damage types that should stop it, as no damage type taken is kept yet.
+function regenerationEvents(actor: Actor, context: Context): SystemEvent[] {
+  if (isDown(actor)) return [];
+  const stats = deriveStats(actor, context);
+  const hp = stats.passives.reduce(
+    (sum, passive) => sum + (passive.kind === "regeneration" ? passive.hp : 0),
+    0,
+  );
+  const amount = Math.min(hp, stats.maxHp - actor.hp);
+  return amount > 0
+    ? [dndEvent(`${NS}:healed`, { actor: actor.id, amount, max: stats.maxHp })]
+    : [];
 }
 
 // shortcut: the roll happens at the end of the monster's turn rather than the start of its next one,

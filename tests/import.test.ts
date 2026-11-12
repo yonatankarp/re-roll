@@ -1,3 +1,4 @@
+import { parse, stringify } from "yaml";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { systems } from "../app/systems.ts";
@@ -377,7 +378,7 @@ describe("parsing a monster stat block", () => {
     expect(bite?.kind === "attack" ? bite.damage : []).toHaveLength(2);
   });
 
-  it("leaves out extra damage that only applies sometimes", () => {
+  it("turns extra damage on Advantage into a passive, not damage on every hit", () => {
     const [goblin] = parseMonstersFromHtml(
       page.replace(
         "plus 3 (1d6) Acid damage,",
@@ -385,9 +386,17 @@ describe("parsing a monster stat block", () => {
       ),
       "my-book",
     );
-    const bite = MonsterSchema.parse(goblin?.entry).actions[0]?.activation
-      .resolution;
+    const parsed = MonsterSchema.parse(goblin?.entry);
+    const bite = parsed.actions[0]?.activation.resolution;
     expect(bite?.kind === "attack" ? bite.damage : []).toHaveLength(1);
+    expect(parsed.passives).toEqual([
+      {
+        kind: "extraDamage",
+        dice: "1d6",
+        when: "advantage",
+        oncePerTurn: false,
+      },
+    ]);
   });
 
   it("encodes a recharging area save", () => {
@@ -482,6 +491,7 @@ describe("parsing a monster stat block", () => {
     ],
     ["The beast uses Spit and makes one Claw attack.", 1],
     ["The beast uses Claw three times.", 3],
+    ["The beast uses Gaze twice.", 2],
   ])("counts the routine %s", (routine, count) => {
     expect(
       withActions(action("Multiattack", routine), claw).entry.multiattack,
@@ -539,11 +549,7 @@ describe("parsing a monster stat block", () => {
       "a charge requirement",
     ],
     [
-      "If the target is a Large or smaller creature, it has the Grappled condition (escape DC 13).",
-      "a size limit",
-    ],
-    [
-      "The target has the Prone condition if it is Huge or smaller.",
+      "If the target is a Small or smaller creature, it has the Grappled condition (escape DC 13).",
       "a size limit",
     ],
     [
@@ -569,6 +575,158 @@ describe("parsing a monster stat block", () => {
     expect(gore?.kind === "attack" ? gore.onHit : ["kept"]).toEqual([]);
     expect(gore?.kind === "attack" ? gore.damage : []).toHaveLength(1);
     expect(notes).toContain(`partial: Gore: left out ${reason}`);
+  });
+
+  it.each([
+    "If the target is a Large or smaller creature, it has the Grappled condition (escape DC 13).",
+    "The target has the Prone condition if it is Huge or smaller.",
+  ])("keeps a size limit every hero meets: %s", (rider) => {
+    const { entry, notes } = withActions(
+      action(
+        "Gore",
+        `<em>Melee Attack Roll:</em> +5, reach 5 ft. <em>Hit:</em> 7 (1d8 + 3) Piercing damage. ${rider}`,
+      ),
+    );
+    const gore = entry.actions[0]?.activation.resolution;
+    expect(gore?.kind === "attack" ? gore.onHit : []).toHaveLength(1);
+    expect(notes).not.toContain("partial: Gore: left out a size limit");
+  });
+
+  it("keeps a save aimed at one Large or smaller creature", () => {
+    const { entry } = withActions(
+      action(
+        "Squeeze",
+        "<em>Strength Saving Throw:</em> DC 14, one Large or smaller creature within 10 feet. <em>Failure:</em> 9 (2d6 + 2) Bludgeoning damage, and the target has the Restrained condition.",
+      ),
+    );
+    expect(entry.actions[0]).toMatchObject({
+      name: "Squeeze",
+      activation: {
+        targeting: { creatures: 1, range: 10 },
+        resolution: { kind: "save", onFail: [{ condition: "restrained" }] },
+      },
+    });
+  });
+
+  it("imports a Melee or Ranged attack as a melee and a ranged action", () => {
+    const { entry } = withActions(
+      action("Multiattack", "The beast makes two Spike attacks."),
+      action(
+        "Spike",
+        "<em>Melee or Ranged Attack Roll:</em> +4, reach 5 ft. or range 20/60 ft. <em>Hit:</em> 4 (1d4 + 2) Piercing damage.",
+      ),
+    );
+    expect(
+      entry.actions.map((item) => [
+        item.name,
+        "range" in item.activation.targeting
+          ? item.activation.targeting.range
+          : null,
+      ]),
+    ).toEqual([
+      ["Spike", 5],
+      ["Spike (ranged)", 20],
+    ]);
+  });
+
+  it("gives an X/Day action a resource with that many uses", () => {
+    const { entry } = withActions(
+      action(
+        "Howl (2/Day)",
+        saveOn(
+          "each creature in a 30-foot Emanation.",
+          "The target has the Frightened condition.",
+        ),
+      ),
+    );
+    expect(entry.actions[0]).toMatchObject({
+      name: "Howl",
+      perDay: 2,
+      activation: { cost: ["action", { resource: "day:howl" }] },
+    });
+  });
+
+  it("reads repeat saves and a condition that ends on damage", () => {
+    const { entry } = withActions(
+      action(
+        "Lull",
+        saveOn(
+          "one creature within 30 feet.",
+          "The target has the Unconscious condition. The effect ends early if the target takes damage, and the target repeats the save at the end of each of its turns.",
+        ),
+      ),
+    );
+    const lull = entry.actions[0]?.activation.resolution;
+    expect(lull?.kind === "save" ? lull.onFail : []).toMatchObject([
+      { condition: "unconscious", repeatSave: true, endsOnDamage: true },
+    ]);
+  });
+
+  it("counts as many attacks as the heads a trait names", () => {
+    const [many] = parseMonstersFromHtml(
+      page
+        .replace("It swims in mud.", "The beast has five heads.")
+        .replace(
+          "The beast makes two Bite attacks.",
+          "The beast makes as many Bite attacks as it has heads.",
+        ),
+      "my-book",
+    );
+    expect(MonsterSchema.parse(many?.entry).multiattack).toBe(5);
+  });
+
+  it("reads defences and known traits as passives", () => {
+    const [tough] = parseMonstersFromHtml(
+      page
+        .replace(
+          "<p><strong>CR</strong>",
+          "<p><strong>Resistances</strong> Cold, Fire</p><p><strong>Vulnerabilities</strong> Radiant</p><p><strong>Immunities</strong> Poison; Charmed, Poisoned</p><p><strong>CR</strong>",
+        )
+        .replace(
+          "<p><strong><em>Mudborn.</em></strong> It swims in mud.</p>",
+          "<p><strong><em>Magic Resistance.</em></strong> It shrugs off spells.</p><p><strong><em>Regeneration.</em></strong> The beast regains 10 Hit Points at the start of each of its turns. Acid damage stops this for a turn.</p>",
+        ),
+      "my-book",
+    );
+    expect(MonsterSchema.parse(tough?.entry).passives).toEqual([
+      { kind: "modifier", modifier: { kind: "resistance", damage: "cold" } },
+      { kind: "modifier", modifier: { kind: "resistance", damage: "fire" } },
+      {
+        kind: "modifier",
+        modifier: { kind: "vulnerability", damage: "radiant" },
+      },
+      { kind: "modifier", modifier: { kind: "immunity", damage: "poison" } },
+      { kind: "conditionImmunity", condition: "charmed" },
+      { kind: "conditionImmunity", condition: "poisoned" },
+      { kind: "magicResistance" },
+      { kind: "regeneration", hp: 10, stoppedBy: ["acid"] },
+    ]);
+    expect(tough?.notes).not.toContain("not automated: Magic Resistance");
+  });
+
+  it("reads older defence lines", () => {
+    const [old] = parseMonstersFromHtml(
+      page.replace(
+        "<p><strong>CR</strong>",
+        "<p><strong>Damage Resistances</strong> bludgeoning, piercing, and slashing from nonmagical attacks</p><p><strong>Condition Immunities</strong> frightened</p><p><strong>CR</strong>",
+      ),
+      "my-book",
+    );
+    expect(MonsterSchema.parse(old?.entry).passives).toEqual([
+      {
+        kind: "modifier",
+        modifier: { kind: "resistance", damage: "bludgeoning" },
+      },
+      {
+        kind: "modifier",
+        modifier: { kind: "resistance", damage: "piercing" },
+      },
+      {
+        kind: "modifier",
+        modifier: { kind: "resistance", damage: "slashing" },
+      },
+      { kind: "conditionImmunity", condition: "frightened" },
+    ]);
   });
 
   it("keeps a rider that always holds", () => {
@@ -627,7 +785,7 @@ describe("parsing a monster stat block", () => {
     [
       "only some sizes can be targeted",
       saveOn(
-        "one Large or smaller creature within 5 feet.",
+        "one Small or smaller creature within 5 feet.",
         "7 (2d6) Bludgeoning damage.",
       ),
     ],
@@ -867,8 +1025,21 @@ describe("using encodings that were already written", () => {
       encodings,
       ...onlyFireBolt,
     });
-    return { summary, client };
+    return { summary, client, storage };
   };
+
+  it("keeps the cantrip scaling a provided encoding gives", async () => {
+    const scaling = { perTier: { addDice: "1d10" } };
+    const { storage } = await request({
+      "fire-bolt": {
+        encoding: { ...FIREBOLT_DRAFT.encoding, cantrip: scaling },
+      },
+    });
+    const draft = parse(
+      (await storage.read("books/import/my-book/spells/fire-bolt.yaml")) ?? "",
+    ) as { entry: { cantrip?: unknown } };
+    expect(draft.entry.cantrip).toEqual(scaling);
+  });
 
   it("uses a provided encoding without calling a model", async () => {
     const { summary, client } = await request({
@@ -1245,7 +1416,7 @@ describe("approving drafts", () => {
       slugs: ["fire-bolt"],
       requires: [{ plugin: "srd52", version: "^1" }],
     });
-    expect(result).toEqual({ approved: ["fire-bolt"], missing: [] });
+    expect(result).toEqual({ approved: ["fire-bolt"], missing: [], kept: [] });
 
     const report = await checkPlugins(storage, ["plugins", "books"], systems);
     expect(report.issues).toEqual([]);
@@ -1276,7 +1447,7 @@ describe("approving drafts", () => {
       slugs: ["nope"],
       requires: [],
     });
-    expect(result).toEqual({ approved: [], missing: ["nope"] });
+    expect(result).toEqual({ approved: [], missing: ["nope"], kept: [] });
   });
 
   it("can approve everything at once, skipping the report", async () => {
@@ -1290,6 +1461,32 @@ describe("approving drafts", () => {
       requires: [],
     });
     expect(result.approved).toEqual(["fire-bolt"]);
+  });
+
+  it("keeps an approved entry that has fields added by hand", async () => {
+    const storage = await drafted();
+    const approve = () =>
+      approveImport({
+        storage,
+        system: dnd55e,
+        pluginId: "my-book",
+        folder: "spells",
+        slugs: "all",
+        requires: [],
+      });
+    await approve();
+    const path = "books/rules/my-book/spells/fire-bolt.yaml";
+    const [entry] = parse((await storage.read(path)) ?? "") as object[];
+    const edited = stringify([
+      { ...entry, cantrip: { perTier: { addDice: "1d10" } } },
+    ]);
+    await storage.replaceAtomically(path, edited);
+    expect(await approve()).toEqual({
+      approved: [],
+      missing: [],
+      kept: ["fire-bolt"],
+    });
+    expect(await storage.read(path)).toBe(edited);
   });
 });
 

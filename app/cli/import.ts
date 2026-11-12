@@ -205,6 +205,11 @@ if (command === "parse") {
   if (result.missing.length > 0) {
     console.log(`Not found: ${result.missing.join(", ")}`);
   }
+  if (result.kept.length > 0) {
+    console.log(
+      `Kept, as they have fields added after approval: ${result.kept.join(", ")}`,
+    );
+  }
   const report = await checkPlugins(storage, PLUGIN_ROOTS, systems);
   for (const issue of report.issues) console.error(formatIssue(issue));
   console.log(`check-pack: ${String(report.issues.length)} issues`);
