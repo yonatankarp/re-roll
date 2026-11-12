@@ -512,6 +512,63 @@ describe("levelling up", () => {
     expect(deriveStats(actorIn(state), run).abilities.con).toBe(16);
   });
 
+  it("asks a feat taken at level 4 for its own choices", async () => {
+    const { registry, run: base } = await loadAdventure("goblin-ambush");
+    const run = withContent(storyRun(base, [[levelUp], [levelUp], [levelUp]]), [
+      FeatSchema.parse({
+        id: "test:feat/studious",
+        name: "Studious",
+        category: "general",
+        text: "Test.",
+        choices: [
+          {
+            kind: "skills",
+            id: "skills",
+            count: 1,
+            from: ["athletics", "insight", "perception"],
+          },
+          {
+            kind: "spells",
+            id: "spells",
+            count: 1,
+            maxLevel: 1,
+            schools: ["evocation"],
+          },
+        ],
+      }),
+    ]);
+    const plan: Plan = [
+      ...FIGHTER.filter(([pattern]) => !String(pattern).includes(":feat")),
+      [/:feat-0$/, "test:feat/studious"],
+      [/:feat:feat0-skills-0$/, "insight"],
+      [/:feat:feat0-spells-0$/, "srd52:spell/magic-missile"],
+    ];
+    const driven = drive(run, "studious", plan);
+    const skillStep = driven.asked.find(
+      (item) => item.id === "dnd5.5e:build:player:4:feat:feat0-skills-0",
+    );
+    // A skill the character already has isn't on offer again.
+    expect(skillStep?.options.map((option) => option.id)).not.toContain(
+      "athletics",
+    );
+    // Any list's spells of the feat's schools: Shield is abjuration.
+    const spellOptions = driven.asked
+      .find((item) => item.id === "dnd5.5e:build:player:4:feat:feat0-spells-0")
+      ?.options.map((option) => option.id);
+    expect(spellOptions).toContain("srd52:spell/magic-missile");
+    expect(spellOptions).not.toContain("srd52:spell/shield");
+    const player = actorIn(driven.state);
+    expect(buildOf(player).levels[3]?.answers).toEqual(
+      expect.arrayContaining([
+        { kind: "feats", values: ["test:feat/studious"] },
+        { kind: "skills", values: ["insight"] },
+        { kind: "spells", values: ["srd52:spell/magic-missile"] },
+      ]),
+    );
+    expect(deriveStats(player, run).skills).toContain("insight");
+    expectReplays(run, registry, "studious", driven);
+  });
+
   it("takes a wizard from 1 to 5, with slots and prepared spells", async () => {
     const run = storyRun(await goblin(), [
       [levelUp],

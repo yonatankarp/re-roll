@@ -392,6 +392,17 @@ export const FeatureSchema = ContentEntrySchema.extend({
 }).strict();
 export type Feature = z.infer<typeof FeatureSchema>;
 
+export const SpellSchoolSchema = z.enum([
+  "abjuration",
+  "conjuration",
+  "divination",
+  "enchantment",
+  "evocation",
+  "illusion",
+  "necromancy",
+  "transmutation",
+]);
+
 export const ChoiceDefSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("subclass"), id: z.string() }),
   z.strictObject({
@@ -415,7 +426,8 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     id: z.string(),
     count: z.number().int().min(1),
     maxLevel: z.number().int().min(0).max(9),
-    list: ContentIdSchema,
+    list: ContentIdSchema.optional(), // a class whose spell list it is; any spell when absent
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
   }),
   z.strictObject({
     kind: z.literal("option"),
@@ -495,7 +507,7 @@ export const FeatSchema = ContentEntrySchema.extend({
   ]),
   text: z.string().min(1),
   grants: z.array(ContentIdSchema).default([]),
-  choices: z.array(ChoiceDefSchema).default([]), // asked when the feat is taken at character creation
+  choices: z.array(ChoiceDefSchema).default([]), // asked when the feat is taken
   abilityIncrease: z.array(AbilitySchema).min(1).optional(), // its Ability Score Increase: +1 to one of these
 }).strict();
 export type Feat = z.infer<typeof FeatSchema>;
@@ -503,16 +515,7 @@ export type Feat = z.infer<typeof FeatSchema>;
 export const SpellSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
   level: z.number().int().min(0).max(9),
-  school: z.enum([
-    "abjuration",
-    "conjuration",
-    "divination",
-    "enchantment",
-    "evocation",
-    "illusion",
-    "necromancy",
-    "transmutation",
-  ]),
+  school: SpellSchoolSchema,
   classes: z.array(ContentIdSchema),
   castingTime: z.string().min(1),
   ritual: z.boolean().default(false),

@@ -566,7 +566,7 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("feat"), id: ChoiceIdSchema, category: FeatCategorySchema }),
   z.object({ kind: z.literal("skills"), id: ChoiceIdSchema, count: z.number(), from: z.array(SkillSchema) }),
   z.object({ kind: z.literal("weaponMastery"), id: ChoiceIdSchema, count: z.number() }),
-  z.object({ kind: z.literal("spells"), id: ChoiceIdSchema, count: z.number(), maxLevel: z.number(), list: ClassIdSchema }),
+  z.object({ kind: z.literal("spells"), id: ChoiceIdSchema, count: z.number(), maxLevel: z.number(), list: ClassIdSchema.optional(), schools: z.array(SpellSchoolSchema).optional() }),
   z.object({ kind: z.literal("option"), id: ChoiceIdSchema, count: z.number(), from: z.array(FeatureIdSchema) }),
 ]);
 ```

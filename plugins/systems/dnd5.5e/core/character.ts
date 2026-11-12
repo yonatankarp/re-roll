@@ -422,7 +422,10 @@ function originChoices(
 // Each spell choice looks at every spell, and companions make many of them when a run starts.
 const parsedSpells = new WeakMap<ContentAccess["content"], readonly Spell[]>();
 
-function classSpells(access: ContentAccess, list: string): readonly Spell[] {
+function classSpells(
+  access: ContentAccess,
+  list: string | undefined,
+): readonly Spell[] {
   let spells = parsedSpells.get(access.content);
   if (!spells) {
     spells = access
@@ -431,11 +434,17 @@ function classSpells(access: ContentAccess, list: string): readonly Spell[] {
       .map((id) => lookup(access, SpellSchema, id));
     parsedSpells.set(access.content, spells);
   }
-  const named = ClassSchema.safeParse(access.content(list)).data?.spellList;
+  const named =
+    list === undefined
+      ? undefined
+      : ClassSchema.safeParse(access.content(list)).data?.spellList;
   const byName = new Map<string, Spell>();
   // The list is applied first, as namedContent applies `offered`; then the first spell of each name wins.
   for (const spell of spells) {
-    const listed = spell.classes.includes(list) || named?.includes(spell.id);
+    const listed =
+      list === undefined ||
+      spell.classes.includes(list) ||
+      named?.includes(spell.id);
     if (listed && !byName.has(spell.name)) byName.set(spell.name, spell);
   }
   return [...byName.values()];
@@ -524,6 +533,7 @@ export function choiceOptions(
       const spells = classSpells(access, choice.list).filter(
         (spell) =>
           !had.has(spell.id) &&
+          (choice.schools?.includes(spell.school) ?? true) &&
           (choice.maxLevel === 0
             ? spell.level === 0
             : spell.level >= 1 && spell.level <= choice.maxLevel),
@@ -635,6 +645,34 @@ function isAbilityImprovement(featId: string): boolean {
   return featId.endsWith("/ability-score-improvement");
 }
 
+// Everything this level asks. A feat picked at this level, such as a general feat at level 4, asks its own choices
+// too, under `<choice>:feat<n>-` so they can't meet the class's, the origin's or `<choice>:increase`.
+function stepChoices(
+  draft: Draft,
+  base: CharacterBuild | null,
+  classDef: ClassDef,
+  level: number,
+  access: ContentAccess,
+): readonly ChoiceDef[] {
+  const choices = levelChoices(
+    classDef,
+    level,
+    chosenSubclass(draft.picks, base),
+    access,
+  );
+  const featChoices = choices.flatMap((choice) =>
+    choice.kind === "feat"
+      ? (draft.picks[choice.id] ?? []).flatMap((id, index) =>
+          lookup(access, FeatSchema, id).choices.map((own) => ({
+            ...own,
+            id: `${choice.id}:feat${String(index)}-${own.id}`,
+          })),
+        )
+      : [],
+  );
+  return [...choices, ...featChoices, ...originChoices(draft, base, access)];
+}
+
 function classStep(
   draft: Draft,
   base: CharacterBuild | null,
@@ -642,11 +680,7 @@ function classStep(
 ): Step | null {
   const classDef = lookup(access, ClassSchema, draft.classId ?? "");
   const level = (base?.levels.length ?? 0) + 1;
-  const choices = [
-    ...levelChoices(classDef, level, chosenSubclass(draft.picks, base), access),
-    ...originChoices(draft, base, access),
-  ];
-  for (const choice of choices) {
+  for (const choice of stepChoices(draft, base, classDef, level, access)) {
     const picked = draft.picks[choice.id] ?? [];
     const count = "count" in choice ? choice.count : 1;
     if (picked.length < count) {
@@ -767,15 +801,7 @@ function levelEntry(
     // The highest roll at level 1, then the fixed value: half the die plus one.
     hitPointGain: level === 1 ? sides : sides / 2 + 1,
     answers: answersOf(
-      [
-        ...levelChoices(
-          classDef,
-          level,
-          chosenSubclass(draft.picks, base),
-          access,
-        ),
-        ...originChoices(draft, base, access),
-      ],
+      stepChoices(draft, base, classDef, level, access),
       draft.picks,
     ),
   });
