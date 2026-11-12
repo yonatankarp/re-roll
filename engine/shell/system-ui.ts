@@ -29,6 +29,25 @@ export interface DecisionCard {
   readonly footer?: string; // a closing line, such as the purse after the find
 }
 
+// One thing at a merchant's: what it is, what it costs, and the choice that trades it.
+export interface ShopCard {
+  readonly item: string;
+  readonly name: string;
+  readonly summary: string; // a short mechanical line, such as "1d8 slashing, Versatile"
+  readonly price: string;
+  readonly note?: string; // such as "2 left" or "Not enough gold"
+  readonly option: string | null; // null while it can't be traded
+}
+
+// A merchant's screen in place of the choices, with Buy and Sell tabs over one decision.
+export interface ShopView {
+  readonly merchant: string;
+  readonly purse: string;
+  readonly buy: readonly ShopCard[];
+  readonly sell: readonly ShopCard[];
+  readonly leave: string; // the option that ends the visit
+}
+
 export interface SheetSection {
   readonly title: string;
   readonly rows: readonly SheetRow[];
@@ -135,6 +154,12 @@ export interface SystemUi {
     state: unknown,
     access: ContentAccess,
   ) => DecisionCard | null;
+  // A merchant's screen for the decision, shown in place of its choices.
+  readonly shop?: (
+    decision: Decision,
+    state: unknown,
+    access: ContentAccess,
+  ) => ShopView | null;
   readonly playerDied: (state: unknown) => boolean;
   // Turns an event into plain data for the board to animate, given the state either side of it.
   readonly cue?: (

@@ -29,6 +29,7 @@ import {
 import type {
   CombatView,
   DecisionCard,
+  ShopView,
   OptionGroup,
   OptionView,
   SheetView,
@@ -65,6 +66,7 @@ export interface GameView {
   readonly endingName: string | null;
   readonly optionGroups: readonly OptionGroup[];
   readonly card: DecisionCard | null; // shown above the choices, such as treasure found
+  readonly shop: ShopView | null; // a merchant's screen, shown in place of the choices
   readonly rests: readonly OptionView[]; // offered at the campfire, apart from the choices
   readonly monsterArt: Readonly<Record<string, string>>; // by combatant id
   readonly tokenArt: Readonly<Record<string, TokenArt>>; // by combatant id, with its face
@@ -817,6 +819,9 @@ export function createGame({
           : [],
         card: decision
           ? (ui.card?.(decision, state.system, run) ?? null)
+          : null,
+        shop: decision
+          ? (ui.shop?.(decision, state.system, run) ?? null)
           : null,
         rests: (decision?.options ?? [])
           .filter((option) => isRest(option.id))

@@ -1,5 +1,6 @@
 import { collapseCard, loadScreen } from "./load-screen.ts";
 import { campfire } from "./campfire.ts";
+import { shopPanel } from "./shop.ts";
 import { adventureCard, adventureGrid } from "./adventure-picker.ts";
 import { soundControls } from "./sound-panel.ts";
 import type { Game, GameView } from "./session.ts";
@@ -928,6 +929,18 @@ export function mountShell(
     };
     sound.follow(camp.dialog);
     actions.replaceChildren(saved, camp.button, hud, journal, gameMenu);
+    const shop = shopPanel(
+      (optionId) => {
+        act(async () => {
+          await game.answer(optionId);
+          draw();
+          flashSaved();
+        });
+      },
+      () => {
+        if (sound.effects()) cardSound?.();
+      },
+    );
     const stage = el(
       "main",
       { class: "play" },
@@ -947,6 +960,7 @@ export function mountShell(
         card,
         prompt,
         options,
+        shop.element,
         ending,
       ),
     );
@@ -984,7 +998,10 @@ export function mountShell(
     let choiceShown = 0; // the same, for revealing the choices
     // An ending takes focus on its heading, so a repeated key press can't skip past it.
     const firstFocus = (): HTMLElement =>
-      options.querySelector("button") ?? ending.querySelector("h3") ?? title;
+      shop.focusTarget() ??
+      options.querySelector("button") ??
+      ending.querySelector("h3") ??
+      title;
     const draw = (): void => {
       const view = game.view();
       const factory = boards[view.system];
@@ -1104,7 +1121,7 @@ export function mountShell(
       const { decision } = view;
       // A card says what the prompt would, so it stands in for it.
       prompt.textContent =
-        decision && decision.prompt !== view.scene && !view.card
+        decision && decision.prompt !== view.scene && !view.card && !view.shop
           ? decision.prompt
           : "";
       const fresh = (decision?.id ?? null) !== decisionShown;
@@ -1255,6 +1272,8 @@ export function mountShell(
             ]
           : []),
       );
+      options.hidden = view.shop !== null;
+      shop.update(view.shop);
       // The next choice waits for the board to finish, so it can't be picked under a die still to throw.
       if (!firstDraw && board?.settled && cues.length > 0) {
         const shownChoice = ++choiceShown;

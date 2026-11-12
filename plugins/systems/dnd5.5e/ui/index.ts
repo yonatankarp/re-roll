@@ -7,7 +7,10 @@ import {
 import { z } from "zod";
 import { weaponProficient } from "../core/character.ts";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
+import { carriedWeight, carryingCapacity } from "../core/carry.ts";
 import { foundText } from "../core/gear.ts";
+import { coins } from "../core/shop.ts";
+import { shop } from "./shop.ts";
 import { inArea } from "../core/grid.ts";
 import { dndCue } from "./cues.ts";
 import {
@@ -20,6 +23,7 @@ import {
   LootSchema,
   SKILL_ABILITIES,
   type Skill,
+  SpeciesSchema,
 } from "../core/schemas.ts";
 import {
   type Actor,
@@ -339,6 +343,7 @@ function equipmentRows(
   gold: number | null,
   stats: Stats,
   access: ContentAccess,
+  capacity: number,
 ) {
   const worn = equipped(actor);
   const attuned = actor.attuned ?? [];
@@ -405,7 +410,8 @@ function equipmentRows(
     return [{ label, value: "", ...detail }];
   });
   return [
-    ...(gold === null ? [] : [{ label: "Gold", value: `${String(gold)} gp` }]),
+    ...(gold === null ? [] : [{ label: "Gold", value: coins(gold) }]),
+    carryRow(carriedWeight(actor, access), capacity),
     ...(attuned.length > 0 ||
     actor.inventory.some((id) => {
       const parsed = ItemSchema.safeParse(access.content(id));
@@ -424,6 +430,21 @@ function equipmentRows(
       : []),
     ...items,
   ];
+}
+
+// The weight carried against what Strength allows, and what going over does to Speed.
+function carryRow(carried: number, capacity: number) {
+  const pounds = (weight: number): string =>
+    String(Math.round(weight * 10) / 10);
+  return {
+    label: "Carrying",
+    value: `${pounds(carried)} of ${pounds(capacity)} lb`,
+    ...(carried > capacity * 2
+      ? { note: "Too heavy to move" }
+      : carried > capacity
+        ? { note: "Over capacity: Speed 5 feet" }
+        : {}),
+  };
 }
 
 function sheets(rawState: unknown, access: ContentAccess) {
@@ -538,7 +559,16 @@ function sheetOf(
       // Near the top, so what the party carries and its gold are found without scrolling.
       {
         title: "Equipment",
-        rows: equipmentRows(player, gold, stats, access),
+        rows: equipmentRows(
+          player,
+          gold,
+          stats,
+          access,
+          carryingCapacity(
+            stats.abilities.str,
+            SpeciesSchema.parse(access.content(build.speciesId)).size,
+          ),
+        ),
       },
       {
         title: "Abilities",
@@ -861,6 +891,10 @@ function describe(
       const scroll = item?.type === "magicItem" && item.category === "scroll";
       return `${name(data.actor)} uses ${nameOf(access, data.item)}${scroll ? ", and it crumbles to dust" : ""}.`;
     }
+    case "dnd5.5e:traded": {
+      const data = EVENT_SCHEMAS["dnd5.5e:traded"].parse(payload);
+      return `${name(data.actor)} ${data.bought ? "buys" : "sells"} ${nameOf(access, data.item)} for ${coins(data.priceCp / 100)}.`;
+    }
     case "dnd5.5e:gearChanged": {
       const data = EVENT_SCHEMAS["dnd5.5e:gearChanged"].parse(payload);
       return `${name(data.actor)} changes gear.`;
@@ -879,7 +913,7 @@ function card(decision: Decision, rawState: unknown, access: ContentAccess) {
         title: "Found",
         icon: "\u{1FA99}",
         lines: foundText(found.data, access),
-        footer: `Purse: ${String(StateSchema.parse(rawState).gold ?? 0)} gp`,
+        footer: `Purse: ${coins(StateSchema.parse(rawState).gold ?? 0)}`,
       }
     : null;
 }
@@ -899,5 +933,6 @@ export const dndUi = {
   actorOf,
   optionGroups,
   card,
+  shop,
   playerDied,
 };
