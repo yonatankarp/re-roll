@@ -5,3 +5,4 @@ out/
 saves/
 app/desktop/src-tauri/target/
 app/desktop/src-tauri/gen/
+.claude/worktrees/
