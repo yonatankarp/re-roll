@@ -9,6 +9,7 @@ import {
   type AbilityScores,
   type Activation,
   type Amount,
+  type Condition,
   ArmorSchema,
   BackgroundSchema,
   ClassSchema,
@@ -527,7 +528,7 @@ function multiattackRoutines(
         .map(({ id }) => id);
       return { fixed, free };
     });
-  return Object.fromEntries(
+  const routines: Record<string, readonly string[]> = Object.fromEntries(
     attacks.map(({ id }) => {
       const clause = clauses.find(
         ({ fixed, free }) => fixed.includes(id) || free.includes(id),
@@ -553,6 +554,15 @@ function multiattackRoutines(
       ];
     }),
   );
+  // A "Melee or Ranged" attack is imported twice, and the ranged copy repeats as the melee one does.
+  for (const { id, name } of attacks) {
+    const melee = attacks.find((item) => `${item.name} (ranged)` === name);
+    const routine = melee && routines[melee.id];
+    if (melee && routine) {
+      routines[id] = routine.map((item) => (item === melee.id ? id : item));
+    }
+  }
+  return routines;
 }
 
 function monsterStats(actor: Actor, access: ContentAccess): Stats {
@@ -580,7 +590,7 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
     resources: Object.fromEntries(
       monster.actions.flatMap((action) =>
         action.activation.cost.flatMap((cost) =>
-          typeof cost === "object" ? [[cost.resource, 1]] : [],
+          typeof cost === "object" ? [[cost.resource, action.perDay ?? 1]] : [],
         ),
       ),
     ),
@@ -630,6 +640,13 @@ export function doesSomething(resolution: Resolution): boolean {
       (effect.kind === "applyCondition" &&
         effect.condition !== "deafened" &&
         effect.condition !== "grappled"),
+  );
+}
+
+export function immuneToCondition(stats: Stats, condition: Condition): boolean {
+  return stats.passives.some(
+    (passive) =>
+      passive.kind === "conditionImmunity" && passive.condition === condition,
   );
 }
 

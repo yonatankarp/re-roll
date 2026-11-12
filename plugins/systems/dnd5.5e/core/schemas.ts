@@ -64,6 +64,7 @@ export const ConditionSchema = z.enum([
   "stunned",
   "unconscious",
 ]);
+export type Condition = z.infer<typeof ConditionSchema>;
 
 export const AutomationSchema = z.enum(["full", "partial", "text"]);
 
@@ -310,6 +311,16 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("packTactics") }),
   z.strictObject({ kind: z.literal("undeadFortitude") }),
   z.strictObject({ kind: z.literal("magicResistance") }),
+  z.strictObject({
+    kind: z.literal("conditionImmunity"),
+    condition: ConditionSchema,
+  }),
+  // Hit Points regained at the start of each of its turns, as a troll does.
+  z.strictObject({
+    kind: z.literal("regeneration"),
+    hp: z.number().int().min(1),
+    stoppedBy: z.array(DamageTypeSchema).default([]), // damage that stops it for a turn
+  }),
   // A Critical Hit on this natural roll or higher, as with Improved Critical.
   z.strictObject({
     kind: z.literal("criticalRange"),
@@ -695,6 +706,7 @@ export const MonsterSchema = ContentEntrySchema.extend({
       z.strictObject({
         name: z.string().min(1),
         recharge: z.number().int().min(2).max(6).optional(), // ready again on this d6 roll or higher
+        perDay: z.number().int().min(1).optional(), // uses of its resource cost, back after a Long Rest
         activation: ActivationSchema,
       }),
     )

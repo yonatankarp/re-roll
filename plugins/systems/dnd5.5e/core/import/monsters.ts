@@ -1,5 +1,11 @@
 import type { ParsedImport } from "#sdk";
-import type { Damage, LeafEffect, Resolution } from "../schemas.ts";
+import type {
+  Damage,
+  LeafEffect,
+  Modifier,
+  Passive,
+  Resolution,
+} from "../schemas.ts";
 import { ConditionSchema, DAMAGE_TYPES } from "../schemas.ts";
 import { dependsOnCaster, statBlocksIn } from "./book.ts";
 import { plainText, slugOf } from "./spells.ts";
@@ -39,10 +45,24 @@ const OLDER_CONDITION =
 const sentencesOf = (text: string): readonly string[] =>
   text.split(/(?<=\.)\s+/);
 
+// Every hero is Small or Medium, so a limit of Medium or smaller, or anything larger, always holds.
+const withoutSizeLimits = (text: string): string =>
+  text
+    .replace(
+      /\b(?:if )?(?:the )?(?:target|it) is (?:a )?(?:Medium|Large|Huge|Gargantuan) or smaller(?: creature)?,?/gi,
+      "",
+    )
+    .replace(
+      /\b(?:Medium|Large|Huge|Gargantuan) or smaller (creatures?)\b/gi,
+      "$1",
+    );
+
 // Why part of an effect only applies sometimes, in our own words so that a note never quotes the book.
 function limitOn(text: string): string | null {
   // Every target in a fight is a creature, so this one always holds.
-  const clause = text.replace(/\bif the target is a creature,/gi, "");
+  const clause = withoutSizeLimits(
+    text.replace(/\bif the target is a creature,/gi, ""),
+  );
   if (/\bmov(?:ed|ing)\b/i.test(clause)) return "a charge requirement";
   if (/\bor (?:smaller|larger)\b|\bno larger than\b/i.test(clause)) {
     return "a size limit";
@@ -57,7 +77,12 @@ function limitOn(text: string): string | null {
     : null;
 }
 
-function damageIn(sentence: string, left: string[]): Damage[] {
+// Dice that are only added when the attack roll had Advantage go to advantage, for an extraDamage passive.
+function damageIn(
+  sentence: string,
+  left: string[],
+  advantage: string[] = [],
+): Damage[] {
   // "..., or 7 (1d8 + 3) Piercing damage if used with two hands" is an alternative, not extra damage.
   const [main = ""] = sentence
     .replace(/[—–]\s*or\b[^—–]*(?:[—–]\s*|$)/g, " ")
@@ -81,11 +106,22 @@ function damageIn(sentence: string, left: string[]): Damage[] {
           )
         ? "damage to another creature"
         : limitOn(around);
+    const [, dice, sign, bonus, flat, type = ""] = match;
+    if (
+      limit === "another condition" &&
+      dice &&
+      !bonus &&
+      /\bif the (?:attack (?:roll )?(?:had|was made with)|\w+ had) Advantage\b/i.test(
+        around,
+      )
+    ) {
+      advantage.push(dice);
+      return [];
+    }
     if (limit) {
       left.push(limit);
       return [];
     }
-    const [, dice, sign, bonus, flat, type = ""] = match;
     const base = flat ?? (sign === "+" ? bonus : bonus && `-${bonus}`);
     return [
       {
@@ -109,7 +145,14 @@ function noteLaterDamage(sentences: readonly string[], left: string[]): void {
 }
 
 function conditionsIn(text: string, left: string[]): LeafEffect[] {
-  const repeatSave = /repeats the save/i.test(text);
+  const repeatSave =
+    /\brepeats? the sav(?:e|ing throw)\b(?:,|[^.]*?\b(?:at the end of|whenever it takes damage)\b)/i.test(
+      text,
+    );
+  const endsOnDamage =
+    /\bends? (?:early )?(?:if|when) the target takes (?:any )?damage\b/i.test(
+      text,
+    );
   return sentencesOf(text).flatMap((sentence) => {
     const shortTerm = /until the (start|end) of [^.]*next turn/i.test(sentence);
     return [
@@ -133,7 +176,7 @@ function conditionsIn(text: string, left: string[]): LeafEffect[] {
             ? { until: "yourNextTurnStart" as const }
             : { minutes: 1 },
           repeatSave,
-          endsOnDamage: false,
+          endsOnDamage,
         },
       ];
     });
@@ -143,6 +186,8 @@ function conditionsIn(text: string, left: string[]): LeafEffect[] {
 interface ParsedAction {
   readonly targeting: unknown;
   readonly resolution: Resolution;
+  readonly advantageDice?: readonly string[];
+  readonly thrownRange?: number; // a "Melee or Ranged" attack's range, for a second, ranged action
 }
 
 function parseAttack(text: string, left: string[]): ParsedAction | null {
@@ -162,7 +207,8 @@ function parseAttack(text: string, left: string[]): ParsedAction | null {
     new RegExp(`(?=${SAVE_LABEL}|(?:Hit or )?Miss:)`),
   );
   const sentences = sentencesOf(hit);
-  const damage = damageIn(sentences[0] ?? "", left);
+  const advantageDice: string[] = [];
+  const damage = damageIn(sentences[0] ?? "", left, advantageDice);
   noteLaterDamage(sentences, left);
   const onHit = conditionsIn(hit, left);
   if (
@@ -171,14 +217,18 @@ function parseAttack(text: string, left: string[]): ParsedAction | null {
   ) {
     return null;
   }
-  const distances = [
-    /reach (\d+) ft/.exec(text)?.[1],
-    /range (\d+)(?:\/\d+)? ft/.exec(text)?.[1],
-  ].flatMap((item) => (item ? [Number(item)] : []));
+  const reach = /reach (\d+) ft/.exec(text)?.[1];
+  const range = /range (\d+)(?:\/\d+)? ft/.exec(text)?.[1];
+  const both = text.startsWith("Melee or Ranged") && reach && range;
+  const distances = [reach, range].flatMap((item) =>
+    item ? [Number(item)] : [],
+  );
   return {
+    ...(both ? { thrownRange: Number(range) } : {}),
+    ...(advantageDice.length > 0 ? { advantageDice } : {}),
     targeting: {
       creatures: 1,
-      range: Math.max(5, ...distances),
+      range: both ? Number(reach) : Math.max(5, ...distances),
       side: "enemy",
     },
     resolution: {
@@ -308,8 +358,12 @@ function multiattackCount(text: string): number | null {
       ),
     ),
   ].map((match) => NUMBER_WORDS[(match[1] ?? "").toLowerCase()] ?? 0);
-  if (counts.length === 0) return /\battacks?\b/i.test(routine) ? null : 1;
-  return counts.reduce((sum, count) => sum + count, 0);
+  // "uses Eye Rays twice" counts as "three times" does.
+  const twice = [...routine.matchAll(/\btwice\b/gi)].map(() => 2);
+  if (counts.length === 0 && twice.length === 0) {
+    return /\battacks?\b/i.test(routine) ? null : 1;
+  }
+  return [...counts, ...twice].reduce((sum, count) => sum + count, 0);
 }
 
 // "Breath Weapons (Recharge 5–6). ... Fire Breath. Dexterity Saving Throw: ... Cold Breath. ..." is several actions.
@@ -504,6 +558,59 @@ export function legendaryOf(
   return { fields, notes };
 }
 
+// "Resistances Cold, Fire", "Immunities Poison; Poisoned", or older "Damage Immunities poison" and
+// "Condition Immunities poisoned". shortcut: "from nonmagical attacks" is read as all such damage.
+function defencesOf(lines: readonly string[]): Passive[] {
+  const passives: Passive[] = [];
+  for (const line of lines) {
+    const match =
+      /^(Damage |Condition )?(Resistances?|Immunities|Vulnerabilities)\s+(.+)$/.exec(
+        line,
+      );
+    if (!match) continue;
+    const [, prefix, label = "", list = ""] = match;
+    const words = new Set(list.toLowerCase().match(/[a-z]+/g) ?? []);
+    if (prefix !== "Condition ") {
+      const kind = label.startsWith("Resist")
+        ? "resistance"
+        : label === "Immunities"
+          ? "immunity"
+          : "vulnerability";
+      for (const damage of DAMAGE_TYPES) {
+        if (words.has(damage)) {
+          passives.push({
+            kind: "modifier",
+            modifier: { kind, damage } as Modifier, // one of three kinds, which TypeScript can't narrow
+          });
+        }
+      }
+    }
+    if (label !== "Immunities") continue;
+    for (const word of words) {
+      const condition = ConditionSchema.safeParse(word);
+      if (condition.success) {
+        passives.push({ kind: "conditionImmunity", condition: condition.data });
+      }
+    }
+  }
+  return passives;
+}
+
+// The traits the engine already knows how to play, or null for one it doesn't.
+function traitPassive(label: string, text: string): Passive | null {
+  if (label === "Magic Resistance") return { kind: "magicResistance" };
+  if (label === "Pack Tactics") return { kind: "packTactics" };
+  if (label === "Undead Fortitude") return { kind: "undeadFortitude" };
+  const regains = /\bregains (\d+) Hit Points\b/.exec(text)?.[1];
+  if (!/^Regeneration\b/.test(label) || !regains) return null;
+  const words = new Set(text.toLowerCase().match(/[a-z]+/g) ?? []);
+  return {
+    kind: "regeneration",
+    hp: Number(regains),
+    stoppedBy: DAMAGE_TYPES.filter((damage) => words.has(damage)),
+  };
+}
+
 // Second pass, for a block the first pass found no action in. It's separate so that blocks which already parse don't change.
 function parseBlock(
   block: string,
@@ -549,6 +656,8 @@ function parseBlock(
   const slug = slugOf(name);
   const actions: unknown[] = [];
   const notes: string[] = [];
+  const passives = defencesOf(lines);
+  const advantageDice = new Set<string>();
   let multiattack = 1;
   let section = "";
   for (const paragraph of paragraphs) {
@@ -572,11 +681,17 @@ function parseBlock(
       continue;
     }
     if (section === "traits") {
-      notes.push(`not automated: ${label}`);
+      const passive = traitPassive(label, text);
+      if (passive) passives.push(passive);
+      else notes.push(`not automated: ${label}`);
       continue;
     }
     if (/^multiattack/i.test(label)) {
-      const count = multiattackCount(text);
+      // "as many Bite attacks as it has heads" takes the heads a trait names.
+      const heads = new RegExp(`\\b(${NUMBER}) heads\\b`, "i").exec(
+        lines.join(" "),
+      )?.[1];
+      const count = multiattackCount(text) ?? (heads ? countOf(heads) : null);
       if (count === null) notes.push(`not automated: ${label} count`);
       multiattack = count ?? 1;
       continue;
@@ -586,7 +701,8 @@ function parseBlock(
       continue;
     }
     const rechargeOn = /\(Recharge (\d)/.exec(label)?.[1];
-    const resource = `recharge:${slugOf(label.replace(/\s*\(.*$/, ""))}`;
+    const perDay = /\((\d+)\/Day\b/.exec(label)?.[1];
+    const resource = `${perDay ? "day" : "recharge"}:${slugOf(label.replace(/\s*\(.*$/, ""))}`;
     let recharge = rechargeOn; // options share one recharge, and each action holding it would roll for it
     for (const option of optionsIn(label, text)) {
       const left: string[] = [];
@@ -603,18 +719,36 @@ function parseBlock(
       for (const reason of new Set(left)) {
         notes.push(`partial: ${actionName}: left out ${reason}`);
       }
+      for (const dice of parsed.advantageDice ?? []) advantageDice.add(dice);
+      const cost = [
+        section === "bonus actions" ? "bonusAction" : "action",
+        ...(rechargeOn || perDay ? [{ resource }] : []),
+      ];
       actions.push({
         name: actionName,
         ...(recharge ? { recharge: Number(recharge) } : {}),
+        ...(perDay ? { perDay: Number(perDay) } : {}),
         activation: {
-          cost: [
-            section === "bonus actions" ? "bonusAction" : "action",
-            ...(rechargeOn ? [{ resource }] : []),
-          ],
+          cost,
           targeting: parsed.targeting,
           resolution: parsed.resolution,
         },
       });
+      // A "Melee or Ranged" attack is two actions, so it's a melee attack up close and a ranged one further off.
+      if (parsed.thrownRange !== undefined) {
+        actions.push({
+          name: `${actionName} (ranged)`,
+          ...(perDay ? { perDay: Number(perDay) } : {}),
+          activation: {
+            cost,
+            targeting: {
+              ...(parsed.targeting as object),
+              range: parsed.thrownRange,
+            },
+            resolution: parsed.resolution,
+          },
+        });
+      }
       recharge = undefined;
     }
   }
@@ -629,6 +763,15 @@ function parseBlock(
   );
   notes.push(...legendary.notes);
 
+  // shortcut: an Advantage rider printed on one attack is added to all of the monster's attacks.
+  for (const dice of advantageDice) {
+    passives.push({
+      kind: "extraDamage",
+      dice,
+      when: "advantage",
+      oncePerTurn: false,
+    });
+  }
   const kind = lines.map((line) => CREATURE_KIND.exec(line)).find(Boolean);
   const speed = Number(field(/^Speed\s+(\d+)/) ?? 0);
   const otherSpeeds = [
@@ -662,6 +805,7 @@ function parseBlock(
       proficiency: Number(field(/\b(?:PB|Proficiency Bonus) \+(\d+)/) ?? 2),
       saves,
       // Older books print no initiative, which is the Dexterity modifier there.
+      ...(passives.length > 0 ? { passives } : {}),
       initiative: Number(
         (
           field(/Initiative\s+([+−-]?\d+)/) ??
