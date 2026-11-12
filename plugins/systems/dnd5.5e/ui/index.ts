@@ -341,6 +341,7 @@ function sheetOf(player: Actor, build: CharacterBuild, access: ContentAccess) {
   return {
     id: player.id,
     title: player.name,
+    level: stats.level,
     subtitle: [
       `${nameOf(access, build.speciesId)} ${classes}`,
       ...(subclasses.length > 0 ? [subclasses.join(", ")] : []),

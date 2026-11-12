@@ -3,7 +3,15 @@ import { type Server, createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { systems } from "../app/systems.ts";
 import {
   CONTENT_ROUTE,
@@ -332,6 +340,126 @@ describe("playing through the shell's session", () => {
     expect((await game.listSaves()).map((save) => save.path)).toEqual([
       second.path,
     ]);
+  });
+
+  describe("save slots", () => {
+    // Each step is a second apart, so the order never rests on two saves sharing a millisecond.
+    let clock = Date.parse("2026-11-12T10:00:00Z");
+    const tick = (): void => {
+      clock += 1000;
+      vi.setSystemTime(clock);
+    };
+    const gameOn = (store: SaveStore) =>
+      createGame({
+        storage: withSaves(createContentReader(url), store),
+        roots: ["plugins"],
+        systems,
+        uis: [dndUi],
+      });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("keeps manual saves beside the autosave, newest first, and Continue takes the newest", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      tick();
+      const store = memorySaves();
+      const game = gameOn(store);
+      await game.start("goblin-ambush", "slots", { difficulty: "hard" });
+      tick();
+      await chooseCharacter(game, "Fighter");
+      tick();
+      const first = await game.save("first");
+      tick();
+      await firstOption(game); // moves the autosave on
+      tick();
+      const second = await game.save("second");
+      const autosave = "saves/goblin-ambush-slots-autosave.json";
+
+      const saves = await game.listSaves();
+      expect(saves.map((save) => save.path)).toEqual([second, autosave, first]);
+      expect(saves.map((save) => save.kind)).toEqual([
+        "manual",
+        "autosave",
+        "manual",
+      ]);
+      const [newest] = saves;
+      expect(newest).toMatchObject({
+        title: "Ambush on the Old Road",
+        level: 1,
+        settings: ["Hard"],
+        savedAt: new Date(clock).toISOString(),
+      });
+      expect(newest?.scene).toBeTruthy();
+      // Builds from before save cards read the times as plain strings, so they stay that way.
+      const times: unknown = JSON.parse(store.getItem("saves/times") ?? "{}");
+      expect(
+        Object.values(times as object).every(
+          (time) => typeof time === "string",
+        ),
+      ).toBe(true);
+
+      // Continue loads the first save in the list, which an answer's autosave then replaces.
+      tick();
+      await firstOption(game);
+      expect((await game.listSaves())[0]?.path).toBe(autosave);
+
+      await game.deleteSave(first);
+      expect((await game.listSaves()).map((save) => save.path)).toEqual([
+        autosave,
+        second,
+      ]);
+      await game.load(second);
+      expect(game.view().decision).not.toBeNull();
+    });
+
+    // The save files themselves haven't changed, only the record of times beside them.
+    it("loads saves from before save cards, and fills in their details", async () => {
+      const made = memorySaves();
+      const maker = gameOn(made);
+      await maker.start("goblin-ambush", "old");
+      await chooseCharacter(maker, "Wizard");
+      const text = made.getItem("saves/goblin-ambush-old-autosave.json");
+      if (text === null) throw new Error("No autosave was written");
+
+      const store = memorySaves();
+      store.setItem("saves/goblin-ambush-dated.json", text);
+      store.setItem("saves/goblin-ambush-undated.json", text);
+      store.setItem(
+        "saves/times",
+        JSON.stringify({
+          "saves/goblin-ambush-dated.json": "2026-01-01T00:00:00.000Z",
+        }),
+      );
+      const game = gameOn(store);
+
+      const before = await game.listSaves();
+      expect(before.map((save) => save.path)).toEqual([
+        "saves/goblin-ambush-dated.json",
+        "saves/goblin-ambush-undated.json",
+      ]);
+      expect(before[0]).toMatchObject({
+        savedAt: "2026-01-01T00:00:00.000Z",
+        scene: null,
+        level: null,
+        kind: "manual",
+      });
+
+      await game.load("saves/goblin-ambush-dated.json");
+      expect(game.view().sheets[0]?.title).toBeTruthy();
+      const [dated] = await game.listSaves();
+      expect(dated).toMatchObject({
+        path: "saves/goblin-ambush-dated.json",
+        savedAt: "2026-01-01T00:00:00.000Z",
+        level: 1,
+      });
+      expect(dated?.scene).toBeTruthy();
+
+      await game.load("saves/goblin-ambush-undated.json");
+      const fresh = await game.save("new");
+      expect((await game.listSaves())[0]?.path).toBe(fresh);
+    });
   });
 
   it("finds a monster's picture by name and ignores art that isn't an image", async () => {
