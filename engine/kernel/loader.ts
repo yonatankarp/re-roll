@@ -526,13 +526,14 @@ export async function loadRun(
     if (!aliases.has(id)) content.set(id, deepFreeze(entry));
   }
   for (const adventure of adventures.values()) deepFreeze(adventure);
+  const ids = Object.freeze([...content.keys()].sort());
 
   return {
     ok: true,
     registry: Object.freeze({
       system,
       plugins: Object.freeze(order.map((record) => record.manifest)),
-      contentIds: () => [...content.keys()].sort(),
+      contentIds: () => ids,
       pluginHash: (pluginId: string) => hashes.get(pluginId),
       content: (id: string) => {
         const resolved = resolve(id);
