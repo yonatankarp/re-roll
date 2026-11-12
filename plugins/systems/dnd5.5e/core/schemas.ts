@@ -4,6 +4,14 @@ import { z } from "zod";
 export const ABILITIES = ["str", "dex", "con", "int", "wis", "cha"] as const;
 export const AbilitySchema = z.enum(ABILITIES);
 export type Ability = z.infer<typeof AbilitySchema>;
+export const ABILITY_NAMES = {
+  str: "Strength",
+  dex: "Dexterity",
+  con: "Constitution",
+  int: "Intelligence",
+  wis: "Wisdom",
+  cha: "Charisma",
+} as const satisfies Record<Ability, string>;
 
 export const SKILL_ABILITIES = {
   acrobatics: "dex",

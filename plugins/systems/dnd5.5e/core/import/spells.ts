@@ -1,6 +1,7 @@
 import type { ImportKind, ImportSource } from "#sdk";
 import { z } from "zod";
 import {
+  ABILITY_NAMES,
   type Activation,
   type Amount,
   type Damage,
@@ -348,15 +349,6 @@ export function shapeProblems(
   }
   return problems;
 }
-
-const ABILITY_NAMES = {
-  str: "Strength",
-  dex: "Dexterity",
-  con: "Constitution",
-  int: "Intelligence",
-  wis: "Wisdom",
-  cha: "Charisma",
-} as const;
 
 function amountText(amount: Amount): string {
   const { dice, bonus } = amount;

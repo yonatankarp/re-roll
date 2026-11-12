@@ -19,6 +19,7 @@ import type { BoardExtra } from "./board-data.ts";
 import { dndCue } from "./cues.ts";
 import {
   ABILITIES,
+  ABILITY_NAMES,
   type Amount,
   type CharacterBuild,
   ClassSchema,
@@ -246,15 +247,6 @@ function actorOf(event: SystemEvent, rawState: unknown): string | null {
   const id = reported ?? state.combat?.order[state.combat.index];
   return id ? (state.actors[id]?.name ?? null) : null;
 }
-
-const ABILITY_NAMES = {
-  str: "Strength",
-  dex: "Dexterity",
-  con: "Constitution",
-  int: "Intelligence",
-  wis: "Wisdom",
-  cha: "Charisma",
-} as const;
 
 // The names a token picture can be found by, best first: a monster's own name, or a character's
 // species and class together, then each alone.
