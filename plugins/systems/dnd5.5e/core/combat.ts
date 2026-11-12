@@ -29,10 +29,12 @@ import type {
   Damage,
   Duration,
   LeafEffect,
+  Loot,
   Resolution,
   Targeting,
 } from "./schemas.ts";
 import { ClassSchema, MonsterSchema, PregenSchema } from "./schemas.ts";
+import { treasure } from "./gear.ts";
 import {
   type Actor,
   type DndState,
@@ -73,6 +75,7 @@ const ALL = "all"; // an area takes everyone, and projectiles go for the lowest 
 const DECLINE = "decline";
 export const MOVE = "move";
 const STAY = "stay";
+const ITEM_PREFIX = "item:"; // an action that uses up the item, such as a potion
 const AIM = "@"; // an area aimed at a creature: "@" and its id
 
 function actorOf(state: DndState, id: string): Actor {
@@ -439,6 +442,7 @@ export function startCombat(
     }[];
     readonly forPartySize?: number | undefined;
     readonly battlemap?: Battlemap | undefined;
+    readonly loot?: Loot | undefined;
   },
   context: Context,
   { canFlee, defeatContinues }: EncounterOptions,
@@ -530,6 +534,7 @@ export function startCombat(
           : {}),
         ...(canFlee ? { canFlee } : {}),
         ...(defeatContinues ? { defeatContinues } : {}),
+        ...(encounter.loot ? { loot: encounter.loot } : {}),
       }),
     ],
   };
@@ -1119,6 +1124,15 @@ export function runTakeAction(
     ],
     frames: [
       ...(result.frames ?? []),
+      // Used up once its darts or rolls are done, since they look the action up again.
+      ...(actionId.startsWith(ITEM_PREFIX)
+        ? [
+            frame("useItem", {
+              actor: actor.id,
+              item: actionId.slice(ITEM_PREFIX.length),
+            }),
+          ]
+        : []),
       CHECK_END,
       frame("afterAction", { actor: actor.id }),
     ],
@@ -1876,7 +1890,14 @@ export function runCheckCombatEnd(context: Context): SystemResult {
       ? { events: combatEnded(state, "defeat") }
       : { events: [{ kind: "partyDefeated" }] };
   }
-  if (!enemyStanding) return { events: combatEnded(state) };
+  if (!enemyStanding) {
+    const { loot } = state.combat;
+    const found = loot ? treasure(loot, context) : {};
+    return {
+      events: [...combatEnded(state), ...(found.events ?? [])],
+      ...(found.frames ? { frames: found.frames } : {}),
+    };
+  }
   return {};
 }
 

@@ -1,0 +1,368 @@
+import { readFile, readdir } from "node:fs/promises";
+import { PLAYER_ACTOR, type Decision } from "#sdk";
+import { describe, expect, it } from "vitest";
+import { loadAdventure } from "../app/cli/load-adventure.ts";
+import { systems } from "../app/systems.ts";
+import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
+import type { GameState } from "../engine/kernel/events.ts";
+import { type RunContext, startRun, step } from "../engine/kernel/turn.ts";
+import type { StoryEffect } from "../engine/story/adventure.ts";
+import { checkPlugins } from "../engine/tools/check-pack.ts";
+import {
+  runCheckCombatEnd,
+  startCombat,
+} from "../plugins/systems/dnd5.5e/core/combat.ts";
+import { gearOptions } from "../plugins/systems/dnd5.5e/core/gear.ts";
+import {
+  type Actor,
+  type DndState,
+  NS,
+  StateSchema,
+  applyDndEvent,
+  dndEvent,
+} from "../plugins/systems/dnd5.5e/core/state.ts";
+import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { memoryStorage } from "./memory-storage.ts";
+
+const POTION = "srd52:item/potion-of-healing";
+const RING = "srd52:item/ring-of-protection";
+const SCALE = "srd52:item/scale-mail";
+const SCROLL = "srd52:item/spell-scroll-magic-missile";
+
+const dnd = (state: GameState): DndState => StateSchema.parse(state.system);
+
+function playerOf(state: DndState): Actor {
+  const actor = state.actors[PLAYER_ACTOR];
+  if (!actor) throw new Error("No player");
+  return actor;
+}
+
+function treasure(gold: number, items: readonly string[]): StoryEffect {
+  return {
+    kind: "system",
+    effect: "dnd5.5e:treasure",
+    args: { gold, items },
+  };
+}
+
+// One scene whose only choice runs `effects`, then an ending.
+async function storyRun(effects: readonly StoryEffect[]): Promise<RunContext> {
+  const { run } = await loadAdventure("goblin-ambush");
+  return {
+    ...run,
+    adventure: {
+      ...run.adventure,
+      startScene: "s0",
+      scenes: [
+        {
+          id: "s0",
+          text: "Onward.",
+          textVariants: [],
+          choices: [
+            {
+              label: "Go on",
+              effects: [...effects, { kind: "goto", scene: "end" }],
+            },
+          ],
+        },
+        { id: "end", text: "The end.", textVariants: [], choices: [] },
+      ],
+    },
+  };
+}
+
+// Plays as the pregen, answering each decision with `pick`, or "done" and then the first option.
+function play(
+  run: RunContext,
+  pregen: string,
+  pick: (decision: Decision, state: DndState) => string | undefined = () =>
+    undefined,
+): { state: GameState; asked: Decision[] } {
+  const started = startRun(run, "gear");
+  let { state, pending } = started;
+  const asked: Decision[] = [];
+  for (let count = 0; pending && count < 50; count += 1) {
+    const decision: Decision = pending;
+    asked.push(decision);
+    const optionId =
+      decision.id === `${NS}:chooseCharacter`
+        ? pregen
+        : (pick(decision, dnd(state)) ??
+          decision.options.find((option) => option.id === "done")?.id ??
+          decision.options[0]?.id ??
+          "");
+    const outcome = step(run, state, {
+      kind: "answer",
+      decisionId: decision.id,
+      optionId,
+    });
+    if (!outcome.ok) throw new Error(`${decision.id}: ${outcome.error}`);
+    ({ state, pending } = outcome);
+  }
+  return { state, asked };
+}
+
+describe("treasure and gold", () => {
+  it("adds up gold and carries found gear in the pack", async () => {
+    const run = await storyRun([
+      treasure(12, [SCALE]),
+      treasure(30, [POTION, POTION]),
+    ]);
+    const { state, asked } = play(run, "srd52:pregen/fighter");
+    const system = dnd(state);
+    expect(system.gold).toBe(42);
+    const player = playerOf(system);
+    expect(player.inventory).toEqual(
+      expect.arrayContaining([SCALE, POTION, POTION]),
+    );
+    expect(player.stowed).toEqual([SCALE]);
+    // The fighter's own Chain Mail is still what counts.
+    expect(deriveStats(player, run).ac).toBe(18);
+    const found = asked.filter((item) => item.id.startsWith(`${NS}:found:`));
+    expect(found.map((item) => item.prompt)).toEqual([
+      "Found: 12 gp, Scale Mail.",
+      "Found: 30 gp, Potion of Healing, Potion of Healing.",
+    ]);
+    expect(found[0]?.options.map((option) => option.label)).toEqual([
+      "Equip Scale Mail",
+      "Carry on",
+    ]);
+  });
+
+  it("grants an encounter's loot on a win", async () => {
+    const { run } = await loadAdventure("goblin-ambush");
+    const started = startRun(run, "loot");
+    const chosen = step(run, started.state, {
+      kind: "answer",
+      decisionId: `${NS}:chooseCharacter`,
+      optionId: "srd52:pregen/fighter",
+    });
+    if (!chosen.ok) throw new Error(chosen.error);
+    let state = dnd(chosen.state);
+    const context = {
+      state,
+      dice: createDice(rngFromSeed("loot")),
+      content: run.content,
+      contentIds: run.contentIds,
+    };
+    const begun = startCombat(
+      {
+        id: "e",
+        monsters: [{ monster: "srd52:monster/goblin-warrior", count: 1 }],
+        loot: { gold: 5, items: [RING] },
+      },
+      context,
+      { canFlee: false, defeatContinues: false },
+    );
+    for (const event of begun.events ?? []) state = applyDndEvent(state, event);
+    state = applyDndEvent(
+      state,
+      dndEvent(`${NS}:damaged`, {
+        actor: "e:goblin-warrior-1",
+        amount: 99,
+        type: "slashing",
+        critical: false,
+        massive: false,
+      }),
+    );
+    const ended = runCheckCombatEnd({ ...context, state });
+    for (const event of ended.events ?? []) state = applyDndEvent(state, event);
+    expect(state.combat).toBeNull();
+    expect(state.gold).toBe(5);
+    expect(playerOf(state).inventory).toContain(RING);
+    expect(ended.frames?.[0]?.kind).toBe(`${NS}:gearStep`);
+  });
+});
+
+describe("equipping and attuning", () => {
+  it("swaps armor and changes AC", async () => {
+    const run = await storyRun([treasure(0, [SCALE])]);
+    const before = playerOf(dnd(play(run, "srd52:pregen/rogue").state));
+    expect(deriveStats(before, run).ac).toBe(14); // Leather Armor, Dex +3
+
+    const { state } = play(run, "srd52:pregen/rogue", (decision) =>
+      decision.options.some((option) => option.id === `equip:${SCALE}`)
+        ? `equip:${SCALE}`
+        : undefined,
+    );
+    const after = playerOf(dnd(state));
+    expect(after.stowed).toEqual(["srd52:item/leather-armor"]);
+    expect(deriveStats(after, run).ac).toBe(16); // Scale Mail, Dex +2 at most
+  });
+
+  it("drops AC and attacks for stowed gear", async () => {
+    const { run } = await loadAdventure("goblin-ambush");
+    const fighter = playerOf(
+      dnd(play(await storyRun([]), "srd52:pregen/fighter").state),
+    );
+    const stowed = {
+      ...fighter,
+      stowed: ["srd52:item/shield", "srd52:item/longsword"],
+    };
+    expect(deriveStats(stowed, run).ac).toBe(deriveStats(fighter, run).ac - 2);
+    expect(deriveStats(fighter, run).actions.map((item) => item.id)).toContain(
+      "weapon:srd52:item/longsword",
+    );
+    expect(
+      deriveStats(stowed, run).actions.map((item) => item.id),
+    ).not.toContain("weapon:srd52:item/longsword");
+    expect(gearOptions(stowed, run).map((option) => option.id)).toContain(
+      "equip:srd52:item/shield",
+    );
+  });
+
+  it("adds a ring's AC only while attuned, to at most three items", async () => {
+    const { run } = await loadAdventure("goblin-ambush");
+    const fighter = playerOf(
+      dnd(play(await storyRun([]), "srd52:pregen/fighter").state),
+    );
+    const ringed = { ...fighter, inventory: [...fighter.inventory, RING] };
+    const ac = deriveStats(fighter, run).ac;
+    expect(deriveStats(ringed, run).ac).toBe(ac);
+    expect(deriveStats({ ...ringed, attuned: [RING] }, run).ac).toBe(ac + 1);
+    expect(gearOptions(ringed, run).map((option) => option.id)).toContain(
+      `attune:${RING}`,
+    );
+    const full = { ...ringed, attuned: ["a:item/x", "a:item/y", "a:item/z"] };
+    expect(gearOptions(full, run).map((option) => option.id)).not.toContain(
+      `attune:${RING}`,
+    );
+  });
+
+  it("attunes during a short rest", async () => {
+    const run = await storyRun([
+      treasure(0, [RING]),
+      { kind: "system", effect: "dnd5.5e:shortRest", args: {} },
+    ]);
+    const { state, asked } = play(
+      run,
+      "srd52:pregen/fighter",
+      (decision, now) => {
+        const ids = decision.options.map((option) => option.id);
+        if (ids.includes(`attune:${RING}`)) return `attune:${RING}`;
+        const attuned = playerOf(now).attuned ?? [];
+        if (!ids.includes("finish")) return undefined;
+        return ids.includes("gear") && attuned.length === 0 ? "gear" : "finish";
+      },
+    );
+    const player = playerOf(dnd(state));
+    expect(player.attuned).toEqual([RING]);
+    expect(deriveStats(player, run).ac).toBe(19);
+    expect(asked.some((item) => item.id.startsWith(`${NS}:gear:`))).toBe(true);
+  });
+});
+
+describe("items in a fight", () => {
+  it("drinks a potion as a Bonus Action, and it's used up", async () => {
+    const { run } = await loadAdventure("goblin-ambush");
+    const fighter = playerOf(
+      dnd(play(await storyRun([]), "srd52:pregen/fighter").state),
+    );
+    const carrying = { ...fighter, inventory: [...fighter.inventory, POTION] };
+    const potion = deriveStats(carrying, run).actions.find(
+      (item) => item.id === `item:${POTION}`,
+    );
+    expect(potion?.name).toBe("Drink Potion of Healing");
+    expect(potion?.activation.cost).toEqual(["bonusAction"]);
+    const state: DndState = {
+      actors: { [PLAYER_ACTOR]: carrying },
+      combat: null,
+    };
+    const after = applyDndEvent(
+      state,
+      dndEvent(`${NS}:itemUsed`, { actor: PLAYER_ACTOR, item: POTION }),
+    );
+    expect(playerOf(after).inventory).toEqual(fighter.inventory);
+  });
+
+  it("lets a spellcaster read a scroll without a slot", async () => {
+    const { run } = await loadAdventure("goblin-ambush");
+    const wizard = playerOf(
+      dnd(play(await storyRun([]), "srd52:pregen/wizard").state),
+    );
+    const fighter = playerOf(
+      dnd(play(await storyRun([]), "srd52:pregen/fighter").state),
+    );
+    const read = (actor: Actor) =>
+      deriveStats(
+        { ...actor, inventory: [...actor.inventory, SCROLL] },
+        run,
+      ).actions.find((item) => item.id === `item:${SCROLL}`);
+    expect(read(wizard)?.activation.cost).toEqual(["action"]);
+    expect(read(fighter)).toBeUndefined();
+  });
+});
+
+describe("checking loot", () => {
+  async function issuesFor(
+    documents: Readonly<Record<string, string>>,
+  ): Promise<string[]> {
+    const files: Record<string, string> = {};
+    const root = "plugins/rules/srd52";
+    for (const name of await readdir(root, { recursive: true })) {
+      if (name.endsWith(".yaml")) {
+        files[`${root}/${name}`] = await readFile(`${root}/${name}`, "utf8");
+      }
+    }
+    const adventure = "plugins/adventures/loot-test";
+    files[`${adventure}/plugin.yaml`] = [
+      "id: loot-test",
+      "kind: adventure",
+      "version: 1.0.0",
+      "sdk: ^1",
+      "system: dnd5.5e@^1",
+      "requires:",
+      "  - { plugin: srd52, version: ^1 }",
+      "distribution: shipped",
+    ].join("\n");
+    files[`${adventure}/adventure.yaml`] = "title: Test\nstartScene: start\n";
+    for (const [name, text] of Object.entries(documents)) {
+      files[`${adventure}/${name}`] = text;
+    }
+    const report = await checkPlugins(
+      memoryStorage(files),
+      ["plugins"],
+      systems,
+    );
+    return report.issues.map((issue) => issue.message);
+  }
+
+  const scenes = (args: string): string =>
+    `- id: start\n  text: Hi.\n  choices:\n    - label: Look\n      effects:\n        - { kind: system, effect: "dnd5.5e:treasure", args: ${args} }\n        - { kind: goto, scene: end }\n- { id: end, text: The end. }\n`;
+
+  it("accepts known items", async () => {
+    const issues = await issuesFor({
+      "scenes.yaml": scenes(`{ gold: 5, items: ["${POTION}"] }`),
+    });
+    expect(issues).toEqual([]);
+  });
+
+  it("reports an unknown item from the treasure effect", async () => {
+    const issues = await issuesFor({
+      "scenes.yaml": scenes('{ items: ["srd52:item/nope"] }'),
+    });
+    expect(issues.join("\n")).toContain('unknown reference "srd52:item/nope"');
+  });
+
+  it("reports an unknown or non-item id in an encounter's loot", async () => {
+    const encounter = (items: string): string =>
+      `- id: fight\n  monsters: [{ monster: "srd52:monster/goblin-warrior" }]\n  loot: { gold: 3, items: [${items}] }\n`;
+    const scenesText = "- { id: start, text: The end. }\n";
+    expect(
+      (
+        await issuesFor({
+          "scenes.yaml": scenesText,
+          "encounters.yaml": encounter('"srd52:item/nope"'),
+        })
+      ).join("\n"),
+    ).toContain('unknown reference "srd52:item/nope"');
+    expect(
+      (
+        await issuesFor({
+          "scenes.yaml": scenesText,
+          "encounters.yaml": encounter('"srd52:spell/magic-missile"'),
+        })
+      ).join("\n"),
+    ).toContain("must be an item id");
+  });
+});

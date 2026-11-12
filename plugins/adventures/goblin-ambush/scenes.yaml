@@ -7,6 +7,9 @@
         success:
           - { kind: setFlag, flag: spotted-ambush }
           - { kind: system, effect: "dnd5.5e:grantInspiration", args: {} }
+          - kind: system
+            effect: "dnd5.5e:treasure"
+            args: { gold: 12, items: ["srd52:item/spell-scroll-magic-missile"] }
           - { kind: goto, scene: fight }
         failure:
           - { kind: startEncounter, encounter: roadside }

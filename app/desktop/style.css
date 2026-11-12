@@ -932,6 +932,62 @@ summary {
   animation: rise 0.4s ease both;
 }
 
+/* A moment above the choices, such as treasure found: a card that rises, then each find in turn. */
+.decision-card {
+  margin: 16px 0 0;
+  padding: 12px 18px 14px;
+  max-width: 28rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--rule);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.12);
+}
+
+.decision-card[hidden] {
+  display: none;
+}
+
+.decision-card h3 {
+  margin: 0 0 6px;
+  font: 1.6rem/1 var(--font-title);
+  color: var(--accent);
+}
+
+.decision-card ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.decision-card li {
+  padding: 3px 0;
+  font-size: 1.1rem;
+}
+
+.decision-card li + li {
+  border-top: 1px dotted var(--line);
+}
+
+.decision-card.enter {
+  animation: rise 0.45s ease both;
+}
+
+.decision-card.enter li {
+  animation: rise 0.35s ease both;
+  animation-delay: calc(0.25s + var(--i, 0) * 140ms);
+}
+
+.settling > .decision-card {
+  visibility: hidden;
+}
+
+/* A sheet row's own choice, such as Equip, offered while the game allows it. */
+.row-option {
+  margin-left: 10px;
+  padding: 1px 10px;
+  font: 0.8rem var(--font-ui);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

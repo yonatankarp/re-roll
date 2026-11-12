@@ -5,3 +5,11 @@
   monsters:
     - { monster: "srd52:monster/goblin-warrior", count: 1 }
     - { monster: "goblin-ambush:monster/chief", count: 1 }
+  loot:
+    gold: 30
+    items:
+      [
+        "srd52:item/potion-of-healing",
+        "srd52:item/ring-of-protection",
+        "srd52:item/scale-mail",
+      ]

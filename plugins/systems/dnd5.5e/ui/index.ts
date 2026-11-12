@@ -6,6 +6,7 @@ import {
 } from "#sdk";
 import { z } from "zod";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
+import { foundText } from "../core/gear.ts";
 import { inArea } from "../core/grid.ts";
 import { dndCue } from "./cues.ts";
 import {
@@ -13,6 +14,8 @@ import {
   type Amount,
   type CharacterBuild,
   type Damage,
+  ItemSchema,
+  LootSchema,
   SKILL_ABILITIES,
   type Skill,
 } from "../core/schemas.ts";
@@ -20,7 +23,9 @@ import {
   type Actor,
   type DndState,
   EVENT_SCHEMAS,
+  MAX_ATTUNED,
   StateSchema,
+  equipped,
   isDead,
   isDown,
   isStable,
@@ -111,6 +116,7 @@ function actionDetail(
 
 function groupOf(action: KnownAction | undefined): string {
   if (!action) return "Other";
+  if (action.id.startsWith("item:")) return "Items";
   if (action.spellLevel === 0) return "Cantrips";
   if (action.spellLevel !== null) {
     return `Level ${String(action.spellLevel)} spells`;
@@ -297,8 +303,78 @@ function signed(value: number): string {
 }
 
 // The player first, then the companions; none until the player has chosen a character.
+// What the character carries, with a way to change it whenever the pending choice allows, such as on a rest.
+function equipmentRows(
+  actor: Actor,
+  gold: number | null,
+  access: ContentAccess,
+) {
+  const worn = equipped(actor);
+  const attuned = actor.attuned ?? [];
+  const items = [...new Set(actor.inventory)].flatMap((id) => {
+    const parsed = ItemSchema.safeParse(access.content(id));
+    if (!parsed.success) return [];
+    const item = parsed.data;
+    const count = actor.inventory.filter((other) => other === id).length;
+    const wornCount = worn.filter((other) => other === id).length;
+    const label = count > 1 ? `${item.name} ×${String(count)}` : item.name;
+    const detail = "text" in item && item.text ? { detail: item.text } : {};
+    if (
+      item.type === "weapon" ||
+      item.type === "armor" ||
+      item.type === "shield"
+    ) {
+      return [
+        {
+          label,
+          value: wornCount === 0 ? "In pack" : "Equipped",
+          option:
+            wornCount < count
+              ? { id: `equip:${id}`, label: "Equip" }
+              : { id: `stow:${id}`, label: "Stow" },
+          ...detail,
+        },
+      ];
+    }
+    if (item.type === "magicItem" && item.attunement) {
+      const on = attuned.includes(id);
+      return [
+        {
+          label,
+          value: on ? "Attuned" : "Not attuned",
+          option: on
+            ? { id: `unattune:${id}`, label: "End attunement" }
+            : { id: `attune:${id}`, label: "Attune" },
+          ...detail,
+        },
+      ];
+    }
+    return [{ label, value: "", ...detail }];
+  });
+  return [
+    ...(gold === null ? [] : [{ label: "Gold", value: `${String(gold)} gp` }]),
+    ...(attuned.length > 0 ||
+    actor.inventory.some((id) => {
+      const parsed = ItemSchema.safeParse(access.content(id));
+      return (
+        parsed.success &&
+        parsed.data.type === "magicItem" &&
+        parsed.data.attunement
+      );
+    })
+      ? [
+          {
+            label: "Attunement",
+            value: `${String(attuned.length)} of ${String(MAX_ATTUNED)}`,
+          },
+        ]
+      : []),
+    ...items,
+  ];
+}
+
 function sheets(rawState: unknown, access: ContentAccess) {
-  const { actors } = StateSchema.parse(rawState);
+  const { actors, gold } = StateSchema.parse(rawState);
   const player = actors[PLAYER_ACTOR];
   if (player?.source.kind !== "character" || !player.source.build) return [];
   return [
@@ -308,12 +384,24 @@ function sheets(rawState: unknown, access: ContentAccess) {
     actor.side === "party" &&
     actor.source.kind === "character" &&
     actor.source.build
-      ? [sheetOf(actor, actor.source.build, access)]
+      ? [
+          sheetOf(
+            actor,
+            actor.source.build,
+            access,
+            actor.id === PLAYER_ACTOR ? (gold ?? 0) : null,
+          ),
+        ]
       : [],
   );
 }
 
-function sheetOf(player: Actor, build: CharacterBuild, access: ContentAccess) {
+function sheetOf(
+  player: Actor,
+  build: CharacterBuild,
+  access: ContentAccess,
+  gold: number | null, // the party's, shown on the player's sheet
+) {
   const stats = deriveStats(player, access);
   const subclasses = build.levels
     .flatMap((level) => level.answers)
@@ -476,6 +564,10 @@ function sheetOf(player: Actor, build: CharacterBuild, access: ContentAccess) {
             ...actionRow(action),
             label: `${action.name} (${String(action.spellLevel)})`,
           })),
+      },
+      {
+        title: "Equipment",
+        rows: equipmentRows(player, gold, access),
       },
       {
         title: "Features",
@@ -694,9 +786,31 @@ function describe(
       const data = EVENT_SCHEMAS["dnd5.5e:inspirationGranted"].parse(payload);
       return `${name(data.actor)} gains Heroic Inspiration.`;
     }
+    case "dnd5.5e:treasureFound": {
+      const data = EVENT_SCHEMAS["dnd5.5e:treasureFound"].parse(payload);
+      const found = foundText(data, access);
+      return found.length > 0 ? `Found: ${found.join(", ")}.` : null;
+    }
+    case "dnd5.5e:itemUsed": {
+      const data = EVENT_SCHEMAS["dnd5.5e:itemUsed"].parse(payload);
+      return `${name(data.actor)} uses ${nameOf(access, data.item)}.`;
+    }
+    case "dnd5.5e:gearChanged": {
+      const data = EVENT_SCHEMAS["dnd5.5e:gearChanged"].parse(payload);
+      return `${name(data.actor)} changes gear.`;
+    }
     default:
       return null;
   }
+}
+
+// The moment treasure is found, shown as a card above its choices.
+function card(decision: Decision, _rawState: unknown, access: ContentAccess) {
+  if (!decision.id.startsWith("dnd5.5e:found:")) return null;
+  const found = LootSchema.safeParse(decision.resume.payload.found);
+  return found.success
+    ? { title: "Found", lines: foundText(found.data, access) }
+    : null;
 }
 
 function playerDied(rawState: unknown): boolean {
@@ -713,5 +827,6 @@ export const dndUi = {
   describe,
   actorOf,
   optionGroups,
+  card,
   playerDied,
 };

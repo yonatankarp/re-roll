@@ -5,6 +5,7 @@ import {
   CharacterBuildSchema,
   ConditionSchema,
   DamageTypeSchema,
+  LootSchema,
   ModifierSchema,
 } from "./schemas.ts";
 
@@ -88,6 +89,9 @@ const ActorSchema = z.strictObject({
   activeEffects: z.array(ActiveEffectSchema),
   concentratingOn: z.string().nullable(),
   inventory: z.array(ContentIdSchema),
+  // Copies in `inventory` carried in the pack rather than worn or wielded. Missing in older saves, where all is worn.
+  stowed: z.array(ContentIdSchema).optional(),
+  attuned: z.array(ContentIdSchema).optional(), // magic items attuned to, at most MAX_ATTUNED
   xp: z.number().int().optional(), // only the player's is tracked, and the party levels together
   // Where the creature stands in a fight, null outside one. Saves from before the grid have none.
   position: SquareSchema.nullable().default(null),
@@ -96,10 +100,12 @@ const ActorSchema = z.strictObject({
 export type Actor = z.infer<typeof ActorSchema>;
 
 export const DIFFICULTIES = ["story", "normal", "hard"] as const;
+export const MAX_ATTUNED = 3;
 
 export const StateSchema = z.strictObject({
   // Chosen when the game starts. Missing in saves from before there was a choice, which played as normal.
   difficulty: z.enum(DIFFICULTIES).optional(),
+  gold: z.number().int().optional(), // the party's coins, in gold pieces
   actors: z.record(z.string(), ActorSchema),
   combat: z
     .strictObject({
@@ -112,6 +118,7 @@ export const StateSchema = z.strictObject({
       grid: GridSchema.optional(),
       walls: z.array(z.string()).optional(), // squares no one can enter, as "x,y"
       map: FightMapSchema.optional(),
+      loot: LootSchema.optional(), // found if the party wins
     })
     .nullable(),
 });
@@ -149,6 +156,22 @@ const CombatStartedSchema = z.strictObject({
   positions: z.record(z.string(), SquareSchema).optional(),
   walls: z.array(z.string()).optional(),
   map: FightMapSchema.optional(),
+  loot: LootSchema.optional(),
+});
+const TreasureFoundSchema = z.strictObject({
+  actor: z.string(), // who carries the items
+  gold: z.number().int(),
+  items: z.array(ContentIdSchema),
+  stowed: z.array(ContentIdSchema), // the found gear that goes in the pack
+});
+const GearChangedSchema = z.strictObject({
+  actor: z.string(),
+  stowed: z.array(ContentIdSchema),
+  attuned: z.array(ContentIdSchema),
+});
+const ItemUsedSchema = z.strictObject({
+  actor: z.string(),
+  item: ContentIdSchema,
 });
 const MovedSchema = z.strictObject({
   actor: z.string(),
@@ -243,6 +266,9 @@ export const EVENT_SCHEMAS = {
   [`${NS}:deathSaveRolled`]: DeathSaveSchema,
   [`${NS}:rollReported`]: RollReportSchema,
   [`${NS}:inspirationGranted`]: ActorOnlySchema,
+  [`${NS}:treasureFound`]: TreasureFoundSchema,
+  [`${NS}:gearChanged`]: GearChangedSchema,
+  [`${NS}:itemUsed`]: ItemUsedSchema,
 } as const;
 
 export type EventKind = keyof typeof EVENT_SCHEMAS;
@@ -271,6 +297,25 @@ export function freshActor(
     position: null,
     moved: 0,
   };
+}
+
+// Removes one copy of each id in `taken`, so two daggers stay two daggers.
+export function without(
+  list: readonly string[],
+  taken: readonly string[],
+): string[] {
+  const left = [...taken];
+  return list.filter((id) => {
+    const at = left.indexOf(id);
+    if (at === -1) return true;
+    left.splice(at, 1);
+    return false;
+  });
+}
+
+// What the actor wears and wields: everything carried that isn't stowed.
+export function equipped(actor: Actor): string[] {
+  return without(actor.inventory, actor.stowed ?? []);
 }
 
 type Condition = z.infer<typeof ConditionSchema>;
@@ -535,6 +580,7 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
           ...(data.grid ? { grid: data.grid } : {}),
           ...(data.walls ? { walls: data.walls } : {}),
           ...(data.map ? { map: data.map } : {}),
+          ...(data.loot ? { loot: data.loot } : {}),
         },
       };
     }
@@ -664,6 +710,30 @@ export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
           heroicInspiration: true,
         }),
       );
+    case `${NS}:treasureFound`: {
+      const data = payload(TreasureFoundSchema, event);
+      const found = updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        inventory: [...actor.inventory, ...data.items],
+        stowed: [...(actor.stowed ?? []), ...data.stowed],
+      }));
+      return { ...found, gold: (state.gold ?? 0) + data.gold };
+    }
+    case `${NS}:gearChanged`: {
+      const data = payload(GearChangedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        stowed: data.stowed,
+        attuned: data.attuned,
+      }));
+    }
+    case `${NS}:itemUsed`: {
+      const data = payload(ItemUsedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        inventory: without(actor.inventory, [data.item]),
+      }));
+    }
     default:
       return state;
   }
