@@ -349,6 +349,17 @@ describe("monster spellcasting", () => {
     expect(byName(monster, "Ember Burst")).toMatchObject({ perDay: 1 });
   });
 
+  it("reads a list run into the one before it with no break", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Spellcasting",
+        "The caster casts one of the following spells, using Intelligence as the spellcasting ability (spell save DC 15): At Will: Frost Needle, Glow2/Day Each: Ember Burst",
+      )}`,
+    );
+    expect(byName(monster, "Ember Burst")).toMatchObject({ perDay: 2 });
+    expect(byName(monster, "Frost Needle")?.perDay).toBeUndefined();
+  });
+
   it("reads an action that casts one of several spells, sharing its uses", () => {
     const monster = parse(
       `${spellcasting}${header("Bonus Actions")}${entry(
