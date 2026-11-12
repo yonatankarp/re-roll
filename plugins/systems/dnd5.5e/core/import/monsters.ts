@@ -630,7 +630,10 @@ export function legendaryOf(
     const [, label = "", text = ""] = entry;
     const name = label.replace(/\s*\(.*$/, "");
     const left: string[] = [];
-    const parsed = parseSave(text, left) ?? parseAttack(text, left);
+    const read = parseSave(text, left) ?? parseAttack(text, left);
+    // Legendary and lair targets are picked without the condition check, so a gated action stays text there.
+    const parsed =
+      read && "targetConditions" in (read.targeting as object) ? null : read;
     const activation = parsed ? { cost: [], ...parsed } : undefined;
     if (section === "lair actions") {
       if (activation) lair.push({ name, activation });

@@ -203,6 +203,26 @@ describe("monster actions aimed only at a creature with a condition", () => {
   });
 });
 
+describe("gated actions outside the action list", () => {
+  it("leaves a gated legendary action as text, since its targets aren't checked", () => {
+    const [parsed] = parseMonstersFromHtml(
+      block(
+        "Test Caster",
+        `${header("Actions")}${entry(
+          "Slam",
+          "Melee Attack Roll: +5, reach 5 ft. Hit: 7 (1d8 + 3) Bludgeoning damage.",
+        )}${header("Legendary Actions")}<p>Legendary Action Uses: 3.</p>${entry(
+          "Stomp",
+          "Dexterity Saving Throw: DC 15, one creature within 5 feet that has the Prone condition. Failure: 11 (2d10) Bludgeoning damage.",
+        )}`,
+      ),
+      "my-book",
+    );
+    expect(MonsterSchema.parse(parsed?.entry).legendary).toBeUndefined();
+    expect(parsed?.notes).toContain("not automated: legendary action Stomp");
+  });
+});
+
 describe("more monster save shapes", () => {
   it("reads a condition before the creature, or one the monster caused", () => {
     const monster = parse(
