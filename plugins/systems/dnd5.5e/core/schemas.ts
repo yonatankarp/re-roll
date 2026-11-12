@@ -315,7 +315,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     dice: DiceSchema,
     diceCount: z.string().optional(), // a class scaling key that replaces the number of dice
     dieSize: z.string().optional(), // a class scaling key that replaces the die size
-    // shortcut: "ally" means any living ally, since there are no positions until the grid in step 6.
+    // "advantageOrAlly" also counts an ally within 5 feet of the target, as Sneak Attack does.
     when: z.enum(["advantage", "advantageOrAlly"]),
     oncePerTurn: z.boolean().default(false),
   }),

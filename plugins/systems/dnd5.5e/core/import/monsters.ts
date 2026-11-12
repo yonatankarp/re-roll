@@ -291,7 +291,8 @@ function targetingFor(rule: string): unknown {
   if (area) {
     const shape = (area[2] ?? "").toLowerCase();
     return {
-      // shortcut: Cylinder has no shape of its own, and positions don't exist until step 6 anyway.
+      // shortcut: a cylinder is read as a sphere of its radius, since the grid has no height; give it a
+      // shape of its own once heights matter.
       area: {
         shape: shape === "cylinder" ? "sphere" : shape,
         radius: Number(area[1]),
