@@ -68,7 +68,7 @@ export async function readAll(
     loaded += value.length;
     progress(Math.min(100, Math.floor((loaded / total) * 100)));
   }
-  return bytes.buffer.slice(0, loaded);
+  return loaded === bytes.length ? bytes.buffer : bytes.buffer.slice(0, loaded);
 }
 
 // Wraps fetch so Hugging Face is reached only for the pinned files, and each arrives with its hash.

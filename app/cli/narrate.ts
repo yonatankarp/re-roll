@@ -145,6 +145,7 @@ if (plan.make.length > 0) {
   // From a pinned commit, each file checked against its hash (engine/shell/kokoro-files.ts).
   const { env: hub } = await import("@huggingface/transformers");
   hub.remotePathTemplate = KOKORO_PATH_TEMPLATE;
+  hub.allowLocalModels = false; // its local folder would be read without a check
   globalThis.fetch = kokoroFetch(globalThis.fetch);
   // Node's file cache ignores the commit, so a copy cached before is checked here instead.
   for (const [file, hash] of Object.entries(KOKORO_FILES)) {
