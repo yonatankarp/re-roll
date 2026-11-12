@@ -1,5 +1,13 @@
 import { PLAYER_ACTOR } from "#sdk";
-import { StateSchema } from "../core/state.ts";
+import { NS, StateSchema } from "../core/state.ts";
+import {
+  ADD,
+  type AreaTargeting,
+  BACK,
+  CONFIRM,
+  REMOVE,
+  covers,
+} from "../core/targeting.ts";
 import type { DndCue } from "./cues.ts";
 import { cueSound, diceSound, setEffectsVolume } from "./sound.ts";
 
@@ -136,11 +144,8 @@ interface Move {
 interface BoardExtra {
   readonly moves?: readonly Move[];
   readonly reach?: Readonly<Record<string, number>>; // melee reach in feet, by creature
-  // The squares an area spell would cover, by its option id without the slot level.
   readonly map?: FightMap | null; // the book's battle map, when the encounter has one
-  readonly areas?: Readonly<
-    Record<string, readonly (readonly [number, number])[]>
-  >;
+  readonly shapes?: Readonly<Record<string, AreaTargeting>>; // the player's area actions, by id
 }
 
 // Written by this plugin's own combat view in ui/index.ts, so its shape is known.
@@ -225,8 +230,11 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   const blast = el("div", "dnd-blast");
   const menu = el("div", "dnd-menu");
   menu.hidden = true;
+  // While choosing targets or aiming an area: how many are chosen, Cast and Back.
+  const pickBar = el("div", "dnd-pickbar");
+  pickBar.hidden = true;
   field.append(reachZone, blast, cells, route, cursorBox);
-  board.append(field, banner, caption, hint, menu, said);
+  board.append(field, banner, caption, hint, menu, pickBar, said);
   slot.append(board);
   slot.hidden = true;
 
@@ -263,12 +271,17 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     const target = event.target as HTMLElement;
     const cell = target.closest<HTMLElement>(".dnd-cell");
     const token = target.closest<HTMLElement>(".dnd-token");
-    const item = target.closest<HTMLElement>(".dnd-menu button");
+    const item = target.closest<HTMLElement>(
+      ".dnd-menu button, .dnd-pickbar button",
+    );
+    const aim = aiming() ? aimCellFor(squareAt(event)) : undefined;
     if (item?.dataset.option) {
       closeMenu();
       board.focus(); // the menu button goes away, so focus stays on the map
       mapUsed();
       host.answer(item.dataset.option);
+    } else if (aiming()) {
+      if (aim) answerCell(aim);
     } else if (cell?.dataset.option) {
       answerCell(cell);
     } else if (token?.dataset.id) {
@@ -494,6 +507,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       cells.append(cell);
     }
     if (playing) return; // the caption is telling what's happening
+    if (aiming() || picking()) {
+      showCaption(""); // the bar says what to do, and the caption names who an aim catches
+      return;
+    }
     if (howTo === "unseen" && options.length > 0) howTo = "showing";
     showCaption(howTo === "showing" ? HOW_TO : "");
   };
@@ -555,17 +572,144 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     reachZone.hidden = false;
   };
 
-  // Pointing at an area spell in a menu lights the squares it would cover.
-  const showArea = (optionId: string | null): void => {
+  // Lights the squares an area aimed at `aim` would cover, and rings everyone it would catch.
+  const outline = (
+    targeting: AreaTargeting | null | undefined,
+    aim: { readonly x: number; readonly y: number } | null,
+  ): void => {
     blast.replaceChildren();
-    if (!grid || !optionId) return;
-    const key = optionId.split(SEPARATOR).slice(0, 2).join(SEPARATOR);
-    for (const [x, y] of extraOf(latest).areas?.[key] ?? []) {
-      const square = el("div", "dnd-blast-square");
-      square.style.left = `${String((x / grid.width) * 100)}%`;
-      square.style.top = `${String((y / grid.height) * 100)}%`;
-      blast.append(square);
+    for (const token of tokens.values()) token.node.classList.remove("caught");
+    const me = tokens.get(PLAYER_ACTOR);
+    if (!grid || !targeting || !aim || me?.x == null || me.y === null) return;
+    const origin = { x: me.x, y: me.y };
+    for (let y = 0; y < grid.height; y += 1) {
+      for (let x = 0; x < grid.width; x += 1) {
+        if (!covers(targeting, origin, aim, { x, y })) continue;
+        const square = el("div", "dnd-blast-square");
+        square.style.left = `${String((x / grid.width) * 100)}%`;
+        square.style.top = `${String((y / grid.height) * 100)}%`;
+        blast.append(square);
+      }
     }
+    for (const token of tokens.values()) {
+      if (token.x === null || token.y === null || token.hp <= 0) continue;
+      const caught =
+        (targeting.side === "enemy" || token.side === "party") &&
+        covers(targeting, origin, aim, { x: token.x, y: token.y });
+      token.node.classList.toggle("caught", caught);
+    }
+  };
+
+  // Pointing at an area spell round the player in a menu lights the squares it covers.
+  const showArea = (optionId: string | null): void => {
+    const [actionId = "", target] = (optionId ?? "").split(SEPARATOR);
+    const targeting = extraOf(latest).shapes?.[actionId];
+    const me = tokens.get(PLAYER_ACTOR);
+    outline(
+      target === "all" && targeting?.area.shape === "emanation"
+        ? targeting
+        : null,
+      me?.x == null || me.y === null ? null : { x: me.x, y: me.y },
+    );
+  };
+
+  // The follow-up the player is answering: aiming an area (with its shape), or choosing targets.
+  const pendingId = (): string =>
+    playerOptions().length > 0 ? (latest?.decision?.id ?? "") : "";
+  const aiming = (): AreaTargeting | null => {
+    const id = pendingId();
+    if (!id.startsWith(`${NS}:aim:`)) return null;
+    return extraOf(latest).shapes?.[id.split(SEPARATOR).at(-1) ?? ""] ?? null;
+  };
+  const picking = (): boolean => pendingId().startsWith(`${NS}:targets:`);
+
+  // The grid square under the pointer.
+  const squareAt = (event: MouseEvent): { x: number; y: number } | null => {
+    if (!grid) return null;
+    const box = field.getBoundingClientRect();
+    const x = Math.floor(((event.clientX - box.left) / box.width) * grid.width);
+    const y = Math.floor(
+      ((event.clientY - box.top) / box.height) * grid.height,
+    );
+    return x >= 0 && y >= 0 && x < grid.width && y < grid.height
+      ? { x, y }
+      : null;
+  };
+
+  // The aim option for a square: that square, or for an area from the player, the nearest of the 8 ways.
+  const aimCellFor = (
+    square: { readonly x: number; readonly y: number } | null,
+  ): HTMLElement | undefined => {
+    if (!square) return undefined;
+    const exact = cellNodeAt(square.x, square.y);
+    const me = tokens.get(PLAYER_ACTOR);
+    if (exact || aiming()?.range !== "self" || me?.x == null || me.y === null) {
+      return exact;
+    }
+    if (square.x === me.x && square.y === me.y) return undefined;
+    const eighth =
+      Math.round(Math.atan2(square.y - me.y, square.x - me.x) / (Math.PI / 4)) *
+      (Math.PI / 4);
+    return cellNodeAt(
+      me.x + Math.round(Math.cos(eighth)),
+      me.y + Math.round(Math.sin(eighth)),
+    );
+  };
+
+  // Shows where an aim would land and who it catches, named in the caption.
+  const showAim = (cell: HTMLElement | undefined): void => {
+    for (const item of cells.children) {
+      item.classList.toggle("hover", item === cell);
+    }
+    outline(
+      aiming(),
+      cell ? { x: Number(cell.dataset.x), y: Number(cell.dataset.y) } : null,
+    );
+    showCaption(cell?.title ?? "");
+  };
+
+  // The bar while choosing targets or aiming: the count so far, Cast once it can, and Back.
+  const showPickBar = (): void => {
+    const options = playerOptions();
+    const id = pendingId();
+    const choosing = picking();
+    pickBar.hidden = !choosing && !aiming();
+    for (const token of tokens.values()) {
+      token.node.classList.remove("picked");
+      delete token.node.dataset.count;
+    }
+    if (pickBar.hidden) return;
+    const [, , total = "0", chosen = ""] = id.split(SEPARATOR);
+    const picked = chosen.split(",").filter(Boolean);
+    for (const pickedId of new Set(picked)) {
+      const token = tokens.get(pickedId);
+      if (!token) continue;
+      token.node.classList.add("picked");
+      const times = picked.filter((item) => item === pickedId).length;
+      if (times > 1) token.node.dataset.count = String(times);
+    }
+    const note = el(
+      "span",
+      "",
+      choosing
+        ? `${String(picked.length)} of ${total} chosen: click to add or remove`
+        : "Point at where it lands, and click",
+    );
+    const buttons = [CONFIRM, BACK].flatMap((optionId) => {
+      const option = options.find((item) => item.id === optionId);
+      if (!option) return [];
+      const button = el(
+        "button",
+        "",
+        optionId === CONFIRM
+          ? `Cast (${String(picked.length)} of ${total})`
+          : "Back",
+      );
+      button.dataset.option = option.id;
+      button.title = option.label;
+      return [button];
+    });
+    pickBar.replaceChildren(note, ...buttons);
   };
   menu.addEventListener("pointerover", (event) => {
     showArea(
@@ -588,6 +732,10 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   field.addEventListener("pointerleave", () => {
     showRoute(null);
     showReach(null);
+    if (aiming()) showAim(undefined);
+  });
+  field.addEventListener("pointermove", (event) => {
+    if (aiming() && !playing) showAim(aimCellFor(squareAt(event)));
   });
 
   const answerCell = (cell: HTMLElement): void => {
@@ -643,21 +791,28 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
 
   // The options aimed at a token, or for the player's own token, the ones aimed at nobody in particular.
   // A click on a foe with one thing to do does it; keys always get the menu, and so does your own
-  // token, whose menu can hold End your turn.
+  // token, whose menu can hold End your turn, unless you're choosing targets.
   const openMenu = (id: string, anchor: HTMLElement, pointer = false): void => {
     const own = id === PLAYER_ACTOR;
     const options = playerOptions().filter((option) => {
       if (SQUARE.test(option.id) || option.id === MOVE) return false;
       const target = option.id.split(SEPARATOR)[1];
       if (target === id || target === `${AIM}${id}`) return true;
-      return own && (target === undefined || target === "all");
+      if (option.id.startsWith(ADD) || option.id.startsWith(REMOVE)) {
+        return option.id.slice(1) === id;
+      }
+      return (
+        own &&
+        (target === undefined || ["all", "aim", "pick"].includes(target)) &&
+        !(picking() && (option.id === CONFIRM || option.id === BACK))
+      );
     });
     if (options.length === 0) {
       closeMenu();
       return;
     }
     const [only] = options;
-    if (pointer && !own && only && options.length === 1) {
+    if (pointer && (!own || picking()) && only && options.length === 1) {
       closeMenu();
       mapUsed();
       host.answer(only.id);
@@ -708,6 +863,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     cursorBox.style.top = `${String((cursor.y / grid.height) * 100)}%`;
     const found = tokenAt(cursor.x, cursor.y);
     const cell = cellNodeAt(cursor.x, cursor.y);
+    if (aiming()) showAim(aimCellFor(cursor));
     showRoute(cell ?? null);
     showReach(found?.[0] ?? null);
     for (const token of tokens.values()) {
@@ -776,6 +932,15 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       const from = cursor ?? { x: me?.x ?? 0, y: me?.y ?? 0 };
       placeCursor(from.x + step[0], from.y + step[1]);
       event.preventDefault();
+    } else if ((event.key === "Enter" || event.key === " ") && aiming()) {
+      event.preventDefault();
+      const cell = aimCellFor(cursor);
+      if (cell) answerCell(cell);
+      else said.textContent = "It can't be aimed there.";
+    } else if (event.key === "Escape" && (aiming() || picking())) {
+      event.preventDefault();
+      mapUsed();
+      host.answer(BACK);
     } else if ((event.key === "Enter" || event.key === " ") && cursor) {
       event.preventDefault();
       const found = tokenAt(cursor.x, cursor.y);
@@ -868,6 +1033,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     }
     layout();
     showCells();
+    showPickBar();
     closeMenu();
     slot.hidden = tokens.size === 0 && !playing;
     // While the map has focus, the cursor visibly goes back to the player's square.
@@ -1921,6 +2087,39 @@ const BOARD_CSS = `
 }
 .dnd-board:not(.playing) .dnd-token[data-id="player"] { cursor: grab; touch-action: none; }
 .dnd-board:not(.playing) .dnd-token { cursor: pointer; }
+.dnd-pickbar {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 6px 8px 6px 14px;
+  border: 1px solid #c9ad6a;
+  border-radius: 999px;
+  background: rgb(15 10 6 / 85%);
+  color: #f4e7c8;
+  font: 0.9rem var(--font-ui, system-ui), sans-serif;
+}
+.dnd-pickbar[hidden] { display: none; }
+.dnd-pickbar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dnd-pickbar button { min-height: 32px; padding: 4px 12px; white-space: nowrap; }
+.dnd-token.picked .dnd-disc { box-shadow: 0 0 0 3px #ffd36b, 0 0 18px 4px rgb(255 211 107 / 65%); }
+.dnd-token[data-count]::after {
+  content: "×" attr(data-count);
+  position: absolute;
+  right: -6px;
+  top: -6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ffd36b;
+  color: #2a1a06;
+  font: bold 0.75rem var(--font-ui, system-ui), sans-serif;
+}
+.dnd-token.caught .dnd-disc { box-shadow: 0 0 0 3px #ff8c3c, 0 0 20px 6px rgb(255 140 60 / 60%); }
 .dnd-menu {
   position: absolute;
   z-index: 6;

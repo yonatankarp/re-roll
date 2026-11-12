@@ -11,7 +11,6 @@ import { carriedWeight, carryingCapacity } from "../core/carry.ts";
 import { foundText } from "../core/gear.ts";
 import { coins } from "../core/shop.ts";
 import { shop } from "./shop.ts";
-import { inArea } from "../core/grid.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
 import { dndCue } from "./cues.ts";
 import {
@@ -695,37 +694,18 @@ function combat(rawState: unknown, access: ContentAccess) {
       return feet === null ? [] : [[id, feet]];
     }),
   );
-  // The squares each of the player's area spells would cover, by option: aimed at a creature, or around them.
-  const grid = state.combat.grid;
-  const areas: Record<string, (readonly [number, number])[]> = {};
-  if (player && grid && order[index] === PLAYER_ACTOR) {
-    for (const action of deriveStats(player, access).actions) {
-      const { targeting } = action.activation;
-      if (!("area" in targeting)) continue;
-      const { shape, radius } = targeting.area;
-      const aims =
-        shape === "emanation"
-          ? [{ key: "all", at: player.position }]
-          : order.flatMap((id) => {
-              const aim = state.actors[id];
-              return aim ? [{ key: `@${id}`, at: aim.position }] : [];
-            });
-      for (const { key, at } of aims) {
-        const covered: (readonly [number, number])[] = [];
-        for (let y = 0; y < grid.height; y += 1) {
-          for (let x = 0; x < grid.width; x += 1) {
-            if (inArea(shape, radius, player.position, at, { x, y })) {
-              covered.push([x, y]);
-            }
-          }
-        }
-        areas[`${action.id}|${key}`] = covered;
-      }
-    }
-  }
+  // Each of the player's area actions, by id, so the board can outline where it lands with the rules' own geometry.
+  const shapes = Object.fromEntries(
+    player && order[index] === PLAYER_ACTOR
+      ? deriveStats(player, access).actions.flatMap((action) => {
+          const { targeting } = action.activation;
+          return "area" in targeting ? [[action.id, targeting]] : [];
+        })
+      : [],
+  );
   return {
     round,
-    board: { moves, reach, areas, map: state.combat.map ?? null },
+    board: { moves, reach, shapes, map: state.combat.map ?? null },
     combatants: order.flatMap((id, position) => {
       const actor = state.actors[id];
       if (!actor) return [];

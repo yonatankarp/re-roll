@@ -20,6 +20,8 @@ import {
   HitSchema,
   LingeringSchema,
   MoveSchema,
+  PickSchema,
+  AimSchema,
   ReactionSchema,
   SmiteSchema,
   TakeActionSchema,
@@ -39,6 +41,8 @@ import {
   runFinishTurn,
   runLingeringTick,
   runMove,
+  runPickTargets,
+  runAimArea,
   runProjectile,
   runRecheckHit,
   runSmite,
@@ -346,6 +350,11 @@ export const dnd55e = defineSystem<DndState>({
       run: runTakeAction,
     }),
     [`${NS}:move`]: frameHandler({ schema: MoveSchema, run: runMove }),
+    [`${NS}:pickTargets`]: frameHandler({
+      schema: PickSchema,
+      run: runPickTargets,
+    }),
+    [`${NS}:aimArea`]: frameHandler({ schema: AimSchema, run: runAimArea }),
     [`${NS}:finishMove`]: frameHandler({
       schema: FinishMoveSchema,
       run: runFinishMove,
@@ -505,7 +514,7 @@ export const dnd55e = defineSystem<DndState>({
   rests: availableRests,
   decidePolicy: choosePolicy,
   tactical: (decision) =>
-    /^dnd5\.5e:(turn|moveTo|reaction|afterHit|inspiration|deathSave):/.test(
+    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave):/.test(
       decision.id,
     ),
 });

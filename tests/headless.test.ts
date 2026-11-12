@@ -215,6 +215,39 @@ describe("headless play of goblin-ambush", () => {
     expect((await play.choose("1")).id).toBe("1");
     expect((await other.choose(1)).id).toBe("0");
   });
+
+  it("casts Bless on targets picked one by one, and a save replays them", async () => {
+    const saves = await savesFolder();
+    const play = await openHeadless(saves);
+    await play.start("goblin-ambush", { seed: "bless" });
+    await play.choose("Human Cleric");
+    const bless = "spell:srd52:spell/bless|pick";
+    for (let count = 0; count < 100; count += 1) {
+      const ids = play.screen().choices.map((choice) => choice.id);
+      if (ids.includes(bless)) break;
+      const first = play.screen().choices.find((c) => c.where === "list");
+      if (!first) throw new Error("Nothing to choose");
+      await play.choose(first.n);
+    }
+    await play.act(bless);
+    // Every ally the map would light, one click each, then Cast.
+    const adds = play
+      .screen()
+      .choices.filter((choice) => choice.id.startsWith("+"))
+      .map((choice) => choice.id);
+    expect(adds.length).toBeGreaterThan(1);
+    await play.act(...adds.slice(0, 2));
+    expect(play.screen().choices.map((c) => c.label)).toContain(
+      "Cast Bless (2 of 3)",
+    );
+    await play.act("cast");
+    expect(play.screen().decision).not.toMatch(/:targets:/);
+    const before = settled(play.view());
+    const path = await play.save("blessed");
+    const later = await openHeadless(saves);
+    await later.load(path);
+    expect(settled(later.view())).toEqual(before);
+  }, 60_000);
 });
 
 // Random choices from what is on screen, through every adventure, so a state no player could get past fails.
