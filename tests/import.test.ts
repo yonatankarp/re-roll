@@ -1,3 +1,4 @@
+import { parse, stringify } from "yaml";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { systems } from "../app/systems.ts";
@@ -1024,8 +1025,21 @@ describe("using encodings that were already written", () => {
       encodings,
       ...onlyFireBolt,
     });
-    return { summary, client };
+    return { summary, client, storage };
   };
+
+  it("keeps the cantrip scaling a provided encoding gives", async () => {
+    const scaling = { perTier: { addDice: "1d10" } };
+    const { storage } = await request({
+      "fire-bolt": {
+        encoding: { ...FIREBOLT_DRAFT.encoding, cantrip: scaling },
+      },
+    });
+    const draft = parse(
+      (await storage.read("books/import/my-book/spells/fire-bolt.yaml")) ?? "",
+    ) as { entry: { cantrip?: unknown } };
+    expect(draft.entry.cantrip).toEqual(scaling);
+  });
 
   it("uses a provided encoding without calling a model", async () => {
     const { summary, client } = await request({
@@ -1402,14 +1416,16 @@ describe("approving drafts", () => {
       slugs: ["fire-bolt"],
       requires: [{ plugin: "srd52", version: "^1" }],
     });
-    expect(result).toEqual({ approved: ["fire-bolt"], missing: [] });
+    expect(result).toEqual({ approved: ["fire-bolt"], missing: [], kept: [] });
 
     const report = await checkPlugins(storage, ["plugins", "books"], systems);
     expect(report.issues).toEqual([]);
     expect(report.checked).toContain("my-book");
 
     const catalog = await scanPlugins(storage, ["plugins", "books"]);
-    expect(catalog.plugins.get("my-book")?.manifest.distribution).toBe("private");
+    expect(catalog.plugins.get("my-book")?.manifest.distribution).toBe(
+      "private",
+    );
     const loaded: LoadResult = await loadRun(storage, catalog, systems, [
       "my-book",
     ]);
@@ -1431,7 +1447,7 @@ describe("approving drafts", () => {
       slugs: ["nope"],
       requires: [],
     });
-    expect(result).toEqual({ approved: [], missing: ["nope"] });
+    expect(result).toEqual({ approved: [], missing: ["nope"], kept: [] });
   });
 
   it("can approve everything at once, skipping the report", async () => {
@@ -1445,6 +1461,32 @@ describe("approving drafts", () => {
       requires: [],
     });
     expect(result.approved).toEqual(["fire-bolt"]);
+  });
+
+  it("keeps an approved entry that has fields added by hand", async () => {
+    const storage = await drafted();
+    const approve = () =>
+      approveImport({
+        storage,
+        system: dnd55e,
+        pluginId: "my-book",
+        folder: "spells",
+        slugs: "all",
+        requires: [],
+      });
+    await approve();
+    const path = "books/rules/my-book/spells/fire-bolt.yaml";
+    const [entry] = parse((await storage.read(path)) ?? "") as object[];
+    const edited = stringify([
+      { ...entry, cantrip: { perTier: { addDice: "1d10" } } },
+    ]);
+    await storage.replaceAtomically(path, edited);
+    expect(await approve()).toEqual({
+      approved: [],
+      missing: [],
+      kept: ["fire-bolt"],
+    });
+    expect(await storage.read(path)).toBe(edited);
   });
 });
 
