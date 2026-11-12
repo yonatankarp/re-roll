@@ -13,15 +13,15 @@ through the real level-up decisions, and each feature gained is checked against 
 | --- | --- | --- | --- |
 | Barbarian | 5 | 5 | 28 |
 | Bard | 5 | 3 | 20 |
-| Cleric | 6 | 1 | 24 |
-| Druid | 4 | 1 | 28 |
+| Cleric | 10 | 1 | 20 |
+| Druid | 6 | 1 | 26 |
 | Fighter | 12 | 3 | 23 |
 | Monk | 4 | 9 | 28 |
-| Paladin | 7 | 8 | 23 |
-| Ranger | 8 | 2 | 28 |
+| Paladin | 11 | 8 | 19 |
+| Ranger | 10 | 2 | 26 |
 | Rogue | 5 | 4 | 29 |
-| Sorcerer | 4 | 3 | 24 |
-| Warlock | 4 | 3 | 24 |
+| Sorcerer | 7 | 3 | 21 |
+| Warlock | 8 | 3 | 20 |
 | Wizard | 4 | 1 | 25 |
 
 ## Features
@@ -31,10 +31,10 @@ through the real level-up decisions, and each feature gained is checked against 
 | Barbarian | 1 | Rage | partial | resource rage max 2; bonusAction+rage: resistance x3, damageBonus |
 | Barbarian | 1 | Unarmored Defense | partial | passive: acFormula |
 | Barbarian | 1 | Weapon Mastery | working | level choice: weapon masteries |
-| Barbarian | 2 | Danger Sense | text-only | no mechanics |
+| Barbarian | 2 | Danger Sense | text-only | needs Advantage on one ability's saves |
 | Barbarian | 2 | Reckless Attack | partial | resource reckless-attack max 1; reckless-attack: advantage x2 |
 | Barbarian | 3 | Barbarian Subclass | working | level choice: subclass |
-| Barbarian | 3 | Primal Knowledge | text-only | no mechanics |
+| Barbarian | 3 | Primal Knowledge | text-only | out of combat only: skills, tools or languages |
 | Barbarian | 4 | Ability Score Improvement | working | level choice: feat |
 | Barbarian | 5 | Extra Attack | working | attacks per action: 2 |
 | Barbarian | 5 | Fast Movement | partial | passive: bonus |
@@ -68,8 +68,8 @@ through the real level-up decisions, and each feature gained is checked against 
 | Barbarian (Path of the Zealot) | 14 | Rage of the Gods | text-only | no mechanics |
 | Bard | 1 | Bardic Inspiration | partial | resource bardic-inspiration max 1; bonusAction+bardic-inspiration: bonus |
 | Bard | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
-| Bard | 2 | Expertise | text-only | no mechanics |
-| Bard | 2 | Jack of All Trades | text-only | no mechanics |
+| Bard | 2 | Expertise | text-only | out of combat only: skills, tools or languages |
+| Bard | 2 | Jack of All Trades | text-only | out of combat only: skills, tools or languages |
 | Bard | 3 | Bard Subclass | working | level choice: subclass |
 | Bard | 4 | Ability Score Improvement | working | level choice: feat |
 | Bard | 5 | Font of Inspiration | partial | resource bardic-inspiration max 1; bardic-inspiration spent by other features |
@@ -95,44 +95,44 @@ through the real level-up decisions, and each feature gained is checked against 
 | Bard (College of Valor) | 6 | Extra Attack | working | attacks per action: 2 |
 | Bard (College of Valor) | 14 | Battle Magic | text-only | no mechanics |
 | Cleric | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
-| Cleric | 1 | Divine Order | text-only | no mechanics |
+| Cleric | 1 | Divine Order | text-only | needs a choice between the orders at level-up |
 | Cleric | 2 | Channel Divinity | partial | resource cleric-channel-divinity max 2; action+cleric-channel-divinity: heal; action+cleric-channel-divinity: save damage; action+cleric-channel-divinity: condition frightened, condition incapacitated |
 | Cleric | 3 | Cleric Subclass | working | level choice: subclass |
 | Cleric | 4 | Ability Score Improvement | working | level choice: feat |
-| Cleric | 5 | Sear Undead | text-only | no mechanics |
+| Cleric | 5 | Sear Undead | text-only | needs damage added to Turn Undead |
 | Cleric | 7 | Blessed Strikes | text-only | no mechanics |
 | Cleric | 10 | Divine Intervention | text-only | no mechanics |
 | Cleric | 14 | Improved Blessed Strikes | text-only | no mechanics |
 | Cleric | 19 | Epic Boon | working | level choice: epic boon |
 | Cleric | 20 | Greater Divine Intervention | text-only | no mechanics |
 | Cleric (Life Domain) | 3 | Disciple of Life | text-only | no mechanics |
-| Cleric (Life Domain) | 3 | Life Domain Spells | text-only | no mechanics |
+| Cleric (Life Domain) | 3 | Life Domain Spells | working | always-prepared spells: 4 |
 | Cleric (Life Domain) | 3 | Preserve Life | text-only | no mechanics |
 | Cleric (Life Domain) | 6 | Blessed Healer | text-only | no mechanics |
 | Cleric (Life Domain) | 17 | Supreme Healing | text-only | no mechanics |
-| Cleric (Light Domain) | 3 | Light Domain Spells | text-only | no mechanics |
+| Cleric (Light Domain) | 3 | Light Domain Spells | working | always-prepared spells: 4 |
 | Cleric (Light Domain) | 3 | Radiance of the Dawn | working | action+cleric-channel-divinity: save damage |
 | Cleric (Light Domain) | 3 | Warding Flare | text-only | no mechanics |
 | Cleric (Light Domain) | 6 | Improved Warding Flare | text-only | no mechanics |
 | Cleric (Light Domain) | 17 | Corona of Light | text-only | no mechanics |
 | Cleric (Trickery Domain) | 3 | Blessing of the Trickster | text-only | no mechanics |
-| Cleric (Trickery Domain) | 3 | Trickery Domain Spells | text-only | no mechanics |
+| Cleric (Trickery Domain) | 3 | Trickery Domain Spells | working | always-prepared spells: 4 |
 | Cleric (Trickery Domain) | 3 | Invoke Duplicity | text-only | no mechanics |
 | Cleric (Trickery Domain) | 6 | Trickster’s Transposition | text-only | no mechanics |
 | Cleric (Trickery Domain) | 17 | Improved Duplicity | text-only | no mechanics |
 | Cleric (War Domain) | 3 | Guided Strike | text-only | no mechanics |
-| Cleric (War Domain) | 3 | War Domain Spells | text-only | no mechanics |
+| Cleric (War Domain) | 3 | War Domain Spells | working | always-prepared spells: 4 |
 | Cleric (War Domain) | 3 | War Priest | text-only | no mechanics |
 | Cleric (War Domain) | 6 | War God’s Blessing | text-only | no mechanics |
 | Cleric (War Domain) | 17 | Avatar of Battle | working | passive: resistance x3 |
 | Druid | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
-| Druid | 1 | Druidic | text-only | no mechanics |
-| Druid | 1 | Primal Order | text-only | no mechanics |
+| Druid | 1 | Druidic | text-only | out of combat only: skills, tools or languages |
+| Druid | 1 | Primal Order | text-only | needs a choice between the orders at level-up |
 | Druid | 2 | Wild Shape | partial | resource wild-shape max 2; bonusAction+wild-shape: tempHp |
-| Druid | 2 | Wild Companion | text-only | no mechanics |
+| Druid | 2 | Wild Companion | text-only | needs summoned familiars |
 | Druid | 3 | Druid Subclass | working | level choice: subclass |
 | Druid | 4 | Ability Score Improvement | working | level choice: feat |
-| Druid | 5 | Wild Resurgence | text-only | no mechanics |
+| Druid | 5 | Wild Resurgence | text-only | needs a way to regain spell slots |
 | Druid | 7 | Elemental Fury | text-only | no mechanics |
 | Druid | 15 | Improved Elemental Fury | text-only | no mechanics |
 | Druid | 18 | Beast Spells | text-only | no mechanics |
@@ -144,11 +144,11 @@ through the real level-up decisions, and each feature gained is checked against 
 | Druid (Circle of the Land) | 10 | Nature’s Ward | text-only | no mechanics |
 | Druid (Circle of the Land) | 14 | Nature’s Sanctuary | text-only | no mechanics |
 | Druid (Circle of the Moon) | 3 | Circle Forms | text-only | no mechanics |
-| Druid (Circle of the Moon) | 3 | Circle of the Moon Spells | text-only | no mechanics |
+| Druid (Circle of the Moon) | 3 | Circle of the Moon Spells | working | always-prepared spells: 3 |
 | Druid (Circle of the Moon) | 6 | Improved Circle Forms | text-only | no mechanics |
 | Druid (Circle of the Moon) | 10 | Moonlight Step | text-only | no mechanics |
 | Druid (Circle of the Moon) | 14 | Lunar Form | text-only | no mechanics |
-| Druid (Circle of the Sea) | 3 | Circle of the Sea Spells | text-only | no mechanics |
+| Druid (Circle of the Sea) | 3 | Circle of the Sea Spells | working | always-prepared spells: 5 |
 | Druid (Circle of the Sea) | 3 | Wrath of the Sea | text-only | no mechanics |
 | Druid (Circle of the Sea) | 6 | Aquatic Affinity | text-only | no mechanics |
 | Druid (Circle of the Sea) | 10 | Stormborn | text-only | no mechanics |
@@ -162,11 +162,11 @@ through the real level-up decisions, and each feature gained is checked against 
 | Fighter | 1 | Second Wind | working | resource second-wind max 2; bonusAction+second-wind: heal |
 | Fighter | 1 | Weapon Mastery | working | level choice: weapon masteries |
 | Fighter | 2 | Action Surge | partial | resource action-surge max 1; action-surge: extraAction |
-| Fighter | 2 | Tactical Mind | text-only | no mechanics |
+| Fighter | 2 | Tactical Mind | text-only | out of combat only: skills, tools or languages |
 | Fighter | 3 | Fighter Subclass | working | level choice: subclass |
 | Fighter | 4 | Ability Score Improvement | working | level choice: feat |
 | Fighter | 5 | Extra Attack | working | attacks per action: 2 |
-| Fighter | 5 | Tactical Shift | text-only | no mechanics |
+| Fighter | 5 | Tactical Shift | text-only | needs free movement after Second Wind |
 | Fighter | 9 | Indomitable | text-only | no mechanics |
 | Fighter | 9 | Tactical Master | text-only | no mechanics |
 | Fighter | 11 | Two Extra Attacks | working | attacks per action: 3 |
@@ -200,11 +200,11 @@ through the real level-up decisions, and each feature gained is checked against 
 | Monk | 1 | Unarmored Defense | partial | passive: acFormula |
 | Monk | 2 | Monk’s Focus | partial | resource focus-points max 2; bonusAction+focus-points: attack damage; bonusAction+focus-points: disadvantage |
 | Monk | 2 | Unarmored Movement | partial | passive: bonus |
-| Monk | 2 | Uncanny Metabolism | text-only | no mechanics |
+| Monk | 2 | Uncanny Metabolism | text-only | needs Focus Points regained on Initiative |
 | Monk | 3 | Deflect Attacks | partial | reaction (triggered): reduceDamage |
 | Monk | 3 | Monk Subclass | working | level choice: subclass |
 | Monk | 4 | Ability Score Improvement | working | level choice: feat |
-| Monk | 4 | Slow Fall | text-only | no mechanics |
+| Monk | 4 | Slow Fall | text-only | no falling in fights |
 | Monk | 5 | Extra Attack | working | attacks per action: 2 |
 | Monk | 5 | Stunning Strike | partial | focus-points (triggered): condition stunned, advantage |
 | Monk | 6 | Empowered Strikes | text-only | no mechanics |
@@ -246,7 +246,7 @@ through the real level-up decisions, and each feature gained is checked against 
 | Paladin | 3 | Paladin Subclass | working | level choice: subclass |
 | Paladin | 4 | Ability Score Improvement | working | level choice: feat |
 | Paladin | 5 | Extra Attack | working | attacks per action: 2 |
-| Paladin | 5 | Faithful Steed | text-only | no mechanics |
+| Paladin | 5 | Faithful Steed | text-only | needs summoned mounts |
 | Paladin | 6 | Aura of Protection | partial | passive: bonus |
 | Paladin | 9 | Abjure Foes | partial | action+paladin-channel-divinity: condition frightened |
 | Paladin | 10 | Aura of Courage | text-only | no mechanics |
@@ -254,23 +254,23 @@ through the real level-up decisions, and each feature gained is checked against 
 | Paladin | 14 | Restoring Touch | text-only | no mechanics |
 | Paladin | 18 | Aura Expansion | text-only | no mechanics |
 | Paladin | 19 | Epic Boon | working | level choice: epic boon |
-| Paladin (Oath of Devotion) | 3 | Oath of Devotion Spells | text-only | no mechanics |
+| Paladin (Oath of Devotion) | 3 | Oath of Devotion Spells | working | always-prepared spells: 2 |
 | Paladin (Oath of Devotion) | 3 | Sacred Weapon | partial | paladin-channel-divinity: bonus |
 | Paladin (Oath of Devotion) | 7 | Aura of Devotion | text-only | no mechanics |
 | Paladin (Oath of Devotion) | 15 | Smite of Protection | text-only | no mechanics |
 | Paladin (Oath of Devotion) | 20 | Holy Nimbus | text-only | no mechanics |
 | Paladin (Oath of Glory) | 3 | Inspiring Smite | text-only | no mechanics |
-| Paladin (Oath of Glory) | 3 | Oath of Glory Spells | text-only | no mechanics |
+| Paladin (Oath of Glory) | 3 | Oath of Glory Spells | working | always-prepared spells: 2 |
 | Paladin (Oath of Glory) | 3 | Peerless Athlete | text-only | no mechanics |
 | Paladin (Oath of Glory) | 7 | Aura of Alacrity | text-only | no mechanics |
 | Paladin (Oath of Glory) | 15 | Glorious Defense | text-only | no mechanics |
 | Paladin (Oath of Glory) | 20 | Living Legend | text-only | no mechanics |
 | Paladin (Oath of the Ancients) | 3 | Nature’s Wrath | partial | action+paladin-channel-divinity: condition restrained |
-| Paladin (Oath of the Ancients) | 3 | Oath of the Ancients Spells | text-only | no mechanics |
+| Paladin (Oath of the Ancients) | 3 | Oath of the Ancients Spells | working | always-prepared spells: 2 |
 | Paladin (Oath of the Ancients) | 7 | Aura of Warding | partial | passive: resistance x3 |
 | Paladin (Oath of the Ancients) | 15 | Undying Sentinel | text-only | no mechanics |
 | Paladin (Oath of the Ancients) | 20 | Elder Champion | text-only | no mechanics |
-| Paladin (Oath of Vengeance) | 3 | Oath of Vengeance Spells | text-only | no mechanics |
+| Paladin (Oath of Vengeance) | 3 | Oath of Vengeance Spells | working | always-prepared spells: 2 |
 | Paladin (Oath of Vengeance) | 3 | Vow of Enmity | text-only | no mechanics |
 | Paladin (Oath of Vengeance) | 7 | Relentless Avenger | text-only | no mechanics |
 | Paladin (Oath of Vengeance) | 15 | Soul of Vengeance | text-only | no mechanics |
@@ -278,7 +278,7 @@ through the real level-up decisions, and each feature gained is checked against 
 | Ranger | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
 | Ranger | 1 | Favored Enemy | partial | resource favored-enemy max 2; bonusAction+favored-enemy: hitDamage; always-prepared spells: 1 |
 | Ranger | 1 | Weapon Mastery | working | level choice: weapon masteries |
-| Ranger | 2 | Deft Explorer | text-only | no mechanics |
+| Ranger | 2 | Deft Explorer | text-only | out of combat only: skills, tools or languages |
 | Ranger | 2 | Fighting Style | working | level choice: fighting style |
 | Ranger | 3 | Ranger Subclass | working | level choice: subclass |
 | Ranger | 4 | Ability Score Improvement | working | level choice: feat |
@@ -297,13 +297,13 @@ through the real level-up decisions, and each feature gained is checked against 
 | Ranger (Beast Master) | 11 | Bestial Fury | text-only | no mechanics |
 | Ranger (Beast Master) | 15 | Share Spells | text-only | no mechanics |
 | Ranger (Fey Wanderer) | 3 | Dreadful Strikes | text-only | no mechanics |
-| Ranger (Fey Wanderer) | 3 | Fey Wanderer Spells | text-only | no mechanics |
+| Ranger (Fey Wanderer) | 3 | Fey Wanderer Spells | working | always-prepared spells: 1 |
 | Ranger (Fey Wanderer) | 3 | Otherworldly Glamour | text-only | no mechanics |
 | Ranger (Fey Wanderer) | 7 | Beguiling Twist | text-only | no mechanics |
 | Ranger (Fey Wanderer) | 11 | Fey Reinforcements | text-only | no mechanics |
 | Ranger (Fey Wanderer) | 15 | Misty Wanderer | text-only | no mechanics |
 | Ranger (Gloom Stalker) | 3 | Dread Ambusher | text-only | no mechanics |
-| Ranger (Gloom Stalker) | 3 | Gloom Stalker Spells | text-only | no mechanics |
+| Ranger (Gloom Stalker) | 3 | Gloom Stalker Spells | working | always-prepared spells: 1 |
 | Ranger (Gloom Stalker) | 3 | Umbral Sight | text-only | no mechanics |
 | Ranger (Gloom Stalker) | 7 | Iron Mind | text-only | no mechanics |
 | Ranger (Gloom Stalker) | 11 | Stalker’s Flurry | text-only | no mechanics |
@@ -313,15 +313,15 @@ through the real level-up decisions, and each feature gained is checked against 
 | Ranger (Hunter) | 7 | Defensive Tactics | text-only | no mechanics |
 | Ranger (Hunter) | 11 | Superior Hunter’s Prey | text-only | no mechanics |
 | Ranger (Hunter) | 15 | Superior Hunter’s Defense | text-only | no mechanics |
-| Rogue | 1 | Expertise | text-only | no mechanics |
+| Rogue | 1 | Expertise | text-only | out of combat only: skills, tools or languages |
 | Rogue | 1 | Sneak Attack | partial | passive: extraDamage |
-| Rogue | 1 | Thieves’ Cant | text-only | no mechanics |
+| Rogue | 1 | Thieves’ Cant | text-only | out of combat only: skills, tools or languages |
 | Rogue | 1 | Weapon Mastery | working | level choice: weapon masteries |
-| Rogue | 2 | Cunning Action | text-only | no mechanics |
+| Rogue | 2 | Cunning Action | text-only | needs bonus-action Dash, Disengage and Hide |
 | Rogue | 3 | Rogue Subclass | working | level choice: subclass |
 | Rogue | 3 | Steady Aim | partial | bonusAction: advantage |
 | Rogue | 4 | Ability Score Improvement | working | level choice: feat |
-| Rogue | 5 | Cunning Strike | text-only | no mechanics |
+| Rogue | 5 | Cunning Strike | text-only | needs Sneak Attack dice traded for effects |
 | Rogue | 5 | Uncanny Dodge | working | reaction (triggered): reduceDamage |
 | Rogue | 7 | Evasion | text-only | no mechanics |
 | Rogue | 7 | Reliable Talent | text-only | no mechanics |
@@ -353,27 +353,27 @@ through the real level-up decisions, and each feature gained is checked against 
 | Rogue (Thief) | 17 | Thief’s Reflexes | text-only | no mechanics |
 | Sorcerer | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
 | Sorcerer | 1 | Innate Sorcery | partial | resource innate-sorcery max 2; bonusAction+innate-sorcery: advantage |
-| Sorcerer | 2 | Font of Magic | text-only | no mechanics |
-| Sorcerer | 2 | Metamagic | text-only | no mechanics |
+| Sorcerer | 2 | Font of Magic | text-only | needs Sorcery Points turned into spell slots |
+| Sorcerer | 2 | Metamagic | text-only | needs Metamagic options picked and applied to spells |
 | Sorcerer | 3 | Sorcerer Subclass | working | level choice: subclass |
 | Sorcerer | 4 | Ability Score Improvement | working | level choice: feat |
-| Sorcerer | 5 | Sorcerous Restoration | text-only | no mechanics |
+| Sorcerer | 5 | Sorcerous Restoration | text-only | needs a way to regain spell slots |
 | Sorcerer | 7 | Sorcery Incarnate | text-only | no mechanics |
 | Sorcerer | 19 | Epic Boon | working | level choice: epic boon |
 | Sorcerer | 20 | Arcane Apotheosis | text-only | no mechanics |
-| Sorcerer (Aberrant Sorcery) | 3 | Psionic Spells | text-only | no mechanics |
+| Sorcerer (Aberrant Sorcery) | 3 | Psionic Spells | working | always-prepared spells: 5 |
 | Sorcerer (Aberrant Sorcery) | 3 | Telepathic Speech | text-only | no mechanics |
 | Sorcerer (Aberrant Sorcery) | 6 | Psionic Sorcery | text-only | no mechanics |
 | Sorcerer (Aberrant Sorcery) | 6 | Psychic Defenses | partial | passive: resistance |
 | Sorcerer (Aberrant Sorcery) | 14 | Revelation in Flesh | text-only | no mechanics |
 | Sorcerer (Aberrant Sorcery) | 18 | Warping Implosion | text-only | no mechanics |
-| Sorcerer (Clockwork Sorcery) | 3 | Clockwork Spells | text-only | no mechanics |
+| Sorcerer (Clockwork Sorcery) | 3 | Clockwork Spells | working | always-prepared spells: 4 |
 | Sorcerer (Clockwork Sorcery) | 3 | Restore Balance | text-only | no mechanics |
 | Sorcerer (Clockwork Sorcery) | 6 | Bastion of Law | text-only | no mechanics |
 | Sorcerer (Clockwork Sorcery) | 14 | Trance of Order | text-only | no mechanics |
 | Sorcerer (Clockwork Sorcery) | 18 | Clockwork Cavalcade | text-only | no mechanics |
 | Sorcerer (Draconic Sorcery) | 3 | Draconic Resilience | partial | passive: acFormula |
-| Sorcerer (Draconic Sorcery) | 3 | Draconic Spells | text-only | no mechanics |
+| Sorcerer (Draconic Sorcery) | 3 | Draconic Spells | working | always-prepared spells: 4 |
 | Sorcerer (Draconic Sorcery) | 6 | Elemental Affinity | text-only | no mechanics |
 | Sorcerer (Draconic Sorcery) | 14 | Dragon Wings | text-only | no mechanics |
 | Sorcerer (Draconic Sorcery) | 18 | Dragon Companion | text-only | no mechanics |
@@ -382,44 +382,44 @@ through the real level-up decisions, and each feature gained is checked against 
 | Sorcerer (Wild Magic Sorcery) | 6 | Bend Luck | text-only | no mechanics |
 | Sorcerer (Wild Magic Sorcery) | 14 | Controlled Chaos | text-only | no mechanics |
 | Sorcerer (Wild Magic Sorcery) | 18 | Tamed Surge | text-only | no mechanics |
-| Warlock | 1 | Eldritch Invocations | text-only | no mechanics |
+| Warlock | 1 | Eldritch Invocations | text-only | needs invocation choices at level-up |
 | Warlock | 1 | Pact Magic | working | spell slots: 1, spells picked at level-up |
-| Warlock | 2 | Magical Cunning | text-only | no mechanics |
+| Warlock | 2 | Magical Cunning | text-only | needs a way to regain spell slots |
 | Warlock | 3 | Warlock Subclass | working | level choice: subclass |
 | Warlock | 4 | Ability Score Improvement | working | level choice: feat |
 | Warlock | 9 | Contact Patron | text-only | no mechanics |
 | Warlock | 11 | Mystic Arcanum | text-only | no mechanics |
 | Warlock | 19 | Epic Boon | working | level choice: epic boon |
 | Warlock | 20 | Eldritch Master | text-only | no mechanics |
-| Warlock (Archfey Patron) | 3 | Archfey Spells | text-only | no mechanics |
+| Warlock (Archfey Patron) | 3 | Archfey Spells | working | always-prepared spells: 5 |
 | Warlock (Archfey Patron) | 3 | Steps of the Fey | text-only | no mechanics |
 | Warlock (Archfey Patron) | 6 | Misty Escape | text-only | no mechanics |
 | Warlock (Archfey Patron) | 10 | Beguiling Defenses | text-only | no mechanics |
 | Warlock (Archfey Patron) | 14 | Bewitching Magic | text-only | no mechanics |
-| Warlock (Celestial Patron) | 3 | Celestial Spells | text-only | no mechanics |
+| Warlock (Celestial Patron) | 3 | Celestial Spells | working | always-prepared spells: 6 |
 | Warlock (Celestial Patron) | 3 | Healing Light | partial | resource healing-light max 4; bonusAction+healing-light: heal |
 | Warlock (Celestial Patron) | 6 | Radiant Soul | partial | passive: resistance |
 | Warlock (Celestial Patron) | 10 | Celestial Resilience | text-only | no mechanics |
 | Warlock (Celestial Patron) | 14 | Searing Vengeance | text-only | no mechanics |
 | Warlock (Fiend Patron) | 3 | Dark One’s Blessing | text-only | no mechanics |
-| Warlock (Fiend Patron) | 3 | Fiend Spells | text-only | no mechanics |
+| Warlock (Fiend Patron) | 3 | Fiend Spells | working | always-prepared spells: 4 |
 | Warlock (Fiend Patron) | 6 | Dark One’s Own Luck | text-only | no mechanics |
 | Warlock (Fiend Patron) | 10 | Fiendish Resilience | text-only | no mechanics |
 | Warlock (Fiend Patron) | 14 | Hurl Through Hell | text-only | no mechanics |
 | Warlock (Great Old One Patron) | 3 | Awakened Mind | text-only | no mechanics |
-| Warlock (Great Old One Patron) | 3 | Great Old One Spells | text-only | no mechanics |
+| Warlock (Great Old One Patron) | 3 | Great Old One Spells | working | always-prepared spells: 4 |
 | Warlock (Great Old One Patron) | 3 | Psychic Spells | text-only | no mechanics |
 | Warlock (Great Old One Patron) | 6 | Clairvoyant Combatant | text-only | no mechanics |
 | Warlock (Great Old One Patron) | 10 | Eldritch Hex | text-only | no mechanics |
 | Warlock (Great Old One Patron) | 10 | Thought Shield | partial | passive: resistance |
 | Warlock (Great Old One Patron) | 14 | Create Thrall | text-only | no mechanics |
 | Wizard | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
-| Wizard | 1 | Ritual Adept | text-only | no mechanics |
-| Wizard | 1 | Arcane Recovery | text-only | no mechanics |
-| Wizard | 2 | Scholar | text-only | no mechanics |
+| Wizard | 1 | Ritual Adept | text-only | out of combat only: skills, tools or languages |
+| Wizard | 1 | Arcane Recovery | text-only | needs a way to regain spell slots |
+| Wizard | 2 | Scholar | text-only | out of combat only: skills, tools or languages |
 | Wizard | 3 | Wizard Subclass | working | level choice: subclass |
 | Wizard | 4 | Ability Score Improvement | working | level choice: feat |
-| Wizard | 5 | Memorize Spell | text-only | no mechanics |
+| Wizard | 5 | Memorize Spell | text-only | needs prepared spells swapped on a Short Rest |
 | Wizard | 18 | Spell Mastery | text-only | no mechanics |
 | Wizard | 19 | Epic Boon | working | level choice: epic boon |
 | Wizard | 20 | Signature Spells | text-only | no mechanics |

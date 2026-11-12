@@ -23,7 +23,7 @@ import {
   freshActor,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
-import { bookRun, levelTo } from "./class-features.ts";
+import { bookRun, classify, levelTo } from "./class-features.ts";
 
 // Spot checks of each class's signature features in a fight, on characters built through the real level-up
 // decisions. A feature that doesn't work yet is an `it.fails`, so it turns red once someone makes it work.
@@ -478,6 +478,37 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
     expect(
       actorIn(done.state, PLAYER_ACTOR).resourcesSpent["focus-points"],
     ).toBe(1);
+  });
+
+  it("prepares a subclass's spells from its table by level", () => {
+    const known = (level: number) =>
+      deriveStats(
+        hero("cleric", level, "phb:subclass/cleric-life-domain"),
+        run,
+      ).actions.map((action) => action.id);
+    expect(known(3)).toContain("spell:phb:spell/bless");
+    expect(known(3)).not.toContain("spell:phb:spell/mass-healing-word");
+    expect(known(5)).toContain("spell:phb:spell/mass-healing-word");
+  });
+
+  it("reports a feature's status from what the engine does with it", () => {
+    const stats = deriveStats(hero("rogue", 2), run);
+    expect(classify("phb:feature/rogue-sneak-attack", stats, run).status).toBe(
+      "partial",
+    );
+    expect(
+      classify(
+        "phb:feature/rogue-uncanny-dodge",
+        deriveStats(hero("rogue", 5), run),
+        run,
+      ).status,
+    ).toBe("working");
+    expect(
+      classify("phb:feature/rogue-cunning-action", stats, run),
+    ).toMatchObject({
+      status: "text-only",
+      why: "needs bonus-action Dash, Disengage and Hide",
+    });
   });
 
   it("Hunter's Mark is prepared and adds 1d6 to the Ranger's hits on the mark", () => {

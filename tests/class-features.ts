@@ -245,6 +245,42 @@ function spentElsewhere(resource: string, featureId: string, stats: Stats) {
   );
 }
 
+const OUT_OF_COMBAT = "out of combat only: skills, tools or languages";
+const SLOT_RECOVERY = "needs a way to regain spell slots";
+
+// What the engine would need first, for the level 1 to 5 class features left as text.
+const WAITING_ON: Readonly<Record<string, string>> = {
+  "barbarian-danger-sense": "needs Advantage on one ability's saves",
+  "barbarian-primal-knowledge": OUT_OF_COMBAT,
+  "bard-expertise": OUT_OF_COMBAT,
+  "bard-jack-of-all-trades": OUT_OF_COMBAT,
+  "cleric-divine-order": "needs a choice between the orders at level-up",
+  "cleric-sear-undead": "needs damage added to Turn Undead",
+  "druid-druidic": OUT_OF_COMBAT,
+  "druid-primal-order": "needs a choice between the orders at level-up",
+  "druid-wild-companion": "needs summoned familiars",
+  "druid-wild-resurgence": SLOT_RECOVERY,
+  "fighter-tactical-mind": OUT_OF_COMBAT,
+  "fighter-tactical-shift": "needs free movement after Second Wind",
+  "monk-uncanny-metabolism": "needs Focus Points regained on Initiative",
+  "monk-slow-fall": "no falling in fights",
+  "paladin-faithful-steed": "needs summoned mounts",
+  "ranger-deft-explorer": OUT_OF_COMBAT,
+  "rogue-expertise": OUT_OF_COMBAT,
+  "rogue-thieves-cant": OUT_OF_COMBAT,
+  "rogue-cunning-action": "needs bonus-action Dash, Disengage and Hide",
+  "rogue-cunning-strike": "needs Sneak Attack dice traded for effects",
+  "sorcerer-font-of-magic": "needs Sorcery Points turned into spell slots",
+  "sorcerer-metamagic": "needs Metamagic options picked and applied to spells",
+  "sorcerer-sorcerous-restoration": SLOT_RECOVERY,
+  "warlock-eldritch-invocations": "needs invocation choices at level-up",
+  "warlock-magical-cunning": SLOT_RECOVERY,
+  "wizard-ritual-adept": OUT_OF_COMBAT,
+  "wizard-arcane-recovery": SLOT_RECOVERY,
+  "wizard-scholar": OUT_OF_COMBAT,
+  "wizard-memorize-spell": "needs prepared spells swapped on a Short Rest",
+};
+
 export function classify(
   id: string,
   stats: Stats,
@@ -286,7 +322,7 @@ export function classify(
       why:
         reasons.length > 0
           ? `${reasons.join("; ")}; nothing spends it`
-          : "no mechanics",
+          : (WAITING_ON[id.slice(id.indexOf("/") + 1)] ?? "no mechanics"),
     };
   }
   const status: Status =
