@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { systems } from "../app/systems.ts";
 import {
   type SaveStore,
@@ -69,5 +69,54 @@ describe("the session's loaded content", () => {
     await game.restart("cache-3");
     expect(contentReads).toBeGreaterThan(0);
     expect(game.view().steps).toBe(1);
+  });
+});
+
+describe("the menu", () => {
+  it("still lists everything when an adventure.yaml is malformed", async () => {
+    const content = await createNodeStorage(process.cwd());
+    const broken = "plugins/adventures/haunted-house/adventure.yaml";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const game = createGame({
+      storage: withSaves(
+        {
+          read: (path) =>
+            path === broken
+              ? Promise.resolve("title: [unclosed")
+              : content.read(path),
+          list: (prefix) => content.list(prefix),
+        },
+        memorySaves(),
+      ),
+      roots: ["plugins"],
+      systems,
+      uis: [dndUi],
+    });
+    await game.start("goblin-ambush", "menu-1");
+    const adventures = await game.listAdventures();
+    expect(adventures.find((item) => item.id === "haunted-house")?.title).toBe(
+      "haunted-house",
+    );
+    expect((await game.listSaves(adventures)).length).toBe(1);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("lists saves from their details without reading each save", async () => {
+    const content = await createNodeStorage(process.cwd());
+    const saves = memorySaves();
+    const game = createGame({
+      storage: withSaves(content, saves),
+      roots: ["plugins"],
+      systems,
+      uis: [dndUi],
+    });
+    await game.start("goblin-ambush", "menu-2");
+    const path = await game.save("mine");
+    const read = vi.spyOn(saves, "getItem");
+    const listed = await game.listSaves();
+    expect(listed.find((save) => save.path === path)?.steps).toBe(1);
+    expect(read).toHaveBeenCalled(); // the times and details records
+    expect(read.mock.calls.map(([key]) => key)).not.toContain(path);
   });
 });

@@ -483,9 +483,10 @@ export function mountShell(
   const showMenu = async (): Promise<void> => {
     actions.replaceChildren();
     document.title = "Re-roll";
+    const listing = game.listAdventures();
     const [adventures, saves, books] = await Promise.all([
-      game.listAdventures(),
-      game.listSaves(),
+      listing,
+      listing.then((found) => game.listSaves(found)),
       game.listBooks(),
     ]);
     const heading = el("h2", { text: "Choose an adventure" });
