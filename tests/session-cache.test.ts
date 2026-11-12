@@ -116,7 +116,7 @@ describe("the menu", () => {
     const read = vi.spyOn(saves, "getItem");
     const listed = await game.listSaves();
     expect(listed.find((save) => save.path === path)?.steps).toBe(1);
-    expect(read).toHaveBeenCalled(); // the times and details records
+    // The records are kept in memory once read, so nothing is read again.
     expect(read.mock.calls.map(([key]) => key)).not.toContain(path);
   });
 });

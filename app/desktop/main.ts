@@ -1,11 +1,15 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  type SaveFiles,
   type SaveStore,
   contentImageUrl,
   createContentReader,
-  withSaves,
+  moveSavesToFiles,
+  storeFiles,
+  withSaveFiles,
 } from "../../engine/platform/browser/storage.ts";
+import { createTauriSaves } from "../../engine/platform/tauri/saves.ts";
 import {
   createTauriReader,
   tauriImageUrl,
@@ -52,22 +56,36 @@ function browserSaves(): SaveStore {
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("The page has no #app element");
 
-mountShell(
-  root,
-  createGame({
-    storage: withSaves(
-      isTauri() ? createTauriReader() : createContentReader(),
-      browserSaves(),
-    ),
-    roots: ["plugins", "books"],
-    systems,
-    uis: [dndUi],
-    imageUrl: isTauri() ? tauriImageUrl : contentImageUrl,
-  }),
-  { [dndUi.systemId]: mountDndBoard },
-  [FONT_CREDIT],
-  coinSound,
-);
+// The desktop app keeps saves as files, and moves any it kept in localStorage there first.
+async function desktopSaves(): Promise<SaveFiles> {
+  const files = createTauriSaves();
+  try {
+    await moveSavesToFiles(browserSaves(), files);
+  } catch (error) {
+    console.warn("Couldn't move the old saves to the saves folder", error);
+  }
+  return files;
+}
+
+async function start(page: HTMLElement): Promise<void> {
+  mountShell(
+    page,
+    createGame({
+      storage: withSaveFiles(
+        isTauri() ? createTauriReader() : createContentReader(),
+        isTauri() ? await desktopSaves() : storeFiles(browserSaves()),
+      ),
+      roots: ["plugins", "books"],
+      systems,
+      uis: [dndUi],
+      imageUrl: isTauri() ? tauriImageUrl : contentImageUrl,
+    }),
+    { [dndUi.systemId]: mountDndBoard },
+    [FONT_CREDIT],
+    coinSound,
+  );
+}
+void start(root);
 
 // The macOS window keeps the title it opened with, so it follows the page's, such as "Adventure — Scene".
 if (isTauri()) {

@@ -116,6 +116,8 @@ export interface StoryPredicateDef<S> {
 }
 
 export interface FrameDef<S> {
+  // The payload's shape, so a save can be checked at load before a frame runs.
+  readonly schema?: z.ZodType;
   readonly run: (
     payload: JsonObject,
     context: SystemContext<S>,
@@ -154,6 +156,7 @@ export function frameHandler<P, S>(definition: {
   readonly run: (payload: P, context: SystemContext<S>) => SystemResult;
 }): FrameDef<S> {
   return {
+    schema: definition.schema,
     run: (payload, context) =>
       definition.run(definition.schema.parse(payload), context),
   };

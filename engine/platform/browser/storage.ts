@@ -43,30 +43,22 @@ export function createContentReader(baseUrl = ""): ContentReader {
   };
 }
 
-// Content is read-only, so saves live in the webview's own store and nothing can write to the content folders.
-// shortcut: about 5 MB and tied to this origin, move to real files once the app has a save folder (step 7).
-export function withSaves(
-  content: ContentReader,
-  saves: SaveStore,
-): Storage & { remove(path: string): Promise<void> } {
+// Where saves are kept: the webview's localStorage in a browser, files in the desktop app.
+// Paths are whole, such as "saves/x.json".
+export interface SaveFiles {
+  read(path: string): Promise<string | null>;
+  write(path: string, contents: string): Promise<void>;
+  list(): Promise<readonly string[]>;
+  remove(path: string): Promise<void>;
+}
+
+// shortcut: about 5 MB and tied to this origin, so only the browser build keeps its saves here.
+export function storeFiles(store: SaveStore): SaveFiles {
   return {
-    remove: (path) => {
-      if (!path.startsWith(SAVES)) {
-        return Promise.reject(new Error(`${path} is read-only`));
-      }
-      saves.removeItem(path);
-      return Promise.resolve();
-    },
-    read: (path) =>
-      path.startsWith(SAVES)
-        ? Promise.resolve(saves.getItem(path))
-        : content.read(path),
-    replaceAtomically: (path, contents) => {
-      if (!path.startsWith(SAVES)) {
-        return Promise.reject(new Error(`${path} is read-only`));
-      }
+    read: (path) => Promise.resolve(store.getItem(path)),
+    write: (path, contents) => {
       try {
-        saves.setItem(path, contents);
+        store.setItem(path, contents);
         return Promise.resolve();
       } catch (error) {
         return Promise.reject(
@@ -74,14 +66,68 @@ export function withSaves(
         );
       }
     },
-    list: (prefix) => {
-      if (!`${prefix}/`.startsWith(SAVES)) return content.list(prefix);
-      const paths: StorageEntry[] = [];
-      for (let index = 0; index < saves.length; index += 1) {
-        const path = saves.key(index);
-        if (path?.startsWith(SAVES)) paths.push({ path, symlink: false });
+    list: () => {
+      const paths: string[] = [];
+      for (let index = 0; index < store.length; index += 1) {
+        const path = store.key(index);
+        if (path?.startsWith(SAVES)) paths.push(path);
       }
       return Promise.resolve(paths);
     },
+    remove: (path) => {
+      store.removeItem(path);
+      return Promise.resolve();
+    },
   };
+}
+
+// Content is read-only, so saves are kept apart and nothing can write to the content folders.
+export function withSaveFiles(
+  content: ContentReader,
+  saves: SaveFiles,
+): Storage & { remove(path: string): Promise<void> } {
+  const refuse = (path: string) =>
+    Promise.reject(new Error(`${path} is read-only`));
+  return {
+    remove: (path) =>
+      path.startsWith(SAVES) ? saves.remove(path) : refuse(path),
+    read: (path) =>
+      path.startsWith(SAVES) ? saves.read(path) : content.read(path),
+    replaceAtomically: (path, contents) =>
+      path.startsWith(SAVES) ? saves.write(path, contents) : refuse(path),
+    list: async (prefix) =>
+      `${prefix}/`.startsWith(SAVES)
+        ? (await saves.list()).map((path) => ({ path, symlink: false }))
+        : content.list(prefix),
+  };
+}
+
+export function withSaves(
+  content: ContentReader,
+  saves: SaveStore,
+): Storage & { remove(path: string): Promise<void> } {
+  return withSaveFiles(content, storeFiles(saves));
+}
+
+// Kept with the saves, not in localStorage, which may be too full to take it. Not a .json file,
+// so the save list and pruning pass it by.
+const MOVED = `${SAVES}moved-from-localstorage`;
+
+// The desktop app kept saves in localStorage before it had a saves folder. They are copied there
+// once, never over a file, and the originals stay as a backup.
+export async function moveSavesToFiles(
+  from: SaveStore,
+  to: SaveFiles,
+): Promise<number> {
+  if ((await to.read(MOVED)) !== null) return 0;
+  const existing = new Set(await to.list());
+  let moved = 0;
+  for (const path of await storeFiles(from).list()) {
+    const contents = from.getItem(path);
+    if (contents === null || existing.has(path)) continue;
+    await to.write(path, contents);
+    moved += 1;
+  }
+  await to.write(MOVED, new Date().toISOString());
+  return moved;
 }
