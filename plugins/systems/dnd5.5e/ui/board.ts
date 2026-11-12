@@ -2,7 +2,12 @@ import { PLAYER_ACTOR } from "#sdk";
 import { AIM, parseOption } from "../core/combat/ids.ts";
 import { StateSchema } from "../core/state.ts";
 import type { BoardHost, BoardUpdate, ShellUpdate } from "./board-data.ts";
-import { type BoardContext, el, extraOf } from "./board-context.ts";
+import {
+  type BoardContext,
+  el,
+  extraOf,
+  showCaption,
+} from "./board-context.ts";
 import { placeCursor, wireInput } from "./board-input.ts";
 import {
   closeMenu,
@@ -235,14 +240,34 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     board.classList.add("playing");
     cells.replaceChildren();
     closeMenu(ctx);
-    for (let cue = ctx.queue.shift(); cue; cue = ctx.queue.shift()) {
-      await play(ctx, cue);
+    try {
+      for (let cue = ctx.queue.shift(); cue; cue = ctx.queue.shift()) {
+        // A cue that breaks is skipped, so the rest still play and the choices come back.
+        await play(ctx, cue).catch((error: unknown) => {
+          console.error("A board cue failed", cue, error);
+          // Clears what a cue leaves showing while it plays.
+          showCaption(ctx, "");
+          ctx.throwNow = null;
+          board.classList.remove("checking", "awaiting");
+          slot.classList.remove("dnd-overlay");
+          for (const node of board.querySelectorAll(".dnd-throw")) {
+            node.remove();
+          }
+          for (const token of ctx.tokens.values()) {
+            token.node.classList.remove("acting", "targeted");
+          }
+        });
+      }
+    } finally {
+      ctx.playing = false;
+      ctx.skipping = false;
+      board.classList.remove("playing");
+      try {
+        if (ctx.latest) sync(ctx.latest, true);
+      } finally {
+        for (const done of ctx.waiting.splice(0)) done();
+      }
     }
-    ctx.playing = false;
-    ctx.skipping = false;
-    board.classList.remove("playing");
-    if (ctx.latest) sync(ctx.latest, true);
-    for (const done of ctx.waiting.splice(0)) done();
   };
 
   return {
