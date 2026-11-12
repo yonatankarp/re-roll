@@ -73,6 +73,7 @@
     armorType: heavy,
     base: 16,
     addDex: false,
+    strength: 13,
   }
 - {
     id: "srd52:item/leather-armor",

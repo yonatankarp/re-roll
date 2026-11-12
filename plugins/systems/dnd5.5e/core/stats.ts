@@ -31,6 +31,7 @@ import {
   SubclassSchema,
   type Subclass,
   type CharacterBuild,
+  type ClassDef,
   type Spell,
   SpellSchema,
   WeaponSchema,
@@ -97,6 +98,13 @@ export interface Stats {
   readonly features: readonly string[];
   readonly resourceDefs: Feature["resources"];
   readonly pactMagic: boolean; // slots come back on a Short Rest
+  // Wearing armor without training: Disadvantage on Strength and Dexterity rolls, and no spellcasting.
+  readonly untrainedArmor: boolean;
+  readonly exhaustion: number; // each level takes 2 from every d20 test and 5 feet from speed
+  // From magic items worn, and attuned where they need it.
+  readonly itemBonuses: Readonly<
+    Record<"attack" | "spellAttack" | "savingThrows", number>
+  >;
 }
 
 export function passiveModifiers(
@@ -182,9 +190,21 @@ function collectFeatureData(
   return { passives, actions, resources };
 }
 
+export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
+  if (!classDef.weapons.includes(weapon.category)) return false;
+  const limit = classDef.martialWeaponProperties;
+  return (
+    weapon.category !== "martial" ||
+    !limit ||
+    weapon.properties.some((property) => limit.includes(property))
+  );
+}
+
 export function weaponActivation(
   weapon: Weapon,
   abilities: AbilityScores,
+  proficient = true,
+  damageBonus = 0,
 ): Activation {
   const ranged = weapon.properties.includes("ammunition");
   const finesse = weapon.properties.includes("finesse");
@@ -198,13 +218,17 @@ export function weaponActivation(
     targeting: { creatures: 1, range: ranged ? 80 : 5, side: "enemy" },
     resolution: {
       kind: "attack",
-      attack: { type: "weapon", ability },
+      attack: {
+        type: "weapon",
+        ability,
+        ...(proficient ? {} : { proficient }),
+      },
       damage: [
         {
           amount: {
             ...(weapon.damage.dice ? { dice: weapon.damage.dice } : {}),
             bonus: {
-              base: weapon.damage.flat ?? 0,
+              base: (weapon.damage.flat ?? 0) + damageBonus,
               add: [{ kind: "abilityMod", ability }],
             },
           },
@@ -272,6 +296,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   let scaling: Record<string, number> = {};
   let slots: readonly number[] = [];
   let subclass: Subclass | null = null;
+  const featIds = new Set<string>();
 
   // shortcut: spell slots come from the last class level, so multiclass slot tables need adding with multiclassing.
   for (const entry of build.levels) {
@@ -296,6 +321,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         for (const id of answer.values) featureIds.add(id);
       } else if (answer.kind === "feats") {
         for (const id of answer.values) {
+          featIds.add(id);
           for (const grant of lookup(access, FeatSchema, id).grants) {
             featureIds.add(grant);
           }
@@ -321,14 +347,62 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     0,
   );
 
-  const armorBases: number[] = [];
-  let flatBonus = 0;
-  const actions: KnownAction[] = [];
-  const attuned = actor.attuned ?? [];
+  // shortcut: training comes from every class taken, while a multiclass really gets only some of a later class's.
+  // shortcut: a Protector cleric's or Warden druid's training isn't given, since the order chosen isn't recorded as its own feature.
+  const classes = Object.keys(classLevels).map((id) =>
+    lookup(access, ClassSchema, id),
+  );
+  const trained = new Set<string>(classes.flatMap((def) => def.armor));
+  for (const id of featIds) {
+    if (id.endsWith("lightly-armored")) trained.add("light").add("shield");
+    if (id.endsWith("moderately-armored")) trained.add("medium").add("shield");
+    if (id.endsWith("heavily-armored")) trained.add("heavy");
+  }
   // One action per kind of item, so a second dagger or potion doesn't list twice.
-  for (const itemId of new Set(equipped(actor))) {
-    const item = lookup(access, ItemSchema, itemId);
-    const usable = itemAction(itemId, item, access, firstClass.spellcasting);
+  const worn = [...new Set(equipped(actor))].map(
+    (itemId) => [itemId, lookup(access, ItemSchema, itemId)] as const,
+  );
+  const untrainedArmor = worn.some(
+    ([, item]) => item.type === "armor" && !trained.has(item.armorType),
+  );
+  const tooHeavy = worn.some(
+    ([, item]) => item.type === "armor" && abilities.str < (item.strength ?? 0),
+  );
+
+  const attuned = actor.attuned ?? [];
+  const magic = {
+    ac: 0,
+    attack: 0,
+    damage: 0,
+    savingThrows: 0,
+    spellAttack: 0,
+  };
+  for (const [itemId, item] of worn) {
+    if (item.type !== "magicItem") continue;
+    if (item.attunement && !attuned.includes(itemId)) continue;
+    // shortcut: the inventory doesn't record which version of an item was found, so one with versions counts as its first.
+    for (const { to, amount } of item.bonuses ??
+      item.variants?.[0]?.bonuses ??
+      []) {
+      // shortcut: a magic weapon isn't a weapon to swing here, so its bonus goes to the weapons carried, the best one once.
+      magic[to] =
+        to === "attack" || to === "damage"
+          ? Math.max(magic[to], amount)
+          : magic[to] + amount;
+    }
+  }
+
+  const armorBases: number[] = [];
+  const flatBonus = magic.ac;
+  let shield = 0;
+  const actions: KnownAction[] = [];
+  for (const [itemId, item] of worn) {
+    const usable = itemAction(
+      itemId,
+      item,
+      access,
+      untrainedArmor ? undefined : firstClass.spellcasting,
+    );
     if (usable) actions.push(usable);
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
@@ -336,22 +410,21 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       const allowed = parsed.addDex ? Math.min(dex, parsed.maxDex ?? dex) : 0;
       armorBases.push(parsed.base + allowed);
     } else if (item.type === "shield") {
-      flatBonus += item.bonus;
+      // Only one shield is held, and it protects only with training.
+      if (trained.has("shield")) shield = Math.max(shield, item.bonus);
     } else if (item.type === "weapon") {
+      const weapon = WeaponSchema.parse(item);
       actions.push({
         id: `weapon:${itemId}`,
         name: item.name,
-        activation: weaponActivation(WeaponSchema.parse(item), abilities),
+        activation: weaponActivation(
+          weapon,
+          abilities,
+          classes.some((def) => weaponProficient(def, weapon)),
+          magic.damage,
+        ),
         spellLevel: null,
       });
-    } else if (
-      item.type === "magicItem" &&
-      (!item.attunement || attuned.includes(itemId))
-    ) {
-      // shortcut: only AC bonuses apply, not saving throw or weapon bonuses, nor a variant's own numbers.
-      for (const bonus of item.bonuses ?? []) {
-        if (bonus.to === "ac") flatBonus += bonus.amount;
-      }
     }
   }
 
@@ -363,7 +436,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
-  for (const spellId of knownSpells) {
+  for (const spellId of untrainedArmor ? [] : knownSpells) {
     const spell: Spell = lookup(access, SpellSchema, spellId);
     if (spell.activation && doesSomething(spell.activation.resolution)) {
       actions.push({
@@ -391,7 +464,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     maxHp,
     ac: bestAc(actor, abilities, {
       armorBases,
-      flatBonus,
+      flatBonus: flatBonus + shield,
       passives: fromFeatures.passives,
     }),
     speed: encumberedSpeed(
@@ -404,11 +477,26 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     spellAbility: firstClass.spellcasting?.ability ?? null,
     slots,
     resources: {},
-    passives: fromFeatures.passives.map((passive) =>
-      passive.kind === "extraDamage"
-        ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
-        : passive,
-    ),
+    passives: [
+      ...fromFeatures.passives.map((passive) =>
+        passive.kind === "extraDamage"
+          ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
+          : passive,
+      ),
+      // Every weapon attack uses Strength or Dexterity.
+      // shortcut: a save can't be limited to Strength and Dexterity without a change in combat.ts, so saves aren't affected yet.
+      ...(untrainedArmor
+        ? [
+            {
+              kind: "modifier" as const,
+              modifier: {
+                kind: "disadvantage" as const,
+                on: "attacks" as const,
+              },
+            },
+          ]
+        : []),
+    ],
     actions,
     multiattack: Math.max(
       ...[...featureIds].map(attacksFrom),
@@ -417,15 +505,24 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ),
     routines: null,
     creatureType: species.creatureType.toLowerCase(),
-    initiative: abilityModifier(abilities.dex),
+    initiative: abilityModifier(abilities.dex) - 2 * actor.exhaustion,
     scaling,
     features: [...featureIds],
     resourceDefs: fromFeatures.resources,
     pactMagic: [...featureIds].some((id) => id.endsWith("pact-magic")),
+    untrainedArmor,
+    exhaustion: actor.exhaustion,
+    itemBonuses: magic,
   };
   return {
     ...partial,
-    speed: partial.speed + speedBonus(partial),
+    speed: Math.max(
+      0,
+      partial.speed +
+        speedBonus(partial) -
+        (tooHeavy ? 10 : 0) -
+        5 * actor.exhaustion,
+    ),
     resources: Object.fromEntries(
       fromFeatures.resources.map((resource) => [
         resource.id,
@@ -454,7 +551,14 @@ function itemAction(
   access: ContentAccess,
   spellcasting: unknown,
 ): KnownAction | null {
-  if ((item.type === "gear" || item.type === "magicItem") && item.healing) {
+  // shortcut: a potion with versions heals as its first, since the inventory doesn't say which was found.
+  const healing =
+    item.type === "gear"
+      ? item.healing
+      : item.type === "magicItem"
+        ? (item.healing ?? item.variants?.[0]?.healing)
+        : undefined;
+  if (healing) {
     return {
       id: `item:${itemId}`,
       name: `Drink ${item.name}`,
@@ -464,7 +568,7 @@ function itemAction(
         resolution: {
           kind: "automatic",
           damage: [],
-          effects: [{ kind: "heal", amount: item.healing }],
+          effects: [{ kind: "heal", amount: healing }],
         },
       },
       spellLevel: null,
@@ -581,7 +685,7 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
       flatBonus: 0,
       passives: [...monster.passives, ...fromFeatures.passives],
     }),
-    speed: monster.speed,
+    speed: Math.max(0, monster.speed - 5 * actor.exhaustion),
     savingThrows: monster.saves,
     skills: [],
     spellAbility: null,
@@ -609,11 +713,14 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
     ),
     routines: multiattackRoutines(monster),
     creatureType: monster.creatureType?.toLowerCase(),
-    initiative: monster.initiative,
+    initiative: monster.initiative - 2 * actor.exhaustion,
     scaling: {},
     features: monster.features,
     resourceDefs: fromFeatures.resources,
     pactMagic: false,
+    untrainedArmor: false,
+    exhaustion: actor.exhaustion,
+    itemBonuses: { attack: 0, spellAttack: 0, savingThrows: 0 },
   };
 }
 
@@ -662,15 +769,28 @@ export function attackBonus(
   stats: Stats,
 ): number {
   const { attack } = resolution;
-  if (attack.flatBonus !== undefined) return attack.flatBonus;
+  const exhaustion = 2 * stats.exhaustion;
+  if (attack.flatBonus !== undefined) return attack.flatBonus - exhaustion;
   const ability = attack.type === "spell" ? stats.spellAbility : attack.ability;
-  return stats.proficiency + (ability ? modifierFor(stats, ability) : 0);
+  const proficiency = attack.proficient === false ? 0 : stats.proficiency;
+  const item =
+    attack.type === "spell"
+      ? stats.itemBonuses.spellAttack
+      : stats.itemBonuses.attack;
+  return (
+    proficiency +
+    (ability ? modifierFor(stats, ability) : 0) +
+    item -
+    exhaustion
+  );
 }
 
 export function saveBonus(stats: Stats, ability: Ability): number {
   return (
     modifierFor(stats, ability) +
-    (stats.savingThrows.includes(ability) ? stats.proficiency : 0)
+    (stats.savingThrows.includes(ability) ? stats.proficiency : 0) +
+    stats.itemBonuses.savingThrows -
+    2 * stats.exhaustion
   );
 }
 

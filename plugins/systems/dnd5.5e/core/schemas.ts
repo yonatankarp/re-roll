@@ -234,6 +234,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       type: z.enum(["weapon", "spell"]),
       ability: AbilitySchema.optional(),
       flatBonus: z.number().int().optional(),
+      proficient: z.boolean().optional(), // false for a weapon the wielder has no training with
     }),
     damage: z.array(DamageSchema).min(1),
     onHit: LeafEffectsSchema,
@@ -533,6 +534,7 @@ export const ArmorSchema = ItemBaseSchema.extend({
   base: z.number().int(),
   addDex: z.boolean(),
   maxDex: z.number().int().optional(),
+  strength: z.number().int().optional(), // a lower Strength score costs 10 feet of speed
 }).strict();
 export type Armor = z.infer<typeof ArmorSchema>;
 

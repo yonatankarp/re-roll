@@ -68,9 +68,10 @@ function parseArmor(
     };
   }
   const maxDex = /\(max (\d+)\)/.exec(ac)?.[1];
+  const minStrength = /^Str (\d+)/.exec(strength)?.[1];
   return {
     slug,
-    notes: [strength, stealth]
+    notes: [stealth]
       .filter((item) => item !== "—")
       .map((item) => `not held: ${item}`),
     entry: {
@@ -80,6 +81,7 @@ function parseArmor(
       base: Number(/^\d+/.exec(ac)?.[0]),
       addDex: ac.includes("Dex modifier"),
       ...(maxDex ? { maxDex: Number(maxDex) } : {}),
+      ...(minStrength ? { strength: Number(minStrength) } : {}),
     },
   };
 }

@@ -522,6 +522,7 @@ function applyDamage(
   const hp = Math.max(0, actor.hp - remaining);
   const hitWhileDown =
     wasDown && remaining > 0 && actor.side === "party" ? (critical ? 2 : 1) : 0;
+  const unsettled = hitWhileDown > 0 && isStable(actor);
   return {
     ...actor,
     activeEffects:
@@ -530,10 +531,13 @@ function applyDamage(
         : actor.activeEffects,
     tempHp: actor.tempHp - absorbed,
     hp,
+    // Becoming Stable reset both counts, so damage that ends it starts death saves from nothing.
     deathSaves: {
-      ...actor.deathSaves,
+      successes: unsettled ? 0 : actor.deathSaves.successes,
       // Massive damage kills outright, which three failures also represent.
-      failures: massive ? 3 : actor.deathSaves.failures + hitWhileDown,
+      failures: massive
+        ? 3
+        : (unsettled ? 0 : actor.deathSaves.failures) + hitWhileDown,
     },
   };
 }
