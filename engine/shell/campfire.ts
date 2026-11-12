@@ -137,6 +137,7 @@ export function campfire(
         const choice = action(item.label, () => {
           pick(item.id);
         });
+        choice.dataset.choice = item.id;
         if (item.detail) {
           choice.replaceChildren(
             node("strong", "", item.label),
@@ -160,7 +161,7 @@ export function campfire(
       show(
         "Resting",
         decision.prompt,
-        choices(decision.options, (id) => {
+        choices(view.choices, (id) => {
           act(async () => {
             await game.answer(id);
             carryOn(sceneDecision, before);

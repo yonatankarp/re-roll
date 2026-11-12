@@ -66,6 +66,7 @@ export function drawCreation(
       answer(choice.id);
     });
     pick.className = "creation-pick";
+    pick.dataset.choice = choice.id;
     pick.append(
       ...(art ? [picture(ctx.game, art, "", "creation-art")] : []),
       el("strong", { text: choice.label }),
@@ -96,6 +97,7 @@ export function drawCreation(
     input.spellcheck = false;
     const go = el("button", { class: "begin", text: "Begin the adventure" });
     go.type = "submit";
+    go.dataset.choice = suggested;
     const form = el(
       "form",
       { class: "creation-name" },

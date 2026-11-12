@@ -11,7 +11,6 @@ export function drawSheets(
   cues: GameView["cues"],
   firstDraw: boolean,
 ): void {
-  const { decision } = view;
   const [playerSheet] = view.sheets;
   page.hud.hidden = !playerSheet;
   // The bar shows what the board has shown, so a hit doesn't land on the HP before the die does.
@@ -56,11 +55,13 @@ export function drawSheets(
       panel,
       renderSheet(item, true, (row) => {
         const { option } = row;
-        // Only on the sheet of whoever the decision is for, so a companion's row can't answer for the player.
-        const offered =
-          decision?.actor === item.id &&
-          decision.options.some((o) => o.id === option?.id);
-        if (!option || (!offered && !option.hint)) return [];
+        if (!option) return [];
+        const offered = view.choices.some(
+          (choice) =>
+            choice.where === "sheet" &&
+            choice.sheet === item.id &&
+            choice.id === option.id,
+        );
         if (!offered) {
           // Shown but not offered, so the player sees what can change, and when.
           const later = button(option.label, () => undefined);
@@ -81,6 +82,7 @@ export function drawSheets(
           });
         });
         pick.className = "row-option";
+        pick.dataset.choice = option.id;
         pick.setAttribute("aria-label", `${option.label} ${row.label}`);
         // Inside a row's summary, the button shouldn't also open the row.
         pick.addEventListener("click", (event) => {

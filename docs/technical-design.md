@@ -996,7 +996,7 @@ A failed bot run prints its seed and input list, so any failure can be reproduce
 
 The bot plays at the engine level, so it can't see what the page shows. Headless play goes through `createGame` in `engine/shell/session.ts`, the same game layer as the UI, with no DOM. `engine/tools/headless.ts` has the driver, and `app/cli/headless-game.ts` wires it to Node storage, the systems and their UIs.
 
-**What counts as on screen** is what `shell.ts` draws from the view. It is the option list, the campfire's rests, and the sheet row buttons, such as Equip. `view()` keeps a row's button only on the sheet of whoever the decision is for, and only while the decision offers it. The driver chooses by a choice's number on screen, its id or its label, and refuses anything that isn't on screen. `act(...ids)` answers ids one after another, as the combat board does, such as `move` then `3,4`. The board itself is only a shortcut: token menus offer the list's own options, and every square it lights is offered once Move is chosen. Dice are rolled inside each answer, so rolling means choosing the option, such as a check or a death save. The board's throw is only animation. Saves, the save list, loading, deleting and restarting are the session's own.
+**What counts as on screen** is the view's `choices`, built once in `view()` by `engine/shell/choices.ts`, which the page draws from too. It is the option list, the campfire's rests, the sheet row buttons, such as Equip, a merchant's cards, and a step of making the character; the last two stand in for the option list. A row's button is a choice only on the sheet of whoever the decision is for, and only while the decision offers it; a row with a hint stays on the sheet otherwise, drawn disabled. A story choice that surely ends the adventure while another on the list carries on is marked `endsEarly`, and the page asks before taking it. The driver chooses by a choice's number on screen, its id or its label, and refuses anything that isn't on screen. `act(...ids)` answers ids one after another, as the combat board does, such as `move` then `3,4`. The board itself is only a shortcut: token menus offer the list's own options, and every square it lights is offered once Move is chosen. Dice are rolled inside each answer, so rolling means choosing the option, such as a check or a death save. The board's throw is only animation. Saves, the save list, loading, deleting and restarting are the session's own.
 
 **Stuck states** are reported with every screen as `problems`:
 
@@ -1004,6 +1004,8 @@ The bot plays at the engine level, so it can't see what the page shows. Headless
 - a choice shown that the decision doesn't offer;
 - an option the decision offers that nothing shows;
 - no decision, before the story has ended.
+
+`tests/ui/agree.e2e.ts` loads the page's autosave headless at the character choice, the first scene with its rests, and a turn in the fight, and checks the page's clickable choices match the headless screen's.
 
 `tests/headless.test.ts` plays `goblin-ambush` through a fight with a move and an attack, treasure, equipping from the sheet, buying and selling at Tam's camp, a rest, a save and load, an ending and a restart. It also plays random on-screen choices through every adventure. Book adventures run only where `books/` exists.
 

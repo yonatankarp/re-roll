@@ -87,6 +87,11 @@ export function drawDecision(
     page.showAll = false;
     page.openGroup = null;
   }
+  const endsEarly = new Set(
+    view.choices
+      .filter((choice) => choice.endsEarly)
+      .map((choice) => choice.id),
+  );
   const optionRow = (option: OptionView, index: number): HTMLElement => {
     const row = el(
       "div",
@@ -100,11 +105,11 @@ export function drawDecision(
           });
         };
         // A choice that ends the adventure early asks first; nothing is chosen until it's confirmed.
-        if (page.ctx.game.endsEarly(option.id))
-          confirmEnding(page, option, take);
+        if (endsEarly.has(option.id)) confirmEnding(page, option, take);
         else take();
       }),
     );
+    row.firstElementChild?.setAttribute("data-choice", option.id);
     row.style.setProperty("--i", String(index));
     if (option.detail) {
       const info = el("p", { class: "option-detail", text: option.detail });

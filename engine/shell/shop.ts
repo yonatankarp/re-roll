@@ -87,6 +87,7 @@ export function shopPanel(
     trade.disabled = ware.option === null;
     const { option } = ware;
     if (option !== null) {
+      trade.dataset.choice = option;
       trade.addEventListener("click", () => {
         refocus = ware.item;
         coin();
@@ -133,6 +134,7 @@ export function shopPanel(
       shown = view;
       element.hidden = view === null;
       if (!view) return;
+      leave.dataset.choice = view.leave;
       if (opening) tab = "buy";
       draw();
     },
