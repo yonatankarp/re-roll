@@ -298,6 +298,24 @@ describe("how the party protects itself and spends free boosts", () => {
       "tactic:dodge",
     );
     expect(decide(run, fight(caster, ...foes))).toContain("fire-bolt");
+    // Foes that can't act this round are no reason to Dodge: it would wait on them forever.
+    const asleep = foes.map((foe) => ({
+      ...foe,
+      activeEffects: [
+        {
+          sourceId: "spell:sleep",
+          casterId: PLAYER_ACTOR,
+          ends: "spellDuration" as const,
+          modifier: {
+            kind: "condition" as const,
+            condition: "unconscious" as const,
+          },
+        },
+      ],
+    }));
+    expect(decide(run, fight({ ...caster, hp: 3 }, ...asleep))).toContain(
+      "fire-bolt",
+    );
   });
 
   it("spends a luck point before its attack, never after", async () => {

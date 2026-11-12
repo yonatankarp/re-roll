@@ -19,6 +19,7 @@ import {
 } from "./stats.ts";
 import type { Condition, LeafEffect, Modifier, Resolution } from "./schemas.ts";
 import { finalDamage } from "./rules.ts";
+import type { Square } from "./grid.ts";
 import { dodging } from "./tactics.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX } from "./combat/ids.ts";
@@ -34,6 +35,7 @@ import {
   hasPassive,
   inReach,
   meleeReach,
+  moveSquares,
   slotLevelFor,
   targetCount,
   within5,
@@ -401,11 +403,32 @@ export function makeJudge(context: Context, side: Actor): Judge {
     );
   }
 
+  // Whether a foe could attack the creature on its next turn: awake, and with a harmful action that reaches it
+  // now or from a square it can walk to.
+  const canReach = (foe: Actor, target: Actor): boolean => {
+    if (hasCondition(foe, ...INCAPACITATING)) return false;
+    if (!foe.position || !target.position) return true;
+    const own = stats(foe);
+    const harmful = own.actions.filter(harms);
+    const reachesFrom = (square: Square): boolean =>
+      harmful.some((action) => {
+        const moved = { ...foe, position: square };
+        return inReach(action, moved, state, context).some(
+          (item) => item.id === target.id,
+        );
+      });
+    return (
+      reachesFrom(foe.position) ||
+      moveSquares(foe, state, own).some(({ square }) => reachesFrom(square))
+    );
+  };
+
   // Dodge spares about two hits in five, worth something to whoever the foes go for: the one lowest on HP.
   const dodgeWorth = (actor: Actor): number => {
     const lowest = Math.min(...party.map((item) => item.hp));
     if (!actor.budget.action || actor.hp > lowest) return 0;
-    return keepUpWorth(actor, 0.4 * sum(foes, threat));
+    const coming = foes.filter((foe) => canReach(foe, actor));
+    return keepUpWorth(actor, 0.4 * sum(coming, threat));
   };
 
   const rounds = (
