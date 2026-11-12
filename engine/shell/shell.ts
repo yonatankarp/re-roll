@@ -1,3 +1,4 @@
+import { loadScreen } from "./load-screen.ts";
 import type { Game, GameView } from "./session.ts";
 import type {
   Board,
@@ -13,7 +14,7 @@ import type {
 // A system's own encounter view, such as a combat board, keyed by system id. It draws its own DOM in the slot.
 export type BoardFactory = (slot: HTMLElement, host: BoardHost) => Board;
 
-function el<K extends keyof HTMLElementTagNameMap>(
+export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   options: { readonly class?: string; readonly text?: string } = {},
   ...children: readonly Node[]
@@ -25,7 +26,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function button(label: string, onClick: () => void): HTMLButtonElement {
+export function button(label: string, onClick: () => void): HTMLButtonElement {
   const node = el("button", { text: label });
   node.type = "button";
   node.addEventListener("click", onClick);
@@ -59,7 +60,7 @@ function soundToggle(): HTMLButtonElement {
 }
 
 // A picture that is missing or won't load shows nothing at all.
-function picture(
+export function picture(
   game: Game,
   path: string,
   alt: string,
@@ -494,30 +495,6 @@ export function mountShell(
       }
     });
 
-    const saveRow = (save: (typeof saves)[number]): HTMLElement => {
-      const load = button(save.label, () => {
-        act(async () => {
-          await game.load(save.path);
-          showGame();
-        });
-      });
-      // A second press confirms, which also works where the webview has no confirm dialog.
-      let armed = false;
-      const remove = button("Delete", () => {
-        if (!armed) {
-          armed = true;
-          remove.textContent = "Really delete?";
-          return;
-        }
-        act(async () => {
-          await game.deleteSave(save.path);
-          await showMenu();
-        });
-      });
-      remove.setAttribute("aria-label", `Delete ${save.label}`);
-      return el("div", { class: "row" }, load, remove);
-    };
-
     // Saves come newest first, so the first is the game to carry on with.
     const [newest] = saves;
     const carryOn = newest
@@ -540,21 +517,20 @@ export function mountShell(
         "section",
         { class: "menu" },
         ...carryOn,
-        heading,
-        filter,
-        ...groups,
         ...(saves.length > 0
           ? [
               el(
-                "details",
-                { class: "saves" },
-                el("summary", {
-                  text: `Saved games (${String(saves.length)})`,
+                "div",
+                { class: "options saves" },
+                button(`Load a game (${String(saves.length)})`, () => {
+                  act(() => showLoad(showMenu));
                 }),
-                el("div", { class: "options" }, ...saves.map(saveRow)),
               ),
             ]
           : []),
+        heading,
+        filter,
+        ...groups,
         ...(books.length > 0
           ? [
               el(
@@ -568,6 +544,34 @@ export function mountShell(
           : []),
       ),
     );
+    focusNext = heading;
+  };
+
+  // Opened from the main menu or a game, and Back returns there.
+  const showLoad = async (back: () => void | Promise<void>): Promise<void> => {
+    const saves = await game.listSaves();
+    actions.replaceChildren(
+      button("Back", () => {
+        act(async () => {
+          await back();
+        });
+      }),
+    );
+    const { node, heading } = loadScreen(game, saves, {
+      load: (save) => {
+        act(async () => {
+          await game.load(save.path);
+          showGame();
+        });
+      },
+      remove: (save) => {
+        act(async () => {
+          await game.deleteSave(save.path);
+          await showLoad(back);
+        });
+      },
+    });
+    screen.replaceChildren(node);
     focusNext = heading;
   };
 
@@ -771,9 +775,13 @@ export function mountShell(
           gameMenu.open = false;
           act(async () => {
             const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-            const path = await game.save(stamp);
-            say(`Saved as ${path}.`);
+            await game.save(stamp);
+            say("Game saved.");
           });
+        }),
+        button("Load game", () => {
+          gameMenu.open = false;
+          act(() => showLoad(showGame));
         }),
         restartButton,
         soundToggle(),

@@ -1377,3 +1377,69 @@ button:active {
     background: #2c2319;
   }
 }
+
+/* The Load screen: one card per save, newest first. */
+.save-cards {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.save-card {
+  position: relative;
+  animation: rise 0.3s ease both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+.save-open {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  width: 100%;
+  padding: 10px 120px 10px 10px;
+}
+
+.save-art {
+  flex: none;
+  width: 96px;
+  height: 64px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.save-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.save-text strong {
+  font: 1.25rem/1.1 var(--font-head);
+  color: var(--accent);
+}
+
+.save-facts,
+.save-text small {
+  font: 0.85rem var(--font-ui);
+  color: var(--muted);
+}
+
+.save-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-height: 32px;
+  padding: 4px 10px;
+  font: 0.85rem var(--font-caps);
+  color: var(--muted);
+}
+
+.save-delete.armed {
+  color: var(--accent-ink);
+  background: var(--error);
+  border-color: var(--error);
+}

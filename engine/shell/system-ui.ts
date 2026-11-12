@@ -37,6 +37,7 @@ export interface SheetView {
   readonly id: string; // the actor it shows
   readonly title: string;
   readonly subtitle?: string;
+  readonly level?: number; // shown on save cards
   readonly summary?: readonly SheetRow[]; // the few numbers kept in the top bar, such as HP
   readonly tags?: readonly string[]; // such as conditions
   readonly sections: readonly SheetSection[];
