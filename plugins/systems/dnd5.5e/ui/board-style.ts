@@ -151,6 +151,22 @@ const BOARD_CSS = `
   pointer-events: none;
 }
 .dnd-token[data-level="mid"] .dnd-ring { --hp-color: #e3b341; }
+/* A foe's ring starts bone-white rather than green, so allies and foes differ in more than hue. */
+.dnd-token[data-side="enemy"][data-level="high"] .dnd-ring { --hp-color: #ece3cf; }
+/* A foe also carries a dark diamond under its token: a shape, for players who can't tell red from green. */
+.dnd-foe {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--disc) * -0.08);
+  width: max(9px, calc(var(--disc) * 0.2));
+  height: max(9px, calc(var(--disc) * 0.2));
+  box-sizing: border-box;
+  transform: translateX(-50%) rotate(45deg);
+  border: 2px solid #ece3cf;
+  background: #3a120c;
+  pointer-events: none;
+}
+.dnd-token[data-side="party"] .dnd-foe { display: none; }
 .dnd-token[data-level="low"] .dnd-ring { --hp-color: #e0533f; }
 .dnd-token.down .dnd-ring { opacity: 0; }
 /* The name, HP and conditions, on hover or under the keyboard cursor. */
@@ -193,8 +209,17 @@ const BOARD_CSS = `
 .dnd-float.damage.crit { color: #ffd84d; font-size: 1.8rem; }
 .dnd-float.heal { color: #6dff9b; }
 .dnd-float.hit { color: #ffd36b; font-size: 1rem; }
-.dnd-float.miss { color: #d8d4cc; font-size: 1rem; }
-.dnd-float.status { color: #c9b3ff; font-size: 0.9rem; text-transform: capitalize; }
+.dnd-float.miss { color: #ece6da; font-size: 1rem; }
+.dnd-float.status { color: #d9caff; font-size: 0.9rem; text-transform: capitalize; }
+/* Words, unlike the big numbers, sit on a dark pill so they read on parchment and light maps. */
+.dnd-float.hit,
+.dnd-float.miss,
+.dnd-float.status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(20 12 6 / 85%);
+  text-shadow: none;
+}
 .dnd-float.legendary {
   padding: 2px 10px;
   border: 1px solid #ffd36b;

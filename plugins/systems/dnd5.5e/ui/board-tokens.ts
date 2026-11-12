@@ -57,9 +57,9 @@ export function float(
       still(ctx)
         ? // With reduced motion it stands above the token and fades, without rising.
           [
-            { transform: "translate(-50%, -24px)", opacity: 1 },
-            { transform: "translate(-50%, -24px)", opacity: 1, offset: 0.8 },
-            { transform: "translate(-50%, -24px)", opacity: 0 },
+            { transform: above, opacity: 1 },
+            { transform: above, opacity: 1, offset: 0.8 },
+            { transform: above, opacity: 0 },
           ]
         : [
             { transform: "translate(-50%, 0) scale(0.6)", opacity: 0 },
@@ -133,7 +133,7 @@ export function tokenFor(ctx: BoardContext, actor: Combatant): Token {
   const shield = el("span", "dnd-shield");
   shield.hidden = true;
   const node = el("div", "dnd-token");
-  node.append(el("span", "dnd-ring"), disc, tip, shield);
+  node.append(el("span", "dnd-ring"), disc, el("span", "dnd-foe"), tip, shield);
   node.dataset.side = sideOf(actor);
   node.dataset.id = actor.id;
   ctx.field.append(node);
