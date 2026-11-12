@@ -130,6 +130,14 @@ export function healSound(): void {
   });
 }
 
+// Coins poured into the purse, for the moment treasure is found.
+export function coinSound(): void {
+  [2093, 2794, 2349, 3136].forEach((pitch, step) => {
+    tone("triangle", pitch, pitch * 0.98, step * 0.06, 0.22, 0.25);
+  });
+  noise("highpass", 5000, 8000, 0, 0.06, 0.15);
+}
+
 export function castSound(): void {
   [1319, 1760, 2093, 2637].forEach((pitch, step) => {
     tone("sine", pitch, pitch * 1.01, step * 0.05, 0.3, 0.2);
@@ -183,9 +191,14 @@ export function cueSound(cue: DndCue): void {
     case "end":
       fightEndSound();
       return;
+    case "legendary":
+    case "lair":
+      castSound();
+      return;
     case "move":
     case "turn":
     case "status":
+    case "resist":
       return;
   }
 }

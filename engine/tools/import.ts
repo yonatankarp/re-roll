@@ -6,8 +6,8 @@ import type { GameSystem, ImportKind, ImportSource } from "../kernel/system.ts";
 import type { ModelClient } from "../prep/model.ts";
 import { runJob } from "../prep/run-job.ts";
 
-const OUTPUT_ROOT = "private/import";
-const RULES_ROOT = "private/rules";
+const OUTPUT_ROOT = "books/import";
+const RULES_ROOT = "books/rules";
 
 const DraftFileSchema = z.object({
   sourceHash: z.string(),
@@ -335,6 +335,7 @@ export interface ApproveRequest {
 export interface ApproveResult {
   readonly approved: readonly string[];
   readonly missing: readonly string[];
+  readonly kept: readonly string[]; // approved entries with fields the draft lacks, such as hand-added mechanics
 }
 
 // Drafts never load in the game. Approving copies them to where the plugin loader can see them.
@@ -370,16 +371,28 @@ export async function approveImport(
   }
 
   const approved: string[] = [];
+  const kept: string[] = [];
   for (const slug of wanted) {
     if (!available.includes(slug)) continue;
     const text = await storage.read(`${draftRoot}/${slug}.yaml`);
     if (text === null) continue;
     const draft = DraftFileSchema.parse(parse(text));
-    await storage.replaceAtomically(
-      `${pluginRoot}/${folder}/${slug}.yaml`,
-      stringify([draft.entry]),
-    );
+    const target = `${pluginRoot}/${folder}/${slug}.yaml`;
+    const old = await storage.read(target);
+    const [existing] = old === null ? [] : (parse(old) as unknown[]);
+    // A field only the approved entry has was added by hand after approval, so re-importing would lose it.
+    if (
+      typeof existing === "object" &&
+      existing !== null &&
+      Object.keys(existing).some(
+        (key) => !Object.hasOwn(draft.entry as object, key),
+      )
+    ) {
+      kept.push(slug);
+      continue;
+    }
+    await storage.replaceAtomically(target, stringify([draft.entry]));
     approved.push(slug);
   }
-  return { approved, missing };
+  return { approved, missing, kept };
 }

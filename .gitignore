@@ -1,8 +1,11 @@
 node_modules/
-private/
+private
 .DS_Store
 out/
 saves/
 app/desktop/src-tauri/target/
 app/desktop/src-tauri/gen/
 .claude/worktrees/
+books
+.env*
+coverage/

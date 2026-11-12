@@ -5,7 +5,9 @@ import {
   dndEvent,
   freshActor,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
+import { leadGroups } from "../engine/shell/session.ts";
 import { dndCue } from "../plugins/systems/dnd5.5e/ui/cues.ts";
+import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 
 const access = {} as ContentAccess; // cues read nothing from content
 
@@ -92,5 +94,187 @@ describe("combat board cues", () => {
         access,
       ),
     ).toBeNull();
+  });
+
+  it("shows legendary actions, Legendary Resistance left and lair actions", () => {
+    const tyrant = {
+      ...freshActor({
+        id: "goblin",
+        name: "Tyrant",
+        side: "enemy",
+        source: { kind: "monster", statBlockId: "test:monster/tyrant" },
+        hp: 50,
+        inventory: [],
+      }),
+      resourcesSpent: { legendaryResistance: 1 },
+    };
+    const state: DndState = { ...stateWith(50), actors: { goblin: tyrant } };
+    const withLegend = {
+      content: (id: string) =>
+        id === "test:monster/tyrant"
+          ? {
+              id,
+              name: "Tyrant",
+              ac: 12,
+              hp: 50,
+              speed: 30,
+              abilities: {
+                str: 10,
+                dex: 10,
+                con: 10,
+                int: 10,
+                wis: 10,
+                cha: 10,
+              },
+              proficiency: 2,
+              initiative: 0,
+              legendaryResistance: { perDay: 3 },
+            }
+          : undefined,
+      contentIds: () => [],
+    } as ContentAccess;
+    const cue = (event: Parameters<typeof dndCue>[0]) =>
+      dndCue(event, state, state, withLegend);
+    expect(
+      cue(
+        dndEvent("dnd5.5e:legendaryActionTaken", {
+          actor: "goblin",
+          name: "Snap",
+          cost: 1,
+        }),
+      ),
+    ).toEqual({ kind: "legendary", actor: "goblin", label: "Snap" });
+    expect(
+      cue(dndEvent("dnd5.5e:legendaryResistanceUsed", { actor: "goblin" })),
+    ).toEqual({ kind: "resist", actor: "goblin", left: 2 });
+    expect(
+      cue(
+        dndEvent("dnd5.5e:lairActionTaken", {
+          actor: "goblin",
+          name: "Falling Rocks",
+        }),
+      ),
+    ).toEqual({ kind: "lair", actor: "goblin", label: "Falling Rocks" });
+  });
+});
+
+describe("the roll history", () => {
+  const roll = (kind: Parameters<typeof dndEvent>[0], payload: never) =>
+    dndUi.roll(dndEvent(kind, payload), stateWith(10));
+
+  it("shows an attack's die and bonus against the AC, by name", () => {
+    expect(
+      roll("dnd5.5e:rollReported", {
+        actor: "goblin",
+        against: "hero",
+        natural: 14,
+        total: 19,
+        target: 15,
+        success: true,
+        label: "Scimitar",
+      } as never),
+    ).toEqual({
+      actor: "Goblin",
+      label: "Scimitar → hero", // the hero isn't in this state, so it keeps its id
+      math: "14 + 5 = 19 vs AC 15",
+      success: true,
+    });
+  });
+
+  it("says when a natural 1 misses whatever the total", () => {
+    expect(
+      roll("dnd5.5e:rollReported", {
+        actor: "goblin",
+        against: "hero",
+        natural: 1,
+        total: 16,
+        target: 15,
+        success: false,
+        label: "Scimitar",
+      } as never)?.math,
+    ).toBe("1 + 15 = 16 vs AC 15, natural 1");
+  });
+
+  it("names checks, saves and death saves, and lists damage with no target", () => {
+    const lines = [
+      roll("dnd5.5e:rollReported", {
+        actor: "goblin",
+        against: "check",
+        natural: 9,
+        total: 8,
+        target: 13,
+        success: false,
+        label: "sleightOfHand",
+      } as never),
+      roll("dnd5.5e:rollReported", {
+        actor: "goblin",
+        against: "check",
+        natural: 12,
+        total: 12,
+        target: 10,
+        success: true,
+        label: "wis",
+      } as never),
+      roll("dnd5.5e:saveRolled", {
+        actor: "goblin",
+        ability: "dex",
+        natural: 8,
+        total: 10,
+        dc: 13,
+        success: false,
+      } as never),
+      roll("dnd5.5e:deathSaveRolled", {
+        actor: "goblin",
+        natural: 12,
+      } as never),
+      roll("dnd5.5e:damaged", {
+        actor: "goblin",
+        amount: 7,
+        type: "fire",
+        critical: true,
+        massive: false,
+      } as never),
+    ];
+    expect(lines.map((line) => line && `${line.label}: ${line.math}`)).toEqual([
+      "Sleight of Hand check: 9 − 1 = 8 vs DC 13",
+      "Wisdom check: 12 vs DC 10",
+      "Dexterity save: 8 + 2 = 10 vs DC 13",
+      "Death save: 12 vs 10",
+      "Damage taken: 7 fire, critical hit",
+    ]);
+    expect(lines.map((line) => line?.success)).toEqual([
+      false,
+      true,
+      false,
+      true,
+      null,
+    ]);
+  });
+
+  it("leaves out events that roll nothing", () => {
+    expect(
+      dndUi.roll({ kind: "actorDowned", actor: "goblin" }, stateWith(0)),
+    ).toBeNull();
+    expect(roll("dnd5.5e:turnAdvanced", {} as never)).toBeNull();
+  });
+});
+
+describe("leads", () => {
+  it("groups clues by the secret they point to, the newest group and clue first", () => {
+    expect(
+      leadGroups([
+        { secret: "a", text: "first", step: 1 },
+        { secret: "b", text: "second", step: 2 },
+        { secret: "a", text: "third", step: 3 },
+      ]),
+    ).toEqual([
+      {
+        clues: [
+          { text: "third", step: 3 },
+          { text: "first", step: 1 },
+        ],
+      },
+      { clues: [{ text: "second", step: 2 }] },
+    ]);
   });
 });

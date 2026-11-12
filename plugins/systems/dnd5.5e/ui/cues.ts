@@ -1,5 +1,7 @@
 import type { ContentAccess, SystemEvent } from "#sdk";
-import { EVENT_SCHEMAS, StateSchema } from "../core/state.ts";
+import { resistancesLeft } from "../core/legendary.ts";
+import { EVENT_SCHEMAS } from "../core/state.ts";
+import { parseState } from "./parse-state.ts";
 import { deriveStats, evaluateFormula, scaledDice } from "../core/stats.ts";
 
 // Plain data for the combat board to animate, one per event worth showing. No DOM here, so tests can check it.
@@ -17,6 +19,7 @@ export type DndCue =
         readonly y: number | null;
       }[];
       readonly grid: { readonly width: number; readonly height: number } | null;
+      readonly surprised: "party" | "enemies" | null;
     }
   | {
       readonly kind: "move";
@@ -68,10 +71,17 @@ export type DndCue =
     }
   | { readonly kind: "down"; readonly actor: string }
   | { readonly kind: "status"; readonly actor: string; readonly text: string }
-  | { readonly kind: "cast"; readonly actor: string };
+  | { readonly kind: "cast"; readonly actor: string }
+  | {
+      readonly kind: "legendary";
+      readonly actor: string;
+      readonly label: string;
+    }
+  | { readonly kind: "resist"; readonly actor: string; readonly left: number }
+  | { readonly kind: "lair"; readonly actor: string; readonly label: string };
 
 function hpOf(state: unknown, actor: string): number {
-  return StateSchema.parse(state).actors[actor]?.hp ?? 0;
+  return parseState(state).actors[actor]?.hp ?? 0;
 }
 
 // How an attack looks: a weapon swing, a shot or a spell, and the damage dice it rolls.
@@ -81,7 +91,7 @@ function attackLook(
   label: string,
   access: ContentAccess,
 ): { readonly style: "melee" | "ranged" | "spell"; readonly damage: string } {
-  const actor = StateSchema.parse(state).actors[actorId];
+  const actor = parseState(state).actors[actorId];
   if (!actor) return { style: "melee", damage: "" };
   const stats = deriveStats(actor, access);
   const action = stats.actions.find((item) => item.name === label);
@@ -130,7 +140,7 @@ export function dndCue(
   switch (event.kind) {
     // Everyone as the fight begins, so the board doesn't show how it ends while it plays the start.
     case "dnd5.5e:combatStarted": {
-      const { actors, combat } = StateSchema.parse(after);
+      const { actors, combat } = parseState(after);
       return {
         kind: "start",
         combatants: (combat?.order ?? []).flatMap((id) => {
@@ -150,6 +160,9 @@ export function dndCue(
             : [];
         }),
         grid: combat?.grid ?? null,
+        surprised:
+          EVENT_SCHEMAS["dnd5.5e:combatStarted"].parse(event.payload)
+            .surprised ?? null,
       };
     }
     case "dnd5.5e:moved": {
@@ -159,7 +172,7 @@ export function dndCue(
     case "dnd5.5e:combatEnded":
       return { kind: "end" };
     case "dnd5.5e:turnAdvanced": {
-      const { combat } = StateSchema.parse(after);
+      const { combat } = parseState(after);
       const actor = combat?.order[combat.index];
       return actor ? { kind: "turn", actor } : null;
     }
@@ -226,6 +239,30 @@ export function dndCue(
       return spent.resource.startsWith("slot:")
         ? { kind: "cast", actor: spent.actor }
         : null;
+    }
+    case "dnd5.5e:legendaryActionTaken": {
+      const taken = EVENT_SCHEMAS["dnd5.5e:legendaryActionTaken"].parse(
+        event.payload,
+      );
+      return { kind: "legendary", actor: taken.actor, label: taken.name };
+    }
+    case "dnd5.5e:legendaryResistanceUsed": {
+      const { actor } = EVENT_SCHEMAS["dnd5.5e:legendaryResistanceUsed"].parse(
+        event.payload,
+      );
+      const state = parseState(after);
+      const resisting = state.actors[actor];
+      return {
+        kind: "resist",
+        actor,
+        left: resisting ? resistancesLeft(resisting, access, state) : 0,
+      };
+    }
+    case "dnd5.5e:lairActionTaken": {
+      const taken = EVENT_SCHEMAS["dnd5.5e:lairActionTaken"].parse(
+        event.payload,
+      );
+      return { kind: "lair", actor: taken.actor, label: taken.name };
     }
     default:
       return null;

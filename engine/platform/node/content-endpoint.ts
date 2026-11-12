@@ -1,11 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
+import { parseContentPath } from "../browser/content-path.ts";
 import { createNodeStorage } from "./storage.ts";
 
-// The dev server's read-only window onto plugins/ and private/, for a browser that can't read files.
+export { type ContentPath, parseContentPath } from "../browser/content-path.ts";
+
+// The dev server's read-only window onto plugins/ and books/, for a browser that can't read files.
 
 export const CONTENT_ROUTE = "/__content";
-const CONTENT_FOLDERS = ["plugins", "private"];
 
 // No SVG: opened directly it could run scripts on this origin.
 const IMAGE_TYPES: Readonly<Record<string, string>> = {
@@ -17,20 +19,8 @@ const IMAGE_TYPES: Readonly<Record<string, string>> = {
   mp3: "audio/mpeg", // narration clips, read through the same route as pictures
 };
 
-export interface ContentPath {
-  readonly folder: string;
-  readonly rest: string;
-}
-
-// Takes a path that has already been URL-decoded once. Returns null for anything outside the folders.
-export function parseContentPath(path: string): ContentPath | null {
-  if (path.includes("\\") || path.includes("\0")) return null;
-  const [folder = "", ...rest] = path.split("/");
-  if (!CONTENT_FOLDERS.includes(folder)) return null;
-  if (rest.some((part) => part === "" || part === "." || part === "..")) {
-    return null;
-  }
-  return { folder, rest: rest.join("/") };
+function isHidden(path: string): boolean {
+  return path.split("/").some((part) => part.startsWith("."));
 }
 
 function isMissing(error: unknown): boolean {
@@ -52,7 +42,7 @@ function send(
   response.end(body);
 }
 
-// A name that resolves to 127.0.0.1 could otherwise read private/ from another site (DNS rebinding).
+// A name that resolves to 127.0.0.1 could otherwise read books/ from another site (DNS rebinding).
 function isLocalHost(host: string | undefined): boolean {
   const name = host?.replace(/:\d+$/, "");
   return name === "127.0.0.1" || name === "localhost";
@@ -64,7 +54,7 @@ export function contentEndpoint(repoRoot: string) {
     try {
       return await createNodeStorage(join(repoRoot, folder));
     } catch (error) {
-      if (isMissing(error)) return null; // private/ is optional
+      if (isMissing(error)) return null; // books/ is optional
       throw error;
     }
   };
@@ -109,10 +99,12 @@ export function contentEndpoint(repoRoot: string) {
           200,
           "application/json",
           JSON.stringify(
-            entries.map((entry) => ({
-              ...entry,
-              path: `${folder}/${entry.path}`,
-            })),
+            entries
+              .filter((entry) => !isHidden(entry.path))
+              .map((entry) => ({
+                ...entry,
+                path: `${folder}/${entry.path}`,
+              })),
           ),
         );
       } else {

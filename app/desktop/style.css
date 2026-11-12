@@ -72,7 +72,9 @@
   --panel: #fbf6e9;
   --ink: #221b12;
   --muted: #5e5240;
-  --line: #c9ad6a;
+  --line: #c9ad6a; /* decorative rules */
+  --edge: #86693a; /* the borders of things to press, type in or read as a card */
+  --column: 760px; /* the reading column the setup and the story share */
   --accent: #58180d;
   --accent-ink: #fbf6e9;
   --active: #f2e2bf;
@@ -109,6 +111,7 @@
     --ink: #ede3cc;
     --muted: #b3a688;
     --line: #5a4630;
+    --edge: #9a7d4c;
     --accent: #e0b062;
     --accent-ink: #1a1408;
     --active: #3a2c1c;
@@ -129,6 +132,11 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* The page doesn't shift sideways when a scrollbar comes and goes. */
+html {
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -203,23 +211,39 @@ h3 {
   gap: 8px;
 }
 
+/* A message hangs from the bar's underside, so it never changes the bar's height.
+   Its colours are the light ones, which read on the leather in either scheme. */
 .notice {
-  margin: 0 0 8px;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 0;
+  /* The page column's gutter: #app is at most 1080px wide, with 16px padding. */
+  padding: 6px max(16px, calc(50vw - 524px)) 8px;
   font-size: 0.9rem;
-  color: var(--good);
+  cursor: pointer; /* a click puts it away */
+  background: var(--leather);
+  border-bottom: 3px solid var(--line);
+  box-shadow: 0 6px 12px rgb(0 0 0 / 20%);
   white-space: pre-line;
   overflow-wrap: anywhere;
+  animation: fade 0.2s ease;
 }
 
-.notice.error {
-  color: var(--error);
+.top .notice {
+  color: #8fce9b;
+}
+
+.top .notice.error {
+  color: #ff8f7a;
 }
 
 button {
   font: inherit;
   color: var(--ink);
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 6px;
   padding: 10px 14px;
   min-height: 44px;
@@ -269,7 +293,7 @@ button:hover {
 }
 
 .game {
-  max-width: 760px;
+  max-width: var(--column);
   margin: 16px auto 48px;
 }
 
@@ -294,26 +318,51 @@ html {
 }
 
 /* Held back while the board plays out what just happened; the space stays so nothing jumps. */
-.settling > .prompt,
-.settling > .options {
+.settling .rail > .prompt,
+.settling .rail > .options,
+.settling .rail > .ending {
   visibility: hidden;
 }
 
+/* The end of a run closes like a chapter: a big title, the tapered red rule and what it came to. */
 .ending {
-  padding: 16px;
-  margin: 16px 0;
-  background: var(--panel);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
+  margin: 40px 0 16px;
+  scroll-margin-bottom: 24px;
+}
+
+.in-combat .ending {
+  margin-top: 16px;
 }
 
 .ending h3 {
-  margin-top: 0;
-  font-family: inherit;
-  font-size: 1.3rem;
-  letter-spacing: 0;
-  text-transform: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font: 3rem/1 var(--font-title);
   color: var(--accent);
+}
+
+.ending h3::after {
+  content: "";
+  display: block;
+  height: 4px;
+  margin-top: 12px;
+  background: linear-gradient(to right, var(--rule), transparent);
+}
+
+.ending p {
+  font-size: 1.15rem;
+}
+
+.ending .ending-tally {
+  font: 1.3rem/1.2 var(--font-head);
+  color: var(--accent);
+}
+
+.ending-actions .begin {
+  width: auto;
+  margin-top: 0;
+  padding: 12px 28px;
 }
 
 .ending[data-ending="defeat"] h3 {
@@ -449,7 +498,7 @@ dd {
   font: inherit;
   color: var(--ink);
   background: var(--panel);
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 6px;
 }
 
@@ -561,7 +610,7 @@ summary {
 
 .box-label {
   font-family: var(--font-ui);
-  font-size: 0.65rem;
+  font-size: 12px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
@@ -664,7 +713,6 @@ summary {
 }
 
 .book-contents button {
-  min-height: 36px;
   padding: 4px 8px;
   font-size: 0.9rem;
 }
@@ -715,7 +763,7 @@ summary {
 
 .hud-stat small {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 12px;
   letter-spacing: 0.05em;
 }
 
@@ -775,6 +823,122 @@ summary {
 
 .ticker:empty {
   display: none;
+}
+
+/* "Why?" under the ticker: the latest choice's rolls, opened on demand. */
+.rolls-why {
+  margin-top: 2px;
+  font-size: 0.9rem;
+}
+
+.rolls-why summary {
+  display: inline-block;
+  color: var(--muted);
+  font-style: italic;
+  cursor: pointer;
+}
+
+.rolls-why[open] .rolls {
+  animation: rise 0.18s ease both;
+}
+
+.rolls {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.92rem;
+}
+
+.roll {
+  padding: 2px 0;
+}
+
+.roll.new-step {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.roll-who {
+  font-weight: bold;
+}
+
+.roll-math {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.roll-mark.hit {
+  color: var(--good);
+}
+
+.roll-mark.miss {
+  color: var(--rule);
+}
+
+/* The Journal's tabs: the story so far, the rolls, and the leads. */
+.journal-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+}
+
+.journal-panels > [hidden] {
+  display: none;
+}
+
+.tab.has-new::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  vertical-align: super;
+  border-radius: 50%;
+  background: var(--rule);
+}
+
+.leads {
+  display: grid;
+  gap: 10px;
+}
+
+.lead {
+  list-style: none;
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--line);
+  border-radius: 6px;
+}
+
+.lead li {
+  padding: 3px 0;
+}
+
+.lead li.new {
+  animation: rise 0.3s ease both;
+}
+
+.new-mark {
+  margin-right: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font: 0.75rem var(--font-ui);
+  color: var(--accent-ink);
+  background: var(--rule);
+  vertical-align: 1px;
+}
+
+.rolls .empty,
+.leads .empty {
+  color: var(--muted);
+  font-style: italic;
 }
 
 .initiative-details summary {
@@ -934,9 +1098,10 @@ summary {
 
 /* A moment above the choices, such as treasure found: a card that rises, then each find in turn. */
 .decision-card {
+  position: relative;
+  overflow: hidden;
   margin: 16px 0 0;
   padding: 12px 18px 14px;
-  max-width: 28rem;
   background: var(--panel);
   border: 1px solid var(--line);
   border-top: 3px solid var(--rule);
@@ -948,9 +1113,25 @@ summary {
 }
 
 .decision-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 6px;
   font: 1.6rem/1 var(--font-title);
   color: var(--accent);
+}
+
+.card-icon {
+  font-size: 1.3rem;
+}
+
+.card-footer {
+  margin: 8px 0 0;
+  padding-top: 6px;
+  border-top: 2px solid var(--line);
+  font: 0.95rem var(--font-ui);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .decision-card ul {
@@ -972,12 +1153,34 @@ summary {
   animation: rise 0.45s ease both;
 }
 
+/* A glint of gold that sweeps across once as the card arrives. */
+.decision-card.enter::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgb(255 214 120 / 55%) 50%,
+    transparent 65%
+  );
+  transform: translateX(-100%);
+  animation: glint 0.9s 0.3s ease-out both;
+}
+
+@keyframes glint {
+  to {
+    transform: translateX(100%);
+  }
+}
+
 .decision-card.enter li {
   animation: rise 0.35s ease both;
   animation-delay: calc(0.25s + var(--i, 0) * 140ms);
 }
 
-.settling > .decision-card {
+.settling .rail > .decision-card {
   visibility: hidden;
 }
 
@@ -988,6 +1191,11 @@ summary {
   font: 0.8rem var(--font-ui);
 }
 
+.row-option:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -996,6 +1204,11 @@ summary {
   .drawer[open]::backdrop {
     animation: none !important;
     transition: none !important;
+  }
+
+  /* Only fades, with no movement, so it still shows; without it "Saved" would never appear. */
+  .saved.enter {
+    animation: saved-flash 1.8s ease both !important;
   }
 }
 
@@ -1018,7 +1231,7 @@ summary {
 button {
   font-family: var(--font-body);
   background: var(--panel);
-  border-color: var(--line);
+  border-color: var(--edge);
   box-shadow: 0 1px 2px rgb(60 40 10 / 15%);
   transition:
     border-color 0.15s,
@@ -1026,8 +1239,14 @@ button {
     transform 0.15s;
 }
 
+/* Hover only lightens; the red bar marks the button that has focus or is chosen. */
 button:hover {
-  border-color: var(--accent);
+  background: var(--active);
+  border-color: var(--edge);
+  box-shadow: 0 2px 6px rgb(60 40 10 / 20%);
+}
+
+button:focus-visible {
   box-shadow:
     inset 4px 0 0 var(--accent),
     0 2px 6px rgb(60 40 10 / 20%);
@@ -1041,7 +1260,7 @@ button:active {
 .bar-actions button {
   color: var(--leather-ink);
   background: transparent;
-  border-color: rgb(201 173 106 / 45%);
+  border-color: rgb(201 173 106 / 75%);
   box-shadow: none;
   font-family: var(--font-caps);
   letter-spacing: 0.03em;
@@ -1081,12 +1300,16 @@ button:active {
   line-height: 1.6;
 }
 
-/* A drop cap opens each scene, as a chapter does in the books. */
-.play:not(.in-combat) .scene-text::first-letter {
-  float: left;
-  margin: 0.08em 0.08em 0 0;
-  font: 3.4rem/0.8 var(--font-title);
-  color: var(--accent);
+/* A drop cap opens each scene, as a chapter does in the books. Without initial-letter a floated
+   letter overhangs one-line scenes, so those browsers go without. */
+@supports (initial-letter: 2) or (-webkit-initial-letter: 2) {
+  .play:not(.in-combat) .scene-text::first-letter {
+    -webkit-initial-letter: 2;
+    initial-letter: 2;
+    margin-right: 0.08em;
+    font-family: var(--font-title);
+    color: var(--accent);
+  }
 }
 
 .prompt {
@@ -1104,9 +1327,10 @@ button:active {
 }
 
 .option .info {
-  font-family: var(--font-head);
+  font-family: var(--font-ui);
   font-style: normal;
-  font-size: 1.1rem;
+  font-weight: normal;
+  font-size: 1.25rem;
 }
 
 .tab {
@@ -1124,10 +1348,9 @@ button:active {
 
 /* Action panels and stat boxes look like the books' stat blocks: tinted paper between gold bars. */
 .group-panel,
-.box,
-.ending {
+.box {
   background: #fdf1dc;
-  border: 1px solid #d4b97f;
+  border: 1px solid var(--edge);
   box-shadow: 0 2px 6px rgb(60 40 10 / 18%);
 }
 
@@ -1167,15 +1390,6 @@ button:active {
   color: var(--accent);
 }
 
-.ending {
-  border-color: var(--rule);
-}
-
-.ending h3 {
-  font: 2rem/1 var(--font-title);
-  border: 0;
-}
-
 .drawer {
   background: var(--paper), var(--bg);
   border-left: 4px solid var(--line);
@@ -1202,7 +1416,7 @@ button:active {
 .search {
   font: inherit;
   padding: 10px 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--edge);
   border-radius: 6px;
   background: var(--panel);
   color: var(--ink);
@@ -1220,10 +1434,15 @@ button:active {
 @media (prefers-color-scheme: dark) {
   .group-panel,
   .box,
-  .ending,
-  .log {
+  .log,
+  .level-up {
     background: #2c2319;
-    border-color: #5a4630;
+    border-color: var(--edge);
+  }
+
+  .level-up {
+    border-top-color: #a8701e;
+    border-bottom-color: #a8701e;
   }
 
   .group-panel {
@@ -1277,7 +1496,7 @@ button:active {
   align-items: center;
   min-height: 44px;
   padding: 6px 12px;
-  border: 1px solid rgb(201 173 106 / 45%);
+  border: 1px solid rgb(201 173 106 / 75%);
   border-radius: 6px;
   color: var(--leather-ink);
   font-family: var(--font-caps);
@@ -1318,6 +1537,17 @@ button:active {
   font-family: var(--font-body);
   letter-spacing: 0;
   text-align: left;
+}
+
+.game-menu-items button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.game-menu-items kbd {
+  font: 0.8rem var(--font-ui);
+  color: var(--muted);
 }
 
 .game-menu-items .bar-actions button[aria-pressed="false"],
@@ -1368,7 +1598,7 @@ button:active {
 
 /* Setting up a new game: one card per choice, such as difficulty. */
 .setup {
-  max-width: 640px;
+  max-width: var(--column);
   margin: 24px auto;
 }
 
@@ -1426,6 +1656,8 @@ button:active {
 
 .begin:hover {
   color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -1447,6 +1679,26 @@ button:active {
   position: relative;
   animation: rise 0.3s ease both;
   animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+.save-adventure {
+  font: 0.9rem var(--font-ui);
+  color: var(--muted);
+}
+
+.save-when {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.save-current {
+  padding: 0 8px;
+  border-radius: 999px;
+  font: 0.75rem/1.6 var(--font-caps);
+  letter-spacing: 0.03em;
+  color: var(--accent-ink);
+  background: var(--accent);
 }
 
 .save-open {
@@ -1502,9 +1754,26 @@ button:active {
 
 /* The campfire: a rest between scenes, offered from the top bar. */
 .campfire-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 44px;
-  font-size: 1.1rem;
   line-height: 1;
+}
+
+.campfire-button svg {
+  color: var(--leather-ink);
+}
+
+/* Kept in the bar while there's no rest to take, so nothing shifts when one comes. */
+.top .campfire-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.top .campfire-button:disabled:hover {
+  border-color: rgb(201 173 106 / 45%);
+  background: transparent;
 }
 
 .campfire {
@@ -1527,6 +1796,12 @@ button:active {
 .campfire[open],
 .campfire[open]::backdrop {
   animation: fade 0.8s ease;
+}
+
+/* Breaking camp fades out as slowly as the camp faded in. */
+.campfire.closing,
+.campfire.closing::backdrop {
+  animation: fade 0.8s ease reverse both;
 }
 
 .campfire-fire {
@@ -1554,6 +1829,35 @@ button:active {
   margin-top: 16px;
 }
 
+.campfire .options button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.campfire .options small {
+  font: 0.85rem var(--font-ui);
+  color: var(--muted);
+}
+
+/* "Not now": a quiet way out, not a third choice. */
+.campfire .quiet {
+  margin-top: 12px;
+  color: var(--leather-ink);
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-align: center;
+}
+
+.campfire .quiet:hover {
+  border-color: transparent;
+  box-shadow: none;
+  opacity: 0.8;
+}
+
 .campfire-body > * {
   animation: rise 0.4s ease both;
 }
@@ -1573,6 +1877,215 @@ button:active {
 
 .campfire-recovered + button {
   margin-top: 16px;
+}
+
+/* The adventure picker: a shelf of book covers, each lifting under the pointer. */
+.menu {
+  margin-inline: auto;
+}
+
+.covers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 20px 16px;
+  margin-top: 12px;
+}
+
+.cover-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: rise 0.35s ease both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+.cover-card[hidden] {
+  display: none;
+}
+
+.cover-open {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+  transition: transform 0.18s ease;
+}
+
+.cover-open:hover,
+.cover-open:focus-visible {
+  transform: translateY(-4px);
+}
+
+/* A leather binding with a gold-tooled frame, which shows whenever the cover doesn't. */
+.cover-art {
+  position: relative;
+  display: block;
+  aspect-ratio: 2 / 3;
+  margin-bottom: 6px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgb(255 255 255 / 8%), transparent 60%),
+    linear-gradient(90deg, rgb(0 0 0 / 35%), transparent 8%), #4a2a1a;
+  border-radius: 3px 6px 6px 3px;
+  box-shadow: 0 4px 10px rgb(0 0 0 / 25%);
+  transition: box-shadow 0.18s ease;
+}
+
+.cover-open:hover .cover-art,
+.cover-open:focus-visible .cover-art {
+  box-shadow: 0 12px 24px rgb(0 0 0 / 35%);
+}
+
+.cover-plate {
+  position: absolute;
+  inset: 10px;
+  display: grid;
+  place-items: center;
+  padding: 14px 10px;
+  font: 1.9rem/1 var(--font-title);
+  color: #e0b062;
+  text-align: center;
+  text-wrap: balance;
+  border: 2px solid #c9ad6a;
+  outline: 1px solid #c9ad6a;
+  outline-offset: -7px;
+}
+
+.cover-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cover-title {
+  font: 1.1rem/1.15 var(--font-head);
+  color: var(--accent);
+}
+
+.cover-resume {
+  align-self: flex-start;
+  padding: 4px 12px;
+  font: 0.9rem var(--font-ui);
+}
+
+/* A level-up is a callout between gold rules, not one more line in the ticker. */
+.level-up {
+  margin: 12px 0;
+  padding: 10px 14px;
+  background: #fdf1dc;
+  border-top: 3px solid #e69a28;
+  border-bottom: 3px solid #e69a28;
+  font-size: 1.05rem;
+}
+
+.level-up strong {
+  margin-right: 4px;
+  font: 1.5rem/1 var(--font-title);
+  color: var(--accent);
+}
+
+.level-up.enter {
+  animation: rise 0.45s ease both;
+}
+
+/* Story choices read as a book's numbered entries; the number is also the key that picks it. */
+.rail > .options.story {
+  counter-reset: choice;
+}
+
+.options.story .option {
+  counter-increment: choice;
+}
+
+.options.story .option > button:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.options.story .option > button:first-child::before {
+  content: counter(choice);
+  min-width: 0.7em;
+  font: 1.6rem/1 var(--font-title);
+  color: var(--rule);
+  text-align: right;
+}
+
+/* Outside a fight the rail adds nothing; its contents lay out as the stage's own. */
+.rail {
+  display: contents;
+}
+
+/* A wide window puts the fight's choices in a column beside the map, so neither scrolls off. */
+@media (min-width: 960px) {
+  .game:has(> .play.in-combat) {
+    max-width: 1080px;
+  }
+
+  .play.in-combat {
+    --map-reserve: 230px; /* the top bar, the scene title and its line, and the frame */
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    column-gap: 24px;
+  }
+
+  .play.in-combat > * {
+    grid-column: 1 / -1;
+  }
+
+  .play.in-combat > #combat-grid-slot {
+    grid-column: 1;
+  }
+
+  .play.in-combat > .rail {
+    grid-column: 2;
+    align-self: start;
+    position: sticky;
+    top: 72px;
+    display: block;
+    max-height: calc(100dvh - 88px);
+    margin: 12px -8px 0;
+    padding: 0 8px 12px; /* room for focus rings and entrances, which a scrolling box would clip */
+    overflow: auto;
+  }
+
+  .play.in-combat > .rail > :first-child {
+    margin-top: 0;
+  }
+}
+
+/* A narrow window keeps the fight's choices in a tray along the bottom, over the page. */
+@media (max-width: 959px) {
+  .play.in-combat .rail > .options:not(:empty) {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    max-height: 45dvh;
+    overflow: auto;
+    margin-inline: -16px;
+    padding: 10px 16px 12px;
+    background: var(--bg);
+    border-top: 2px solid var(--line);
+    box-shadow: 0 -6px 16px rgb(60 40 10 / 18%);
+  }
+
+  /* Side by side where they fit, so the tray covers as little of the map as it can. */
+  .play.in-combat .rail > .options > .options,
+  .play.in-combat .rail > .options > .group-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
+
+  .play.in-combat .rail > .options > :first-child {
+    margin-top: 0;
+  }
 }
 
 /* Sound: the panel from the game menu, and the narrator's controls under the scene text. */
@@ -1644,4 +2157,125 @@ button:active {
   font-size: 0.85rem;
   font-style: italic;
   opacity: 0.75;
+}
+
+/* A merchant's screen in place of the choices: a parchment panel of item cards under Buy and Sell tabs. */
+.options[hidden],
+.shop[hidden] {
+  display: none;
+}
+
+.shop {
+  margin-top: 16px;
+  padding: 12px 18px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--rule);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.12);
+  animation: rise 0.4s ease both;
+}
+
+.shop-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  border-bottom: 2px solid var(--line);
+  padding-bottom: 6px;
+}
+
+.shop-head h3 {
+  margin: 0;
+  font: 1.6rem/1.1 var(--font-title);
+  color: var(--accent);
+}
+
+.shop-purse {
+  margin: 0;
+  font: 1rem var(--font-ui);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.shop-purse::before {
+  content: "\1FA99  ";
+}
+
+.shop-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.shop-tab {
+  font-family: var(--font-ui);
+  font-size: 0.95rem;
+  border-radius: 999px;
+  padding: 8px 22px;
+}
+
+.shop-tab[aria-selected="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.shop-wares {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.ware {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  animation: rise 0.3s ease both;
+  animation-delay: calc(var(--i, 0) * 35ms);
+}
+
+.ware h4 {
+  margin: 0;
+  font: 1.2rem/1.1 var(--font-head);
+  color: var(--accent);
+}
+
+.ware-summary,
+.ware-note,
+.ware-none {
+  margin: 0;
+  font: 0.9rem var(--font-ui);
+  color: var(--muted);
+}
+
+.ware-note {
+  font-style: italic;
+}
+
+.ware-trade {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  font-family: var(--font-ui);
+}
+
+.ware-price {
+  font-variant-numeric: tabular-nums;
+  font-weight: bold;
+}
+
+.ware-trade:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.shop-leave {
+  margin-top: 14px;
+  width: 100%;
 }

@@ -125,7 +125,7 @@ function evaluateLeaf(
     case "visited":
       return (story.visits?.[leaf.scene] ?? 0) >= leaf.atLeast;
     case "attitude":
-      return (story.attitudes[leaf.npc] ?? 0) >= leaf.atLeast;
+      return inBounds(story.attitudes[leaf.npc] ?? 0, leaf);
     case "system": {
       const predicate = run.system.storyPredicates[leaf.predicate];
       if (!predicate) throw new Error(`Unknown predicate ${leaf.predicate}`);

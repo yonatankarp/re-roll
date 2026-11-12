@@ -1,0 +1,6 @@
+{
+  "identifier": "window",
+  "description": "Lets the page set the window title, such as the adventure and scene.",
+  "windows": ["main"],
+  "permissions": ["core:window:allow-set-title"]
+}

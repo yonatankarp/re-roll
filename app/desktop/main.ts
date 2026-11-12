@@ -1,5 +1,7 @@
 import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  type SaveStore,
   contentImageUrl,
   createContentReader,
   withSaves,
@@ -12,6 +14,7 @@ import { createGame } from "../../engine/shell/session.ts";
 import { mountShell } from "../../engine/shell/shell.ts";
 import { mountDndBoard } from "../../plugins/systems/dnd5.5e/ui/board.ts";
 import { dndUi } from "../../plugins/systems/dnd5.5e/ui/index.ts";
+import { coinSound } from "../../plugins/systems/dnd5.5e/ui/sound.ts";
 import { systems } from "../systems.ts";
 
 // CC BY-SA 4.0 asks for the title, the authors, the source and the licence.
@@ -19,6 +22,32 @@ const FONT_CREDIT =
   "Fonts: Bookinsanity, Mr Eaves Small Caps, Nodesto Caps Condensed, Scaly Sans and Scaly Sans Caps, " +
   "Solbera's recreations of the fifth edition fonts, with fixes by Ryrok, Ners and LUCASTUCIOUS, " +
   "from github.com/jonathonf/solbera-dnd-fonts, under the Creative Commons Attribution-ShareAlike 4.0 licence.";
+
+// Reading localStorage throws where site storage is blocked, and then saves last only while the page is open.
+function browserSaves(): SaveStore {
+  try {
+    // Firefox with storage turned off gives null instead of throwing.
+    const store = window.localStorage as SaveStore | null;
+    if (store) return store;
+    throw new Error("localStorage is null");
+  } catch (error) {
+    console.warn("Site storage is blocked, so saves won't be kept", error);
+    const items = new Map<string, string>();
+    return {
+      get length() {
+        return items.size;
+      },
+      key: (index) => [...items.keys()][index] ?? null,
+      getItem: (key) => items.get(key) ?? null,
+      setItem: (key, value) => {
+        items.set(key, value);
+      },
+      removeItem: (key) => {
+        items.delete(key);
+      },
+    };
+  }
+}
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("The page has no #app element");
@@ -28,13 +57,26 @@ mountShell(
   createGame({
     storage: withSaves(
       isTauri() ? createTauriReader() : createContentReader(),
-      localStorage,
+      browserSaves(),
     ),
-    roots: ["plugins", "private"],
+    roots: ["plugins", "books"],
     systems,
     uis: [dndUi],
     imageUrl: isTauri() ? tauriImageUrl : contentImageUrl,
   }),
   { [dndUi.systemId]: mountDndBoard },
   [FONT_CREDIT],
+  coinSound,
 );
+
+// The macOS window keeps the title it opened with, so it follows the page's, such as "Adventure — Scene".
+if (isTauri()) {
+  const appWindow = getCurrentWindow();
+  new MutationObserver(() => {
+    appWindow.setTitle(document.title).catch(() => undefined);
+  }).observe(document.head, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+}

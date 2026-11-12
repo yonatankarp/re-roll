@@ -4,16 +4,23 @@ import {
   type Decision,
   type GameEvent,
   type GameState,
+  PLAYER_ACTOR,
   isNamespacedEvent,
   isNarrativeEvent,
 } from "../kernel/events.ts";
 import { formatIssue } from "../kernel/issues.ts";
-import { type Registry, loadRun, scanPlugins } from "../kernel/loader.ts";
+import {
+  type Catalog,
+  type Registry,
+  loadRun,
+  scanPlugins,
+} from "../kernel/loader.ts";
 import { type LogEntry, createSave, loadSave } from "../kernel/save.ts";
 import type { Storage } from "../kernel/storage.ts";
 import { type Ambience, sceneAmbience } from "../story/ambience.ts";
 import { scenesAhead } from "../story/narration.ts";
 import { REST_OPTION_PREFIX, sceneText } from "../story/runtime.ts";
+import type { Adventure } from "../story/adventure.ts";
 import type { GameSystem, SystemSetting } from "../kernel/system.ts";
 import {
   type RunContext,
@@ -27,8 +34,10 @@ import {
 import type {
   CombatView,
   DecisionCard,
+  ShopView,
   OptionGroup,
   OptionView,
+  RollView,
   SheetView,
   SystemUi,
 } from "./system-ui.ts";
@@ -40,8 +49,8 @@ const SAVES = "saves";
 const SAVE_TIMES = `${SAVES}/times`;
 // What each save's card shows. Kept apart from the times, which older builds still read as plain strings.
 const SAVE_DETAILS = `${SAVES}/details`;
-const ASSETS = "private/assets";
-const LIBRARY = "private/library";
+const ASSETS = "books/assets";
+const LIBRARY = "books/library";
 const IMAGE_FILE = /\.(png|jpe?g|webp|gif)$/i;
 const BARE_NAME = /^[^/\\]+$/;
 
@@ -49,17 +58,31 @@ export interface LogLine {
   readonly kind: "scene" | "event";
   readonly text: string;
   readonly actor?: string | null;
+  // A line worth more than the ticker: the player's level-up, or a foe defeated, which the ending counts.
+  readonly moment?: "levelUp" | "foeDefeated";
+}
+
+// A roll, with the step of the log it came in, so the latest choice's rolls can be found.
+export interface RollLine extends RollView {
+  readonly step: number;
+}
+
+// The clues found that point to one secret, newest first. Only the clue text, never what the secret is.
+export interface LeadGroup {
+  readonly clues: readonly { readonly text: string; readonly step: number }[];
 }
 
 export interface GameView {
   readonly title: string;
   readonly scene: string | null;
+  readonly sceneTitle: string | null; // a name for the scene, such as for the window title
   readonly sceneArt: string | null; // a content path, for imageUrl
   readonly ambience: Ambience; // the background sound the scene asks for
   readonly upcoming: readonly string[]; // the text of scenes the choices go to, to read ahead
   readonly endingName: string | null;
   readonly optionGroups: readonly OptionGroup[];
   readonly card: DecisionCard | null; // shown above the choices, such as treasure found
+  readonly shop: ShopView | null; // a merchant's screen, shown in place of the choices
   readonly rests: readonly OptionView[]; // offered at the campfire, apart from the choices
   readonly monsterArt: Readonly<Record<string, string>>; // by combatant id
   readonly tokenArt: Readonly<Record<string, TokenArt>>; // by combatant id, with its face
@@ -70,6 +93,10 @@ export interface GameView {
   readonly log: readonly LogLine[];
   // Plain data for the system's encounter board to animate, in order, from the start of the run.
   readonly cues: readonly unknown[];
+  readonly rolls: readonly RollLine[]; // from the start of the run, oldest first
+  readonly leads: readonly LeadGroup[]; // the group with the newest clue first
+  readonly steps: number; // inputs so far, the run's start included
+  readonly canUndo: boolean; // a forgiving setting is on and there's a choice to take back
   readonly system: string;
   readonly systemState: unknown; // for the system's own board
   readonly ended: GameState["story"]["ended"];
@@ -84,6 +111,7 @@ export interface AdventureChoice {
   readonly title: string;
   readonly source: "shipped" | "private";
   readonly levels: string | null;
+  readonly cover: string | null; // a content path, for imageUrl
 }
 
 export interface SaveChoice {
@@ -94,7 +122,13 @@ export interface SaveChoice {
   readonly title: string;
   readonly kind: "autosave" | "manual";
   readonly when: string | null; // savedAt, for people
+  readonly ago: string | null; // savedAt from now, such as "2 min ago"
   readonly steps: number;
+  readonly current: boolean; // the autosave of the run being played
+  // Who is playing, such as "Human Wizard", and the first number the system sums them up with, such as "6/8 HP".
+  readonly character: string | null;
+  readonly characterKind: string | null; // such as "Human Wizard", when the name doesn't already say it
+  readonly health: string | null;
   // Missing on saves made before these were recorded, until the save is next loaded.
   readonly scene: string | null;
   readonly level: number | null;
@@ -118,6 +152,8 @@ interface Current {
   readonly log: LogEntry[];
   readonly lines: LogLine[];
   readonly cues: unknown[];
+  readonly rolls: RollLine[];
+  readonly clues: Clue[];
   state: GameState;
   warnings: readonly string[];
 }
@@ -140,6 +176,14 @@ const SaveDetailsSchema = z.record(
     level: z.number().nullable(),
     settings: z.array(z.string()),
     art: z.string().nullable(),
+    // Added later, so older records have none, and a record without them must still parse.
+    character: z.string().nullable().optional(),
+    characterKind: z.string().nullable().optional(),
+    health: z.string().nullable().optional(),
+    // Kept so the menu needn't read every whole save; older records read the save instead.
+    adventure: z.string().optional(),
+    seed: z.string().optional(),
+    steps: z.number().optional(),
   }),
 );
 type SaveDetails = z.infer<typeof SaveDetailsSchema>[string];
@@ -154,6 +198,7 @@ const ArtIndexSchema = z.array(
     monster: z.string().optional(),
     subjects: z.array(z.string()).optional(), // other names it can stand for, such as "dwarf cleric"
     face: FaceSchema.optional(),
+    cover: z.array(z.string()).optional(), // ids of the adventures this picture is the cover of
   }),
 );
 
@@ -177,9 +222,76 @@ function stableIndex(id: string, count: number): number {
   return count > 0 ? hash % count : 0;
 }
 
-function endingName(id: string): string {
-  const words = id.replace(/-/g, " ");
+// The scene's own title, or its id made readable for one that has none.
+function sceneTitle(scene: Adventure["scenes"][number]): string {
+  if (scene.title) return scene.title;
+  const words = scene.id.replace(/-/g, " ");
   return `${words[0]?.toUpperCase() ?? ""}${words.slice(1)}`;
+}
+
+export function stepsText(count: number): string {
+  return `${String(count)} ${count === 1 ? "step" : "steps"}`;
+}
+
+// How long ago, such as "2 min ago", or null after a week, when the date itself says more.
+function agoText(savedAt: string, now: number): string | null {
+  const seconds = Math.max(0, (now - Date.parse(savedAt)) / 1000);
+  if (Number.isNaN(seconds) || seconds >= 7 * 86400) return null;
+  if (seconds < 60) return "just now";
+  const format = new Intl.RelativeTimeFormat(undefined, { style: "short" });
+  if (seconds < 3600) return format.format(-Math.floor(seconds / 60), "minute");
+  if (seconds < 86400)
+    return format.format(-Math.floor(seconds / 3600), "hour");
+  return format.format(-Math.floor(seconds / 86400), "day");
+}
+
+// What came back between two looks at the party, such as over a rest: per member whose sheet changed,
+// a line per change, such as "Hit Points 7 → 12 of 12". Keyed by section too, since the same label,
+// such as a weapon, can sit in two sections with different values.
+export function sheetChanges(
+  before: readonly SheetView[],
+  after: readonly SheetView[],
+): { readonly title: string; readonly changes: readonly string[] }[] {
+  const key = (sheet: SheetView, section: string, label: string): string =>
+    `${sheet.id}\u0000${section}\u0000${label}`;
+  const was = new Map<string, string>();
+  for (const sheet of before) {
+    for (const section of sheet.sections) {
+      for (const row of section.rows) {
+        was.set(key(sheet, section.title, row.label), row.value);
+      }
+    }
+  }
+  return after.flatMap((sheet) => {
+    const changes = sheet.sections.flatMap((section) =>
+      section.rows.flatMap((row) => {
+        const old = was.get(key(sheet, section.title, row.label));
+        return old === undefined || old === row.value
+          ? []
+          : [
+              `${row.label} ${old} → ${row.value}${row.note ? ` ${row.note}` : ""}`,
+            ];
+      }),
+    );
+    return changes.length > 0 ? [{ title: sheet.title, changes }] : [];
+  });
+}
+
+interface Clue {
+  readonly secret: string;
+  readonly text: string;
+  readonly step: number;
+}
+
+// Clues of the same secret together, the newest first in each and the group found last at the top.
+export function leadGroups(clues: readonly Clue[]): LeadGroup[] {
+  const groups = new Map<string, Clue[]>();
+  for (const clue of [...clues].reverse()) {
+    groups.set(clue.secret, [...(groups.get(clue.secret) ?? []), clue]);
+  }
+  return [...groups.values()].map((group) => ({
+    clues: group.map(({ text, step }) => ({ text, step })),
+  }));
 }
 
 function narrate(
@@ -187,15 +299,23 @@ function narrate(
   ui: SystemUi,
   from: GameState | null,
   events: readonly GameEvent[],
+  step: number, // the log entry these events belong to
 ): {
   readonly state: GameState | null;
   readonly lines: readonly LogLine[];
   readonly cues: readonly unknown[];
+  readonly rolls: readonly RollLine[];
+  readonly clues: readonly Clue[];
 } {
   let state = from;
   const lines: LogLine[] = [];
   const cues: unknown[] = [];
+  const rolls: RollLine[] = [];
+  const clues: Clue[] = [];
   for (const event of events) {
+    if (event.kind === "clueRevealed") {
+      clues.push({ secret: event.secret, text: event.text, step });
+    }
     if (event.kind === "runStarted") {
       state = event.state;
       continue;
@@ -204,12 +324,24 @@ function narrate(
     if (isNarrativeEvent(event) || isNamespacedEvent(event)) {
       const text = ui.describe(event, state.system, run);
       if (text !== null) {
+        const moment =
+          event.kind === "levelGained" && event.actor === PLAYER_ACTOR
+            ? "levelUp"
+            : event.kind === "actorDefeated" &&
+                !state.partyIds.includes(event.actor)
+              ? "foeDefeated"
+              : undefined;
         lines.push({
           kind: "event",
           text,
           actor: ui.actorOf(event, state.system),
+          ...(moment ? { moment } : {}),
         });
       }
+    }
+    if (ui.roll && isNamespacedEvent(event)) {
+      const rolled = ui.roll(event, state.system, run);
+      if (rolled) rolls.push({ ...rolled, step });
     }
     const before = state;
     state = applyEvent(run, state, event);
@@ -227,14 +359,51 @@ function narrate(
       }
     }
   }
-  return { state, lines, cues };
+  return { state, lines, cues, rolls, clues };
 }
 
-function narrated(told: ReturnType<typeof narrate>): {
+// The whole log told again from the start, as on loading or taking back a choice.
+function retell(
+  run: RunContext,
+  ui: SystemUi,
+  log: readonly LogEntry[],
+): {
+  readonly state: GameState | null;
   readonly lines: LogLine[];
   readonly cues: unknown[];
+  readonly rolls: RollLine[];
+  readonly clues: Clue[];
 } {
-  return { lines: [...told.lines], cues: [...told.cues] };
+  let state: GameState | null = null;
+  const told = {
+    lines: [] as LogLine[],
+    cues: [] as unknown[],
+    rolls: [] as RollLine[],
+    clues: [] as Clue[],
+  };
+  log.forEach((entry, step) => {
+    const part = narrate(run, ui, state, entry.events, step);
+    state = part.state;
+    told.lines.push(...part.lines);
+    told.cues.push(...part.cues);
+    told.rolls.push(...part.rolls);
+    told.clues.push(...part.clues);
+  });
+  return { state, ...told };
+}
+
+// Whether the run's settings include a forgiving one that lets the player take back a choice.
+function undoAllowed(run: RunContext, log: readonly LogEntry[]): boolean {
+  const [first] = log;
+  const chosen = resolveSettings(
+    run,
+    first?.input.kind === "start" ? first.input.settings : undefined,
+  );
+  return (run.system.settings ?? []).some(
+    (setting) =>
+      setting.options.find((option) => option.id === chosen[setting.id])
+        ?.undo === true,
+  );
 }
 
 export interface GameDependencies {
@@ -258,22 +427,28 @@ export function createGame({
   let monsterArt: ReadonlyMap<string, string> = new Map();
   // Every picture each name can use, so party members who share a look don't all share one face.
   let tokenArt: ReadonlyMap<string, readonly TokenArt[]> = new Map();
+  let covers: ReadonlyMap<string, string> = new Map();
 
   // Art is optional and still being extracted, so a bad index only loses its pictures.
   const loadArt = async (): Promise<void> => {
     const found = new Map<string, string>();
     const tokens = new Map<string, TokenArt[]>();
+    const coverPaths = new Map<string, string>();
     try {
       const entries = await storage.list(ASSETS);
       for (const { path } of entries) {
-        if (!/^private\/assets\/[^/]+\/index\.json$/.test(path)) continue;
+        if (!/^books\/assets\/[^/]+\/index\.json$/.test(path)) continue;
         const folder = path.slice(0, -"/index.json".length);
         const parsed = ArtIndexSchema.safeParse(
           JSON.parse((await storage.read(path)) ?? "null"),
         );
-        for (const { file, monster, subjects, face } of parsed.data ?? []) {
+        for (const { file, monster, subjects, face, cover } of parsed.data ??
+          []) {
           if (!BARE_NAME.test(file)) continue;
           const art = { path: `${folder}/${file}`, ...(face ? { face } : {}) };
+          if (IMAGE_FILE.test(file)) {
+            for (const id of cover ?? []) coverPaths.set(id, art.path);
+          }
           if (monster) found.set(artKey(monster), art.path);
           for (const name of [
             ...(monster ? [monster] : []),
@@ -289,7 +464,11 @@ export function createGame({
     }
     monsterArt = found;
     tokenArt = tokens;
+    covers = coverPaths;
   };
+  // The art is scanned once, and again when the plugins' files change.
+  let artScan: Promise<void> | null = null;
+  const scanArt = (): Promise<void> => (artScan ??= loadArt());
 
   // A missing or broken record only loses what the cards show, never the saves.
   const readRecord = async <T>(
@@ -318,8 +497,7 @@ export function createGame({
     return reuse ?? openFresh(adventure);
   };
 
-  const openFresh = async (adventure: string) => {
-    const catalog = await scanPlugins(storage, roots);
+  const loadFresh = async (adventure: string, catalog: Catalog) => {
     const loaded = await loadRun(storage, catalog, systems, [adventure]);
     if (!loaded.ok) {
       throw new Error(loaded.issues.map(formatIssue).join("\n"));
@@ -327,13 +505,38 @@ export function createGame({
     const { registry } = loaded;
     const ui = uis.find((item) => item.systemId === registry.system.id);
     if (!ui) throw new Error(`No UI for the ${registry.system.id} system`);
-    await loadArt();
     return {
       registry,
       ui,
       root: catalog.plugins.get(adventure)?.root ?? "",
-      run: createRunContext(registry, adventure),
     };
+  };
+  // The last adventure loaded, kept while the plugins' files stay the same, so Continue, Load and
+  // Restart don't load it all again. One, since a book's content is large.
+  // shortcut: keyed on file lists, so an edit inside a file is missed; key on contents if content is edited during play.
+  let loadedLast: {
+    readonly key: string;
+    readonly loading: ReturnType<typeof loadFresh>;
+  } | null = null;
+
+  const openFresh = async (adventure: string) => {
+    const catalog = await scanPlugins(storage, roots);
+    const key = JSON.stringify([
+      adventure,
+      [...catalog.plugins.values()].map(({ root, files }) => [root, files]),
+    ]);
+    if (loadedLast?.key !== key) {
+      artScan = null;
+      const loading = loadFresh(adventure, catalog);
+      const entry = { key, loading };
+      loadedLast = entry;
+      loading.catch(() => {
+        if (loadedLast === entry) loadedLast = null;
+      });
+    }
+    const { registry, ui, root } = await loadedLast.loading;
+    await scanArt();
+    return { registry, ui, root, run: createRunContext(registry, adventure) };
   };
 
   const active = (): Current => {
@@ -342,16 +545,26 @@ export function createGame({
   };
 
   // What a save's card shows, read from the game as it stands.
-  const detailsOf = ({ run, ui, state, root, log }: Current): SaveDetails => {
+  const detailsOf = (game: Current): SaveDetails => {
+    const { run, ui, state, root, log } = game;
     const scene = run.adventure.scenes.find(
       (item) => item.id === state.story.scene,
     );
     const [first] = log;
     const chosen =
       first?.input.kind === "start" ? (first.input.settings ?? {}) : {};
+    const [sheet] = ui.sheets(state.system, run);
+    const [health] = sheet?.summary ?? [];
     return {
-      scene: scene ? endingName(scene.id) : null,
-      level: ui.sheets(state.system, run)[0]?.level ?? null,
+      adventure: game.adventure,
+      seed: game.seed,
+      steps: log.length,
+      scene: scene ? sceneTitle(scene) : null,
+      level: sheet?.level ?? null,
+      character: sheet?.title ?? null,
+      characterKind:
+        sheet?.kind && sheet.kind !== sheet.title ? sheet.kind : null,
+      health: health ? `${health.value} ${health.label}` : null,
       settings: (run.system.settings ?? []).flatMap((setting) => {
         const option = setting.options.find(
           (item) => item.id === chosen[setting.id],
@@ -402,40 +615,68 @@ export function createGame({
 
   return {
     async listAdventures(): Promise<readonly AdventureChoice[]> {
-      const catalog = await scanPlugins(storage, roots);
+      const [catalog] = await Promise.all([
+        scanPlugins(storage, roots),
+        scanArt(),
+      ]);
       const adventures: AdventureChoice[] = [];
       for (const plugin of catalog.plugins.values()) {
         if (plugin.manifest.kind !== "adventure") continue;
-        const text = await storage.read(`${plugin.root}/adventure.yaml`);
-        const info = AdventureInfoSchema.safeParse(parse(text ?? ""));
+        // One broken adventure only loses its title, so the menu and its saves stay reachable.
+        let info: ReturnType<typeof AdventureInfoSchema.safeParse>;
+        try {
+          const text = await storage.read(`${plugin.root}/adventure.yaml`);
+          info = AdventureInfoSchema.safeParse(parse(text ?? ""));
+        } catch (error) {
+          console.warn(`Can't read ${plugin.root}/adventure.yaml`, error);
+          info = AdventureInfoSchema.safeParse(null);
+        }
         adventures.push({
           id: plugin.manifest.id,
           title: info.success ? info.data.title : plugin.manifest.id,
           source: plugin.manifest.distribution,
           levels: info.data?.levels ?? null,
+          cover: covers.get(plugin.manifest.id) ?? null,
         });
       }
       return adventures.sort((a, b) => (a.title < b.title ? -1 : 1));
     },
 
-    async listSaves(): Promise<readonly SaveChoice[]> {
+    // The menu passes the adventures it already listed, so it scans once.
+    async listSaves(
+      listed?: readonly AdventureChoice[],
+    ): Promise<readonly SaveChoice[]> {
       const entries = await storage.list(SAVES);
       const times = await readSaveTimes();
       const allDetails = await readSaveDetails();
-      const adventures = await this.listAdventures();
+      const adventures = listed ?? (await this.listAdventures());
+      const now = Date.now();
       const saves: SaveChoice[] = [];
       for (const { path } of entries) {
         if (!path.endsWith(".json")) continue;
         const name = path.slice(SAVES.length + 1, -".json".length);
-        let info: z.infer<typeof SaveInfoSchema> | undefined;
-        try {
-          info = SaveInfoSchema.safeParse(
-            JSON.parse((await storage.read(path)) ?? "null"),
-          ).data;
-        } catch {
-          info = undefined;
-        }
         const details = allDetails[path];
+        let info:
+          { adventure: string; seed: string; steps: number } | undefined =
+          details?.adventure !== undefined &&
+          details.seed !== undefined &&
+          details.steps !== undefined
+            ? {
+                adventure: details.adventure,
+                seed: details.seed,
+                steps: details.steps,
+              }
+            : undefined;
+        if (!info) {
+          try {
+            const save = SaveInfoSchema.safeParse(
+              JSON.parse((await storage.read(path)) ?? "null"),
+            ).data;
+            info = save && { ...save, steps: save.log.length };
+          } catch {
+            info = undefined;
+          }
+        }
         const savedAt = times[path] ?? null;
         const when = savedAt
           ? new Date(savedAt).toLocaleString(undefined, {
@@ -448,8 +689,12 @@ export function createGame({
           level: details?.level ?? null,
           settings: details?.settings ?? [],
           art: details?.art ?? null,
+          character: details?.character ?? null,
+          characterKind: details?.characterKind ?? null,
+          health: details?.health ?? null,
           savedAt,
           when,
+          ago: savedAt ? agoText(savedAt, now) : null,
         };
         // A broken save still gets listed, so it can be deleted.
         if (!info) {
@@ -461,10 +706,11 @@ export function createGame({
             title: name,
             kind: "manual",
             steps: 0,
+            current: false,
           });
           continue;
         }
-        const { adventure, seed, log } = info;
+        const { adventure, seed, steps } = info;
         const title =
           adventures.find((item) => item.id === adventure)?.title ?? adventure;
         const kind = path.endsWith(`-${seed}-autosave.json`)
@@ -473,11 +719,15 @@ export function createGame({
         saves.push({
           ...bare,
           path,
-          label: `${title}: ${kind === "autosave" ? "Autosave" : "Saved"}, ${when ?? `run ${seed}`}, ${String(log.length)} steps`,
+          label: `${title}: ${kind === "autosave" ? "Autosave" : "Saved"}, ${when ?? `run ${seed}`}, ${stepsText(steps)}`,
           adventure,
           title,
           kind,
-          steps: log.length,
+          steps,
+          current:
+            kind === "autosave" &&
+            current?.adventure === adventure &&
+            current.seed === seed,
         });
       }
       // Oldest saves have no time, and go last.
@@ -510,7 +760,7 @@ export function createGame({
       const entries = await storage.list(LIBRARY).catch(() => []);
       return entries.flatMap(
         ({ path }) =>
-          /^private\/library\/([^/]+)\/index\.json$/.exec(path)?.[1] ?? [],
+          /^books\/library\/([^/]+)\/index\.json$/.exec(path)?.[1] ?? [],
       );
     },
 
@@ -577,9 +827,9 @@ export function createGame({
         registry,
         run,
         ui,
-        state: started.state,
         log: [{ input: start, events: started.events }],
-        ...narrated(narrate(run, ui, null, started.events)),
+        ...retell(run, ui, [{ input: start, events: started.events }]),
+        state: started.state,
         warnings: [],
       };
       current = game;
@@ -597,13 +847,43 @@ export function createGame({
       } as const;
       const outcome = step(game.run, game.state, input);
       if (!outcome.ok) throw new Error(outcome.error);
-      const told = narrate(game.run, game.ui, game.state, outcome.events);
+      const told = narrate(
+        game.run,
+        game.ui,
+        game.state,
+        outcome.events,
+        game.log.length,
+      );
       game.lines.push(...told.lines);
       game.cues.push(...told.cues);
+      game.rolls.push(...told.rolls);
+      game.clues.push(...told.clues);
       game.state = outcome.state;
       game.log.push({ input, events: outcome.events });
       game.warnings = [];
       await autosave(game);
+    },
+
+    // Takes back the last choice by telling the log again without it. The dice live in the state,
+    // so making the same choice again rolls the same numbers.
+    async undo(): Promise<void> {
+      const game = active();
+      if (!undoAllowed(game.run, game.log)) {
+        throw new Error("This difficulty doesn't allow undoing a choice");
+      }
+      if (game.log.length < 2) throw new Error("There is no choice to undo");
+      const log = game.log.slice(0, -1);
+      const told = retell(game.run, game.ui, log);
+      if (told.state === null) throw new Error("The log has no run start");
+      const undone: Current = {
+        ...game,
+        ...told,
+        state: told.state,
+        log,
+        warnings: [],
+      };
+      current = undone;
+      await autosave(undone);
     },
 
     // Each save gets its own file. Only a run's own autosave is ever overwritten.
@@ -634,23 +914,17 @@ export function createGame({
         registry,
         run,
         ui,
-        state: loaded.state,
         log: [...log],
-        ...narrated(
-          narrate(
-            run,
-            ui,
-            null,
-            log.flatMap((entry) => entry.events),
-          ),
-        ),
+        ...retell(run, ui, log),
+        state: loaded.state,
         warnings: loaded.warnings,
       };
       current = game;
       // A save from before cards had details gets them now, so its card shows them next time.
       // The game is already loaded, so a failure here only leaves the card bare.
       try {
-        if ((await readSaveDetails())[path] === undefined) {
+        // Details from before the steps were recorded are written again too.
+        if ((await readSaveDetails())[path]?.steps === undefined) {
           await writeDetails(path, detailsOf(game));
         }
       } catch {
@@ -659,8 +933,19 @@ export function createGame({
     },
 
     view(): GameView {
-      const { run, ui, state, lines, cues, registry, warnings, root } =
-        active();
+      const {
+        run,
+        ui,
+        state,
+        lines,
+        cues,
+        rolls,
+        clues,
+        log: entries,
+        registry,
+        warnings,
+        root,
+      } = active();
       const currentScene = run.adventure.scenes.find(
         (item) => item.id === state.story.scene,
       );
@@ -690,6 +975,7 @@ export function createGame({
       return {
         title: run.adventure.title,
         scene: text,
+        sceneTitle: currentScene ? sceneTitle(currentScene) : null,
         ambience: sceneAmbience(currentScene?.ambience, text ?? ""),
         upcoming: scenesAhead(currentScene).flatMap((id) => {
           const next = run.adventure.scenes.find((item) => item.id === id);
@@ -701,7 +987,7 @@ export function createGame({
             : null,
         endingName:
           state.story.ended === "ending" && currentScene
-            ? endingName(currentScene.id)
+            ? sceneTitle(currentScene)
             : null,
         decision,
         optionGroups: choices
@@ -710,16 +996,43 @@ export function createGame({
         card: decision
           ? (ui.card?.(decision, state.system, run) ?? null)
           : null,
+        shop: decision
+          ? (ui.shop?.(decision, state.system, run) ?? null)
+          : null,
         rests: (decision?.options ?? [])
           .filter((option) => isRest(option.id))
-          .map((option) => ({ ...option, detail: null })),
+          .map((option) => ({
+            ...option,
+            detail:
+              run.system
+                .rests?.(state.system)
+                .find((rest) => `${REST_OPTION_PREFIX}${rest.id}` === option.id)
+                ?.detail ?? null,
+          })),
         monsterArt: pictures,
         tokenArt: tokens,
         adventureRoot: root,
         combat,
-        sheets: ui.sheets(state.system, run),
+        // A row's own choice only on the decider's sheet while it's offered, so a companion's row can't answer for the player.
+        sheets: ui.sheets(state.system, run).map((sheet) => ({
+          ...sheet,
+          sections: sheet.sections.map((section) => ({
+            ...section,
+            rows: section.rows.map(({ option, ...row }) =>
+              option &&
+              sheet.id === decision?.actor &&
+              decision.options.some((item) => item.id === option.id)
+                ? { ...row, option }
+                : row,
+            ),
+          })),
+        })),
         log: [...lines],
         cues: [...cues],
+        rolls: [...rolls],
+        leads: leadGroups(clues),
+        steps: entries.length,
+        canUndo: entries.length > 1 && undoAllowed(run, entries),
         system: ui.systemId,
         systemState: state.system,
         ended: state.story.ended,

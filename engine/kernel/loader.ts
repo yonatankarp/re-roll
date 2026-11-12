@@ -71,7 +71,7 @@ function extensionOf(path: string): string {
 }
 
 async function readYaml(
-  storage: Storage,
+  storage: Pick<Storage, "read">,
   path: string,
   plugin: string,
   issues: Issue[],
@@ -287,7 +287,7 @@ interface LoadedEntry {
 }
 
 async function parseContentFile(
-  storage: Storage,
+  storage: Pick<Storage, "read">,
   record: PluginRecord,
   file: string,
   kind: ContentKind,
@@ -356,9 +356,23 @@ export async function loadRun(
   const adventures = new Map<string, Adventure>();
   const adventureReferences: { readonly owner: string; readonly id: string }[] =
     [];
+  // Each file is read once, for both loading and the hash.
+  const texts = new Map<string, Promise<string | null>>();
+  const reader = {
+    read: (path: string) => texts.get(path) ?? storage.read(path),
+  };
+  const hashed = (file: string): boolean =>
+    // Narration's index changes as clips are made, which doesn't change the story.
+    extensionOf(file) === YAML && !file.startsWith(`${NARRATION_FOLDER}/`);
 
   for (const record of order) {
     const plugin = record.manifest.id;
+    // A plugin's files are read all at once and then used in order, so issues keep their order.
+    for (const file of record.files.filter(hashed)) {
+      const text = storage.read(`${record.root}/${file}`);
+      text.catch(() => undefined); // a failed read is reported where the file is used
+      texts.set(`${record.root}/${file}`, text);
+    }
     const documents = new Map<StoryFile, unknown>();
     const assetPaths = new Set(
       record.files.filter((file) => file.startsWith("assets/")),
@@ -381,7 +395,7 @@ export async function loadRun(
           continue;
         }
         const raw = await readYaml(
-          storage,
+          reader,
           `${record.root}/${file}`,
           plugin,
           issues,
@@ -406,7 +420,7 @@ export async function loadRun(
         issues.push({ plugin, file: `${record.root}/${file}`, message });
         continue;
       }
-      await parseContentFile(storage, record, file, kind, entries, issues);
+      await parseContentFile(reader, record, file, kind, entries, issues);
     }
 
     if (isAdventure) {
@@ -513,10 +527,8 @@ export async function loadRun(
   for (const record of order) {
     const parts: string[] = [];
     for (const file of [...record.files].sort()) {
-      if (extensionOf(file) !== YAML) continue;
-      // Narration's index changes as clips are made, which doesn't change the story.
-      if (file.startsWith(`${NARRATION_FOLDER}/`)) continue;
-      parts.push(file, (await storage.read(`${record.root}/${file}`)) ?? "");
+      if (!hashed(file)) continue;
+      parts.push(file, (await reader.read(`${record.root}/${file}`)) ?? "");
     }
     hashes.set(record.manifest.id, hashText(parts.join("\0")));
   }
@@ -526,13 +538,14 @@ export async function loadRun(
     if (!aliases.has(id)) content.set(id, deepFreeze(entry));
   }
   for (const adventure of adventures.values()) deepFreeze(adventure);
+  const ids = Object.freeze([...content.keys()].sort());
 
   return {
     ok: true,
     registry: Object.freeze({
       system,
       plugins: Object.freeze(order.map((record) => record.manifest)),
-      contentIds: () => [...content.keys()].sort(),
+      contentIds: () => ids,
       pluginHash: (pluginId: string) => hashes.get(pluginId),
       content: (id: string) => {
         const resolved = resolve(id);

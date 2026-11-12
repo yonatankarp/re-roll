@@ -1,9 +1,12 @@
+import { env as hub } from "@huggingface/transformers";
 import { KokoroTTS, TextSplitterStream, env } from "kokoro-js";
 import { KOKORO_MODEL } from "../story/narration.ts";
+import { KOKORO_PATH_TEMPLATE, kokoroFetch } from "./kokoro-files.ts";
 
 // Reads text aloud with Kokoro-82M off the page's thread, a sentence at a time, so playback can
 // start before the whole scene is read. WebGPU when the device has it, else WASM on the CPU.
-// The model comes from Hugging Face on first use and stays in the browser's cache after that.
+// The model comes from Hugging Face on first use, from a pinned commit and checked against its
+// hashes (kokoro-files.ts), and stays in the browser's cache after that. The voices ship with the app.
 
 export type NarrationRequest =
   | {
@@ -43,6 +46,32 @@ env.wasmPaths = {
   ).href,
 };
 
+// Bundled with the app, so a voice never comes from the network.
+const VOICE_URLS: Readonly<Record<string, string>> = {
+  af_heart: new URL(
+    "../../node_modules/kokoro-js/voices/af_heart.bin",
+    import.meta.url,
+  ).href,
+  bm_george: new URL(
+    "../../node_modules/kokoro-js/voices/bm_george.bin",
+    import.meta.url,
+  ).href,
+  bf_emma: new URL(
+    "../../node_modules/kokoro-js/voices/bf_emma.bin",
+    import.meta.url,
+  ).href,
+};
+
+// The pinned commit is also in the cache key, so copies fetched from main before aren't reused.
+hub.remotePathTemplate = KOKORO_PATH_TEMPLATE;
+let downloaded: (percent: number) => void = () => undefined;
+globalThis.fetch = kokoroFetch(fetch.bind(globalThis), {
+  voiceUrl: (voice) => VOICE_URLS[voice],
+  progress: (percent) => {
+    downloaded(percent);
+  },
+});
+
 const reply = (
   message: NarrationReply,
   transfer: Transferable[] = [],
@@ -57,16 +86,24 @@ async function load(): Promise<KokoroTTS> {
       ? await navigator.gpu.requestAdapter().catch(() => null)
       : null;
   let percent = 0;
+  const show = (now: number): void => {
+    if (now !== percent) {
+      percent = now;
+      reply({ type: "loading", percent });
+    }
+  };
+  // While the hash check holds the download back, kokoroFetch reports it instead.
+  downloaded = show;
   const progress_callback = (info: { status: string; progress?: number }) => {
     // The model file dwarfs the rest, so its progress stands for the whole.
     if (info.status === "progress" && info.progress !== undefined) {
-      const now = Math.floor(info.progress);
-      if (now !== percent) {
-        percent = now;
-        reply({ type: "loading", percent });
-      }
+      show(Math.floor(info.progress));
     }
   };
+  // Voices kokoro-js cached from the network before are dropped, so the checked bundled ones are read.
+  if (typeof caches !== "undefined") {
+    await caches.delete("kokoro-voices").catch(() => false);
+  }
   const ready = (tts: KokoroTTS, device: string): KokoroTTS => {
     reply({
       type: "ready",

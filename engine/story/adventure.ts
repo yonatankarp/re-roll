@@ -48,11 +48,14 @@ const ConditionLeafSchema = z.discriminatedUnion("kind", [
     scene: SlugSchema,
     atLeast: z.number().int().min(1).default(1),
   }),
-  z.strictObject({
-    kind: z.literal("attitude"),
-    npc: SlugSchema,
-    atLeast: z.number().int(),
-  }),
+  z
+    .strictObject({
+      kind: z.literal("attitude"),
+      npc: SlugSchema,
+      atLeast: z.number().int().optional(),
+      atMost: z.number().int().optional(),
+    })
+    .refine(hasBound, NEEDS_BOUND),
   z.strictObject({
     kind: z.literal("system"),
     predicate: z.string(),
@@ -112,6 +115,7 @@ const CheckChoiceSchema = z.strictObject({
 
 const SceneSchema = z.strictObject({
   id: SlugSchema,
+  title: z.string().min(1).optional(), // a short name, such as on save cards; the id stands in without one
   text: z.string().min(1),
   // The first whose condition holds replaces the text.
   textVariants: z

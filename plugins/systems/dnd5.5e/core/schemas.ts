@@ -64,6 +64,7 @@ export const ConditionSchema = z.enum([
   "stunned",
   "unconscious",
 ]);
+export type Condition = z.infer<typeof ConditionSchema>;
 
 export const AutomationSchema = z.enum(["full", "partial", "text"]);
 
@@ -118,10 +119,12 @@ export type Damage = z.infer<typeof DamageSchema>;
 const RollFlagSchema = z.enum(["attacks", "saves", "checks", "attacksAgainst"]);
 
 export const ModifierSchema = z.discriminatedUnion("kind", [
+  // "once" ends the effect after the next attack roll it adds to, as with Bardic Inspiration.
   z.strictObject({
     kind: z.literal("bonus"),
-    to: z.enum(["ac", "attacks", "saves", "checks"]),
+    to: z.enum(["ac", "attacks", "saves", "checks", "speed"]),
     amount: AmountSchema,
+    once: z.boolean().optional(),
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   z.strictObject({
@@ -232,6 +235,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       type: z.enum(["weapon", "spell"]),
       ability: AbilitySchema.optional(),
       flatBonus: z.number().int().optional(),
+      proficient: z.boolean().optional(), // false for a weapon the wielder has no training with
     }),
     damage: z.array(DamageSchema).min(1),
     onHit: LeafEffectsSchema,
@@ -308,6 +312,21 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("packTactics") }),
   z.strictObject({ kind: z.literal("undeadFortitude") }),
   z.strictObject({ kind: z.literal("magicResistance") }),
+  z.strictObject({
+    kind: z.literal("conditionImmunity"),
+    condition: ConditionSchema,
+  }),
+  // Hit Points regained at the start of each of its turns, as a troll does.
+  z.strictObject({
+    kind: z.literal("regeneration"),
+    hp: z.number().int().min(1),
+    stoppedBy: z.array(DamageTypeSchema).default([]), // damage that stops it for a turn
+  }),
+  // A Critical Hit on this natural roll or higher, as with Improved Critical.
+  z.strictObject({
+    kind: z.literal("criticalRange"),
+    from: z.number().int().min(2).max(19),
+  }),
   // Attacks per Attack action, such as Extra Attack.
   z.strictObject({
     kind: z.literal("multiattack"),
@@ -481,7 +500,14 @@ export const SpellSchema = ContentEntrySchema.extend({
 }).strict();
 export type Spell = z.infer<typeof SpellSchema>;
 
-const ItemBaseSchema = ContentEntrySchema.extend({ name: z.string().min(1) });
+// In copper pieces, so prices compare without converting coins.
+const CostCpSchema = z.number().int().min(0);
+
+const ItemBaseSchema = ContentEntrySchema.extend({
+  name: z.string().min(1),
+  costCp: CostCpSchema.optional(), // what a merchant asks; missing for "Varies" and for magic items
+  weightLb: z.number().min(0).optional(),
+});
 
 export const WeaponSchema = ItemBaseSchema.extend({
   type: z.literal("weapon"),
@@ -519,6 +545,7 @@ export const ArmorSchema = ItemBaseSchema.extend({
   base: z.number().int(),
   addDex: z.boolean(),
   maxDex: z.number().int().optional(),
+  strength: z.number().int().optional(), // a lower Strength score costs 10 feet of speed
 }).strict();
 export type Armor = z.infer<typeof ArmorSchema>;
 
@@ -526,9 +553,6 @@ const ShieldItemSchema = ItemBaseSchema.extend({
   type: z.literal("shield"),
   bonus: z.number().int(),
 }).strict();
-
-// In copper pieces, so prices compare without converting coins.
-const CostCpSchema = z.number().int().min(0);
 
 const GearSchema = ItemBaseSchema.extend({
   type: z.literal("gear"),
@@ -546,7 +570,6 @@ const GearSchema = ItemBaseSchema.extend({
       "vehicle",
     ])
     .optional(),
-  costCp: CostCpSchema.optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
 }).strict();
 
@@ -554,7 +577,6 @@ const ToolSchema = ItemBaseSchema.extend({
   type: z.literal("tool"),
   ability: AbilitySchema,
   text: z.string().min(1),
-  costCp: CostCpSchema.optional(),
 }).strict();
 
 const RaritySchema = z.enum([
@@ -641,6 +663,21 @@ export const CompanionSchema = ContentEntrySchema.extend({
 }).strict();
 export type Companion = z.infer<typeof CompanionSchema>;
 
+// One legendary action: either some of the monster's own actions, by name, or an effect of its own.
+export const LegendaryActionSchema = z
+  .strictObject({
+    name: z.string().min(1),
+    cost: z.number().int().min(1).default(1), // uses it spends
+    oncePerRound: z.boolean().default(false), // not again until the start of the monster's next turn
+    moves: z.boolean().default(false), // it may move up to half its Speed first
+    makes: z.array(z.string().min(1)).optional(), // its own actions it takes, once each, such as two Bites
+    activation: ActivationSchema.optional(),
+  })
+  .refine((item) => item.makes !== undefined || item.activation, {
+    message: "needs makes or an activation",
+  });
+export type LegendaryAction = z.infer<typeof LegendaryActionSchema>;
+
 export const MonsterSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
   ac: z.number().int(),
@@ -671,10 +708,31 @@ export const MonsterSchema = ContentEntrySchema.extend({
       z.strictObject({
         name: z.string().min(1),
         recharge: z.number().int().min(2).max(6).optional(), // ready again on this d6 roll or higher
+        perDay: z.number().int().min(1).optional(), // uses of its resource cost, back after a Long Rest
         activation: ActivationSchema,
       }),
     )
     .default([]), // empty when nothing it does can be automated, as for a creature that only has traits
+  // Taken right after another creature's turn, spending uses that come back at the start of its own.
+  legendary: z
+    .strictObject({
+      uses: z.number().int().min(1),
+      usesInLair: z.number().int().min(1).optional(),
+      actions: z.array(LegendaryActionSchema).min(1),
+    })
+    .optional(),
+  legendaryResistance: z // turns a failed save into a success, so many times a day
+    .strictObject({
+      perDay: z.number().int().min(1),
+      inLair: z.number().int().min(1).optional(),
+    })
+    .optional(),
+  // Taken on initiative count 20, losing ties, when the encounter is in its lair.
+  lairActions: z
+    .array(
+      z.strictObject({ name: z.string().min(1), activation: ActivationSchema }),
+    )
+    .optional(),
   text: z.string().optional(), // the stat block as printed, for reading
 }).strict();
 export type Monster = z.infer<typeof MonsterSchema>;
@@ -854,6 +912,8 @@ export const EncounterSchema = z.strictObject({
   // The party size the counts were written for. Counts scale to the party that actually shows up.
   forPartySize: z.number().int().min(1).optional(),
   loot: LootSchema.optional(), // found when the party wins
+  lair: z.boolean().optional(), // fought in a monster's lair: lair actions and its "in Lair" numbers
+  surprise: z.enum(["party", "enemies"]).optional(), // the side caught unaware, which rolls initiative with disadvantage
 });
 
 export const CheckSchema = z.union([
