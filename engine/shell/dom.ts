@@ -56,3 +56,10 @@ export function replaceKeepingOpen(
     item.open = opened.has(item.querySelector("summary")?.textContent ?? "");
   }
 }
+
+// Restarts a CSS entrance animation on a node that stays in the page.
+export function enter(node: HTMLElement): void {
+  node.classList.remove("enter");
+  node.getBoundingClientRect(); // a reflow, so the animation starts again
+  node.classList.add("enter");
+}
