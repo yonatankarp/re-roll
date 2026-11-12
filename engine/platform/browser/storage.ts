@@ -2,7 +2,7 @@ import type { Storage, StorageEntry } from "../../kernel/storage.ts";
 
 // The route is repeated from platform/node/content-endpoint.ts, which browser code can't import.
 const CONTENT_ROUTE = "/__content";
-const SAVES = "saves/";
+export const SAVES = "saves/";
 
 export type ContentReader = Pick<Storage, "read" | "list">;
 
@@ -43,7 +43,7 @@ export function createContentReader(baseUrl = ""): ContentReader {
   };
 }
 
-// Where saves are kept: the webview's localStorage in a browser, files in the desktop app.
+// Where saves are kept: IndexedDB in a browser, files in the desktop app.
 // Paths are whole, such as "saves/x.json".
 export interface SaveFiles {
   read(path: string): Promise<string | null>;
@@ -52,7 +52,7 @@ export interface SaveFiles {
   remove(path: string): Promise<void>;
 }
 
-// shortcut: about 5 MB and tied to this origin, so only the browser build keeps its saves here.
+// shortcut: about 5 MB, so only a browser without IndexedDB keeps its saves here.
 export function storeFiles(store: SaveStore): SaveFiles {
   return {
     read: (path) => Promise.resolve(store.getItem(path)),
@@ -113,8 +113,8 @@ export function withSaves(
 // so the save list and pruning pass it by.
 const MOVED = `${SAVES}moved-from-localstorage`;
 
-// The desktop app kept saves in localStorage before it had a saves folder. They are copied there
-// once, never over a file, and the originals stay as a backup.
+// Saves were kept in localStorage before the desktop app had a saves folder and the browser had
+// IndexedDB. They are copied over once, never over a newer copy, and the originals stay as a backup.
 export async function moveSavesToFiles(
   from: SaveStore,
   to: SaveFiles,

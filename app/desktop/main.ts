@@ -9,6 +9,7 @@ import {
   storeFiles,
   withSaveFiles,
 } from "../../engine/platform/browser/storage.ts";
+import { openIndexedDbFiles } from "../../engine/platform/browser/indexeddb.ts";
 import { createTauriSaves } from "../../engine/platform/tauri/saves.ts";
 import {
   createTauriReader,
@@ -81,13 +82,34 @@ async function desktopSaves(): Promise<SaveFiles> {
   return files;
 }
 
+// The browser build keeps saves in IndexedDB and moves any it kept in localStorage there first.
+// Without IndexedDB (site storage blocked) they stay in localStorage.
+async function webSaves(): Promise<SaveFiles> {
+  let files: SaveFiles;
+  try {
+    files = await openIndexedDbFiles();
+  } catch (error) {
+    console.warn(
+      "IndexedDB is unavailable, so saves stay in localStorage",
+      error,
+    );
+    return storeFiles(browserSaves());
+  }
+  try {
+    await moveSavesToFiles(browserSaves(), files);
+  } catch (error) {
+    console.warn("Couldn't move the old saves to IndexedDB", error);
+  }
+  return files;
+}
+
 async function start(page: HTMLElement): Promise<void> {
   mountShell(
     page,
     createGame({
       storage: withSaveFiles(
         isTauri() ? createTauriReader() : createContentReader(),
-        isTauri() ? await desktopSaves() : storeFiles(browserSaves()),
+        isTauri() ? await desktopSaves() : await webSaves(),
       ),
       roots: ["plugins", "books"],
       systems,

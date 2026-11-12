@@ -74,8 +74,10 @@ test("makes a character and confirms an early ending", async ({ page }) => {
 
   // The first choice of every step, until the name.
   const name = page.getByRole("textbox", { name: "Name" });
+  // The next step renders after the save, so a pick can vanish under the click; then look again.
+  const pick = page.locator(".creation-pick").first();
   for (let picks = 0; picks < 40 && !(await name.isVisible()); picks += 1) {
-    await page.locator(".creation-pick").first().click();
+    await pick.click({ timeout: 2000 }).catch(() => undefined);
   }
   await name.fill("Ilyra");
   await page.getByRole("button", { name: "Begin the adventure" }).click();
