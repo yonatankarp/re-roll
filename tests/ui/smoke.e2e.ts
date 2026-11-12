@@ -33,15 +33,19 @@ test("starts the shipped adventure and plays a turn on the map", async ({
   const log = page.locator("ol.log > li");
   const before = await log.count();
 
-  // A lit square that doesn't provoke an Opportunity Attack moves the fighter there, which the log doesn't record.
+  // The farthest lit square that gives no Opportunity Attack (any square, if all do) moves the fighter
+  // there. The log doesn't record a move, but the fighter's token leaves its square.
+  const fighter = page.locator(".dnd-token.active");
+  const start = await fighter.getAttribute("style");
   const squares = page.locator(".dnd-cell");
-  await page.locator(".dnd-cell:not(.risky)").last().click();
-  await expect(squares).toHaveCount(0); // a full move leaves no squares to move to
+  const safe = page.locator(".dnd-cell:not(.risky)");
+  await ((await safe.count()) > 0 ? safe : squares).last().click();
+  await expect(fighter).not.toHaveAttribute("style", start ?? "");
 
   // The fighter's own token offers its actions, such as Second Wind, once it has finished walking.
   const action = page.locator(".dnd-menu button").first();
   await expect(async () => {
-    await page.locator(".dnd-token.active").click();
+    await fighter.click();
     await expect(action).toBeVisible({ timeout: 1000 });
   }).toPass({ timeout: 10_000 });
   await action.click();
