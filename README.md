@@ -62,6 +62,18 @@ The built desktop app has no checkout, so it reads your plugins from its content
 
 `npm run import` turns your saved book pages into plugins under `books/`. Its subcommands are `parse`, `library`, `extract`, `split`, `draft` and `approve`, and section 11 of the design doc explains them. `npm run narrate -- <adventure>` reads a `books/` adventure's scenes aloud once and keeps the clips beside it. Scenes without a clip are read in the app as they play.
 
+### Narration on each OS
+
+Scenes without a made-ahead clip are read in the app by Kokoro-82M, on WebGPU when the webview has it, or else on the CPU in WASM. The model comes from Hugging Face on first use. The app sends `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers, so WASM can use several threads where the webview allows it. At start it logs whether the page is cross-origin isolated and whether the Cache API is there. Without the Cache API the model is downloaded again each launch, but narration still works.
+
+|             | Webview             | WASM threads                                                                                                       | Model cache                                     |
+| ----------- | ------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| **macOS**   | WKWebView           | No. The page is cross-origin isolated, but WebKit gives the app no `SharedArrayBuffer`, so WASM runs on one thread | Yes, the Cache API works on `tauri://localhost` |
+| **Windows** | WebView2 (Chromium) | Expected, not yet checked                                                                                          | Expected, not yet checked                       |
+| **Linux**   | WebKitGTK           | Not yet checked. It has no WebGPU by default, so narration always runs in WASM                                     | Not yet checked                                 |
+
+The macOS row was checked on a release build on macOS 27 (Apple silicon).
+
 ## Saves
 
 - **Browser and desktop:** in the page's `localStorage`, under `saves/`. Each origin has its own, so the game on another `--port` has a separate save list, and so does the desktop app's webview. Clearing site data deletes them.

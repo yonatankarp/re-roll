@@ -53,6 +53,11 @@ function browserSaves(): SaveStore {
 
 if (isTauri()) offerContentFolder(openContentFolder);
 
+// Narration reads faster with WASM threads, which need cross-origin isolation, and keeps its model in the Cache API.
+console.info(
+  `Secure context: ${String(isSecureContext)}, cross-origin isolated: ${String(crossOriginIsolated)}, Cache API: ${String(typeof caches !== "undefined")}`,
+);
+
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("The page has no #app element");
 
