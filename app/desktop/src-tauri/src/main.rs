@@ -37,13 +37,16 @@ fn saves_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 // One bare file name, as the page encodes it (engine/platform/tauri/saves.ts), so no path can climb out.
-fn save_path(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
-    let bare = !name.is_empty()
+fn is_save_name(name: &str) -> bool {
+    !name.is_empty()
         && !name.starts_with('.')
         && name
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-_.%".contains(c));
-    if !bare {
+            .all(|c| c.is_ascii_alphanumeric() || "-_.%".contains(c))
+}
+
+fn save_path(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
+    if !is_save_name(name) {
         return Err(format!("{name} isn't a save file name"));
     }
     Ok(saves_dir(app)?.join(name))
@@ -126,4 +129,30 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("the app failed to start");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_save_name;
+
+    #[test]
+    fn save_names_stay_in_the_saves_folder() {
+        assert!(is_save_name("goblin-ambush-run-autosave.json.gz"));
+        assert!(is_save_name("details.gz"));
+        assert!(is_save_name("%2E%2E%2Fescape.json.gz"));
+        for name in [
+            "",
+            ".",
+            "..",
+            "../x",
+            "a/b",
+            "a\\b",
+            ".hidden.tmp",
+            "c:x",
+            "a b",
+            "ü",
+        ] {
+            assert!(!is_save_name(name), "{name:?} should be refused");
+        }
+    }
 }
