@@ -185,6 +185,18 @@ const ActorSchema = z.strictObject({
       kind: z.literal("monster"),
       statBlockId: ContentIdSchema,
     }),
+    // A creature a spell brought, by a companion stat block (stats.ts), with its caster's numbers as cast.
+    z.strictObject({
+      kind: z.literal("summon"),
+      companion: ContentIdSchema,
+      level: z.number().int(), // the spell's level, which its numbers grow with
+      casterId: z.string(),
+      sourceId: z.string(), // the spell, which it lasts as long as
+      concentration: z.boolean(), // it vanishes when the caster stops concentrating on the spell
+      proficiency: z.number().int(), // the caster's
+      spellAttack: z.number().int(), // the caster's spell attack bonus
+      spellDc: z.number().int(), // the caster's spell save DC
+    }),
   ]),
   hp: z.number().int(),
   tempHp: z.number().int(),
@@ -421,6 +433,11 @@ const LairActionTakenSchema = z.strictObject({
   actor: z.string(),
   name: z.string(),
 });
+// A creature joining a fight already under way, standing where `actor.position` says, its turn right after `after`'s.
+const SummonedSchema = z.strictObject({
+  actor: ActorSchema,
+  after: z.string(),
+});
 
 export const EVENT_SCHEMAS = {
   [`${NS}:characterChosen`]: CharacterChosenSchema,
@@ -456,6 +473,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
   [`${NS}:legendaryActionTaken`]: LegendaryActionTakenSchema,
+  [`${NS}:summoned`]: SummonedSchema,
   [`${NS}:legendaryResistanceUsed`]: ActorOnlySchema,
   [`${NS}:lairActionTaken`]: LairActionTakenSchema,
   [`${NS}:surpriseSet`]: z.strictObject({ side: SurpriseSchema }),
@@ -547,7 +565,11 @@ export function isDown(actor: Actor): boolean {
 
 export function isDead(actor: Actor): boolean {
   if (actor.hp > 0) return false;
-  return actor.side === "enemy" || actor.deathSaves.failures >= 3;
+  return (
+    actor.side === "enemy" ||
+    actor.source.kind === "summon" ||
+    actor.deathSaves.failures >= 3
+  );
 }
 
 // Three successes make a dying character Stable: no more death saves until healed.
@@ -636,10 +658,29 @@ function removeConcentration(state: DndState, casterId: string): DndState {
   return { ...state, actors };
 }
 
+// A summoned creature vanishes when its caster dies or, for a Concentration spell, stops concentrating on it.
+// It stays in the order at 0 Hit Points, as a dead foe does, so the turn passes it by.
+function settleSummons(state: DndState): DndState {
+  let { actors } = state;
+  for (const [id, actor] of Object.entries(state.actors)) {
+    const { source } = actor;
+    if (source.kind !== "summon" || actor.hp <= 0) continue;
+    const caster = state.actors[source.casterId];
+    const gone =
+      !caster ||
+      isDead(caster) ||
+      (source.concentration && caster.concentratingOn !== source.sourceId);
+    if (gone) actors = { ...actors, [id]: { ...actor, hp: 0, tempHp: 0 } };
+  }
+  return actors === state.actors ? state : { ...state, actors };
+}
+
 function endCombat(state: DndState): DndState {
   const actors = Object.fromEntries(
     Object.entries(state.actors)
-      .filter(([, actor]) => actor.side === "party")
+      .filter(
+        ([, actor]) => actor.side === "party" && actor.source.kind !== "summon",
+      )
       .map(([id, actor]) => [
         id,
         {
@@ -715,7 +756,7 @@ function payload<S extends z.ZodType>(
 }
 
 export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
-  return settleForms(state, applyOne(state, event));
+  return settleSummons(settleForms(state, applyOne(state, event)));
 }
 
 function applyOne(state: DndState, event: SystemEvent): DndState {
@@ -812,6 +853,29 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
     }
     case `${NS}:combatEnded`:
       return endCombat(state);
+    case `${NS}:summoned`: {
+      const data = payload(SummonedSchema, event);
+      const { combat } = state;
+      if (!combat) return state;
+      const at = combat.order.indexOf(data.after) + 1;
+      // Everything stored as a place in the order after the new turn moves down one.
+      const shift = (index: number): number =>
+        index >= at ? index + 1 : index;
+      return {
+        ...state,
+        actors: { ...state.actors, [data.actor.id]: data.actor },
+        combat: {
+          ...combat,
+          order: [
+            ...combat.order.slice(0, at),
+            data.actor.id,
+            ...combat.order.slice(at),
+          ],
+          index: shift(combat.index),
+          ...(combat.lair ? { lair: { at: shift(combat.lair.at) } } : {}),
+        },
+      };
+    }
     case `${NS}:turnAdvanced`:
       return advanceTurn(state);
     case `${NS}:moved`: {

@@ -28,6 +28,7 @@ import { DAMAGE_TO_PARTY } from "./combat/effects.ts";
 import { cureFor, dispellable } from "./combat/dispel.ts";
 import { seesThrough } from "./sight.ts";
 import { formOf } from "./forms.ts";
+import { summonedActors } from "./combat/summon.ts";
 import {
   aimsFor,
   allies,
@@ -699,6 +700,19 @@ export function makeJudge(context: Context, side: Actor): Judge {
       }
       case "extraAction":
         return actor.budget.action ? 0 : rate * threat(actor);
+      // What the creatures deal in the rounds they last, as an extra Action's damage is worth.
+      // shortcut: the hits they draw away from the party count for nothing.
+      case "summon":
+        return target.id === actor.id
+          ? summonedActors(effect, action, actor, stats(actor), context).reduce(
+              (sum, summoned) =>
+                sum +
+                rate *
+                  threat(summoned) *
+                  Math.min(horizon, rounds(effect.duration, 0, false, false)),
+              0,
+            )
+          : 0;
       // Thorns: about two squares of them walked by each creature caught. Darkness or fog: worth something only
       // to a caster who sees through it, against the foes it hides.
       case "zone":

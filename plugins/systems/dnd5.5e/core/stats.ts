@@ -14,6 +14,7 @@ import {
   ArmorSchema,
   BackgroundSchema,
   ClassSchema,
+  CompanionSchema,
   type Damage,
   type DamageType,
   FeatSchema,
@@ -859,7 +860,80 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
   if (actor.source.kind !== "monster") {
     throw new Error(`${actor.id} is not a monster`);
   }
-  const monster = lookup(access, MonsterSchema, actor.source.statBlockId);
+  return statBlockStats(
+    actor,
+    lookup(access, MonsterSchema, actor.source.statBlockId),
+    access,
+  );
+}
+
+// A summoned creature: its companion's numbers at the spell's level, and its caster's spell attack and save DC.
+function summonStats(actor: Actor, access: ContentAccess): Stats {
+  const { source } = actor;
+  if (source.kind !== "summon") throw new Error(`${actor.id} is not summoned`);
+  const companion = lookup(access, CompanionSchema, source.companion);
+  const { play } = companion;
+  if (!play) throw new Error(`${companion.id} has no numbers to play`);
+  const above = Math.max(0, source.level - play.level);
+  const casterNumbers = (resolution: Resolution): Resolution => {
+    const dc = { base: source.spellDc, add: [] };
+    switch (resolution.kind) {
+      case "attack":
+        return {
+          ...resolution,
+          attack:
+            resolution.attack.type === "spell"
+              ? { ...resolution.attack, flatBonus: source.spellAttack }
+              : resolution.attack,
+          ...(resolution.onHitSave
+            ? { onHitSave: { ...resolution.onHitSave, dc } }
+            : {}),
+        };
+      case "save":
+        return { ...resolution, dc };
+      default:
+        return resolution;
+    }
+  };
+  const stats = statBlockStats(
+    actor,
+    {
+      id: companion.id,
+      name: companion.name,
+      ...(companion.size ? { size: companion.size } : {}),
+      abilities: companion.abilities,
+      ac: play.ac + play.acPerLevel * above,
+      hp: play.hp + play.hpPerLevel * above,
+      speed: play.speed,
+      ...(play.speeds ? { speeds: play.speeds } : {}),
+      proficiency: source.proficiency,
+      saves: play.saves,
+      initiative: 0, // it goes right after its caster
+      ...(play.creatureType ? { creatureType: play.creatureType } : {}),
+      features: [],
+      passives: play.passives,
+      multiattack: play.halfLevelAttacks
+        ? Math.max(1, Math.floor(source.level / 2))
+        : play.multiattack,
+      actions: play.actions.map((action) => ({
+        ...action,
+        activation: {
+          ...action.activation,
+          resolution: casterNumbers(action.activation.resolution),
+        },
+      })),
+    },
+    access,
+  );
+  // Damage "plus the spell's level" reads it as a scaling key.
+  return { ...stats, scaling: { spellLevel: source.level } };
+}
+
+function statBlockStats(
+  actor: Actor,
+  monster: Monster,
+  access: ContentAccess,
+): Stats {
   const fromFeatures = collectFeatureData(access, monster.features);
   return {
     abilities: monster.abilities,
@@ -932,6 +1006,7 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "dispel" ||
       effect.kind === "zone" ||
       effect.kind === "polymorph" ||
+      effect.kind === "summon" ||
       effect.kind === "extraAction" ||
       effect.kind === "reduceDamage" ||
       effect.kind === "teleport" ||
@@ -953,7 +1028,9 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
   const own =
     actor.source.kind === "monster"
       ? monsterStats(actor, access)
-      : characterStats(actor, access);
+      : actor.source.kind === "summon"
+        ? summonStats(actor, access)
+        : characterStats(actor, access);
   // A form's stat block replaces the creature's own, but it keeps its creature type and Hit Point maximum.
   const form = formOf(actor);
   const stats = form

@@ -33,6 +33,7 @@ import { encodeOption } from "./ids.ts";
 import { swallowerOf } from "./swallow.ts";
 import {
   type Ability,
+  CompanionSchema,
   MonsterSchema,
   SpeciesSchema,
   type Targeting,
@@ -287,6 +288,10 @@ export const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
 export function sizeOf(actor: Actor, access: ContentAccess): number {
   if (actor.source.kind === "monster") {
     const { size } = lookup(access, MonsterSchema, actor.source.statBlockId);
+    return SIZES.indexOf(size ?? "medium");
+  }
+  if (actor.source.kind === "summon") {
+    const { size } = lookup(access, CompanionSchema, actor.source.companion);
     return SIZES.indexOf(size ?? "medium");
   }
   const { build } = actor.source;
