@@ -200,6 +200,7 @@ const BeatSchema = z.strictObject({
 const AdventureInfoSchema = z.strictObject({
   title: z.string().min(1),
   levels: z.string().min(1).optional(), // shown in the menu, such as "1-3"
+  blurb: z.string().min(1).optional(), // a line or two on the setup screen, before a new game
   startScene: SlugSchema,
   resources: z.record(SlugSchema, z.number().int().min(0)).optional(),
 });

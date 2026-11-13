@@ -1654,6 +1654,15 @@ button:active {
   font: 2.2rem/1 var(--font-title);
 }
 
+.setup .meta {
+  margin: 4px 0 0;
+}
+
+.setup-blurb {
+  margin: 8px 0 16px;
+  font-style: italic;
+}
+
 /* The adventure's cover, as a banner over its settings. */
 .setup-cover {
   display: block;
