@@ -25,6 +25,7 @@ import {
   type ChoiceDef,
   type ClassDef,
   ClassSchema,
+  type Feat,
   FeatSchema,
   type Feature,
   FeatureSchema,
@@ -531,9 +532,18 @@ export function choiceOptions(
       };
     case "feat": {
       const had = taken("feats").add(background.feat);
-      const feats = namedContent(access, "feat", FeatSchema).filter(
+      const all = namedContent(access, "feat", FeatSchema);
+      // A feat printed once and encoded as one version per spell list, as Magic Initiate is, is offered by version.
+      const versioned = (item: Feat) =>
+        all.some(
+          (other) =>
+            other.id.startsWith(`${item.id}-`) &&
+            other.name.startsWith(`${item.name} (`),
+        );
+      const feats = all.filter(
         (item) =>
           item.category === choice.category &&
+          !versioned(item) &&
           // shortcut: a feat's prerequisites are only in its text, so they aren't checked.
           (!had.has(item.id) || item.text.includes("Repeatable")),
       );
@@ -858,7 +868,13 @@ function answersOf(
       case "skills":
         return [{ kind: "skills", values }];
       case "spells":
-        return [{ kind: "spells", values }];
+        return [
+          {
+            kind: "spells",
+            values,
+            ...(choice.freeCast ? { freeCast: true } : {}),
+          },
+        ];
       case "weaponMastery":
         return [{ kind: "weaponMastery", values }];
       case "option":

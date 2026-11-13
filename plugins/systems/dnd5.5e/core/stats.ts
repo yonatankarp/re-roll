@@ -168,6 +168,76 @@ function bestAc(
   return Math.max(...bases) + bonus;
 }
 
+// A leveled spell a feat or trait lets the character cast once per Long Rest without a slot, as its own action.
+function freeCastActions(
+  spellIds: ReadonlySet<string>,
+  access: ContentAccess,
+): { action: KnownAction; resource: Feature["resources"][number] }[] {
+  return [...spellIds].flatMap((spellId) => {
+    if (!access.content(spellId)) return [];
+    const spell = lookup(access, SpellSchema, spellId);
+    const { activation } = spell;
+    if (spell.level === 0 || !activation) return [];
+    if (!doesSomething(activation.resolution)) return [];
+    const id = `free:${spellId}`;
+    return [
+      {
+        action: {
+          id: `spell:${spellId}:free`,
+          name: `${spell.name} (free)`,
+          activation: {
+            ...activation,
+            cost: [
+              ...activation.cost.filter((cost) => cost !== "slot"),
+              { resource: id },
+            ],
+          },
+          spellLevel: spell.level,
+        },
+        resource: {
+          id,
+          max: { base: 1, add: [] },
+          recharge: [{ on: "longRest", amount: "all" }],
+        },
+      },
+    ];
+  });
+}
+
+// The abilities a level's feat raised, when that feat makes its raised save proficient, as Resilient does.
+function raisedByFeat(
+  answers: CharacterBuild["levels"][number]["answers"],
+  access: ContentAccess,
+): Ability[] {
+  const proficient = answers.some(
+    (answer) =>
+      answer.kind === "feats" &&
+      answer.values.some((featId) =>
+        lookup(access, FeatSchema, featId).grants.some(
+          (id) =>
+            !!access.content(id) &&
+            lookup(access, FeatureSchema, id).passives.some(
+              (passive) =>
+                passive.kind === "saveProficiency" && passive.increased,
+            ),
+        ),
+      ),
+  );
+  if (!proficient) return [];
+  return answers.flatMap((answer) =>
+    answer.kind === "abilities"
+      ? (Object.keys(answer.increases) as Ability[])
+      : [],
+  );
+}
+
+function bestMentalAbility(abilities: AbilityScores): Ability {
+  return (["int", "wis", "cha"] as const).reduce<Ability>(
+    (best, ability) => (abilities[ability] > abilities[best] ? ability : best),
+    "int",
+  );
+}
+
 function collectFeatureData(
   access: ContentAccess,
   featureIds: readonly string[],
@@ -177,18 +247,22 @@ function collectFeatureData(
   actions: KnownAction[];
   resources: Feature["resources"];
   spells: string[];
+  free: string[];
 } {
   const passives: Passive[] = [];
   const actions: KnownAction[] = [];
   const resources: Feature["resources"] = [];
   const spells = featureIds.flatMap((id) => grantedSpells(id, level));
+  const free: string[] = [];
   for (const id of featureIds) {
     const feature = featureRules(lookup(access, FeatureSchema, id));
     if ((feature.fromLevel ?? 1) > level) continue;
     passives.push(...feature.passives);
     resources.push(...feature.resources);
     for (const [from, ids] of Object.entries(feature.spells ?? {})) {
-      if (Number(from) <= level) spells.push(...ids);
+      if (Number(from) > level) continue;
+      spells.push(...ids);
+      if (feature.freeCast) free.push(...ids);
     }
     feature.activations.forEach((activation, index) => {
       actions.push({
@@ -203,7 +277,7 @@ function collectFeatureData(
       });
     });
   }
-  return { passives, actions, resources, spells };
+  return { passives, actions, resources, spells, free };
 }
 
 export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
@@ -308,6 +382,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const classLevels: Record<string, number> = {};
   const skills = new Set<Skill>(background.skills);
   const knownSpells = new Set<string>();
+  const freeSpells = new Set<string>(); // also cast once per Long Rest without a slot
+  const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
   const featureIds = new Set<string>(species.traits);
   const feat = lookup(access, FeatSchema, background.feat);
   for (const id of feat.grants) featureIds.add(id);
@@ -333,7 +409,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       if (answer.kind === "skills") {
         for (const skill of answer.values) skills.add(skill);
       } else if (answer.kind === "spells") {
-        for (const spell of answer.values) knownSpells.add(spell);
+        for (const spell of answer.values) {
+          knownSpells.add(spell);
+          if (answer.freeCast) freeSpells.add(spell);
+        }
       } else if (answer.kind === "features") {
         for (const id of answer.values) featureIds.add(id);
       } else if (answer.kind === "feats") {
@@ -353,6 +432,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ? subclass.levels.find((item) => item.level === classLevel)
         : undefined;
     for (const id of subclassLevel?.grants ?? []) featureIds.add(id);
+    for (const ability of raisedByFeat(entry.answers, access)) {
+      raisedSaves.add(ability);
+    }
     scaling = { ...scaling, ...subclassLevel?.scaling };
     const own = subclassLevel?.slots.length
       ? subclassLevel.slots
@@ -397,6 +479,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     if (id.endsWith("moderately-armored")) trained.add("medium").add("shield");
     if (id.endsWith("heavily-armored")) trained.add("heavy");
   }
+  const martialTraining = [...featIds].some((id) =>
+    id.endsWith("/martial-weapon-training"),
+  );
   // One action per kind of item, so a second dagger or potion doesn't list twice.
   const worn = [...new Set(equipped(actor))].map(
     (itemId) => [itemId, lookup(access, ItemSchema, itemId)] as const,
@@ -459,7 +544,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         activation: weaponActivation(
           weapon,
           abilities,
-          classes.some((def) => weaponProficient(def, weapon)),
+          martialTraining ||
+            classes.some((def) => weaponProficient(def, weapon)),
           magic.damage,
         ),
         spellLevel: null,
@@ -472,6 +558,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   for (const spellId of fromFeatures.spells) {
     if (access.content(spellId)) knownSpells.add(spellId);
   }
+  for (const spellId of fromFeatures.free) freeSpells.add(spellId);
+  const freeCasts = untrainedArmor ? [] : freeCastActions(freeSpells, access);
+  actions.push(...freeCasts.map(({ action }) => action));
 
   for (const spellId of untrainedArmor ? [] : knownSpells) {
     const spell: Spell = lookup(access, SpellSchema, spellId);
@@ -509,9 +598,21 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       carriedWeight(actor, access),
       carryingCapacity(abilities.str, species.size),
     ),
-    savingThrows: firstClass.savingThrows,
+    savingThrows: [
+      ...new Set([
+        ...firstClass.savingThrows,
+        ...raisedSaves,
+        ...fromFeatures.passives.flatMap((passive) =>
+          passive.kind === "saveProficiency" ? passive.abilities : [],
+        ),
+      ]),
+    ],
     skills: [...skills],
-    spellAbility: caster?.spellcasting?.ability ?? null,
+    // shortcut: a character with no Spellcasting casts the spells a feat or trait gives with the best of
+    // Intelligence, Wisdom or Charisma, as if it had chosen that one.
+    spellAbility:
+      caster?.spellcasting?.ability ??
+      (knownSpells.size > 0 ? bestMentalAbility(abilities) : null),
     slots,
     resources: {},
     passives: [
@@ -552,7 +653,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     initiative: abilityModifier(abilities.dex) - 2 * actor.exhaustion,
     scaling,
     features: [...featureIds],
-    resourceDefs: fromFeatures.resources,
+    resourceDefs: [
+      ...fromFeatures.resources,
+      ...freeCasts.map(({ resource }) => resource),
+    ],
     pactMagic: [...featureIds].some(isPactMagic),
     untrainedArmor,
     exhaustion: actor.exhaustion,

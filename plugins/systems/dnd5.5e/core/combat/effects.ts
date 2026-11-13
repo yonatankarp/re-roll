@@ -388,6 +388,7 @@ export function rollSave(
       disadvantage ||
       hasFlag(target, "disadvantage", "saves", stats, ability) ||
       (ability === "dex" && hasCondition(target, "restrained")),
+    rerollOnes: hasPassive(stats, "rerollOnes"),
   });
   const total =
     roll.natural +

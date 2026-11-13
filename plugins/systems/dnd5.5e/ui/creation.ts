@@ -26,6 +26,7 @@ import {
 } from "../core/schemas.ts";
 import { NS } from "../core/state.ts";
 import { lookup } from "../core/stats.ts";
+import { featureRules } from "../core/feature-rules.ts";
 import { parseState } from "./parse-state.ts";
 
 // Matched by shape, as SystemUi is, so the plugin never imports the shell.
@@ -63,6 +64,42 @@ export function find<T>(
   } catch {
     return null;
   }
+}
+
+// How much of a feature or feat the rules play, in words the sheet and character creation show.
+const IN_PLAY = {
+  full: "In play",
+  partial: "Partly in play",
+  text: "Text only",
+} as const;
+
+export function featureInPlay(access: ContentAccess, id: string) {
+  const feature = find(access, FeatureSchema, id);
+  return feature ? IN_PLAY[featureRules(feature).automation] : null;
+}
+
+// A feat plays as much as the features it grants, and its own choices and Ability Score Increase always play.
+function featInPlay(access: ContentAccess, featId: string) {
+  const feat = find(access, FeatSchema, featId);
+  if (!feat) return null;
+  const levels = feat.grants.flatMap((id) => {
+    const feature = find(access, FeatureSchema, id);
+    return feature ? [featureRules(feature).automation] : [];
+  });
+  const ownMechanics = feat.choices.length > 0 || feat.abilityIncrease;
+  if (levels.length > 0 && levels.every((level) => level === "full")) {
+    return IN_PLAY.full;
+  }
+  return levels.some((level) => level !== "text") || ownMechanics
+    ? IN_PLAY.partial
+    : IN_PLAY.text;
+}
+
+function featureLine(access: ContentAccess, id: string): string[] {
+  const feature = find(access, FeatureSchema, id);
+  if (!feature) return [];
+  const inPlay = featureInPlay(access, id) ?? IN_PLAY.text;
+  return [`${feature.name} (${inPlay.toLowerCase()}). ${feature.text}`];
 }
 
 export function nameOf(
@@ -109,10 +146,7 @@ export function speciesChoice(
 ) {
   const species = find(access, SpeciesSchema, id);
   if (!species) return { id, label };
-  const traits = species.traits.flatMap((trait) => {
-    const feature = find(access, FeatureSchema, trait);
-    return feature ? [`${feature.name}. ${feature.text}`] : [];
-  });
+  const traits = species.traits.flatMap((trait) => featureLine(access, trait));
   return {
     id,
     label,
@@ -131,10 +165,9 @@ export function classChoice(
   const classDef = find(access, ClassSchema, id);
   if (!classDef) return { id, label };
   const first = classDef.levels.find((level) => level.level === 1);
-  const features = (first?.grants ?? []).flatMap((grant) => {
-    const feature = find(access, FeatureSchema, grant);
-    return feature ? [`${feature.name}. ${feature.text}`] : [];
-  });
+  const features = (first?.grants ?? []).flatMap((grant) =>
+    featureLine(access, grant),
+  );
   const primary = classDef.primaryAbilities
     .map((ability) => ABILITY_NAMES[ability])
     .join(" or ");
@@ -171,7 +204,11 @@ export function backgroundChoice(
       `Abilities: ${background.abilities.map((ability) => ABILITY_NAMES[ability]).join(", ")}`,
       `Skills: ${background.skills.map(skillName).join(", ")}`,
       `Tool: ${background.tool}`,
-      ...(feat ? [`${feat.name}. ${feat.text}`] : []),
+      ...(feat
+        ? [
+            `${feat.name} (${(featInPlay(access, feat.id) ?? IN_PLAY.text).toLowerCase()}). ${feat.text}`,
+          ]
+        : []),
     ].join("\n\n"),
   };
 }
@@ -197,9 +234,23 @@ export function contentChoice(
     };
   }
   const feat = find(access, FeatSchema, id);
-  if (feat) return { id, label, detail: feat.text };
+  if (feat) {
+    return {
+      id,
+      label,
+      summary: featInPlay(access, id) ?? IN_PLAY.text,
+      detail: feat.text,
+    };
+  }
   const feature = find(access, FeatureSchema, id);
-  if (feature) return { id, label, detail: feature.text };
+  if (feature) {
+    return {
+      id,
+      label,
+      summary: featureInPlay(access, id) ?? IN_PLAY.text,
+      detail: feature.text,
+    };
+  }
   const subclass = find(access, SubclassSchema, id);
   if (subclass) {
     const features = subclass.levels.flatMap((level) =>

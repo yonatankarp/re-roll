@@ -833,7 +833,7 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 
 **Deliberately cut for now, each with a `shortcut:` comment where it applies:**
 - **The grid:** no difficult terrain, cover, line of sight or creature sizes, and no flanking. An Opportunity Attack checks only where a move starts and ends.
-- **Character building:** no multiclassing, swapping prepared spells, feat prerequisites, feat ability increases other than Ability Score Improvement, or starting gear from the class tables. Expertise, Eldritch Invocations and other options with no choice data stay as text. Companions' classes don't follow their personalities.
+- **Character building:** no multiclassing, swapping prepared spells, feat prerequisites, or starting gear from the class tables. Expertise, Eldritch Invocations and other options with no choice data stay as text. Companions' classes don't follow their personalities.
 - **Spell rules:** no swapping prepared spells or one-spell-slot-per-turn rule. Upcasting works for spells whose data has `upcast`, and cantrips scale by tier from their `cantrip` data.
 - **Other rules:** no Arcane Recovery, weapon mastery effects or armor training limits, and forced movement is stored in data but does nothing yet. Section 8.17 lists which class features work.
 - **Recovery after a fight:** anyone down but not dead gets back up with 1 HP, since an adventure doesn't have to offer a rest. HP otherwise carries over between fights.
@@ -961,8 +961,8 @@ The importer turns the owner's saved book pages and PDFs into private plugins un
 Leaving out `--encodings` on `draft` uses the local model instead, which is free but slower and less accurate.
 
 **Rules when re-importing**
-- Never run `approve --all` on PHB features, feats, species or spells: their mechanics and choices exist only in the approved files.
-- Each feat grants a feature of its own text (`feature/feat-<slug>`), which holds its mechanics. A species' or feat's `choices` are asked at character creation, and a choice of lineage or ancestry picks one feature among several. A feat's `abilityIncrease` lists the abilities its Ability Score Increase can raise by 1, and taking the feat asks which one.
+- Never run `approve --all` on PHB features, feats, species or spells, or on any book's feats, feat features or species: their mechanics and choices exist only in the approved files.
+- Each feat grants a feature of its own text (`feature/feat-<slug>`), which holds its mechanics. A spell a feat or trait gives, with `freeCast` on the feature or on its spell choice, is also cast once per Long Rest without a slot. The sheet and character creation show each feature's `automation` as in play, partly in play or text only. A species' or feat's `choices` are asked at character creation, and a choice of lineage or ancestry picks one feature among several. A feat's `abilityIncrease` lists the abilities its Ability Score Increase can raise by 1, and taking the feat asks which one.
 - Parse subclasses and backgrounds with `--requires phb`.
 - A book's plugin id can't match an adventure's, so book plugins use a `-rules` suffix in that case.
 - Older-edition content is marked and kept out of the character builder by default.

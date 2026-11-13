@@ -1,7 +1,7 @@
-import type { SystemEvent } from "#sdk";
-import type { Ability, DamageType } from "./schemas.ts";
+import type { ContentAccess, Dice, SystemEvent } from "#sdk";
+import { type Ability, type DamageType, ItemSchema } from "./schemas.ts";
 import { type Actor, NS, dndEvent } from "./state.ts";
-import type { Stats } from "./stats.ts";
+import { type Stats, lookup } from "./stats.ts";
 
 // Species traits and feats that change rolls combat makes, kept out of combat.ts behind one call each.
 
@@ -22,6 +22,35 @@ export function traitSaveAdvantage(
       (passive.kind === "concentrationAdvantage" &&
         conditions.includes("concentration")),
   );
+}
+
+// Great Weapon Fighting: damage dice of a Two-Handed melee weapon attack never count below 3.
+// shortcut: a Versatile weapon held in two hands doesn't count, since the hands used aren't tracked.
+export function weaponDamageDice(
+  dice: Dice,
+  actionId: string,
+  stats: Stats,
+  access: ContentAccess,
+): Dice {
+  if (!stats.passives.some(({ kind }) => kind === "greatWeaponFighting")) {
+    return dice;
+  }
+  const itemId = actionId.startsWith("weapon:") ? actionId.slice(7) : "";
+  const item =
+    itemId && access.content(itemId)
+      ? lookup(access, ItemSchema, itemId)
+      : null;
+  const twoHanded =
+    item?.type === "weapon" &&
+    item.properties.includes("twoHanded") &&
+    !item.properties.includes("ammunition") &&
+    !item.properties.includes("thrown");
+  return twoHanded
+    ? {
+        below: (count) => dice.below(count),
+        roll: (sides) => Math.max(3, dice.roll(sides)),
+      }
+    : dice;
 }
 
 // The conditions a repeated save would end, so that a trait such as Fey Ancestry gives its Advantage there as well.

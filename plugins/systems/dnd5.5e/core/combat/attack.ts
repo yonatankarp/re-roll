@@ -47,6 +47,7 @@ import {
 } from "../class-rules.ts";
 import { conditionsApplied } from "../legendary.ts";
 import { type Damage, type Resolution } from "../schemas.ts";
+import { weaponDamageDice } from "../trait-rules.ts";
 import {
   actorOf,
   allies,
@@ -106,6 +107,8 @@ function aimAt(
 }
 
 // An automatic hit such as a Magic Missile dart: all of them land, one at a time against current HP.
+const SAVAGE_ATTACKER = "savage-attacker";
+
 export function runProjectile(
   payload: z.infer<typeof AttackSchema>,
   context: Context,
@@ -267,7 +270,11 @@ export function runAttackRoll(
       "restrained",
     ) ||
     hasCondition(target, "invisible");
-  const roll = rollD20(dice, { advantage, disadvantage });
+  const roll = rollD20(dice, {
+    advantage,
+    disadvantage,
+    rerollOnes: hasPassive(stats, "rerollOnes"),
+  });
   const hadAdvantage = advantage && !disadvantage;
   const total =
     roll.natural +
@@ -464,9 +471,24 @@ export function runApplyHit(
     }
   });
 
+  // Savage Attacker: once a turn, a weapon's damage dice are rolled twice and the higher roll kept.
+  const savage =
+    resolution.attack.type === "weapon" &&
+    hasPassive(stats, "savageAttacker") &&
+    !attacker.usedThisTurn.includes(SAVAGE_ATTACKER);
+  if (savage) {
+    events.push(
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: attacker.id,
+        key: SAVAGE_ATTACKER,
+      }),
+    );
+  }
+  const weaponDice = weaponDamageDice(dice, action.id, stats, context);
   resolution.damage.forEach(({ amount, type }, index) => {
+    const roll = () => rollAmount(amount, stats, weaponDice, multiplier);
     const rolled =
-      rollAmount(amount, stats, dice, multiplier) +
+      (savage && index === 0 ? Math.max(roll(), roll()) : roll()) +
       (index === 0 && type === firstType
         ? extra + damageBonus(attacker, resolution, stats, context)
         : 0) -

@@ -476,6 +476,7 @@ export const dnd55e = defineSystem<DndState>({
       advantage: false,
       disadvantage:
         stats.untrainedArmor && (ability === "str" || ability === "dex"),
+      rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
     });
     const total =
       roll.natural +

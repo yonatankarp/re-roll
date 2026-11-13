@@ -53,15 +53,15 @@ export function startCombat(
   // The story's word on surprise, such as from a Stealth check, beats the encounter's own.
   const surprised = context.state.surprise ?? encounter.surprise;
   const caught = { party: "party", enemies: "enemy" }[surprised ?? "party"];
-  const rolled = [...party, ...monsters].map((actor, position) => ({
-    id: actor.id,
-    position,
-    total:
-      (surprised && actor.side === caught
-        ? rollD20(context.dice, { advantage: false, disadvantage: true })
-            .natural
-        : context.dice.roll(20)) + deriveStats(actor, context).initiative,
-  }));
+  const rolled = [...party, ...monsters].map((actor, position) => {
+    const stats = deriveStats(actor, context);
+    const roll = rollD20(context.dice, {
+      advantage: false,
+      disadvantage: Boolean(surprised) && actor.side === caught,
+      rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
+    });
+    return { id: actor.id, position, total: roll.natural + stats.initiative };
+  });
   // Ties keep their listed order, so the result is the same on every machine.
   const sorted = rolled.sort(
     (a, b) => b.total - a.total || a.position - b.position,
