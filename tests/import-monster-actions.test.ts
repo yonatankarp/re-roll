@@ -137,6 +137,70 @@ function parse(paragraphs: string, withSpells = true): Monster {
 const byName = (monster: Monster, name: string) =>
   monster.actions.find((action) => action.name === name);
 
+describe("monster bonus actions that take an action anyone can", () => {
+  it("reads Nimble Escape and Cunning Action as Bonus Action tactics", () => {
+    const club = entry(
+      "Club",
+      "Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Bludgeoning damage.",
+    );
+    const goblin = parseMonstersFromHtml(
+      block(
+        "Goblin",
+        `${header("Actions")}${club}${header("Bonus Actions")}${entry("Nimble Escape", "The goblin takes the Disengage or Hide action.")}`,
+      ),
+      "my-book",
+    )[0];
+    expect(goblin?.notes).toEqual([]);
+    expect(MonsterSchema.parse(goblin?.entry).passives).toContainEqual({
+      kind: "bonusTactics",
+      tactics: ["disengage", "hide"],
+    });
+    const spy = parse(
+      `${header("Actions")}${club}${header("Bonus Actions")}${entry("Cunning Action", "The spy takes the Dash, Disengage, or Hide action.")}`,
+    );
+    expect(spy.passives).toContainEqual({
+      kind: "bonusTactics",
+      tactics: ["dash", "disengage", "hide"],
+    });
+  });
+});
+
+describe("monster teleports and leaps", () => {
+  it("reads Teleport, Leap and Misty Step as a move to a chosen square", () => {
+    const club = entry(
+      "Club",
+      "Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Bludgeoning damage.",
+    );
+    const parsed = parseMonstersFromHtml(
+      block(
+        "Blinker",
+        `${header("Actions")}${club}${header("Bonus Actions")}${entry("Teleport (Recharge 4–6)", "The dog teleports up to 40 feet to an unoccupied space it can see.")}${entry("Leap", "The bulette jumps up to 30 feet by spending 10 feet of movement.")}${entry("Misty Step (3/Day)", "The mage casts Misty Step, using the same spellcasting ability as Spellcasting.")}`,
+      ),
+      "my-book",
+    )[0];
+    expect(parsed?.notes).toEqual([]);
+    const monster = MonsterSchema.parse(parsed?.entry);
+    const move = (name: string) => byName(monster, name)?.activation.resolution;
+    expect(byName(monster, "Teleport")).toMatchObject({
+      recharge: 4,
+      activation: {
+        cost: ["bonusAction", { resource: "recharge:teleport" }],
+        targeting: { self: true },
+      },
+    });
+    expect(move("Teleport")).toMatchObject({
+      effects: [{ kind: "teleport", feet: 40, movement: 0 }],
+    });
+    expect(move("Leap")).toMatchObject({
+      effects: [{ kind: "teleport", feet: 30, movement: 10 }],
+    });
+    expect(byName(monster, "Misty Step")).toMatchObject({ perDay: 3 });
+    expect(move("Misty Step")).toMatchObject({
+      effects: [{ kind: "teleport", feet: 30, movement: 0 }],
+    });
+  });
+});
+
 describe("monster saves after a lead-in", () => {
   it("takes the range from the lead-in and the area from the save", () => {
     const monster = parse(
@@ -574,6 +638,18 @@ describe("monster actions read in round 4", () => {
           { modifier: { kind: "lingeringDamage", when: "turnEnd" } },
         ],
       },
+    });
+  });
+  it("keeps a swallow's size limit when it leaves out some heroes", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Gulp",
+        "The caster swallows a Small or smaller target it is grappling. While swallowed, the target isn’t Grappled but has the Blinded and Restrained conditions.",
+      )}`,
+    );
+    expect(byName(monster, "Gulp")?.activation.targeting).toMatchObject({
+      targetConditions: ["grappled"],
+      maxSize: "small",
     });
   });
   it("reads a save a hit brings, its creature gate, and a condition lasting as another does", () => {

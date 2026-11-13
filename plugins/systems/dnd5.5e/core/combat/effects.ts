@@ -41,7 +41,8 @@ import { dodging } from "../tactics.ts";
 import { AIM, ALL } from "./ids.ts";
 import { inArea, parseSquare, pushTo } from "../grid.ts";
 import { caughtBy } from "../targeting.ts";
-import { behindTotalCover, coverBonus, coverFor } from "../sight.ts";
+import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
+import { teleportFrame } from "./movement.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import {
@@ -348,7 +349,9 @@ export function leafEvents(
       }
       case "note":
       case "reduceDamage":
-        // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit.
+      case "teleport":
+        // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit, and
+        // a teleport's square by its own decision (resolveAction).
         break;
       default:
         effect satisfies never;
@@ -546,6 +549,14 @@ export function resolveAction(
             context,
           ),
         );
+        // Where it lands is chosen, as a move is.
+        for (const effect of resolution.effects) {
+          if (effect.kind === "teleport" && target.id === actor.id) {
+            frames.push(
+              teleportFrame(actor, effect.feet, effect.movement, context),
+            );
+          }
+        }
       }
       break;
     }
@@ -570,9 +581,7 @@ export function resolveAction(
               dc,
               context,
               action.spellLevel !== null,
-              coverBonus(
-                coverFor(context.state, actor.position, target, [actor.id]),
-              ),
+              coverAgainst(context.state, actor, target),
               conditionsApplied(resolution.onFail),
               heightened === target.id,
             );

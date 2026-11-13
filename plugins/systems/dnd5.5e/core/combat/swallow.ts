@@ -2,7 +2,7 @@ import { type ContentAccess, type SystemEvent } from "#sdk";
 import { type Actor, dndEvent, type DndState, isDown, NS } from "../state.ts";
 import { lookup } from "../stats.ts";
 import { MonsterSchema } from "../schemas.ts";
-import { distanceFeet, nearestOpen, squareKey } from "../grid.ts";
+import { distanceFeet, nearestOpen, type Square, squareKey } from "../grid.ts";
 import { type Context } from "./queries.ts";
 import { rollSave } from "./effects.ts";
 
@@ -40,13 +40,30 @@ function regurgitation(
     : null;
 }
 
-// Out of the swallower, with the Prone condition, and within `feet` of it.
-// shortcut: getting out of a dead swallower costs no movement, as it ends the creature's Restrained at once.
+// "can escape from the corpse by using 20 feet of movement": what getting out of a dead swallower costs.
+function corpseExit(swallower: Actor, access: ContentAccess): number {
+  if (swallower.source.kind !== "monster") return 0;
+  const { text = "" } = lookup(
+    access,
+    MonsterSchema,
+    swallower.source.statBlockId,
+  );
+  const feet =
+    /\bescape from the corpse (?:by )?using (\d+) feet of movement/i.exec(
+      text.replace(/\s+/g, " "),
+    )?.[1];
+  return Number(feet ?? 0);
+}
+
+// Out of the swallower, with the Prone condition, and within `feet` of it. Out of a corpse, it pays `exit` feet
+// of movement: now, on its own turn, or else on its next one.
+// shortcut: it stands outside at once, before it has paid them.
 function releaseEvents(
   held: Actor,
   swallower: Actor,
   feet: number,
   state: DndState,
+  exit = 0,
 ): SystemEvent[] {
   const sources = new Set(
     held.activeEffects.flatMap((effect) =>
@@ -90,7 +107,41 @@ function releaseEvents(
         ends: "spellDuration",
       },
     }),
+    ...exitEvents(held, to, exit, state),
+  ];
+}
+
+function exitEvents(
+  held: Actor,
+  to: Square | null,
+  exit: number,
+  state: DndState,
+): SystemEvent[] {
+  const { order = [], index = 0 } = state.combat ?? {};
+  const own = order[index] === held.id;
+  const at = to ?? held.position;
+  if (own || exit === 0) {
+    return at && (to || exit > 0)
+      ? [
+          dndEvent(`${NS}:moved`, {
+            actor: held.id,
+            to: at,
+            feet: own ? exit : 0,
+          }),
+        ]
+      : [];
+  }
+  return [
     ...(to ? [dndEvent(`${NS}:moved`, { actor: held.id, to, feet: 0 })] : []),
+    dndEvent(`${NS}:effectAdded`, {
+      actor: held.id,
+      effect: {
+        sourceId: "swallowed:exit",
+        casterId: held.id,
+        modifier: { kind: "tactic", tactic: "exiting", value: exit },
+        ends: "casterNextTurnEnd",
+      },
+    }),
   ];
 }
 
@@ -118,6 +169,7 @@ export function releasedSwallows(
           swallower,
           regurgitation(swallower, access)?.feet ?? 5,
           state,
+          corpseExit(swallower, access),
         )
       : [];
   });

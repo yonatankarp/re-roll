@@ -245,6 +245,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     direction: z.enum(["away", "toward"]),
   }),
   z.strictObject({ kind: z.literal("note"), text: z.string() }),
+  // The bearer teleports up to `feet` to an open square it can see, or with `movement` jumps there for that much
+  // of the turn's movement (a monster's Leap), provoking Opportunity Attacks as a walk would.
+  z.strictObject({
+    kind: z.literal("teleport"),
+    feet: z.number().int().min(5),
+    movement: z.number().int().min(0).default(0),
+  }),
   z.strictObject({ kind: z.literal("extraAction") }), // Action Surge
   // Lessens the hit that triggered a reaction, such as Uncanny Dodge or Deflect Attacks.
   z.strictObject({
@@ -319,6 +326,10 @@ export const TargetingSchema = z.union([
     side: SideSchema,
     creatureTypes: z.array(z.string()).optional(), // only these lowercase types can be targeted
     targetConditions: z.array(ConditionSchema).min(1).optional(), // only a creature with one of these, as for Trample
+    // only a creature this size or smaller, as for a giant frog's Swallow
+    maxSize: z
+      .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
+      .optional(),
   }),
   z.strictObject({
     area: z.strictObject({
@@ -411,6 +422,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("pactWeapon"),
     damage: z.array(DamageSchema).default([]),
+  }),
+  // Dash, Disengage or Hide as a Bonus Action, as with Cunning Action or a goblin's Nimble Escape.
+  z.strictObject({
+    kind: z.literal("bonusTactics"),
+    tactics: z.array(z.enum(["dash", "disengage", "hide"])).min(1),
   }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
   z.strictObject({ kind: z.literal("concentrationAdvantage") }),

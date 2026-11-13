@@ -27,6 +27,11 @@ import {
   hasCondition,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import {
+  coverAgainst,
+  coverFor,
+} from "../plugins/systems/dnd5.5e/core/sight.ts";
+import { distanceFeet } from "../plugins/systems/dnd5.5e/core/grid.ts";
 import { dndCue } from "../plugins/systems/dnd5.5e/ui/cues.ts";
 import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 
@@ -157,6 +162,7 @@ const GULPER = dummy("test:monster/gulper", {
     "Actions",
     "Gulp. Strength Saving Throw: DC 14, one creature Grappled by the gulper. Failure: The target is swallowed, and the Grappled condition ends.",
     "If the gulper takes 10 damage or more on a single turn from a creature inside it, the gulper must succeed on a DC 12 Constitution saving throw at the end of that turn or regurgitate all swallowed creatures, each of which falls in a space within 5 feet of the gulper and has the Prone condition.",
+    "If the gulper dies, a swallowed creature is no longer Restrained and can escape from the corpse using 10 feet of movement, exiting Prone.",
   ].join("\n"),
   actions: [
     {
@@ -231,6 +237,84 @@ const CLAWER = dummy("test:monster/clawer", {
   ],
 });
 
+// A plain Club and a weaker Claw whose hit brings a hard save against paralysis, which elves skip, or humans.
+const pinner = (exempt: readonly string[]) =>
+  dummy(`test:monster/pinner-${exempt.join("-")}`, {
+    actions: [
+      ...(dummy("x").actions as unknown[]),
+      {
+        name: "Claw",
+        activation: {
+          cost: ["action"],
+          targeting: { creatures: 1, range: 5, side: "enemy" },
+          resolution: {
+            kind: "attack",
+            attack: { type: "weapon", flatBonus: 4 },
+            damage: [{ amount: { dice: "1d4" }, type: "slashing" }],
+            onHitSave: {
+              ability: "con",
+              dc: { base: 16 },
+              onFail: [
+                {
+                  kind: "applyCondition",
+                  condition: "paralyzed",
+                  duration: { minutes: 1 },
+                  repeatSave: true,
+                },
+              ],
+              exempt,
+            },
+          },
+        },
+      },
+    ],
+  });
+// Cunning Action: Dash, Disengage or Hide as a Bonus Action.
+const SNEAK = dummy("test:monster/sneak", {
+  passives: [{ kind: "bonusTactics", tactics: ["dash", "disengage", "hide"] }],
+});
+
+// Teleports 40 feet, or jumps 30 for 10 feet of movement.
+const mover = (name: string, movement: number) => ({
+  name,
+  activation: {
+    cost: ["bonusAction"],
+    targeting: { self: true },
+    resolution: {
+      kind: "automatic",
+      effects: [{ kind: "teleport", feet: movement ? 30 : 40, movement }],
+    },
+  },
+});
+const BLINKER = dummy("test:monster/blinker", {
+  actions: [...(dummy("x").actions as unknown[]), mover("Teleport", 0)],
+});
+const LEAPER = dummy("test:monster/leaper", {
+  actions: [...(dummy("x").actions as unknown[]), mover("Leap", 10)],
+});
+
+// The gulper with its Club listed first, as the giant toad lists its Bite before Swallow.
+const TOAD = dummy("test:monster/toad", {
+  actions: [...(GULPER.actions as unknown[])].reverse(),
+});
+// The same, swallowing only a Small or smaller creature, as the giant frog does.
+const FROG = dummy("test:monster/frog", {
+  actions: (TOAD.actions as { activation: { targeting: object } }[]).map(
+    (action, index) =>
+      index === 1
+        ? {
+            ...action,
+            activation: {
+              ...action.activation,
+              targeting: { ...action.activation.targeting, maxSize: "small" },
+            },
+          }
+        : action,
+  ),
+});
+const PINNER = pinner(["elf"]);
+const HUMAN_PINNER = pinner(["human"]);
+
 // Weakens one creature: Disadvantage on Strength saves and a damage penalty, saved against each turn.
 const WEAKENER = dummy("test:monster/weakener", {
   actions: [
@@ -300,6 +384,13 @@ function arena(base: RunContext): RunContext {
     "test:monster/gulper": GULPER,
     "test:monster/clawer": CLAWER,
     "test:monster/weakener": WEAKENER,
+    [PINNER.id]: PINNER,
+    [TOAD.id]: TOAD,
+    [FROG.id]: FROG,
+    [SNEAK.id]: SNEAK,
+    [BLINKER.id]: BLINKER,
+    [LEAPER.id]: LEAPER,
+    [HUMAN_PINNER.id]: HUMAN_PINNER,
     "test:monster/giant": dummy("test:monster/giant", { size: "huge" }),
     ...Object.fromEntries(WEAPONS.map((item) => [item.id, item])),
   };
@@ -1349,6 +1440,27 @@ describe("monster grapples and multiattacks", () => {
         feet: 0,
       }),
     );
+    // Three-quarters cover between the hero's old square and the gulper counts for nothing from inside.
+    const walled: DndState = {
+      ...moved,
+      combat: moved.combat && {
+        ...moved.combat,
+        terrain: {
+          difficult: [],
+          half: [],
+          threeQuarters: ["8,5"],
+          dim: [],
+          dark: [],
+          light: "bright",
+        },
+      },
+    };
+    const swallowed = who(walled, PLAYER_ACTOR);
+    const gulper = who(walled, "gulper");
+    expect(coverFor(walled, swallowed.position, gulper, [PLAYER_ACTOR])).toBe(
+      5,
+    );
+    expect(coverAgainst(walled, swallowed, gulper)).toBe(0);
     const options = optionIds(run, moved);
     expect(options).toContain(`${LONGSWORD}|gulper`);
     expect(options).not.toContain(`${LONGSWORD}|near`);
@@ -1397,6 +1509,33 @@ describe("monster grapples and multiattacks", () => {
       hasCondition(who(freed, PLAYER_ACTOR), "blinded", "restrained"),
     ).toBe(false);
     expect(hasCondition(who(freed, PLAYER_ACTOR), "prone")).toBe(true);
+    // Climbing out of the corpse takes 10 feet of the hero's next turn, and of that turn only.
+    const stats = deriveStats(who(freed, PLAYER_ACTOR), run);
+    const heroTurn = (from: DndState): DndState => {
+      let state = from;
+      do {
+        state = settle(
+          run,
+          state,
+          [{ kind: `${NS}:endTurn`, payload: {} }],
+          LOW,
+        ).state;
+      } while (state.combat?.order[state.combat.index] !== PLAYER_ACTOR);
+      return state;
+    };
+    const next = heroTurn(freed);
+    expect(speedLeft(who(next, PLAYER_ACTOR), stats)).toBe(stats.speed - 10);
+    expect(speedLeft(who(heroTurn(next), PLAYER_ACTOR), stats)).toBe(
+      stats.speed,
+    );
+    // Killing it from inside on its own turn spends the 10 feet then.
+    const own = settle(
+      run,
+      { ...dead, combat: dead.combat && { ...dead.combat, index: 0 } },
+      [{ kind: `${NS}:checkCombatEnd`, payload: {} }],
+      LOW,
+    ).state;
+    expect(who(own, PLAYER_ACTOR).moved).toBe(10);
   });
 
   it("rolls the save a hit brings, keeping its effects apart from the hit's grapple", async () => {
@@ -1422,6 +1561,189 @@ describe("monster grapples and multiattacks", () => {
       HIGH,
     ).state;
     expect(sources(who(saved, PLAYER_ACTOR))).toEqual(["monster:0"]);
+  });
+
+  it("has a monster weigh a hit's save and a swallow against plain damage", async () => {
+    const run = await base();
+    const turnOf = (state: DndState, index: number): string => {
+      const turn = {
+        ...state,
+        combat: state.combat && { ...state.combat, index },
+      };
+      const decision = run.system.nextDecision(turn, run);
+      if (!decision) throw new Error("No decision");
+      return tacticalPolicy(decision, contextOf(run, turn, LOW));
+    };
+    // The Claw's paralysis is worth more than the Club's extra damage, unless the target never makes the save.
+    const clawed = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("pinner", [6, 5], PINNER.id),
+    ]);
+    expect(turnOf(clawed, 1)).toBe("monster:1|player");
+    const human = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("pinner", [6, 5], HUMAN_PINNER.id),
+    ]);
+    expect(turnOf(human, 1)).toBe("monster:0|player");
+    // A toad swallows the creature it's grappling instead of clubbing it.
+    const start = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("toad", [6, 5], TOAD.id),
+    ]);
+    expect(turnOf(start, 1)).toBe("monster:0|player");
+    const held = applyDndEvent(
+      start,
+      dndEvent(`${NS}:effectAdded`, {
+        actor: PLAYER_ACTOR,
+        effect: {
+          sourceId: "monster:0",
+          casterId: "toad",
+          modifier: { kind: "condition", condition: "grappled" },
+          ends: "spellDuration",
+        },
+      }),
+    );
+    expect(turnOf(held, 1)).toBe("monster:1|player");
+    // A frog can't swallow the Medium hero it holds.
+    const frog = {
+      ...held,
+      actors: {
+        ...held.actors,
+        toad: {
+          ...who(held, "toad"),
+          source: { kind: "monster" as const, statBlockId: FROG.id },
+        },
+      },
+    };
+    expect(
+      optionIds(run, {
+        ...frog,
+        combat: frog.combat && { ...frog.combat, index: 1 },
+      }),
+    ).not.toContain("monster:1|player");
+  });
+
+  it("dashes with Cunning Action when walking won't reach, and hides with it only behind cover", async () => {
+    const run = await base();
+    const choose = (state: DndState): string => {
+      const decision = run.system.nextDecision(state, run);
+      if (!decision) throw new Error("No decision");
+      return tacticalPolicy(decision, contextOf(run, state, LOW));
+    };
+    const sneakTurn = (at: readonly [number, number]): DndState => {
+      const state = fight([
+        fighter(run, { at: [5, 5] }),
+        monster("sneak", at, SNEAK.id),
+      ]);
+      return {
+        ...state,
+        combat: state.combat && { ...state.combat, index: 1 },
+      };
+    };
+    const far = sneakTurn([15, 5]);
+    expect(choose(far)).toBe("tactic:bonus-dash");
+    const dashed = settle(
+      run,
+      far,
+      [act("sneak", "tactic:bonus-dash")],
+      LOW,
+    ).state;
+    const sneak = who(dashed, "sneak");
+    expect(sneak.budget).toMatchObject({ action: true, bonusAction: false });
+    expect(speedLeft(sneak, deriveStats(sneak, run))).toBe(60);
+    expect(choose(dashed)).toBe("move");
+    // Close enough to walk up and club: no Dash.
+    expect(choose(sneakTurn([9, 5]))).toBe("move");
+    // With its Action spent, it hides only where the hero sees it through Three-Quarters Cover.
+    const spent = (state: DndState): DndState =>
+      applyDndEvent(
+        state,
+        dndEvent(`${NS}:budgetSpent`, { actor: "sneak", kind: "action" }),
+      );
+    const open = spent(sneakTurn([12, 5]));
+    expect(optionIds(run, open)).toContain("tactic:bonus-hide");
+    expect(choose(open)).not.toBe("tactic:bonus-hide");
+    const covered: DndState = {
+      ...open,
+      combat: open.combat && {
+        ...open.combat,
+        terrain: {
+          difficult: [],
+          half: [],
+          threeQuarters: ["8,5"],
+          dim: [],
+          dark: [],
+          light: "bright",
+        },
+      },
+    };
+    expect(choose(covered)).toBe("tactic:bonus-hide");
+    const hidden = settle(
+      run,
+      covered,
+      [act("sneak", "tactic:bonus-hide")],
+      HIGH,
+    ).state;
+    expect(hasCondition(who(hidden, "sneak"), "invisible")).toBe(true);
+    expect(who(hidden, "sneak").budget.bonusAction).toBe(false);
+  });
+
+  it("teleports or leaps into reach when walking won't get there", async () => {
+    const run = await base();
+    const turnAt = (statBlockId: string, x: number): DndState => {
+      const state = fight([
+        fighter(run, { at: [5, 5] }),
+        monster("mover", [x, 5], statBlockId),
+      ]);
+      return {
+        ...state,
+        combat: state.combat && { ...state.combat, index: 1 },
+      };
+    };
+    const choose = (state: DndState) => {
+      const decision = run.system.nextDecision(state, run);
+      if (!decision) throw new Error("No decision");
+      return {
+        decision,
+        answer: tacticalPolicy(decision, contextOf(run, state, LOW)),
+      };
+    };
+    // A walk of 30 feet doesn't reach from 45 feet away; a 40-foot teleport does, and costs no movement.
+    const far = turnAt(BLINKER.id, 14);
+    expect(choose(far).answer).toBe("monster:1|mover");
+    const asked = settle(run, far, [act("mover", "monster:1|mover")], LOW);
+    const blinked = who(asked.state, "mover");
+    expect(distanceFeet(blinked.position, { x: 5, y: 5 })).toBe(5);
+    expect(blinked.moved).toBe(0);
+    expect(blinked.budget.bonusAction).toBe(false);
+    expect(choose(asked.state).answer).toBe("monster:0|player");
+    // Close enough to walk: no teleport.
+    expect(choose(turnAt(BLINKER.id, 10)).answer).toBe("move");
+    // A Leap pays 10 feet of movement for its 30.
+    const leapt = settle(
+      run,
+      turnAt(LEAPER.id, 12),
+      [act("mover", "monster:1|mover")],
+      LOW,
+    ).state;
+    expect(who(leapt, "mover").moved).toBe(10);
+    expect(distanceFeet(who(leapt, "mover").position, { x: 5, y: 5 })).toBe(5);
+    // Leaping out of a foe's reach provokes; teleporting doesn't.
+    const away = (movement: number) =>
+      settle(
+        run,
+        turnAt(LEAPER.id, 6),
+        [
+          {
+            kind: `${NS}:teleport`,
+            payload: { actor: "mover", feet: 30, movement, answer: "12,5" },
+          },
+        ],
+        LOW,
+      );
+    expect(rolls(away(10).events)[0]).toMatchObject({ actor: PLAYER_ACTOR });
+    expect(rolls(away(0).events)).toEqual([]);
+    expect(who(away(0).state, "mover").position).toEqual({ x: 12, y: 5 });
   });
 
   it("gives Disadvantage only on rolls with the ability an effect names", async () => {

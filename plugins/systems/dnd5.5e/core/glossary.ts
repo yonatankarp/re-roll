@@ -60,6 +60,7 @@ const TACTIC_ACTIONS: Readonly<
   ready: "action:ready",
   slowed: null, // a weapon's Slow mastery, which the Rules Glossary doesn't cover
   metamagic: null, // a Sorcerer feature, not in the Rules Glossary
+  exiting: null, // a swallower's stat block, not the Rules Glossary
 };
 
 const RULES: readonly GlossaryTerm[] = [

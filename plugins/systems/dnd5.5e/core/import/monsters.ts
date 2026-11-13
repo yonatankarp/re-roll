@@ -363,10 +363,13 @@ function ongoingDamage(text: string, left: string[]): LeafEffect[] {
 function parseSwallow(text: string, left: string[]): ParsedAction | null {
   const [first = "", ...rest] = sentencesOf(text);
   const swallows = new RegExp(
-    `^The [^.]*? swallows (?:a|one) (?:${HERO_SIZES} )?(?:target|creature) (?:it is grappling|Grappled by [^.]*)\\.$`,
+    `^The [^.]*? swallows (?:a|one) (?:${HERO_SIZES} |(Small|Tiny) or smaller )?(?:target|creature) (?:it is grappling|Grappled by [^.]*)\\.$`,
     "i",
   );
-  if (!swallows.test(first)) return null;
+  const match = swallows.exec(first);
+  if (!match) return null;
+  // "a Small or smaller target" leaves out a Medium hero.
+  const largest = match[1]?.toLowerCase() as "small" | "tiny" | undefined;
   const after = rest.join(" ");
   const effects = [...conditionsIn(after, left), ...ongoingDamage(after, left)];
   if (!effects.some((effect) => effect.kind === "removeCondition")) {
@@ -378,6 +381,7 @@ function parseSwallow(text: string, left: string[]): ParsedAction | null {
       range: 5,
       side: "enemy",
       targetConditions: ["grappled"],
+      ...(largest ? { maxSize: largest } : {}),
     },
     resolution: { kind: "automatic", damage: [], effects },
   };
@@ -1166,6 +1170,20 @@ function parseBlock(
       notes.push(`not automated: ${label}`);
       continue;
     }
+    // Nimble Escape or Cunning Action: "The goblin takes the Disengage or Hide action."
+    const tactics =
+      /^[^.]*?\btakes the ((?:Dash|Disengage|Hide)(?:,? (?:or )?(?:Dash|Disengage|Hide))*) action\.?$/.exec(
+        text.trim(),
+      )?.[1];
+    if (section === "bonus actions" && tactics && !label.includes("(")) {
+      passives.push({
+        kind: "bonusTactics",
+        tactics: [...tactics.matchAll(/Dash|Disengage|Hide/g)].map(
+          (match) => match[0].toLowerCase() as "dash" | "disengage" | "hide",
+        ),
+      });
+      continue;
+    }
     const rechargeOn = /\(Recharge (\d)/.exec(label)?.[1];
     const perDay = /\((\d+)\/Day\b/.exec(label)?.[1];
     const resource = `${perDay ? "day" : "recharge"}:${slugOf(label.replace(/\s*\(.*$/, ""))}`;
@@ -1208,6 +1226,38 @@ function parseBlock(
               notes,
             )
           : [];
+        const move = cast.length === 0 ? teleportOf(optionText) : null;
+        if (move) {
+          const actionName = option.name.replace(/\s*\(.*$/, "");
+          if (move.rest) {
+            notes.push(`partial: ${actionName}: left out what follows it`);
+          }
+          actions.push({
+            name: actionName,
+            ...(recharge ? { recharge: Number(recharge) } : {}),
+            ...(perDay ? { perDay: Number(perDay) } : {}),
+            activation: {
+              cost: [
+                costOf(section),
+                ...(rechargeOn || perDay ? [{ resource }] : []),
+              ],
+              targeting: { self: true },
+              resolution: {
+                kind: "automatic",
+                damage: [],
+                effects: [
+                  {
+                    kind: "teleport",
+                    feet: move.feet,
+                    movement: move.movement,
+                  },
+                ],
+              },
+            },
+          });
+          recharge = undefined;
+          continue;
+        }
         if (cast.length === 0) notes.push(`not automated: ${option.name}`);
         else recharge = undefined;
         actions.push(...cast);
@@ -1315,6 +1365,35 @@ function parseBlock(
       text: lines.join("\n"),
     },
   };
+}
+
+// "The phaerimm teleports up to 30 feet to an unoccupied space it can see.", "The bulette jumps up to 30 feet by
+// spending 10 feet of movement.", or "casts Misty Step" while no book gives that spell a play. `rest` is any
+// sentence after it, such as a limit or a creature taken along, which is left out.
+export function teleportOf(
+  text: string,
+): { feet: number; movement: number; rest: string } | null {
+  const teleport =
+    /^The [^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)? up to (\d+) feet to an unoccupied space (?:it|the [^.]+?) can see\.\s*(.*)$/s.exec(
+      text.trim(),
+    );
+  if (teleport) {
+    return { feet: Number(teleport[1]), movement: 0, rest: teleport[2] ?? "" };
+  }
+  const leap =
+    /^The [^.]*? jumps up to (\d+) feet by spending (\d+) feet of movement\.\s*(.*)$/s.exec(
+      text.trim(),
+    );
+  if (leap) {
+    return {
+      feet: Number(leap[1]),
+      movement: Number(leap[2]),
+      rest: leap[3] ?? "",
+    };
+  }
+  return /\bcasts (?:the )?Misty Step\b/.test(text)
+    ? { feet: 30, movement: 0, rest: "" }
+    : null;
 }
 
 // Stat blocks are regular enough for code alone, so no model is needed and nothing is invented.

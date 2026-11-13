@@ -26,6 +26,10 @@ import {
   within5,
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
+import { teleportSquares } from "./combat/movement.ts";
+import { SIZES, sizeOf } from "./combat/queries.ts";
+import { moveOf, reachesFrom } from "./policy.ts";
+import { coverFor, seeing } from "./sight.ts";
 import {
   classOptionPolicy,
   classOptions,
@@ -38,12 +42,7 @@ import { type Square, distanceFeet, pushTo, squareKey } from "./grid.ts";
 export { pushTo };
 import { FLEE } from "./legendary.ts";
 import { finalDamage, rollD20 } from "./rules.ts";
-import {
-  type Ability,
-  MonsterSchema,
-  type Skill,
-  SpeciesSchema,
-} from "./schemas.ts";
+import { type Ability, type Skill } from "./schemas.ts";
 import {
   type ActiveEffect,
   type Actor,
@@ -64,7 +63,6 @@ import {
   checkBonus,
   damageResponses,
   deriveStats,
-  lookup,
   modifierFor,
   saveBonus,
 } from "./stats.ts";
@@ -87,6 +85,10 @@ import {
 
 const DASH = `${TACTIC}dash`;
 const DISENGAGE = `${TACTIC}disengage`;
+// The same as a Bonus Action, through Cunning Action or Nimble Escape.
+export const BONUS_DASH = `${TACTIC}bonus-dash`;
+export const BONUS_DISENGAGE = `${TACTIC}bonus-disengage`;
+export const BONUS_HIDE = `${TACTIC}bonus-hide`;
 const DODGE = `${TACTIC}dodge`;
 const HIDE = HIDE_SOURCE;
 const SEARCH = `${TACTIC}search`;
@@ -129,19 +131,6 @@ function effect(
     actor,
     effect: { sourceId, casterId, modifier, ends, ...more },
   });
-}
-
-const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
-
-function sizeOf(actor: Actor, access: ContentAccess): number {
-  if (actor.source.kind === "monster") {
-    const { size } = lookup(access, MonsterSchema, actor.source.statBlockId);
-    return SIZES.indexOf(size ?? "medium");
-  }
-  const { build } = actor.source;
-  return build
-    ? SIZES.indexOf(lookup(access, SpeciesSchema, build.speciesId).size)
-    : SIZES.indexOf("medium");
 }
 
 // An Unarmed Strike's Grapple or Shove, and a mastery's save: 8 + the ability modifier + Proficiency Bonus.
@@ -309,6 +298,50 @@ function readyable(stats: Stats): readonly KnownAction[] {
   );
 }
 
+// Dash, Disengage or Hide for the Bonus Action, as far as the bearer's passives allow.
+function bonusTacticOptions(
+  actor: Actor,
+  state: DndState,
+  stats: Stats,
+): { id: string; label: string }[] {
+  if (!actor.budget.bonusAction) return [];
+  const allowed = new Set(
+    stats.passives.flatMap((passive) =>
+      passive.kind === "bonusTactics" ? passive.tactics : [],
+    ),
+  );
+  const options: { id: string; label: string }[] = [];
+  const extra = speedOf(actor, stats) / (1 + tacticsOf(actor, "dash").length);
+  if (
+    allowed.has("dash") &&
+    extra > 0 &&
+    !hasCondition(actor, "grappled", "restrained")
+  ) {
+    options.push({
+      id: BONUS_DASH,
+      label: `Dash as a Bonus Action (${String(extra)} ft more this turn)`,
+    });
+  }
+  if (allowed.has("disengage") && !hasTactic(actor, "disengage")) {
+    options.push({
+      id: BONUS_DISENGAGE,
+      label: "Disengage as a Bonus Action (no Opportunity Attacks this turn)",
+    });
+  }
+  // The same shortcut as the Hide action's: no foe within 5 feet.
+  if (
+    allowed.has("hide") &&
+    !hasTactic(actor, "hidden") &&
+    !standing(enemies(state, actor)).some((foe) => within5(actor, foe))
+  ) {
+    options.push({
+      id: BONUS_HIDE,
+      label: `Hide as a Bonus Action (Stealth, DC ${String(HIDE_DC)})`,
+    });
+  }
+  return options;
+}
+
 export function tacticOptions(
   actor: Actor,
   state: DndState,
@@ -330,6 +363,7 @@ export function tacticOptions(
   }
   options.push(...offhandOptions(actor, state, access, stats));
   options.push(...classOptions(actor, state, access));
+  options.push(...bonusTacticOptions(actor, state, stats));
   if (!actor.budget.action) return options;
   // Everyone else's turns are played by tacticalPolicy, so they're offered only what it can pick, which also
   // spares working out every Study and Shove on every monster's turn.
@@ -563,6 +597,10 @@ export function runTactic(
       return { events: [spend("action"), self("dash")] };
     case DISENGAGE:
       return { events: [spend("action"), self("disengage")] };
+    case BONUS_DASH:
+      return { events: [spend("bonusAction"), self("dash")] };
+    case BONUS_DISENGAGE:
+      return { events: [spend("bonusAction"), self("disengage")] };
     case DODGE:
       return { events: [spend("action"), self("dodge")], frames: done };
     case READY:
@@ -570,7 +608,8 @@ export function runTactic(
         events: [spend("action"), self("ready", targetId)],
         frames: done,
       };
-    case HIDE: {
+    case HIDE:
+    case BONUS_HIDE: {
       const rolled = check(
         actor,
         "stealth",
@@ -598,7 +637,11 @@ export function runTactic(
           ]
         : [];
       return {
-        events: [spend("action"), ...rolled.events, ...hidden],
+        events: [
+          spend(kind === HIDE ? "action" : "bonusAction"),
+          ...rolled.events,
+          ...hidden,
+        ],
         frames: done,
       };
     }
@@ -1056,11 +1099,26 @@ function dashTarget(actor: Actor, context: Context): Square | null {
   );
 }
 
+// A monster hides as a Bonus Action only where the 2024 rules let it: every foe sees it through at least
+// Three-Quarters Cover, or not at all in the dark.
+function hiddenFromAll(actor: Actor, context: Context): boolean {
+  const { state } = context;
+  return standing(enemies(state, actor)).every((foe) => {
+    const cover = coverFor(state, foe.position, actor, [foe.id]);
+    return (
+      cover === 5 ||
+      cover === "total" ||
+      seeing(foe, actor.position, state, context) === "none"
+    );
+  });
+}
+
 // The system's tactics, with these actions: stand up first, escape a grapple that does more than hold, take
 // the off-hand attack, walk on after a Dash, and spend an action that would otherwise go unused on an escape,
 // a Search, a Dash toward the foe or a Dodge.
 // Grapple, Shove, Help, Hide, Study and Ready are never picked: here each costs a whole action that an
-// attack or spell uses better. Disengage would need a step away from foes, which stepToward never takes.
+// attack or spell uses better. Disengage would need a step away from foes, which stepToward never takes,
+// so a Bonus Action Disengage is never picked either. A Bonus Action Dash or Hide is, as above.
 export function tacticalPolicy(decision: Decision, context: Context): string {
   const mover = context.state.actors[decision.actor];
   if (
@@ -1134,7 +1192,38 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   ) {
     return dying.option.id;
   }
+  // A teleport or Leap that lands in reach when walking won't get there.
+  if (chosen === MOVE && actor.budget.action) {
+    const step = stepToward(actor, context);
+    const stats = deriveStats(actor, context);
+    const leap =
+      step && reachesFrom(actor, step, context)
+        ? undefined
+        : decision.options.find((option) => {
+            const [id, target] = parseOption(option.id);
+            const action = stats.actions.find((item) => item.id === id);
+            const move = action && moveOf(action);
+            return (
+              target === actor.id &&
+              move &&
+              teleportSquares(
+                actor,
+                move.feet,
+                move.movement,
+                state,
+                context,
+              ).some((square) => reachesFrom(actor, square, context))
+            );
+          });
+    if (leap) return leap.id;
+  }
+  // Cunning Action's Dash when walking alone won't bring a foe into reach this turn.
+  if (chosen === MOVE && ids.has(BONUS_DASH) && actor.budget.action) {
+    const step = stepToward(actor, context);
+    if (!step || !reachesFrom(actor, step, context)) return BONUS_DASH;
+  }
   if (chosen !== PASS) return chosen;
+  if (ids.has(BONUS_HIDE) && hiddenFromAll(actor, context)) return BONUS_HIDE;
   const offhand = decision.options
     .filter((option) => option.id.startsWith(encodeOption(OFFHAND, "")))
     .sort(

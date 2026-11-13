@@ -11,6 +11,7 @@ import {
   frame,
 } from "../state.ts";
 import {
+  awaitDecision,
   type ContentAccess,
   type Frame,
   type SystemEvent,
@@ -18,7 +19,14 @@ import {
   frameHandler,
 } from "#sdk";
 import { deriveStats, type KnownAction } from "../stats.ts";
-import { distanceFeet, parseSquare, type Square, squareKey } from "../grid.ts";
+import {
+  coverBetween,
+  distanceFeet,
+  parseSquare,
+  type Square,
+  squareKey,
+} from "../grid.ts";
+import { seeing } from "../sight.ts";
 import { hasTactic } from "../tactics.ts";
 import { STAY } from "./ids.ts";
 import {
@@ -28,6 +36,8 @@ import {
   enemies,
   meleeReach,
   moveSquares,
+  speedLeft,
+  squareName,
 } from "./queries.ts";
 
 // Walking on the grid, and the Opportunity Attacks it provokes.
@@ -78,14 +88,17 @@ function walksOf(
 // whose reach some step of the walk leaves. Off the grid (fleeing), only where it starts and ends counts.
 // shortcut: the walk is the cheapest one moveSquares finds, not the one that provokes fewest; let a move
 // choose its path once the board lets the player draw one.
+// A jump goes straight there, so `path` is just its end.
 export function provokers(
   actor: Actor,
   to: Square,
   state: DndState,
   access: ContentAccess,
+  path?: readonly Square[],
 ): readonly { readonly foe: Actor; readonly melee: KnownAction }[] {
   if (hasTactic(actor, "disengage")) return [];
-  const walked = walksOf(actor, state, access).get(squareKey(to)) ?? [to];
+  const walked = path ??
+    walksOf(actor, state, access).get(squareKey(to)) ?? [to];
   const steps = [actor.position, ...walked];
   return enemies(state, actor).flatMap((foe) => {
     if (
@@ -187,8 +200,149 @@ export function runFinishMove(
   };
 }
 
+// Where a teleport or a jump of `feet` can land: open squares on the map the actor can see, nearest a foe first.
+// A jump also needs the movement it costs. shortcut: the line of sight is only checked against walls and the dark.
+export function teleportSquares(
+  actor: Actor,
+  feet: number,
+  movement: number,
+  state: DndState,
+  access: ContentAccess,
+): readonly Square[] {
+  const { grid, walls = [] } = state.combat ?? {};
+  const from = actor.position;
+  if (!grid || !from) return [];
+  if (movement > 0 && speedLeft(actor, deriveStats(actor, access)) < movement) {
+    return [];
+  }
+  const blocked = new Set(walls);
+  const taken = new Set(
+    Object.values(state.actors).flatMap((item) =>
+      item.position && !isDown(item) ? [squareKey(item.position)] : [],
+    ),
+  );
+  const noCover = { half: new Set<string>(), threeQuarters: new Set<string>() };
+  const foes = enemies(state, actor).filter((item) => !isDown(item));
+  const nearest = (square: Square): number =>
+    Math.min(...foes.map((foe) => distanceFeet(square, foe.position)));
+  const squares: Square[] = [];
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      const square = { x, y };
+      const key = squareKey(square);
+      if (
+        distanceFeet(from, square) <= feet &&
+        !blocked.has(key) &&
+        !taken.has(key) &&
+        coverBetween(from, square, blocked, noCover, new Set()) !== "total" &&
+        seeing(actor, square, state, access) !== "none"
+      ) {
+        squares.push(square);
+      }
+    }
+  }
+  return squares.sort(
+    (a, b) =>
+      nearest(a) - nearest(b) || distanceFeet(from, a) - distanceFeet(from, b),
+  );
+}
+
+// The square a teleport or jump lands on, chosen like a move.
+export function teleportFrame(
+  actor: Actor,
+  feet: number,
+  movement: number,
+  context: Context,
+): Frame {
+  const squares = teleportSquares(
+    actor,
+    feet,
+    movement,
+    context.state,
+    context,
+  );
+  return awaitDecision({
+    id: `${NS}:teleportTo:${actor.id}:${String(actor.moved)}`,
+    actor: actor.id,
+    prompt: `Where does ${actor.name} ${movement > 0 ? "jump" : "teleport"} to?`,
+    options: [
+      ...squares.map((square) => ({
+        id: squareKey(square),
+        label: squareName(square),
+      })),
+      { id: STAY, label: "Stay where you are" },
+    ],
+    resume: frame("teleport", { actor: actor.id, feet, movement }),
+  });
+}
+
+export const TeleportSchema = z.object({
+  actor: z.string(),
+  feet: z.number(),
+  movement: z.number(),
+  answer: z.string(),
+});
+
+// A teleport provokes nothing and costs no movement. A jump pays its movement and provokes as a walk would.
+export function runTeleport(
+  payload: z.infer<typeof TeleportSchema>,
+  context: Context,
+): SystemResult {
+  const { state } = context;
+  const actor = actorOf(state, payload.actor);
+  const to = parseSquare(payload.answer);
+  if (payload.answer === STAY || !to) return {};
+  const open = teleportSquares(
+    actor,
+    payload.feet,
+    payload.movement,
+    state,
+    context,
+  );
+  if (!open.some((square) => squareKey(square) === payload.answer)) {
+    throw new Error(`${actor.name} can't land on ${payload.answer}`);
+  }
+  const jump = payload.movement > 0;
+  const events: SystemEvent[] = [];
+  const frames: Frame[] = [];
+  for (const { foe, melee } of jump
+    ? provokers(actor, to, state, context, [to])
+    : []) {
+    events.push(
+      dndEvent(`${NS}:budgetSpent`, { actor: foe.id, kind: "reaction" }),
+    );
+    frames.push(
+      frame("attackRoll", {
+        attacker: foe.id,
+        actionId: melee.id,
+        target: actor.id,
+      }),
+    );
+  }
+  return {
+    events,
+    frames: [
+      ...frames,
+      frame("finishMove", {
+        actor: actor.id,
+        x: to.x,
+        y: to.y,
+        feet: payload.movement,
+      }),
+      ...(actor.position
+        ? [frame("afterMove", { actor: actor.id, ...actor.position })]
+        : []),
+      CHECK_END,
+    ],
+  };
+}
+
 export const movementFrames = {
   [`${NS}:move`]: frameHandler({ schema: MoveSchema, run: runMove }),
+  [`${NS}:teleport`]: frameHandler({
+    schema: TeleportSchema,
+    run: runTeleport,
+  }),
   [`${NS}:finishMove`]: frameHandler({
     schema: FinishMoveSchema,
     run: runFinishMove,

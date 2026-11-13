@@ -31,6 +31,7 @@ import {
   canAfford,
   type Context,
   enemies,
+  exemptFrom,
   findAction,
   hasFlag,
   hasPassive,
@@ -181,7 +182,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
     caster: Actor,
     target: Actor,
     action: KnownAction,
-    resolution: Extract<Resolution, { kind: "save" }>,
+    resolution: Pick<Extract<Resolution, { kind: "save" }>, "ability" | "dc">,
   ): number => {
     const targetStats = stats(target);
     const dc = evaluateFormula(resolution.dc, stats(caster));
@@ -250,6 +251,40 @@ export function makeJudge(context: Context, side: Actor): Judge {
     return averageDamage(attacker, target, extra) + bonus;
   };
 
+  // The save a hit brings, as a ghoul's claw: the chance the target makes it, or null when it never has to.
+  const hitSave = (
+    attacker: Actor,
+    target: Actor,
+    action: KnownAction,
+  ): number | null => {
+    const { resolution } = action.activation;
+    const save =
+      resolution.kind === "attack" ? resolution.onHitSave : undefined;
+    if (!save || exemptFrom(save.exempt, target, stats(target))) return null;
+    return saveChance(attacker, target, action, save);
+  };
+
+  // The damage that save adds, on average, once the attack has hit.
+  const hitSaveDamage = (
+    attacker: Actor,
+    target: Actor,
+    action: KnownAction,
+  ): number => {
+    const { resolution } = action.activation;
+    const save =
+      resolution.kind === "attack" ? resolution.onHitSave : undefined;
+    const saved = hitSave(attacker, target, action);
+    if (!save || saved === null) return 0;
+    const dealt = averageDamage(attacker, target, save.damage);
+    const kept =
+      save.onSuccessDamage === "full"
+        ? 1
+        : save.onSuccessDamage === "half"
+          ? 0.5
+          : 0;
+    return (1 - saved) * dealt + saved * kept * dealt;
+  };
+
   // Average damage one use deals one target, before its HP caps it.
   // With `sure`, as if every attack hit and every save failed.
   const expectedDamage = (
@@ -266,7 +301,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
         const dealt =
           averageDamage(attacker, target, resolution.damage) +
           riders(attacker, target, resolution);
-        return hit * dealt * 1.05;
+        return hit * (dealt * 1.05 + hitSaveDamage(attacker, target, action));
       }
       case "save": {
         const saved = sure
@@ -622,6 +657,12 @@ export function makeJudge(context: Context, side: Actor): Judge {
         const hit = hitChance(actor, target, action, resolution);
         leaves(resolution.onHit, hit, 1 - hit);
         leaves(resolution.onMiss, 1 - hit, 1 - hit);
+        // A condition from the hit's save lasts as a failed save would leave it.
+        const saved = hitSave(actor, target, action);
+        if (resolution.onHitSave && saved !== null) {
+          leaves(resolution.onHitSave.onFail, hit * (1 - saved), saved);
+          leaves(resolution.onHitSave.onSuccess, hit * saved, saved);
+        }
         break;
       }
       case "save": {
