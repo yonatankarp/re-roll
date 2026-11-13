@@ -31,7 +31,7 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 ## Git
 
 - Commit or push only when asked. Never add Co-Authored-By or other attribution lines to commits or PRs.
-- Merge session branches with `--no-ff`, naming them `refs/heads/claude/...`.
+- Merge session branches straight into `main` with `--no-ff`, naming them `refs/heads/claude/...`. There is no integration branch; never recreate `feat/foundations`.
 - Run `git config core.hooksPath .githooks` once per clone. The pre-commit hook runs typecheck and lint and rejects staged `books/` or `private/` paths. It needs Node on PATH, so commit with the same `PATH=…` prefix.
 
 ## Sessions
