@@ -504,6 +504,17 @@ const BOARD_CSS = `
 .dnd-throw.crit .d20-face { fill: #f2c24b; }
 .dnd-throw.fumble .d20-body { fill: #3a3a3a; stroke: #111; }
 .dnd-throw.fumble .d20-face { fill: #555; }
+.dnd-throw.three { filter: none; z-index: 8; }
+.dnd-throw.three .dnd-throw-note { margin-top: 14px; }
+.dnd-dice-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 7;
+  pointer-events: none;
+}
+.dnd-damage-hand { position: absolute; left: 0; top: 0; z-index: 8; pointer-events: none; }
 .dnd-throw-number {
   position: absolute;
   left: 50%;

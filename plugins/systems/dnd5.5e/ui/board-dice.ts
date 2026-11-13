@@ -7,6 +7,18 @@ import {
   still,
   wait,
 } from "./board-context.ts";
+import { damageFaces } from "./board-math.ts";
+
+type Dice3d = typeof import("./board-dice3d.ts");
+let dice3d: Promise<Dice3d | null> | null = null;
+
+// The 3D dice, loaded on the first throw; null without WebGL, which keeps the flat die.
+function solid(): Promise<Dice3d | null> {
+  dice3d ??= import("./board-dice3d.ts")
+    .then(async (module) => ((await module.ready()) ? module : null))
+    .catch(() => null);
+  return dice3d;
+}
 
 // The dice thrown across the board, and the blows and shots that follow an attack.
 
@@ -47,6 +59,59 @@ export function centreOf(
 
 // A d20 tumbles from one point to another and lands on the roll. Yours waits for you to throw it.
 export async function throwD20(
+  ctx: BoardContext,
+  start: { x: number; y: number },
+  to: { x: number; y: number },
+  natural: number,
+  before: string, // what it's for, such as "Perception · DC 12"
+  note: string,
+  mine: boolean,
+): Promise<HTMLElement> {
+  const three = await solid();
+  if (!three) return flatD20(ctx, start, to, natural, before, note, mine);
+  let from = start;
+  const die = el("div", mine ? "dnd-throw three mine" : "dnd-throw three");
+  const label = el(
+    "small",
+    "dnd-throw-note",
+    mine ? `${before}: click or press Return` : "",
+  );
+  die.append(label);
+  ctx.board.append(die);
+  const place = (point: { x: number; y: number }): void => {
+    die.style.left = `${String(point.x)}px`;
+    die.style.top = `${String(point.y)}px`;
+  };
+  const size = mine ? 96 : 64;
+  let held = null;
+  if (mine && !fast(ctx)) {
+    const box = ctx.board.getBoundingClientRect();
+    from = { x: box.width / 2, y: box.height / 2 };
+    place(from);
+    held = three.hold(ctx.board, die, 20, from, size, still(ctx));
+    await waitForThrow(ctx, die);
+    label.textContent = "";
+  }
+  place(to);
+  const ms = still(ctx) ? 0 : mine ? 1100 : 750;
+  three.cast(
+    ctx.board,
+    die,
+    [{ sides: 20, value: natural, from, to }],
+    size,
+    ms,
+    held,
+  );
+  await wait(ctx, ms);
+  three.settle(die);
+  label.textContent = note;
+  die.classList.toggle("crit", natural === 20);
+  die.classList.toggle("fumble", natural === 1);
+  return die;
+}
+
+// The flat d20, where WebGL can't draw the 3D one.
+async function flatD20(
   ctx: BoardContext,
   start: { x: number; y: number },
   to: { x: number; y: number },
@@ -104,6 +169,114 @@ export async function throwD20(
   die.classList.toggle("crit", natural === 20);
   die.classList.toggle("fumble", natural === 1);
   return die;
+}
+
+// An attack's damage dice, thrown together where the blow lands, with their total. It plays alongside
+// what follows rather than holding it up.
+export async function rollDamage(
+  ctx: BoardContext,
+  at: { x: number; y: number },
+  dice: string, // such as "1d8+3"
+  amount: number,
+  critical: boolean,
+  mine: boolean,
+): Promise<void> {
+  const three = await solid();
+  const faces = damageFaces(dice, amount, critical, Math.random);
+  const calm = still(ctx);
+  const roll = el("div", "dnd-damage-dice", `${dice} = ${String(amount)}`);
+  roll.style.left = `${String(at.x)}px`;
+  ctx.board.append(roll);
+  const duration = mine ? 1400 : 1000;
+  const remove = (): void => {
+    roll.remove();
+  };
+  if (!three || faces.length === 0) {
+    // Held still, it sits below the token so the damage number above stays readable.
+    roll.style.top = `${String(at.y + (calm ? 46 : -40))}px`;
+    roll
+      .animate(
+        calm
+          ? // With reduced motion the roll shows where the blow lands and fades, without moving.
+            [
+              { transform: "translate(-50%, -50%)", opacity: 1 },
+              { transform: "translate(-50%, -50%)", opacity: 1, offset: 0.8 },
+              { transform: "translate(-50%, -50%)", opacity: 0 },
+            ]
+          : [
+              {
+                transform: "translate(-50%, -50%) scale(0.5) rotate(-20deg)",
+                opacity: 0,
+              },
+              {
+                transform: "translate(-50%, -50%) scale(1.1) rotate(4deg)",
+                opacity: 1,
+                offset: 0.3,
+              },
+              {
+                transform: "translate(-50%, -70%) scale(1)",
+                opacity: 1,
+                offset: 0.8,
+              },
+              { transform: "translate(-50%, -90%) scale(1)", opacity: 0 },
+            ],
+        { duration, easing: "ease-out" },
+      )
+      .addEventListener("finish", remove);
+    return;
+  }
+  // The handful lands in a row under the token, its total beneath. The dice fade with the hand they're in.
+  const hand = el("div", "dnd-damage-hand");
+  hand.append(roll);
+  ctx.board.append(hand);
+  const size = 40;
+  const y = Math.min(at.y + 52, ctx.board.clientHeight - size * 1.6);
+  roll.style.top = `${String(y + size * 0.95)}px`;
+  const tumble = calm ? 0 : 600;
+  three.cast(
+    ctx.board,
+    hand,
+    faces.map((face, i) => {
+      const x = at.x + (i - (faces.length - 1) / 2) * size * 1.1;
+      return {
+        sides: face.sides,
+        value: face.value,
+        from: {
+          x: x - 50 + Math.random() * 20,
+          y: y - 70 + Math.random() * 20,
+        },
+        to: { x, y },
+      };
+    }),
+    size,
+    tumble,
+  );
+  const whole = duration + tumble;
+  // The total shows once the dice have settled.
+  roll.animate(
+    [
+      { transform: "translate(-50%, -50%)", opacity: 0 },
+      {
+        transform: "translate(-50%, -50%)",
+        opacity: 0,
+        offset: tumble / whole,
+      },
+      {
+        transform: "translate(-50%, -50%)",
+        opacity: 1,
+        offset: Math.min(1, (tumble + 150) / whole),
+      },
+      { transform: "translate(-50%, -50%)", opacity: 1 },
+    ],
+    { duration: whole, fill: "forwards" },
+  );
+  hand
+    .animate([{ opacity: 1 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }], {
+      duration: whole,
+    })
+    .addEventListener("finish", () => {
+      hand.remove();
+    });
 }
 
 // A swing at the target, a shot flying to it, or a spell streaking to it.
