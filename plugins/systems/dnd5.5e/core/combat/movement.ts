@@ -42,6 +42,7 @@ import {
   CHECK_END,
   type Context,
   enemies,
+  hasPassive,
   meleeReach,
   moveSquares,
   speedLeft,
@@ -104,7 +105,8 @@ export function provokers(
   access: ContentAccess,
   path?: readonly Square[],
 ): readonly { readonly foe: Actor; readonly melee: KnownAction }[] {
-  if (hasTactic(actor, "disengage")) return [];
+  // Sentinel's Guardian: Disengage doesn't stop a Sentinel's Opportunity Attack.
+  const disengaged = hasTactic(actor, "disengage");
   const walked = path ??
     walksOf(actor, state, access).get(squareKey(to)) ?? [to];
   const steps = [actor.position, ...walked];
@@ -112,7 +114,8 @@ export function provokers(
     if (
       !foe.budget.reaction ||
       isDown(foe) ||
-      hasCondition(foe, ...INCAPACITATING)
+      hasCondition(foe, ...INCAPACITATING) ||
+      (disengaged && !hasPassive(deriveStats(foe, access), "sentinel"))
     ) {
       return [];
     }
@@ -216,6 +219,11 @@ export function runFinishMove(
 ): SystemResult {
   const actor = context.state.actors[payload.actor];
   if (!context.state.combat || !actor || isDown(actor) || isDead(actor)) {
+    return {};
+  }
+  // An Opportunity Attack that halted or grabbed the walker, as Sentinel's does, keeps it where it stood. A teleport
+  // costs no movement, so nothing stops it.
+  if (payload.feet > 0 && speedLeft(actor, deriveStats(actor, context)) <= 0) {
     return {};
   }
   return {

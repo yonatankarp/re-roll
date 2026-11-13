@@ -14,6 +14,8 @@ import {
   frame,
 } from "../state.ts";
 import { ALL, DECLINE, parseOption } from "./ids.ts";
+import { distanceFeet } from "../grid.ts";
+import { grapplesOn } from "./grapple.ts";
 import { behindTotalCover, coverAgainst, seeing } from "../sight.ts";
 import { insideDamageEvents, swallowerOf } from "./swallow.ts";
 import {
@@ -54,6 +56,7 @@ import {
   masteredDice,
   masteredTypes,
   piercing,
+  rescuedSave,
   steadyShot,
   weaponDamageDice,
 } from "../trait-rules.ts";
@@ -239,6 +242,55 @@ function guardFor(
   return null;
 }
 
+// The bearer's own activation for this trigger that it can pay for now, as Lucky's or Storm's Thunder.
+function ownTrigger(
+  actor: Actor,
+  when: "attacked" | "damaged",
+  context: Context,
+): KnownAction | null {
+  const stats = deriveStats(actor, context);
+  return (
+    stats.actions.find(
+      (item) =>
+        item.activation.trigger?.[when] && canAfford(item, actor, stats),
+    ) ?? null
+  );
+}
+
+// Storm's Thunder: a bearer an attack damages takes its reaction against the attacker on its own, when in range.
+function retaliation(
+  bearerId: string,
+  attackerId: string,
+  context: Context,
+): SystemResult {
+  const { state } = context;
+  const bearer = state.actors[bearerId];
+  const attacker = state.actors[attackerId];
+  if (
+    !bearer ||
+    !attacker ||
+    isDown(bearer) ||
+    isDead(attacker) ||
+    !bearer.budget.reaction ||
+    hasCondition(bearer, ...INCAPACITATING)
+  ) {
+    return {};
+  }
+  const action = ownTrigger(bearer, "damaged", context);
+  if (!action) return {};
+  const { targeting } = action.activation;
+  const range =
+    "range" in targeting && typeof targeting.range === "number"
+      ? targeting.range
+      : 5;
+  if (distanceFeet(bearer.position, attacker.position) > range) return {};
+  const result = resolveAction(action, bearer, [attacker], context);
+  return {
+    events: [...guardCosts(bearer, action, context), ...(result.events ?? [])],
+    frames: result.frames ?? [],
+  };
+}
+
 // What taking a guard's reaction costs, named so the log says which reaction it was.
 function guardCosts(
   guard: Actor,
@@ -362,17 +414,12 @@ export function runAttackRoll(
       "stunned",
       "unconscious",
     ) ||
-    (hasCondition(target, "prone") && close);
+    (hasCondition(target, "prone") && close) ||
+    (hasPassive(stats, "grappledAdvantage") &&
+      grapplesOn(target).some(({ casterId }) => casterId === attacker.id));
   // Protection: an ally's Shield gives this roll, and the others against the target, Disadvantage.
   const shielded = guardFor(target, attacker, "allyAttacked", context);
-  const guarded = shielded
-    ? [
-        ...guardCosts(shielded.guard, shielded.action, context),
-        ...(resolveAction(shielded.action, shielded.guard, [target], context)
-          .events ?? []),
-      ]
-    : [];
-  const disadvantage =
+  const hampered =
     shielded !== null ||
     crowded ||
     unseenTarget ||
@@ -397,6 +444,24 @@ export function runAttackRoll(
       "restrained",
     ) ||
     invisibleTo(target, attacker);
+  // Lucky: the target spends a Luck Point on its own once it's badly hurt or the attacker has Advantage.
+  const luck =
+    hampered ||
+    !(advantage || target.hp * 2 <= targetStats.maxHp) ||
+    isDown(target)
+      ? null
+      : ownTrigger(target, "attacked", context);
+  const disadvantage = hampered || luck !== null;
+  const guarded = [
+    ...(shielded
+      ? [
+          ...guardCosts(shielded.guard, shielded.action, context),
+          ...(resolveAction(shielded.action, shielded.guard, [target], context)
+            .events ?? []),
+        ]
+      : []),
+    ...(luck ? payCosts(luck, target, context) : []),
+  ];
   const roll = rollD20(dice, {
     advantage,
     disadvantage,
@@ -617,6 +682,9 @@ export function runApplyHit(
     resolution.attack.type === "weapon" &&
     hasPassive(stats, "savageAttacker") &&
     !attacker.usedThisTurn.includes(SAVAGE_ATTACKER);
+  // Zhentarim Ruffian's Exploit Opening does the same for every Opportunity Attack.
+  const exploit =
+    hasPassive(stats, "opportunityDamage") && inOwnTurn(target, context);
   if (savage) {
     events.push(
       dndEvent(`${NS}:oncePerTurnUsed`, {
@@ -625,17 +693,42 @@ export function runApplyHit(
       }),
     );
   }
+  // Piercer: once a turn, a low die of the first damage of its type is rolled again, and a Critical Hit with it
+  // rolls one more die.
+  // shortcut: the turn's use is spent on the first piercing hit even when no die is low enough to roll again.
+  const piercer = stats.passives.find(
+    (passive) =>
+      passive.kind === "damageReroll" &&
+      resolution.damage.some(({ type }) => type === passive.damage),
+  );
+  const pierced = piercer?.kind === "damageReroll" ? piercer.damage : null;
+  const pierceIndex = resolution.damage.findIndex(
+    ({ type }) => type === pierced,
+  );
+  const pierceKey = `reroll:${String(pierced)}`;
+  const rerolls =
+    pierced !== null && !attacker.usedThisTurn.includes(pierceKey);
+  if (rerolls) {
+    events.push(
+      dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key: pierceKey }),
+    );
+  }
   const weaponDice = weaponDamageDice(dice, action.id, stats, context);
   resolution.damage.forEach(({ amount, type }, index) => {
+    const pierces = index === pierceIndex;
+    const die = /d(\d+)/.exec(amount.dice ?? "")?.[1];
     const roll = () =>
       rollAmount(
-        amount,
+        pierces && rerolls ? { ...amount, reroll: 1 } : amount,
         stats,
         masteredDice(weaponDice, type, mastered),
         multiplier,
       );
     const rolled =
-      (savage && index === 0 ? Math.max(roll(), roll()) : roll()) +
+      ((savage || exploit) && index === 0 ? Math.max(roll(), roll()) : roll()) +
+      (pierces && payload.critical && die
+        ? rollDiceNotation(`1d${die}`, dice)
+        : 0) +
       (index === 0 && type === firstType
         ? extra + damageBonus(attacker, resolution, stats, context)
         : 0) -
@@ -683,6 +776,9 @@ export function runApplyHit(
     ),
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
+    ...halted(attacker, target, stats, context),
+    ...inspiringStrike(attacker, payload.critical, stats, context),
+    ...(dealt.dealt > 0 ? reassertHonor(attacker, target, context) : []),
   );
   // The save sees the target as the hit left it.
   const afterHit = events.reduce(applyDndEvent, state);
@@ -691,10 +787,23 @@ export function runApplyHit(
     state: afterHit,
   });
   events.push(...nested.events);
+  const thunder =
+    dealt.dealt + nested.dealt > 0
+      ? retaliation(target.id, attacker.id, {
+          ...context,
+          state: nested.events.reduce(applyDndEvent, afterHit),
+        })
+      : {};
+  events.push(...(thunder.events ?? []));
   return {
     events,
     frames: [
-      ...concentrationFrame(target, dealt.dealt + nested.dealt),
+      ...concentrationFrame(
+        target,
+        dealt.dealt + nested.dealt,
+        hasPassive(stats, "concentrationBreaker"),
+      ),
+      ...(thunder.frames ?? []),
       ...(smitesFor(action, attacker, stats).length > 0
         ? [
             frame("afterHit", {
@@ -711,6 +820,110 @@ export function runApplyHit(
       CHECK_END,
     ],
   };
+}
+
+// Whether it's the creature's own turn, so a hit on it is a reaction such as an Opportunity Attack.
+function inOwnTurn(target: Actor, context: Context): boolean {
+  const { combat } = context.state;
+  return combat?.order[combat.index] === target.id;
+}
+
+// Lords' Alliance Agent: once a turn, a Critical Hit gives the nearest ally within 30 feet without Heroic
+// Inspiration that Inspiration.
+function inspiringStrike(
+  attacker: Actor,
+  critical: boolean,
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  const key = "inspiring-strike";
+  if (
+    !critical ||
+    !hasPassive(stats, "critInspiration") ||
+    attacker.usedThisTurn.includes(key)
+  ) {
+    return [];
+  }
+  const ally = allies(context.state, attacker)
+    .filter(
+      (item) =>
+        item.id !== attacker.id &&
+        !isDead(item) &&
+        !item.heroicInspiration &&
+        distanceFeet(attacker.position, item.position) <= 30,
+    )
+    .sort(
+      (a, b) =>
+        distanceFeet(attacker.position, a.position) -
+        distanceFeet(attacker.position, b.position),
+    )[0];
+  return ally
+    ? [
+        dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key }),
+        dndEvent(`${NS}:inspirationGranted`, { actor: ally.id }),
+      ]
+    : [];
+}
+
+// Lords' Alliance Agent's Reassert Honor: an enemy that damages an ally beside the bearer is easier to hit.
+// shortcut: anyone's next attack on it gets the Advantage, as with Help, not only the bearer's.
+function reassertHonor(
+  attacker: Actor,
+  target: Actor,
+  context: Context,
+): SystemEvent[] {
+  const { state } = context;
+  return allies(state, target).flatMap((bearer) =>
+    bearer.id !== target.id &&
+    bearer.side !== attacker.side &&
+    !isDown(bearer) &&
+    within5(bearer, target) &&
+    seeing(bearer, attacker.position, state, context) !== "none" &&
+    hasPassive(deriveStats(bearer, context), "avengeAlly")
+      ? leafEvents(
+          [
+            {
+              kind: "modifier",
+              duration: { until: "yourNextTurnEnd" },
+              modifier: { kind: "advantage", on: "attacksAgainst", once: true },
+            },
+          ],
+          "reassert-honor",
+          bearer,
+          attacker,
+          context,
+        )
+      : [],
+  );
+}
+
+// Sentinel's Halt: a Sentinel's hit on a creature in that creature's own turn is a reaction, so an Opportunity
+// Attack, and takes its Speed to 0 for the turn.
+function halted(
+  attacker: Actor,
+  target: Actor,
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  if (!hasPassive(stats, "sentinel") || !inOwnTurn(target, context)) return [];
+  return leafEvents(
+    [
+      {
+        kind: "modifier",
+        duration: { until: "yourNextTurnStart" },
+        modifier: {
+          kind: "bonus",
+          to: "speed",
+          amount: { bonus: { base: 1000, add: [] } },
+          subtract: true,
+        },
+      },
+    ],
+    "sentinel",
+    attacker,
+    target,
+    context,
+  );
 }
 
 // Crusher's and Slasher's effects on a creature hit by an attack dealing their damage type.
@@ -804,13 +1017,24 @@ function nestedSave(
     0,
     conditionsApplied(save.onFail),
   );
+  const rescued = rolled.saved
+    ? []
+    : rescuedSave(
+        target,
+        save.ability,
+        conditionsApplied(save.onFail),
+        deriveStats(target, context),
+        rolled.events,
+        [],
+      );
+  const succeeded = rolled.saved || rescued.length > 0;
   const responses = damageResponses(target, context);
   const damage = dealEvents(
     target,
     save.damage.flatMap(({ amount, type }) => {
       const total = rollAmount(amount, stats, context.dice);
       const scaled =
-        !rolled.saved || save.onSuccessDamage === "full"
+        !succeeded || save.onSuccessDamage === "full"
           ? total
           : save.onSuccessDamage === "half"
             ? halved(total)
@@ -826,9 +1050,10 @@ function nestedSave(
   return {
     events: [
       ...rolled.events,
+      ...rescued,
       ...damage.events,
       ...leafEvents(
-        rolled.saved ? save.onSuccess : save.onFail,
+        succeeded ? save.onSuccess : save.onFail,
         source,
         attacker,
         target,
@@ -962,6 +1187,7 @@ export function runSmite(
 export const ConcentrationSchema = z.object({
   actor: z.string(),
   dc: z.number(),
+  disadvantage: z.boolean().optional(), // from a Mage Slayer's damage
 });
 
 export function runConcentrationSave(
@@ -973,7 +1199,16 @@ export function runConcentrationSave(
   // Being down ends Concentration outright, as does any failed save.
   const save = isDown(actor)
     ? null
-    : rollSave(actor, "con", payload.dc, context, false, 0, ["concentration"]);
+    : rollSave(
+        actor,
+        "con",
+        payload.dc,
+        context,
+        false,
+        0,
+        ["concentration"],
+        payload.disadvantage,
+      );
   const rolled = save?.events ?? [];
   if (!save?.saved) {
     return {

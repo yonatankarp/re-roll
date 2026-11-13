@@ -719,6 +719,10 @@ Weapon options such as Finesse are handled by the plugin when it builds the atta
 
 A trigger of `allyAttacked` or `allyHit`, with what the bearer must be `holding`, is a reaction for another creature within 5 feet, as Protection gives before the attack roll and Interception after a hit. An ally who can see the attacker takes it as soon as it can, without asking, and the log names it through `budgetSpent`'s `label`.
 
+A trigger of `attacked` is the bearer's own, before an attack roll against it, as Lucky's Disadvantage. It's taken without asking once the bearer is at half its Hit Points or fewer, or the attacker has Advantage. A trigger of `damaged` is a reaction right after an attack damages the bearer, aimed at the attacker when it's in the activation's range, as Storm's Thunder. An activation's `carrying` names an item the bearer must carry, as Battle Medic's Healer's Kit.
+
+A hit on a creature during that creature's own turn counts as an Opportunity Attack, for Sentinel's Halt and Zhentarim Ruffian's damage. A walk whose Speed drops to 0 before it finishes, from Halt or a grapple, ends where it started.
+
 ### 8.8 Formulas
 
 Formulas are a flat sum, with no expression language:

@@ -624,6 +624,7 @@ function sheetOf(
           carryingCapacity(
             stats.abilities.str,
             SpeciesSchema.parse(access.content(build.speciesId)).size,
+            stats.passives.some(({ kind }) => kind === "powerfulBuild"),
           ),
         ),
       },
@@ -669,8 +670,17 @@ function sheetOf(
       {
         title: "Attacks and actions",
         pinned: true,
+        // A use taken on its own, such as Lucky's against an attack, is left out beside the one the player takes.
         rows: stats.actions
           .filter((action) => action.spellLevel === null)
+          .filter(
+            (action, _, all) =>
+              !action.activation.trigger ||
+              !all.some(
+                (other) =>
+                  other.name === action.name && !other.activation.trigger,
+              ),
+          )
           .map(actionRow),
       },
       {
