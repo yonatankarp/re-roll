@@ -617,7 +617,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     speed: encumberedSpeed(
       species.speed,
       carriedWeight(actor, access),
-      carryingCapacity(abilities.str, species.size),
+      carryingCapacity(
+        abilities.str,
+        species.size,
+        fromFeatures.passives.some(({ kind }) => kind === "powerfulBuild"),
+      ),
     ),
     savingThrows: [
       ...new Set([
@@ -925,6 +929,7 @@ export function doesSomething(resolution: Resolution): boolean {
   return effects.some(
     (effect) =>
       effect.kind === "heal" ||
+      effect.kind === "hitDieHeal" ||
       effect.kind === "tempHp" ||
       effect.kind === "modifier" ||
       effect.kind === "removeCondition" ||
@@ -1225,6 +1230,17 @@ export function scaleActivation(
   }
 }
 
+// Dice whose 1s are rolled again once, the new roll standing, as with Healing Rerolls or Tavern Brawler.
+export function rerollingOnes(dice: Dice): Dice {
+  return {
+    ...dice,
+    roll: (sides) => {
+      const rolled = dice.roll(sides);
+      return rolled === 1 ? dice.roll(sides) : rolled;
+    },
+  };
+}
+
 export function rollAmount(
   amount: Amount,
   stats: Stats,
@@ -1232,10 +1248,11 @@ export function rollAmount(
   diceMultiplier = 1,
 ): number {
   const notation = scaledDice(amount, stats.scaling);
+  const rolling = amount.rerollOnes ? rerollingOnes(dice) : dice;
   const rolled = notation
     ? amount.reroll
-      ? rollRerolling(notation, dice, diceMultiplier, amount.reroll)
-      : rollDiceNotation(notation, dice, diceMultiplier)
+      ? rollRerolling(notation, rolling, diceMultiplier, amount.reroll)
+      : rollDiceNotation(notation, rolling, diceMultiplier)
     : 0;
   return rolled + (amount.bonus ? evaluateFormula(amount.bonus, stats) : 0);
 }

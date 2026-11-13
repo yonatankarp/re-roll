@@ -120,6 +120,7 @@ export const AmountSchema = z.strictObject({
   dieSize: z.string().optional(), // a scaling key holding the die size, such as martialArtsDie
   bonus: FormulaSchema.optional(),
   reroll: z.number().int().min(1).optional(), // dice rolled again once when below average, as with Empowered Spell
+  rerollOnes: z.literal(true).optional(), // a die that rolls 1 is rolled again and the new roll stands
 });
 export type Amount = z.infer<typeof AmountSchema>;
 
@@ -295,6 +296,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     halve: z.boolean().default(false),
     amount: AmountSchema.optional(),
   }),
+  // The target spends one of its Hit Point Dice and regains what it rolls plus `bonus`, as with Healer's Battle Medic.
+  z.strictObject({ kind: z.literal("hitDieHeal"), bonus: FormulaSchema }),
 ]);
 export type LeafEffect = z.infer<typeof LeafEffectSchema>;
 
@@ -393,8 +396,15 @@ export const ActivationSchema = z.strictObject({
       allyAttacked: z.literal(true).optional(),
       allyHit: z.literal(true).optional(),
       holding: z.enum(["shield", "shieldOrWeapon"]).optional(), // what the bearer must hold to take it
+      // Taken by the bearer when a creature attacks it, before the roll, giving that roll Disadvantage, as with
+      // Lucky. It's taken on its own once the bearer is at half its Hit Points or fewer, or the attacker has
+      // Advantage.
+      attacked: z.literal(true).optional(),
+      // Taken right after a creature's attack damages the bearer, against that creature, as with Storm's Thunder.
+      damaged: z.literal(true).optional(),
     })
     .optional(),
+  carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
@@ -539,6 +549,32 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     crossbows: z.boolean().default(false),
     bypassCover: z.boolean().default(false),
   }),
+  // A healing die that rolls 1 is rolled again and the new roll stands, as with Healer's Healing Rerolls.
+  z.strictObject({ kind: z.literal("healingRerolls") }),
+  // This much off the price of nonmagical items the bearer buys, as with Crafter.
+  z.strictObject({
+    kind: z.literal("shopDiscount"),
+    percent: z.number().int().min(1).max(100),
+  }),
+  // Counts as one size larger for carrying, with Advantage on checks to escape a grapple, as with Powerful Build.
+  z.strictObject({ kind: z.literal("powerfulBuild") }),
+  // A failed save with one of these abilities succeeds instead, spending the resource, as with Mage Slayer's
+  // Guarded Mind.
+  z.strictObject({
+    kind: z.literal("saveRescue"),
+    abilities: z.array(AbilitySchema).min(1),
+    resource: z.string(),
+  }),
+  // A creature the bearer damages has Disadvantage on the save to keep Concentration, as with Mage Slayer.
+  z.strictObject({ kind: z.literal("concentrationBreaker") }),
+  // Disengage doesn't stop the bearer's Opportunity Attacks, and a creature it hits with one stops moving, as with
+  // Sentinel.
+  z.strictObject({ kind: z.literal("sentinel") }),
+  // Advantage on attack rolls against a creature the bearer has grappled, as with Grappler.
+  z.strictObject({ kind: z.literal("grappledAdvantage") }),
+  // Once a turn, one damage die of a hit of this type is rolled again, and a Critical Hit rolls one more die, as
+  // with Piercer.
+  z.strictObject({ kind: z.literal("damageReroll"), damage: DamageTypeSchema }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
 

@@ -27,7 +27,7 @@ import {
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { teleportSquares } from "./combat/movement.ts";
-import { SIZES, sizeOf } from "./combat/queries.ts";
+import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
 import {
@@ -176,6 +176,7 @@ function check(
   dc: number,
   label: (success: boolean) => string,
   context: Context,
+  advantage = false, // from a trait, as Powerful Build gives to escape a grapple
 ): {
   readonly success: boolean;
   readonly total: number;
@@ -183,7 +184,8 @@ function check(
 } {
   const stats = deriveStats(actor, context);
   const roll = rollD20(context.dice, {
-    advantage: hasFlag(actor, "advantage", "checks", stats, ability),
+    advantage:
+      advantage || hasFlag(actor, "advantage", "checks", stats, ability),
     disadvantage:
       hasFlag(actor, "disadvantage", "checks", stats, ability) ||
       hasCondition(actor, "poisoned", "frightened"),
@@ -771,6 +773,7 @@ export function runTactic(
         escapeDc(grapple, state, context),
         () => `Escape (${athletics ? "Athletics" : "Acrobatics"})`,
         context,
+        hasPassive(stats, "powerfulBuild"),
       );
       return {
         events: [

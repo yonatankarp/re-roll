@@ -1,7 +1,13 @@
 import type { ContentAccess, Dice, SystemEvent } from "#sdk";
-import { type Ability, type DamageType, ItemSchema } from "./schemas.ts";
+import {
+  type Ability,
+  ClassSchema,
+  type DamageType,
+  ItemSchema,
+} from "./schemas.ts";
 import { type Actor, NS, dndEvent, equipped } from "./state.ts";
 import { type Stats, evaluateFormula, lookup } from "./stats.ts";
+import { HIT_DICE } from "./combat/ids.ts";
 
 // Species traits and feats that change rolls combat makes, kept out of combat.ts behind one call each.
 
@@ -183,4 +189,40 @@ export function dropToOneEvents(
       massive: false,
     }),
   ];
+}
+
+// Mage Slayer's Guarded Mind: a failed save with one of its abilities succeeds instead, spending the resource.
+// `pending` holds the events not yet applied, so two saves in one step can't spend the same use.
+export function rescuedSave(
+  target: Actor,
+  ability: Ability,
+  stats: Stats,
+  pending: readonly SystemEvent[],
+): SystemEvent | null {
+  for (const passive of stats.passives) {
+    if (passive.kind !== "saveRescue" || !passive.abilities.includes(ability)) {
+      continue;
+    }
+    const { resource } = passive;
+    const spent =
+      (target.resourcesSpent[resource] ?? 0) +
+      pending.filter(
+        (event) =>
+          event.kind === `${NS}:resourceSpent` &&
+          "payload" in event &&
+          event.payload.actor === target.id &&
+          event.payload.resource === resource,
+      ).length;
+    if (spent < (stats.resources[resource] ?? 0)) {
+      return dndEvent(`${NS}:resourceSpent`, { actor: target.id, resource });
+    }
+  }
+  return null;
+}
+
+// The die a character's next unspent Hit Point Die is, in level order as resting spends them, or null for none.
+export function nextHitDie(actor: Actor, access: ContentAccess): string | null {
+  if (actor.source.kind !== "character") return null;
+  const entry = actor.source.build?.levels[actor.resourcesSpent[HIT_DICE] ?? 0];
+  return entry ? lookup(access, ClassSchema, entry.classId).hitDie : null;
 }

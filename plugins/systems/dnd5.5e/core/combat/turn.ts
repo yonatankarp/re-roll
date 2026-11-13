@@ -35,6 +35,7 @@ import {
   masteredTypes,
   piercing,
   repeatSaveConditions,
+  rescuedSave,
 } from "../trait-rules.ts";
 import {
   actorOf,
@@ -243,12 +244,18 @@ export function runFinishTurn(context: Context): SystemResult {
     events.push(...rolled.events);
     const resisted = rolled.saved
       ? null
-      : legendaryResistance(
+      : (legendaryResistance(
           target,
           modifier.kind === "condition" ? [modifier.condition] : [],
           context,
           events,
-        );
+        ) ??
+        rescuedSave(
+          target,
+          save.ability,
+          deriveStats(target, context),
+          events,
+        ));
     if (resisted) events.push(resisted);
     const worse = (
       target.activeEffects.find(

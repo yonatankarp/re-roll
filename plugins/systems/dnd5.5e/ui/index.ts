@@ -624,6 +624,7 @@ function sheetOf(
           carryingCapacity(
             stats.abilities.str,
             SpeciesSchema.parse(access.content(build.speciesId)).size,
+            stats.passives.some(({ kind }) => kind === "powerfulBuild"),
           ),
         ),
       },

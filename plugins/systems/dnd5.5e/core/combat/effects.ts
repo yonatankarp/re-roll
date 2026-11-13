@@ -6,7 +6,9 @@ import {
   type KnownAction,
   lookup,
   modifierFor,
+  rerollingOnes,
   rollAmount,
+  rollDiceNotation,
   saveBonus,
 } from "../stats.ts";
 import { metamagicSaves } from "../metamagic.ts";
@@ -40,11 +42,13 @@ import {
   dropToOneEvents,
   masteredDice,
   masteredTypes,
+  nextHitDie,
   piercing,
+  rescuedSave,
   traitSaveAdvantage,
 } from "../trait-rules.ts";
 import { dodging } from "../tactics.ts";
-import { AIM, ALL } from "./ids.ts";
+import { AIM, ALL, HIT_DICE } from "./ids.ts";
 import { inArea, parseSquare, pushTo, type Square } from "../grid.ts";
 import { caughtBy } from "../targeting.ts";
 import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
@@ -102,15 +106,18 @@ export function payCosts(
   return events;
 }
 
+// `breaker` gives the save Disadvantage, as damage from a Mage Slayer does.
 export function concentrationFrame(
   target: Actor,
   amount: number,
+  breaker = false,
 ): readonly Frame[] {
   return target.concentratingOn !== null && amount > 0
     ? [
         frame("concentrationSave", {
           actor: target.id,
           dc: concentrationDc(amount),
+          ...(breaker ? { disadvantage: true } : {}),
         }),
       ]
     : [];
@@ -246,6 +253,10 @@ export function leafEvents(
   slotLevel?: number, // the slot a spell was cast with, so Dispel Magic knows its level
 ): SystemEvent[] {
   const stats = deriveStats(caster, context);
+  // Healing Rerolls: a healing die that rolls 1 is rolled again.
+  const healDice = hasPassive(stats, "healingRerolls")
+    ? rerollingOnes(context.dice)
+    : context.dice;
   const level = slotLevel === undefined ? {} : { level: slotLevel };
   const events: SystemEvent[] = [];
   // Taking the target out of a grapple and into the caster swallows it (combat/swallow.ts).
@@ -273,12 +284,33 @@ export function leafEvents(
     switch (effect.kind) {
       case "heal": {
         const max = deriveStats(target, context).maxHp + raisedMax;
-        const rolled = rollAmount(effect.amount, stats, context.dice);
+        const rolled = rollAmount(effect.amount, stats, healDice);
         // Healing beyond the maximum is lost, so only what's really gained is reported.
         events.push(
           dndEvent(`${NS}:healed`, {
             actor: target.id,
             amount: Math.min(rolled, max - Math.max(target.hp, 0)),
+            max,
+          }),
+        );
+        break;
+      }
+      case "hitDieHeal": {
+        // shortcut: a Healer's Kit's ten uses aren't counted; the target's Hit Point Dice are the limit.
+        const die = nextHitDie(target, context);
+        if (!die) break;
+        const max = deriveStats(target, context).maxHp;
+        const rolled =
+          rollDiceNotation(`1${die}`, healDice) +
+          evaluateFormula(effect.bonus, stats);
+        events.push(
+          dndEvent(`${NS}:resourceSpent`, {
+            actor: target.id,
+            resource: HIT_DICE,
+          }),
+          dndEvent(`${NS}:healed`, {
+            actor: target.id,
+            amount: Math.max(0, Math.min(rolled, max - Math.max(target.hp, 0))),
             max,
           }),
         );
@@ -637,7 +669,13 @@ export function resolveAction(
       ...result.events,
       ...insideDamageEvents(actor, target, result.dealt),
     );
-    frames.push(...concentrationFrame(target, result.dealt));
+    frames.push(
+      ...concentrationFrame(
+        target,
+        result.dealt,
+        hasPassive(stats, "concentrationBreaker"),
+      ),
+    );
   };
 
   const rollSharedDamage = (list: readonly Damage[]) =>
@@ -733,12 +771,18 @@ export function resolveAction(
         events.push(...saveEvents);
         const resisted = rolledSave
           ? null
-          : legendaryResistance(
+          : (legendaryResistance(
               target,
               conditionsApplied(resolution.onFail),
               context,
               events,
-            );
+            ) ??
+            rescuedSave(
+              target,
+              resolution.ability,
+              deriveStats(target, context),
+              events,
+            ));
         if (resisted) events.push(resisted);
         const saved = rolledSave || resisted !== null;
         applyRolled(target, damage, (amount) => {
