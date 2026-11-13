@@ -20,7 +20,7 @@ Each bundle holds the compiled UI from `out/desktop` and the shipped plugins in 
 
 `beforeBuildCommand` runs `npm run check-bundle` after building the UI. It walks every `bundle.resources` source and fails the build if it finds:
 
-- a path through a `books` or `private` folder,
+- a path through a `books` folder,
 - a `plugin.yaml` that isn't `distribution: shipped`,
 - a symlink, since the bundler would follow it, or
 - a glob, which the check can't expand.

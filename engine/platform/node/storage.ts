@@ -130,7 +130,7 @@ export async function createNodeStorage(
 }
 
 const SAVES = "saves";
-const PRIVATE = "books";
+const BOOKS = "books";
 
 function under(folder: string, path: string): boolean {
   return path === folder || path.startsWith(`${folder}/`);
@@ -147,15 +147,11 @@ export async function createPlayStorage(
   // The saves folder's parent, so paths keep their saves/ prefix.
   await mkdir(join(savesRoot, SAVES), { recursive: true });
   const saves = await createNodeStorage(savesRoot);
-  const privateDir = await realpath(join(contentRoot, PRIVATE)).catch(
-    () => null,
-  );
+  const booksDir = await realpath(join(contentRoot, BOOKS)).catch(() => null);
   // shortcut: assumes the link's target is itself named books, as in the main checkout; map paths if that changes.
-  const owner = privateDir
-    ? await createNodeStorage(dirname(privateDir))
-    : content;
+  const owner = booksDir ? await createNodeStorage(dirname(booksDir)) : content;
   const source = (path: string) =>
-    under(SAVES, path) ? saves : under(PRIVATE, path) ? owner : content;
+    under(SAVES, path) ? saves : under(BOOKS, path) ? owner : content;
   const readOnly = (path: string) =>
     Promise.reject(new Error(`${path} is read-only`));
   return {

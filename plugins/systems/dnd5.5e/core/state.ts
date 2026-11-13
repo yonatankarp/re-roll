@@ -324,6 +324,7 @@ const ActorOnlySchema = z.strictObject({ actor: z.string() });
 const BudgetSpentSchema = z.strictObject({
   actor: z.string(),
   kind: z.enum(["action", "bonusAction", "reaction"]),
+  label: z.string().optional(), // the reaction taken on its own, as Interception is
 });
 const ResourceSpentSchema = z.strictObject({
   actor: z.string(),

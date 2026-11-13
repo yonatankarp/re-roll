@@ -120,7 +120,7 @@ describe("createPlayStorage", () => {
     await rm(base, { recursive: true, force: true });
   });
 
-  it("reads a symlinked private folder, writes only saves, and removes them", async () => {
+  it("reads a symlinked books folder, writes only saves, and removes them", async () => {
     const repo = join(base, "repo");
     const owner = join(base, "owner");
     await mkdir(join(repo, "plugins"), { recursive: true });

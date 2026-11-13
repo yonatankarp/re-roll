@@ -36,7 +36,13 @@ import {
   MonsterSchema,
 } from "../schemas.ts";
 import { multiattackUses } from "../multiattack-uses.ts";
-import { dropToOneEvents, traitSaveAdvantage } from "../trait-rules.ts";
+import {
+  dropToOneEvents,
+  masteredDice,
+  masteredTypes,
+  piercing,
+  traitSaveAdvantage,
+} from "../trait-rules.ts";
 import { dodging } from "../tactics.ts";
 import { AIM, ALL } from "./ids.ts";
 import { inArea, parseSquare, pushTo, type Square } from "../grid.ts";
@@ -562,6 +568,7 @@ export function resolveAction(
   const stats = deriveStats(actor, context);
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];
+  const mastered = masteredTypes(stats, action.spellLevel !== null);
   // Another spell aimed at a creature ends what lasts only until one is, as Modify Memory's charm.
   const spellEnds = targets.flatMap((target) =>
     [
@@ -619,7 +626,7 @@ export function resolveAction(
         amount: finalDamage(
           scale(total),
           type,
-          damageResponses(target, context),
+          piercing(damageResponses(target, context), mastered, stats),
         ),
         type,
       })),
@@ -635,7 +642,12 @@ export function resolveAction(
 
   const rollSharedDamage = (list: readonly Damage[]) =>
     list.map(({ amount, type }) => ({
-      total: rollAmount(amount, stats, context.dice, critical ? 2 : 1),
+      total: rollAmount(
+        amount,
+        stats,
+        masteredDice(context.dice, type, mastered),
+        critical ? 2 : 1,
+      ),
       type,
     }));
 

@@ -13,6 +13,7 @@ import {
   CREATE_CHARACTER,
   DEATH_SAVE,
   encodeOption,
+  ITEM_PREFIX,
   MOVE,
   PASS,
 } from "./ids.ts";
@@ -44,7 +45,7 @@ function turnOptions(
     return [{ id: PASS, label: "End your turn" }];
   }
   const stats = deriveStats(actor, access);
-  const options: { id: string; label: string }[] = [];
+  const options: Decision["options"][number][] = [];
   for (const action of stats.actions) {
     const { activation } = action;
     if (activation.trigger || !canAfford(action, actor, stats)) continue;
@@ -53,7 +54,19 @@ function turnOptions(
       options.push(...withUpcasts(action, actor, stats, target, label));
     };
     if ("self" in targeting) {
-      add(actor.id, action.name);
+      // A potion only heals, so at full health it's hidden, though an older save that drank it still replays.
+      const full =
+        action.id.startsWith(ITEM_PREFIX) &&
+        activation.resolution.kind === "automatic" &&
+        activation.resolution.effects.some((item) => item.kind === "heal") &&
+        actor.hp >= stats.maxHp;
+      if (full) {
+        options.push({
+          id: encodeOption(action.id, actor.id),
+          label: action.name,
+          hidden: true,
+        });
+      } else add(actor.id, action.name);
       continue;
     }
     const candidates = inReach(action, actor, state, access);

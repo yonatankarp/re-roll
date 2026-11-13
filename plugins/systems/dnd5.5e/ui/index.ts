@@ -1036,6 +1036,11 @@ function describe(
       const data = EVENT_SCHEMAS["dnd5.5e:tempHpGained"].parse(payload);
       return `${name(data.actor)} gains ${String(data.amount)} temporary HP.`;
     }
+    case "dnd5.5e:budgetSpent": {
+      // A reaction taken on its own, as Interception is, says which it was.
+      const data = EVENT_SCHEMAS["dnd5.5e:budgetSpent"].parse(payload);
+      return data.label ? `${name(data.actor)} uses ${data.label}.` : null;
+    }
     case "dnd5.5e:effectAdded": {
       const { actor, effect } =
         EVENT_SCHEMAS["dnd5.5e:effectAdded"].parse(payload);

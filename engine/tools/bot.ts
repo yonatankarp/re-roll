@@ -72,9 +72,13 @@ export function playRun(
         ? sceneActionsHere(run, state).map((action) => action.id)
         : [],
     );
+    // Nor does it take a hidden turn option, such as a potion at full health, kept only for older saves.
+    const tactical = run.system.tactical?.(pending) ?? false;
     let choices = pending.options.filter(
       (item) =>
-        !item.id.startsWith(REST_OPTION_PREFIX) && !actions.has(item.id),
+        !item.id.startsWith(REST_OPTION_PREFIX) &&
+        !actions.has(item.id) &&
+        !(tactical && item.hidden),
     );
     if (options.avoidEndings && pending.id.startsWith(SCENE_DECISION_PREFIX)) {
       // Trying a choice sees the same dice the real one would.
@@ -86,7 +90,7 @@ export function playRun(
     }
     const option =
       rest ??
-      (options.smart && run.system.tactical?.(pending)
+      (options.smart && tactical
         ? {
             id: run.system.decidePolicy(pending, {
               state: state.system,

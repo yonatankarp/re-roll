@@ -853,6 +853,56 @@ describe("saves", () => {
     expect(loaded.warnings.length).toBeGreaterThan(0);
   });
 
+  describe("hashes a plugin's content, not its text", () => {
+    const scenes = `
+- id: start
+  text: Start.
+  choices:
+    - label: Gain
+      effects:
+        - { kind: system, effect: "d6:gainLuck", args: { amount: 5 } }
+        - { kind: goto, scene: end }
+- { id: end, text: End. }
+`;
+    async function warningsAfterEdit(edited: string, stored = "pluginHash") {
+      const before = await loadInline({ "scenes.yaml": scenes });
+      const played = playRun(before.run, "s", { maxDecisions: 10 });
+      const save = createSave(before.registry, "inline", "s", played.log);
+      const hash = (id: string) =>
+        stored === "legacy"
+          ? before.registry.legacyPluginHash(id)
+          : before.registry.pluginHash(id);
+      const text = JSON.stringify({
+        ...save,
+        plugins: save.plugins.map((p) => ({ ...p, hash: hash(p.id) })),
+      });
+      const after = await loadInline({ "scenes.yaml": edited });
+      const loaded = loadSave(text, after.registry, after.run);
+      if (!loaded.ok) throw new Error(loaded.error);
+      return loaded.warnings;
+    }
+
+    it("doesn't warn after a comment, formatting or key order edit", async () => {
+      const edited = `# A comment\n${scenes}`
+        .replace("- { id: end, text: End. }", "- text: End.\n  id: end")
+        .replace("{ amount: 5 } }", "{ amount: 5 } }  # five");
+      expect(await warningsAfterEdit(edited)).toEqual([]);
+    });
+
+    it("warns after a changed number", async () => {
+      const edited = scenes.replace("amount: 5", "amount: 6");
+      expect(await warningsAfterEdit(edited)).toEqual([
+        'The plugin "inline" has changed since this save.',
+      ]);
+    });
+
+    it("accepts the raw-text hash older saves stored", async () => {
+      expect(await warningsAfterEdit(scenes, "legacy")).toEqual([]);
+      const edited = `# A comment\n${scenes}`;
+      expect(await warningsAfterEdit(edited, "legacy")).toHaveLength(1);
+    });
+  });
+
   it("rejects a tampered system event", async () => {
     const { registry, run, save } = await savedRun();
     const log = [

@@ -26,20 +26,24 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - Only write ids, names and numbers there: coordinates, counts, monster ids, `onFlee` targets. Never write book prose of your own, and never copy book text into this repository, its issues or its docs.
 - Never log in to or download from D&D Beyond.
 - A git worktree has no `books/`. To play-test, symlink `~/Projects/re-roll/books` into it, and only one session at a time may write to the same files there.
-- `private` is a temporary link to `books/` for older worktrees; new code uses `books/` only. The manifest field `distribution: private` keeps its name (it means not redistributable).
+- The manifest field `distribution: private` means not redistributable; it has nothing to do with a folder.
 
 ## Git
 
 - Commit or push only when asked. Never add Co-Authored-By or other attribution lines to commits or PRs.
 - Merge session branches straight into `main` with `--no-ff`, naming them `refs/heads/claude/...`. There is no integration branch; never recreate `feat/foundations`.
-- Run `git config core.hooksPath .githooks` once per clone. The pre-commit hook runs typecheck and lint and rejects staged `books/` or `private/` paths. It needs Node on PATH, so commit with the same `PATH=…` prefix.
+- Run `git config core.hooksPath .githooks` once per clone. The pre-commit hook runs typecheck and lint and rejects staged `books/` paths. It needs Node on PATH, so commit with the same `PATH=…` prefix.
 
 ## Sessions
 
 Every side session is archived when its work is done, and leaves no worktree or branch behind, locally or on the remote.
 
 - **A session that leaves nothing to merge** (a check, a review, a no-change result) archives itself as its last step.
-- **A session that leaves a branch** commits there and reports. Once the branch is merged, the session that merged it deletes the worktree (`git worktree remove`) and the branch (`git branch -d`, plus `git push origin --delete` if it was pushed), and archives the finished session.
+- **A session that leaves a branch merges it into `main` itself**, then cleans up and archives itself:
+  1. Merge `origin/main` into the branch and run every check.
+  2. In its worktree: `git fetch origin && git checkout --detach origin/main && git merge --no-ff refs/heads/claude/<branch>`, then `git push origin HEAD:main`. If the push is rejected, another session got there first: fetch, redo the merge, rerun the checks it could affect, and push again.
+  3. Fast-forward the main checkout (`git -C ~/Projects/re-roll pull --ff-only`), and watch the CI run on `main` until it passes. Fix anything it breaks.
+  4. Delete the branch (`git branch -D`, plus `git push origin --delete` if it was pushed), and archive itself, which also removes its worktree.
 
 ## Platforms
 

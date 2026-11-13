@@ -386,8 +386,21 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const freeSpells = new Set<string>(); // also cast once per Long Rest without a slot
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
   const featureIds = new Set<string>(species.traits);
-  const feat = lookup(access, FeatSchema, background.feat);
-  for (const id of feat.grants) featureIds.add(id);
+  // A feat picked in place of the background's, as a Dark Gift for Haunted One, is in the first level's answers.
+  const replaced =
+    background.featOr !== undefined &&
+    (build.levels[0]?.answers ?? []).some(
+      (answer) =>
+        answer.kind === "feats" &&
+        answer.values.some(
+          (id) => lookup(access, FeatSchema, id).category === background.featOr,
+        ),
+    );
+  if (!replaced) {
+    for (const id of lookup(access, FeatSchema, background.feat).grants) {
+      featureIds.add(id);
+    }
+  }
   let scaling: Record<string, number> = {};
   let slots: readonly number[] = [];
   const casters: Record<string, Caster> = {};
@@ -517,6 +530,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
+  const fromFeatures = collectFeatureData(access, [...featureIds], level);
   const armorBases: number[] = [];
   const flatBonus = magic.ac;
   let shield = 0;
@@ -532,7 +546,14 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
       const dex = abilityModifier(abilities.dex);
-      const allowed = parsed.addDex ? Math.min(dex, parsed.maxDex ?? dex) : 0;
+      const maxDex = fromFeatures.passives.reduce(
+        (most, passive) =>
+          passive.kind === "armorDexMax" && passive.armor === parsed.armorType
+            ? Math.max(most, passive.max)
+            : most,
+        parsed.maxDex ?? dex,
+      );
+      const allowed = parsed.addDex ? Math.min(dex, maxDex) : 0;
       armorBases.push(parsed.base + allowed);
     } else if (item.type === "shield") {
       // Only one shield is held, and it protects only with training.
@@ -554,7 +575,6 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
-  const fromFeatures = collectFeatureData(access, [...featureIds], level);
   actions.push(...fromFeatures.actions);
   for (const spellId of fromFeatures.spells) {
     if (access.content(spellId)) knownSpells.add(spellId);
@@ -966,7 +986,7 @@ function effectBonus(actor: Actor, to: "speed" | "maxHp"): number {
     if (modifier.kind !== "bonus" || modifier.to !== to || seen.has(sourceId))
       continue;
     seen.add(sourceId);
-    total += modifier.amount.bonus?.base ?? 0;
+    total += (modifier.subtract ? -1 : 1) * (modifier.amount.bonus?.base ?? 0);
   }
   return total;
 }

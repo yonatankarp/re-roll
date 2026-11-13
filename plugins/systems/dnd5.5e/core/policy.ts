@@ -423,7 +423,9 @@ export function choosePolicy(decision: Decision, context: Context): string {
     bestAim.set(action.id, score);
     return score;
   };
+  // A hidden option, such as a potion at full health, only answers older saves.
   const parsed = decision.options.flatMap((option) => {
+    if (option.hidden) return [];
     const [actionId = "", targetId = "", slot] = parseOption(option.id);
     const action = stats.actions.find((item) => item.id === actionId);
     const target = state.actors[targetId];
