@@ -196,6 +196,11 @@ export interface SystemUi {
     access: ContentAccess,
   ) => CreationView | null;
   readonly playerDied: (state: unknown) => boolean;
+  // Rules terms a book can explain, by id, with the words the system's own text uses for each.
+  readonly terms?: readonly {
+    readonly id: string;
+    readonly words: readonly string[];
+  }[];
   // Turns an event into plain data for the board to animate, given the state either side of it.
   readonly cue?: (
     event: SystemEvent,

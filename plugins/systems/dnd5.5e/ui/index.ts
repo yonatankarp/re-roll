@@ -17,6 +17,7 @@ import { creation } from "./creation.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
 import type { BoardExtra } from "./board-data.ts";
 import { dndCue } from "./cues.ts";
+import { GLOSSARY_TERMS } from "../core/glossary.ts";
 import {
   ABILITIES,
   ABILITY_NAMES,
@@ -1083,4 +1084,5 @@ export const dndUi = {
   shop,
   creation,
   playerDied,
+  terms: GLOSSARY_TERMS,
 };

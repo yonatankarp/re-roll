@@ -236,6 +236,19 @@ const BookIndexSchema = z.object({
   entries: z.array(z.object({ path: z.array(z.string()), file: z.string() })),
 });
 
+// The owner's glossary index: for each of a system's rules terms, the book section that explains it.
+const GlossarySchema = z.object({
+  system: z.string(),
+  terms: z.record(z.string(), z.object({ book: z.string(), file: z.string() })),
+});
+
+export interface TermEntry {
+  readonly id: string;
+  readonly words: readonly string[];
+  readonly book: string;
+  readonly file: string;
+}
+
 // "Goblin Warrior", "goblin-warrior" and "srd52:monster/goblin-warrior" all find the same picture.
 function artKey(name: string): string {
   return (name.split("/").pop() ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -913,6 +926,29 @@ export function createGame({
         throw new Error("That isn't part of a book");
       }
       return (await storage.read(`${LIBRARY}/${id}/${file}`)) ?? "";
+    },
+
+    // The current system's terms that a book in the library explains, or none without the owner's books.
+    async terms(): Promise<readonly TermEntry[]> {
+      const ui = current?.ui;
+      if (!ui?.terms) return [];
+      const text = await storage
+        .read(`${LIBRARY}/glossary.json`)
+        .catch(() => null);
+      if (!text) return [];
+      let glossary;
+      try {
+        glossary = GlossarySchema.parse(JSON.parse(text));
+      } catch {
+        return [];
+      }
+      if (glossary.system !== ui.systemId) return [];
+      return ui.terms.flatMap((term) => {
+        const at = glossary.terms[term.id];
+        return at && BARE_NAME.test(at.book) && BARE_NAME.test(at.file)
+          ? [{ id: term.id, words: term.words, ...at }]
+          : [];
+      });
     },
 
     imageUrl(path: string): string | Promise<string | null> | null {

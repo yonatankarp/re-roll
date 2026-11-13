@@ -190,6 +190,11 @@ const BOARD_CSS = `
 }
 .dnd-board:not(.playing) .dnd-token:hover .dnd-tip,
 .dnd-board:focus-visible:not(.playing) .dnd-token.cursor .dnd-tip { opacity: 1; }
+/* A shown tip's terms can be hovered, over a bridge from the token; the rest of it still lets clicks through. */
+.dnd-board:not(.playing) .dnd-token:hover .dnd-tip .term,
+.dnd-board:not(.playing) .dnd-token:hover .dnd-tip::after { pointer-events: auto; }
+.dnd-tip::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 10px; }
+.dnd-token.high .dnd-tip::after { top: auto; bottom: 100%; }
 .dnd-token.high .dnd-tip { bottom: auto; top: calc(100% + 8px); }
 .dnd-token.west .dnd-tip { left: 0; transform: none; }
 .dnd-token.east .dnd-tip { left: auto; right: 0; transform: none; }

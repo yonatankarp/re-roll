@@ -67,6 +67,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   const routeCost = el("div", "dnd-route-cost");
   routeCost.hidden = true;
   const menu = el("div", "dnd-menu");
+  menu.dataset.terms = ""; // the shell explains an action such as Dodge on hover or "?"
   menu.hidden = true;
   // While choosing targets or aiming an area: how many are chosen, Cast and Back.
   const pickBar = el("div", "dnd-pickbar");
