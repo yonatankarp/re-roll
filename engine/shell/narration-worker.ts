@@ -8,9 +8,10 @@ import {
   pickBackend,
 } from "./kokoro-files.ts";
 import { openModelCache } from "./model-cache.ts";
+import { readAloud } from "./read-aloud.ts";
 
-// Reads text aloud with Kokoro-82M off the page's thread, a sentence at a time, so playback can
-// start before the whole scene is read. WebGPU when the device has it, else WASM on the CPU, on
+// Reads text aloud with Kokoro-82M off the page's thread, a sentence or two at a time
+// (read-aloud.ts), so playback can start before the whole scene is read. WebGPU when the device has it, else WASM on the CPU, on
 // several threads where the page can share memory. The model comes from Hugging Face on first use,
 // from a pinned commit and checked against its hashes (kokoro-files.ts), and is kept in the Cache
 // API or IndexedDB after that. The voices ship with the app.
@@ -39,6 +40,9 @@ export type NarrationReply =
       readonly id: number;
       readonly samples: Float32Array;
       readonly rate: number;
+      readonly spent?: number; // seconds it took to make, for the page's pace
+      readonly chars?: number; // characters this piece read
+      readonly left?: readonly number[]; // characters in each piece still to read after it
     }
   | {
       readonly type: "done";
@@ -194,19 +198,15 @@ async function speak(
     const tts = await model;
     const started = performance.now();
     let audio = 0;
-    // kokoro-js 1.2.1 never closes the splitter it makes for a plain string, so stream() would hang.
-    const sentences = new TextSplitterStream();
-    sentences.push(text);
-    sentences.close();
-    for await (const chunk of tts.stream(sentences, {
-      voice: voice as "af_heart",
-    })) {
+    for await (const piece of readAloud(
+      tts,
+      TextSplitterStream,
+      text,
+      voice as "af_heart",
+    )) {
       if (cancelled.delete(id)) return;
-      const samples = chunk.audio.audio;
-      audio += samples.length / chunk.audio.sampling_rate;
-      reply({ type: "chunk", id, samples, rate: chunk.audio.sampling_rate }, [
-        samples.buffer,
-      ]);
+      audio += piece.samples.length / piece.rate;
+      reply({ type: "chunk", id, ...piece }, [piece.samples.buffer]);
     }
     reply({
       type: "done",

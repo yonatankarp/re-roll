@@ -10,6 +10,7 @@ import {
   kokoroFetch,
   sha256,
 } from "../../engine/shell/kokoro-files.ts";
+import { readAloud } from "../../engine/shell/read-aloud.ts";
 import {
   DEFAULT_VOICE,
   EMPTY_INDEX,
@@ -41,7 +42,6 @@ function fail(message: string): never {
 }
 
 const SAMPLE_RATE = 24000;
-const GAP_SECONDS = 0.12; // between sentences, which Kokoro reads one at a time
 
 const args = process.argv.slice(2);
 const adventure = args.find((arg) => !arg.startsWith("--"));
@@ -163,18 +163,16 @@ if (plan.make.length > 0) {
   console.log(
     `Model ready in ${((performance.now() - started) / 1000).toFixed(1)}s`,
   );
-  const gap = new Float32Array(Math.round(GAP_SECONDS * SAMPLE_RATE));
   for (const [number, item] of plan.make.entries()) {
     started = performance.now();
     const parts: Float32Array[] = [];
-    // kokoro-js 1.2.1 never closes the splitter it makes for a plain string, so stream() would hang.
-    const sentences = new TextSplitterStream();
-    sentences.push(item.text);
-    sentences.close();
-    for await (const chunk of tts.stream(sentences, {
-      voice: voice as "af_heart",
-    })) {
-      parts.push(chunk.audio.audio, gap);
+    for await (const piece of readAloud(
+      tts,
+      TextSplitterStream,
+      item.text,
+      voice as "af_heart", // kokoro-js checks it against its list
+    )) {
+      parts.push(piece.samples);
     }
     const samples = new Float32Array(
       parts.reduce((total, part) => total + part.length, 0),

@@ -1,10 +1,7 @@
-import {
-  NARRATION_FOLDER,
-  clipFile,
-  normaliseText,
-} from "../story/narration.ts";
+import { NARRATION_FOLDER, clipFile } from "../story/narration.ts";
 import { shellAudio } from "./audio.ts";
 import type { NarrationReply, NarrationRequest } from "./narration-worker.ts";
+import { canPlayThrough } from "./read-aloud.ts";
 import type { NarrationHealth } from "./sound-settings.ts";
 
 // Reads the scene aloud: a clip made ahead of time (npm run narrate) when there is one, or else
@@ -26,6 +23,9 @@ const RESTARTS = 2; // then a stuck reading is given up, and its scene isn't rea
 interface Clip {
   readonly key: string;
   readonly buffers: AudioBuffer[]; // each sentence as it comes, or one whole clip
+  made: number; // characters the worker has read so far
+  left: readonly number[] | null; // characters in each piece it still has to read, as it last said
+  lastPiece: number; // when its last piece came
   done: boolean;
   failed: boolean;
   job: number | null; // the worker's reading of it, while that's under way
@@ -104,15 +104,18 @@ function narrationWorker(): Worker | null {
             );
             buffer.copyToChannel(new Float32Array(reply.samples), 0);
             clip.buffers.push(buffer);
+            clip.made += reply.chars ?? 0;
+            clip.left = reply.left ?? [];
+            clip.lastPiece = performance.now();
+            // A hidden page's work is slowed, so only pieces made in view say how fast it reads.
+            if (reply.spent !== undefined && !document.hidden) {
+              health.read += reply.spent;
+              health.spoken += buffer.duration;
+            }
           } else if (reply.type === "done") {
             working.delete(reply.id);
             clip.job = null;
             clip.done = true;
-            // A hidden page's work is slowed, so only readings done in view say how fast it reads.
-            if (!document.hidden) {
-              health.read += reply.seconds;
-              health.spoken += reply.audio;
-            }
             console.info(
               `Narration: ${reply.audio.toFixed(1)}s of speech read in ${reply.seconds.toFixed(1)}s`,
             );
@@ -199,6 +202,8 @@ setInterval(() => {
   for (const clip of stuck) {
     clip.job = null;
     clip.buffers.length = 0; // read again from the start; playback carries on where it was
+    clip.made = 0;
+    clip.left = null;
     if (restarts <= RESTARTS) {
       speak(clip);
     } else {
@@ -235,6 +240,22 @@ async function fetchClip(
   }
 }
 
+const seconds = (buffers: readonly AudioBuffer[]): number =>
+  buffers.reduce((total, buffer) => total + buffer.duration, 0);
+
+// Whether a clip still being read can play from this point to its end without stalling, at the
+// pace this device reads. Each piece still to read is timed by the speech per character so far.
+function readyToPlay(clip: Clip, index: number, offset: number): boolean {
+  if (clip.made === 0 || !clip.left) return false;
+  const perChar = seconds(clip.buffers) / clip.made;
+  return canPlayThrough(
+    seconds(clip.buffers.slice(index)) - offset,
+    clip.left.map((chars) => chars * perChar),
+    (performance.now() - clip.lastPiece) / 1000,
+    health.spoken > 0 ? health.read / health.spoken : 0,
+  );
+}
+
 // The clip for a text in a voice: kept, recorded, or read in the worker.
 function obtain(
   clipUrl: (path: string) => string | Promise<string | null> | null,
@@ -253,10 +274,13 @@ function obtain(
   const clip: Clip = {
     key,
     buffers: [],
+    made: 0,
+    left: null,
+    lastPiece: 0,
     done: false,
     failed: false,
     job: null,
-    text: normaliseText(text),
+    text, // its paragraphs too, for the longer pause between them
     voice,
     changed: new Set(),
   };
@@ -327,8 +351,10 @@ export function narrator(
     source: AudioBufferSourceNode | null;
     startedAt: number;
     paused: boolean;
+    held: boolean; // waiting for enough to be read, at the start or after running dry
   } | null = null;
   let readAhead = false;
+  let recheck: ReturnType<typeof setTimeout> | undefined; // while held, as the piece being read gets nearer
 
   const speaking = (): boolean => reading?.source != null && !reading.paused;
 
@@ -385,10 +411,24 @@ export function narrator(
       if (clip.done) {
         clip.changed.delete(playNext);
         reading = null; // finished; the button reads it again
+      } else {
+        reading.held = true; // ran dry, so wait for more than the next piece
       }
       draw();
       return;
     }
+    // Waiting a little before the first word beats stopping between sentences.
+    if (
+      reading.held &&
+      !clip.done &&
+      !readyToPlay(clip, reading.index, reading.offset)
+    ) {
+      clearTimeout(recheck);
+      recheck = setTimeout(playNext, 250);
+      draw();
+      return;
+    }
+    reading.held = false;
     const source = audio.context.createBufferSource();
     source.buffer = buffer;
     source.connect(audio.narration);
@@ -406,6 +446,7 @@ export function narrator(
   };
 
   const stop = (): void => {
+    clearTimeout(recheck);
     halt();
     reading?.clip.changed.delete(playNext);
     reading = null;
@@ -427,6 +468,7 @@ export function narrator(
       source: null,
       startedAt: 0,
       paused: false,
+      held: true,
     };
     loading = (percent) => {
       if (reading?.clip === clip && !reading.source) {
