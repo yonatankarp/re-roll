@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Page, expect, test } from "@playwright/test";
 import { openHeadless } from "../../app/cli/headless-game.ts";
+import { savedFiles } from "./saved-files.ts";
 
 // The page and headless play must offer the same choices. At each screen, the run the page autosaved is
 // loaded headless, and what the page lets the player click is compared with the headless screen's choices.
@@ -67,13 +68,11 @@ async function onPage(page: Page): Promise<string[]> {
 
 // The same run, loaded headless from the page's autosave.
 async function headless(page: Page, folder: string): Promise<string[]> {
-  const saves = await page.evaluate(() =>
-    Object.keys(localStorage)
-      .filter((key) => key.endsWith("-autosave.json"))
-      .map((key) => [key, localStorage.getItem(key) ?? ""] as const),
+  const saves = Object.entries(await savedFiles(page)).filter(([key]) =>
+    key.endsWith("-autosave.json"),
   );
   expect(saves).toHaveLength(1);
-  const [[path, save]] = saves as [readonly [string, string]];
+  const [[path, save]] = saves as [[string, string]];
   const play = await openHeadless(folder); // makes its saves folder
   await writeFile(join(folder, path), save);
   await play.load(path);

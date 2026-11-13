@@ -108,7 +108,7 @@ export function concentrationFrame(
 // Reports the damage, and whatever follows from it, as events.
 // The difficulty setting scales the damage the party takes, and only that, so the books' monsters keep
 // their numbers: Story takes a third of it, Hard adds half again.
-const DAMAGE_TO_PARTY = { story: 1 / 3, normal: 1, hard: 1.5 } as const;
+export const DAMAGE_TO_PARTY = { story: 1 / 3, normal: 1, hard: 1.5 } as const;
 
 function scaledForParty(
   target: Actor,

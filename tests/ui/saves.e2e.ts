@@ -1,36 +1,12 @@
 import { type Page, expect, test } from "@playwright/test";
+import { type Entries, savedFiles } from "./saved-files.ts";
 
-type Entries = Record<string, string>;
-
-// The test project has no DOM types, so code that touches IndexedDB is sent to the page as text.
-const READ_FILES = `new Promise((done, fail) => {
-  const open = indexedDB.open("re-roll");
-  open.onerror = () => fail(open.error);
-  open.onsuccess = () => {
-    const entries = {};
-    const cursor = open.result.transaction("files", "readonly").objectStore("files").openCursor();
-    cursor.onsuccess = () => {
-      const at = cursor.result;
-      if (!at) {
-        open.result.close();
-        done(entries);
-        return;
-      }
-      entries[String(at.key)] = String(at.value);
-      at.continue();
-    };
-  };
-})`;
-
+// Sent to the page as text, like the reader in saved-files.ts.
 const DELETE_FILES = `new Promise((done, fail) => {
   const remove = indexedDB.deleteDatabase("re-roll");
   remove.onsuccess = () => done();
   remove.onerror = () => fail(remove.error);
 })`;
-
-// The browser build's saves, read straight from IndexedDB.
-const savedFiles = (page: Page): Promise<Entries> =>
-  page.evaluate<Entries>(READ_FILES);
 
 const localSaves = (page: Page): Promise<string[]> =>
   page.evaluate(() =>

@@ -23,6 +23,7 @@ import type { Square } from "./grid.ts";
 import { dodging } from "./tactics.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX } from "./combat/ids.ts";
+import { DAMAGE_TO_PARTY } from "./combat/effects.ts";
 import {
   aimsFor,
   allies,
@@ -112,9 +113,7 @@ const standing = (list: readonly Actor[]): Actor[] =>
 
 export function makeJudge(context: Context, side: Actor): Judge {
   const { state } = context;
-  const DAMAGE_TO_PARTY = { story: 1 / 3, normal: 1, hard: 1.5 }[
-    state.difficulty ?? "normal"
-  ];
+  const damageToParty = DAMAGE_TO_PARTY[state.difficulty ?? "normal"];
   const stats = cached((actor) => deriveStats(actor, context));
   const responses = cached((actor) => damageResponses(actor, context));
 
@@ -336,7 +335,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
       best = Math.max(best, each * spread);
     }
     // The difficulty setting scales only the damage the party takes (core/combat/effects.ts).
-    return actor.side === "party" ? best : best * DAMAGE_TO_PARTY;
+    return actor.side === "party" ? best : best * damageToParty;
   };
   const threat = cached((actor) => roundDamage(actor, false));
   const freeThreat = cached((actor) => roundDamage(actor, true));
