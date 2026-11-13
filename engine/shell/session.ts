@@ -53,6 +53,7 @@ import type {
   SheetView,
   SystemUi,
 } from "./system-ui.ts";
+import { type ShownChoice, shownChoices } from "./choices.ts";
 
 // Everything the page does to the game, with no DOM, so tests can play through the same code.
 
@@ -96,7 +97,9 @@ export interface GameView {
   readonly ambience: Ambience; // the background sound the scene asks for
   readonly upcoming: readonly string[]; // the text of scenes the choices go to, to read ahead
   readonly endingName: string | null;
-  readonly optionGroups: readonly OptionGroup[];
+  readonly optionGroups: readonly OptionGroup[]; // empty while a shop or creation step stands in for them
+  // Everything the player can choose on this screen, wherever it's drawn; the shell and headless play read it.
+  readonly choices: readonly ShownChoice[];
   readonly card: DecisionCard | null; // shown above the choices, such as treasure found
   readonly shop: ShopView | null; // a merchant's screen, shown in place of the choices
   // A step of making the character, shown in place of the choices, with each choice's picture by option id.
@@ -477,6 +480,11 @@ export function createGame({
   imageUrl,
 }: GameDependencies) {
   let current: Current | null = null;
+  // The story choices that would end the adventure early, for the state they were worked out for.
+  let endingsSeen: {
+    readonly state: GameState;
+    readonly ids: ReadonlySet<string>;
+  } | null = null;
   let monsterArt: ReadonlyMap<string, string> = new Map();
   // Every picture each name can use, so party members who share a look don't all share one face.
   let tokenArt: ReadonlyMap<string, readonly TokenArt[]> = new Map();
@@ -992,25 +1000,6 @@ export function createGame({
       await autosave(game);
     },
 
-    // A story choice that surely ends the adventure while another would carry on, for the page to confirm
-    // first. Only endings reached without a roll count, so whether it asks never gives a pending roll away.
-    endsEarly(optionId: string): boolean {
-      const { run, state } = active();
-      const decision = pendingDecision(run, state);
-      if (!decision?.id.startsWith(SCENE_DECISION_PREFIX)) return false;
-      const ends = (id: string): boolean =>
-        wouldEnd(run, state, decision, id, true);
-      return (
-        ends(optionId) &&
-        decision.options.some(
-          (option) =>
-            option.id !== optionId &&
-            !option.id.startsWith(REST_OPTION_PREFIX) &&
-            !ends(option.id),
-        )
-      );
-    },
-
     // Takes back the last choice by telling the log again without it. The dice live in the state,
     // so making the same choice again rolls the same numbers.
     async undo(): Promise<void> {
@@ -1104,12 +1093,64 @@ export function createGame({
           ? sceneActionsHere(run, state).map((action) => action.id)
           : [],
       );
-      const choices = decision && {
+      const listed = decision && {
         ...decision,
         options: decision.options.filter(
           (option) => !isRest(option.id) && !actions.has(option.id),
         ),
       };
+      const shop = decision
+        ? (ui.shop?.(decision, state.system, run) ?? null)
+        : null;
+      const creation = decision
+        ? (ui.creation?.(decision, state.system, run) ?? null)
+        : null;
+      // A merchant's screen or a step of making the character is drawn in place of the option list.
+      const optionGroups =
+        listed && !shop && !creation
+          ? ui.optionGroups(listed, state.system, run)
+          : [];
+      // A story choice that surely ends the adventure while another on the list carries on, for the page to
+      // confirm first. Only endings reached without a roll count, so asking never gives a pending roll away.
+      if (endingsSeen?.state !== state) {
+        const ids = optionGroups.flatMap((group) =>
+          group.options.map((option) => option.id),
+        );
+        const ends =
+          decision?.id.startsWith(SCENE_DECISION_PREFIX) === true
+            ? ids.filter((id) => wouldEnd(run, state, decision, id, true))
+            : [];
+        endingsSeen = {
+          state,
+          ids: new Set(ends.length < ids.length ? ends : []),
+        };
+      }
+      const rests = (decision?.options ?? [])
+        .filter((option) => isRest(option.id))
+        .map((option) => ({
+          ...option,
+          detail:
+            run.system
+              .rests?.(state.system)
+              .find((rest) => `${REST_OPTION_PREFIX}${rest.id}` === option.id)
+              ?.detail ?? null,
+        }));
+      // A row keeps its own choice on the decider's sheet while it's offered, and anywhere with a hint,
+      // drawn disabled, which says when it will be offered.
+      const sheets = ui.sheets(state.system, run).map((sheet) => ({
+        ...sheet,
+        sections: sheet.sections.map((section) => ({
+          ...section,
+          rows: section.rows.map(({ option, ...row }) =>
+            option &&
+            (option.hint !== undefined ||
+              (sheet.id === decision?.actor &&
+                decision.options.some((item) => item.id === option.id)))
+              ? { ...row, option }
+              : row,
+          ),
+        })),
+      }));
       const combat = ui.combat(state.system, run);
       const pictures: Record<string, string> = {};
       const tokens: Record<string, TokenArt> = {};
@@ -1126,9 +1167,6 @@ export function createGame({
           }
         }
       }
-      const creation = decision
-        ? (ui.creation?.(decision, state.system, run) ?? null)
-        : null;
       const creationArt: Record<string, string> = {};
       for (const choice of creation?.choices ?? []) {
         for (const look of choice.looks ?? []) {
@@ -1159,45 +1197,28 @@ export function createGame({
             ? sceneTitle(currentScene)
             : null,
         decision,
-        optionGroups: choices
-          ? ui.optionGroups(choices, state.system, run)
-          : [],
+        optionGroups,
+        choices: shownChoices({
+          decision,
+          optionGroups,
+          rests,
+          sheets,
+          shop,
+          creation,
+          endsEarly: endingsSeen.ids,
+        }),
         card: decision
           ? (ui.card?.(decision, state.system, run) ?? null)
           : null,
-        shop: decision
-          ? (ui.shop?.(decision, state.system, run) ?? null)
-          : null,
+        shop,
         creation,
         creationArt,
-        rests: (decision?.options ?? [])
-          .filter((option) => isRest(option.id))
-          .map((option) => ({
-            ...option,
-            detail:
-              run.system
-                .rests?.(state.system)
-                .find((rest) => `${REST_OPTION_PREFIX}${rest.id}` === option.id)
-                ?.detail ?? null,
-          })),
+        rests,
         monsterArt: pictures,
         tokenArt: tokens,
         adventureRoot: root,
         combat,
-        // A row's own choice only on the decider's sheet while it's offered, so a companion's row can't answer for the player.
-        sheets: ui.sheets(state.system, run).map((sheet) => ({
-          ...sheet,
-          sections: sheet.sections.map((section) => ({
-            ...section,
-            rows: section.rows.map(({ option, ...row }) =>
-              option &&
-              sheet.id === decision?.actor &&
-              decision.options.some((item) => item.id === option.id)
-                ? { ...row, option }
-                : row,
-            ),
-          })),
-        })),
+        sheets,
         log: [...lines],
         cues: [...cues],
         rolls: [...rolls],

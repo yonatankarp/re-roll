@@ -1,20 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { Game, GameView, LogLine, SaveChoice } from "../shell/session.ts";
+import type { ShownChoice } from "../shell/choices.ts";
 import type { CombatView, DecisionCard } from "../shell/system-ui.ts";
 
 // Plays through the same game layer the page uses, with no DOM, so tests and agents can do what a player does.
-// What counts as on screen mirrors engine/shell/shell.ts: the option list, the campfire's rests, and the
-// buttons on the sheet of whoever the decision is for.
+// What counts as on screen is GameView.choices, which the page draws from too.
 
-export const SCREEN_VERSION = 1;
+export const SCREEN_VERSION = 2;
 
-export interface Choice {
+export interface Choice extends ShownChoice {
   readonly n: number; // 1-based, as numbered on this screen
-  readonly id: string;
-  readonly label: string;
-  readonly where: "list" | "rest" | "sheet";
-  readonly group: string | null; // the list's tab, such as Attacks
-  readonly detail: string | null;
 }
 
 export interface Screen {
@@ -43,43 +38,7 @@ export interface Screen {
 }
 
 export function choicesOf(view: GameView): Choice[] {
-  const { decision } = view;
-  if (!decision) return [];
-  const found: Omit<Choice, "n">[] = [
-    ...view.optionGroups.flatMap((group) =>
-      group.options.map((option) => ({
-        id: option.id,
-        label: option.label,
-        where: "list" as const,
-        group: group.title,
-        detail: option.detail,
-      })),
-    ),
-    ...view.rests.map((option) => ({
-      id: option.id,
-      label: option.label,
-      where: "rest" as const,
-      group: null,
-      detail: null,
-    })),
-    // The view keeps a row's choice only on the decider's sheet while it's offered, as the shell shows it.
-    ...view.sheets
-      .flatMap((sheet) => sheet.sections.flatMap((section) => section.rows))
-      .flatMap(({ option, label, detail }) =>
-        option
-          ? [
-              {
-                id: option.id,
-                label: `${option.label} ${label}`,
-                where: "sheet" as const,
-                group: null,
-                detail: detail ?? null,
-              },
-            ]
-          : [],
-      ),
-  ];
-  return found.map((choice, index) => ({ n: index + 1, ...choice }));
+  return view.choices.map((choice, index) => ({ n: index + 1, ...choice }));
 }
 
 // What would leave a player unable to go on, or offer something the game can't take.
@@ -152,10 +111,10 @@ export function screenText(screen: Screen): string {
     );
   }
   if (screen.combat) {
-    out.push(`\nRound ${String(screen.combat.round)}`);
+    out.push(`\n${screen.combat.title}`);
     for (const actor of screen.combat.combatants) {
       out.push(
-        `  ${actor.active ? ">" : " "} ${actor.name} (${actor.side}) ${String(actor.hp)}/${String(actor.maxHp)} HP${actor.status ? `, ${actor.status}` : ""}${actor.conditions.length > 0 ? `, ${actor.conditions.join(", ")}` : ""}`,
+        `  ${actor.active ? ">" : " "} ${actor.name} (${actor.side})${actor.details.length > 0 ? ` ${actor.details.join(", ")}` : ""}`,
       );
     }
   }
@@ -177,15 +136,18 @@ export function screenText(screen: Screen): string {
   if (screen.prompt && !told) out.push(`\n${screen.prompt}`);
   let group: string | null = null;
   for (const choice of screen.choices) {
-    const heading =
-      choice.where === "list"
-        ? choice.group
-        : choice.where === "rest"
-          ? "Campfire"
-          : "Character sheet";
+    const heading = {
+      list: choice.group,
+      rest: "Campfire",
+      sheet: "Character sheet",
+      shop: choice.group ?? "Shop",
+      creation: null,
+    }[choice.where];
     if (heading !== group && heading !== null) out.push(`  ${heading}:`);
     group = heading;
-    out.push(`  ${String(choice.n)}. ${choice.label}`);
+    out.push(
+      `  ${String(choice.n)}. ${choice.label}${choice.endsEarly ? " (ends the adventure)" : ""}`,
+    );
   }
   for (const warning of screen.warnings) out.push(`Warning: ${warning}`);
   for (const problem of screen.problems) out.push(`Stuck: ${problem}`);

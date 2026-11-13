@@ -173,7 +173,13 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     const actors = state.actors;
     if (settle) ctx.grid = state.combat?.grid ?? null;
     const present = new Set<string>();
-    for (const actor of update.combat?.combatants ?? []) {
+    const vitals = extraOf(update).vitals ?? {};
+    for (const shown of update.combat?.combatants ?? []) {
+      // Written beside each combatant by this plugin's combat view.
+      const actor = {
+        ...shown,
+        ...(vitals[shown.id] ?? { hp: 0, maxHp: 0, conditions: [] }),
+      };
       present.add(actor.id);
       const isNew = !ctx.tokens.has(actor.id);
       // While cues play, the start cue brings everyone in as the fight began.

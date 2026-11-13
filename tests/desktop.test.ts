@@ -334,11 +334,11 @@ describe("playing through the shell's session", () => {
     const game = newGame();
     await game.start("goblin-ambush", "ending-test");
     await chooseCharacter(game, "Fighter");
-    const options = game.view().decision?.options ?? [];
-    const warn = options.find((item) => item.label.startsWith("Turn back"));
-    const check = options.find((item) => item.label.includes("treeline"));
-    expect(warn && game.endsEarly(warn.id)).toBe(true);
-    expect(check && game.endsEarly(check.id)).toBe(false);
+    const { choices } = game.view();
+    const warn = choices.find((item) => item.label.startsWith("Turn back"));
+    const check = choices.find((item) => item.label.includes("treeline"));
+    expect(warn?.endsEarly).toBe(true);
+    expect(check?.endsEarly).toBe(false);
     // Only asking changes nothing.
     expect(game.view().ended).toBe(null);
     expect(game.view().steps).toBe(2);
@@ -466,7 +466,7 @@ describe("playing through the shell's session", () => {
           view.combat.combatants.filter((actor) => actor.active),
         ).toHaveLength(1);
         for (const actor of view.combat.combatants) {
-          expect(actor.maxHp).toBeGreaterThan(0);
+          expect(actor.details[0]).toMatch(/^HP -?\d+ of [1-9]/);
         }
         savedPath = await game.save("mid-fight");
         const before = game.view();

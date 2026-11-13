@@ -1,4 +1,10 @@
-import type { BoardUpdate, Combatant, Face, TokenArt } from "./board-data.ts";
+import type {
+  BoardUpdate,
+  Combatant,
+  Face,
+  TokenArt,
+  Vitals,
+} from "./board-data.ts";
 import {
   type BoardContext,
   type Token,
@@ -125,7 +131,7 @@ export function setArt(
   });
 }
 
-export function tokenFor(ctx: BoardContext, actor: Combatant): Token {
+export function tokenFor(ctx: BoardContext, actor: Combatant & Vitals): Token {
   const existing = ctx.tokens.get(actor.id);
   if (existing) return existing;
   const disc = el("div", "dnd-disc", initials(actor.name));

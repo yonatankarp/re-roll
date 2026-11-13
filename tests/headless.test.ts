@@ -250,6 +250,36 @@ describe("headless play of goblin-ambush", () => {
     await later.load(path);
     expect(settled(later.view())).toEqual(before);
   }, 60_000);
+
+  it("keeps a sheet's hinted buttons, disabled, while the fight doesn't offer them", async () => {
+    const play = await driver();
+    await play.start("goblin-ambush", { seed: "gear-hint" });
+    await play.choose("Human Fighter");
+    const gear = (): string[] =>
+      (play.view().sheets[0]?.sections ?? []).flatMap((section) =>
+        section.rows.flatMap(({ option }) =>
+          option?.hint && GEAR.test(option.id) ? [option.id] : [],
+        ),
+      );
+    const onSheet = (): string[] =>
+      play
+        .screen()
+        .choices.filter((choice) => choice.where === "sheet")
+        .map((choice) => choice.id);
+    // Between choices the gear is offered, so its buttons are choices.
+    expect(gear().length).toBeGreaterThan(0);
+    expect(onSheet()).toEqual(expect.arrayContaining(gear()));
+    await play.choose("[Perception] Check the treeline");
+    for (let count = 0; count < 20 && !play.view().combat; count += 1) {
+      const next = play.screen().choices.find((c) => c.where === "list");
+      if (!next) throw new Error("Nothing to choose");
+      await play.choose(next.n);
+    }
+    // In a fight they stay on the sheet, for the page to draw disabled, and aren't choices.
+    expect(play.view().combat).not.toBeNull();
+    expect(gear().length).toBeGreaterThan(0);
+    expect(onSheet().filter((id) => GEAR.test(id))).toEqual([]);
+  });
 });
 
 // Random choices from what is on screen, through every adventure, so a state no player could get past fails.
@@ -280,9 +310,9 @@ describe("headless random play of every adventure", async () => {
         );
       }
       if (!screen.decision) return screen.ended ?? "none";
-      // Rests come back to the same choice, so they would only make runs longer.
+      // Rests and a sheet's buttons come back to the same choice, so they would only make runs longer.
       const choices = screen.choices.filter(
-        (choice) => choice.where === "list",
+        (choice) => choice.where !== "rest" && choice.where !== "sheet",
       );
       const choice = choices[dice.below(choices.length)];
       if (!choice)
