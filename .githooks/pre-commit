@@ -2,8 +2,9 @@
 # Enable once per clone: git config core.hooksPath .githooks
 set -e
 
-# Book content belongs only in the private books/ repository.
-if git diff --cached --name-only --diff-filter=ACMR | grep -iE '(^|/)(books|private)/'; then
+# Book content belongs only in the private books/ repository. private is its old name, and (/|$)
+# also catches a books or private symlink, which git stages as a file.
+if git diff --cached --name-only --diff-filter=ACMR | grep -iE '(^|/)(books|private)(/|$)'; then
   echo "pre-commit: the paths above are book content; commit them only in books/." >&2
   exit 1
 fi

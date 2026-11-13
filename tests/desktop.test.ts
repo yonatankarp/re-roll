@@ -170,7 +170,7 @@ describe("the content endpoint", () => {
     expect(new Set(reads)).toEqual(new Set(["good: true"]));
   });
 
-  it("treats a missing private folder as empty", async () => {
+  it("treats a missing books folder as empty", async () => {
     const reader = createContentReader(url);
     expect(await reader.read("books/rules/a.yaml")).toBeNull();
     expect(await reader.list("books/rules")).toEqual([]);
