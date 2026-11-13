@@ -506,7 +506,7 @@ describe("parsing a monster stat block", () => {
     expect(notes).toContain("not automated: Multiattack count");
   });
 
-  it("applies only the first stage of a staged condition", () => {
+  it("puts a staged condition's second failure on the first", () => {
     const { entry, notes } = withActions(
       action(
         "Stony Stare",
@@ -515,10 +515,14 @@ describe("parsing a monster stat block", () => {
     );
     const stare = entry.actions[0]?.activation.resolution;
     expect(stare?.kind === "save" ? stare.onFail : []).toMatchObject([
-      { condition: "restrained", repeatSave: true },
+      {
+        condition: "restrained",
+        repeatSave: true,
+        secondFailure: { condition: "petrified" },
+      },
     ]);
     expect(stare?.kind === "save" ? stare.onFail : []).toHaveLength(1);
-    expect(notes).toContain(
+    expect(notes).not.toContain(
       "partial: Stony Stare: left out a later failure stage",
     );
   });
@@ -557,7 +561,7 @@ describe("parsing a monster stat block", () => {
       "another condition",
     ],
     [
-      "<em>Constitution Saving Throw:</em> DC 12. <em>Failure:</em> The target has the Paralyzed condition.",
+      "If the target is a Humanoid, it is subjected to the following effect. <em>Constitution Saving Throw:</em> DC 12. <em>Failure:</em> The target has the Paralyzed condition.",
       "a nested save",
     ],
   ])("leaves out the rider in %s", (rider, reason) => {

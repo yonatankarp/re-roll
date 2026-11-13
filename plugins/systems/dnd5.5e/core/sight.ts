@@ -12,6 +12,7 @@ import type { Battlemap } from "./schemas.ts";
 import { FeatureSchema, MonsterSchema, SpeciesSchema } from "./schemas.ts";
 import { type Actor, type DndState, type Terrain, isDead } from "./state.ts";
 import { lookup } from "./stats.ts";
+import { swallowerOf } from "./combat/swallow.ts";
 
 // A map's codes as squares, or nothing for a map that marks none, so fights on older maps stay as they were.
 export function terrainOf(map: Battlemap): Terrain | null {
@@ -157,8 +158,10 @@ export function behindTotalCover(
   actor: Actor,
   target: Actor,
 ): boolean {
+  // From inside a swallower, nothing stands between them, wherever it has carried the creature.
   return (
     actor.id !== target.id &&
+    swallowerOf(actor) !== target.id &&
     coverFor(state, actor.position, target, [actor.id]) === "total"
   );
 }

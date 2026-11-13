@@ -21,6 +21,7 @@ import {
   damageResponses,
   deriveStats,
   evaluateFormula,
+  immuneToCondition,
   lookup,
   rollAmount,
 } from "../stats.ts";
@@ -40,12 +41,16 @@ import {
 } from "./queries.ts";
 import { concentrationFrame, dealEvents, rollSave } from "./effects.ts";
 import { releasedGrapples } from "./grapple.ts";
+import { regurgitationEvents, releasedSwallows } from "./swallow.ts";
 
 // The turn order: ending a fight, lingering effects, and the start and end of each turn.
 
 // Run after nearly every step of a fight, so it's also where grapples whose grappler fell or moved away end.
 export function runCheckCombatEnd(context: Context): SystemResult {
-  const released = releasedGrapples(context.state, context);
+  const released = [
+    ...releasedGrapples(context.state, context),
+    ...releasedSwallows(context.state, context),
+  ];
   const result = fightOver(context);
   return released.length > 0
     ? { ...result, events: [...released, ...(result.events ?? [])] }
@@ -208,9 +213,10 @@ export function runFinishTurn(context: Context): SystemResult {
   const seen = new Set<string>();
   const events: SystemEvent[] = [];
   for (const { actor: target, effect, save } of repeated) {
-    const { sourceId, modifier } = effect;
-    if (seen.has(sourceId)) continue;
-    seen.add(sourceId);
+    const { sourceId, casterId, modifier } = effect;
+    // Each caster's effect is saved against on its own, as two snakes' grapples are two grapples.
+    if (seen.has(`${casterId}|${sourceId}`)) continue;
+    seen.add(`${casterId}|${sourceId}`);
     const rolled = rollSave(
       target,
       save.ability,
@@ -230,13 +236,49 @@ export function runFinishTurn(context: Context): SystemResult {
           events,
         );
     if (resisted) events.push(resisted);
-    if (rolled.saved || resisted) {
+    const worse = (
+      target.activeEffects.find(
+        (item) =>
+          item.sourceId === sourceId &&
+          item.casterId === casterId &&
+          item.secondFailure,
+      ) ?? effect
+    ).secondFailure;
+    if (rolled.saved || resisted || worse) {
       events.push(
-        dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId }),
+        dndEvent(`${NS}:effectEnded`, {
+          actor: target.id,
+          sourceId,
+          casterId,
+        }),
+      );
+    }
+    // A second failure leaves the worse condition instead, with no more saves.
+    if (
+      worse &&
+      !rolled.saved &&
+      !resisted &&
+      !immuneToCondition(deriveStats(target, context), worse.condition)
+    ) {
+      events.push(
+        dndEvent(`${NS}:effectAdded`, {
+          actor: target.id,
+          effect: {
+            sourceId,
+            casterId,
+            modifier: { kind: "condition", condition: worse.condition },
+            ends: worse.ends,
+            ...(worse.endsOnDamage ? { endsOnDamage: true } : {}),
+          },
+        }),
       );
     }
   }
-  const ending = [...events, ...(actor ? rechargeEvents(actor, context) : [])];
+  const ending = [
+    ...events,
+    ...regurgitationEvents(context),
+    ...(actor ? rechargeEvents(actor, context) : []),
+  ];
   const between = betweenTurns(state, ending, context);
   return between.length > 0
     ? { events: ending, frames: [...between, frame("advanceTurn", {})] }

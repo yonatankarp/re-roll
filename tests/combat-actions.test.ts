@@ -151,6 +151,122 @@ const COILER = dummy("test:monster/coiler", {
   ],
 });
 
+// Swallows a creature it's grappling, and lets it out after 10 damage from inside in one turn.
+const GULPER = dummy("test:monster/gulper", {
+  text: [
+    "Actions",
+    "Gulp. Strength Saving Throw: DC 14, one creature Grappled by the gulper. Failure: The target is swallowed, and the Grappled condition ends.",
+    "If the gulper takes 10 damage or more on a single turn from a creature inside it, the gulper must succeed on a DC 12 Constitution saving throw at the end of that turn or regurgitate all swallowed creatures, each of which falls in a space within 5 feet of the gulper and has the Prone condition.",
+  ].join("\n"),
+  actions: [
+    {
+      name: "Gulp",
+      activation: {
+        cost: ["action"],
+        targeting: {
+          creatures: 1,
+          range: 5,
+          side: "enemy",
+          targetConditions: ["grappled"],
+        },
+        resolution: {
+          kind: "save",
+          ability: "str",
+          dc: { base: 14 },
+          onFail: [
+            { kind: "removeCondition", condition: "grappled" },
+            {
+              kind: "applyCondition",
+              condition: "blinded",
+              duration: { minutes: 1 },
+            },
+            {
+              kind: "applyCondition",
+              condition: "restrained",
+              duration: { minutes: 1 },
+            },
+          ],
+        },
+      },
+    },
+    ...(dummy("x").actions as unknown[]),
+  ],
+});
+
+// A claw whose hit brings a save against paralysis, on its own source.
+const CLAWER = dummy("test:monster/clawer", {
+  actions: [
+    {
+      name: "Claw",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "weapon", flatBonus: 4 },
+          damage: [{ amount: { dice: "1d4" }, type: "slashing" }],
+          onHit: [
+            {
+              kind: "applyCondition",
+              condition: "grappled",
+              duration: { minutes: 1 },
+            },
+          ],
+          onHitSave: {
+            ability: "con",
+            dc: { base: 10 },
+            onFail: [
+              {
+                kind: "applyCondition",
+                condition: "paralyzed",
+                duration: { minutes: 1 },
+                repeatSave: true,
+              },
+            ],
+            exempt: ["undead"],
+          },
+        },
+      },
+    },
+  ],
+});
+
+// Weakens one creature: Disadvantage on Strength saves and a damage penalty, saved against each turn.
+const WEAKENER = dummy("test:monster/weakener", {
+  actions: [
+    {
+      name: "Sap",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "str",
+          dc: { base: 12 },
+          onFail: [
+            {
+              kind: "modifier",
+              modifier: { kind: "disadvantage", on: "saves", ability: "str" },
+              duration: { minutes: 1 },
+              repeatSave: true,
+            },
+            {
+              kind: "modifier",
+              modifier: {
+                kind: "damageBonus",
+                amount: { dice: "1d4" },
+                subtract: true,
+              },
+              duration: { minutes: 1 },
+              repeatSave: true,
+            },
+          ],
+        },
+      },
+    },
+  ],
+});
+
 // Bites, then sprays a cone that the Multiattack has to aim.
 const SPITTER = dummy("test:monster/spitter", {
   text: "Actions\nMultiattack. The spitter makes one Club attack and uses Spray.",
@@ -181,6 +297,9 @@ function arena(base: RunContext): RunContext {
     "test:monster/dummy": dummy("test:monster/dummy"),
     "test:monster/coiler": COILER,
     "test:monster/spitter": SPITTER,
+    "test:monster/gulper": GULPER,
+    "test:monster/clawer": CLAWER,
+    "test:monster/weakener": WEAKENER,
     "test:monster/giant": dummy("test:monster/giant", { size: "huge" }),
     ...Object.fromEntries(WEAPONS.map((item) => [item.id, item])),
   };
@@ -1054,6 +1173,275 @@ describe("monster grapples and multiattacks", () => {
     // Squeeze reaches 10 feet.
     expect(hasCondition(after(moved(7)), "grappled", "restrained")).toBe(true);
     expect(sources(after(moved(8)))).toEqual([]);
+  });
+
+  it("keeps two coilers' grapples apart, so one letting go leaves the other's", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("coiler", [6, 5], "test:monster/coiler"),
+      monster("coiler2", [4, 5], "test:monster/coiler"),
+    ]);
+    const first = settle(
+      run,
+      state,
+      [act("coiler", "monster:0|player")],
+      LOW,
+    ).state;
+    const both = settle(
+      run,
+      { ...first, combat: first.combat && { ...first.combat, index: 2 } },
+      [act("coiler2", "monster:0|player")],
+      LOW,
+    ).state;
+    const held: DndState = {
+      ...both,
+      combat: both.combat && { ...both.combat, index: 0 },
+    };
+    const decision = run.system.nextDecision(held, {
+      content: run.content,
+      contentIds: run.contentIds,
+    });
+    const escapes = (decision?.options ?? [])
+      .map((option) => option.id)
+      .filter((id) => id.startsWith("tactic:escape"));
+    expect(escapes).toEqual([
+      "tactic:escape|coiler|monster:0",
+      "tactic:escape|coiler2|monster:0",
+    ]);
+    // Escaping one keeps the other's grapple, Restrained and squeeze.
+    const free = settle(
+      run,
+      held,
+      [act(PLAYER_ACTOR, "tactic:escape|coiler|monster:0")],
+      HIGH,
+    ).state;
+    const hero = who(free, PLAYER_ACTOR);
+    expect(hasCondition(hero, "grappled", "restrained")).toBe(true);
+    expect(new Set(hero.activeEffects.map((e) => e.casterId))).toEqual(
+      new Set(["coiler2"]),
+    );
+    // The other one dropping releases its grapple too.
+    const check = { kind: `${NS}:checkCombatEnd`, payload: {} };
+    const gone = settle(
+      run,
+      applyDndEvent(
+        free,
+        dndEvent(`${NS}:damaged`, {
+          actor: "coiler2",
+          amount: 999,
+          type: "fire",
+          critical: false,
+          massive: false,
+        }),
+      ),
+      [check],
+      LOW,
+    ).state;
+    expect(sources(who(gone, PLAYER_ACTOR))).toEqual([]);
+  });
+
+  it("lets a swallowed creature hit only its swallower, and out on enough damage or the swallower dropping", async () => {
+    const run = await base();
+    const start = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("gulper", [6, 5], "test:monster/gulper"),
+      monster("near", [4, 5]),
+    ]);
+    const grappled = applyDndEvent(
+      start,
+      dndEvent(`${NS}:effectAdded`, {
+        actor: PLAYER_ACTOR,
+        effect: {
+          sourceId: "monster:1",
+          casterId: "gulper",
+          modifier: { kind: "condition", condition: "grappled" },
+          ends: "spellDuration",
+        },
+      }),
+    );
+    const gulped = settle(
+      run,
+      {
+        ...grappled,
+        combat: grappled.combat && { ...grappled.combat, index: 1 },
+      },
+      [act("gulper", "monster:0|player")],
+      LOW,
+    ).state;
+    const inside = who(gulped, PLAYER_ACTOR);
+    expect(hasCondition(inside, "grappled")).toBe(false);
+    expect(inside.activeEffects.every((e) => e.swallowed)).toBe(true);
+    // It carries the hero off, and the foe beside the hero is outside.
+    const moved = applyDndEvent(
+      { ...gulped, combat: gulped.combat && { ...gulped.combat, index: 0 } },
+      dndEvent(`${NS}:moved`, {
+        actor: "gulper",
+        to: { x: 12, y: 5 },
+        feet: 0,
+      }),
+    );
+    const options = optionIds(run, moved);
+    expect(options).toContain(`${LONGSWORD}|gulper`);
+    expect(options).not.toContain(`${LONGSWORD}|near`);
+    // A critical hit from inside does 10 or more, and the gulper fails its save at the end of the turn.
+    const hit = settle(
+      run,
+      moved,
+      [act(PLAYER_ACTOR, `${LONGSWORD}|gulper`)],
+      HIGH,
+    );
+    expect(who(hit.state, "gulper").insideDamage).toBeGreaterThanOrEqual(10);
+    const out = settle(
+      run,
+      hit.state,
+      [{ kind: `${NS}:endTurn`, payload: {} }],
+      LOW,
+    ).state;
+    const hero = who(out, PLAYER_ACTOR);
+    expect(hasCondition(hero, "blinded", "restrained")).toBe(false);
+    expect(hasCondition(hero, "prone")).toBe(true);
+    expect(
+      Math.max(
+        Math.abs((hero.position?.x ?? 0) - 12),
+        Math.abs((hero.position?.y ?? 0) - 5),
+      ),
+    ).toBe(1);
+    expect(who(out, "gulper").insideDamage).toBe(0);
+    // A swallower that drops lets the creature out too.
+    const dead = applyDndEvent(
+      gulped,
+      dndEvent(`${NS}:damaged`, {
+        actor: "gulper",
+        amount: 999,
+        type: "fire",
+        critical: false,
+        massive: false,
+      }),
+    );
+    const freed = settle(
+      run,
+      dead,
+      [{ kind: `${NS}:checkCombatEnd`, payload: {} }],
+      LOW,
+    ).state;
+    expect(
+      hasCondition(who(freed, PLAYER_ACTOR), "blinded", "restrained"),
+    ).toBe(false);
+    expect(hasCondition(who(freed, PLAYER_ACTOR), "prone")).toBe(true);
+  });
+
+  it("rolls the save a hit brings, keeping its effects apart from the hit's grapple", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("clawer", [6, 5], "test:monster/clawer"),
+    ]);
+    const { state: after } = settle(
+      run,
+      { ...state, combat: state.combat && { ...state.combat, index: 1 } },
+      [act("clawer", "monster:0|player")],
+      d20s(19, 1),
+    );
+    const hero = who(after, PLAYER_ACTOR);
+    expect(hasCondition(hero, "grappled", "paralyzed")).toBe(true);
+    expect(sources(hero).sort()).toEqual(["monster:0", "monster:0:save"]);
+    // Saving at the end of its turn ends the paralysis and leaves the grapple.
+    const saved = settle(
+      run,
+      { ...after, combat: after.combat && { ...after.combat, index: 0 } },
+      [{ kind: `${NS}:endTurn`, payload: {} }],
+      HIGH,
+    ).state;
+    expect(sources(who(saved, PLAYER_ACTOR))).toEqual(["monster:0"]);
+  });
+
+  it("gives Disadvantage only on rolls with the ability an effect names", async () => {
+    const run = await base();
+    const weakened = applyDndEvent(
+      fight([fighter(run, { at: [5, 5] })]),
+      dndEvent(`${NS}:effectAdded`, {
+        actor: PLAYER_ACTOR,
+        effect: {
+          sourceId: "test",
+          casterId: "foe",
+          modifier: { kind: "disadvantage", on: "saves", ability: "str" },
+          ends: "spellDuration",
+        },
+      }),
+    );
+    const hero = who(weakened, PLAYER_ACTOR);
+    const context = contextOf(run, weakened, d20s(15, 2, 15, 2));
+    expect(rollSave(hero, "str", 10, context).saved).toBe(false);
+    expect(rollSave(hero, "dex", 10, context).saved).toBe(true);
+  });
+
+  it("turns a condition into its second failure when the repeat save fails", async () => {
+    const run = await base();
+    const start = applyDndEvent(
+      fight([fighter(run, { at: [5, 5] }), monster("gazer", [9, 5])]),
+      dndEvent(`${NS}:effectAdded`, {
+        actor: PLAYER_ACTOR,
+        effect: {
+          sourceId: "monster:0",
+          casterId: "gazer",
+          modifier: { kind: "condition", condition: "restrained" },
+          ends: "spellDuration",
+          repeatSave: { ability: "con", dc: 12 },
+          secondFailure: { condition: "petrified", ends: "spellDuration" },
+        },
+      }),
+    );
+    const end = [{ kind: `${NS}:endTurn`, payload: {} }];
+    const failed = who(settle(run, start, end, LOW).state, PLAYER_ACTOR);
+    expect(hasCondition(failed, "restrained")).toBe(false);
+    expect(hasCondition(failed, "petrified")).toBe(true);
+    expect(failed.activeEffects[0]?.repeatSave).toBeUndefined();
+    expect(
+      sources(who(settle(run, start, end, HIGH).state, PLAYER_ACTOR)),
+    ).toEqual([]);
+  });
+
+  it("takes a damage penalty off weapon hits until a repeated save ends it", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("weakener", [6, 5], "test:monster/weakener"),
+    ]);
+    const sapped = settle(
+      run,
+      { ...state, combat: state.combat && { ...state.combat, index: 1 } },
+      [act("weakener", "monster:0|player")],
+      LOW,
+    ).state;
+    const hero = who(sapped, PLAYER_ACTOR);
+    expect(hero.activeEffects.map((e) => e.repeatSave)).toEqual([
+      { ability: "str", dc: 12 },
+      { ability: "str", dc: 12 },
+    ]);
+    const onHero = (from: DndState) => ({
+      ...from,
+      combat: from.combat && { ...from.combat, index: 0 },
+    });
+    const hit = (from: DndState) =>
+      damageTo(
+        settle(
+          run,
+          onHero(from),
+          [act(PLAYER_ACTOR, `${LONGSWORD}|weakener`)],
+          HIGH,
+        ).events,
+        "weakener",
+      )[0] ?? 0;
+    expect(hit(state) - hit(sapped)).toBe(4);
+    // One successful save at the end of the turn ends both.
+    const saved = settle(
+      run,
+      onHero(sapped),
+      [{ kind: `${NS}:endTurn`, payload: {} }],
+      HIGH,
+    ).state;
+    expect(sources(who(saved, PLAYER_ACTOR))).toEqual([]);
   });
 
   it("aims an area a Multiattack uses where it catches the most foes", async () => {

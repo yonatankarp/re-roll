@@ -28,7 +28,8 @@ import {
 import { speedOf } from "../tactics.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
 import { encodeOption } from "./ids.ts";
-import { type Targeting } from "../schemas.ts";
+import { swallowerOf } from "./swallow.ts";
+import { type Ability, type Targeting } from "../schemas.ts";
 import { bossAction } from "../legendary.ts";
 import { aimScore, aimSquares, caughtBy } from "../targeting.ts";
 
@@ -49,11 +50,17 @@ export function hasFlag(
   kind: "advantage" | "disadvantage",
   on: "attacks" | "saves" | "checks" | "attacksAgainst",
   stats: Stats,
+  ability?: Ability,
 ): boolean {
   return [
     ...actor.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
-  ].some((modifier) => modifier.kind === kind && modifier.on === on);
+  ].some(
+    (modifier) =>
+      modifier.kind === kind &&
+      modifier.on === on &&
+      (!modifier.ability || modifier.ability === ability),
+  );
 }
 
 export function hasPassive(
@@ -128,6 +135,10 @@ export function reaches(
 ): boolean {
   const { targeting } = action.activation;
   if ("self" in targeting) return true;
+  // From inside a swallower, it's the one creature within reach.
+  const inside = swallowerOf(actor);
+  if (inside !== undefined)
+    return inside === target.id || target.id === actor.id;
   const distance = distanceFeet(actor.position, target.position);
   if ("area" in targeting && targeting.range === "self") {
     return distance <= targeting.area.radius;

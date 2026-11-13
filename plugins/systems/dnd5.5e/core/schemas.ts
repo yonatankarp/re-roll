@@ -144,15 +144,18 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     once: z.boolean().optional(),
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
+  // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
   z.strictObject({
     kind: z.literal("advantage"),
     on: RollFlagSchema,
     once: z.boolean().optional(),
+    ability: AbilitySchema.optional(),
   }),
   z.strictObject({
     kind: z.literal("disadvantage"),
     on: RollFlagSchema,
     once: z.boolean().optional(),
+    ability: AbilitySchema.optional(),
   }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
@@ -189,6 +192,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("damageBonus"),
     amount: AmountSchema,
     ability: AbilitySchema.optional(),
+    subtract: z.boolean().optional(), // a penalty, as a gold dragon's Weakening Breath
   }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
@@ -211,6 +215,14 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     duration: DurationSchema,
     repeatSave: z.boolean().default(false), // the target repeats the save at the end of each of its turns
     endsOnDamage: z.boolean().default(false),
+    // What a failed repeat save turns it into, as a cockatrice's Restrained becoming Petrified.
+    secondFailure: z
+      .strictObject({
+        condition: ConditionSchema,
+        duration: DurationSchema,
+        endsOnDamage: z.boolean().default(false),
+      })
+      .optional(),
   }),
   z.strictObject({
     kind: z.literal("removeCondition"),
@@ -220,6 +232,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("modifier"),
     modifier: ModifierSchema,
     duration: DurationSchema,
+    repeatSave: z.boolean().optional(), // as an applyCondition's
   }),
   z.strictObject({
     kind: z.literal("forcedMove"),
@@ -257,6 +270,19 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     damage: z.array(DamageSchema).min(1),
     onHit: LeafEffectsSchema,
     onMiss: LeafEffectsSchema,
+    // A save the target makes after a hit, as a ghoul's paralysing claw. Creatures of an `exempt` type or species
+    // (lowercase) never make it.
+    onHitSave: z
+      .strictObject({
+        ability: AbilitySchema,
+        dc: FormulaSchema,
+        damage: z.array(DamageSchema).default([]),
+        onSuccessDamage: z.enum(["half", "none"]).default("none"),
+        onFail: LeafEffectsSchema,
+        onSuccess: LeafEffectsSchema,
+        exempt: z.array(z.string()).optional(),
+      })
+      .optional(),
   }),
   z.strictObject({
     kind: z.literal("save"),

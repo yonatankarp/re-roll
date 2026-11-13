@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   type Actor,
+  applyDndEvent,
   dndEvent,
   type DndState,
   hasCondition,
@@ -12,6 +13,7 @@ import {
 } from "../state.ts";
 import { ALL, DECLINE, parseOption } from "./ids.ts";
 import { behindTotalCover, coverBonus, coverFor, seeing } from "../sight.ts";
+import { insideDamageEvents } from "./swallow.ts";
 import {
   awaitDecision,
   type SystemEvent,
@@ -25,6 +27,7 @@ import {
   type KnownAction,
   modifierFor,
   passiveModifiers,
+  evaluateFormula,
   rollAmount,
   rollDiceNotation,
   type Stats,
@@ -37,6 +40,7 @@ import {
   revealEvents,
 } from "../tactics.ts";
 import { criticalFrom, offerInspiration, onceEnded } from "../class-rules.ts";
+import { conditionsApplied } from "../legendary.ts";
 import { type Damage, type Resolution } from "../schemas.ts";
 import {
   actorOf,
@@ -219,10 +223,13 @@ export function runAttackRoll(
     seeing(attacker, target.position, state, context) === "none";
   const unseenAttacker =
     seeing(target, attacker.position, state, context) === "none";
+  // A monster's flat bonus names no ability: a weapon attack is Strength-based in melee and Dexterity-based at range.
+  const ability =
+    resolution.attack.ability ?? (meleeReach(action) === null ? "dex" : "str");
   const advantage =
     packed ||
     unseenAttacker ||
-    hasFlag(attacker, "advantage", "attacks", stats) ||
+    hasFlag(attacker, "advantage", "attacks", stats, ability) ||
     hasFlag(target, "advantage", "attacksAgainst", targetStats) ||
     hasCondition(attacker, "invisible") ||
     hasCondition(
@@ -241,7 +248,7 @@ export function runAttackRoll(
     proneFar ||
     dodging(target) ||
     grappledAwayFrom(attacker, target) ||
-    hasFlag(attacker, "disadvantage", "attacks", stats) ||
+    hasFlag(attacker, "disadvantage", "attacks", stats, ability) ||
     hasFlag(target, "disadvantage", "attacksAgainst", targetStats) ||
     hasCondition(
       attacker,
@@ -481,12 +488,20 @@ export function runApplyHit(
   );
   events.push(
     ...dealt.events,
+    ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
   );
+  // The save sees the target as the hit left it.
+  const afterHit = events.reduce(applyDndEvent, state);
+  const nested = nestedSave(resolution, action, attacker, target, {
+    ...context,
+    state: afterHit,
+  });
+  events.push(...nested.events);
   return {
     events,
     frames: [
-      ...concentrationFrame(target, dealt.dealt),
+      ...concentrationFrame(target, dealt.dealt + nested.dealt),
       ...(smitesFor(action, attacker, stats).length > 0
         ? [
             frame("afterHit", {
@@ -546,6 +561,76 @@ function hitRiders(
   });
 }
 
+// The save a hit brings, as a ghoul's claw. Its effects have a source of their own, so a successful repeat save
+// against them leaves a grapple from the same hit.
+function nestedSave(
+  resolution: Extract<Resolution, { kind: "attack" }>,
+  action: KnownAction,
+  attacker: Actor,
+  hit: Actor,
+  context: Context,
+): { readonly events: SystemEvent[]; readonly dealt: number } {
+  const save = resolution.onHitSave;
+  const target = context.state.actors[hit.id];
+  if (!save || !target || isDead(target)) return { events: [], dealt: 0 };
+  const targetStats = deriveStats(target, context);
+  const species =
+    target.source.kind === "character"
+      ? target.source.build?.speciesId.split("/").pop()
+      : undefined;
+  if (
+    save.exempt?.some(
+      (kind) => kind === targetStats.creatureType || kind === species,
+    )
+  ) {
+    return { events: [], dealt: 0 };
+  }
+  const stats = deriveStats(attacker, context);
+  const dc = evaluateFormula(save.dc, stats);
+  const rolled = rollSave(
+    target,
+    save.ability,
+    dc,
+    context,
+    false,
+    0,
+    conditionsApplied(save.onFail),
+  );
+  const responses = damageResponses(target, context);
+  const damage = dealEvents(
+    target,
+    save.damage.flatMap(({ amount, type }) => {
+      const total = rollAmount(amount, stats, context.dice);
+      const scaled = !rolled.saved
+        ? total
+        : save.onSuccessDamage === "half"
+          ? halved(total)
+          : 0;
+      return scaled > 0
+        ? [{ amount: finalDamage(scaled, type, responses), type }]
+        : [];
+    }),
+    false,
+    context,
+  );
+  const source = `${action.id}:save`;
+  return {
+    events: [
+      ...rolled.events,
+      ...damage.events,
+      ...leafEvents(
+        rolled.saved ? save.onSuccess : save.onFail,
+        source,
+        attacker,
+        target,
+        context,
+        { ability: save.ability, dc },
+      ),
+    ],
+    dealt: damage.dealt,
+  };
+}
+
 // Flat damage added to a weapon's own roll, such as Rage.
 function damageBonus(
   attacker: Actor,
@@ -566,7 +651,9 @@ function damageBonus(
     (total, modifier) =>
       modifier.kind === "damageBonus" &&
       (!modifier.ability || modifier.ability === resolution.attack.ability)
-        ? total + rollAmount(modifier.amount, stats, context.dice)
+        ? total +
+          (modifier.subtract ? -1 : 1) *
+            rollAmount(modifier.amount, stats, context.dice)
         : total,
     0,
   );

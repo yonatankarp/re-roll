@@ -178,16 +178,58 @@ function noteLaterDamage(sentences: readonly string[], left: string[]): void {
   }
 }
 
+const REPEAT_SAVE =
+  /\brepeats? the sav(?:e|ing throw)\b(?:,|[^.]*?\b(?:at the end of|whenever it takes damage)\b)|\bat which point it repeats the save\b/i;
+
+// "has Disadvantage on Strength-based D20 Tests and subtracts 3 (1d6) from its damage rolls", for the fight or until
+// a repeated save ends it. shortcut: the penalty is taken off weapon damage only, as damageBonus is.
+function modifiersIn(text: string): LeafEffect[] {
+  const named = new RegExp(
+    `\\bhas Disadvantage on (${ABILITY_NAMES})-based D20 Tests\\b`,
+  ).exec(text)?.[1];
+  const ability = (Object.keys(ABILITIES) as AbilityKey[]).find(
+    (key) => ABILITIES[key] === named,
+  );
+  const penalty = /\bsubtracts \d+ \((\d+d\d+)\) from its damage rolls\b/.exec(
+    text,
+  )?.[1];
+  const leaf = (modifier: Modifier): LeafEffect => ({
+    kind: "modifier",
+    modifier,
+    duration: { minutes: 1 },
+    ...(REPEAT_SAVE.test(text) ? { repeatSave: true } : {}),
+  });
+  return [
+    ...(ability
+      ? (["attacks", "saves", "checks"] as const).map((on) =>
+          leaf({ kind: "disadvantage", on, ability }),
+        )
+      : []),
+    ...(penalty
+      ? [
+          leaf({
+            kind: "damageBonus",
+            amount: { dice: penalty },
+            subtract: true,
+          }),
+        ]
+      : []),
+  ];
+}
+
 function conditionsIn(text: string, left: string[]): LeafEffect[] {
-  const repeatSave =
-    /\brepeats? the sav(?:e|ing throw)\b(?:,|[^.]*?\b(?:at the end of|whenever it takes damage)\b)/i.test(
-      text,
-    );
+  const repeatSave = REPEAT_SAVE.test(text);
   const endsOnDamage =
-    /\bends? (?:early )?(?:on the target )?(?:if|when) (?:the target|it) takes (?:any )?damage\b|\buntil (?:it|the target) takes (?:any )?damage\b/i.test(
+    /\bends? (?:early )?(?:(?:on|for) the target )?(?:if|when) (?:the target|it) takes (?:any )?damage\b|\buntil (?:it|the target) takes (?:any )?damage\b/i.test(
       text,
     );
+  // "The target wakes up if it takes damage" ends only the Unconscious condition.
+  const wakes = /\bwakes up if it takes (?:any )?damage\b/i.test(text);
+  // "While Poisoned, the target has the Paralyzed condition" lasts as that Poisoned condition does.
+  const applied = new Map<string, LeafEffect>();
   return sentencesOf(text).flatMap((sentence) => {
+    const whileHeld = WHILE_CONDITION.exec(sentence)?.[1]?.toLowerCase();
+    const parent = whileHeld ? applied.get(whileHeld) : undefined;
     // "until the end of the spy's next turn" outlasts the spy's next turn, and the end of the target's own comes before it.
     const [, edge, whose = ""] =
       /until the (start|end) of ([^.]*?)\s*next turn/i.exec(sentence) ?? [];
@@ -207,11 +249,16 @@ function conditionsIn(text: string, left: string[]): LeafEffect[] {
     // "which is no longer Grappled", or "and the Grappled condition ends": swallowing replaces the grapple.
     const released = [
       ...stated.matchAll(
-        /\bno longer (Grappled)\b|\bthe (Grappled) condition ends\b/g,
+        /\bno longer (Grappled)\b|\bthe (Grappled) condition ends\b|\bisn[’']t (Grappled)\b/g,
       ),
     ].map((match) => ({
       kind: "removeCondition" as const,
-      condition: (match[1] ?? match[2] ?? "").toLowerCase() as Condition,
+      condition: (
+        match[1] ??
+        match[2] ??
+        match[3] ??
+        ""
+      ).toLowerCase() as Condition,
     }));
     return [
       ...released,
@@ -232,35 +279,59 @@ function conditionsIn(text: string, left: string[]): LeafEffect[] {
             return parsed.success ? [parsed.data] : [];
           });
         if (conditions.length === 0) return [];
-        if (limit) {
-          left.push(limit);
+        if (limit || (whileHeld && parent?.kind !== "applyCondition")) {
+          left.push(limit ?? "another condition");
           return [];
         }
-        return conditions.map((condition) => ({
-          kind: "applyCondition" as const,
-          condition,
-          duration: edge ? { until } : { minutes },
-          repeatSave,
-          endsOnDamage,
-        }));
+        return conditions.map((condition) => {
+          const effect = {
+            kind: "applyCondition" as const,
+            condition,
+            duration:
+              parent?.kind === "applyCondition"
+                ? parent.duration
+                : edge
+                  ? { until }
+                  : { minutes },
+            repeatSave,
+            endsOnDamage:
+              endsOnDamage || (wakes && condition === "unconscious"),
+          };
+          applied.set(condition, effect);
+          return effect;
+        });
       }),
     ];
   });
 }
 
 const STATE_LEAD =
-  /^\s*While (?:swallowed|engulfed|trapped|grafted)(?: in this way)?,\s*/i;
+  /^\s*While (?:swallowed|engulfed|trapped|grafted|Restrained|Poisoned)(?: in this way)?,\s*/i;
+const WHILE_CONDITION = /^\s*While (Restrained|Poisoned)(?: in this way)?,/i;
 
 // "… takes 10 (3d6) Acid damage at the start of each of the monster's turns" while swallowed. shortcut: it ticks on the
 // bearer's own turn rather than the monster's, which is one turn's difference at most.
 function ongoingDamage(text: string, left: string[]): LeafEffect[] {
   const effects = sentencesOf(text).flatMap((sentence): LeafEffect[] => {
     const stated = sentence.replace(STATE_LEAD, "");
+    const amount = `(?:\\d+ \\(\\d+d\\d+(?:\\s*[+−–-]\\s*\\d+)?\\)|\\d+) (?:${TYPES}) damage`;
     const match = new RegExp(
-      `^(.*?)\\btakes? ((?:\\d+ \\(\\d+d\\d+(?:\\s*[+−–-]\\s*\\d+)?\\)|\\d+) (?:${TYPES}) damage) at the (start|end) of each of [^.]*?\\bturns\\b`,
+      `^(.*?)\\btakes? (${amount}(?: plus ${amount})*) at the (start|end) of each of [^.]*?\\bturns\\b`,
       "i",
     ).exec(stated);
-    if (!match || limitOn(match[1] ?? "")) return [];
+    // "has Total Cover against attacks … outside the worm" is part of being swallowed, not a condition on the damage.
+    const lead = (match?.[1] ?? "").replace(
+      /\bhas (?:Total|Half|Three-Quarters) Cover against [^,]*/gi,
+      "",
+    );
+    const whileHeld = WHILE_CONDITION.exec(sentence)?.[1];
+    const held =
+      !whileHeld ||
+      new RegExp(
+        `\\bhas the (?:\\w+ and )?${whileHeld} conditions?\\b`,
+        "i",
+      ).test(text);
+    if (!match || limitOn(lead) || !held) return [];
     const damage = damageIn(match[2] ?? "", []);
     return damage.length > 0
       ? [
@@ -287,6 +358,31 @@ function ongoingDamage(text: string, left: string[]): LeafEffect[] {
   return effects;
 }
 
+// "The toad swallows a Medium or smaller target it is grappling. While swallowed, …": no roll, and only a creature
+// the monster is grappling can be chosen.
+function parseSwallow(text: string, left: string[]): ParsedAction | null {
+  const [first = "", ...rest] = sentencesOf(text);
+  const swallows = new RegExp(
+    `^The [^.]*? swallows (?:a|one) (?:${HERO_SIZES} )?(?:target|creature) (?:it is grappling|Grappled by [^.]*)\\.$`,
+    "i",
+  );
+  if (!swallows.test(first)) return null;
+  const after = rest.join(" ");
+  const effects = [...conditionsIn(after, left), ...ongoingDamage(after, left)];
+  if (!effects.some((effect) => effect.kind === "removeCondition")) {
+    return null;
+  }
+  return {
+    targeting: {
+      creatures: 1,
+      range: 5,
+      side: "enemy",
+      targetConditions: ["grappled"],
+    },
+    resolution: { kind: "automatic", damage: [], effects },
+  };
+}
+
 interface ParsedAction {
   readonly targeting: unknown;
   readonly resolution: Resolution;
@@ -303,15 +399,16 @@ function parseAttack(text: string, left: string[]): ParsedAction | null {
   const hitAt = text.indexOf("Hit:");
   if (hitAt < 0) return null;
   const afterHit = text.slice(hitAt + 4).trim();
-  // A save nested in the hit has its own chance to fail, which a resolution can't hold.
-  if (/saving throw/i.test(afterHit)) left.push("a nested save");
+  const nested = nestedSave(afterHit, left);
+  if (/saving throw/i.test(afterHit) && !nested) left.push("a nested save");
   // Older books say "is grappled", which has no duration or end this parser can read reliably.
   if (OLDER_CONDITION.test(afterHit)) left.push("a condition in older wording");
   // "Critical Hit: …" only happens on a critical, which onHit can't tell apart.
   if (/\bCritical Hit:/.test(afterHit)) left.push("a Critical Hit rider");
-  const [hit = ""] = afterHit.split(
+  const [split = ""] = afterHit.split(
     new RegExp(`(?=${SAVE_LABEL}|(?:Hit or )?Miss:|Critical Hit:)`),
   );
+  const hit = nested ? split.replace(nested.intro, "") : split;
   const sentences = sentencesOf(hit);
   const advantageDice: string[] = [];
   const damage = damageIn(sentences[0] ?? "", left, advantageDice);
@@ -357,6 +454,63 @@ function parseAttack(text: string, left: string[]): ParsedAction | null {
             ],
       onHit,
       onMiss: [],
+      ...(nested ? { onHitSave: nested.save } : {}),
+    },
+  };
+}
+
+// "If the target is a creature, it is subjected to the following effect. Constitution Saving Throw: DC 11. Failure: …"
+// after a hit, or the save printed straight after the damage. Only a gate every hero meets, or one by creature type
+// or species, is read.
+function nestedSave(
+  afterHit: string,
+  left: string[],
+): {
+  readonly intro: string;
+  readonly save: NonNullable<
+    Extract<Resolution, { kind: "attack" }>["onHitSave"]
+  >;
+} | null {
+  const at = afterHit.search(SAVE_START);
+  const before = afterHit.slice(0, at);
+  // "Hit or Miss: … the following effect" happens on a miss too, which a hit's save can't hold.
+  if (at < 0 || /\bMiss:/.test(before)) return null;
+  const intro =
+    /(?:^|(?<=\.\s)|(?<=, and ))(?:If the target is ([^.,]*), )?(?:it|the target) (?:is (?:also )?subjected to the following effect|must make the following saving throw)[.:]\s*$/i.exec(
+      before,
+    );
+  if (
+    !intro &&
+    /\bfollowing\b/i.test(sentencesOf(before.trim()).at(-1) ?? "")
+  ) {
+    return null;
+  }
+  const gate = (intro?.[1] ?? "a creature").replace(/’/g, "'");
+  const exempt = /^a creature$/i.test(gate)
+    ? []
+    : /^a non-Undead creature$|^a creature that isn't an Undead$/i.test(gate)
+      ? ["undead"]
+      : /^a creature that isn't an Undead or elf$/i.test(gate)
+        ? ["undead", "elf"]
+        : null;
+  if (!exempt) return null;
+  const [saveText = ""] = afterHit
+    .slice(at)
+    .split(/(?=(?:Hit or )?Miss:|Critical Hit:)/);
+  const parsed = parseSaveFrom(saveText, "", left);
+  if (parsed?.resolution.kind !== "save") return null;
+  const { ability, dc, damage, onSuccessDamage, onFail, onSuccess } =
+    parsed.resolution;
+  return {
+    intro: intro?.[0] ?? "",
+    save: {
+      ability,
+      dc,
+      damage,
+      onSuccessDamage,
+      onFail,
+      onSuccess,
+      ...(exempt.length > 0 ? { exempt } : {}),
     },
   };
 }
@@ -497,12 +651,12 @@ function parseSaveFrom(
   lead: string,
   left: string[],
 ): ParsedAction | null {
-  // A worse condition on a later failure can't be tracked, so only the first stage applies.
+  // A worse condition on a failed repeat save goes on the first one; any other later stage can't be tracked.
+  const second = /\s*Second Failure:\s*(.*?)(?=\s*Success:|$)/s.exec(text)?.[1];
   const firstStage = text.replace(
     /\s*(?:Second Failure|Failure by \d+ or More):.*?(?=\s*Success:|$)/s,
     "",
   );
-  if (firstStage !== text) left.push("a later failure stage");
   const eitherResult = /\s*Failure or Success:.*$/s;
   if (eitherResult.test(firstStage)) left.push("an effect on either result");
   const match =
@@ -536,10 +690,20 @@ function parseSaveFrom(
   const sentences = sentencesOf(failure.replace(threshold, ""));
   const damage = damageIn(sentences[0] ?? "", left);
   noteLaterDamage(sentences, left);
-  const onFail = [
-    ...conditionsIn(failure, left),
-    ...ongoingDamage(failure, left),
-  ];
+  const onFail = withSecondFailure(
+    [
+      ...conditionsIn(failure, left),
+      ...ongoingDamage(failure, left),
+      ...modifiersIn(failure),
+    ],
+    second,
+  );
+  if (
+    firstStage !== text &&
+    !onFail.some((effect) => "secondFailure" in effect)
+  ) {
+    left.push("a later failure stage");
+  }
   if (damage.length === 0 && onFail.length === 0) return null;
   // The lead-in gives the area or range when the save's own clause doesn't.
   const within = /within \d+ feet/.exec(lead)?.[0];
@@ -566,6 +730,38 @@ function parseSaveFrom(
       onSuccess: [],
     },
   };
+}
+
+// "First Failure: Restrained, and it repeats the save … Second Failure: Petrified instead": the one condition that's
+// saved against again becomes the second one on a failure.
+function withSecondFailure(
+  onFail: LeafEffect[],
+  second: string | undefined,
+): LeafEffect[] {
+  const [worse, ...more] = second
+    ? conditionsIn(second, []).filter((item) => item.kind === "applyCondition")
+    : [];
+  const first = onFail.filter((item) => item.kind === "applyCondition");
+  if (
+    !worse ||
+    more.length > 0 ||
+    first.length !== 1 ||
+    !first[0]?.repeatSave
+  ) {
+    return onFail;
+  }
+  return onFail.map((item) =>
+    item.kind === "applyCondition"
+      ? {
+          ...item,
+          secondFailure: {
+            condition: worse.condition,
+            duration: worse.duration,
+            endsOnDamage: worse.endsOnDamage,
+          },
+        }
+      : item,
+  );
 }
 
 // null means the routine has a count that depends on something else, such as a spell's level.
@@ -979,7 +1175,10 @@ function parseBlock(
       let optionText = secondPass
         ? withFirstChosenType(option.text, left)
         : option.text;
-      let parsed = parseAttack(optionText, left) ?? parseSave(optionText, left);
+      let parsed =
+        parseAttack(optionText, left) ??
+        parseSave(optionText, left) ??
+        parseSwallow(optionText, left);
       // "Acid or Necrotic damage (its choice)" is read as the first type when nothing else could be.
       if (!parsed && !secondPass) {
         const retry: string[] = [];

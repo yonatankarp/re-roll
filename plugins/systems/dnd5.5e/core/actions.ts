@@ -174,9 +174,9 @@ function check(
 } {
   const stats = deriveStats(actor, context);
   const roll = rollD20(context.dice, {
-    advantage: hasFlag(actor, "advantage", "checks", stats),
+    advantage: hasFlag(actor, "advantage", "checks", stats, ability),
     disadvantage:
-      hasFlag(actor, "disadvantage", "checks", stats) ||
+      hasFlag(actor, "disadvantage", "checks", stats, ability) ||
       hasCondition(actor, "poisoned", "frightened"),
   });
   const total =
@@ -715,6 +715,7 @@ export function runTactic(
                 dndEvent(`${NS}:effectEnded`, {
                   actor: actor.id,
                   sourceId: grapple.sourceId,
+                  casterId: grapple.casterId,
                 }),
               ]
             : []),
@@ -1058,10 +1059,11 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   );
   // Restrained, swallowed up or crushed each turn "until the grapple ends".
   const crushing = escapes.find(({ id }) => {
-    const source = parseOption(id)[2];
+    const [, grappler, source] = parseOption(id);
     return mover?.activeEffects.some(
-      ({ sourceId, modifier }) =>
+      ({ sourceId, casterId, modifier }) =>
         sourceId === source &&
+        casterId === grappler &&
         (modifier.kind !== "condition" || modifier.condition !== "grappled"),
     );
   });
