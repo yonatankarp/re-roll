@@ -55,6 +55,7 @@ import {
   CHECK_END,
   type Context,
   enemies,
+  exemptFrom,
   findAction,
   hasFlag,
   hasPassive,
@@ -584,16 +585,7 @@ function nestedSave(
   const save = resolution.onHitSave;
   const target = context.state.actors[hit.id];
   if (!save || !target || isDead(target)) return { events: [], dealt: 0 };
-  const targetStats = deriveStats(target, context);
-  const species =
-    target.source.kind === "character"
-      ? target.source.build?.speciesId.split("/").pop()
-      : undefined;
-  if (
-    save.exempt?.some(
-      (kind) => kind === targetStats.creatureType || kind === species,
-    )
-  ) {
+  if (exemptFrom(save.exempt, target, deriveStats(target, context))) {
     return { events: [], dealt: 0 };
   }
   const stats = deriveStats(attacker, context);

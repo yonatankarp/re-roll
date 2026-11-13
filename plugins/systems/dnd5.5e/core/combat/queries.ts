@@ -45,6 +45,22 @@ export function actorOf(state: DndState, id: string): Actor {
 
 export const CHECK_END = frame("checkCombatEnd", {});
 
+// Whether a creature of one of these lowercase types or species never makes a hit's save, as an elf a ghoul's.
+export function exemptFrom(
+  exempt: readonly string[] | undefined,
+  target: Actor,
+  stats: Stats,
+): boolean {
+  const species =
+    target.source.kind === "character"
+      ? target.source.build?.speciesId.split("/").pop()
+      : undefined;
+  return (
+    exempt?.some((kind) => kind === stats.creatureType || kind === species) ??
+    false
+  );
+}
+
 export function hasFlag(
   actor: Actor,
   kind: "advantage" | "disadvantage",

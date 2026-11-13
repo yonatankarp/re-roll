@@ -174,6 +174,16 @@ function leavesOf(action: KnownAction) {
       : resolution.onHit;
 }
 
+// A save that comes with a hit, or a condition left by an action that deals no damage.
+function weighed(action: KnownAction): boolean {
+  const { resolution } = action.activation;
+  if (resolution.kind === "attack" && resolution.onHitSave) return true;
+  return (
+    !("damage" in resolution && resolution.damage.length > 0) &&
+    leavesOf(action).some((item) => item.kind === "applyCondition")
+  );
+}
+
 function concentrates(action: KnownAction): boolean {
   return leavesOf(action).some(
     (item) =>
@@ -501,14 +511,29 @@ export function choosePolicy(decision: Decision, context: Context): string {
   const routineSize = (action: KnownAction): number =>
     attackRoutine(action, actor, stats).length +
     multiattackExtras(action, actor, context).length;
-  const attack = parsed
-    .filter(
-      ({ action, target }) =>
-        target?.side !== actor.side &&
-        target !== undefined &&
-        !heals(action) &&
-        (action.spellLevel ?? 0) === 0,
-    )
+  const attacks = parsed.filter(
+    ({ action, target }) =>
+      target?.side !== actor.side &&
+      target !== undefined &&
+      !heals(action) &&
+      (action.spellLevel ?? 0) === 0,
+  );
+  // A save a hit brings (a ghoul's paralysing Claw) or a hold that deals nothing (Swallow) is weighed against
+  // plain damage by worth.ts. Fights with neither keep choosing by the size of the routine.
+  const judge = attacks.some(({ action }) => weighed(action))
+    ? makeJudge(context, actor)
+    : null;
+  const routineWorth = (action: KnownAction, targetId: string): number =>
+    judge
+      ? [
+          ...attackRoutine(action, actor, stats),
+          ...multiattackExtras(action, actor, context),
+        ].reduce(
+          (total, id) => total + judge.worth(actor, id, targetId, undefined),
+          0,
+        )
+      : 0;
+  const attack = attacks
     .map((item) => ({
       ...item,
       // Three-quarters cover is worth going around while someone else is in the open.
@@ -516,11 +541,13 @@ export function choosePolicy(decision: Decision, context: Context): string {
         item.target !== undefined &&
           coverFor(state, actor.position, item.target, [actor.id]) === 5,
       ),
+      worth: routineWorth(item.action, item.targetId),
     }))
     .sort(
       (a, b) =>
         a.hidden - b.hidden ||
         (a.target?.hp ?? 0) - (b.target?.hp ?? 0) ||
+        b.worth - a.worth ||
         routineSize(b.action) - routineSize(a.action),
     )[0];
   if (attack) return attack.option.id;

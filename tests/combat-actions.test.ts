@@ -231,6 +231,45 @@ const CLAWER = dummy("test:monster/clawer", {
   ],
 });
 
+// A plain Club and a weaker Claw whose hit brings a hard save against paralysis, which elves skip, or humans.
+const pinner = (exempt: readonly string[]) =>
+  dummy(`test:monster/pinner-${exempt.join("-")}`, {
+    actions: [
+      ...(dummy("x").actions as unknown[]),
+      {
+        name: "Claw",
+        activation: {
+          cost: ["action"],
+          targeting: { creatures: 1, range: 5, side: "enemy" },
+          resolution: {
+            kind: "attack",
+            attack: { type: "weapon", flatBonus: 4 },
+            damage: [{ amount: { dice: "1d4" }, type: "slashing" }],
+            onHitSave: {
+              ability: "con",
+              dc: { base: 16 },
+              onFail: [
+                {
+                  kind: "applyCondition",
+                  condition: "paralyzed",
+                  duration: { minutes: 1 },
+                  repeatSave: true,
+                },
+              ],
+              exempt,
+            },
+          },
+        },
+      },
+    ],
+  });
+// The gulper with its Club listed first, as the giant toad lists its Bite before Swallow.
+const TOAD = dummy("test:monster/toad", {
+  actions: [...(GULPER.actions as unknown[])].reverse(),
+});
+const PINNER = pinner(["elf"]);
+const HUMAN_PINNER = pinner(["human"]);
+
 // Weakens one creature: Disadvantage on Strength saves and a damage penalty, saved against each turn.
 const WEAKENER = dummy("test:monster/weakener", {
   actions: [
@@ -300,6 +339,9 @@ function arena(base: RunContext): RunContext {
     "test:monster/gulper": GULPER,
     "test:monster/clawer": CLAWER,
     "test:monster/weakener": WEAKENER,
+    [PINNER.id]: PINNER,
+    [TOAD.id]: TOAD,
+    [HUMAN_PINNER.id]: HUMAN_PINNER,
     "test:monster/giant": dummy("test:monster/giant", { size: "huge" }),
     ...Object.fromEntries(WEAPONS.map((item) => [item.id, item])),
   };
@@ -1422,6 +1464,49 @@ describe("monster grapples and multiattacks", () => {
       HIGH,
     ).state;
     expect(sources(who(saved, PLAYER_ACTOR))).toEqual(["monster:0"]);
+  });
+
+  it("has a monster weigh a hit's save and a swallow against plain damage", async () => {
+    const run = await base();
+    const turnOf = (state: DndState, index: number): string => {
+      const turn = {
+        ...state,
+        combat: state.combat && { ...state.combat, index },
+      };
+      const decision = run.system.nextDecision(turn, run);
+      if (!decision) throw new Error("No decision");
+      return tacticalPolicy(decision, contextOf(run, turn, LOW));
+    };
+    // The Claw's paralysis is worth more than the Club's extra damage, unless the target never makes the save.
+    const clawed = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("pinner", [6, 5], PINNER.id),
+    ]);
+    expect(turnOf(clawed, 1)).toBe("monster:1|player");
+    const human = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("pinner", [6, 5], HUMAN_PINNER.id),
+    ]);
+    expect(turnOf(human, 1)).toBe("monster:0|player");
+    // A toad swallows the creature it's grappling instead of clubbing it.
+    const start = fight([
+      fighter(run, { at: [5, 5] }),
+      monster("toad", [6, 5], TOAD.id),
+    ]);
+    expect(turnOf(start, 1)).toBe("monster:0|player");
+    const held = applyDndEvent(
+      start,
+      dndEvent(`${NS}:effectAdded`, {
+        actor: PLAYER_ACTOR,
+        effect: {
+          sourceId: "monster:0",
+          casterId: "toad",
+          modifier: { kind: "condition", condition: "grappled" },
+          ends: "spellDuration",
+        },
+      }),
+    );
+    expect(turnOf(held, 1)).toBe("monster:1|player");
   });
 
   it("gives Disadvantage only on rolls with the ability an effect names", async () => {
