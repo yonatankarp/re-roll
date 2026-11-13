@@ -23,6 +23,7 @@ import {
 import {
   type SaveStore,
   createContentReader,
+  limiter,
   withSaves,
 } from "../engine/platform/browser/storage.ts";
 import { createGame, sheetChanges } from "../engine/shell/session.ts";
@@ -135,6 +136,38 @@ describe("the content endpoint", () => {
     expect(await reader.list("plugins/rules")).toEqual([
       { path: "plugins/rules/a.yaml", symlink: false },
     ]);
+  });
+
+  it("keeps at most a few reads in flight, so a whole book loads in a browser", async () => {
+    const limit = limiter(3);
+    let active = 0;
+    let most = 0;
+    const task = async (value: number): Promise<number> => {
+      active += 1;
+      most = Math.max(most, active);
+      await new Promise((done) => setTimeout(done, 1));
+      active -= 1;
+      if (value === 5) throw new Error("bad file");
+      return value;
+    };
+    const results = await Promise.allSettled(
+      Array.from({ length: 20 }, (_, value) => limit(() => task(value))),
+    );
+    expect(most).toBe(3);
+    expect(results[5]?.status).toBe("rejected"); // and its slot still frees
+    expect(
+      results.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
+      ),
+    ).toEqual([
+      0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+    ]);
+
+    const reader = createContentReader(url);
+    const reads = await Promise.all(
+      Array.from({ length: 200 }, () => reader.read("plugins/rules/a.yaml")),
+    );
+    expect(new Set(reads)).toEqual(new Set(["good: true"]));
   });
 
   it("treats a missing private folder as empty", async () => {

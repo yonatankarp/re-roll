@@ -20,26 +20,53 @@ export function contentImageUrl(path: string): string {
   return `${CONTENT_ROUTE}/image?path=${encodeURIComponent(path)}`;
 }
 
+// A book loads thousands of files at once, and a browser refuses that many requests in flight
+// (ERR_INSUFFICIENT_RESOURCES), so reads wait their turn.
+export const READS_IN_FLIGHT = 16;
+
+// Runs at most max tasks at once; a task that finishes hands its slot to the next one waiting.
+export function limiter(
+  max: number,
+): <T>(task: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async (task) => {
+    if (active < max) active += 1;
+    else await new Promise<void>((go) => waiting.push(go));
+    try {
+      return await task();
+    } finally {
+      const next = waiting.shift();
+      if (next) next();
+      else active -= 1;
+    }
+  };
+}
+
 // baseUrl is only set by tests, which have no page to be relative to.
 export function createContentReader(baseUrl = ""): ContentReader {
+  const limit = limiter(READS_IN_FLIGHT);
   const query = (action: string, path: string) =>
     fetch(
       `${baseUrl}${CONTENT_ROUTE}/${action}?path=${encodeURIComponent(path)}`,
     );
   const refuse = (path: string, status: number): Error =>
     new Error(`Couldn't read ${path} (${String(status)})`);
+  // The body is read inside the slot too, since an unread response still holds its connection.
   return {
-    async read(path) {
-      const response = await query("read", path);
-      if (response.status === 404) return null;
-      if (!response.ok) throw refuse(path, response.status);
-      return response.text();
-    },
-    async list(prefix) {
-      const response = await query("list", prefix);
-      if (!response.ok) throw refuse(prefix, response.status);
-      return (await response.json()) as readonly StorageEntry[];
-    },
+    read: (path) =>
+      limit(async () => {
+        const response = await query("read", path);
+        if (response.status === 404) return null;
+        if (!response.ok) throw refuse(path, response.status);
+        return response.text();
+      }),
+    list: (prefix) =>
+      limit(async () => {
+        const response = await query("list", prefix);
+        if (!response.ok) throw refuse(prefix, response.status);
+        return (await response.json()) as readonly StorageEntry[];
+      }),
   };
 }
 
