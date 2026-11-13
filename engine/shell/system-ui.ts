@@ -243,7 +243,12 @@ export interface SystemUi {
     state: unknown,
     access: ContentAccess,
   ) => readonly SheetView[];
-  readonly combat: (state: unknown, access: ContentAccess) => CombatView | null;
+  // encounter looks up the adventure's encounter by id, as the system parsed it.
+  readonly combat: (
+    state: unknown,
+    access: ContentAccess,
+    encounter?: (id: string) => unknown,
+  ) => CombatView | null;
   // Called with the state from just before the event, so a monster that leaves with it still has a name.
   readonly describe: (
     event: SystemEvent,

@@ -3229,6 +3229,74 @@ describe("battle map ground, cover and light", () => {
     expect(state.combat).toBeNull();
     expect(reported(events).length).toBeGreaterThan(0);
   });
+
+  it("shows the encounter's map picture for a fight saved before it had one, on the same squares only", async () => {
+    const run = archer(await base(), "archer", { hp: 12 });
+    const party = [hero(run)];
+    const battlemap = BattlemapSchema.parse({
+      image: "assets/map.png",
+      imageWidth: 800,
+      imageHeight: 500,
+      crop: { x: 100, y: 0, width: 600, height: 500 },
+      columns: 6,
+      rows: 5,
+      walls: ["......", "......", "......", "......", "......"],
+      party: [[0, 4]],
+      monsters: [[5, 0]],
+    });
+    const encounter = {
+      id: "e",
+      monsters: [{ monster: "srd52:monster/archer", count: 1 }],
+      battlemap,
+    };
+    const started = startCombat(
+      encounter,
+      contextOf(run, fight(...party), HIGH),
+      {
+        canFlee: false,
+        defeatContinues: false,
+      },
+    );
+    // The older shape: the stored start of the fight has squares but no picture.
+    const older = (started.events ?? []).map((event) => {
+      if (event.kind !== `${NS}:combatStarted`) return event;
+      const payload = { ...(event.payload as { map?: unknown }) };
+      delete payload.map;
+      return { ...event, payload };
+    });
+    const state = older.reduce<DndState>(
+      (current, event) => applyDndEvent(current, event),
+      {
+        actors: Object.fromEntries(party.map((item) => [item.id, item])),
+        combat: null,
+      },
+    );
+    expect(state.combat?.map).toBeUndefined();
+    const picture = {
+      image: "assets/map.png",
+      imageWidth: 800,
+      imageHeight: 500,
+      crop: { x: 100, y: 0, width: 600, height: 500 },
+    };
+    const mapFor = (found: unknown): unknown =>
+      dndUi.combat(state, run, (id) => (id === "e" ? found : undefined))?.board
+        .map;
+    expect(mapFor(encounter)).toEqual(picture);
+    expect(dndUi.combat(state, run)?.board.map).toBeNull();
+    // A map redrawn to other squares would put the tokens in the wrong places.
+    expect(
+      mapFor({ ...encounter, battlemap: { ...battlemap, rows: 6 } }),
+    ).toBeNull();
+    // A stored picture wins over the encounter's current one.
+    const stored = { ...picture, image: "assets/old.png" };
+    const withMap = {
+      ...state,
+      combat: state.combat && { ...state.combat, map: stored },
+    };
+    expect(dndUi.combat(withMap, run, () => encounter)?.board.map).toEqual(
+      stored,
+    );
+  });
 });
 
 describe("difficulty helpers", () => {

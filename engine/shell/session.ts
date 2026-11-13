@@ -1276,7 +1276,9 @@ export function createGame({
           ),
         })),
       }));
-      const combat = ui.combat(state.system, run);
+      const combat = ui.combat(state.system, run, (id) =>
+        run.adventure.encounters.find((item) => item.id === id),
+      );
       const pictures: Record<string, string> = {};
       const tokens: Record<string, TokenArt> = {};
       for (const actor of combat?.combatants ?? []) {
