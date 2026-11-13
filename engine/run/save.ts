@@ -164,7 +164,10 @@ export function loadSave(
         error: `This save needs the plugin "${plugin.id}", which isn't loaded`,
       };
     }
-    if (hash !== plugin.hash) {
+    if (
+      hash !== plugin.hash &&
+      registry.legacyPluginHash(plugin.id) !== plugin.hash
+    ) {
       warnings.push(`The plugin "${plugin.id}" has changed since this save.`);
     }
   }

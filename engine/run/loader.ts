@@ -60,6 +60,8 @@ export interface Registry {
   readonly precedence: readonly string[]; // plugin ids, the one whose entries win first
   readonly contentIds: () => readonly string[]; // in precedence order, then by id
   readonly pluginHash: (pluginId: string) => string | undefined;
+  // The raw-text hash that saves stored before the content hash, so those don't warn after an upgrade.
+  readonly legacyPluginHash: (pluginId: string) => string | undefined;
   readonly content: (id: string) => ContentEntry | undefined; // follows replacements
   readonly adventure: (pluginId: string) => Adventure | undefined;
 }
@@ -72,6 +74,21 @@ function extensionOf(path: string): string {
   const name = path.slice(path.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
   return dot > 0 ? name.slice(dot).toLowerCase() : "";
+}
+
+// JSON of the parsed YAML with sorted keys. A file that doesn't parse has failed loading already.
+function canonicalYaml(text: string): string {
+  try {
+    return JSON.stringify(parse(text) ?? null, (_, value: unknown) =>
+      value !== null && typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(
+            Object.entries(value).sort(([a], [b]) => compareText(a, b)),
+          )
+        : value,
+    );
+  } catch {
+    return text;
+  }
 }
 
 async function readYaml(
@@ -567,14 +584,20 @@ export async function loadRun(
   if (issues.length > 0) return { ok: false, issues };
 
   // shortcut: only YAML is hashed, so a changed image won't warn. Hash assets if art ever affects saves.
+  // The hash covers parsed content, so comments, key order and formatting don't change it.
   const hashes = new Map<string, string>();
+  const legacyHashes = new Map<string, string>();
   for (const record of order) {
-    const parts: string[] = [];
+    const raw: string[] = [];
+    const parsed: string[] = [];
     for (const file of [...record.files].sort()) {
       if (!hashed(file)) continue;
-      parts.push(file, (await reader.read(`${record.root}/${file}`)) ?? "");
+      const text = (await reader.read(`${record.root}/${file}`)) ?? "";
+      raw.push(file, text);
+      parsed.push(file, canonicalYaml(text));
     }
-    hashes.set(record.manifest.id, hashText(parts.join("\0")));
+    hashes.set(record.manifest.id, hashText(parsed.join("\0")));
+    legacyHashes.set(record.manifest.id, hashText(raw.join("\0")));
   }
 
   const content = new Map<string, ContentEntry>();
@@ -597,6 +620,7 @@ export async function loadRun(
       precedence: Object.freeze(precedence),
       contentIds: () => ids,
       pluginHash: (pluginId: string) => hashes.get(pluginId),
+      legacyPluginHash: (pluginId: string) => legacyHashes.get(pluginId),
       content: (id: string) => {
         const resolved = resolve(id);
         return resolved === null ? undefined : content.get(resolved);
