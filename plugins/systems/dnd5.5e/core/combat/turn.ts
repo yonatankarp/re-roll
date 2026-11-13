@@ -95,9 +95,12 @@ export function runAfterAction(
   const actor = actorOf(state, payload.actor);
   const stats = deriveStats(actor, context);
   // The turn carries on only while something other than ending it is still possible.
-  const canContinue = stats.actions.some(
-    (action) => !action.activation.trigger && canAfford(action, actor, stats),
-  );
+  const canContinue =
+    stats.actions.some(
+      (action) => !action.activation.trigger && canAfford(action, actor, stats),
+    ) ||
+    (actor.budget.bonusAction &&
+      stats.passives.some((passive) => passive.kind === "bonusTactics"));
   return canContinue &&
     !isDown(actor) &&
     !hasCondition(actor, ...INCAPACITATING)

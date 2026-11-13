@@ -1166,6 +1166,20 @@ function parseBlock(
       notes.push(`not automated: ${label}`);
       continue;
     }
+    // Nimble Escape or Cunning Action: "The goblin takes the Disengage or Hide action."
+    const tactics =
+      /^[^.]*?\btakes the ((?:Dash|Disengage|Hide)(?:,? (?:or )?(?:Dash|Disengage|Hide))*) action\.?$/.exec(
+        text.trim(),
+      )?.[1];
+    if (section === "bonus actions" && tactics && !label.includes("(")) {
+      passives.push({
+        kind: "bonusTactics",
+        tactics: [...tactics.matchAll(/Dash|Disengage|Hide/g)].map(
+          (match) => match[0].toLowerCase() as "dash" | "disengage" | "hide",
+        ),
+      });
+      continue;
+    }
     const rechargeOn = /\(Recharge (\d)/.exec(label)?.[1];
     const perDay = /\((\d+)\/Day\b/.exec(label)?.[1];
     const resource = `${perDay ? "day" : "recharge"}:${slugOf(label.replace(/\s*\(.*$/, ""))}`;

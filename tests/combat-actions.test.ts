@@ -268,6 +268,11 @@ const pinner = (exempt: readonly string[]) =>
       },
     ],
   });
+// Cunning Action: Dash, Disengage or Hide as a Bonus Action.
+const SNEAK = dummy("test:monster/sneak", {
+  passives: [{ kind: "bonusTactics", tactics: ["dash", "disengage", "hide"] }],
+});
+
 // The gulper with its Club listed first, as the giant toad lists its Bite before Swallow.
 const TOAD = dummy("test:monster/toad", {
   actions: [...(GULPER.actions as unknown[])].reverse(),
@@ -346,6 +351,7 @@ function arena(base: RunContext): RunContext {
     "test:monster/weakener": WEAKENER,
     [PINNER.id]: PINNER,
     [TOAD.id]: TOAD,
+    [SNEAK.id]: SNEAK,
     [HUMAN_PINNER.id]: HUMAN_PINNER,
     "test:monster/giant": dummy("test:monster/giant", { size: "huge" }),
     ...Object.fromEntries(WEAPONS.map((item) => [item.id, item])),
@@ -1560,6 +1566,71 @@ describe("monster grapples and multiattacks", () => {
       }),
     );
     expect(turnOf(held, 1)).toBe("monster:1|player");
+  });
+
+  it("dashes with Cunning Action when walking won't reach, and hides with it only behind cover", async () => {
+    const run = await base();
+    const choose = (state: DndState): string => {
+      const decision = run.system.nextDecision(state, run);
+      if (!decision) throw new Error("No decision");
+      return tacticalPolicy(decision, contextOf(run, state, LOW));
+    };
+    const sneakTurn = (at: readonly [number, number]): DndState => {
+      const state = fight([
+        fighter(run, { at: [5, 5] }),
+        monster("sneak", at, SNEAK.id),
+      ]);
+      return {
+        ...state,
+        combat: state.combat && { ...state.combat, index: 1 },
+      };
+    };
+    const far = sneakTurn([15, 5]);
+    expect(choose(far)).toBe("tactic:bonus-dash");
+    const dashed = settle(
+      run,
+      far,
+      [act("sneak", "tactic:bonus-dash")],
+      LOW,
+    ).state;
+    const sneak = who(dashed, "sneak");
+    expect(sneak.budget).toMatchObject({ action: true, bonusAction: false });
+    expect(speedLeft(sneak, deriveStats(sneak, run))).toBe(60);
+    expect(choose(dashed)).toBe("move");
+    // Close enough to walk up and club: no Dash.
+    expect(choose(sneakTurn([9, 5]))).toBe("move");
+    // With its Action spent, it hides only where the hero sees it through Three-Quarters Cover.
+    const spent = (state: DndState): DndState =>
+      applyDndEvent(
+        state,
+        dndEvent(`${NS}:budgetSpent`, { actor: "sneak", kind: "action" }),
+      );
+    const open = spent(sneakTurn([12, 5]));
+    expect(optionIds(run, open)).toContain("tactic:bonus-hide");
+    expect(choose(open)).not.toBe("tactic:bonus-hide");
+    const covered: DndState = {
+      ...open,
+      combat: open.combat && {
+        ...open.combat,
+        terrain: {
+          difficult: [],
+          half: [],
+          threeQuarters: ["8,5"],
+          dim: [],
+          dark: [],
+          light: "bright",
+        },
+      },
+    };
+    expect(choose(covered)).toBe("tactic:bonus-hide");
+    const hidden = settle(
+      run,
+      covered,
+      [act("sneak", "tactic:bonus-hide")],
+      HIGH,
+    ).state;
+    expect(hasCondition(who(hidden, "sneak"), "invisible")).toBe(true);
+    expect(who(hidden, "sneak").budget.bonusAction).toBe(false);
   });
 
   it("gives Disadvantage only on rolls with the ability an effect names", async () => {

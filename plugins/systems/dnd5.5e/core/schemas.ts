@@ -412,6 +412,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("pactWeapon"),
     damage: z.array(DamageSchema).default([]),
   }),
+  // Dash, Disengage or Hide as a Bonus Action, as with Cunning Action or a goblin's Nimble Escape.
+  z.strictObject({
+    kind: z.literal("bonusTactics"),
+    tactics: z.array(z.enum(["dash", "disengage", "hide"])).min(1),
+  }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
   z.strictObject({ kind: z.literal("concentrationAdvantage") }),
   // Attacks per Attack action, such as Extra Attack.

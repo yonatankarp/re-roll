@@ -137,6 +137,34 @@ function parse(paragraphs: string, withSpells = true): Monster {
 const byName = (monster: Monster, name: string) =>
   monster.actions.find((action) => action.name === name);
 
+describe("monster bonus actions that take an action anyone can", () => {
+  it("reads Nimble Escape and Cunning Action as Bonus Action tactics", () => {
+    const club = entry(
+      "Club",
+      "Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Bludgeoning damage.",
+    );
+    const goblin = parseMonstersFromHtml(
+      block(
+        "Goblin",
+        `${header("Actions")}${club}${header("Bonus Actions")}${entry("Nimble Escape", "The goblin takes the Disengage or Hide action.")}`,
+      ),
+      "my-book",
+    )[0];
+    expect(goblin?.notes).toEqual([]);
+    expect(MonsterSchema.parse(goblin?.entry).passives).toContainEqual({
+      kind: "bonusTactics",
+      tactics: ["disengage", "hide"],
+    });
+    const spy = parse(
+      `${header("Actions")}${club}${header("Bonus Actions")}${entry("Cunning Action", "The spy takes the Dash, Disengage, or Hide action.")}`,
+    );
+    expect(spy.passives).toContainEqual({
+      kind: "bonusTactics",
+      tactics: ["dash", "disengage", "hide"],
+    });
+  });
+});
+
 describe("monster saves after a lead-in", () => {
   it("takes the range from the lead-in and the area from the save", () => {
     const monster = parse(
