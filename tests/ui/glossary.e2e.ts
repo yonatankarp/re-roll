@@ -85,6 +85,15 @@ test("explains a term in a fight and opens its book section", async ({
       }
       holder.stopOver = stop;
     }, block);
+  // Hovered only once the choices stop sliding in, or the resting pointer ends up beside the term.
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((run) => run.effect?.getComputedTiming().endTime !== Infinity)
+        .map((run) => run.finished.catch(() => undefined)),
+    ),
+  );
   await term.hover();
   await blockOver(true);
   await redraw();
