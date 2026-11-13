@@ -26,13 +26,13 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - Only write ids, names and numbers there: coordinates, counts, monster ids, `onFlee` targets. Never write book prose of your own, and never copy book text into this repository, its issues or its docs.
 - Never log in to or download from D&D Beyond.
 - A git worktree has no `books/`. To play-test, symlink `~/Projects/re-roll/books` into it, and only one session at a time may write to the same files there.
-- `private` is a temporary link to `books/` for older worktrees; new code uses `books/` only. The manifest field `distribution: private` keeps its name (it means not redistributable).
+- The manifest field `distribution: private` means not redistributable; it has nothing to do with a folder.
 
 ## Git
 
 - Commit or push only when asked. Never add Co-Authored-By or other attribution lines to commits or PRs.
 - Merge session branches straight into `main` with `--no-ff`, naming them `refs/heads/claude/...`. There is no integration branch; never recreate `feat/foundations`.
-- Run `git config core.hooksPath .githooks` once per clone. The pre-commit hook runs typecheck and lint and rejects staged `books/` or `private/` paths. It needs Node on PATH, so commit with the same `PATH=…` prefix.
+- Run `git config core.hooksPath .githooks` once per clone. The pre-commit hook runs typecheck and lint and rejects staged `books/` paths. It needs Node on PATH, so commit with the same `PATH=…` prefix.
 
 ## Sessions
 

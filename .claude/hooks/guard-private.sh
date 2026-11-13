@@ -56,10 +56,6 @@ case "$named" in
   "$worktrees"/*/*) rest="${named#"$worktrees"/}"; checkouts+=("$worktrees/${rest%%/*}") ;;
 esac
 for checkout in "${checkouts[@]}"; do
-  # private/ is a link to books/ in older checkouts, so it's caught by name, not by where it leads.
-  case "$named/" in
-    "$(resolve "$checkout/private" lexical)"/*) block "private/ is now books/; write to books/ instead." ;;
-  esac
   books=$(resolve "$checkout/books")
   case "$target" in
     "$books"/*.yaml | "$books"/*.yml | "$books"/*.json | "$books"/*.png | "$books"/*.jpg | "$books"/*.jpeg | "$books"/*.webp) ;;

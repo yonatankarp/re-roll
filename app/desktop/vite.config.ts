@@ -34,14 +34,7 @@ export default defineConfig({
       allow: ["app/desktop", "engine", "plugins/systems", "node_modules"].map(
         (folder) => resolve(repoRoot, folder),
       ),
-      deny: [
-        ".env",
-        ".env.*",
-        "*.{crt,pem}",
-        "**/.git/**",
-        "**/books/**",
-        "**/books/**",
-      ],
+      deny: [".env", ".env.*", "*.{crt,pem}", "**/.git/**", "**/books/**"],
     },
   },
   plugins: [

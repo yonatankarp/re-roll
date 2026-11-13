@@ -4,6 +4,7 @@ import { parse } from "yaml";
 
 // What the desktop build must never ship: content from the owner's books, which isn't redistributable.
 // Tauri copies bundle.resources as they are and follows symlinks, so a link is refused rather than followed.
+// private is the old name of books/, kept as a guard.
 const PRIVATE_FOLDERS = new Set(["books", "private"]);
 
 // Every reason the resources in a tauri.conf.json can't be bundled, or none.
