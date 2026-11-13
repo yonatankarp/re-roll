@@ -10,11 +10,16 @@ const CAPACITY_PER_STRENGTH: Readonly<Record<Species["size"], number>> = {
   large: 30,
 };
 
+const SIZES = ["tiny", "small", "medium", "large"] as const;
+
+// `larger` counts the bearer one size up, as Powerful Build does; past Large, Huge counts 60 to the point.
 export function carryingCapacity(
   strength: number,
   size: Species["size"],
+  larger = false,
 ): number {
-  return strength * CAPACITY_PER_STRENGTH[size];
+  const up = larger ? SIZES[SIZES.indexOf(size) + 1] : size;
+  return strength * (up ? CAPACITY_PER_STRENGTH[up] : 60);
 }
 
 // shortcut: coins weigh nothing (the book has 50 to the pound); count them if a hoard ever matters.

@@ -29,6 +29,7 @@ import { cureFor, dispellable } from "./combat/dispel.ts";
 import { seesThrough } from "./sight.ts";
 import { formOf } from "./forms.ts";
 import { summonedActors } from "./combat/summon.ts";
+import { nextHitDie } from "./trait-rules.ts";
 import {
   aimsFor,
   allies,
@@ -604,6 +605,19 @@ export function makeJudge(context: Context, side: Actor): Judge {
         return foe
           ? 0
           : healWorth(target, rollAmount(effect.amount, stats(actor), AVERAGE));
+      case "hitDieHeal": {
+        const die = nextHitDie(target, context);
+        return foe || !die
+          ? 0
+          : healWorth(
+              target,
+              rollAmount(
+                { dice: `1${die}`, bonus: effect.bonus },
+                stats(actor),
+                AVERAGE,
+              ),
+            );
+      }
       case "tempHp":
         return foe || isDown(target)
           ? 0

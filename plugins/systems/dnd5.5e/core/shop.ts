@@ -10,8 +10,8 @@ import {
 } from "#sdk";
 import { z } from "zod";
 import { type Item, ItemSchema } from "./schemas.ts";
-import { type DndState, NS, dndEvent, frame } from "./state.ts";
-import { lookup } from "./stats.ts";
+import { type DndState, NS, dndEvent, frame, isDead } from "./state.ts";
+import { deriveStats, lookup } from "./stats.ts";
 
 type Context = SystemContext<DndState>;
 
@@ -37,17 +37,34 @@ function itemOf(access: ContentAccess, id: string): Item {
   return lookup(access, ItemSchema, id);
 }
 
-// What the merchant asks, in cp, or null for an item with no price.
+// What the merchant asks, in cp, or null for an item with no price. `bearer` is the party's own discount on
+// nonmagical items, as Crafter gives.
 export function buyPriceCp(
   stock: Stock,
   item: Item,
   discount: number,
+  bearer = 0,
 ): number | null {
   const base =
     stock.price === undefined ? item.costCp : Math.round(stock.price * 100);
+  const own = item.type === "magicItem" ? 0 : bearer;
   return base === undefined
     ? null
-    : Math.round((base * (100 - discount)) / 100);
+    : Math.round((base * (100 - discount) * (100 - own)) / 10000);
+}
+
+// The best discount a party member's feature gives on nonmagical items, as Crafter's 20 percent.
+export function partyDiscount(state: DndState, access: ContentAccess): number {
+  return Math.max(
+    0,
+    ...Object.values(state.actors).flatMap((actor) =>
+      actor.side === "party" && !isDead(actor)
+        ? deriveStats(actor, access).passives.flatMap((passive) =>
+            passive.kind === "shopDiscount" ? [passive.percent] : [],
+          )
+        : [],
+    ),
+  );
 }
 
 // Selling pays half the item's cost, rounded down to the copper; null when it fetches nothing.
@@ -99,7 +116,12 @@ export function shopOptions(
   const player = state.actors[PLAYER_ACTOR];
   const buys = shop.stock.flatMap((stock) => {
     const item = itemOf(access, stock.item);
-    const price = buyPriceCp(stock, item, shop.discount);
+    const price = buyPriceCp(
+      stock,
+      item,
+      shop.discount,
+      partyDiscount(state, access),
+    );
     if (price === null) {
       throw new Error(
         `${stock.item} has no cost; give it a price in the stock`,
@@ -167,7 +189,12 @@ function runShopAnswer(
   const stock = shop.stock.find((entry) => entry.item === id);
   const buying = verb === "buy" && stock !== undefined;
   const price = buying
-    ? (buyPriceCp(stock, item, shop.discount) ?? 0)
+    ? (buyPriceCp(
+        stock,
+        item,
+        shop.discount,
+        partyDiscount(context.state, context),
+      ) ?? 0)
     : (sellPriceCp(item) ?? 0);
   return {
     events: [

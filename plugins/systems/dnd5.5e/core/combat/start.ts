@@ -6,7 +6,7 @@ import { rollD20 } from "../rules.ts";
 import { placeOnMap, placeSides, type Square, wallKeys } from "../grid.ts";
 import { terrainOf } from "../sight.ts";
 import { lairTurns } from "../legendary.ts";
-import { type Context } from "./queries.ts";
+import { type Context, hasPassive } from "./queries.ts";
 
 export function startCombat(
   encounter: {
@@ -53,14 +53,29 @@ export function startCombat(
   // The story's word on surprise, such as from a Stealth check, beats the encounter's own.
   const surprised = context.state.surprise ?? encounter.surprise;
   const caught = { party: "party", enemies: "enemy" }[surprised ?? "party"];
+  // Zhentarim Ruffian's Family First: Heroic Inspiration held now buys the party Advantage on Initiative.
+  const rallier = party.find(
+    (actor) =>
+      actor.heroicInspiration &&
+      hasPassive(deriveStats(actor, context), "initiativeInspiration"),
+  );
   const rolled = [...party, ...monsters].map((actor, position) => {
     const stats = deriveStats(actor, context);
-    const roll = rollD20(context.dice, {
-      advantage: false,
+    const edge = {
+      advantage: rallier !== undefined && actor.side === "party",
       disadvantage: Boolean(surprised) && actor.side === caught,
       rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
-    });
-    return { id: actor.id, position, total: roll.natural + stats.initiative };
+    };
+    const first = rollD20(context.dice, edge).natural;
+    // Survivor's Hypervigilance rolls a low one again, and the new roll stands.
+    const low = Math.max(
+      0,
+      ...stats.passives.flatMap((passive) =>
+        passive.kind === "initiativeReroll" ? [passive.atMost] : [],
+      ),
+    );
+    const natural = first <= low ? rollD20(context.dice, edge).natural : first;
+    return { id: actor.id, position, total: natural + stats.initiative };
   });
   // Ties keep their listed order, so the result is the same on every machine.
   const sorted = rolled.sort(
@@ -105,6 +120,9 @@ export function startCombat(
   return {
     events: [
       { kind: "encounterStarted", encounter: encounter.id },
+      ...(rallier
+        ? [dndEvent(`${NS}:inspirationSpent`, { actor: rallier.id })]
+        : []),
       dndEvent(`${NS}:combatStarted`, {
         encounter: encounter.id,
         monsters,

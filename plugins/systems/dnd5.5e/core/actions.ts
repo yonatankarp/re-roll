@@ -27,7 +27,7 @@ import {
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { teleportSquares } from "./combat/movement.ts";
-import { SIZES, sizeOf } from "./combat/queries.ts";
+import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
 import {
@@ -134,6 +134,31 @@ function effect(
   });
 }
 
+// Sharp Eye: the resource whose use gives a Search or Study check Advantage, or null with none left.
+function sharpEye(actor: Actor, stats: Stats): string | null {
+  for (const passive of stats.passives) {
+    if (
+      passive.kind === "sharpEye" &&
+      (actor.resourcesSpent[passive.resource] ?? 0) <
+        (stats.resources[passive.resource] ?? 0)
+    ) {
+      return passive.resource;
+    }
+  }
+  return null;
+}
+
+// A use of Sharp Eye is spent only when the check succeeds.
+function keenSpent(
+  actor: Actor,
+  resource: string | null,
+  success: boolean,
+): SystemEvent[] {
+  return resource && success
+    ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
+    : [];
+}
+
 // An Unarmed Strike's Grapple or Shove, and a mastery's save: 8 + the ability modifier + Proficiency Bonus.
 function saveDc(stats: Stats, ability: Ability): number {
   return 8 + modifierFor(stats, ability) + stats.proficiency;
@@ -177,6 +202,7 @@ function check(
   dc: number,
   label: (success: boolean) => string,
   context: Context,
+  advantage = false, // from a trait, as Powerful Build gives to escape a grapple
 ): {
   readonly success: boolean;
   readonly total: number;
@@ -184,7 +210,8 @@ function check(
 } {
   const stats = deriveStats(actor, context);
   const roll = rollD20(context.dice, {
-    advantage: hasFlag(actor, "advantage", "checks", stats, ability),
+    advantage:
+      advantage || hasFlag(actor, "advantage", "checks", stats, ability),
     disadvantage:
       hasFlag(actor, "disadvantage", "checks", stats, ability) ||
       hasCondition(actor, "poisoned", "frightened"),
@@ -425,8 +452,19 @@ export function tacticOptions(
       label: `Study ${foe.name} (${capitalized(studySkill(foe, access))})`,
     });
   }
+  // Harper Agent's Distracting Melody helps against an enemy farther off.
+  const helpFeet = Math.max(
+    5,
+    ...stats.passives.flatMap((passive) =>
+      passive.kind === "helpRange" ? [passive.feet] : [],
+    ),
+  );
   if (friends.length > 0) {
-    for (const foe of near) {
+    for (const foe of foes.filter(
+      (item) =>
+        within5(actor, item) ||
+        distanceFeet(actor.position, item.position) <= helpFeet,
+    )) {
       options.push({
         id: encodeOption(HELP, foe.id),
         label: `Help an ally attack ${foe.name}`,
@@ -624,7 +662,21 @@ export function runTactic(
       return { events: [spend("action"), self("dodge")], frames: done };
     case READY:
       return {
-        events: [spend("action"), self("ready", targetId)],
+        events: [
+          spend("action"),
+          self("ready", targetId),
+          ...(hasPassive(stats, "vigilant")
+            ? [
+                effect(
+                  actor.id,
+                  "vigilant",
+                  actor.id,
+                  { kind: "disadvantage", on: "attacksAgainst", once: true },
+                  "casterNextTurn",
+                ),
+              ]
+            : []),
+        ],
         frames: done,
       };
     case HIDE:
@@ -671,6 +723,7 @@ export function runTactic(
         return mark ? [{ foe, dc: mark.value ?? HIDE_DC }] : [];
       });
       const lowest = Math.min(HIDE_DC, ...hidden.map(({ dc }) => dc));
+      const keen = sharpEye(actor, stats);
       const rolled = check(
         actor,
         "perception",
@@ -678,6 +731,7 @@ export function runTactic(
         lowest,
         () => "perception",
         context,
+        keen !== null,
       );
       const found = hidden.flatMap(({ foe, dc }) =>
         rolled.total >= dc
@@ -690,7 +744,12 @@ export function runTactic(
           : [],
       );
       return {
-        events: [spend("action"), ...rolled.events, ...found],
+        events: [
+          spend("action"),
+          ...rolled.events,
+          ...keenSpent(actor, keen, rolled.success),
+          ...found,
+        ],
         frames: done,
       };
     }
@@ -698,6 +757,7 @@ export function runTactic(
       // shortcut: what's learned is only reported, as nothing else in the rules reads it.
       const studied = needTarget();
       const skill = studySkill(studied, context);
+      const keen = sharpEye(actor, stats);
       const rolled = check(
         actor,
         skill,
@@ -708,8 +768,16 @@ export function runTactic(
             ? `${skill} (${studied.name}: ${lore(studied, context)})`
             : skill,
         context,
+        keen !== null,
       );
-      return { events: [spend("action"), ...rolled.events], frames: done };
+      return {
+        events: [
+          spend("action"),
+          ...rolled.events,
+          ...keenSpent(actor, keen, rolled.success),
+        ],
+        frames: done,
+      };
     }
     case HELP: {
       const helped = needTarget();
@@ -789,6 +857,7 @@ export function runTactic(
         escapeDc(grapple, state, context),
         () => `Escape (${athletics ? "Athletics" : "Acrobatics"})`,
         context,
+        hasPassive(stats, "powerfulBuild"),
       );
       return {
         events: [

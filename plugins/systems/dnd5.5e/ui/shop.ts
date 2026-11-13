@@ -8,6 +8,7 @@ import {
   buyPriceCp,
   coins,
   left,
+  partyDiscount,
   sellPriceCp,
 } from "../core/shop.ts";
 import { parseState } from "./parse-state.ts";
@@ -71,6 +72,7 @@ export function shop(
   const state = parseState(rawState);
   const offered = new Set(decision.options.map((option) => option.id));
   const itemOf = (id: string) => ItemSchema.parse(access.content(id));
+  const discount = partyDiscount(state, access);
   const buy = wares.stock.map((stock) => {
     const item = itemOf(stock.item);
     const remaining = left(stock, wares.merchant, state);
@@ -88,7 +90,9 @@ export function shop(
       item: stock.item,
       name: item.name,
       summary: itemSummary(item),
-      price: coins((buyPriceCp(stock, item, wares.discount) ?? 0) / 100),
+      price: coins(
+        (buyPriceCp(stock, item, wares.discount, discount) ?? 0) / 100,
+      ),
       ...(note ? { note } : {}),
       option: tradeable ? option : null,
     };
