@@ -49,7 +49,9 @@ export function imageCache(
       .then((bytes) => {
         entry.size = bytes.byteLength;
         total += entry.size;
-        return URL.createObjectURL(new Blob([bytes]));
+        // Typed, so the WebView needn't sniff the format (the books' pictures are WebP).
+        const type = /\.webp$/i.test(path) ? "image/webp" : "";
+        return URL.createObjectURL(new Blob([bytes], { type }));
       })
       .catch(() => null)
       .finally(() => {

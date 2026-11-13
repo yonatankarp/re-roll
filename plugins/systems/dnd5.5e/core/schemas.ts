@@ -929,7 +929,7 @@ const MapSquareSchema = z.tuple([
 // with the walls, ground, cover and light, and where each side starts.
 export const BattlemapSchema = z
   .strictObject({
-    image: z.string().min(1), // inside the adventure plugin, such as assets/p048-79.png
+    image: z.string().min(1), // inside the adventure plugin, such as assets/p048-79.webp
     imageWidth: z.number().int().min(1),
     imageHeight: z.number().int().min(1),
     crop: z.strictObject({
