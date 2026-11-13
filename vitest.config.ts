@@ -9,6 +9,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["{engine,plugins,app}/**/*.{ts,js}"],
+      exclude: ["app/desktop/src-tauri/**"], // Rust build output, once the app is built
       reporter: ["text-summary", "html"],
     },
     projects: [
