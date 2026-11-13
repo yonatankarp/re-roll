@@ -9,6 +9,7 @@ import { type RunContext, startRun, step } from "../engine/run/turn.ts";
 import type { StoryEffect } from "../engine/story/adventure.ts";
 import { checkPlugins } from "../engine/tools/check-pack.ts";
 import {
+  nextDndDecision,
   runCheckCombatEnd,
   startCombat,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
@@ -359,6 +360,66 @@ describe("items in a fight", () => {
       dndEvent(`${NS}:itemUsed`, { actor: PLAYER_ACTOR, item: POTION }),
     );
     expect(playerOf(after).inventory).toEqual(fighter.inventory);
+  });
+
+  it("keeps the potion offered but hidden at full health, and never picks it there", async () => {
+    const { run } = await loadAdventure("goblin-ambush");
+    const fighter = playerOf(
+      dnd(play(await storyRun([]), "srd52:pregen/fighter").state),
+    );
+    const max = deriveStats(fighter, run).maxHp;
+    const goblin = {
+      ...fighter,
+      id: "g",
+      name: "Goblin",
+      side: "enemy" as const,
+      source: {
+        kind: "monster" as const,
+        statBlockId: "srd52:monster/goblin-warrior",
+      },
+      hp: 7,
+      position: { x: 20, y: 20 },
+    };
+    const at = (hp: number): DndState => ({
+      actors: {
+        [PLAYER_ACTOR]: {
+          ...fighter,
+          hp,
+          position: { x: 0, y: 0 },
+          inventory: [...fighter.inventory, POTION],
+        },
+        g: goblin,
+      },
+      combat: {
+        encounter: "e",
+        order: [PLAYER_ACTOR, "g"],
+        index: 0,
+        round: 1,
+      },
+    });
+    const drinkIn = (state: DndState) => {
+      const decision = nextDndDecision(state, run);
+      if (!decision) throw new Error("No turn");
+      const policy = run.system.decidePolicy(decision, {
+        state,
+        dice: createDice(rngFromSeed("drink")),
+        content: run.content,
+        contentIds: run.contentIds,
+      });
+      const option = decision.options.find((item) =>
+        item.id.startsWith(`item:${POTION}`),
+      );
+      return { option, policy };
+    };
+
+    const full = drinkIn(at(max));
+    expect(full.option?.hidden).toBe(true);
+    expect(full.policy.startsWith("item:")).toBe(false);
+
+    const hurt = drinkIn(at(1));
+    expect(hurt.option).toBeDefined();
+    expect(hurt.option?.hidden).toBeUndefined();
+    expect(hurt.policy.startsWith(`item:${POTION}`)).toBe(true);
   });
 
   it("lets a spellcaster read a scroll without a slot", async () => {
