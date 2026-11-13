@@ -6,7 +6,8 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { dirname, extname, join, relative } from "node:path";
+// posix paths on every OS: the books name files with "/", and Node reads those on Windows too.
+import { dirname, extname, join, relative } from "node:path/posix";
 import sharp from "sharp";
 
 // Converts a books folder's pictures to WebP and crops battle maps to the part their fights use (books#26).
