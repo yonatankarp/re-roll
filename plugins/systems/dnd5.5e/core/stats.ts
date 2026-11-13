@@ -2,6 +2,7 @@ import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
 import { carriedWeight, carryingCapacity, encumberedSpeed } from "./carry.ts";
 import { type Actor, equipped, hasCondition } from "./state.ts";
+import { formOf } from "./forms.ts";
 import {
   DAMAGE_TYPES,
   ABILITIES,
@@ -910,6 +911,7 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "cure" ||
       effect.kind === "dispel" ||
       effect.kind === "zone" ||
+      effect.kind === "polymorph" ||
       effect.kind === "extraAction" ||
       effect.kind === "reduceDamage" ||
       effect.kind === "teleport" ||
@@ -928,10 +930,22 @@ export function immuneToCondition(stats: Stats, condition: Condition): boolean {
 }
 
 export function deriveStats(actor: Actor, access: ContentAccess): Stats {
-  const stats =
+  const own =
     actor.source.kind === "monster"
       ? monsterStats(actor, access)
       : characterStats(actor, access);
+  // A form's stat block replaces the creature's own, but it keeps its creature type and Hit Point maximum.
+  const form = formOf(actor);
+  const stats = form
+    ? {
+        ...monsterStats(
+          { ...actor, source: { kind: "monster", statBlockId: form } },
+          access,
+        ),
+        creatureType: own.creatureType,
+        maxHp: own.maxHp,
+      }
+    : own;
   const speed = effectBonus(actor, "speed");
   const maxHp = effectBonus(actor, "maxHp");
   return speed === 0 && maxHp === 0

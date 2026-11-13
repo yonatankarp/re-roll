@@ -27,6 +27,7 @@ import { ALL, ITEM_PREFIX } from "./combat/ids.ts";
 import { DAMAGE_TO_PARTY } from "./combat/effects.ts";
 import { cureFor, dispellable } from "./combat/dispel.ts";
 import { seesThrough } from "./sight.ts";
+import { formOf } from "./forms.ts";
 import {
   aimsFor,
   allies,
@@ -649,6 +650,14 @@ export function makeJudge(context: Context, side: Actor): Judge {
               Math.max(threat(target), meanFoeThreat * 0.5)
           : 0;
       }
+      // A foe in a weak Beast's shape has lost most of what it does, like an Incapacitated one, until its
+      // borrowed Hit Points run out.
+      case "polymorph":
+        return foe && !isDown(target) && formOf(target) === null
+          ? 0.8 *
+              Math.max(threat(target), 0.25 * meanFoeThreat) *
+              lasting(rounds(effect.duration, saved, false, false))
+          : 0;
       // Ending a foe's help or an ally's harm is worth about what the effect was doing, a round or two of it.
       case "dispel":
         return dispellable(

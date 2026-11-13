@@ -280,6 +280,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     duration: DurationSchema,
     damage: z.array(DamageSchema).optional(),
   }),
+  // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
+  // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe.
+  z.strictObject({ kind: z.literal("polymorph"), duration: DurationSchema }),
   // Ends every spell of this level or lower that is on the target, as Dispel Magic does.
   z.strictObject({
     kind: z.literal("dispel"),

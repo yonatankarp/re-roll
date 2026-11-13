@@ -9,6 +9,7 @@ import {
   LootSchema,
   ModifierSchema,
 } from "./schemas.ts";
+import { settleForms } from "./forms.ts";
 
 export const NS = "dnd5.5e";
 
@@ -101,6 +102,8 @@ const ActiveEffectSchema = z.strictObject({
       kind: z.literal("condition"),
       condition: ConditionSchema,
     }),
+    // Another creature's shape, by its stat block (core/forms.ts).
+    z.strictObject({ kind: z.literal("form"), monster: ContentIdSchema }),
     // An area a spell left on the map, kept on its caster (core/zones.ts).
     z.strictObject({
       kind: z.literal("zone"),
@@ -710,6 +713,10 @@ function payload<S extends z.ZodType>(
 }
 
 export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
+  return settleForms(state, applyOne(state, event));
+}
+
+function applyOne(state: DndState, event: SystemEvent): DndState {
   switch (event.kind) {
     case `${NS}:characterChosen`: {
       const data = payload(CharacterChosenSchema, event);

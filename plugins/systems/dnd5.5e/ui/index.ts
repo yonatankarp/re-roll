@@ -1043,6 +1043,12 @@ function describe(
         return `${name(actor)} is ${TACTIC_WORDS[effect.modifier.tactic]}.`;
       }
       if (effect.sourceId === HIDE_SOURCE) return null; // the hidden line says it
+      if (effect.modifier.kind === "form") {
+        return `${name(actor)} turns into ${sourceName(access, effect.modifier.monster)}.`;
+      }
+      if (effect.modifier.kind === "zone") {
+        return `${sourceName(access, effect.sourceId)} fills a ${String(effect.modifier.radius)}-foot radius with ${effect.modifier.zone}.`;
+      }
       return effect.modifier.kind === "condition"
         ? `${name(actor)} is ${effect.modifier.condition}.`
         : `${name(actor)} is affected by ${sourceName(access, effect.sourceId)}.`;

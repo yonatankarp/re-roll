@@ -46,6 +46,7 @@ import { teleportFrame } from "./movement.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { cureFor, dispelEvents, isSpell } from "./dispel.ts";
+import { formOf, weakestBeast } from "../forms.ts";
 import {
   actorOf,
   allies,
@@ -369,6 +370,33 @@ export function leafEvents(
         }
         break;
       }
+      case "polymorph": {
+        const beast =
+          formOf(target) === null ? weakestBeast(target, context) : null;
+        if (!beast) break;
+        events.push(
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: {
+              sourceId,
+              casterId: caster.id,
+              modifier: { kind: "form", monster: beast.id },
+              ends: effectEnds(effect.duration),
+            },
+          }),
+          dndEvent(`${NS}:tempHpGained`, {
+            actor: target.id,
+            amount: beast.hp,
+          }),
+        );
+        // A Beast's shape can't keep up a spell, since it can't cast one.
+        if (target.concentratingOn !== null) {
+          events.push(
+            dndEvent(`${NS}:concentrationEnded`, { actor: target.id }),
+          );
+        }
+        break;
+      }
       case "dispel":
         events.push(
           ...dispelEvents(target, effect.maxLevel, context.state, context),
@@ -554,7 +582,8 @@ export function resolveAction(
       (effect) =>
         (effect.kind === "modifier" ||
           effect.kind === "applyCondition" ||
-          effect.kind === "zone") &&
+          effect.kind === "zone" ||
+          effect.kind === "polymorph") &&
         typeof effect.duration === "object" &&
         "concentration" in effect.duration,
     );
