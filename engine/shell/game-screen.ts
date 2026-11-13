@@ -4,6 +4,7 @@ import { campfire } from "./campfire.ts";
 import { shopPanel } from "./shop.ts";
 import { CANT_OPEN, OPENING, type ShellContext } from "./context.ts";
 import type { GamePage } from "./game-page.ts";
+import { artPlate, unseen } from "./art-plate.ts";
 import { drawEnding } from "./ending.ts";
 import { drawDecision } from "./game-options.ts";
 import { drawJournal } from "./game-journal.ts";
@@ -40,6 +41,34 @@ export function showGame(ctx: ShellContext): void {
   title.tabIndex = -1;
   const sceneArt = el("div", { class: "scene-art" });
   let artShown: string | null = null;
+  const plate = artPlate();
+  // Without motion a new picture takes the old one's place at once.
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // The next scene's picture turns in over the last one, like a page, and then takes its place.
+  const turnTo = (next: HTMLImageElement | null, firstDraw: boolean): void => {
+    const old = [...sceneArt.children];
+    if (!next || old.length === 0 || firstDraw) {
+      sceneArt.replaceChildren(...(next ? [next] : []));
+      if (next && !firstDraw) enter(sceneArt);
+      return;
+    }
+    next.classList.add("turning");
+    sceneArt.append(next);
+    const settle = (): void => {
+      for (const item of old) item.remove();
+      next.classList.remove("turning", "turn-in");
+    };
+    next.addEventListener(
+      "load",
+      () => {
+        next.classList.add("turn-in");
+        // Timed rather than on animationend, which never comes without motion.
+        setTimeout(settle, still ? 0 : 700);
+      },
+      { once: true },
+    );
+    next.addEventListener("error", settle, { once: true });
+  };
   const scene = el("p", { class: "scene-text" });
   let sceneShown: string | null = null;
   const sound = soundControls((path) => ctx.game.imageUrl(path));
@@ -267,6 +296,7 @@ export function showGame(ctx: ShellContext): void {
       journalDrawer,
       camp.dialog,
       sound.dialog,
+      plate.element,
     ),
   );
   ctx.keys = {
@@ -293,6 +323,7 @@ export function showGame(ctx: ShellContext): void {
     ending.querySelector("h3") ??
     title;
   const draw = (): void => {
+    plate.close(); // the player has moved on
     const view = ctx.game.view();
     const factory = ctx.boards[view.system];
     if (factory && !page.board) {
@@ -325,6 +356,32 @@ export function showGame(ctx: ShellContext): void {
     });
     const firstDraw = cuesShown === null;
     cuesShown = view.cues.length;
+    // The first time the party meets a kind of foe, its picture fills the page for a moment.
+    const playerSide = view.combat?.combatants.find(
+      (actor) => actor.id === view.sheets[0]?.id,
+    )?.side;
+    const foes = unseen(
+      view.run,
+      (view.combat?.combatants ?? []).flatMap((actor) => {
+        const path = view.monsterArt[actor.id];
+        return actor.monster && path && actor.side !== playerSide
+          ? [{ key: `foe:${actor.monster}`, name: actor.monster, path }]
+          : [];
+      }),
+      firstDraw,
+    );
+    if (foes.length > 0) {
+      plate.show(ctx.game, {
+        kind: "foe",
+        kicker: foes.length === 1 ? "A foe appears" : "Foes appear",
+        title: new Intl.ListFormat(undefined, { type: "conjunction" }).format(
+          foes.map((foe) => foe.name),
+        ),
+        pictures: foes
+          .slice(0, 3)
+          .map((foe) => ({ path: foe.path, alt: foe.name })),
+      });
+    }
     // A fight's layout comes at once, so its start plays on the map; leaving it waits like the scene.
     if (view.combat) stage.classList.add("in-combat");
 
@@ -345,12 +402,26 @@ export function showGame(ctx: ShellContext): void {
       // Only touched on a change, so staying in a scene doesn't reload its picture.
       if (view.sceneArt !== artShown) {
         artShown = view.sceneArt;
-        sceneArt.replaceChildren(
-          ...(view.sceneArt
-            ? [picture(ctx.game, view.sceneArt, "", "art")]
-            : []),
+        turnTo(
+          view.sceneArt ? picture(ctx.game, view.sceneArt, "", "art") : null,
+          firstDraw,
         );
-        if (!firstDraw) enter(sceneArt);
+      }
+      // A chapter opens on its title page, once a run, after the character is made.
+      const [chapter] = unseen(
+        view.run,
+        view.chapterArt && !view.creation
+          ? [{ key: `chapter:${view.chapterArt}`, path: view.chapterArt }]
+          : [],
+        firstDraw,
+      );
+      if (chapter && !foes.length) {
+        plate.show(ctx.game, {
+          kind: "chapter",
+          kicker: view.title,
+          title: view.sceneTitle ?? "",
+          pictures: [{ path: chapter.path, alt: "" }],
+        });
       }
     };
     // Every later draw waits, since one without cues can still come while the board replays.

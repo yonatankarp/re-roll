@@ -1071,6 +1071,173 @@ summary {
   max-height: none;
 }
 
+/* The next scene's picture turns in over the last, like a page, then takes its place. */
+.scene-art {
+  position: relative;
+}
+
+.scene-art img.turning {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  max-height: none;
+  opacity: 0;
+}
+
+.scene-art img.turn-in {
+  animation: page-turn 0.7s cubic-bezier(0.3, 0.6, 0.2, 1) both;
+}
+
+@keyframes page-turn {
+  from {
+    opacity: 0.2;
+    clip-path: inset(0 0 0 100%);
+    filter: brightness(1.15);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0);
+  }
+}
+
+/* An ended run shows its picture as a closing plate in the ending, not at the top. */
+.ended .scene-art {
+  display: none;
+}
+
+.ending-art {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  margin-bottom: 20px;
+  object-fit: cover;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.25);
+}
+
+.in-combat .ending-art {
+  max-height: 200px;
+}
+
+.ending[data-ending="defeat"] .ending-art,
+.ending[data-ending="deadEnd"] .ending-art {
+  filter: grayscale(0.7) sepia(0.3) brightness(0.85);
+}
+
+/* A find with its picture: the item or the coins beside what was found. */
+.decision-card.with-art {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  column-gap: 16px;
+}
+
+.decision-card.with-art > :not(.card-art) {
+  grid-column: 2;
+}
+
+.card-art {
+  grid-row: 1 / span 3;
+  align-self: center;
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+}
+
+/* A small picture before a row's name in the sheet, such as the item it is. */
+.row-art {
+  width: 28px;
+  height: 28px;
+  margin-right: 8px;
+  vertical-align: middle;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+/* A book's plate laid over the page for a moment: a foe met for the first time, or a chapter's title page. */
+.art-plate {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(20 12 4 / 0.6);
+  cursor: pointer;
+}
+
+.art-plate figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  max-width: min(92vw, 960px);
+  max-height: calc(100vh - 48px);
+  margin: 0;
+  padding: 18px 18px 14px;
+  background: var(--paper), var(--bg);
+  border: 1px solid var(--edge);
+  border-top: 4px solid var(--rule);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 0.55);
+}
+
+.plate-pictures {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  min-height: 0;
+}
+
+.plate-art {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  max-height: calc(100vh - 220px);
+  object-fit: contain;
+}
+
+.art-plate figcaption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.plate-kicker {
+  font: 1.2rem/1.2 var(--font-head);
+  color: var(--muted);
+}
+
+.plate-title {
+  font: 2.6rem/1.05 var(--font-title);
+  color: var(--accent);
+}
+
+.art-plate[data-kind="foe"] .plate-title {
+  color: var(--rule);
+}
+
+.plate-hint {
+  margin-top: 4px;
+  font: 0.85rem var(--font-ui);
+  color: var(--muted);
+}
+
+.art-plate.enter {
+  animation: fade 0.35s ease both;
+}
+
+.art-plate.enter figure {
+  animation: plate-in 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes plate-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(14px);
+  }
+}
+
 /* Entrances: what changes slides in, so the eye follows it. */
 @keyframes rise {
   from {

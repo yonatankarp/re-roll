@@ -47,12 +47,15 @@ export function renderCombat(
 
 // A sheet row's own choice, such as Equip, as a button while the pending decision offers it.
 type RowOption = (row: SheetRow) => Node[];
+// A small picture before a row's name, such as the item it is.
+type RowArt = (row: SheetRow) => Node[];
 
 function detailsRow(
   label: string,
   value: string,
   detail: string,
   extra: Node[] = [],
+  art: Node[] = [],
 ): HTMLElement {
   return el(
     "details",
@@ -60,7 +63,7 @@ function detailsRow(
     el(
       "summary",
       {},
-      el("span", { text: label }),
+      el("span", {}, ...art, document.createTextNode(label)),
       ...(value ? [el("span", { class: "sheet-value", text: value })] : []),
       ...extra,
     ),
@@ -71,6 +74,7 @@ function detailsRow(
 function renderSection(
   section: SheetSection,
   rowOption: RowOption,
+  rowArt: RowArt,
 ): HTMLElement {
   const heading = el("h3", { text: section.title });
   switch (section.layout) {
@@ -134,14 +138,27 @@ function renderSection(
             row.detail
               ? []
               : [
-                  el("dt", { text: row.label }),
+                  el(
+                    "dt",
+                    {},
+                    ...rowArt(row),
+                    document.createTextNode(row.label),
+                  ),
                   el("dd", { text: row.value }, ...rowOption(row)),
                 ],
           ),
         ),
         ...section.rows.flatMap((row) =>
           row.detail
-            ? [detailsRow(row.label, row.value, row.detail, rowOption(row))]
+            ? [
+                detailsRow(
+                  row.label,
+                  row.value,
+                  row.detail,
+                  rowOption(row),
+                  rowArt(row),
+                ),
+              ]
             : [],
         ),
       );
@@ -153,6 +170,7 @@ export function renderSheet(
   sheet: SheetView,
   full: boolean,
   rowOption: RowOption = () => [],
+  rowArt: RowArt = () => [],
 ): HTMLElement {
   return el(
     "section",
@@ -180,7 +198,7 @@ export function renderSheet(
       ...sheet.sections
         .filter((section) => section.rows.length > 0)
         .filter((section) => full || section.pinned)
-        .map((section) => renderSection(section, rowOption)),
+        .map((section) => renderSection(section, rowOption, rowArt)),
     ),
   );
 }

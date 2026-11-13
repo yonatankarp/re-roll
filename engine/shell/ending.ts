@@ -1,7 +1,7 @@
 import { type GameView } from "./session.ts";
 import type { OptionView } from "./system-ui.ts";
 import type { GamePage } from "./game-page.ts";
-import { button, el } from "./dom.ts";
+import { button, el, picture } from "./dom.ts";
 
 export function endingOf(view: GameView): {
   readonly title: string;
@@ -51,9 +51,14 @@ export function drawEnding(page: GamePage, view: GameView): void {
     ...tally("foeDefeated", "foe defeated", "foes defeated"),
     ...tally("levelUp", "level gained", "levels gained"),
   ].join(" · ");
+  // A closing plate: the ending scene's own picture, or the adventure's cover. The scene's picture
+  // moves down here from the top of the page, so it isn't shown twice.
+  const art = (view.ended === "ending" ? view.sceneArt : null) ?? view.cover;
+  page.stage.classList.toggle("ended", end !== null);
   page.ending.replaceChildren(
     ...(end
       ? [
+          ...(art ? [picture(page.ctx.game, art, "", "ending-art")] : []),
           endTitle,
           ...(end.text ? [el("p", { text: end.text })] : []),
           ...(summary

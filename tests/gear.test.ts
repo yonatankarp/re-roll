@@ -413,6 +413,7 @@ describe("items in a fight", () => {
     expect(row("Scale Mail")).not.toHaveProperty("option");
     expect(row("Potion of Healing")).toMatchObject({
       option: { id: `drink:${POTION}`, label: "Drink" },
+      looks: [POTION], // its picture, found by its id
     });
     expect(row("Spell Scroll")?.label).not.toContain("can't use");
     // Near the top, right after the combat numbers.

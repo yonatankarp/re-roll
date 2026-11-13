@@ -12,6 +12,7 @@ export interface SheetRow {
   readonly note?: string; // a small line under the value, in boxes and marks
   readonly marked?: boolean; // such as proficient, in marks
   readonly meter?: number; // a share from 0 to 1, drawn as a bar in the top bar's summary
+  readonly looks?: readonly string[]; // names to find a small picture by, such as an item's id, best first
   // A choice of the pending decision this row can make, such as equipping an item. With a hint, it's
   // shown disabled while not offered, and the hint says when it will be, such as "Change gear during a rest".
   readonly option?: {
@@ -27,6 +28,7 @@ export interface DecisionCard {
   readonly lines: readonly string[];
   readonly icon?: string; // an inline <svg> beside the title, such as a coin, so no emoji font is needed
   readonly footer?: string; // a closing line, such as the purse after the find
+  readonly looks?: readonly string[]; // names to find its picture by, such as the items found, best first
 }
 
 // One thing at a merchant's: what it is, what it costs, and the choice that trades it.
