@@ -107,7 +107,7 @@ const ActiveEffectSchema = z.strictObject({
     // An area a spell left on the map, kept on its caster (core/zones.ts).
     z.strictObject({
       kind: z.literal("zone"),
-      zone: z.enum(["darkness", "fog", "thorns", "light"]),
+      zone: z.enum(["darkness", "fog", "thorns", "light", "dim"]),
       at: z.strictObject({ x: z.number().int(), y: z.number().int() }),
       radius: z.number().int(),
       damage: z.array(DamageSchema).optional(),

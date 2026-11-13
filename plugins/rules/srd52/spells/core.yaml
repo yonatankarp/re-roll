@@ -1815,7 +1815,6 @@
     Speed. Using a Higher-Level Spell Slot. You can target one additional
     creature for each spell slot level above 2.
   automation: text
-  outOfCombat: utility
 - id: srd52:spell/stinking-cloud
   name: Stinking Cloud
   level: 3
@@ -5141,7 +5140,6 @@
     You touch a willing creature and choose a skill. Until the spell ends, the
     creature adds 1d4 to any ability check using the chosen skill.
   automation: text
-  outOfCombat: utility
 - id: srd52:spell/harm
   name: Harm
   level: 6
@@ -6807,7 +6805,6 @@
     to a space within range. A light must be within 20 feet of another light
     created by this spell, and a light vanishes if it exceeds the spell’s range.
   automation: text
-  outOfCombat: utility
 - id: srd52:spell/delayed-blast-fireball
   name: Delayed Blast Fireball
   level: 7
@@ -6998,7 +6995,6 @@
     (including yourself) for each spell slot level above 7. The creatures must
     be within 10 feet of you when you cast the spell.
   automation: text
-  outOfCombat: utility
 - id: srd52:spell/faithful-hound
   name: Faithful Hound
   level: 4
@@ -7507,7 +7503,6 @@
     Using a Higher-Level Spell Slot. You can target one additional creature for
     each spell slot level above 1.
   automation: text
-  outOfCombat: utility
 - id: srd52:spell/light
   name: Light
   level: 0
@@ -7528,7 +7523,6 @@
     colored as you like. Covering the object with something opaque blocks the
     light. The spell ends if you cast it again.
   automation: text
-  outOfCombat: utility
 - id: srd52:spell/longstrider
   name: Longstrider
   level: 1
@@ -8888,7 +8882,6 @@
     like a regular flame, but it creates no heat and consumes no fuel. The flame
     can be covered or hidden but not smothered or quenched.
   automation: text
-  outOfCombat: utility
 - id: srd52:spell/create-or-destroy-water
   name: Create or Destroy Water
   level: 1
@@ -8910,7 +8903,6 @@
     additional gallons of water, or the size of the Cube increases by 5 feet,
     for each spell slot level above 1."
   automation: text
-  outOfCombat: utility
 - id: srd52:spell/darkness
   name: Darkness
   level: 2

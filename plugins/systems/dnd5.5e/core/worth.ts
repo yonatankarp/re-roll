@@ -711,6 +711,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
         }
         return foe &&
           effect.zone !== "light" &&
+          effect.zone !== "dim" &&
           seesThrough(actor, effect.zone, context) > 0
           ? 0.25 * Math.max(threat(target), 0.25 * meanFoeThreat)
           : 0;

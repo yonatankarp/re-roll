@@ -6,7 +6,7 @@ import { distanceFeet, type Square, squareKey } from "./grid.ts";
 // it ends with the caster's Concentration or the caster's death.
 // shortcut: a zone stays on the square it was cast at, even when the book lets it move with an object.
 
-export type ZoneKind = "darkness" | "fog" | "thorns" | "light";
+export type ZoneKind = "darkness" | "fog" | "thorns" | "light" | "dim";
 
 export interface Zone {
   readonly zone: ZoneKind;
@@ -41,6 +41,9 @@ export function obscuring(
 
 export const lit = (square: Square | null, state: DndState): boolean =>
   zonesOf(state).some((zone) => zone.zone === "light" && inZone(zone, square));
+
+export const glows = (square: Square | null, state: DndState): boolean =>
+  zonesOf(state).some((zone) => zone.zone === "dim" && inZone(zone, square));
 
 // Squares a thorny zone covers, which cost double to walk through.
 export function thornKeys(state: DndState): readonly string[] {

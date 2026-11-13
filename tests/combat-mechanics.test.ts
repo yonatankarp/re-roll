@@ -3608,6 +3608,20 @@ describe("ending, hiding and reshaping spells", () => {
       : state;
     expect(lightAt({ x: 2, y: 2 }, night)).toBe("bright");
     expect(lightAt({ x: 9, y: 9 }, night)).toBe("dark");
+    const glow = effect("spell:dancing-lights", {
+      kind: "zone",
+      zone: "dim",
+      at: { x: 9, y: 9 },
+      radius: 10,
+    });
+    const glowing: DndState = {
+      ...night,
+      actors: {
+        ...night.actors,
+        a: { ...dark, activeEffects: [glow] },
+      },
+    };
+    expect(lightAt({ x: 9, y: 9 }, glowing)).toBe("dim");
     const { activation } = SpellSchema.parse(
       run.content("srd52:spell/test-darkness"),
     );

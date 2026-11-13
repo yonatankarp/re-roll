@@ -119,7 +119,7 @@ export function snuffedLights(
   return Object.values(context.state.actors).flatMap((actor) =>
     actor.activeEffects.flatMap(({ modifier, sourceId, casterId, level }) =>
       modifier.kind === "zone" &&
-      modifier.zone === "light" &&
+      (modifier.zone === "light" || modifier.zone === "dim") &&
       distanceFeet(modifier.at, at) <= modifier.radius + radius &&
       (level ?? spellLevelOf(sourceId, actor, context) ?? 9) <= 2
         ? [

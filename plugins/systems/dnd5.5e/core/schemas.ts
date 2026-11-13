@@ -272,11 +272,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // An area left where the spell is aimed, or round the caster: magical darkness that only Blindsight, Truesight
   // or Devil's Sight see through (Darkness), fog only Blindsight sees through (Fog Cloud), or thorns that cost
-  // double to cross and deal `damage` for each 5 feet walked in them (Spike Growth), or Bright Light (Light).
+  // double to cross and deal `damage` for each 5 feet walked in them (Spike Growth), Bright Light (Light), or Dim Light (Dancing Lights).
   // It ends with the spell.
   z.strictObject({
     kind: z.literal("zone"),
-    zone: z.enum(["darkness", "fog", "thorns", "light"]),
+    zone: z.enum(["darkness", "fog", "thorns", "light", "dim"]),
     radius: z.number().int().min(5),
     duration: DurationSchema,
     damage: z.array(DamageSchema).optional(),
