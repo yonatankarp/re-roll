@@ -40,6 +40,8 @@ import {
 } from "./schemas.ts";
 import { featureRules, grantedSpells } from "./feature-rules.ts";
 import { type Caster, multiclassSlots } from "./multiclass.ts";
+import { holdsConcentration, withMetamagic } from "./metamagic.ts";
+import { withInvocations } from "./invocations.ts";
 
 // Content is frozen once loaded, so each entry is checked against a schema only once.
 const parsed = new WeakMap<object, Map<z.ZodType, unknown>>();
@@ -74,6 +76,7 @@ export interface KnownAction {
   readonly activation: Activation;
   readonly spellLevel: number | null;
   readonly upcast?: Spell["upcast"];
+  readonly hitType?: true; // its damage takes the type of the hit it adds to, as a maneuver's die does
 }
 
 export interface Stats {
@@ -195,6 +198,8 @@ function collectFeatureData(
           ? scaleActivation(activation, feature.perTier, cantripTier(level))
           : activation,
         spellLevel: null,
+        ...(feature.upcast ? { upcast: feature.upcast } : {}),
+        ...(feature.hitType ? { hitType: true as const } : {}),
       });
     });
   }
@@ -515,6 +520,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
           : passive,
       ),
+      ...(holdsConcentration(actor)
+        ? [{ kind: "concentrationAdvantage" as const }]
+        : []),
       // Every weapon attack uses Strength or Dexterity.
       // shortcut: a save can't be limited to Strength and Dexterity without a change in combat.ts, so saves aren't affected yet.
       ...(untrainedArmor
@@ -529,7 +537,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           ]
         : []),
     ],
-    actions,
+    actions: withMetamagic(
+      withInvocations(actions, fromFeatures.passives, abilities, classLevels),
+      actor,
+      abilityModifier(abilities.cha),
+    ),
     multiattack: Math.max(
       ...[...featureIds].map(attacksFrom),
       ...passiveAttacks(fromFeatures.passives),
@@ -880,7 +892,9 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
         total += stats.proficiency;
         break;
       case "classLevel":
-        total += stats.classLevels[term.class] ?? 0;
+        total += Math.floor(
+          (stats.classLevels[term.class] ?? 0) / (term.half ? 2 : 1),
+        );
         break;
       case "level":
         total += stats.level;
@@ -912,6 +926,26 @@ export function rollDiceNotation(
     total += dice.roll(Number(sides));
   }
   return total;
+}
+
+// Rolls again, once, up to `reroll` of the dice that came up below average, the lowest first, and keeps the new rolls.
+function rollRerolling(
+  notation: string,
+  dice: Dice,
+  multiplier: number,
+  reroll: number,
+): number {
+  const [count = "0", sides = "0"] = notation.split("d");
+  const rolls = Array.from({ length: Number(count) * multiplier }, () =>
+    dice.roll(Number(sides)),
+  );
+  const low = rolls
+    .map((value, index) => ({ value, index }))
+    .filter(({ value }) => value < (Number(sides) + 1) / 2)
+    .sort((a, b) => a.value - b.value)
+    .slice(0, reroll);
+  for (const { index } of low) rolls[index] = dice.roll(Number(sides));
+  return rolls.reduce((sum, value) => sum + value, 0);
 }
 
 // A scaling key can replace the number of dice (sneakAttackD6) or the die size (martialArtsDie).
@@ -1032,7 +1066,9 @@ export function rollAmount(
 ): number {
   const notation = scaledDice(amount, stats.scaling);
   const rolled = notation
-    ? rollDiceNotation(notation, dice, diceMultiplier)
+    ? amount.reroll
+      ? rollRerolling(notation, dice, diceMultiplier, amount.reroll)
+      : rollDiceNotation(notation, dice, diceMultiplier)
     : 0;
   return rolled + (amount.bonus ? evaluateFormula(amount.bonus, stats) : 0);
 }

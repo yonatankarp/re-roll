@@ -11,7 +11,7 @@ import {
 import type { Battlemap } from "./schemas.ts";
 import { FeatureSchema, MonsterSchema, SpeciesSchema } from "./schemas.ts";
 import { type Actor, type DndState, type Terrain, isDead } from "./state.ts";
-import { lookup } from "./stats.ts";
+import { deriveStats, lookup } from "./stats.ts";
 import { swallowerOf } from "./combat/swallow.ts";
 
 // A map's codes as squares, or nothing for a map that marks none, so fights on older maps stay as they were.
@@ -120,6 +120,9 @@ export function darkvisionOf(actor: Actor, access: ContentAccess): number {
   const species = lookup(access, SpeciesSchema, build.speciesId);
   return Math.max(
     0,
+    ...deriveStats(actor, access).passives.flatMap((passive) =>
+      passive.kind === "seesInDarkness" ? [passive.feet] : [],
+    ),
     ...species.traits.flatMap((id) => {
       const feature = lookup(access, FeatureSchema, id);
       // A trait named Darkvision, or one that lists all the species' traits starting with it, as the SRD's do.

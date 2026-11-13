@@ -5,9 +5,11 @@ import {
   immuneToCondition,
   type KnownAction,
   lookup,
+  modifierFor,
   rollAmount,
   saveBonus,
 } from "../stats.ts";
+import { metamagicSaves } from "../metamagic.ts";
 import {
   type Actor,
   applyDndEvent,
@@ -37,7 +39,7 @@ import { multiattackUses } from "../multiattack-uses.ts";
 import { dropToOneEvents, traitSaveAdvantage } from "../trait-rules.ts";
 import { dodging } from "../tactics.ts";
 import { AIM, ALL } from "./ids.ts";
-import { inArea, parseSquare } from "../grid.ts";
+import { inArea, parseSquare, pushTo } from "../grid.ts";
 import { caughtBy } from "../targeting.ts";
 import { behindTotalCover, coverBonus, coverFor } from "../sight.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
@@ -331,12 +333,22 @@ export function leafEvents(
       case "extraAction":
         events.push(dndEvent(`${NS}:actionRegained`, { actor: target.id }));
         break;
-      case "forcedMove":
+      // shortcut: a push is made on the grid as Shove's is, while a pull is only described, and neither checks size.
+      case "forcedMove": {
+        const to =
+          effect.direction === "away"
+            ? pushTo(caster.position, target, effect.feet, context.state)
+            : null;
+        if (to) {
+          events.push(
+            dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 }),
+          );
+        }
+        break;
+      }
       case "note":
       case "reduceDamage":
-        // shortcut: forced movement is only described, not made; move the target on the grid, as Shove's push
-        // does, once a spell needs it. A note is only for reading.
-        // Reduced damage is worked out by the reaction that holds up the hit.
+        // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit.
         break;
       default:
         effect satisfies never;
@@ -354,6 +366,7 @@ export function rollSave(
   magical = false,
   cover = 0, // half or three-quarters cover adds to Dexterity saves
   conditions: readonly string[] = [],
+  disadvantage = false, // from the caster, as with Heightened Spell
 ): { readonly saved: boolean; readonly events: SystemEvent[] } {
   if (
     (ability === "str" || ability === "dex") &&
@@ -369,6 +382,7 @@ export function rollSave(
       (ability === "dex" && dodging(target)) ||
       traitSaveAdvantage(stats, ability, conditions),
     disadvantage:
+      disadvantage ||
       hasFlag(target, "disadvantage", "saves", stats, ability) ||
       (ability === "dex" && hasCondition(target, "restrained")),
   });
@@ -540,19 +554,28 @@ export function resolveAction(
       const dc = evaluateFormula(resolution.dc, stats);
       // Damage against several targets at once is rolled once for all of them.
       const damage = rollSharedDamage(resolution.damage);
+      const { spared, heightened } = metamagicSaves(
+        action,
+        actor,
+        targets,
+        modifierFor(stats, "cha"),
+      );
       for (const target of targets) {
         // shortcut: cover counts from the caster, even for a sphere whose centre is elsewhere.
-        const { saved: rolledSave, events: saveEvents } = rollSave(
-          target,
-          resolution.ability,
-          dc,
-          context,
-          action.spellLevel !== null,
-          coverBonus(
-            coverFor(context.state, actor.position, target, [actor.id]),
-          ),
-          conditionsApplied(resolution.onFail),
-        );
+        const { saved: rolledSave, events: saveEvents } = spared.has(target.id)
+          ? { saved: true, events: [] }
+          : rollSave(
+              target,
+              resolution.ability,
+              dc,
+              context,
+              action.spellLevel !== null,
+              coverBonus(
+                coverFor(context.state, actor.position, target, [actor.id]),
+              ),
+              conditionsApplied(resolution.onFail),
+              heightened === target.id,
+            );
         events.push(...saveEvents);
         const resisted = rolledSave
           ? null
@@ -565,8 +588,10 @@ export function resolveAction(
         if (resisted) events.push(resisted);
         const saved = rolledSave || resisted !== null;
         applyRolled(target, damage, (amount) => {
-          if (!saved) return amount;
-          return resolution.onSuccessDamage === "half" ? halved(amount) : 0;
+          if (!saved || resolution.onSuccessDamage === "full") return amount;
+          return resolution.onSuccessDamage === "half" && !spared.has(target.id)
+            ? halved(amount)
+            : 0;
         });
         events.push(
           ...leafEvents(

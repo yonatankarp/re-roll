@@ -39,7 +39,12 @@ import {
   masteryOf,
   revealEvents,
 } from "../tactics.ts";
-import { criticalFrom, offerInspiration, onceEnded } from "../class-rules.ts";
+import {
+  asHit,
+  criticalFrom,
+  offerInspiration,
+  onceEnded,
+} from "../class-rules.ts";
 import { conditionsApplied } from "../legendary.ts";
 import { type Damage, type Resolution } from "../schemas.ts";
 import {
@@ -308,7 +313,13 @@ export function runAttackRoll(
 
   if (!hits) {
     return (
-      offerInspiration(attacker, { ...payload, target: target.id }, report) ?? {
+      offerInspiration(
+        attacker,
+        { ...payload, target: target.id },
+        report,
+        hit,
+        context,
+      ) ?? {
         events: [report, ...spent],
         ...(masteryOf(attacker, action.id, context)
           ? { frames: [frame("masteryMiss", hit)] }
@@ -601,11 +612,12 @@ function nestedSave(
     target,
     save.damage.flatMap(({ amount, type }) => {
       const total = rollAmount(amount, stats, context.dice);
-      const scaled = !rolled.saved
-        ? total
-        : save.onSuccessDamage === "half"
-          ? halved(total)
-          : 0;
+      const scaled =
+        !rolled.saved || save.onSuccessDamage === "full"
+          ? total
+          : save.onSuccessDamage === "half"
+            ? halved(total)
+            : 0;
       return scaled > 0
         ? [{ amount: finalDamage(scaled, type, responses), type }]
         : [];
@@ -728,7 +740,10 @@ export function runSmite(
       ? (slotToSpend(known, attacker, deriveStats(attacker, context)) ??
         undefined)
       : Number(slot);
-  const action = findAction(attacker, actionId, context, slotLevel);
+  const action = asHit(
+    findAction(attacker, actionId, context, slotLevel),
+    findAction(attacker, payload.actionId, context),
+  );
   // A smite's damage is part of the attack, so a Critical Hit doubles its dice too.
   const result = resolveAction(
     action,
@@ -761,7 +776,7 @@ export function runConcentrationSave(
   // Being down ends Concentration outright, as does any failed save.
   const save = isDown(actor)
     ? null
-    : rollSave(actor, "con", payload.dc, context);
+    : rollSave(actor, "con", payload.dc, context, false, 0, ["concentration"]);
   const rolled = save?.events ?? [];
   if (!save?.saved) {
     return {

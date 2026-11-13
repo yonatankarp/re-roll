@@ -11,11 +11,16 @@ export function traitSaveAdvantage(
   ability: Ability,
   conditions: readonly string[],
 ): boolean {
+  // A save to keep Concentration names "concentration" among its conditions.
   return stats.passives.some(
     (passive) =>
-      passive.kind === "saveAdvantage" &&
-      (passive.abilities.includes(ability) ||
-        passive.conditions.some((condition) => conditions.includes(condition))),
+      (passive.kind === "saveAdvantage" &&
+        (passive.abilities.includes(ability) ||
+          passive.conditions.some((condition) =>
+            conditions.includes(condition),
+          ))) ||
+      (passive.kind === "concentrationAdvantage" &&
+        conditions.includes("concentration")),
   );
 }
 

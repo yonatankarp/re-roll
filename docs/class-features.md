@@ -15,13 +15,13 @@ through the real level-up decisions, and each feature gained is checked against 
 | Bard | 5 | 3 | 20 |
 | Cleric | 10 | 1 | 20 |
 | Druid | 6 | 1 | 26 |
-| Fighter | 12 | 3 | 23 |
+| Fighter | 16 | 6 | 25 |
 | Monk | 4 | 9 | 28 |
 | Paladin | 11 | 8 | 19 |
 | Ranger | 10 | 2 | 26 |
 | Rogue | 5 | 4 | 29 |
-| Sorcerer | 7 | 3 | 21 |
-| Warlock | 8 | 3 | 20 |
+| Sorcerer | 9 | 3 | 25 |
+| Warlock | 14 | 4 | 23 |
 | Wizard | 4 | 1 | 25 |
 
 ## Features
@@ -163,22 +163,31 @@ through the real level-up decisions, and each feature gained is checked against 
 | Fighter | 1 | Weapon Mastery | working | level choice: weapon masteries |
 | Fighter | 2 | Action Surge | partial | resource action-surge max 1; action-surge: extraAction |
 | Fighter | 2 | Tactical Mind | text-only | out of combat only: skills, tools or languages |
+| Fighter | 3 | Ambush | text-only | no mechanics |
+| Fighter | 3 | Bait and Switch | text-only | no mechanics |
+| Fighter | 3 | Commander’s Strike | text-only | no mechanics |
 | Fighter | 3 | Fighter Subclass | working | level choice: subclass |
 | Fighter | 4 | Ability Score Improvement | working | level choice: feat |
 | Fighter | 5 | Extra Attack | working | attacks per action: 2 |
 | Fighter | 5 | Tactical Shift | text-only | needs free movement after Second Wind |
+| Fighter | 7 | Commanding Presence | text-only | no mechanics |
+| Fighter | 7 | Disarming Attack | partial | superiority-dice (triggered): automatic damage |
 | Fighter | 9 | Indomitable | text-only | no mechanics |
 | Fighter | 9 | Tactical Master | text-only | no mechanics |
+| Fighter | 10 | Distracting Strike | working | superiority-dice (triggered): automatic damage, advantage |
+| Fighter | 10 | Evasive Footwork | text-only | no mechanics |
 | Fighter | 11 | Two Extra Attacks | working | attacks per action: 3 |
 | Fighter | 13 | Studied Attacks | text-only | no mechanics |
+| Fighter | 15 | Feinting Attack | partial | bonusAction+superiority-dice: advantage |
+| Fighter | 15 | Goading Attack | partial | superiority-dice (triggered): automatic damage |
 | Fighter | 19 | Epic Boon | working | level choice: epic boon |
 | Fighter | 20 | Three Extra Attacks | working | attacks per action: 4 |
-| Fighter (Battle Master) | 3 | Combat Superiority | text-only | no mechanics |
+| Fighter (Battle Master) | 3 | Combat Superiority | working | level choice: options, each with its own mechanics |
 | Fighter (Battle Master) | 3 | Student of War | text-only | no mechanics |
 | Fighter (Battle Master) | 7 | Know Your Enemy | text-only | no mechanics |
-| Fighter (Battle Master) | 10 | Improved Combat Superiority | text-only | no mechanics |
+| Fighter (Battle Master) | 10 | Improved Combat Superiority | working | superiority die d10 |
 | Fighter (Battle Master) | 15 | Relentless | text-only | no mechanics |
-| Fighter (Battle Master) | 18 | Ultimate Combat Superiority | text-only | no mechanics |
+| Fighter (Battle Master) | 18 | Ultimate Combat Superiority | working | superiority die d12 |
 | Fighter (Champion) | 3 | Improved Critical | working | passive: criticalRange |
 | Fighter (Champion) | 3 | Remarkable Athlete | text-only | no mechanics |
 | Fighter (Champion) | 7 | Additional Fighting Style | working | level choice: fighting style |
@@ -353,12 +362,18 @@ through the real level-up decisions, and each feature gained is checked against 
 | Rogue (Thief) | 17 | Thief’s Reflexes | text-only | no mechanics |
 | Sorcerer | 1 | Spellcasting | working | spell slots: 2, spells picked at level-up |
 | Sorcerer | 1 | Innate Sorcery | partial | resource innate-sorcery max 2; bonusAction+innate-sorcery: advantage |
-| Sorcerer | 2 | Font of Magic | text-only | needs Sorcery Points turned into spell slots |
-| Sorcerer | 2 | Metamagic | text-only | needs Metamagic options picked and applied to spells |
+| Sorcerer | 2 | Careful Spell | text-only | no mechanics |
+| Sorcerer | 2 | Distant Spell | text-only | no mechanics |
+| Sorcerer | 2 | Font of Magic | working | turn options: spell slots to Sorcery Points and back |
+| Sorcerer | 2 | Metamagic | working | level choice: options, each with its own mechanics |
 | Sorcerer | 3 | Sorcerer Subclass | working | level choice: subclass |
 | Sorcerer | 4 | Ability Score Improvement | working | level choice: feat |
 | Sorcerer | 5 | Sorcerous Restoration | text-only | needs a way to regain spell slots |
 | Sorcerer | 7 | Sorcery Incarnate | text-only | no mechanics |
+| Sorcerer | 10 | Empowered Spell | text-only | no mechanics |
+| Sorcerer | 10 | Extended Spell | text-only | no mechanics |
+| Sorcerer | 17 | Heightened Spell | text-only | no mechanics |
+| Sorcerer | 17 | Quickened Spell | text-only | no mechanics |
 | Sorcerer | 19 | Epic Boon | working | level choice: epic boon |
 | Sorcerer | 20 | Arcane Apotheosis | text-only | no mechanics |
 | Sorcerer (Aberrant Sorcery) | 3 | Psionic Spells | working | always-prepared spells: 5 |
@@ -382,13 +397,23 @@ through the real level-up decisions, and each feature gained is checked against 
 | Sorcerer (Wild Magic Sorcery) | 6 | Bend Luck | text-only | no mechanics |
 | Sorcerer (Wild Magic Sorcery) | 14 | Controlled Chaos | text-only | no mechanics |
 | Sorcerer (Wild Magic Sorcery) | 18 | Tamed Surge | text-only | no mechanics |
-| Warlock | 1 | Eldritch Invocations | text-only | needs invocation choices at level-up |
+| Warlock | 1 | Armor of Shadows | working | passive: acFormula |
+| Warlock | 1 | Eldritch Invocations | working | level choice: options, each with its own mechanics |
 | Warlock | 1 | Pact Magic | working | spell slots: 1, spells picked at level-up |
+| Warlock | 2 | Agonizing Blast | working | passive: cantripRider |
+| Warlock | 2 | Devil’s Sight | partial | passive: seesInDarkness |
 | Warlock | 2 | Magical Cunning | text-only | needs a way to regain spell slots |
 | Warlock | 3 | Warlock Subclass | working | level choice: subclass |
 | Warlock | 4 | Ability Score Improvement | working | level choice: feat |
+| Warlock | 5 | Ascendant Step | text-only | no mechanics |
+| Warlock | 5 | Eldritch Mind | working | passive: concentrationAdvantage |
+| Warlock | 7 | Eldritch Spear | working | passive: cantripRider |
+| Warlock | 9 | Fiendish Vigor | working | action: tempHp |
 | Warlock | 9 | Contact Patron | text-only | no mechanics |
 | Warlock | 11 | Mystic Arcanum | text-only | no mechanics |
+| Warlock | 12 | Gaze of Two Minds | text-only | no mechanics |
+| Warlock | 15 | Gift of the Depths | text-only | no mechanics |
+| Warlock | 18 | Lessons of the First Ones | text-only | no mechanics |
 | Warlock | 19 | Epic Boon | working | level choice: epic boon |
 | Warlock | 20 | Eldritch Master | text-only | no mechanics |
 | Warlock (Archfey Patron) | 3 | Archfey Spells | working | always-prepared spells: 5 |

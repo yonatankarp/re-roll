@@ -1,3 +1,5 @@
+import { type Actor, type DndState, isDead } from "./state.ts";
+
 // The 5-foot grid. Each square costs 5 feet, diagonals too, as the SRD's grid rules allow.
 // A creature with no square, as in a save from before the grid, is within reach of everyone.
 
@@ -372,4 +374,37 @@ export function nearestOpen(
     }
   }
   return null;
+}
+
+// Where a push of so many feet straight away from `from` leaves the target, stopping at walls, creatures and the
+// map's edge. Null when it can't move.
+export function pushTo(
+  from: Square | null,
+  target: Actor,
+  feet: number,
+  state: DndState,
+): Square | null {
+  const grid = state.combat?.grid;
+  const start = target.position;
+  if (!grid || !from || !start) return null;
+  const dx = Math.sign(start.x - from.x);
+  const dy = Math.sign(start.y - from.y);
+  if (dx === 0 && dy === 0) return null;
+  const blocked = new Set([
+    ...(state.combat?.walls ?? []),
+    ...Object.values(state.actors).flatMap((item) =>
+      item.id !== target.id && item.position && !isDead(item)
+        ? [squareKey(item.position)]
+        : [],
+    ),
+  ]);
+  let at = start;
+  for (let pushed = 0; pushed < feet; pushed += 5) {
+    const next = { x: at.x + dx, y: at.y + dy };
+    const outside =
+      next.x < 0 || next.y < 0 || next.x >= grid.width || next.y >= grid.height;
+    if (outside || blocked.has(squareKey(next))) break;
+    at = next;
+  }
+  return at === start ? null : at;
 }
