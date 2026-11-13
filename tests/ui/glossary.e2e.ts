@@ -42,6 +42,7 @@ test("explains a term in a fight and opens its book section", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
   await page.getByRole("button", { name: "Begin the adventure" }).click();
+  await page.getByRole("button", { name: /^Pick a ready hero/ }).click();
   await page.getByRole("button", { name: /^Human Fighter/ }).click();
   await page
     .getByRole("button", { name: "[Perception] Check the treeline" })
@@ -60,8 +61,12 @@ test("explains a term in a fight and opens its book section", async ({
   const dodge = page.locator(".option > button", { hasText: /^Dodge/ });
   const term = dodge.locator(".term[data-term='action:dodge']");
   const pop = page.locator(".term-pop");
-  await term.hover();
-  await expect(pop).toBeVisible();
+  // A redraw under a resting pointer gives the new term no pointerover, so move off and hover again, as a player would.
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await term.hover();
+    await expect(pop).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 10_000 });
   await expect(pop.locator("h4")).toHaveText("Ducking [Made Up]");
   await expect(pop).toContainText("You bob and weave like a fixture.");
 

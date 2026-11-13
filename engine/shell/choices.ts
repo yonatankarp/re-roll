@@ -1,5 +1,6 @@
 import type { Decision } from "../kernel/events.ts";
 import type {
+  CreationChoice,
   CreationView,
   OptionGroup,
   OptionView,
@@ -86,12 +87,18 @@ export function shownChoices(parts: {
         ...creation.choices.map((item) =>
           choice("creation", item.id, item.label, item.summary ?? null),
         ),
+        ...sheetAnswers(creation)
+          .filter((answer) => offered.has(answer.id))
+          .map((answer) => choice("creation", answer.id, answer.label)),
         ...(decision.text
           ? decision.options
               .slice(0, 1)
               .map((option) => choice("creation", option.id, option.label))
           : []),
-      ]
+      ].filter(
+        (item, index, all) =>
+          all.findIndex((other) => other.id === item.id) === index,
+      )
     : [];
   return [
     ...parts.optionGroups.flatMap((group) =>
@@ -126,5 +133,37 @@ export function shownChoices(parts: {
           )
         : [],
     ),
+  ];
+}
+
+// Every answer the easy sheet's controls give: doors and their picks, groups, steppers, review and Next.
+// creation-sheet-view.ts marks those that answer a listed option, as the rest of the shell does.
+function sheetAnswers(
+  creation: CreationView,
+): { readonly id: string; readonly label: string }[] {
+  const picks = (items: readonly CreationChoice[] = []) =>
+    items.map((item) => ({ id: item.answer ?? item.id, label: item.label }));
+  return [
+    ...(creation.doors ?? []).flatMap((door) => [
+      ...(door.answer ? [{ id: door.answer, label: door.label }] : []),
+      ...picks(door.choices),
+      ...(door.question?.answers ?? []).flatMap((answer) =>
+        picks(answer.choices),
+      ),
+    ]),
+    ...(creation.groups ?? []).flatMap((group) => picks(group.choices)),
+    ...(creation.steppers?.rows ?? []).flatMap((row) => [
+      ...(row.minus ? [{ id: row.minus, label: `Lower ${row.label}` }] : []),
+      ...(row.plus ? [{ id: row.plus, label: `Raise ${row.label}` }] : []),
+    ]),
+    ...(creation.review ?? []).flatMap((row) =>
+      row.change ? [{ id: row.change, label: `Change ${row.label}` }] : [],
+    ),
+    ...creation.steps.flatMap((step) =>
+      step.answer ? [{ id: step.answer, label: step.title }] : [],
+    ),
+    ...(creation.next
+      ? [{ id: creation.next.answer, label: creation.next.label }]
+      : []),
   ];
 }

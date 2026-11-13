@@ -51,7 +51,11 @@ export function problemsOf(view: GameView): string[] {
   }
   const choices = choicesOf(view);
   const shown = new Set(choices.map((choice) => choice.id));
-  const offered = new Set(decision.options.map((option) => option.id));
+  const offered = new Set(
+    decision.options
+      .filter((option) => !option.hidden)
+      .map((option) => option.id),
+  );
   const problems: string[] = [];
   if (choices.length === 0) problems.push(`${decision.id} shows no choice`);
   else if (choices.every((choice) => choice.where === "rest")) {

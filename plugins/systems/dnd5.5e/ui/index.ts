@@ -14,6 +14,7 @@ import { coverBonus, coverFor } from "../core/sight.ts";
 import { coins } from "../core/shop.ts";
 import { shop } from "./shop.ts";
 import { creation } from "./creation.ts";
+import { sheetCreation } from "./creation-sheet.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
 import type { BoardExtra } from "./board-data.ts";
 import { dndCue } from "./cues.ts";
@@ -1113,7 +1114,9 @@ export const dndUi = {
   optionGroups,
   card,
   shop,
-  creation,
+  creation: (decision: Decision, rawState: unknown, access: ContentAccess) =>
+    sheetCreation(decision, rawState, access) ??
+    creation(decision, rawState, access),
   playerDied,
   terms: GLOSSARY_TERMS,
 };

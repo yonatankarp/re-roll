@@ -56,6 +56,8 @@ export const FRAME_KINDS = [
   "shopStep",
   "shortRestAnswer",
   "shortRestStep",
+  "sheetAnswer",
+  "sheetStep",
   "smite",
   "takeAction",
   "useAction",

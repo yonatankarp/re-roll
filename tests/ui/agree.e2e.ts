@@ -46,6 +46,19 @@ async function onPage(page: Page): Promise<string[]> {
   };
   await unfold();
   await grab();
+  // Each of the character's doors opened, and each answer to a door's question.
+  const doors = page.locator(".sheet-door:not([data-choice])");
+  for (let index = 0; index < (await doors.count()); index += 1) {
+    await doors.nth(index).click();
+    const styles = page.locator(".sheet-styles .creation-pick");
+    for (let style = 0; style < (await styles.count()); style += 1) {
+      await styles.nth(style).click();
+      await grab();
+      await page.getByRole("button", { name: "Another answer" }).click();
+    }
+    await grab();
+    await page.getByRole("button", { name: "All the ways in" }).click();
+  }
   const tabs = page.locator(".options > .tabs > .tab");
   for (let index = 0; index < (await tabs.count()); index += 1) {
     await tabs.nth(index).click();
@@ -101,6 +114,7 @@ test("the page and headless play offer the same choices", async ({ page }) => {
     expect((await agree()).every((id) => id.startsWith("creation:"))).toBe(
       true,
     );
+    await page.getByRole("button", { name: /^Pick a ready hero/ }).click();
     await page.getByRole("button", { name: /^Human Fighter/ }).click();
     await expect(page.locator(".options.story")).toBeVisible();
     const scene = await agree();

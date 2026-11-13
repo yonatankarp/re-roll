@@ -16,7 +16,14 @@ export const DecisionSchema = z.strictObject({
   actor: z.string().min(1),
   prompt: z.string(),
   options: z
-    .array(z.strictObject({ id: z.string().min(1), label: z.string().min(1) }))
+    .array(
+      z.strictObject({
+        id: z.string().min(1),
+        label: z.string().min(1),
+        // Still answerable, so older saves that chose it replay, but no longer shown.
+        hidden: z.literal(true).optional(),
+      }),
+    )
     .min(1),
   // Answering pushes this frame, with the chosen option added to its payload as "answer".
   resume: FrameSchema,

@@ -67,6 +67,12 @@ import {
   characterEffects,
   characterFrames,
 } from "./character.ts";
+import {
+  ACCEPT,
+  SHEET_KEY,
+  beginSheet,
+  sheetFrames,
+} from "./character-sheet.ts";
 import { gearEffects, gearFrames, sceneGearActions } from "./gear.ts";
 import { gearPolicy, isGearDecision } from "./policy.ts";
 import { legendaryFrames, surpriseEffects } from "./legendary.ts";
@@ -332,6 +338,8 @@ export const dnd55e = defineSystem<DndState>({
       schema: CharacterChosenPayload,
       run: ({ answer }, context: SystemContext<DndState>) => {
         if (answer === CREATE_CHARACTER) return beginCreation();
+        const sheet = beginSheet(PLAYER_ACTOR, answer, context);
+        if (sheet) return sheet;
         const pregen = lookup(context, PregenSchema, answer);
         const actor = characterActor(
           PLAYER_ACTOR,
@@ -353,6 +361,7 @@ export const dnd55e = defineSystem<DndState>({
       },
     }),
     ...characterFrames,
+    ...sheetFrames,
     ...restFrames,
     ...gearFrames,
     ...legendaryFrames,
@@ -499,11 +508,13 @@ export const dnd55e = defineSystem<DndState>({
   rests: availableRests,
   sceneActions: sceneGearActions,
   decidePolicy: (decision, context) =>
-    decision.id.startsWith(`${NS}:build:`)
-      ? buildPolicy(decision, context)
-      : isGearDecision(decision)
-        ? gearPolicy(decision, context)
-        : tacticalPolicy(decision, context),
+    decision.id.endsWith(`:build:${decision.actor}:${SHEET_KEY}`)
+      ? ACCEPT // the sheet is always a sound, recommended build
+      : decision.id.startsWith(`${NS}:build:`)
+        ? buildPolicy(decision, context)
+        : isGearDecision(decision)
+          ? gearPolicy(decision, context)
+          : tacticalPolicy(decision, context),
   // Building steps (class, scores, subclass, spells, feats) are made as a companion's are, and a rest's
   // Hit Dice and gear as a careful player would.
   tactical: (decision) =>

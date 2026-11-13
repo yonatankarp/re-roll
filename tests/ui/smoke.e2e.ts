@@ -13,6 +13,7 @@ test("starts the shipped adventure and plays a turn on the map", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
   await page.getByRole("button", { name: "Begin the adventure" }).click();
+  await page.getByRole("button", { name: /^Pick a ready hero/ }).click();
   await page.getByRole("button", { name: /^Human Fighter/ }).click();
   await page
     .getByRole("button", { name: "[Perception] Check the treeline" })
@@ -56,7 +57,8 @@ test("starts the shipped adventure and plays a turn on the map", async ({
   expect(errors).toEqual([]);
 });
 
-// Makes a character by its steps, takes one back, then asks before the story's early ending.
+// Builds a character on the sheet: a change, Undo, Next through every part, point-buy from the review,
+// a name, then asks before the story's early ending.
 test("makes a character and confirms an early ending", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -64,22 +66,50 @@ test("makes a character and confirms an early ending", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
   await page.getByRole("button", { name: "Begin the adventure" }).click();
-  await page.getByRole("button", { name: /^Create your own/ }).click();
+  await page.getByRole("button", { name: /^Build it myself/ }).click();
   const current = page.locator(".creation-steps [aria-current=step]");
+  const subtitle = page.locator(".sheet-card-subtitle");
   await expect(current).toHaveText("Species");
-  await page.getByRole("button", { name: /^Human/ }).click();
-  await expect(current).toHaveText("Class");
-  await page.getByRole("button", { name: "Back", exact: true }).click();
-  await expect(current).toHaveText("Species");
+  await expect(subtitle).toContainText("Dwarf Fighter");
+  await page.getByRole("button", { name: /^Elf/ }).click();
+  await expect(subtitle).toContainText("Elf Fighter");
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await expect(subtitle).toContainText("Dwarf Fighter");
 
-  // The first choice of every step, until the name.
-  const name = page.getByRole("textbox", { name: "Name" });
-  // The next step renders after the save, so a pick can vanish under the click; then look again.
-  const pick = page.locator(".creation-pick").first();
-  for (let picks = 0; picks < 40 && !(await name.isVisible()); picks += 1) {
-    await pick.click({ timeout: 2000 }).catch(() => undefined);
+  // Next alone makes a sound character.
+  for (const title of [
+    "Class",
+    "Background",
+    "Abilities",
+    "Skills & spells",
+    "Name",
+    "Review",
+  ]) {
+    await page.getByRole("button", { name: `Next: ${title}` }).click();
+    await expect(current).toHaveText(title);
   }
-  await name.fill("Ilyra");
+
+  await page.getByRole("button", { name: "Change Abilities" }).click();
+  await expect(current).toHaveText("Abilities");
+  await page.getByRole("button", { name: /^Point buy/ }).click();
+  await expect(page.getByText("0 of 27 points left")).toBeVisible();
+  // By keyboard: focus stays on the button pressed, so it can be pressed again.
+  const lower = page.getByRole("button", { name: "Lower Strength" });
+  await lower.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("2 of 27 points left")).toBeVisible();
+  await expect(lower).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("4 of 27 points left")).toBeVisible();
+  await expect(lower).toBeFocused();
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  // Going to another part starts at its top, with focus on its heading.
+  await expect(page.locator(".sheet-heading")).toBeFocused();
+
+  await page.getByRole("button", { name: "Change Name" }).click();
+  await page.getByRole("textbox", { name: "Name" }).fill("Ilyra");
+  await page.getByRole("button", { name: "Next: Review" }).click();
+  await expect(page.locator(".sheet-card h4")).toHaveText("Ilyra");
   await page.getByRole("button", { name: "Begin the adventure" }).click();
   await expect(page.getByText("You are playing Ilyra").first()).toBeVisible();
 

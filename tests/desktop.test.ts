@@ -289,43 +289,50 @@ describe("playing through the shell's session", () => {
     }
   });
 
-  it("makes a character step by step, with Back on Normal only while making it", async () => {
+  it("makes a character on the sheet, with Back on Normal only while making it", async () => {
     const game = newGame();
     await game.start("goblin-ambush", "creation-test", {
       difficulty: "normal",
     });
-    const pregens = game.view().creation;
-    expect(pregens?.choices.at(-1)?.label).toBe("Create your own");
-    expect(pregens?.choices[0]?.detail).toContain("STR");
-    await chooseCharacter(game, "Create a new character");
+    const doors = game.view().creation?.doors ?? [];
+    expect(doors.map((door) => door.id)).toEqual(["ready", "quiz", "build"]);
+    const ready = doors[0]?.choices ?? [];
+    expect(ready[0]?.detail).toContain("STR"); // the adventure's own heroes come first
+    expect(ready.map((choice) => choice.label)).toContain("Edric Quill");
+    expect(
+      doors[1]?.question?.answers.find((item) => item.label === "With magic")
+        ?.choices[0]?.label,
+    ).toBe("Edric Quill");
+    await game.answer("build");
 
     const species = game.view().creation;
     expect(
       species?.steps.find((item) => item.status === "current")?.title,
     ).toBe("Species");
-    expect(species?.choices.map((choice) => choice.label)).toContain("Elf");
-    expect(game.view().canUndo).toBe(true); // back to the pregens
-    await chooseCharacter(game, "Elf");
-    const classes = game.view().creation;
-    expect(classes?.steps.map((item) => item.status)).toEqual([
-      "done",
-      "current",
-      "todo",
-      "todo",
-      "todo",
-      "todo",
-    ]);
-    expect(classes?.summary).toEqual([{ label: "Species", value: "Elf" }]);
-    expect(
-      classes?.choices.find((choice) => choice.label === "Wizard")?.summary,
-    ).toBe("d6 hit die · Intelligence · Spells");
+    const elf = species?.groups?.[0]?.choices.find(
+      (choice) => choice.label === "Elf",
+    );
+    expect(elf?.answer).toBe("species:srd52:species/elf");
+    expect(species?.card?.subtitle).toMatch(/^Level 1 Dwarf Fighter/);
+    expect(game.view().canUndo).toBe(true); // back to the doors
+    await game.answer(elf?.answer ?? "");
+    expect(game.view().creation?.card?.subtitle).toMatch(
+      /^Level 1 Elf Fighter/,
+    );
 
     await game.undo();
-    expect(game.view().decision?.id).toBe("dnd5.5e:build:player:species");
+    expect(game.view().creation?.card?.subtitle).toMatch(
+      /^Level 1 Dwarf Fighter/,
+    );
 
-    while (!game.view().decision?.text) await firstOption(game);
-    expect(game.view().creation?.choices).toEqual([]);
-    await game.answer("Ilyra");
+    while (game.view().creation?.next?.answer === "next") {
+      await game.answer("next");
+    }
+    expect(game.view().creation?.review?.map((row) => row.label)).toContain(
+      "Abilities",
+    );
+    await game.answer("name:Ilyra");
+    await game.answer("accept");
     expect(game.view().sheets[0]?.title).toBe("Ilyra");
     expect(game.view().canUndo).toBe(false); // the story has begun
   });

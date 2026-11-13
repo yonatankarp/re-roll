@@ -1034,8 +1034,10 @@ describe("playing a D&D adventure", () => {
     const started = startRun(run, "choose");
     expect(started.pending?.id).toBe("dnd5.5e:chooseCharacter");
     expect(started.state.story.scene).toBeNull();
-    expect(started.pending?.options).toHaveLength(5);
-    expect(started.pending?.options.at(-1)?.id).toBe("create");
+    // Four pregens, making one step by step, a ready hero per class and building one on the sheet.
+    expect(started.pending?.options).toHaveLength(10);
+    expect(started.pending?.options[4]?.id).toBe("create");
+    expect(started.pending?.options.at(-1)?.id).toBe("build");
 
     const chosen = step(run, started.state, {
       kind: "answer",

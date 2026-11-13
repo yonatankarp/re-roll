@@ -20,6 +20,7 @@ test("keeps saves in IndexedDB and moves old localStorage saves there", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
   await page.getByRole("button", { name: "Begin the adventure" }).click();
+  await page.getByRole("button", { name: /^Pick a ready hero/ }).click();
   await page.getByRole("button", { name: /^Human Fighter/ }).click();
   await expect(
     page.getByRole("button", { name: "[Perception] Check the treeline" }),

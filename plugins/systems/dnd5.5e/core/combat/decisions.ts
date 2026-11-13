@@ -20,6 +20,7 @@ import { deriveStats, lookup } from "../stats.ts";
 import { AIM_AREA, PICK } from "../targeting.ts";
 import { fleeOptions } from "../legendary.ts";
 import { PregenSchema } from "../schemas.ts";
+import { heroOptions } from "../character-sheet.ts";
 import {
   actorOf,
   canAfford,
@@ -117,11 +118,15 @@ export function nextDndDecision(
 ): Decision | null {
   const player = state.actors[PLAYER_ACTOR];
   if (player?.source.kind === "character" && player.source.build === null) {
-    const options = access
-      .contentIds()
-      .filter((id) => id.includes(":pregen/"))
-      .map((id) => ({ id, label: lookup(access, PregenSchema, id).name }));
-    options.push({ id: CREATE_CHARACTER, label: "Create a new character" });
+    const options: Decision["options"] = [
+      ...access
+        .contentIds()
+        .filter((id) => id.includes(":pregen/"))
+        .map((id) => ({ id, label: lookup(access, PregenSchema, id).name })),
+      // The old step-by-step way in, kept for saves that took it; the sheet's "Build a hero yourself" replaces it.
+      { id: CREATE_CHARACTER, label: "Create a new character", hidden: true },
+      ...heroOptions(access),
+    ];
     return {
       id: `${NS}:chooseCharacter`,
       actor: PLAYER_ACTOR,
