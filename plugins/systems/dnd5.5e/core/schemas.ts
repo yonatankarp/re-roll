@@ -682,7 +682,7 @@ export const ItemSchema = z.discriminatedUnion("type", [
 ]);
 export type Item = z.infer<typeof ItemSchema>;
 
-const AbilityScoresSchema = z.strictObject({
+export const AbilityScoresSchema = z.strictObject({
   str: z.number().int(),
   dex: z.number().int(),
   con: z.number().int(),

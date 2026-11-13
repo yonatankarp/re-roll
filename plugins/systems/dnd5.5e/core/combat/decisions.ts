@@ -20,6 +20,7 @@ import { deriveStats, lookup } from "../stats.ts";
 import { AIM_AREA, PICK } from "../targeting.ts";
 import { fleeOptions } from "../legendary.ts";
 import { PregenSchema } from "../schemas.ts";
+import { heroOptions } from "../character-sheet.ts";
 import {
   actorOf,
   canAfford,
@@ -122,6 +123,7 @@ export function nextDndDecision(
       .filter((id) => id.includes(":pregen/"))
       .map((id) => ({ id, label: lookup(access, PregenSchema, id).name }));
     options.push({ id: CREATE_CHARACTER, label: "Create a new character" });
+    options.push(...heroOptions(access));
     return {
       id: `${NS}:chooseCharacter`,
       actor: PLAYER_ACTOR,

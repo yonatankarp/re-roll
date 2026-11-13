@@ -52,7 +52,11 @@ const STEPS = [
   "Name",
 ] as const;
 
-function find<T>(access: ContentAccess, schema: z.ZodType<T>, id: string) {
+export function find<T>(
+  access: ContentAccess,
+  schema: z.ZodType<T>,
+  id: string,
+) {
   if (!access.content(id)) return null;
   try {
     return lookup(access, schema, id);
@@ -61,7 +65,10 @@ function find<T>(access: ContentAccess, schema: z.ZodType<T>, id: string) {
   }
 }
 
-function nameOf(access: ContentAccess, id: string | undefined): string | null {
+export function nameOf(
+  access: ContentAccess,
+  id: string | undefined,
+): string | null {
   if (id === undefined) return null;
   const entry = access.content(id);
   return entry && typeof entry === "object" && "name" in entry
@@ -69,15 +76,15 @@ function nameOf(access: ContentAccess, id: string | undefined): string | null {
     : null;
 }
 
-function list(items: readonly string[]): string {
+export function list(items: readonly string[]): string {
   return items.length > 0 ? items.join(", ") : "None";
 }
 
-function capital(text: string): string {
+export function capital(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-function skillName(skill: string): string {
+export function skillName(skill: string): string {
   return capital(skill.replace(/([A-Z])/g, " $1").replace(" Of ", " of "));
 }
 
@@ -95,7 +102,11 @@ function stepOf(key: string): number {
   return 4;
 }
 
-function speciesChoice(access: ContentAccess, id: string, label: string) {
+export function speciesChoice(
+  access: ContentAccess,
+  id: string,
+  label: string,
+) {
   const species = find(access, SpeciesSchema, id);
   if (!species) return { id, label };
   const traits = species.traits.flatMap((trait) => {
@@ -111,7 +122,7 @@ function speciesChoice(access: ContentAccess, id: string, label: string) {
   };
 }
 
-function classChoice(
+export function classChoice(
   access: ContentAccess,
   id: string,
   label: string,
@@ -144,7 +155,11 @@ function classChoice(
   };
 }
 
-function backgroundChoice(access: ContentAccess, id: string, label: string) {
+export function backgroundChoice(
+  access: ContentAccess,
+  id: string,
+  label: string,
+) {
   const background = find(access, BackgroundSchema, id);
   if (!background) return { id, label };
   const feat = find(access, FeatSchema, background.feat);
@@ -162,7 +177,11 @@ function backgroundChoice(access: ContentAccess, id: string, label: string) {
 }
 
 // Whatever an option names, such as a spell, a feat or a skill, with what it does.
-function contentChoice(access: ContentAccess, id: string, label: string) {
+export function contentChoice(
+  access: ContentAccess,
+  id: string,
+  label: string,
+) {
   const spell = find(access, SpellSchema, id);
   if (spell) {
     const what =
@@ -320,7 +339,10 @@ function creationSteps(draft: Draft, current: number) {
   }));
 }
 
-function pregenChoices(decision: Decision, access: ContentAccess): Choice[] {
+export function pregenChoices(
+  decision: Decision,
+  access: ContentAccess,
+): Choice[] {
   return decision.options.map((option) => {
     if (option.id === CREATE_CHARACTER) {
       return {

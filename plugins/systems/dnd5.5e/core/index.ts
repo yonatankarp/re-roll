@@ -67,6 +67,12 @@ import {
   characterEffects,
   characterFrames,
 } from "./character.ts";
+import {
+  ACCEPT,
+  SHEET_KEY,
+  beginSheet,
+  sheetFrames,
+} from "./character-sheet.ts";
 import { gearEffects, gearFrames, sceneGearActions } from "./gear.ts";
 import { legendaryFrames, surpriseEffects } from "./legendary.ts";
 import { shopEffects, shopFrames } from "./shop.ts";
@@ -325,6 +331,8 @@ export const dnd55e = defineSystem<DndState>({
       schema: CharacterChosenPayload,
       run: ({ answer }, context: SystemContext<DndState>) => {
         if (answer === CREATE_CHARACTER) return beginCreation();
+        const sheet = beginSheet(PLAYER_ACTOR, answer, context);
+        if (sheet) return sheet;
         const pregen = lookup(context, PregenSchema, answer);
         const actor = characterActor(
           PLAYER_ACTOR,
@@ -346,6 +354,7 @@ export const dnd55e = defineSystem<DndState>({
       },
     }),
     ...characterFrames,
+    ...sheetFrames,
     ...restFrames,
     ...gearFrames,
     ...legendaryFrames,
@@ -487,9 +496,11 @@ export const dnd55e = defineSystem<DndState>({
   rests: availableRests,
   sceneActions: sceneGearActions,
   decidePolicy: (decision, context) =>
-    decision.id.startsWith(`${NS}:build:`)
-      ? buildPolicy(decision, context)
-      : tacticalPolicy(decision, context),
+    decision.id.endsWith(`:build:${decision.actor}:${SHEET_KEY}`)
+      ? ACCEPT // the sheet is always a sound, recommended build
+      : decision.id.startsWith(`${NS}:build:`)
+        ? buildPolicy(decision, context)
+        : tacticalPolicy(decision, context),
   // Building steps (class, scores, subclass, spells, feats) are made as a companion's are.
   tactical: (decision) =>
     /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave|build):/.test(

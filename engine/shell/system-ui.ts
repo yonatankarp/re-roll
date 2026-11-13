@@ -55,6 +55,61 @@ export interface CreationChoice {
   readonly summary?: string; // a short line under the name, such as "d12 hit die · Strength"
   readonly detail?: string; // opened in a drawer
   readonly looks?: readonly string[]; // names to find its picture by, best first
+  readonly answer?: string; // what choosing it answers, when that isn't its id, such as a typed change
+  readonly selected?: boolean; // what the character has now
+  readonly recommended?: boolean; // the pick the system suggests
+}
+
+// Several picks on one page, such as a class's skills and a feat's spells.
+export interface CreationGroup {
+  readonly title: string;
+  readonly note?: string; // such as "Choose 2"
+  readonly layout: "cards" | "chips";
+  readonly choices: readonly CreationChoice[];
+}
+
+// A number changed in small steps, such as an ability score. minus and plus are the answers, absent when not allowed.
+export interface CreationStepper {
+  readonly label: string;
+  readonly value: string;
+  readonly note?: string;
+  readonly term?: string; // a glossary term it is about
+  readonly minus?: string;
+  readonly plus?: string;
+}
+
+// A way in, before anything is chosen: a door that answers at once, opens a list, or asks a question first.
+export interface CreationDoor {
+  readonly id: string;
+  readonly label: string;
+  readonly summary: string;
+  readonly looks?: readonly string[];
+  readonly answer?: string;
+  readonly choices?: readonly CreationChoice[];
+  readonly question?: {
+    readonly prompt: string;
+    readonly answers: readonly {
+      readonly label: string;
+      readonly summary: string;
+      readonly choices: readonly CreationChoice[];
+    }[];
+  };
+}
+
+// The character as it stands, kept in view while it changes.
+export interface CreationCard {
+  readonly title: string;
+  readonly subtitle: string;
+  readonly looks: readonly string[];
+  readonly numbers: readonly CreationStat[];
+  readonly abilities: readonly CreationStat[];
+  readonly strengths: readonly string[]; // what it is good at, in a few words each
+}
+
+export interface CreationStat {
+  readonly label: string;
+  readonly value: string;
+  readonly term?: string; // a glossary term it is about
 }
 
 // Making or levelling up a character, shown in place of the decision's choices, one step at a time.
@@ -62,11 +117,33 @@ export interface CreationView {
   readonly steps: readonly {
     readonly title: string;
     readonly status: "done" | "current" | "todo";
+    readonly answer?: string; // going straight to that step
   }[];
   readonly heading: string; // such as "Species"
   readonly layout: "cards" | "list"; // cards for pictures and blurbs, a list for short picks such as a skill
   readonly choices: readonly CreationChoice[];
   readonly summary: readonly SheetRow[]; // the character so far
+  readonly intro?: string;
+  readonly doors?: readonly CreationDoor[];
+  readonly groups?: readonly CreationGroup[];
+  readonly steppers?: {
+    readonly title: string;
+    readonly note: string;
+    readonly rows: readonly CreationStepper[];
+  };
+  readonly name?: {
+    readonly label: string;
+    readonly value: string;
+    readonly prefix: string; // the answer is the prefix and the typed name
+    readonly maxLength: number;
+  };
+  readonly card?: CreationCard;
+  readonly review?: readonly {
+    readonly label: string;
+    readonly value: string;
+    readonly change?: string; // the answer that goes back to change it
+  }[];
+  readonly next?: { readonly label: string; readonly answer: string };
 }
 
 export interface SheetSection {

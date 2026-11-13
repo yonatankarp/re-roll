@@ -2,6 +2,7 @@ import type { GamePage } from "./game-page.ts";
 import type { GameView } from "./session.ts";
 import type { CreationChoice, CreationView } from "./system-ui.ts";
 import { button, el, picture } from "./dom.ts";
+import { drawCreationSheet } from "./creation-sheet-view.ts";
 
 // Making a character, one step at a time: where you are among the steps, the choices as cards with
 // details in a drawer, what the character is so far, and Back. Drawn in place of the choices.
@@ -10,6 +11,10 @@ export function drawCreation(
   view: GameView,
   creation: CreationView,
 ): void {
+  if (creation.doors || creation.card) {
+    drawCreationSheet(page, view, creation);
+    return;
+  }
   const { ctx } = page;
   // The page is inert while it waits, so focus is handed over once it's done: to the name field, or the first card.
   const focusStep = (): void => {

@@ -18,6 +18,7 @@ import {
   type Ability,
   AbilitySchema,
   type AbilityScores,
+  AbilityScoresSchema,
   BackgroundSchema,
   type CharacterBuild,
   CharacterBuildSchema,
@@ -72,7 +73,7 @@ export function levelForXp(xp: number): number {
 }
 
 // A half-built character travels in the frames on the stack, so a save resumes mid-creation with no extra state.
-const DraftSchema = z.strictObject({
+export const DraftSchema = z.strictObject({
   classId: ContentIdSchema.optional(),
   speciesId: ContentIdSchema.optional(),
   backgroundId: ContentIdSchema.optional(),
@@ -80,25 +81,27 @@ const DraftSchema = z.strictObject({
   increase: z.string().optional(),
   picks: z.record(z.string(), z.array(z.string())), // choice id to what was picked so far
   name: z.string().optional(), // what the player called the character, asked last
+  base: AbilityScoresSchema.optional(), // set scores, such as point-buy, in place of the placed standard array
 });
-type Draft = z.infer<typeof DraftSchema>;
+export type Draft = z.infer<typeof DraftSchema>;
 
 interface Option {
   readonly id: string;
   readonly label: string;
 }
 
-interface Step {
+export interface Step {
   readonly key: string;
   readonly prompt: string;
   readonly options: readonly Option[];
   readonly prefer?: readonly string[]; // companions pick among these when any are on offer
   readonly text?: { readonly label: string; readonly maxLength: number }; // the answer may be typed
+  readonly slot?: string; // the picks it writes to, for a class or origin choice
   readonly apply: (draft: Draft, answer: string) => Draft;
 }
 
-const NAME_LENGTH = 40;
-const NameSchema = z
+export const NAME_LENGTH = 40;
+export const NameSchema = z
   .string()
   .trim()
   .min(1)
@@ -110,7 +113,7 @@ const NameSchema = z
 const SPECIES_FIRST = 2;
 
 // When two loaded books print the same name, the first in content id order wins: the run's precedence.
-function namedContent<T extends { readonly name: string }>(
+export function namedContent<T extends { readonly name: string }>(
   access: ContentAccess,
   kind: string,
   schema: z.ZodType<T>,
@@ -128,7 +131,7 @@ function namedContent<T extends { readonly name: string }>(
 }
 
 // The score a companion should raise first: the class's own, then staying alive.
-function abilityPriority(classDef: ClassDef): readonly Ability[] {
+export function abilityPriority(classDef: ClassDef): readonly Ability[] {
   return [
     ...new Set<Ability>([
       ...classDef.primaryAbilities,
@@ -143,7 +146,7 @@ function abilityPriority(classDef: ClassDef): readonly Ability[] {
   ];
 }
 
-function encodeIncrease(
+export function encodeIncrease(
   increase: readonly (readonly [Ability, number])[],
 ): string {
   return increase
@@ -166,7 +169,7 @@ function describeIncrease(text: string): string {
     .join(", ");
 }
 
-function backgroundIncreaseStep(
+export function backgroundIncreaseStep(
   abilities: readonly Ability[],
   classDef: ClassDef,
 ): Step {
@@ -241,7 +244,11 @@ function originStep(
   const classDef = lookup(access, ClassSchema, draft.classId);
   const score = STANDARD_ARRAY[draft.scores.length];
   // The last score has only one place left to go.
-  if (score !== undefined && draft.scores.length < ABILITIES.length - 1) {
+  if (
+    draft.base === undefined &&
+    score !== undefined &&
+    draft.scores.length < ABILITIES.length - 1
+  ) {
     const free = ABILITIES.filter((item) => !draft.scores.includes(item));
     const [best] = abilityPriority(classDef).filter((item) =>
       free.includes(item),
@@ -645,6 +652,7 @@ function abilityImprovementStep(
       label: describeIncrease(id),
     })),
     ...(best ? { prefer: [encodeIncrease([[best, 2]])] } : {}),
+    slot: key,
     apply: (draft, answer) => ({
       ...draft,
       picks: { ...draft.picks, [key]: [answer] },
@@ -675,6 +683,7 @@ function plusOneStep(
       return { id, label: describeIncrease(id) };
     }),
     ...(best ? { prefer: [encodeIncrease([[best, 1]])] } : {}),
+    slot: key,
     apply: (draft, answer) => ({
       ...draft,
       picks: { ...draft.picks, [key]: [answer] },
@@ -714,7 +723,7 @@ function stepChoices(
   return [...choices, ...featChoices, ...originChoices(draft, base, access)];
 }
 
-function classStep(
+export function classStep(
   draft: Draft,
   base: CharacterBuild | null,
   access: ContentAccess,
@@ -742,6 +751,7 @@ function classStep(
               : `Choose ${what}.`,
           options,
           ...(prefer ? { prefer } : {}),
+          slot: choice.id,
           apply: (current, answer) => ({
             ...current,
             picks: { ...current.picks, [choice.id]: [...picked, answer] },
@@ -830,11 +840,11 @@ function answersOf(
 
 const LevelEntrySchema = CharacterBuildSchema.shape.levels.element;
 
-function placeholderEntry(classDef: ClassDef): LevelEntry {
+export function placeholderEntry(classDef: ClassDef): LevelEntry {
   return { classId: classDef.id, hitPointGain: 1, answers: [] };
 }
 
-function levelEntry(
+export function levelEntry(
   draft: Draft,
   base: CharacterBuild | null,
   access: ContentAccess,
@@ -853,15 +863,17 @@ function levelEntry(
   });
 }
 
-function originBuild(draft: Draft, entry: LevelEntry): CharacterBuild {
+export function originBuild(draft: Draft, entry: LevelEntry): CharacterBuild {
   const order = [
     ...draft.scores,
     ...ABILITIES.filter((item) => !draft.scores.includes(item)),
   ];
   return CharacterBuildSchema.parse({
-    baseAbilities: Object.fromEntries(
-      order.map((ability, index) => [ability, STANDARD_ARRAY[index]]),
-    ),
+    baseAbilities:
+      draft.base ??
+      Object.fromEntries(
+        order.map((ability, index) => [ability, STANDARD_ARRAY[index]]),
+      ),
     speciesId: draft.speciesId,
     backgroundId: draft.backgroundId,
     backgroundIncrease: parseIncrease(draft.increase ?? ""),
@@ -955,7 +967,7 @@ function pickStep(step: Step, dice: Dice): string {
   return option.id;
 }
 
-function finishedCharacter(
+export function finishedCharacter(
   id: string,
   name: string,
   draft: Draft,

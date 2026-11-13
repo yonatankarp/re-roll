@@ -1130,7 +1130,19 @@ export function createGame({
         ? (ui.creation?.(decision, state.system, run) ?? null)
         : null;
       const creationArt: Record<string, string> = {};
-      for (const choice of creation?.choices ?? []) {
+      // Every picture the creation screen can show, by the id it is drawn under; the live card is "card".
+      const pictured = [
+        ...(creation?.choices ?? []),
+        ...(creation?.groups ?? []).flatMap((group) => group.choices),
+        ...(creation?.doors ?? []).flatMap((door) => [
+          door,
+          ...(door.choices ?? []),
+          ...(door.question?.answers ?? []).flatMap((answer) => answer.choices),
+        ]),
+        ...(creation?.card ? [{ id: "card", looks: creation.card.looks }] : []),
+      ];
+      for (const choice of pictured) {
+        if (creationArt[choice.id]) continue;
         for (const look of choice.looks ?? []) {
           const options = tokenArt.get(artKey(look)) ?? [];
           const chosen = options[stableIndex(choice.id, options.length)];
