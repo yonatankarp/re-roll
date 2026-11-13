@@ -16,8 +16,13 @@ import {
   type Actor,
   type DndState,
   NS,
+  applyDndEvent,
   freshActor,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
+import {
+  canAfford,
+  findAction,
+} from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { deriveStats, lookup } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { weaponDamageDice } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
 
@@ -66,6 +71,10 @@ const FIXTURES = [
     freeCast: true,
   }),
   trait("sturdy", [{ kind: "saveProficiency", increased: true }]),
+  trait("blessed", [], {
+    spells: { 1: ["srd52:spell/bless"] },
+    freeCast: true,
+  }),
   {
     id: "test:feat/sturdy",
     name: "Sturdy",
@@ -292,6 +301,43 @@ describe("shared feat and species mechanics", () => {
       );
     expect(picked(true)).toBeDefined();
     expect(picked(false)).toBeUndefined();
+  });
+
+  it("casts a free spell through a turn, spending its own use, until a Long Rest brings it back", async () => {
+    const run = await testRun();
+    const free = "spell:srd52:spell/bless:free";
+    const cleric = hero(["blessed"]);
+    const context = contextOf(run, [cleric], scripted([]).dice);
+    const result = run.system.frames[`${NS}:takeAction`]?.run(
+      { actor: PLAYER_ACTOR, answer: `${free}|${PLAYER_ACTOR}` },
+      context,
+    );
+    const events = result?.events ?? [];
+    const spent = events.flatMap((event) =>
+      event.kind === `${NS}:resourceSpent`
+        ? [(event.payload as { resource: string }).resource]
+        : [],
+    );
+    expect(spent).toContain("free:srd52:spell/bless");
+    expect(spent.some((id) => id.startsWith("slot:"))).toBe(false);
+    const after = events.reduce(applyDndEvent, context.state);
+    const caster = after.actors[PLAYER_ACTOR];
+    if (!caster) throw new Error("No caster");
+    expect(caster.concentratingOn).toBe(free);
+    const action = findAction(caster, free, { ...context, state: after });
+    expect(canAfford(action, caster, deriveStats(caster, run))).toBe(false);
+    run.system.frames[`${NS}:finishTurn`]?.run(
+      {},
+      { ...context, state: after },
+    );
+    const rested = (
+      restFrames[`${NS}:finishRest`].run(
+        { rest: "long" },
+        { ...context, state: after },
+      ).events ?? []
+    ).reduce(applyDndEvent, after).actors[PLAYER_ACTOR];
+    if (!rested) throw new Error("No caster");
+    expect(rested.resourcesSpent["free:srd52:spell/bless"]).toBeUndefined();
   });
 
   it("makes the save a feat raised proficient, as Resilient does", async () => {
