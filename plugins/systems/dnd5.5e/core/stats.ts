@@ -385,8 +385,21 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const freeSpells = new Set<string>(); // also cast once per Long Rest without a slot
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
   const featureIds = new Set<string>(species.traits);
-  const feat = lookup(access, FeatSchema, background.feat);
-  for (const id of feat.grants) featureIds.add(id);
+  // A feat picked in place of the background's, as a Dark Gift for Haunted One, is in the first level's answers.
+  const replaced =
+    background.featOr !== undefined &&
+    (build.levels[0]?.answers ?? []).some(
+      (answer) =>
+        answer.kind === "feats" &&
+        answer.values.some(
+          (id) => lookup(access, FeatSchema, id).category === background.featOr,
+        ),
+    );
+  if (!replaced) {
+    for (const id of lookup(access, FeatSchema, background.feat).grants) {
+      featureIds.add(id);
+    }
+  }
   let scaling: Record<string, number> = {};
   let slots: readonly number[] = [];
   const casters: Record<string, Caster> = {};

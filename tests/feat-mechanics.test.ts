@@ -95,6 +95,42 @@ const FIXTURES = [
     category: "origin",
     text: "Test.",
   })),
+  ...(
+    [
+      ["test:feat/gift", "Gift", "darkGift", { grants: ["test:feature/luck"] }],
+      ["test:feat/kin", "Kin", "racial", { requires: ["test:species/plain"] }],
+      ["test:feat/far", "Far", "racial", { requires: ["test:species/far"] }],
+      ["test:feat/mark", "Mark", "dragonmark", {}],
+      ["test:feat/other-mark", "Other Mark", "dragonmark", {}],
+      [
+        "test:feat/greater",
+        "Greater",
+        "general",
+        { requires: ["test:feat/mark"] },
+      ],
+      [
+        "test:feat/steady",
+        "Steady",
+        "origin",
+        { grants: ["test:feature/savage"] },
+      ],
+    ] as const
+  ).map(([id, name, category, extra]) => ({
+    id,
+    name,
+    category,
+    text: "Test.",
+    ...extra,
+  })),
+  {
+    id: "test:background/haunted",
+    name: "Haunted",
+    abilities: ["str", "dex", "con"],
+    feat: "test:feat/steady",
+    skills: ["athletics", "survival"],
+    tool: "Test Tools",
+    featOr: "darkGift",
+  },
   {
     id: "test:background/plain",
     name: "Plain",
@@ -119,12 +155,17 @@ type Answers = CharacterBuild["levels"][number]["answers"];
 
 function hero(
   traits: readonly string[],
-  { level = 1, answers = [] as Answers, id = PLAYER_ACTOR } = {},
+  {
+    level = 1,
+    answers = [] as Answers,
+    id = PLAYER_ACTOR,
+    background = "test:background/plain",
+  } = {},
 ): Actor {
   const build: CharacterBuild = {
     baseAbilities: { str: 15, dex: 14, con: 13, int: 8, wis: 12, cha: 10 },
     speciesId: "test:species/plain",
-    backgroundId: "test:background/plain",
+    backgroundId: background,
     backgroundIncrease: { str: 2, con: 1 },
     levels: Array.from({ length: level }, (_, index) => ({
       classId: "srd52:class/fighter",
@@ -369,6 +410,57 @@ describe("shared feat and species mechanics", () => {
     const ids = options.map((item) => item.id);
     expect(ids).toContain("test:feat/initiate-cleric");
     expect(ids).not.toContain("test:feat/initiate");
+  });
+
+  it("offers racial feats to their species and one dragonmark at a general feat choice", async () => {
+    const run = await testRun();
+    const offered = (feats: readonly string[]) =>
+      choiceOptions(
+        { kind: "feat", id: "feat", category: "general" },
+        { picks: {} } as never,
+        (
+          hero([], {
+            level: 4,
+            answers: [{ kind: "feats", values: [...feats] }],
+          }).source as { build: CharacterBuild }
+        ).build,
+        lookup(run, ClassSchema, "srd52:class/fighter"),
+        run,
+      ).options.map((item) => item.id);
+    expect(offered([])).toEqual(
+      expect.arrayContaining(["test:feat/kin", "test:feat/mark"]),
+    );
+    expect(offered([])).not.toContain("test:feat/far");
+    expect(offered([])).not.toContain("test:feat/greater");
+    const marked = offered(["test:feat/mark"]);
+    expect(marked).toContain("test:feat/greater");
+    expect(marked).not.toContain("test:feat/other-mark");
+  });
+
+  it("lets a background's feat give way to one of the category it names, defaulting to its own", async () => {
+    const run = await testRun();
+    const { options, prefer } = choiceOptions(
+      { kind: "feat", id: "background-feat", category: "darkGift" },
+      { picks: {}, backgroundId: "test:background/haunted" } as never,
+      null,
+      lookup(run, ClassSchema, "srd52:class/fighter"),
+      run,
+    );
+    expect(options.map((item) => item.id).slice(0, 2)).toEqual([
+      "test:feat/steady",
+      "test:feat/gift",
+    ]);
+    expect(prefer).toEqual(["test:feat/steady"]);
+    const features = (answers: Answers) =>
+      deriveStats(
+        hero([], { background: "test:background/haunted", answers }),
+        run,
+      ).features;
+    const gifted = features([{ kind: "feats", values: ["test:feat/gift"] }]);
+    expect(gifted).toContain("test:feature/luck");
+    expect(gifted).not.toContain("test:feature/savage");
+    // A save from before the choice existed has no answer and keeps the background's own feat.
+    expect(features([])).toContain("test:feature/savage");
   });
 });
 

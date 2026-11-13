@@ -530,7 +530,13 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("feat"),
     id: z.string(),
-    category: z.enum(["origin", "general", "fightingStyle", "epicBoon"]),
+    category: z.enum([
+      "origin",
+      "general",
+      "fightingStyle",
+      "epicBoon",
+      "darkGift",
+    ]),
   }),
   z.strictObject({
     kind: z.literal("skills"),
@@ -615,6 +621,8 @@ export const BackgroundSchema = ContentEntrySchema.extend({
   feat: ContentIdSchema,
   skills: z.array(SkillSchema).length(2),
   tool: z.string().min(1),
+  // Its feat, or one of this category instead, as with "Survivor or a Dark Gift feat of your choice".
+  featOr: z.literal("darkGift").optional(),
 }).strict();
 export type Background = z.infer<typeof BackgroundSchema>;
 
@@ -633,6 +641,8 @@ export const FeatSchema = ContentEntrySchema.extend({
   grants: z.array(ContentIdSchema).default([]),
   choices: z.array(ChoiceDefSchema).default([]), // asked when the feat is taken
   abilityIncrease: z.array(AbilitySchema).min(1).optional(), // its Ability Score Increase: +1 to one of these
+  // Its prerequisite, met by any of these: the species, a trait or lineage it has, or a feat taken.
+  requires: z.array(ContentIdSchema).min(1).optional(),
 }).strict();
 export type Feat = z.infer<typeof FeatSchema>;
 
