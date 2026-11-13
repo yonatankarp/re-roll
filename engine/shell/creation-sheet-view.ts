@@ -34,36 +34,47 @@ export function drawCreationSheet(
     opened = { decision: decisionId, door: null, answer: null };
   }
   const listed = new Set(view.decision?.options.map((option) => option.id));
-  const tag = (node: HTMLElement, answer: string): HTMLElement => {
+  // focus is a key that stays the same when the answer changes, such as "minus:Strength", so focus can return.
+  const tag = (
+    node: HTMLElement,
+    answer: string,
+    focus?: string,
+  ): HTMLElement => {
     node.dataset.answer = answer;
+    if (focus !== undefined) node.dataset.focus = focus;
     // Buttons that answer one of the decision's listed options are marked as the rest of the shell marks them.
     if (listed.has(answer)) node.dataset.choice = answer;
     return node;
   };
-  // Focus comes back to the control that was pressed, so a keyboard player can press + again.
-  const refocus = (answer: string | null): void => {
-    const again =
-      answer === null
-        ? null
-        : page.options.querySelector<HTMLElement>(
-            `[data-answer="${CSS.escape(answer)}"]:not(:disabled)`,
-          );
+  // Focus comes back to the control that was pressed, so a keyboard player can press + again; with nothing to
+  // come back to, such as after Next, it goes to the heading at the top.
+  const refocus = (keys: readonly string[]): void => {
+    const again = keys
+      .map((key) =>
+        page.options.querySelector<HTMLElement>(
+          `[data-focus="${CSS.escape(key)}"]:not(:disabled)`,
+        ),
+      )
+      .find((node) => node !== null);
     ctx.focusNext =
       again ??
       page.options.querySelector<HTMLElement>(".sheet-heading") ??
       ctx.focusNext;
   };
-  const answer = (...answers: readonly string[]): void => {
+  const answer = (
+    focus: readonly string[],
+    ...answers: readonly string[]
+  ): void => {
     ctx.act(async () => {
       for (const id of answers) await ctx.game.answer(id);
       page.draw();
       page.flashSaved();
-      refocus(answers.at(-1) ?? null);
+      refocus(focus);
     });
   };
   const redraw = (): void => {
     drawCreationSheet(page, view, creation);
-    refocus(null);
+    refocus([]);
     const focus = ctx.focusNext;
     if (focus instanceof HTMLElement && focus.isConnected) focus.focus();
   };
@@ -131,7 +142,7 @@ export function drawCreationSheet(
       ...(choice.summary ? [el("span", { text: choice.summary })] : []),
       ...badge(choice),
     );
-    tag(pick, choice.answer ?? choice.id);
+    tag(pick, choice.answer ?? choice.id, `pick:${choice.id}`);
     const item = el(
       "li",
       { class: "creation-card" },
@@ -147,7 +158,7 @@ export function drawCreationSheet(
       { class: "creation-choices cards" },
       ...choices.map((choice, index) =>
         pickCard(choice, index, () => {
-          answer(choice.answer ?? choice.id);
+          answer([`pick:${choice.id}`], choice.answer ?? choice.id);
         }),
       ),
     );
@@ -162,7 +173,7 @@ export function drawCreationSheet(
         ctx.act(async () => {
           await ctx.game.undo();
           page.draw();
-          refocus(null);
+          refocus([]);
         });
       })
     : null;
@@ -194,7 +205,7 @@ export function drawCreationSheet(
           ...doors.map((item, index) => {
             const pick = button("", () => {
               if (item.answer !== undefined) {
-                answer(item.answer);
+                answer([], item.answer);
                 return;
               }
               opened = { ...opened, door: item.id, answer: null };
@@ -270,7 +281,7 @@ export function drawCreationSheet(
           item.append(el("span", { text: step.title }));
         } else if (step.answer !== undefined) {
           const go = button(step.title, () => {
-            if (step.answer !== undefined) answer(step.answer);
+            if (step.answer !== undefined) answer([], step.answer);
           });
           item.append(tag(go, step.answer));
         } else {
@@ -302,8 +313,8 @@ export function drawCreationSheet(
         // A name typed but not yet saved goes with Next.
         const name = typed?.value.trim();
         if (sheet.name && name && name !== sheet.name.value) {
-          answer(`${sheet.name.prefix}${name}`, id);
-        } else answer(id);
+          answer([], `${sheet.name.prefix}${name}`, id);
+        } else answer([], id);
       });
       go.className = "begin sheet-next";
       main.append(tag(go, id));
@@ -328,7 +339,9 @@ export function drawCreationSheet(
             { class: "sheet-chips" },
             ...item.choices.map((choice) => {
               const chip = button("", () => {
-                if (!choice.selected) answer(choice.answer ?? choice.id);
+                if (!choice.selected) {
+                  answer([`chip:${choice.id}`], choice.answer ?? choice.id);
+                }
               });
               chip.className = "sheet-chip";
               chip.setAttribute(
@@ -342,7 +355,7 @@ export function drawCreationSheet(
                   : []),
                 ...badge(choice),
               );
-              tag(chip, choice.answer ?? choice.id);
+              tag(chip, choice.answer ?? choice.id, `chip:${choice.id}`);
               return el("li", {}, chip, ...details(choice, "sheet-chip-info"));
             }),
           );
@@ -386,13 +399,20 @@ export function drawCreationSheet(
             id: string | undefined,
             verb: string,
           ) => {
+            // Back to this button, or to the row's other one when this reaches its limit.
+            const own = `${verb}:${row.label}`;
+            const keys = [
+              own,
+              `${verb === "Lower" ? "Raise" : "Lower"}:${row.label}`,
+            ];
             const control = button(sign, () => {
-              if (id !== undefined) answer(id);
+              if (id !== undefined) answer(keys, id);
             });
             control.className = "sheet-step";
             control.setAttribute("aria-label", `${verb} ${row.label}`);
             control.disabled = id === undefined;
             if (id !== undefined) tag(control, id);
+            control.dataset.focus = own;
             return control;
           };
           const label = el("span", {
@@ -436,7 +456,7 @@ export function drawCreationSheet(
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const name = input.value.trim();
-      if (name && name !== item.value) answer(`${item.prefix}${name}`);
+      if (name && name !== item.value) answer([], `${item.prefix}${name}`);
     });
     return form;
   }
@@ -452,7 +472,7 @@ export function drawCreationSheet(
             : [
                 tag(
                   button("Change", () => {
-                    if (row.change !== undefined) answer(row.change);
+                    if (row.change !== undefined) answer([], row.change);
                   }),
                   row.change,
                 ),

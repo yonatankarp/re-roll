@@ -93,9 +93,18 @@ test("makes a character and confirms an early ending", async ({ page }) => {
   await expect(current).toHaveText("Abilities");
   await page.getByRole("button", { name: /^Point buy/ }).click();
   await expect(page.getByText("0 of 27 points left")).toBeVisible();
-  await page.getByRole("button", { name: "Lower Strength" }).click();
+  // By keyboard: focus stays on the button pressed, so it can be pressed again.
+  const lower = page.getByRole("button", { name: "Lower Strength" });
+  await lower.focus();
+  await page.keyboard.press("Enter");
   await expect(page.getByText("2 of 27 points left")).toBeVisible();
+  await expect(lower).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText("4 of 27 points left")).toBeVisible();
+  await expect(lower).toBeFocused();
   await page.getByRole("button", { name: "Review", exact: true }).click();
+  // Going to another part starts at its top, with focus on its heading.
+  await expect(page.locator(".sheet-heading")).toBeFocused();
 
   await page.getByRole("button", { name: "Change Name" }).click();
   await page.getByRole("textbox", { name: "Name" }).fill("Ilyra");

@@ -191,7 +191,8 @@ export function contentChoice(
     return {
       id,
       label: label.replace(/ \(level \d\)/, ""), // the summary says the level
-      summary: `${what} · ${spell.castingTime} · ${spell.range}`,
+      // A reaction's trigger stays in the drawer, so the line stays short.
+      summary: `${what} · ${spell.castingTime.split(",")[0] ?? ""} · ${spell.range}`,
       detail: spell.text,
     };
   }

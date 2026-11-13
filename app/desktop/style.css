@@ -2289,7 +2289,7 @@ button:active {
 
   .sheet-card {
     position: sticky;
-    top: 8px;
+    top: 68px; /* under the top bar */
   }
 }
 
@@ -2341,7 +2341,19 @@ button:active {
     font-size: 0.85rem;
   }
 
+  .sheet-card {
+    position: sticky;
+    top: 44px; /* under the top bar */
+    z-index: 1;
+  }
+
   .sheet-strengths {
+    padding-left: 0;
+    list-style: none;
+  }
+
+  /* Only the pitch, what the hero is good at, fits the strip. */
+  .sheet-strengths li:not(:first-child) {
     display: none;
   }
 
