@@ -50,6 +50,45 @@ const FIXTURES = [
   trait("defy-death", [{ kind: "deathSaveAdvantage" }]),
   trait("great-weapon", [{ kind: "greatWeaponFighting" }]),
   trait("adept", [{ kind: "energyMastery", damage: "fire" }]),
+  trait("overcome", [
+    {
+      kind: "overcomeResistance",
+      damage: ["bludgeoning", "piercing", "slashing"],
+    },
+  ]),
+  trait("slashproof", [
+    { kind: "modifier", modifier: { kind: "resistance", damage: "slashing" } },
+  ]),
+  trait("armored", [
+    {
+      kind: "armoredReduction",
+      armor: "heavy",
+      damage: ["bludgeoning", "piercing", "slashing"],
+      amount: { add: [{ kind: "proficiency" }] },
+    },
+  ]),
+  trait("hamstring", [
+    {
+      kind: "damageRider",
+      damage: "slashing",
+      oncePerTurn: true,
+      effects: [
+        {
+          kind: "modifier",
+          duration: { until: "yourNextTurnStart" },
+          modifier: {
+            kind: "bonus",
+            to: "speed",
+            amount: { bonus: { base: 10 } },
+            subtract: true,
+          },
+        },
+      ],
+    },
+  ]),
+  trait("sharpshooter", [
+    { kind: "firingInMelee", attack: "weapon", bypassCover: true },
+  ]),
   trait("protector", [], {
     activations: [
       {
@@ -401,6 +440,76 @@ describe("shared feat and species mechanics", () => {
       reduceBy: 6,
     });
     expect(attack([], shield)).toMatchObject({ d20s: 1, labels: [] });
+  });
+
+  it("lessens, rides on and overcomes a weapon hit's damage, as Heavy Armor Master, Slasher and Irresistible Offense do", async () => {
+    const run = await testRun();
+    const swing = (
+      attackerTraits: readonly string[],
+      targetTraits: readonly string[],
+      armor: readonly string[] = [],
+    ) => {
+      const attacker = hero(attackerTraits);
+      const target = {
+        ...hero(targetTraits, { id: "foe" }),
+        side: "enemy" as const,
+        hp: 30,
+        inventory: [...armor],
+      };
+      const ones: Dice = { below: () => 0, roll: () => 1 };
+      const context = contextOf(run, [attacker, target], ones);
+      const events =
+        run.system.frames[`${NS}:applyHit`]?.run(
+          {
+            attacker: PLAYER_ACTOR,
+            actionId: "weapon:srd52:item/longsword",
+            target: "foe",
+            critical: false,
+            hadAdvantage: false,
+            total: 20,
+            natural: 15,
+          },
+          context,
+        ).events ?? [];
+      const after = events.reduce(applyDndEvent, context.state);
+      return {
+        damage: events.flatMap((event) =>
+          event.kind === `${NS}:damaged`
+            ? [(event.payload as { amount: number }).amount]
+            : [],
+        ),
+        speed: deriveStats(after.actors.foe ?? target, run).speed,
+      };
+    };
+    // A 1 on the d8 plus a Strength modifier of 3.
+    expect(swing([], []).damage).toEqual([4]);
+    expect(swing([], ["armored"], ["srd52:item/chain-mail"]).damage).toEqual([
+      2,
+    ]);
+    expect(swing([], ["armored"]).damage).toEqual([4]);
+    expect(swing([], ["slashproof"]).damage).toEqual([2]);
+    expect(swing(["overcome"], ["slashproof"]).damage).toEqual([4]);
+    expect(swing(["hamstring"], []).speed).toBe(swing([], []).speed - 10);
+  });
+
+  it("shoots beside an enemy without Disadvantage with Sharpshooter", async () => {
+    const run = await testRun();
+    const d20s = (traits: readonly string[]) => {
+      const archer = { ...hero(traits), inventory: ["srd52:item/shortbow"] };
+      const foe = { ...hero([], { id: "foe" }), side: "enemy" as const };
+      const { dice, counts } = scripted([15, 15]);
+      run.system.frames[`${NS}:attackRoll`]?.run(
+        {
+          attacker: PLAYER_ACTOR,
+          actionId: "weapon:srd52:item/shortbow",
+          target: "foe",
+        },
+        contextOf(run, [archer, foe], dice),
+      );
+      return counts[20];
+    };
+    expect(d20s([])).toBe(2);
+    expect(d20s(["sharpshooter"])).toBe(1);
   });
 
   it("gives Advantage on Death Saving Throws", async () => {

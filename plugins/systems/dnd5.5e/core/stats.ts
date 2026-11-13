@@ -529,6 +529,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
+  const fromFeatures = collectFeatureData(access, [...featureIds], level);
   const armorBases: number[] = [];
   const flatBonus = magic.ac;
   let shield = 0;
@@ -544,7 +545,14 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
       const dex = abilityModifier(abilities.dex);
-      const allowed = parsed.addDex ? Math.min(dex, parsed.maxDex ?? dex) : 0;
+      const maxDex = fromFeatures.passives.reduce(
+        (most, passive) =>
+          passive.kind === "armorDexMax" && passive.armor === parsed.armorType
+            ? Math.max(most, passive.max)
+            : most,
+        parsed.maxDex ?? dex,
+      );
+      const allowed = parsed.addDex ? Math.min(dex, maxDex) : 0;
       armorBases.push(parsed.base + allowed);
     } else if (item.type === "shield") {
       // Only one shield is held, and it protects only with training.
@@ -566,7 +574,6 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
-  const fromFeatures = collectFeatureData(access, [...featureIds], level);
   actions.push(...fromFeatures.actions);
   for (const spellId of fromFeatures.spells) {
     if (access.content(spellId)) knownSpells.add(spellId);
@@ -962,7 +969,7 @@ function effectBonus(actor: Actor, to: "speed" | "maxHp"): number {
     if (modifier.kind !== "bonus" || modifier.to !== to || seen.has(sourceId))
       continue;
     seen.add(sourceId);
-    total += modifier.amount.bonus?.base ?? 0;
+    total += (modifier.subtract ? -1 : 1) * (modifier.amount.bonus?.base ?? 0);
   }
   return total;
 }

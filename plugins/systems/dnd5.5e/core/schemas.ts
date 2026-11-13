@@ -473,6 +473,41 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("energyMastery"),
     damage: DamageTypeSchema,
   }),
+  // Damage of these types the bearer deals ignores Resistance, as with the Boon of Irresistible Offense.
+  z.strictObject({
+    kind: z.literal("overcomeResistance"),
+    damage: z.array(DamageTypeSchema).min(1),
+  }),
+  // Effects on a creature the bearer hits with an attack dealing this type, as Crusher or Slasher give: with
+  // `critical` only on a Critical Hit, with `oncePerTurn` once a turn.
+  z.strictObject({
+    kind: z.literal("damageRider"),
+    damage: DamageTypeSchema,
+    critical: z.boolean().default(false),
+    oncePerTurn: z.boolean().default(false),
+    effects: z.array(LeafEffectSchema).min(1),
+  }),
+  // An attack's damage of these types lessened while the bearer wears this armor, as with Heavy Armor Master.
+  z.strictObject({
+    kind: z.literal("armoredReduction"),
+    armor: z.enum(["light", "medium", "heavy"]),
+    damage: z.array(DamageTypeSchema).min(1),
+    amount: FormulaSchema,
+  }),
+  // The most Dexterity this armor adds to AC, as Medium Armor Master raises it to 3.
+  z.strictObject({
+    kind: z.literal("armorDexMax"),
+    armor: z.enum(["light", "medium", "heavy"]),
+    max: z.number().int().min(0),
+  }),
+  // Ranged attacks of this kind have no Disadvantage from an enemy within 5 feet, and with `bypassCover` ignore Half and
+  // Three-Quarters Cover, as Sharpshooter and Spell Sniper give. `crossbows` limits it to crossbows, as Crossbow Expert.
+  z.strictObject({
+    kind: z.literal("firingInMelee"),
+    attack: z.enum(["weapon", "spell"]),
+    crossbows: z.boolean().default(false),
+    bypassCover: z.boolean().default(false),
+  }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
 

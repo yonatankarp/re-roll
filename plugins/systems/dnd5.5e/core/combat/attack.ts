@@ -49,9 +49,11 @@ import {
 import { conditionsApplied } from "../legendary.ts";
 import { type Damage, ItemSchema, type Resolution } from "../schemas.ts";
 import {
+  armoredReduction,
   masteredDice,
   masteredTypes,
   piercing,
+  steadyShot,
   weaponDamageDice,
 } from "../trait-rules.ts";
 import {
@@ -321,9 +323,11 @@ export function runAttackRoll(
         within5(item, target),
     );
   const close = within5(attacker, target);
+  const steady = steadyShot(stats, action.id, resolution.attack.type);
   // A ranged attack is harder with an enemy standing next to the attacker.
   const crowded =
     meleeReach(action) === null &&
+    !steady.inMelee &&
     enemies(state, attacker).some(
       (item) =>
         !isDown(item) &&
@@ -395,7 +399,10 @@ export function runAttackRoll(
     roll.natural +
     attackBonus(resolution, stats) +
     rollBonus(attacker, "attacks", context);
-  const ac = targetStats.ac + coverAgainst(state, attacker, target);
+  const cover = coverAgainst(state, attacker, target);
+  const ac =
+    targetStats.ac +
+    (steady.bypassCover && meleeReach(action) === null ? 0 : cover);
   const critFrom = criticalFrom(stats);
   const hits = roll.natural >= critFrom || (roll.natural !== 1 && total >= ac);
   // A hit from within 5 feet on a Paralyzed or Unconscious target is a Critical Hit.
@@ -565,7 +572,7 @@ export function runApplyHit(
   const stats = deriveStats(attacker, context);
   const multiplier = payload.critical ? 2 : 1;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
-  const responses = piercing(damageResponses(target, context), mastered);
+  const responses = piercing(damageResponses(target, context), mastered, stats);
 
   const events: SystemEvent[] = [];
   let totalDealt = 0;
@@ -639,14 +646,30 @@ export function runApplyHit(
       type,
     })),
   ];
+  const targetStats = deriveStats(target, context);
+  const armored = hits.map((item) => ({
+    ...item,
+    amount: Math.max(
+      0,
+      item.amount - armoredReduction(target, targetStats, item.type, context),
+    ),
+  }));
   const dealt = dealEvents(
     target,
-    lessenHits(hits, payload),
+    lessenHits(armored, payload),
     payload.critical,
     context,
   );
   events.push(
     ...dealt.events,
+    ...damageRiders(
+      attacker,
+      target,
+      resolution,
+      payload.critical,
+      stats,
+      context,
+    ),
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
   );
@@ -677,6 +700,30 @@ export function runApplyHit(
       CHECK_END,
     ],
   };
+}
+
+// Crusher's and Slasher's effects on a creature hit by an attack dealing their damage type.
+function damageRiders(
+  attacker: Actor,
+  target: Actor,
+  resolution: Extract<Resolution, { kind: "attack" }>,
+  critical: boolean,
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  const types = new Set(resolution.damage.map(({ type }) => type));
+  return stats.passives.flatMap((passive) => {
+    if (passive.kind !== "damageRider" || !types.has(passive.damage)) return [];
+    if (passive.critical && !critical) return [];
+    const key = `rider:${passive.damage}:${String(passive.critical)}`;
+    if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return [];
+    return [
+      ...(passive.oncePerTurn
+        ? [dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key })]
+        : []),
+      ...leafEvents(passive.effects, key, attacker, target, context),
+    ];
+  });
 }
 
 // shortcut: a reaction lessens the damage after Resistance rather than before it, which only matters to rounding.

@@ -549,7 +549,7 @@ export function resolveAction(
         amount: finalDamage(
           scale(total),
           type,
-          piercing(damageResponses(target, context), mastered),
+          piercing(damageResponses(target, context), mastered, stats),
         ),
         type,
       })),

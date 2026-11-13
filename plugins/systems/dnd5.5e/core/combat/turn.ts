@@ -171,7 +171,9 @@ export function runLingeringTick(
   const mastered = caster
     ? masteredTypes(stats, effect.sourceId.startsWith("spell:"))
     : [];
-  const responses = piercing(damageResponses(target, context), mastered);
+  const responses = caster
+    ? piercing(damageResponses(target, context), mastered, stats)
+    : damageResponses(target, context);
   const { events, dealt } = dealEvents(
     target,
     damage.map(({ amount, type }) => ({
