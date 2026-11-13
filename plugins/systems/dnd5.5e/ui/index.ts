@@ -670,8 +670,13 @@ function sheetOf(
       {
         title: "Attacks and actions",
         pinned: true,
+        // One row per name, as a feature with two uses, such as Lucky, is one entry.
         rows: stats.actions
           .filter((action) => action.spellLevel === null)
+          .filter(
+            (action, index, all) =>
+              all.findIndex((other) => other.name === action.name) === index,
+          )
           .map(actionRow),
       },
       {
