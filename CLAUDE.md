@@ -39,7 +39,11 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 Every side session is archived when its work is done, and leaves no worktree or branch behind, locally or on the remote.
 
 - **A session that leaves nothing to merge** (a check, a review, a no-change result) archives itself as its last step.
-- **A session that leaves a branch** commits there and reports. Once the branch is merged, the session that merged it deletes the worktree (`git worktree remove`) and the branch (`git branch -d`, plus `git push origin --delete` if it was pushed), and archives the finished session.
+- **A session that leaves a branch merges it into `main` itself**, then cleans up and archives itself:
+  1. Merge `origin/main` into the branch and run every check.
+  2. In its worktree: `git fetch origin && git checkout --detach origin/main && git merge --no-ff refs/heads/claude/<branch>`, then `git push origin HEAD:main`. If the push is rejected, another session got there first: fetch, redo the merge, rerun the checks it could affect, and push again.
+  3. Fast-forward the main checkout (`git -C ~/Projects/re-roll pull --ff-only`), and watch the CI run on `main` until it passes. Fix anything it breaks.
+  4. Delete the branch (`git branch -D`, plus `git push origin --delete` if it was pushed), and archive itself, which also removes its worktree.
 
 ## Platforms
 
