@@ -448,6 +448,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Advantage on Death Saving Throws, as with Durable.
   z.strictObject({ kind: z.literal("deathSaveAdvantage") }),
   // Temporary Hit Points as a rest ends, for the bearer and with `allies` the whole party, as with Inspiring Leader.
+  // A 1 or 2 on a damage die of a Two-Handed melee weapon counts as a 3, as with Great Weapon Fighting.
+  z.strictObject({ kind: z.literal("greatWeaponFighting") }),
   z.strictObject({
     kind: z.literal("restTempHp"),
     rests: z.array(z.enum(["short", "long"])).min(1),

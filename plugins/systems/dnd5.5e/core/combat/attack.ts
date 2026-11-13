@@ -47,6 +47,7 @@ import {
 } from "../class-rules.ts";
 import { conditionsApplied } from "../legendary.ts";
 import { type Damage, type Resolution } from "../schemas.ts";
+import { weaponDamageDice } from "../trait-rules.ts";
 import {
   actorOf,
   allies,
@@ -483,8 +484,9 @@ export function runApplyHit(
       }),
     );
   }
+  const weaponDice = weaponDamageDice(dice, action.id, stats, context);
   resolution.damage.forEach(({ amount, type }, index) => {
-    const roll = () => rollAmount(amount, stats, dice, multiplier);
+    const roll = () => rollAmount(amount, stats, weaponDice, multiplier);
     const rolled =
       (savage && index === 0 ? Math.max(roll(), roll()) : roll()) +
       (index === 0 && type === firstType

@@ -19,6 +19,7 @@ import {
   freshActor,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import { deriveStats, lookup } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { weaponDamageDice } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
 
 // Made-up traits and feats for the shared mechanics feats and species use: ids and mechanics only.
 const trait = (id: string, passives: readonly object[], extra = {}) => ({
@@ -42,6 +43,16 @@ const FIXTURES = [
   trait("luck", [{ kind: "rerollOnes" }]),
   trait("savage", [{ kind: "savageAttacker" }]),
   trait("defy-death", [{ kind: "deathSaveAdvantage" }]),
+  trait("great-weapon", [{ kind: "greatWeaponFighting" }]),
+  {
+    id: "test:item/maul",
+    name: "Maul",
+    type: "weapon",
+    category: "martial",
+    damage: { dice: "2d6", type: "bludgeoning" },
+    properties: ["heavy", "twoHanded"],
+    mastery: "push",
+  },
   trait("rally", [
     {
       kind: "restTempHp",
@@ -198,6 +209,21 @@ describe("shared feat and species mechanics", () => {
     expect(d8s([])).toBe(1);
     expect(d8s(["savage"])).toBe(2);
     expect(d8s(["savage"], ["savage-attacker"])).toBe(1);
+  });
+
+  it("counts a 1 or 2 on a Two-Handed weapon's damage die as a 3 with Great Weapon Fighting", async () => {
+    const run = await testRun();
+    const ones: Dice = { below: () => 0, roll: () => 1 };
+    const rolled = (traits: readonly string[], weapon: string) =>
+      weaponDamageDice(
+        ones,
+        `weapon:${weapon}`,
+        deriveStats(hero(traits), run),
+        run,
+      ).roll(6);
+    expect(rolled(["great-weapon"], "test:item/maul")).toBe(3);
+    expect(rolled(["great-weapon"], "srd52:item/longsword")).toBe(1);
+    expect(rolled([], "test:item/maul")).toBe(1);
   });
 
   it("gives Advantage on Death Saving Throws", async () => {
