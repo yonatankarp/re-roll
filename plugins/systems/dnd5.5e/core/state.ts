@@ -4,6 +4,7 @@ import {
   AbilitySchema,
   CharacterBuildSchema,
   ConditionSchema,
+  DamageSchema,
   DamageTypeSchema,
   LootSchema,
   ModifierSchema,
@@ -100,6 +101,14 @@ const ActiveEffectSchema = z.strictObject({
       kind: z.literal("condition"),
       condition: ConditionSchema,
     }),
+    // An area a spell left on the map, kept on its caster (core/zones.ts).
+    z.strictObject({
+      kind: z.literal("zone"),
+      zone: z.enum(["darkness", "fog", "thorns"]),
+      at: z.strictObject({ x: z.number().int(), y: z.number().int() }),
+      radius: z.number().int(),
+      damage: z.array(DamageSchema).optional(),
+    }),
     // What an action anyone can take, such as Dodge, or a weapon mastery, leaves behind (core/tactics.ts).
     z.strictObject({
       kind: z.literal("tactic"),
@@ -114,6 +123,7 @@ const ActiveEffectSchema = z.strictObject({
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
   endsOnDamage: z.boolean().optional(),
+  endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
   // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
   swallowed: z.boolean().optional(),
   // The condition a failed repeat save leaves instead of this one (combat/turn.ts).
@@ -505,6 +515,16 @@ export function hasCondition(
   return actor.activeEffects.some(
     ({ modifier }) =>
       modifier.kind === "condition" && conditions.includes(modifier.condition),
+  );
+}
+
+// Invisible to this viewer: it has the condition and the viewer has nothing that sees through it.
+export function invisibleTo(target: Actor, viewer: Actor): boolean {
+  return (
+    hasCondition(target, "invisible") &&
+    !viewer.activeEffects.some(
+      ({ modifier }) => modifier.kind === "seeInvisible",
+    )
   );
 }
 

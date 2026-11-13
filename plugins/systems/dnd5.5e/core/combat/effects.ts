@@ -39,12 +39,13 @@ import { multiattackUses } from "../multiattack-uses.ts";
 import { dropToOneEvents, traitSaveAdvantage } from "../trait-rules.ts";
 import { dodging } from "../tactics.ts";
 import { AIM, ALL } from "./ids.ts";
-import { inArea, parseSquare, pushTo } from "../grid.ts";
+import { inArea, parseSquare, pushTo, type Square } from "../grid.ts";
 import { caughtBy } from "../targeting.ts";
 import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
 import { teleportFrame } from "./movement.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
+import { cureFor, dispelEvents, isSpell } from "./dispel.ts";
 import {
   actorOf,
   allies,
@@ -324,6 +325,7 @@ export function leafEvents(
                 ? { repeatSave: conditionSave }
                 : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
+              ...(effect.endsOnSpell ? { endsOnSpell: true } : {}),
               ...(effect.secondFailure && conditionSave
                 ? {
                     secondFailure: {
@@ -358,6 +360,20 @@ export function leafEvents(
           }),
         );
         break;
+      case "cure": {
+        const condition = cureFor(target, effect.conditions);
+        if (condition) {
+          events.push(
+            dndEvent(`${NS}:conditionRemoved`, { actor: target.id, condition }),
+          );
+        }
+        break;
+      }
+      case "dispel":
+        events.push(
+          ...dispelEvents(target, effect.maxLevel, context.state, context),
+        );
+        break;
       case "extraAction":
         events.push(dndEvent(`${NS}:actionRegained`, { actor: target.id }));
         break;
@@ -377,8 +393,9 @@ export function leafEvents(
       case "note":
       case "reduceDamage":
       case "teleport":
+      case "zone":
         // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit, and
-        // a teleport's square by its own decision (resolveAction).
+        // a teleport's square by its own decision and a zone once for the whole spell (resolveAction).
         break;
       default:
         effect satisfies never;
@@ -397,6 +414,7 @@ export function rollSave(
   cover = 0, // half or three-quarters cover adds to Dexterity saves
   conditions: readonly string[] = [],
   disadvantage = false, // from the caster, as with Heightened Spell
+  advantage = false, // from the spell itself, as Modify Memory gives a foe it fights
 ): { readonly saved: boolean; readonly events: SystemEvent[] } {
   if (
     (ability === "str" || ability === "dex") &&
@@ -407,6 +425,7 @@ export function rollSave(
   const stats = deriveStats(target, context);
   const roll = rollD20(context.dice, {
     advantage:
+      advantage ||
       hasFlag(target, "advantage", "saves", stats, ability) ||
       (magical && hasPassive(stats, "magicResistance")) ||
       (ability === "dex" && dodging(target)) ||
@@ -438,6 +457,16 @@ export function rollSave(
   };
 }
 
+// The square an answer aims at ("@x,y" or "@id"), or null for one that aims at no square.
+export function aimSquare(
+  answerTarget: string,
+  state: DndState,
+): Square | null {
+  if (!answerTarget.startsWith(AIM)) return null;
+  const aimedAt = answerTarget.slice(AIM.length);
+  return parseSquare(aimedAt) ?? state.actors[aimedAt]?.position ?? null;
+}
+
 export function resolveTargets(
   answerTarget: string,
   action: KnownAction,
@@ -453,13 +482,7 @@ export function resolveTargets(
   if ("area" in targeting) {
     const { shape, radius } = targeting.area;
     // Aimed at a square ("@x,y") or a creature ("@id"), an area catches everyone in it, the caster's side too.
-    const aimedAt = answerTarget.startsWith(AIM)
-      ? answerTarget.slice(AIM.length)
-      : null;
-    const aim =
-      aimedAt === null
-        ? null
-        : (parseSquare(aimedAt) ?? state.actors[aimedAt]?.position ?? null);
+    const aim = aimSquare(answerTarget, state);
     if (aim && actor.position) {
       // Total cover from where it spreads keeps a creature out of it.
       const centre =
@@ -501,16 +524,37 @@ export function resolveAction(
   context: Context,
   slotLevel?: number,
   critical = false,
+  aim?: Square, // where an area was aimed, for a zone it leaves
 ): SystemResult {
   const { resolution } = action.activation;
   const stats = deriveStats(actor, context);
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];
+  // Another spell aimed at a creature ends what lasts only until one is, as Modify Memory's charm.
+  const spellEnds = targets.flatMap((target) =>
+    [
+      ...new Set(
+        target.activeEffects
+          .filter(
+            (effect) =>
+              effect.endsOnSpell && effect.sourceId !== spellSource(action),
+          )
+          .map((effect) => effect.sourceId),
+      ),
+    ].map((sourceId) =>
+      dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId }),
+    ),
+  );
+  if (spellEnds.length > 0 && isSpell(action, actor, context)) {
+    events.push(...spellEnds);
+  }
 
   const usesConcentration = (effects: readonly LeafEffect[]): boolean =>
     effects.some(
       (effect) =>
-        (effect.kind === "modifier" || effect.kind === "applyCondition") &&
+        (effect.kind === "modifier" ||
+          effect.kind === "applyCondition" ||
+          effect.kind === "zone") &&
         typeof effect.duration === "object" &&
         "concentration" in effect.duration,
     );
@@ -565,6 +609,28 @@ export function resolveAction(
   switch (resolution.kind) {
     case "automatic": {
       beginConcentration(resolution.effects);
+      // A zone is left once, where the area was aimed or round the caster, whoever it caught.
+      const at = aim ?? actor.position;
+      for (const effect of resolution.effects) {
+        if (effect.kind !== "zone" || !at) continue;
+        events.push(
+          dndEvent(`${NS}:effectAdded`, {
+            actor: actor.id,
+            effect: {
+              sourceId: spellSource(action),
+              casterId: actor.id,
+              modifier: {
+                kind: "zone",
+                zone: effect.zone,
+                at,
+                radius: effect.radius,
+                ...(effect.damage ? { damage: effect.damage } : {}),
+              },
+              ends: effectEnds(effect.duration),
+            },
+          }),
+        );
+      }
       const damage = rollSharedDamage(resolution.damage);
       for (const target of targets) {
         applyRolled(target, damage, (amount) => amount);
@@ -612,6 +678,7 @@ export function resolveAction(
               coverAgainst(context.state, actor, target),
               conditionsApplied(resolution.onFail),
               heightened === target.id,
+              resolution.advantage,
             );
         events.push(...saveEvents);
         const resisted = rolledSave

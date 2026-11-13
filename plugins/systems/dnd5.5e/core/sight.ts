@@ -13,6 +13,7 @@ import { FeatureSchema, MonsterSchema, SpeciesSchema } from "./schemas.ts";
 import { type Actor, type DndState, type Terrain, isDead } from "./state.ts";
 import { deriveStats, lookup } from "./stats.ts";
 import { swallowerOf } from "./combat/swallow.ts";
+import { obscuring, thornKeys, type ZoneKind } from "./zones.ts";
 
 // A map's codes as squares, or nothing for a map that marks none, so fights on older maps stay as they were.
 export function terrainOf(map: Battlemap): Terrain | null {
@@ -47,7 +48,9 @@ function setOf(keys: readonly string[] | undefined): ReadonlySet<string> {
 }
 
 export function difficultSquares(state: DndState): ReadonlySet<string> {
-  return setOf(state.combat?.terrain?.difficult);
+  const thorns = thornKeys(state);
+  const ground = setOf(state.combat?.terrain?.difficult);
+  return thorns.length > 0 ? new Set([...ground, ...thorns]) : ground;
 }
 
 // The cover `target` has against something coming from `from`. Creatures in the way count, except the target and
@@ -138,6 +141,34 @@ export function darkvisionOf(actor: Actor, access: ContentAccess): number {
   );
 }
 
+const SEES_THROUGH = /\b(blindsight|truesight) (\d+) ft/gi;
+
+// How far a creature sees into a zone: Blindsight sees through fog and darkness, Truesight or Devil's Sight only
+// through darkness. 0 for not at all.
+export function seesThrough(
+  viewer: Actor,
+  zone: ZoneKind,
+  access: ContentAccess,
+): number {
+  const text =
+    viewer.source.kind === "monster"
+      ? (lookup(access, MonsterSchema, viewer.source.statBlockId).text ?? "")
+      : "";
+  return Math.max(
+    0,
+    ...[...text.matchAll(SEES_THROUGH)].flatMap((match) =>
+      zone === "darkness" || match[1]?.toLowerCase() === "blindsight"
+        ? [Number(match[2])]
+        : [],
+    ),
+    ...(zone === "darkness" && viewer.source.kind === "character"
+      ? deriveStats(viewer, access).passives.flatMap((passive) =>
+          passive.kind === "seesInDarkness" ? [passive.feet] : [],
+        )
+      : []),
+  );
+}
+
 // How well `viewer` sees the square `at`: Darkness hides it from a creature without Darkvision in range, and
 // Darkvision sees darkness as dim light. Dim light gives Disadvantage on Perception that relies on sight.
 export function seeing(
@@ -146,6 +177,14 @@ export function seeing(
   state: DndState,
   access: ContentAccess,
 ): "clear" | "dim" | "none" {
+  // shortcut: a zone hides whatever is in it and blinds whoever stands in it, whichever way the line runs.
+  const hidden = obscuring(at, state) ?? obscuring(viewer.position, state);
+  if (hidden) {
+    const feet = seesThrough(viewer, hidden, access);
+    return feet > 0 && distanceFeet(viewer.position, at) <= feet
+      ? "clear"
+      : "none";
+  }
   const light = lightAt(at, state);
   if (light === "bright") return "clear";
   const darkvision = darkvisionOf(viewer, access);

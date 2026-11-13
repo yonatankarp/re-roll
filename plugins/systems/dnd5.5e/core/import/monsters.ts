@@ -16,9 +16,12 @@ import { dependsOnCaster, statBlocksIn } from "./book.ts";
 import {
   type Caster,
   castActions,
+  castItems,
+  nothingToCast,
   casterIn,
   type SpellLookup,
   spellcastingActions,
+  spellcastingItems,
   spellLookup,
 } from "./monster-spells.ts";
 import { plainText, slugOf } from "./spells.ts";
@@ -965,6 +968,7 @@ export function legendaryOf(
     const made = activation ? [] : actionsMade(text, actionNames, left);
     const move = activation || made.length > 0 ? null : teleportOf(text);
     if (move?.rest) left.push("what follows it");
+    if (move?.others) left.push("teleporting a willing creature");
     const own = move
       ? {
           cost: [],
@@ -1148,20 +1152,27 @@ function parseBlock(
           entryOf(item[2] ?? "") !== null ||
           /monster-header|Stat-Block-Heading/.test(item[1] ?? ""),
       );
+      const entryText = [
+        text,
+        ...lines.slice(
+          index + 1,
+          index + 1 + (end < 0 ? following.length : end),
+        ),
+      ].join("\n");
       const listed = spellcastingActions(
-        [
-          text,
-          ...lines.slice(
-            index + 1,
-            index + 1 + (end < 0 ? following.length : end),
-          ),
-        ].join("\n"),
+        entryText,
         section === "traits" ? [] : [costOf(section)],
         casterFor(text),
         spells,
         notes,
       );
-      if (listed.length === 0) notes.push(`not automated: ${label}`);
+      if (listed.length === 0) {
+        notes.push(
+          nothingToCast(spellcastingItems(entryText), spells)
+            ? `no combat use: ${label}`
+            : `not automated: ${label}`,
+        );
+      }
       actions.push(...listed);
       continue;
     }
@@ -1247,6 +1258,11 @@ function parseBlock(
           if (move.rest) {
             notes.push(`partial: ${actionName}: left out what follows it`);
           }
+          if (move.others) {
+            notes.push(
+              `partial: ${actionName}: left out teleporting a willing creature`,
+            );
+          }
           actions.push({
             name: actionName,
             ...(recharge ? { recharge: Number(recharge) } : {}),
@@ -1273,8 +1289,13 @@ function parseBlock(
           recharge = undefined;
           continue;
         }
-        if (cast.length === 0) notes.push(`not automated: ${option.name}`);
-        else recharge = undefined;
+        if (cast.length === 0) {
+          notes.push(
+            spells && nothingToCast(castItems(optionText), spells)
+              ? `no combat use: ${option.name}`
+              : `not automated: ${option.name}`,
+          );
+        } else recharge = undefined;
         actions.push(...cast);
         continue;
       }
@@ -1388,14 +1409,26 @@ function parseBlock(
 // sentence after it, such as a limit or a creature taken along, which is left out.
 export function teleportOf(
   text: string,
-): { feet: number; movement: number; rest: string } | null {
+): { feet: number; movement: number; rest: string; others?: true } | null {
+  // "teleports itself or a willing creature it can see within 10 feet of itself up to 120 feet": only itself.
   const teleport =
-    /^(?:The )?[^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)? up to (\d+) feet to an unoccupied space (?:it|he|she|they|the [^.]+?) can see(?:[.,]| and)\s*(.*)$/s.exec(
+    /^(?:The )?[^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)?( itself or a willing creature [^.]*?)? up to (\d+) feet to an unoccupied space (?:it|he|she|they|the [^.]+?) can see(?:[.,]| and)\s*(.*)$/s.exec(
       text.trim(),
     );
   if (teleport) {
-    return { feet: Number(teleport[1]), movement: 0, rest: teleport[2] ?? "" };
+    return {
+      feet: Number(teleport[2]),
+      movement: 0,
+      rest: teleport[3] ?? "",
+      ...(teleport[1] ? { others: true as const } : {}),
+    };
   }
+  // "teleports to an unoccupied space she can see within 30 feet of herself and makes one … attack"
+  const near =
+    /^(?:The )?[^.]*? (?:magically )?teleports to an unoccupied space (?:it|he|she|they) can see within (\d+) feet of (?:itself|himself|herself|themselves)(?:[.,]| and)\s*(.*)$/s.exec(
+      text.trim(),
+    );
+  if (near) return { feet: Number(near[1]), movement: 0, rest: near[2] ?? "" };
   const leap =
     /^The [^.]*? jumps up to (\d+) feet by spending (\d+) feet of movement\.\s*(.*)$/s.exec(
       text.trim(),

@@ -129,6 +129,7 @@
     and close the object despite the lock. You can also set a password that,
     when spoken within 5 feet of the object, unlocks it for 1 minute.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/aura-of-life
   name: Aura of Life
   level: 4
@@ -332,6 +333,7 @@
     creature’s original remains, if any, become inert and can’t be revived,
     since the creature’s soul is elsewhere.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/commune-with-nature
   name: Commune with Nature
   level: 5
@@ -356,6 +358,7 @@
     of a powerful monster in the area, the locations of bodies of water, and the
     locations of any towns."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/conjure-animals
   name: Conjure Animals
   level: 3
@@ -453,6 +456,7 @@
     whirlpool only if it first takes an action to pull away and succeeds on a
     Strength (Athletics) check against your spell save DC.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/create-undead
   name: Create Undead
   level: 6
@@ -488,6 +492,7 @@
     over six Ghouls, three Ghasts or Wights, or two Mummies. See “Monsters” for
     these stat blocks.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/darkvision
   name: Darkvision
   level: 2
@@ -523,6 +528,7 @@
     blocked by 1 foot of stone, dirt, or wood; 1 inch of metal; or a thin sheet
     of lead.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/disguise-self
   name: Disguise Self
   level: 1
@@ -546,6 +552,7 @@
     must take the Study action to inspect your appearance and succeed on an
     Intelligence (Investigation) check against your spell save DC.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/divination
   name: Divination
   level: 4
@@ -567,6 +574,7 @@
     once before finishing a Long Rest, there is a cumulative 25 percent chance
     for each casting after the first that you get no answer.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/dominate-monster
   name: Dominate Monster
   level: 8
@@ -807,6 +815,7 @@
     This spell reveals that a trap is present but not its location. You do learn
     the general nature of the danger posed by a trap you sense.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/fire-storm
   name: Fire Storm
   level: 7
@@ -870,6 +879,7 @@
     and other creatures have Disadvantage on attack rolls against it. The spell
     ends early if you cast it again.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/geas
   name: Geas
   level: 5
@@ -897,6 +907,7 @@
     level 9 spell slot, the spell lasts until it is ended by one of the spells
     mentioned above.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/glyph-of-warding
   name: Glyph of Warding
   level: 3
@@ -947,6 +958,7 @@
     store any spell of up to the same level as the spell slot you use for the
     Glyph of Warding.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/guardian-of-faith
   name: Guardian of Faith
   level: 4
@@ -1007,6 +1019,7 @@
     Vulnerability. Creatures of any types you choose have Vulnerability to one
     damage type of your choice while in the area."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/healing-word
   name: Healing Word
   level: 1
@@ -1155,6 +1168,7 @@
     original script and the illusion both disappear. A creature that has
     Truesight can read the hidden message.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/instant-summons
   name: Instant Summons
   level: 6
@@ -1178,6 +1192,7 @@
     but instead you learn who that creature is and where that creature is
     currently located.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/legend-lore
   name: Legend Lore
   level: 5
@@ -1201,6 +1216,7 @@
     famous thing you chose isn’t actually famous, you hear sad musical notes
     played on a trombone, and the spell fails.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/locate-animals-or-plants
   name: Locate Animals or Plants
   level: 2
@@ -1215,6 +1231,7 @@
     plant. You learn the direction and distance to the closest creature or plant
     of that kind within 5 miles, if any are present.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/mage-hand
   name: Mage Hand
   level: 0
@@ -1238,6 +1255,7 @@
     up to 30 feet. The hand can’t attack, activate magic items, or carry more
     than 10 pounds.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/magic-weapon
   name: Magic Weapon
   level: 2
@@ -1313,6 +1331,7 @@
     familiar with the target and know it is beyond the barrier. Magical silence;
     1 foot of stone, metal, or wood; or a thin sheet of lead blocks the spell.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/mirage-arcane
   name: Mirage Arcane
   level: 7
@@ -1341,6 +1360,7 @@
     creature is aware of the illusion’s presence, the creature can still
     physically interact with the illusion.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/moonbeam
   name: Moonbeam
   level: 2
@@ -1483,6 +1503,7 @@
     circle is too small to hold all the creatures you transported, they appear
     in the closest unoccupied spaces next to the circle.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/power-word-kill
   name: Power Word Kill
   level: 9
@@ -1611,6 +1632,7 @@
     object is a cursed magic item, its curse remains, but the spell breaks its
     owner’s Attunement to the object so it can be removed or discarded.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/revivify
   name: Revivify
   level: 3
@@ -1660,6 +1682,7 @@
     a location you have seen. When you do so, the sensor appears at that
     location and doesn’t move.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/sending
   name: Sending
   level: 3
@@ -1684,6 +1707,7 @@
     hours. If you try to send another message during that time, you learn that
     you are blocked, and the spell fails.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/shield-of-faith
   name: Shield of Faith
   level: 1
@@ -1750,6 +1774,7 @@
     discerns the illusion for what it is, the creature can see through the
     image.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/sorcerous-burst
   name: Sorcerous Burst
   level: 0
@@ -1790,6 +1815,7 @@
     Speed. Using a Higher-Level Spell Slot. You can target one additional
     creature for each spell slot level above 2.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/stinking-cloud
   name: Stinking Cloud
   level: 3
@@ -1959,6 +1985,7 @@
     perform a task that would move it more than 60 feet away from you, the spell
     ends.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/wall-of-force
   name: Wall of Force
   level: 5
@@ -2003,6 +2030,7 @@
     the ability to breathe underwater until the spell ends. Affected creatures
     also retain their normal mode of respiration.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/wind-wall
   name: Wind Wall
   level: 3
@@ -2097,6 +2125,7 @@
     returns to where you cast the spell. Using a Higher-Level Spell Slot. The
     spell’s duration increases by 48 hours for each spell slot level above 2.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/antimagic-field
   name: Antimagic Field
   level: 8
@@ -2167,6 +2196,7 @@
     allies deal damage to it. When that condition ends, the awakened creature
     chooses its attitude toward you.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/befuddlement
   name: Befuddlement
   level: 8
@@ -2420,6 +2450,7 @@
     takes about 1 minute to read one page of text. This spell doesn’t decode
     symbols or secret messages.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/conjure-celestial
   name: Conjure Celestial
   level: 7
@@ -2472,6 +2503,7 @@
     damage and have the Incapacitated condition until you finish a Long Rest. A
     Greater Restoration spell cast on you ends this effect.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/control-weather
   name: Control Weather
   level: 8
@@ -2500,6 +2532,7 @@
     Temperature Wind Stage Condition Stage Heat wave Calm Hot Moderate wind Warm
     Strong wind Cool Gale Cold Storm Freezing Condition
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/creation
   name: Creation
   level: 5
@@ -2526,6 +2559,7 @@
     mithral 1 minute Using a Higher-Level Spell Slot. The Cube increases by 5
     feet for each spell slot level above 5.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/daylight
   name: Daylight
   level: 3
@@ -2569,6 +2603,7 @@
     school of magic. The spell is blocked by 1 foot of stone, dirt, or wood; 1
     inch of metal; or a thin sheet of lead.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/disintegrate
   name: Disintegrate
   level: 6
@@ -2788,6 +2823,7 @@
     a high degree of skill—such as weapons and armor—unless you have proficiency
     with the type of Artisan’s Tools used to craft such objects.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/feather-fall
   name: Feather Fall
   level: 1
@@ -2807,6 +2843,7 @@
     creature lands before the spell ends, the creature takes no damage from the
     fall, and the spell ends for that creature.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/finger-of-death
   name: Finger of Death
   level: 7
@@ -2926,6 +2963,7 @@
     under the influence of this spell don’t count against the time limit of
     spells such as Raise Dead.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/goodberry
   name: Goodberry
   level: 1
@@ -2984,6 +3022,7 @@
     • Suggestion in one 5-foot square; any creature that enters that square
     receives the suggestion mentally"
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/hallucinatory-terrain
   name: Hallucinatory Terrain
   level: 4
@@ -3010,6 +3049,7 @@
     is illusory, the creature sees a vague image superimposed on the real
     terrain.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/heat-metal
   name: Heat Metal
   level: 2
@@ -3186,6 +3226,7 @@
     it is cast with a level 9 spell slot, targeting either the prison or the
     component used to create it."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/irresistible-dance
   name: Irresistible Dance
   level: 6
@@ -3248,6 +3289,7 @@
     This spell can’t locate a creature if any thickness of lead blocks a direct
     path between you and the creature.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/magic-circle
   name: Magic Circle
   level: 3
@@ -3277,6 +3319,7 @@
     Cylinder and protecting targets outside it. Using a Higher-Level Spell Slot.
     The duration increases by 1 hour for each spell slot level above 3."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/magnificent-mansion
   name: Magnificent Mansion
   level: 7
@@ -3311,6 +3354,7 @@
     inside the extradimensional space are expelled into the unoccupied spaces
     nearest to the entrance.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/mass-suggestion
   name: Mass Suggestion
   level: 6
@@ -3433,6 +3477,7 @@
     it might collapse. Similarly, this spell doesn’t directly affect plant
     growth. The moved earth carries any plants along with it.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/phantasmal-killer
   name: Phantasmal Killer
   level: 4
@@ -3577,6 +3622,7 @@
     Spell Slot. You can increase the size of the Cube by 100 feet for each spell
     slot level above 4."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/protection-from-evil-and-good
   name: Protection from Evil and Good
   level: 1
@@ -3690,6 +3736,7 @@
     can’t pass into or out of the space, but creatures inside it can see through
     the portal. Anything inside the space drops out when the spell ends.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/searing-smite
   name: Searing Smite
   level: 1
@@ -3770,6 +3817,7 @@
     target. Examples include “after 1,000 years” or “when the tarrasque
     awakens.” This spell also ends if the target takes any damage.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/shillelagh
   name: Shillelagh
   level: 0
@@ -3820,6 +3868,7 @@
     point it reverts to snow and melts away. If you cast this spell again, any
     simulacrum you created with this spell is instantly destroyed.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/spare-the-dying
   name: Spare the Dying
   level: 0
@@ -3876,6 +3925,7 @@
     you create can have up to two hinges and a latch, but finer mechanical
     detail isn’t possible.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/sunbeam
   name: Sunbeam
   level: 6
@@ -3975,6 +4025,7 @@
     or 8, northeast. On Target. You and your group (or the target object) appear
     where you intended."
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/tiny-hut
   name: Tiny Hut
   level: 3
@@ -4000,6 +4051,7 @@
     color you choose, but it’s transparent from the inside. The spell ends early
     if you leave the Emanation or if you cast it again.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/true-resurrection
   name: True Resurrection
   level: 9
@@ -4021,6 +4073,7 @@
     speak the creature’s name. The creature then appears in an unoccupied space
     you choose within 10 feet of you.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/vampiric-touch
   name: Vampiric Touch
   level: 3
@@ -4096,6 +4149,7 @@
     target falls into the liquid, the target passes through the surface into the
     liquid below.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/wish
   name: Wish
   level: 9
@@ -4233,6 +4287,7 @@
     this effect is immune to it for 1 minute, after which it can be affected
     again."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/arcanist-s-magic-aura
   name: Arcanist’s Magic Aura
   level: 2
@@ -4628,6 +4683,7 @@
     kind of poison, creature, or contagion in each case. The spell is blocked by
     1 foot of stone, dirt, or wood; 1 inch of metal; or a thin sheet of lead.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/dispel-evil-and-good
   name: Dispel Evil and Good
   level: 5
@@ -4738,6 +4794,7 @@
     fit in a 1-foot Cube to assume a crude shape (such as that of a creature)
     for 1 hour.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/enthrall
   name: Enthrall
   level: 2
@@ -4757,6 +4814,7 @@
     a failed save, a target has a −10 penalty to Wisdom (Perception) checks and
     Passive Perception until the spell ends.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/faerie-fire
   name: Faerie Fire
   level: 1
@@ -4839,6 +4897,7 @@
     more than one familiar at a time. If you cast this spell while you have a
     familiar, you instead cause it to adopt a new eligible form."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/fireball
   name: Fireball
   level: 3
@@ -5082,6 +5141,7 @@
     You touch a willing creature and choose a skill. Until the spell ends, the
     creature adds 1d4 to any ability check using the chosen skill.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/harm
   name: Harm
   level: 6
@@ -5370,6 +5430,7 @@
     jewelry, furniture, tool, or weapon. This spell can’t locate an object if
     any thickness of lead blocks a direct path between you and the object.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/magic-jar
   name: Magic Jar
   level: 6
@@ -5412,6 +5473,7 @@
     feet. Otherwise, that creature dies. When the spell ends, the container is
     destroyed.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/major-image
   name: Major Image
   level: 3
@@ -5445,6 +5507,7 @@
     creature. Using a Higher-Level Spell Slot. The spell lasts until dispelled,
     without requiring Concentration, if cast with a level 4+ spell slot.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/maze
   name: Maze
   level: 8
@@ -5542,6 +5605,7 @@
     larger than 10 feet in any dimension. The target can’t be targeted by any
     Divination spell or perceived through magical scrying sensors.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/phantom-steed
   name: Phantom Steed
   level: 3
@@ -5564,6 +5628,7 @@
     in an hour. When the spell ends, the steed gradually fades, giving the rider
     1 minute to dismount. The spell ends early if the steed takes any damage.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/poison-spray
   name: Poison Spray
   level: 0
@@ -5617,6 +5682,7 @@
     creature finishes a Long Rest. Using a Higher-Level Spell Slot. The healing
     increases by 1d8 for each spell slot level above 2.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/produce-flame
   name: Produce Flame
   level: 0
@@ -5689,6 +5755,7 @@
     target regains 1 Hit Point at the start of each of its turns, and any
     severed body parts regrow after 2 minutes.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/resistance
   name: Resistance
   level: 0
@@ -5895,6 +5962,7 @@
     locations and monsters, including whatever it has perceived within the past
     day.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/spirit-guardians
   name: Spirit Guardians
   level: 3
@@ -6082,6 +6150,7 @@
     teleportation circle by casting this spell in the same location every day
     for 365 days.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/tongues
   name: Tongues
   level: 3
@@ -6101,6 +6170,7 @@
     language can understand it if that creature can hear the speech or see the
     signing.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/true-seeing
   name: True Seeing
   level: 6
@@ -6247,6 +6317,7 @@
     designate a location, such as a temple, as a sanctuary by casting this spell
     there.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/alarm
   name: Alarm
   level: 1
@@ -6269,6 +6340,7 @@
     you are within 1 mile of the warded area. This ping awakens you if you’re
     asleep."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/animate-dead
   name: Animate Dead
   level: 3
@@ -6302,6 +6374,7 @@
     each spell slot level above 3. Each of the creatures must come from a
     different corpse or pile of bones."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/arcane-eye
   name: Arcane Eye
   level: 4
@@ -6323,6 +6396,7 @@
     barrier blocks the eye’s movement, but the eye can pass through an opening
     as small as 1 inch in diameter.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/astral-projection
   name: Astral Projection
   level: 9
@@ -6356,6 +6430,7 @@
     dismiss it. When the spell ends for a target who isn’t dead, the target
     reappears in its body and exits the state of suspended animation.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/banishment
   name: Banishment
   level: 4
@@ -6692,6 +6767,7 @@
     Contingency spell on you ends. Also, Contingency ends on you if its material
     component is ever not on your person.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/create-food-and-water
   name: Create Food and Water
   level: 3
@@ -6709,6 +6785,7 @@
     like a food of your choice, and the water is clean. The food spoils after 24
     hours if uneaten.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/dancing-lights
   name: Dancing Lights
   level: 0
@@ -6730,6 +6807,7 @@
     to a space within range. A light must be within 20 feet of another light
     created by this spell, and a light vanishes if it exceeds the spell’s range.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/delayed-blast-fireball
   name: Delayed Blast Fireball
   level: 7
@@ -6793,6 +6871,7 @@
     Intelligence (Arcana) check against your spell save DC, ending the spell on
     a success.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/dispel-magic
   name: Dispel Magic
   level: 3
@@ -6865,6 +6944,7 @@
     target makes a Wisdom saving throw. On a failed save, the target gains no
     benefit from its rest, and it takes 3d6 Psychic damage when it wakes up.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/enhance-ability
   name: Enhance Ability
   level: 2
@@ -6918,6 +6998,7 @@
     (including yourself) for each spell slot level above 7. The creatures must
     be within 10 feet of you when you cast the spell.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/faithful-hound
   name: Faithful Hound
   level: 4
@@ -7115,6 +7196,7 @@
     every day for 30 days in the same location, the spell lasts until it is
     dispelled, and the Material components are consumed on the last casting."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/gaseous-form
   name: Gaseous Form
   level: 3
@@ -7160,6 +7242,7 @@
     would determine if you are telling the truth indicates that you are being
     truthful.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/greater-invisibility
   name: Greater Invisibility
   level: 4
@@ -7277,6 +7360,7 @@
     Poisoned conditions. Its Hit Point maximum also increases by 2d10, and it
     gains the same number of Hit Points.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/hold-person
   name: Hold Person
   level: 2
@@ -7423,6 +7507,7 @@
     Using a Higher-Level Spell Slot. You can target one additional creature for
     each spell slot level above 1.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/light
   name: Light
   level: 0
@@ -7443,6 +7528,7 @@
     colored as you like. Covering the object with something opaque blocks the
     light. The spell ends if you cast it again.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/longstrider
   name: Longstrider
   level: 1
@@ -7563,6 +7649,7 @@
     expelled, you move into an unoccupied space closest to where you first
     entered and have the Prone condition.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/mind-spike
   name: Mind Spike
   level: 2
@@ -7643,6 +7730,7 @@
     in the passage created by the spell are safely ejected to an unoccupied
     space nearest to the surface on which you cast the spell."
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/planar-ally
   name: Planar Ally
   level: 6
@@ -7683,6 +7771,7 @@
     If you are unable to agree on a price for the creature’s service, the
     creature immediately returns to its home plane."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/polymorph
   name: Polymorph
   level: 4
@@ -7738,6 +7827,7 @@
     in your hand. It lasts until the end of your next turn. A trinket can deal
     no damage and has no monetary worth.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/programmed-illusion
   name: Programmed Illusion
   level: 6
@@ -7769,6 +7859,7 @@
     illusion for what it is, the creature can see through the image, and any
     noise it makes sounds hollow to the creature.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/purify-food-and-drink
   name: Purify Food and Drink
   level: 1
@@ -7783,6 +7874,7 @@
   text: You remove poison and rot from nonmagical food and drink in a
     5-foot-radius Sphere centered on a point within range.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/ray-of-sickness
   name: Ray of Sickness
   level: 1
@@ -7846,6 +7938,7 @@
     dead for 365 days or longer taxes you. Until you finish a Long Rest, you
     can’t cast spells again, and you have Disadvantage on D20 Tests.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/sanctuary
   name: Sanctuary
   level: 1
@@ -8008,6 +8101,7 @@
     new information, doesn’t comprehend anything that has happened since it
     died, and can’t speculate about future events.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/spiritual-weapon
   name: Spiritual Weapon
   level: 2
@@ -8109,6 +8203,7 @@
     Stunning. Each target must succeed on a Wisdom saving throw or have the
     Stunned condition for 1 minute."
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/thaumaturgy
   name: Thaumaturgy
   level: 0
@@ -8134,6 +8229,7 @@
     raven, or ominous whispers. Tremors. You cause harmless tremors in the
     ground for 1 minute.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/transport-via-plants
   name: Transport via Plants
   level: 6
@@ -8151,6 +8247,7 @@
     before. For the duration, any creature can step into the target plant and
     exit from the destination plant by using 5 feet of movement.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/true-strike
   name: True Strike
   level: 0
@@ -8343,6 +8440,7 @@
     the spell and can avoid answering questions to which it would normally
     respond with a lie. Such a creature can be evasive yet must be truthful.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/alter-self
   name: Alter Self
   level: 2
@@ -8479,6 +8577,7 @@
     finishing a Long Rest, there is a cumulative 25 percent chance for each
     casting after the first that you get no answer.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/barkskin
   name: Barkskin
   level: 2
@@ -8698,6 +8797,7 @@
     sensor (such as a creature benefiting from See Invisibility or Truesight)
     sees a luminous orb about the size of your fist.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/commune
   name: Commune
   level: 5
@@ -8721,6 +8821,7 @@
     a cumulative 25 percent chance for each casting after the first that you get
     no answer.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/confusion
   name: Confusion
   level: 4
@@ -8787,6 +8888,7 @@
     like a regular flame, but it creates no heat and consumes no fuel. The flame
     can be covered or hidden but not smothered or quenched.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/create-or-destroy-water
   name: Create or Destroy Water
   level: 1
@@ -8808,6 +8910,7 @@
     additional gallons of water, or the size of the Cube increases by 5 feet,
     for each spell slot level above 1."
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/darkness
   name: Darkness
   level: 2
@@ -8856,6 +8959,7 @@
     created by a casting of this spell by another creature, you can connect the
     shadowy door to that demiplane instead.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/dimension-door
   name: Dimension Door
   level: 4
@@ -8966,6 +9070,7 @@
     an animal, or the faint odor of skunk. The effect must fit in a 5-foot Cube.
     Fire Play. You light or snuff out a candle, a torch, or a campfire.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/enlarge-reduce
   name: Enlarge/Reduce
   level: 2
@@ -9064,6 +9169,7 @@
     Whenever you face a choice of paths along the way there, you know which path
     is the most direct.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/fire-shield
   name: Fire Shield
   level: 4
@@ -9355,6 +9461,7 @@
     If you instead touch a creature throughout the casting, you learn which
     ongoing spells, if any, are currently affecting it.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/insect-plague
   name: Insect Plague
   level: 5
@@ -9460,6 +9567,7 @@
     closed. When you cast the spell, a loud knock, audible up to 300 feet away,
     emanates from the target.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/lightning-bolt
   name: Lightning Bolt
   level: 3
@@ -9570,6 +9678,7 @@
     within 30 feet of the object or when a silver bell rings within 30 feet of
     it.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/mass-heal
   name: Mass Heal
   level: 9
@@ -9606,6 +9715,7 @@
     can physically repair a magic item, but it can’t restore magic to such an
     object.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/minor-illusion
   name: Minor Illusion
   level: 0
@@ -9634,6 +9744,7 @@
     light, smell, or any other sensory effect. Physical interaction with the
     image reveals it to be an illusion, since things can pass through it.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/modify-memory
   name: Modify Memory
   level: 5
@@ -9723,6 +9834,7 @@
     Higher-Level Spell Slot. The duration increases with a spell slot of level 6
     (10 days), 7 (30 days), 8 (180 days), and 9 (366 days).
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/power-word-heal
   name: Power Word Heal
   level: 9
@@ -9800,6 +9912,7 @@
     creature can see through the image, and any noise it makes sounds hollow to
     the creature.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/raise-dead
   name: Raise Dead
   level: 5
@@ -9821,6 +9934,7 @@
     takes a −4 penalty to D20 Tests. Every time the target finishes a Long Rest,
     the penalty is reduced by 1 until it becomes 0.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/reincarnate
   name: Reincarnate
   level: 5
@@ -9842,6 +9956,7 @@
     capabilities it had in its original form, except it loses the traits of its
     previous species and gains the traits of its new one.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/reverse-gravity
   name: Reverse Gravity
   level: 7
@@ -9932,6 +10047,7 @@
     your spell save DC. If it succeeds, it becomes aware that the target is
     disguised.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/shield
   name: Shield
   level: 1
@@ -10066,6 +10182,7 @@
     Plant creature is in the area, you can communicate with it as if you shared
     a common language.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/starry-wisp
   name: Starry Wisp
   level: 0
@@ -10254,6 +10371,7 @@
     5 feet of the tree you entered. You can use this transportation ability only
     once on each of your turns. You must end each turn outside a tree.
   automation: text
+  outOfCombat: utility
 - id: srd52:spell/tsunami
   name: Tsunami
   level: 8
@@ -10284,6 +10402,7 @@
     your spell save DC to move at all. If it fails the check, it can’t move. A
     creature that moves out of the wall falls to the ground.
   automation: text
+  outOfCombat: castingTime
 - id: srd52:spell/wall-of-fire
   name: Wall of Fire
   level: 4
@@ -10404,3 +10523,4 @@
     60 feet per round for 1 minute until it lands, which it does safely. If it
     can’t land after 1 minute, it falls the remaining distance.
   automation: text
+  outOfCombat: castingTime

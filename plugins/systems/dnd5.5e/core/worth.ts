@@ -3,6 +3,7 @@ import {
   type Actor,
   hasCondition,
   INCAPACITATING,
+  invisibleTo,
   isDead,
   isDown,
 } from "./state.ts";
@@ -24,6 +25,8 @@ import { dodging } from "./tactics.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX } from "./combat/ids.ts";
 import { DAMAGE_TO_PARTY } from "./combat/effects.ts";
+import { cureFor, dispellable } from "./combat/dispel.ts";
+import { seesThrough } from "./sight.ts";
 import {
   aimsFor,
   allies,
@@ -136,7 +139,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
     const up =
       hasFlag(attacker, "advantage", "attacks", stats(attacker)) ||
       hasFlag(target, "advantage", "attacksAgainst", stats(target)) ||
-      hasCondition(attacker, "invisible") ||
+      invisibleTo(attacker, target) ||
       hasCondition(
         target,
         "blinded",
@@ -152,7 +155,14 @@ export function makeJudge(context: Context, side: Actor): Judge {
       dodging(target) ||
       (hasCondition(target, "prone") && !close) ||
       hasFlag(attacker, "disadvantage", "attacks", stats(attacker)) ||
-      hasFlag(target, "disadvantage", "attacksAgainst", stats(target)) ||
+      hasFlag(
+        target,
+        "disadvantage",
+        "attacksAgainst",
+        stats(target),
+        undefined,
+        stats(attacker).creatureType,
+      ) ||
       hasCondition(
         attacker,
         "blinded",
@@ -161,7 +171,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
         "prone",
         "restrained",
       ) ||
-      hasCondition(target, "invisible");
+      invisibleTo(target, attacker);
     return Number(up) - Number(down);
   };
 
@@ -182,7 +192,10 @@ export function makeJudge(context: Context, side: Actor): Judge {
     caster: Actor,
     target: Actor,
     action: KnownAction,
-    resolution: Pick<Extract<Resolution, { kind: "save" }>, "ability" | "dc">,
+    resolution: Pick<
+      Extract<Resolution, { kind: "save" }>,
+      "ability" | "dc" | "advantage"
+    >,
   ): number => {
     const targetStats = stats(target);
     const dc = evaluateFormula(resolution.dc, stats(caster));
@@ -192,7 +205,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
       1,
     );
     const resists =
-      action.spellLevel !== null && hasPassive(targetStats, "magicResistance");
+      resolution.advantage === true ||
+      (action.spellLevel !== null &&
+        hasPassive(targetStats, "magicResistance"));
     return resists ? 1 - (1 - chance) ** 2 : chance;
   };
 
@@ -536,13 +551,28 @@ export function makeJudge(context: Context, side: Actor): Judge {
           ? 0.12 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
           : modifier.to === "maxHp"
             ? 0.05 * meanFoeThreat * lasting(span)
-            : 0;
+            : // Stealth matters to one that can Hide as a Bonus Action.
+              modifier.skill === "stealth" &&
+                stats(target).passives.some(
+                  (passive) =>
+                    passive.kind === "bonusTactics" &&
+                    passive.tactics.includes("hide"),
+                )
+              ? 0.05 * own * lasting(span)
+              : 0;
       case "advantage":
         return (modifier.on === "attacks" ? 0.25 : 0.05) * own * lasting(span);
-      case "disadvantage":
-        return modifier.on === "attacksAgainst"
-          ? 0.2 * meanFoeThreat * lasting(span)
-          : 0;
+      case "disadvantage": {
+        if (modifier.on !== "attacksAgainst") return 0;
+        // Only against the foes it names, as Protection from Evil and Good's.
+        const { attackers } = modifier;
+        const named = attackers
+          ? foes.filter((foe) =>
+              attackers.includes(stats(foe).creatureType ?? ""),
+            ).length / Math.max(1, foes.length)
+          : 1;
+        return 0.2 * named * meanFoeThreat * lasting(span);
+      }
       case "hitDamage":
       case "damageBonus":
         return 0.2 * own * lasting(span);
@@ -550,6 +580,10 @@ export function makeJudge(context: Context, side: Actor): Judge {
         return 0.08 * meanFoeThreat * lasting(span);
       case "acFormula":
         return 0.05 * meanFoeThreat * lasting(span);
+      case "seeInvisible":
+        return foes.some((foe) => invisibleTo(foe, target))
+          ? 0.25 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
+          : 0;
       default:
         return 0;
     }
@@ -608,6 +642,26 @@ export function makeJudge(context: Context, side: Actor): Judge {
         return !foe && hasCondition(target, effect.condition)
           ? 0.5 * Math.max(threat(target), meanFoeThreat * 0.5)
           : 0;
+      case "cure": {
+        const condition = foe ? null : cureFor(target, effect.conditions);
+        return condition
+          ? (CONDITION_WORTH[condition] ?? 0.1) *
+              Math.max(threat(target), meanFoeThreat * 0.5)
+          : 0;
+      }
+      // Ending a foe's help or an ally's harm is worth about what the effect was doing, a round or two of it.
+      case "dispel":
+        return dispellable(
+          target,
+          effect.maxLevel,
+          context.state,
+          context,
+        ).reduce((sum, { casterId }) => {
+          const helps = context.state.actors[casterId]?.side === target.side;
+          return helps === foe
+            ? sum + 0.3 * Math.max(threat(target), meanFoeThreat * 0.5)
+            : sum;
+        }, 0);
       case "modifier": {
         // The same effect from the same source is already doing its work.
         if (
@@ -636,6 +690,19 @@ export function makeJudge(context: Context, side: Actor): Judge {
       }
       case "extraAction":
         return actor.budget.action ? 0 : rate * threat(actor);
+      // Thorns: about two squares of them walked by each creature caught. Darkness or fog: worth something only
+      // to a caster who sees through it, against the foes it hides.
+      case "zone":
+        if (effect.zone === "thorns") {
+          return hurtWorth(
+            target,
+            2 * averageDamage(actor, target, effect.damage ?? []),
+            foe,
+          );
+        }
+        return foe && seesThrough(actor, effect.zone, context) > 0
+          ? 0.25 * Math.max(threat(target), 0.25 * meanFoeThreat)
+          : 0;
       default:
         return 0;
     }

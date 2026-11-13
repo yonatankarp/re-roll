@@ -5,6 +5,7 @@ import {
   dndEvent,
   type DndState,
   hasCondition,
+  invisibleTo,
   INCAPACITATING,
   isDead,
   isDown,
@@ -242,7 +243,7 @@ export function runAttackRoll(
     unseenAttacker ||
     hasFlag(attacker, "advantage", "attacks", stats, ability) ||
     hasFlag(target, "advantage", "attacksAgainst", targetStats) ||
-    hasCondition(attacker, "invisible") ||
+    invisibleTo(attacker, target) ||
     hasCondition(
       target,
       "blinded",
@@ -260,7 +261,14 @@ export function runAttackRoll(
     dodging(target) ||
     grappledAwayFrom(attacker, target) ||
     hasFlag(attacker, "disadvantage", "attacks", stats, ability) ||
-    hasFlag(target, "disadvantage", "attacksAgainst", targetStats) ||
+    hasFlag(
+      target,
+      "disadvantage",
+      "attacksAgainst",
+      targetStats,
+      undefined,
+      stats.creatureType,
+    ) ||
     hasCondition(
       attacker,
       "blinded",
@@ -269,7 +277,7 @@ export function runAttackRoll(
       "prone",
       "restrained",
     ) ||
-    hasCondition(target, "invisible");
+    invisibleTo(target, attacker);
   const roll = rollD20(dice, {
     advantage,
     disadvantage,

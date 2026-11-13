@@ -192,7 +192,7 @@ function check(
   const total =
     roll.natural +
     checkBonus(stats, actor, { ability, skill }) +
-    rollBonus(actor, "checks", context);
+    rollBonus(actor, "checks", context, skill);
   const success = total >= dc;
   const helped = actor.activeEffects.some(
     ({ sourceId, modifier }) =>

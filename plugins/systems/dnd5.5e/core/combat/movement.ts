@@ -18,7 +18,15 @@ import {
   type SystemResult,
   frameHandler,
 } from "#sdk";
-import { deriveStats, type KnownAction } from "../stats.ts";
+import {
+  damageResponses,
+  deriveStats,
+  type KnownAction,
+  rollAmount,
+} from "../stats.ts";
+import { finalDamage } from "../rules.ts";
+import { thornHits } from "../zones.ts";
+import { concentrationFrame, dealEvents } from "./effects.ts";
 import {
   coverBetween,
   distanceFeet,
@@ -144,6 +152,27 @@ export function runMove(
   if (!step) throw new Error(`${actor.name} can't reach ${payload.answer}`);
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];
+  // shortcut: thorns hurt as the walk starts, so damage that drops the walker stops it where it stood.
+  const thorns = thornHits(step.path, state);
+  if (thorns.length > 0) {
+    const stats = deriveStats(actor, context);
+    const responses = damageResponses(actor, context);
+    const hurt = dealEvents(
+      actor,
+      thorns.map(({ amount, type }) => ({
+        amount: finalDamage(
+          rollAmount(amount, stats, context.dice),
+          type,
+          responses,
+        ),
+        type,
+      })),
+      false,
+      context,
+    );
+    events.push(...hurt.events);
+    frames.push(...concentrationFrame(actor, hurt.dealt));
+  }
   for (const { foe, melee } of provokers(actor, to, state, context)) {
     events.push(
       dndEvent(`${NS}:budgetSpent`, { actor: foe.id, kind: "reaction" }),

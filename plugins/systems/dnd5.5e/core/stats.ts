@@ -907,6 +907,9 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "tempHp" ||
       effect.kind === "modifier" ||
       effect.kind === "removeCondition" ||
+      effect.kind === "cure" ||
+      effect.kind === "dispel" ||
+      effect.kind === "zone" ||
       effect.kind === "extraAction" ||
       effect.kind === "reduceDamage" ||
       effect.kind === "teleport" ||
