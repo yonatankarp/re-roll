@@ -233,6 +233,7 @@ describe("reading legends from a stat block", () => {
         "Snap. The tyrant moves up to half its Speed, and it makes two Bite attacks.",
         "Roar. Wisdom Saving Throw: DC 15, each creature in a 20-foot Emanation originating from the tyrant. Failure: The target has the Frightened condition until the start of its next turn. Success: Nothing. The tyrant can't take this action again until the start of its next turn.",
         "Blink. The tyrant teleports up to 30 feet.",
+        "Step. The tyrant teleports up to 60 feet to an unoccupied space it can see, and each creature within 10 feet of the space it left takes 5 (2d4) Necrotic damage.",
       ],
       ["Bite"],
     );
@@ -240,7 +241,15 @@ describe("reading legends from a stat block", () => {
     const legend = MonsterSchema.shape.legendary.parse(fields.legendary);
     expect(legend?.uses).toBe(3);
     expect(legend?.usesInLair).toBe(4);
-    expect(legend?.actions.map((item) => item.name)).toEqual(["Snap", "Roar"]);
+    expect(legend?.actions.map((item) => item.name)).toEqual([
+      "Snap",
+      "Roar",
+      "Step",
+    ]);
+    expect(legend?.actions[2]?.activation).toMatchObject({
+      targeting: { self: true },
+      resolution: { effects: [{ kind: "teleport", feet: 60 }] },
+    });
     expect(legend?.actions[0]).toMatchObject({
       makes: ["Bite", "Bite"],
       moves: true,
@@ -248,7 +257,10 @@ describe("reading legends from a stat block", () => {
     });
     expect(legend?.actions[1]).toMatchObject({ oncePerRound: true });
     expect(legend?.actions[1]?.activation?.resolution.kind).toBe("save");
-    expect(notes).toEqual(["not automated: legendary action Blink"]);
+    expect(notes).toEqual([
+      "not automated: legendary action Blink",
+      "partial: Step: left out what follows it",
+    ]);
   });
 
   it("reads an older import's printed text when the stat block has no legend fields", async () => {
