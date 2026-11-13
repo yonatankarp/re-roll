@@ -16,7 +16,7 @@ import { shop } from "./shop.ts";
 import { creation, featureInPlay } from "./creation.ts";
 import { sheetCreation } from "./creation-sheet.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
-import type { BoardExtra } from "./board-data.ts";
+import type { BoardExtra, FightMap } from "./board-data.ts";
 import { dndCue } from "./cues.ts";
 import { GLOSSARY_TERMS } from "../core/glossary.ts";
 import {
@@ -25,6 +25,7 @@ import {
   type Amount,
   type CharacterBuild,
   type Damage,
+  EncounterSchema,
   ItemSchema,
   LootSchema,
   SKILL_ABILITIES,
@@ -733,7 +734,30 @@ function sheetOf(
   };
 }
 
-function combat(rawState: unknown, access: ContentAccess) {
+// A save from before its encounter had a battle map stored no picture. The encounter's map stands in,
+// only on the same squares, so the tokens still sit where the fight put them. Nothing stored changes.
+function fightMap(
+  combat: NonNullable<DndState["combat"]>,
+  encounter: ((id: string) => unknown) | undefined,
+): FightMap | null {
+  if (combat.map) return combat.map;
+  const found = EncounterSchema.safeParse(encounter?.(combat.encounter));
+  const battlemap = found.success ? found.data.battlemap : undefined;
+  if (
+    !battlemap ||
+    battlemap.columns !== combat.grid?.width ||
+    battlemap.rows !== combat.grid.height
+  )
+    return null;
+  const { image, imageWidth, imageHeight, crop } = battlemap;
+  return { image, imageWidth, imageHeight, crop };
+}
+
+function combat(
+  rawState: unknown,
+  access: ContentAccess,
+  encounter?: (id: string) => unknown,
+) {
   const state = parseState(rawState);
   if (!state.combat) return null;
   const { order, index, round } = state.combat;
@@ -796,7 +820,7 @@ function combat(rawState: unknown, access: ContentAccess) {
       shapes,
       cover,
       terrain: state.combat.terrain ?? null,
-      map: state.combat.map ?? null,
+      map: fightMap(state.combat, encounter),
       vitals: Object.fromEntries(
         order.flatMap((id) => {
           const actor = state.actors[id];
