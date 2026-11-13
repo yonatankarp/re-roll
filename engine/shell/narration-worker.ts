@@ -1,12 +1,20 @@
 import { env as hub } from "@huggingface/transformers";
 import { KokoroTTS, TextSplitterStream, env } from "kokoro-js";
 import { KOKORO_MODEL } from "../story/narration.ts";
-import { KOKORO_PATH_TEMPLATE, kokoroFetch } from "./kokoro-files.ts";
+import {
+  KOKORO_PATH_TEMPLATE,
+  type ModelStore,
+  kokoroFetch,
+  pickBackend,
+} from "./kokoro-files.ts";
+import { openModelCache } from "./model-cache.ts";
+import { readAloud } from "./read-aloud.ts";
 
-// Reads text aloud with Kokoro-82M off the page's thread, a sentence at a time, so playback can
-// start before the whole scene is read. WebGPU when the device has it, else WASM on the CPU.
-// The model comes from Hugging Face on first use, from a pinned commit and checked against its
-// hashes (kokoro-files.ts), and stays in the browser's cache after that. The voices ship with the app.
+// Reads text aloud with Kokoro-82M off the page's thread, a sentence or two at a time
+// (read-aloud.ts), so playback can start before the whole scene is read. WebGPU when the device has it, else WASM on the CPU, on
+// several threads where the page can share memory. The model comes from Hugging Face on first use,
+// from a pinned commit and checked against its hashes (kokoro-files.ts), and is kept in the Cache
+// API or IndexedDB after that. The voices ship with the app.
 
 export type NarrationRequest =
   | {
@@ -20,9 +28,11 @@ export type NarrationRequest =
 
 export type NarrationReply =
   | { readonly type: "loading"; readonly percent: number }
+  | { readonly type: "store"; readonly store: ModelStore } // where the model is kept, before it loads
   | {
       readonly type: "ready";
       readonly device: string;
+      readonly threads: number;
       readonly seconds: number;
     }
   | {
@@ -30,6 +40,9 @@ export type NarrationReply =
       readonly id: number;
       readonly samples: Float32Array;
       readonly rate: number;
+      readonly spent?: number; // seconds it took to make, for the page's pace
+      readonly chars?: number; // characters this piece read
+      readonly left?: readonly number[]; // characters in each piece still to read after it
     }
   | {
       readonly type: "done";
@@ -65,8 +78,6 @@ const VOICE_URLS: Readonly<Record<string, string>> = {
 
 // The pinned commit is also in the cache key, so copies fetched from main before aren't reused.
 hub.remotePathTemplate = KOKORO_PATH_TEMPLATE;
-// Without the Cache API the model is downloaded again each launch, rather than failing to load.
-hub.useBrowserCache = typeof caches !== "undefined";
 let downloaded: (percent: number) => void = () => undefined;
 globalThis.fetch = kokoroFetch(fetch.bind(globalThis), {
   voiceUrl: (voice) => VOICE_URLS[voice],
@@ -82,12 +93,40 @@ const reply = (
   postMessage(message, { transfer });
 };
 
+// The Cache API when it opens, which some webviews refuse on their own scheme, else IndexedDB.
+async function keepModel(): Promise<ModelStore> {
+  try {
+    await caches.open("transformers-cache");
+    hub.useBrowserCache = true;
+    return "cache-api";
+  } catch {
+    hub.useBrowserCache = false;
+  }
+  try {
+    hub.customCache = await openModelCache(indexedDB);
+    hub.useCustomCache = true;
+    return "indexeddb";
+  } catch {
+    return "none";
+  }
+}
+
 async function load(cpu: boolean): Promise<KokoroTTS> {
   const started = performance.now();
   const adapter =
     !cpu && "gpu" in navigator
       ? await navigator.gpu.requestAdapter().catch(() => null)
       : null;
+  const backend = pickBackend(
+    adapter !== null,
+    crossOriginIsolated,
+    typeof SharedArrayBuffer !== "undefined",
+    navigator.hardwareConcurrency,
+  );
+  // Read by the ONNX runtime once, when its first session starts, the WebGPU one included.
+  if (hub.backends.onnx.wasm)
+    hub.backends.onnx.wasm.numThreads = backend.threads;
+  reply({ type: "store", store: await keepModel() });
   let percent = 0;
   const show = (now: number): void => {
     if (now !== percent) {
@@ -111,11 +150,12 @@ async function load(cpu: boolean): Promise<KokoroTTS> {
     reply({
       type: "ready",
       device,
+      threads: backend.threads,
       seconds: (performance.now() - started) / 1000,
     });
     return tts;
   };
-  if (adapter) {
+  if (backend.device === "webgpu") {
     try {
       // Kokoro's advice: full precision on WebGPU, where quantised weights read badly.
       return ready(
@@ -158,19 +198,15 @@ async function speak(
     const tts = await model;
     const started = performance.now();
     let audio = 0;
-    // kokoro-js 1.2.1 never closes the splitter it makes for a plain string, so stream() would hang.
-    const sentences = new TextSplitterStream();
-    sentences.push(text);
-    sentences.close();
-    for await (const chunk of tts.stream(sentences, {
-      voice: voice as "af_heart",
-    })) {
+    for await (const piece of readAloud(
+      tts,
+      TextSplitterStream,
+      text,
+      voice as "af_heart",
+    )) {
       if (cancelled.delete(id)) return;
-      const samples = chunk.audio.audio;
-      audio += samples.length / chunk.audio.sampling_rate;
-      reply({ type: "chunk", id, samples, rate: chunk.audio.sampling_rate }, [
-        samples.buffer,
-      ]);
+      audio += piece.samples.length / piece.rate;
+      reply({ type: "chunk", id, ...piece }, [piece.samples.buffer]);
     }
     reply({
       type: "done",
@@ -184,13 +220,17 @@ async function speak(
   }
 }
 
-addEventListener("message", (event: MessageEvent<NarrationRequest>) => {
-  const request = event.data;
-  if (request.type === "cancel") {
-    cancelled.add(request.id);
-    return;
-  }
-  queue = queue.then(() =>
-    speak(request.id, request.text, request.voice, request.cpu),
-  );
-});
+// In a build, the ONNX runtime's WASM threads load this same bundle, and their messages aren't
+// ours: only the narrator's own worker listens. The runtime tells its threads apart by this name.
+if (!self.name.startsWith("em-pthread")) {
+  addEventListener("message", (event: MessageEvent<NarrationRequest>) => {
+    const request = event.data;
+    if (request.type === "cancel") {
+      cancelled.add(request.id);
+      return;
+    }
+    queue = queue.then(() =>
+      speak(request.id, request.text, request.voice, request.cpu),
+    );
+  });
+}
