@@ -12,7 +12,11 @@ import {
   runCheckCombatEnd,
   startCombat,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
-import { gearOptions } from "../plugins/systems/dnd5.5e/core/gear.ts";
+import { shownChoices } from "../engine/shell/choices.ts";
+import {
+  gearOptions,
+  sceneGearActions,
+} from "../plugins/systems/dnd5.5e/core/gear.ts";
 import {
   type Actor,
   type DndState,
@@ -419,6 +423,78 @@ describe("items in a fight", () => {
     expect(sheet?.sections.map((section) => section.title).slice(0, 2)).toEqual(
       ["Combat", "Equipment"],
     );
+  });
+});
+
+describe("drinking at full health", () => {
+  it("shows Drink disabled with a hint, still answerable, and offers it once hurt", async () => {
+    const { run } = await loadAdventure("goblin-ambush");
+    const state = dnd(play(await storyRun([]), "srd52:pregen/fighter").state);
+    const fighter = playerOf(state);
+    const at = (hp: number): DndState => ({
+      ...state,
+      actors: {
+        ...state.actors,
+        [PLAYER_ACTOR]: {
+          ...fighter,
+          hp,
+          inventory: [...fighter.inventory, POTION],
+        },
+      },
+    });
+    const max = deriveStats(fighter, run).maxHp;
+    const drinkOf = (dndState: DndState) => {
+      const action = sceneGearActions(dndState, run).find(
+        (item) => item.id === `drink:${POTION}`,
+      );
+      const sheets = dndUi.sheets(dndState, run);
+      const row = sheets[0]?.sections
+        .flatMap((section) => section.rows)
+        .find((item) => item.label.startsWith("Potion of Healing"));
+      const decision: Decision = {
+        id: "scene:s0",
+        actor: PLAYER_ACTOR,
+        prompt: "Onward.",
+        options: [
+          { id: "0", label: "Go on" },
+          ...(action
+            ? [
+                {
+                  id: action.id,
+                  label: action.label,
+                  ...(action.hidden ? { hidden: action.hidden } : {}),
+                },
+              ]
+            : []),
+        ],
+        resume: { kind: "story:resolveChoice", payload: { scene: "s0" } },
+      };
+      const shown = shownChoices({
+        decision,
+        optionGroups: [],
+        rests: [],
+        sheets,
+        shop: null,
+        creation: null,
+        endsEarly: new Set(),
+      }).map((choice) => choice.id);
+      return { action, row, shown };
+    };
+
+    const full = drinkOf(at(max));
+    expect(full.action?.hidden).toBe(true);
+    expect(full.row).toMatchObject({
+      option: { id: `drink:${POTION}`, hint: "Already at full health" },
+    });
+    expect(full.shown).not.toContain(`drink:${POTION}`);
+
+    const hurt = drinkOf(at(max - 3));
+    expect(hurt.action).toBeDefined();
+    expect(hurt.action?.hidden).toBeUndefined();
+    expect(hurt.row).toMatchObject({
+      option: { hint: "Drink between choices, or on your turn in a fight" },
+    });
+    expect(hurt.shown).toContain(`drink:${POTION}`);
   });
 });
 

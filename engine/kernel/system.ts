@@ -280,6 +280,7 @@ export interface SceneAction {
   readonly effect: string;
   readonly args: Readonly<Record<string, unknown>>;
   readonly rest?: boolean; // only where the scene allows a rest, as for something that takes one
+  readonly hidden?: true; // still answerable, so older saves replay, but not shown, such as a potion at full health
 }
 
 export interface SystemDefinition<S> {
