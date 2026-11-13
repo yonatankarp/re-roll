@@ -7,15 +7,24 @@ export interface D20Roll {
 }
 
 // Advantage never stacks, and one instance of each cancels out, however many apply.
+// With `rerollOnes`, as with Halfling Luck, a die that comes up 1 is rolled again and the new roll stands.
 export function rollD20(
   dice: Dice,
-  options: { readonly advantage: boolean; readonly disadvantage: boolean },
+  options: {
+    readonly advantage: boolean;
+    readonly disadvantage: boolean;
+    readonly rerollOnes?: boolean;
+  },
 ): D20Roll {
-  const first = dice.roll(20);
+  const roll = () => {
+    const value = dice.roll(20);
+    return value === 1 && options.rerollOnes ? dice.roll(20) : value;
+  };
+  const first = roll();
   if (options.advantage === options.disadvantage) {
     return { natural: first, rolls: [first] };
   }
-  const second = dice.roll(20);
+  const second = roll();
   return {
     natural: options.advantage
       ? Math.max(first, second)

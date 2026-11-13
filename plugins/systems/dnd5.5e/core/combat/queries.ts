@@ -19,6 +19,7 @@ import {
   scaleActivation,
   type Stats,
 } from "../stats.ts";
+import type { Passive } from "../schemas.ts";
 import {
   distanceFeet,
   rangeFeet,
@@ -85,10 +86,7 @@ export function hasFlag(
   );
 }
 
-export function hasPassive(
-  stats: Stats,
-  kind: "packTactics" | "undeadFortitude" | "magicResistance",
-): boolean {
+export function hasPassive(stats: Stats, kind: Passive["kind"]): boolean {
   return stats.passives.some((passive) => passive.kind === kind);
 }
 

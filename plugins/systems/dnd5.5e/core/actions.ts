@@ -187,6 +187,7 @@ function check(
     disadvantage:
       hasFlag(actor, "disadvantage", "checks", stats, ability) ||
       hasCondition(actor, "poisoned", "frightened"),
+    rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
   });
   const total =
     roll.natural +

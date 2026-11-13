@@ -435,6 +435,25 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("multiattack"),
     attacks: z.number().int().min(2),
   }),
+  // A 1 on the d20 of a D20 Test is rolled again, and the new roll stands, as with Halfling Luck.
+  z.strictObject({ kind: z.literal("rerollOnes") }),
+  // Once a turn, a weapon hit's damage dice are rolled twice and the higher kept, as with Savage Attacker.
+  z.strictObject({ kind: z.literal("savageAttacker") }),
+  // Proficiency in these saving throws, or with `increased` in the one its feat raised, as with Resilient.
+  z.strictObject({
+    kind: z.literal("saveProficiency"),
+    abilities: z.array(AbilitySchema).default([]),
+    increased: z.boolean().default(false),
+  }),
+  // Advantage on Death Saving Throws, as with Durable.
+  z.strictObject({ kind: z.literal("deathSaveAdvantage") }),
+  // Temporary Hit Points as a rest ends, for the bearer and with `allies` the whole party, as with Inspiring Leader.
+  z.strictObject({
+    kind: z.literal("restTempHp"),
+    rests: z.array(z.enum(["short", "long"])).min(1),
+    amount: FormulaSchema,
+    allies: z.boolean().default(false),
+  }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
 
@@ -468,6 +487,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
   perTier: ScaleStepSchema.optional(),
   // Spells it always gives, from the character level in the key.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched.
+  freeCast: z.literal(true).optional(),
   // Its damage is added to a hit's, so it takes that hit's damage type, as a Battle Master maneuver's die does.
   hitType: z.literal(true).optional(),
   // Dice its slot-spending activations add for each slot level, as with Eldritch Smite.
@@ -522,6 +543,7 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     list: ContentIdSchema.optional(), // a class whose spell list it is; any spell when absent
     schools: z.array(SpellSchoolSchema).min(1).optional(),
     ritual: z.boolean().optional(), // only spells with the Ritual tag
+    freeCast: z.literal(true).optional(), // each leveled spell picked is also cast once per Long Rest without a slot
   }),
   z.strictObject({
     kind: z.literal("option"),
@@ -874,6 +896,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("spells"),
     values: z.array(ContentIdSchema),
+    freeCast: z.literal(true).optional(), // from a choice with `freeCast`
   }),
   z.strictObject({
     kind: z.literal("features"),

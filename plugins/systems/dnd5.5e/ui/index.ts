@@ -13,7 +13,7 @@ import { canUse, foundText } from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
 import { coins } from "../core/shop.ts";
 import { shop } from "./shop.ts";
-import { creation } from "./creation.ts";
+import { creation, featureInPlay } from "./creation.ts";
 import { sheetCreation } from "./creation-sheet.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
 import type { BoardExtra } from "./board-data.ts";
@@ -115,7 +115,10 @@ function actionDetail(
   stats: Stats,
   access: ContentAccess,
 ): string {
-  const source = contentText(access, action.id.replace(/^[a-z]+:/, ""));
+  const source = contentText(
+    access,
+    action.id.replace(/^[a-z]+:/, "").replace(/:free$/, ""),
+  );
   const upcast = action.upcast?.perSlotLevel;
   return [
     actionNumbers(action, stats),
@@ -324,7 +327,9 @@ function actionSummary(action: KnownAction, stats: Stats): string {
 function sourceName(access: ContentAccess, source: string): string {
   const tactic = tacticSourceName(source);
   if (tactic) return tactic;
-  const id = source.replace(/^(spell|feature):/, "").replace(/:\d+$/, "");
+  const id = source
+    .replace(/^(spell|feature):/, "")
+    .replace(/:(\d+|free)$/, "");
   const named = NamedSchema.safeParse(access.content(id));
   return named.success ? named.data.name : "an effect";
 }
@@ -714,7 +719,13 @@ function sheetOf(
         rows: stats.features.flatMap((id) => {
           const feature = contentText(access, id);
           return feature
-            ? [{ label: feature.name, value: "", detail: feature.text }]
+            ? [
+                {
+                  label: feature.name,
+                  value: featureInPlay(access, id) ?? "",
+                  detail: feature.text,
+                },
+              ]
             : [];
         }),
       },

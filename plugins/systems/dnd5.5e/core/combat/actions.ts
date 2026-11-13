@@ -28,6 +28,7 @@ import {
 } from "../state.ts";
 import { distanceFeet, type Square, squareKey } from "../grid.ts";
 import { deriveStats } from "../stats.ts";
+import { rollD20 } from "../rules.ts";
 import { FLEE, runFlee } from "../legendary.ts";
 import {
   ADD,
@@ -48,6 +49,7 @@ import {
   type Context,
   enemies,
   findAction,
+  hasPassive,
   inReach,
   moveSquares,
   slotLevelFor,
@@ -72,7 +74,12 @@ export function runTakeAction(
   const actor = actorOf(state, payload.actor);
 
   if (payload.answer === DEATH_SAVE) {
-    const natural = dice.roll(20);
+    const stats = deriveStats(actor, context);
+    const { natural } = rollD20(dice, {
+      advantage: hasPassive(stats, "deathSaveAdvantage"),
+      disadvantage: false,
+      rerollOnes: hasPassive(stats, "rerollOnes"),
+    });
     const events: SystemEvent[] = [
       dndEvent(`${NS}:deathSaveRolled`, { actor: actor.id, natural }),
     ];

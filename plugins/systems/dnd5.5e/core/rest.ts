@@ -24,6 +24,7 @@ import { ClassSchema } from "./schemas.ts";
 import {
   type Stats,
   deriveStats,
+  evaluateFormula,
   lookup,
   modifierFor,
   rollDiceNotation,
@@ -250,8 +251,35 @@ function restInspiration(
       }
     }
   }
-  return [...inspired].map((actor) =>
-    dndEvent(`${NS}:inspirationGranted`, { actor }),
+  return [
+    ...[...inspired].map((actor) =>
+      dndEvent(`${NS}:inspirationGranted`, { actor }),
+    ),
+    ...restTempHp(members, rest, context),
+  ];
+}
+
+// Temporary Hit Points as a rest ends, as with Inspiring Leader. They don't stack, so the most is kept.
+function restTempHp(
+  members: readonly Actor[],
+  rest: "short" | "long",
+  context: Context,
+): SystemEvent[] {
+  const best = new Map<string, number>();
+  for (const actor of members) {
+    const stats = deriveStats(actor, context);
+    for (const passive of stats.passives) {
+      if (passive.kind !== "restTempHp" || !passive.rests.includes(rest)) {
+        continue;
+      }
+      const amount = evaluateFormula(passive.amount, stats);
+      for (const other of passive.allies ? members : [actor]) {
+        best.set(other.id, Math.max(best.get(other.id) ?? 0, amount));
+      }
+    }
+  }
+  return [...best].flatMap(([actor, amount]) =>
+    amount > 0 ? [dndEvent(`${NS}:tempHpGained`, { actor, amount })] : [],
   );
 }
 
