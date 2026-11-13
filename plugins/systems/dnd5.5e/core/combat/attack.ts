@@ -508,7 +508,10 @@ export function runAfterReaction(
 ): SystemResult {
   const { state } = context;
   const { answer, ...hit } = payload;
-  if (answer === DECLINE) return { frames: [frame("applyHit", hit)] };
+  if (answer === DECLINE) {
+    const guard = intercepted(hit, context);
+    return { events: guard.events, frames: [frame("applyHit", guard.hit)] };
+  }
 
   const target = actorOf(state, payload.target);
   const action = findAction(target, answer, context);

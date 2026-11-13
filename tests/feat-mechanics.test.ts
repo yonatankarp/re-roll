@@ -4,7 +4,10 @@ import { loadAdventure } from "../app/cli/load-adventure.ts";
 import type { Dice } from "../engine/kernel/dice.ts";
 import type { RunContext } from "../engine/run/turn.ts";
 import { choiceOptions } from "../plugins/systems/dnd5.5e/core/character.ts";
-import { DEATH_SAVE } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
+import {
+  DEATH_SAVE,
+  DECLINE,
+} from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
 import { rollSave } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { restFrames } from "../plugins/systems/dnd5.5e/core/rest.ts";
 import { rollD20 } from "../plugins/systems/dnd5.5e/core/rules.ts";
@@ -440,6 +443,32 @@ describe("shared feat and species mechanics", () => {
       reduceBy: 6,
     });
     expect(attack([], shield)).toMatchObject({ d20s: 1, labels: [] });
+    // A target that declines a reaction of its own still gets the ally's Interception.
+    const declined = run.system.frames[`${NS}:afterReaction`]?.run(
+      {
+        attacker: "foe",
+        actionId: "weapon:srd52:item/longsword",
+        target: "friend",
+        critical: false,
+        hadAdvantage: false,
+        total: 20,
+        natural: 15,
+        answer: DECLINE,
+      },
+      contextOf(
+        run,
+        [
+          { ...hero([], { id: "foe" }), side: "enemy" as const },
+          hero([], { id: "friend" }),
+          hero(["interceptor"], { id: "guard" }),
+        ],
+        scripted([4]).dice,
+      ),
+    );
+    expect(declined?.events?.map((event) => event.kind)).toContain(
+      `${NS}:budgetSpent`,
+    );
+    expect(declined?.frames?.[0]?.payload).toMatchObject({ reduceBy: 6 });
   });
 
   it("lessens, rides on and overcomes a weapon hit's damage, as Heavy Armor Master, Slasher and Irresistible Offense do", async () => {
