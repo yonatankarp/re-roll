@@ -92,6 +92,7 @@ export function wireTerms(ctx: ShellContext): void {
   pop.hidden = true;
   document.body.append(pop);
   let anchor: HTMLElement | null = null;
+  let anchorBox = new DOMRect(); // where it was, since a redrawn one has no box left
   let opener: HTMLElement | null = null; // where focus goes back to
   let pinned = false;
   let returning = false;
@@ -120,6 +121,7 @@ export function wireTerms(ctx: ShellContext): void {
   const place = (): void => {
     if (!anchor) return;
     const box = anchor.getBoundingClientRect();
+    anchorBox = box;
     const width = Math.min(pop.offsetWidth, innerWidth - 16);
     const left = Math.max(8, Math.min(box.left, innerWidth - width - 8));
     const below = box.bottom + 6 + pop.offsetHeight <= innerHeight;
@@ -133,6 +135,7 @@ export function wireTerms(ctx: ShellContext): void {
   ): Promise<void> => {
     const entry = entries.get(target.dataset.term ?? "");
     if (!entry) return;
+    const box = target.getBoundingClientRect();
     clearTimeout(hideTimer);
     const mine = ++shown;
     const key = `${entry.book}/${entry.file}`;
@@ -140,7 +143,9 @@ export function wireTerms(ctx: ShellContext): void {
       sections.get(key) ?? ctx.game.readSection(entry.book, entry.file);
     sections.set(key, read);
     const text = await read.catch(() => "");
-    if (mine !== shown || !target.isConnected || !text) return;
+    const now = redrawn(target, box);
+    if (mine !== shown || !now || !text) return;
+    target = now;
     const { title: heading, paragraphs } = excerpt(text, target.textContent);
     title.textContent = heading;
     pop.setAttribute("aria-label", heading);
@@ -205,18 +210,42 @@ export function wireTerms(ctx: ShellContext): void {
     observer.takeRecords(); // its own changes
   };
   const observer = new MutationObserver((records) => {
-    if (anchor && !anchor.isConnected) hide();
     void refresh();
     linkAll(
       records.flatMap((record) =>
         record.target instanceof Element ? [record.target] : [],
       ),
     );
+    // After linking, so a choice drawn again from its words has its term back.
+    if (anchor && !anchor.isConnected) {
+      const next = redrawn(anchor, anchorBox);
+      if (!next) {
+        hide();
+        return;
+      }
+      anchor = next;
+      if (opener && !opener.isConnected)
+        opener =
+          next.closest<HTMLElement>("button, summary, a, [tabindex]") ?? opener;
+      place();
+    }
   });
   observer.observe(ctx.screen, { childList: true, subtree: true });
 
   const termOf = (target: EventTarget | null): HTMLElement | null =>
     target instanceof Element ? target.closest<HTMLElement>(".term") : null;
+  // The same term drawn again where it was. A redraw under a resting pointer sends the new one no
+  // pointerover, so without this its explanation would never open, or would close.
+  function redrawn(old: HTMLElement, box: DOMRect): HTMLElement | null {
+    if (old.isConnected) return old;
+    const hit = termOf(
+      document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      ),
+    );
+    return hit?.dataset.term === old.dataset.term ? hit : null;
+  }
 
   document.addEventListener("pointerover", (event) => {
     if (pop.contains(event.target as Node)) {
@@ -224,10 +253,20 @@ export function wireTerms(ctx: ShellContext): void {
       return;
     }
     const term = termOf(event.target);
-    if (!term || event.pointerType !== "mouse" || term === anchor) return;
+    if (event.pointerType !== "mouse" || term === anchor) return;
+    if (!term) {
+      // Leaving a redrawn term sends no pointerout, as the node the pointer left is gone.
+      if (!pinned && !pop.hidden) {
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(hide, 250);
+      }
+      return;
+    }
     clearTimeout(hoverTimer);
+    const box = term.getBoundingClientRect();
     hoverTimer = setTimeout(() => {
-      if (!pinned) void show(term, { pin: false, focus: false });
+      const now = redrawn(term, box);
+      if (now && !pinned) void show(now, { pin: false, focus: false });
     }, 350);
   });
   document.addEventListener("pointerout", (event) => {
@@ -271,7 +310,7 @@ export function wireTerms(ctx: ShellContext): void {
     const term = termOf(event.target);
     if (returning) return;
     if (term?.tabIndex === 0) void show(term, { pin: false, focus: false });
-    else if (!pop.contains(event.target as Node)) hide();
+    else if (!pop.hidden && !pop.contains(event.target as Node)) hide();
   });
   document.addEventListener(
     "keydown",
@@ -319,7 +358,10 @@ export function wireTerms(ctx: ShellContext): void {
   addEventListener("resize", hide);
   document.addEventListener(
     "scroll",
-    () => {
+    (event) => {
+      // Only a scroll that moves the open term, not the log rolling on, nor one before it opens.
+      if (pop.hidden || !anchor || !(event.target as Node).contains(anchor))
+        return;
       if (!pinned) hide();
       else place();
     },

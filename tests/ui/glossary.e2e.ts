@@ -65,14 +65,36 @@ test("explains a term in a fight and opens its book section", async ({
   const dodge = page.locator(".option > button", { hasText: /^Dodge/ });
   const term = dodge.locator(".term[data-term='action:dodge']");
   const pop = page.locator(".term-pop");
-  // A redraw under a resting pointer gives the new term no pointerover, so move off and hover again, as a player would.
-  await expect(async () => {
-    await page.mouse.move(0, 0);
-    await term.hover();
-    await expect(pop).toBeVisible({ timeout: 1000 });
-  }).toPass({ timeout: 10_000 });
+  // The choices drawn again from their words under the resting pointer, before and after it opens. The
+  // browser may or may not send the new term a pointerover (and the old one a pointerout) then, so
+  // neither gets through here.
+  const redraw = () =>
+    term.evaluate((span) => {
+      span.replaceWith(document.createTextNode(span.textContent));
+    });
+  const blockOver = (block: boolean) =>
+    page.evaluate((on) => {
+      const stop = (event: Event) => {
+        event.stopImmediatePropagation();
+      };
+      const holder = window as unknown as { stopOver?: typeof stop };
+      for (const kind of ["pointerover", "pointerout"]) {
+        if (on) addEventListener(kind, stop, true);
+        else if (holder.stopOver)
+          removeEventListener(kind, holder.stopOver, true);
+      }
+      holder.stopOver = stop;
+    }, block);
+  await term.hover();
+  await blockOver(true);
+  await redraw();
+  await expect(pop).toBeVisible();
   await expect(pop.locator("h4")).toHaveText("Ducking [Made Up]");
   await expect(pop).toContainText("You bob and weave like a fixture.");
+  await redraw();
+  await expect(term).toBeVisible();
+  await expect(pop).toBeVisible();
+  await blockOver(false);
 
   // By keyboard: "?" on the focused choice, then Escape back to it.
   await page.mouse.move(0, 0);
@@ -97,7 +119,10 @@ test("explains a term in a fight and opens its book section", async ({
   await actions.click();
   await dodge.click();
   await page.getByText("Turn order and conditions").click();
-  const dodging = page.locator(".initiative .term[data-term='action:dodge']");
+  // The first, as a monster may be dodging too.
+  const dodging = page
+    .locator(".initiative .term[data-term='action:dodge']")
+    .first();
   await dodging.focus();
   await expect(pop).toBeVisible();
   await page.keyboard.press("Enter");
