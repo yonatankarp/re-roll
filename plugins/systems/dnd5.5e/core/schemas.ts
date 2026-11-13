@@ -357,6 +357,11 @@ export const ActivationSchema = z.strictObject({
       targetedBySpell: z.string().optional(),
       // Taken right after hitting with a weapon, as with the smite spells.
       afterHit: z.enum(["weapon", "meleeWeapon"]).optional(),
+      // Taken for another creature within 5 feet that a creature the bearer can see attacks, before the roll, or hits,
+      // as with Protection and Interception. It's taken as soon as it can be.
+      allyAttacked: z.literal(true).optional(),
+      allyHit: z.literal(true).optional(),
+      holding: z.enum(["shield", "shieldOrWeapon"]).optional(), // what the bearer must hold to take it
     })
     .optional(),
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
@@ -461,6 +466,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     rests: z.array(z.enum(["short", "long"])).min(1),
     amount: FormulaSchema,
     allies: z.boolean().default(false),
+  }),
+  // The bearer's spells of this type ignore Resistance to it, and a 1 on their damage dice counts as a 2, as with
+  // Elemental Adept.
+  z.strictObject({
+    kind: z.literal("energyMastery"),
+    damage: DamageTypeSchema,
   }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;

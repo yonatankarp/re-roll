@@ -49,6 +49,50 @@ const FIXTURES = [
   trait("savage", [{ kind: "savageAttacker" }]),
   trait("defy-death", [{ kind: "deathSaveAdvantage" }]),
   trait("great-weapon", [{ kind: "greatWeaponFighting" }]),
+  trait("adept", [{ kind: "energyMastery", damage: "fire" }]),
+  trait("protector", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { allyAttacked: true, holding: "shield" },
+        targeting: { creatures: 1, range: 5, side: "ally" },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "modifier",
+              duration: { until: "yourNextTurnStart" },
+              modifier: { kind: "disadvantage", on: "attacksAgainst" },
+            },
+          ],
+        },
+      },
+    ],
+  }),
+  trait("interceptor", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { allyHit: true, holding: "shieldOrWeapon" },
+        targeting: { creatures: 1, range: 5, side: "ally" },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "reduceDamage",
+              amount: {
+                dice: "1d10",
+                bonus: { add: [{ kind: "proficiency" }] },
+              },
+            },
+          ],
+        },
+      },
+    ],
+  }),
+  trait("fireproof", [
+    { kind: "modifier", modifier: { kind: "resistance", damage: "fire" } },
+  ]),
   {
     id: "test:item/maul",
     name: "Maul",
@@ -274,6 +318,89 @@ describe("shared feat and species mechanics", () => {
     expect(rolled(["great-weapon"], "test:item/maul")).toBe(3);
     expect(rolled(["great-weapon"], "srd52:item/longsword")).toBe(1);
     expect(rolled([], "test:item/maul")).toBe(1);
+  });
+
+  it("lets a spell of the mastered type ignore Resistance and count a 1 as a 2, as Elemental Adept does", async () => {
+    const run = await testRun();
+    const dealt = (traits: readonly string[]) => {
+      const caster = hero(traits, {
+        answers: [{ kind: "spells", values: ["srd52:spell/fire-bolt"] }],
+      });
+      const target = {
+        ...hero(["fireproof"], { id: "foe" }),
+        side: "enemy" as const,
+        hp: 30,
+      };
+      const ones: Dice = { below: () => 0, roll: () => 1 };
+      const events =
+        run.system.frames[`${NS}:applyHit`]?.run(
+          {
+            attacker: PLAYER_ACTOR,
+            actionId: "spell:srd52:spell/fire-bolt",
+            target: "foe",
+            critical: false,
+            hadAdvantage: false,
+            total: 20,
+            natural: 15,
+          },
+          contextOf(run, [caster, target], ones),
+        ).events ?? [];
+      return events.flatMap((event) =>
+        event.kind === `${NS}:damaged`
+          ? [(event.payload as { amount: number }).amount]
+          : [],
+      );
+    };
+    expect(dealt(["adept"])).toEqual([2]);
+    // Halved by Resistance, the 1 deals nothing.
+    expect(dealt([])).toEqual([]);
+  });
+
+  it("takes an ally's Protection or Interception on its own when a foe attacks or hits a creature beside it", async () => {
+    const run = await testRun();
+    const attack = (
+      guardTraits: readonly string[],
+      inventory: string[],
+      rolls = [15, 15],
+    ) => {
+      const foe = { ...hero([], { id: "foe" }), side: "enemy" as const };
+      const friend = hero([], { id: "friend" });
+      const guard = { ...hero(guardTraits, { id: "guard" }), inventory };
+      const { dice, counts } = scripted(rolls);
+      const context = contextOf(run, [foe, friend, guard], dice);
+      const result = run.system.frames[`${NS}:attackRoll`]?.run(
+        {
+          attacker: "foe",
+          actionId: "weapon:srd52:item/longsword",
+          target: "friend",
+        },
+        context,
+      );
+      const labels = (result?.events ?? []).flatMap((event) =>
+        event.kind === `${NS}:budgetSpent`
+          ? [(event.payload as { label?: string }).label]
+          : [],
+      );
+      const hit = result?.frames?.find((item) => item.kind === `${NS}:applyHit`)
+        ?.payload as { reduceBy?: number } | undefined;
+      return { d20s: counts[20], labels, reduceBy: hit?.reduceBy };
+    };
+    const shield = ["srd52:item/shield"];
+    expect(attack(["protector"], shield)).toMatchObject({
+      d20s: 2,
+      labels: ["protector"],
+    });
+    // Protection needs a Shield in hand.
+    expect(attack(["protector"], ["srd52:item/longsword"]).d20s).toBe(1);
+    // A 4 on the d10 plus a Proficiency Bonus of 2.
+    expect(
+      attack(["interceptor"], ["srd52:item/longsword"], [15, 4]),
+    ).toMatchObject({
+      d20s: 1,
+      labels: ["interceptor"],
+      reduceBy: 6,
+    });
+    expect(attack([], shield)).toMatchObject({ d20s: 1, labels: [] });
   });
 
   it("gives Advantage on Death Saving Throws", async () => {

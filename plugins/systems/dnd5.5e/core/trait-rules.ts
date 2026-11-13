@@ -53,6 +53,46 @@ export function weaponDamageDice(
     : dice;
 }
 
+// Elemental Adept: the damage types a spell of the bearer's ignores Resistance to.
+export function masteredTypes(
+  stats: Stats,
+  spell: boolean,
+): readonly DamageType[] {
+  return spell
+    ? stats.passives.flatMap((passive) =>
+        passive.kind === "energyMastery" ? [passive.damage] : [],
+      )
+    : [];
+}
+
+// Resistance the mastered types go through.
+export function piercing<
+  T extends { readonly resistances: readonly DamageType[] },
+>(responses: T, mastered: readonly DamageType[]): T {
+  return mastered.length === 0
+    ? responses
+    : {
+        ...responses,
+        resistances: responses.resistances.filter(
+          (type) => !mastered.includes(type),
+        ),
+      };
+}
+
+// A 1 on a damage die of a mastered type counts as a 2.
+export function masteredDice(
+  dice: Dice,
+  type: DamageType,
+  mastered: readonly DamageType[],
+): Dice {
+  return mastered.includes(type)
+    ? {
+        below: (count) => dice.below(count),
+        roll: (sides) => Math.max(2, dice.roll(sides)),
+      }
+    : dice;
+}
+
 // The conditions a repeated save would end, so that a trait such as Fey Ancestry gives its Advantage there as well.
 export function repeatSaveConditions(actor: Actor, sourceId: string): string[] {
   return actor.activeEffects.flatMap((effect) =>
