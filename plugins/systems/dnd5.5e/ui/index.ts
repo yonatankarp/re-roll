@@ -670,12 +670,16 @@ function sheetOf(
       {
         title: "Attacks and actions",
         pinned: true,
-        // One row per name, as a feature with two uses, such as Lucky, is one entry.
+        // A use taken on its own, such as Lucky's against an attack, is left out beside the one the player takes.
         rows: stats.actions
           .filter((action) => action.spellLevel === null)
           .filter(
-            (action, index, all) =>
-              all.findIndex((other) => other.name === action.name) === index,
+            (action, _, all) =>
+              !action.activation.trigger ||
+              !all.some(
+                (other) =>
+                  other.name === action.name && !other.activation.trigger,
+              ),
           )
           .map(actionRow),
       },

@@ -695,6 +695,7 @@ export function runApplyHit(
   }
   // Piercer: once a turn, a low die of the first damage of its type is rolled again, and a Critical Hit with it
   // rolls one more die.
+  // shortcut: the turn's use is spent on the first piercing hit even when no die is low enough to roll again.
   const piercer = stats.passives.find(
     (passive) =>
       passive.kind === "damageReroll" &&
