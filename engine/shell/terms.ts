@@ -11,8 +11,9 @@ import { button, el } from "./dom.ts";
 const PLACES = [
   ".log li.event",
   ".ticker li",
-  ".option > button:first-child",
-  ".option-detail",
+  // Not a story's choices, which are the adventure's own words ("Force the lock").
+  ".options:not(.story) .option > button:first-child",
+  ".options:not(.story) .option-detail",
   ".tags li",
   ".initiative .details",
   ".sheet-detail",

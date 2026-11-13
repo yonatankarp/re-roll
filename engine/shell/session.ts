@@ -67,6 +67,7 @@ const AUTOSAVE_END = `${AUTOSAVE}.json`;
 const AUTOSAVES_KEPT = 5; // the current run's included
 const ASSETS = "books/assets";
 const LIBRARY = "books/library";
+const GLOSSARY = `${LIBRARY}/glossary.json`;
 const IMAGE_FILE = /\.(png|jpe?g|webp|gif)$/i;
 const BARE_NAME = /^[^/\\]+$/;
 
@@ -494,6 +495,7 @@ export function createGame({
   // Every picture each name can use, so party members who share a look don't all share one face.
   let tokenArt: ReadonlyMap<string, readonly TokenArt[]> = new Map();
   let covers: ReadonlyMap<string, string> = new Map();
+  let glossaryText: Promise<string | null> | undefined; // read once, as the books don't change in play
 
   // Art is optional and still being extracted, so a bad index only loses its pictures.
   const loadArt = async (): Promise<void> => {
@@ -932,9 +934,16 @@ export function createGame({
     async terms(): Promise<readonly TermEntry[]> {
       const ui = current?.ui;
       if (!ui?.terms) return [];
-      const text = await storage
-        .read(`${LIBRARY}/glossary.json`)
+      glossaryText ??= storage
+        .list(LIBRARY)
+        .then((entries) =>
+          // Listed first, as reading a missing file is an error in a browser's console.
+          entries.some(({ path }) => path === GLOSSARY)
+            ? storage.read(GLOSSARY)
+            : null,
+        )
         .catch(() => null);
+      const text = await glossaryText;
       if (!text) return [];
       let glossary;
       try {

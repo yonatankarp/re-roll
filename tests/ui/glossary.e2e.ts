@@ -31,6 +31,14 @@ test("explains a term in a fight and opens its book section", async ({
       : route.fulfill({ body: text, contentType: "text/plain" });
   });
 
+  await page.route("**/__content/list?*", (route) =>
+    new URL(route.request().url()).searchParams.get("path") === "books/library"
+      ? route.fulfill({
+          json: Object.keys(FILES).map((path) => ({ path, symlink: false })),
+        })
+      : route.fallback(),
+  );
+
   await page.goto("/");
   await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
   await page.getByRole("button", { name: "Begin the adventure" }).click();
@@ -75,6 +83,19 @@ test("explains a term in a fight and opens its book section", async ({
   );
   await page.getByRole("button", { name: "Back to the game" }).click();
   await expect(actions).toBeVisible();
+
+  // Dodging shows in the turn order, where Tab reaches it, Enter opens it and Escape goes back to it.
+  await actions.click();
+  await dodge.click();
+  await page.getByText("Turn order and conditions").click();
+  const dodging = page.locator(".initiative .term[data-term='action:dodge']");
+  await dodging.focus();
+  await expect(pop).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(pop.getByRole("button", { name: "More" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(pop).toBeHidden();
+  await expect(dodging).toBeFocused();
 
   expect(errors).toEqual([]);
 });

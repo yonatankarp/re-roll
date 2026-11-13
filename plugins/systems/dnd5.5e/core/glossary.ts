@@ -188,10 +188,11 @@ export const GLOSSARY_TERMS: readonly GlossaryTerm[] = [
     heading: `${capital(condition)} [Condition]`,
     words: both(condition),
   })),
+  // Lower-case only, as in "7 fire damage", so names such as Fire Bolt aren't linked.
   ...DAMAGE_TYPES.map((type) => ({
     id: `damage:${type}`,
     heading: "Damage Types",
-    words: both(type),
+    words: [type],
   })),
   ...ACTIONS.map((action) => {
     const tactic = TACTICS.find((item) => TACTIC_ACTIONS[item] === action.id);

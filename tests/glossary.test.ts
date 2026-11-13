@@ -165,7 +165,12 @@ describe("the session's rules terms", () => {
             path === "books/library/glossary.json"
               ? Promise.resolve(glossary)
               : content.read(path),
-          list: (prefix) => content.list(prefix),
+          list: async (prefix) => [
+            ...(await content.list(prefix)),
+            ...(glossary !== null && prefix === "books/library"
+              ? [{ path: "books/library/glossary.json", symlink: false }]
+              : []),
+          ],
         },
         memorySaves(),
       ),
