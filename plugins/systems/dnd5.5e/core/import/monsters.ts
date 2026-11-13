@@ -363,10 +363,13 @@ function ongoingDamage(text: string, left: string[]): LeafEffect[] {
 function parseSwallow(text: string, left: string[]): ParsedAction | null {
   const [first = "", ...rest] = sentencesOf(text);
   const swallows = new RegExp(
-    `^The [^.]*? swallows (?:a|one) (?:${HERO_SIZES} )?(?:target|creature) (?:it is grappling|Grappled by [^.]*)\\.$`,
+    `^The [^.]*? swallows (?:a|one) (?:${HERO_SIZES} |(Small|Tiny) or smaller )?(?:target|creature) (?:it is grappling|Grappled by [^.]*)\\.$`,
     "i",
   );
-  if (!swallows.test(first)) return null;
+  const match = swallows.exec(first);
+  if (!match) return null;
+  // "a Small or smaller target" leaves out a Medium hero.
+  const largest = match[1]?.toLowerCase() as "small" | "tiny" | undefined;
   const after = rest.join(" ");
   const effects = [...conditionsIn(after, left), ...ongoingDamage(after, left)];
   if (!effects.some((effect) => effect.kind === "removeCondition")) {
@@ -378,6 +381,7 @@ function parseSwallow(text: string, left: string[]): ParsedAction | null {
       range: 5,
       side: "enemy",
       targetConditions: ["grappled"],
+      ...(largest ? { maxSize: largest } : {}),
     },
     resolution: { kind: "automatic", damage: [], effects },
   };

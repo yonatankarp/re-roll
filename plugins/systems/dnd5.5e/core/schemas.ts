@@ -326,6 +326,10 @@ export const TargetingSchema = z.union([
     side: SideSchema,
     creatureTypes: z.array(z.string()).optional(), // only these lowercase types can be targeted
     targetConditions: z.array(ConditionSchema).min(1).optional(), // only a creature with one of these, as for Trample
+    // only a creature this size or smaller, as for a giant frog's Swallow
+    maxSize: z
+      .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
+      .optional(),
   }),
   z.strictObject({
     area: z.strictObject({

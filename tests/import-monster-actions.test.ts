@@ -640,6 +640,18 @@ describe("monster actions read in round 4", () => {
       },
     });
   });
+  it("keeps a swallow's size limit when it leaves out some heroes", () => {
+    const monster = parse(
+      `${header("Actions")}${entry(
+        "Gulp",
+        "The caster swallows a Small or smaller target it is grappling. While swallowed, the target isn’t Grappled but has the Blinded and Restrained conditions.",
+      )}`,
+    );
+    expect(byName(monster, "Gulp")?.activation.targeting).toMatchObject({
+      targetConditions: ["grappled"],
+      maxSize: "small",
+    });
+  });
   it("reads a save a hit brings, its creature gate, and a condition lasting as another does", () => {
     const monster = parse(
       `${header("Actions")}${entry(

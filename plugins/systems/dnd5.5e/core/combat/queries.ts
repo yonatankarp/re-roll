@@ -13,6 +13,7 @@ import {
 import {
   deriveStats,
   type KnownAction,
+  lookup,
   passiveModifiers,
   rollAmount,
   scaleActivation,
@@ -29,7 +30,12 @@ import { speedOf } from "../tactics.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
 import { encodeOption } from "./ids.ts";
 import { swallowerOf } from "./swallow.ts";
-import { type Ability, type Targeting } from "../schemas.ts";
+import {
+  type Ability,
+  MonsterSchema,
+  SpeciesSchema,
+  type Targeting,
+} from "../schemas.ts";
 import { bossAction } from "../legendary.ts";
 import { aimScore, aimSquares, caughtBy } from "../targeting.ts";
 
@@ -266,6 +272,20 @@ export function charmersOf(actor: Actor): ReadonlySet<string> {
   );
 }
 
+export const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
+
+// A creature's size, as its index in SIZES.
+export function sizeOf(actor: Actor, access: ContentAccess): number {
+  if (actor.source.kind === "monster") {
+    const { size } = lookup(access, MonsterSchema, actor.source.statBlockId);
+    return SIZES.indexOf(size ?? "medium");
+  }
+  const { build } = actor.source;
+  return build
+    ? SIZES.indexOf(lookup(access, SpeciesSchema, build.speciesId).size)
+    : SIZES.indexOf("medium");
+}
+
 export function fitsType(
   item: Actor,
   targeting: Targeting,
@@ -274,6 +294,8 @@ export function fitsType(
   if ("self" in targeting) return true;
   const gate = "targetConditions" in targeting && targeting.targetConditions;
   if (gate && !hasCondition(item, ...gate)) return false;
+  const largest = "maxSize" in targeting ? targeting.maxSize : undefined;
+  if (largest && sizeOf(item, access) > SIZES.indexOf(largest)) return false;
   if (!targeting.creatureTypes) return true;
   return targeting.creatureTypes.includes(
     deriveStats(item, access).creatureType ?? "",

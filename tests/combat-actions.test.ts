@@ -297,6 +297,21 @@ const LEAPER = dummy("test:monster/leaper", {
 const TOAD = dummy("test:monster/toad", {
   actions: [...(GULPER.actions as unknown[])].reverse(),
 });
+// The same, swallowing only a Small or smaller creature, as the giant frog does.
+const FROG = dummy("test:monster/frog", {
+  actions: (TOAD.actions as { activation: { targeting: object } }[]).map(
+    (action, index) =>
+      index === 1
+        ? {
+            ...action,
+            activation: {
+              ...action.activation,
+              targeting: { ...action.activation.targeting, maxSize: "small" },
+            },
+          }
+        : action,
+  ),
+});
 const PINNER = pinner(["elf"]);
 const HUMAN_PINNER = pinner(["human"]);
 
@@ -371,6 +386,7 @@ function arena(base: RunContext): RunContext {
     "test:monster/weakener": WEAKENER,
     [PINNER.id]: PINNER,
     [TOAD.id]: TOAD,
+    [FROG.id]: FROG,
     [SNEAK.id]: SNEAK,
     [BLINKER.id]: BLINKER,
     [LEAPER.id]: LEAPER,
@@ -1588,6 +1604,23 @@ describe("monster grapples and multiattacks", () => {
       }),
     );
     expect(turnOf(held, 1)).toBe("monster:1|player");
+    // A frog can't swallow the Medium hero it holds.
+    const frog = {
+      ...held,
+      actors: {
+        ...held.actors,
+        toad: {
+          ...who(held, "toad"),
+          source: { kind: "monster" as const, statBlockId: FROG.id },
+        },
+      },
+    };
+    expect(
+      optionIds(run, {
+        ...frog,
+        combat: frog.combat && { ...frog.combat, index: 1 },
+      }),
+    ).not.toContain("monster:1|player");
   });
 
   it("dashes with Cunning Action when walking won't reach, and hides with it only behind cover", async () => {

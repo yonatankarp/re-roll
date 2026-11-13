@@ -27,6 +27,7 @@ import {
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { teleportSquares } from "./combat/movement.ts";
+import { SIZES, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
 import {
@@ -41,12 +42,7 @@ import { type Square, distanceFeet, pushTo, squareKey } from "./grid.ts";
 export { pushTo };
 import { FLEE } from "./legendary.ts";
 import { finalDamage, rollD20 } from "./rules.ts";
-import {
-  type Ability,
-  MonsterSchema,
-  type Skill,
-  SpeciesSchema,
-} from "./schemas.ts";
+import { type Ability, type Skill } from "./schemas.ts";
 import {
   type ActiveEffect,
   type Actor,
@@ -67,7 +63,6 @@ import {
   checkBonus,
   damageResponses,
   deriveStats,
-  lookup,
   modifierFor,
   saveBonus,
 } from "./stats.ts";
@@ -136,19 +131,6 @@ function effect(
     actor,
     effect: { sourceId, casterId, modifier, ends, ...more },
   });
-}
-
-const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
-
-function sizeOf(actor: Actor, access: ContentAccess): number {
-  if (actor.source.kind === "monster") {
-    const { size } = lookup(access, MonsterSchema, actor.source.statBlockId);
-    return SIZES.indexOf(size ?? "medium");
-  }
-  const { build } = actor.source;
-  return build
-    ? SIZES.indexOf(lookup(access, SpeciesSchema, build.speciesId).size)
-    : SIZES.indexOf("medium");
 }
 
 // An Unarmed Strike's Grapple or Shove, and a mastery's save: 8 + the ability modifier + Proficiency Bonus.
