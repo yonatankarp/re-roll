@@ -219,8 +219,17 @@ function handledByName(
   if (id.endsWith("fighting-style"))
     return working("level choice: fighting style");
   if (id.endsWith("epic-boon")) return working("level choice: epic boon");
-  if (id.endsWith("-metamagic") || id.endsWith("-eldritch-invocations")) {
+  if (
+    id.endsWith("-metamagic") ||
+    id.endsWith("-eldritch-invocations") ||
+    id.endsWith("-battle-master-combat-superiority")
+  ) {
     return working("level choice: options, each with its own mechanics");
+  }
+  if (/-(improved|ultimate)-combat-superiority$/.test(id)) {
+    return working(
+      `superiority die d${String(stats.scaling.superiorityDie ?? 8)}`,
+    );
   }
   if (id.endsWith("-font-of-magic")) {
     return working("turn options: spell slots to Sorcery Points and back");
