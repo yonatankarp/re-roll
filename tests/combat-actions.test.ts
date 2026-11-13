@@ -538,6 +538,14 @@ describe("actions anyone can take", () => {
       monster("foe", [9, 9]),
     ]);
     expect(optionIds(run, state)).toContain("tactic:help|ally");
+    const decision = run.system.nextDecision(state, run);
+    if (!decision) throw new Error("No decision");
+    const shown = dndUi
+      .optionGroups(decision, state, run)
+      .flatMap((group) => group.options)
+      .find((option) => option.id === "tactic:help|ally");
+    expect(shown?.label).toMatch(/Stabilize/);
+    expect(shown?.detail).toMatch(/Stable/);
     const steadied = settle(
       run,
       state,

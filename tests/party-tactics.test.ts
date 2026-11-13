@@ -187,6 +187,18 @@ describe("how the party fights", () => {
     expect(picked).toContain("fire-bolt");
   });
 
+  it("heals at the damage the difficulty lets foes deal: on Story a hurt ally can wait", async () => {
+    const run = await arena();
+    const healer = hero(run, { spells: ["cure-wounds", "fire-bolt"] });
+    const ally = hero(run, { id: "ally" });
+    const hurt = { ...ally, hp: 8 };
+    const normal = fight(healer, hurt, monster("a", "brute", 40));
+    expect(choose(run, normal)).toContain("cure-wounds");
+    expect(choose(run, { ...normal, difficulty: "story" })).toContain(
+      "fire-bolt",
+    );
+  });
+
   it("hits the dangerous foe before the harmless one with a little less HP", async () => {
     const run = await arena();
     const caster = hero(run, { spells: ["fire-bolt"] });
