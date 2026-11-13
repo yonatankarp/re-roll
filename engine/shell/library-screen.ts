@@ -63,9 +63,17 @@ export async function showBook(
   ctx: ShellContext,
   books: readonly string[],
   id: string,
+  at?: { readonly file: string; readonly back: () => void },
 ): Promise<void> {
   const book = await ctx.game.openBook(id);
   ctx.actions.replaceChildren(
+    ...(at
+      ? [
+          button("Back to the game", () => {
+            at.back();
+          }),
+        ]
+      : []),
     button("Library", () => {
       ctx.act(() => ctx.showLibrary(books));
     }),
@@ -113,4 +121,8 @@ export async function showBook(
     ),
   );
   ctx.focusNext = heading;
+  if (at) {
+    text.textContent = await ctx.game.readSection(id, at.file);
+    ctx.focusNext = text;
+  }
 }

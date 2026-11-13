@@ -3,6 +3,7 @@ import { type BoardFactory, type ShellContext, act, say } from "./context.ts";
 import { el } from "./dom.ts";
 import { showGame } from "./game-screen.ts";
 import { wireKeys } from "./keys.ts";
+import { wireTerms } from "./terms.ts";
 import { showBook, showLibrary } from "./library-screen.ts";
 import { resume, showLoad, showMenu } from "./menu-screen.ts";
 import { showSetup } from "./setup-screen.ts";
@@ -86,12 +87,13 @@ export function mountShell(
     },
     showLoad: (back) => showLoad(ctx, back),
     showLibrary: (books) => showLibrary(ctx, books),
-    showBook: (books, id) => showBook(ctx, books, id),
+    showBook: (books, id, at) => showBook(ctx, books, id, at),
     showGame: () => {
       showGame(ctx);
     },
   };
   wireKeys(ctx);
+  wireTerms(ctx);
 
   ctx.act(ctx.showMenu);
 }

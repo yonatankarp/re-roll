@@ -68,6 +68,7 @@ const AUTOSAVE_END = `${AUTOSAVE}.json`;
 const AUTOSAVES_KEPT = 5; // the current run's included
 const ASSETS = "books/assets";
 const LIBRARY = "books/library";
+const GLOSSARY = `${LIBRARY}/glossary.json`;
 const IMAGE_FILE = /\.(png|jpe?g|webp|gif)$/i;
 const BARE_NAME = /^[^/\\]+$/;
 
@@ -238,6 +239,19 @@ const BookIndexSchema = z.object({
   title: z.string(),
   entries: z.array(z.object({ path: z.array(z.string()), file: z.string() })),
 });
+
+// The owner's glossary index: for each of a system's rules terms, the book section that explains it.
+const GlossarySchema = z.object({
+  system: z.string(),
+  terms: z.record(z.string(), z.object({ book: z.string(), file: z.string() })),
+});
+
+export interface TermEntry {
+  readonly id: string;
+  readonly words: readonly string[];
+  readonly book: string;
+  readonly file: string;
+}
 
 // "Goblin Warrior", "goblin-warrior" and "srd52:monster/goblin-warrior" all find the same picture.
 function artKey(name: string): string {
@@ -489,6 +503,7 @@ export function createGame({
   // Every picture each name can use, so party members who share a look don't all share one face.
   let tokenArt: ReadonlyMap<string, readonly TokenArt[]> = new Map();
   let covers: ReadonlyMap<string, string> = new Map();
+  let glossaryText: Promise<string | null> | undefined; // read once, as the books don't change in play
 
   // Art is optional and still being extracted, so a bad index only loses its pictures.
   const loadArt = async (): Promise<void> => {
@@ -921,6 +936,36 @@ export function createGame({
         throw new Error("That isn't part of a book");
       }
       return (await storage.read(`${LIBRARY}/${id}/${file}`)) ?? "";
+    },
+
+    // The current system's terms that a book in the library explains, or none without the owner's books.
+    async terms(): Promise<readonly TermEntry[]> {
+      const ui = current?.ui;
+      if (!ui?.terms) return [];
+      glossaryText ??= storage
+        .list(LIBRARY)
+        .then((entries) =>
+          // Listed first, as reading a missing file is an error in a browser's console.
+          entries.some(({ path }) => path === GLOSSARY)
+            ? storage.read(GLOSSARY)
+            : null,
+        )
+        .catch(() => null);
+      const text = await glossaryText;
+      if (!text) return [];
+      let glossary;
+      try {
+        glossary = GlossarySchema.parse(JSON.parse(text));
+      } catch {
+        return [];
+      }
+      if (glossary.system !== ui.systemId) return [];
+      return ui.terms.flatMap((term) => {
+        const at = glossary.terms[term.id];
+        return at && BARE_NAME.test(at.book) && BARE_NAME.test(at.file)
+          ? [{ id: term.id, words: term.words, ...at }]
+          : [];
+      });
     },
 
     imageUrl(path: string): string | Promise<string | null> | null {

@@ -48,7 +48,12 @@ export interface ShellContext {
   readonly resume: (save: SaveChoice) => void;
   readonly showLoad: (back: () => void | Promise<void>) => Promise<void>;
   readonly showLibrary: (books: readonly string[]) => Promise<void>;
-  readonly showBook: (books: readonly string[], id: string) => Promise<void>;
+  // Opened at a section, and with a way back to the game, when a rules term's "More" asks for it.
+  readonly showBook: (
+    books: readonly string[],
+    id: string,
+    at?: { readonly file: string; readonly back: () => void },
+  ) => Promise<void>;
   readonly showGame: () => void;
 }
 

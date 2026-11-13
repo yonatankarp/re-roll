@@ -136,6 +136,7 @@ export function tokenFor(ctx: BoardContext, actor: Combatant & Vitals): Token {
   if (existing) return existing;
   const disc = el("div", "dnd-disc", initials(actor.name));
   const tip = el("span", "dnd-tip");
+  tip.dataset.terms = ""; // the shell explains a condition named here
   const shield = el("span", "dnd-shield");
   shield.hidden = true;
   const node = el("div", "dnd-token");

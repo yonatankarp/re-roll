@@ -6,12 +6,17 @@ import { createLlamaClient } from "../../engine/platform/node/llama-client.ts";
 import { createNodeStorage } from "../../engine/platform/node/storage.ts";
 import { checkPlugins } from "../../engine/tools/check-pack.ts";
 import { buildLibrary } from "../../engine/tools/library.ts";
+import { type BookIndex, buildGlossary } from "../../engine/tools/glossary.ts";
 import {
   approveImport,
   importParsed,
   importSource,
   splitSource,
 } from "../../engine/tools/import.ts";
+import {
+  GLOSSARY_BOOKS,
+  GLOSSARY_TERMS,
+} from "../../plugins/systems/dnd5.5e/core/glossary.ts";
 import { spellTextFromHtml } from "../../plugins/systems/dnd5.5e/core/import/spells.ts";
 import { systems } from "../systems.ts";
 import { PLUGIN_ROOTS } from "./load-adventure.ts";
@@ -27,6 +32,7 @@ const USAGE = `Usage:
   npm run import -- extract --input <book.html> --output <file>
   npm run import -- draft   --plugin <id> --kind <folder> --input <file> [--system <id>] [--encodings <file>]
   npm run import -- library --plugin <id> --input <book.html> [--system <id>]
+  npm run import -- glossary
   npm run import -- approve --plugin <id> --kind <folder> (--all | --slugs a,b,c)`;
 
 const { values, positionals } = parseArgs({
@@ -76,6 +82,28 @@ if (command === "library") {
   const words = library.entries.reduce((sum, entry) => sum + entry.words, 0);
   console.log(
     `${id}: ${String(library.entries.length)} sections, ${String(words)} words ${JSON.stringify(kinds)}`,
+  );
+  process.exit(0);
+}
+
+if (command === "glossary") {
+  const books = (
+    await Promise.all(
+      GLOSSARY_BOOKS.map((id) =>
+        readFile(`books/library/${id}/index.json`, "utf8").then(
+          (text) => ({ ...(JSON.parse(text) as BookIndex), plugin: id }),
+          () => null,
+        ),
+      ),
+    )
+  ).filter((book) => book !== null);
+  const glossary = buildGlossary("dnd5.5e", GLOSSARY_TERMS, books);
+  await writeFile(
+    "books/library/glossary.json",
+    `${JSON.stringify(glossary, null, 2)}\n`,
+  );
+  console.log(
+    `glossary: ${String(Object.keys(glossary.terms).length)} terms from ${books.map((book) => book.plugin).join(", ")}; none for ${glossary.missing.join(", ") || "-"}`,
   );
   process.exit(0);
 }
