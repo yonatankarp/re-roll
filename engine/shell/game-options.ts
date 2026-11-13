@@ -1,7 +1,7 @@
 import type { OptionView } from "./system-ui.ts";
 import type { GameView } from "./session.ts";
 import type { GamePage } from "./game-page.ts";
-import { button, el, enter } from "./dom.ts";
+import { button, el, enter, lookArt, picture } from "./dom.ts";
 import { drawCreation } from "./creation-view.ts";
 import { confirmEnding } from "./ending.ts";
 
@@ -42,13 +42,19 @@ export function drawDecision(
     : "";
   // Filled and shown once the board has finished, so its entrance isn't spent, and its news
   // isn't announced, while it's still hidden. The key is set only then, so a newer draw retries.
+  // The find's own picture, such as the item or the coins, beside what it says.
+  const cardArt = shownCard ? lookArt(view, shownCard.looks) : undefined;
   const revealCard =
     cardKey !== (page.card.dataset.key ?? "")
       ? (): void => {
           page.card.dataset.key = cardKey;
+          page.card.classList.toggle("with-art", cardArt !== undefined);
           page.card.replaceChildren(
             ...(shownCard
               ? [
+                  ...(cardArt
+                    ? [picture(page.ctx.game, cardArt, "", "card-art")]
+                    : []),
                   el(
                     "h3",
                     {},

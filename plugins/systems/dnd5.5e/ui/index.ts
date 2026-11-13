@@ -392,6 +392,7 @@ function equipmentRows(
       return [
         {
           label,
+          looks: [id],
           value: wornCount === 0 ? "In pack" : "Equipped",
           // Putting on a spare comes first, as between choices. Untrained armor isn't offered, as it would only hinder.
           ...(changes && (wornCount > 0 || wearable)
@@ -411,6 +412,7 @@ function equipmentRows(
       return [
         {
           label,
+          looks: [id],
           value: on ? "Attuned" : "Not attuned",
           ...(changes
             ? {
@@ -437,6 +439,7 @@ function equipmentRows(
     return [
       {
         label,
+        looks: [id],
         value: "",
         ...(changes && itemHealing(item)
           ? { option: { id: `drink:${id}`, label: "Drink", hint: DRINK_HINT } }
@@ -446,7 +449,9 @@ function equipmentRows(
     ];
   });
   return [
-    ...(gold === null ? [] : [{ label: "Gold", value: coins(gold) }]),
+    ...(gold === null
+      ? []
+      : [{ label: "Gold", value: coins(gold), looks: ["coins"] }]),
     carryRow(carriedWeight(actor, access), capacity),
     ...(attuned.length > 0 ||
     actor.inventory.some((id) => {
@@ -1093,6 +1098,8 @@ function card(decision: Decision, rawState: unknown, access: ContentAccess) {
         icon: COIN_ICON,
         lines: foundText(found.data, access),
         footer: `Purse: ${coins(parseState(rawState).gold ?? 0)}`,
+        // Its picture: the first item found with art, or the coins.
+        looks: [...found.data.items, ...(found.data.gold > 0 ? ["coins"] : [])],
       }
     : null;
 }

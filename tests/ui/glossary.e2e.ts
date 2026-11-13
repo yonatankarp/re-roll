@@ -39,6 +39,10 @@ test("explains a term in a fight and opens its book section", async ({
       : route.fallback(),
   );
 
+  // A monster's first sight covers the page with its picture until a click, as a player would dismiss it.
+  await page.addLocatorHandler(page.locator(".art-plate"), (plate) =>
+    plate.click(),
+  );
   await page.goto("/");
   await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
   await page.getByRole("button", { name: "Begin the adventure" }).click();

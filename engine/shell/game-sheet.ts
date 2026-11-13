@@ -1,6 +1,6 @@
 import type { GameView } from "./session.ts";
 import type { GamePage } from "./game-page.ts";
-import { button, el, replaceKeepingOpen } from "./dom.ts";
+import { button, el, lookArt, picture, replaceKeepingOpen } from "./dom.ts";
 import { meter, renderSheet } from "./sheet-view.ts";
 
 // The top bar's summary of the player, and the character sheets with a tab for each party member.
@@ -53,43 +53,51 @@ export function drawSheets(
     page.sheetPanels.set(item.id, panel);
     replaceKeepingOpen(
       panel,
-      renderSheet(item, true, (row) => {
-        const { option } = row;
-        if (!option) return [];
-        const offered = view.choices.some(
-          (choice) =>
-            choice.where === "sheet" &&
-            choice.sheet === item.id &&
-            choice.id === option.id,
-        );
-        if (!offered) {
-          // Shown but not offered, so the player sees what can change, and when.
-          const later = button(option.label, () => undefined);
-          later.className = "row-option";
-          later.disabled = true;
-          later.title = option.hint ?? "";
-          later.setAttribute(
-            "aria-label",
-            `${option.label} ${row.label}: ${option.hint ?? ""}`,
+      renderSheet(
+        item,
+        true,
+        (row) => {
+          const { option } = row;
+          if (!option) return [];
+          const offered = view.choices.some(
+            (choice) =>
+              choice.where === "sheet" &&
+              choice.sheet === item.id &&
+              choice.id === option.id,
           );
-          return [later];
-        }
-        const pick = button(option.label, () => {
-          page.ctx.act(async () => {
-            await page.ctx.game.answer(option.id);
-            page.draw();
-            page.flashSaved();
+          if (!offered) {
+            // Shown but not offered, so the player sees what can change, and when.
+            const later = button(option.label, () => undefined);
+            later.className = "row-option";
+            later.disabled = true;
+            later.title = option.hint ?? "";
+            later.setAttribute(
+              "aria-label",
+              `${option.label} ${row.label}: ${option.hint ?? ""}`,
+            );
+            return [later];
+          }
+          const pick = button(option.label, () => {
+            page.ctx.act(async () => {
+              await page.ctx.game.answer(option.id);
+              page.draw();
+              page.flashSaved();
+            });
           });
-        });
-        pick.className = "row-option";
-        pick.dataset.choice = option.id;
-        pick.setAttribute("aria-label", `${option.label} ${row.label}`);
-        // Inside a row's summary, the button shouldn't also open the row.
-        pick.addEventListener("click", (event) => {
-          event.preventDefault();
-        });
-        return [pick];
-      }),
+          pick.className = "row-option";
+          pick.dataset.choice = option.id;
+          pick.setAttribute("aria-label", `${option.label} ${row.label}`);
+          // Inside a row's summary, the button shouldn't also open the row.
+          pick.addEventListener("click", (event) => {
+            event.preventDefault();
+          });
+          return [pick];
+        },
+        (row) => {
+          const path = lookArt(view, row.looks);
+          return path ? [picture(page.ctx.game, path, "", "row-art")] : [];
+        },
+      ),
     );
     panel.hidden = item !== shown;
     return panel;

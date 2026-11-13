@@ -95,6 +95,8 @@ export interface GameView {
   readonly scene: string | null;
   readonly sceneTitle: string | null; // a name for the scene, such as for the window title
   readonly sceneArt: string | null; // a content path, for imageUrl
+  readonly chapterArt: string | null; // the title page of the chapter this scene opens, if it opens one
+  readonly cover: string | null; // the adventure's cover, for an ending with no picture of its own
   readonly ambience: Ambience; // the background sound the scene asks for
   readonly upcoming: readonly string[]; // the text of scenes the choices go to, to read ahead
   readonly endingName: string | null;
@@ -111,6 +113,8 @@ export interface GameView {
   readonly rests: readonly OptionView[]; // offered at the campfire, apart from the choices
   readonly monsterArt: Readonly<Record<string, string>>; // by combatant id
   readonly tokenArt: Readonly<Record<string, TokenArt>>; // by combatant id, with its face
+  // Pictures for the card's and the sheets' looks, such as an item found, by the look they were found for.
+  readonly itemArt: Readonly<Record<string, string>>;
   readonly adventureRoot: string; // where the adventure's own pictures are
   readonly decision: Decision | null;
   readonly combat: CombatView | null;
@@ -121,6 +125,7 @@ export interface GameView {
   readonly rolls: readonly RollLine[]; // from the start of the run, oldest first
   readonly leads: readonly LeadGroup[]; // the group with the newest clue first
   readonly steps: number; // inputs so far, the run's start included
+  readonly run: string; // the same for every step of one run, and different for the next
   readonly canUndo: boolean; // there's a choice to take back, and a forgiving setting or the choice allows it
   readonly system: string;
   readonly systemState: unknown; // for the system's own board
@@ -230,6 +235,9 @@ const ArtIndexSchema = z.array(
     subjects: z.array(z.string()).optional(), // other names it can stand for, such as "dwarf cleric"
     face: FaceSchema.optional(),
     cover: z.array(z.string()).optional(), // ids of the adventures this picture is the cover of
+    chapter: z.array(z.string()).optional(), // "<adventure>:<scene>" for each chapter it opens
+    items: z.array(z.string()).optional(), // ids of the items it shows
+    treasure: z.array(z.string()).optional(), // kinds of treasure it shows, such as "coins"
   }),
 );
 
@@ -505,6 +513,8 @@ export function createGame({
   // Every picture each name can use, so party members who share a look don't all share one face.
   let tokenArt: ReadonlyMap<string, readonly TokenArt[]> = new Map();
   let covers: ReadonlyMap<string, string> = new Map();
+  let chapters: ReadonlyMap<string, string> = new Map(); // by "<adventure>:<scene>"
+  let things: ReadonlyMap<string, string> = new Map(); // by item id or treasure kind
   let glossaryText: Promise<string | null> | undefined; // read once, as the books don't change in play
 
   // Art is optional and still being extracted, so a bad index only loses its pictures.
@@ -512,6 +522,8 @@ export function createGame({
     const found = new Map<string, string>();
     const tokens = new Map<string, TokenArt[]>();
     const coverPaths = new Map<string, string>();
+    const chapterPaths = new Map<string, string>();
+    const thingPaths = new Map<string, string>();
     try {
       const entries = await storage.list(ASSETS);
       for (const { path } of entries) {
@@ -520,12 +532,20 @@ export function createGame({
         const parsed = ArtIndexSchema.safeParse(
           JSON.parse((await storage.read(path)) ?? "null"),
         );
-        for (const { file, monster, subjects, face, cover } of parsed.data ??
-          []) {
+        for (const entry of parsed.data ?? []) {
+          const { file, monster, subjects, face, cover } = entry;
           if (!BARE_NAME.test(file)) continue;
           const art = { path: `${folder}/${file}`, ...(face ? { face } : {}) };
           if (IMAGE_FILE.test(file)) {
             for (const id of cover ?? []) coverPaths.set(id, art.path);
+            for (const key of entry.chapter ?? [])
+              chapterPaths.set(key, art.path);
+            // The first picture found for a thing keeps it, so the books' order picks.
+            for (const id of [
+              ...(entry.items ?? []),
+              ...(entry.treasure ?? []),
+            ])
+              if (!thingPaths.has(id)) thingPaths.set(id, art.path);
           }
           if (monster) found.set(artKey(monster), art.path);
           for (const name of [
@@ -543,6 +563,8 @@ export function createGame({
     monsterArt = found;
     tokenArt = tokens;
     covers = coverPaths;
+    chapters = chapterPaths;
+    things = thingPaths;
   };
   // The art is scanned once, and again when the plugins' files change.
   let artScan: Promise<void> | null = null;
@@ -884,6 +906,11 @@ export function createGame({
           : "manual";
         saves.push({
           ...bare,
+          // A save from a scene with no picture shows its adventure's cover.
+          art:
+            bare.art ??
+            adventures.find((item) => item.id === adventure)?.cover ??
+            null,
           path,
           label: `${title}: ${kind === "autosave" ? "Autosave" : "Saved"}, ${when ?? `run ${seed}`}, ${stepsText(steps)}`,
           adventure,
@@ -1128,6 +1155,8 @@ export function createGame({
         registry,
         warnings,
         root,
+        adventure,
+        seed,
       } = active();
       const currentScene = run.adventure.scenes.find(
         (item) => item.id === state.story.scene,
@@ -1203,7 +1232,11 @@ export function createGame({
       const pictures: Record<string, string> = {};
       const tokens: Record<string, TokenArt> = {};
       for (const actor of combat?.combatants ?? []) {
-        const art = actor.monster && monsterArt.get(artKey(actor.monster));
+        // A monster shown only alongside another, through subjects, still has a picture.
+        const art =
+          actor.monster &&
+          (monsterArt.get(artKey(actor.monster)) ??
+            tokenArt.get(artKey(actor.monster))?.[0]?.path);
         if (art) pictures[actor.id] = art;
         // The first of its looks with a picture, picked by id among several, so it's the same every time.
         for (const look of actor.looks ?? []) {
@@ -1243,6 +1276,21 @@ export function createGame({
           }
         }
       }
+      const itemArt: Record<string, string> = {};
+      const card = decision
+        ? (ui.card?.(decision, state.system, run) ?? null)
+        : null;
+      for (const look of [
+        ...(card?.looks ?? []),
+        ...sheets.flatMap((sheet) =>
+          sheet.sections.flatMap((section) =>
+            section.rows.flatMap((row) => row.looks ?? []),
+          ),
+        ),
+      ]) {
+        const path = things.get(look);
+        if (path) itemArt[look] = path;
+      }
       const text = currentScene ? sceneText(run, state, currentScene) : null;
       return {
         title: run.adventure.title,
@@ -1257,6 +1305,10 @@ export function createGame({
           currentScene?.art && IMAGE_FILE.test(currentScene.art)
             ? `${root}/${currentScene.art}`
             : null,
+        chapterArt: currentScene
+          ? (chapters.get(`${adventure}:${currentScene.id}`) ?? null)
+          : null,
+        cover: covers.get(adventure) ?? null,
         endingName:
           state.story.ended === "ending" && currentScene
             ? sceneTitle(currentScene)
@@ -1272,9 +1324,7 @@ export function createGame({
           creation,
           endsEarly: endingsSeen.ids,
         }),
-        card: decision
-          ? (ui.card?.(decision, state.system, run) ?? null)
-          : null,
+        card,
         shop,
         creation,
         creationArt,
@@ -1282,6 +1332,7 @@ export function createGame({
         rests,
         monsterArt: pictures,
         tokenArt: tokens,
+        itemArt,
         adventureRoot: root,
         combat,
         sheets,
@@ -1290,6 +1341,7 @@ export function createGame({
         rolls: [...rolls],
         leads: leadGroups(clues),
         steps: entries.length,
+        run: `${adventure}:${seed}`,
         canUndo: canTakeBack(run, state, entries),
         system: ui.systemId,
         systemState: state.system,

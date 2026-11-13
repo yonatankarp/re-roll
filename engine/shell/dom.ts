@@ -1,4 +1,4 @@
-import { type Game } from "./session.ts";
+import { type Game, type GameView } from "./session.ts";
 
 // Small DOM helpers the shell's screens share.
 
@@ -39,6 +39,14 @@ export function picture(
     else image.remove();
   });
   return image;
+}
+
+// The picture for the first of a card's or a row's looks that has one.
+export function lookArt(
+  view: GameView,
+  looks: readonly string[] | undefined,
+): string | undefined {
+  return looks?.map((look) => view.itemArt[look]).find(Boolean);
 }
 
 // A redraw must not close what the player has opened to read.

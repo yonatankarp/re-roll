@@ -34,6 +34,9 @@ function serve(root: string): Promise<{ server: Server; url: string }> {
     request.url = (request.url ?? "").slice(CONTENT_ROUTE.length);
     void handle(request, response);
   });
+  // A game can play for longer than Node's 5 s keep-alive between fetches, and a reused socket the
+  // server has just closed fails with ECONNRESET.
+  server.keepAliveTimeout = 60_000;
   return new Promise((done) => {
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address() as AddressInfo;
@@ -735,6 +738,72 @@ describe("playing through the shell's session", () => {
     await game.start("haunted-house", "desktop-test-1");
     // Its only art is a text file, which must never reach an <img>.
     expect(game.view().sceneArt).toBeNull();
+  });
+
+  it("finds chapter, item and coin pictures, a monster's through subjects, and a save's cover", async () => {
+    const content = createContentReader(url);
+    const game = createGame({
+      storage: withSaves(
+        {
+          read: (path) =>
+            path === "books/assets/book/index.json"
+              ? Promise.resolve(
+                  JSON.stringify([
+                    { file: "road.png", chapter: ["goblin-ambush:road"] },
+                    { file: "sword.png", items: ["srd52:item/longsword"] },
+                    { file: "coins.png", treasure: ["coins"] },
+                    { file: "notes.txt", items: ["srd52:item/shield"] },
+                    // Goblin warriors are only shown alongside another, so they're found through subjects.
+                    {
+                      file: "band.png",
+                      monster: "Hobgoblin Captain",
+                      subjects: ["goblin-warrior"],
+                    },
+                    { file: "cover.jpg", cover: ["goblin-ambush"] },
+                  ]),
+                )
+              : content.read(path),
+          list: (prefix) =>
+            prefix === "books/assets"
+              ? Promise.resolve([
+                  { path: "books/assets/book/index.json", symlink: false },
+                ])
+              : content.list(prefix),
+        },
+        memorySaves(),
+      ),
+      roots: ["plugins"],
+      systems,
+      uis: [dndUi],
+    });
+    await game.start("goblin-ambush", "desktop-test-1");
+    await chooseCharacter(game, "Fighter");
+    const view = game.view();
+    expect(view.chapterArt).toBe("books/assets/book/road.png");
+    expect(view.cover).toBe("books/assets/book/cover.jpg");
+    // The sheet's gold and sword have pictures; a picture that is a text file is never offered.
+    expect(view.itemArt).toMatchObject({
+      coins: "books/assets/book/coins.png",
+      "srd52:item/longsword": "books/assets/book/sword.png",
+    });
+    expect(Object.values(view.itemArt)).not.toContain(
+      "books/assets/book/notes.txt",
+    );
+    // The road's scene has no picture, so its save shows the adventure's cover.
+    await game.save("cover");
+    expect(
+      (await game.listSaves()).find(
+        (save) => save.adventure === "goblin-ambush",
+      )?.art,
+    ).toBe("books/assets/book/cover.jpg");
+    for (let count = 0; count < 100 && !game.view().combat; count += 1) {
+      const option = game.view().decision?.options[0];
+      if (!option) break;
+      await game.answer(option.id);
+    }
+    expect(new Set(Object.values(game.view().monsterArt))).toEqual(
+      new Set(["books/assets/book/band.png"]),
+    );
   });
 
   it("serves only real image types from the image route", async () => {
