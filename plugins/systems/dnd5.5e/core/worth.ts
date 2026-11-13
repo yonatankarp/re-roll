@@ -518,12 +518,20 @@ export function makeJudge(context: Context, side: Actor): Judge {
             : 0;
         case "vulnerability":
           return 0.2 * Math.max(own, meanFoeThreat) * lasting(span);
+        // A die off its rolls, as Bane's, is about what Bless's die gives an ally.
+        case "bonus":
+          return modifier.subtract && modifier.to !== "checks"
+            ? 0.12 * own * lasting(span)
+            : 0;
+        case "damageBonus":
+          return modifier.subtract ? 0.15 * own * lasting(span) : 0;
         default:
           return 0;
       }
     }
     switch (modifier.kind) {
       case "bonus":
+        if (modifier.subtract) return 0;
         return ["attacks", "ac", "saves"].includes(modifier.to)
           ? 0.12 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
           : modifier.to === "maxHp"
@@ -574,14 +582,15 @@ export function makeJudge(context: Context, side: Actor): Judge {
         if (
           hasCondition(target, condition) ||
           immuneToCondition(stats(target), condition) ||
-          isDown(target)
+          isDown(target) ||
+          (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost)
         ) {
           return 0;
         }
         const span = rounds(
           effect.duration,
           saved,
-          effect.repeatSave,
+          effect.repeatSave || effect.endSave !== undefined,
           effect.endsOnDamage,
         );
         if (foe) {

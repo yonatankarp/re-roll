@@ -147,6 +147,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     ]),
     amount: AmountSchema,
     once: z.boolean().optional(),
+    subtract: z.boolean().optional(), // taken off attack rolls, saves or checks instead, as with Bane
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
@@ -219,6 +220,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     condition: ConditionSchema,
     duration: DurationSchema,
     repeatSave: z.boolean().default(false), // the target repeats the save at the end of each of its turns
+    // A save at the end of each of its turns for a condition that came with none, as with Power Word Stun.
+    endSave: z
+      .strictObject({ ability: AbilitySchema, dc: FormulaSchema })
+      .optional(),
+    hpAtMost: z.number().int().min(1).optional(), // only a target with this many Hit Points or fewer
     endsOnDamage: z.boolean().default(false),
     // What a failed repeat save turns it into, as a cockatrice's Restrained becoming Petrified.
     secondFailure: z

@@ -787,8 +787,8 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
 }
 
 // Calculated on demand and never stored, so stats can't drift out of step with choices or gear.
-// Forced movement needs the grid, and Deafened and Grappled have no effect without positions or hearing rules,
-// so a spell that only does those would waste a slot. Drop this filter when the grid arrives.
+// Deafened and Grappled have no effect without hearing rules or a grappler's own grip, so a spell that only does
+// those would waste a slot. A push or a teleport moves on the grid every fight has.
 export function doesSomething(resolution: Resolution): boolean {
   if ("damage" in resolution && resolution.damage.length > 0) return true;
   const effects =
@@ -805,6 +805,8 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "removeCondition" ||
       effect.kind === "extraAction" ||
       effect.kind === "reduceDamage" ||
+      effect.kind === "teleport" ||
+      effect.kind === "forcedMove" ||
       (effect.kind === "applyCondition" &&
         effect.condition !== "deafened" &&
         effect.condition !== "grappled"),
@@ -819,9 +821,33 @@ export function immuneToCondition(stats: Stats, condition: Condition): boolean {
 }
 
 export function deriveStats(actor: Actor, access: ContentAccess): Stats {
-  return actor.source.kind === "monster"
-    ? monsterStats(actor, access)
-    : characterStats(actor, access);
+  const stats =
+    actor.source.kind === "monster"
+      ? monsterStats(actor, access)
+      : characterStats(actor, access);
+  const speed = effectBonus(actor, "speed");
+  const maxHp = effectBonus(actor, "maxHp");
+  return speed === 0 && maxHp === 0
+    ? stats
+    : {
+        ...stats,
+        speed: Math.max(0, stats.speed + speed),
+        maxHp: stats.maxHp + maxHp,
+      };
+}
+
+// A spell's flat Speed or Hit Point maximum increase, as with Longstrider or Aid, counted once per source.
+// shortcut: Hit Points above the maximum aren't taken away when the increase ends.
+function effectBonus(actor: Actor, to: "speed" | "maxHp"): number {
+  const seen = new Set<string>();
+  let total = 0;
+  for (const { sourceId, modifier } of actor.activeEffects) {
+    if (modifier.kind !== "bonus" || modifier.to !== to || seen.has(sourceId))
+      continue;
+    seen.add(sourceId);
+    total += modifier.amount.bonus?.base ?? 0;
+  }
+  return total;
 }
 
 export function modifierFor(stats: Stats, ability: Ability): number {

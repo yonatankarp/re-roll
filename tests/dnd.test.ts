@@ -1226,7 +1226,7 @@ describe("spell effects without a map", () => {
       doesSomething(
         save([{ kind: "forcedMove", feet: 10, direction: "away" }]),
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(doesSomething(save([{ ...charmed, condition: "deafened" }]))).toBe(
       false,
     );

@@ -245,10 +245,24 @@ export function leafEvents(
   )
     ? { swallowed: true }
     : {};
+  // A Hit Point maximum the same spell raises counts for its healing, as with Aid.
+  const raisedMax = target.activeEffects.some(
+    (item) => item.sourceId === sourceId,
+  )
+    ? 0
+    : effects.reduce(
+        (sum, effect) =>
+          effect.kind === "modifier" &&
+          effect.modifier.kind === "bonus" &&
+          effect.modifier.to === "maxHp"
+            ? sum + (effect.modifier.amount.bonus?.base ?? 0)
+            : sum,
+        0,
+      );
   for (const effect of effects) {
     switch (effect.kind) {
       case "heal": {
-        const max = deriveStats(target, context).maxHp;
+        const max = deriveStats(target, context).maxHp + raisedMax;
         const rolled = rollAmount(effect.amount, stats, context.dice);
         // Healing beyond the maximum is lost, so only what's really gained is reported.
         events.push(
@@ -283,9 +297,18 @@ export function leafEvents(
           }),
         );
         break;
-      case "applyCondition":
-        if (immuneToCondition(deriveStats(target, context), effect.condition))
+      case "applyCondition": {
+        if (
+          immuneToCondition(deriveStats(target, context), effect.condition) ||
+          (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost)
+        )
           break;
+        const conditionSave = effect.endSave
+          ? {
+              ability: effect.endSave.ability,
+              dc: evaluateFormula(effect.endSave.dc, stats),
+            }
+          : save;
         events.push(
           dndEvent(`${NS}:effectAdded`, {
             actor: target.id,
@@ -294,11 +317,14 @@ export function leafEvents(
               casterId: caster.id,
               modifier: { kind: "condition", condition: effect.condition },
               ends: effectEnds(effect.duration),
-              ...((effect.repeatSave || effect.secondFailure) && save
-                ? { repeatSave: save }
+              ...((effect.repeatSave ||
+                effect.secondFailure ||
+                effect.endSave) &&
+              conditionSave
+                ? { repeatSave: conditionSave }
                 : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
-              ...(effect.secondFailure && save
+              ...(effect.secondFailure && conditionSave
                 ? {
                     secondFailure: {
                       condition: effect.secondFailure.condition,
@@ -323,6 +349,7 @@ export function leafEvents(
           );
         }
         break;
+      }
       case "removeCondition":
         events.push(
           dndEvent(`${NS}:conditionRemoved`, {
