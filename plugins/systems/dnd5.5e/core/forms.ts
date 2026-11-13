@@ -25,6 +25,7 @@ export function levelOrChallenge(actor: Actor, access: ContentAccess): number {
   if (actor.source.kind === "character") {
     return actor.source.build?.levels.length ?? 1;
   }
+  if (actor.source.kind === "summon") return 0; // its Challenge Rating is None
   const entry = access.content(actor.source.statBlockId);
   const monster = MonsterSchema.safeParse(entry).data;
   return monster ? (challengeOf(monster) ?? 0) : 0;

@@ -9,7 +9,12 @@ import {
   squareKey,
 } from "./grid.ts";
 import type { Battlemap } from "./schemas.ts";
-import { FeatureSchema, MonsterSchema, SpeciesSchema } from "./schemas.ts";
+import {
+  CompanionSchema,
+  FeatureSchema,
+  MonsterSchema,
+  SpeciesSchema,
+} from "./schemas.ts";
 import { type Actor, type DndState, type Terrain, isDead } from "./state.ts";
 import { deriveStats, lookup } from "./stats.ts";
 import { swallowerOf } from "./combat/swallow.ts";
@@ -116,6 +121,13 @@ export function darkvisionOf(actor: Actor, access: ContentAccess): number {
       MonsterSchema,
       actor.source.statBlockId,
     );
+    return Math.max(
+      0,
+      ...[...text.matchAll(SEES_IN_DARK)].map((match) => Number(match[1])),
+    );
+  }
+  if (actor.source.kind === "summon") {
+    const { text } = lookup(access, CompanionSchema, actor.source.companion);
     return Math.max(
       0,
       ...[...text.matchAll(SEES_IN_DARK)].map((match) => Number(match[1])),

@@ -296,6 +296,20 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     halve: z.boolean().default(false),
     amount: AmountSchema.optional(),
   }),
+  // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts).
+  z.strictObject({ kind: z.literal("counter") }),
+  // Creatures that join the fight on the caster's side, using a companion stat block's `play` numbers at the
+  // slot's level, in open squares within `range` feet nearest the foes. They take their turns right after the
+  // caster's, and vanish at 0 Hit Points or when the spell ends. `dc` is the caster's spell save DC, which their
+  // saves and spell attacks use, and `count` how many come, as Animate Objects' spellcasting modifier.
+  z.strictObject({
+    kind: z.literal("summon"),
+    companion: ContentIdSchema,
+    duration: DurationSchema,
+    range: z.number().int().min(5),
+    count: FormulaSchema.default({ base: 1, add: [] }),
+    dc: FormulaSchema.default({ base: 0, add: [{ kind: "spellSaveDc" }] }),
+  }),
   // The target spends one of its Hit Point Dice and regains what it rolls plus `bonus`, as with Healer's Battle Medic.
   z.strictObject({ kind: z.literal("hitDieHeal"), bonus: FormulaSchema }),
 ]);
@@ -389,6 +403,8 @@ export const ActivationSchema = z.strictObject({
     .strictObject({
       hitByAttack: z.literal(true).optional(),
       targetedBySpell: z.string().optional(),
+      // Taken when a foe it can see within the activation's range casts a spell, as with Counterspell.
+      spellCast: z.literal(true).optional(),
       // Taken right after hitting with a weapon, as with the smite spells.
       afterHit: z.enum(["weapon", "meleeWeapon"]).optional(),
       // Taken for another creature within 5 feet that a creature the bearer can see attacks, before the roll, or hits,
@@ -479,6 +495,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("bonusTactics"),
     tactics: z.array(z.enum(["dash", "disengage", "hide"])).min(1),
+    half: z.literal(true).optional(), // its Dash adds half its Speed, as a troll's Charge
   }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
   z.strictObject({ kind: z.literal("concentrationAdvantage") }),
@@ -963,19 +980,6 @@ export const AbilityScoresSchema = z.strictObject({
 });
 export type AbilityScores = z.infer<typeof AbilityScoresSchema>;
 
-// A creature whose numbers depend on who brought it, such as a summoned spirit, so it isn't a monster yet.
-export const CompanionSchema = ContentEntrySchema.extend({
-  name: z.string().min(1),
-  size: z
-    .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
-    .optional(),
-  ac: z.string().min(1), // as printed, because it's a formula
-  hp: z.string().min(1), // as printed, because it's a formula
-  speed: z.string().min(1),
-  abilities: AbilityScoresSchema,
-  text: z.string().min(1),
-}).strict();
-
 // One legendary action: either some of the monster's own actions, by name, or an effect of its own.
 export const LegendaryActionSchema = z
   .strictObject({
@@ -1048,6 +1052,42 @@ export const MonsterSchema = ContentEntrySchema.extend({
   text: z.string().optional(), // the stat block as printed, for reading
 }).strict();
 export type Monster = z.infer<typeof MonsterSchema>;
+
+// A creature whose numbers depend on who brought it, such as a summoned spirit, so it isn't a monster yet.
+export const CompanionSchema = ContentEntrySchema.extend({
+  name: z.string().min(1),
+  size: z
+    .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
+    .optional(),
+  ac: z.string().min(1), // as printed, because it's a formula
+  hp: z.string().min(1), // as printed, because it's a formula
+  speed: z.string().min(1),
+  abilities: AbilityScoresSchema,
+  text: z.string().min(1),
+  // How a spell's `summon` effect plays it: its numbers as printed for the spell's own `level`, and what each
+  // level above adds. Its attacks of type "spell" use the caster's spell attack, and its save DCs the caster's.
+  play: MonsterSchema.pick({
+    ac: true,
+    hp: true,
+    speed: true,
+    speeds: true,
+    saves: true,
+    creatureType: true,
+    passives: true,
+    multiattack: true,
+    actions: true,
+  })
+    .extend({
+      level: z.number().int().min(1).max(9),
+      acPerLevel: z.number().int().default(0),
+      hpPerLevel: z.number().int().default(0),
+      // Its Multiattack makes half the spell's level in attacks, rounded down.
+      halfLevelAttacks: z.boolean().default(false),
+    })
+    .strict()
+    .optional(),
+}).strict();
+export type Companion = z.infer<typeof CompanionSchema>;
 
 const AbilityIncreaseSchema = z.partialRecord(
   AbilitySchema,

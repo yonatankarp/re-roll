@@ -1192,6 +1192,30 @@ function parseBlock(
       multiattack = count ?? 1;
       continue;
     }
+    // "casts Counterspell or Shield in response to the spell's trigger": the spells' own triggers say when.
+    const reactionDays = /\((\d+)\/Day\b/.exec(label)?.[1];
+    const reactions =
+      section === "reactions" && spells
+        ? castActions(
+            text,
+            {
+              cost: ["reaction"],
+              ...(reactionDays
+                ? {
+                    perDay: Number(reactionDays),
+                    resource: `day:${slugOf(label.replace(/\s*\(.*$/, ""))}`,
+                  }
+                : {}),
+            },
+            casterFor(text),
+            spells,
+            notes,
+          )
+        : [];
+    if (reactions.length > 0) {
+      actions.push(...reactions);
+      continue;
+    }
     if (section !== "actions" && section !== "bonus actions") {
       notes.push(`not automated: ${label}`);
       continue;
@@ -1207,6 +1231,20 @@ function parseBlock(
         tactics: [...tactics.matchAll(/Dash|Disengage|Hide/g)].map(
           (match) => match[0].toLowerCase() as "dash" | "disengage" | "hide",
         ),
+      });
+      continue;
+    }
+    // Charge: "The troll moves up to half its Speed straight toward an enemy it can see." A Dash toward the foes,
+    // which is where a monster's moves go.
+    const charge =
+      /^[^.]*?\bmoves up to (half )?its Speed(?: or (?:its )?\w+ Speed)? straight toward an enemy it can (?:see|sense)\.?$/.exec(
+        text.trim(),
+      );
+    if (section === "bonus actions" && charge && !label.includes("(")) {
+      passives.push({
+        kind: "bonusTactics",
+        tactics: ["dash"],
+        ...(charge[1] ? { half: true as const } : {}),
       });
       continue;
     }

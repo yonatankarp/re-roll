@@ -63,6 +63,7 @@ import {
   resolveTargets,
 } from "./effects.ts";
 import { keepsHidden, metamagicCast } from "../metamagic.ts";
+import { counterFrame, counterWindow } from "./counter.ts";
 
 // Taking an action on a turn: casting it, choosing its targets one by one, or aiming its area.
 
@@ -146,10 +147,26 @@ function castAction(
   slot: string | undefined,
   target: string | readonly string[],
   context: Context,
+  uncountered = false, // a foe has already had its chance to counter it
 ): SystemResult {
   const { state } = context;
   const slotLevel = slotLevelFor(actor, actionId, slot, context);
   const action = findAction(actor, actionId, context, slotLevel);
+  const counter = uncountered
+    ? null
+    : counterWindow(
+        actor,
+        action,
+        {
+          actor: actor.id,
+          actionId,
+          ...(slot === undefined ? {} : { slot }),
+          target: typeof target === "string" ? target : [...target],
+        },
+        slotLevel,
+        context,
+      );
+  if (counter) return { frames: [counter] };
   const picked = typeof target === "string" ? null : target;
   const targetId = typeof target === "string" ? target : ALL;
   const { projectiles, resolution } = action.activation;
@@ -393,6 +410,16 @@ export function runUseAction(
 }
 
 export const actionFrames = {
+  ...counterFrame((cast, context) =>
+    castAction(
+      actorOf(context.state, cast.actor),
+      cast.actionId,
+      cast.slot,
+      cast.target,
+      context,
+      true,
+    ),
+  ),
   [`${NS}:useAction`]: frameHandler({
     schema: UseActionSchema,
     run: runUseAction,

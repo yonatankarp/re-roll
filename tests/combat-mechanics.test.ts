@@ -25,6 +25,7 @@ import {
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import {
   PASS,
+  STAY,
   encodeOption,
   parseOption,
 } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
@@ -52,6 +53,11 @@ import {
   rollBonus,
 } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { thornHits, thornKeys } from "../plugins/systems/dnd5.5e/core/zones.ts";
+import { speedOf } from "../plugins/systems/dnd5.5e/core/tactics.ts";
+import {
+  BONUS_DASH,
+  withTactics,
+} from "../plugins/systems/dnd5.5e/core/actions.ts";
 import {
   BattlemapSchema,
   ClassSchema,
@@ -3860,5 +3866,106 @@ describe("ending, hiding and reshaping spells", () => {
     expect(back.tempHp).toBe(0);
     expect(back.hp).toBe(target.hp - 2);
     expect(back.activeEffects).toEqual([]);
+  });
+});
+
+describe("counterspell", () => {
+  const missile = `spell:${spell("magic-missile")}`;
+  const counterer = (id: string): Actor =>
+    monster(id, "srd52:monster/counterer");
+  const counterRun = async (): Promise<RunContext> =>
+    arenaRun(await base(), {
+      "srd52:monster/counterer": dummy("srd52:monster/counterer", {
+        actions: [
+          {
+            name: "Counterspell",
+            activation: {
+              cost: ["reaction"],
+              trigger: { spellCast: true },
+              targeting: { creatures: 1, range: 60, side: "enemy" },
+              resolution: {
+                kind: "save",
+                ability: "con",
+                dc: { base: 30, add: [] },
+                onFail: [{ kind: "counter" }],
+              },
+            },
+          },
+        ],
+      }),
+    });
+
+  it("stops a spell on a failed save: its action is spent, its slot isn't", async () => {
+    const run = await counterRun();
+    const state = fight(
+      hero(run, { spells: ["magic-missile"] }),
+      counterer("a"),
+    );
+    const cast = settle(run, state, [act(PLAYER_ACTOR, `${missile}|a`)], LOW);
+    expect(cast.decisions.map((item) => item.id)).toContain(`${NS}:reaction:a`);
+    expect(damageOf(cast.events, "a")).toEqual([]);
+    expect(actor(cast.state, PLAYER_ACTOR).resourcesSpent).toEqual({});
+    expect(cast.events).toContainEqual(
+      dndEvent(`${NS}:budgetSpent`, { actor: PLAYER_ACTOR, kind: "action" }),
+    );
+    expect(cast.events).toContainEqual(
+      dndEvent(`${NS}:budgetSpent`, { actor: "a", kind: "reaction" }),
+    );
+  });
+
+  it("lets the spell through when declined, and lets a cantrip through first", async () => {
+    const run = await counterRun();
+    const state = fight(
+      hero(run, { spells: ["magic-missile", "fire-bolt"] }),
+      counterer("a"),
+    );
+    const declined = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `${missile}|a`)],
+      LOW,
+      (decision) =>
+        decision.id.includes(":reaction:")
+          ? "decline"
+          : (decision.options[0]?.id ?? ""),
+    );
+    expect(damageOf(declined.events, "a")).toEqual([2, 2, 2]);
+    const bolt = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `spell:${spell("fire-bolt")}|a`)],
+      HIGH,
+    );
+    expect(bolt.decisions[0]?.options[0]?.id).toBe("decline");
+    expect(kinds(bolt.events)).not.toContain(`${NS}:saveRolled`);
+  });
+});
+
+describe("a Charge", () => {
+  it("adds half the Speed as a Bonus Action Dash", async () => {
+    const run = arenaRun(await base(), {
+      "srd52:monster/charger": dummy("srd52:monster/charger", {
+        speed: 30,
+        passives: [{ kind: "bonusTactics", tactics: ["dash"], half: true }],
+      }),
+    });
+    const troll = {
+      ...monster("t", "srd52:monster/charger"),
+      position: { x: 0, y: 0 },
+    };
+    const start = fight(troll, { ...hero(run), position: { x: 9, y: 0 } });
+    const state: DndState = start.combat
+      ? {
+          ...start,
+          combat: { ...start.combat, grid: { width: 10, height: 10 } },
+        }
+      : start;
+    const turn = withTactics(nextDndDecision(state, run), state, run);
+    expect(turn?.options.map((option) => option.label)).toContain(
+      "Dash as a Bonus Action (15 ft more this turn)",
+    );
+    const dashed = settle(run, state, [act("t", BONUS_DASH)], LOW, () => STAY);
+    const charged = actor(dashed.state, "t");
+    expect(speedOf(charged, deriveStats(charged, run))).toBe(45);
   });
 });

@@ -53,6 +53,7 @@ import { inArea, parseSquare, pushTo, type Square } from "../grid.ts";
 import { caughtBy } from "../targeting.ts";
 import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
 import { teleportFrame } from "./movement.ts";
+import { summonEvents } from "./summon.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
@@ -464,6 +465,8 @@ export function leafEvents(
       case "reduceDamage":
       case "teleport":
       case "zone":
+      case "summon":
+      case "counter":
         // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit, and
         // a teleport's square by its own decision and a zone once for the whole spell (resolveAction).
         break;
@@ -626,7 +629,8 @@ export function resolveAction(
         (effect.kind === "modifier" ||
           effect.kind === "applyCondition" ||
           effect.kind === "zone" ||
-          effect.kind === "polymorph") &&
+          effect.kind === "polymorph" ||
+          effect.kind === "summon") &&
         typeof effect.duration === "object" &&
         "concentration" in effect.duration,
     );
@@ -695,6 +699,11 @@ export function resolveAction(
       // A zone is left once, where the area was aimed or round the caster, whoever it caught.
       const at = aim ?? actor.position;
       for (const effect of resolution.effects) {
+        if (effect.kind === "summon") {
+          events.push(
+            ...summonEvents(effect, action, actor, stats, context, slotLevel),
+          );
+        }
         if (effect.kind !== "zone" || !at) continue;
         if (effect.zone === "darkness") {
           events.push(...snuffedLights(at, effect.radius, context));

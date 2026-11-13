@@ -261,6 +261,7 @@ function looksOf(actor: Actor, access: ContentAccess): readonly string[] {
   if (source.kind === "monster") {
     return [nameOf(access, source.statBlockId), actor.name];
   }
+  if (source.kind === "summon") return [nameOf(access, source.companion)];
   const build = source.build;
   const classId = build?.levels[0]?.classId;
   if (!build || !classId) return [];
