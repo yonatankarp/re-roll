@@ -69,7 +69,11 @@ export function drawCreationSheet(
   };
   const art = (id: string, className: string): Node[] => {
     const path = view.creationArt[id];
-    return path ? [picture(ctx.game, path, "", className)] : [];
+    if (!path) return [];
+    const image = picture(ctx.game, path, "", className);
+    const focus = view.creationFocus?.[id];
+    if (focus) image.style.objectPosition = focus;
+    return [image];
   };
 
   const drawer = el("dialog", { class: "drawer creation-drawer" });
@@ -342,11 +346,27 @@ export function drawCreationSheet(
               return el("li", {}, chip, ...details(choice, "sheet-chip-info"));
             }),
           );
+    const note = item.note
+      ? [el("p", { class: "sheet-note", text: item.note })]
+      : [];
+    if (item.folded) {
+      const fold = el(
+        "details",
+        { class: "sheet-group sheet-fold" },
+        el("summary", {
+          text: `${item.title} (${String(item.choices.length)})`,
+        }),
+        ...note,
+        body,
+      );
+      fold.open = item.choices.some((choice) => choice.selected);
+      return fold;
+    }
     return el(
       "section",
       { class: "sheet-group" },
       el("h4", { text: item.title }),
-      ...(item.note ? [el("p", { class: "sheet-note", text: item.note })] : []),
+      ...note,
       body,
     );
   }

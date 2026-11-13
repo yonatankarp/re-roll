@@ -66,6 +66,7 @@ export interface CreationGroup {
   readonly note?: string; // such as "Choose 2"
   readonly layout: "cards" | "chips";
   readonly choices: readonly CreationChoice[];
+  readonly folded?: boolean; // shown on request, such as picks that matter less
 }
 
 // A number changed in small steps, such as an ability score. minus and plus are the answers, absent when not allowed.

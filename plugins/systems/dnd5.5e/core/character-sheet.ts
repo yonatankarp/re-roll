@@ -248,10 +248,13 @@ export function validScores(
   return values.every((value, index) => value === STANDARD_ARRAY[index]);
 }
 
-// The background that raises what the class needs most.
+// The background that raises what the class needs most, and for a caster one whose feat brings more spells.
 function recommendedBackground(classDef: ClassDef, access: ContentAccess) {
   const priority = abilityPriority(classDef);
-  const worth = (abilities: readonly Ability[]): number =>
+  const worth = (abilities: readonly Ability[], feat: string): number =>
+    (classDef.spellcasting && slugOf(feat).startsWith("magic-initiate")
+      ? 20
+      : 0) +
     abilities.reduce(
       (sum, ability) =>
         sum + (ABILITIES.length - priority.indexOf(ability)) ** 2,
@@ -259,7 +262,7 @@ function recommendedBackground(classDef: ClassDef, access: ContentAccess) {
     );
   let best: { id: string; worth: number } | null = null;
   for (const item of namedContent(access, "background", BackgroundSchema)) {
-    const value = worth(item.abilities);
+    const value = worth(item.abilities, item.feat);
     if (!best || value > best.worth) best = { id: item.id, worth: value };
   }
   return best?.id;
@@ -413,12 +416,18 @@ export function changeSheet(
         : sheet;
     case "class": {
       if (!offered(access, "class", value)) return sheet;
-      // A new class wants its own scores and increase; the rest is kept where the rules still allow it.
+      // A new class wants its own scores and increase. A species or background still on the old class's suggestion
+      // follows the new one; one the player picked stays, as does the rest while the rules allow it.
+      const before = completeDraft(
+        { classId: draft.classId, scores: [], picks: {} },
+        "standard",
+        access,
+      );
+      const drop: (keyof Draft)[] = ["base", "increase"];
+      if (draft.speciesId === before.speciesId) drop.push("speciesId");
+      if (draft.backgroundId === before.backgroundId) drop.push("backgroundId");
       return completeSheet(
-        {
-          ...sheet,
-          draft: { ...without(draft, ["base", "increase"]), classId: value },
-        },
+        { ...sheet, draft: { ...without(draft, drop), classId: value } },
         access,
       );
     }

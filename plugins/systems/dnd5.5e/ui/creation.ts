@@ -209,7 +209,13 @@ export function contentChoice(
           : [];
       }),
     );
-    return { id, label, detail: features.join("\n\n") };
+    const className = nameOf(access, subclass.class) ?? "";
+    return {
+      id,
+      label,
+      detail: features.join("\n\n"),
+      looks: [`${className} ${subclass.name}`, className],
+    };
   }
   const item = find(access, ItemSchema, id);
   if (item) return { id, label, summary: capital(item.type) };

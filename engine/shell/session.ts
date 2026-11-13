@@ -102,6 +102,8 @@ export interface GameView {
   // A step of making the character, shown in place of the choices, with each choice's picture by option id.
   readonly creation: CreationView | null;
   readonly creationArt: Readonly<Record<string, string>>;
+  // Where a creation picture's face is, as a CSS object-position, so a tall portrait isn't cropped to its top.
+  readonly creationFocus?: Readonly<Record<string, string>>;
   readonly rests: readonly OptionView[]; // offered at the campfire, apart from the choices
   readonly monsterArt: Readonly<Record<string, string>>; // by combatant id
   readonly tokenArt: Readonly<Record<string, TokenArt>>; // by combatant id, with its face
@@ -1130,6 +1132,7 @@ export function createGame({
         ? (ui.creation?.(decision, state.system, run) ?? null)
         : null;
       const creationArt: Record<string, string> = {};
+      const creationFocus: Record<string, string> = {};
       // Every picture the creation screen can show, by the id it is drawn under; the live card is "card".
       const pictured = [
         ...(creation?.choices ?? []),
@@ -1148,6 +1151,10 @@ export function createGame({
           const chosen = options[stableIndex(choice.id, options.length)];
           if (chosen) {
             creationArt[choice.id] = chosen.path;
+            if (chosen.face) {
+              creationFocus[choice.id] =
+                `${String(Math.round(chosen.face.x * 100))}% ${String(Math.round(chosen.face.y * 100))}%`;
+            }
             break;
           }
         }
@@ -1182,6 +1189,7 @@ export function createGame({
           : null,
         creation,
         creationArt,
+        creationFocus,
         rests: (decision?.options ?? [])
           .filter((option) => isRest(option.id))
           .map((option) => ({

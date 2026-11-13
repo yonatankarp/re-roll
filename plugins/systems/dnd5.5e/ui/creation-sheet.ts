@@ -305,15 +305,36 @@ function slotOwner(slot: string, draft: Draft, access: ContentAccess): string {
   return nameOf(access, draft.classId) ?? "";
 }
 
+// Spells the rules can't play in a fight yet are folded away below the rest of their pick.
+function foldStoryOnly<T extends { readonly choices: readonly Choice[] }>(
+  group: T,
+): readonly (T | (T & { readonly folded: true; readonly title: string }))[] {
+  const story = (choice: Choice): boolean =>
+    choice.label.endsWith("(story only)");
+  const later = group.choices.filter(story);
+  if (later.length === 0 || later.length === group.choices.length)
+    return [group];
+  return [
+    { ...group, choices: group.choices.filter((choice) => !story(choice)) },
+    {
+      ...group,
+      title: "More, for the story only",
+      note: "The rules don't play these in a fight yet.",
+      folded: true,
+      choices: later,
+    },
+  ];
+}
+
 function skillGroups(draft: Draft, access: ContentAccess) {
   const fresh = completeDraft({ ...draft, picks: {} }, "standard", access);
-  return sheetSlots(draft, access).map((slot) => {
+  return sheetSlots(draft, access).flatMap((slot) => {
     const picked = draft.picks[slot.slot] ?? [];
     const what = slot.prompt
       .replace(/^Choose /, "")
       .replace(/ \(\d+ of \d+\)/, "")
       .replace(/\.$/, "");
-    return {
+    return foldStoryOnly({
       title: `${slotOwner(slot.slot, draft, access)}: ${what}`,
       note:
         slot.count > 1
@@ -333,7 +354,7 @@ function skillGroups(draft: Draft, access: ContentAccess) {
           recommended: fresh.picks[slot.slot]?.includes(option.id) === true,
         };
       }),
-    };
+    });
   });
 }
 

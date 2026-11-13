@@ -673,6 +673,14 @@ summary {
   gap: 8px;
 }
 
+.sheet-fold summary {
+  min-height: 44px;
+  padding: 10px 0;
+  font: 1.05rem var(--font-head);
+  color: var(--accent);
+  cursor: pointer;
+}
+
 .sheet-step:disabled {
   opacity: 0.35;
   cursor: default;
@@ -2064,8 +2072,8 @@ button:active {
 }
 
 .sheet-chips {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 8px;
   margin: 0;
   padding: 0;
@@ -2078,6 +2086,7 @@ button:active {
 
 .sheet-chip {
   display: flex;
+  flex: 1;
   flex-direction: column;
   align-items: flex-start;
   min-height: 44px;
@@ -2286,6 +2295,21 @@ button:active {
 
 /* On a phone the card rides on top as a strip: the face, the name and the key numbers. */
 @media (max-width: 899px) {
+  .sheet-steps {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .sheet-steps li {
+    flex: none;
+  }
+
+  .creation:has(> .creation-back) .sheet-steps {
+    padding-right: 0;
+    margin-right: 80px;
+  }
+
   .sheet-card {
     order: -1;
     display: grid;

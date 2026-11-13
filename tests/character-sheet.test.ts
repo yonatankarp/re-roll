@@ -175,6 +175,24 @@ describe("the character sheet", () => {
     }
   });
 
+  it("moves a suggested species and background to the new class, and keeps picked ones", async () => {
+    const { run } = await goblin();
+    const wizard = sheetOf(play(run, [`${READY_PREFIX}srd52:class/wizard`]));
+    const moved = sheetOf(
+      play(run, [BUILD_YOURSELF, "class:srd52:class/wizard"]),
+    );
+    expect(moved.draft.speciesId).toBe(wizard.draft.speciesId);
+    expect(moved.draft.backgroundId).toBe(wizard.draft.backgroundId);
+    const kept = sheetOf(
+      play(run, [
+        BUILD_YOURSELF,
+        "species:srd52:species/elf",
+        "class:srd52:class/wizard",
+      ]),
+    );
+    expect(kept.draft.speciesId).toBe("srd52:species/elf");
+  });
+
   it("takes picked skills and fills the rest", async () => {
     const { run } = await goblin();
     const ready = sheetOf(play(run, [`${READY_PREFIX}srd52:class/fighter`]));
