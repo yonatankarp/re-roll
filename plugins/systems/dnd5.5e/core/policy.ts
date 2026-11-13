@@ -50,12 +50,15 @@ export function stepToward(actor: Actor, context: Context): Square | null {
   const { state } = context;
   const stats = deriveStats(actor, context);
   if (!actor.position) return null;
+  // A Concentration spell it's still holding someone with doesn't count, as it won't be cast again.
+  const holding = holdingConcentration(actor, context);
   const offensive = stats.actions.filter(
     (action) =>
       !action.activation.trigger &&
       "side" in action.activation.targeting &&
       action.activation.targeting.side === "enemy" &&
-      canAfford(action, actor, stats),
+      canAfford(action, actor, stats) &&
+      !(holding && concentrates(action)),
   );
   if (offensive.length === 0) return null;
   const reach = Math.max(
@@ -546,12 +549,16 @@ export function choosePolicy(decision: Decision, context: Context): string {
   const routineSize = (action: KnownAction): number =>
     attackRoutine(action, actor, stats).length +
     multiattackExtras(action, actor, context).length;
+  // A spell it keeps up with Concentration isn't cast again while the last one still holds someone, which would
+  // only end it (a succubus re-casting Dominate Person every turn).
+  const holding = holdingConcentration(actor, context);
   const attacks = parsed.filter(
     ({ action, target }) =>
       target?.side !== actor.side &&
       target !== undefined &&
       !heals(action) &&
-      (action.spellLevel ?? 0) === 0,
+      (action.spellLevel ?? 0) === 0 &&
+      !(holding && concentrates(action)),
   );
   // A save a hit brings (a ghoul's paralysing Claw) or a hold that deals nothing (Swallow) is weighed against
   // plain damage by worth.ts. Fights with neither keep choosing by the size of the routine.

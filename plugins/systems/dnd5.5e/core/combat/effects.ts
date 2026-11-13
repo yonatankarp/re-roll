@@ -780,6 +780,7 @@ export function multiattackExtras(
 ): readonly string[] {
   if (
     actor.source.kind !== "monster" ||
+    formOf(actor) !== null || // a Beast's shape has only the Beast's routine
     action.activation.resolution.kind !== "attack" ||
     !action.id.startsWith("monster:") ||
     !action.activation.cost.includes("action")
