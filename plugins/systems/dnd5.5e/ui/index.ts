@@ -138,7 +138,7 @@ const TACTIC_DETAILS: Readonly<Record<string, string>> = {
     "A Perception check. Each hidden foe whose Stealth total it matches is found.",
   study:
     "A check to recall what you know about a creature. On a DC 15 success you learn its AC and what damage it resists.",
-  help: "On a foe beside you, the next attack against it before your next turn has Advantage. On an ally, their next check has Advantage.",
+  help: "On a foe beside you, the next attack against it before your next turn has Advantage. On an ally, their next check has Advantage. On a dying ally beside you, a DC 10 Wisdom (Medicine) check makes them Stable.",
   grapple:
     "An Unarmed Strike. The target makes a Strength or Dexterity saving throw, and on a failure it's Grappled, with Speed 0, until it escapes.",
   shove:
@@ -1041,6 +1041,10 @@ function describe(
     case "dnd5.5e:deathSaveRolled": {
       const data = EVENT_SCHEMAS["dnd5.5e:deathSaveRolled"].parse(payload);
       return `${name(data.actor)} rolls a death saving throw: ${String(data.natural)}.`;
+    }
+    case "dnd5.5e:stabilized": {
+      const data = EVENT_SCHEMAS["dnd5.5e:stabilized"].parse(payload);
+      return `${name(data.actor)} is stable.`;
     }
     case "dnd5.5e:inspirationGranted": {
       const data = EVENT_SCHEMAS["dnd5.5e:inspirationGranted"].parse(payload);

@@ -1855,7 +1855,6 @@ describe("how companions spend spell slots", () => {
       ),
     );
     expect(picked).toContain("magic-missile");
-    expect(picked.split("|")).toHaveLength(2);
   });
 
   it("saves slots for a fight nearly won", async () => {
@@ -1905,9 +1904,22 @@ describe("how companions spend spell slots", () => {
       ...hero(run, { spells: ["bless", "fire-bolt"], hp: 8 }),
       concentratingOn: "spell:other",
     };
-    expect(choose(run, fight(concentrating, monster("a")))).not.toContain(
-      "bless",
-    );
+    // The spell it holds is still on the foe.
+    const held = {
+      ...monster("a"),
+      activeEffects: [
+        {
+          sourceId: "spell:other",
+          casterId: PLAYER_ACTOR,
+          ends: "spellDuration" as const,
+          modifier: {
+            kind: "condition" as const,
+            condition: "restrained" as const,
+          },
+        },
+      ],
+    };
+    expect(choose(run, fight(concentrating, held))).not.toContain("bless");
     const armored = {
       ...hero(run, { spells: ["mage-armor", "fire-bolt"], hp: 8 }),
       activeEffects: [

@@ -644,6 +644,74 @@ describe("actions anyone can take", () => {
     expect(sources(who(hid.state, "ally"))).not.toContain("tactic:help");
   });
 
+  it("Help stabilizes a dying ally within 5 feet on a DC 10 Medicine check", async () => {
+    const run = await base();
+    const dying = {
+      ...fighter(run, { id: "ally", at: [1, 0] }),
+      hp: 0,
+      deathSaves: { successes: 1, failures: 2 },
+    };
+    const state = fight([
+      fighter(run, { at: [0, 0] }),
+      dying,
+      monster("foe", [9, 9]),
+    ]);
+    expect(optionIds(run, state)).toContain("tactic:help|ally");
+    const decision = run.system.nextDecision(state, run);
+    if (!decision) throw new Error("No decision");
+    const shown = dndUi
+      .optionGroups(decision, state, run)
+      .flatMap((group) => group.options)
+      .find((option) => option.id === "tactic:help|ally");
+    expect(shown?.label).toMatch(/Stabilize/);
+    expect(shown?.detail).toMatch(/Stable/);
+    const steadied = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, "tactic:help|ally")],
+      HIGH,
+    );
+    expect(who(steadied.state, "ally").deathSaves).toEqual({
+      successes: 3,
+      failures: 0,
+    });
+    const fumbled = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, "tactic:help|ally")],
+      LOW,
+    );
+    expect(who(fumbled.state, "ally").deathSaves.failures).toBe(2);
+    // Too far away, there's no one to stabilize.
+    const far = fight([
+      fighter(run, { at: [0, 0] }),
+      { ...dying, position: { x: 5, y: 0 } },
+      monster("foe", [9, 9]),
+    ]);
+    expect(optionIds(run, far)).not.toContain("tactic:help|ally");
+  });
+
+  it("a companion stabilizes the dying player beside it instead of attacking", async () => {
+    const run = await base();
+    const state = fight([
+      fighter(run, { id: "ally", at: [0, 0] }),
+      {
+        ...fighter(run, { at: [1, 0] }),
+        hp: 0,
+        deathSaves: { successes: 0, failures: 1 },
+      },
+      monster("foe", [0, 1]),
+    ]);
+    const decision = run.system.nextDecision(state, run);
+    if (!decision) throw new Error("No decision");
+    expect(decision.options.map((option) => option.id)).toContain(
+      `${LONGSWORD}|foe`,
+    );
+    expect(tacticalPolicy(decision, contextOf(run, state, LOW))).toBe(
+      `tactic:help|${PLAYER_ACTOR}`,
+    );
+  });
+
   it("Hide makes you Invisible until you attack, and a Search can find you", async () => {
     const run = await base();
     const state = fight([fighter(run, { at: [0, 0] }), monster("foe", [6, 0])]);

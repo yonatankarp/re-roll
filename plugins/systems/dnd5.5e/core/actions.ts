@@ -47,6 +47,7 @@ import {
   hasCondition,
   isDead,
   isDown,
+  isStable,
   frame,
 } from "./state.ts";
 import {
@@ -93,9 +94,20 @@ const OFFHAND_USED = "offhand";
 const NICK_USED = `${MASTERY}nick`;
 const CLEAVE_USED = `${MASTERY}cleave`;
 const HIDE_DC = 15;
+const STABILIZE_DC = 10;
 const STUDY_DC = 15;
 
 const CHECK_END = frame("checkCombatEnd", {});
+
+// At 0 HP and still making death saves.
+function dyingNow(actor: Actor): boolean {
+  return (
+    actor.side === "party" &&
+    isDown(actor) &&
+    !isDead(actor) &&
+    !isStable(actor)
+  );
+}
 
 function effect(
   actor: string,
@@ -360,6 +372,15 @@ export function tacticOptions(
     id: DODGE,
     label: "Dodge (attacks against you have Disadvantage)",
   });
+  // Help also stabilizes a dying creature within 5 feet, which every companion should be able to do.
+  for (const dying of allies(state, actor).filter(
+    (item) => item.id !== actor.id && dyingNow(item) && within5(actor, item),
+  )) {
+    options.push({
+      id: encodeOption(HELP, dying.id),
+      label: `Stabilize ${dying.name} (Medicine, DC ${String(STABILIZE_DC)})`,
+    });
+  }
   if (foes.some((foe) => hasTactic(foe, "hidden"))) {
     options.push({ id: SEARCH, label: "Search for hidden foes (Perception)" });
   }
@@ -649,9 +670,30 @@ export function runTactic(
       return { events: [spend("action"), ...rolled.events], frames: done };
     }
     case HELP: {
+      const helped = needTarget();
+      // On a dying creature, a Wisdom (Medicine) check to make it Stable.
+      if (helped.side === actor.side && dyingNow(helped)) {
+        const rolled = check(
+          actor,
+          "medicine",
+          "wis",
+          STABILIZE_DC,
+          () => "medicine",
+          context,
+        );
+        return {
+          events: [
+            spend("action"),
+            ...rolled.events,
+            ...(rolled.success
+              ? [dndEvent(`${NS}:stabilized`, { actor: helped.id })]
+              : []),
+          ],
+          frames: done,
+        };
+      }
       // On a foe, the next attack against it before your next turn has Advantage; on an ally, its next check.
       // shortcut: your own attack could use the Advantage on the foe too, though only an ally should.
-      const helped = needTarget();
       const modifier =
         helped.side === actor.side
           ? ({ kind: "advantage", on: "checks" } as const)
@@ -1071,13 +1113,46 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   const chosen = choosePolicy(
     {
       ...decision,
-      options: decision.options.filter((option) => !isTactic(option.id)),
+      // Dodge stays, for the party to weigh against attacking (policy.ts).
+      options: decision.options.filter(
+        (option) => !isTactic(option.id) || option.id === DODGE,
+      ),
     },
     context,
   );
   const { state } = context;
   const actor = state.actors[decision.actor];
-  if (chosen !== PASS || !actor) return chosen;
+  if (!actor) return chosen;
+  // A dying friend in reach is stabilized with the Action, unless the choice already heals it or leaves the
+  // Action free. The player's character first, since its death ends the run; a companion once it has failed a save.
+  const [dying] = decision.options
+    .flatMap((option) => {
+      const [kind, id = ""] = parseOption(option.id);
+      const who = state.actors[id];
+      return kind === HELP && who && dyingNow(who) ? [{ option, who }] : [];
+    })
+    .sort(
+      (a, b) =>
+        Number(b.who.id === PLAYER_ACTOR) - Number(a.who.id === PLAYER_ACTOR) ||
+        b.who.deathSaves.failures - a.who.deathSaves.failures,
+    );
+  const [chosenId = "", chosenTarget] = parseOption(chosen);
+  const chosenAction = deriveStats(actor, context).actions.find(
+    (item) => item.id === chosenId,
+  );
+  if (
+    dying &&
+    chosenTarget !== dying.who.id &&
+    (chosen === PASS ||
+      chosen === MOVE ||
+      chosenAction?.activation.cost.includes("action")) &&
+    (dying.who.id === PLAYER_ACTOR ||
+      dying.who.deathSaves.failures > 0 ||
+      chosen === PASS)
+  ) {
+    return dying.option.id;
+  }
+  if (chosen !== PASS) return chosen;
   const offhand = decision.options
     .filter((option) => option.id.startsWith(encodeOption(OFFHAND, "")))
     .sort(

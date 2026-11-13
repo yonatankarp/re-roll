@@ -68,6 +68,7 @@ import {
   characterFrames,
 } from "./character.ts";
 import { gearEffects, gearFrames, sceneGearActions } from "./gear.ts";
+import { gearPolicy, isGearDecision } from "./policy.ts";
 import { legendaryFrames, surpriseEffects } from "./legendary.ts";
 import { shopEffects, shopFrames } from "./shop.ts";
 import { availableRests, restEffects, restFrames } from "./rest.ts";
@@ -489,10 +490,13 @@ export const dnd55e = defineSystem<DndState>({
   decidePolicy: (decision, context) =>
     decision.id.startsWith(`${NS}:build:`)
       ? buildPolicy(decision, context)
-      : tacticalPolicy(decision, context),
-  // Building steps (class, scores, subclass, spells, feats) are made as a companion's are.
+      : isGearDecision(decision)
+        ? gearPolicy(decision, context)
+        : tacticalPolicy(decision, context),
+  // Building steps (class, scores, subclass, spells, feats) are made as a companion's are, and a rest's
+  // Hit Dice and gear as a careful player would.
   tactical: (decision) =>
     /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave|build):/.test(
       decision.id,
-    ),
+    ) || isGearDecision(decision),
 });
