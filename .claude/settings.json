@@ -1,4 +1,16 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(git rebase:*)",
+      "Bash(git merge:*)",
+      "Bash(git checkout --detach origin/main)",
+      "Bash(git push origin HEAD:main)",
+      "Bash(rtk git rebase:*)",
+      "Bash(rtk git merge:*)",
+      "Bash(rtk git checkout --detach origin/main)",
+      "Bash(rtk git push origin HEAD:main)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
