@@ -717,6 +717,8 @@ Every `switch` over `kind` ends with an exhaustive check, so adding an effect ty
 
 Weapon options such as Finesse are handled by the plugin when it builds the attack. On a *Shield* trigger, the plugin holds the hit in a pending frame (section 6.2) and rechecks it against the new AC.
 
+A trigger of `allyAttacked` or `allyHit`, with what the bearer must be `holding`, is a reaction for another creature within 5 feet, as Protection gives before the attack roll and Interception after a hit. An ally who can see the attacker takes it as soon as it can, without asking, and the log names it through `budgetSpent`'s `label`.
+
 ### 8.8 Formulas
 
 Formulas are a flat sum, with no expression language:
@@ -963,6 +965,8 @@ Leaving out `--encodings` on `draft` uses the local model instead, which is free
 **Rules when re-importing**
 - Never run `approve --all` on PHB features, feats, species or spells, or on any book's feats, feat features or species: their mechanics and choices exist only in the approved files.
 - Each feat grants a feature of its own text (`feature/feat-<slug>`), which holds its mechanics. A spell a feat or trait gives, with `freeCast` on the feature or on its spell choice, is also cast once per Long Rest without a slot. The sheet and character creation show each feature's `automation` as in play, partly in play or text only. A species' or feat's `choices` are asked at character creation, and a choice of lineage or ancestry picks one feature among several. A feat's `abilityIncrease` lists the abilities its Ability Score Increase can raise by 1, and taking the feat asks which one.
+- A damage type chosen when a feat or trait is taken, as for Elemental Adept or Strange Endurance, is an `option` choice among one feature per type. Each keeps the feature's own text, and the likeliest type is listed first so the builder preselects it.
+- A feat's `requires` lists what meets its prerequisite: a species, a trait or lineage, or a feat. General feat choices also offer the racial feats a character meets and one Dragonmark feat. A background's `featOr` names a category its feat can give way to, as "Survivor or a Dark Gift feat of your choice", and the builder asks which, with the background's own feat first.
 - Parse subclasses and backgrounds with `--requires phb`.
 - A book's plugin id can't match an adventure's, so book plugins use a `-rules` suffix in that case.
 - Older-edition content is marked and kept out of the character builder by default.
