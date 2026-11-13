@@ -73,6 +73,12 @@ export async function showSetup(
       ? [picture(ctx.game, adventure.cover, "", "setup-cover")]
       : []),
     heading,
+    ...(adventure.levels
+      ? [el("p", { class: "meta", text: `Levels ${adventure.levels}` })]
+      : []),
+    ...(adventure.blurb
+      ? [el("p", { class: "setup-blurb", text: adventure.blurb })]
+      : []),
     ...groups,
     go,
   );

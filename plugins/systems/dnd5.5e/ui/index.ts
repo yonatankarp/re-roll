@@ -358,6 +358,7 @@ function signed(value: number): string {
 const GEAR_HINT = "Change gear between choices, outside a fight";
 const ATTUNE_HINT = "Attune where the party can rest";
 const DRINK_HINT = "Drink between choices, or on your turn in a fight";
+const FULL_HINT = "Already at full health";
 
 // The player first, then the companions; none until the player has chosen a character.
 // What the character carries, with a way to change it whenever the pending choice allows, such as on a rest.
@@ -442,7 +443,13 @@ function equipmentRows(
         looks: [id],
         value: "",
         ...(changes && itemHealing(item)
-          ? { option: { id: `drink:${id}`, label: "Drink", hint: DRINK_HINT } }
+          ? {
+              option: {
+                id: `drink:${id}`,
+                label: "Drink",
+                hint: actor.hp >= stats.maxHp ? FULL_HINT : DRINK_HINT,
+              },
+            }
           : {}),
         ...detail,
       },
@@ -866,8 +873,9 @@ function roll(
   readonly success: boolean | null;
 } | null {
   if (!("payload" in event)) return null;
-  const state = parseState(rawState);
-  const name = (id: string): string => state.actors[id]?.name ?? id;
+  // Parsed only for a roll, since most events roll nothing and a loaded game asks of every one.
+  const name = (id: string): string =>
+    parseState(rawState).actors[id]?.name ?? id;
   switch (event.kind) {
     case "dnd5.5e:rollReported": {
       const data = EVENT_SCHEMAS["dnd5.5e:rollReported"].parse(event.payload);

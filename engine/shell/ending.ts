@@ -44,7 +44,7 @@ export function drawEnding(page: GamePage, view: GameView): void {
   const again = button("Play again", page.restart);
   again.className = "begin";
   const tally = (moment: string, one: string, many: string): string[] => {
-    const count = view.log.filter((line) => line.moment === moment).length;
+    const count = view.moments.filter((each) => each === moment).length;
     return count > 0 ? [`${String(count)} ${count === 1 ? one : many}`] : [];
   };
   const summary = [

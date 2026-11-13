@@ -72,12 +72,14 @@ const GLOSSARY = `${LIBRARY}/glossary.json`;
 const IMAGE_FILE = /\.(png|jpe?g|webp|gif)$/i;
 const BARE_NAME = /^[^/\\]+$/;
 
+// Something worth more than the ticker: the player's level-up, or a foe defeated, which the ending counts.
+export type Moment = "levelUp" | "foeDefeated";
+
 export interface LogLine {
   readonly kind: "scene" | "event";
   readonly text: string;
   readonly actor?: string | null;
-  // A line worth more than the ticker: the player's level-up, or a foe defeated, which the ending counts.
-  readonly moment?: "levelUp" | "foeDefeated";
+  readonly moment?: Moment;
 }
 
 // A roll, with the step of the log it came in, so the latest choice's rolls can be found.
@@ -119,7 +121,9 @@ export interface GameView {
   readonly decision: Decision | null;
   readonly combat: CombatView | null;
   readonly sheets: readonly SheetView[]; // the player's first
+  // A loaded game's starts at the current scene; a game played on keeps every line since.
   readonly log: readonly LogLine[];
+  readonly moments: readonly Moment[]; // from the start of the run, for the ending's tally
   // Plain data for the system's encounter board to animate, in order, from the start of the run.
   readonly cues: readonly unknown[];
   readonly rolls: readonly RollLine[]; // from the start of the run, oldest first
@@ -141,6 +145,7 @@ export interface AdventureChoice {
   readonly title: string;
   readonly source: "shipped" | "private";
   readonly levels: string | null;
+  readonly blurb: string | null; // what the setup screen says of it
   readonly cover: string | null; // a content path, for imageUrl
 }
 
@@ -183,6 +188,7 @@ interface Current {
   readonly ui: SystemUi;
   readonly log: LogEntry[];
   readonly lines: LogLine[];
+  readonly moments: Moment[];
   readonly cues: unknown[];
   readonly rolls: RollLine[];
   readonly clues: Clue[];
@@ -194,6 +200,7 @@ const SaveHeaderSchema = z.object({ adventure: z.string() });
 const AdventureInfoSchema = z.object({
   title: z.string(),
   levels: z.string().optional(),
+  blurb: z.string().optional(),
 });
 const SaveInfoSchema = z.object({
   adventure: z.string(),
@@ -353,19 +360,23 @@ function narrate(
   events: readonly GameEvent[],
   step: number, // the log entry these events belong to
   cue = true, // false when retelling, since the board shows a told-again log as it stands
+  silent = 0, // how many of the events to fold without a line, as before the scene a loaded game opens in
 ): {
   readonly state: GameState | null;
   readonly lines: readonly LogLine[];
+  readonly moments: readonly Moment[];
   readonly cues: readonly unknown[];
   readonly rolls: readonly RollLine[];
   readonly clues: readonly Clue[];
 } {
   let state = from;
   const lines: LogLine[] = [];
+  const moments: Moment[] = [];
   const cues: unknown[] = [];
   const rolls: RollLine[] = [];
   const clues: Clue[] = [];
-  for (const event of events) {
+  for (const [index, event] of events.entries()) {
+    const told = index >= silent;
     if (event.kind === "clueRevealed") {
       clues.push({ secret: event.secret, text: event.text, step });
     }
@@ -374,16 +385,17 @@ function narrate(
       continue;
     }
     if (state === null) throw new Error("The log has no run start");
-    if (isNarrativeEvent(event) || isNamespacedEvent(event)) {
+    const moment: Moment | undefined =
+      event.kind === "levelGained" && event.actor === PLAYER_ACTOR
+        ? "levelUp"
+        : event.kind === "actorDefeated" &&
+            !state.partyIds.includes(event.actor)
+          ? "foeDefeated"
+          : undefined;
+    if (moment) moments.push(moment);
+    if (told && (isNarrativeEvent(event) || isNamespacedEvent(event))) {
       const text = ui.describe(event, state.system, run);
       if (text !== null) {
-        const moment =
-          event.kind === "levelGained" && event.actor === PLAYER_ACTOR
-            ? "levelUp"
-            : event.kind === "actorDefeated" &&
-                !state.partyIds.includes(event.actor)
-              ? "foeDefeated"
-              : undefined;
         lines.push({
           kind: "event",
           text,
@@ -407,7 +419,7 @@ function narrate(
       if (cue !== null && cue !== undefined) cues.push(cue);
     }
     // Scene text is chosen after the event, so a "visited" variant counts this visit.
-    if (event.kind === "sceneEntered") {
+    if (told && event.kind === "sceneEntered") {
       const scene = run.adventure.scenes.find(
         (item) => item.id === event.scene,
       );
@@ -416,17 +428,21 @@ function narrate(
       }
     }
   }
-  return { state, lines, cues, rolls, clues };
+  return { state, lines, moments, cues, rolls, clues };
 }
 
-// The whole log told again from the start, as on loading or taking back a choice.
+// The whole log told again from the start, as on taking back a choice. On loading (`tail`), the journal
+// starts at the scene the game is in, since describing every event of a long campaign takes seconds; the
+// rolls, leads and the ending's tally still come from the whole log.
 function retell(
   run: RunContext,
   ui: SystemUi,
   log: readonly LogEntry[],
+  tail = false,
 ): {
   readonly state: GameState | null;
   readonly lines: LogLine[];
+  readonly moments: Moment[];
   readonly cues: unknown[];
   readonly rolls: RollLine[];
   readonly clues: Clue[];
@@ -434,14 +450,28 @@ function retell(
   let state: GameState | null = null;
   const told = {
     lines: [] as LogLine[],
+    moments: [] as Moment[],
     cues: [] as unknown[],
     rolls: [] as RollLine[],
     clues: [] as Clue[],
   };
+  // The last scene entered, as its entry and event; before any scene, such as mid-creation, all is told.
+  const sceneAt = tail
+    ? log.findLastIndex((entry) =>
+        entry.events.some((event) => event.kind === "sceneEntered"),
+      )
+    : -1;
+  const sceneEvent =
+    log[sceneAt]?.events.findLastIndex(
+      (event) => event.kind === "sceneEntered",
+    ) ?? 0;
   log.forEach((entry, step) => {
-    const part = narrate(run, ui, state, entry.events, step, false);
+    const silent =
+      step < sceneAt ? entry.events.length : step === sceneAt ? sceneEvent : 0;
+    const part = narrate(run, ui, state, entry.events, step, false, silent);
     state = part.state;
     told.lines.push(...part.lines);
+    told.moments.push(...part.moments);
     told.cues.push(...part.cues);
     told.rolls.push(...part.rolls);
     told.clues.push(...part.clues);
@@ -801,6 +831,7 @@ export function createGame({
           title: info.success ? info.data.title : plugin.manifest.id,
           source: plugin.manifest.distribution,
           levels: info.data?.levels ?? null,
+          blurb: info.data?.blurb ?? null,
           cover: covers.get(plugin.manifest.id) ?? null,
         });
       }
@@ -1065,6 +1096,7 @@ export function createGame({
         game.log.length,
       );
       game.lines.push(...told.lines);
+      game.moments.push(...told.moments);
       game.cues.push(...told.cues);
       game.rolls.push(...told.rolls);
       game.clues.push(...told.clues);
@@ -1125,7 +1157,7 @@ export function createGame({
         run,
         ui,
         log: [...log],
-        ...retell(run, ui, log),
+        ...retell(run, ui, log, true),
         state: loaded.state,
         warnings: loaded.warnings,
       };
@@ -1148,6 +1180,7 @@ export function createGame({
         ui,
         state,
         lines,
+        moments,
         cues,
         rolls,
         clues,
@@ -1337,6 +1370,7 @@ export function createGame({
         combat,
         sheets,
         log: [...lines],
+        moments: [...moments],
         cues: [...cues],
         rolls: [...rolls],
         leads: leadGroups(clues),

@@ -10,7 +10,7 @@ import {
   left,
   sellPriceCp,
 } from "../core/shop.ts";
-import { StateSchema } from "../core/state.ts";
+import { parseState } from "./parse-state.ts";
 
 const words = (camel: string): string =>
   camel
@@ -68,7 +68,7 @@ export function shop(
   const resume = ResumeSchema.safeParse(decision.resume.payload);
   if (!resume.success) return null;
   const { shop: wares } = resume.data;
-  const state = StateSchema.parse(rawState);
+  const state = parseState(rawState);
   const offered = new Set(decision.options.map((option) => option.id));
   const itemOf = (id: string) => ItemSchema.parse(access.content(id));
   const buy = wares.stock.map((stock) => {

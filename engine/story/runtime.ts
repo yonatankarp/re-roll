@@ -228,9 +228,10 @@ export function storyDecision(
     label: rest.label,
   }));
 
-  const actions = sceneActionsHere(run, state).map(({ id, label }) => ({
+  const actions = sceneActionsHere(run, state).map(({ id, label, hidden }) => ({
     id,
     label,
+    ...(hidden ? { hidden } : {}),
   }));
 
   return {

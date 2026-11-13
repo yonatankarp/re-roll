@@ -34,6 +34,12 @@ export function shownChoices(parts: {
   const { decision, shop, creation } = parts;
   if (!decision) return [];
   const offered = new Set(decision.options.map((option) => option.id));
+  // A hidden option still answers an older save, but its sheet row shows disabled, as Drink at full health.
+  const shown = new Set(
+    decision.options
+      .filter((option) => !option.hidden)
+      .map((option) => option.id),
+  );
   const choice = (
     where: ShownChoice["where"],
     id: string,
@@ -117,7 +123,7 @@ export function shownChoices(parts: {
       sheet.id === decision.actor
         ? sheet.sections.flatMap((section) =>
             section.rows.flatMap(({ option, label, detail }) =>
-              option && offered.has(option.id)
+              option && shown.has(option.id)
                 ? [
                     choice(
                       "sheet",

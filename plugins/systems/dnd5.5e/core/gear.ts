@@ -234,6 +234,7 @@ export function sceneGearActions(
   }
   // One choice per item, as the sheet's row has one button: putting on a spare comes before stowing.
   const rows = new Set<string>();
+  const full = actor.hp >= deriveStats(actor, access).maxHp;
   return [
     ...gearOptions(actor, access)
       .filter(({ id }) => {
@@ -256,6 +257,8 @@ export function sceneGearActions(
               label: `Drink ${item.name}`,
               effect: `${NS}:drink`,
               args: { item: id },
+              // A potion only heals, so at full health the sheet shows Drink disabled.
+              ...(full ? { hidden: true as const } : {}),
             },
           ]
         : [];
