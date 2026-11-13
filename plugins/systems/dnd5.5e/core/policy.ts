@@ -3,6 +3,7 @@ import { deriveStats, type KnownAction, rollAmount } from "./stats.ts";
 import {
   distanceFeet,
   rangeFeet,
+  parseSquare,
   reachableSquares,
   type Square,
   squareKey,
@@ -172,6 +173,32 @@ function leavesOf(action: KnownAction) {
     : resolution.kind === "save"
       ? resolution.onFail
       : resolution.onHit;
+}
+
+// Whether a step to `square` would bring a foe into reach of something harmful the actor can still afford.
+export function reachesFrom(
+  actor: Actor,
+  square: Square,
+  context: Context,
+): boolean {
+  const stats = deriveStats(actor, context);
+  const moved = { ...actor, position: square };
+  return stats.actions.some(
+    (action) =>
+      !action.activation.trigger &&
+      "side" in action.activation.targeting &&
+      action.activation.targeting.side === "enemy" &&
+      canAfford(action, actor, stats) &&
+      inReach(action, moved, context.state, context).length > 0,
+  );
+}
+
+// The teleport or jump an action makes, if it does.
+export function moveOf(action: KnownAction) {
+  const { resolution } = action.activation;
+  return resolution.kind === "automatic"
+    ? resolution.effects.find((item) => item.kind === "teleport")
+    : undefined;
 }
 
 // A save that comes with a hit, or a condition left by an action that deals no damage.
@@ -350,6 +377,14 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (decision.id.startsWith(`${NS}:moveTo:`)) {
     const square = stepToward(actor, context);
     return square ? squareKey(square) : STAY;
+  }
+  // A teleport or jump lands where a foe is in reach, nearest one first, as its options are listed.
+  if (decision.id.startsWith(`${NS}:teleportTo:`)) {
+    const landing = decision.options.find((option) => {
+      const square = parseSquare(option.id);
+      return square !== null && reachesFrom(actor, square, context);
+    });
+    return landing?.id ?? STAY;
   }
   if (decision.id.startsWith(`${NS}:targets:`)) {
     return pickPolicy(decision, actor, context);
@@ -569,7 +604,9 @@ export function choosePolicy(decision: Decision, context: Context): string {
   // With the Attack action spent: Action Surge when the fight is still on, and a monster's free trick like Nimble Escape.
   const extra = parsed.find(({ action, target }) => {
     const { cost, resolution } = action.activation;
-    if (target?.id !== actor.id || heals(action)) return false;
+    if (target?.id !== actor.id || heals(action) || moveOf(action)) {
+      return false;
+    }
     return resolution.kind === "automatic" &&
       resolution.effects.some((item) => item.kind === "extraAction")
       ? foesHp > stats.maxHp && !actor.budget.action

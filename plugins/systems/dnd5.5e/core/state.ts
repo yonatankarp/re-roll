@@ -60,6 +60,7 @@ export const FRAME_KINDS = [
   "sheetStep",
   "smite",
   "takeAction",
+  "teleport",
   "useAction",
   "useItem",
 ] as const;

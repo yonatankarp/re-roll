@@ -1222,6 +1222,38 @@ function parseBlock(
               notes,
             )
           : [];
+        const move = cast.length === 0 ? teleportOf(optionText) : null;
+        if (move) {
+          const actionName = option.name.replace(/\s*\(.*$/, "");
+          if (move.rest) {
+            notes.push(`partial: ${actionName}: left out what follows it`);
+          }
+          actions.push({
+            name: actionName,
+            ...(recharge ? { recharge: Number(recharge) } : {}),
+            ...(perDay ? { perDay: Number(perDay) } : {}),
+            activation: {
+              cost: [
+                costOf(section),
+                ...(rechargeOn || perDay ? [{ resource }] : []),
+              ],
+              targeting: { self: true },
+              resolution: {
+                kind: "automatic",
+                damage: [],
+                effects: [
+                  {
+                    kind: "teleport",
+                    feet: move.feet,
+                    movement: move.movement,
+                  },
+                ],
+              },
+            },
+          });
+          recharge = undefined;
+          continue;
+        }
         if (cast.length === 0) notes.push(`not automated: ${option.name}`);
         else recharge = undefined;
         actions.push(...cast);
@@ -1329,6 +1361,35 @@ function parseBlock(
       text: lines.join("\n"),
     },
   };
+}
+
+// "The phaerimm teleports up to 30 feet to an unoccupied space it can see.", "The bulette jumps up to 30 feet by
+// spending 10 feet of movement.", or "casts Misty Step" while no book gives that spell a play. `rest` is any
+// sentence after it, such as a limit or a creature taken along, which is left out.
+export function teleportOf(
+  text: string,
+): { feet: number; movement: number; rest: string } | null {
+  const teleport =
+    /^The [^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)? up to (\d+) feet to an unoccupied space (?:it|the [^.]+?) can see\.\s*(.*)$/s.exec(
+      text.trim(),
+    );
+  if (teleport) {
+    return { feet: Number(teleport[1]), movement: 0, rest: teleport[2] ?? "" };
+  }
+  const leap =
+    /^The [^.]*? jumps up to (\d+) feet by spending (\d+) feet of movement\.\s*(.*)$/s.exec(
+      text.trim(),
+    );
+  if (leap) {
+    return {
+      feet: Number(leap[1]),
+      movement: Number(leap[2]),
+      rest: leap[3] ?? "",
+    };
+  }
+  return /\bcasts (?:the )?Misty Step\b/.test(text)
+    ? { feet: 30, movement: 0, rest: "" }
+    : null;
 }
 
 // Stat blocks are regular enough for code alone, so no model is needed and nothing is invented.

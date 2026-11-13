@@ -26,7 +26,8 @@ import {
   within5,
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
-import { canAfford, inReach } from "./combat/queries.ts";
+import { teleportSquares } from "./combat/movement.ts";
+import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
 import {
   classOptionPolicy,
@@ -1116,20 +1117,6 @@ function dashTarget(actor: Actor, context: Context): Square | null {
   );
 }
 
-// Whether a step to `square` would bring a foe into reach of something harmful the actor can still afford.
-function reachesFrom(actor: Actor, square: Square, context: Context): boolean {
-  const stats = deriveStats(actor, context);
-  const moved = { ...actor, position: square };
-  return stats.actions.some(
-    (action) =>
-      !action.activation.trigger &&
-      "side" in action.activation.targeting &&
-      action.activation.targeting.side === "enemy" &&
-      canAfford(action, actor, stats) &&
-      inReach(action, moved, context.state, context).length > 0,
-  );
-}
-
 // A monster hides as a Bonus Action only where the 2024 rules let it: every foe sees it through at least
 // Three-Quarters Cover, or not at all in the dark.
 function hiddenFromAll(actor: Actor, context: Context): boolean {
@@ -1222,6 +1209,31 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
       chosen === PASS)
   ) {
     return dying.option.id;
+  }
+  // A teleport or Leap that lands in reach when walking won't get there.
+  if (chosen === MOVE && actor.budget.action) {
+    const step = stepToward(actor, context);
+    const stats = deriveStats(actor, context);
+    const leap =
+      step && reachesFrom(actor, step, context)
+        ? undefined
+        : decision.options.find((option) => {
+            const [id, target] = parseOption(option.id);
+            const action = stats.actions.find((item) => item.id === id);
+            const move = action && moveOf(action);
+            return (
+              target === actor.id &&
+              move &&
+              teleportSquares(
+                actor,
+                move.feet,
+                move.movement,
+                state,
+                context,
+              ).some((square) => reachesFrom(actor, square, context))
+            );
+          });
+    if (leap) return leap.id;
   }
   // Cunning Action's Dash when walking alone won't bring a foe into reach this turn.
   if (chosen === MOVE && ids.has(BONUS_DASH) && actor.budget.action) {

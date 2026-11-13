@@ -31,6 +31,7 @@ import {
   coverAgainst,
   coverFor,
 } from "../plugins/systems/dnd5.5e/core/sight.ts";
+import { distanceFeet } from "../plugins/systems/dnd5.5e/core/grid.ts";
 import { dndCue } from "../plugins/systems/dnd5.5e/ui/cues.ts";
 import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 
@@ -273,6 +274,25 @@ const SNEAK = dummy("test:monster/sneak", {
   passives: [{ kind: "bonusTactics", tactics: ["dash", "disengage", "hide"] }],
 });
 
+// Teleports 40 feet, or jumps 30 for 10 feet of movement.
+const mover = (name: string, movement: number) => ({
+  name,
+  activation: {
+    cost: ["bonusAction"],
+    targeting: { self: true },
+    resolution: {
+      kind: "automatic",
+      effects: [{ kind: "teleport", feet: movement ? 30 : 40, movement }],
+    },
+  },
+});
+const BLINKER = dummy("test:monster/blinker", {
+  actions: [...(dummy("x").actions as unknown[]), mover("Teleport", 0)],
+});
+const LEAPER = dummy("test:monster/leaper", {
+  actions: [...(dummy("x").actions as unknown[]), mover("Leap", 10)],
+});
+
 // The gulper with its Club listed first, as the giant toad lists its Bite before Swallow.
 const TOAD = dummy("test:monster/toad", {
   actions: [...(GULPER.actions as unknown[])].reverse(),
@@ -352,6 +372,8 @@ function arena(base: RunContext): RunContext {
     [PINNER.id]: PINNER,
     [TOAD.id]: TOAD,
     [SNEAK.id]: SNEAK,
+    [BLINKER.id]: BLINKER,
+    [LEAPER.id]: LEAPER,
     [HUMAN_PINNER.id]: HUMAN_PINNER,
     "test:monster/giant": dummy("test:monster/giant", { size: "huge" }),
     ...Object.fromEntries(WEAPONS.map((item) => [item.id, item])),
@@ -1631,6 +1653,64 @@ describe("monster grapples and multiattacks", () => {
     ).state;
     expect(hasCondition(who(hidden, "sneak"), "invisible")).toBe(true);
     expect(who(hidden, "sneak").budget.bonusAction).toBe(false);
+  });
+
+  it("teleports or leaps into reach when walking won't get there", async () => {
+    const run = await base();
+    const turnAt = (statBlockId: string, x: number): DndState => {
+      const state = fight([
+        fighter(run, { at: [5, 5] }),
+        monster("mover", [x, 5], statBlockId),
+      ]);
+      return {
+        ...state,
+        combat: state.combat && { ...state.combat, index: 1 },
+      };
+    };
+    const choose = (state: DndState) => {
+      const decision = run.system.nextDecision(state, run);
+      if (!decision) throw new Error("No decision");
+      return {
+        decision,
+        answer: tacticalPolicy(decision, contextOf(run, state, LOW)),
+      };
+    };
+    // A walk of 30 feet doesn't reach from 45 feet away; a 40-foot teleport does, and costs no movement.
+    const far = turnAt(BLINKER.id, 14);
+    expect(choose(far).answer).toBe("monster:1|mover");
+    const asked = settle(run, far, [act("mover", "monster:1|mover")], LOW);
+    const blinked = who(asked.state, "mover");
+    expect(distanceFeet(blinked.position, { x: 5, y: 5 })).toBe(5);
+    expect(blinked.moved).toBe(0);
+    expect(blinked.budget.bonusAction).toBe(false);
+    expect(choose(asked.state).answer).toBe("monster:0|player");
+    // Close enough to walk: no teleport.
+    expect(choose(turnAt(BLINKER.id, 10)).answer).toBe("move");
+    // A Leap pays 10 feet of movement for its 30.
+    const leapt = settle(
+      run,
+      turnAt(LEAPER.id, 12),
+      [act("mover", "monster:1|mover")],
+      LOW,
+    ).state;
+    expect(who(leapt, "mover").moved).toBe(10);
+    expect(distanceFeet(who(leapt, "mover").position, { x: 5, y: 5 })).toBe(5);
+    // Leaping out of a foe's reach provokes; teleporting doesn't.
+    const away = (movement: number) =>
+      settle(
+        run,
+        turnAt(LEAPER.id, 6),
+        [
+          {
+            kind: `${NS}:teleport`,
+            payload: { actor: "mover", feet: 30, movement, answer: "12,5" },
+          },
+        ],
+        LOW,
+      );
+    expect(rolls(away(10).events)[0]).toMatchObject({ actor: PLAYER_ACTOR });
+    expect(rolls(away(0).events)).toEqual([]);
+    expect(who(away(0).state, "mover").position).toEqual({ x: 12, y: 5 });
   });
 
   it("gives Disadvantage only on rolls with the ability an effect names", async () => {

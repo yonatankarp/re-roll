@@ -165,6 +165,42 @@ describe("monster bonus actions that take an action anyone can", () => {
   });
 });
 
+describe("monster teleports and leaps", () => {
+  it("reads Teleport, Leap and Misty Step as a move to a chosen square", () => {
+    const club = entry(
+      "Club",
+      "Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Bludgeoning damage.",
+    );
+    const parsed = parseMonstersFromHtml(
+      block(
+        "Blinker",
+        `${header("Actions")}${club}${header("Bonus Actions")}${entry("Teleport (Recharge 4–6)", "The dog teleports up to 40 feet to an unoccupied space it can see.")}${entry("Leap", "The bulette jumps up to 30 feet by spending 10 feet of movement.")}${entry("Misty Step (3/Day)", "The mage casts Misty Step, using the same spellcasting ability as Spellcasting.")}`,
+      ),
+      "my-book",
+    )[0];
+    expect(parsed?.notes).toEqual([]);
+    const monster = MonsterSchema.parse(parsed?.entry);
+    const move = (name: string) => byName(monster, name)?.activation.resolution;
+    expect(byName(monster, "Teleport")).toMatchObject({
+      recharge: 4,
+      activation: {
+        cost: ["bonusAction", { resource: "recharge:teleport" }],
+        targeting: { self: true },
+      },
+    });
+    expect(move("Teleport")).toMatchObject({
+      effects: [{ kind: "teleport", feet: 40, movement: 0 }],
+    });
+    expect(move("Leap")).toMatchObject({
+      effects: [{ kind: "teleport", feet: 30, movement: 10 }],
+    });
+    expect(byName(monster, "Misty Step")).toMatchObject({ perDay: 3 });
+    expect(move("Misty Step")).toMatchObject({
+      effects: [{ kind: "teleport", feet: 30, movement: 0 }],
+    });
+  });
+});
+
 describe("monster saves after a lead-in", () => {
   it("takes the range from the lead-in and the area from the save", () => {
     const monster = parse(

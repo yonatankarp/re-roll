@@ -245,6 +245,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     direction: z.enum(["away", "toward"]),
   }),
   z.strictObject({ kind: z.literal("note"), text: z.string() }),
+  // The bearer teleports up to `feet` to an open square it can see, or with `movement` jumps there for that much
+  // of the turn's movement (a monster's Leap), provoking Opportunity Attacks as a walk would.
+  z.strictObject({
+    kind: z.literal("teleport"),
+    feet: z.number().int().min(5),
+    movement: z.number().int().min(0).default(0),
+  }),
   z.strictObject({ kind: z.literal("extraAction") }), // Action Surge
   // Lessens the hit that triggered a reaction, such as Uncanny Dodge or Deflect Attacks.
   z.strictObject({
