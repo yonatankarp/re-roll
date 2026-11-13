@@ -24,6 +24,7 @@ import {
   restingTurn,
   shapeOf,
 } from "./dice-shapes.ts";
+import { FONT, type Skin, paintGround, paintNumber } from "./dice-skins.ts";
 
 // Dice drawn in 3D on one WebGL canvas laid over the board. Each die tumbles to the face the engine
 // already rolled: Math.random only picks the spin, never the number. Loaded on the first throw, so the
@@ -61,8 +62,6 @@ interface Die {
 }
 
 const CELL = 128;
-const FONT = '"Scaly Sans", Georgia, serif';
-const INK = "#2a1d0b";
 const GOLD = new Color("#ffd24d");
 const BLOOD = new Color("#e0503c");
 const WHITE = new Color("#ffffff");
@@ -79,10 +78,7 @@ let stage: {
 let starting: Promise<boolean> | null = null;
 let frame = 0;
 const dice: Die[] = [];
-const looks = new Map<
-  Sides,
-  { readonly geometry: BufferGeometry; readonly texture: CanvasTexture }
->();
+const looks = new Map<string, Look>(); // by set and die, so each is painted once
 
 function webgl(): boolean {
   try {
@@ -147,72 +143,80 @@ function blot(): CanvasTexture {
   return new CanvasTexture(canvas);
 }
 
-// A die's faces painted on one texture: parchment, an inked edge and its numbers.
-function lookOf(sides: Sides): {
-  geometry: BufferGeometry;
-  texture: CanvasTexture;
-} {
-  const known = looks.get(sides);
+interface Look {
+  readonly geometry: BufferGeometry;
+  readonly texture: CanvasTexture;
+  readonly shine: CanvasTexture | null; // the numbers alone, for a set whose numbers glow
+}
+
+// A die's faces in one set, painted on one texture: ground, inked edge and numbers.
+function lookOf(sides: Sides, skin: Skin): Look {
+  const key = `${skin.id}:${String(sides)}`;
+  const known = looks.get(key);
   if (known) return known;
   const shape = shapeOf(sides);
   const { columns, rows } = gridOf(shape);
-  const canvas = document.createElement("canvas");
-  canvas.width = columns * CELL;
-  canvas.height = rows * CELL;
-  const g = canvas.getContext("2d");
-  if (!g) throw new Error("No 2D canvas for the dice");
+  const layer = (): [HTMLCanvasElement, CanvasRenderingContext2D] => {
+    const canvas = document.createElement("canvas");
+    canvas.width = columns * CELL;
+    canvas.height = rows * CELL;
+    const g = canvas.getContext("2d");
+    if (!g) throw new Error("No 2D canvas for the dice");
+    return [canvas, g];
+  };
+  const [canvas, g] = layer();
+  const glowing = skin.glow ? layer() : null;
   const at = (i: number, x: number, y: number): [number, number] => {
     const [u, v] = cellPoint(i, columns, rows, x, y);
     return [u * canvas.width, (1 - v) * canvas.height];
   };
+  if (glowing) {
+    glowing[1].fillStyle = "#000";
+    glowing[1].fillRect(0, 0, canvas.width, canvas.height);
+  }
   shape.faces.forEach((face, i) => {
-    const [cx, cy] = at(i, 0, 0);
-    const paper = g.createRadialGradient(cx, cy, 0, cx, cy, CELL * 0.6);
-    paper.addColorStop(0, "#f7ecd2");
-    paper.addColorStop(1, "#d9c193");
-    g.fillStyle = paper;
-    g.fillRect(cx - CELL / 2, cy - CELL / 2, CELL, CELL);
-    g.beginPath();
-    face.points.forEach(([x, y], k) => {
-      const [px, py] = at(i, x * 0.92, y * 0.92);
-      if (k === 0) g.moveTo(px, py);
-      else g.lineTo(px, py);
-    });
-    g.closePath();
-    g.strokeStyle = "rgb(110 72 32 / 55%)";
-    g.lineWidth = 3;
-    g.stroke();
-    const height = Math.round(CELL * shape.font);
-    g.font = `bold ${String(height)}px ${FONT}`;
-    g.fillStyle = INK;
-    g.textAlign = "center";
-    g.textBaseline = "alphabetic";
+    const [x, y] = at(i, 0, 0);
+    const outline = (): void => {
+      g.beginPath();
+      face.points.forEach(([px, py], k) => {
+        const [cx, cy] = at(i, px * 0.92, py * 0.92);
+        if (k === 0) g.moveTo(cx, cy);
+        else g.lineTo(cx, cy);
+      });
+      g.closePath();
+    };
+    paintGround(skin, { g, x, y, size: CELL, outline });
+    const height = CELL * shape.font;
     for (const label of face.labels) {
       const [px, py] = at(i, label.x, label.y);
-      const box = g.measureText(label.text);
-      g.save();
-      g.translate(px, py);
-      g.rotate(label.angle);
-      const lift =
-        (box.actualBoundingBoxAscent - box.actualBoundingBoxDescent) / 2;
-      g.fillText(label.text, 0, lift);
-      if (label.mark) {
-        g.fillRect(
-          -box.width / 2,
-          lift + height * 0.1,
-          box.width,
-          height * 0.08,
+      paintNumber(skin, g, label.text, px, py, label.angle, height, label.mark);
+      if (glowing && skin.glow) {
+        paintNumber(
+          skin,
+          glowing[1],
+          label.text,
+          px,
+          py,
+          label.angle,
+          height,
+          label.mark,
+          skin.glow,
         );
       }
-      g.restore();
     }
   });
-  const texture = new CanvasTexture(canvas);
-  texture.colorSpace = SRGBColorSpace;
-  if (stage)
-    texture.anisotropy = stage.renderer.capabilities.getMaxAnisotropy();
-  const look = { geometry: geometryOf(shape), texture };
-  looks.set(sides, look);
+  const texture = (from: HTMLCanvasElement): CanvasTexture => {
+    const made = new CanvasTexture(from);
+    made.colorSpace = SRGBColorSpace;
+    if (stage) made.anisotropy = stage.renderer.capabilities.getMaxAnisotropy();
+    return made;
+  };
+  const look = {
+    geometry: geometryOf(shape),
+    texture: texture(canvas),
+    shine: glowing ? texture(glowing[0]) : null,
+  };
+  looks.set(key, look);
   return look;
 }
 
@@ -260,14 +264,19 @@ function add(
   value: number,
   at: Point,
   size: number,
+  skin: Skin,
 ): Die | null {
   if (!stage) return null;
   const { scene, plane, blot: spotTexture } = stage;
-  const { geometry, texture } = lookOf(sides);
+  const { geometry, texture, shine } = lookOf(sides, skin);
   const shape = shapeOf(sides);
   const mesh = new Mesh(
     geometry,
-    new MeshLambertMaterial({ map: texture, transparent: true }),
+    new MeshLambertMaterial({
+      map: texture,
+      transparent: true,
+      ...(shine ? { emissiveMap: shine, emissive: 0xffffff } : {}),
+    }),
   );
   const spot = (color: Color): Mesh<PlaneGeometry, MeshBasicMaterial> =>
     new Mesh(
@@ -312,10 +321,11 @@ export function hold(
   sides: Sides,
   at: Point,
   size: number,
+  skin: Skin,
   calm: boolean,
 ): Die | null {
   fit(board);
-  const die = add(anchor, sides, 1, at, size);
+  const die = add(anchor, sides, 1, at, size, skin);
   if (!die) return null;
   die.held = true;
   die.spin = calm ? 0 : 0.004;
@@ -332,6 +342,7 @@ export function cast(
   anchor: HTMLElement,
   casts: readonly Cast[],
   size: number,
+  skin: Skin,
   ms: number,
   held: Die | null = null,
 ): void {
@@ -341,7 +352,7 @@ export function cast(
     const die =
       i === 0 && held && dice.includes(held)
         ? held
-        : add(anchor, roll.sides, roll.value, roll.from, size);
+        : add(anchor, roll.sides, roll.value, roll.from, size, skin);
     if (!die) return;
     const lead = die.held ? pose(die, now) : randomTurn();
     die.held = false;

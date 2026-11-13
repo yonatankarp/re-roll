@@ -311,6 +311,12 @@ export function showGame(ctx: ShellContext): void {
           });
         },
       });
+      // A system's own settings, such as its dice, go in the game menu after Sound.
+      const menu = page.board.menu;
+      if (menu) {
+        sound.menuItem.after(menu.item);
+        sound.dialog.after(menu.dialog);
+      }
     }
     const cues = view.cues.slice(cuesShown ?? view.cues.length);
     page.board?.update({

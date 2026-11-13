@@ -514,6 +514,11 @@ const BOARD_CSS = `
   z-index: 7;
   pointer-events: none;
 }
+.dnd-dice-panel.sound-panel { width: min(460px, calc(100vw - 32px)); }
+.dnd-dice-sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
+.dnd-dice-panel label.dnd-dice-set { gap: 8px; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+.dnd-dice-set:has(input:checked) { background: rgb(88 24 13 / 12%); outline: 1px solid rgb(88 24 13 / 45%); }
+.dnd-dice-set canvas { flex: none; filter: drop-shadow(0 2px 2px rgb(0 0 0 / 35%)); }
 .dnd-damage-hand { position: absolute; left: 0; top: 0; z-index: 8; pointer-events: none; }
 .dnd-throw-number {
   position: absolute;

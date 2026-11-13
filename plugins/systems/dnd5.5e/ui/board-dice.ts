@@ -8,6 +8,7 @@ import {
   wait,
 } from "./board-context.ts";
 import { damageFaces } from "./board-math.ts";
+import { chosenSkin } from "./dice-skins.ts";
 
 type Dice3d = typeof import("./board-dice3d.ts");
 let dice3d: Promise<Dice3d | null> | null = null;
@@ -83,12 +84,13 @@ export async function throwD20(
     die.style.top = `${String(point.y)}px`;
   };
   const size = mine ? 96 : 64;
+  const skin = chosenSkin();
   let held = null;
   if (mine && !fast(ctx)) {
     const box = ctx.board.getBoundingClientRect();
     from = { x: box.width / 2, y: box.height / 2 };
     place(from);
-    held = three.hold(ctx.board, die, 20, from, size, still(ctx));
+    held = three.hold(ctx.board, die, 20, from, size, skin, still(ctx));
     await waitForThrow(ctx, die);
     label.textContent = "";
   }
@@ -99,6 +101,7 @@ export async function throwD20(
     die,
     [{ sides: 20, value: natural, from, to }],
     size,
+    skin,
     ms,
     held,
   );
@@ -249,6 +252,7 @@ export async function rollDamage(
       };
     }),
     size,
+    chosenSkin(),
     tumble,
   );
   const whole = duration + tumble;
