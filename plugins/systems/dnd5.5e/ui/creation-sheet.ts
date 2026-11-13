@@ -17,9 +17,11 @@ import {
   slugOf,
 } from "../core/character-sheet.ts";
 import {
+  BACKGROUND_FEAT,
   type Draft,
   NAME_LENGTH,
   STANDARD_ARRAY,
+  backgroundFeatOf,
   backgroundIncreaseStep,
   finishedCharacter,
   namedContent,
@@ -286,6 +288,7 @@ function card(draft: Draft, access: ContentAccess) {
 // Whose choice a pick is, by its slot: the species', an origin feat's or the class's.
 function slotOwner(slot: string, draft: Draft, access: ContentAccess): string {
   if (slot.startsWith("species-")) return nameOf(access, draft.speciesId) ?? "";
+  if (slot === BACKGROUND_FEAT) return nameOf(access, draft.backgroundId) ?? "";
   const feat = /^feat(\d+)-/.exec(slot);
   if (feat) {
     const background = find(access, BackgroundSchema, draft.backgroundId ?? "");
@@ -298,7 +301,11 @@ function slotOwner(slot: string, draft: Draft, access: ContentAccess): string {
     return (
       nameOf(
         access,
-        index === 0 ? background?.feat : speciesFeats[index - 1],
+        index === 0
+          ? background
+            ? backgroundFeatOf(draft, background)
+            : undefined
+          : speciesFeats[index - 1],
       ) ?? ""
     );
   }

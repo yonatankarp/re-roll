@@ -5,6 +5,7 @@ import {
   dndEvent,
   type DndState,
   hasCondition,
+  equipped,
   INCAPACITATING,
   isDead,
   isDown,
@@ -46,8 +47,15 @@ import {
   onceEnded,
 } from "../class-rules.ts";
 import { conditionsApplied } from "../legendary.ts";
-import { type Damage, type Resolution } from "../schemas.ts";
-import { weaponDamageDice } from "../trait-rules.ts";
+import { type Damage, ItemSchema, type Resolution } from "../schemas.ts";
+import {
+  armoredReduction,
+  masteredDice,
+  masteredTypes,
+  piercing,
+  steadyShot,
+  weaponDamageDice,
+} from "../trait-rules.ts";
 import {
   actorOf,
   allies,
@@ -180,6 +188,105 @@ function reactionFor(
   );
 }
 
+// Whether the bearer holds what a reaction needs, such as a Shield for Protection.
+function holds(
+  actor: Actor,
+  holding: "shield" | "shieldOrWeapon" | undefined,
+  context: Context,
+): boolean {
+  return (
+    holding === undefined ||
+    equipped(actor).some((id) => {
+      const item = ItemSchema.safeParse(context.content(id)).data;
+      return (
+        item?.type === "shield" ||
+        (holding === "shieldOrWeapon" && item?.type === "weapon")
+      );
+    })
+  );
+}
+
+// An ally's reaction for a target within 5 feet: Protection before the roll, Interception after a hit. It's taken
+// as soon as it can be, the way a companion takes it, so the player isn't asked.
+function guardFor(
+  target: Actor,
+  attacker: Actor,
+  when: "allyAttacked" | "allyHit",
+  context: Context,
+): { readonly guard: Actor; readonly action: KnownAction } | null {
+  const { state } = context;
+  for (const guard of allies(state, target)) {
+    if (
+      guard.id === target.id ||
+      !guard.budget.reaction ||
+      isDown(guard) ||
+      hasCondition(guard, ...INCAPACITATING) ||
+      !within5(guard, target) ||
+      seeing(guard, attacker.position, state, context) === "none"
+    ) {
+      continue;
+    }
+    const stats = deriveStats(guard, context);
+    const action = stats.actions.find(
+      (item) =>
+        item.activation.trigger?.[when] &&
+        holds(guard, item.activation.trigger.holding, context) &&
+        canAfford(item, guard, stats),
+    );
+    if (action) return { guard, action };
+  }
+  return null;
+}
+
+// What taking a guard's reaction costs, named so the log says which reaction it was.
+function guardCosts(
+  guard: Actor,
+  action: KnownAction,
+  context: Context,
+): SystemEvent[] {
+  return payCosts(action, guard, context).map((event) =>
+    event.kind === `${NS}:budgetSpent`
+      ? dndEvent(`${NS}:budgetSpent`, {
+          actor: guard.id,
+          kind: "reaction",
+          label: action.name,
+        })
+      : event,
+  );
+}
+
+// Interception: an ally lessens the hit by what its reaction rolls.
+function intercepted(
+  hit: z.infer<typeof HitSchema>,
+  context: Context,
+): { readonly events: SystemEvent[]; readonly hit: z.infer<typeof HitSchema> } {
+  const { state, dice } = context;
+  const target = actorOf(state, hit.target);
+  const found = guardFor(
+    target,
+    actorOf(state, hit.attacker),
+    "allyHit",
+    context,
+  );
+  if (!found) return { events: [], hit };
+  const { guard, action } = found;
+  const { resolution } = action.activation;
+  const stats = deriveStats(guard, context);
+  const reduceBy = (
+    resolution.kind === "automatic" ? resolution.effects : []
+  ).reduce(
+    (sum, effect) =>
+      effect.kind === "reduceDamage" && effect.amount
+        ? sum + rollAmount(effect.amount, stats, dice)
+        : sum,
+    0,
+  );
+  return {
+    events: guardCosts(guard, action, context),
+    hit: { ...hit, reduceBy: (hit.reduceBy ?? 0) + reduceBy },
+  };
+}
+
 export function runAttackRoll(
   payload: z.infer<typeof AttackSchema>,
   context: Context,
@@ -216,9 +323,11 @@ export function runAttackRoll(
         within5(item, target),
     );
   const close = within5(attacker, target);
+  const steady = steadyShot(stats, action.id, resolution.attack.type);
   // A ranged attack is harder with an enemy standing next to the attacker.
   const crowded =
     meleeReach(action) === null &&
+    !steady.inMelee &&
     enemies(state, attacker).some(
       (item) =>
         !isDown(item) &&
@@ -253,7 +362,17 @@ export function runAttackRoll(
       "unconscious",
     ) ||
     (hasCondition(target, "prone") && close);
+  // Protection: an ally's Shield gives this roll, and the others against the target, Disadvantage.
+  const shielded = guardFor(target, attacker, "allyAttacked", context);
+  const guarded = shielded
+    ? [
+        ...guardCosts(shielded.guard, shielded.action, context),
+        ...(resolveAction(shielded.action, shielded.guard, [target], context)
+          .events ?? []),
+      ]
+    : [];
   const disadvantage =
+    shielded !== null ||
     crowded ||
     unseenTarget ||
     proneFar ||
@@ -280,7 +399,10 @@ export function runAttackRoll(
     roll.natural +
     attackBonus(resolution, stats) +
     rollBonus(attacker, "attacks", context);
-  const ac = targetStats.ac + coverAgainst(state, attacker, target);
+  const cover = coverAgainst(state, attacker, target);
+  const ac =
+    targetStats.ac +
+    (steady.bypassCover && meleeReach(action) === null ? 0 : cover);
   const critFrom = criticalFrom(stats);
   const hits = roll.natural >= critFrom || (roll.natural !== 1 && total >= ac);
   // A hit from within 5 feet on a Paralyzed or Unconscious target is a Critical Hit.
@@ -301,6 +423,7 @@ export function runAttackRoll(
   });
   // An effect like Guiding Bolt's lasts only until the next attack roll it applies to.
   const spent = [
+    ...guarded,
     ...onceEnded(attacker, "attacks"),
     ...onceEnded(target, "attacksAgainst"),
     ...revealEvents(attacker),
@@ -320,20 +443,22 @@ export function runAttackRoll(
   };
 
   if (!hits) {
-    return (
-      offerInspiration(
-        attacker,
-        { ...payload, target: target.id },
-        report,
-        hit,
-        context,
-      ) ?? {
-        events: [report, ...spent],
-        ...(masteryOf(attacker, action.id, context)
-          ? { frames: [frame("masteryMiss", hit)] }
-          : {}),
-      }
+    const reroll = offerInspiration(
+      attacker,
+      { ...payload, target: target.id },
+      report,
+      hit,
+      context,
     );
+    if (reroll) {
+      return { ...reroll, events: [...guarded, ...(reroll.events ?? [])] };
+    }
+    return {
+      events: [report, ...spent],
+      ...(masteryOf(attacker, action.id, context)
+        ? { frames: [frame("masteryMiss", hit)] }
+        : {}),
+    };
   }
 
   const reaction = reactionFor(target, total, ac, context, critical);
@@ -354,7 +479,11 @@ export function runAttackRoll(
       ],
     };
   }
-  return { events: [report, ...spent], frames: [frame("applyHit", hit)] };
+  const guard = intercepted(hit, context);
+  return {
+    events: [report, ...spent, ...guard.events],
+    frames: [frame("applyHit", guard.hit)],
+  };
 }
 
 export const HitSchema = z.object({
@@ -379,7 +508,10 @@ export function runAfterReaction(
 ): SystemResult {
   const { state } = context;
   const { answer, ...hit } = payload;
-  if (answer === DECLINE) return { frames: [frame("applyHit", hit)] };
+  if (answer === DECLINE) {
+    const guard = intercepted(hit, context);
+    return { events: guard.events, frames: [frame("applyHit", guard.hit)] };
+  }
 
   const target = actorOf(state, payload.target);
   const action = findAction(target, answer, context);
@@ -403,7 +535,7 @@ export function runAfterReaction(
       frame("recheckHit", {
         ...hit,
         ...(lessened.some((effect) => effect.halve) ? { halve: true } : {}),
-        ...(reduceBy > 0 ? { reduceBy } : {}),
+        ...(reduceBy > 0 ? { reduceBy: (hit.reduceBy ?? 0) + reduceBy } : {}),
       }),
     ],
   };
@@ -418,9 +550,9 @@ export function runRecheckHit(
   const ac =
     deriveStats(target, context).ac +
     coverAgainst(state, actorOf(state, payload.attacker), target);
-  return payload.critical || payload.total >= ac
-    ? { frames: [frame("applyHit", payload)] }
-    : {};
+  if (!payload.critical && payload.total < ac) return {};
+  const guard = intercepted(payload, context);
+  return { events: guard.events, frames: [frame("applyHit", guard.hit)] };
 }
 
 export function runApplyHit(
@@ -442,7 +574,8 @@ export function runApplyHit(
   }
   const stats = deriveStats(attacker, context);
   const multiplier = payload.critical ? 2 : 1;
-  const responses = damageResponses(target, context);
+  const mastered = masteredTypes(stats, action.spellLevel !== null);
+  const responses = piercing(damageResponses(target, context), mastered, stats);
 
   const events: SystemEvent[] = [];
   let totalDealt = 0;
@@ -486,7 +619,13 @@ export function runApplyHit(
   }
   const weaponDice = weaponDamageDice(dice, action.id, stats, context);
   resolution.damage.forEach(({ amount, type }, index) => {
-    const roll = () => rollAmount(amount, stats, weaponDice, multiplier);
+    const roll = () =>
+      rollAmount(
+        amount,
+        stats,
+        masteredDice(weaponDice, type, mastered),
+        multiplier,
+      );
     const rolled =
       (savage && index === 0 ? Math.max(roll(), roll()) : roll()) +
       (index === 0 && type === firstType
@@ -510,14 +649,30 @@ export function runApplyHit(
       type,
     })),
   ];
+  const targetStats = deriveStats(target, context);
+  const armored = hits.map((item) => ({
+    ...item,
+    amount: Math.max(
+      0,
+      item.amount - armoredReduction(target, targetStats, item.type, context),
+    ),
+  }));
   const dealt = dealEvents(
     target,
-    lessenHits(hits, payload),
+    lessenHits(armored, payload),
     payload.critical,
     context,
   );
   events.push(
     ...dealt.events,
+    ...damageRiders(
+      attacker,
+      target,
+      resolution,
+      payload.critical,
+      stats,
+      context,
+    ),
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
   );
@@ -548,6 +703,30 @@ export function runApplyHit(
       CHECK_END,
     ],
   };
+}
+
+// Crusher's and Slasher's effects on a creature hit by an attack dealing their damage type.
+function damageRiders(
+  attacker: Actor,
+  target: Actor,
+  resolution: Extract<Resolution, { kind: "attack" }>,
+  critical: boolean,
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  const types = new Set(resolution.damage.map(({ type }) => type));
+  return stats.passives.flatMap((passive) => {
+    if (passive.kind !== "damageRider" || !types.has(passive.damage)) return [];
+    if (passive.critical && !critical) return [];
+    const key = `rider:${passive.damage}:${String(passive.critical)}`;
+    if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return [];
+    return [
+      ...(passive.oncePerTurn
+        ? [dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key })]
+        : []),
+      ...leafEvents(passive.effects, key, attacker, target, context),
+    ];
+  });
 }
 
 // shortcut: a reaction lessens the damage after Resistance rather than before it, which only matters to rounding.

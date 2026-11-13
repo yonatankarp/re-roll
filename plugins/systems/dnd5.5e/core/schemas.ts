@@ -357,6 +357,11 @@ export const ActivationSchema = z.strictObject({
       targetedBySpell: z.string().optional(),
       // Taken right after hitting with a weapon, as with the smite spells.
       afterHit: z.enum(["weapon", "meleeWeapon"]).optional(),
+      // Taken for another creature within 5 feet that a creature the bearer can see attacks, before the roll, or hits,
+      // as with Protection and Interception. It's taken as soon as it can be.
+      allyAttacked: z.literal(true).optional(),
+      allyHit: z.literal(true).optional(),
+      holding: z.enum(["shield", "shieldOrWeapon"]).optional(), // what the bearer must hold to take it
     })
     .optional(),
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
@@ -462,6 +467,47 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     amount: FormulaSchema,
     allies: z.boolean().default(false),
   }),
+  // The bearer's spells of this type ignore Resistance to it, and a 1 on their damage dice counts as a 2, as with
+  // Elemental Adept.
+  z.strictObject({
+    kind: z.literal("energyMastery"),
+    damage: DamageTypeSchema,
+  }),
+  // Damage of these types the bearer deals ignores Resistance, as with the Boon of Irresistible Offense.
+  z.strictObject({
+    kind: z.literal("overcomeResistance"),
+    damage: z.array(DamageTypeSchema).min(1),
+  }),
+  // Effects on a creature the bearer hits with an attack dealing this type, as Crusher or Slasher give: with
+  // `critical` only on a Critical Hit, with `oncePerTurn` once a turn.
+  z.strictObject({
+    kind: z.literal("damageRider"),
+    damage: DamageTypeSchema,
+    critical: z.boolean().default(false),
+    oncePerTurn: z.boolean().default(false),
+    effects: z.array(LeafEffectSchema).min(1),
+  }),
+  // An attack's damage of these types lessened while the bearer wears this armor, as with Heavy Armor Master.
+  z.strictObject({
+    kind: z.literal("armoredReduction"),
+    armor: z.enum(["light", "medium", "heavy"]),
+    damage: z.array(DamageTypeSchema).min(1),
+    amount: FormulaSchema,
+  }),
+  // The most Dexterity this armor adds to AC, as Medium Armor Master raises it to 3.
+  z.strictObject({
+    kind: z.literal("armorDexMax"),
+    armor: z.enum(["light", "medium", "heavy"]),
+    max: z.number().int().min(0),
+  }),
+  // Ranged attacks of this kind have no Disadvantage from an enemy within 5 feet, and with `bypassCover` ignore Half and
+  // Three-Quarters Cover, as Sharpshooter and Spell Sniper give. `crossbows` limits it to crossbows, as Crossbow Expert.
+  z.strictObject({
+    kind: z.literal("firingInMelee"),
+    attack: z.enum(["weapon", "spell"]),
+    crossbows: z.boolean().default(false),
+    bypassCover: z.boolean().default(false),
+  }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
 
@@ -530,7 +576,13 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("feat"),
     id: z.string(),
-    category: z.enum(["origin", "general", "fightingStyle", "epicBoon"]),
+    category: z.enum([
+      "origin",
+      "general",
+      "fightingStyle",
+      "epicBoon",
+      "darkGift",
+    ]),
   }),
   z.strictObject({
     kind: z.literal("skills"),
@@ -615,6 +667,8 @@ export const BackgroundSchema = ContentEntrySchema.extend({
   feat: ContentIdSchema,
   skills: z.array(SkillSchema).length(2),
   tool: z.string().min(1),
+  // Its feat, or one of this category instead, as with "Survivor or a Dark Gift feat of your choice".
+  featOr: z.literal("darkGift").optional(),
 }).strict();
 export type Background = z.infer<typeof BackgroundSchema>;
 
@@ -633,6 +687,8 @@ export const FeatSchema = ContentEntrySchema.extend({
   grants: z.array(ContentIdSchema).default([]),
   choices: z.array(ChoiceDefSchema).default([]), // asked when the feat is taken
   abilityIncrease: z.array(AbilitySchema).min(1).optional(), // its Ability Score Increase: +1 to one of these
+  // Its prerequisite, met by any of these: the species, a trait or lineage it has, or a feat taken.
+  requires: z.array(ContentIdSchema).min(1).optional(),
 }).strict();
 export type Feat = z.infer<typeof FeatSchema>;
 

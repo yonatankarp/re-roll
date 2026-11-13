@@ -1,8 +1,10 @@
 import { type ContentAccess, type Decision, PLAYER_ACTOR } from "#sdk";
 import type { z } from "zod";
 import {
+  BACKGROUND_FEAT,
   BuildStepSchema,
   STANDARD_ARRAY,
+  backgroundFeatOf,
   parseIncrease,
   startingGear,
 } from "../core/character.ts";
@@ -370,12 +372,18 @@ function headingOf(key: string, draft: Draft, access: ContentAccess): string {
     return (
       nameOf(
         access,
-        index === 0 ? background?.feat : speciesFeats[index - 1],
+        index === 0
+          ? background
+            ? backgroundFeatOf(draft, background)
+            : undefined
+          : speciesFeats[index - 1],
       ) ?? ""
     );
   }
   if (choice.startsWith("species-"))
     return nameOf(access, draft.speciesId) ?? "";
+  if (choice === BACKGROUND_FEAT)
+    return nameOf(access, draft.backgroundId) ?? "";
   // A feat's own choices, such as a fighting style's, under its choice id.
   const owner = /^([^:]+):feat\d+-/.exec(choice)?.[1];
   const ownerFeat = owner === undefined ? undefined : draft.picks[owner]?.[0];

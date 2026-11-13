@@ -1,7 +1,7 @@
 import type { ContentAccess, Dice, SystemEvent } from "#sdk";
 import { type Ability, type DamageType, ItemSchema } from "./schemas.ts";
-import { type Actor, NS, dndEvent } from "./state.ts";
-import { type Stats, lookup } from "./stats.ts";
+import { type Actor, NS, dndEvent, equipped } from "./state.ts";
+import { type Stats, evaluateFormula, lookup } from "./stats.ts";
 
 // Species traits and feats that change rolls combat makes, kept out of combat.ts behind one call each.
 
@@ -49,6 +49,97 @@ export function weaponDamageDice(
     ? {
         below: (count) => dice.below(count),
         roll: (sides) => Math.max(3, dice.roll(sides)),
+      }
+    : dice;
+}
+
+// Elemental Adept: the damage types a spell of the bearer's ignores Resistance to.
+export function masteredTypes(
+  stats: Stats,
+  spell: boolean,
+): readonly DamageType[] {
+  return spell
+    ? stats.passives.flatMap((passive) =>
+        passive.kind === "energyMastery" ? [passive.damage] : [],
+      )
+    : [];
+}
+
+// Resistance the bearer's damage goes through: the mastered types, and any the bearer always overcomes, as with the
+// Boon of Irresistible Offense.
+export function piercing<
+  T extends { readonly resistances: readonly DamageType[] },
+>(responses: T, mastered: readonly DamageType[], stats: Stats): T {
+  const ignored = [
+    ...mastered,
+    ...stats.passives.flatMap((passive) =>
+      passive.kind === "overcomeResistance" ? passive.damage : [],
+    ),
+  ];
+  return ignored.length === 0
+    ? responses
+    : {
+        ...responses,
+        resistances: responses.resistances.filter(
+          (type) => !ignored.includes(type),
+        ),
+      };
+}
+
+// Heavy Armor Master: what an attack's damage of a type is lessened by while the target wears the armor.
+export function armoredReduction(
+  target: Actor,
+  stats: Stats,
+  type: DamageType,
+  access: ContentAccess,
+): number {
+  const worn = new Set(
+    equipped(target).flatMap((id) => {
+      const item = ItemSchema.safeParse(access.content(id)).data;
+      return item?.type === "armor" ? [item.armorType] : [];
+    }),
+  );
+  return stats.passives.reduce(
+    (total, passive) =>
+      passive.kind === "armoredReduction" &&
+      worn.has(passive.armor) &&
+      passive.damage.includes(type)
+        ? total + evaluateFormula(passive.amount, stats)
+        : total,
+    0,
+  );
+}
+
+// Sharpshooter, Spell Sniper and Crossbow Expert: whether a ranged attack ignores an enemy beside the attacker, and
+// whether it ignores Half and Three-Quarters Cover.
+export function steadyShot(
+  stats: Stats,
+  actionId: string,
+  attack: "weapon" | "spell",
+): { readonly inMelee: boolean; readonly bypassCover: boolean } {
+  const fits = stats.passives.flatMap((passive) =>
+    passive.kind === "firingInMelee" &&
+    passive.attack === attack &&
+    (!passive.crossbows || actionId.includes("crossbow"))
+      ? [passive]
+      : [],
+  );
+  return {
+    inMelee: fits.length > 0,
+    bypassCover: fits.some((passive) => passive.bypassCover),
+  };
+}
+
+// A 1 on a damage die of a mastered type counts as a 2.
+export function masteredDice(
+  dice: Dice,
+  type: DamageType,
+  mastered: readonly DamageType[],
+): Dice {
+  return mastered.includes(type)
+    ? {
+        below: (count) => dice.below(count),
+        roll: (sides) => Math.max(2, dice.roll(sides)),
       }
     : dice;
 }

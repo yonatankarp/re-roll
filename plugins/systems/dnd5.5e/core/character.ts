@@ -440,6 +440,16 @@ export function levelChoices(
   ];
 }
 
+export const BACKGROUND_FEAT = "background-feat";
+
+// The feat a background gave: the one picked in its place, or the one it names.
+export function backgroundFeatOf(
+  draft: Draft,
+  background: { readonly feat: string },
+): string {
+  return draft.picks[BACKGROUND_FEAT]?.[0] ?? background.feat;
+}
+
 // What the species and the origin feats ask for, at level 1 only. Ids get a prefix so they can't meet a class's.
 function originChoices(
   draft: Draft,
@@ -453,15 +463,21 @@ function originChoices(
     "species",
     lookup(access, SpeciesSchema, draft.speciesId).choices,
   );
+  const background = lookup(access, BackgroundSchema, draft.backgroundId);
+  // A background that gives its feat or one of a category asks which, as Haunted One does with a Dark Gift.
+  const backgroundFeat: ChoiceDef[] = background.featOr
+    ? [{ kind: "feat", id: BACKGROUND_FEAT, category: background.featOr }]
+    : [];
   // A feat picked here, such as a Human's Versatile origin feat, asks its own choices too.
   const feats = [
-    lookup(access, BackgroundSchema, draft.backgroundId).feat,
+    backgroundFeatOf(draft, background),
     ...species.flatMap((choice) =>
       choice.kind === "feat" ? (draft.picks[choice.id] ?? []) : [],
     ),
   ];
   return [
     ...species,
+    ...backgroundFeat,
     ...feats.flatMap((id, index) =>
       prefixed(`feat${String(index)}`, lookup(access, FeatSchema, id).choices),
     ),
@@ -531,8 +547,25 @@ export function choiceOptions(
           .map((item) => ({ id: item.id, label: item.name })),
       };
     case "feat": {
-      const had = taken("feats").add(background.feat);
+      const forBackground = choice.id === BACKGROUND_FEAT;
+      const had = taken("feats");
+      if (!forBackground) had.add(background.feat);
       const all = namedContent(access, "feat", FeatSchema);
+      const categoryOf = (id: string) =>
+        FeatSchema.safeParse(access.content(id)).data?.category;
+      // A prerequisite is met by the species, a trait or lineage picked, or a feat taken.
+      const held = new Set([
+        base?.speciesId ?? draft.speciesId ?? "",
+        ...taken("features"),
+        ...had,
+      ]);
+      const marked = [...had].some((id) => categoryOf(id) === "dragonmark");
+      // Dragonmark feats are taken at any feat choice that isn't limited, one only, and racial feats there too.
+      const fits = (item: Feat): boolean =>
+        item.category === choice.category ||
+        (choice.category === "general" &&
+          (item.category === "racial" ||
+            (item.category === "dragonmark" && !marked)));
       // A feat printed once and encoded as one version per spell list, as Magic Initiate is, is offered by version.
       const versioned = (item: Feat) =>
         all.some(
@@ -542,11 +575,23 @@ export function choiceOptions(
         );
       const feats = all.filter(
         (item) =>
-          item.category === choice.category &&
+          fits(item) &&
+          (item.requires?.some((id) => held.has(id)) ?? true) &&
           !versioned(item) &&
-          // shortcut: a feat's prerequisites are only in its text, so they aren't checked.
+          // shortcut: prerequisites other than `requires`, such as a level, are only in the text and aren't checked.
           (!had.has(item.id) || item.text.includes("Repeatable")),
       );
+      if (forBackground) {
+        // The feat the background names comes first and is the default.
+        const named = lookup(access, FeatSchema, background.feat);
+        return {
+          what: "a feat",
+          options: [named, ...feats.filter((item) => item.id !== named.id)].map(
+            (item) => ({ id: item.id, label: item.name }),
+          ),
+          prefer: [named.id],
+        };
+      }
       return {
         what: "a feat",
         options: feats.map((item) => ({ id: item.id, label: item.name })),

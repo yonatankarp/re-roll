@@ -30,7 +30,12 @@ import { finalDamage, halved } from "../rules.ts";
 import { betweenTurns, legendaryResistance } from "../legendary.ts";
 import { turnRecharge } from "../class-rules.ts";
 import { MonsterSchema } from "../schemas.ts";
-import { repeatSaveConditions } from "../trait-rules.ts";
+import {
+  masteredDice,
+  masteredTypes,
+  piercing,
+  repeatSaveConditions,
+} from "../trait-rules.ts";
 import {
   actorOf,
   canAfford,
@@ -162,12 +167,18 @@ export function runLingeringTick(
     if (!saved || save?.onSuccess === "full") return amount;
     return save?.onSuccess === "half" ? halved(amount) : 0;
   };
-  const responses = damageResponses(target, context);
+  const caster = state.actors[effect.casterId];
+  const mastered = caster
+    ? masteredTypes(stats, effect.sourceId.startsWith("spell:"))
+    : [];
+  const responses = caster
+    ? piercing(damageResponses(target, context), mastered, stats)
+    : damageResponses(target, context);
   const { events, dealt } = dealEvents(
     target,
     damage.map(({ amount, type }) => ({
       amount: finalDamage(
-        scale(rollAmount(amount, stats, dice)),
+        scale(rollAmount(amount, stats, masteredDice(dice, type, mastered))),
         type,
         responses,
       ),
