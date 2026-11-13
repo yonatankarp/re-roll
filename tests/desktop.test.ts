@@ -507,14 +507,22 @@ describe("playing through the shell's session", () => {
       seed += 1
     ) {
       const game = newGame();
-      await game.start("goblin-ambush", `endings-${String(seed)}`);
+      // On Normal the companions stabilize a dying Wizard, so a death is rare there.
+      await game.start("goblin-ambush", `endings-${String(seed)}`, {
+        difficulty: "hard",
+      });
       await chooseCharacter(game, "Wizard");
-      // Passing every turn when possible makes defeat common enough to test.
+      // Go on in the story, and on even seeds end every turn in a fight, which makes defeat common
+      // enough to test. Rests and sheet buttons such as Stow Dagger are left out, as they loop in place.
       for (let count = 0; count < 500; count += 1) {
-        const options = game.view().decision?.options;
-        const last = options?.at(-1);
-        if (!last) break;
-        await game.answer(seed % 2 === 0 ? last.id : (options?.[0]?.id ?? ""));
+        const screen = game.view();
+        const options = screen.choices.filter(
+          (choice) => choice.where !== "rest" && choice.where !== "sheet",
+        );
+        const pick =
+          screen.combat && seed % 2 === 0 ? options.at(-1) : options[0];
+        if (!pick) break;
+        await game.answer(pick.id);
       }
       const view = game.view();
       // A win is named by its own scene, and shows that scene's text.
