@@ -1,11 +1,12 @@
 import { NARRATOR_VOICES } from "../story/narration.ts";
 import { ambiencePlayer } from "./ambience.ts";
 import { setMasterVolume } from "./audio.ts";
-import { narrator } from "./narration.ts";
+import { health, narrator } from "./narration.ts";
 import {
   type SettingsStore,
   type SoundSettings,
   loadSettings,
+  narrationNote,
   saveSettings,
 } from "./sound-settings.ts";
 import type { GameView } from "./session.ts";
@@ -124,6 +125,9 @@ export function soundControls(
   note.className = "sound-note";
   note.textContent =
     "Without a recorded reading, the narrator's voice is downloaded once (90 MB, or 330 MB to use the graphics card) and read on this device.";
+  const pace = document.createElement("p");
+  pace.className = "sound-note";
+  pace.setAttribute("role", "status");
 
   const dialog = document.createElement("dialog");
   dialog.className = "sound-panel";
@@ -146,6 +150,7 @@ export function soundControls(
     toggle("Narration", "narration"),
     voiceRow,
     note,
+    pace,
     form,
   );
   dialog.addEventListener("click", (event) => {
@@ -161,6 +166,8 @@ export function soundControls(
   menuItem.textContent = "Sound…";
   menuItem.addEventListener("click", () => {
     menuItem.closest("details")?.removeAttribute("open");
+    pace.textContent = narrationNote(health);
+    pace.hidden = !pace.textContent;
     dialog.showModal();
   });
 

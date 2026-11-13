@@ -5,6 +5,7 @@ import {
 } from "../story/narration.ts";
 import { shellAudio } from "./audio.ts";
 import type { NarrationReply, NarrationRequest } from "./narration-worker.ts";
+import type { NarrationHealth } from "./sound-settings.ts";
 
 // Reads the scene aloud: a clip made ahead of time (npm run narrate) when there is one, or else
 // read in a worker, a sentence at a time, as it plays. On a CPU that reads slower than speech,
@@ -46,6 +47,15 @@ let cpu = false; // after a hung reading, the CPU model for the rest of the sess
 // so a scene being listened to from another window isn't cut off.
 const held = new Set<number>();
 
+// How reading in the app goes on this device, for the sound panel. Unknown until the worker says.
+export const health: NarrationHealth = {
+  store: null,
+  device: null,
+  threads: 1,
+  read: 0,
+  spoken: 0,
+};
+
 function tell(clip: Clip): void {
   for (const listener of clip.changed) listener();
 }
@@ -66,9 +76,20 @@ function narrationWorker(): Worker | null {
             loading?.(reply.percent);
             return;
           }
+          if (reply.type === "store") {
+            health.store = reply.store;
+            if (reply.store === "none") {
+              console.warn(
+                "Narration: this webview can't keep the model, so it's downloaded each launch",
+              );
+            }
+            return;
+          }
           if (reply.type === "ready") {
+            health.device = reply.device;
+            health.threads = reply.threads;
             console.info(
-              `Narration voice ready on ${reply.device} in ${reply.seconds.toFixed(1)}s`,
+              `Narration voice ready on ${reply.device} with ${String(reply.threads)} WASM thread(s), model kept in ${String(health.store)}, in ${reply.seconds.toFixed(1)}s`,
             );
             return;
           }
@@ -87,6 +108,11 @@ function narrationWorker(): Worker | null {
             working.delete(reply.id);
             clip.job = null;
             clip.done = true;
+            // A hidden page's work is slowed, so only readings done in view say how fast it reads.
+            if (!document.hidden) {
+              health.read += reply.seconds;
+              health.spoken += reply.audio;
+            }
             console.info(
               `Narration: ${reply.audio.toFixed(1)}s of speech read in ${reply.seconds.toFixed(1)}s`,
             );
@@ -404,7 +430,10 @@ export function narrator(
     };
     loading = (percent) => {
       if (reading?.clip === clip && !reading.source) {
-        status.textContent = `Preparing voice… ${String(percent)}%`;
+        status.textContent =
+          health.store === "none"
+            ? `Downloading voice… ${String(percent)}% (not kept on this device)`
+            : `Preparing voice… ${String(percent)}%`;
       }
     };
     draw();

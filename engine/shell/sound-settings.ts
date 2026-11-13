@@ -3,6 +3,7 @@ import {
   NARRATOR_VOICES,
   type NarratorVoice,
 } from "../story/narration.ts";
+import type { ModelStore } from "./kokoro-files.ts";
 
 // The player's sound settings, kept in the page's localStorage or in a store passed in.
 
@@ -71,4 +72,41 @@ export function saveSettings(
   } catch {
     // Not remembered, but still applies for now.
   }
+}
+
+// How reading in the app goes on this device, as the narrator's worker reports it.
+export interface NarrationHealth {
+  store: ModelStore | null;
+  device: string | null;
+  threads: number;
+  read: number; // seconds spent reading, while the page was shown
+  spoken: number; // seconds of speech those readings made
+}
+
+const PACE_SAMPLE = 3; // seconds of speech before the pace is worth telling
+
+// What the sound panel says about reading aloud here, once there's something to say.
+export function narrationNote(health: NarrationHealth): string {
+  const lines: string[] = [];
+  if (health.device === "webgpu")
+    lines.push("The narrator reads on the graphics card.");
+  else if (health.device) {
+    lines.push(
+      health.threads > 1
+        ? `The narrator reads on the CPU, on ${String(health.threads)} threads.`
+        : "The narrator reads on the CPU, on one thread.",
+    );
+  }
+  if (health.store === "none") {
+    lines.push(
+      "This device can't keep the voice, so it's downloaded again each time the game starts.",
+    );
+  }
+  const pace = health.spoken >= PACE_SAMPLE ? health.read / health.spoken : 0;
+  if (pace > 1) {
+    lines.push(
+      `It reads ${pace.toFixed(1)} times slower than it speaks, so a scene can take a while to start. Scenes with a recorded reading play at once; for the rest you may rather turn narration off and read.`,
+    );
+  }
+  return lines.join(" ");
 }

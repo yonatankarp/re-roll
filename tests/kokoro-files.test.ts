@@ -4,6 +4,7 @@ import {
   KOKORO_REVISION,
   KOKORO_VOICES,
   kokoroFetch,
+  pickBackend,
   readAll,
   sha256,
 } from "../engine/shell/kokoro-files.ts";
@@ -82,5 +83,30 @@ describe("fetching the narration model", () => {
     const inner = vi.fn(() => Promise.resolve(new Response("wasm")));
     const response = await kokoroFetch(inner)("/assets/ort.wasm");
     expect(await response.text()).toBe("wasm");
+  });
+});
+
+describe("choosing where the narrator reads", () => {
+  it("takes the graphics card, then threads, then one thread", () => {
+    expect(pickBackend(true, true, true, 8)).toEqual({
+      device: "webgpu",
+      threads: 4,
+    });
+    expect(pickBackend(false, true, true, 6)).toEqual({
+      device: "wasm",
+      threads: 3,
+    });
+    expect(pickBackend(false, false, false, 8)).toEqual({
+      device: "wasm",
+      threads: 1,
+    });
+  });
+
+  it("stays on one thread when isolated without shared memory, as in WKWebView", () => {
+    expect(pickBackend(false, true, false, 8).threads).toBe(1);
+  });
+
+  it("copes with a device that doesn't say how many cores it has", () => {
+    expect(pickBackend(false, true, true, 0).threads).toBe(1);
   });
 });

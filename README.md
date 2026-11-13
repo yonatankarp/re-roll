@@ -64,15 +64,17 @@ The built desktop app has no checkout, so it reads your plugins from its content
 
 ### Narration on each OS
 
-Scenes without a made-ahead clip are read in the app by Kokoro-82M, on WebGPU when the webview has it, or else on the CPU in WASM. The model comes from Hugging Face on first use. The app sends `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers, so WASM can use several threads where the webview allows it. At start it logs whether the page is cross-origin isolated and whether the Cache API is there. Without the Cache API the model is downloaded again each launch, but narration still works.
+Scenes without a made-ahead clip are read in the app by Kokoro-82M: on WebGPU when the webview has it, else in WASM on several threads when the page is cross-origin isolated and has `SharedArrayBuffer`, else in WASM on one thread. The app sends `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers for the threads. The model comes from Hugging Face on first use and is kept in the Cache API, or in IndexedDB where the Cache API is missing or refused. With neither it is downloaded each launch, and the narrator's status line says so. The console logs the device, thread count and store once the voice is ready. The Sound panel says where the narrator reads and, once it has read a few seconds, how much slower than speech it reads, so a player on a slow CPU can turn narration off; recorded clips still play at once.
 
-|             | Webview             | WASM threads                                                                                                       | Model cache                                     |
-| ----------- | ------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
-| **macOS**   | WKWebView           | No. The page is cross-origin isolated, but WebKit gives the app no `SharedArrayBuffer`, so WASM runs on one thread | Yes, the Cache API works on `tauri://localhost` |
-| **Windows** | WebView2 (Chromium) | Expected, not yet checked                                                                                          | Expected, not yet checked                       |
-| **Linux**   | WebKitGTK           | Not yet checked. It has no WebGPU by default, so narration always runs in WASM                                     | Not yet checked                                 |
+|             | Webview             | WASM threads                                                                                                       | Model cache                                                          |
+| ----------- | ------------------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| **macOS**   | WKWebView           | No. The page is cross-origin isolated, but WebKit gives the app no `SharedArrayBuffer`, so WASM runs on one thread | Yes, the Cache API works on `tauri://localhost`                      |
+| **Windows** | WebView2 (Chromium) | Expected, as Chromium runs 4 threads. Not yet checked in WebView2                                                  | Expected, not yet checked                                            |
+| **Linux**   | WebKitGTK           | Not yet checked. It has no WebGPU by default, so narration always runs in WASM                                     | Not yet checked. Falls back to IndexedDB if the Cache API is refused |
 
 The macOS row was checked on a release build on macOS 27 (Apple silicon). There the narrator read on WebGPU, so it took the 330 MB model, and one WASM thread only matters on a Mac without WebGPU. The model was downloaded once and read from the Cache API after a relaunch.
+
+The Windows expectation comes from Chromium on the same Mac. A production browser build started 3 extra WASM threads, 4 in all. A dev build did the same with the app's `script-src` and `worker-src` rules applied. On 4 threads the narrator read about 1.8 to 2.4 times slower than speech, against about 3 times on one thread.
 
 ## Saves
 

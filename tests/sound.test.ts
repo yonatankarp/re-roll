@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { loadSettings, saveSettings } from "../engine/shell/sound-settings.ts";
+import {
+  loadSettings,
+  narrationNote,
+  saveSettings,
+} from "../engine/shell/sound-settings.ts";
 import { systems } from "../app/systems.ts";
 import { guessAmbience, sceneAmbience } from "../engine/story/ambience.ts";
 import {
@@ -208,5 +212,44 @@ describe("sound settings", () => {
     });
     items.set("re-roll:audio", JSON.stringify({ volume: 9 }));
     expect(loadSettings(store)).toMatchObject({ volume: 1, ambience: false });
+  });
+});
+
+describe("what the sound panel says about reading aloud", () => {
+  const unknown = {
+    store: null,
+    device: null,
+    threads: 1,
+    read: 0,
+    spoken: 0,
+  };
+
+  it("says nothing before the narrator has read", () => {
+    expect(narrationNote(unknown)).toBe("");
+  });
+
+  it("says where it reads", () => {
+    expect(narrationNote({ ...unknown, device: "webgpu" })).toMatch(
+      /graphics card/,
+    );
+    expect(narrationNote({ ...unknown, device: "wasm", threads: 4 })).toMatch(
+      /4 threads/,
+    );
+    expect(narrationNote({ ...unknown, device: "wasm" })).toMatch(/one thread/);
+  });
+
+  it("says when the voice can't be kept", () => {
+    expect(narrationNote({ ...unknown, store: "none" })).toMatch(
+      /downloaded again each time/,
+    );
+    expect(narrationNote({ ...unknown, store: "indexeddb" })).toBe("");
+  });
+
+  it("says when it reads slower than it speaks, once it has read enough", () => {
+    expect(
+      narrationNote({ ...unknown, device: "wasm", read: 30, spoken: 12 }),
+    ).toMatch(/2\.5 times slower.*turn narration off/);
+    expect(narrationNote({ ...unknown, read: 4, spoken: 2 })).toBe("");
+    expect(narrationNote({ ...unknown, read: 5, spoken: 10 })).toBe("");
   });
 });

@@ -120,3 +120,28 @@ export function kokoroFetch(
     return Promise.resolve(new Response(null, { status: 404 }));
   };
 }
+
+export interface NarrationBackend {
+  readonly device: "webgpu" | "wasm";
+  readonly threads: number; // WASM threads, which the WebGPU path also uses for its CPU work
+}
+
+// The graphics card first, then WASM on several threads, then on one. Threads need a
+// SharedArrayBuffer, and cross-origin isolation alone doesn't promise one: WKWebView is isolated
+// but has none. The thread count is the ONNX runtime's own default.
+export function pickBackend(
+  gpu: boolean,
+  isolated: boolean,
+  sharedMemory: boolean,
+  cores: number,
+): NarrationBackend {
+  return {
+    device: gpu ? "webgpu" : "wasm",
+    threads:
+      isolated && sharedMemory ? Math.min(4, Math.ceil((cores || 1) / 2)) : 1,
+  };
+}
+
+// Where the model is kept between launches: the Cache API, else IndexedDB, else nowhere, when
+// it's downloaded each launch.
+export type ModelStore = "cache-api" | "indexeddb" | "none";
