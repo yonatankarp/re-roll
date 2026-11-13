@@ -339,7 +339,7 @@ const FIGHTER = [
   },
   {
     id: "test:class/fighter",
-    name: "Fighter",
+    name: "Test Fighter", // not the shipped Fighter's name, which a pregen would take instead
     hitDie: "d10",
     primaryAbilities: ["str"],
     savingThrows: ["str", "con"],
@@ -1371,5 +1371,126 @@ describe("Battle Master maneuvers", () => {
       dice(1),
     );
     expect(far.decisions).toEqual([]);
+  });
+});
+
+describe("saves", () => {
+  // The fixture run with the shipped adventure's wizard pregen swapped for one of these characters.
+  const withPregen = (actor: Actor): RunContext => {
+    const build = actor.source.kind === "character" ? actor.source.build : null;
+    const pregen = {
+      id: "srd52:pregen/wizard",
+      name: actor.name,
+      build,
+      equipment: actor.inventory,
+    };
+    return {
+      ...run,
+      content: (id) => (id === pregen.id ? pregen : run.content(id)),
+    };
+  };
+
+  // Plays from the start, answering with `choose` or else the first option, until `done`; then the inputs must
+  // replay to the same state, and a save of the log must load to it.
+  const replays = async (
+    playing: RunContext,
+    choose: (decision: Decision) => string | undefined,
+    done: () => boolean,
+    seed = "class-options",
+  ): Promise<void> => {
+    const { startRun, step } = await import("../engine/run/turn.ts");
+    const { createSave, loadSave, replayInputs } =
+      await import("../engine/run/save.ts");
+    const { registry } = await loadAdventure("goblin-ambush");
+    const started = startRun(playing, seed);
+    let { state, pending } = started;
+    const inputs: Parameters<typeof replayInputs>[2][number][] = [
+      { kind: "start" },
+    ];
+    const log: Parameters<typeof createSave>[3][number][] = [
+      { input: { kind: "start" }, events: started.events },
+    ];
+    for (let count = 0; pending && !done() && count < 600; count += 1) {
+      const decision = pending;
+      const optionId = decision.id.includes("chooseCharacter")
+        ? "srd52:pregen/wizard"
+        : (choose(decision) ?? decision.options[0]?.id ?? "");
+      const input = {
+        kind: "answer" as const,
+        decisionId: decision.id,
+        optionId,
+      };
+      const outcome = step(playing, state, input);
+      if (!outcome.ok) throw new Error(outcome.error);
+      ({ state, pending } = outcome);
+      inputs.push(input);
+      log.push({ input, events: outcome.events });
+    }
+    expect(done()).toBe(true);
+    expect(replayInputs(playing, seed, inputs).state).toStrictEqual(state);
+    const loaded = loadSave(
+      JSON.stringify(createSave(registry, "goblin-ambush", seed, log)),
+      registry,
+      playing,
+    );
+    if (!loaded.ok) throw new Error(loaded.error);
+    expect(loaded.state).toEqual(state);
+  };
+
+  it("replay Metamagic picked before a cast and Font of Magic after it", async () => {
+    const steps = { readied: false, picked: false, cast: false, font: false };
+    await replays(
+      withPregen(sorcerer(3)),
+      (decision) => {
+        if (decision.actor !== PLAYER_ACTOR) return undefined;
+        const find = (prefix: string) =>
+          decision.options.find((item) => item.id.startsWith(prefix))?.id;
+        if (decision.id.startsWith(`${NS}:metamagic:`)) {
+          steps.picked = true;
+          return ZAP;
+        }
+        if (!decision.id.startsWith(`${NS}:turn:`)) return undefined;
+        if (!steps.readied) {
+          const ready = find(`tactic:metamagic|${option("quickened")}`);
+          if (ready) steps.readied = true;
+          return ready;
+        }
+        if (!steps.cast) {
+          const cast = find(`${ZAP}|`);
+          if (cast) steps.cast = true;
+          return cast;
+        }
+        const font = find("tactic:font-points|");
+        if (font) steps.font = true;
+        return font;
+      },
+      () => steps.font,
+    );
+    expect(steps).toEqual({
+      readied: true,
+      picked: true,
+      cast: true,
+      font: true,
+    });
+  });
+
+  it("replay a Precision Attack", async () => {
+    let used = false;
+    await replays(
+      withPregen(fighter(3)),
+      (decision) => {
+        if (decision.id.startsWith(`${NS}:precision:`)) {
+          used = true;
+          return "use";
+        }
+        // Swing whenever a foe is in reach, so there are misses to save.
+        return decision.actor === PLAYER_ACTOR &&
+          decision.id.startsWith(`${NS}:turn:`)
+          ? decision.options.find((item) => item.id.startsWith(SWORD))?.id
+          : undefined;
+      },
+      () => used,
+      "precision-1", // a seed whose fight has a miss the die can save
+    );
   });
 });
