@@ -824,6 +824,9 @@ function combat(rawState: unknown, access: ContentAccess) {
               ? (NamedSchema.safeParse(access.content(actor.source.statBlockId))
                   .data?.name ?? null)
               : null,
+          ...(actor.source.kind === "monster"
+            ? { source: actor.source.statBlockId }
+            : {}),
           looks: looksOf(actor, access),
         },
       ];

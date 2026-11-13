@@ -406,12 +406,11 @@ export function showGame(ctx: ShellContext): void {
         if (!firstDraw) enter(scene);
       }
       // Only touched on a change, so staying in a scene doesn't reload its picture.
-      if (view.sceneArt !== artShown) {
-        artShown = view.sceneArt;
-        turnTo(
-          view.sceneArt ? picture(ctx.game, view.sceneArt, "", "art") : null,
-          firstDraw,
-        );
+      // A scene with no picture of its own shows its adventure's cover. Only here: the board keeps sceneArt.
+      const banner = view.sceneArt ?? view.cover;
+      if (banner !== artShown) {
+        artShown = banner;
+        turnTo(banner ? picture(ctx.game, banner, "", "art") : null, firstDraw);
       }
       // A chapter opens on its title page, once a run, after the character is made.
       const [chapter] = unseen(
@@ -441,7 +440,7 @@ export function showGame(ctx: ShellContext): void {
     drawEnding(page, view);
     // With a board showing the fight, the written turn order folds away until it's wanted.
     const order = view.combat
-      ? renderCombat(ctx.game, view.combat, view.monsterArt)
+      ? renderCombat(ctx.game, view.combat, view.monsterArt, view.coverArt)
       : null;
     replaceKeepingOpen(
       combat,

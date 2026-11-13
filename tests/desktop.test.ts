@@ -26,6 +26,7 @@ import {
   withSaves,
 } from "../engine/platform/browser/storage.ts";
 import { createGame, sheetChanges } from "../engine/shell/session.ts";
+import { lookArt } from "../engine/shell/dom.ts";
 import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 
 function serve(root: string): Promise<{ server: Server; url: string }> {
@@ -740,7 +741,7 @@ describe("playing through the shell's session", () => {
     expect(game.view().sceneArt).toBeNull();
   });
 
-  it("finds chapter, item and coin pictures, a monster's through subjects, and a save's cover", async () => {
+  it("finds chapter, item and coin pictures, a monster's through subjects, a save's cover, and a book's cover for the rest", async () => {
     const content = createContentReader(url);
     const game = createGame({
       storage: withSaves(
@@ -760,6 +761,8 @@ describe("playing through the shell's session", () => {
                       subjects: ["goblin-warrior"],
                     },
                     { file: "cover.jpg", cover: ["goblin-ambush"] },
+                    // Only for this test: the real books never give SRD content a cover.
+                    { file: "srd.jpg", cover: ["srd52"] },
                   ]),
                 )
               : content.read(path),
@@ -776,9 +779,29 @@ describe("playing through the shell's session", () => {
       systems,
       uis: [dndUi],
     });
+    // A species with no picture of its own shows its book's cover, and a game knows it for one.
+    await game.start("goblin-ambush", "desktop-test-2");
+    await game.answer("build");
+    expect(game.view().creationArt["srd52:species/elf"]).toBe(
+      "books/assets/book/srd.jpg",
+    );
+    expect(game.isCover("books/assets/book/srd.jpg")).toBe(true);
+    expect(game.isCover("books/assets/book/sword.png")).toBe(false);
     await game.start("goblin-ambush", "desktop-test-1");
     await chooseCharacter(game, "Fighter");
     const view = game.view();
+    // Gear with no picture shows its book's cover, and a real picture always beats a cover.
+    const untagged = Object.keys(view.coverArt ?? {}).find(
+      (id) => !(id in view.itemArt),
+    );
+    expect(untagged).toBeDefined();
+    expect(lookArt(view, [untagged ?? ""])).toBe("books/assets/book/srd.jpg");
+    expect(lookArt(view, [untagged ?? "", "coins"])).toBe(
+      "books/assets/book/coins.png",
+    );
+    expect(lookArt(view, ["srd52:item/longsword"])).toBe(
+      "books/assets/book/sword.png",
+    );
     expect(view.chapterArt).toBe("books/assets/book/road.png");
     expect(view.cover).toBe("books/assets/book/cover.jpg");
     // The sheet's gold and sword have pictures; a picture that is a text file is never offered.
@@ -801,8 +824,17 @@ describe("playing through the shell's session", () => {
       if (!option) break;
       await game.answer(option.id);
     }
-    expect(new Set(Object.values(game.view().monsterArt))).toEqual(
+    // A cover never stands in for a foe's picture, its token or the battle's backdrop, only its turn-order portrait.
+    const fight = game.view();
+    expect(new Set(Object.values(fight.monsterArt))).toEqual(
       new Set(["books/assets/book/band.png"]),
+    );
+    expect(
+      Object.values(fight.tokenArt).map((token) => token.path),
+    ).not.toContain("books/assets/book/srd.jpg");
+    expect(fight.sceneArt).toBeNull();
+    expect(Object.values(fight.coverArt ?? {})).toContain(
+      "books/assets/book/srd.jpg",
     );
   });
 

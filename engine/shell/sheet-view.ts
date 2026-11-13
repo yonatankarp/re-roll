@@ -13,6 +13,7 @@ export function renderCombat(
   game: Game,
   combat: CombatView,
   art: GameView["monsterArt"],
+  covers: GameView["coverArt"] = {}, // a foe with no picture shows its book's cover
 ): HTMLElement {
   return el(
     "section",
@@ -22,7 +23,8 @@ export function renderCombat(
       "ol",
       { class: "initiative" },
       ...combat.combatants.map((actor) => {
-        const portrait = art[actor.id];
+        const portrait =
+          art[actor.id] ?? (actor.source ? covers[actor.source] : undefined);
         const item = el(
           "li",
           {

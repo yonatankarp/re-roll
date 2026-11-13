@@ -189,6 +189,7 @@ export interface CombatantView {
   readonly details: readonly string[]; // written by the system, shown beside the name in the turn order
   readonly status: string | null; // a word for being out of the fight, such as dying, which the top bar shows
   readonly monster: string | null; // the name to find its picture by
+  readonly source?: string; // the content id it comes from, such as its stat block, for its book's cover
   readonly looks?: readonly string[]; // names to find its token picture by, best first
 }
 
