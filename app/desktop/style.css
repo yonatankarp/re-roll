@@ -3523,3 +3523,15 @@ button:active {
   display: flex;
   justify-content: flex-end;
 }
+
+/* A book's cover standing in for a picture of its own fills its frame, cropped, and is never stretched. */
+img.is-cover {
+  object-fit: cover;
+  object-position: center;
+}
+
+/* Over a scene, a cover is shown whole and smaller, as the book itself, since a wide crop of it says nothing. */
+.scene-art img.is-cover {
+  height: 220px;
+  object-fit: contain;
+}

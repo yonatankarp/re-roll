@@ -117,6 +117,8 @@ export interface GameView {
   readonly tokenArt: Readonly<Record<string, TokenArt>>; // by combatant id, with its face
   // Pictures for the card's and the sheets' looks, such as an item found, by the look they were found for.
   readonly itemArt: Readonly<Record<string, string>>;
+  // The cover of the book a thing comes from, by its content id, for a look or a foe with no picture of its own.
+  readonly coverArt?: Readonly<Record<string, string>>;
   readonly adventureRoot: string; // where the adventure's own pictures are
   readonly decision: Decision | null;
   readonly combat: CombatView | null;
@@ -241,7 +243,7 @@ const ArtIndexSchema = z.array(
     monster: z.string().optional(),
     subjects: z.array(z.string()).optional(), // other names it can stand for, such as "dwarf cleric"
     face: FaceSchema.optional(),
-    cover: z.array(z.string()).optional(), // ids of the adventures this picture is the cover of
+    cover: z.array(z.string()).optional(), // ids of the plugins (adventures or books) this picture is the cover of
     chapter: z.array(z.string()).optional(), // "<adventure>:<scene>" for each chapter it opens
     items: z.array(z.string()).optional(), // ids of the items it shows
     treasure: z.array(z.string()).optional(), // kinds of treasure it shows, such as "coins"
@@ -546,6 +548,14 @@ export function createGame({
   let chapters: ReadonlyMap<string, string> = new Map(); // by "<adventure>:<scene>"
   let things: ReadonlyMap<string, string> = new Map(); // by item id or treasure kind
   let glossaryText: Promise<string | null> | undefined; // read once, as the books don't change in play
+  // The cover of the book an id such as "phb:background/acolyte" comes from. Spells and features keep
+  // none, so a list of them isn't a wall of the same cover.
+  const coverOf = (id: string): string | undefined =>
+    covers.get(
+      /^([a-z0-9-]+):(?:species|class|subclass|background|feat|item|monster)\//.exec(
+        id,
+      )?.[1] ?? "",
+    );
 
   // Art is optional and still being extracted, so a bad index only loses its pictures.
   const loadArt = async (): Promise<void> => {
@@ -1032,6 +1042,11 @@ export function createGame({
       return imageUrl ? imageUrl(path) : null;
     },
 
+    // A book's cover is cropped to fill whatever small frame it stands in.
+    isCover(path: string): boolean {
+      return [...covers.values()].includes(path);
+    },
+
     // The same adventure again from its first scene, with fresh dice and the same settings.
     async restart(seed: string): Promise<void> {
       const game = active();
@@ -1308,8 +1323,15 @@ export function createGame({
             break;
           }
         }
+        const cover = creationArt[choice.id] ? undefined : coverOf(choice.id);
+        if (cover) creationArt[choice.id] = cover;
       }
       const itemArt: Record<string, string> = {};
+      const coverArt: Record<string, string> = {};
+      for (const actor of combat?.combatants ?? []) {
+        const cover = actor.source ? coverOf(actor.source) : undefined;
+        if (actor.source && cover) coverArt[actor.source] = cover;
+      }
       const card = decision
         ? (ui.card?.(decision, state.system, run) ?? null)
         : null;
@@ -1323,6 +1345,8 @@ export function createGame({
       ]) {
         const path = things.get(look);
         if (path) itemArt[look] = path;
+        const cover = coverOf(look);
+        if (cover) coverArt[look] = cover;
       }
       const text = currentScene ? sceneText(run, state, currentScene) : null;
       return {
@@ -1366,6 +1390,7 @@ export function createGame({
         monsterArt: pictures,
         tokenArt: tokens,
         itemArt,
+        coverArt,
         adventureRoot: root,
         combat,
         sheets,

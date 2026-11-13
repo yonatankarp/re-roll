@@ -29,6 +29,7 @@ export function picture(
   className: string,
 ): HTMLImageElement {
   const image = el("img", { class: className });
+  if (game.isCover(path)) image.classList.add("is-cover");
   image.alt = alt;
   image.loading = "lazy";
   image.addEventListener("error", () => {
@@ -41,12 +42,15 @@ export function picture(
   return image;
 }
 
-// The picture for the first of a card's or a row's looks that has one.
+// The picture for the first of a card's or a row's looks that has one, or else its book's cover.
 export function lookArt(
   view: GameView,
   looks: readonly string[] | undefined,
 ): string | undefined {
-  return looks?.map((look) => view.itemArt[look]).find(Boolean);
+  return (
+    looks?.map((look) => view.itemArt[look]).find(Boolean) ??
+    looks?.map((look) => view.coverArt?.[look]).find(Boolean)
+  );
 }
 
 // A redraw must not close what the player has opened to read.
