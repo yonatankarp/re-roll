@@ -38,17 +38,26 @@ import {
 import {
   coverFor,
   darkvisionOf,
+  lightAt,
   seeing,
   terrainOf,
 } from "../plugins/systems/dnd5.5e/core/sight.ts";
 import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
-import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
-import { rollBonus } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import {
+  leafEvents,
+  resolveAction,
+} from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import {
+  hasFlag,
+  rollBonus,
+} from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import { thornHits, thornKeys } from "../plugins/systems/dnd5.5e/core/zones.ts";
 import {
   BattlemapSchema,
   ClassSchema,
   MonsterSchema,
   PregenSchema,
+  SpellSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
   type Actor,
@@ -59,6 +68,7 @@ import {
   dndEvent,
   freshActor,
   hasCondition,
+  invisibleTo,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import {
   damageResponses,
@@ -3398,5 +3408,389 @@ describe("spell numbers on the bearer", () => {
     expect(deriveStats(after, run).maxHp).toBe(max + 5);
     expect(deriveStats(after, run).speed).toBe(speed + 10);
     expect(after.hp).toBe(max + 5);
+  });
+});
+
+describe("ending, hiding and reshaping spells", () => {
+  const gridded = (state: DndState): DndState =>
+    state.combat
+      ? {
+          ...state,
+          combat: { ...state.combat, grid: { width: 10, height: 10 } },
+        }
+      : state;
+  const effect = (
+    sourceId: string,
+    modifier: Actor["activeEffects"][number]["modifier"],
+    ends: Actor["activeEffects"][number]["ends"] = "spellDuration",
+  ): Actor["activeEffects"][number] => ({
+    sourceId,
+    casterId: PLAYER_ACTOR,
+    modifier,
+    ends,
+  });
+  const condition = (name: "paralyzed" | "poisoned") =>
+    effect("monster:0", { kind: "condition", condition: name });
+
+  it("cures the worst of the conditions it names, and nothing when there is none", async () => {
+    const run = arenaRun(await base(), {});
+    const caster = hero(run);
+    const sick = {
+      ...monster("a"),
+      side: "party" as const,
+      activeEffects: [condition("poisoned"), condition("paralyzed")],
+    };
+    const context = contextOf(run, fight(caster, sick), LOW);
+    const cure = {
+      kind: "cure" as const,
+      conditions: ["blinded", "paralyzed", "poisoned"] as const,
+    };
+    expect(
+      leafEvents(
+        [{ ...cure, conditions: [...cure.conditions] }],
+        "spell:x",
+        caster,
+        sick,
+        context,
+      ),
+    ).toEqual([
+      dndEvent(`${NS}:conditionRemoved`, {
+        actor: "a",
+        condition: "paralyzed",
+      }),
+    ]);
+    expect(
+      leafEvents(
+        [{ kind: "cure", conditions: ["blinded"] }],
+        "spell:x",
+        caster,
+        sick,
+        context,
+      ),
+    ).toEqual([]);
+  });
+
+  it("dispels spells up to its level: a held one ends its caster's Concentration", async () => {
+    const run = arenaRun(await base(), {});
+    const bless = `spell:${spell("bless")}`;
+    const caster = { ...hero(run), concentratingOn: bless };
+    const target = {
+      ...monster("a"),
+      activeEffects: [
+        effect(
+          bless,
+          { kind: "bonus", to: "attacks", amount: { dice: "1d4" } },
+          "concentration",
+        ),
+        effect(`spell:${spell("hold-monster")}`, {
+          kind: "condition",
+          condition: "paralyzed",
+        }),
+        effect(`spell:${spell("hold-person")}`, {
+          kind: "condition",
+          condition: "paralyzed",
+        }),
+      ],
+    };
+    const events = leafEvents(
+      [{ kind: "dispel", maxLevel: 3 }],
+      "spell:dispel",
+      caster,
+      target,
+      contextOf(run, fight(caster, target), LOW),
+    );
+    expect(events).toEqual([
+      dndEvent(`${NS}:concentrationEnded`, { actor: PLAYER_ACTOR }),
+      dndEvent(`${NS}:effectEnded`, {
+        actor: "a",
+        sourceId: `spell:${spell("hold-person")}`,
+        casterId: PLAYER_ACTOR,
+      }),
+    ]);
+  });
+
+  it("leaves a spell cast with a higher slot to a higher dispel", async () => {
+    const run = arenaRun(await base(), {});
+    const caster = hero(run);
+    const held = {
+      ...monster("a"),
+      activeEffects: [
+        {
+          ...effect(`spell:${spell("hold-person")}`, {
+            kind: "condition",
+            condition: "paralyzed",
+          }),
+          level: 4,
+        },
+      ],
+    };
+    const context = contextOf(run, fight(caster, held), LOW);
+    const dispel = (maxLevel: number) =>
+      leafEvents(
+        [{ kind: "dispel", maxLevel }],
+        "spell:d",
+        caster,
+        held,
+        context,
+      );
+    expect(dispel(3)).toEqual([]);
+    expect(dispel(4)).toHaveLength(1);
+  });
+
+  it("lights its area, and darkness cast over it snuffs a low-level light", async () => {
+    const run = arenaRun(await base(), {
+      "srd52:spell/test-darkness": {
+        id: "srd52:spell/test-darkness",
+        name: "Test Darkness",
+        level: 2,
+        school: "evocation",
+        classes: [],
+        castingTime: "Action",
+        range: "60 feet",
+        components: "V",
+        duration: { concentration: true, minutes: 10 },
+        text: "Dark.",
+        automation: "full",
+        activation: {
+          cost: ["action"],
+          targeting: {
+            area: { shape: "sphere", radius: 15 },
+            range: 60,
+            side: "enemy",
+          },
+          resolution: {
+            kind: "automatic",
+            damage: [],
+            effects: [
+              {
+                kind: "zone",
+                zone: "darkness",
+                radius: 15,
+                duration: { concentration: true, minutes: 10 },
+              },
+            ],
+          },
+        },
+      },
+    });
+    const lamp = {
+      ...hero(run),
+      position: { x: 0, y: 0 },
+      activeEffects: [
+        {
+          ...effect("spell:light", {
+            kind: "zone",
+            zone: "light",
+            at: { x: 0, y: 0 },
+            radius: 20,
+          }),
+          level: 1,
+        },
+      ],
+    };
+    const dark = { ...monster("a"), position: { x: 8, y: 0 } };
+    const state = gridded(fight(lamp, dark));
+    const night: DndState = state.combat
+      ? {
+          ...state,
+          combat: {
+            ...state.combat,
+            terrain: {
+              difficult: [],
+              half: [],
+              threeQuarters: [],
+              dim: [],
+              dark: [],
+              light: "dark",
+            },
+          },
+        }
+      : state;
+    expect(lightAt({ x: 2, y: 2 }, night)).toBe("bright");
+    expect(lightAt({ x: 9, y: 9 }, night)).toBe("dark");
+    const glow = effect("spell:dancing-lights", {
+      kind: "zone",
+      zone: "dim",
+      at: { x: 9, y: 9 },
+      radius: 10,
+    });
+    const glowing: DndState = {
+      ...night,
+      actors: {
+        ...night.actors,
+        a: { ...dark, activeEffects: [glow] },
+      },
+    };
+    expect(lightAt({ x: 9, y: 9 }, glowing)).toBe("dim");
+    const { activation } = SpellSchema.parse(
+      run.content("srd52:spell/test-darkness"),
+    );
+    if (!activation) throw new Error("No activation");
+    const result = resolveAction(
+      {
+        id: "spell:srd52:spell/test-darkness",
+        name: "Test Darkness",
+        activation,
+        spellLevel: 2,
+      },
+      dark,
+      [],
+      contextOf(run, night, LOW),
+      undefined,
+      false,
+      { x: 4, y: 0 },
+    );
+    expect(result.events).toContainEqual(
+      dndEvent(`${NS}:effectEnded`, {
+        actor: PLAYER_ACTOR,
+        sourceId: "spell:light",
+        casterId: PLAYER_ACTOR,
+      }),
+    );
+  });
+
+  it("hides creatures in darkness from those without Blindsight or Truesight, both ways", async () => {
+    const run = arenaRun(await base(), {});
+    const caster = {
+      ...hero(run),
+      position: { x: 0, y: 0 },
+      activeEffects: [
+        effect(
+          "spell:darkness",
+          { kind: "zone", zone: "darkness", at: { x: 5, y: 0 }, radius: 5 },
+          "concentration",
+        ),
+      ],
+    };
+    const inside = { ...monster("a"), position: { x: 5, y: 0 } };
+    const state = gridded(fight(caster, inside));
+    expect(seeing(caster, inside.position, state, run)).toBe("none");
+    expect(seeing(inside, caster.position, state, run)).toBe("none");
+    const away = { ...inside, position: { x: 9, y: 9 } };
+    expect(seeing(caster, away.position, state, run)).toBe("clear");
+  });
+
+  it("makes thorns difficult and hurts for each square walked in them", async () => {
+    const run = arenaRun(await base(), {});
+    const thorns = {
+      ...hero(run),
+      position: { x: 0, y: 0 },
+      activeEffects: [
+        effect(
+          "spell:spike-growth",
+          {
+            kind: "zone",
+            zone: "thorns",
+            at: { x: 3, y: 3 },
+            radius: 5,
+            damage: [{ amount: { dice: "2d4" }, type: "piercing" }],
+          },
+          "concentration",
+        ),
+      ],
+    };
+    const state = gridded(fight(thorns));
+    expect(thornKeys(state)).toHaveLength(9);
+    expect(
+      thornHits(
+        [
+          { x: 1, y: 1 },
+          { x: 2, y: 2 },
+          { x: 3, y: 3 },
+        ],
+        state,
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("sees an invisible creature only with See Invisibility", async () => {
+    const run = arenaRun(await base(), {});
+    const unseen = {
+      ...monster("a"),
+      activeEffects: [
+        effect("spell:invisibility", {
+          kind: "condition",
+          condition: "invisible",
+        }),
+      ],
+    };
+    const viewer = hero(run);
+    expect(invisibleTo(unseen, viewer)).toBe(true);
+    const seer = {
+      ...viewer,
+      activeEffects: [effect("spell:see", { kind: "seeInvisible" })],
+    };
+    expect(invisibleTo(unseen, seer)).toBe(false);
+  });
+
+  it("limits Disadvantage to the attacker types named, and a bonus to one skill", async () => {
+    const run = arenaRun(await base(), {});
+    const warded = {
+      ...hero(run),
+      activeEffects: [
+        effect("spell:pfeg", {
+          kind: "disadvantage",
+          on: "attacksAgainst",
+          attackers: ["fiend"],
+        }),
+        effect("spell:pwt", {
+          kind: "bonus",
+          to: "checks",
+          amount: { bonus: { base: 10, add: [] } },
+          skill: "stealth",
+        }),
+      ],
+    };
+    const stats = deriveStats(warded, run);
+    const flag = (type: string): boolean =>
+      hasFlag(warded, "disadvantage", "attacksAgainst", stats, undefined, type);
+    expect(flag("fiend")).toBe(true);
+    expect(flag("humanoid")).toBe(false);
+    const context = contextOf(run, fight(warded), LOW);
+    expect(rollBonus(warded, "checks", context, "stealth")).toBe(10);
+    expect(rollBonus(warded, "checks", context, "athletics")).toBe(0);
+  });
+
+  it("turns a foe into the weakest Beast, until its borrowed Hit Points run out", async () => {
+    const run = arenaRun(await base(), {
+      "srd52:monster/test-rat": dummy("srd52:monster/test-rat", {
+        name: "Test Rat",
+        hp: 3,
+        creatureType: "beast",
+        text: "CR 0 (XP 10; PB +2)",
+      }),
+    });
+    const caster = hero(run);
+    const target = { ...hero(run, { id: "b" }), concentratingOn: "spell:x" };
+    const state = fight(caster, target);
+    const events = leafEvents(
+      [{ kind: "polymorph", duration: { concentration: true, minutes: 60 } }],
+      "spell:polymorph",
+      caster,
+      target,
+      contextOf(run, state, LOW),
+    );
+    const shaped = actor(events.reduce(applyDndEvent, state), "b");
+    expect(shaped.tempHp).toBe(3);
+    expect(target.concentratingOn).not.toBeNull();
+    expect(shaped.concentratingOn).toBeNull();
+    const stats = deriveStats(shaped, run);
+    expect(stats.actions.map((item) => item.name)).toEqual(["Club"]);
+    expect(stats.creatureType).toBe(deriveStats(target, run).creatureType);
+    expect(stats.maxHp).toBe(deriveStats(target, run).maxHp);
+    const after = applyDndEvent(
+      { ...state, actors: { ...state.actors, b: shaped } },
+      dndEvent(`${NS}:damaged`, {
+        actor: "b",
+        amount: 5,
+        type: "slashing",
+        critical: false,
+        massive: false,
+      }),
+    );
+    const back = actor(after, "b");
+    expect(back.tempHp).toBe(0);
+    expect(back.hp).toBe(target.hp - 2);
+    expect(back.activeEffects).toEqual([]);
   });
 });

@@ -148,6 +148,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     amount: AmountSchema,
     once: z.boolean().optional(),
     subtract: z.boolean().optional(), // taken off attack rolls, saves or checks instead, as with Bane
+    skill: SkillSchema.optional(), // only checks with this skill, as Pass without Trace's Stealth
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
@@ -157,11 +158,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     once: z.boolean().optional(),
     ability: AbilitySchema.optional(),
   }),
+  // "attackers" limits attacksAgainst to creatures of these lowercase types, as with Protection from Evil and Good.
   z.strictObject({
     kind: z.literal("disadvantage"),
     on: RollFlagSchema,
     once: z.boolean().optional(),
     ability: AbilitySchema.optional(),
+    attackers: z.array(z.string()).min(1).optional(),
   }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
@@ -170,6 +173,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("immunity"), damage: DamageTypeSchema }),
   z.strictObject({ kind: z.literal("acFormula"), formula: FormulaSchema }),
+  // Seeing creatures that have the Invisible condition as if they were visible, as See Invisibility does.
+  z.strictObject({ kind: z.literal("seeInvisible") }),
   // Damage at the start or end of the bearer's turn, such as Moonbeam or Searing Smite.
   z.strictObject({
     kind: z.literal("lingeringDamage"),
@@ -226,6 +231,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .optional(),
     hpAtMost: z.number().int().min(1).optional(), // only a target with this many Hit Points or fewer
     endsOnDamage: z.boolean().default(false),
+    endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature, as Modify Memory's
     // What a failed repeat save turns it into, as a cockatrice's Restrained becoming Petrified.
     secondFailure: z
       .strictObject({
@@ -259,6 +265,30 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     movement: z.number().int().min(0).default(0),
   }),
   z.strictObject({ kind: z.literal("extraAction") }), // Action Surge
+  // Ends one of these conditions on the target, the one that hampers it most, as Lesser Restoration does.
+  z.strictObject({
+    kind: z.literal("cure"),
+    conditions: z.array(ConditionSchema).min(1),
+  }),
+  // An area left where the spell is aimed, or round the caster: magical darkness that only Blindsight, Truesight
+  // or Devil's Sight see through (Darkness), fog only Blindsight sees through (Fog Cloud), or thorns that cost
+  // double to cross and deal `damage` for each 5 feet walked in them (Spike Growth), Bright Light (Light), or Dim Light (Dancing Lights).
+  // It ends with the spell.
+  z.strictObject({
+    kind: z.literal("zone"),
+    zone: z.enum(["darkness", "fog", "thorns", "light", "dim"]),
+    radius: z.number().int().min(5),
+    duration: DurationSchema,
+    damage: z.array(DamageSchema).optional(),
+  }),
+  // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
+  // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe.
+  z.strictObject({ kind: z.literal("polymorph"), duration: DurationSchema }),
+  // Ends every spell of this level or lower that is on the target, as Dispel Magic does.
+  z.strictObject({
+    kind: z.literal("dispel"),
+    maxLevel: z.number().int().min(0).max(9),
+  }),
   // Lessens the hit that triggered a reaction, such as Uncanny Dodge or Deflect Attacks.
   z.strictObject({
     kind: z.literal("reduceDamage"),
@@ -306,6 +336,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     kind: z.literal("save"),
     ability: AbilitySchema,
     dc: FormulaSchema,
+    advantage: z.boolean().optional(), // the target saves with Advantage, as when its caster is fighting it
     damage: z.array(DamageSchema).default([]),
     // "full" deals the damage either way, and the save is only for its effects, as with Trip Attack.
     onSuccessDamage: z.enum(["half", "none", "full"]).default("none"),
@@ -705,6 +736,9 @@ export const SpellSchema = ContentEntrySchema.extend({
   text: z.string().min(1),
   automation: AutomationSchema,
   activation: ActivationSchema.optional(),
+  // Why a spell with no activation needs none: it takes longer than a turn to cast ("castingTime"), or does
+  // nothing a grid fight plays, such as travel, senses, talk or downtime ("utility").
+  outOfCombat: z.enum(["castingTime", "utility"]).optional(),
   upcast: z
     .strictObject({
       perSlotLevel: ScaleStepSchema,

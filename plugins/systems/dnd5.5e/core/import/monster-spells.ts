@@ -175,6 +175,37 @@ function upcast(
     : null;
 }
 
+// "Fireball (level 5 version)": the spell's name and what the brackets say.
+function partsOf(item: string): {
+  readonly name: string;
+  readonly aside: string;
+} {
+  const [, raw = "", aside = ""] =
+    /^\s*(.+?)\s*(?:\(([^)]*)\))?[\s*†]*$/.exec(item) ?? [];
+  return {
+    name: raw.replace(/^the\s+/i, "").replace(/\s+spell$/i, ""),
+    aside,
+  };
+}
+
+// Mage Armor already counts in the printed AC, and a spell cast before the fight is already running.
+const castBefore = (aside: string): boolean =>
+  /included in AC|before combat/i.test(aside);
+
+// Whether every spell listed is one a fight never needs, so the block is fully handled with no actions.
+export function nothingToCast(
+  items: readonly string[],
+  spells: SpellLookup,
+): boolean {
+  return (
+    items.length > 0 &&
+    items.every((item) => {
+      const { name, aside } = partsOf(item);
+      return castBefore(aside) || spells(name)?.outOfCombat !== undefined;
+    })
+  );
+}
+
 // One spell as a monster action, or null with a note when it can't be played.
 function spellAction(
   item: string,
@@ -183,11 +214,8 @@ function spellAction(
   spells: SpellLookup,
   notes: string[],
 ): MonsterAction | null {
-  const [, raw = "", aside = ""] =
-    /^\s*(.+?)\s*(?:\(([^)]*)\))?[\s*†]*$/.exec(item) ?? [];
-  const name = raw.replace(/^the\s+/i, "").replace(/\s+spell$/i, "");
-  // Mage Armor already counts in the printed AC, and a spell cast before the fight is already running.
-  if (!name || /included in AC|before combat/i.test(aside)) return null;
+  const { name, aside } = partsOf(item);
+  if (!name || castBefore(aside)) return null;
   const spell = spells(name);
   const activation = spell?.activation;
   if (!spell || !activation) return null;
@@ -231,11 +259,12 @@ function spellAction(
   };
 }
 
-// Commas inside "(level 7 version)" or "(self only)" don't separate spells.
+// Commas inside "(level 7 version)" or "(self only)" don't separate spells, nor does the "or" of Create or Destroy
+// Water or Locate Animals or Plants.
 const namesIn = (list: string): string[] =>
   list
     .replace(/\.\s*$/, "")
-    .split(/,(?![^(]*\))|\s+or\s+(?![^(]*\))/)
+    .split(/,(?![^(]*\))|(?<!\bCreate|\bAnimals)\s+or\s+(?![^(]*\))/)
     .map((item) => item.trim())
     .filter(Boolean);
 
@@ -245,6 +274,18 @@ const LIST =
 
 // A Spellcasting entry: "At Will: …", "2/Day Each: …", or an older "1st level (4 slots): …", in one paragraph
 // or one per line. An older slot is shared by every spell of its level.
+export const spellcastingItems = (text: string): string[] => {
+  const labels = [...text.matchAll(LIST)];
+  return labels.flatMap((label, index) =>
+    namesIn(
+      text.slice(
+        label.index + label[0].length,
+        labels[index + 1]?.index ?? text.length,
+      ),
+    ),
+  );
+};
+
 export function spellcastingActions(
   text: string,
   cost: Use["cost"],
@@ -282,6 +323,13 @@ export function spellcastingActions(
 }
 
 // "The priest casts Bless, Dispel Magic, or Healing Word, using …": each spell is an option of the same action.
+export const castItems = (text: string): string[] =>
+  namesIn(
+    /\bcasts (.+?)(?:,? (?:using|requiring|with|on|targeting|twice|at)\b|\.(?:\s|$)|$)/.exec(
+      text,
+    )?.[1] ?? "",
+  );
+
 export function castActions(
   text: string,
   use: Use,
@@ -289,13 +337,9 @@ export function castActions(
   spells: SpellLookup,
   notes: string[],
 ): MonsterAction[] {
-  const [, list = ""] =
-    /\bcasts (.+?)(?:,? (?:using|requiring|with|on|targeting|twice|at)\b|\.(?:\s|$)|$)/.exec(
-      text,
-    ) ?? [];
   const { recharge: first, ...shared } = use;
   let recharge = first; // options share one recharge, so only the first rolls for it
-  return namesIn(list).flatMap((item) => {
+  return castItems(text).flatMap((item) => {
     const action = spellAction(
       item,
       { ...shared, ...(recharge ? { recharge } : {}) },

@@ -120,6 +120,20 @@ const spells: Record<string, unknown> = {
     text: "Light.",
     automation: "text",
   },
+  "lib:spell/create-or-destroy-water": {
+    id: "lib:spell/create-or-destroy-water",
+    name: "Create or Destroy Water",
+    level: 1,
+    school: "transmutation",
+    classes: [],
+    castingTime: "Action",
+    range: "30 feet",
+    components: "V, S",
+    duration: "instantaneous",
+    text: "Water.",
+    automation: "text",
+    outOfCombat: "utility",
+  },
 };
 const knownIds = Object.keys(spells);
 const contentOf = (id: string): unknown => spells[id];
@@ -472,6 +486,28 @@ describe("monster spellcasting", () => {
     expect(
       byName(monster, "Frost Needle")?.activation.resolution,
     ).toMatchObject({ attack: { flatBonus: 6 } });
+  });
+
+  it("notes no combat use for a list of spells a fight never needs, and keeps an unplayed one a gap", () => {
+    const notesOf = (list: string): readonly string[] =>
+      parseMonstersFromHtml(
+        block(
+          "Test Caster",
+          `${header("Actions")}${entry(
+            "Spellcasting",
+            `The caster casts one of the following spells, using Intelligence as the spellcasting ability (spell save DC 15): At Will: ${list}`,
+          )}`,
+        ),
+        "my-book",
+        knownIds,
+        contentOf,
+      )[0]?.notes ?? [];
+    expect(notesOf("Create or Destroy Water")).toContain(
+      "no combat use: Spellcasting",
+    );
+    expect(notesOf("Create or Destroy Water, Glow")).toContain(
+      "not automated: Spellcasting",
+    );
   });
 
   it("leaves Spellcasting as text when no spells are loaded", () => {

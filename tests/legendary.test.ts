@@ -234,6 +234,8 @@ describe("reading legends from a stat block", () => {
         "Roar. Wisdom Saving Throw: DC 15, each creature in a 20-foot Emanation originating from the tyrant. Failure: The target has the Frightened condition until the start of its next turn. Success: Nothing. The tyrant can't take this action again until the start of its next turn.",
         "Blink. The tyrant teleports up to 30 feet.",
         "Step. The tyrant teleports up to 60 feet to an unoccupied space it can see, and each creature within 10 feet of the space it left takes 5 (2d4) Necrotic damage.",
+        "Hop. The tyrant teleports to an unoccupied space it can see within 30 feet of itself and makes one Bite attack.",
+        "Swap. The tyrant teleports itself or a willing creature it can see within 10 feet of itself up to 90 feet to an unoccupied space the tyrant can see.",
       ],
       ["Bite"],
     );
@@ -245,7 +247,15 @@ describe("reading legends from a stat block", () => {
       "Snap",
       "Roar",
       "Step",
+      "Hop",
+      "Swap",
     ]);
+    expect(legend?.actions[3]?.activation).toMatchObject({
+      resolution: { effects: [{ kind: "teleport", feet: 30 }] },
+    });
+    expect(legend?.actions[4]?.activation).toMatchObject({
+      resolution: { effects: [{ kind: "teleport", feet: 90 }] },
+    });
     expect(legend?.actions[2]?.activation).toMatchObject({
       targeting: { self: true },
       resolution: { effects: [{ kind: "teleport", feet: 60 }] },
@@ -260,6 +270,8 @@ describe("reading legends from a stat block", () => {
     expect(notes).toEqual([
       "not automated: legendary action Blink",
       "partial: Step: left out what follows it",
+      "partial: Hop: left out what follows it",
+      "partial: Swap: left out teleporting a willing creature",
     ]);
   });
 

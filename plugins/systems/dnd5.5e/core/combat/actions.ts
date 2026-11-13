@@ -56,7 +56,12 @@ import {
   squareName,
   targetCount,
 } from "./queries.ts";
-import { payCosts, resolveAction, resolveTargets } from "./effects.ts";
+import {
+  aimSquare,
+  payCosts,
+  resolveAction,
+  resolveTargets,
+} from "./effects.ts";
 import { keepsHidden, metamagicCast } from "../metamagic.ts";
 
 // Taking an action on a turn: casting it, choosing its targets one by one, or aiming its area.
@@ -168,6 +173,8 @@ function castAction(
             : resolveTargets(targetId, action, actor, context),
           context,
           slotLevel,
+          false,
+          aimSquare(targetId, state) ?? undefined,
         );
   return {
     events: [
@@ -370,7 +377,15 @@ export function runUseAction(
           : []
         : resolveTargets(ALL, action, actor, context);
   if (targets.length === 0) return {};
-  const result = resolveAction(action, actor, targets, context);
+  const result = resolveAction(
+    action,
+    actor,
+    targets,
+    context,
+    undefined,
+    false,
+    aim?.square,
+  );
   return {
     events: [...payCosts(action, actor, context), ...(result.events ?? [])],
     frames: [...(result.frames ?? []), CHECK_END],

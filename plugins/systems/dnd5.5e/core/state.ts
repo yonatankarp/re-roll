@@ -4,10 +4,12 @@ import {
   AbilitySchema,
   CharacterBuildSchema,
   ConditionSchema,
+  DamageSchema,
   DamageTypeSchema,
   LootSchema,
   ModifierSchema,
 } from "./schemas.ts";
+import { settleForms } from "./forms.ts";
 
 export const NS = "dnd5.5e";
 
@@ -100,6 +102,16 @@ const ActiveEffectSchema = z.strictObject({
       kind: z.literal("condition"),
       condition: ConditionSchema,
     }),
+    // Another creature's shape, by its stat block (core/forms.ts).
+    z.strictObject({ kind: z.literal("form"), monster: ContentIdSchema }),
+    // An area a spell left on the map, kept on its caster (core/zones.ts).
+    z.strictObject({
+      kind: z.literal("zone"),
+      zone: z.enum(["darkness", "fog", "thorns", "light", "dim"]),
+      at: z.strictObject({ x: z.number().int(), y: z.number().int() }),
+      radius: z.number().int(),
+      damage: z.array(DamageSchema).optional(),
+    }),
     // What an action anyone can take, such as Dodge, or a weapon mastery, leaves behind (core/tactics.ts).
     z.strictObject({
       kind: z.literal("tactic"),
@@ -114,6 +126,8 @@ const ActiveEffectSchema = z.strictObject({
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
   endsOnDamage: z.boolean().optional(),
+  endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
+  level: z.number().int().optional(), // the slot a spell was cast with, when it was given one
   // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
   swallowed: z.boolean().optional(),
   // The condition a failed repeat save leaves instead of this one (combat/turn.ts).
@@ -509,6 +523,16 @@ export function hasCondition(
   );
 }
 
+// Invisible to this viewer: it has the condition and the viewer has nothing that sees through it.
+export function invisibleTo(target: Actor, viewer: Actor): boolean {
+  return (
+    hasCondition(target, "invisible") &&
+    !viewer.activeEffects.some(
+      ({ modifier }) => modifier.kind === "seeInvisible",
+    )
+  );
+}
+
 export const INCAPACITATING: readonly Condition[] = [
   "incapacitated",
   "paralyzed",
@@ -691,6 +715,10 @@ function payload<S extends z.ZodType>(
 }
 
 export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
+  return settleForms(state, applyOne(state, event));
+}
+
+function applyOne(state: DndState, event: SystemEvent): DndState {
   switch (event.kind) {
     case `${NS}:characterChosen`: {
       const data = payload(CharacterChosenSchema, event);

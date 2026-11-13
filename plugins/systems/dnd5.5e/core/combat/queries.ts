@@ -19,7 +19,7 @@ import {
   scaleActivation,
   type Stats,
 } from "../stats.ts";
-import type { Passive } from "../schemas.ts";
+import type { Passive, Skill } from "../schemas.ts";
 import {
   distanceFeet,
   rangeFeet,
@@ -74,6 +74,7 @@ export function hasFlag(
   on: "attacks" | "saves" | "checks" | "attacksAgainst",
   stats: Stats,
   ability?: Ability,
+  attackerType?: string, // the attacker's creature type, for attacksAgainst
 ): boolean {
   return [
     ...actor.activeEffects.map((effect) => effect.modifier),
@@ -82,7 +83,10 @@ export function hasFlag(
     (modifier) =>
       modifier.kind === kind &&
       modifier.on === on &&
-      (!modifier.ability || modifier.ability === ability),
+      (!modifier.ability || modifier.ability === ability) &&
+      (!("attackers" in modifier) ||
+        !modifier.attackers ||
+        modifier.attackers.includes(attackerType ?? "")),
   );
 }
 
@@ -95,12 +99,14 @@ export function rollBonus(
   actor: Actor,
   to: "attacks" | "saves" | "checks",
   context: Context,
+  skill?: Skill, // the check's skill, for a bonus that only adds to one
 ): number {
   const seen = new Set<string>();
   let total = 0;
   for (const effect of actor.activeEffects) {
     const { modifier } = effect;
     if (modifier.kind !== "bonus" || modifier.to !== to) continue;
+    if (modifier.skill && modifier.skill !== skill) continue;
     if (seen.has(effect.sourceId)) continue;
     seen.add(effect.sourceId);
     const caster = context.state.actors[effect.casterId] ?? actor;
@@ -113,7 +119,11 @@ export function rollBonus(
   }
   const stats = deriveStats(actor, context);
   for (const modifier of passiveModifiers(stats.passives)) {
-    if (modifier.kind === "bonus" && modifier.to === to) {
+    if (
+      modifier.kind === "bonus" &&
+      modifier.to === to &&
+      (!modifier.skill || modifier.skill === skill)
+    ) {
       total += rollAmount(modifier.amount, stats, context.dice);
     }
   }

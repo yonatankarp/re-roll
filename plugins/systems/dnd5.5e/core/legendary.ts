@@ -9,6 +9,7 @@ import {
   frameHandler,
   storyEffect,
 } from "#sdk";
+import { formOf } from "./forms.ts";
 import { z } from "zod";
 import { AIM, ALL, encodeOption, parseOption } from "./combat/ids.ts";
 import {
@@ -64,7 +65,8 @@ export function legendOf(
   actor: Actor,
   access: Pick<ContentAccess, "content">,
 ): Legend {
-  if (actor.source.kind !== "monster") return {};
+  // In another shape, the stat block that made it a legend is replaced.
+  if (actor.source.kind !== "monster" || formOf(actor) !== null) return {};
   const entry = access.content(actor.source.statBlockId);
   if (!entry) return {};
   const known = legends.get(entry);
