@@ -8,7 +8,11 @@ import {
   choosePolicy,
   nextDndDecision,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
-import { resolveAction } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import {
+  resolveAction,
+  resolveTargets,
+} from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { ALL } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
 import {
   ClassSchema,
   PregenSchema,
@@ -271,6 +275,26 @@ describe("summoned creatures", () => {
       }),
     );
     expect(isDead(summonedIn(hit))).toBe(true);
+    // A heal on every ally in reach doesn't bring it back.
+    const mend = {
+      id: "test:mend",
+      name: "Mend",
+      spellLevel: null,
+      activation: {
+        cost: ["action" as const],
+        targeting: { creatures: 6, range: 60, side: "ally" as const },
+        resolution: {
+          kind: "automatic" as const,
+          damage: [],
+          effects: [{ kind: "heal" as const, amount: { dice: "1d4" } }],
+        },
+      },
+    };
+    expect(
+      resolveTargets(ALL, mend, caster, contextOf(run, hit)).map(
+        (item) => item.id,
+      ),
+    ).toEqual([PLAYER_ACTOR]);
     const next = applyDndEvent(hit, dndEvent(`${NS}:turnAdvanced`, {}));
     expect(next.combat?.order[next.combat.index]).toBe("g");
     expect(nextDndDecision(next, run)?.actor).toBe("g");
