@@ -35,7 +35,17 @@ describe("golden saves", () => {
       const { registry, run } = await open(adventure);
       const loaded = loadSave(text, registry, run);
       if (!loaded.ok) throw new Error(loaded.error);
-      // Warnings are left alone: every content edit changes a plugin's hash.
+      // Real content edits since a golden still warn; the content hash must add no warning the old
+      // raw-text hash wouldn't have given.
+      const save = JSON.parse(text) as {
+        plugins: { id: string; hash: string }[];
+      };
+      const rawWarnings = save.plugins
+        .filter(({ id, hash }) => registry.legacyPluginHash(id) !== hash)
+        .map(({ id }) => `The plugin "${id}" has changed since this save.`);
+      for (const warning of loaded.warnings) {
+        expect(rawWarnings).toContain(warning);
+      }
       expect(JSON.parse(JSON.stringify(loaded.state))).toStrictEqual(
         JSON.parse(await read(`${name}.state.json`)),
       );
