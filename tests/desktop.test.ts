@@ -480,7 +480,13 @@ describe("playing through the shell's session", () => {
         await firstOption(game); // moves on, so the load has something to undo
         await game.load(savedPath);
         expect(game.view().cues).toEqual([]);
-        expect({ ...game.view(), cues: [] }).toEqual({ ...before, cues: [] });
+        // The journal starts again at the scene the game is in.
+        const scene = before.log.findLastIndex((line) => line.kind === "scene");
+        expect({ ...game.view(), cues: [] }).toEqual({
+          ...before,
+          cues: [],
+          log: before.log.slice(Math.max(scene, 0)),
+        });
         expect((await game.listSaves()).map((save) => save.path)).toContain(
           savedPath,
         );

@@ -30,6 +30,12 @@ function settled(view: GameView): GameView {
   return { ...view, warnings: [], cues: [] };
 }
 
+// The same game once loaded: its journal starts at the scene it's in, and all else is as it was.
+function loaded(view: GameView): GameView {
+  const scene = view.log.findLastIndex((line) => line.kind === "scene");
+  return { ...view, log: scene === -1 ? view.log : view.log.slice(scene) };
+}
+
 const GEAR = /^(equip|stow|attune|unattune):/;
 
 describe("headless play of goblin-ambush", () => {
@@ -121,9 +127,9 @@ describe("headless play of goblin-ambush", () => {
         const path = await play.save("mid");
         const later = await openHeadless(saves);
         await later.load(path);
-        expect(settled(later.view())).toEqual(before);
+        expect(settled(later.view())).toEqual(loaded(before));
         await play.load(path);
-        expect(settled(play.view())).toEqual(before);
+        expect(settled(play.view())).toEqual(loaded(before));
         expect((await play.saves()).map((save) => save.path)).toContain(path);
         await play.deleteSave(path);
         expect((await play.saves()).map((save) => save.path)).not.toContain(
@@ -248,7 +254,7 @@ describe("headless play of goblin-ambush", () => {
     const path = await play.save("blessed");
     const later = await openHeadless(saves);
     await later.load(path);
-    expect(settled(later.view())).toEqual(before);
+    expect(settled(later.view())).toEqual(loaded(before));
   }, 60_000);
 
   it("keeps a sheet's hinted buttons, disabled, while the fight doesn't offer them", async () => {

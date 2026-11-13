@@ -868,8 +868,9 @@ function roll(
   readonly success: boolean | null;
 } | null {
   if (!("payload" in event)) return null;
-  const state = parseState(rawState);
-  const name = (id: string): string => state.actors[id]?.name ?? id;
+  // Parsed only for a roll, since most events roll nothing and a loaded game asks of every one.
+  const name = (id: string): string =>
+    parseState(rawState).actors[id]?.name ?? id;
   switch (event.kind) {
     case "dnd5.5e:rollReported": {
       const data = EVENT_SCHEMAS["dnd5.5e:rollReported"].parse(event.payload);
