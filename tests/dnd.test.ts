@@ -1222,11 +1222,6 @@ describe("spell effects without a map", () => {
   };
 
   it("leaves out a spell that would only waste its slot", () => {
-    expect(
-      doesSomething(
-        save([{ kind: "forcedMove", feet: 10, direction: "away" }]),
-      ),
-    ).toBe(false);
     expect(doesSomething(save([{ ...charmed, condition: "deafened" }]))).toBe(
       false,
     );
@@ -1234,6 +1229,12 @@ describe("spell effects without a map", () => {
   });
 
   it("keeps a spell with at least one working effect", () => {
+    // Every fight has a grid, so a push alone does something.
+    expect(
+      doesSomething(
+        save([{ kind: "forcedMove", feet: 10, direction: "away" }]),
+      ),
+    ).toBe(true);
     expect(
       doesSomething(
         save([

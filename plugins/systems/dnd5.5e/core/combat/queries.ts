@@ -104,11 +104,12 @@ export function rollBonus(
     if (seen.has(effect.sourceId)) continue;
     seen.add(effect.sourceId);
     const caster = context.state.actors[effect.casterId] ?? actor;
-    total += rollAmount(
+    const rolled = rollAmount(
       modifier.amount,
       deriveStats(caster, context),
       context.dice,
     );
+    total += modifier.subtract ? -rolled : rolled;
   }
   const stats = deriveStats(actor, context);
   for (const modifier of passiveModifiers(stats.passives)) {

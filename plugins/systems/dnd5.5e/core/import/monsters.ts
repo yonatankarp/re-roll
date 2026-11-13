@@ -963,7 +963,22 @@ export function legendaryOf(
       continue;
     }
     const made = activation ? [] : actionsMade(text, actionNames, left);
-    if (!activation && made.length === 0) {
+    const move = activation || made.length > 0 ? null : teleportOf(text);
+    if (move?.rest) left.push("what follows it");
+    const own = move
+      ? {
+          cost: [],
+          targeting: { self: true },
+          resolution: {
+            kind: "automatic",
+            damage: [],
+            effects: [
+              { kind: "teleport", feet: move.feet, movement: move.movement },
+            ],
+          },
+        }
+      : activation;
+    if (!own && made.length === 0) {
       notes.push(`not automated: legendary action ${name}`);
       continue;
     }
@@ -975,7 +990,7 @@ export function legendaryOf(
       cost: Number(/\(Costs (\d+) Actions\)/i.exec(label)?.[1] ?? 1),
       oncePerRound: /again until the start of \w+ next turn/i.test(text),
       moves: /\bmoves? up to half \w+ Speed\b/i.test(text),
-      ...(activation ? { activation } : { makes: made }),
+      ...(own ? { activation: own } : { makes: made }),
     });
   }
   if (uses && legendary.length > 0) {
@@ -1367,14 +1382,15 @@ function parseBlock(
   };
 }
 
-// "The phaerimm teleports up to 30 feet to an unoccupied space it can see.", "The bulette jumps up to 30 feet by
+// "The phaerimm teleports up to 30 feet to an unoccupied space it can see.", "Hazlik teleports … he can see, and …",
+// "The bulette jumps up to 30 feet by
 // spending 10 feet of movement.", or "casts Misty Step" while no book gives that spell a play. `rest` is any
 // sentence after it, such as a limit or a creature taken along, which is left out.
 export function teleportOf(
   text: string,
 ): { feet: number; movement: number; rest: string } | null {
   const teleport =
-    /^The [^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)? up to (\d+) feet to an unoccupied space (?:it|the [^.]+?) can see\.\s*(.*)$/s.exec(
+    /^(?:The )?[^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)? up to (\d+) feet to an unoccupied space (?:it|he|she|they|the [^.]+?) can see(?:[.,]| and)\s*(.*)$/s.exec(
       text.trim(),
     );
   if (teleport) {

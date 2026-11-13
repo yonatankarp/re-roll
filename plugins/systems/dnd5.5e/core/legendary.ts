@@ -514,6 +514,8 @@ export function chooseBossAction(decision: Decision, context: Context): string {
     const [, target = ""] = parseOption(option.id);
     if (option.id === WAIT || !actor) return [];
     if (target === ALL) return [{ option, score: 1000 }];
+    // A move of its own, such as a teleport, only when nothing reaches a foe.
+    if (target === actor.id) return [{ option, score: -Infinity }];
     const foe = context.state.actors[target.replace(AIM, "")];
     return foe ? [{ option, score: 500 - foe.hp }] : [];
   });

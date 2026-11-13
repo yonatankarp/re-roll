@@ -42,6 +42,8 @@ import {
   terrainOf,
 } from "../plugins/systems/dnd5.5e/core/sight.ts";
 import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
+import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { rollBonus } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import {
   BattlemapSchema,
   ClassSchema,
@@ -3298,5 +3300,103 @@ describe("the difficulty setting", () => {
     };
     const ended = applyDndEvent(state, dndEvent(`${NS}:combatEnded`, {}));
     expect(ended.difficulty).toBe("story");
+  });
+});
+
+describe("spell numbers on the bearer", () => {
+  const minute = { minutes: 1 };
+  const added = (events: readonly SystemEvent[]) =>
+    events.filter((event) => event.kind === `${NS}:effectAdded`);
+
+  it("takes a Bane die off attack rolls", async () => {
+    const run = arenaRun(await base(), {});
+    const target = {
+      ...monster("a"),
+      activeEffects: [
+        {
+          sourceId: "spell:bane",
+          casterId: PLAYER_ACTOR,
+          ends: "concentration" as const,
+          modifier: {
+            kind: "bonus" as const,
+            to: "attacks" as const,
+            amount: { dice: "1d4" },
+            subtract: true,
+          },
+        },
+      ],
+    };
+    const state = fight(hero(run), target);
+    expect(rollBonus(target, "attacks", contextOf(run, state, HIGH))).toBe(-4);
+    expect(rollBonus(target, "saves", contextOf(run, state, HIGH))).toBe(0);
+  });
+
+  it("stuns only a target at or under the Hit Point limit, with a save at the end of its turns", async () => {
+    const run = arenaRun(await base(), {});
+    const stun = {
+      kind: "applyCondition" as const,
+      condition: "stunned" as const,
+      duration: { text: "Special" },
+      repeatSave: false,
+      endsOnDamage: false,
+      hpAtMost: 150,
+      endSave: { ability: "con" as const, dc: { base: 15, add: [] } },
+    };
+    const caster = hero(run);
+    const weak = monster("a", "srd52:monster/dummy", 150);
+    const strong = monster("b", "srd52:monster/dummy", 151);
+    const context = contextOf(run, fight(caster, weak, strong), LOW);
+    const [stunned] = added(
+      leafEvents([stun], "spell:pws", caster, weak, context),
+    );
+    expect(
+      stunned && "payload" in stunned && stunned.payload.effect,
+    ).toMatchObject({
+      modifier: { kind: "condition", condition: "stunned" },
+      repeatSave: { ability: "con", dc: 15 },
+    });
+    expect(leafEvents([stun], "spell:pws", caster, strong, context)).toEqual(
+      [],
+    );
+  });
+
+  it("raises Speed and the Hit Point maximum, and heals into the raised maximum", async () => {
+    const run = arenaRun(await base(), {});
+    const start = hero(run);
+    const max = deriveStats(start, run).maxHp;
+    const full = { ...start, hp: max };
+    const speed = deriveStats(full, run).speed;
+    const state = fight(full, monster("a"));
+    const events = leafEvents(
+      [
+        {
+          kind: "modifier",
+          modifier: {
+            kind: "bonus",
+            to: "maxHp",
+            amount: { bonus: { base: 5, add: [] } },
+          },
+          duration: minute,
+        },
+        {
+          kind: "modifier",
+          modifier: {
+            kind: "bonus",
+            to: "speed",
+            amount: { bonus: { base: 10, add: [] } },
+          },
+          duration: minute,
+        },
+        { kind: "heal", amount: { bonus: { base: 5, add: [] } } },
+      ],
+      "spell:aid",
+      full,
+      full,
+      contextOf(run, state, LOW),
+    );
+    const after = actor(events.reduce(applyDndEvent, state), PLAYER_ACTOR);
+    expect(deriveStats(after, run).maxHp).toBe(max + 5);
+    expect(deriveStats(after, run).speed).toBe(speed + 10);
+    expect(after.hp).toBe(max + 5);
   });
 });
