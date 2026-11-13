@@ -155,6 +155,18 @@ export function seeing(
   return inRange ? "clear" : "dim";
 }
 
+// The cover `target` has against what `actor` does to it. From inside its swallower there is none, wherever
+// the creature's old square lies.
+export function coverAgainst(
+  state: DndState,
+  actor: Actor,
+  target: Actor,
+): number {
+  return swallowerOf(actor) === target.id
+    ? 0
+    : coverBonus(coverFor(state, actor.position, target, [actor.id]));
+}
+
 // Whether total cover keeps `target` out of reach of anything `actor` aims at it.
 export function behindTotalCover(
   state: DndState,

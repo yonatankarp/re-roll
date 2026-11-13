@@ -42,10 +42,17 @@ export function dodging(actor: Actor): boolean {
 }
 
 // Slow takes 10 feet off however often it hits, and each Dash adds the Speed that's left again.
+// Climbing out of a dead swallower takes its feet off the whole turn's movement.
 export function speedOf(actor: Actor, stats: Stats): number {
   const slowed = hasTactic(actor, "slowed") ? 10 : 0;
-  return (
-    Math.max(0, stats.speed - slowed) * (1 + tacticsOf(actor, "dash").length)
+  const exiting = tacticsOf(actor, "exiting").reduce(
+    (total, { value }) => total + (value ?? 0),
+    0,
+  );
+  return Math.max(
+    0,
+    Math.max(0, stats.speed - slowed) * (1 + tacticsOf(actor, "dash").length) -
+      exiting,
   );
 }
 
@@ -133,6 +140,7 @@ export const TACTIC_WORDS: Readonly<Record<Tactic, string>> = {
   ready: "ready to strike",
   slowed: "slowed",
   metamagic: "shaping a spell",
+  exiting: "climbing out",
 };
 
 // "Help" for tactic:help, "Sap" for mastery:sap.

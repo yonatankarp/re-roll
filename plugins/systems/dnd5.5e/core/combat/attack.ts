@@ -12,8 +12,8 @@ import {
   frame,
 } from "../state.ts";
 import { ALL, DECLINE, parseOption } from "./ids.ts";
-import { behindTotalCover, coverBonus, coverFor, seeing } from "../sight.ts";
-import { insideDamageEvents } from "./swallow.ts";
+import { behindTotalCover, coverAgainst, seeing } from "../sight.ts";
+import { insideDamageEvents, swallowerOf } from "./swallow.ts";
 import {
   awaitDecision,
   type SystemEvent,
@@ -225,10 +225,12 @@ export function runAttackRoll(
   const proneFar = hasCondition(target, "prone") && !close;
   // Darkness hides a creature from anyone without Darkvision in range: attacking an unseen target has
   // Disadvantage, and a target that can't see its attacker gives Advantage.
+  // From inside its swallower, the light at the creature's old square has nothing to do with it.
+  const inside = swallowerOf(attacker) === target.id;
   const unseenTarget =
-    seeing(attacker, target.position, state, context) === "none";
+    !inside && seeing(attacker, target.position, state, context) === "none";
   const unseenAttacker =
-    seeing(target, attacker.position, state, context) === "none";
+    !inside && seeing(target, attacker.position, state, context) === "none";
   // A monster's flat bonus names no ability: a weapon attack is Strength-based in melee and Dexterity-based at range.
   const ability =
     resolution.attack.ability ?? (meleeReach(action) === null ? "dex" : "str");
@@ -271,9 +273,7 @@ export function runAttackRoll(
     roll.natural +
     attackBonus(resolution, stats) +
     rollBonus(attacker, "attacks", context);
-  const ac =
-    targetStats.ac +
-    coverBonus(coverFor(state, attacker.position, target, [attacker.id]));
+  const ac = targetStats.ac + coverAgainst(state, attacker, target);
   const critFrom = criticalFrom(stats);
   const hits = roll.natural >= critFrom || (roll.natural !== 1 && total >= ac);
   // A hit from within 5 feet on a Paralyzed or Unconscious target is a Critical Hit.
@@ -410,11 +410,7 @@ export function runRecheckHit(
   const target = actorOf(state, payload.target);
   const ac =
     deriveStats(target, context).ac +
-    coverBonus(
-      coverFor(state, actorOf(state, payload.attacker).position, target, [
-        payload.attacker,
-      ]),
-    );
+    coverAgainst(state, actorOf(state, payload.attacker), target);
   return payload.critical || payload.total >= ac
     ? { frames: [frame("applyHit", payload)] }
     : {};

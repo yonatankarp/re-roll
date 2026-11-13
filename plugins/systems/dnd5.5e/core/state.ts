@@ -79,6 +79,7 @@ export const TACTICS = [
   "ready",
   "slowed",
   "metamagic", // a Metamagic option waiting for its spell, or Extended Spell's hold on Concentration (metamagic.ts)
+  "exiting", // the feet of movement climbing out of a dead swallower still costs (combat/swallow.ts)
 ] as const;
 
 const EndsSchema = z.enum([

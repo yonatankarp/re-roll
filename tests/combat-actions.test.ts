@@ -27,6 +27,10 @@ import {
   hasCondition,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import {
+  coverAgainst,
+  coverFor,
+} from "../plugins/systems/dnd5.5e/core/sight.ts";
 import { dndCue } from "../plugins/systems/dnd5.5e/ui/cues.ts";
 import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 
@@ -157,6 +161,7 @@ const GULPER = dummy("test:monster/gulper", {
     "Actions",
     "Gulp. Strength Saving Throw: DC 14, one creature Grappled by the gulper. Failure: The target is swallowed, and the Grappled condition ends.",
     "If the gulper takes 10 damage or more on a single turn from a creature inside it, the gulper must succeed on a DC 12 Constitution saving throw at the end of that turn or regurgitate all swallowed creatures, each of which falls in a space within 5 feet of the gulper and has the Prone condition.",
+    "If the gulper dies, a swallowed creature is no longer Restrained and can escape from the corpse using 10 feet of movement, exiting Prone.",
   ].join("\n"),
   actions: [
     {
@@ -1391,6 +1396,27 @@ describe("monster grapples and multiattacks", () => {
         feet: 0,
       }),
     );
+    // Three-quarters cover between the hero's old square and the gulper counts for nothing from inside.
+    const walled: DndState = {
+      ...moved,
+      combat: moved.combat && {
+        ...moved.combat,
+        terrain: {
+          difficult: [],
+          half: [],
+          threeQuarters: ["8,5"],
+          dim: [],
+          dark: [],
+          light: "bright",
+        },
+      },
+    };
+    const swallowed = who(walled, PLAYER_ACTOR);
+    const gulper = who(walled, "gulper");
+    expect(coverFor(walled, swallowed.position, gulper, [PLAYER_ACTOR])).toBe(
+      5,
+    );
+    expect(coverAgainst(walled, swallowed, gulper)).toBe(0);
     const options = optionIds(run, moved);
     expect(options).toContain(`${LONGSWORD}|gulper`);
     expect(options).not.toContain(`${LONGSWORD}|near`);
@@ -1439,6 +1465,33 @@ describe("monster grapples and multiattacks", () => {
       hasCondition(who(freed, PLAYER_ACTOR), "blinded", "restrained"),
     ).toBe(false);
     expect(hasCondition(who(freed, PLAYER_ACTOR), "prone")).toBe(true);
+    // Climbing out of the corpse takes 10 feet of the hero's next turn, and of that turn only.
+    const stats = deriveStats(who(freed, PLAYER_ACTOR), run);
+    const heroTurn = (from: DndState): DndState => {
+      let state = from;
+      do {
+        state = settle(
+          run,
+          state,
+          [{ kind: `${NS}:endTurn`, payload: {} }],
+          LOW,
+        ).state;
+      } while (state.combat?.order[state.combat.index] !== PLAYER_ACTOR);
+      return state;
+    };
+    const next = heroTurn(freed);
+    expect(speedLeft(who(next, PLAYER_ACTOR), stats)).toBe(stats.speed - 10);
+    expect(speedLeft(who(heroTurn(next), PLAYER_ACTOR), stats)).toBe(
+      stats.speed,
+    );
+    // Killing it from inside on its own turn spends the 10 feet then.
+    const own = settle(
+      run,
+      { ...dead, combat: dead.combat && { ...dead.combat, index: 0 } },
+      [{ kind: `${NS}:checkCombatEnd`, payload: {} }],
+      LOW,
+    ).state;
+    expect(who(own, PLAYER_ACTOR).moved).toBe(10);
   });
 
   it("rolls the save a hit brings, keeping its effects apart from the hit's grapple", async () => {
