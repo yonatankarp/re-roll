@@ -1234,6 +1234,20 @@ function parseBlock(
       });
       continue;
     }
+    // Charge: "The troll moves up to half its Speed straight toward an enemy it can see." A Dash toward the foes,
+    // which is where a monster's moves go.
+    const charge =
+      /^[^.]*?\bmoves up to (half )?its Speed(?: or (?:its )?\w+ Speed)? straight toward an enemy it can (?:see|sense)\.?$/.exec(
+        text.trim(),
+      );
+    if (section === "bonus actions" && charge && !label.includes("(")) {
+      passives.push({
+        kind: "bonusTactics",
+        tactics: ["dash"],
+        ...(charge[1] ? { half: true as const } : {}),
+      });
+      continue;
+    }
     const rechargeOn = /\(Recharge (\d)/.exec(label)?.[1];
     const perDay = /\((\d+)\/Day\b/.exec(label)?.[1];
     const resource = `${perDay ? "day" : "recharge"}:${slugOf(label.replace(/\s*\(.*$/, ""))}`;

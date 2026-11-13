@@ -74,8 +74,9 @@ import {
   TACTIC,
   hasTactic,
   masteryOf,
-  speedOf,
+  bonusDashFeet,
   tacticsOf,
+  walkSpeed,
   weaponOf,
 } from "./tactics.ts";
 
@@ -312,7 +313,7 @@ function bonusTacticOptions(
     ),
   );
   const options: { id: string; label: string }[] = [];
-  const extra = speedOf(actor, stats) / (1 + tacticsOf(actor, "dash").length);
+  const extra = bonusDashFeet(actor, stats);
   if (
     allowed.has("dash") &&
     extra > 0 &&
@@ -375,7 +376,7 @@ export function tacticOptions(
   const friends = standing(allies(state, actor)).filter(
     (item) => item.id !== actor.id,
   );
-  const extra = speedOf(actor, stats) / (1 + tacticsOf(actor, "dash").length);
+  const extra = walkSpeed(actor, stats);
   if (extra > 0 && !hasCondition(actor, "grappled", "restrained")) {
     options.push({
       id: DASH,
@@ -598,8 +599,25 @@ export function runTactic(
       return { events: [spend("action"), self("dash")] };
     case DISENGAGE:
       return { events: [spend("action"), self("disengage")] };
-    case BONUS_DASH:
-      return { events: [spend("bonusAction"), self("dash")] };
+    case BONUS_DASH: {
+      const feet = bonusDashFeet(actor, stats);
+      return {
+        events: [
+          spend("bonusAction"),
+          effect(
+            actor.id,
+            kind,
+            actor.id,
+            {
+              kind: "tactic",
+              tactic: "dash",
+              ...(feet === walkSpeed(actor, stats) ? {} : { value: feet }),
+            },
+            "casterNextTurn",
+          ),
+        ],
+      };
+    }
     case BONUS_DISENGAGE:
       return { events: [spend("bonusAction"), self("disengage")] };
     case DODGE:

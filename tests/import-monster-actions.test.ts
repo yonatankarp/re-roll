@@ -30,6 +30,30 @@ const header = (title: string): string =>
   `<p class="monster-header">${title}</p>`;
 
 const spells: Record<string, unknown> = {
+  "lib:spell/hush": {
+    id: "lib:spell/hush",
+    name: "Hush",
+    level: 3,
+    school: "abjuration",
+    classes: [],
+    castingTime: "Reaction",
+    range: "60 feet",
+    components: "S",
+    duration: "instantaneous",
+    text: "Stops a spell.",
+    automation: "full",
+    activation: {
+      cost: ["reaction", "slot"],
+      trigger: { spellCast: true },
+      targeting: { creatures: 1, range: 60, side: "enemy" },
+      resolution: {
+        kind: "save",
+        ability: "con",
+        dc: { add: [{ kind: "spellSaveDc" }] },
+        onFail: [{ kind: "counter" }],
+      },
+    },
+  },
   "lib:spell/ember-burst": {
     id: "lib:spell/ember-burst",
     name: "Ember Burst",
@@ -176,6 +200,48 @@ describe("monster bonus actions that take an action anyone can", () => {
       kind: "bonusTactics",
       tactics: ["dash", "disengage", "hide"],
     });
+  });
+
+  it("reads Charge as a Dash, of half the Speed when it says so", () => {
+    const club = entry(
+      "Club",
+      "Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Bludgeoning damage.",
+    );
+    const troll = parse(
+      `${header("Actions")}${club}${header("Bonus Actions")}${entry("Charge", "The troll moves up to half its Speed straight toward an enemy it can see.")}`,
+    );
+    expect(troll.passives).toContainEqual({
+      kind: "bonusTactics",
+      tactics: ["dash"],
+      half: true,
+    });
+    const xorn = parse(
+      `${header("Actions")}${club}${header("Bonus Actions")}${entry("Charge", "The xorn moves up to its Speed or Burrow Speed straight toward an enemy it can sense.")}`,
+    );
+    expect(xorn.passives).toContainEqual({
+      kind: "bonusTactics",
+      tactics: ["dash"],
+    });
+  });
+});
+
+describe("monster reactions that cast a spell", () => {
+  it("keeps a spell with its own trigger, as a reaction with the entry's uses", () => {
+    const club = entry(
+      "Club",
+      "Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Bludgeoning damage.",
+    );
+    const mage = parse(
+      `${header("Actions")}${club}${header("Reactions")}${entry("Protective Magic (3/Day)", "The mage casts Hush in response to the spell’s trigger, using Intelligence (spell save DC 17).")}`,
+    );
+    const hush = byName(mage, "Hush");
+    expect(hush?.perDay).toBe(3);
+    expect(hush?.activation.cost).toEqual([
+      "reaction",
+      { resource: "day:protective-magic" },
+    ]);
+    expect(hush?.activation.trigger).toEqual({ spellCast: true });
+    expect(hush?.activation.resolution).toMatchObject({ dc: { base: 17 } });
   });
 });
 

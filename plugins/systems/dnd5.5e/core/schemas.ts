@@ -485,6 +485,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("bonusTactics"),
     tactics: z.array(z.enum(["dash", "disengage", "hide"])).min(1),
+    half: z.literal(true).optional(), // its Dash adds half its Speed, as a troll's Charge
   }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
   z.strictObject({ kind: z.literal("concentrationAdvantage") }),

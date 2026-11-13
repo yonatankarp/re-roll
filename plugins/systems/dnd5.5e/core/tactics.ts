@@ -41,19 +41,36 @@ export function dodging(actor: Actor): boolean {
   return hasTactic(actor, "dodge") && !hasCondition(actor, ...INCAPACITATING);
 }
 
-// Slow takes 10 feet off however often it hits, and each Dash adds the Speed that's left again.
+// The Speed left after Slow, which takes 10 feet off however often it hits.
+export function walkSpeed(actor: Actor, stats: Stats): number {
+  return Math.max(0, stats.speed - (hasTactic(actor, "slowed") ? 10 : 0));
+}
+
+// Each Dash adds that Speed again, or the feet it holds, as a Charge's half Speed.
 // Climbing out of a dead swallower takes its feet off the whole turn's movement.
 export function speedOf(actor: Actor, stats: Stats): number {
-  const slowed = hasTactic(actor, "slowed") ? 10 : 0;
+  const walk = walkSpeed(actor, stats);
   const exiting = tacticsOf(actor, "exiting").reduce(
     (total, { value }) => total + (value ?? 0),
     0,
   );
-  return Math.max(
+  const dashes = tacticsOf(actor, "dash").reduce(
+    (total, { value }) => total + (value ?? walk),
     0,
-    Math.max(0, stats.speed - slowed) * (1 + tacticsOf(actor, "dash").length) -
-      exiting,
   );
+  return Math.max(0, walk + dashes - exiting);
+}
+
+// A Bonus Action Dash's feet: half the Speed, to the square, for a Charge.
+export function bonusDashFeet(actor: Actor, stats: Stats): number {
+  const walk = walkSpeed(actor, stats);
+  const half = stats.passives.some(
+    (passive) =>
+      passive.kind === "bonusTactics" &&
+      passive.half === true &&
+      passive.tactics.includes("dash"),
+  );
+  return half ? 5 * Math.floor(walk / 10) : walk;
 }
 
 // A Grappled creature has Disadvantage on attacks against anyone but whoever holds it.
