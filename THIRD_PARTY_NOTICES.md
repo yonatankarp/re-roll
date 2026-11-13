@@ -68,6 +68,7 @@ Generated from `npm ls --omit=dev`. Each package's licence text ships in its own
 | sharp                           | 0.34.5                         | Apache-2.0        | git://github.com/lovell/sharp                          |
 | sprintf-js                      | 1.1.3                          | BSD-3-Clause      | https://github.com/alexei/sprintf.js                   |
 | tar                             | 7.5.23                         | BlueOak-1.0.0     | https://github.com/isaacs/node-tar                     |
+| three                           | 0.186.1                        | MIT               | https://github.com/mrdoob/three.js                     |
 | type-fest                       | 0.13.1                         | (MIT OR CC0-1.0)  | sindresorhus/type-fest                                 |
 | undici-types                    | 8.9.0                          | MIT               | https://github.com/nodejs/undici                       |
 | yallist                         | 5.0.0                          | BlueOak-1.0.0     | https://github.com/isaacs/yallist                      |

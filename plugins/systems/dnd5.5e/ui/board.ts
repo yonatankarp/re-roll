@@ -18,6 +18,7 @@ import { play } from "./board-playback.ts";
 import { wireZoom } from "./board-zoom.ts";
 import { parseState } from "./parse-state.ts";
 import { injectStyle } from "./board-style.ts";
+import { dicePanel } from "./dice-panel.ts";
 import {
   artFor,
   layout,
@@ -284,6 +285,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   };
 
   return {
+    menu: dicePanel(),
     // Resolves once everything queued so far has played, so the shell can hold back text that would spoil it.
     settled(): Promise<void> {
       return ctx.playing || ctx.queue.length > 0

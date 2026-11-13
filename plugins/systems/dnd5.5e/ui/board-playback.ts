@@ -2,13 +2,11 @@ import { PLAYER_ACTOR } from "#sdk";
 import {
   type BoardContext,
   animate,
-  el,
   fast,
   showCaption,
-  still,
   wait,
 } from "./board-context.ts";
-import { centreOf, strike, throwD20 } from "./board-dice.ts";
+import { centreOf, rollDamage, strike, throwD20 } from "./board-dice.ts";
 import {
   artFor,
   float,
@@ -253,55 +251,14 @@ export async function play(ctx: BoardContext, cue: DndCue): Promise<void> {
       const color = DAMAGE_COLORS[cue.type] ?? "#ff4d4d";
       // The damage dice, rolled where the blow lands, for the attack just shown.
       if (ctx.pendingDamage?.target === cue.actor && !fast(ctx)) {
-        const roll = el(
-          "div",
-          "dnd-damage-dice",
-          `${ctx.pendingDamage.dice} = ${String(cue.amount)}`,
+        void rollDamage(
+          ctx,
+          centreOf(ctx, token.node),
+          ctx.pendingDamage.dice,
+          cue.amount,
+          cue.critical,
+          ctx.pendingDamage.mine,
         );
-        const at = centreOf(ctx, token.node);
-        roll.style.left = `${String(at.x)}px`;
-        // Held still, it sits below the token so the damage number above stays readable.
-        roll.style.top = `${String(at.y + (still(ctx) ? 46 : -40))}px`;
-        ctx.board.append(roll);
-        roll
-          .animate(
-            still(ctx)
-              ? // With reduced motion the roll shows where the blow lands and fades, without moving.
-                [
-                  { transform: "translate(-50%, -50%)", opacity: 1 },
-                  {
-                    transform: "translate(-50%, -50%)",
-                    opacity: 1,
-                    offset: 0.8,
-                  },
-                  { transform: "translate(-50%, -50%)", opacity: 0 },
-                ]
-              : [
-                  {
-                    transform:
-                      "translate(-50%, -50%) scale(0.5) rotate(-20deg)",
-                    opacity: 0,
-                  },
-                  {
-                    transform: "translate(-50%, -50%) scale(1.1) rotate(4deg)",
-                    opacity: 1,
-                    offset: 0.3,
-                  },
-                  {
-                    transform: "translate(-50%, -70%) scale(1)",
-                    opacity: 1,
-                    offset: 0.8,
-                  },
-                  { transform: "translate(-50%, -90%) scale(1)", opacity: 0 },
-                ],
-            {
-              duration: ctx.pendingDamage.mine ? 1400 : 1000,
-              easing: "ease-out",
-            },
-          )
-          .addEventListener("finish", () => {
-            roll.remove();
-          });
       }
       ctx.pendingDamage = null;
       token.node.style.setProperty("--flash", color);

@@ -1,4 +1,4 @@
-import type { Board } from "./system-ui.ts";
+import type { PageBoard } from "./context.ts";
 import type { ShellContext } from "./context.ts";
 import type { journalTabs, rollsWhy } from "./journal-tabs.ts";
 import type { shopPanel } from "./shop.ts";
@@ -31,7 +31,7 @@ export interface GamePage {
   readonly flashSaved: () => void;
   readonly firstFocus: () => HTMLElement;
   readonly restart: () => void;
-  board: Board | null;
+  board: PageBoard | null;
   decisionShown: string | null;
   openGroup: string | null;
   showAll: boolean;

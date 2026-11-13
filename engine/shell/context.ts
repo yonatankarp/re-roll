@@ -11,8 +11,15 @@ export const CANT_LOAD =
   "This save couldn't be opened. It may be damaged, or from an older version of the adventure.";
 const BUSY_AFTER_MS = 300; // a step quicker than this shows no overlay, so it doesn't flicker
 
-// A system's own encounter view, such as a combat board, keyed by system id. It draws its own DOM in the slot.
-export type BoardFactory = (slot: HTMLElement, host: BoardHost) => Board;
+// A system's own encounter view, such as a combat board, keyed by system id. It draws its own DOM in the slot,
+// and may add an entry to the game menu with the dialog it opens, for the system's own settings.
+export interface PageBoard extends Board {
+  readonly menu?: {
+    readonly item: HTMLButtonElement;
+    readonly dialog: HTMLDialogElement;
+  };
+}
+export type BoardFactory = (slot: HTMLElement, host: BoardHost) => PageBoard;
 
 export interface ActOptions {
   readonly busy?: string;
