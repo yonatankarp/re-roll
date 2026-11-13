@@ -1,7 +1,10 @@
 import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
 import { describe, expect, it } from "vitest";
 import { carryingCapacity } from "../plugins/systems/dnd5.5e/core/carry.ts";
+import { tacticOptions } from "../plugins/systems/dnd5.5e/core/actions.ts";
+import { encodeOption } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
 import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { startCombat } from "../plugins/systems/dnd5.5e/core/combat/start.ts";
 import { provokers } from "../plugins/systems/dnd5.5e/core/combat/movement.ts";
 import {
   canAfford,
@@ -16,12 +19,14 @@ import {
   type Actor,
   NS,
   applyDndEvent,
+  dndEvent,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import {
   deriveStats,
   lookup,
   rollAmount,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { TACTIC } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import { rescuedSave } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
 import { contextOf, hero, scripted, testRun } from "./feat-fixtures.ts";
 
@@ -190,10 +195,80 @@ describe("feats and traits that act on their own", () => {
 
     const slayer = hero(["mage-slayer"]);
     const stats = deriveStats(slayer, run);
-    const used = rescuedSave(slayer, "wis", stats, []);
-    expect(used).toMatchObject({ payload: { resource: "mind" } });
-    expect(used && rescuedSave(slayer, "wis", stats, [used])).toBeNull();
-    expect(rescuedSave(slayer, "str", stats, [])).toBeNull();
+    const used = rescuedSave(slayer, "wis", [], stats, [], []);
+    expect(used).toEqual([
+      expect.objectContaining({
+        payload: { actor: PLAYER_ACTOR, resource: "mind" },
+      }),
+    ]);
+    expect(rescuedSave(slayer, "wis", [], stats, [], used)).toEqual([]);
+    expect(rescuedSave(slayer, "str", [], stats, [], [])).toEqual([]);
+  });
+
+  it("adds its Proficiency Bonus to a failed save against Frightened with its Reaction once, and rolls a low Initiative again, as Survivor does", async () => {
+    const run = await testRun();
+    const survivor = hero(["survivor"]);
+    const stats = deriveStats(survivor, run);
+    const failed = (total: number) => [
+      dndEvent(`${NS}:saveRolled`, {
+        actor: PLAYER_ACTOR,
+        ability: "wis",
+        natural: total,
+        total,
+        dc: 12,
+        success: false,
+      }),
+    ];
+    const rescue = (total: number, actor: Actor = survivor) =>
+      rescuedSave(actor, "wis", ["frightened"], stats, failed(total), []).map(
+        (event) => event.kind,
+      );
+    // A Proficiency Bonus of 2 lifts a 10 to the DC of 12, but not a 9.
+    expect(rescue(10)).toEqual([`${NS}:budgetSpent`, `${NS}:resourceSpent`]);
+    expect(rescue(9)).toEqual([]);
+    expect(
+      rescue(10, {
+        ...survivor,
+        budget: { ...survivor.budget, reaction: false },
+      }),
+    ).toEqual([]);
+    expect(
+      rescuedSave(survivor, "wis", ["charmed"], stats, failed(10), []),
+    ).toHaveLength(2);
+    expect(rescuedSave(survivor, "wis", [], stats, failed(10), [])).toEqual([]);
+
+    const initiative = (traits: readonly string[]) => {
+      const context = contextOf(run, [hero(traits)], scripted([]).dice);
+      const { dice, counts } = scripted([5, 15, 12]);
+      startCombat(
+        {
+          id: "ambush",
+          monsters: [{ monster: "srd52:monster/goblin-warrior", count: 1 }],
+        },
+        { ...context, dice, state: { ...context.state, combat: null } },
+        { canFlee: false, defeatContinues: false },
+      );
+      return counts[20];
+    };
+    expect(initiative(["survivor"])).toBe(3);
+    expect(initiative([])).toBe(2);
+  });
+
+  it("gives a Study check Advantage, spending a use only when it succeeds, as Sharp Eye does", async () => {
+    const run = await testRun();
+    const study = (rolls: readonly number[]) => {
+      const { dice, counts } = scripted(rolls);
+      const result = run.system.frames[`${NS}:takeAction`]?.run(
+        { actor: PLAYER_ACTOR, answer: encodeOption(`${TACTIC}study`, "foe") },
+        contextOf(run, [hero(["keen"]), foeOf()], dice),
+      );
+      return {
+        d20s: counts[20],
+        spent: payloads(result?.events ?? [], "resourceSpent").length,
+      };
+    };
+    expect(study([19, 19])).toEqual({ d20s: 2, spent: 1 });
+    expect(study([1, 1])).toEqual({ d20s: 2, spent: 0 });
   });
 
   it("makes Opportunity Attacks through Disengage and stops the creature it hits, as Sentinel does", async () => {
@@ -315,5 +390,118 @@ describe("feats and traits that act on their own", () => {
     });
     // A Critical Hit rolls two dice and one more.
     expect(stab(["piercer"], ["reroll:piercing"], true).d6s).toBe(3);
+  });
+
+  it("helps against an enemy 30 feet away with Harper Agent", async () => {
+    const run = await testRun();
+    const helps = (traits: readonly string[]) => {
+      const helper = { ...hero(traits), position: { x: 0, y: 0 } };
+      const friend = {
+        ...hero([], { id: "friend" }),
+        position: { x: 0, y: 1 },
+      };
+      const foe = foeOf([], { position: { x: 5, y: 0 } });
+      const { state } = contextOf(
+        run,
+        [helper, friend, foe],
+        scripted([]).dice,
+      );
+      return tacticOptions(helper, state, run).some(
+        (option) => option.id === encodeOption(`${TACTIC}help`, "foe"),
+      );
+    };
+    expect(helps(["harper"])).toBe(true);
+    expect(helps([])).toBe(false);
+  });
+
+  it("inspires an ally on a Critical Hit once a turn, and marks a foe that hurts an ally beside the bearer, as Lords' Alliance Agent does", async () => {
+    const run = await testRun();
+    const crit = (used: readonly string[] = []) => {
+      const attacker = { ...hero(["lords"]), usedThisTurn: [...used] };
+      const friend = hero([], { id: "friend" });
+      const events =
+        run.system.frames[`${NS}:applyHit`]?.run(
+          { ...SWING, attacker: PLAYER_ACTOR, target: "foe", critical: true },
+          contextOf(run, [attacker, friend, foeOf()], scripted([]).dice),
+        ).events ?? [];
+      return payloads(events, "inspirationGranted");
+    };
+    expect(crit()).toEqual([{ actor: "friend" }]);
+    expect(crit(["inspiring-strike"])).toEqual([]);
+
+    const marked = (traits: readonly string[]) => {
+      const friend = { ...hero([], { id: "friend" }), hp: 30 };
+      const events =
+        run.system.frames[`${NS}:applyHit`]?.run(
+          { ...SWING, attacker: "foe", target: "friend" },
+          contextOf(run, [hero(traits), friend, foeOf()], scripted([]).dice),
+        ).events ?? [];
+      return payloads(events, "effectAdded").flatMap((payload) =>
+        payload.actor === "foe"
+          ? [(payload.effect as { modifier: unknown }).modifier]
+          : [],
+      );
+    };
+    expect(marked(["lords"])).toEqual([
+      { kind: "advantage", on: "attacksAgainst", once: true },
+    ]);
+    expect(marked([])).toEqual([]);
+  });
+
+  it("rolls an Opportunity Attack's damage twice and spends Inspiration on the party's Initiative, as Zhentarim Ruffian does", async () => {
+    const run = await testRun();
+    const d8s = (theirTurn: boolean) => {
+      const foe = foeOf();
+      const actors = theirTurn
+        ? [foe, hero(["zhent"])]
+        : [hero(["zhent"]), foe];
+      const { dice, counts } = scripted([]);
+      run.system.frames[`${NS}:applyHit`]?.run(
+        { ...SWING, attacker: PLAYER_ACTOR, target: "foe" },
+        contextOf(run, actors, dice),
+      );
+      return counts[8];
+    };
+    expect(d8s(true)).toBe(2);
+    expect(d8s(false)).toBe(1);
+
+    const start = (inspired: boolean) => {
+      const leader = { ...hero(["zhent"]), heroicInspiration: inspired };
+      const context = contextOf(run, [leader], scripted([]).dice);
+      const { dice, counts } = scripted([]);
+      const result = startCombat(
+        {
+          id: "ambush",
+          monsters: [{ monster: "srd52:monster/goblin-warrior", count: 1 }],
+        },
+        { ...context, dice, state: { ...context.state, combat: null } },
+        { canFlee: false, defeatContinues: false },
+      );
+      return {
+        d20s: counts[20],
+        spent: payloads(result.events ?? [], "inspirationSpent"),
+      };
+    };
+    expect(start(true)).toEqual({ d20s: 3, spent: [{ actor: PLAYER_ACTOR }] });
+    expect(start(false)).toEqual({ d20s: 2, spent: [] });
+  });
+
+  it("gives the next attack against a bearer that Readies an action Disadvantage, as Tyro of the Gauntlet does", async () => {
+    const run = await testRun();
+    const readied = (traits: readonly string[]) => {
+      const result = run.system.frames[`${NS}:takeAction`]?.run(
+        {
+          actor: PLAYER_ACTOR,
+          answer: encodeOption(`${TACTIC}ready`, SWING.actionId),
+        },
+        contextOf(run, [hero(traits), foeOf()], scripted([]).dice),
+      );
+      return payloads(result?.events ?? [], "effectAdded").some(
+        (payload) =>
+          (payload.effect as { sourceId: string }).sourceId === "vigilant",
+      );
+    };
+    expect(readied(["tyro"])).toBe(true);
+    expect(readied([])).toBe(false);
   });
 });

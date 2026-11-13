@@ -771,20 +771,26 @@ export function resolveAction(
         events.push(...saveEvents);
         const resisted = rolledSave
           ? null
-          : (legendaryResistance(
+          : legendaryResistance(
               target,
               conditionsApplied(resolution.onFail),
               context,
               events,
-            ) ??
-            rescuedSave(
-              target,
-              resolution.ability,
-              deriveStats(target, context),
-              events,
-            ));
+            );
         if (resisted) events.push(resisted);
-        const saved = rolledSave || resisted !== null;
+        const rescued =
+          rolledSave || resisted
+            ? []
+            : rescuedSave(
+                target,
+                resolution.ability,
+                conditionsApplied(resolution.onFail),
+                deriveStats(target, context),
+                saveEvents,
+                events,
+              );
+        events.push(...rescued);
+        const saved = rolledSave || resisted !== null || rescued.length > 0;
         applyRolled(target, damage, (amount) => {
           if (!saved || resolution.onSuccessDamage === "full") return amount;
           return resolution.onSuccessDamage === "half" && !spared.has(target.id)

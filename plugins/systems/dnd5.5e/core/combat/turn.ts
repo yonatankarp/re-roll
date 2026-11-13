@@ -244,19 +244,25 @@ export function runFinishTurn(context: Context): SystemResult {
     events.push(...rolled.events);
     const resisted = rolled.saved
       ? null
-      : (legendaryResistance(
+      : legendaryResistance(
           target,
           modifier.kind === "condition" ? [modifier.condition] : [],
           context,
           events,
-        ) ??
-        rescuedSave(
-          target,
-          save.ability,
-          deriveStats(target, context),
-          events,
-        ));
+        );
     if (resisted) events.push(resisted);
+    const rescued =
+      rolled.saved || resisted
+        ? []
+        : rescuedSave(
+            target,
+            save.ability,
+            repeatSaveConditions(target, sourceId),
+            deriveStats(target, context),
+            rolled.events,
+            events,
+          );
+    events.push(...rescued);
     const worse = (
       target.activeEffects.find(
         (item) =>
@@ -265,7 +271,7 @@ export function runFinishTurn(context: Context): SystemResult {
           item.secondFailure,
       ) ?? effect
     ).secondFailure;
-    if (rolled.saved || resisted || worse) {
+    if (rolled.saved || resisted || rescued.length > 0 || worse) {
       events.push(
         dndEvent(`${NS}:effectEnded`, {
           actor: target.id,
@@ -279,6 +285,7 @@ export function runFinishTurn(context: Context): SystemResult {
       worse &&
       !rolled.saved &&
       !resisted &&
+      rescued.length === 0 &&
       !immuneToCondition(deriveStats(target, context), worse.condition)
     ) {
       events.push(

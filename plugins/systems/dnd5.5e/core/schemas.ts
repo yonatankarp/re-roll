@@ -558,11 +558,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Counts as one size larger for carrying, with Advantage on checks to escape a grapple, as with Powerful Build.
   z.strictObject({ kind: z.literal("powerfulBuild") }),
-  // A failed save with one of these abilities succeeds instead, spending the resource, as with Mage Slayer's
-  // Guarded Mind.
+  // A failed save with one of these abilities, or against one of these conditions, succeeds instead, spending the
+  // resource, as with Mage Slayer's Guarded Mind. With `bonus` it's added to the roll when that's enough, as with
+  // Survivor's Steel Yourself, and with `reaction` it takes the bearer's Reaction too.
   z.strictObject({
     kind: z.literal("saveRescue"),
-    abilities: z.array(AbilitySchema).min(1),
+    abilities: z.array(AbilitySchema).default([]),
+    conditions: z.array(ConditionSchema).default([]),
+    bonus: FormulaSchema.optional(),
+    reaction: z.boolean().default(false),
     resource: z.string(),
   }),
   // A creature the bearer damages has Disadvantage on the save to keep Concentration, as with Mage Slayer.
@@ -575,6 +579,31 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Once a turn, one damage die of a hit of this type is rolled again, and a Critical Hit rolls one more die, as
   // with Piercer.
   z.strictObject({ kind: z.literal("damageReroll"), damage: DamageTypeSchema }),
+  // Help distracts an enemy this far away, as with Harper Agent's Distracting Melody.
+  z.strictObject({
+    kind: z.literal("helpRange"),
+    feet: z.number().int().min(10),
+  }),
+  // Once a turn, a Critical Hit gives an ally within 30 feet Heroic Inspiration, as with Lords' Alliance Agent.
+  z.strictObject({ kind: z.literal("critInspiration") }),
+  // An enemy that damages an ally within 5 feet of the bearer is easier to hit until the end of the bearer's next
+  // turn, as with Lords' Alliance Agent's Reassert Honor.
+  z.strictObject({ kind: z.literal("avengeAlly") }),
+  // An Opportunity Attack's damage dice are rolled twice and the higher kept, as with Zhentarim Ruffian.
+  z.strictObject({ kind: z.literal("opportunityDamage") }),
+  // Heroic Inspiration held as a fight starts is spent on Advantage on the party's Initiative, as with Zhentarim
+  // Ruffian's Family First.
+  z.strictObject({ kind: z.literal("initiativeInspiration") }),
+  // Readying an action gives the next attack against the bearer Disadvantage, as with Tyro of the Gauntlet.
+  z.strictObject({ kind: z.literal("vigilant") }),
+  // An Initiative d20 of this or lower is rolled again, and the new roll stands, as with Survivor's Hypervigilance.
+  z.strictObject({
+    kind: z.literal("initiativeReroll"),
+    atMost: z.number().int().min(1).max(19),
+  }),
+  // Advantage on the check of a Search or Study action, spending a use of the resource only when it succeeds, as
+  // with Sharp Eye.
+  z.strictObject({ kind: z.literal("sharpEye"), resource: z.string() }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
 

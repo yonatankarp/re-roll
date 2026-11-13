@@ -682,6 +682,9 @@ export function runApplyHit(
     resolution.attack.type === "weapon" &&
     hasPassive(stats, "savageAttacker") &&
     !attacker.usedThisTurn.includes(SAVAGE_ATTACKER);
+  // Zhentarim Ruffian's Exploit Opening does the same for every Opportunity Attack.
+  const exploit =
+    hasPassive(stats, "opportunityDamage") && inOwnTurn(target, context);
   if (savage) {
     events.push(
       dndEvent(`${NS}:oncePerTurnUsed`, {
@@ -721,7 +724,7 @@ export function runApplyHit(
         multiplier,
       );
     const rolled =
-      (savage && index === 0 ? Math.max(roll(), roll()) : roll()) +
+      ((savage || exploit) && index === 0 ? Math.max(roll(), roll()) : roll()) +
       (pierces && payload.critical && die
         ? rollDiceNotation(`1d${die}`, dice)
         : 0) +
@@ -773,6 +776,8 @@ export function runApplyHit(
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
     ...halted(attacker, target, stats, context),
+    ...inspiringStrike(attacker, payload.critical, stats, context),
+    ...(dealt.dealt > 0 ? reassertHonor(attacker, target, context) : []),
   );
   // The save sees the target as the hit left it.
   const afterHit = events.reduce(applyDndEvent, state);
@@ -816,6 +821,81 @@ export function runApplyHit(
   };
 }
 
+// Whether it's the creature's own turn, so a hit on it is a reaction such as an Opportunity Attack.
+function inOwnTurn(target: Actor, context: Context): boolean {
+  const { combat } = context.state;
+  return combat?.order[combat.index] === target.id;
+}
+
+// Lords' Alliance Agent: once a turn, a Critical Hit gives the nearest ally within 30 feet without Heroic
+// Inspiration that Inspiration.
+function inspiringStrike(
+  attacker: Actor,
+  critical: boolean,
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  const key = "inspiring-strike";
+  if (
+    !critical ||
+    !hasPassive(stats, "critInspiration") ||
+    attacker.usedThisTurn.includes(key)
+  ) {
+    return [];
+  }
+  const ally = allies(context.state, attacker)
+    .filter(
+      (item) =>
+        item.id !== attacker.id &&
+        !isDead(item) &&
+        !item.heroicInspiration &&
+        distanceFeet(attacker.position, item.position) <= 30,
+    )
+    .sort(
+      (a, b) =>
+        distanceFeet(attacker.position, a.position) -
+        distanceFeet(attacker.position, b.position),
+    )[0];
+  return ally
+    ? [
+        dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key }),
+        dndEvent(`${NS}:inspirationGranted`, { actor: ally.id }),
+      ]
+    : [];
+}
+
+// Lords' Alliance Agent's Reassert Honor: an enemy that damages an ally beside the bearer is easier to hit.
+// shortcut: anyone's next attack on it gets the Advantage, as with Help, not only the bearer's.
+function reassertHonor(
+  attacker: Actor,
+  target: Actor,
+  context: Context,
+): SystemEvent[] {
+  const { state } = context;
+  return allies(state, target).flatMap((bearer) =>
+    bearer.id !== target.id &&
+    bearer.side !== attacker.side &&
+    !isDown(bearer) &&
+    within5(bearer, target) &&
+    seeing(bearer, attacker.position, state, context) !== "none" &&
+    hasPassive(deriveStats(bearer, context), "avengeAlly")
+      ? leafEvents(
+          [
+            {
+              kind: "modifier",
+              duration: { until: "yourNextTurnEnd" },
+              modifier: { kind: "advantage", on: "attacksAgainst", once: true },
+            },
+          ],
+          "reassert-honor",
+          bearer,
+          attacker,
+          context,
+        )
+      : [],
+  );
+}
+
 // Sentinel's Halt: a Sentinel's hit on a creature in that creature's own turn is a reaction, so an Opportunity
 // Attack, and takes its Speed to 0 for the turn.
 function halted(
@@ -824,13 +904,7 @@ function halted(
   stats: Stats,
   context: Context,
 ): SystemEvent[] {
-  const { combat } = context.state;
-  if (
-    !hasPassive(stats, "sentinel") ||
-    combat?.order[combat.index] !== target.id
-  ) {
-    return [];
-  }
+  if (!hasPassive(stats, "sentinel") || !inOwnTurn(target, context)) return [];
   return leafEvents(
     [
       {
@@ -943,9 +1017,16 @@ function nestedSave(
     conditionsApplied(save.onFail),
   );
   const rescued = rolled.saved
-    ? null
-    : rescuedSave(target, save.ability, deriveStats(target, context), []);
-  const succeeded = rolled.saved || rescued !== null;
+    ? []
+    : rescuedSave(
+        target,
+        save.ability,
+        conditionsApplied(save.onFail),
+        deriveStats(target, context),
+        rolled.events,
+        [],
+      );
+  const succeeded = rolled.saved || rescued.length > 0;
   const responses = damageResponses(target, context);
   const damage = dealEvents(
     target,
@@ -968,7 +1049,7 @@ function nestedSave(
   return {
     events: [
       ...rolled.events,
-      ...(rescued ? [rescued] : []),
+      ...rescued,
       ...damage.events,
       ...leafEvents(
         succeeded ? save.onSuccess : save.onFail,

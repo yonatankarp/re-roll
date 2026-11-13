@@ -5,7 +5,14 @@ import {
   type DamageType,
   ItemSchema,
 } from "./schemas.ts";
-import { type Actor, NS, dndEvent, equipped } from "./state.ts";
+import {
+  type Actor,
+  INCAPACITATING,
+  NS,
+  dndEvent,
+  equipped,
+  hasCondition,
+} from "./state.ts";
 import { type Stats, evaluateFormula, lookup } from "./stats.ts";
 import { HIT_DICE } from "./combat/ids.ts";
 
@@ -191,33 +198,64 @@ export function dropToOneEvents(
   ];
 }
 
-// Mage Slayer's Guarded Mind: a failed save with one of its abilities succeeds instead, spending the resource.
+// A failed save turned into a success by a trait, as Mage Slayer's Guarded Mind or Survivor's Steel Yourself do:
+// the events that pay for it, or none when nothing rescues it. `rolled` holds the save's own events, for its total.
 // `pending` holds the events not yet applied, so two saves in one step can't spend the same use.
 export function rescuedSave(
   target: Actor,
   ability: Ability,
+  conditions: readonly string[],
   stats: Stats,
+  rolled: readonly SystemEvent[],
   pending: readonly SystemEvent[],
-): SystemEvent | null {
+): SystemEvent[] {
+  const roll = rolled.findLast((event) => event.kind === `${NS}:saveRolled`);
+  const { total, dc } =
+    roll && "payload" in roll
+      ? (roll.payload as { total: number; dc: number })
+      : { total: 0, dc: Infinity };
+  const spentNow = (kind: string, resource?: string): number =>
+    pending.filter(
+      (event) =>
+        event.kind === `${NS}:${kind}` &&
+        "payload" in event &&
+        event.payload.actor === target.id &&
+        (resource === undefined || event.payload.resource === resource),
+    ).length;
   for (const passive of stats.passives) {
-    if (passive.kind !== "saveRescue" || !passive.abilities.includes(ability)) {
+    if (
+      passive.kind !== "saveRescue" ||
+      !(
+        passive.abilities.includes(ability) ||
+        passive.conditions.some((condition) => conditions.includes(condition))
+      ) ||
+      (passive.bonus && total + evaluateFormula(passive.bonus, stats) < dc) ||
+      (passive.reaction &&
+        (!target.budget.reaction ||
+          hasCondition(target, ...INCAPACITATING) ||
+          spentNow("budgetSpent") > 0))
+    ) {
       continue;
     }
     const { resource } = passive;
     const spent =
       (target.resourcesSpent[resource] ?? 0) +
-      pending.filter(
-        (event) =>
-          event.kind === `${NS}:resourceSpent` &&
-          "payload" in event &&
-          event.payload.actor === target.id &&
-          event.payload.resource === resource,
-      ).length;
+      spentNow("resourceSpent", resource);
     if (spent < (stats.resources[resource] ?? 0)) {
-      return dndEvent(`${NS}:resourceSpent`, { actor: target.id, resource });
+      return [
+        ...(passive.reaction
+          ? [
+              dndEvent(`${NS}:budgetSpent`, {
+                actor: target.id,
+                kind: "reaction",
+              }),
+            ]
+          : []),
+        dndEvent(`${NS}:resourceSpent`, { actor: target.id, resource }),
+      ];
     }
   }
-  return null;
+  return [];
 }
 
 // The die a character's next unspent Hit Point Die is, in level order as resting spends them, or null for none.

@@ -186,6 +186,44 @@ const FIXTURES = [
   trait("sentinel", [{ kind: "sentinel" }]),
   trait("grappler", [{ kind: "grappledAdvantage" }]),
   trait("piercer", [{ kind: "damageReroll", damage: "piercing" }]),
+  trait("harper", [{ kind: "helpRange", feet: 30 }]),
+  trait("lords", [{ kind: "critInspiration" }, { kind: "avengeAlly" }]),
+  trait("zhent", [
+    { kind: "opportunityDamage" },
+    { kind: "initiativeInspiration" },
+  ]),
+  trait("tyro", [{ kind: "vigilant" }]),
+  trait(
+    "survivor",
+    [
+      { kind: "initiativeReroll", atMost: 9 },
+      {
+        kind: "saveRescue",
+        conditions: ["charmed", "frightened"],
+        bonus: { add: [{ kind: "proficiency" }] },
+        reaction: true,
+        resource: "steel",
+      },
+    ],
+    {
+      resources: [
+        {
+          id: "steel",
+          max: { base: 1 },
+          recharge: [{ on: "longRest", amount: "all" }],
+        },
+      ],
+    },
+  ),
+  trait("keen", [{ kind: "sharpEye", resource: "keen" }], {
+    resources: [
+      {
+        id: "keen",
+        max: { add: [{ kind: "proficiency" }] },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+  }),
   {
     id: "test:item/kit",
     name: "Kit",
