@@ -45,7 +45,7 @@ import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
 import { teleportFrame } from "./movement.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
-import { cureFor, dispelEvents, isSpell } from "./dispel.ts";
+import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { formOf, weakestBeast } from "../forms.ts";
 import {
   actorOf,
@@ -237,8 +237,10 @@ export function leafEvents(
   target: Actor,
   context: Context,
   save?: { readonly ability: Ability; readonly dc: number },
+  slotLevel?: number, // the slot a spell was cast with, so Dispel Magic knows its level
 ): SystemEvent[] {
   const stats = deriveStats(caster, context);
+  const level = slotLevel === undefined ? {} : { level: slotLevel };
   const events: SystemEvent[] = [];
   // Taking the target out of a grapple and into the caster swallows it (combat/swallow.ts).
   const swallowed = effects.some(
@@ -291,6 +293,7 @@ export function leafEvents(
             effect: {
               sourceId,
               casterId: caster.id,
+              ...level,
               modifier: effect.modifier,
               ends: effectEnds(effect.duration),
               ...(effect.repeatSave && save ? { repeatSave: save } : {}),
@@ -317,6 +320,7 @@ export function leafEvents(
             effect: {
               sourceId,
               casterId: caster.id,
+              ...level,
               modifier: { kind: "condition", condition: effect.condition },
               ends: effectEnds(effect.duration),
               ...((effect.repeatSave ||
@@ -642,6 +646,9 @@ export function resolveAction(
       const at = aim ?? actor.position;
       for (const effect of resolution.effects) {
         if (effect.kind !== "zone" || !at) continue;
+        if (effect.zone === "darkness") {
+          events.push(...snuffedLights(at, effect.radius, context));
+        }
         events.push(
           dndEvent(`${NS}:effectAdded`, {
             actor: actor.id,
@@ -670,6 +677,8 @@ export function resolveAction(
             actor,
             target,
             context,
+            undefined,
+            slotLevel,
           ),
         );
         // Where it lands is chosen, as a move is.
@@ -734,6 +743,7 @@ export function resolveAction(
             target,
             context,
             { ability: resolution.ability, dc },
+            slotLevel,
           ),
         );
       }

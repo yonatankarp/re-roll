@@ -9,6 +9,7 @@ import {
 } from "../state.ts";
 import { type Condition, MonsterSchema, SpellSchema } from "../schemas.ts";
 import { slugOf } from "../import/spells.ts";
+import { distanceFeet, type Square } from "../grid.ts";
 
 // Ending conditions and spells on a creature, as Lesser Restoration and Dispel Magic do.
 
@@ -45,7 +46,7 @@ export function cureFor(
 
 // A spell's level from the id its effects carry: a character's "spell:<id>", or a monster's own spell action,
 // found by its name. null for anything that isn't a spell.
-function spellLevelOf(
+export function spellLevelOf(
   sourceId: string,
   caster: Actor | undefined,
   access: ContentAccess,
@@ -95,11 +96,10 @@ export function dispellable(
     if (effect.modifier.kind === "tactic") continue;
     const key = `${effect.casterId} ${effect.sourceId}`;
     if (found.has(key)) continue;
-    const level = spellLevelOf(
-      effect.sourceId,
-      state.actors[effect.casterId],
-      access,
-    );
+    // shortcut: a monster's spell cast at a higher level counts at its own, since its effects don't say.
+    const level =
+      effect.level ??
+      spellLevelOf(effect.sourceId, state.actors[effect.casterId], access);
     if (level === null || level > maxLevel) continue;
     found.set(key, {
       sourceId: effect.sourceId,
@@ -108,6 +108,30 @@ export function dispellable(
     });
   }
   return [...found.values()];
+}
+
+// Darkness dispels the light of a spell of level 2 or lower whose area overlaps it.
+export function snuffedLights(
+  at: Square,
+  radius: number,
+  context: ContentAccess & { readonly state: DndState },
+): SystemEvent[] {
+  return Object.values(context.state.actors).flatMap((actor) =>
+    actor.activeEffects.flatMap(({ modifier, sourceId, casterId, level }) =>
+      modifier.kind === "zone" &&
+      modifier.zone === "light" &&
+      distanceFeet(modifier.at, at) <= modifier.radius + radius &&
+      (level ?? spellLevelOf(sourceId, actor, context) ?? 9) <= 2
+        ? [
+            dndEvent(`${NS}:effectEnded`, {
+              actor: actor.id,
+              sourceId,
+              casterId,
+            }),
+          ]
+        : [],
+    ),
+  );
 }
 
 // The spell ends, so one held by Concentration ends for everyone it touched.

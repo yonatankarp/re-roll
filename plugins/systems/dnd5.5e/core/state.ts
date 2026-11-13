@@ -107,7 +107,7 @@ const ActiveEffectSchema = z.strictObject({
     // An area a spell left on the map, kept on its caster (core/zones.ts).
     z.strictObject({
       kind: z.literal("zone"),
-      zone: z.enum(["darkness", "fog", "thorns"]),
+      zone: z.enum(["darkness", "fog", "thorns", "light"]),
       at: z.strictObject({ x: z.number().int(), y: z.number().int() }),
       radius: z.number().int(),
       damage: z.array(DamageSchema).optional(),
@@ -127,6 +127,7 @@ const ActiveEffectSchema = z.strictObject({
     .optional(),
   endsOnDamage: z.boolean().optional(),
   endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
+  level: z.number().int().optional(), // the slot a spell was cast with, when it was given one
   // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
   swallowed: z.boolean().optional(),
   // The condition a failed repeat save leaves instead of this one (combat/turn.ts).

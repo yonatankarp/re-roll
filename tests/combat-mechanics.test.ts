@@ -38,11 +38,15 @@ import {
 import {
   coverFor,
   darkvisionOf,
+  lightAt,
   seeing,
   terrainOf,
 } from "../plugins/systems/dnd5.5e/core/sight.ts";
 import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
-import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import {
+  leafEvents,
+  resolveAction,
+} from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import {
   hasFlag,
   rollBonus,
@@ -53,6 +57,7 @@ import {
   ClassSchema,
   MonsterSchema,
   PregenSchema,
+  SpellSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
   type Actor,
@@ -3502,6 +3507,132 @@ describe("ending, hiding and reshaping spells", () => {
         casterId: PLAYER_ACTOR,
       }),
     ]);
+  });
+
+  it("leaves a spell cast with a higher slot to a higher dispel", async () => {
+    const run = arenaRun(await base(), {});
+    const caster = hero(run);
+    const held = {
+      ...monster("a"),
+      activeEffects: [
+        {
+          ...effect(`spell:${spell("hold-person")}`, {
+            kind: "condition",
+            condition: "paralyzed",
+          }),
+          level: 4,
+        },
+      ],
+    };
+    const context = contextOf(run, fight(caster, held), LOW);
+    const dispel = (maxLevel: number) =>
+      leafEvents(
+        [{ kind: "dispel", maxLevel }],
+        "spell:d",
+        caster,
+        held,
+        context,
+      );
+    expect(dispel(3)).toEqual([]);
+    expect(dispel(4)).toHaveLength(1);
+  });
+
+  it("lights its area, and darkness cast over it snuffs a low-level light", async () => {
+    const run = arenaRun(await base(), {
+      "srd52:spell/test-darkness": {
+        id: "srd52:spell/test-darkness",
+        name: "Test Darkness",
+        level: 2,
+        school: "evocation",
+        classes: [],
+        castingTime: "Action",
+        range: "60 feet",
+        components: "V",
+        duration: { concentration: true, minutes: 10 },
+        text: "Dark.",
+        automation: "full",
+        activation: {
+          cost: ["action"],
+          targeting: {
+            area: { shape: "sphere", radius: 15 },
+            range: 60,
+            side: "enemy",
+          },
+          resolution: {
+            kind: "automatic",
+            damage: [],
+            effects: [
+              {
+                kind: "zone",
+                zone: "darkness",
+                radius: 15,
+                duration: { concentration: true, minutes: 10 },
+              },
+            ],
+          },
+        },
+      },
+    });
+    const lamp = {
+      ...hero(run),
+      position: { x: 0, y: 0 },
+      activeEffects: [
+        {
+          ...effect("spell:light", {
+            kind: "zone",
+            zone: "light",
+            at: { x: 0, y: 0 },
+            radius: 20,
+          }),
+          level: 1,
+        },
+      ],
+    };
+    const dark = { ...monster("a"), position: { x: 8, y: 0 } };
+    const state = gridded(fight(lamp, dark));
+    const night: DndState = state.combat
+      ? {
+          ...state,
+          combat: {
+            ...state.combat,
+            terrain: {
+              difficult: [],
+              half: [],
+              threeQuarters: [],
+              dim: [],
+              dark: [],
+              light: "dark",
+            },
+          },
+        }
+      : state;
+    expect(lightAt({ x: 2, y: 2 }, night)).toBe("bright");
+    expect(lightAt({ x: 9, y: 9 }, night)).toBe("dark");
+    const { activation } = SpellSchema.parse(
+      run.content("srd52:spell/test-darkness"),
+    );
+    if (!activation) throw new Error("No activation");
+    const result = resolveAction(
+      {
+        id: "spell:srd52:spell/test-darkness",
+        name: "Test Darkness",
+        activation,
+        spellLevel: 2,
+      },
+      dark,
+      [],
+      contextOf(run, night, LOW),
+      undefined,
+      false,
+      { x: 4, y: 0 },
+    );
+    expect(result.events).toContainEqual(
+      dndEvent(`${NS}:effectEnded`, {
+        actor: PLAYER_ACTOR,
+        sourceId: "spell:light",
+        casterId: PLAYER_ACTOR,
+      }),
+    );
   });
 
   it("hides creatures in darkness from those without Blindsight or Truesight, both ways", async () => {

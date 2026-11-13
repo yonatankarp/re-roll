@@ -13,7 +13,7 @@ import { FeatureSchema, MonsterSchema, SpeciesSchema } from "./schemas.ts";
 import { type Actor, type DndState, type Terrain, isDead } from "./state.ts";
 import { deriveStats, lookup } from "./stats.ts";
 import { swallowerOf } from "./combat/swallow.ts";
-import { obscuring, thornKeys, type ZoneKind } from "./zones.ts";
+import { lit, obscuring, thornKeys, type ZoneKind } from "./zones.ts";
 
 // A map's codes as squares, or nothing for a map that marks none, so fights on older maps stay as they were.
 export function terrainOf(map: Battlemap): Terrain | null {
@@ -94,7 +94,7 @@ export function lightAt(
   state: DndState,
 ): "bright" | "dim" | "dark" {
   const terrain = state.combat?.terrain;
-  if (!terrain || !square) return "bright";
+  if (!terrain || !square || lit(square, state)) return "bright";
   const key = squareKey(square);
   if (setOf(terrain.dark).has(key)) return "dark";
   if (setOf(terrain.dim).has(key)) return "dim";
