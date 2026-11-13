@@ -1192,6 +1192,30 @@ function parseBlock(
       multiattack = count ?? 1;
       continue;
     }
+    // "casts Counterspell or Shield in response to the spell's trigger": the spells' own triggers say when.
+    const reactionDays = /\((\d+)\/Day\b/.exec(label)?.[1];
+    const reactions =
+      section === "reactions" && spells
+        ? castActions(
+            text,
+            {
+              cost: ["reaction"],
+              ...(reactionDays
+                ? {
+                    perDay: Number(reactionDays),
+                    resource: `day:${slugOf(label.replace(/\s*\(.*$/, ""))}`,
+                  }
+                : {}),
+            },
+            casterFor(text),
+            spells,
+            notes,
+          )
+        : [];
+    if (reactions.length > 0) {
+      actions.push(...reactions);
+      continue;
+    }
     if (section !== "actions" && section !== "bonus actions") {
       notes.push(`not automated: ${label}`);
       continue;

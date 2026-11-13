@@ -1007,6 +1007,7 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "zone" ||
       effect.kind === "polymorph" ||
       effect.kind === "summon" ||
+      effect.kind === "counter" ||
       effect.kind === "extraAction" ||
       effect.kind === "reduceDamage" ||
       effect.kind === "teleport" ||

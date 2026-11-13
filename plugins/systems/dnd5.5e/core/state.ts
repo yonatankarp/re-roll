@@ -32,6 +32,7 @@ export const FRAME_KINDS = [
   "checkCombatEnd",
   "companionsSpend",
   "concentrationSave",
+  "counterspell",
   "endTurn",
   "escape",
   "finishMove",

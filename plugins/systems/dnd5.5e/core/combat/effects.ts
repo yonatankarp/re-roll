@@ -434,6 +434,7 @@ export function leafEvents(
       case "teleport":
       case "zone":
       case "summon":
+      case "counter":
         // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit, and
         // a teleport's square by its own decision and a zone once for the whole spell (resolveAction).
         break;

@@ -223,9 +223,11 @@ function spellAction(
     /\blevel (\d) version\b/i.exec(aside)?.[1] ?? spell.level,
   );
   const cost = activation.cost.filter((item) => item !== "slot");
+  // A reaction spell, such as Shield or Counterspell, is kept only from a Reactions entry that casts it.
+  const reacts = use.cost.includes("reaction");
   if (
-    activation.trigger ||
-    cost.includes("reaction") ||
+    (activation.trigger !== undefined || cost.includes("reaction")) !==
+      reacts ||
     !doesSomething(activation.resolution)
   ) {
     return null;
@@ -325,7 +327,7 @@ export function spellcastingActions(
 // "The priest casts Bless, Dispel Magic, or Healing Word, using …": each spell is an option of the same action.
 export const castItems = (text: string): string[] =>
   namesIn(
-    /\bcasts (.+?)(?:,? (?:using|requiring|with|on|targeting|twice|at)\b|\.(?:\s|$)|$)/.exec(
+    /\bcasts (.+?)(?:,? (?:using|requiring|with|on|targeting|twice|at|in response)\b|\.(?:\s|$)|$)/.exec(
       text,
     )?.[1] ?? "",
   );

@@ -295,6 +295,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     halve: z.boolean().default(false),
     amount: AmountSchema.optional(),
   }),
+  // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts).
+  z.strictObject({ kind: z.literal("counter") }),
   // Creatures that join the fight on the caster's side, using a companion stat block's `play` numbers at the
   // slot's level, in open squares within `range` feet nearest the foes. They take their turns right after the
   // caster's, and vanish at 0 Hit Points or when the spell ends. `dc` is the caster's spell save DC, which their
@@ -398,6 +400,8 @@ export const ActivationSchema = z.strictObject({
     .strictObject({
       hitByAttack: z.literal(true).optional(),
       targetedBySpell: z.string().optional(),
+      // Taken when a foe it can see within the activation's range casts a spell, as with Counterspell.
+      spellCast: z.literal(true).optional(),
       // Taken right after hitting with a weapon, as with the smite spells.
       afterHit: z.enum(["weapon", "meleeWeapon"]).optional(),
       // Taken for another creature within 5 feet that a creature the bearer can see attacks, before the roll, or hits,
