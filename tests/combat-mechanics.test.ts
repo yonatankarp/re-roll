@@ -3525,6 +3525,78 @@ describe("the difficulty setting", () => {
     expect(frail).toBeLessThan(healthy);
   });
 
+  it("counts the Advantage a fight's opening positions don't show yet", async () => {
+    const bite = (onHit: readonly unknown[]) => ({
+      name: "Bite",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "weapon", flatBonus: 0 },
+          damage: [{ amount: { dice: "2d6" }, type: "piercing" }],
+          onHit,
+        },
+      },
+    });
+    const knock = [
+      { kind: "applyCondition", condition: "prone", duration: { minutes: 1 } },
+    ];
+    const run = arenaRun(await base(), {
+      "srd52:monster/biter": dummy("srd52:monster/biter", {
+        actions: [bite([])],
+        multiattack: 2,
+      }),
+      "srd52:monster/tripper": dummy("srd52:monster/tripper", {
+        actions: [bite(knock)],
+        multiattack: 2,
+      }),
+      "srd52:monster/packer": dummy("srd52:monster/packer", {
+        actions: [bite([])],
+        multiattack: 2,
+        passives: [{ kind: "packTactics" }],
+      }),
+    });
+    // Everyone starts apart, as a fight does.
+    const at = (who: Actor, x: number): Actor => ({
+      ...who,
+      position: { x, y: 0 },
+    });
+    const party = at(hero(run), 0);
+    const threat = (
+      foe: string,
+      target = party,
+      ...others: Actor[]
+    ): number => {
+      const actor = at(monster("m", foe), 6);
+      return makeJudge(
+        contextOf(run, fight(target, actor, ...others), HIGH),
+        target,
+      ).threat(actor);
+    };
+    const plain = threat("srd52:monster/biter");
+    const prone: Actor = {
+      ...party,
+      activeEffects: [
+        {
+          sourceId: "x",
+          casterId: "m",
+          ends: "spellDuration",
+          modifier: { kind: "condition", condition: "prone" },
+        },
+      ],
+    };
+    // A bite is made from beside its target, so a prone one is easier to hit, not harder.
+    expect(threat("srd52:monster/biter", prone)).toBeGreaterThan(plain);
+    // The second bite counts the chance the first knocked the target down.
+    expect(threat("srd52:monster/tripper")).toBeGreaterThan(plain);
+    // A pack's ally will close in beside the target.
+    expect(threat("srd52:monster/packer")).toBeCloseTo(plain);
+    expect(
+      threat("srd52:monster/packer", party, at(monster("friend"), 9)),
+    ).toBeGreaterThan(plain);
+  });
+
   it("takes the share the fight started with", async () => {
     const run = arenaRun(await base(), {});
     const party = hero(run);

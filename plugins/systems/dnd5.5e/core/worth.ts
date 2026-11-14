@@ -22,7 +22,8 @@ import {
 import type { Condition, LeafEffect, Modifier, Resolution } from "./schemas.ts";
 import { finalDamage } from "./rules.ts";
 import type { Square } from "./grid.ts";
-import { dodging } from "./tactics.ts";
+import { dodging, grappledAwayFrom } from "./tactics.ts";
+import { grapplesOn } from "./combat/grapple.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX } from "./combat/ids.ts";
 import { DAMAGE_TO_PARTY, damageToParty } from "./combat/effects.ts";
@@ -30,7 +31,7 @@ import { cureFor, dispellable } from "./combat/dispel.ts";
 import { seesThrough } from "./sight.ts";
 import { formOf } from "./forms.ts";
 import { summonedActors } from "./combat/summon.ts";
-import { nextHitDie } from "./trait-rules.ts";
+import { nextHitDie, steadyShot } from "./trait-rules.ts";
 import {
   aimsFor,
   allies,
@@ -128,15 +129,36 @@ export function makeJudge(context: Context, side: Actor): Judge {
   const stats = cached((actor) => deriveStats(actor, context));
   const responses = cached((actor) => damageResponses(actor, context));
 
-  // Advantage (1), Disadvantage (-1) or neither on an attack, as attack.ts rolls it, leaving out sight.
+  // Advantage (1), Disadvantage (-1) or neither on an attack, as attack.ts rolls it, leaving out sight and
+  // reactions. The fight's opening positions don't say who will stand where: a melee attack with 5-foot reach
+  // is made from beside its target, and a pack's allies close in on the target too.
   const attackEdge = (
     attacker: Actor,
     target: Actor,
     action: KnownAction,
   ): number => {
-    const close = within5(attacker, target);
+    const own = stats(attacker);
+    const reach = meleeReach(action);
+    const close = within5(attacker, target) || (reach !== null && reach <= 5);
+    const { resolution } = action.activation;
+    const steady = steadyShot(
+      own,
+      action.id,
+      resolution.kind === "attack" ? resolution.attack.type : "weapon",
+    );
+    // shortcut: any ally able to act counts as beside the target, as a pack closes in; a fight where the pack
+    // hangs back is overrated.
+    const packed =
+      hasPassive(own, "packTactics") &&
+      allies(state, attacker).some(
+        (item) =>
+          item.id !== attacker.id &&
+          !isDown(item) &&
+          !hasCondition(item, ...INCAPACITATING),
+      );
     const crowded =
-      meleeReach(action) === null &&
+      reach === null &&
+      !steady.inMelee &&
       enemies(state, attacker).some(
         (item) =>
           !isDown(item) &&
@@ -144,7 +166,8 @@ export function makeJudge(context: Context, side: Actor): Judge {
           within5(item, attacker),
       );
     const up =
-      hasFlag(attacker, "advantage", "attacks", stats(attacker)) ||
+      packed ||
+      hasFlag(attacker, "advantage", "attacks", own) ||
       hasFlag(target, "advantage", "attacksAgainst", stats(target)) ||
       invisibleTo(attacker, target) ||
       hasCondition(
@@ -156,19 +179,22 @@ export function makeJudge(context: Context, side: Actor): Judge {
         "stunned",
         "unconscious",
       ) ||
-      (hasCondition(target, "prone") && close);
+      (hasCondition(target, "prone") && close) ||
+      (hasPassive(own, "grappledAdvantage") &&
+        grapplesOn(target).some(({ casterId }) => casterId === attacker.id));
     const down =
       crowded ||
       dodging(target) ||
+      grappledAwayFrom(attacker, target) ||
       (hasCondition(target, "prone") && !close) ||
-      hasFlag(attacker, "disadvantage", "attacks", stats(attacker)) ||
+      hasFlag(attacker, "disadvantage", "attacks", own) ||
       hasFlag(
         target,
         "disadvantage",
         "attacksAgainst",
         stats(target),
         undefined,
-        stats(attacker).creatureType,
+        own.creatureType,
       ) ||
       hasCondition(
         attacker,
@@ -382,13 +408,64 @@ export function makeJudge(context: Context, side: Actor): Judge {
     );
   };
 
+  // A routine's attacks on one target in turn. After a hit that knocks it prone, the attacks that follow
+  // count the chance it lies there, as an ogre's second blow does.
+  const routineDamage = (
+    attacker: Actor,
+    target: Actor,
+    steps: readonly KnownAction[],
+    sure: boolean,
+  ): number => {
+    const floored =
+      hasCondition(target, "prone") || immuneToCondition(stats(target), "prone")
+        ? null
+        : {
+            ...target,
+            activeEffects: [
+              ...target.activeEffects,
+              {
+                sourceId: "worth:prone",
+                ends: "spellDuration" as const,
+                casterId: attacker.id,
+                modifier: {
+                  kind: "condition" as const,
+                  condition: "prone" as const,
+                },
+              },
+            ],
+          };
+    let down = 0; // the chance an earlier step left it prone
+    let total = 0;
+    for (const step of steps) {
+      const upright = expectedDamage(attacker, target, step, sure);
+      total +=
+        floored && down > 0
+          ? (1 - down) * upright +
+            down * expectedDamage(attacker, floored, step, sure)
+          : upright;
+      const { resolution } = step.activation;
+      if (
+        floored &&
+        resolution.kind === "attack" &&
+        resolution.onHit.some(
+          (effect) =>
+            effect.kind === "applyCondition" && effect.condition === "prone",
+        )
+      ) {
+        const hit = sure ? 1 : hitChance(attacker, target, step, resolution);
+        down += (1 - down) * hit;
+      }
+    }
+    return total;
+  };
+
   const roundDamage = (actor: Actor, free: boolean, sure = false): number => {
     const own = stats(actor);
     const foes = standing(enemies(state, actor)).slice(0, 6);
     if (foes.length === 0) return 0;
-    const against = (action: KnownAction): number =>
+    const against = (steps: readonly KnownAction[]): number =>
       foes.reduce(
-        (total, foe) => total + expectedDamage(actor, foe, action, sure),
+        (total, foe) => total + routineDamage(actor, foe, steps, sure),
         0,
       ) / foes.length;
     const byId = new Map(own.actions.map((item) => [item.id, item]));
@@ -408,10 +485,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
       );
       if (!affordable) continue;
       const routine = attackRoutine(action, actor, own);
-      const each = routine.reduce((total, id) => {
-        const step = byId.get(id) ?? action;
-        return total + against(step);
-      }, 0);
+      const each = against(routine.map((id) => byId.get(id) ?? action));
       const spread =
         "area" in targeting
           ? Math.min(2, foes.length)
