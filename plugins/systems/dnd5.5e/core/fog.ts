@@ -161,28 +161,44 @@ export interface PartySight {
 }
 
 const sights = new WeakMap<DndState, PartySight>();
-// What the party sees right now. With no fog, everything.
+// What the party sees right now, whether or not the fight has fog.
 export function partySight(state: DndState, access: ContentAccess): PartySight {
   const known = sights.get(state);
   if (known) return known;
+  const viewers = partyViewers(state);
   const squares = new Set<string>();
-  for (const viewer of partyViewers(state)) {
+  for (const viewer of viewers) {
     if (!viewer.position) continue;
     for (const key of seenFrom(viewer, viewer.position, state, access)) {
       squares.add(key);
     }
   }
-  // A foe that has hidden isn't seen, even where its square is.
-  const foes = new Set(
-    Object.values(state.actors).flatMap((actor) =>
-      actor.side !== "party" &&
-      actor.position &&
-      squares.has(squareKey(actor.position)) &&
-      !hasTactic(actor, "hidden")
-        ? [actor.id]
-        : [],
-    ),
-  );
+  // The search outward can miss a square the sight rules' own line reaches, such as one along the map's edge,
+  // so a foe is also in view when a line runs between it and a party member either way: what can aim at the
+  // party, or be aimed at, is seen.
+  const walls = new Set(state.combat?.walls);
+  const inView = (at: Square): boolean =>
+    viewers.some(
+      (viewer) =>
+        viewer.position !== null &&
+        (coverBetween(viewer.position, at, walls, NO_COVER, NOBODY) !==
+          "total" ||
+          coverBetween(at, viewer.position, walls, NO_COVER, NOBODY) !==
+            "total") &&
+        seeing(viewer, at, state, access, darkvisionFor(viewer, access)) !==
+          "none",
+    );
+  const foes = new Set<string>();
+  for (const actor of Object.values(state.actors)) {
+    // A foe that has hidden isn't seen, even where its square is.
+    if (actor.side === "party" || !actor.position) continue;
+    if (hasTactic(actor, "hidden")) continue;
+    const key = squareKey(actor.position);
+    if (squares.has(key) || inView(actor.position)) {
+      foes.add(actor.id);
+      squares.add(key);
+    }
+  }
   const sight = { squares, foes };
   sights.set(state, sight);
   return sight;
