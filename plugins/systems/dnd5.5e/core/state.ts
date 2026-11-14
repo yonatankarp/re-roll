@@ -260,6 +260,9 @@ export const StateSchema = z.strictObject({
       map: FightMapSchema.optional(),
       loot: LootSchema.optional(), // found if the party wins
       lair: LairSchema.optional(),
+      // The share of damage the party takes this fight, set as it starts. Missing in older saves, which
+      // played at the difficulty's own share.
+      damageToParty: z.number().optional(),
     })
     .nullable(),
 });
@@ -304,6 +307,7 @@ const CombatStartedSchema = z.strictObject({
   loot: LootSchema.optional(),
   surprised: SurpriseSchema.optional(),
   lair: LairSchema.optional(),
+  damageToParty: z.number().optional(),
 });
 const TreasureFoundSchema = z.strictObject({
   actor: z.string(), // who carries the items
@@ -849,6 +853,9 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           ...(data.map ? { map: data.map } : {}),
           ...(data.loot ? { loot: data.loot } : {}),
           ...(data.lair ? { lair: data.lair } : {}),
+          ...(data.damageToParty === undefined
+            ? {}
+            : { damageToParty: data.damageToParty }),
         },
       };
     }

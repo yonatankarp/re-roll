@@ -53,6 +53,11 @@ import {
   rollBonus,
 } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { thornHits, thornKeys } from "../plugins/systems/dnd5.5e/core/zones.ts";
+import {
+  damageToPartyFor,
+  makeJudge,
+  MOST_PRESSURE,
+} from "../plugins/systems/dnd5.5e/core/worth.ts";
 import { speedOf } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import {
   BONUS_DASH,
@@ -2144,7 +2149,11 @@ describe("class feature building blocks", () => {
         ],
       }),
     });
-    const sneaky = hero(run, { features: ["srd52:feature/sneak"] });
+    // Sneak Attack wants a Finesse or Ranged weapon.
+    const sneaky = hero(run, {
+      features: ["srd52:feature/sneak"],
+      inventory: ["srd52:item/shortsword"],
+    });
     const sneak = settle(
       run,
       fight(sneaky, monster("a")),
@@ -2153,7 +2162,7 @@ describe("class feature building blocks", () => {
           kind: `${NS}:applyHit`,
           payload: {
             attacker: PLAYER_ACTOR,
-            actionId: "weapon:srd52:item/longsword",
+            actionId: "weapon:srd52:item/shortsword",
             target: "a",
             critical: false,
             hadAdvantage: true,
@@ -2164,7 +2173,7 @@ describe("class feature building blocks", () => {
       ],
       HIGH,
     );
-    expect(damageOf(sneak.events, "a")).toEqual([7 + 18]); // 1d8 - 1 Str, plus 3d6
+    expect(damageOf(sneak.events, "a")).toEqual([8 + 18]); // 1d6 + 2 Dex, plus 3d6
     const puncher = hero(run, { features: ["srd52:feature/fist"] });
     const punch = settle(
       run,
@@ -3374,6 +3383,84 @@ describe("the difficulty setting", () => {
     expect(taken("normal", party)).toEqual([10]);
     expect(taken("hard", party)).toEqual([15]);
     expect(taken("story", foe)).toEqual([10]); // monsters take what the dice say
+  });
+
+  it("cuts the party's share in a fight far beyond it just enough, and leaves a fair fight alone", async () => {
+    const brute = "srd52:monster/brute";
+    const run = arenaRun(await base(), {
+      [brute]: dummy(brute, {
+        actions: [
+          {
+            name: "Maul",
+            activation: {
+              cost: ["action"],
+              targeting: { creatures: 1, range: 5, side: "enemy" },
+              resolution: {
+                kind: "attack",
+                attack: { type: "weapon", flatBonus: 6 },
+                damage: [{ amount: { dice: "4d12" }, type: "bludgeoning" }],
+              },
+            },
+          },
+        ],
+      }),
+    });
+    const party = hero(run);
+    const share = (state: DndState): number =>
+      damageToPartyFor(contextOf(run, state, HIGH));
+    expect(share(fight(party, monster("a", undefined, 5)))).toBe(1);
+    expect(
+      share({
+        ...fight(party, monster("a", undefined, 5)),
+        difficulty: "story",
+      }),
+    ).toBeCloseTo(1 / 3);
+    // One hero against a brute would lose; at the lowered share the fight is as hard as Normal allows.
+    const hopeless = fight(party, monster("a", brute, 60));
+    const lowered = share(hopeless);
+    expect(lowered).toBeLessThan(1);
+    const combat = hopeless.combat && {
+      ...hopeless.combat,
+      damageToParty: lowered,
+    };
+    const judged = makeJudge(
+      contextOf(run, { ...hopeless, combat }, HIGH),
+      party,
+    );
+    expect(judged.pressure).toBeCloseTo(MOST_PRESSURE.normal);
+    // The run ends with the player, so a player near 0 HP beside a healthy ally lowers it further.
+    const ally = hero(run, { id: "ally" });
+    const healthy = share(fight(party, ally, monster("a", brute, 60)));
+    const frail = share(
+      fight({ ...party, hp: 5 }, { ...ally, hp: 195 }, monster("a", brute, 60)),
+    );
+    expect(frail).toBeLessThan(healthy);
+  });
+
+  it("takes the share the fight started with", async () => {
+    const run = arenaRun(await base(), {});
+    const party = hero(run);
+    const foe = monster("a");
+    const started = applyDndEvent(
+      { actors: { [party.id]: party }, combat: null },
+      dndEvent(`${NS}:combatStarted`, {
+        encounter: "arena",
+        monsters: [foe],
+        order: [party.id, foe.id],
+        damageToParty: 0.5,
+      }),
+    );
+    expect(started.combat?.damageToParty).toBe(0.5);
+    const taken = damageEvents(
+      party,
+      10,
+      "slashing",
+      false,
+      contextOf(run, started, HIGH),
+    );
+    expect(
+      taken.map((event) => ("payload" in event ? event.payload.amount : 0)),
+    ).toEqual([5]);
   });
 
   it("keeps the difficulty through the start and end of a fight", async () => {

@@ -416,18 +416,20 @@ export const dnd55e = defineSystem<DndState>({
           id: "story",
           label: "Story",
           detail:
-            "Your party takes a third of the damage, and you can undo your last choice. For enjoying the story.",
+            "Your party takes a third of the damage, less in a fight far beyond it, and you can undo your last choice. For enjoying the story.",
           undo: true,
         },
         {
           id: "normal",
           label: "Normal",
-          detail: "The book as written.",
+          detail:
+            "The book's monsters as written. A fight far beyond your party hits it softer, so it stays winnable.",
         },
         {
           id: "hard",
           label: "Hard",
-          detail: "Your party takes half as much damage again.",
+          detail:
+            "Your party takes half as much damage again, softened only in a fight it couldn't hope to win.",
         },
       ],
     },

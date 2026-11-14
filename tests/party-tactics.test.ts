@@ -290,6 +290,66 @@ describe("how the party fights", () => {
   });
 });
 
+describe("how the party closes in on a map", () => {
+  // The hero at A1, the foe five squares away on open ground.
+  const onMap = (hero: Actor, foe: Actor): DndState => {
+    const state = fight(
+      { ...hero, position: { x: 0, y: 0 } },
+      { ...foe, position: { x: 5, y: 0 } },
+    );
+    return {
+      ...state,
+      combat: state.combat && {
+        ...state.combat,
+        grid: { width: 10, height: 10 },
+      },
+    };
+  };
+
+  it("walks up to a foe its heavy blow can't reach yet, rather than casting a cantrip from where it stands", async () => {
+    const maul = "test:feature/maul";
+    const run = await arena({
+      [maul]: {
+        id: maul,
+        name: "Maul",
+        text: "Maul",
+        automation: "full",
+        activations: [club("4d12").activation],
+      },
+    });
+    const fighter = hero(run, { spells: ["ray-of-frost"], features: [maul] });
+    const state = onMap(fighter, monster("a", "brute", 40));
+    expect(choose(run, state)).toBe("move");
+    const square = choosePolicy(
+      {
+        id: `dnd5.5e:moveTo:${PLAYER_ACTOR}:0`,
+        actor: PLAYER_ACTOR,
+        prompt: "Where?",
+        options: [{ id: "stay", label: "Stay" }],
+        resume: { kind: "dnd5.5e:move", payload: { actor: PLAYER_ACTOR } },
+      },
+      {
+        state,
+        dice: createDice(rngFromSeed("party-tactics")),
+        content: run.content,
+        contentIds: run.contentIds,
+      },
+    );
+    expect(square).toBe("4,0");
+  });
+
+  it("stays put when its cantrip from here is worth more than the walk", async () => {
+    const run = await arena();
+    const caster = hero(run, {
+      spells: ["fire-bolt"],
+      inventory: ["srd52:item/mace"],
+    });
+    expect(choose(run, onMap(caster, monster("a", "brute", 40)))).toContain(
+      "fire-bolt",
+    );
+  });
+});
+
 describe("how the party protects itself and spends free boosts", () => {
   const decide = (run: RunContext, state: DndState): string => {
     const decision = run.system.nextDecision(state, run);
