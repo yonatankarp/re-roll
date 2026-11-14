@@ -930,7 +930,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
 // fight written for a bigger party, has the party take less damage, just enough to bring it down to this;
 // gentler fights keep the difficulty's own share.
 // Measured with the bot on 2026-11-14: Normal at 0.7 puts the hardest book adventures near 30-45% defeats.
-export const MOST_PRESSURE = { story: 0.3, normal: 0.7, hard: 1 } as const;
+export const MOST_PRESSURE = { story: 0.2, normal: 0.7, hard: 1 } as const;
 
 // The share of damage the party takes in the fight that's starting, with every combatant in `context.state`.
 export function damageToPartyFor(context: Context): number {
