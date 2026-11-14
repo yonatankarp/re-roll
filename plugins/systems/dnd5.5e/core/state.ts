@@ -246,6 +246,8 @@ export const StateSchema = z.strictObject({
   // Hours since the last Long Rest began. Missing until the first, so the first is always allowed.
   sinceLongRest: z.number().int().optional(),
   surprise: SurpriseSchema.optional(), // set by the story for the next fight, such as after a Stealth check
+  // What the party has seen of each battle map picture, as "x,y" cells of its grid (fog.ts), kept between fights.
+  revealed: z.record(z.string(), z.array(z.string())).optional(),
   combat: z
     .strictObject({
       encounter: z.string(),
@@ -263,6 +265,8 @@ export const StateSchema = z.strictObject({
       // The share of damage the party takes this fight, set as it starts. Missing in older saves, which
       // played at the difficulty's own share.
       damageToParty: z.number().optional(),
+      // The map is covered until the party sees it (fog.ts). Missing in older saves, whose fights show all of it.
+      fog: z.literal(true).optional(),
     })
     .nullable(),
 });
@@ -308,6 +312,7 @@ const CombatStartedSchema = z.strictObject({
   surprised: SurpriseSchema.optional(),
   lair: LairSchema.optional(),
   damageToParty: z.number().optional(),
+  fog: z.literal(true).optional(),
 });
 const TreasureFoundSchema = z.strictObject({
   actor: z.string(), // who carries the items
@@ -338,6 +343,11 @@ const MovedSchema = z.strictObject({
   feet: z.number().int(),
 });
 const ActorOnlySchema = z.strictObject({ actor: z.string() });
+// Cells of a battle map picture the party has just seen for the first time, keyed as fog.ts keys them.
+const SquaresSeenSchema = z.strictObject({
+  map: z.string(),
+  cells: z.array(z.string()),
+});
 const BudgetSpentSchema = z.strictObject({
   actor: z.string(),
   kind: z.enum(["action", "bonusAction", "reaction"]),
@@ -454,6 +464,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:combatEnded`]: z.strictObject({}),
   [`${NS}:turnAdvanced`]: z.strictObject({}),
   [`${NS}:moved`]: MovedSchema,
+  [`${NS}:squaresSeen`]: SquaresSeenSchema,
   [`${NS}:budgetSpent`]: BudgetSpentSchema,
   [`${NS}:actionRegained`]: ActorOnlySchema,
   [`${NS}:resourceSpent`]: ResourceSpentSchema,
@@ -856,11 +867,23 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           ...(data.damageToParty === undefined
             ? {}
             : { damageToParty: data.damageToParty }),
+          ...(data.fog ? { fog: true as const } : {}),
         },
       };
     }
     case `${NS}:combatEnded`:
       return endCombat(state);
+    case `${NS}:squaresSeen`: {
+      const data = payload(SquaresSeenSchema, event);
+      const seen = state.revealed ?? {};
+      return {
+        ...state,
+        revealed: {
+          ...seen,
+          [data.map]: [...(seen[data.map] ?? []), ...data.cells],
+        },
+      };
+    }
     case `${NS}:summoned`: {
       const data = payload(SummonedSchema, event);
       const { combat } = state;

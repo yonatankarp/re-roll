@@ -1,6 +1,13 @@
 import { type Battlemap, type Loot, MonsterSchema } from "../schemas.ts";
 import { type EncounterOptions, type SystemResult } from "#sdk";
-import { type Actor, dndEvent, freshActor, isDead, NS } from "../state.ts";
+import {
+  type Actor,
+  applyDndEvent,
+  dndEvent,
+  freshActor,
+  isDead,
+  NS,
+} from "../state.ts";
 import { deriveStats, lookup } from "../stats.ts";
 import { rollD20 } from "../rules.ts";
 import { placeOnMap, placeSides, type Square, wallKeys } from "../grid.ts";
@@ -119,17 +126,39 @@ export function startCombat(
         monsters.map((actor) => actor.id),
       );
 
-  // Weighed as the fight starts, with everyone in it, and kept: a fight's share never changes once begun.
+  const started = {
+    encounter: encounter.id,
+    monsters,
+    order,
+    grid,
+    positions,
+    ...(battlemap
+      ? {
+          walls: [...walls],
+          ...(terrain ? { terrain } : {}),
+          map: {
+            image: battlemap.image,
+            imageWidth: battlemap.imageWidth,
+            imageHeight: battlemap.imageHeight,
+            crop: battlemap.crop,
+          },
+          fog: true as const,
+        }
+      : {}),
+    ...(canFlee ? { canFlee } : {}),
+    ...(defeatContinues ? { defeatContinues } : {}),
+    ...(encounter.loot ? { loot: encounter.loot } : {}),
+    ...(surprised ? { surprised } : {}),
+    ...(lair ? { lair } : {}),
+  };
+  // Weighed as the fight starts, with everyone in it the party can see, and kept: a fight's share never
+  // changes once begun.
   const share = damageToPartyFor({
     ...context,
-    state: {
-      ...context.state,
-      actors: {
-        ...context.state.actors,
-        ...Object.fromEntries(monsters.map((item) => [item.id, item])),
-      },
-      combat: { encounter: encounter.id, order, index: 0, round: 1 },
-    },
+    state: applyDndEvent(
+      context.state,
+      dndEvent(`${NS}:combatStarted`, started),
+    ),
   });
   const lowered = share < DAMAGE_TO_PARTY[context.state.difficulty ?? "normal"];
 
@@ -140,28 +169,7 @@ export function startCombat(
         ? [dndEvent(`${NS}:inspirationSpent`, { actor: rallier.id })]
         : []),
       dndEvent(`${NS}:combatStarted`, {
-        encounter: encounter.id,
-        monsters,
-        order,
-        grid,
-        positions,
-        ...(battlemap
-          ? {
-              walls: [...walls],
-              ...(terrain ? { terrain } : {}),
-              map: {
-                image: battlemap.image,
-                imageWidth: battlemap.imageWidth,
-                imageHeight: battlemap.imageHeight,
-                crop: battlemap.crop,
-              },
-            }
-          : {}),
-        ...(canFlee ? { canFlee } : {}),
-        ...(defeatContinues ? { defeatContinues } : {}),
-        ...(encounter.loot ? { loot: encounter.loot } : {}),
-        ...(surprised ? { surprised } : {}),
-        ...(lair ? { lair } : {}),
+        ...started,
         ...(lowered ? { damageToParty: share } : {}),
       }),
     ],

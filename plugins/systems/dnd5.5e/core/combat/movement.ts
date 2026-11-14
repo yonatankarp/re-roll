@@ -75,7 +75,7 @@ const walks = new WeakMap<
   Actor,
   WeakMap<DndState, ReadonlyMap<string, readonly Square[]>>
 >();
-function walksOf(
+export function walksOf(
   actor: Actor,
   state: DndState,
   access: ContentAccess,
