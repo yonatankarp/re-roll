@@ -1026,7 +1026,11 @@ function describe(
     "payload" in event && typeof event.payload.against === "string"
       ? event.payload.against
       : null;
-  if (about !== null && unseen(about) && (against === null || unseen(against)))
+  if (
+    about !== null &&
+    unseen(about) &&
+    state.actors[against ?? ""]?.side !== "party"
+  )
     return null;
   if (!("payload" in event)) {
     switch (event.kind) {
