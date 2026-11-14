@@ -1,5 +1,6 @@
 import {
   type ContentAccess,
+  type FrameDef,
   PLAYER_ACTOR,
   type SystemContext,
   contentKind,
@@ -123,6 +124,23 @@ import {
   freshActor,
 } from "./state.ts";
 import { checkBonus, deriveStats, lookup } from "./stats.ts";
+import { withReveal } from "./fog.ts";
+
+// Every step ends by revealing what the party sees once its events land, so the fog clears as it happens.
+function revealing(
+  frames: Readonly<Record<string, FrameDef<DndState>>>,
+): Record<string, FrameDef<DndState>> {
+  return Object.fromEntries(
+    Object.entries(frames).map(([kind, definition]) => [
+      kind,
+      {
+        ...definition,
+        run: (payload, context) =>
+          withReveal(definition.run(payload, context), context),
+      },
+    ]),
+  );
+}
 
 function buildReferences(pregen: z.infer<typeof PregenSchema>): string[] {
   return [
@@ -333,7 +351,7 @@ export const dnd55e = defineSystem<DndState>({
         state.actors[PLAYER_ACTOR]?.heroicInspiration ?? false,
     }),
   },
-  frames: {
+  frames: revealing({
     [`${NS}:characterChosen`]: frameHandler({
       schema: CharacterChosenPayload,
       run: ({ answer }, context: SystemContext<DndState>) => {
@@ -405,7 +423,7 @@ export const dnd55e = defineSystem<DndState>({
           ? {}
           : runAfterAction(payload, context),
     }),
-  },
+  }),
   settings: [
     {
       id: "difficulty",
@@ -504,7 +522,10 @@ export const dnd55e = defineSystem<DndState>({
     };
   },
   startEncounter: (encounter, context, options) =>
-    startCombat(EncounterSchema.parse(encounter), context, options),
+    withReveal(
+      startCombat(EncounterSchema.parse(encounter), context, options),
+      context,
+    ),
   applyEvent: applyDndEvent,
   nextDecision: (state, access) =>
     withTactics(nextDndDecision(state, access), state, access),

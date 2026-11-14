@@ -127,7 +127,8 @@ export function concentrationFrame(
 // Reports the damage, and whatever follows from it, as events.
 // The difficulty setting scales the damage the party takes, and only that, so the books' monsters keep
 // their numbers: Story takes a third of it, Hard adds half again. A fight far beyond the party takes less
-// still (worth.ts damageToPartyFor), fixed when it starts.
+// still (worth.ts damageToPartyFor), set when it starts and only lowered after, as the party sees more of it
+// through the fog (fog.ts).
 export const DAMAGE_TO_PARTY = { story: 1 / 3, normal: 1, hard: 1.5 } as const;
 
 export function damageToParty(state: DndState): number {

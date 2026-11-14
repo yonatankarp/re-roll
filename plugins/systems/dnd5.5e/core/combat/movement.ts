@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { knownFoes } from "../fog.ts";
 import {
   type Actor,
   dndEvent,
@@ -75,7 +76,7 @@ const walks = new WeakMap<
   Actor,
   WeakMap<DndState, ReadonlyMap<string, readonly Square[]>>
 >();
-function walksOf(
+export function walksOf(
   actor: Actor,
   state: DndState,
   access: ContentAccess,
@@ -259,7 +260,7 @@ export function teleportSquares(
     ),
   );
   const noCover = { half: new Set<string>(), threeQuarters: new Set<string>() };
-  const foes = enemies(state, actor).filter((item) => !isDown(item));
+  const foes = knownFoes(state, actor, access).filter((item) => !isDown(item));
   const nearest = (square: Square): number =>
     Math.min(...foes.map((foe) => distanceFeet(square, foe.position)));
   const squares: Square[] = [];

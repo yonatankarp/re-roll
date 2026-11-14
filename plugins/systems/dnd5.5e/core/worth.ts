@@ -19,6 +19,7 @@ import {
   saveBonus,
   type Stats,
 } from "./stats.ts";
+import { knownFoes } from "./fog.ts";
 import type { Condition, LeafEffect, Modifier, Resolution } from "./schemas.ts";
 import { finalDamage } from "./rules.ts";
 import type { Square } from "./grid.ts";
@@ -39,7 +40,6 @@ import {
   canAfford,
   carriesExtraDice,
   type Context,
-  enemies,
   exemptFrom,
   findAction,
   hasFlag,
@@ -159,7 +159,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
     const crowded =
       reach === null &&
       !steady.inMelee &&
-      enemies(state, attacker).some(
+      knownFoes(state, attacker, context).some(
         (item) =>
           !isDown(item) &&
           !hasCondition(item, ...INCAPACITATING) &&
@@ -461,7 +461,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
 
   const roundDamage = (actor: Actor, free: boolean, sure = false): number => {
     const own = stats(actor);
-    const foes = standing(enemies(state, actor)).slice(0, 6);
+    const foes = standing(knownFoes(state, actor, context)).slice(0, 6);
     if (foes.length === 0) return 0;
     const against = (steps: readonly KnownAction[]): number =>
       foes.reduce(
@@ -504,7 +504,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
   const hardestRound = cached((actor) => roundDamage(actor, false, true));
 
   const party = standing(allies(state, side));
-  const foes = standing(enemies(state, side));
+  const foes = standing(knownFoes(state, side, context));
   const sum = (list: readonly Actor[], of: (actor: Actor) => number): number =>
     list.reduce((total, item) => total + of(item), 0);
   const partyDamage = Math.max(1, sum(party, threat));
@@ -956,7 +956,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
     } else if (targetId === ALL && "area" in targeting) {
       const side =
         targeting.side === "enemy"
-          ? enemies(state, actor)
+          ? knownFoes(state, actor, context)
           : allies(state, actor);
       gained = side.reduce(
         (total, item) =>

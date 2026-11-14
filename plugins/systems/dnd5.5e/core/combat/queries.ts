@@ -1,4 +1,5 @@
 import { type ContentAccess, type SystemContext, type SystemEvent } from "#sdk";
+import { knownFoes, knows } from "../fog.ts";
 import {
   type Actor,
   dndEvent,
@@ -349,7 +350,7 @@ export function inReach(
   const charmers = charmersOf(actor);
   return (
     targeting.side === "enemy"
-      ? enemies(state, actor).filter(
+      ? knownFoes(state, actor, access).filter(
           (item) => !isDown(item) && !charmers.has(item.id),
         )
       : allies(state, actor)
@@ -462,7 +463,11 @@ export function aimsFor(
   const { targeting } = action.activation;
   const grid = context.state.combat?.grid;
   if (!("area" in targeting) || !grid || !actor.position) return [];
-  const pool = areaPool(targeting, context);
+  // Aimed by what the actor's side knows of: the party doesn't aim at foes in the fog, though the area still
+  // catches them.
+  const pool = areaPool(targeting, context).filter((item) =>
+    knows(context.state, actor, item, context),
+  );
   return aimSquares(targeting, actor.position, grid)
     .map((square) => {
       const caught = caughtBy(targeting, actor, square, pool);

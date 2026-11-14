@@ -11,6 +11,7 @@ import { placeCursor, wireInput } from "./board-input.ts";
 import {
   closeMenu,
   showCells,
+  showFog,
   showGround,
   showPickBar,
 } from "./board-overlays.ts";
@@ -65,6 +66,9 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   reachZone.hidden = true;
   const blast = el("div", "dnd-blast");
   const ground = el("div", "dnd-ground"); // difficult terrain, cover and shadow, faint under everything
+  const fog = document.createElement("canvas");
+  fog.className = "dnd-fog";
+  fog.setAttribute("aria-hidden", "true");
   const routeCost = el("div", "dnd-route-cost");
   routeCost.hidden = true;
   const menu = el("div", "dnd-menu");
@@ -73,7 +77,16 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   // While choosing targets or aiming an area: how many are chosen, Cast and Back.
   const pickBar = el("div", "dnd-pickbar");
   pickBar.hidden = true;
-  field.append(ground, reachZone, blast, cells, route, routeCost, cursorBox);
+  field.append(
+    ground,
+    fog,
+    reachZone,
+    blast,
+    cells,
+    route,
+    routeCost,
+    cursorBox,
+  );
   // The map's window: it scrolls when the map is zoomed in, while what's over the map stays put.
   const view = el("div", "dnd-view");
   view.append(field);
@@ -96,6 +109,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     reachZone,
     blast,
     ground,
+    fog,
     routeCost,
     menu,
     pickBar,
@@ -104,6 +118,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     decisionSeen: null,
     cursorHome: false,
     groundShown: "",
+    fogShown: "",
     tokens: new Map(),
     queue: [],
     latest: null,
@@ -174,6 +189,9 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     const state = parseState(update.state);
     const actors = state.actors;
     if (settle) ctx.grid = state.combat?.grid ?? null;
+    // shortcut: while cues play, the fog already shows what the party sees once they end, so a fight never
+    // opens on the whole map; fade it in step with each move if that reads as a spoiler.
+    showFog(ctx, extraOf(update).fog ?? null, state.combat?.grid ?? null);
     const present = new Set<string>();
     const vitals = extraOf(update).vitals ?? {};
     for (const shown of update.combat?.combatants ?? []) {

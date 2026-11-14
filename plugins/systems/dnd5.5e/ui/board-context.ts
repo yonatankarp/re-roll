@@ -45,6 +45,7 @@ export interface BoardDom {
   readonly reachZone: HTMLElement;
   readonly blast: HTMLElement;
   readonly ground: HTMLElement; // difficult terrain, cover and shadow, faint under everything
+  readonly fog: HTMLCanvasElement; // what the party hasn't seen, or doesn't see now, one pixel a square
   readonly routeCost: HTMLElement;
   readonly menu: HTMLElement;
   readonly pickBar: HTMLElement; // while choosing targets or aiming an area: how many are chosen, Cast and Back
@@ -57,6 +58,7 @@ export interface BoardState {
   decisionSeen: string | null;
   cursorHome: boolean; // the cursor goes back to the player once the board settles
   groundShown: string;
+  fogShown: string;
   readonly tokens: Map<string, Token>;
   readonly queue: DndCue[];
   latest: BoardUpdate | null;

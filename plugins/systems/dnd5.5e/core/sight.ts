@@ -191,6 +191,7 @@ export function seeing(
   at: Square | null,
   state: DndState,
   access: ContentAccess,
+  darkvision?: number, // the viewer's, when already worked out
 ): "clear" | "dim" | "none" {
   // shortcut: a zone hides whatever is in it and blinds whoever stands in it, whichever way the line runs.
   const hidden = obscuring(at, state) ?? obscuring(viewer.position, state);
@@ -202,9 +203,8 @@ export function seeing(
   }
   const light = lightAt(at, state);
   if (light === "bright") return "clear";
-  const darkvision = darkvisionOf(viewer, access);
-  const inRange =
-    darkvision > 0 && distanceFeet(viewer.position, at) <= darkvision;
+  const feet = darkvision ?? darkvisionOf(viewer, access);
+  const inRange = feet > 0 && distanceFeet(viewer.position, at) <= feet;
   if (light === "dark") return inRange ? "dim" : "none";
   return inRange ? "clear" : "dim";
 }

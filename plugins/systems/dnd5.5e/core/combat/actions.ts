@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { knownFoes } from "../fog.ts";
 import {
   awaitDecision,
   type Frame,
@@ -47,7 +48,6 @@ import {
   canAfford,
   CHECK_END,
   type Context,
-  enemies,
   findAction,
   hasPassive,
   inReach,
@@ -103,7 +103,9 @@ export function runTakeAction(
   if (payload.answer === PASS) return { frames: [frame("endTurn", {})] };
   if (payload.answer === MOVE) {
     // Squares next to the nearest enemy come first, as the likeliest choice.
-    const foes = enemies(state, actor).filter((item) => !isDown(item));
+    const foes = knownFoes(state, actor, context).filter(
+      (item) => !isDown(item),
+    );
     const nearest = (square: Square): number =>
       Math.min(...foes.map((foe) => distanceFeet(square, foe.position)));
     const squares = [
