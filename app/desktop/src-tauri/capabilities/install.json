@@ -1,0 +1,10 @@
+{
+  "identifier": "install",
+  "description": "Installing content from a zip. The commands (main.rs) write only data files inside the content folder's adventures/, rules/, assets/ and library/, checking every path.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-content-install-begin",
+    "allow-content-install-file",
+    "allow-content-install-commit"
+  ]
+}

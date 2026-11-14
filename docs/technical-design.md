@@ -18,7 +18,7 @@ The engine contains no game rules and no adventure content. **Everything specifi
 
 **In scope:** the plugin system, and the D&D 5.5e system plugin.
 
-**Not in scope:** implementing other rule systems (the design must allow them, but only D&D is built now), multiplayer, a database, a plugin marketplace or remote installs, and live model calls during play. The live model may return later as an optional add-on.
+**Not in scope:** implementing other rule systems (the design must allow them, but only D&D is built now), multiplayer, a database, a central plugin marketplace, and live model calls during play. The desktop app's Store installs only from GitHub repos the player adds (see the README). The live model may return later as an optional add-on.
 
 **Assumptions to confirm**
 - **Platform:** TypeScript, with illustrated scenes and grid combat for D&D. Free roaming would add map-position state and change the UI, but the rest of the design would stand.
@@ -162,7 +162,7 @@ export interface ModelClient {
 }
 ```
 
-The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `books/` through a read-only endpoint on the dev server. A built desktop app has no checkout: it reads the shipped plugins from its bundled resources, and the player's own from a content folder in its app data, laid out like `books/` (see the README). Both keep saves in the webview's own storage for now, so the file scopes stay limited to the two content folders (section 9).
+The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `books/` through a read-only endpoint on the dev server. A built desktop app has no checkout: it reads the shipped plugins from its bundled resources, and the player's own from a content folder in its app data, laid out like `books/` (see the README). The fs plugin can only read the two content folders. The app's own commands do its writing: saves go to its app data, and **Install from a zip** unzips a plugin or a book into the content folder's `adventures/`, `rules/`, `assets/` and `library/`, with every path checked again in Rust (section 9).
 
 One exception to "only `engine/platform` touches the network": the narration worker in `engine/shell` downloads the Kokoro-82M model from Hugging Face on first use, and the Tauri CSP allows only that host (section 7.2).
 

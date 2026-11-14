@@ -1,0 +1,11 @@
+{
+  "identifier": "store",
+  "description": "The Store: downloading a GitHub repo's store release, and keeping a token for a private repo in the OS keychain. The commands (main.rs) build every URL from a repo name and a store file name, and never hand a token back to the page.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-store-fetch",
+    "allow-store-token-set",
+    "allow-store-token-forget",
+    "allow-store-token-has"
+  ]
+}

@@ -1,4 +1,4 @@
-import { isTauri } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   type SaveFiles,
@@ -12,11 +12,19 @@ import {
 import { openIndexedDbFiles } from "../../engine/platform/browser/indexeddb.ts";
 import { createTauriSaves } from "../../engine/platform/tauri/saves.ts";
 import {
+  describePlan,
+  installPlan,
+  planInstall,
+} from "../../engine/platform/tauri/install.ts";
+import {
   createTauriReader,
   openContentFolder,
   tauriImageUrl,
 } from "../../engine/platform/tauri/storage.ts";
 import { offerContentFolder } from "../../engine/shell/content-folder.ts";
+import { offerStore } from "../../engine/shell/store-screen.ts";
+import type { Storage } from "../../engine/kernel/storage.ts";
+import { scanPlugins } from "../../engine/run/loader.ts";
 import { createGame } from "../../engine/shell/session.ts";
 import { mountShell } from "../../engine/shell/shell.ts";
 import { mountDndBoard } from "../../plugins/systems/dnd5.5e/ui/board.ts";
@@ -56,7 +64,27 @@ function browserSaves(): SaveStore {
   }
 }
 
-if (isTauri()) offerContentFolder(openContentFolder);
+// A zip is installed into the content folder. The page reloads after a new copy of a plugin, or new
+// art or book text, since the game keeps what it read, such as the last adventure and its pictures.
+async function installZip(zip: Uint8Array): Promise<string> {
+  const catalog = await scanPlugins(createTauriReader(), ["plugins", "books"]);
+  const known = new Map(
+    [...catalog.plugins].map(([id, plugin]) => [id, plugin.root]),
+  );
+  const plan = planInstall(zip, known);
+  const replaced = await installPlan(zip, plan);
+  const installed = describePlan(plan);
+  if (
+    replaced ||
+    plan.parts.some(({ folder }) => folder === "assets" || folder === "library")
+  ) {
+    window.location.reload();
+    return `Installed ${installed}. Reloading…`;
+  }
+  return `Installed ${installed}.`;
+}
+
+if (isTauri()) offerContentFolder(openContentFolder, installZip);
 
 // A promise nobody awaits, such as a board cue, says what broke rather than failing silently.
 window.addEventListener("unhandledrejection", (event) => {
@@ -103,14 +131,51 @@ async function webSaves(): Promise<SaveFiles> {
   return files;
 }
 
+// Kept with the saves, but not a .json file, so the save list passes it by.
+const STORE_STATE = "saves/store";
+
+// The Store's downloads and tokens go through the app's own commands (src-tauri/src/main.rs).
+function offerDesktopStore(storage: Storage): void {
+  offerStore({
+    fetch: async (repo, file) =>
+      new Uint8Array(await invoke<ArrayBuffer>("store_fetch", { repo, file })),
+    setToken: (repo, token) => invoke("store_token_set", { repo, token }),
+    forgetToken: (repo) => invoke("store_token_forget", { repo }),
+    hasToken: (repo) => invoke("store_token_has", { repo }),
+    readState: () => storage.read(STORE_STATE),
+    writeState: (text) => storage.replaceAtomically(STORE_STATE, text),
+    plugins: async () =>
+      new Set(
+        (
+          await scanPlugins(createTauriReader(), ["plugins", "books"])
+        ).plugins.keys(),
+      ),
+    install: async (zip) => {
+      const catalog = await scanPlugins(createTauriReader(), [
+        "plugins",
+        "books",
+      ]);
+      const known = new Map(
+        [...catalog.plugins].map(([id, plugin]) => [id, plugin.root]),
+      );
+      await installPlan(zip, planInstall(zip, known));
+    },
+    reload: () => {
+      window.location.reload();
+    },
+  });
+}
+
 async function start(page: HTMLElement): Promise<void> {
+  const storage = withSaveFiles(
+    isTauri() ? createTauriReader() : createContentReader(),
+    isTauri() ? await desktopSaves() : await webSaves(),
+  );
+  if (isTauri()) offerDesktopStore(storage);
   mountShell(
     page,
     createGame({
-      storage: withSaveFiles(
-        isTauri() ? createTauriReader() : createContentReader(),
-        isTauri() ? await desktopSaves() : await webSaves(),
-      ),
+      storage,
       roots: ["plugins", "books"],
       systems,
       uis: [dndUi],
