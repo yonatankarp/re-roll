@@ -441,9 +441,9 @@ An adventure targets one system. Running it under another means a converted copy
 
 A scene decision also offers `rest:short` and `rest:long`, from the system's optional `rests(state)` hook (`engine/story/runtime.ts`). A rest is allowed once per scene visit (`story.restedIn`) and never on a scene with `rest: false`. Answering one is an ordinary input, so saves replay it.
 
-The D&D plugin (`availableRests` in `core/rest.ts`) allows a Short Rest at any time out of combat, and a Long Rest when there has been none yet or 24 hours have passed since the last one began. Only rests pass time: 1 hour and 8 hours.
+The D&D plugin (`availableRests` in `core/rest.ts`) allows a Short Rest (1 hour) and a Long Rest (8 hours) at any time out of combat. The rules allow one Long Rest in 24 hours, so a Long Rest within a day of the last one's start first waits out the hours left, and says how many. Nothing but rests passes time, so a party never needs 16 Short Rests to earn its next Long Rest.
 
-`engine/shell/campfire.ts` puts a campfire button in the top bar. Its dialog asks which rest, plays the rest's own questions (such as spending Hit Dice), then lists what came back by comparing each sheet before and after. It knows no rule system. The test bot never rests, so balance numbers leave rests out.
+`engine/shell/campfire.ts` puts a campfire button in the top bar. Its dialog asks which rest, plays the rest's own questions (such as spending Hit Dice), then lists what came back by comparing each sheet before and after. It knows no rule system. The test bot rests only with `--rests`, and then takes the Long Rest at every scene that allows a rest.
 
 **Gaps:** rests don't advance adventure clocks, and a Long Rest the story triggers ignores the 24-hour rule.
 

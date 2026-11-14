@@ -1144,23 +1144,30 @@ describe("resting between scenes", () => {
     ).toBe(false);
   });
 
-  it("allows one long rest in 24 hours, counting the hours rests pass", async () => {
+  it("allows one long rest in 24 hours, waiting out the hours left", async () => {
     const { run, driven } = await atCamp();
     const rested = play(run, driven, "scene:s0", "rest:long");
     const next = play(run, rested, "scene:s0", "0");
     expect(next.state.story.scene).toBe("s1");
-    expect(options(pendingDecision(run, next.state))).toEqual([
-      "0",
-      "rest:short",
-    ]);
+    const long = (state: GameState): string | undefined =>
+      pendingDecision(run, state)?.options.find(
+        (option) => option.id === "rest:long",
+      )?.label;
+    // The last one began 8 hours ago, so 16 are left of the day.
+    expect(long(next.state)).toBe("Long rest (wait 16 hours, then 8)");
 
     const later = play(run, next, "scene:s1", "rest:short");
     expect(system(later.state).sinceLongRest).toBe(9);
     const dnd = system(later.state);
-    expect(availableRests({ ...dnd, sinceLongRest: 23 })).toHaveLength(1);
     expect(
-      availableRests({ ...dnd, sinceLongRest: 24 }).map((rest) => rest.id),
-    ).toEqual(["short", "long"]);
+      availableRests({ ...dnd, sinceLongRest: 23 }).map((rest) => rest.label),
+    ).toEqual(["Short rest (1 hour)", "Long rest (wait 1 hour, then 8)"]);
+    expect(availableRests({ ...dnd, sinceLongRest: 24 })[1]?.label).toBe(
+      "Long rest (8 hours)",
+    );
+    // Waiting doesn't stack up: the day starts again with the rest.
+    const again = play(run, next, "scene:s1", "rest:long");
+    expect(system(again.state).sinceLongRest).toBe(8);
   });
 
   it("offers no rest in a fight", async () => {
