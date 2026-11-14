@@ -116,6 +116,22 @@ function play(
 }
 
 describe("treasure and gold", () => {
+  it("pays gold to each living party member", async () => {
+    const run = await storyRun([
+      {
+        kind: "system",
+        effect: "dnd5.5e:treasure",
+        args: { gold: 5, goldEach: 150, items: [] },
+      },
+    ]);
+    const system = dnd(play(run, "srd52:pregen/fighter").state);
+    const members = Object.values(system.actors).filter(
+      (actor) => actor.side === "party" && actor.source.kind !== "summon",
+    ).length;
+    expect(members).toBeGreaterThan(1);
+    expect(system.gold).toBe(5 + 150 * members);
+  });
+
   it("adds up gold and carries found gear in the pack", async () => {
     const run = await storyRun([
       treasure(12, [SCALE]),

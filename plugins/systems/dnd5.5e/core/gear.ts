@@ -19,6 +19,7 @@ import {
   equipped,
   without,
   frame,
+  isDead,
 } from "./state.ts";
 import {
   type Stats,
@@ -46,6 +47,16 @@ function itemOf(access: ContentAccess, id: string) {
 
 // The coins and items go to the player's character, and found gear goes in the pack until put on.
 // shortcut: companions never carry loot, so only the player's character can equip it.
+// The party's living members, its summons left out.
+function partySize(state: DndState): number {
+  return Object.values(state.actors).filter(
+    (actor) =>
+      actor.side === "party" &&
+      actor.source.kind !== "summon" &&
+      !isDead(actor),
+  ).length;
+}
+
 export function treasure(loot: Loot, context: Context): SystemResult {
   const { gold, items } = loot;
   return {
@@ -307,10 +318,20 @@ export const gearEffects = {
     references: ({ item }) => [item],
     apply: ({ item }, context: Context) => drink(item, context),
   }),
+  // `goldEach` is paid to every living party member, as "150 GP each", so the total follows the party's size then.
   [`${NS}:treasure`]: storyEffect({
-    schema: LootSchema,
+    schema: LootSchema.extend({
+      goldEach: z.number().int().min(0).default(0),
+    }),
     references: (loot) => loot.items,
-    apply: (loot, context: Context) => treasure(loot, context),
+    apply: ({ goldEach, ...loot }, context: Context) =>
+      treasure(
+        {
+          ...loot,
+          gold: loot.gold + goldEach * partySize(context.state),
+        },
+        context,
+      ),
   }),
 };
 
