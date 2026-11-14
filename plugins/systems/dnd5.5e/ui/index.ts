@@ -1175,6 +1175,10 @@ function describe(
       const scroll = item?.type === "magicItem" && item.category === "scroll";
       return `${name(data.actor)} uses ${nameOf(access, data.item)}${scroll ? ", and it crumbles to dust" : ""}.`;
     }
+    case "dnd5.5e:goldSpent": {
+      const data = EVENT_SCHEMAS["dnd5.5e:goldSpent"].parse(payload);
+      return `The party pays ${coins(data.gold)}.`;
+    }
     case "dnd5.5e:traded": {
       const data = EVENT_SCHEMAS["dnd5.5e:traded"].parse(payload);
       return `${name(data.actor)} ${data.bought ? "buys" : "sells"} ${nameOf(access, data.item)} for ${coins(data.priceCp / 100)}.`;

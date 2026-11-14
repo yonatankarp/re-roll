@@ -45,8 +45,6 @@ function itemOf(access: ContentAccess, id: string) {
   return lookup(access, ItemSchema, id);
 }
 
-// The coins and items go to the player's character, and found gear goes in the pack until put on.
-// shortcut: companions never carry loot, so only the player's character can equip it.
 // The party's living members, its summons left out.
 function partySize(state: DndState): number {
   return Object.values(state.actors).filter(
@@ -57,6 +55,8 @@ function partySize(state: DndState): number {
   ).length;
 }
 
+// The coins and items go to the player's character, and found gear goes in the pack until put on.
+// shortcut: companions never carry loot, so only the player's character can equip it.
 export function treasure(loot: Loot, context: Context): SystemResult {
   const { gold, items } = loot;
   return {

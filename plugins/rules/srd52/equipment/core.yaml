@@ -135,3 +135,21 @@
   text: Reading it casts Magic Missile without a spell slot, and the scroll crumbles to dust.
   automation: partial
   spell: "srd52:spell/magic-missile"
+- id: "srd52:item/spell-scroll-disintegrate"
+  name: Spell Scroll (Disintegrate)
+  type: magicItem
+  category: scroll
+  rarity: veryRare
+  attunement: false
+  text: Reading it casts Disintegrate without a spell slot, and the scroll crumbles to dust.
+  automation: partial
+  spell: "srd52:spell/disintegrate"
+- id: "srd52:item/spell-scroll-teleport"
+  name: Spell Scroll (Teleport)
+  type: magicItem
+  category: scroll
+  rarity: veryRare
+  attunement: false
+  text: Reading it casts Teleport without a spell slot, and the scroll crumbles to dust.
+  automation: partial
+  spell: "srd52:spell/teleport"

@@ -75,6 +75,7 @@ import {
   sheetFrames,
 } from "./character-sheet.ts";
 import { gearEffects, gearFrames, sceneGearActions } from "./gear.ts";
+import { sceneEffects, scenePredicates } from "./scene.ts";
 import { gearPolicy, isGearDecision } from "./policy.ts";
 import { legendaryFrames, surpriseEffects } from "./legendary.ts";
 import { shopEffects, shopFrames } from "./shop.ts";
@@ -343,6 +344,7 @@ export const dnd55e = defineSystem<DndState>({
     ...gearEffects,
     ...surpriseEffects,
     ...shopEffects,
+    ...sceneEffects,
   },
   storyPredicates: {
     [`${NS}:hasInspiration`]: storyPredicate({
@@ -350,6 +352,7 @@ export const dnd55e = defineSystem<DndState>({
       evaluate: (_args, state: DndState) =>
         state.actors[PLAYER_ACTOR]?.heroicInspiration ?? false,
     }),
+    ...scenePredicates,
   },
   frames: revealing({
     [`${NS}:characterChosen`]: frameHandler({
