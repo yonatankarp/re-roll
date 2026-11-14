@@ -217,6 +217,7 @@ export function moveSquares(
     ]),
     new Set([...keys(others), ...walls]),
     difficultSquares(state),
+    new Set(walls),
   );
 }
 
