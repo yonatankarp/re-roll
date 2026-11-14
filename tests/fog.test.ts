@@ -163,7 +163,12 @@ function step(
 ): DndState {
   const result = withReveal(
     { events },
-    { state, content: run.content, contentIds: run.contentIds },
+    {
+      state,
+      dice: createDice(rngFromSeed("fog")),
+      content: run.content,
+      contentIds: run.contentIds,
+    },
   );
   return (result.events ?? []).reduce(applyDndEvent, state);
 }

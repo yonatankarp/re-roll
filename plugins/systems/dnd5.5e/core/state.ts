@@ -343,6 +343,8 @@ const MovedSchema = z.strictObject({
   feet: z.number().int(),
 });
 const ActorOnlySchema = z.strictObject({ actor: z.string() });
+// The share of damage the party takes, weighed again when it first sees more of the foes (fog.ts). Only lower.
+const DamageShareLoweredSchema = z.strictObject({ share: z.number() });
 // Cells of a battle map picture the party has just seen for the first time, keyed as fog.ts keys them.
 const SquaresSeenSchema = z.strictObject({
   map: z.string(),
@@ -465,6 +467,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:turnAdvanced`]: z.strictObject({}),
   [`${NS}:moved`]: MovedSchema,
   [`${NS}:squaresSeen`]: SquaresSeenSchema,
+  [`${NS}:damageShareLowered`]: DamageShareLoweredSchema,
   [`${NS}:budgetSpent`]: BudgetSpentSchema,
   [`${NS}:actionRegained`]: ActorOnlySchema,
   [`${NS}:resourceSpent`]: ResourceSpentSchema,
@@ -873,6 +876,12 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
     }
     case `${NS}:combatEnded`:
       return endCombat(state);
+    case `${NS}:damageShareLowered`: {
+      const { share } = payload(DamageShareLoweredSchema, event);
+      return state.combat
+        ? { ...state, combat: { ...state.combat, damageToParty: share } }
+        : state;
+    }
     case `${NS}:squaresSeen`: {
       const data = payload(SquaresSeenSchema, event);
       const seen = state.revealed ?? {};

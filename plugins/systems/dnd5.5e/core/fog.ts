@@ -1,6 +1,6 @@
 // Fog of war on a battle map: what the party has seen of the picture, and which foes it sees now.
 // The party's side knows only that; monsters, as the DM's side, know everything.
-import type { ContentAccess, SystemResult } from "#sdk";
+import type { ContentAccess, SystemEvent, SystemResult } from "#sdk";
 import {
   type Grid,
   type Square,
@@ -23,6 +23,9 @@ import { hasTactic } from "./tactics.ts";
 import { zonesOf } from "./zones.ts";
 import { enemies, moveSquares } from "./combat/queries.ts";
 import { walksOf } from "./combat/movement.ts";
+import { type Context } from "./combat/queries.ts";
+import { DAMAGE_TO_PARTY } from "./combat/effects.ts";
+import { damageToPartyFor } from "./worth.ts";
 
 type Combat = NonNullable<DndState["combat"]>;
 
@@ -262,7 +265,7 @@ export function revealedSquares(state: DndState): ReadonlySet<string> | null {
 // A walk shows what the party passes on the way, not only where it stops.
 export function withReveal(
   result: SystemResult,
-  context: ContentAccess & { readonly state: DndState },
+  context: Context,
 ): SystemResult {
   const events = result.events ?? [];
   const before = context.state;
@@ -300,15 +303,42 @@ export function withReveal(
       : null;
     return cell && !known.has(cell) ? [cell] : [];
   });
-  return cells.length === 0
+  const added: SystemEvent[] = [
+    ...(cells.length > 0
+      ? [dndEvent(`${NS}:squaresSeen`, { map: lattice.key, cells })]
+      : []),
+    ...reweighed(before, after, context),
+  ];
+  return added.length === 0
     ? result
-    : {
-        ...result,
-        events: [
-          ...events,
-          dndEvent(`${NS}:squaresSeen`, { map: lattice.key, cells }),
-        ],
-      };
+    : { ...result, events: [...events, ...added] };
+}
+
+// The fight's share of damage is weighed on the foes the party sees as it starts. When it first sees one more,
+// the share is weighed again on all it sees now, and kept if lower, so a fight that proves far beyond the party
+// is softened as the difficulty says, once the party knows it.
+function reweighed(
+  before: DndState,
+  after: DndState,
+  context: Context,
+): readonly SystemEvent[] {
+  const combat = after.combat;
+  if (!combat) return [];
+  const earlier = before.combat ? partySight(before, context).foes : NOBODY;
+  const now = partySight(after, context).foes;
+  if (![...now].some((id) => !earlier.has(id))) return [];
+  const base = DAMAGE_TO_PARTY[after.difficulty ?? "normal"];
+  const current = combat.damageToParty ?? base;
+  // Weighed at the difficulty's own share, as at the start, not at the one it may already have.
+  const unshared = { ...combat };
+  delete unshared.damageToParty;
+  const share = damageToPartyFor({
+    ...context,
+    state: { ...after, combat: unshared },
+  });
+  return share < current - 1e-9
+    ? [dndEvent(`${NS}:damageShareLowered`, { share })]
+    : [];
 }
 
 // Whether `id` is a foe of the party it can't see now, which the board, the turn order and the journal leave out.
