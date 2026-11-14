@@ -58,6 +58,8 @@ esac
 for checkout in "${checkouts[@]}"; do
   books=$(resolve "$checkout/books")
   case "$target" in
+    # The books repo's own README, on using it as a store, which holds no book text.
+    "$books"/readme.md) ;;
     "$books"/*.yaml | "$books"/*.yml | "$books"/*.json | "$books"/*.png | "$books"/*.jpg | "$books"/*.jpeg | "$books"/*.webp) ;;
     "$books" | "$books"/*) block "only data files (YAML, JSON, images) may be written under books/, never book prose." ;;
   esac
