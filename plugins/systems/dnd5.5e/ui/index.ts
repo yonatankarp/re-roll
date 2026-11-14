@@ -7,10 +7,12 @@ import {
 import { z } from "zod";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
 import { HIT_DICE, parseOption } from "../core/combat/ids.ts";
+import { squareKey } from "../core/grid.ts";
 import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
 import { canUse, foundText } from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
+import { partySight, revealedSquares, unseenFoe } from "../core/fog.ts";
 import { coins } from "../core/shop.ts";
 import { shop } from "./shop.ts";
 import { creation, featureInPlay } from "./creation.ts";
@@ -771,18 +773,32 @@ function combat(
 ) {
   const state = parseState(rawState);
   if (!state.combat) return null;
-  const { order, index, round } = state.combat;
+  const { index, round } = state.combat;
+  const acting = state.combat.order[index];
+  // The foes the party can't see now are left out: off the board, out of the turn order and unweighed.
+  const order = state.combat.order.filter(
+    (id) => !unseenFoe(state, id, access),
+  );
+  const revealed = revealedSquares(state);
   // Where the player can walk this turn, so the board can move them with one click.
   const player = state.actors[PLAYER_ACTOR];
+  // Only onto squares the party has seen, so the shading doesn't trace what's still in the fog.
   const moves =
-    player && order[index] === PLAYER_ACTOR
-      ? moveSquares(player, state, deriveStats(player, access)).map(
-          ({ square, feet, path }) => ({
-            ...square,
-            feet,
-            path: path.map(({ x, y }) => [x, y] as const),
-            provokes: provokers(player, square, state, access).length,
-          }),
+    player && acting === PLAYER_ACTOR
+      ? moveSquares(player, state, deriveStats(player, access)).flatMap(
+          ({ square, feet, path }) =>
+            revealed && !revealed.has(squareKey(square))
+              ? []
+              : [
+                  {
+                    ...square,
+                    feet,
+                    path: path.map(({ x, y }) => [x, y] as const),
+                    provokes: provokers(player, square, state, access).filter(
+                      ({ foe }) => !unseenFoe(state, foe.id, access),
+                    ).length,
+                  },
+                ],
         )
       : [];
   // How far each creature's melee reaches, for shading the squares it threatens.
@@ -806,7 +822,7 @@ function combat(
   );
   // Each of the player's area actions, by id, so the board can outline where it lands with the rules' own geometry.
   const shapes = Object.fromEntries(
-    player && order[index] === PLAYER_ACTOR
+    player && acting === PLAYER_ACTOR
       ? deriveStats(player, access).actions.flatMap((action) => {
           const { targeting } = action.activation;
           return "area" in targeting ? [[action.id, targeting]] : [];
@@ -832,6 +848,10 @@ function combat(
       cover,
       terrain: state.combat.terrain ?? null,
       map: fightMap(state.combat, encounter),
+      fog: revealed && {
+        revealed: [...revealed],
+        seen: [...partySight(state, access).squares],
+      },
       vitals: Object.fromEntries(
         order.flatMap((id) => {
           const actor = state.actors[id];
@@ -850,7 +870,7 @@ function combat(
         }),
       ),
     } satisfies BoardExtra,
-    combatants: order.flatMap((id, position) => {
+    combatants: order.flatMap((id) => {
       const actor = state.actors[id];
       if (!actor) return [];
       const status = statusOf(actor);
@@ -859,7 +879,7 @@ function combat(
           id,
           name: actor.name,
           side: actor.side === "party" ? "Ally" : "Enemy",
-          active: position === index,
+          active: id === acting,
           details: [
             `HP ${String(actor.hp)} of ${String(deriveStats(actor, access).maxHp)}`,
             ...(actor.tempHp > 0 ? [`${String(actor.tempHp)} temp HP`] : []),
@@ -992,7 +1012,22 @@ function describe(
   access: ContentAccess,
 ): string | null {
   const state = parseState(rawState);
-  const name = (id: string): string => state.actors[id]?.name ?? id;
+  // The party doesn't hear about a foe it can't see, unless it does something to one of them.
+  const unseen = (id: string): boolean => unseenFoe(state, id, access);
+  const name = (id: string): string =>
+    unseen(id) ? "Something unseen" : (state.actors[id]?.name ?? id);
+  const about =
+    "actor" in event
+      ? event.actor
+      : "payload" in event && typeof event.payload.actor === "string"
+        ? event.payload.actor
+        : null;
+  const against =
+    "payload" in event && typeof event.payload.against === "string"
+      ? event.payload.against
+      : null;
+  if (about !== null && unseen(about) && (against === null || unseen(against)))
+    return null;
   if (!("payload" in event)) {
     switch (event.kind) {
       case "encounterStarted":

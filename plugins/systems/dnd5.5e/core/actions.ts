@@ -79,6 +79,7 @@ import {
   walkSpeed,
   weaponOf,
 } from "./tactics.ts";
+import { fogged, knownFoes, partySight } from "./fog.ts";
 
 // The 2024 actions anyone can take in a fight besides attacking and casting (Dash, Disengage, Dodge, Help,
 // Hide, Ready, Search, Study, Grapple, Shove, standing up, escaping a grapple), the off-hand attack of a second Light weapon,
@@ -307,7 +308,7 @@ function offhandOptions(
       masteryOf(actor, action.id, access) === "nick" &&
       !actor.usedThisTurn.includes(NICK_USED);
     if (!another || (!nick && !actor.budget.bonusAction)) return [];
-    return standing(enemies(state, actor))
+    return standing(knownFoes(state, actor, access))
       .filter((foe) => distanceFeet(actor.position, foe.position) <= reach)
       .map((foe) => ({
         id: encodeOption(OFFHAND, foe.id, action.id),
@@ -398,7 +399,7 @@ export function tacticOptions(
   // spares working out every Study and Shove on every monster's turn.
   const full = actor.id === PLAYER_ACTOR;
 
-  const foes = standing(enemies(state, actor));
+  const foes = standing(knownFoes(state, actor, access));
   const near = foes.filter((foe) => within5(actor, foe));
   const friends = standing(allies(state, actor)).filter(
     (item) => item.id !== actor.id,
@@ -423,7 +424,18 @@ export function tacticOptions(
       label: `Stabilize ${dying.name} (Medicine, DC ${String(STABILIZE_DC)})`,
     });
   }
-  if (foes.some((foe) => hasTactic(foe, "hidden"))) {
+  // Searching is offered where the party saw a foe slip out of sight, not for one it never knew of.
+  const sight = fogged(state) ? partySight(state, access) : null;
+  if (
+    enemies(state, actor).some(
+      (foe) =>
+        hasTactic(foe, "hidden") &&
+        (actor.side !== "party" ||
+          !sight ||
+          (foe.position !== null &&
+            sight.squares.has(squareKey(foe.position)))),
+    )
+  ) {
     options.push({ id: SEARCH, label: "Search for hidden foes (Perception)" });
   }
   for (const grapple of grapplesOn(actor)) {
@@ -1117,7 +1129,7 @@ export function runMasteryHit(
       if (reach === null || attacker.usedThisTurn.includes(CLEAVE_USED)) {
         return {};
       }
-      const [next] = standing(enemies(state, attacker))
+      const [next] = standing(knownFoes(state, attacker, context))
         .filter(
           (item) =>
             item.id !== target.id &&
@@ -1323,7 +1335,7 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   if (hasTactic(actor, "dash") && ids.has(MOVE) && dashTarget(actor, context)) {
     return MOVE;
   }
-  const foes = standing(enemies(state, actor));
+  const foes = standing(knownFoes(state, actor, context));
   const [escape] = escapes;
   if (escape) return escape.id;
   if (ids.has(SEARCH)) return SEARCH;

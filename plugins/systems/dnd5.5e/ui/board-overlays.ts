@@ -54,6 +54,45 @@ export function showGround(ctx: BoardContext, terrain: Terrain | null): void {
   }
 }
 
+// Parchment over what the party has never seen, and a sepia shade over what it saw once but doesn't see now.
+// Drawn one pixel a square and scaled up smoothly, so the fog's edge fades across a square.
+export function showFog(
+  ctx: BoardContext,
+  fog: {
+    readonly revealed: readonly string[];
+    readonly seen: readonly string[];
+  } | null,
+  grid: { readonly width: number; readonly height: number } | null,
+): void {
+  const shown = JSON.stringify([fog, grid]);
+  if (shown === ctx.fogShown) return;
+  ctx.fogShown = shown;
+  ctx.fog.hidden = !fog || !grid;
+  if (!fog || !grid) return;
+  ctx.fog.width = grid.width;
+  ctx.fog.height = grid.height;
+  const paint = ctx.fog.getContext("2d");
+  if (!paint) return;
+  const revealed = new Set(fog.revealed);
+  const seen = new Set(fog.seen);
+  const pixels = paint.createImageData(grid.width, grid.height);
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      const key = `${String(x)},${String(y)}`;
+      const at = 4 * (y * grid.width + x);
+      // A little mottling, the same every time, so the cover reads as old paper rather than a flat fill.
+      const mottle = ((x * 73 + y * 151 + x * y * 7) % 23) - 11;
+      const [r, g, b, a] = seen.has(key)
+        ? [0, 0, 0, 0]
+        : revealed.has(key)
+          ? [58, 40, 20, 105]
+          : [226 + mottle, 208 + mottle, 170 + mottle, 255];
+      pixels.data.set([r, g, b, a], at);
+    }
+  }
+  paint.putImageData(pixels, 0, 0);
+}
+
 // Where the player can walk. On the turn itself a square answers Move and then the square, so one
 // click or drag does it; while the list is already asking where to, it answers that.
 export function showCells(ctx: BoardContext): void {
@@ -62,9 +101,13 @@ export function showCells(ctx: BoardContext): void {
   ctx.reachZone.hidden = true;
   if (!ctx.grid) return;
   const options = playerOptions(ctx);
+  // Squares still in the fog aren't drawn, so the shading doesn't trace them; the list still offers them.
+  const fog = extraOf(ctx.latest).fog;
+  const revealed = fog ? new Set(fog.revealed) : null;
   const asked = options.flatMap((option) => {
     const match = SQUARE.exec(option.id);
-    return match
+    return match &&
+      (!revealed || revealed.has(`${match[1] ?? ""},${match[2] ?? ""}`))
       ? [
           {
             x: Number(match[1]),

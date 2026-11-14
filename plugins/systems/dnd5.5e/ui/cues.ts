@@ -1,6 +1,7 @@
 import type { ContentAccess, SystemEvent } from "#sdk";
 import { resistancesLeft } from "../core/legendary.ts";
 import { EVENT_SCHEMAS } from "../core/state.ts";
+import { unseenFoe } from "../core/fog.ts";
 import { parseState } from "./parse-state.ts";
 import { deriveStats, evaluateFormula, scaledDice } from "../core/stats.ts";
 import {
@@ -126,9 +127,26 @@ function attackLook(
   return { style, damage };
 }
 
+// What the board shows of an event: nothing of a foe the party can't see, before it or after.
 export function dndCue(
   event: SystemEvent,
-  _before: unknown,
+  before: unknown,
+  after: unknown,
+  access: ContentAccess,
+): DndCue | null {
+  const cue = cueOf(event, after, access);
+  if (!cue || !("actor" in cue)) return cue;
+  const hidden = (id: string): boolean =>
+    unseenFoe(parseState(before), id, access) &&
+    unseenFoe(parseState(after), id, access);
+  // An unseen foe's attack still lands on the party, so it plays with no one to throw it.
+  return hidden(cue.actor) && !(cue.kind === "attack" && !hidden(cue.target))
+    ? null
+    : cue;
+}
+
+function cueOf(
+  event: SystemEvent,
   after: unknown,
   access: ContentAccess,
 ): DndCue | null {
@@ -145,12 +163,13 @@ export function dndCue(
   switch (event.kind) {
     // Everyone as the fight begins, so the board doesn't show how it ends while it plays the start.
     case "dnd5.5e:combatStarted": {
-      const { actors, combat } = parseState(after);
+      const state = parseState(after);
+      const { actors, combat } = state;
       return {
         kind: "start",
         combatants: (combat?.order ?? []).flatMap((id) => {
           const actor = actors[id];
-          return actor
+          return actor && !unseenFoe(state, id, access)
             ? [
                 {
                   id,

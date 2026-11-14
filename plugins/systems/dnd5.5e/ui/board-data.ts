@@ -98,4 +98,9 @@ export interface BoardExtra {
   readonly cover?: Readonly<Record<string, number>>; // +2 or +5 against the player, by creature
   readonly terrain?: Terrain | null; // the battle map's ground, cover and light
   readonly vitals?: Readonly<Record<string, Vitals>>; // by creature
+  // What the party has seen ("x,y" squares), and sees now; missing or null when the whole map shows.
+  readonly fog?: {
+    readonly revealed: readonly string[];
+    readonly seen: readonly string[];
+  } | null;
 }

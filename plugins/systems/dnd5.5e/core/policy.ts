@@ -6,6 +6,7 @@ import {
   NS,
 } from "./state.ts";
 import { deriveStats, type KnownAction, rollAmount } from "./stats.ts";
+import { knownFoes } from "./fog.ts";
 import {
   distanceFeet,
   rangeFeet,
@@ -27,7 +28,6 @@ import {
   attackRoutine,
   canAfford,
   type Context,
-  enemies,
   findAction,
   inReach,
   meleeReach,
@@ -87,7 +87,9 @@ export function stepToward(
     );
   const foes = toward
     ? [toward.foe]
-    : enemies(state, actor).filter((item) => !isDown(item) && item.position);
+    : knownFoes(state, actor, context).filter(
+        (item) => !isDown(item) && item.position,
+      );
   // How far it is to walk from a square to a foe, round walls and through difficult terrain, ignoring
   // creatures. On a map with no walls that's the straight distance.
   const { grid, walls = [] } = state.combat ?? {};
@@ -170,7 +172,7 @@ function approach(actor: Actor, context: Context): Square | null {
   const { state } = context;
   const here = actor.position;
   if (!here) return null;
-  const foes = enemies(state, actor).filter(
+  const foes = knownFoes(state, actor, context).filter(
     (item) => !isDown(item) && item.position,
   );
   const awake = (item: Actor): boolean =>
@@ -495,7 +497,10 @@ export function choosePolicy(decision: Decision, context: Context): string {
       list
         .filter((item) => !isDown(item))
         .reduce((sum, item) => sum + item.hp, 0);
-    if (standing(enemies(state, actor)) > 3 * standing(allies(state, actor))) {
+    if (
+      standing(knownFoes(state, actor, context)) >
+      3 * standing(allies(state, actor))
+    ) {
       return FLEE;
     }
   }
@@ -521,7 +526,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
   });
 
   // Slots go on fights that need them: the enemies left must outlast the caster's own HP, and a healer keeps its last slot.
-  const foesHp = enemies(state, actor)
+  const foesHp = knownFoes(state, actor, context)
     .filter((item) => !isDown(item))
     .reduce((total, item) => total + item.hp, 0);
   const healer = stats.actions.some(
@@ -558,7 +563,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
     .sort((a, b) => (a.target?.hp ?? 0) - (b.target?.hp ?? 0))[0];
   if (wounded) return wounded.option.id;
 
-  const foes = enemies(state, actor).filter((item) => !isDown(item));
+  const foes = knownFoes(state, actor, context).filter((item) => !isDown(item));
   const areas = parsed.filter(
     ({ action, target }) =>
       !target &&
@@ -616,7 +621,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
       if (!harms && !lasting) return false;
       const side =
         "side" in activation.targeting && activation.targeting.side === "enemy"
-          ? enemies(state, actor)
+          ? knownFoes(state, actor, context)
           : allies(state, actor);
       const aimedAt = target ? [target] : side;
       return !(

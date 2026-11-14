@@ -1,7 +1,13 @@
 // Fog of war on a battle map: what the party has seen of the picture, and which foes it sees now.
 // The party's side knows only that; monsters, as the DM's side, know everything.
 import type { ContentAccess, SystemResult } from "#sdk";
-import { type Square, coverBetween, parseSquare, squareKey } from "./grid.ts";
+import {
+  type Grid,
+  type Square,
+  coverBetween,
+  parseSquare,
+  squareKey,
+} from "./grid.ts";
 import { darkvisionOf, seeing } from "./sight.ts";
 import {
   type Actor,
@@ -47,14 +53,28 @@ const NO_COVER = { half: new Set<string>(), threeQuarters: new Set<string>() };
 const NOBODY: ReadonlySet<string> = new Set();
 
 // The squares in line of sight from `from`, walls and all, found outward from it: a square counts unless it has
-// total cover from there, and only open squares lead on. Kept per fight's walls, which never change in a fight.
-const lines = new WeakMap<object, Map<string, ReadonlySet<string>>>();
+// total cover from there, and only open squares lead on. Kept by the map's size and walls, which never change in
+// a fight, so a replayed save or a later fight on the same map finds them again.
+const MAPS_KEPT = 64;
+const lines = new Map<string, Map<string, ReadonlySet<string>>>();
+const mapKeys = new WeakMap<object, string>();
+function linesOf(combat: Combat, grid: Grid): Map<string, ReadonlySet<string>> {
+  const owner = combat.walls ?? grid;
+  const key =
+    mapKeys.get(owner) ??
+    `${String(grid.width)}x${String(grid.height)}:${(combat.walls ?? []).join(";")}`;
+  mapKeys.set(owner, key);
+  const known = lines.get(key);
+  if (known) return known;
+  if (lines.size >= MAPS_KEPT) lines.delete(lines.keys().next().value ?? "");
+  const made = new Map<string, ReadonlySet<string>>();
+  lines.set(key, made);
+  return made;
+}
 function sightFrom(combat: Combat, from: Square): ReadonlySet<string> {
   const grid = combat.grid;
   if (!grid) return NOBODY;
-  const owner = combat.walls ?? grid;
-  const byOrigin = lines.get(owner) ?? new Map<string, ReadonlySet<string>>();
-  lines.set(owner, byOrigin);
+  const byOrigin = linesOf(combat, grid);
   const start = squareKey(from);
   const known = byOrigin.get(start);
   if (known) return known;
@@ -237,7 +257,11 @@ export function withReveal(
   const seen = new Set(partySight(after, context).squares);
   for (const event of events) {
     if (event.kind !== `${NS}:moved`) continue;
-    const { actor: id, to, feet } = event.payload as {
+    const {
+      actor: id,
+      to,
+      feet,
+    } = event.payload as {
       actor: string;
       to: Square;
       feet: number;
@@ -267,4 +291,19 @@ export function withReveal(
           dndEvent(`${NS}:squaresSeen`, { map: lattice.key, cells }),
         ],
       };
+}
+
+// Whether `id` is a foe of the party it can't see now, which the board, the turn order and the journal leave out.
+export function unseenFoe(
+  state: DndState,
+  id: string,
+  access: ContentAccess,
+): boolean {
+  const actor = state.actors[id];
+  return (
+    actor !== undefined &&
+    actor.side !== "party" &&
+    fogged(state) &&
+    !partySight(state, access).foes.has(id)
+  );
 }

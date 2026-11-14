@@ -7,7 +7,8 @@ import {
   frameHandler,
 } from "#sdk";
 import { z } from "zod";
-import { type Context, canAfford, enemies } from "./combat.ts";
+import { type Context, canAfford } from "./combat.ts";
+import { knownFoes } from "./fog.ts";
 import { inReach } from "./combat/queries.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { FeatureSchema } from "./schemas.ts";
@@ -402,7 +403,7 @@ export function classOptionPolicy(
     return quickened;
   }
   const twinned = offered("twinned");
-  const foes = enemies(state, actor).filter((item) => !isDown(item));
+  const foes = knownFoes(state, actor, context).filter((item) => !isDown(item));
   if (twinned && actor.budget.action && foes.length >= 2) return twinned;
   return null;
 }

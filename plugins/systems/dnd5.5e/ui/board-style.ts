@@ -405,6 +405,9 @@ const BOARD_CSS = `
 .dnd-route.risky polyline { stroke: #ff6a55; }
 .dnd-blast { position: absolute; inset: 0; pointer-events: none; }
 .dnd-ground { position: absolute; inset: 0; pointer-events: none; }
+/* The fog of war, stretched from one pixel a square; the smoothing feathers its edge. */
+.dnd-fog { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.dnd-fog[hidden] { display: none; }
 .dnd-ground[data-light="dim"] { background: rgb(8 10 30 / 22%); }
 .dnd-ground[data-light="dark"] { background: rgb(4 4 14 / 48%); }
 .dnd-ground-square {
