@@ -285,10 +285,12 @@ function restTempHp(
 
 const DAY_HOURS = 24;
 
-// Out of combat a Short Rest is always possible, and a Long Rest once a day.
+// Out of combat a Short Rest is always possible, and so is a Long Rest: a party within a day of its last one
+// waits out the hours left first, as the rule allows one Long Rest in 24 hours. Nothing else passes time, so
+// the wait costs only what the hours themselves do.
 export function availableRests(state: DndState): readonly RestOption[] {
   if (state.combat) return [];
-  const since = state.sinceLongRest;
+  const wait = Math.max(0, DAY_HOURS - (state.sinceLongRest ?? DAY_HOURS));
   return [
     {
       id: "short",
@@ -296,16 +298,15 @@ export function availableRests(state: DndState): readonly RestOption[] {
       detail: "Spend Hit Dice to heal",
       effect: `${NS}:shortRest`,
     },
-    ...(since === undefined || since >= DAY_HOURS
-      ? [
-          {
-            id: "long",
-            label: `Long rest (${String(REST_HOURS.long)} hours)`,
-            detail: "Restore HP, Hit Dice and spell slots",
-            effect: `${NS}:longRest`,
-          },
-        ]
-      : []),
+    {
+      id: "long",
+      label:
+        wait > 0
+          ? `Long rest (wait ${String(wait)} hour${wait === 1 ? "" : "s"}, then ${String(REST_HOURS.long)})`
+          : `Long rest (${String(REST_HOURS.long)} hours)`,
+      detail: "Restore HP, Hit Dice and spell slots",
+      effect: `${NS}:longRest`,
+    },
   ];
 }
 

@@ -2198,6 +2198,94 @@ describe("class feature building blocks", () => {
     expect(damageOf(punch.events, "a")).toEqual([8]);
   });
 
+  it("gives Sneak Attack for an ally beside the target only if the ally can act and the roll has no Disadvantage", async () => {
+    const run = arenaRun(await base(), {
+      ...feature("srd52:feature/sneak", {
+        passives: [
+          { kind: "extraDamage", dice: "3d6", when: "advantageOrAlly" },
+        ],
+      }),
+    });
+    const at = (who: Actor, x: number): Actor => ({
+      ...who,
+      position: { x, y: 0 },
+    });
+    const rogue = at(
+      hero(run, {
+        features: ["srd52:feature/sneak"],
+        inventory: ["srd52:item/shortsword"],
+      }),
+      0,
+    );
+    const ally = at(hero(run, { id: "ally" }), 2);
+    const dazed: Actor = {
+      ...ally,
+      activeEffects: [
+        {
+          sourceId: "monster:1",
+          casterId: "a",
+          ends: "spellDuration",
+          modifier: { kind: "condition", condition: "incapacitated" },
+        },
+      ],
+    };
+    const dealt = (
+      beside: Actor,
+      roll: { hadAdvantage: boolean; hadDisadvantage?: boolean },
+    ): number[] =>
+      damageOf(
+        settle(
+          run,
+          fight(rogue, beside, at(monster("a"), 1)),
+          [
+            {
+              kind: `${NS}:applyHit`,
+              payload: {
+                attacker: PLAYER_ACTOR,
+                actionId: "weapon:srd52:item/shortsword",
+                target: "a",
+                critical: false,
+                total: 30,
+                natural: 15,
+                ...roll,
+              },
+            },
+          ],
+          HIGH,
+        ).events,
+        "a",
+      );
+    expect(dealt(ally, { hadAdvantage: false })).toEqual([8 + 18]);
+    expect(dealt(dazed, { hadAdvantage: false })).toEqual([8]);
+    expect(dealt(dazed, { hadAdvantage: true })).toEqual([8 + 18]);
+    expect(dealt(ally, { hadAdvantage: false, hadDisadvantage: true })).toEqual(
+      [8],
+    );
+    // A poisoned rogue's roll has Disadvantage, and its hit says so.
+    const poisoned: Actor = {
+      ...rogue,
+      activeEffects: [
+        {
+          sourceId: "monster:1",
+          casterId: "a",
+          ends: "spellDuration",
+          modifier: { kind: "condition", condition: "poisoned" },
+        },
+      ],
+    };
+    const rolled = runAttackRoll(
+      {
+        attacker: PLAYER_ACTOR,
+        actionId: "weapon:srd52:item/shortsword",
+        target: "a",
+      },
+      contextOf(run, fight(poisoned, ally, at(monster("a"), 1)), HIGH),
+    );
+    expect(rolled.frames?.at(-1)?.payload).toMatchObject({
+      hadDisadvantage: true,
+    });
+  });
+
   it("adds a damage bonus to matching weapon attacks only", async () => {
     const run = arenaRun(await base(), {
       ...feature("srd52:feature/rage", {
@@ -3478,6 +3566,78 @@ describe("the difficulty setting", () => {
       fight({ ...party, hp: 5 }, { ...ally, hp: 195 }, monster("a", brute, 60)),
     );
     expect(frail).toBeLessThan(healthy);
+  });
+
+  it("counts the Advantage a fight's opening positions don't show yet", async () => {
+    const bite = (onHit: readonly unknown[]) => ({
+      name: "Bite",
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "weapon", flatBonus: 0 },
+          damage: [{ amount: { dice: "2d6" }, type: "piercing" }],
+          onHit,
+        },
+      },
+    });
+    const knock = [
+      { kind: "applyCondition", condition: "prone", duration: { minutes: 1 } },
+    ];
+    const run = arenaRun(await base(), {
+      "srd52:monster/biter": dummy("srd52:monster/biter", {
+        actions: [bite([])],
+        multiattack: 2,
+      }),
+      "srd52:monster/tripper": dummy("srd52:monster/tripper", {
+        actions: [bite(knock)],
+        multiattack: 2,
+      }),
+      "srd52:monster/packer": dummy("srd52:monster/packer", {
+        actions: [bite([])],
+        multiattack: 2,
+        passives: [{ kind: "packTactics" }],
+      }),
+    });
+    // Everyone starts apart, as a fight does.
+    const at = (who: Actor, x: number): Actor => ({
+      ...who,
+      position: { x, y: 0 },
+    });
+    const party = at(hero(run), 0);
+    const threat = (
+      foe: string,
+      target = party,
+      ...others: Actor[]
+    ): number => {
+      const actor = at(monster("m", foe), 6);
+      return makeJudge(
+        contextOf(run, fight(target, actor, ...others), HIGH),
+        target,
+      ).threat(actor);
+    };
+    const plain = threat("srd52:monster/biter");
+    const prone: Actor = {
+      ...party,
+      activeEffects: [
+        {
+          sourceId: "x",
+          casterId: "m",
+          ends: "spellDuration",
+          modifier: { kind: "condition", condition: "prone" },
+        },
+      ],
+    };
+    // A bite is made from beside its target, so a prone one is easier to hit, not harder.
+    expect(threat("srd52:monster/biter", prone)).toBeGreaterThan(plain);
+    // The second bite counts the chance the first knocked the target down.
+    expect(threat("srd52:monster/tripper")).toBeGreaterThan(plain);
+    // A pack's ally will close in beside the target.
+    expect(threat("srd52:monster/packer")).toBeCloseTo(plain);
+    expect(
+      threat("srd52:monster/packer", party, at(monster("friend"), 9)),
+    ).toBeGreaterThan(plain);
   });
 
   it("takes the share the fight started with", async () => {

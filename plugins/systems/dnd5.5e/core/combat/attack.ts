@@ -469,6 +469,7 @@ export function runAttackRoll(
     rerollOnes: hasPassive(stats, "rerollOnes"),
   });
   const hadAdvantage = advantage && !disadvantage;
+  const hadDisadvantage = disadvantage && !advantage;
   const total =
     roll.natural +
     attackBonus(resolution, stats) +
@@ -508,6 +509,7 @@ export function runAttackRoll(
     target: target.id,
     critical,
     hadAdvantage,
+    ...(hadDisadvantage ? { hadDisadvantage: true } : {}),
     total,
     natural: roll.natural,
     ...(payload.slotLevel === undefined
@@ -566,6 +568,7 @@ export const HitSchema = z.object({
   target: z.string(),
   critical: z.boolean(),
   hadAdvantage: z.boolean(),
+  hadDisadvantage: z.boolean().optional(), // older saves' hits have none
   total: z.number(),
   natural: z.number(),
   slotLevel: z.number().optional(),
@@ -662,14 +665,19 @@ export function runApplyHit(
     if (passive.kind !== "extraDamage" || !extraDice) return;
     const key = `extra:${String(index)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return;
+    // Sneak Attack's ally must be able to act, and the ally never makes up for Disadvantage on the roll.
     const allyPresent = allies(state, attacker).some(
       (item) =>
-        item.id !== attacker.id && !isDown(item) && within5(item, target),
+        item.id !== attacker.id &&
+        !isDown(item) &&
+        !hasCondition(item, ...INCAPACITATING) &&
+        within5(item, target),
     );
     const applies =
       passive.when === "advantage"
         ? payload.hadAdvantage
-        : payload.hadAdvantage || allyPresent;
+        : payload.hadAdvantage ||
+          (allyPresent && payload.hadDisadvantage !== true);
     if (!applies) return;
     extra += rollDiceNotation(passive.dice, dice, multiplier);
     if (passive.oncePerTurn) {
