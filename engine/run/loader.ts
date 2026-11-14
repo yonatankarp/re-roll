@@ -22,7 +22,7 @@ import {
 } from "../kernel/system.ts";
 
 // An allowlist, because a denylist would miss formats such as .mjs, .wasm or a script-bearing .svg.
-const ALLOWED_EXTENSIONS = new Set([
+export const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
   ".yaml",
   ".md",
   ".txt",
@@ -70,7 +70,7 @@ export type LoadResult =
   | { readonly ok: true; readonly registry: Registry }
   | { readonly ok: false; readonly issues: readonly Issue[] };
 
-function extensionOf(path: string): string {
+export function extensionOf(path: string): string {
   const name = path.slice(path.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
   return dot > 0 ? name.slice(dot).toLowerCase() : "";
@@ -110,7 +110,7 @@ async function readYaml(
 }
 
 export async function scanPlugins(
-  storage: Storage,
+  storage: Pick<Storage, "read" | "list">,
   roots: readonly string[],
 ): Promise<Catalog> {
   const plugins = new Map<string, PluginRecord>();

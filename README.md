@@ -52,13 +52,28 @@ Two adventures ship with the game, both original and built on the SRD 5.2 rules 
 
 Content from books you own goes in a `books/` folder at the root of your checkout. It is git-ignored here, and the game reads it beside `plugins/`. Keep it as its own private git repository if you want history, and never commit it to this one. Plugins there carry `distribution: private`, which means they aren't redistributable.
 
-The built desktop app has no checkout, so it reads your plugins from its content folder instead. **Open content folder** on the main menu shows it. It has the same `adventures`, `rules`, `assets` and `library` folders as `books/`, so copy a plugin into the matching one and reopen the menu. The folder is `plugins` inside the app's data folder:
+The built desktop app has no checkout, so it reads your plugins from its content folder instead. **Open content folder** on the main menu shows it. It has the same `adventures`, `rules`, `assets` and `library` folders as `books/`, so copy a plugin into the matching one and reopen the menu. **Install from a zip** does that for you. The zip holds either one plugin, whose `plugin.yaml` picks `adventures` or `rules` and the folder name, or a whole book laid out like the content folder, with any of its `adventures`, `rules`, `assets` and `library` folders. It replaces older copies of what it installs, and refuses a zip that holds anything but game data. The folder is `plugins` inside the app's data folder:
 
 - **macOS:** `~/Library/Application Support/app.re-roll.desktop/plugins`
 - **Windows:** `%APPDATA%\app.re-roll.desktop\plugins`
 - **Linux:** `~/.local/share/app.re-roll.desktop/plugins`
 
 `npm run desktop` still reads `plugins/` and `books/` from your checkout.
+
+### The Store
+
+**Store** on the desktop app's main menu installs books and adventures from GitHub repos you add, as many as you like, public or private. Type a repo as `owner/repo` or paste its link. A private repo needs a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with read-only access to its **Contents**. The game keeps the token in your system's keychain and uses it only for that repo. Installing a package also installs the packages it needs from your stores, and **Update** appears when the store has a newer copy.
+
+A store is a repo laid out like `books/`, with a `store.yaml` that names each package and the folders it installs:
+
+```yaml
+packages:
+  - id: phb
+    title: Player's Handbook
+    parts: [rules/phb, assets/phb, library/phb, library/glossary.json]
+```
+
+`npm run store:pack -- <folder> --out <dir>` checks each package and writes one zip per package and a `store.json` index to `<dir>`. Adding `--publish owner/repo` uploads them to that repo's `store` release with the `gh` CLI. It refuses to publish plugins marked `distribution: private` to a public repo.
 
 `npm run import` turns your saved book pages into plugins under `books/`. Its subcommands are `parse`, `library`, `extract`, `split`, `draft` and `approve`, and section 11 of the design doc explains them. `npm run narrate -- <adventure>` reads a `books/` adventure's scenes aloud once and keeps the clips beside it. Scenes without a clip are read in the app as they play.
 

@@ -8,6 +8,13 @@ fn main() {
             "save_write",
             "save_list",
             "save_remove",
+            "content_install_begin",
+            "content_install_file",
+            "content_install_commit",
+            "store_fetch",
+            "store_token_set",
+            "store_token_forget",
+            "store_token_has",
         ]),
     ))
     .expect("the Tauri build step failed");

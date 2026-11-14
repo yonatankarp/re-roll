@@ -1,6 +1,7 @@
 import { type SaveChoice } from "./session.ts";
 import { adventureCard, adventureGrid } from "./adventure-picker.ts";
 import { contentFolderOption } from "./content-folder.ts";
+import { storeOption } from "./store-screen.ts";
 import {
   collapseCard,
   loadScreen,
@@ -124,7 +125,14 @@ export async function showMenu(ctx: ShellContext): Promise<void> {
             ),
           ]
         : []),
-      ...contentFolderOption(ctx.act),
+      ...storeOption(ctx),
+      ...contentFolderOption(
+        ctx.act,
+        () => showMenu(ctx),
+        (text) => {
+          ctx.say(text);
+        },
+      ),
     ),
   );
   ctx.focusNext = heading;
