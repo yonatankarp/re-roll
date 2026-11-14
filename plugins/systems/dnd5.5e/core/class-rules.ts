@@ -135,6 +135,7 @@ const MissSchema = z.object({
   target: z.string(),
   critical: z.boolean(),
   hadAdvantage: z.boolean(),
+  hadDisadvantage: z.boolean().optional(),
   total: z.number(),
   natural: z.number(),
   slotLevel: z.number().optional(),

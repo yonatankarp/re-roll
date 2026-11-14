@@ -283,7 +283,10 @@ export function makeJudge(context: Context, side: Actor): Judge {
     const edge = attackEdge(attacker, target, action);
     const flanked = allies(state, attacker).some(
       (item) =>
-        item.id !== attacker.id && !isDown(item) && within5(item, target),
+        item.id !== attacker.id &&
+        !isDown(item) &&
+        !hasCondition(item, ...INCAPACITATING) &&
+        within5(item, target),
     );
     return stats(attacker).passives.reduce(
       (total, passive, index) =>
@@ -292,7 +295,8 @@ export function makeJudge(context: Context, side: Actor): Judge {
           passive.oncePerTurn &&
           attacker.usedThisTurn.includes(`extra:${String(index)}`)
         ) &&
-        (edge > 0 || (passive.when === "advantageOrAlly" && flanked))
+        (edge > 0 ||
+          (passive.when === "advantageOrAlly" && flanked && edge === 0))
           ? total + rollDiceNotation(passive.dice, AVERAGE)
           : total,
       0,

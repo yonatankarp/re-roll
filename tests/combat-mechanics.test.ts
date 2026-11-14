@@ -2198,6 +2198,94 @@ describe("class feature building blocks", () => {
     expect(damageOf(punch.events, "a")).toEqual([8]);
   });
 
+  it("gives Sneak Attack for an ally beside the target only if the ally can act and the roll has no Disadvantage", async () => {
+    const run = arenaRun(await base(), {
+      ...feature("srd52:feature/sneak", {
+        passives: [
+          { kind: "extraDamage", dice: "3d6", when: "advantageOrAlly" },
+        ],
+      }),
+    });
+    const at = (who: Actor, x: number): Actor => ({
+      ...who,
+      position: { x, y: 0 },
+    });
+    const rogue = at(
+      hero(run, {
+        features: ["srd52:feature/sneak"],
+        inventory: ["srd52:item/shortsword"],
+      }),
+      0,
+    );
+    const ally = at(hero(run, { id: "ally" }), 2);
+    const dazed: Actor = {
+      ...ally,
+      activeEffects: [
+        {
+          sourceId: "monster:1",
+          casterId: "a",
+          ends: "spellDuration",
+          modifier: { kind: "condition", condition: "incapacitated" },
+        },
+      ],
+    };
+    const dealt = (
+      beside: Actor,
+      roll: { hadAdvantage: boolean; hadDisadvantage?: boolean },
+    ): number[] =>
+      damageOf(
+        settle(
+          run,
+          fight(rogue, beside, at(monster("a"), 1)),
+          [
+            {
+              kind: `${NS}:applyHit`,
+              payload: {
+                attacker: PLAYER_ACTOR,
+                actionId: "weapon:srd52:item/shortsword",
+                target: "a",
+                critical: false,
+                total: 30,
+                natural: 15,
+                ...roll,
+              },
+            },
+          ],
+          HIGH,
+        ).events,
+        "a",
+      );
+    expect(dealt(ally, { hadAdvantage: false })).toEqual([8 + 18]);
+    expect(dealt(dazed, { hadAdvantage: false })).toEqual([8]);
+    expect(dealt(dazed, { hadAdvantage: true })).toEqual([8 + 18]);
+    expect(dealt(ally, { hadAdvantage: false, hadDisadvantage: true })).toEqual(
+      [8],
+    );
+    // A poisoned rogue's roll has Disadvantage, and its hit says so.
+    const poisoned: Actor = {
+      ...rogue,
+      activeEffects: [
+        {
+          sourceId: "monster:1",
+          casterId: "a",
+          ends: "spellDuration",
+          modifier: { kind: "condition", condition: "poisoned" },
+        },
+      ],
+    };
+    const rolled = runAttackRoll(
+      {
+        attacker: PLAYER_ACTOR,
+        actionId: "weapon:srd52:item/shortsword",
+        target: "a",
+      },
+      contextOf(run, fight(poisoned, ally, at(monster("a"), 1)), HIGH),
+    );
+    expect(rolled.frames?.at(-1)?.payload).toMatchObject({
+      hadDisadvantage: true,
+    });
+  });
+
   it("adds a damage bonus to matching weapon attacks only", async () => {
     const run = arenaRun(await base(), {
       ...feature("srd52:feature/rage", {
