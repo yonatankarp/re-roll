@@ -13,7 +13,7 @@ const DIFFICULTY = flags
   ?.slice("--difficulty=".length);
 const RUNS = Number(args[0] ?? 500);
 const ONLY = args[1]; // one adventure's id, or all of them
-const MAX_DECISIONS = 500;
+const MAX_DECISIONS = 5000; // a long book adventure played to its end takes over a thousand
 const CHECK = flags.includes("--check");
 
 // Defeat %, smart play, seeds bot-0..199. Wide bands around the rates measured on 2026-11-12, to catch

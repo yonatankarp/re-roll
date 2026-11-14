@@ -64,6 +64,7 @@ import {
   actorOf,
   allies,
   canAfford,
+  carriesExtraDice,
   charmersOf,
   CHECK_END,
   type Context,
@@ -656,8 +657,9 @@ export function runApplyHit(
 
   // Add dice-based extra damage such as Sneak Attack to the first damage roll.
   let extra = 0;
+  const extraDice = carriesExtraDice(attacker, action, context);
   stats.passives.forEach((passive, index) => {
-    if (passive.kind !== "extraDamage") return;
+    if (passive.kind !== "extraDamage" || !extraDice) return;
     const key = `extra:${String(index)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return;
     const allyPresent = allies(state, attacker).some(

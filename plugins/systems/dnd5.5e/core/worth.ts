@@ -15,6 +15,7 @@ import {
   immuneToCondition,
   type KnownAction,
   rollAmount,
+  rollDiceNotation,
   saveBonus,
   type Stats,
 } from "./stats.ts";
@@ -24,7 +25,7 @@ import type { Square } from "./grid.ts";
 import { dodging } from "./tactics.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX } from "./combat/ids.ts";
-import { DAMAGE_TO_PARTY } from "./combat/effects.ts";
+import { DAMAGE_TO_PARTY, damageToParty } from "./combat/effects.ts";
 import { cureFor, dispellable } from "./combat/dispel.ts";
 import { seesThrough } from "./sight.ts";
 import { formOf } from "./forms.ts";
@@ -35,6 +36,7 @@ import {
   allies,
   attackRoutine,
   canAfford,
+  carriesExtraDice,
   type Context,
   enemies,
   exemptFrom,
@@ -93,6 +95,8 @@ export interface Judge {
   readonly horizon: number;
   // How dear a spell slot is: high in a fight the party is winning easily, near 0 in one it's losing.
   readonly slotPrice: number;
+  // Rounds the party needs to win over rounds the foes need to drop it: above 1 it's losing.
+  readonly pressure: number;
   // Taking the Dodge action instead.
   readonly dodgeWorth: (actor: Actor) => number;
   readonly worth: (
@@ -120,7 +124,7 @@ const standing = (list: readonly Actor[]): Actor[] =>
 
 export function makeJudge(context: Context, side: Actor): Judge {
   const { state } = context;
-  const damageToParty = DAMAGE_TO_PARTY[state.difficulty ?? "normal"];
+  const partyShare = damageToParty(state);
   const stats = cached((actor) => deriveStats(actor, context));
   const responses = cached((actor) => damageResponses(actor, context));
 
@@ -269,6 +273,32 @@ export function makeJudge(context: Context, side: Actor): Judge {
     return averageDamage(attacker, target, extra) + bonus;
   };
 
+  // Dice a hit adds on its own terms, such as Sneak Attack, as attack.ts adds them.
+  const extraDice = (
+    attacker: Actor,
+    target: Actor,
+    action: KnownAction,
+  ): number => {
+    if (!carriesExtraDice(attacker, action, context)) return 0;
+    const edge = attackEdge(attacker, target, action);
+    const flanked = allies(state, attacker).some(
+      (item) =>
+        item.id !== attacker.id && !isDown(item) && within5(item, target),
+    );
+    return stats(attacker).passives.reduce(
+      (total, passive, index) =>
+        passive.kind === "extraDamage" &&
+        !(
+          passive.oncePerTurn &&
+          attacker.usedThisTurn.includes(`extra:${String(index)}`)
+        ) &&
+        (edge > 0 || (passive.when === "advantageOrAlly" && flanked))
+          ? total + rollDiceNotation(passive.dice, AVERAGE)
+          : total,
+      0,
+    );
+  };
+
   // The save a hit brings, as a ghoul's claw: the chance the target makes it, or null when it never has to.
   const hitSave = (
     attacker: Actor,
@@ -318,7 +348,8 @@ export function makeJudge(context: Context, side: Actor): Judge {
         // A critical hit doubles the dice, about one hit in twenty.
         const dealt =
           averageDamage(attacker, target, resolution.damage) +
-          riders(attacker, target, resolution);
+          riders(attacker, target, resolution) +
+          extraDice(attacker, target, action);
         return hit * (dealt * 1.05 + hitSaveDamage(attacker, target, action));
       }
       case "save": {
@@ -388,7 +419,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
       best = Math.max(best, each * spread);
     }
     // The difficulty setting scales only the damage the party takes (core/combat/effects.ts).
-    return actor.side === "party" ? best : best * damageToParty;
+    return actor.side === "party" ? best : best * partyShare;
   };
   const threat = cached((actor) => roundDamage(actor, false));
   const freeThreat = cached((actor) => roundDamage(actor, true));
@@ -889,7 +920,38 @@ export function makeJudge(context: Context, side: Actor): Judge {
     freeThreat,
     horizon,
     slotPrice,
+    pressure,
     worth,
     dodgeWorth,
   };
+}
+
+// The most pressure (Judge.pressure) a fight may start with at each difficulty. One beyond it, such as a book
+// fight written for a bigger party, has the party take less damage, just enough to bring it down to this;
+// gentler fights keep the difficulty's own share.
+// Measured with the bot on 2026-11-14: Normal at 0.7 puts the hardest book adventures near 30-45% defeats.
+export const MOST_PRESSURE = { story: 0.3, normal: 0.7, hard: 1 } as const;
+
+// The share of damage the party takes in the fight that's starting, with every combatant in `context.state`.
+export function damageToPartyFor(context: Context): number {
+  const difficulty = context.state.difficulty ?? "normal";
+  const base = DAMAGE_TO_PARTY[difficulty];
+  const side = Object.values(context.state.actors).find(
+    (actor) => actor.side === "party" && !isDown(actor),
+  );
+  if (!side) return base;
+  // The run ends with the player's character, so a party leaning on a player near 0 HP is closer to losing
+  // than its total HP says: count the player as holding only its own share of the foes' damage.
+  const party = Object.values(context.state.actors).filter(
+    (actor) => actor.side === "party" && !isDown(actor),
+  );
+  const player = context.state.actors[PLAYER_ACTOR];
+  const total = party.reduce((sum, actor) => sum + actor.hp, 0);
+  const frail =
+    player && !isDown(player)
+      ? Math.max(1, total / (player.hp * party.length))
+      : 1;
+  const pressure = makeJudge(context, side).pressure * frail;
+  const most = MOST_PRESSURE[difficulty];
+  return pressure > most ? (base * most) / pressure : base;
 }

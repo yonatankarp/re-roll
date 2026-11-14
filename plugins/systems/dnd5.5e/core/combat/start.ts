@@ -7,6 +7,8 @@ import { placeOnMap, placeSides, type Square, wallKeys } from "../grid.ts";
 import { terrainOf } from "../sight.ts";
 import { lairTurns } from "../legendary.ts";
 import { type Context, hasPassive } from "./queries.ts";
+import { DAMAGE_TO_PARTY } from "./effects.ts";
+import { damageToPartyFor } from "../worth.ts";
 
 export function startCombat(
   encounter: {
@@ -117,6 +119,20 @@ export function startCombat(
         monsters.map((actor) => actor.id),
       );
 
+  // Weighed as the fight starts, with everyone in it, and kept: a fight's share never changes once begun.
+  const share = damageToPartyFor({
+    ...context,
+    state: {
+      ...context.state,
+      actors: {
+        ...context.state.actors,
+        ...Object.fromEntries(monsters.map((item) => [item.id, item])),
+      },
+      combat: { encounter: encounter.id, order, index: 0, round: 1 },
+    },
+  });
+  const lowered = share < DAMAGE_TO_PARTY[context.state.difficulty ?? "normal"];
+
   return {
     events: [
       { kind: "encounterStarted", encounter: encounter.id },
@@ -146,6 +162,7 @@ export function startCombat(
         ...(encounter.loot ? { loot: encounter.loot } : {}),
         ...(surprised ? { surprised } : {}),
         ...(lair ? { lair } : {}),
+        ...(lowered ? { damageToParty: share } : {}),
       }),
     ],
     // With nobody on 20 or more, the lair acts before anyone.

@@ -34,6 +34,7 @@ import { swallowerOf } from "./swallow.ts";
 import {
   type Ability,
   CompanionSchema,
+  ItemSchema,
   MonsterSchema,
   SpeciesSchema,
   type Targeting,
@@ -495,4 +496,24 @@ export function combatEnded(
 export function currentActor(state: DndState): Actor | undefined {
   const actorId = state.combat?.order[state.combat.index];
   return actorId === undefined ? undefined : state.actors[actorId];
+}
+
+// Whether a hit can carry extra dice such as Sneak Attack. A character's need a Finesse or a Ranged weapon,
+// as the rogue's feature says; a monster's follow its own stat block.
+export function carriesExtraDice(
+  attacker: Actor,
+  action: KnownAction,
+  access: Pick<ContentAccess, "content">,
+): boolean {
+  if (attacker.source.kind !== "character") return true;
+  const itemId = action.id.startsWith("weapon:") ? action.id.slice(7) : "";
+  const item =
+    itemId && access.content(itemId)
+      ? lookup(access, ItemSchema, itemId)
+      : null;
+  return (
+    item?.type === "weapon" &&
+    (item.properties.includes("finesse") ||
+      item.properties.includes("ammunition"))
+  );
 }

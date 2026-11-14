@@ -309,7 +309,7 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
   });
 
   it("Sneak Attack adds 1d6 to a hit with Advantage", () => {
-    const rogue = hero("rogue", 1);
+    const rogue = { ...hero("rogue", 1), inventory: ["phb:item/rapier"] };
     const weapon = weaponOf(rogue);
     const hit = (hadAdvantage: boolean): number =>
       damageTo(
@@ -335,6 +335,38 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
         "a",
       );
     expect(hit(true)).toBe(hit(false) + 6);
+  });
+
+  it("Sneak Attack needs a Finesse or Ranged weapon, so a Club hit gets none", () => {
+    const rogue = { ...hero("rogue", 1), inventory: ["phb:item/club"] };
+    const club = deriveStats(rogue, run).actions.find(
+      (action) => action.id === "weapon:phb:item/club",
+    );
+    if (!club) throw new Error("The rogue can't swing the club");
+    const hit = (hadAdvantage: boolean): number =>
+      damageTo(
+        settle(
+          run,
+          fight(rogue, monster("a")),
+          [
+            {
+              kind: `${NS}:applyHit`,
+              payload: {
+                attacker: PLAYER_ACTOR,
+                actionId: club.id,
+                target: "a",
+                critical: false,
+                hadAdvantage,
+                total: 30,
+                natural: 15,
+              },
+            },
+          ],
+          dice(),
+        ).events,
+        "a",
+      );
+    expect(hit(true)).toBe(hit(false));
   });
 
   // The bonus-action Dash, Disengage and Hide need those standard actions first.

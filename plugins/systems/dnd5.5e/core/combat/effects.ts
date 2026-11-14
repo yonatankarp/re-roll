@@ -126,8 +126,15 @@ export function concentrationFrame(
 
 // Reports the damage, and whatever follows from it, as events.
 // The difficulty setting scales the damage the party takes, and only that, so the books' monsters keep
-// their numbers: Story takes a third of it, Hard adds half again.
+// their numbers: Story takes a third of it, Hard adds half again. A fight far beyond the party takes less
+// still (worth.ts damageToPartyFor), fixed when it starts.
 export const DAMAGE_TO_PARTY = { story: 1 / 3, normal: 1, hard: 1.5 } as const;
+
+export function damageToParty(state: DndState): number {
+  return (
+    state.combat?.damageToParty ?? DAMAGE_TO_PARTY[state.difficulty ?? "normal"]
+  );
+}
 
 function scaledForParty(
   target: Actor,
@@ -135,8 +142,7 @@ function scaledForParty(
   state: DndState,
 ): number {
   if (target.side !== "party" || amount <= 0) return amount;
-  const factor = DAMAGE_TO_PARTY[state.difficulty ?? "normal"];
-  return Math.max(1, Math.round(amount * factor));
+  return Math.max(1, Math.round(amount * damageToParty(state)));
 }
 
 export function damageEvents(

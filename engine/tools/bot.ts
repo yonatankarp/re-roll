@@ -17,6 +17,8 @@ export interface BotRun {
   readonly scenes: readonly string[];
 }
 
+const MAX_SCENE_VISITS = 20;
+
 // The bot has its own dice, so its choices never disturb the game's own rolls.
 export function playRun(
   run: RunContext,
@@ -43,6 +45,7 @@ export function playRun(
   const inputs: Input[] = [start];
   const log: LogEntry[] = [{ input: start, events: started.events }];
   const scenes = new Set<string>();
+  const sceneVisits = new Map<string, number>();
   let { state, pending } = started;
   options.onState?.(state);
 
@@ -80,7 +83,14 @@ export function playRun(
         !actions.has(item.id) &&
         !(tactical && item.hidden),
     );
-    if (options.avoidEndings && pending.id.startsWith(SCENE_DECISION_PREFIX)) {
+    const visits = (sceneVisits.get(pending.id) ?? 0) + 1;
+    sceneVisits.set(pending.id, visits);
+    // A scene come back to again and again is a loop only an ending leaves, so there it may end.
+    if (
+      options.avoidEndings &&
+      pending.id.startsWith(SCENE_DECISION_PREFIX) &&
+      visits <= MAX_SCENE_VISITS
+    ) {
       // Trying a choice sees the same dice the real one would.
       const scene = pending;
       const going = choices.filter(

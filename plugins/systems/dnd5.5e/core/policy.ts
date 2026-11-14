@@ -1,4 +1,10 @@
-import { type Actor, hasCondition, isDown, NS } from "./state.ts";
+import {
+  type Actor,
+  hasCondition,
+  INCAPACITATING,
+  isDown,
+  NS,
+} from "./state.ts";
 import { deriveStats, type KnownAction, rollAmount } from "./stats.ts";
 import {
   distanceFeet,
@@ -24,10 +30,12 @@ import {
   enemies,
   findAction,
   inReach,
+  meleeReach,
   moveSquares,
   slotLevelFor,
   spellSource,
   targetCount,
+  within5,
 } from "./combat/queries.ts";
 import { AimSchema, PickSchema } from "./combat/actions.ts";
 import { multiattackExtras } from "./combat/effects.ts";
@@ -45,8 +53,12 @@ function hpFraction(actor: Actor, context: Context): number {
 
 // Simple, predictable tactics, so non-player characters never need a model: heal, attack the weakest, react when it helps.
 // Where a creature should step to: within reach of the nearest foe it can hurt, by the shortest walk.
-// Null when no square gets it any closer than it is.
-export function stepToward(actor: Actor, context: Context): Square | null {
+// Null when no square gets it any closer than it is. With `toward`, only that foe and that reach count.
+export function stepToward(
+  actor: Actor,
+  context: Context,
+  toward?: { readonly foe: Actor; readonly reach: number },
+): Square | null {
   const { state } = context;
   const stats = deriveStats(actor, context);
   if (!actor.position) return null;
@@ -61,19 +73,21 @@ export function stepToward(actor: Actor, context: Context): Square | null {
       !(holding && concentrates(action)),
   );
   if (offensive.length === 0) return null;
-  const reach = Math.max(
-    ...offensive.map((action) => {
-      const { targeting } = action.activation;
-      return "area" in targeting && targeting.range === "self"
-        ? targeting.area.radius
-        : "range" in targeting
-          ? rangeFeet(targeting.range)
-          : 0;
-    }),
-  );
-  const foes = enemies(state, actor).filter(
-    (item) => !isDown(item) && item.position,
-  );
+  const reach =
+    toward?.reach ??
+    Math.max(
+      ...offensive.map((action) => {
+        const { targeting } = action.activation;
+        return "area" in targeting && targeting.range === "self"
+          ? targeting.area.radius
+          : "range" in targeting
+            ? rangeFeet(targeting.range)
+            : 0;
+      }),
+    );
+  const foes = toward
+    ? [toward.foe]
+    : enemies(state, actor).filter((item) => !isDown(item) && item.position);
   // How far it is to walk from a square to a foe, round walls and through difficult terrain, ignoring
   // creatures. On a map with no walls that's the straight distance.
   const { grid, walls = [] } = state.combat ?? {};
@@ -145,6 +159,74 @@ export function stepToward(actor: Actor, context: Context): Square | null {
     }))
     .sort((a, b) => b.cover - a.cover || a.rough - b.rough || a.feet - b.feet);
   return ranked[0]?.square ?? null;
+}
+
+// Where a party member walks before acting: into reach of the weapon or cantrip attack worth clearly more
+// than any it has from where it stands, as a player closes in with a sword rather than throwing a
+// cantrip from across the room. Null when it's already engaged, as leaving would provoke, or nothing is
+// worth the walk.
+function approach(actor: Actor, context: Context): Square | null {
+  const { state } = context;
+  const here = actor.position;
+  if (!here) return null;
+  const foes = enemies(state, actor).filter(
+    (item) => !isDown(item) && item.position,
+  );
+  const awake = (item: Actor): boolean =>
+    !hasCondition(item, ...INCAPACITATING);
+  if (foes.some((foe) => awake(foe) && within5(actor, foe))) return null;
+  const stats = deriveStats(actor, context);
+  const judge = makeJudge(context, actor);
+  const options = stats.actions.flatMap((action) => {
+    const { cost, resolution, targeting, trigger } = action.activation;
+    if (
+      trigger ||
+      !cost.includes("action") ||
+      cost.includes("slot") ||
+      resolution.kind !== "attack" ||
+      !("creatures" in targeting) ||
+      targeting.side !== "enemy" ||
+      !canAfford(action, actor, stats)
+    ) {
+      return [];
+    }
+    const reach = rangeFeet(targeting.range);
+    const melee = meleeReach(action) !== null;
+    const routine = attackRoutine(action, actor, stats).length;
+    return foes.map((foe) => ({
+      foe,
+      reach,
+      melee,
+      worth: routine * judge.worth(actor, action.id, foe.id, undefined),
+    }));
+  });
+  // A ranged attack from beside a foe has Disadvantage, so it only counts away from them.
+  const hitsFrom = (square: Square, option: (typeof options)[number]) =>
+    distanceFeet(square, option.foe.position) <= option.reach &&
+    (option.melee ||
+      !foes.some(
+        (foe) => awake(foe) && distanceFeet(square, foe.position) <= 5,
+      )) &&
+    coverFor(state, square, option.foe, [actor.id]) !== "total";
+  const now = Math.max(
+    0,
+    ...options
+      .filter((option) => hitsFrom(here, option))
+      .map((option) => option.worth),
+  );
+  const better = options
+    .filter((option) => option.worth > 1.2 * now)
+    .sort((a, b) => b.worth - a.worth);
+  const squares = [...moveSquares(actor, state, stats)].sort(
+    (a, b) => a.feet - b.feet,
+  );
+  // The best attack it can reach this turn, by the shortest walk; else it heads for the best of all.
+  for (const option of better) {
+    const square = squares.find((item) => hitsFrom(item.square, option));
+    if (square) return square.square;
+  }
+  const [best] = better;
+  return best ? stepToward(actor, context, best) : null;
 }
 
 function heals(action: KnownAction): boolean {
@@ -378,7 +460,9 @@ export function choosePolicy(decision: Decision, context: Context): string {
 
   const actor = actorOf(state, decision.actor);
   if (decision.id.startsWith(`${NS}:moveTo:`)) {
-    const square = stepToward(actor, context);
+    const square =
+      (actor.side === "party" ? approach(actor, context) : null) ??
+      stepToward(actor, context);
     return square ? squareKey(square) : STAY;
   }
   // A teleport or jump lands where a foe is in reach, nearest one first, as its options are listed.
@@ -451,6 +535,8 @@ export function choosePolicy(decision: Decision, context: Context): string {
 
   // The party plays by worth. Monsters keep the simple rules below, so the books' fights stay as hard as written.
   if (actor.side === "party" && decision.id.startsWith(`${NS}:turn:`)) {
+    const moving = decision.options.some((option) => option.id === MOVE);
+    if (moving && actor.budget.action && approach(actor, context)) return MOVE;
     const chosen = partyChoice(parsed, decision.options, actor, context);
     if (chosen) return chosen;
     if (
