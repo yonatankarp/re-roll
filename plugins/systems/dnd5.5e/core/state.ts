@@ -320,6 +320,8 @@ const TreasureFoundSchema = z.strictObject({
   items: z.array(ContentIdSchema),
   stowed: z.array(ContentIdSchema), // the found gear that goes in the pack
 });
+// Gold a scene took, such as a fare or a bribe: no more than the party had.
+const GoldSpentSchema = z.strictObject({ gold: z.number().min(0) });
 const GearChangedSchema = z.strictObject({
   actor: z.string(),
   stowed: z.array(ContentIdSchema),
@@ -489,6 +491,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:inspirationGranted`]: ActorOnlySchema,
   [`${NS}:inspirationSpent`]: ActorOnlySchema,
   [`${NS}:treasureFound`]: TreasureFoundSchema,
+  [`${NS}:goldSpent`]: GoldSpentSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
   [`${NS}:legendaryActionTaken`]: LegendaryActionTakenSchema,
@@ -1063,6 +1066,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         payload(ActorOnlySchema, event).actor,
         (actor) => ({ ...actor, heroicInspiration: false }),
       );
+    case `${NS}:goldSpent`: {
+      const { gold } = payload(GoldSpentSchema, event);
+      return {
+        ...state,
+        gold: Math.max(0, Math.round(((state.gold ?? 0) - gold) * 100) / 100),
+      };
+    }
     case `${NS}:treasureFound`: {
       const data = payload(TreasureFoundSchema, event);
       const found = updateActor(state, data.actor, (actor) => ({
