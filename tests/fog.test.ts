@@ -356,6 +356,50 @@ describe("what the party knows in the fog", () => {
   });
 });
 
+describe("the damage share in the fog", () => {
+  it("softens a fight that proves far beyond the party once it sees how far", async () => {
+    const run = await base();
+    const wizard = hero(run);
+    const context = (state: DndState) => ({
+      state,
+      dice: createDice(rngFromSeed("fog")),
+      content: run.content,
+      contentIds: run.contentIds,
+    });
+    // One goblin in sight, five more in the next room.
+    const start: DndState = {
+      actors: { [PLAYER_ACTOR]: wizard },
+      combat: null,
+    };
+    const result = withReveal(
+      startCombat(
+        {
+          id: "cellar",
+          monsters: [{ monster: "srd52:monster/goblin-warrior", count: 6 }],
+          battlemap: battlemap(ROOMS, {
+            monsters: [
+              [2, 0],
+              [6, 1],
+              [6, 2],
+              [7, 1],
+              [7, 2],
+              [8, 1],
+            ],
+          }),
+        },
+        context(start),
+        { canFlee: false, defeatContinues: false },
+      ),
+      context(start),
+    );
+    let state = (result.events ?? []).reduce(applyDndEvent, start);
+    const first = state.combat?.damageToParty ?? 1;
+    state = step(run, state, [moved(PLAYER_ACTOR, 5, 0)]);
+    expect(partySight(state, run).foes.size).toBe(6);
+    expect(state.combat?.damageToParty ?? 1).toBeLessThan(first);
+  });
+});
+
 describe("the board in the fog", () => {
   it("doesn't animate a foe the party can't see, before or after", async () => {
     const run = await base();
