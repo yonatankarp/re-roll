@@ -6,9 +6,11 @@ import {
   type Square,
   coverBetween,
   parseSquare,
+  reachableSquares,
   squareKey,
 } from "./grid.ts";
-import { darkvisionOf, seeing } from "./sight.ts";
+import { darkvisionOf, difficultSquares, seeing } from "./sight.ts";
+import { deriveStats } from "./stats.ts";
 import {
   type Actor,
   type DndState,
@@ -19,7 +21,7 @@ import {
 } from "./state.ts";
 import { hasTactic } from "./tactics.ts";
 import { zonesOf } from "./zones.ts";
-import { enemies } from "./combat/queries.ts";
+import { enemies, moveSquares } from "./combat/queries.ts";
 import { walksOf } from "./combat/movement.ts";
 
 type Combat = NonNullable<DndState["combat"]>;
@@ -321,5 +323,48 @@ export function unseenFoe(
     actor.side !== "party" &&
     fogged(state) &&
     !partySight(state, access).foes.has(id)
+  );
+}
+
+// Where a party member steps when it sees no foe but the fight goes on: along the shortest walk to the nearest
+// square the party doesn't see now, as far as it can go this turn. Null when there's nowhere left to look.
+export function searchStep(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+): Square | null {
+  const combat = state.combat;
+  if (
+    !combat?.grid ||
+    !actor.position ||
+    actor.side !== "party" ||
+    !fogged(state) ||
+    !enemies(state, actor).some((foe) => !isDown(foe))
+  ) {
+    return null;
+  }
+  const seen = partySight(state, access).squares;
+  const walls = new Set(combat.walls);
+  const [nearest] = reachableSquares(
+    actor.position,
+    Infinity,
+    combat.grid,
+    walls,
+    new Set(),
+    difficultSquares(state),
+    walls,
+  )
+    .filter((item) => !seen.has(squareKey(item.square)))
+    .sort((a, b) => a.feet - b.feet);
+  if (!nearest) return null;
+  const moves = new Set(
+    moveSquares(actor, state, deriveStats(actor, access)).map((item) =>
+      squareKey(item.square),
+    ),
+  );
+  return (
+    [...nearest.path]
+      .reverse()
+      .find((square) => moves.has(squareKey(square))) ?? null
   );
 }

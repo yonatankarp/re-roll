@@ -6,7 +6,7 @@ import {
   NS,
 } from "./state.ts";
 import { deriveStats, type KnownAction, rollAmount } from "./stats.ts";
-import { knownFoes } from "./fog.ts";
+import { knownFoes, searchStep } from "./fog.ts";
 import {
   distanceFeet,
   rangeFeet,
@@ -127,7 +127,10 @@ export function stepToward(
           : 0;
       }),
     );
-  if (foes.length === 0) return null;
+  // With no foe in sight, the party goes looking for one (fog.ts).
+  if (foes.length === 0) {
+    return toward ? null : searchStep(actor, state, context);
+  }
   const now = gap(actor.position);
   const gaps = new Map(
     moveSquares(actor, state, stats).map((item) => [item, gap(item.square)]),

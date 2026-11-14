@@ -10,6 +10,7 @@ import {
   choosePolicy,
   nextDndDecision,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
+import { stepToward } from "../plugins/systems/dnd5.5e/core/policy.ts";
 import {
   MOVE,
   parseOption,
@@ -272,18 +273,31 @@ describe("fog of war", () => {
 });
 
 describe("what the party knows in the fog", () => {
-  it("doesn't walk toward a foe it hasn't found, and goes for it once seen", async () => {
+  it("goes looking for a foe it hasn't found rather than straight at it, and goes for it once seen", async () => {
     const run = await base();
-    const state = started(run, [hero(run)], battlemap(ROOMS));
+    // A pocket to the west, and the goblin round the bend to the east.
+    const halls = [
+      "#############",
+      "#...#.......#",
+      "#.#.#.#####.#",
+      "#.#...#.....#",
+      "#############",
+    ];
+    const state = started(
+      run,
+      [hero(run)],
+      battlemap(halls, { party: [[3, 3]], monsters: [[10, 3]] }),
+    );
+    const context = (now: DndState) => ({
+      state: now,
+      dice: createDice(rngFromSeed("fog")),
+      content: run.content,
+      contentIds: run.contentIds,
+    });
     const choose = (now: DndState): string => {
       const decision = nextDndDecision(now, run);
       if (!decision) throw new Error("No decision");
-      return choosePolicy(decision, {
-        state: now,
-        dice: createDice(rngFromSeed("fog")),
-        content: run.content,
-        contentIds: run.contentIds,
-      });
+      return choosePolicy(decision, context(now));
     };
     const wizard = state.actors[PLAYER_ACTOR];
     if (!wizard || !state.combat) throw new Error("No fight");
@@ -292,18 +306,20 @@ describe("what the party knows in the fog", () => {
       combat: { ...state.combat, order: [PLAYER_ACTOR, foeId], index: 0 },
     };
     expect(knownFoes(yours, wizard, run)).toEqual([]);
-    expect(choose(yours)).not.toBe(MOVE);
     expect(choose(yours)).not.toContain(foeId);
+    // It searches the nearest place it hasn't seen, the pocket to the west.
+    expect(choose(yours)).toBe(MOVE);
+    expect(stepToward(wizard, context(yours))?.x).toBeLessThan(3);
+    // Knowing where the goblin is, the same party would head east for it.
+    expect(stepToward(wizard, context(unfogged(yours)))?.x).toBeGreaterThan(3);
     // The monsters, as the DM, know where the party is.
     const goblinActor = yours.actors[foeId];
     if (!goblinActor) throw new Error("No goblin");
     expect(knownFoes(yours, goblinActor, run).map((item) => item.id)).toEqual([
       PLAYER_ACTOR,
     ]);
-    // Without the fog, the same party goes after it.
-    expect(choose(unfogged(yours))).toBe(MOVE);
     // Once it stands in sight, it's fair game.
-    const seen = applyDndEvent(yours, moved(foeId, 3, 0));
+    const seen = applyDndEvent(yours, moved(foeId, 5, 1));
     expect(choose(seen)).toContain(foeId);
   });
 
