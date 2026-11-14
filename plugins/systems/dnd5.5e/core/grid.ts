@@ -65,6 +65,22 @@ export function placeSides(
   return { grid: { width, height }, positions };
 }
 
+// A diagonal step between two walls that meet at a corner, which would slip through a wall drawn as a
+// diagonal line of squares. Two creatures there don't close it, as the rules let a creature squeeze by.
+export function cutsCorner(
+  from: Square,
+  dx: number,
+  dy: number,
+  walls: ReadonlySet<string>,
+): boolean {
+  return (
+    dx !== 0 &&
+    dy !== 0 &&
+    walls.has(squareKey({ x: from.x + dx, y: from.y })) &&
+    walls.has(squareKey({ x: from.x, y: from.y + dy }))
+  );
+}
+
 // Every square a creature can end its move on, with what it costs. It can pass allies but not enemies,
 // and can't stop where anyone else stands. Entering a square of difficult terrain costs double.
 export function reachableSquares(
@@ -74,6 +90,7 @@ export function reachableSquares(
   blocked: ReadonlySet<string>,
   occupied: ReadonlySet<string>,
   difficult: ReadonlySet<string> = new Set(),
+  walls: ReadonlySet<string> = new Set(),
 ): readonly {
   readonly square: Square;
   readonly feet: number;
@@ -103,6 +120,7 @@ export function reachableSquares(
           square.x >= grid.width ||
           square.y >= grid.height ||
           blocked.has(key) ||
+          cutsCorner(next, dx, dy, walls) ||
           spent + step > feet ||
           spent + step >= (cost.get(key) ?? Infinity)
         ) {
@@ -265,6 +283,32 @@ function alongWalls(
   return false;
 }
 
+// Whether the segment between two grid corners passes, between its ends, through a corner where two walls
+// meet diagonally, as through a wall drawn as a diagonal line of squares.
+function throughPinch(
+  [ax, ay]: readonly [number, number],
+  [bx, by]: readonly [number, number],
+  walls: ReadonlySet<string>,
+): boolean {
+  const dx = bx - ax;
+  const dy = by - ay;
+  if (dx === 0 || dy === 0) return false;
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const steps = gcd(Math.abs(dx), Math.abs(dy));
+  const wall = (x: number, y: number) => walls.has(squareKey({ x, y }));
+  for (let step = 1; step < steps; step += 1) {
+    const px = ax + (dx / steps) * step;
+    const py = ay + (dy / steps) * step;
+    // The line runs between the two squares it doesn't enter; both walls close it.
+    const pinched =
+      Math.sign(dx) === Math.sign(dy)
+        ? wall(px, py - 1) && wall(px - 1, py)
+        : wall(px - 1, py - 1) && wall(px, py);
+    if (pinched) return true;
+  }
+  return false;
+}
+
 // The cover a target at `to` has against something coming from `from`, as on the DMG's grid: lines from the
 // attacker's best corner to the target square's four corners, where each one through a wall is blocked.
 // One or two blocked is half cover, three is three-quarters, four is total. Cover squares and creatures
@@ -305,7 +349,8 @@ export function coverBetween(
               corners(to).filter(
                 (target) =>
                   crossesAny(corner, target, nearWalls) ||
-                  alongWalls(corner, target, walls),
+                  alongWalls(corner, target, walls) ||
+                  throughPinch(corner, target, walls),
               ).length,
           ),
         );
@@ -390,8 +435,9 @@ export function pushTo(
   const dx = Math.sign(start.x - from.x);
   const dy = Math.sign(start.y - from.y);
   if (dx === 0 && dy === 0) return null;
+  const walls = new Set(state.combat?.walls ?? []);
   const blocked = new Set([
-    ...(state.combat?.walls ?? []),
+    ...walls,
     ...Object.values(state.actors).flatMap((item) =>
       item.id !== target.id && item.position && !isDead(item)
         ? [squareKey(item.position)]
@@ -403,7 +449,12 @@ export function pushTo(
     const next = { x: at.x + dx, y: at.y + dy };
     const outside =
       next.x < 0 || next.y < 0 || next.x >= grid.width || next.y >= grid.height;
-    if (outside || blocked.has(squareKey(next))) break;
+    if (
+      outside ||
+      blocked.has(squareKey(next)) ||
+      cutsCorner(at, dx, dy, walls)
+    )
+      break;
     at = next;
   }
   return at === start ? null : at;

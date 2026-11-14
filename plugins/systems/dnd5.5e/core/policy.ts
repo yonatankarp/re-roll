@@ -106,6 +106,7 @@ export function stepToward(
           new Set(walls),
           new Set(),
           difficultSquares(state),
+          new Set(walls),
         ).map((item) => [squareKey(item.square), item.feet]),
       );
       walkFrom.set(foe.id, field);

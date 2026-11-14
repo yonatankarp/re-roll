@@ -2979,6 +2979,49 @@ describe("battle map ground, cover and light", () => {
     );
   });
 
+  it("keeps walking and sight from slipping between two wall corners", () => {
+    // A wall drawn as a diagonal line of squares, with open squares on both sides of its pinch.
+    const rows = ["...", ".#.", "#.."];
+    const { walls, cover: squares } = keysOf(rows);
+    const walk = reachableSquares(
+      { x: 0, y: 1 },
+      5,
+      { width: 3, height: 3 },
+      walls,
+      new Set(),
+      new Set(),
+      walls,
+    );
+    expect(walk.some(({ square }) => square.x === 1 && square.y === 2)).toBe(
+      false,
+    );
+    // Two creatures at the corners don't close it, as a creature may squeeze by.
+    const past = reachableSquares(
+      { x: 0, y: 1 },
+      5,
+      { width: 3, height: 3 },
+      new Set(["1,1", "0,2"]),
+      new Set(),
+    );
+    expect(past.some(({ square }) => square.x === 1 && square.y === 2)).toBe(
+      true,
+    );
+    // A whole diagonal wall hides one side from the other, where lines through its pinches used to see.
+    const line = keysOf(["...#", "..#.", ".#..", "#..."]);
+    expect(
+      coverBetween(
+        { x: 0, y: 0 },
+        { x: 3, y: 3 },
+        line.walls,
+        line.cover,
+        new Set(),
+      ),
+    ).toBe("total");
+    expect(
+      coverBetween({ x: 0, y: 0 }, { x: 2, y: 0 }, walls, squares, new Set()),
+    ).toBe(0);
+  });
+
   it("works out cover from walls, cover squares and creatures in the way", () => {
     const cover = (
       rows: readonly string[],
