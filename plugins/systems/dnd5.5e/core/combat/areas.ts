@@ -26,6 +26,7 @@ import { distanceFeet } from "../grid.ts";
 import { lightAt } from "../sight.ts";
 import {
   affects,
+  statsOf,
   inZone,
   sealed,
   sunlit,
@@ -204,7 +205,7 @@ export function burstResult(context: Context): SystemResult | null {
       continue;
     }
     if (actor.source.kind === "character") continue;
-    const bursts = deriveStats(actor, context).passives.flatMap((passive) =>
+    const bursts = statsOf(actor, context).passives.flatMap((passive) =>
       passive.kind === "deathBurst" ? [passive] : [],
     );
     const [burst] = bursts;
@@ -277,7 +278,7 @@ export function sunlightFrames(
   context: ContentAccess & { readonly state: DndState },
 ): Frame[] {
   if (isDead(actor) || actor.source.kind === "character") return [];
-  const burns = deriveStats(actor, context).passives.some(
+  const burns = statsOf(actor, context).passives.some(
     (passive) =>
       passive.kind === "lightSensitive" &&
       passive.damage.length > 0 &&
