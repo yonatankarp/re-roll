@@ -540,6 +540,33 @@ export async function loadRun(
     return current;
   };
 
+  const rankOf = new Map(precedence.map((id, index) => [id, index]));
+  const rank = (id: string): number =>
+    rankOf.get(ownerOf(id)) ?? precedence.length;
+  let ids: readonly string[] | undefined;
+  const contentIds = (): readonly string[] =>
+    (ids ??= Object.freeze(
+      [...entries.keys()]
+        .filter((id) => !aliases.has(id))
+        .sort((a, b) => rank(a) - rank(b) || compareText(a, b)),
+    ));
+  // Derived entries are found by id but not listed, so a list of items doesn't fill with every version.
+  const derived = new Map<string, ContentEntry | undefined>();
+  const content = (id: string): ContentEntry | undefined => {
+    const resolved = resolve(id);
+    if (resolved === null) return undefined;
+    const listed = entries.get(resolved)?.entry;
+    if (listed) return listed;
+    if (!derived.has(resolved)) {
+      const kind = Object.values(system.contentKinds).find(
+        (each) => each.idPrefix === kindPrefixOf(resolved),
+      );
+      const built = kind?.derive?.(resolved, { content, contentIds });
+      derived.set(resolved, built && deepFreeze(built));
+    }
+    return derived.get(resolved);
+  };
+
   const checkReference = (
     owner: string,
     file: string | null,
@@ -552,7 +579,7 @@ export async function loadRun(
         file,
         message: `replacement cycle through "${id}"`,
       });
-    } else if (!entries.has(resolved)) {
+    } else if (!content(resolved)) {
       issues.push({
         plugin: owner,
         file,
@@ -600,17 +627,10 @@ export async function loadRun(
     legacyHashes.set(record.manifest.id, hashText(raw.join("\0")));
   }
 
-  const content = new Map<string, ContentEntry>();
   for (const [id, { entry }] of entries) {
-    if (!aliases.has(id)) content.set(id, deepFreeze(entry));
+    if (!aliases.has(id)) deepFreeze(entry);
   }
   for (const adventure of adventures.values()) deepFreeze(adventure);
-  const rankOf = new Map(precedence.map((id, index) => [id, index]));
-  const rank = (id: string): number =>
-    rankOf.get(ownerOf(id)) ?? precedence.length;
-  const ids = Object.freeze(
-    [...content.keys()].sort((a, b) => rank(a) - rank(b) || compareText(a, b)),
-  );
 
   return {
     ok: true,
@@ -618,13 +638,10 @@ export async function loadRun(
       system,
       plugins: Object.freeze(order.map((record) => record.manifest)),
       precedence: Object.freeze(precedence),
-      contentIds: () => ids,
+      contentIds,
       pluginHash: (pluginId: string) => hashes.get(pluginId),
       legacyPluginHash: (pluginId: string) => legacyHashes.get(pluginId),
-      content: (id: string) => {
-        const resolved = resolve(id);
-        return resolved === null ? undefined : content.get(resolved);
-      },
+      content,
       adventure: (pluginId: string) => adventures.get(pluginId),
     }),
   };

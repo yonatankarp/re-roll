@@ -331,6 +331,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       ability: AbilitySchema.optional(),
       flatBonus: z.number().int().optional(),
       proficient: z.boolean().optional(), // false for a weapon the wielder has no training with
+      itemBonus: z.number().int().min(1).optional(), // a magic weapon's own bonus to hit
     }),
     damage: z.array(DamageSchema).min(1),
     onHit: LeafEffectsSchema,
@@ -840,6 +841,11 @@ const ItemBaseSchema = ContentEntrySchema.extend({
   weightLb: z.number().min(0).optional(),
 });
 
+const MagicBonusSchema = z.strictObject({
+  to: z.enum(["attack", "damage", "ac", "savingThrows", "spellAttack"]),
+  amount: z.number().int().min(1),
+});
+
 export const WeaponSchema = ItemBaseSchema.extend({
   type: z.literal("weapon"),
   category: z.enum(["simple", "martial"]),
@@ -867,6 +873,9 @@ export const WeaponSchema = ItemBaseSchema.extend({
     "topple",
     "vex",
   ]),
+  // A magic weapon made from a plain one, as a +2 Longsword: the plain weapon, and its own bonuses.
+  baseWeapon: ContentIdSchema.optional(),
+  bonuses: z.array(MagicBonusSchema).min(1).optional(),
 }).strict();
 export type Weapon = z.infer<typeof WeaponSchema>;
 
@@ -919,11 +928,6 @@ const RaritySchema = z.enum([
   "artifact",
 ]);
 
-const MagicBonusSchema = z.strictObject({
-  to: z.enum(["attack", "damage", "ac", "savingThrows", "spellAttack"]),
-  amount: z.number().int().min(1),
-});
-
 // Numbers read from the book's text. The engine doesn't apply them yet, so `automation` says what actually happens.
 const MagicItemSchema = ItemBaseSchema.extend({
   type: z.literal("magicItem"),
@@ -946,7 +950,7 @@ const MagicItemSchema = ItemBaseSchema.extend({
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
-  // Set when one entry covers several rarities, such as +1, +2 or +3.
+  // Set when one entry covers several rarities, such as +1, +2 or +3. Content names one as `<id>--<n>` (variants.ts).
   variants: z
     .array(
       z.strictObject({
