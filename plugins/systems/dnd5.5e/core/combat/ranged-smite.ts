@@ -62,7 +62,15 @@ export function replaceHitFrame(
 ): Frame | null {
   const attacker = actorOf(context.state, hit.attacker);
   const target = actorOf(context.state, hit.target);
-  if (isDown(attacker) || isDown(target)) return null;
+  const stats = deriveStats(attacker, context);
+  // Most attackers have no such spell, so that's looked at first.
+  if (
+    isDown(attacker) ||
+    isDown(target) ||
+    !stats.actions.some((action) => action.activation.trigger?.replacesHit)
+  ) {
+    return null;
+  }
   const hitWith = findAction(attacker, hit.actionId, context, hit.slotLevel);
   const { resolution } = hitWith.activation;
   if (
@@ -72,7 +80,6 @@ export function replaceHitFrame(
   ) {
     return null;
   }
-  const stats = deriveStats(attacker, context);
   const options = stats.actions
     .filter(
       (action) =>

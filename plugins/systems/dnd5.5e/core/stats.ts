@@ -1460,6 +1460,20 @@ function withEffectActions(
   actor: Actor,
   access: ContentAccess,
 ): Stats {
+  // Most creatures have none of these, and stats are derived often.
+  if (
+    !actor.activeEffects.some(
+      ({ modifier }) =>
+        modifier.kind === "weaponSpell" ||
+        modifier.kind === "grantedAction" ||
+        modifier.kind === "wished",
+    ) &&
+    !stats.actions.some((action) =>
+      weaponAttackOf(action.activation.resolution),
+    )
+  ) {
+    return stats;
+  }
   const granted: KnownAction[] = [];
   let actions = stats.actions;
   for (const { modifier, sourceId, level } of actor.activeEffects) {
