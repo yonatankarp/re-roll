@@ -1,5 +1,10 @@
+import { initiativeSwapFrames, inspirationEchoes } from "./reactions.ts";
 import { type Battlemap, type Loot, MonsterSchema } from "../schemas.ts";
-import { type EncounterOptions, type SystemResult } from "#sdk";
+import {
+  type EncounterOptions,
+  type SystemEvent,
+  type SystemResult,
+} from "#sdk";
 import {
   type Actor,
   applyDndEvent,
@@ -180,17 +185,22 @@ export function startCombat(
     events: [
       { kind: "encounterStarted", encounter: encounter.id },
       ...(rallier
-        ? [dndEvent(`${NS}:inspirationSpent`, { actor: rallier.id })]
+        ? [
+            dndEvent(`${NS}:inspirationSpent`, { actor: rallier.id }),
+            ...inspirationEchoes(rallier, context),
+          ]
         : []),
       dndEvent(`${NS}:combatStarted`, {
         ...started,
         ...(lowered ? { damageToParty: share } : {}),
       }),
+      ...party.flatMap((actor) => initiativeRecharge(actor, context)),
     ],
-    // With nobody on 20 or more, the lair acts before anyone.
-    ...(lair?.at === 0
-      ? {
-          frames: lairTurns(
+    // Alert's Initiative Swap comes first. With nobody on 20 or more, the lair acts before anyone.
+    frames: [
+      ...initiativeSwapFrames(party, context),
+      ...(lair?.at === 0
+        ? lairTurns(
             {
               ...context.state,
               actors: Object.fromEntries(
@@ -200,8 +210,23 @@ export function startCombat(
             },
             "start",
             context,
-          ),
-        }
-      : {}),
+          )
+        : []),
+    ],
   };
+}
+
+// Uses that come back when Initiative is rolled, as Second Chance's.
+function initiativeRecharge(actor: Actor, context: Context): SystemEvent[] {
+  return deriveStats(actor, context).resourceDefs.flatMap((resource) =>
+    (actor.resourcesSpent[resource.id] ?? 0) > 0 &&
+    resource.recharge.some(({ on }) => on === "initiative")
+      ? [
+          dndEvent(`${NS}:resourceRestored`, {
+            actor: actor.id,
+            resource: resource.id,
+          }),
+        ]
+      : [],
+  );
 }

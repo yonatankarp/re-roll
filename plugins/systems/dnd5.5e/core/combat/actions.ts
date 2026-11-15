@@ -16,6 +16,7 @@ import {
   MOVE,
   parseOption,
   PASS,
+  PICK_UP,
   STAY,
 } from "./ids.ts";
 import {
@@ -65,6 +66,7 @@ import {
 import { keepsHidden, metamagicCast } from "../metamagic.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
 import { spellFumble, timeStopEnds } from "./durations.ts";
+import { castRiders, schoolCastEvents } from "./school.ts";
 
 // Taking an action on a turn: casting it, choosing its targets one by one, or aiming its area.
 
@@ -133,6 +135,16 @@ export function runTakeAction(
   if (payload.answer === FLEE) return runFlee(actor, context);
 
   const [actionId = "", targetId = "", slot] = parseOption(payload.answer);
+  if (actionId === PICK_UP) {
+    return {
+      events: [
+        dndEvent(`${NS}:itemPickedUp`, {
+          actor: actor.id,
+          index: Number(targetId),
+        }),
+      ],
+    };
+  }
   if (targetId === PICK) {
     return { frames: [pickFrame(actor, actionId, slot, [], context)] };
   }
@@ -208,6 +220,8 @@ function castAction(
     events: [
       ...payCosts(action, actor, context, slotLevel),
       ...timeStopEnds(actor, caught),
+      ...schoolCastEvents(actor, action, slotLevel, context),
+      ...castRiders(actor, action, context),
       ...lightAttackEvents(actor, actionId, context),
       // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.
       ...(resolution.kind === "attack" || keepsHidden(actor, actionId)

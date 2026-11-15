@@ -681,6 +681,7 @@ export const spellImportKind: ImportKind = {
     const casting = castingOf(facts);
     const isReaction = casting.startsWith("reaction");
     const reactsToHit = casting.includes("hit by an attack");
+    const reactsToDamage = casting.includes("taking damage"); // as Hellish Rebuke
     // The engine has no trigger for this, so the spell could otherwise be cast without the hit.
     const afterHit = casting.includes("after hitting");
 
@@ -691,10 +692,21 @@ export const spellImportKind: ImportKind = {
       activation = reviewed.activation;
       automation = reviewed.automation;
       notes.push(`mechanics reused from ${reviewed.id}`);
-    } else if (encoded && cost && !afterHit && (!isReaction || reactsToHit)) {
+    } else if (
+      encoded &&
+      cost &&
+      !afterHit &&
+      (!isReaction || reactsToHit || reactsToDamage)
+    ) {
       activation = {
         cost,
-        ...(isReaction ? { trigger: { hitByAttack: true as const } } : {}),
+        ...(isReaction
+          ? {
+              trigger: reactsToDamage
+                ? { damaged: true as const }
+                : { hitByAttack: true as const },
+            }
+          : {}),
         targeting: encoded.targeting,
         resolution: withCalculatedAttack(encoded.resolution),
       };

@@ -8,8 +8,8 @@ import {
   modifierFor,
   rerollingOnes,
   rollAmount,
-  rollDiceNotation,
   saveBonus,
+  type Stats,
 } from "../stats.ts";
 import { metamagicSaves } from "../metamagic.ts";
 import {
@@ -20,11 +20,13 @@ import {
   hasCondition,
   INCAPACITATING,
   isDead,
+  isDown,
   NS,
   frame,
 } from "../state.ts";
 import {
   type ContentAccess,
+  type Dice,
   type Frame,
   type SystemEvent,
   type SystemResult,
@@ -33,6 +35,7 @@ import { concentrationDc, finalDamage, halved, rollD20 } from "../rules.ts";
 import {
   type Ability,
   type Damage,
+  type DamageType,
   type Duration,
   type LeafEffect,
   MonsterSchema,
@@ -40,9 +43,12 @@ import {
 import { multiattackUses } from "../multiattack-uses.ts";
 import {
   dropToOneEvents,
+  HIGHEST,
   masteredDice,
+  maximized,
   masteredTypes,
   rerolledTypes,
+  hitDieRoll,
   nextHitDie,
   piercing,
   interposedShield,
@@ -51,7 +57,7 @@ import {
   traitSaveAdvantage,
 } from "../trait-rules.ts";
 import { dodging } from "../tactics.ts";
-import { AIM, ALL, HIT_DICE } from "./ids.ts";
+import { AIM, ALL, HIT_DICE, THROW_PREFIX, weaponItemId } from "./ids.ts";
 import {
   distanceFeet,
   inArea,
@@ -69,7 +75,14 @@ import {
 import { caughtBy } from "../targeting.ts";
 import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
 import { teleportFrame } from "./movement.ts";
+import {
+  afterDamage,
+  beforeDamage,
+  reactFrames,
+  settleRoll,
+} from "./reactions.ts";
 import { summonEvents } from "./summon.ts";
+import { fueledDamage } from "./school.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
@@ -101,7 +114,13 @@ export function payCosts(
   context: Context,
   slotLevel?: number,
 ): SystemEvent[] {
-  const events: SystemEvent[] = [];
+  // An attack ends them once rolled, so its own roll still has their Advantage (attack.ts).
+  const events: SystemEvent[] = [
+    ...(action.activation.resolution.kind === "attack"
+      ? []
+      : actingEnds(actor, action)),
+    ...kitUse(actor, action, context),
+  ];
   for (const cost of action.activation.cost) {
     if (cost === "action" || cost === "bonusAction" || cost === "reaction") {
       events.push(
@@ -244,6 +263,86 @@ export function damageEvents(
 }
 
 // Several hits on one target, reported in turn so each one sees the HP the last one left.
+// Tyro of the Gauntlet's Stand as One: an ally within 5 feet spends its Reaction to keep the target from being moved.
+export function heldInPlace(
+  target: Actor,
+  context: Pick<Context, "state" | "content" | "contentIds">,
+): SystemEvent[] {
+  if (hasCondition(target, ...INCAPACITATING)) return [];
+  const guard = Object.values(context.state.actors).find(
+    (other) =>
+      other.id !== target.id &&
+      other.side === target.side &&
+      other.budget.reaction &&
+      !isDown(other) &&
+      !hasCondition(other, ...INCAPACITATING) &&
+      distanceFeet(other.position, target.position) <= 5 &&
+      hasPassive(deriveStats(other, context), "standAsOne"),
+  );
+  return guard
+    ? [
+        dndEvent(`${NS}:budgetSpent`, {
+          actor: guard.id,
+          kind: "reaction",
+          label: "Stand as One",
+        }),
+      ]
+    : [];
+}
+
+// A Healer's Kit's ten uses: an activation that needs it carried spends one, and the last use spends the kit.
+function kitUse(
+  actor: Actor,
+  action: KnownAction,
+  context: Context,
+): SystemEvent[] {
+  const { carrying } = action.activation;
+  const item = carrying ? context.content(carrying) : undefined;
+  const uses =
+    item && typeof item === "object" && "uses" in item ? Number(item.uses) : 0;
+  if (!carrying || !uses) return [];
+  const key = `uses:${carrying}`;
+  const spent = (actor.resourcesSpent[key] ?? 0) + 1;
+  return spent < uses
+    ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource: key })]
+    : [
+        dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: carrying }),
+        dndEvent(`${NS}:resourceRestored`, { actor: actor.id, resource: key }),
+      ];
+}
+
+// Boon of Erupting Spellpower: a slot spell's surge, spending its use.
+// shortcut: it's used on the first slot spell that deals damage, and comes back with a rest, not on rolling Initiative.
+function overloaded(
+  actor: Actor,
+  action: KnownAction,
+  stats: Stats,
+): SystemEvent | null {
+  if (action.spellLevel === null) return null;
+  for (const passive of stats.passives) {
+    if (
+      passive.kind === "spellOverload" &&
+      (actor.resourcesSpent[passive.resource] ?? 0) <
+        (stats.resources[passive.resource] ?? 0)
+    ) {
+      return dndEvent(`${NS}:resourceSpent`, {
+        actor: actor.id,
+        resource: passive.resource,
+      });
+    }
+  }
+  return null;
+}
+
+// Boon of Bountiful Health's Augmented Health.
+export function tempHpBonus(stats: Stats): number {
+  return stats.passives.reduce(
+    (sum, passive) =>
+      passive.kind === "tempHpBonus" ? sum + passive.amount : sum,
+    0,
+  );
+}
+
 export function dealEvents(
   target: Actor,
   hits: readonly { readonly amount: number; readonly type: Damage["type"] }[],
@@ -253,19 +352,66 @@ export function dealEvents(
   let { state } = context;
   const events: SystemEvent[] = [];
   let dealt = 0;
-  for (const { amount, type } of hits) {
+  for (const hit of hits) {
     const current = state.actors[target.id] ?? target;
-    for (const event of damageEvents(
-      current,
-      amount,
-      type,
-      critical,
-      context,
-    )) {
+    // A reaction such as Vitality Ward may lessen it before it lands.
+    const lessened = beforeDamage(current, hit.amount, hit.type, {
+      ...context,
+      state,
+    });
+    const { amount, type } = { ...hit, amount: lessened.amount };
+    for (const event of [
+      ...lessened.events,
+      ...damageEvents(current, amount, type, critical, { ...context, state }),
+    ]) {
       events.push(event);
       if (state.actors[target.id]) state = applyDndEvent(state, event);
     }
     dealt += Math.max(0, scaledForParty(target, amount, context.state));
+  }
+  // Dragon Fear: damage lets the target repeat the save that ends the effect.
+  const hurt = state.actors[target.id];
+  // Killer's Fortune: a foe dropping gives the bearer's next attack Advantage.
+  if (hurt && hurt.hp <= 0 && target.hp > 0) {
+    for (const bearer of Object.values(state.actors)) {
+      if (
+        bearer.side === target.side ||
+        isDown(bearer) ||
+        !hasPassive(deriveStats(bearer, context), "killAdvantage")
+      ) {
+        continue;
+      }
+      events.push(
+        dndEvent(`${NS}:effectAdded`, {
+          actor: bearer.id,
+          effect: {
+            sourceId: "killers-fortune",
+            casterId: bearer.id,
+            modifier: { kind: "advantage", on: "attacks", once: true },
+            ends: "casterNextTurnEnd",
+          },
+        }),
+      );
+    }
+  }
+  for (const effect of dealt > 0 ? (hurt?.activeEffects ?? []) : []) {
+    if (!hurt || !effect.saveOnDamage) continue;
+    const save = rollSave(
+      hurt,
+      effect.saveOnDamage.ability,
+      effect.saveOnDamage.dc,
+      { ...context, state },
+    );
+    events.push(...save.events);
+    if (save.saved) {
+      events.push(
+        dndEvent(`${NS}:effectEnded`, {
+          actor: hurt.id,
+          sourceId: effect.sourceId,
+          casterId: effect.casterId,
+        }),
+      );
+    }
   }
   return { events, dealt };
 }
@@ -282,6 +428,59 @@ export function effectEnds(
       : "spellDuration";
   }
   return "concentration" in duration ? "concentration" : "spellDuration";
+}
+
+// Effects on the actor that end as it acts, or as it attacks, deals damage or forces a save, as Fade Away's
+// invisibility.
+export function actingEnds(
+  actor: Actor,
+  action: KnownAction | null, // null for an action anyone can take, such as Dash
+): SystemEvent[] {
+  const resolution = action?.activation.resolution;
+  const harms =
+    resolution !== undefined &&
+    (resolution.kind !== "automatic" || resolution.damage.length > 0);
+  return actor.activeEffects.flatMap(({ endsOn, sourceId, casterId }) =>
+    endsOn === "action" || (endsOn === "attack" && harms)
+      ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId, casterId })]
+      : [],
+  );
+}
+
+// Riders on a creature the bearer damages with this type, as Crusher or Slasher give, from an attack or a spell.
+export function damageRiders(
+  attacker: Actor,
+  target: Actor,
+  types: ReadonlySet<DamageType>,
+  critical: boolean,
+  stats: Stats,
+  context: Context,
+  spell = false, // from a spell's damage, which only a rider with `spells` takes
+): SystemEvent[] {
+  return stats.passives.flatMap((passive) => {
+    if (passive.kind !== "damageRider" || !types.has(passive.damage)) return [];
+    if (spell && !passive.spells) return [];
+    if (passive.critical && !critical) return [];
+    const key = `rider:${passive.damage}:${String(passive.critical)}`;
+    if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return [];
+    const { resource } = passive;
+    if (
+      resource &&
+      (attacker.resourcesSpent[resource] ?? 0) >=
+        (stats.resources[resource] ?? 0)
+    ) {
+      return [];
+    }
+    return [
+      ...(passive.oncePerTurn
+        ? [dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key })]
+        : []),
+      ...(resource
+        ? [dndEvent(`${NS}:resourceSpent`, { actor: attacker.id, resource })]
+        : []),
+      ...leafEvents(passive.effects, key, attacker, target, context),
+    ];
+  });
 }
 
 export function leafEvents(
@@ -344,7 +543,7 @@ export function leafEvents(
         if (!die || unhealed) break;
         const max = deriveStats(target, context).maxHp;
         const rolled =
-          rollDiceNotation(`1${die}`, healDice) +
+          hitDieRoll(die, deriveStats(target, context), healDice) +
           evaluateFormula(effect.bonus, stats);
         events.push(
           dndEvent(`${NS}:resourceSpent`, {
@@ -363,7 +562,22 @@ export function leafEvents(
         events.push(
           dndEvent(`${NS}:tempHpGained`, {
             actor: target.id,
-            amount: rollAmount(effect.amount, stats, context.dice),
+            amount:
+              rollAmount(effect.amount, stats, context.dice) +
+              tempHpBonus(deriveStats(target, context)),
+          }),
+        );
+        break;
+      case "dash":
+        events.push(
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: {
+              sourceId,
+              casterId: caster.id,
+              modifier: { kind: "tactic", tactic: "dash" },
+              ends: "casterNextTurn",
+            },
           }),
         );
         break;
@@ -400,6 +614,11 @@ export function leafEvents(
       case "applyCondition": {
         if (
           immuneToCondition(deriveStats(target, context), effect.condition) ||
+          target.activeEffects.some(
+            ({ modifier }) =>
+              modifier.kind === "conditionImmunity" &&
+              modifier.condition === effect.condition,
+          ) ||
           (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost)
         )
           break;
@@ -427,6 +646,10 @@ export function leafEvents(
                 : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
               ...(effect.endsOnSpell ? { endsOnSpell: true } : {}),
+              ...(effect.endsOn ? { endsOn: effect.endsOn } : {}),
+              ...(effect.saveOnDamage && conditionSave
+                ? { saveOnDamage: conditionSave }
+                : {}),
               ...(effect.secondFailure && conditionSave
                 ? {
                     secondFailure: {
@@ -531,7 +754,10 @@ export function leafEvents(
           effect.direction === "away"
             ? pushTo(caster.position, target, effect.feet, context.state)
             : null;
-        if (to) {
+        const held = to ? heldInPlace(target, context) : [];
+        if (held.length > 0) {
+          events.push(...held);
+        } else if (to) {
           events.push(
             dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 }),
           );
@@ -546,6 +772,16 @@ export function leafEvents(
       case "zone":
       case "summon":
       case "counter":
+      case "reroll":
+      case "rollBonus":
+      case "replaceRoll":
+      case "strike":
+      case "redirect":
+      case "negateHit":
+      case "split":
+      case "swapInitiative":
+      case "inspiration":
+      case "resistTrigger":
         // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit, and
         // a teleport's square by its own decision and a zone once for the whole spell (resolveAction).
         break;
@@ -690,6 +926,31 @@ function wallRing(
   return { squares, pushed };
 }
 
+// Order's Resilience's Stronger Together: a bearer that can act and an ally within 5 feet of it both have Advantage.
+function strongerTogether(
+  target: Actor,
+  ability: Ability,
+  context: Context,
+): boolean {
+  const able = (actor: Actor) =>
+    !isDown(actor) && !hasCondition(actor, ...INCAPACITATING);
+  const bears = (actor: Actor) =>
+    deriveStats(actor, context).passives.some(
+      (passive) =>
+        passive.kind === "allySaveAdvantage" &&
+        passive.abilities.includes(ability),
+    );
+  if (!able(target) || !target.position) return false;
+  const near = Object.values(context.state.actors).filter(
+    (other) =>
+      other.id !== target.id &&
+      other.side === target.side &&
+      able(other) &&
+      distanceFeet(other.position, target.position) <= 5,
+  );
+  return near.length > 0 && (bears(target) || near.some(bears));
+}
+
 // The saved flag, and the roll for the history. An automatic failure rolls no die, so it has no event.
 export function rollSave(
   target: Actor,
@@ -709,7 +970,7 @@ export function rollSave(
     return { saved: false, events: [] };
   }
   const stats = deriveStats(target, context);
-  const roll = rollD20(context.dice, {
+  const edge = {
     advantage:
       advantage ||
       hasFlag(target, "advantage", "saves", stats, ability) ||
@@ -723,7 +984,8 @@ export function rollSave(
       ) ||
       (magical && hasPassive(stats, "magicResistance")) ||
       (ability === "dex" && dodging(target)) ||
-      traitSaveAdvantage(stats, ability, conditions),
+      traitSaveAdvantage(stats, ability, conditions) ||
+      strongerTogether(target, ability, context),
     disadvantage:
       disadvantage ||
       hasFlag(target, "disadvantage", "saves", stats, ability) ||
@@ -736,18 +998,53 @@ export function rollSave(
         ability,
       ) ||
       (ability === "dex" && hasCondition(target, "restrained")),
+  };
+  const roll = rollD20(context.dice, {
+    ...edge,
     rerollOnes: hasPassive(stats, "rerollOnes"),
   });
-  const total =
-    roll.natural +
+  const base =
     saveBonus(stats, ability) +
     rollBonus(target, "saves", context, undefined, ability) +
     (ability === "dex" ? cover : 0);
-  const saved = total >= dc;
+  // Reactions to the roll before it lands, as Bountiful Luck or Portent (combat/reactions.ts).
+  const judge = (natural: number, bonus: number) => ({
+    total: natural + base + bonus,
+    success: natural + base + bonus >= dc,
+  });
+  const settled = settleRoll(
+    {
+      roller: target,
+      kind: "save",
+      natural: roll.natural,
+      goal: dc,
+      magical,
+      ...judge(roll.natural, 0),
+    },
+    edge,
+    judge,
+    context,
+  );
+  const { total, success: saved } = judge(settled.natural, settled.bonus);
+  // A save's once-only edge, as Harper Teamwork's Disadvantage, is spent on it.
+  const spent = target.activeEffects.flatMap(
+    ({ modifier, sourceId, casterId }) =>
+      (modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
+      modifier.on === "saves" &&
+      modifier.once
+        ? [
+            dndEvent(`${NS}:effectEnded`, {
+              actor: target.id,
+              sourceId,
+              casterId,
+            }),
+          ]
+        : [],
+  );
   const rolled = dndEvent(`${NS}:saveRolled`, {
     actor: target.id,
     ability,
-    natural: roll.natural,
+    natural: settled.natural,
     total,
     dc,
     success: saved,
@@ -772,6 +1069,7 @@ export function rollSave(
     return {
       saved: again.saved,
       events: [
+        ...settled.events,
         rolled,
         dndEvent(`${NS}:oncePerTurnUsed`, {
           actor: target.id,
@@ -781,7 +1079,7 @@ export function rollSave(
       ],
     };
   }
-  return { saved, events: [rolled] };
+  return { saved, events: [...settled.events, rolled, ...spent] };
 }
 
 const SAVE_REROLL = "save-reroll";
@@ -908,6 +1206,8 @@ export function resolveAction(
     );
   };
 
+  let ridden = false;
+  const overload = { prone: false };
   const applyRolled = (
     target: Actor,
     damage: readonly {
@@ -933,25 +1233,102 @@ export function resolveAction(
       ...result.events,
       ...insideDamageEvents(actor, target, result.dealt),
     );
+    // Boon of Erupting Spellpower: each creature the surging spell damages is knocked Prone.
+    if (overload.prone && result.dealt > 0) {
+      events.push(
+        ...leafEvents(
+          [
+            {
+              kind: "applyCondition",
+              condition: "prone",
+              duration: { minutes: 1 },
+              repeatSave: false,
+              endsOnDamage: false,
+            },
+          ],
+          "spell-overload",
+          actor,
+          target,
+          context,
+        ),
+      );
+    }
+    // A spell's riders, as Putrefy's, go on the first creature it damages.
+    // shortcut: only the first, since a use spent on one isn't seen by the next in the same cast.
+    if (!ridden && action.spellLevel !== null && result.dealt > 0) {
+      ridden = true;
+      events.push(
+        ...damageRiders(
+          actor,
+          target,
+          new Set(damage.map(({ type }) => type)),
+          false,
+          stats,
+          context,
+          true,
+        ),
+      );
+    }
     frames.push(
-      ...concentrationFrame(
+      ...afterDamage(
         target,
         result.dealt,
-        hasPassive(stats, "concentrationBreaker"),
+        {
+          source: actor.id,
+          types: damage.map(({ type }) => type),
+          spell: action.spellLevel !== null,
+        },
+        concentrationFrame(
+          target,
+          result.dealt,
+          hasPassive(stats, "concentrationBreaker"),
+        ),
+        { ...context, state: events.reduce(applyDndEvent, context.state) },
       ),
     );
   };
 
-  const rollSharedDamage = (list: readonly Damage[]) =>
-    list.map(({ amount, type }) => ({
-      total: rollAmount(
-        amount,
-        stats,
-        masteredDice(context.dice, type, mastered, rerolled),
-        critical ? 2 : 1,
-      ),
+  const rollSharedDamage = (list: readonly Damage[]) => {
+    const fuel =
+      list.length > 0
+        ? fueledDamage(actor, action, context)
+        : { bonus: 0, events: [] };
+    const maxed = maximized(
+      actor,
+      stats,
+      list.map(({ type }) => type),
+    );
+    const surge =
+      list.length > 0 && slotLevel !== undefined
+        ? overloaded(actor, action, stats)
+        : null;
+    overload.prone = surge !== null;
+    events.push(
+      ...fuel.events,
+      ...(maxed?.events ?? []),
+      ...(surge ? [surge] : []),
+    );
+    const maxIndex = list.findIndex(({ type }) => type === maxed?.type);
+    const floored = (dice: Dice): Dice =>
+      surge
+        ? {
+            below: (count) => dice.below(count),
+            roll: (sides) => Math.max(3, dice.roll(sides)),
+          }
+        : dice;
+    return list.map(({ amount, type }, index) => ({
+      total:
+        rollAmount(
+          amount,
+          stats,
+          index === maxIndex
+            ? HIGHEST
+            : floored(masteredDice(context.dice, type, mastered, rerolled)),
+          critical ? 2 : 1,
+        ) + (index === 0 ? fuel.bonus : 0),
       type,
     }));
+  };
 
   switch (resolution.kind) {
     case "automatic": {
@@ -991,7 +1368,13 @@ export function resolveAction(
         for (const effect of resolution.effects) {
           if (effect.kind === "teleport" && target.id === actor.id) {
             frames.push(
-              teleportFrame(actor, effect.feet, effect.movement, context),
+              teleportFrame(
+                actor,
+                effect.feet,
+                effect.movement,
+                context,
+                effect.provokes,
+              ),
             );
           }
         }
@@ -1055,6 +1438,8 @@ export function resolveAction(
                 deriveStats(target, context),
                 saveEvents,
                 events,
+                context.dice,
+                action.spellLevel !== null,
               );
         events.push(...rescued);
         const saved = rolledSave || resisted !== null || rescued.length > 0;
@@ -1091,10 +1476,24 @@ export function resolveAction(
             slotLevel,
           ),
         );
+        // A reaction to how the save went, as Mind Corrosion or Spell Reflection.
+        frames.push(
+          ...reactFrames(
+            {
+              kind: "saved",
+              actor: target.id,
+              source: actor.id,
+              success: saved,
+              spell: action.spellLevel !== null,
+            },
+            context,
+          ),
+        );
       }
       break;
     }
     case "attack": {
+      const thrown: Frame[] = [];
       for (const target of targets) {
         for (const actionId of attackRoutine(action, actor, stats)) {
           frames.push(
@@ -1105,8 +1504,19 @@ export function resolveAction(
               ...(slotLevel === undefined ? {} : { slotLevel }),
             }),
           );
+          // Let go once the rolls are done, since each looks the weapon up again.
+          if (actionId.startsWith(THROW_PREFIX)) {
+            thrown.push(
+              frame("throwWeapon", {
+                actor: actor.id,
+                item: weaponItemId(actionId),
+                target: target.id,
+              }),
+            );
+          }
         }
       }
+      frames.push(...thrown);
       frames.push(...multiattackFrames(action, actor, targets[0], context));
       break;
     }

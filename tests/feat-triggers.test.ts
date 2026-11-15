@@ -20,6 +20,7 @@ import {
   NS,
   applyDndEvent,
   dndEvent,
+  frame,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import {
   deriveStats,
@@ -28,7 +29,7 @@ import {
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { TACTIC } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import { rescuedSave } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
-import { contextOf, hero, scripted, testRun } from "./feat-fixtures.ts";
+import { contextOf, hero, scripted, settle, testRun } from "./feat-fixtures.ts";
 
 const foeOf = (traits: readonly string[] = [], extra: Partial<Actor> = {}) => ({
   ...hero(traits, { id: "foe" }),
@@ -80,11 +81,18 @@ describe("feats and traits that act on their own", () => {
     const hit = (hp: number, foePosition = { x: 1, y: 0 }) => {
       const bearer = { ...hero(["thunder"]), hp, position: { x: 0, y: 0 } };
       const foe = foeOf([], { position: foePosition });
-      const result = run.system.frames[`${NS}:applyHit`]?.run(
-        { ...SWING, attacker: "foe", target: PLAYER_ACTOR },
-        contextOf(run, [bearer, foe], { below: () => 0, roll: () => 4 }),
+      const { events } = settle(
+        run,
+        [bearer, foe],
+        [
+          frame("applyHit", {
+            ...SWING,
+            attacker: "foe",
+            target: PLAYER_ACTOR,
+          }),
+        ],
+        { below: () => 0, roll: () => 4 },
       );
-      const events = result?.events ?? [];
       return {
         struck: payloads(events, "damaged").filter(
           (payload) => payload.actor === "foe",
@@ -442,8 +450,9 @@ describe("feats and traits that act on their own", () => {
           : [],
       );
     };
+    // Only for the bearer, the effect's caster.
     expect(marked(["lords"])).toEqual([
-      { kind: "advantage", on: "attacksAgainst", once: true },
+      { kind: "advantage", on: "attacksAgainst", once: true, casterOnly: true },
     ]);
     expect(marked([])).toEqual([]);
   });

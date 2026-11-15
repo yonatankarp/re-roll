@@ -1,3 +1,4 @@
+import { afterDamage, settleRoll } from "./combat/reactions.ts";
 import {
   type ContentAccess,
   type Decision,
@@ -27,7 +28,7 @@ import {
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { teleportSquares } from "./combat/movement.ts";
-import { leafEvents } from "./combat/effects.ts";
+import { heldInPlace, leafEvents } from "./combat/effects.ts";
 import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
@@ -45,6 +46,7 @@ import { FLEE } from "./legendary.ts";
 import { finalDamage, rollD20 } from "./rules.ts";
 import { ABILITY_NAMES, type Ability, type Skill } from "./schemas.ts";
 import {
+  applyDndEvent,
   type ActiveEffect,
   type Actor,
   type DndState,
@@ -219,7 +221,7 @@ function check(
   events: SystemEvent[];
 } {
   const stats = deriveStats(actor, context);
-  const roll = rollD20(context.dice, {
+  const edge = {
     advantage:
       advantage ||
       hasFlag(actor, "advantage", "checks", stats, ability) ||
@@ -235,13 +237,33 @@ function check(
         ability,
       ) ||
       hasCondition(actor, "poisoned", "frightened"),
+  };
+  const first = rollD20(context.dice, {
+    ...edge,
     rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
   });
-  const total =
-    roll.natural +
+  const base =
     checkBonus(stats, actor, { ability, skill }) +
     rollBonus(actor, "checks", context, skill);
-  const success = total >= dc;
+  const judge = (natural: number, bonus: number) => ({
+    total: natural + base + bonus,
+    success: natural + base + bonus >= dc,
+  });
+  // Reactions to the roll before it lands, as Bountiful Luck (combat/reactions.ts).
+  const settled = settleRoll(
+    {
+      roller: actor,
+      kind: "check",
+      natural: first.natural,
+      goal: dc,
+      ...judge(first.natural, 0),
+    },
+    edge,
+    judge,
+    context,
+  );
+  const roll = { natural: settled.natural };
+  const { total, success } = judge(settled.natural, settled.bonus);
   const helped = actor.activeEffects.some(
     ({ sourceId, modifier }) =>
       sourceId === HELP &&
@@ -252,6 +274,7 @@ function check(
     success,
     total,
     events: [
+      ...settled.events,
       dndEvent(`${NS}:rollReported`, {
         actor: actor.id,
         against: "check",
@@ -276,9 +299,11 @@ function pushEvents(
   by: Actor,
   target: Actor,
   feet: number,
-  state: DndState,
+  context: Context,
 ): SystemEvent[] {
-  const to = pushTo(by.position, target, feet, state);
+  const to = pushTo(by.position, target, feet, context.state);
+  const held = to ? heldInPlace(target, context) : [];
+  if (held.length > 0) return held;
   return to ? [dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 })] : [];
 }
 
@@ -1022,10 +1047,24 @@ export function runTactic(
         helped.side === actor.side
           ? ({ kind: "advantage", on: "checks" } as const)
           : ({ kind: "advantage", on: "attacksAgainst", once: true } as const);
+      // Harper Teamwork's Withering Wordplay: the foe's next save has Disadvantage too.
+      const withering =
+        helped.side !== actor.side && hasPassive(stats, "helpRider")
+          ? [
+              effect(
+                helped.id,
+                `${HELP}:saves`,
+                actor.id,
+                { kind: "disadvantage", on: "saves", once: true },
+                "casterNextTurn",
+              ),
+            ]
+          : [];
       return {
         events: [
           spend("action"),
           effect(helped.id, HELP, actor.id, modifier, "casterNextTurn"),
+          ...withering,
         ],
         frames: done,
       };
@@ -1144,7 +1183,7 @@ export function runTactic(
                 "spellDuration",
               ),
             ]
-          : pushEvents(actor, shoved, 5, state);
+          : pushEvents(actor, shoved, 5, context);
       return {
         events: [spend("action"), ...save.events, ...result],
         frames: done,
@@ -1380,7 +1419,7 @@ export function runMasteryHit(
     }
     case "push":
       return up && sizeOf(target, context) <= SIZES.indexOf("large")
-        ? { events: pushEvents(attacker, target, 10, state) }
+        ? { events: pushEvents(attacker, target, 10, context) }
         : {};
     case "cleave": {
       const reach = meleeReach(action);
@@ -1446,7 +1485,23 @@ export function runMasteryMiss(
     false,
     context,
   );
-  return { events, frames: [...concentrationFrame(target, dealt), CHECK_END] };
+  return {
+    events,
+    frames: [
+      ...afterDamage(
+        target,
+        dealt,
+        {
+          source: attacker.id,
+          types: [type],
+          melee: meleeReach(action) !== null,
+        },
+        concentrationFrame(target, dealt),
+        { ...context, state: events.reduce(applyDndEvent, context.state) },
+      ),
+      CHECK_END,
+    ],
+  };
 }
 
 // Where a creature that spent its action on a Dash walks: toward the foe it means to fight next turn.
