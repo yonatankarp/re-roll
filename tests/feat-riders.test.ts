@@ -14,7 +14,10 @@ import {
   rescuedCheck,
   rescuedSave,
 } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
-import { hasFlag } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import {
+  canAfford,
+  hasFlag,
+} from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import {
   type Actor,
   applyDndEvent,
@@ -24,6 +27,7 @@ import { sceneSwapActions } from "../plugins/systems/dnd5.5e/core/swap.ts";
 import { masteryOf } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import {
   deriveStats,
+  evaluateFormula,
   type KnownAction,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { contextOf, hero, scripted, testRun } from "./feat-fixtures.ts";
@@ -390,5 +394,132 @@ describe("feat and trait riders", () => {
     expect(again).not.toContain(`${NS}:moved`);
     expect(again).not.toContain(`${NS}:effectAdded`);
     expect(hit([], false)).not.toContain(`${NS}:effectAdded`);
+  });
+
+  it("adds the Proficiency Bonus while Bloodied once a turn, and Advantage after a foe drops, as Boon of Bloodshed", async () => {
+    const run = await testRun();
+    const damage = (hp: number) => {
+      const bearer = { ...hero(["bloodshed"]), hp, position: { x: 0, y: 0 } };
+      const foe = {
+        ...hero([], { id: "foe" }),
+        side: "enemy" as const,
+        hp: 30,
+        position: { x: 1, y: 0 },
+      };
+      const events =
+        run.system.frames[`${NS}:applyHit`]?.run(
+          {
+            attacker: PLAYER_ACTOR,
+            actionId: "weapon:srd52:item/longsword",
+            target: "foe",
+            critical: false,
+            hadAdvantage: false,
+            total: 20,
+            natural: 15,
+          },
+          contextOf(run, [bearer, foe], scripted([4]).dice),
+        ).events ?? [];
+      const hit = events.find((event) => event.kind === `${NS}:damaged`);
+      return hit && "payload" in hit ? hit.payload.amount : 0;
+    };
+    // Longsword 1d8 (4) + Str 3, and 2 more while Bloodied.
+    expect(damage(10)).toBe(7);
+    expect(damage(4)).toBe(9);
+
+    const bearer = { ...hero(["bloodshed"]), position: { x: 0, y: 0 } };
+    const foe = { ...hero([], { id: "foe" }), side: "enemy" as const, hp: 3 };
+    const dropped = dealEvents(
+      foe,
+      [{ amount: 5, type: "fire" }],
+      false,
+      contextOf(run, [bearer, foe], scripted([]).dice),
+    );
+    expect(
+      dropped.events.some(
+        (event) =>
+          event.kind === `${NS}:effectAdded` &&
+          "payload" in event &&
+          event.payload.actor === PLAYER_ACTOR,
+      ),
+    ).toBe(true);
+  });
+
+  it("uses a stat's best modifier, waits for an action, and spends a save's one-off Disadvantage", async () => {
+    const run = await testRun();
+    const stats = deriveStats(hero([]), run);
+    // Str 17 (+3) beats Dex 14 (+2).
+    expect(
+      evaluateFormula(
+        {
+          base: 8,
+          add: [{ kind: "bestAbilityMod", abilities: ["str", "dex"] }],
+        },
+        stats,
+      ),
+    ).toBe(11);
+    const blink: KnownAction = {
+      id: "blink",
+      name: "Blink",
+      activation: {
+        cost: [],
+        afterAction: true,
+        targeting: { self: true },
+        resolution: { kind: "automatic", damage: [], effects: [] },
+      },
+      spellLevel: null,
+    };
+    const actor = hero([]);
+    expect(canAfford(blink, actor, stats)).toBe(false);
+    expect(
+      canAfford(
+        blink,
+        { ...actor, budget: { ...actor.budget, action: false } },
+        stats,
+      ),
+    ).toBe(true);
+    const withered: Actor = {
+      ...actor,
+      activeEffects: [
+        {
+          sourceId: "help:saves",
+          casterId: "ally",
+          modifier: { kind: "disadvantage", on: "saves", once: true },
+          ends: "casterNextTurn",
+        },
+      ],
+    };
+    const { dice, counts } = scripted([]);
+    const save = rollSave(
+      withered,
+      "wis",
+      10,
+      contextOf(run, [withered], dice),
+    );
+    expect(counts[20]).toBe(2);
+    expect(kinds(save.events)).toContain(`${NS}:effectEnded`);
+  });
+
+  it("surges a slot spell's damage, counting 1s and 2s as 3s and knocking the damaged Prone, as Erupting Spellpower", async () => {
+    const run = await testRun();
+    const caster = hero(["overload"]);
+    const foe = { ...hero([], { id: "foe" }), side: "enemy" as const, hp: 30 };
+    const spell: KnownAction = {
+      ...action({
+        kind: "automatic",
+        damage: [{ amount: { dice: "2d6" }, type: "fire" }],
+        effects: [],
+      }),
+      spellLevel: 1,
+    };
+    const { events = [] } = resolveAction(
+      spell,
+      caster,
+      [foe],
+      contextOf(run, [caster, foe], scripted([1, 2]).dice),
+      1,
+    );
+    const hit = events.find((event) => event.kind === `${NS}:damaged`);
+    expect(hit && "payload" in hit ? hit.payload.amount : 0).toBe(6);
+    expect(JSON.stringify(events)).toContain('"condition":"prone"');
   });
 });

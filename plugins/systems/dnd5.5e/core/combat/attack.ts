@@ -830,6 +830,19 @@ export function runApplyHit(
   const pierceKey = `reroll:${String(pierced)}`;
   const rerolls =
     pierced !== null && !attacker.usedThisTurn.includes(pierceKey);
+  // Boon of Bloodshed's Power from Pain: once a turn, the Proficiency Bonus more while Bloodied.
+  const pain =
+    hasPassive(stats, "bloodiedDamage") &&
+    attacker.hp * 2 <= stats.maxHp &&
+    !attacker.usedThisTurn.includes(BLOODIED_DAMAGE);
+  if (pain) {
+    events.push(
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: attacker.id,
+        key: BLOODIED_DAMAGE,
+      }),
+    );
+  }
   // The turn's use is spent only when a die is rolled again.
   const pierce = { used: false };
   const maxed = maximized(
@@ -876,7 +889,9 @@ export function runApplyHit(
         ? rollDiceNotation(`1d${die}`, dice)
         : 0) +
       (index === 0 && type === firstType
-        ? extra + damageBonus(attacker, resolution, stats, context)
+        ? extra +
+          damageBonus(attacker, resolution, stats, context) +
+          (pain ? stats.proficiency : 0)
         : 0) -
       (index === 0 && payload.noModifier && resolution.attack.ability
         ? Math.max(0, modifierFor(stats, resolution.attack.ability))
@@ -981,6 +996,7 @@ export function runApplyHit(
 }
 
 const PEERLESS_AIM = "peerless-aim";
+const BLOODIED_DAMAGE = "bloodied-damage";
 const SHIELD_BASH = "shield-bash";
 
 // Shield Master's Shield Bash: once on the bearer's turn, a melee weapon hit on a creature within 5 feet makes it save

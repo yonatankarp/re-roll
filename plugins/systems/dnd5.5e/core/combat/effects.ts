@@ -26,6 +26,7 @@ import {
 } from "../state.ts";
 import {
   type ContentAccess,
+  type Dice,
   type Frame,
   type SystemEvent,
   type SystemResult,
@@ -244,6 +245,29 @@ export function damageEvents(
 }
 
 // Several hits on one target, reported in turn so each one sees the HP the last one left.
+// Boon of Erupting Spellpower: a slot spell's surge, spending its use.
+// shortcut: it's used on the first slot spell that deals damage, and comes back with a rest, not on rolling Initiative.
+function overloaded(
+  actor: Actor,
+  action: KnownAction,
+  stats: Stats,
+): SystemEvent | null {
+  if (action.spellLevel === null) return null;
+  for (const passive of stats.passives) {
+    if (
+      passive.kind === "spellOverload" &&
+      (actor.resourcesSpent[passive.resource] ?? 0) <
+        (stats.resources[passive.resource] ?? 0)
+    ) {
+      return dndEvent(`${NS}:resourceSpent`, {
+        actor: actor.id,
+        resource: passive.resource,
+      });
+    }
+  }
+  return null;
+}
+
 // Boon of Bountiful Health's Augmented Health.
 export function tempHpBonus(stats: Stats): number {
   return stats.passives.reduce(
@@ -278,6 +302,29 @@ export function dealEvents(
   }
   // Dragon Fear: damage lets the target repeat the save that ends the effect.
   const hurt = state.actors[target.id];
+  // Killer's Fortune: a foe dropping gives the bearer's next attack Advantage.
+  if (hurt && hurt.hp <= 0 && target.hp > 0) {
+    for (const bearer of Object.values(state.actors)) {
+      if (
+        bearer.side === target.side ||
+        isDown(bearer) ||
+        !hasPassive(deriveStats(bearer, context), "killAdvantage")
+      ) {
+        continue;
+      }
+      events.push(
+        dndEvent(`${NS}:effectAdded`, {
+          actor: bearer.id,
+          effect: {
+            sourceId: "killers-fortune",
+            casterId: bearer.id,
+            modifier: { kind: "advantage", on: "attacks", once: true },
+            ends: "casterNextTurnEnd",
+          },
+        }),
+      );
+    }
+  }
   for (const effect of dealt > 0 ? (hurt?.activeEffects ?? []) : []) {
     if (!hurt || !effect.saveOnDamage) continue;
     const save = rollSave(
@@ -690,6 +737,14 @@ export function rollSave(
     rollBonus(target, "saves", context) +
     (ability === "dex" ? cover : 0);
   const saved = total >= dc;
+  // A save's once-only edge, as Harper Teamwork's Disadvantage, is spent on it.
+  const spent = target.activeEffects.flatMap(({ modifier, sourceId, casterId }) =>
+    (modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
+    modifier.on === "saves" &&
+    modifier.once
+      ? [dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId, casterId })]
+      : [],
+  );
   const rolled = dndEvent(`${NS}:saveRolled`, {
     actor: target.id,
     ability,
@@ -727,7 +782,7 @@ export function rollSave(
       ],
     };
   }
-  return { saved, events: [rolled] };
+  return { saved, events: [rolled, ...spent] };
 }
 
 const SAVE_REROLL = "save-reroll";
@@ -852,6 +907,7 @@ export function resolveAction(
   };
 
   let ridden = false;
+  const overload = { prone: false };
   const applyRolled = (
     target: Actor,
     damage: readonly {
@@ -877,6 +933,26 @@ export function resolveAction(
       ...result.events,
       ...insideDamageEvents(actor, target, result.dealt),
     );
+    // Boon of Erupting Spellpower: each creature the surging spell damages is knocked Prone.
+    if (overload.prone && result.dealt > 0) {
+      events.push(
+        ...leafEvents(
+          [
+            {
+              kind: "applyCondition",
+              condition: "prone",
+              duration: { minutes: 1 },
+              repeatSave: false,
+              endsOnDamage: false,
+            },
+          ],
+          "spell-overload",
+          actor,
+          target,
+          context,
+        ),
+      );
+    }
     // A spell's riders, as Putrefy's, go on the first creature it damages.
     // shortcut: only the first, since a use spent on one isn't seen by the next in the same cast.
     if (!ridden && action.spellLevel !== null && result.dealt > 0) {
@@ -912,8 +988,24 @@ export function resolveAction(
       stats,
       list.map(({ type }) => type),
     );
-    events.push(...fuel.events, ...(maxed?.events ?? []));
+    const surge =
+      list.length > 0 && slotLevel !== undefined
+        ? overloaded(actor, action, stats)
+        : null;
+    overload.prone = surge !== null;
+    events.push(
+      ...fuel.events,
+      ...(maxed?.events ?? []),
+      ...(surge ? [surge] : []),
+    );
     const maxIndex = list.findIndex(({ type }) => type === maxed?.type);
+    const floored = (dice: Dice): Dice =>
+      surge
+        ? {
+            below: (count) => dice.below(count),
+            roll: (sides) => Math.max(3, dice.roll(sides)),
+          }
+        : dice;
     return list.map(({ amount, type }, index) => ({
       total:
         rollAmount(
@@ -921,7 +1013,7 @@ export function resolveAction(
           stats,
           index === maxIndex
             ? HIGHEST
-            : masteredDice(context.dice, type, mastered, rerolled),
+            : floored(masteredDice(context.dice, type, mastered, rerolled)),
           critical ? 2 : 1,
         ) + (index === 0 ? fuel.bonus : 0),
       type,

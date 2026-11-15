@@ -330,8 +330,9 @@ export function canAfford(
   actor: Actor,
   stats: Stats,
 ): boolean {
-  const { carrying } = action.activation;
+  const { carrying, afterAction } = action.activation;
   if (carrying && !actor.inventory.includes(carrying)) return false;
+  if (afterAction && actor.budget.action) return false;
   return action.activation.cost.every((cost) => {
     if (cost === "action") return actor.budget.action;
     if (cost === "bonusAction") return actor.budget.bonusAction;

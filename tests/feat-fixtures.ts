@@ -567,6 +567,10 @@ const FIXTURES = [
       },
     ],
   }),
+  trait("bloodshed", [{ kind: "bloodiedDamage" }, { kind: "killAdvantage" }]),
+  trait("overload", [{ kind: "spellOverload", resource: "overload" }], {
+    resources: [{ id: "overload", max: { base: 1 }, recharge: [] }],
+  }),
   trait("together", [{ kind: "allySaveAdvantage", abilities: ["str"] }]),
   trait("bountiful", [
     { kind: "tempHpBonus", amount: 5 },

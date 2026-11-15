@@ -976,10 +976,24 @@ export function runTactic(
         helped.side === actor.side
           ? ({ kind: "advantage", on: "checks" } as const)
           : ({ kind: "advantage", on: "attacksAgainst", once: true } as const);
+      // Harper Teamwork's Withering Wordplay: the foe's next save has Disadvantage too.
+      const withering =
+        helped.side !== actor.side && hasPassive(stats, "helpRider")
+          ? [
+              effect(
+                helped.id,
+                `${HELP}:saves`,
+                actor.id,
+                { kind: "disadvantage", on: "saves", once: true },
+                "casterNextTurn",
+              ),
+            ]
+          : [];
       return {
         events: [
           spend("action"),
           effect(helped.id, HELP, actor.id, modifier, "casterNextTurn"),
+          ...withering,
         ],
         frames: done,
       };

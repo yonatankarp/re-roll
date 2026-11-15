@@ -104,6 +104,11 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("level") }), // character level
   z.strictObject({ kind: z.literal("scaling"), key: z.string() }),
+  // The best of these abilities' modifiers, as "the score increased by this feat" when the feat raised one of them.
+  z.strictObject({
+    kind: z.literal("bestAbilityMod"),
+    abilities: z.array(AbilitySchema).min(1),
+  }),
   // With `ability`, the one a feat's spells use instead of the character's (stats.ts castWith).
   z.strictObject({
     kind: z.literal("spellMod"),
@@ -460,6 +465,7 @@ export const ActivationSchema = z.strictObject({
     .optional(),
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
   whileIn: z.literal("shadows").optional(), // only in Dim Light or Darkness, as Merge with Shadows
+  afterAction: z.literal(true).optional(), // only once the bearer has taken its action, as Blink Steps
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
@@ -789,6 +795,18 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     damage: DamageTypeSchema,
     resource: z.string(),
   }),
+  // Once a turn, an attack made while Bloodied deals the Proficiency Bonus more, as Boon of Bloodshed's Power from Pain.
+  z.strictObject({ kind: z.literal("bloodiedDamage") }),
+  // An enemy dropping to 0 Hit Points gives the bearer's next attack Advantage, as Boon of Bloodshed's Killer's
+  // Fortune.
+  z.strictObject({ kind: z.literal("killAdvantage") }),
+  // Helping an attack on an enemy also gives it Disadvantage on its next save, as Harper Teamwork.
+  z.strictObject({ kind: z.literal("helpRider") }),
+  // Ending Frightened or Paralyzed on itself with a save ends it on an ally within 30 feet, as Inspiring Willpower.
+  z.strictObject({ kind: z.literal("sharedRecovery") }),
+  // A slot spell's damage dice count 1s and 2s as 3s and knock the damaged Prone, spending a use, as Boon of Erupting
+  // Spellpower.
+  z.strictObject({ kind: z.literal("spellOverload"), resource: z.string() }),
   // A vial or flask is thrown this far, as with Bomber's Far Lobber.
   z.strictObject({
     kind: z.literal("farLobber"),

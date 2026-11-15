@@ -1415,6 +1415,11 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
       case "scaling":
         total += stats.scaling[term.key] ?? 0;
         break;
+      case "bestAbilityMod":
+        total += Math.max(
+          ...term.abilities.map((ability) => modifierFor(stats, ability)),
+        );
+        break;
       case "spellMod":
         total += term.ability
           ? modifierFor(stats, term.ability)
