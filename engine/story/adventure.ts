@@ -202,6 +202,7 @@ const AdventureInfoSchema = z.strictObject({
   levels: z.string().min(1).optional(), // shown in the menu, such as "1-3"
   blurb: z.string().min(1).optional(), // a line or two on the setup screen, before a new game
   startScene: SlugSchema,
+  setting: SlugSchema.optional(), // the world it's set in, such as "ravenloft", for content that needs one
   resources: z.record(SlugSchema, z.number().int().min(0)).optional(),
 });
 
@@ -217,6 +218,7 @@ export interface EncounterOutcomes {
 export interface Adventure {
   readonly title: string;
   readonly startScene: string;
+  readonly setting?: string | undefined;
   readonly resources?: Readonly<Record<string, number>> | undefined;
   readonly scenes: readonly z.infer<typeof SceneSchema>[];
   readonly npcs: readonly z.infer<typeof NpcSchema>[];

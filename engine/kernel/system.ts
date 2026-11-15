@@ -111,6 +111,7 @@ export interface SystemContext<S> {
   readonly dice: Dice;
   readonly content: (id: string) => ContentEntry | undefined;
   readonly contentIds: () => readonly string[];
+  readonly setting?: string | undefined; // the adventure's, as ContentAccess has it
 }
 
 // Handlers report what happened and never change state, so saves can replay them.
@@ -208,12 +209,15 @@ export interface RunSetup {
   readonly dice: Dice;
   readonly content: (id: string) => ContentEntry | undefined;
   readonly contentIds: () => readonly string[];
+  readonly setting?: string | undefined; // the adventure's, as ContentAccess has it
 }
 
 export interface ContentAccess {
   readonly content: (id: string) => ContentEntry | undefined;
   // Highest-precedence plugin first, then by id, so when two plugins name the same thing the first one wins.
   readonly contentIds: () => readonly string[];
+  // The world the adventure is set in, such as "ravenloft", for content that needs one. None outside a run.
+  readonly setting?: string | undefined;
 }
 
 export interface ImportSource {
