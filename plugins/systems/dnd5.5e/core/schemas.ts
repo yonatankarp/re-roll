@@ -326,6 +326,47 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts).
   z.strictObject({ kind: z.literal("counter") }),
+  // Responses to a d20 roll made before its result applies (combat/reactions.ts): the roller rolls the die again
+  // and must use the new roll, as with Bountiful Luck; the roll gains or loses `amount`, as with Boon of Fate
+  // (`either`) or a sphinx's Burst of Ingenuity; or the bearer rolls a d20 that may stand in for it, as with
+  // Portent.
+  z.strictObject({ kind: z.literal("reroll") }),
+  z.strictObject({
+    kind: z.literal("rollBonus"),
+    amount: AmountSchema,
+    either: z.boolean().default(false),
+  }),
+  z.strictObject({ kind: z.literal("replaceRoll") }),
+  // The bearer makes one attack against the creature that set the reaction off: the action named, or else an
+  // Opportunity Attack with its melee weapon. `approach` moves it next to the creature first without provoking,
+  // as with Bloodthirsty Slash.
+  z.strictObject({
+    kind: z.literal("strike"),
+    action: z.string().optional(),
+    advantage: z.boolean().default(false),
+    approach: z.boolean().default(false),
+  }),
+  // A Small or Medium ally within 5 feet trades places with the bearer and becomes the attack's target, as with
+  // Redirect Attack; with `charmed`, any Charmed creature there instead.
+  z.strictObject({
+    kind: z.literal("redirect"),
+    charmed: z.boolean().default(false),
+  }),
+  // The triggering attack misses instead, as with Jinx on a failed save.
+  z.strictObject({ kind: z.literal("negateHit") }),
+  // The bearer splits in two, each with half its Hit Points, as a black pudding does, while it has at least `minHp`
+  // and has split fewer than `times` times (once for each size it can shrink).
+  z.strictObject({
+    kind: z.literal("split"),
+    minHp: z.number().int().min(1).default(10),
+    times: z.number().int().min(1).default(1),
+  }),
+  // The bearer trades Initiative with a willing ally, as with Alert's Initiative Swap.
+  z.strictObject({ kind: z.literal("swapInitiative") }),
+  // The bearer gains Heroic Inspiration, as with Tireless Reveler.
+  z.strictObject({ kind: z.literal("inspiration") }),
+  // Resistance to the damage that set the reaction off, as with Elemental Absorption.
+  z.strictObject({ kind: z.literal("resistTrigger") }),
   // Creatures that join the fight on the caster's side, using a companion stat block's `play` numbers at the
   // slot's level, in open squares within `range` feet nearest the foes. They take their turns right after the
   // caster's, and vanish at 0 Hit Points or when the spell ends. `dc` is the caster's spell save DC, which their
@@ -443,7 +484,8 @@ export const ActivationSchema = z.strictObject({
       // as with Protection and Interception. It's taken as soon as it can be.
       allyAttacked: z.literal(true).optional(),
       allyHit: z.literal(true).optional(),
-      holding: z.enum(["shield", "shieldOrWeapon"]).optional(), // what the bearer must hold to take it
+      // what the bearer must hold to take it; "polearm" is a Quarterstaff, a Spear or a Heavy weapon with Reach
+      holding: z.enum(["shield", "shieldOrWeapon", "polearm"]).optional(),
       // Taken by the bearer when a creature attacks it, before the roll, giving that roll Disadvantage, as with
       // Lucky. It's taken on its own once the bearer is at half its Hit Points or fewer, or the attacker has
       // Advantage.
@@ -451,6 +493,51 @@ export const ActivationSchema = z.strictObject({
       // Taken right after a creature's attack damages the bearer, against that creature, as with Storm's Thunder.
       damaged: z.literal(true).optional(),
       damagedBy: z.array(DamageTypeSchema).min(1).optional(), // only damage of these types, as with Delicious Pain
+      // With `damaged`, taken before the damage applies, so it can lessen it, as with Vitality Ward.
+      before: z.literal(true).optional(),
+      // With `damaged` and `damagedBy`, damage of any type that leaves the bearer Bloodied also counts, as with a
+      // black pudding's Split.
+      bloodied: z.literal(true).optional(),
+      // Only a ranged attack's hit triggers it, as with Deflect Missile.
+      ranged: z.literal(true).optional(),
+      // How near the creature that sets it off must be, in feet: the attacker for `damaged` or `struck`, the
+      // roller for `rolled`, the ally for `allyAttacked` and `allyHit` (5 when unset), the walker for
+      // `entersReach`, `endsMove` and `turnStart`.
+      within: z.number().int().min(5).optional(),
+      // Taken after a d20 roll and before its result applies, as with Bountiful Luck or Portent (combat/reactions.ts).
+      // `by` is whose roll, from the bearer's side; `when` what it must show: a natural 1, a hit on the bearer or
+      // its ally (`hit`), a failure, or anything; `magical` only a save against a spell or magic.
+      rolled: z
+        .strictObject({
+          rolls: z.array(z.enum(["attack", "save", "check"])).min(1),
+          by: z.enum(["self", "ally", "selfOrAlly", "foe", "any"]),
+          when: z.enum(["natural1", "hit", "failed", "any"]).default("any"),
+          magical: z.literal(true).optional(),
+        })
+        .optional(),
+      // Taken right after an attack hits the bearer (`struck`) or misses it (`missed`), as with Counterattack or
+      // Sticky Shield; or after a foe within `within` hits someone else, as with Sentinel's Guardian.
+      struck: z.literal(true).optional(),
+      missed: z.literal(true).optional(),
+      foeHitsOther: z.literal(true).optional(),
+      // Taken when another creature this Bloodied takes damage within `within`, as with Bloodthirsty Slash.
+      otherDamaged: z.literal("bloodied").optional(),
+      // Taken when an enemy walks into the bearer's reach, or within `within`, as with Polearm Master's Reactive
+      // Strike; when one ends its move within `within`, as with Pursuit; or when one starts its turn there and can
+      // see the bearer, as with Unnerving Gaze.
+      entersReach: z.literal(true).optional(),
+      endsMove: z.literal(true).optional(),
+      turnStart: z.literal(true).optional(),
+      // Taken after the bearer's own save against a creature's effect fails or succeeds, as with Mind Corrosion.
+      ownSave: z.enum(["failed", "succeeded"]).optional(),
+      // With `ownSave`, `missed` or `struck`, only a spell sets it off, as with Spell Reflection.
+      bySpell: z.literal(true).optional(),
+      // Taken when a creature within `within` makes a save to keep Concentration, as with Warp Mind.
+      concentrationSave: z.literal(true).optional(),
+      // Taken when an ally within `within` spends Heroic Inspiration, as with Tireless Reveler.
+      inspirationSpent: z.literal(true).optional(),
+      // Taken right after Initiative is rolled, as with Alert's Initiative Swap.
+      initiative: z.literal(true).optional(),
     })
     .optional(),
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
@@ -560,6 +647,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
   z.strictObject({ kind: z.literal("concentrationAdvantage") }),
+  // A creature leaving the bearer's reach can be answered with a one-target spell of one action instead of an
+  // Opportunity Attack, as with War Caster's Reactive Spell.
+  z.strictObject({ kind: z.literal("reactiveSpell") }),
   // Attacks per Attack action, such as Extra Attack.
   z.strictObject({
     kind: z.literal("multiattack"),
@@ -797,7 +887,8 @@ export const ResourceDefSchema = z.strictObject({
   max: FormulaSchema,
   recharge: z.array(
     z.strictObject({
-      on: z.enum(["turnStart", "shortRest", "longRest", "dawn"]),
+      // "initiative" comes back as a fight starts, as Boon of Fate's Improve Fate does.
+      on: z.enum(["turnStart", "shortRest", "longRest", "dawn", "initiative"]),
       amount: z.union([z.literal("all"), z.number().int()]),
       rollAtLeast: z.number().int().optional(),
     }),

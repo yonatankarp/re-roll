@@ -717,9 +717,17 @@ Every `switch` over `kind` ends with an exhaustive check, so adding an effect ty
 
 Weapon options such as Finesse are handled by the plugin when it builds the attack. On a *Shield* trigger, the plugin holds the hit in a pending frame (section 6.2) and rechecks it against the new AC.
 
-A trigger of `allyAttacked` or `allyHit`, with what the bearer must be `holding`, is a reaction for another creature within 5 feet, as Protection gives before the attack roll and Interception after a hit. An ally who can see the attacker takes it as soon as it can, without asking, and the log names it through `budgetSpent`'s `label`.
+A trigger of `allyAttacked` or `allyHit`, with what the bearer must be `holding`, is a reaction for another creature within 5 feet (or `within`), as Protection gives before the attack roll and Interception after a hit. An ally who can see the attacker takes it as soon as it can, without asking, and the log names it through `budgetSpent`'s `label`.
 
-A trigger of `attacked` is the bearer's own, before an attack roll against it, as Lucky's Disadvantage. It's taken without asking once the bearer is at half its Hit Points or fewer, or the attacker has Advantage. A trigger of `damaged` is a reaction right after an attack damages the bearer, aimed at the attacker when it's in the activation's range, as Storm's Thunder. An activation's `carrying` names an item the bearer must carry, as Battle Medic's Healer's Kit.
+A trigger of `attacked` is the bearer's own, before an attack roll against it, as Lucky's Disadvantage or Redirect Attack. It's taken without asking once the bearer is at half its Hit Points or fewer, or the attacker has Advantage. An activation's `carrying` names an item the bearer must carry, as Battle Medic's Healer's Kit.
+
+The other reactions are answered in `combat/reactions.ts`, through the same hooks for characters and monsters:
+
+- **A d20 roll, before it lands** (`rolled`): an attack, save or check by the bearer, an ally or a foe, as Bountiful Luck, Second Chance, Boon of Fate or Portent. The response rerolls the die, adds or takes away an amount, or puts the bearer's own d20 in its place. Reactors answer only when that could change the result for their side.
+- **A moment**, offered by a `react` frame: damage taken (`damaged`, now from any source, with `within`, `damagedBy`, `melee`), an attack that hits (`struck`) or misses (`missed`) the bearer, a foe hitting someone else (`foeHitsOther`), a Bloodied creature hurt (`otherDamaged`), a walk entering reach (`entersReach`) or ending nearby (`endsMove`), a turn starting nearby (`turnStart`), a save to keep Concentration (`concentrationSave`), and the bearer's own save against a creature's effect (`ownSave`). A `strike` effect answers with one attack, or an Opportunity Attack; `split` halves a creature into two.
+- **Before damage lands** (`damaged` with `before`), as Vitality Ward or Elemental Absorption.
+
+The player decides an attack-roll reaction or a moment's reaction through a `dnd5.5e:reaction:` decision, and the attack roll waits in its payload (`rolled`) until they answer. Monsters and companions decide by tactics. Saves and checks are rolled in the middle of other work, so reactions to them, and before damage, are taken by tactics for the player too. A walk that enters a reaction's reach stops on that square, takes the reaction, then goes on as a `move` with `rest`.
 
 A hit on a creature during that creature's own turn counts as an Opportunity Attack, for Sentinel's Halt and Zhentarim Ruffian's damage. A walk whose Speed drops to 0 before it finishes, from Halt or a grapple, ends where it started.
 

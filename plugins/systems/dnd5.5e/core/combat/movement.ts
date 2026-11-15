@@ -2,6 +2,7 @@ import { z } from "zod";
 import { knownFoes } from "../fog.ts";
 import {
   type Actor,
+  applyDndEvent,
   dndEvent,
   type DndState,
   hasCondition,
@@ -27,11 +28,18 @@ import {
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
 import { thornHits } from "../zones.ts";
-import { concentrationFrame, dealEvents } from "./effects.ts";
+import {
+  concentrationFrame,
+  dealEvents,
+  payCosts,
+  resolveAction,
+} from "./effects.ts";
+import { afterDamage, reactFrames } from "./reactions.ts";
 import {
   coverBetween,
   distanceFeet,
   parseSquare,
+  rangeFeet,
   type Square,
   squareKey,
   wallSet,
@@ -53,7 +61,11 @@ import {
 
 // Walking on the grid, and the Opportunity Attacks it provokes.
 
-export const MoveSchema = z.object({ actor: z.string(), answer: z.string() });
+export const MoveSchema = z.object({
+  actor: z.string(),
+  answer: z.string(),
+  rest: z.boolean().optional(), // the rest of a walk a reaction cut short, which stops if it can't go on
+});
 
 // The longest melee reach a creature has, or null if it has no melee attack.
 export function meleeReachOf(
@@ -143,6 +155,107 @@ export function provokers(
   });
 }
 
+// An Opportunity Attack, or with War Caster a one-target spell of one action cast with the Reaction instead.
+// A caster's companions and monsters cast the first damaging cantrip that reaches, which beats a dagger.
+function opportunity(
+  foe: Actor,
+  melee: KnownAction,
+  walker: Actor,
+  context: Context,
+): SystemResult {
+  const stats = deriveStats(foe, context);
+  const spell = hasPassive(stats, "reactiveSpell")
+    ? stats.actions.find((item) => {
+        const { cost, targeting, resolution } = item.activation;
+        return (
+          item.spellLevel === 0 &&
+          cost.includes("action") &&
+          !item.activation.trigger &&
+          "creatures" in targeting &&
+          targeting.creatures === 1 &&
+          targeting.side === "enemy" &&
+          distanceFeet(foe.position, walker.position) <=
+            rangeFeet(targeting.range) &&
+          "damage" in resolution &&
+          resolution.damage.length > 0
+        );
+      })
+    : undefined;
+  if (spell) {
+    const cast = {
+      ...spell,
+      activation: {
+        ...spell.activation,
+        cost: spell.activation.cost.map((cost) =>
+          cost === "action" ? ("reaction" as const) : cost,
+        ),
+      },
+    };
+    const result = resolveAction(cast, foe, [walker], context);
+    return {
+      events: [...payCosts(cast, foe, context), ...(result.events ?? [])],
+      frames: result.frames ?? [],
+    };
+  }
+  return {
+    events: [
+      dndEvent(`${NS}:budgetSpent`, { actor: foe.id, kind: "reaction" }),
+    ],
+    frames: [
+      frame("attackRoll", {
+        attacker: foe.id,
+        actionId: melee.id,
+        target: walker.id,
+      }),
+    ],
+  };
+}
+
+// The first step of a walk that enters the reach of an enemy's reaction to that, as Polearm Master's, or null.
+function enteredAt(
+  walker: Actor,
+  path: readonly Square[],
+  context: Context,
+): number | null {
+  const { state } = context;
+  const watching = enemies(state, walker).some((foe) =>
+    deriveStats(foe, context).actions.some(
+      (item) => item.activation.trigger?.entersReach,
+    ),
+  );
+  if (!watching) return null;
+  for (let index = 0; index < path.length; index += 1) {
+    const square = path[index];
+    const from = index === 0 ? walker.position : path[index - 1];
+    if (!square || !from) continue;
+    const there = {
+      ...context,
+      state: {
+        ...state,
+        actors: {
+          ...state.actors,
+          [walker.id]: { ...walker, position: square },
+        },
+      },
+    };
+    if (
+      reactFrames({ kind: "entered", actor: walker.id, from }, there).length > 0
+    ) {
+      return index;
+    }
+  }
+  return null;
+}
+
+// Whether an enemy reacts to a creature ending its move near it, as a nalfeshnee's Pursuit does.
+function watchesMoves(walker: Actor, context: Context): boolean {
+  return enemies(context.state, walker).some((foe) =>
+    deriveStats(foe, context).actions.some(
+      (item) => item.activation.trigger?.endsMove,
+    ),
+  );
+}
+
 // Leaving an enemy's reach gives it an Opportunity Attack, made before the move, so falling stops it.
 export function runMove(
   payload: z.infer<typeof MoveSchema>,
@@ -155,7 +268,22 @@ export function runMove(
   const step = moveSquares(actor, state, deriveStats(actor, context)).find(
     ({ square }) => squareKey(square) === payload.answer,
   );
-  if (!step) throw new Error(`${actor.name} can't reach ${payload.answer}`);
+  if (!step) {
+    if (payload.rest) return {};
+    throw new Error(`${actor.name} can't reach ${payload.answer}`);
+  }
+  // A walk into the reach of a reaction such as Polearm Master's stops on the square it enters, for the reaction,
+  // and then goes on from there.
+  const entered = enteredAt(actor, step.path, context);
+  const cut = entered === null ? undefined : step.path[entered];
+  if (entered !== null && cut && entered < step.path.length - 1) {
+    return {
+      frames: [
+        frame("move", { actor: actor.id, answer: squareKey(cut) }),
+        frame("move", { actor: actor.id, answer: payload.answer, rest: true }),
+      ],
+    };
+  }
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];
   // shortcut: thorns hurt as the walk starts, so damage that drops the walker stops it where it stood.
@@ -177,20 +305,22 @@ export function runMove(
       context,
     );
     events.push(...hurt.events);
-    frames.push(...concentrationFrame(actor, hurt.dealt));
+    frames.push(
+      ...afterDamage(
+        actor,
+        hurt.dealt,
+        { types: thorns.map(({ type }) => type) },
+        concentrationFrame(actor, hurt.dealt),
+        { ...context, state: hurt.events.reduce(applyDndEvent, state) },
+      ),
+    );
   }
   for (const { foe, melee } of provokers(actor, to, state, context)) {
-    events.push(
-      dndEvent(`${NS}:budgetSpent`, { actor: foe.id, kind: "reaction" }),
-    );
-    frames.push(
-      frame("attackRoll", {
-        attacker: foe.id,
-        actionId: melee.id,
-        target: actor.id,
-      }),
-    );
+    const answer = opportunity(foe, melee, actor, context);
+    events.push(...(answer.events ?? []));
+    frames.push(...(answer.frames ?? []));
   }
+  const from = step.path.at(-2) ?? actor.position;
   return {
     events,
     frames: [
@@ -201,6 +331,12 @@ export function runMove(
         y: to.y,
         feet: step.feet,
       }),
+      ...(entered !== null && from
+        ? [frame("react", { kind: "entered", actor: actor.id, from })]
+        : []),
+      ...(watchesMoves(actor, context)
+        ? [frame("react", { kind: "endsMove", actor: actor.id })]
+        : []),
       ...(actor.position
         ? [frame("afterMove", { actor: actor.id, ...actor.position })]
         : []),
@@ -355,16 +491,9 @@ export function runTeleport(
   for (const { foe, melee } of jump && payload.provokes !== false
     ? provokers(actor, to, state, context, [to])
     : []) {
-    events.push(
-      dndEvent(`${NS}:budgetSpent`, { actor: foe.id, kind: "reaction" }),
-    );
-    frames.push(
-      frame("attackRoll", {
-        attacker: foe.id,
-        actionId: melee.id,
-        target: actor.id,
-      }),
-    );
+    const answer = opportunity(foe, melee, actor, context);
+    events.push(...(answer.events ?? []));
+    frames.push(...(answer.frames ?? []));
   }
   return {
     events,
