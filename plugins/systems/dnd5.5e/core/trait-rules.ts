@@ -307,6 +307,17 @@ export function dropToOneEvents(
       ...hit,
       massive: false,
     }),
+    ...trait.effects.map((modifier) =>
+      dndEvent(`${NS}:effectAdded`, {
+        actor: target.id,
+        effect: {
+          sourceId: trait.resource,
+          casterId: target.id,
+          modifier,
+          ends: "spellDuration",
+        },
+      }),
+    ),
   ];
 }
 

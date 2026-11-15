@@ -1219,11 +1219,61 @@ function traitLeftOut(label: string): string | null {
     return "Disadvantage on spell attacks against it";
   }
   if (label === "Displacement") return "its end while Incapacitated";
+  if (/^(?:Swarm|Air Form|Water Form|Two-Dimensionality)$/.test(label)) {
+    return "stopping in another creature's space";
+  }
+  if (label === "Fire Form") {
+    return "stopping in another creature's space, and its Fire damage there";
+  }
+  if (label === "Tunneler") return "the tunnel it leaves";
+  if (label === "Ephemeral Movement") {
+    return "moving without Opportunity Attacks";
+  }
   if (label === "Corrosive Form")
     return "what it does to weapons and ammunition";
   if (label === "Greater Lightning Absorption") return "its Speed increase";
   return null;
 }
+
+// Moving through creatures, walls or narrow gaps, as a swarm, a ghost or an ooze does, or null for neither.
+function moveThroughOf(text: string): Passive | null {
+  const objects =
+    /\bmove through other creatures and objects as if they were Difficult Terrain\b/i.test(
+      text,
+    );
+  const creatures =
+    objects ||
+    /\boccupy another creature[’']s space and vice versa\b/.test(text) ||
+    /\benter (?:a|an enemy[’']s|a creature[’']s) space and stop there\b/.test(
+      text,
+    );
+  const earth = /\bburrow through nonmagical, unworked earth and stone\b/.test(
+    text,
+  );
+  const rock = /\bburrow through solid rock at half its Burrow Speed\b/.test(
+    text,
+  );
+  const squeeze =
+    /\bmove through a space as narrow as 1 inch\b/.test(text) ||
+    /\bmove through any opening large enough for a Tiny\b/.test(text);
+  const terrain =
+    /\bdoesn[’']t need to expend extra movement to move through Difficult Terrain\b/.test(
+      text,
+    );
+  if (!creatures && !earth && !rock && !squeeze && !terrain) return null;
+  return {
+    kind: "moveThrough",
+    ...(creatures ? { creatures: "any" as const } : {}),
+    walls: objects || earth || rock,
+    costly: objects || rock,
+    squeeze,
+    open: /\bvice versa\b/.test(text),
+    terrain,
+  };
+}
+
+// Traits whose whole effect on the grid is a Speed the stat block already gives, as Spider Climb's Climb Speed.
+const BY_SPEEDS = /^Spider Climb$/;
 
 // "until the start of its next turn" in an aura's save is the target's turn, which the aura catches it on.
 function theirTurns(effects: readonly LeafEffect[]): LeafEffect[] {
@@ -1678,6 +1728,20 @@ export function traitPassive(label: string, text: string): Passive | null {
     };
   }
   if (label === "Pack Tactics") return { kind: "packTactics" };
+  const through = moveThroughOf(text);
+  if (through) return through;
+  const leap =
+    /\bLong Jump is up to (\d+) feet\b[^.]*\bwith or without a running start\b/.exec(
+      text,
+    ) ??
+    /\bWith a (\d+)-foot running start, [^.]+? can Long Jump up to (\d+) feet\b/.exec(
+      text,
+    );
+  if (leap) {
+    return leap[2]
+      ? { kind: "jump", feet: Number(leap[2]), runUp: Number(leap[1]) }
+      : { kind: "jump", feet: Number(leap[1]), runUp: 0 };
+  }
   if (label === "Undead Fortitude") return { kind: "undeadFortitude" };
   const regains = /\b(?:re)?gains (\d+) Hit Points\b/.exec(text)?.[1];
   if (!/^Regeneration\b/.test(label) || !regains) return null;
@@ -1959,7 +2023,7 @@ function parseBlock(
         });
       }
       if (left) notes.push(`partial: ${label}: left out ${left}`);
-      if (!passive && !placed) {
+      if (!passive && !placed && !BY_SPEEDS.test(label)) {
         notes.push(
           `${noCombatTrait(label, text) ? "no combat use" : "not automated"}: ${label}`,
         );

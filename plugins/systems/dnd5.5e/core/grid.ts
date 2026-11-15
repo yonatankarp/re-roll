@@ -162,8 +162,10 @@ export function openedCorners(
   }
 }
 
-// Every square a creature can end its move on, with what it costs. It can pass allies but not enemies,
-// and can't stop where anyone else stands. Entering a square of difficult terrain costs double.
+// Every square a creature can end its move on, with what it costs. It can't enter `blocked` squares, nor stop on
+// `occupied` ones. Entering a square of difficult terrain costs double. With `how.squeeze` it slips between walls
+// that meet at a corner, and with `how.jump` it can Long Jump over difficult terrain in a straight line, landing on
+// ground that isn't, for 5 feet a square.
 export function reachableSquares(
   start: Square,
   feet: number,
@@ -172,6 +174,14 @@ export function reachableSquares(
   occupied: ReadonlySet<string>,
   difficult: ReadonlySet<string> = new Set(),
   walls: ReadonlySet<string> = new Set(),
+  how: {
+    readonly squeeze?: boolean;
+    readonly jump?: {
+      readonly standing: number;
+      readonly running: number;
+      readonly runUp: number;
+    };
+  } = {},
 ): readonly {
   readonly square: Square;
   readonly feet: number;
@@ -181,38 +191,63 @@ export function reachableSquares(
   const cost = new Map<string, number>([[squareKey(start), 0]]);
   const from = new Map<string, Square>();
   const buckets: Square[][] = [[start]];
+  const open = (at: Square, square: Square, dx: number, dy: number) =>
+    square.x >= 0 &&
+    square.y >= 0 &&
+    square.x < grid.width &&
+    square.y < grid.height &&
+    !blocked.has(squareKey(square)) &&
+    (how.squeeze === true || !cutsCorner(at, dx, dy, walls));
+  const reach = (square: Square, at: Square, total: number): void => {
+    const key = squareKey(square);
+    if (total > feet || total >= (cost.get(key) ?? Infinity)) return;
+    cost.set(key, total);
+    from.set(key, at);
+    const bucket = total / SQUARE_FEET;
+    while (buckets.length <= bucket) buckets.push([]);
+    buckets[bucket]?.push(square);
+  };
+  function visit(next: Square, spent: number): void {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      for (let dy = -1; dy <= 1; dy += 1) {
+        if (dx === 0 && dy === 0) continue;
+        const square = { x: next.x + dx, y: next.y + dy };
+        if (!open(next, square, dx, dy)) continue;
+        const step = difficult.has(squareKey(square))
+          ? SQUARE_FEET * 2
+          : SQUARE_FEET;
+        reach(square, next, spent + step);
+        if (how.jump && difficult.has(squareKey(square))) {
+          leap(next, dx, dy, spent, how.jump);
+        }
+      }
+    }
+  }
+  // Over the difficult squares ahead, onto the first square past them that isn't, if the jump is long enough.
+  function leap(
+    start: Square,
+    dx: number,
+    dy: number,
+    spent: number,
+    jump: NonNullable<typeof how.jump>,
+  ): void {
+    const length = spent >= jump.runUp ? jump.running : jump.standing;
+    let at = start;
+    for (let squares = 1; squares * SQUARE_FEET <= length; squares += 1) {
+      const square = { x: at.x + dx, y: at.y + dy };
+      if (!open(at, square, dx, dy)) return;
+      if (!difficult.has(squareKey(square))) {
+        if (squares > 1) reach(square, start, spent + squares * SQUARE_FEET);
+        return;
+      }
+      at = square;
+    }
+  }
   for (let bucket = 0; bucket < buckets.length; bucket += 1) {
     for (const next of buckets[bucket] ?? []) {
       const spent = bucket * SQUARE_FEET;
       if (cost.get(squareKey(next)) !== spent) continue; // reached more cheaply since
       visit(next, spent);
-    }
-  }
-  function visit(next: Square, spent: number): void {
-    for (let dx = -1; dx <= 1; dx += 1) {
-      for (let dy = -1; dy <= 1; dy += 1) {
-        const square = { x: next.x + dx, y: next.y + dy };
-        const key = squareKey(square);
-        const step = difficult.has(key) ? SQUARE_FEET * 2 : SQUARE_FEET;
-        if (
-          (dx === 0 && dy === 0) ||
-          square.x < 0 ||
-          square.y < 0 ||
-          square.x >= grid.width ||
-          square.y >= grid.height ||
-          blocked.has(key) ||
-          cutsCorner(next, dx, dy, walls) ||
-          spent + step > feet ||
-          spent + step >= (cost.get(key) ?? Infinity)
-        ) {
-          continue;
-        }
-        cost.set(key, spent + step);
-        from.set(key, next);
-        const bucket = (spent + step) / SQUARE_FEET;
-        while (buckets.length <= bucket) buckets.push([]);
-        buckets[bucket]?.push(square);
-      }
     }
   }
   return [...cost]

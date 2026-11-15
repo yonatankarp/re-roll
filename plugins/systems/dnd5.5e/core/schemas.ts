@@ -266,6 +266,18 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     ability: AbilitySchema.optional(),
     subtract: z.boolean().optional(), // a penalty, as a gold dragon's Weakening Breath
   }),
+  // A Speed of another kind, as a Fly Speed: these feet, or without them equal to the bearer's Speed
+  // (core/movement-modes.ts).
+  z.strictObject({
+    kind: z.literal("movementMode"),
+    mode: z.enum(["fly", "climb", "burrow"]),
+    feet: z.number().int().min(5).optional(),
+  }),
+  // Knowing where creatures on the ground are, this far, through walls and darkness, as Stonecunning's Tremorsense.
+  z.strictObject({
+    kind: z.literal("tremorsense"),
+    feet: z.number().int().min(5),
+  }),
   // Regaining no Hit Points, as in a death tyrant's Negative Energy Cone.
   z.strictObject({ kind: z.literal("noHealing") }),
   // The first drop to 0 Hit Points is a drop to 1 instead, and the effect ends, as with Death Ward.
@@ -819,6 +831,26 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     oncePerTurn: z.boolean().default(false),
   }),
   z.strictObject({ kind: z.literal("packTactics") }),
+  // Moving through other creatures' spaces or through walls, as a swarm, a ghost's Incorporeal Movement or Halfling
+  // Nimbleness: `creatures` any, or only ones larger than it; `walls` through walls, at double cost with `costly`;
+  // `squeeze` slips between walls meeting at a corner; `open` lets others through its own space, as a swarm's;
+  // `terrain` crosses difficult terrain at no extra cost, as Freedom of Movement or a gas spore's Rolling Mass.
+  z.strictObject({
+    kind: z.literal("moveThrough"),
+    creatures: z.enum(["any", "larger"]).optional(),
+    walls: z.boolean().default(false),
+    costly: z.boolean().default(false),
+    squeeze: z.boolean().default(false),
+    open: z.boolean().default(false),
+    terrain: z.boolean().default(false),
+  }),
+  // A longer Long Jump, as a frog's Standing Leap (`feet` 20, `runUp` 0) or Athlete's Jumping (`runUp` 5): its feet
+  // after a run-up of `runUp` feet, instead of the Strength score after 10.
+  z.strictObject({
+    kind: z.literal("jump"),
+    feet: z.number().int().min(5).optional(),
+    runUp: z.number().int().min(0).default(10),
+  }),
   // Leaving a foe's reach never provokes an Opportunity Attack, as with Flyby or Agile.
   z.strictObject({ kind: z.literal("noOpportunityAttacks") }),
   // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
@@ -874,7 +906,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     allies: z.boolean().default(false),
   }),
   // Dropping to 1 Hit Point instead of 0 while the resource lasts, as with Relentless Endurance.
-  z.strictObject({ kind: z.literal("dropToOne"), resource: z.string() }),
+  // With `effects` it gains these as it does, for the rest of the fight, as Boon of Misty Escape's Gaseous Form.
+  z.strictObject({
+    kind: z.literal("dropToOne"),
+    resource: z.string(),
+    effects: z.array(ModifierSchema).default([]),
+  }),
   // Changes to the bearer's damaging cantrip that deals the most, as Agonizing, Repelling Blast or Eldritch Spear do:
   // damage added to each roll, effects on a hit, and range for each level of a class.
   z.strictObject({
