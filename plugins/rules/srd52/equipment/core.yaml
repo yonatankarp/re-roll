@@ -153,3 +153,21 @@
   text: Reading it casts Teleport without a spell slot, and the scroll crumbles to dust.
   automation: partial
   spell: "srd52:spell/teleport"
+- id: "srd52:item/spell-scroll-detect-magic"
+  name: Spell Scroll (Detect Magic)
+  type: magicItem
+  category: scroll
+  rarity: common
+  attunement: false
+  text: Reading it casts Detect Magic without a spell slot, and the scroll crumbles to dust.
+  automation: partial
+  spell: "srd52:spell/detect-magic"
+- id: "srd52:item/spell-scroll-magic-circle"
+  name: Spell Scroll (Magic Circle)
+  type: magicItem
+  category: scroll
+  rarity: uncommon
+  attunement: false
+  text: Reading it casts Magic Circle without a spell slot, and the scroll crumbles to dust.
+  automation: partial
+  spell: "srd52:spell/magic-circle"
