@@ -28,6 +28,16 @@ import {
 } from "./monster-spells.ts";
 import { plainText, slugOf } from "./spells.ts";
 import { formsOnly, shapesIn, shapeShiftActions } from "./shapes.ts";
+import {
+  oneOffAction,
+  oneOffLegendary,
+  oneOffReaction,
+  oneOffTrait,
+  type Readers,
+  eitherEffects,
+  riderEffects,
+  VARIANT,
+} from "./monster-oneoffs.ts";
 
 type AbilityKey = keyof typeof ABILITIES;
 
@@ -472,7 +482,7 @@ function parseAttack(text: string, left: string[]): ParsedAction | null {
   const advantageDice: string[] = [];
   const damage = damageIn(sentences[0] ?? "", left, advantageDice);
   noteLaterDamage(sentences, left);
-  const onHit = conditionsIn(hit, left);
+  const onHit = [...conditionsIn(hit, left), ...riderEffects(hit)];
   if (
     damage.length === 0 &&
     (onHit.length === 0 || hit.search(DICE_DAMAGE) >= 0)
@@ -717,7 +727,13 @@ function parseSaveFrom(
     "",
   );
   const eitherResult = /\s*Failure or Success:.*$/s;
-  if (eitherResult.test(firstStage)) left.push("an effect on either result");
+  // A curse or a mark on either result goes on both, as an arch-hag's Crackling Wave's.
+  const both = eitherEffects(
+    /\s*Failure or Success:\s*(.*)$/s.exec(firstStage)?.[1] ?? "",
+  );
+  if (eitherResult.test(firstStage) && both.length === 0) {
+    left.push("an effect on either result");
+  }
   const match =
     /^(Strength|Dexterity|Constitution|Intelligence|Wisdom|Charisma) Saving Throw:\s*DC (\d+),?\s*(.*?)\s*(?:First )?Failure:\s*(.*?)(?:\s*Success:\s*(.*))?$/s.exec(
       firstStage.replace(eitherResult, ""),
@@ -754,6 +770,8 @@ function parseSaveFrom(
       ...conditionsIn(failure, left),
       ...ongoingDamage(failure, left),
       ...modifiersIn(failure),
+      ...riderEffects(failure),
+      ...both,
     ],
     second,
   );
@@ -786,7 +804,7 @@ function parseSaveFrom(
       damage,
       onSuccessDamage: /half damage/i.test(success) ? "half" : "none",
       onFail,
-      onSuccess: [],
+      onSuccess: both,
     },
   };
 }
@@ -1059,7 +1077,12 @@ export function legendaryOf(
           },
         }
       : activation;
-    if (!own && made.length === 0) {
+    const special =
+      own || made.length > 0
+        ? null
+        : oneOffLegendary(text, actionNames, { parseSave, parseAttack });
+    if (special) left.push(...special.left);
+    if (!own && !special && made.length === 0) {
       notes.push(`not automated: legendary action ${name}`);
       continue;
     }
@@ -1071,7 +1094,11 @@ export function legendaryOf(
       cost: Number(/\(Costs (\d+) Actions\)/i.exec(label)?.[1] ?? 1),
       oncePerRound: /again until the start of \w+ next turn/i.test(text),
       moves: /\bmoves? up to half \w+ Speed\b/i.test(text),
-      ...(own ? { activation: own } : { makes: made }),
+      ...(own
+        ? { activation: own }
+        : special
+          ? { activation: special.activation }
+          : { makes: made }),
     });
   }
   if (uses && legendary.length > 0) {
@@ -1176,7 +1203,7 @@ function noCombatTrait(label: string, text: string): boolean {
   return (
     NO_COMBAT_TRAIT.test(name) ||
     (/(?:Restoration|Immortality|Rejuvenation)$/.test(name) &&
-      /\b(?:revives?|re-?forms|gains a new body|regains all its Hit Points in \d)/.test(
+      /\b(?:revives?|re-?forms|gains a new body|regains all its Hit Points in \d|returns to life in \d)/.test(
         text,
       ))
   );
@@ -1185,7 +1212,6 @@ function noCombatTrait(label: string, text: string): boolean {
 // What a trait read as a passive still leaves out.
 function traitLeftOut(label: string): string | null {
   if (label === "Sun Sickness") return "its death after an hour in sunlight";
-  if (label === "Fey Ancestry") return "immunity to magical sleep";
   if (label === "Greater Magic Resistance") {
     return "succeeding on every save against spells";
   }
@@ -1727,6 +1753,88 @@ export function traitPassive(label: string, text: string): Passive | null {
   };
 }
 
+// A list printed under an entry, as Eye Rays' rays, joins that entry's text as "• Name. text" items.
+function listsFolded(block: string): string {
+  return block.replace(
+    /<\/p>\s*<(ol|ul)\b[^>]*>([\s\S]*?)<\/\1>/g,
+    (_, _tag: string, items: string) =>
+      `${items.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/g, " • $1")}</p>`,
+  );
+}
+
+type Paragraph = readonly [string, string, string];
+
+// Entries printed after one that ends in "the following effects:" are its options, not entries of their own: a
+// satyr's songs, a syringe's serums, a variant's "(Hunter Only)" effects, a sphinx's First to Third Roar. They join
+// it as "• Name. text" items until the section ends, or until the options' kind of label does.
+const NOT_AN_OPTION =
+  /^(?:Multiattack|(?:Innate )?Spellcasting|Magic Resistance|Legendary Resistance)\b/;
+function foldedOptions(found: readonly RegExpMatchArray[]): Paragraph[] {
+  const out: [string, string, string][] = [];
+  let parent: [string, string, string] | null = null;
+  let kind: RegExp | null = null;
+  for (const match of found) {
+    const item: [string, string, string] = [
+      match[0],
+      match[1] ?? "",
+      match[2] ?? "",
+    ];
+    const header = /monster-header|Stat-Block-Heading/.test(item[1]);
+    const entry = header ? null : entryOf(item[2]);
+    // "1: Insect Hive. …" printed as a paragraph of its own.
+    if (parent && !header && !entry && /^\d+: [A-Z]/.test(plainText(item[2]))) {
+      parent[2] = `${parent[2]} ${item[2]}`;
+      continue;
+    }
+    if (parent && entry && !NOT_AN_OPTION.test(entry.label)) {
+      kind ??= /\((?:\w+ )?Only\)$/.test(entry.label)
+        ? /\((?:\w+ )?Only\)$/
+        : /^(?:First|Second|Third|Fourth|Fifth)\b/.test(entry.label)
+          ? /^(?:First|Second|Third|Fourth|Fifth)\b/
+          : /./;
+      // An attack, a save, a spell or a limited use of its own is the next action, not an option.
+      const own =
+        kind.source === "." &&
+        (/Attack(?: Roll)?:|Saving Throw:|\bcasts\b/.test(entry.text) ||
+          /\((?:Recharge|\d+\/Day)/.test(entry.label));
+      if (!own && kind.test(entry.label)) {
+        parent[2] = `${parent[2]} • ${item[2]}`;
+        continue;
+      }
+    }
+    parent = null;
+    kind = null;
+    out.push(item);
+    if (
+      entry &&
+      !NOT_AN_OPTION.test(entry.label) &&
+      /:\s*$/.test(entry.text) &&
+      /\bone of the following effects\b|\bas detailed below\b|\bsubjected to [^.:]+ effect:\s*$/i.test(
+        entry.text,
+      )
+    ) {
+      parent = item;
+    }
+  }
+  return out;
+}
+
+// "• Captivated (Forager Only). … • Fearful (Hunter Only). …": the played variant's option stands in for the list.
+function playedVariant(label: string, text: string, notes: string[]): string {
+  const options =
+    /^(.*?)(?:\s*[^.:]*\b[Oo]ne of the following effects(?: occurs)?:)\s*(•.*)$/s.exec(
+      text,
+    );
+  if (!options || !/\((?:\w+ )?Only\)\./.test(options[2] ?? "")) return text;
+  const chosen = new RegExp(
+    `•\\s*[^.•]*\\(${VARIANT} Only\\)\\.\\s*([^•]*)`,
+  ).exec(options[2] ?? "")?.[1];
+  notes.push(
+    `partial: ${label.replace(/\s*\(.*$/, "")}: left out the other variants' effects`,
+  );
+  return chosen ? `${options[1] ?? ""} ${chosen.trim()}` : (options[1] ?? "");
+}
+
 // Second pass, for a block the first pass found no action in. It's separate so that blocks which already parse don't change.
 function parseBlock(
   block: string,
@@ -1739,8 +1847,13 @@ function parseBlock(
       block,
     )?.[1] ?? "",
   );
-  const paragraphs = [...block.matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/g)];
-  const lines = paragraphs.map((item) => plainText(item[2] ?? ""));
+  const found = [
+    ...listsFolded(block).matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/g),
+  ];
+  const paragraphs = foldedOptions(found);
+  const lines = paragraphs.map((item) => plainText(item[2]));
+  // The stat block as printed, for its text and for what reads it as printed: shapes and legendary actions.
+  const printed = found.map((item) => plainText(item[2] ?? ""));
   const field = (pattern: RegExp): string | undefined =>
     lines.map((line) => pattern.exec(line)?.[1]).find(Boolean);
 
@@ -1794,8 +1907,8 @@ function parseBlock(
   const marks: { at: number; forms: readonly string[] | undefined }[] = [];
   const shapePassives: { forms: readonly string[]; passive: Passive }[] = [];
   for (const [index, paragraph] of paragraphs.entries()) {
-    const attributes = paragraph[1] ?? "";
-    const inner = paragraph[2] ?? "";
+    const attributes = paragraph[1];
+    const inner = paragraph[2];
     marks.push({
       at: actions.length,
       forms: formsOnly(entryOf(inner)?.label ?? ""),
@@ -1808,7 +1921,29 @@ function parseBlock(
     }
     const entry = entryOf(inner);
     if (!entry) continue;
-    const { label, text } = entry;
+    const { label } = entry;
+    const folded = playedVariant(label, entry.text, notes);
+    // The general readers take the entry without the options folded under it, which are reported as their own
+    // entries were unless a one-off reader takes them.
+    const [text = "", ...optionTexts] = folded.split(" • ");
+    const leftOptions = () => {
+      for (const option of optionTexts) {
+        const name = /^([^.]{1,60})\./.exec(option)?.[1];
+        if (name) notes.push(`not automated: ${name}`);
+      }
+    };
+    // Paragraphs of its own text printed after it, as "While grafted, …", which only the one-off readers take.
+    const next = paragraphs
+      .slice(index + 1)
+      .findIndex(
+        (item) =>
+          entryOf(item[2]) !== null ||
+          /monster-header|Stat-Block-Heading/.test(item[1]),
+      );
+    const whole = [
+      folded,
+      ...lines.slice(index + 1, next < 0 ? undefined : index + 1 + next),
+    ].join(" ");
     // legendaryOf reads these, and reports what it can't automate.
     if (
       section === "legendary actions" ||
@@ -1826,8 +1961,8 @@ function parseBlock(
       const following = paragraphs.slice(index + 1);
       const end = following.findIndex(
         (item) =>
-          entryOf(item[2] ?? "") !== null ||
-          /monster-header|Stat-Block-Heading/.test(item[1] ?? ""),
+          entryOf(item[2]) !== null ||
+          /monster-header|Stat-Block-Heading/.test(item[1]),
       );
       const entryText = [
         text,
@@ -1855,6 +1990,13 @@ function parseBlock(
     }
     // Older books print traits before any heading.
     if (section === "traits" || section === "") {
+      const special = oneOffTrait(label, whole);
+      if (special) {
+        passives.push(...special.passives);
+        notes.push(...special.notes);
+        continue;
+      }
+      leftOptions();
       const leftOut: string[] = [];
       const placed = areaTrait(label, text, leftOut);
       const passive = placed ? null : traitPassive(label, text);
@@ -1978,6 +2120,13 @@ function parseBlock(
       });
       continue;
     }
+    const reacts =
+      section === "reactions" ? oneOffReaction(label, whole) : null;
+    if (reacts) {
+      actions.push(...reacts.actions);
+      notes.push(...reacts.notes);
+      continue;
+    }
     if (section !== "actions" && section !== "bonus actions") {
       notes.push(`not automated: ${label}`);
       continue;
@@ -2011,6 +2160,25 @@ function parseBlock(
       });
       continue;
     }
+    const special = oneOffAction(
+      label,
+      whole,
+      section,
+      actions,
+      {
+        parseSave,
+        parseAttack,
+      } satisfies Readers,
+      Number(field(/^Speed\s+(\d+)/) ?? 0),
+      lines.join("\n"),
+    );
+    if (special) {
+      actions.push(...special.actions);
+      passives.push(...special.passives);
+      notes.push(...special.notes);
+      continue;
+    }
+    leftOptions();
     const rechargeOn = /\(Recharge (\d)/.exec(label)?.[1];
     const perDay = /\((\d+)\/Day\b/.exec(label)?.[1];
     const resource = `${perDay ? "day" : "recharge"}:${slugOf(label.replace(/\s*\(.*$/, ""))}`;
@@ -2143,7 +2311,7 @@ function parseBlock(
       Object.assign(action as object, { shapes: forms });
     }
   }
-  const shaped = shapesIn(lines, size);
+  const shaped = shapesIn(printed, size);
   const shapes = shaped?.shapes.map((shape) => ({
     ...shape,
     passives: shapePassives.flatMap(({ forms, passive }) =>
@@ -2163,7 +2331,7 @@ function parseBlock(
   }
   if (actions.length === 0) notes.push("no action could be automated");
   const legendary = legendaryOf(
-    lines,
+    printed,
     actions.map((action) => (action as { readonly name: string }).name),
     spells
       ? (text) =>
@@ -2224,7 +2392,7 @@ function parseBlock(
       actions,
       ...(shapes ? { shapes } : {}),
       ...legendary.fields,
-      text: lines.join("\n"),
+      text: printed.join("\n"),
     },
   };
 }
@@ -2238,7 +2406,7 @@ export function teleportOf(
 ): { feet: number; movement: number; rest: string; others?: true } | null {
   // "teleports itself or a willing creature it can see within 10 feet of itself up to 120 feet": only itself.
   const teleport =
-    /^(?:The )?[^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)?( itself or a willing (?:creature|demon|devil|ally) [^.]*?)? up to (\d+) feet to an unoccupied space (?:it|he|she|they|the [^.]+?) can see(?:[.,]| and)\s*(.*)$/s.exec(
+    /^(?:The )?[^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)?( itself or a willing (?:creature|demon|devil|ally) [^.]*?|, along with a willing creature [^,]+,)? up to (\d+) feet to an unoccupied space (?:that )?(?:it|he|she|they|the [^.]+?) can see(?:[.,]| and)\s*(.*)$/s.exec(
       text.trim(),
     );
   if (teleport) {
@@ -2251,7 +2419,7 @@ export function teleportOf(
   }
   // "teleports to an unoccupied space she can see within 30 feet of herself and makes one … attack"
   const near =
-    /^(?:The )?[^.]*? (?:magically )?teleports to an unoccupied space (?:it|he|she|they) can see within (\d+) feet of (?:itself|himself|herself|themselves)(?:[.,]| and)\s*(.*)$/s.exec(
+    /^(?:The )?[^.]*? (?:magically )?teleports to an unoccupied space (?:it|he|she|they) can see within (\d+) feet(?: of (?:itself|himself|herself|themselves))?(?:[.,]| and)\s*(.*)$/s.exec(
       text.trim(),
     );
   if (near) return { feet: Number(near[1]), movement: 0, rest: near[2] ?? "" };

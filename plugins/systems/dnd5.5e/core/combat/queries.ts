@@ -436,10 +436,25 @@ export function fitsType(
   item: Actor,
   targeting: Targeting,
   access: ContentAccess,
+  by?: Actor, // who aims it, for an `afflicted` gate
 ): boolean {
   if ("self" in targeting) return true;
   const gate = "targetConditions" in targeting && targeting.targetConditions;
   if (gate && !hasCondition(item, ...gate)) return false;
+  if (
+    "bloodied" in targeting &&
+    targeting.bloodied &&
+    item.hp * 2 > deriveStats(item, access).maxHp
+  ) {
+    return false;
+  }
+  if (
+    targeting.afflicted &&
+    by &&
+    !afflictedBy(item, by, targeting.afflicted, access)
+  ) {
+    return false;
+  }
   const largest = "maxSize" in targeting ? targeting.maxSize : undefined;
   if (largest && sizeOf(item, access) > SIZES.indexOf(largest)) return false;
   if (!targeting.creatureTypes) return true;
@@ -486,10 +501,11 @@ export function inReach(
   const { targeting } = action.activation;
   if ("self" in targeting) return [actor];
   const charmers = charmersOf(actor);
+  const downed = "downed" in targeting && targeting.downed === true;
   return (
     targeting.side === "enemy"
       ? knownFoes(state, actor, access).filter(
-          (item) => !isDown(item) && !charmers.has(item.id),
+          (item) => isDown(item) === downed && !charmers.has(item.id),
         )
       : allies(state, actor)
   )
@@ -497,7 +513,7 @@ export function inReach(
       (item) =>
         isDead(item) === ("dead" in targeting && targeting.dead === true),
     )
-    .filter((item) => fitsType(item, targeting, access))
+    .filter((item) => fitsType(item, targeting, access, actor))
     .filter((item) => reaches(action, actor, item))
     .filter((item) => !behindTotalCover(state, actor, item))
     .filter((item) => !walledApart(actor, item, action, state, access));
@@ -514,14 +530,20 @@ export function walledApart(
   access: ContentAccess,
 ): boolean {
   if (actor.id !== target.id && (sealed(actor) || sealed(target))) return true;
-  const level = spellLevelOf(action.id, actor, access);
-  if (level === null) return false;
-  return zonesOn(target, state, access).some(
+  const guarding = zonesOn(target, state, access).filter(
     (zone) =>
       zone.area?.noSpells === "all" ||
-      (zone.area?.spellShield !== undefined &&
-        level <= zone.area.spellShield &&
-        !inZone(zone, actor.position)),
+      (zone.area?.spellShield !== undefined && !inZone(zone, actor.position)),
+  );
+  if (guarding.length === 0) return false;
+  const level = spellLevelOf(action.id, actor, access);
+  return (
+    level !== null &&
+    guarding.some(
+      (zone) =>
+        zone.area?.noSpells === "all" ||
+        level <= (zone.area?.spellShield ?? -1),
+    )
   );
 }
 
@@ -538,14 +560,32 @@ export function targetCount(
   return projectiles ?? ("creatures" in targeting ? targeting.creatures : 1);
 }
 
+// Whether `item` is under an effect `by` left with its action of this name, as a curse it laid.
+export function afflictedBy(
+  item: Actor,
+  by: Actor,
+  name: string,
+  access: ContentAccess,
+): boolean {
+  const ids = new Set(
+    deriveStats(by, access)
+      .actions.filter((action) => action.name === name)
+      .map((action) => action.id),
+  );
+  return item.activeEffects.some(
+    (effect) => effect.casterId === by.id && ids.has(effect.sourceId),
+  );
+}
+
 // Every creature in the fight an area could catch.
 export function areaPool(
   targeting: Targeting,
   context: ContentAccess & { readonly state: DndState },
+  by?: Actor,
 ): readonly Actor[] {
   return (context.state.combat?.order ?? []).flatMap((id) => {
     const item = context.state.actors[id];
-    return item && !isDead(item) && fitsType(item, targeting, context)
+    return item && !isDead(item) && fitsType(item, targeting, context, by)
       ? [item]
       : [];
   });
@@ -643,7 +683,7 @@ export function aimsFor(
   if (!("area" in targeting) || !grid || !actor.position) return [];
   // Aimed by what the actor's side knows of: the party doesn't aim at foes in the fog, though the area still
   // catches them.
-  const pool = areaPool(targeting, context).filter((item) =>
+  const pool = areaPool(targeting, context, actor).filter((item) =>
     knows(context.state, actor, item, context),
   );
   return aimSquares(targeting, actor.position, grid)

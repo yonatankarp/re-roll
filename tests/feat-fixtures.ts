@@ -814,6 +814,20 @@ const FIXTURES = [
     text: "Test.",
     prerequisite: { spellcasting: true },
   },
+  {
+    id: "test:feat/marked",
+    name: "Marked",
+    category: "general",
+    text: "Test.",
+    prerequisite: { campaign: "eberron" },
+  },
+  {
+    id: "test:feat/gifted",
+    name: "Gifted",
+    category: "general",
+    text: "Test.",
+    prerequisite: { campaign: "ravenloft" },
+  },
   trait("marked", [], {
     preparedWith: {
       feat: "test:feat/greater",

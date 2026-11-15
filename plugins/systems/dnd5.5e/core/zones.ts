@@ -14,7 +14,7 @@ import {
   isDead,
 } from "./state.ts";
 import { distanceFeet, type Square, squareKey, wallSet } from "./grid.ts";
-import { deriveStats, type KnownAction } from "./stats.ts";
+import { deriveStats, type KnownAction, type Stats } from "./stats.ts";
 import { spellOf } from "./combat/dispel.ts";
 import { lightAt } from "./sight.ts";
 
@@ -39,6 +39,17 @@ export interface Zone {
 }
 
 export const AURA = "aura:";
+
+// A creature's stats as zones read them, kept per actor object, which never changes in place: auras, light
+// sensitivity and creature types are asked for on every roll and every square a walk weighs.
+const statsKept = new WeakMap<Actor, Stats>();
+export function statsOf(actor: Actor, access: ContentAccess): Stats {
+  const known = statsKept.get(actor);
+  if (known) return known;
+  const made = deriveStats(actor, access);
+  statsKept.set(actor, made);
+  return made;
+}
 
 // Spell zones need only the state; monster auras need the stat blocks too, so they come with `access`. Kept per
 // state, which never changes in place.
@@ -82,7 +93,7 @@ function auraZones(state: DndState, access: ContentAccess): readonly Zone[] {
     if (actor.source.kind === "character" || !actor.position) return [];
     if (isDead(actor) || sealed(actor)) return [];
     const at = actor.position;
-    return deriveStats(actor, access).passives.flatMap((passive): Zone[] =>
+    return statsOf(actor, access).passives.flatMap((passive): Zone[] =>
       passive.kind === "aura" &&
       !(passive.area.awake && hasCondition(actor, ...INCAPACITATING))
         ? [
@@ -120,6 +131,20 @@ export const inZone = (zone: Zone, square: Square | null): boolean =>
 export const sealed = (actor: Actor): boolean =>
   actor.activeEffects.some(({ modifier }) => modifier.kind === "sealed");
 
+// Whether one of the two has the other Grappled, as Barbed Hide's spines need.
+const grappleBetween = (a: Actor, b: Actor): boolean =>
+  [
+    [a, b],
+    [b, a],
+  ].some(([held, by]) =>
+    held?.activeEffects.some(
+      ({ modifier, casterId }) =>
+        modifier.kind === "condition" &&
+        modifier.condition === "grappled" &&
+        casterId === by?.id,
+    ),
+  );
+
 // Whether a zone's effects reach `actor`: its side and kind, never the bearer of one that moves with it, and not
 // a creature that saved against it for good.
 export function affects(
@@ -134,8 +159,9 @@ export function affects(
   if (zone.follows && actor.id === owner.id && !area.self) return false;
   if (area.side === "enemy" && actor.side === owner.side) return false;
   if (area.side === "ally" && actor.side !== owner.side) return false;
+  if (area.grappling && !grappleBetween(owner, actor)) return false;
   if (area.creatureTypes || area.exceptTypes) {
-    const type = access ? deriveStats(actor, access).creatureType : undefined;
+    const type = access ? statsOf(actor, access).creatureType : undefined;
     if (area.creatureTypes && !area.creatureTypes.includes(type ?? "")) {
       return false;
     }
@@ -324,14 +350,24 @@ export function placedFlag(
   ability?: Ability,
 ): boolean {
   if (!state.combat || !actor.position) return false;
-  const given = zoneModifiers(actor, state, access).some(
-    (modifier) =>
-      modifier.kind === kind &&
-      modifier.on === on &&
-      (!modifier.ability || modifier.ability === ability),
-  );
-  if (given || kind !== "disadvantage" || on === "attacksAgainst") return given;
-  return deriveStats(actor, access).passives.some(
+  const given =
+    zonesOf(state, access).length > 0 &&
+    zoneModifiers(actor, state, access).some(
+      (modifier) =>
+        modifier.kind === kind &&
+        modifier.on === on &&
+        (!modifier.ability || modifier.ability === ability),
+    );
+  // Light sensitivity is a stat block's trait, so a character is never asked for it.
+  if (
+    given ||
+    kind !== "disadvantage" ||
+    on === "attacksAgainst" ||
+    actor.source.kind === "character"
+  ) {
+    return given;
+  }
+  return statsOf(actor, access).passives.some(
     (passive) =>
       passive.kind === "lightSensitive" &&
       passive.disadvantage.includes(on) &&
@@ -388,7 +424,7 @@ export function zoneHarm(
   ).length;
   const burns =
     actor.source.kind !== "character" &&
-    deriveStats(actor, access).passives.some(
+    statsOf(actor, access).passives.some(
       (passive) =>
         passive.kind === "lightSensitive" &&
         passive.damage.length > 0 &&

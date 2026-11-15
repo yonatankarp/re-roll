@@ -25,11 +25,12 @@ import {
   enemies,
   findAction,
 } from "./queries.ts";
-import { payCosts, rollSave } from "./effects.ts";
+import { payCosts, resolveAction, rollSave } from "./effects.ts";
 import { isSpell, spellLevelOf } from "./dispel.ts";
 
 // Counterspell: a foe who sees a spell being cast nearby may spend its reaction to make the caster save, and on a
-// failure the spell does nothing, its action is spent and its slot isn't.
+// failure the spell does nothing, its action is spent and its slot isn't. Another reaction to a spell nearby only acts
+// on its bearer.
 
 export const CounterSchema = z.object({
   actor: z.string(), // the caster
@@ -112,6 +113,24 @@ export function runCounterspell(
   const counterer = actorOf(state, countererId);
   const counter = findAction(counterer, answer, context);
   const { resolution } = counter.activation;
+  // A reaction to a spell nearby that isn't a counter, as a gremishka's Magic Allergy, acts on its bearer and lets the
+  // spell through.
+  if (
+    resolution.kind === "automatic" &&
+    !resolution.effects.some(({ kind }) => kind === "counter")
+  ) {
+    const reacted = resolveAction(counter, counterer, [counterer], context);
+    const result = cast(rest, context);
+    return {
+      ...result,
+      events: [
+        ...payCosts(counter, counterer, context),
+        ...(reacted.events ?? []),
+        ...(result.events ?? []),
+      ],
+      frames: [...(reacted.frames ?? []), ...(result.frames ?? [])],
+    };
+  }
   const dc =
     resolution.kind === "save"
       ? evaluateFormula(resolution.dc, deriveStats(counterer, context))
