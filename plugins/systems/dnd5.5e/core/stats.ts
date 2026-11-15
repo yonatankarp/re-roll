@@ -297,6 +297,7 @@ export function weaponActivation(
   abilities: AbilityScores,
   proficient = true,
   damageBonus = 0,
+  itemBonus = 0,
 ): Activation {
   const ranged = weapon.properties.includes("ammunition");
   const finesse = weapon.properties.includes("finesse");
@@ -314,6 +315,7 @@ export function weaponActivation(
         type: "weapon",
         ability,
         ...(proficient ? {} : { proficient }),
+        ...(itemBonus > 0 ? { itemBonus } : {}),
       },
       damage: [
         {
@@ -519,7 +521,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   for (const [itemId, item] of worn) {
     if (item.type !== "magicItem") continue;
     if (item.attunement && !attuned.includes(itemId)) continue;
-    // shortcut: the inventory doesn't record which version of an item was found, so one with versions counts as its first.
+    // An entry with versions counts as its first, as older saves hold; content names a version as `<id>--<n>` (variants.ts).
     for (const { to, amount } of item.bonuses ??
       item.variants?.[0]?.bonuses ??
       []) {
@@ -561,6 +563,14 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       if (trained.has("shield")) shield = Math.max(shield, item.bonus);
     } else if (item.type === "weapon") {
       const weapon = WeaponSchema.parse(item);
+      // A magic weapon's own bonus, or the best from a magic weapon carried beside it, never both.
+      const own = (to: "attack" | "damage"): number =>
+        Math.max(
+          magic[to],
+          ...(weapon.bonuses ?? [])
+            .filter((bonus) => bonus.to === to)
+            .map((bonus) => bonus.amount),
+        );
       actions.push({
         id: `weapon:${itemId}`,
         name: item.name,
@@ -569,7 +579,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           abilities,
           martialTraining ||
             classes.some((def) => weaponProficient(def, weapon)),
-          magic.damage,
+          own("damage"),
+          own("attack") - magic.attack,
         ),
         spellLevel: null,
       });
@@ -724,7 +735,7 @@ function passiveBonus(
 }
 
 // What drinking it heals, for a potion such as a Potion of Healing.
-// shortcut: a potion with versions heals as its first, since the inventory doesn't say which was found.
+// A potion entry with versions heals as its first, as older saves hold; `<id>--<n>` is the nth (variants.ts).
 export function itemHealing(item: z.infer<typeof ItemSchema>) {
   return item.type === "gear"
     ? item.healing
@@ -1096,7 +1107,7 @@ export function attackBonus(
   const item =
     attack.type === "spell"
       ? stats.itemBonuses.spellAttack
-      : stats.itemBonuses.attack;
+      : stats.itemBonuses.attack + (attack.itemBonus ?? 0);
   return (
     proficiency +
     (ability ? modifierFor(stats, ability) : 0) +

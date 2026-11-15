@@ -47,7 +47,9 @@ export function buyPriceCp(
 ): number | null {
   const base =
     stock.price === undefined ? item.costCp : Math.round(stock.price * 100);
-  const own = item.type === "magicItem" ? 0 : bearer;
+  const magic =
+    item.type === "magicItem" || (item.type === "weapon" && item.bonuses);
+  const own = magic ? 0 : bearer;
   return base === undefined
     ? null
     : Math.round((base * (100 - discount) * (100 - own)) / 10000);
