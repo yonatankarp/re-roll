@@ -940,8 +940,12 @@ describe("actions anyone can take", () => {
     expect(who(stuck.state, "foe").budget.action).toBe(false);
     const free = settle(run, onFoe, [act("foe", escape)], d20s(13));
     expect(hasCondition(who(free.state, "foe"), "grappled")).toBe(false);
-    // Walking away lets go.
-    const left = settle(run, held, [moveTo(PLAYER_ACTOR, 3, 5)], LOW);
+    // Walking away drags it along at double cost (#122), and walking farther than that lets go.
+    const dragged = settle(run, held, [moveTo(PLAYER_ACTOR, 3, 5)], LOW);
+    expect(who(dragged.state, PLAYER_ACTOR).moved).toBe(20);
+    expect(who(dragged.state, "foe").position).toMatchObject({ x: 4 });
+    expect(hasCondition(who(dragged.state, "foe"), "grappled")).toBe(true);
+    const left = settle(run, held, [moveTo(PLAYER_ACTOR, 1, 5)], LOW);
     expect(hasCondition(who(left.state, "foe"), "grappled")).toBe(false);
   });
 
