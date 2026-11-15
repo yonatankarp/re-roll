@@ -77,6 +77,8 @@ import {
   blockedSquares,
   healingStopped,
   placedFlag,
+  sealed,
+  zoneImmune,
   zonesOf,
 } from "../zones.ts";
 import { caughtBy } from "../targeting.ts";
@@ -107,6 +109,7 @@ import {
   fitsType,
   hasFlag,
   hasPassive,
+  meleeReach,
   reaches,
   rollBonus,
   slotToSpend,
@@ -766,6 +769,7 @@ export function leafEvents(
       case "applyCondition": {
         if (
           immuneToCondition(deriveStats(target, context), effect.condition) ||
+          zoneImmune(target, effect.condition, context.state, context) ||
           target.activeEffects.some(
             ({ modifier }) =>
               modifier.kind === "conditionImmunity" &&
@@ -969,6 +973,7 @@ export function leafEvents(
       case "swapInitiative":
       case "inspiration":
       case "resistTrigger":
+      case "forcedAttack":
         // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit, and
         // a teleport's square by its own decision and a zone once for the whole spell (resolveAction).
         break;
@@ -1168,6 +1173,7 @@ export function rollSave(
         context.state,
         context,
         ability,
+        conditions,
       ) ||
       (magical && hasPassive(stats, "magicResistance")) ||
       (ability === "dex" && dodging(target)) ||
@@ -1718,6 +1724,16 @@ export function resolveAction(
             slotLevel,
           ),
         );
+        if (!saved) {
+          const forced = forcedAttack(
+            resolution.onFail,
+            actor,
+            target,
+            context,
+          );
+          events.push(...forced.events);
+          frames.push(...forced.frames);
+        }
         // A reaction to how the save went, as Mind Corrosion or Spell Reflection.
         frames.push(
           ...reactFrames(
@@ -1766,6 +1782,85 @@ export function resolveAction(
       resolution satisfies never;
   }
   return { events, frames };
+}
+
+// Aura of Violence: the target spends its Reaction on a melee attack against a creature in its reach, its own side
+// first, or takes the damage when no creature is in reach. One with no Reaction left does neither.
+function forcedAttack(
+  effects: readonly LeafEffect[],
+  caster: Actor,
+  target: Actor,
+  context: Context,
+): { readonly events: SystemEvent[]; readonly frames: Frame[] } {
+  const forced = effects.find((effect) => effect.kind === "forcedAttack");
+  if (forced?.kind !== "forcedAttack" || isDown(target)) {
+    return { events: [], frames: [] };
+  }
+  const { state } = context;
+  const melee = deriveStats(target, context).actions.filter(
+    (item) =>
+      meleeReach(item) !== null &&
+      item.activation.resolution.kind === "attack" &&
+      !item.activation.trigger &&
+      item.spellLevel === null,
+  );
+  const reach = Math.max(5, ...melee.map((item) => meleeReach(item) ?? 0));
+  const [victim] = Object.values(state.actors)
+    .filter(
+      (item) =>
+        item.id !== target.id &&
+        !isDead(item) &&
+        !sealed(item) &&
+        item.position !== null &&
+        distanceFeet(target.position, item.position) <= reach,
+    )
+    .sort(
+      (a, b) =>
+        Number(b.side === target.side) - Number(a.side === target.side) ||
+        a.hp - b.hp,
+    );
+  if (!victim) {
+    const stats = deriveStats(caster, context);
+    const responses = damageResponses(target, context);
+    const hurt = dealEvents(
+      target,
+      forced.otherwise.map(({ amount, type }) => ({
+        amount: finalDamage(
+          rollAmount(amount, stats, context.dice),
+          type,
+          responses,
+        ),
+        type,
+      })),
+      false,
+      context,
+    );
+    return {
+      events: hurt.events,
+      frames: [...concentrationFrame(target, hurt.dealt)],
+    };
+  }
+  const away = distanceFeet(target.position, victim.position);
+  const weapon = melee.find((item) => (meleeReach(item) ?? 0) >= away);
+  if (
+    !weapon ||
+    !target.budget.reaction ||
+    hasCondition(target, ...INCAPACITATING)
+  ) {
+    return { events: [], frames: [] };
+  }
+  return {
+    events: [
+      dndEvent(`${NS}:budgetSpent`, { actor: target.id, kind: "reaction" }),
+    ],
+    frames: [
+      frame("attackRoll", {
+        attacker: target.id,
+        actionId: weapon.id,
+        target: victim.id,
+      }),
+    ],
+  };
 }
 
 // A monster's Multiattack can also use another action, as "makes one Bite attack and uses Constrict" does:

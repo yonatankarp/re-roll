@@ -67,6 +67,7 @@ import { keepsHidden, metamagicCast } from "../metamagic.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
 import { spellFumble, timeStopEnds } from "./durations.ts";
 import { castRiders, schoolCastEvents } from "./school.ts";
+import { spellFoiled } from "./areas.ts";
 
 // Taking an action on a turn: casting it, choosing its targets one by one, or aiming its area.
 
@@ -183,9 +184,14 @@ function castAction(
       );
   if (counter) return { frames: [counter] };
   const fumbled = spellFumble(actor, action, context);
-  if (fumbled) {
+  const foiled = fumbled ? null : spellFoiled(actor, action, context);
+  if (fumbled || foiled?.failed) {
     return {
-      events: [...payCosts(action, actor, context, slotLevel), fumbled],
+      events: [
+        ...payCosts(action, actor, context, slotLevel),
+        ...(fumbled ? [fumbled] : []),
+        ...(foiled?.events ?? []),
+      ],
       frames: [CHECK_END, frame("afterAction", { actor: actor.id })],
     };
   }
@@ -222,6 +228,7 @@ function castAction(
       ...timeStopEnds(actor, caught),
       ...schoolCastEvents(actor, action, slotLevel, context),
       ...castRiders(actor, action, context),
+      ...(foiled?.events ?? []),
       ...lightAttackEvents(actor, actionId, context),
       // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.
       ...(resolution.kind === "attack" || keepsHidden(actor, actionId)

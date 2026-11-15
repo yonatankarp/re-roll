@@ -51,6 +51,7 @@ export const FRAME_KINDS = [
   "legendaryTurn",
   "lingeringTick",
   "sunlightTick",
+  "damageBurst",
   "masteryHit",
   "masteryMiss",
   "metamagic",

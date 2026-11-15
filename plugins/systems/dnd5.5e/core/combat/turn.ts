@@ -60,7 +60,13 @@ import {
   extraTurnEvents,
   turnStartEvents,
 } from "./durations.ts";
-import { burstResult, sunlightFrames, zoneFrames } from "./areas.ts";
+import {
+  burstResult,
+  FRESH,
+  fogBoundEvents,
+  sunlightFrames,
+  zoneFrames,
+} from "./areas.ts";
 import { healingStopped } from "../zones.ts";
 
 // The turn order: ending a fight, lingering effects, and the start and end of each turn.
@@ -345,7 +351,10 @@ export function runFinishTurn(context: Context): SystemResult {
   if (!state.combat) return {};
   const actor = currentActor(state);
   const repeated = (actor?.activeEffects ?? []).flatMap((effect) =>
-    actor && effect.repeatSave && !isDown(actor)
+    actor &&
+    effect.repeatSave &&
+    !isDown(actor) &&
+    !actor.usedThisTurn.includes(`${FRESH}${effect.sourceId}`)
       ? [{ actor, effect, save: effect.repeatSave }]
       : [],
   );
@@ -483,6 +492,7 @@ export function runAdvanceTurn(
     ...expired,
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
+    ...(next ? fogBoundEvents(next, { ...context, state: after }) : []),
     ...reactiveEvents(after, context),
   ];
   const starts = { ...context, state: after };

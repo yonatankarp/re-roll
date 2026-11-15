@@ -8,17 +8,19 @@ import {
 import { z } from "zod";
 import {
   type Actor,
+  applyDndEvent,
   type DndState,
   dndEvent,
   frame,
   isDead,
   NS,
 } from "../state.ts";
-import type { Resolution } from "../schemas.ts";
+import { MonsterSchema, type Passive, type Resolution } from "../schemas.ts";
 import {
   damageResponses,
   deriveStats,
   type KnownAction,
+  lookup,
   rollAmount,
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
@@ -28,13 +30,21 @@ import {
   affects,
   statsOf,
   inZone,
+  obscuring,
   sealed,
   sunlit,
   type Zone,
   zonesOf,
+  zonesOn,
 } from "../zones.ts";
+import { isSpell } from "./dispel.ts";
 import { CHECK_END, type Context } from "./queries.ts";
-import { concentrationFrame, dealEvents, resolveAction } from "./effects.ts";
+import {
+  concentrationFrame,
+  dealEvents,
+  resolveAction,
+  rollSave,
+} from "./effects.ts";
 
 // Lasting areas acting on the creatures in them as turns start and end, a monster's burst where it dies, and
 // sunlight burning the creatures it harms.
@@ -235,14 +245,23 @@ export function runZoneTick(
   });
   const action = zoneAction(zone, zone.name ?? "");
   if (targets.length === 0 || !action) return {};
-  const marks = zone.area?.enters
-    ? targets.map((target) =>
-        dndEvent(`${NS}:oncePerTurnUsed`, {
-          actor: target.id,
-          key: caughtKey(zone, state),
-        }),
-      )
-    : [];
+  const marks = [
+    ...(zone.area?.enters
+      ? targets.map((target) =>
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: target.id,
+            key: caughtKey(zone, state),
+          }),
+        )
+      : []),
+    // What it puts on a creature as its turn ends is first saved against at the end of its next turn.
+    ...targets.map((target) =>
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: target.id,
+        key: `${FRESH}${zone.sourceId}`,
+      }),
+    ),
+  ];
   const result = resolveAction(action, owner, targets, context, zone.level);
   const events = [...marks, ...(result.events ?? [])];
   const { maxDamage } = zone.area ?? {};
@@ -277,6 +296,9 @@ export function runZoneTick(
   }
   return { events, frames: [...(result.frames ?? []), CHECK_END] };
 }
+
+// Kept in a creature's usedThisTurn: a zone's effects went on it this turn, so they aren't saved against yet.
+export const FRESH = "zone-fresh:";
 
 // Kept on a zone's owner: the damage it has dealt so far.
 export const DEALT = ":dealt";
@@ -346,6 +368,156 @@ function burstAction(
 }
 const AURA_BURST = "burst:";
 
+// A spell cast inside an area that foils spells, as a haunting revenant's Haunted Zone: the caster's save, and
+// whether the spell fails and is wasted. Null where nothing foils it.
+export function spellFoiled(
+  actor: Actor,
+  action: KnownAction,
+  context: Context,
+): { readonly failed: boolean; readonly events: SystemEvent[] } | null {
+  const { state } = context;
+  if (!zonesOf(state, context).some((zone) => zone.area?.foilsSpells)) {
+    return null;
+  }
+  if (!isSpell(action, actor, context)) return null;
+  const foil = zonesOn(actor, state, context).find(
+    (zone) => zone.area?.foilsSpells,
+  )?.area?.foilsSpells;
+  if (!foil) return null;
+  const save = rollSave(actor, foil.ability, foil.dc, context, true);
+  return { failed: !save.saved, events: save.events };
+}
+
+// Whether a monster's stat block has a trait of this kind: a cheap look, kept by the content, before its stats are
+// worked out on every hit or step.
+const blockHas = (
+  actor: Actor,
+  kind: Passive["kind"],
+  access: ContentAccess,
+): boolean =>
+  actor.source.kind === "monster" &&
+  lookup(access, MonsterSchema, actor.source.statBlockId).passives.some(
+    (passive) => passive.kind === kind,
+  );
+
+// Kept in a bearer's usedThisTurn once its damage burst has gone off on a turn, so two bursting neighbours can't set
+// each other off forever.
+const burstKey = (state: DndState): string =>
+  `damage-burst@${String(state.combat?.round ?? 0)}.${String(state.combat?.index ?? 0)}`;
+
+// A creature that bursts on taking damage of a type, as a spore of Moander's Explosive Core, once a turn.
+export function damageBurstFrames(
+  target: Actor,
+  types: readonly string[],
+  context: ContentAccess & { readonly state: DndState },
+): Frame[] {
+  if (!blockHas(target, "damageBurst", context) || isDead(target)) return [];
+  if (target.usedThisTurn.includes(burstKey(context.state))) return [];
+  const bursts = statsOf(target, context).passives.some(
+    (passive) =>
+      passive.kind === "damageBurst" &&
+      passive.damage.some((type) => types.includes(type)),
+  );
+  return bursts
+    ? [frame("damageBurst", { actor: target.id, types: [...types] })]
+    : [];
+}
+
+export function runDamageBurst(
+  payload: { readonly actor: string; readonly types: readonly string[] },
+  context: Context,
+): SystemResult {
+  const { state } = context;
+  const actor = state.actors[payload.actor];
+  if (!actor?.position || actor.usedThisTurn.includes(burstKey(state))) {
+    return {};
+  }
+  const burst = statsOf(actor, context).passives.find(
+    (passive) =>
+      passive.kind === "damageBurst" &&
+      passive.damage.some((type) => payload.types.includes(type)),
+  );
+  if (burst?.kind !== "damageBurst") return {};
+  const targets = Object.values(state.actors).filter(
+    (item) =>
+      item.id !== actor.id &&
+      !isDead(item) &&
+      !sealed(item) &&
+      item.position !== null &&
+      distanceFeet(actor.position, item.position) <= burst.radius,
+  );
+  const mark = dndEvent(`${NS}:oncePerTurnUsed`, {
+    actor: actor.id,
+    key: burstKey(state),
+  });
+  if (targets.length === 0) return { events: [mark] };
+  const marked = { ...context, state: applyDndEvent(state, mark) };
+  const result = resolveAction(
+    burstAction(burst.name, burst.radius, burst.resolution),
+    actor,
+    targets,
+    marked,
+  );
+  return {
+    events: [mark, ...(result.events ?? [])],
+    frames: [...(result.frames ?? []), CHECK_END],
+  };
+}
+
+const FOG_BOUND = ":fog-bound";
+
+// The conditions a creature bound to fog has where it stands, as a mist horror Invisible in fog and Incapacitated
+// out of it: what changes, as its turn starts and after it moves.
+// shortcut: fog that rises or clears round it counts from its next turn or move.
+export function fogBoundEvents(
+  actor: Actor,
+  context: ContentAccess & { readonly state: DndState },
+): SystemEvent[] {
+  if (!blockHas(actor, "fogBound", context) || isDead(actor)) return [];
+  const bound = statsOf(actor, context).passives.find(
+    (passive) => passive.kind === "fogBound",
+  );
+  if (bound?.kind !== "fogBound") return [];
+  const sourceId = `${actor.id}${FOG_BOUND}`;
+  const wanted =
+    obscuring(actor.position, context.state) === "fog"
+      ? bound.inside
+      : bound.outside;
+  const has = actor.activeEffects.flatMap(({ sourceId: id, modifier }) =>
+    id === sourceId && modifier.kind === "condition"
+      ? [modifier.condition]
+      : [],
+  );
+  if (
+    has.length === wanted.length &&
+    wanted.every((condition) => has.includes(condition))
+  ) {
+    return [];
+  }
+  return [
+    ...(has.length > 0
+      ? [
+          dndEvent(`${NS}:effectEnded`, {
+            actor: actor.id,
+            sourceId,
+            casterId: actor.id,
+          }),
+        ]
+      : []),
+    ...wanted.map((condition) =>
+      dndEvent(`${NS}:effectAdded`, {
+        actor: actor.id,
+        effect: {
+          sourceId,
+          casterId: actor.id,
+          modifier: { kind: "condition", condition },
+          ends: "spellDuration",
+        },
+      }),
+    ),
+  ];
+}
+
 // Whether `actor` is in the light that harms it: sunlight, or for Light Sensitivity any Bright Light.
 export function inHarmfulLight(
   actor: Actor,
@@ -402,6 +574,10 @@ export const areaFrames = {
   [`${NS}:zoneTick`]: frameHandler({
     schema: ZoneTickSchema,
     run: runZoneTick,
+  }),
+  [`${NS}:damageBurst`]: frameHandler({
+    schema: z.object({ actor: z.string(), types: z.array(z.string()) }),
+    run: runDamageBurst,
   }),
   [`${NS}:sunlightTick`]: frameHandler({
     schema: z.object({ actor: z.string() }),

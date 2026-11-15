@@ -35,7 +35,7 @@ import {
   resolveAction,
 } from "./effects.ts";
 import { afterDamage, reactFrames } from "./reactions.ts";
-import { areaEntry, entryFrames } from "./areas.ts";
+import { areaEntry, entryFrames, fogBoundEvents } from "./areas.ts";
 import {
   coverBetween,
   distanceFeet,
@@ -374,15 +374,13 @@ export function runFinishMove(
   if (payload.feet > 0 && speedLeft(actor, deriveStats(actor, context)) <= 0) {
     return {};
   }
-  return {
-    events: [
-      dndEvent(`${NS}:moved`, {
-        actor: actor.id,
-        to: { x: payload.x, y: payload.y },
-        feet: payload.feet,
-      }),
-    ],
-  };
+  const moved = dndEvent(`${NS}:moved`, {
+    actor: actor.id,
+    to: { x: payload.x, y: payload.y },
+    feet: payload.feet,
+  });
+  const walker = { ...actor, position: { x: payload.x, y: payload.y } };
+  return { events: [moved, ...fogBoundEvents(walker, context)] };
 }
 
 // Where a teleport or a jump of `feet` can land: open squares on the map the actor can see, nearest a foe first.

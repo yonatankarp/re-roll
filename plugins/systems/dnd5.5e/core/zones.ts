@@ -145,6 +145,12 @@ export function affects(
   if (zone.follows && actor.id === owner.id && !area.self) return false;
   if (area.side === "enemy" && actor.side === owner.side) return false;
   if (area.side === "ally" && actor.side !== owner.side) return false;
+  if (
+    area.bloodied &&
+    (!access || actor.hp * 2 > statsOf(actor, access).maxHp)
+  ) {
+    return false;
+  }
   if (area.creatureTypes || area.exceptTypes) {
     const type = access ? statsOf(actor, access).creatureType : undefined;
     if (area.creatureTypes && !area.creatureTypes.includes(type ?? "")) {
@@ -185,6 +191,18 @@ export function zoneModifiers(
     (zone) => zone.area?.grants ?? [],
   );
 }
+
+// Immunity to a condition the zones `actor` stands in give it, as a questing knight's Aura of Bravery.
+export const zoneImmune = (
+  actor: Actor,
+  condition: string,
+  state: DndState,
+  access?: ContentAccess,
+): boolean =>
+  zoneModifiers(actor, state, access).some(
+    (modifier) =>
+      modifier.kind === "conditionImmunity" && modifier.condition === condition,
+  );
 
 // The zone that hides a square, darkness before fog, or undefined.
 export function obscuring(
@@ -333,6 +351,7 @@ export function placedFlag(
   state: DndState,
   access: ContentAccess,
   ability?: Ability,
+  conditions: readonly string[] = [], // what the save would put on it or end, for Advantage only against those
 ): boolean {
   if (!state.combat || !actor.position) return false;
   const given =
@@ -341,7 +360,10 @@ export function placedFlag(
       (modifier) =>
         modifier.kind === kind &&
         modifier.on === on &&
-        (!modifier.ability || modifier.ability === ability),
+        (!modifier.ability || modifier.ability === ability) &&
+        (!("conditions" in modifier) ||
+          !modifier.conditions ||
+          modifier.conditions.some((item) => conditions.includes(item))),
     );
   // Light sensitivity is a stat block's trait, so a character is never asked for it.
   if (
