@@ -1012,6 +1012,12 @@ describe("monster traits read as passives", () => {
       { kind: "evasion", anySave: false },
       { kind: "attackAdvantage", when: "targetHurt" },
       { kind: "attackAdvantage", when: "bloodied" },
+      {
+        kind: "saveAdvantage",
+        abilities: ["str", "dex", "con", "int", "wis", "cha"],
+        conditions: [],
+        bloodied: true,
+      },
       { kind: "attackAdvantage", when: "targetFrightened" },
       { kind: "immutableForm" },
       { kind: "saveAdvantage", abilities: [], conditions: ["charmed"] },
@@ -1023,10 +1029,71 @@ describe("monster traits read as passives", () => {
       },
     ]);
     expect(parsed?.notes).toEqual([
-      "partial: Bloodied Frenzy: left out Advantage on saving throws",
       "partial: Fey Ancestry: left out immunity to magical sleep",
       "partial: Greater Magic Resistance: left out succeeding on every save against spells",
       "partial: Displacement: left out its end while Incapacitated",
+    ]);
+  });
+
+  it("reads absorbing, warding, reacting, flinching and striking-back traits", () => {
+    const parsed = traits(
+      [
+        entry(
+          "Fire Absorption",
+          "Whenever the golem is subjected to Fire damage, it regains a number of Hit Points equal to the Fire damage dealt.",
+        ),
+        entry(
+          "Diabolic Ward",
+          "Attack rolls against the devil have Disadvantage. If the devil makes an attack roll, this trait is suppressed until the start of its next turn.",
+        ),
+        entry(
+          "Incomprehensible Form",
+          "Attack rolls against the horror have Disadvantage. This trait is suppressed while the horror has the Incapacitated condition.",
+        ),
+        entry(
+          "Reactive",
+          "The marilith can take one Reaction on every turn of combat.",
+        ),
+        entry("Invisibility", "The stalker has the Invisible condition."),
+        entry(
+          "Fear of Fire",
+          "If the yeti takes Fire damage, it has Disadvantage on attack rolls and ability checks until the end of its next turn.",
+        ),
+        entry(
+          "Corrosive Form",
+          "A creature that hits the pudding with a melee attack roll takes 4 (1d8) Acid damage. Nonmagical ammunition is destroyed.",
+        ),
+        entry(
+          "Immobile Restoration",
+          "If the vampire drops to 0 Hit Points while it doesn’t have the Petrified condition, it turns to stone, regains 50 Hit Points, and has the Petrified condition for 1 hour.",
+        ),
+      ].join(""),
+    );
+    expect(MonsterSchema.parse(parsed?.entry).passives).toEqual([
+      { kind: "absorb", damage: ["fire"] },
+      { kind: "ward", suppressed: "attacking" },
+      { kind: "ward", suppressed: "incapacitated" },
+      { kind: "reactive" },
+      { kind: "innateCondition", condition: "invisible" },
+      {
+        kind: "onDamage",
+        damage: ["fire"],
+        modifiers: [
+          { kind: "disadvantage", on: "attacks" },
+          { kind: "disadvantage", on: "checks" },
+        ],
+      },
+      {
+        kind: "modifier",
+        modifier: {
+          kind: "retaliate",
+          damage: [{ amount: { dice: "1d8" }, type: "acid" }],
+        },
+      },
+      { kind: "stoneRestoration", hp: 50 },
+    ]);
+    expect(parsed?.notes).toEqual([
+      "partial: Corrosive Form: left out what it does to weapons and ammunition",
     ]);
   });
 
@@ -1156,5 +1223,44 @@ describe("monster reactions to being hit", () => {
     expect(parsed?.notes).toEqual([
       "partial: Riposte: left out an attack on a miss",
     ]);
+  });
+});
+
+describe("a stat block's own shapes", () => {
+  it("gates form-only entries and gives each shape a Shape-Shift", () => {
+    const [parsed] = parseMonstersFromHtml(
+      block(
+        "Test Were",
+        `${header("Traits")}${entry(
+          "Flyby (Bat Form Only)",
+          "The were doesn’t provoke an Opportunity Attack when it flies out of an enemy’s reach.",
+        )}${header("Actions")}${entry(
+          "Bite (Bat Form Only)",
+          "Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Piercing damage.",
+        )}${entry(
+          "Club",
+          "Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Bludgeoning damage.",
+        )}${header("Bonus Actions")}${entry(
+          "Shape-Shift",
+          "The were shape-shifts into a Tiny bat (Speed 5 ft., Fly Speed 30 ft.), or it returns to its true humanoid form.",
+        )}`,
+      ),
+      "my-book",
+    );
+    const monster = MonsterSchema.parse(parsed?.entry);
+    expect(monster.actions.map(({ name, shapes }) => [name, shapes])).toEqual([
+      ["Bite", ["bat"]],
+      ["Club", undefined],
+      ["Shape-Shift (humanoid)", undefined],
+      ["Shape-Shift (bat)", undefined],
+    ]);
+    expect(monster.passives).toEqual([]);
+    expect(
+      monster.shapes?.map(({ name, passives }) => [name, passives]),
+    ).toEqual([
+      ["humanoid", []],
+      ["bat", [{ kind: "noOpportunityAttacks" }]],
+    ]);
+    expect(parsed?.notes).toEqual([]);
   });
 });

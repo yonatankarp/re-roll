@@ -618,6 +618,31 @@ export function choosePolicy(decision: Decision, context: Context): string {
     })
     .sort((a, b) => b.gain - a.gain)[0];
   if (shifting && actor.budget.action) return shifting.option.id;
+  // A Bonus Action that sets up its own next attack, as Deadly Aim, comes before the attack, with a foe in reach.
+  const primer = parsed.find(({ action, target }) => {
+    const { cost, resolution } = action.activation;
+    return (
+      actor.source.kind === "monster" &&
+      target?.id === actor.id &&
+      cost.includes("bonusAction") &&
+      resolution.kind === "automatic" &&
+      resolution.effects.some(
+        (item) =>
+          item.kind === "modifier" &&
+          item.modifier.kind === "advantage" &&
+          item.modifier.on === "attacks" &&
+          item.modifier.once === true,
+      ) &&
+      !actor.activeEffects.some(({ sourceId }) => sourceId === action.id)
+    );
+  });
+  if (
+    primer &&
+    actor.budget.action &&
+    (actor.position === null || reachesFrom(actor, actor.position, context))
+  ) {
+    return primer.option.id;
+  }
 
   // Slots go on fights that need them: the enemies left must outlast the caster's own HP, and a healer keeps its last slot.
   const foesHp = knownFoes(state, actor, context)
