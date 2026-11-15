@@ -529,6 +529,15 @@ const FIXTURES = [
       ],
     },
   ]),
+  {
+    id: "test:feat/master",
+    name: "Master",
+    category: "general",
+    text: "Test.",
+    choices: [
+      { kind: "weaponMastery", id: "mastery", count: 1, swap: "longRest" },
+    ],
+  },
   trait("together", [{ kind: "allySaveAdvantage", abilities: ["str"] }]),
   trait("bountiful", [
     { kind: "tempHpBonus", amount: 5 },

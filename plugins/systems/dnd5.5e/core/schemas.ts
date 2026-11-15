@@ -864,11 +864,15 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     // Expertise in the skills picked instead of proficiency: in one the character is proficient in ("proficient"), as
     // Skill Expert gives, or in any ("any"), when the same feat makes it proficient in all, as Boon of Skill.
     expertise: z.enum(["proficient", "any"]).optional(),
+    // Picked again after a Long Rest, as Weapon Master's weapons (swap.ts).
+    swap: z.literal("longRest").optional(),
   }),
   z.strictObject({
     kind: z.literal("weaponMastery"),
     id: z.string(),
     count: z.number().int().min(1),
+    // Picked again after a Long Rest, as Weapon Master's weapons (swap.ts).
+    swap: z.literal("longRest").optional(),
   }),
   z.strictObject({
     kind: z.literal("spells"),
@@ -894,6 +898,8 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     id: z.string(),
     count: z.number().int().min(1),
     from: z.array(ContentIdSchema).min(1),
+    // Picked again after a Long Rest, as Weapon Master's weapons (swap.ts).
+    swap: z.literal("longRest").optional(),
   }),
 ]);
 
@@ -1292,6 +1298,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
     kind: z.literal("skills"),
     values: z.array(SkillSchema),
     expertise: z.literal(true).optional(), // from a choice with `expertise`
+    feat: ContentIdSchema.optional(), // the feat or species that asked, when it can be swapped
   }),
   z.strictObject({
     kind: z.literal("spells"),
@@ -1307,6 +1314,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("weaponMastery"),
     values: z.array(ContentIdSchema),
+    feat: ContentIdSchema.optional(), // the feat that asked, when it can be swapped
   }),
   z.strictObject({
     kind: z.literal("subclass"),

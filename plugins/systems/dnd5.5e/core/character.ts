@@ -505,7 +505,9 @@ function owned<T extends ChoiceDef>(
 ) {
   const own =
     feat.spellAbility !== undefined ||
-    feat.choices.some(({ kind }) => kind === "spellAbility");
+    feat.choices.some(
+      (choice) => choice.kind === "spellAbility" || "swap" in choice,
+    );
   for (const choice of own ? choices : []) choiceOwners.set(choice, feat.id);
   return choices;
 }
@@ -991,6 +993,9 @@ function answersOf(
             kind: "skills",
             values,
             ...(choice.expertise ? { expertise: true } : {}),
+            ...(choiceOwners.has(choice)
+              ? { feat: choiceOwners.get(choice) }
+              : {}),
           },
         ];
       case "spells":
@@ -1009,7 +1014,15 @@ function answersOf(
         return feat ? [{ kind: "spellAbility", ability: values[0], feat }] : [];
       }
       case "weaponMastery":
-        return [{ kind: "weaponMastery", values }];
+        return [
+          {
+            kind: "weaponMastery",
+            values,
+            ...(choiceOwners.has(choice)
+              ? { feat: choiceOwners.get(choice) }
+              : {}),
+          },
+        ];
       case "option":
         return [
           {
