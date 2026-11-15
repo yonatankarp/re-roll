@@ -1,9 +1,22 @@
-import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
+import {
+  awaitDecision,
+  PLAYER_ACTOR,
+  type Question,
+  type SystemEvent,
+} from "#sdk";
+import { startRun, step } from "../engine/run/turn.ts";
+import { DECLINE } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
 import { describe, expect, it } from "vitest";
 import {
   dealEvents,
+  resolveAction,
   rollSave,
 } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { ActivationSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import {
+  deriveStats,
+  type KnownAction,
+} from "../plugins/systems/dnd5.5e/core/stats.ts";
 import {
   afterDamage,
   initiativeSwapFrames,
@@ -223,6 +236,238 @@ describe("reactions to a d20 roll before it lands", () => {
     expect(payloads(save.events, "saveRolled")).toEqual([
       expect.objectContaining({ natural: 18 }),
     ]);
+  });
+});
+
+describe("the player's say on reactions in the middle of a step", () => {
+  // A context that can ask, answering every question as `answer` says and keeping what was asked.
+  const asking = (
+    context: ReturnType<typeof at>,
+    answer: (question: Question) => string,
+  ) => {
+    const asked: Question[] = [];
+    return {
+      asked,
+      context: {
+        ...context,
+        ask: (question: Question) => {
+          asked.push(question);
+          return answer(question);
+        },
+      },
+    };
+  };
+
+  it("asks before spending a Luck Point on a failed save, and keeps the roll when the player declines", async () => {
+    const run = await testRun();
+    const bearer = hero(["lucky-saves"]);
+    const take = asking(
+      at(row([bearer]), scripted([3, 18]).dice, run),
+      (question) => question.options[0]?.id ?? "",
+    );
+    expect(rollSave(bearer, "con", 15, take.context).saved).toBe(true);
+    expect(take.asked.map((item) => item.id)).toEqual([
+      `${NS}:reaction:${PLAYER_ACTOR}:save:${PLAYER_ACTOR}`,
+    ]);
+    expect(take.asked[0]?.prompt).toContain("You roll 3");
+    const decline = asking(
+      at(row([bearer]), scripted([3, 18]).dice, run),
+      () => DECLINE,
+    );
+    const kept = rollSave(bearer, "con", 15, decline.context);
+    expect(kept.saved).toBe(false);
+    expect(payloads(kept.events, "resourceSpent")).toEqual([]);
+  });
+
+  it("waits through the engine on the player's answer, then runs the step again with the same dice", async () => {
+    const run = await testRun();
+    const started = startRun(run, "ask-lucky");
+    const player = {
+      ...hero(["lucky-saves"]),
+      concentratingOn: "srd52:spell/bless",
+    };
+    // A save to keep Concentration the player can't make without Lucky, waiting to be rolled.
+    const state = {
+      ...started.state,
+      system: row([player, foeOf()]),
+      stack: [
+        awaitDecision({
+          id: "test:go",
+          actor: PLAYER_ACTOR,
+          prompt: "Go",
+          options: [{ id: "go", label: "Go" }],
+          resume: {
+            kind: `${NS}:concentrationSave`,
+            payload: { actor: PLAYER_ACTOR, dc: 30 },
+          },
+        }),
+      ],
+    };
+    const asked = step(run, state, {
+      kind: "answer",
+      decisionId: "test:go",
+      optionId: "go",
+    });
+    if (!asked.ok) throw new Error(asked.error);
+    const lucky = `${NS}:reaction:${PLAYER_ACTOR}:save:${PLAYER_ACTOR}`;
+    expect(asked.pending?.id).toBe(lucky);
+    expect(asked.state.rng).toStrictEqual(state.rng);
+    const shown = Number(
+      /You roll (\d+)/.exec(asked.pending?.prompt ?? "")?.[1],
+    );
+    const answer = (optionId: string) => {
+      const done = step(run, asked.state, {
+        kind: "answer",
+        decisionId: lucky,
+        optionId,
+      });
+      if (!done.ok) throw new Error(done.error);
+      const system = done.state.system as DndState;
+      return {
+        rolled: done.events.flatMap((event) =>
+          "payload" in event && event.kind === `${NS}:saveRolled`
+            ? [(event.payload as { natural: number }).natural]
+            : [],
+        ),
+        spent: system.actors[PLAYER_ACTOR]?.resourcesSpent["lucky-saves"],
+      };
+    };
+    // Declined, the roll the player was shown stands; taken, a Luck Point goes on another roll.
+    expect(answer(DECLINE)).toEqual({ rolled: [shown], spent: undefined });
+    expect(answer(asked.pending?.options[0]?.id ?? "")).toMatchObject({
+      spent: 1,
+    });
+  });
+
+  it("asks the player about Vitality Ward before the damage lands, but not a companion", async () => {
+    const run = await testRun();
+    const player = asking(
+      contextOf(run, [hero(["ward"])], scripted([3, 3]).dice),
+      () => DECLINE,
+    );
+    const full = dealEvents(
+      hero(["ward"]),
+      [{ amount: 10, type: "necrotic" }],
+      false,
+      player.context,
+    );
+    expect(player.asked).toHaveLength(1);
+    expect(payloads(full.events, "damaged")).toEqual([
+      expect.objectContaining({ amount: 10 }),
+    ]);
+    const friend = friendOf(["ward"]);
+    const companion = asking(
+      contextOf(run, [hero([]), friend], scripted([3, 3]).dice),
+      () => DECLINE,
+    );
+    const warded = dealEvents(
+      friend,
+      [{ amount: 10, type: "necrotic" }],
+      false,
+      companion.context,
+    );
+    expect(companion.asked).toEqual([]);
+    expect(payloads(warded.events, "damaged")).toEqual([
+      expect.objectContaining({ amount: 4 }),
+    ]);
+  });
+});
+
+describe("a reaction's table, as Mythal Ward's", () => {
+  const zap: KnownAction = {
+    id: "test:spell/zap",
+    name: "Zap",
+    spellLevel: 3,
+    activation: ActivationSchema.parse({
+      cost: ["slot"],
+      targeting: { creatures: 2, range: 60, side: "enemy" },
+      resolution: {
+        kind: "save",
+        ability: "dex",
+        dc: { base: 30 },
+        damage: [{ amount: { bonus: { base: 9 } }, type: "fire" }],
+        onFail: [],
+      },
+    }),
+  };
+  const zapped = async (dice: readonly number[]) => {
+    const run = await testRun();
+    const player = hero(["mythal"]);
+    const foe = foeOf();
+    const scripted_ = scripted(dice);
+    const result = resolveAction(
+      zap,
+      foe,
+      [player],
+      at(row([player, foe]), scripted_.dice, run),
+    );
+    return { events: result.events ?? [], counts: scripted_.counts };
+  };
+  const hurt = (events: readonly SystemEvent[], actor: string) =>
+    payloads(events, "damaged").filter((item) => item.actor === actor);
+
+  it("turns aside a failed save against a spell on a 20, for everyone it caught, and gives its slot back", async () => {
+    const run = await testRun();
+    const player = hero(["mythal"]);
+    const friend = friendOf();
+    const foe = foeOf();
+    const { events = [] } = resolveAction(
+      zap,
+      foe,
+      [friend, player],
+      at(row([player, friend, foe]), scripted([1, 1, 20]).dice, run),
+    );
+    expect(labels(events)).toEqual(["mythal"]);
+    expect(hurt(events, PLAYER_ACTOR)).toEqual([]);
+    expect(hurt(events, "friend")).toEqual([]);
+    expect(payloads(events, "resourceRestored")).toEqual([
+      { actor: "foe", resource: "slot:3", amount: 1 },
+    ]);
+  });
+
+  it("gives +2 AC, or a burst with a d8 for each of the spell's levels, before the failed save lands", async () => {
+    const shielded = await zapped([1, 7]);
+    const raised = payloads(shielded.events, "effectAdded").map(
+      (item) => item.effect as { modifier: { kind: string; to?: string } },
+    );
+    expect(raised.map(({ modifier }) => modifier)).toContainEqual(
+      expect.objectContaining({ kind: "bonus", to: "ac" }),
+    );
+    expect(hurt(shielded.events, PLAYER_ACTOR)).toEqual([
+      expect.objectContaining({ amount: 9, type: "fire" }),
+    ]);
+    // Zap is level 3: three d8s at 2 each, failed by both the player and the foe beside them.
+    const burst = await zapped([1, 1, 2, 2, 2, 1, 1]);
+    expect(burst.counts[8]).toBe(3);
+    expect(hurt(burst.events, "foe")).toEqual([
+      expect.objectContaining({ amount: 6, type: "force" }),
+    ]);
+  });
+
+  it("turns aside a spell attack that hits on a 20", async () => {
+    const run = await testRun();
+    const caster = foeOf(["war-caster"]);
+    const bolt = deriveStats(caster, run).actions.find(
+      (item) => item.name === "Fire Bolt",
+    );
+    if (!bolt) throw new Error("no Fire Bolt");
+    const { events, decisions } = settle(
+      run,
+      row([hero(["mythal"]), caster]),
+      [
+        frame("attackRoll", {
+          attacker: "foe",
+          actionId: bolt.id,
+          target: PLAYER_ACTOR,
+        }),
+      ],
+      // A ranged spell from 5 feet has Disadvantage: two d20s, then the table's.
+      scripted([15, 15, 20]).dice,
+    );
+    expect(decisions.map((item) => item.id)).toEqual([
+      `${NS}:reaction:${PLAYER_ACTOR}`,
+    ]);
+    expect(hurt(events, PLAYER_ACTOR)).toEqual([]);
   });
 });
 

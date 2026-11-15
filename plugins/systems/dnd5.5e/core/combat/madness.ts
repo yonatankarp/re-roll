@@ -64,7 +64,7 @@ export function madnessStart(
 ): { readonly events: SystemEvent[]; readonly frames: Frame[] } {
   if (isDown(actor)) return { events: [], frames: [] };
   const confused = actor.activeEffects.some(
-    ({ modifier }) => modifier.kind === "confused",
+    ({ modifier }) => modifier.kind === "confused" && !modifier.spell,
   );
   const action = meleeAttack(actor, context);
   if (confused) {

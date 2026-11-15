@@ -20,6 +20,7 @@ import {
   rollDiceNotation,
   saveBonus,
   type Stats,
+  weaponFits,
 } from "./stats.ts";
 import { knownFoes } from "./fog.ts";
 import type { Condition, LeafEffect, Modifier, Resolution } from "./schemas.ts";
@@ -31,7 +32,8 @@ import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX, THROW_PREFIX } from "./combat/ids.ts";
 import { DAMAGE_TO_PARTY, damageToParty } from "./combat/effects.ts";
 import { cureFor, dispellable, spellLevelOf } from "./combat/dispel.ts";
-import { seesThrough } from "./sight.ts";
+import { difficultSquares, seesThrough } from "./sight.ts";
+import { crossesDifficult, speedsOf, tremorsenseOf } from "./movement-modes.ts";
 import { formOf, formsFor } from "./forms.ts";
 import { legendOf } from "./legendary.ts";
 import { summonedActors } from "./combat/summon.ts";
@@ -39,6 +41,7 @@ import { nextHitDie, steadyShot, warded } from "./trait-rules.ts";
 import {
   aimsFor,
   allies,
+  enemies,
   attackRoutine,
   throwsLeft,
   canAfford,
@@ -51,6 +54,7 @@ import {
   inReach,
   meleeReach,
   moveSquares,
+  reaches,
   slotLevelFor,
   targetCount,
   within5,
@@ -711,6 +715,26 @@ export function makeJudge(context: Context, side: Actor): Judge {
     foe: boolean,
     span: number,
   ): number => {
+    // Confusion takes the turn about two times in three, and Compelled Duel hampers attacks on all but one.
+    if (modifier.kind === "confused") {
+      return (
+        0.6 *
+        modifierWorth(
+          { kind: "actionLimit", noActions: true },
+          target,
+          foe,
+          span,
+        )
+      );
+    }
+    if (modifier.kind === "duel") {
+      return modifierWorth(
+        { kind: "disadvantage", on: "attacks" },
+        target,
+        foe,
+        span,
+      );
+    }
     const own = threat(target);
     if (foe) {
       switch (modifier.kind) {
@@ -817,6 +841,24 @@ export function makeJudge(context: Context, side: Actor): Judge {
         return foes.some((foe) => invisibleTo(foe, target))
           ? 0.25 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
           : 0;
+      // A new Speed helps one that's faster with it, or that crosses the map's rough ground with it.
+      case "movementMode": {
+        const speeds = speedsOf(target, stats(target));
+        if (speeds.has(modifier.mode)) return 0;
+        const faster =
+          (modifier.feet ?? stats(target).speed) > Math.max(...speeds.values());
+        const rough =
+          difficultSquares(state).size > 0 &&
+          ![...speeds.keys()].some(crossesDifficult);
+        return faster || rough ? 0.08 * own * lasting(span) : 0;
+      }
+      // Tremorsense finds foes the party can't see, in fog.
+      case "tremorsense":
+        return target.side === "party" &&
+          foes.length < standing(enemies(state, side)).length &&
+          tremorsenseOf(target, stats(target)) < modifier.feet
+          ? 0.1 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
+          : 0;
       // Haste's extra attack each turn, and its AC.
       case "hasted":
         return 0.45 * own * lasting(span);
@@ -866,7 +908,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
             );
       }
       case "tempHp":
-        return foe || isDown(target)
+        return foe ||
+          isDown(target) ||
+          (effect.reaction && !target.budget.reaction)
           ? 0
           : 0.5 *
               healWorth(
@@ -992,6 +1036,18 @@ export function makeJudge(context: Context, side: Actor): Judge {
         }
         const span = rounds(effect.duration, saved, false, false);
         return modifierWorth(effect.modifier, target, foe, span);
+      }
+      // True Strike or Swift Quiver: as much as the weapon's own attacks.
+      // shortcut: how the spell changes the attack isn't counted.
+      case "weaponAttack": {
+        const weapon = stats(actor).actions.find(
+          (item) =>
+            weaponFits(item, effect.change, context) &&
+            reaches(item, actor, target),
+        );
+        return weapon && foe
+          ? effect.times * worthOn(actor, target, weapon)
+          : 0;
       }
       case "extraAction":
         return actor.budget.action ? 0 : rate * threat(actor);

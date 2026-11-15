@@ -965,6 +965,69 @@ describe("monster traits read as passives", () => {
       "my-book",
     )[0];
 
+  it("reads traits that move through creatures, walls and gaps, and leaps", () => {
+    const parsed = traits(
+      [
+        entry(
+          "Swarm",
+          "The swarm can occupy another creature’s space and vice versa, and the swarm can move through any opening large enough for a Tiny beast.",
+        ),
+        entry(
+          "Incorporeal Movement",
+          "The beast can move through other creatures and objects as if they were Difficult Terrain.",
+        ),
+        entry(
+          "Air Form",
+          "The beast can enter an enemy’s space and stop there. It can move through a space as narrow as 1 inch without expending extra movement to do so.",
+        ),
+        entry(
+          "Earth Glide",
+          "The beast can burrow through nonmagical, unworked earth and stone.",
+        ),
+        entry(
+          "Tunneler",
+          "The beast can burrow through solid rock at half its Burrow Speed.",
+        ),
+        entry(
+          "Standing Leap",
+          "The beast’s Long Jump is up to 20 feet and its High Jump is up to 10 feet with or without a running start.",
+        ),
+        entry(
+          "Running Leap",
+          "With a 10-foot running start, the beast can Long Jump up to 25 feet.",
+        ),
+        entry(
+          "Spider Climb",
+          "The beast can climb difficult surfaces, including along ceilings, without needing to make an ability check.",
+        ),
+      ].join(""),
+    );
+    const through = (fields: object) => ({
+      kind: "moveThrough",
+      walls: false,
+      costly: false,
+      squeeze: false,
+      open: false,
+      terrain: false,
+      ...fields,
+    });
+    expect(MonsterSchema.parse(parsed?.entry).passives).toEqual([
+      through({ creatures: "any", squeeze: true, open: true }),
+      through({ creatures: "any", walls: true, costly: true }),
+      through({ creatures: "any", squeeze: true }),
+      through({ walls: true }),
+      through({ walls: true, costly: true }),
+      { kind: "jump", feet: 20, runUp: 0 },
+      { kind: "jump", feet: 25, runUp: 10 },
+    ]);
+    // Spider Climb is the stat block's Climb Speed, so nothing is left out.
+    expect(parsed?.notes).toEqual([
+      "partial: Swarm: left out stopping in another creature's space",
+      "partial: Air Form: left out stopping in another creature's space",
+      "partial: Tunneler: left out the tunnel it leaves",
+    ]);
+  });
+
   it("reads movement, saves and Advantage traits", () => {
     const parsed = traits(
       [
@@ -1142,7 +1205,7 @@ describe("monster traits read as passives", () => {
           "If the beast is destroyed, it reforms and regains all its Hit Points in 1d10 days.",
         ),
         entry("Last Stand", "If the beast dies, it explodes."),
-        entry("Spider Climb", "The beast can climb difficult surfaces."),
+        entry("Web Walker", "The beast ignores webs."),
       ].join(""),
     );
     expect(parsed?.notes).toEqual([
@@ -1151,7 +1214,7 @@ describe("monster traits read as passives", () => {
       "no combat use: Shark Telepathy",
       "no combat use: Undead Restoration",
       "not automated: Last Stand",
-      "not automated: Spider Climb",
+      "not automated: Web Walker",
     ]);
   });
 
