@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { blockedSquares } from "../zones.ts";
 import {
   awaitDecision,
   type Frame,
@@ -572,7 +573,7 @@ function besideSquare(
   const { combat, actors } = context.state;
   if (!combat?.grid || !target.position || !bearer.position) return null;
   const blocked = new Set([
-    ...(combat.walls ?? []),
+    ...blockedSquares(context.state),
     ...Object.values(actors).flatMap((item) =>
       item.position && item.id !== bearer.id && !isDown(item)
         ? [squareKey(item.position)]

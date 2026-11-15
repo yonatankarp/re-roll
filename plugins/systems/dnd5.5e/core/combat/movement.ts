@@ -27,7 +27,7 @@ import {
   rollAmount,
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
-import { thornHits } from "../zones.ts";
+import { blockingSet, sealed, thornHits } from "../zones.ts";
 import {
   concentrationFrame,
   dealEvents,
@@ -42,7 +42,6 @@ import {
   rangeFeet,
   type Square,
   squareKey,
-  wallSet,
 } from "../grid.ts";
 import { seeing } from "../sight.ts";
 import { hasTactic } from "../tactics.ts";
@@ -99,7 +98,7 @@ export function walksOf(
   const found =
     byState.get(state) ??
     new Map(
-      moveSquares(actor, state, deriveStats(actor, access)).map(
+      moveSquares(actor, state, deriveStats(actor, access), access).map(
         ({ square, path }) => [squareKey(square), path],
       ),
     );
@@ -129,6 +128,7 @@ export function provokers(
     if (
       !foe.budget.reaction ||
       isDown(foe) ||
+      sealed(foe) ||
       hasCondition(foe, ...INCAPACITATING) ||
       (disengaged && !hasPassive(deriveStats(foe, access), "sentinel"))
     ) {
@@ -265,9 +265,12 @@ export function runMove(
   const actor = actorOf(state, payload.actor);
   const to = parseSquare(payload.answer);
   if (payload.answer === STAY || !to) return {};
-  const step = moveSquares(actor, state, deriveStats(actor, context)).find(
-    ({ square }) => squareKey(square) === payload.answer,
-  );
+  const step = moveSquares(
+    actor,
+    state,
+    deriveStats(actor, context),
+    context,
+  ).find(({ square }) => squareKey(square) === payload.answer);
   if (!step) {
     if (payload.rest) return {};
     throw new Error(`${actor.name} can't reach ${payload.answer}`);
@@ -391,7 +394,7 @@ export function teleportSquares(
   if (movement > 0 && speedLeft(actor, deriveStats(actor, access)) < movement) {
     return [];
   }
-  const blocked = wallSet(state.combat);
+  const blocked = blockingSet(state);
   const taken = new Set(
     Object.values(state.actors).flatMap((item) =>
       item.position && !isDown(item) ? [squareKey(item.position)] : [],

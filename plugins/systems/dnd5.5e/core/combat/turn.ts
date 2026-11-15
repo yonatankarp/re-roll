@@ -55,6 +55,13 @@ import { concentrationFrame, dealEvents, rollSave } from "./effects.ts";
 import { releasedGrapples } from "./grapple.ts";
 import { distanceFeet } from "../grid.ts";
 import { regurgitationEvents, releasedSwallows } from "./swallow.ts";
+import {
+  expiredEvents,
+  extraTurnEvents,
+  turnStartEvents,
+} from "./durations.ts";
+import { burstResult, sunlightFrames, zoneFrames } from "./areas.ts";
+import { healingStopped } from "../zones.ts";
 
 // The turn order: ending a fight, lingering effects, and the start and end of each turn.
 
@@ -98,6 +105,8 @@ function sharedRecovery(
 }
 
 export function runCheckCombatEnd(context: Context): SystemResult {
+  const burst = burstResult(context);
+  if (burst) return burst;
   const released = [
     ...releasedGrapples(context.state, context),
     ...releasedSwallows(context.state, context),
@@ -108,13 +117,49 @@ export function runCheckCombatEnd(context: Context): SystemResult {
     : result;
 }
 
+// Sealed away past the stand-off window, or for good.
+function shutAway(actor: Actor, state: DndState): boolean {
+  const round = state.combat?.round ?? 0;
+  return actor.activeEffects.some(
+    ({ modifier, lasts }) =>
+      modifier.kind === "sealed" &&
+      (!lasts || lasts.round - round > STAND_OFF_ROUNDS),
+  );
+}
+
 function fightOver(context: Context): SystemResult {
   const { state } = context;
   if (!state.combat) return {};
   const fighters = state.combat.order.map((id) => actorOf(state, id));
+  // A foe shut away for longer than a stand-off takes counts as beaten, so a fight never waits out a Maze or a
+  // Forcecage; a shorter prison, as Resilient Sphere's minute, is waited out.
   const enemyStanding = fighters.some(
-    (actor) => actor.side === "enemy" && !isDown(actor),
+    (actor) =>
+      actor.side === "enemy" && !isDown(actor) && !shutAway(actor, state),
   );
+  const partyFree = fighters.some(
+    (actor) =>
+      actor.side === "party" && !isDown(actor) && !shutAway(actor, state),
+  );
+  // With the whole party shut away, its foes wait it out: the time passes, and what holds them ends.
+  if (!partyFree && enemyStanding) {
+    const freed = fighters.flatMap((actor) =>
+      actor.side === "party" && !isDown(actor)
+        ? actor.activeEffects.flatMap(({ modifier, sourceId, casterId }) =>
+            modifier.kind === "sealed"
+              ? [
+                  dndEvent(`${NS}:effectEnded`, {
+                    actor: actor.id,
+                    sourceId,
+                    casterId,
+                  }),
+                ]
+              : [],
+          )
+        : [],
+    );
+    if (freed.length > 0) return { events: freed };
+  }
   const partyStanding = fighters.some(
     (actor) => actor.side === "party" && !isDown(actor),
   );
@@ -160,8 +205,8 @@ export function runAfterAction(
 }
 
 // One frame per source, as the same spell from two casters doesn't stack and a creature saves only once a turn.
-// shortcut: everyone a zone was cast on stays in it until the effect ends, even after walking out of it;
-// check their square once a zone keeps where it was cast.
+// These are the older cast-time effects, as Moonbeam's: everyone it was cast on keeps it until it ends, wherever it
+// walks. Areas that act on whoever stands in them are zones (combat/areas.ts).
 function lingeringFrames(actor: Actor, when: "turnStart" | "turnEnd"): Frame[] {
   const seen = new Set<string>();
   return actor.activeEffects.flatMap(({ modifier, sourceId }) => {
@@ -283,7 +328,12 @@ export function runAfterTurnStart(context: Context): SystemResult {
 function endOfTurn(context: Context): SystemResult {
   const actor = currentActor(context.state);
   const ticks =
-    actor && !isDead(actor) ? lingeringFrames(actor, "turnEnd") : [];
+    actor && !isDead(actor)
+      ? [
+          ...lingeringFrames(actor, "turnEnd"),
+          ...zoneFrames(actor, "end", context),
+        ]
+      : [];
   return ticks.length > 0
     ? { frames: [...ticks, frame("finishTurn", {})] }
     : runFinishTurn(context);
@@ -384,7 +434,14 @@ export function runFinishTurn(context: Context): SystemResult {
     ...events,
     ...regurgitationEvents(context),
     ...(actor ? rechargeEvents(actor, context) : []),
+    ...(actor ? expiredEvents(state, actor.id, "end") : []),
   ];
+  // Time Stop: another turn of its own, with nothing else between.
+  let after = state;
+  for (const event of ending) after = applyDndEvent(after, event);
+  const stopped = actor ? after.actors[actor.id] : undefined;
+  const again = stopped && !isDown(stopped) ? extraTurnEvents(stopped) : null;
+  if (again) return { events: [...ending, ...again] };
   const between = betweenTurns(state, ending, context);
   return between.length > 0
     ? { events: ending, frames: [...between, frame("advanceTurn", {})] }
@@ -416,13 +473,26 @@ export function runAdvanceTurn(
       ],
     };
   }
+  const starting = currentActor(after);
+  // What runs out as the turn starts goes first, so nothing that ended acts on it.
+  const expired = starting ? expiredEvents(after, starting.id, "start") : [];
+  for (const event of expired) after = applyDndEvent(after, event);
   const next = currentActor(after);
   const events = [
     ...finished,
+    ...expired,
+    ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
     ...reactiveEvents(after, context),
   ];
-  const ticks = next ? lingeringFrames(next, "turnStart") : [];
+  const starts = { ...context, state: after };
+  const ticks = next
+    ? [
+        ...lingeringFrames(next, "turnStart"),
+        ...sunlightFrames(next, starts),
+        ...zoneFrames(next, "start", starts),
+      ]
+    : [];
   // A reaction to a creature starting its turn nearby, as with Unnerving Gaze.
   const watched = next
     ? reactFrames(
@@ -440,7 +510,7 @@ export function runAdvanceTurn(
 
 // shortcut: Regeneration isn't stopped by the damage types that should stop it, as no damage type taken is kept yet.
 function regenerationEvents(actor: Actor, context: Context): SystemEvent[] {
-  if (isDown(actor)) return [];
+  if (isDown(actor) || healingStopped(actor, context.state, context)) return [];
   const stats = deriveStats(actor, context);
   const hp = stats.passives.reduce(
     (sum, passive) => sum + (passive.kind === "regeneration" ? passive.hp : 0),

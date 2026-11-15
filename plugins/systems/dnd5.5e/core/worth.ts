@@ -1,4 +1,5 @@
 import { type Dice, PLAYER_ACTOR } from "#sdk";
+import { placedFlag } from "./zones.ts";
 import {
   type Actor,
   hasCondition,
@@ -29,7 +30,7 @@ import { grapplesOn } from "./combat/grapple.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX, THROW_PREFIX } from "./combat/ids.ts";
 import { DAMAGE_TO_PARTY, damageToParty } from "./combat/effects.ts";
-import { cureFor, dispellable } from "./combat/dispel.ts";
+import { cureFor, dispellable, spellLevelOf } from "./combat/dispel.ts";
 import { seesThrough } from "./sight.ts";
 import { formOf, formsFor } from "./forms.ts";
 import { legendOf } from "./legendary.ts";
@@ -172,6 +173,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
       packed ||
       hasFlag(attacker, "advantage", "attacks", own) ||
       hasFlag(target, "advantage", "attacksAgainst", stats(target)) ||
+      placedFlag(attacker, "advantage", "attacks", state, context) ||
       invisibleTo(attacker, target) ||
       hasCondition(
         target,
@@ -199,6 +201,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
         undefined,
         own.creatureType,
       ) ||
+      placedFlag(attacker, "disadvantage", "attacks", state, context) ||
       hasCondition(
         attacker,
         "blinded",
@@ -672,7 +675,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
       });
     return (
       reachesFrom(foe.position) ||
-      moveSquares(foe, state, own).some(({ square }) => reachesFrom(square))
+      moveSquares(foe, state, own, context).some(({ square }) =>
+        reachesFrom(square),
+      )
     );
   };
 
@@ -744,6 +749,26 @@ export function makeJudge(context: Context, side: Actor): Judge {
             : 0;
         case "damageBonus":
           return modifier.subtract ? 0.15 * own * lasting(span) : 0;
+        // Shut away, it does nothing for as long as it lasts; one that can break out lasts about three rounds.
+        case "sealed":
+          return (
+            0.9 *
+            Math.max(own, 0.25 * meanFoeThreat) *
+            lasting(modifier.escape ? Math.min(span, 3) : span)
+          );
+        // Slow's limits: no actions is most of a turn, one of action or Bonus Action and one attack about a third.
+        case "actionLimit":
+          return (
+            (modifier.noActions
+              ? 0.9
+              : (modifier.oneAction || modifier.oneAttack ? 0.3 : 0) +
+                (modifier.noReactions ? 0.05 : 0) +
+                (modifier.speed === "half" || modifier.speed === "none"
+                  ? 0.05
+                  : 0)) *
+            own *
+            lasting(span)
+          );
         default:
           return 0;
       }
@@ -792,6 +817,14 @@ export function makeJudge(context: Context, side: Actor): Judge {
         return foes.some((foe) => invisibleTo(foe, target))
           ? 0.25 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
           : 0;
+      // Haste's extra attack each turn, and its AC.
+      case "hasted":
+        return 0.45 * own * lasting(span);
+      // Sealing or slowing a friend costs it what it would cost a foe.
+      case "sealed":
+        return -0.9 * own * lasting(span);
+      case "actionLimit":
+        return -0.3 * own * lasting(span);
       // A duplicate or a ward turns away about a hit in three while it lasts; Death Ward one drop.
       case "images":
         return 0.3 * meanFoeThreat * lasting(span);
@@ -962,6 +995,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
       }
       case "extraAction":
         return actor.budget.action ? 0 : rate * threat(actor);
+      // Time Stop: its turns in a row are worth about one more turn, since attacking ends them.
+      case "extraTurns":
+        return target.id === actor.id ? 1.5 * rate * threat(actor) : 0;
       // What the creatures deal in the rounds they last, as an extra Action's damage is worth.
       // shortcut: the hits they draw away from the party count for nothing.
       case "summon":
@@ -978,6 +1014,11 @@ export function makeJudge(context: Context, side: Actor): Judge {
       // Thorns: about two squares of them walked by each creature caught. Darkness or fog: worth something only
       // to a caster who sees through it, against the foes it hides.
       case "zone":
+        if (effect.zone === "wall") return wallWorth(actor, target, foe);
+        if (effect.zone === "sunlight") return sunlightWorth(target, foe);
+        if (action.activation.area) {
+          return areaWorth(action, actor, target, effect.follows === true);
+        }
         if (effect.zone === "thorns") {
           return hurtWorth(
             target,
@@ -995,6 +1036,73 @@ export function makeJudge(context: Context, side: Actor): Judge {
         return 0;
     }
   };
+
+  // An area that acts each turn: what it does once, for the rounds a creature is likely to stay in it, longer for
+  // one that moves with its caster. What it gives those in it counts as a modifier would.
+  const areaWorth = (
+    action: KnownAction,
+    actor: Actor,
+    target: Actor,
+    follows: boolean,
+  ): number => {
+    const area = action.activation.area;
+    if (!area) return 0;
+    const foe = target.side !== actor.side;
+    if ((area.side === "enemy" && !foe) || (area.side === "ally" && foe)) {
+      return 0;
+    }
+    const stay = Math.min(horizon, follows ? 3 : 2);
+    const each = area.resolution
+      ? worthOn(actor, target, {
+          ...action,
+          activation: { ...action.activation, resolution: area.resolution },
+        })
+      : 0;
+    // Silence or an Antimagic Field keeps a foe that casts from casting there.
+    const casts =
+      area.noSpells !== undefined &&
+      foe &&
+      stats(target).actions.some(
+        (item) => spellLevelOf(item.id, target, context) !== null,
+      );
+    return (
+      each * stay +
+      (area.grants ?? []).reduce(
+        (sum, modifier) => sum + modifierWorth(modifier, target, foe, stay),
+        0,
+      ) +
+      (area.difficult && foe ? 0.05 * threat(target) : 0) +
+      (casts ? 0.3 * threat(target) * lasting(stay) : 0)
+    );
+  };
+
+  // Sunlight on a foe it hampers: Disadvantage on its rolls, and the damage it takes there each turn.
+  const sunlightWorth = (target: Actor, foe: boolean): number => {
+    if (!foe) return 0;
+    const stay = Math.min(horizon, 2);
+    return stats(target).passives.reduce((sum, passive) => {
+      if (passive.kind !== "lightSensitive" || passive.light !== "sunlight") {
+        return sum;
+      }
+      const hampered = passive.disadvantage.includes("attacks") ? 0.35 : 0.1;
+      return (
+        sum +
+        hampered * threat(target) * lasting(stay) +
+        hurtWorth(
+          target,
+          stay * averageDamage(target, target, passive.damage),
+          true,
+        )
+      );
+    }, 0);
+  };
+
+  // A wall round the area keeps the foes inside from the party for a while, and a friend inside with them.
+  const wallWorth = (actor: Actor, target: Actor, foe: boolean): number =>
+    (foe ? 0.5 : -0.5) *
+    Math.max(threat(target), 0.25 * meanFoeThreat) *
+    lasting(Math.min(horizon, 3)) *
+    (actor.id === target.id ? 0 : 1);
 
   // What one use does to one creature, with `share` of the damage aimed at it (darts split up).
   const worthOn = (

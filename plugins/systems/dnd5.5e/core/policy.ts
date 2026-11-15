@@ -15,7 +15,6 @@ import {
   reachableSquares,
   type Square,
   squareKey,
-  wallSet,
 } from "./grid.ts";
 import { coverBonus, coverFor, difficultSquares } from "./sight.ts";
 import { type Decision } from "#sdk";
@@ -42,6 +41,7 @@ import {
 import { AimSchema, PickSchema } from "./combat/actions.ts";
 import { multiattackExtras } from "./combat/effects.ts";
 import { AVERAGE, makeJudge } from "./worth.ts";
+import { blockedSquares, blockingSet, zoneHarm } from "./zones.ts";
 import { TACTIC } from "./tactics.ts";
 import { SHAPE } from "./forms.ts";
 
@@ -95,7 +95,8 @@ export function stepToward(
       );
   // How far it is to walk from a square to a foe, round walls and through difficult terrain, ignoring
   // creatures. On a map with no walls that's the straight distance.
-  const { grid, walls = [] } = state.combat ?? {};
+  const grid = state.combat?.grid;
+  const walls = blockedSquares(state);
   const walkFrom = new Map<string, ReadonlyMap<string, number>>();
   const walk = (from: Square | null, foe: Actor): number => {
     if (!grid || walls.length === 0 || !from || !foe.position) {
@@ -111,7 +112,7 @@ export function stepToward(
           new Set(walls),
           new Set(),
           difficultSquares(state),
-          wallSet(state.combat),
+          blockingSet(state),
         ).map((item) => [squareKey(item.square), item.feet]),
       );
       walkFrom.set(foe.id, field);
@@ -136,13 +137,17 @@ export function stepToward(
   }
   const now = gap(actor.position);
   const gaps = new Map(
-    moveSquares(actor, state, stats).map((item) => [item, gap(item.square)]),
+    moveSquares(actor, state, stats, context).map((item) => [
+      item,
+      gap(item.square),
+    ]),
   );
   const squares = [...gaps.keys()];
   const closest = Math.min(...gaps.values());
   if (squares.length === 0 || closest >= now) return null;
-  // Of the squares that get it closest, the one off difficult terrain and nearest. One that fights from range
-  // also wants the most cover from its foes; a melee creature is going up to them anyway.
+  // Of the squares that get it closest, the one out of harm's way (a foe's cloud or aura, sunlight that burns
+  // it), then off difficult terrain and nearest. One that fights from range also wants the most cover from its
+  // foes; a melee creature is going up to them anyway.
   const difficult = difficultSquares(state);
   const ranged = reach > 10;
   const ranked = squares
@@ -165,8 +170,15 @@ export function stepToward(
           )
         : 0,
       rough: Number(difficult.has(squareKey(item.square))),
+      harm: zoneHarm(actor, item.square, state, context),
     }))
-    .sort((a, b) => b.cover - a.cover || a.rough - b.rough || a.feet - b.feet);
+    .sort(
+      (a, b) =>
+        a.harm - b.harm ||
+        b.cover - a.cover ||
+        a.rough - b.rough ||
+        a.feet - b.feet,
+    );
   return ranked[0]?.square ?? null;
 }
 
@@ -226,12 +238,19 @@ function approach(actor: Actor, context: Context): Square | null {
   const better = options
     .filter((option) => option.worth > 1.2 * now)
     .sort((a, b) => b.worth - a.worth);
-  const squares = [...moveSquares(actor, state, stats)].sort(
+  const squares = [...moveSquares(actor, state, stats, context)].sort(
     (a, b) => a.feet - b.feet,
   );
-  // The best attack it can reach this turn, by the shortest walk; else it heads for the best of all.
+  // The best attack it can reach this turn, by the shortest walk out of harm's way; else it heads for the best
+  // of all.
   for (const option of better) {
-    const square = squares.find((item) => hitsFrom(item.square, option));
+    const [square] = squares
+      .filter((item) => hitsFrom(item.square, option))
+      .map((item) => ({
+        ...item,
+        harm: zoneHarm(actor, item.square, state, context),
+      }))
+      .sort((a, b) => a.harm - b.harm || a.feet - b.feet);
     if (square) return square.square;
   }
   const [best] = better;

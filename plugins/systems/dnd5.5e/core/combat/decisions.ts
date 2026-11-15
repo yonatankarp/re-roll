@@ -26,6 +26,7 @@ import { AIM_AREA, PICK } from "../targeting.ts";
 import { fleeOptions } from "../legendary.ts";
 import { ItemSchema, PregenSchema } from "../schemas.ts";
 import { heroOptions } from "../character-sheet.ts";
+import { silencedSpells } from "../zones.ts";
 import {
   actorOf,
   canAfford,
@@ -50,11 +51,13 @@ function turnOptions(
   }
   const stats = deriveStats(actor, access);
   const options: Decision["options"][number][] = [];
+  const hushed = silencedSpells(actor, state, access);
   for (const action of stats.actions) {
     const { activation } = action;
     // An eye ray is only taken when Eye Rays rolls it.
     if (activation.trigger || action.rolled || !canAfford(action, actor, stats))
       continue;
+    if (hushed?.(action)) continue;
     if (activation.whileIn && lightAt(actor.position, state) === "bright") {
       continue;
     }
@@ -134,7 +137,7 @@ function turnOptions(
       }
     });
   }
-  if (moveSquares(actor, state, stats).length > 0) {
+  if (moveSquares(actor, state, stats, access).length > 0) {
     options.push({
       id: MOVE,
       label: `Move (${String(speedLeft(actor, stats))} ft left)`,

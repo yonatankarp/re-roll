@@ -25,6 +25,7 @@ import {
   resolveTargets,
 } from "./combat.ts";
 import { distanceFeet, rangeFeet } from "./grid.ts";
+import { aimSquare } from "./combat/effects.ts";
 import { legendaryOf } from "./import/monsters.ts";
 import { type LeafEffect, MonsterSchema } from "./schemas.ts";
 import {
@@ -249,10 +250,12 @@ function stepEvents(
 ): SystemEvent[] {
   if (steps <= 0 || !target || reaches(lead, actor, target)) return [];
   const stats = deriveStats(actor, context);
-  const squares = moveSquares({ ...actor, moved: 0 }, context.state, {
-    ...stats,
-    speed: steps,
-  });
+  const squares = moveSquares(
+    { ...actor, moved: 0 },
+    context.state,
+    { ...stats, speed: steps },
+    context,
+  );
   const best = [...squares].sort(
     (a, b) =>
       distanceFeet(a.square, target.position) -
@@ -308,11 +311,15 @@ function takeEvents(
       );
       continue;
     }
+    // A zone it leaves goes where the area was aimed.
     const result = resolveAction(
       action,
       mover,
       resolveTargets(answerTarget, action, mover, after),
       after,
+      undefined,
+      false,
+      aimSquare(answerTarget, state) ?? undefined,
     );
     events.push(...(result.events ?? []));
     frames.push(...(result.frames ?? []));

@@ -40,6 +40,7 @@ export function startCombat(
     readonly loot?: Loot | undefined;
     readonly lair?: boolean | undefined;
     readonly surprise?: "party" | "enemies" | undefined;
+    readonly sunlight?: true | undefined;
   },
   context: Context,
   { canFlee, defeatContinues }: EncounterOptions,
@@ -182,6 +183,7 @@ export function startCombat(
     ...(canFlee ? { canFlee } : {}),
     ...(defeatContinues ? { defeatContinues } : {}),
     ...(encounter.loot ? { loot: encounter.loot } : {}),
+    ...(encounter.sunlight ? { sunlight: true as const } : {}),
     ...(surprised ? { surprised } : {}),
     ...(lair ? { lair } : {}),
   };

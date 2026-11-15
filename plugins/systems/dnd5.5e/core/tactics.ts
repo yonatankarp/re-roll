@@ -11,6 +11,7 @@ import {
   hasCondition,
 } from "./state.ts";
 import type { Stats } from "./stats.ts";
+import { limitsOf } from "./combat/durations.ts";
 
 // What the actions anyone can take (Dodge, Hide, Grapple…) and weapon masteries leave on a creature, read by
 // the combat rules. The actions themselves are in actions.ts. This file imports nothing from combat.ts.
@@ -44,8 +45,23 @@ export function dodging(actor: Actor): boolean {
 }
 
 // The Speed left after Slow, which takes 10 feet off however often it hits.
+// Slow the spell halves it and Haste doubles it, after that.
 export function walkSpeed(actor: Actor, stats: Stats): number {
-  return Math.max(0, stats.speed - (hasTactic(actor, "slowed") ? 10 : 0));
+  const speed = Math.max(
+    0,
+    stats.speed - (hasTactic(actor, "slowed") ? 10 : 0),
+  );
+  const { speed: limit } = limitsOf(actor);
+  // Shut away, it goes nowhere.
+  const shut = actor.activeEffects.some(
+    ({ modifier }) => modifier.kind === "sealed",
+  );
+  if (limit === "none" || shut) return 0;
+  const hasted = actor.activeEffects.some(
+    ({ modifier }) => modifier.kind === "hasted",
+  );
+  const doubled = hasted || limit === "double" ? speed * 2 : speed;
+  return limit === "half" ? Math.floor(doubled / 10) * 5 : doubled;
 }
 
 // Each Dash adds that Speed again, or the feet it holds, as a Charge's half Speed.

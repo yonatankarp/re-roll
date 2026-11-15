@@ -164,6 +164,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     once: z.boolean().optional(),
     subtract: z.boolean().optional(), // taken off attack rolls, saves or checks instead, as with Bane
     skill: SkillSchema.optional(), // only checks with this skill, as Pass without Trace's Stealth
+    ability: AbilitySchema.optional(), // only saves with this ability, as Slow's Dexterity saves
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
@@ -229,6 +230,35 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     damage: DamageSchema,
     once: z.boolean().optional(), // ends after the bearer's next attack roll, as a bandit crime lord's Deadly Aim
   }),
+  // Limits on what the bearer can do on its turns, as Slow gives: `oneAction` is an action or a Bonus Action, not
+  // both; `noActions` neither; `oneAttack` one attack with the Attack action; `speed` halves, doubles or stops its
+  // Speed; `spellFailure` is the percent chance a spell with a Somatic component fails.
+  z.strictObject({
+    kind: z.literal("actionLimit"),
+    oneAction: z.literal(true).optional(),
+    noActions: z.literal(true).optional(),
+    noReactions: z.literal(true).optional(),
+    oneAttack: z.literal(true).optional(),
+    speed: z.enum(["half", "double", "none"]).optional(),
+    spellFailure: z.number().int().min(1).max(100).optional(),
+  }),
+  // Haste's additional action each turn: the Attack (one attack only), Dash, Disengage or Hide action. When it
+  // ends, the bearer is Incapacitated with a Speed of 0 until the end of its next turn.
+  z.strictObject({ kind: z.literal("hasted") }),
+  // Shut away where nothing reaches it and it reaches nothing, as in Otiluke's Resilient Sphere, a Forcecage box
+  // or Maze. With `escape` it can spend its action on that check to end the effect, as Maze's DC 20 Intelligence.
+  z.strictObject({
+    kind: z.literal("sealed"),
+    escape: z
+      .strictObject({
+        ability: AbilitySchema,
+        dc: z.number().int(),
+        skill: SkillSchema,
+      })
+      .optional(),
+  }),
+  // Kept by a creature that saved against an area, which no longer affects it, as a ghast's Stench.
+  z.strictObject({ kind: z.literal("areaImmunity") }),
   // A flat increase to a weapon's own damage, optionally only with one ability, such as Rage.
   z.strictObject({
     kind: z.literal("damageBonus"),
@@ -266,11 +296,32 @@ export type Modifier = z.infer<typeof ModifierSchema>;
 export const DurationSchema = z.union([
   z.literal("instantaneous"),
   z.strictObject({ concentration: z.literal(true), minutes: z.number() }),
-  z.strictObject({ until: z.enum(["yourNextTurnStart", "yourNextTurnEnd"]) }),
+  // "its" counts the target's turns, not the caster's, and "turnEnd" is the end of the turn it happens on.
+  z.strictObject({
+    until: z.enum([
+      "yourNextTurnStart",
+      "yourNextTurnEnd",
+      "itsNextTurnStart",
+      "itsNextTurnEnd",
+      "turnEnd",
+    ]),
+  }),
   z.strictObject({ minutes: z.number() }),
   z.strictObject({ text: z.string().min(1) }), // not tracked by the rules, such as Until dispelled
 ]);
 export type Duration = z.infer<typeof DurationSchema>;
+
+export const ZoneKindSchema = z.enum([
+  "darkness",
+  "fog",
+  "thorns",
+  "light",
+  "dim",
+  "sunlight",
+  "area",
+  "wall",
+]);
+export type ZoneKind = z.infer<typeof ZoneKindSchema>;
 
 export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("heal"), amount: AmountSchema }),
@@ -337,12 +388,16 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // or Devil's Sight see through (Darkness), fog only Blindsight sees through (Fog Cloud), or thorns that cost
   // double to cross and deal `damage` for each 5 feet walked in them (Spike Growth), Bright Light (Light), or Dim Light (Dancing Lights).
   // It ends with the spell.
+  // "sunlight" is Bright Light that is sunlight (Daylight), "area" has no ground or light of its own and only does
+  // what its activation's `area` says (Spirit Guardians), and "wall" rings the area with squares no one can pass
+  // (Wall of Force). With `follows` it moves with the caster, as an Emanation does.
   z.strictObject({
     kind: z.literal("zone"),
-    zone: z.enum(["darkness", "fog", "thorns", "light", "dim"]),
+    zone: ZoneKindSchema,
     radius: z.number().int().min(5),
     duration: DurationSchema,
     damage: z.array(DamageSchema).optional(),
+    follows: z.literal(true).optional(),
   }),
   // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
   // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe. A caster
@@ -440,6 +495,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     count: FormulaSchema.default({ base: 1, add: [] }),
     dc: FormulaSchema.default({ base: 0, add: [{ kind: "spellSaveDc" }] }),
   }),
+  // A strong wind: it ends the gas and vapour zones in its area, as Gust of Wind does Fog Cloud.
+  z.strictObject({ kind: z.literal("disperse") }),
+  // The caster takes this many turns in a row, ending once something it does reaches another creature, as Time Stop.
+  z.strictObject({ kind: z.literal("extraTurns"), turns: AmountSchema }),
   // The target spends one of its Hit Point Dice and regains what it rolls plus `bonus`, as with Healer's Battle Medic.
   z.strictObject({ kind: z.literal("hitDieHeal"), bonus: FormulaSchema }),
   // The bearer takes another of its stat block's own shapes, by name, or goes back to its true one (core/forms.ts).
@@ -526,6 +585,32 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type Resolution = z.infer<typeof ResolutionSchema>;
+
+// What a lasting area does to the creatures in it (core/zones.ts). `side` counts from the creature it belongs to,
+// and everyone is affected when it's left out; a moving area never affects its own bearer. `when` resolves
+// `resolution` on a creature in it as that creature's turn starts or ends, or on everyone in it (up to `targets`)
+// as its owner's turn starts or ends. `grants` are modifiers those in it have, as Marshal Undead's Advantage.
+export const AreaEffectSchema = z.strictObject({
+  side: z.enum(["enemy", "ally"]).optional(),
+  creatureTypes: z.array(z.string()).min(1).optional(), // only these lowercase types, as Marshal Undead's undead
+  exceptTypes: z.array(z.string()).min(1).optional(), // never these, as Antilife Shell's undead and constructs
+  when: z
+    .enum(["turnStart", "turnEnd", "ownerTurnStart", "ownerTurnEnd"])
+    .optional(),
+  resolution: ResolutionSchema.optional(),
+  targets: z.number().int().min(1).optional(),
+  grants: z.array(ModifierSchema).min(1).optional(),
+  noHealing: z.literal(true).optional(), // no Hit Points regained in it, as Life Suppression
+  difficult: z.literal(true).optional(), // costs double to cross, as Spirit Guardians' halved Speed
+  noSpells: z.enum(["verbal", "all"]).optional(), // Silence's Verbal spells, or Antimagic Field's every spell
+  spellShield: z.number().int().min(0).max(9).optional(), // spells this level or lower from outside can't reach in
+  barrier: z.literal(true).optional(), // those it affects can't move into it, as Antilife Shell
+  awake: z.literal(true).optional(), // only while its owner doesn't have the Incapacitated condition
+  self: z.literal(true).optional(), // a moving area that covers its own bearer too, as Globe of Invulnerability
+  maxDamage: z.number().int().min(1).optional(), // it ends once it has dealt this much, as Guardian of Faith
+  disperses: z.literal(true).optional(), // a strong wind ends it, as Fog Cloud or Stinking Cloud
+});
+export type AreaEffect = z.infer<typeof AreaEffectSchema>;
 
 const CostSchema = z.union([
   z.enum(["action", "bonusAction", "reaction", "slot"]),
@@ -640,6 +725,7 @@ export const ActivationSchema = z.strictObject({
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
+  area: AreaEffectSchema.optional(), // what the zone its resolution leaves does later
 });
 export type Activation = z.infer<typeof ActivationSchema>;
 
@@ -656,6 +742,30 @@ export const SpellSchoolSchema = z.enum([
 
 export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("modifier"), modifier: ModifierSchema }),
+  // An area round the bearer that moves with it, as a ghast's Stench, a balor's Fire Aura or a flameskull's
+  // Illumination ("light" or "dim" for the light it sheds).
+  z.strictObject({
+    kind: z.literal("aura"),
+    name: z.string().min(1),
+    zone: ZoneKindSchema.default("area"),
+    radius: z.number().int().min(5),
+    area: AreaEffectSchema.default({}),
+  }),
+  // What happens round the square where the bearer dies, as a flaming skeleton's Death Burst.
+  z.strictObject({
+    kind: z.literal("deathBurst"),
+    name: z.string().min(1),
+    radius: z.number().int().min(5),
+    resolution: ResolutionSchema,
+  }),
+  // In sunlight, or in Bright Light of any kind: Disadvantage on these rolls, and damage as its turn starts there, as
+  // Sunlight Sensitivity or a vampire's Sunlight.
+  z.strictObject({
+    kind: z.literal("lightSensitive"),
+    light: z.enum(["sunlight", "bright"]),
+    disadvantage: z.array(z.enum(["attacks", "saves", "checks"])).default([]),
+    damage: z.array(DamageSchema).default([]),
+  }),
   z.strictObject({
     kind: z.literal("extraDamage"),
     dice: DiceSchema,
@@ -1791,6 +1901,7 @@ export const EncounterSchema = z.strictObject({
   loot: LootSchema.optional(), // found when the party wins
   lair: z.boolean().optional(), // fought in a monster's lair: lair actions and its "in Lair" numbers
   surprise: z.enum(["party", "enemies"]).optional(), // the side caught unaware, which rolls initiative with disadvantage
+  sunlight: z.literal(true).optional(), // fought outdoors in daylight, outside the map's shade (d) and darkness (x)
 });
 
 export const CheckSchema = z.union([

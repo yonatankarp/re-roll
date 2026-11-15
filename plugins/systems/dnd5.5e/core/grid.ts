@@ -1,4 +1,5 @@
 import { type Actor, type DndState, isDead } from "./state.ts";
+import { blockingSet } from "./zones.ts";
 
 // The 5-foot grid. Each square costs 5 feet, diagonals too, as the SRD's grid rules allow.
 // A creature with no square, as in a save from before the grid, is within reach of everyone.
@@ -515,7 +516,7 @@ export function pushTo(
   const dx = Math.sign(start.x - from.x);
   const dy = Math.sign(start.y - from.y);
   if (dx === 0 && dy === 0) return null;
-  const walls = wallSet(state.combat);
+  const walls = blockingSet(state);
   const blocked = new Set([
     ...walls,
     ...Object.values(state.actors).flatMap((item) =>

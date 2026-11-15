@@ -1673,40 +1673,41 @@ export function scaleActivation(
           }
         : effect;
     });
-  const { resolution } = activation;
-  switch (resolution.kind) {
-    case "automatic":
-      return {
-        ...activation,
-        resolution: {
+  const scaled = (resolution: Resolution): Resolution => {
+    switch (resolution.kind) {
+      case "automatic":
+        return {
           ...resolution,
           damage: damage(resolution.damage),
           effects: effects(resolution.effects),
-        },
-      };
-    case "attack":
-      return {
-        ...activation,
-        resolution: {
+        };
+      case "attack":
+        return {
           ...resolution,
           damage: damage(resolution.damage),
           onHit: effects(resolution.onHit),
           onMiss: effects(resolution.onMiss),
-        },
-      };
-    case "save":
-      return {
-        ...activation,
-        resolution: {
+        };
+      case "save":
+        return {
           ...resolution,
           damage: damage(resolution.damage),
           onFail: effects(resolution.onFail),
           onSuccess: effects(resolution.onSuccess),
-        },
-      };
-    default:
-      return resolution satisfies never;
-  }
+        };
+      default:
+        return resolution satisfies never;
+    }
+  };
+  // What an area it leaves does later grows with the slot too, as Spirit Guardians' damage does.
+  const { area } = activation;
+  return {
+    ...activation,
+    resolution: scaled(activation.resolution),
+    ...(area?.resolution
+      ? { area: { ...area, resolution: scaled(area.resolution) } }
+      : {}),
+  };
 }
 
 // Dice whose 1s are rolled again once, the new roll standing, as with Healing Rerolls or Tavern Brawler.
@@ -1760,7 +1761,7 @@ export function damageResponses(
       passive.while === "bloodied"
         ? actor.hp * 2 <= stats.maxHp
         : access.state !== undefined &&
-          lightAt(actor.position, access.state) !== "bright";
+          lightAt(actor.position, access.state, access) !== "bright";
     if (active) {
       resistances.push(
         ...DAMAGE_TYPES.filter((type) => !passive.except.includes(type)),
