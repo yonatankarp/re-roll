@@ -378,6 +378,7 @@ function collectFeatureData(
   featureIds: readonly string[],
   level = 1,
   highestSlot = 0,
+  feats: ReadonlySet<string> = new Set(),
 ): {
   passives: Passive[];
   actions: KnownAction[];
@@ -403,7 +404,13 @@ function collectFeatureData(
       spells.push(...ids);
       if (feature.freeCast) free.push(...ids);
     }
-    for (const [slot, ids] of Object.entries(feature.spellsBySlot ?? {})) {
+    const { preparedWith } = feature;
+    for (const [slot, ids] of Object.entries({
+      ...feature.spellsBySlot,
+      ...(preparedWith && feats.has(preparedWith.feat)
+        ? preparedWith.spells
+        : {}),
+    })) {
       if (Number(slot) <= highestSlot) spells.push(...ids);
     }
     feature.activations.forEach((activation, index) => {
@@ -729,6 +736,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     [...featureIds],
     level,
     slots.findLastIndex((count) => count > 0) + 1,
+    featIds,
   );
   const castingAbility = featSpellAbilities(
     build,

@@ -814,6 +814,12 @@ const FIXTURES = [
     text: "Test.",
     prerequisite: { spellcasting: true },
   },
+  trait("marked", [], {
+    preparedWith: {
+      feat: "test:feat/greater",
+      spells: { "1": ["srd52:spell/burning-hands"] },
+    },
+  }),
   trait("together", [{ kind: "allySaveAdvantage", abilities: ["str"] }]),
   trait("bountiful", [
     { kind: "tempHpBonus", amount: 5 },

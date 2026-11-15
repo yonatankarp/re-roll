@@ -220,6 +220,38 @@ describe("spell-table feats", () => {
     expect(wizard(3)).toContain("spell:srd52:spell/fear");
   });
 
+  it("prepares a mark's spells only with Potent Dragonmark", async () => {
+    const run = await testRun();
+    const spells = (feats: readonly string[]) => {
+      const actor = hero(["marked"]);
+      const build =
+        actor.source.kind === "character" ? actor.source.build : null;
+      if (!build) throw new Error("no build");
+      return deriveStats(
+        {
+          ...actor,
+          source: {
+            kind: "character",
+            build: {
+              ...build,
+              levels: build.levels.map((entry) => ({
+                ...entry,
+                classId: "srd52:class/wizard",
+                answers: [
+                  ...entry.answers,
+                  { kind: "feats" as const, values: [...feats] },
+                ],
+              })),
+            },
+          },
+        },
+        run,
+      ).actions.map(({ id }) => id);
+    };
+    expect(spells(["test:feat/greater"])).toContain(`spell:${BURNING_HANDS}`);
+    expect(spells([])).not.toContain(`spell:${BURNING_HANDS}`);
+  });
+
   it("rides on casting a spell of the adept's school with a slot", async () => {
     const run = await testRun();
     const MAGE_ARMOR = {

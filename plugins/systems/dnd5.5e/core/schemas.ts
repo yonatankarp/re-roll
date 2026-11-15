@@ -961,6 +961,14 @@ export const FeatureSchema = ContentEntrySchema.extend({
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.
   spellsBySlot: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  // Spells by slot level, as `spellsBySlot`, given only once this feat is taken too, as a Dragonmark's Spells of the
+  // Mark with Potent Dragonmark.
+  preparedWith: z
+    .strictObject({
+      feat: ContentIdSchema,
+      spells: z.record(z.string(), z.array(ContentIdSchema)),
+    })
+    .optional(),
   // These spells' damage takes this type instead, as Rimekin's Cold Fire Magic.
   retype: z.record(ContentIdSchema, DamageTypeSchema).optional(),
   // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched.
