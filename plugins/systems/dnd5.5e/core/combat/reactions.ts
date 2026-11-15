@@ -566,7 +566,7 @@ export function reactFrames(
 }
 
 // Where a reaction that walks to its target stops: the open square next to it nearest the bearer.
-function besideSquare(
+export function besideSquare(
   bearer: Actor,
   target: Actor,
   context: Context,

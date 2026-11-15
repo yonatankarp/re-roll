@@ -53,6 +53,7 @@ import {
   hasPassive,
   inReach,
   moveSquares,
+  reaches,
   slotLevelFor,
   squareName,
   targetCount,
@@ -430,6 +431,8 @@ export const UseActionSchema = z.object({
   actor: z.string(),
   actionId: z.string(),
   target: z.string(),
+  // At that creature whatever its side, as a confused or berserk creature's attack (combat/madness.ts).
+  anyone: z.boolean().optional(),
 });
 
 // An action a Multiattack uses after its attacks: at their target if it still reaches it, or else the weakest
@@ -458,8 +461,12 @@ export function runUseAction(
     "area" in targeting && targeting.area.shape !== "emanation"
       ? aimsFor(action, actor, context)
       : [];
-  const targets =
-    "creatures" in targeting && targeting.creatures === 1
+  const struck = payload.anyone ? state.actors[payload.target] : undefined;
+  const targets = struck
+    ? isDown(struck) || !reaches(action, actor, struck)
+      ? []
+      : [struck]
+    : "creatures" in targeting && targeting.creatures === 1
       ? [
           reached.find((item) => item.id === payload.target) ??
             [...reached].sort((a, b) => a.hp - b.hp)[0],

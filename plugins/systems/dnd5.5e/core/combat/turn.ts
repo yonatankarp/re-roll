@@ -33,7 +33,8 @@ import { z } from "zod";
 import { finalDamage, halved } from "../rules.ts";
 import { betweenTurns, legendaryResistance } from "../legendary.ts";
 import { turnRecharge } from "../class-rules.ts";
-import { MonsterSchema } from "../schemas.ts";
+import { ConditionSchema, MonsterSchema } from "../schemas.ts";
+import { cureFor } from "./dispel.ts";
 import {
   masteredDice,
   masteredTypes,
@@ -73,6 +74,10 @@ import {
   healingStopped,
   placedConditionEvents,
 } from "../zones.ts";
+import { madnessStart } from "./madness.ts";
+import { headsLeft, headsOf, regrowEvents } from "./heads.ts";
+
+const ALL_CONDITIONS = ConditionSchema.options;
 
 // The turn order: ending a fight, lingering effects, and the start and end of each turn.
 
@@ -448,6 +453,7 @@ export function runFinishTurn(context: Context): SystemResult {
     ...events,
     ...regurgitationEvents(context),
     ...(actor ? rechargeEvents(actor, context) : []),
+    ...(actor ? regrowEvents(actor, context) : []),
     ...(actor ? expiredEvents(state, actor.id, "end") : []),
   ];
   // Time Stop: another turn of its own, with nothing else between.
@@ -507,9 +513,12 @@ export function runAdvanceTurn(
     ...reactiveEvents(after, context),
   ];
   const starts = { ...context, state: after };
+  const mad = next ? madnessStart(next, starts) : { events: [], frames: [] };
+  events.push(...mad.events);
   const ticks = next
     ? [
         ...drifted.frames,
+        ...mad.frames,
         ...lingeringFrames(next, "turnStart"),
         ...sunlightFrames(next, starts),
         ...zoneFrames(next, "start", starts),
@@ -539,7 +548,21 @@ function regenerationEvents(actor: Actor, context: Context): SystemEvent[] {
     0,
   );
   const amount = cannotHeal(actor) ? 0 : Math.min(hp, stats.maxHp - actor.hp);
-  if (amount <= 0) return [];
+  // Metabolic Control also ends the condition that hampers it most.
+  const cured = stats.passives.some(
+    (passive) => passive.kind === "regeneration" && passive.cures,
+  )
+    ? cureFor(actor, ALL_CONDITIONS)
+    : null;
+  const curing = cured
+    ? [
+        dndEvent(`${NS}:conditionRemoved`, {
+          actor: actor.id,
+          condition: cured,
+        }),
+      ]
+    : [];
+  if (amount <= 0) return curing;
   // shortcut: all of a troll's Exhaustion is taken as its missing limbs, which grow back as it heals.
   const regrown =
     actor.exhaustion > 0 && hasPassive(stats, "severedLimbs")
@@ -553,7 +576,21 @@ function regenerationEvents(actor: Actor, context: Context): SystemEvent[] {
   return [
     dndEvent(`${NS}:healed`, { actor: actor.id, amount, max: stats.maxHp }),
     ...regrown,
+    ...curing,
   ];
+}
+
+// Reactive Heads: a hydra with heads to spare, whose only Reaction is an Opportunity Attack, has one a head.
+// shortcut: it gets its Reaction back on every turn, as Reactive gives, rather than counting one a head.
+function reactsEveryTurn(
+  actor: Actor,
+  stats: ReturnType<typeof deriveStats>,
+): boolean {
+  const heads = headsOf(stats);
+  return (
+    hasPassive(stats, "reactive") ||
+    (heads !== undefined && headsLeft(actor, heads) > 1)
+  );
 }
 
 // Reactive: a creature that has one Reaction on every turn gets it back as each turn starts.
@@ -562,7 +599,7 @@ function reactiveEvents(state: DndState, context: Context): SystemEvent[] {
     !actor.budget.reaction &&
     !isDown(actor) &&
     actor.source.kind === "monster" &&
-    hasPassive(deriveStats(actor, context), "reactive")
+    reactsEveryTurn(actor, deriveStats(actor, context))
       ? [dndEvent(`${NS}:reactionRegained`, { actor: actor.id })]
       : [],
   );

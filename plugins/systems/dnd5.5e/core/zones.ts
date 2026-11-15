@@ -213,6 +213,20 @@ export function placedConditionEvents(state: DndState): SystemEvent[] {
 export const sealed = (actor: Actor): boolean =>
   actor.activeEffects.some(({ modifier }) => modifier.kind === "sealed");
 
+// Whether one of the two has the other Grappled, as Barbed Hide's spines need.
+const grappleBetween = (a: Actor, b: Actor): boolean =>
+  [
+    [a, b],
+    [b, a],
+  ].some(([held, by]) =>
+    held?.activeEffects.some(
+      ({ modifier, casterId }) =>
+        modifier.kind === "condition" &&
+        modifier.condition === "grappled" &&
+        casterId === by?.id,
+    ),
+  );
+
 // Whether a zone's effects reach `actor`: its side and kind, never the bearer of one that moves with it, and not
 // a creature that saved against it for good.
 export function affects(
@@ -240,6 +254,7 @@ export function affects(
   ) {
     return false;
   }
+  if (area.grappling && !grappleBetween(owner, actor)) return false;
   if (area.creatureTypes || area.exceptTypes) {
     const type = access ? statsOf(actor, access).creatureType : undefined;
     if (area.creatureTypes && !area.creatureTypes.includes(type ?? "")) {
