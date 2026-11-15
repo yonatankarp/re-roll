@@ -26,7 +26,7 @@ import type { Square } from "./grid.ts";
 import { dodging, grappledAwayFrom } from "./tactics.ts";
 import { grapplesOn } from "./combat/grapple.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
-import { ALL, ITEM_PREFIX } from "./combat/ids.ts";
+import { ALL, ITEM_PREFIX, THROW_PREFIX } from "./combat/ids.ts";
 import { DAMAGE_TO_PARTY, damageToParty } from "./combat/effects.ts";
 import { cureFor, dispellable } from "./combat/dispel.ts";
 import { seesThrough } from "./sight.ts";
@@ -38,6 +38,7 @@ import {
   aimsFor,
   allies,
   attackRoutine,
+  throwsLeft,
   canAfford,
   carriesExtraDice,
   type Context,
@@ -1044,7 +1045,11 @@ export function makeJudge(context: Context, side: Actor): Judge {
       cost.filter((item) => typeof item === "object").length *
         0.15 *
         reference +
-      (actionId.startsWith(ITEM_PREFIX) ? 0.3 * reference : 0);
+      (actionId.startsWith(ITEM_PREFIX) ? 0.3 * reference : 0) +
+      // A weapon thrown is out of hand until picked up, the last one the most.
+      (actionId.startsWith(THROW_PREFIX)
+        ? (throwsLeft(actor, actionId) > 1 ? 0.1 : 0.5) * reference
+        : 0);
     return gained - spent;
   };
 

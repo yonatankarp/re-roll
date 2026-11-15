@@ -6,7 +6,14 @@ import {
   awaitDecision,
 } from "#sdk";
 import { z } from "zod";
-import { type Actor, type DndState, NS, dndEvent, frame } from "./state.ts";
+import {
+  type Actor,
+  type DndState,
+  NS,
+  dndEvent,
+  forAttacker,
+  frame,
+} from "./state.ts";
 import { type KnownAction, type Stats, deriveStats } from "./stats.ts";
 import { seekingReroll } from "./metamagic.ts";
 
@@ -21,15 +28,18 @@ const DECLINE = "decline";
 export function onceEnded(
   actor: Actor,
   on: "attacks" | "attacksAgainst",
+  attackerId?: string,
 ): SystemEvent[] {
-  return actor.activeEffects.flatMap(({ modifier, sourceId }) =>
-    ((modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
+  return actor.activeEffects.flatMap((effect) => {
+    const { modifier, sourceId } = effect;
+    return (forAttacker(effect, attackerId) &&
+      (modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
       modifier.on === on &&
       modifier.once) ||
-    (modifier.kind === "bonus" && modifier.to === on && modifier.once)
+      (modifier.kind === "bonus" && modifier.to === on && modifier.once)
       ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId })]
-      : [],
-  );
+      : [];
+  });
 }
 
 // Resources that come back every turn, such as Reckless Attack's once a turn. Given back as the bearer's turn ends,

@@ -442,8 +442,9 @@ describe("feats and traits that act on their own", () => {
           : [],
       );
     };
+    // Only for the bearer, the effect's caster.
     expect(marked(["lords"])).toEqual([
-      { kind: "advantage", on: "attacksAgainst", once: true },
+      { kind: "advantage", on: "attacksAgainst", once: true, casterOnly: true },
     ]);
     expect(marked([])).toEqual([]);
   });

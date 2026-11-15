@@ -64,6 +64,7 @@ export const FRAME_KINDS = [
   "smite",
   "takeAction",
   "teleport",
+  "throwWeapon",
   "useAction",
   "useItem",
 ] as const;
@@ -73,6 +74,7 @@ export function frame(kind: FrameKind, payload: Frame["payload"] = {}): Frame {
   return { kind: `${NS}:${kind}`, payload };
 }
 export const LEGENDARY_USE = "legendary";
+export const PICKED_UP = "pickedUp"; // in usedThisTurn: the one free pick-up of a turn
 export const LEGENDARY_RESISTANCE = "legendaryResistance";
 
 export const TACTICS = [
@@ -128,6 +130,11 @@ const ActiveEffectSchema = z.strictObject({
     .optional(),
   endsOnDamage: z.boolean().optional(),
   endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
+  endsOn: z.enum(["attack", "action"]).optional(), // ends when the creature attacks or deals damage, or acts
+  // Taking damage gives this save, ending it on a success, as Dragon Fear's.
+  saveOnDamage: z
+    .strictObject({ ability: AbilitySchema, dc: z.number().int() })
+    .optional(),
   level: z.number().int().optional(), // the slot a spell was cast with, when it was given one
   // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
   swallowed: z.boolean().optional(),
@@ -145,6 +152,11 @@ export type ActiveEffect = z.infer<typeof ActiveEffectSchema>;
 const SquareSchema = z.strictObject({
   x: z.number().int(),
   y: z.number().int(),
+});
+const DroppedSchema = z.strictObject({
+  item: ContentIdSchema,
+  at: SquareSchema,
+  by: z.string(), // who threw it
 });
 const GridSchema = z.strictObject({
   width: z.number().int(),
@@ -270,6 +282,8 @@ export const StateSchema = z.strictObject({
       damageToParty: z.number().optional(),
       // The map is covered until the party sees it (fog.ts). Missing in older saves, whose fights show all of it.
       fog: z.literal(true).optional(),
+      // Weapons thrown and lying where they landed, until picked up. They go back to their throwers as it ends.
+      dropped: z.array(DroppedSchema).optional(),
     })
     .nullable(),
 });
@@ -338,6 +352,11 @@ const TradedSchema = z.strictObject({
   bought: z.boolean(), // false for sold
   priceCp: z.number().int().min(0),
   stowed: z.boolean(), // bought gear goes in the pack, as found gear does
+});
+const WeaponThrownSchema = DroppedSchema;
+const ItemPickedUpSchema = z.strictObject({
+  actor: z.string(),
+  index: z.number().int().min(0), // in combat.dropped
 });
 const ItemUsedSchema = z.strictObject({
   actor: z.string(),
@@ -498,6 +517,8 @@ export const EVENT_SCHEMAS = {
   [`${NS}:goldSpent`]: GoldSpentSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
+  [`${NS}:weaponThrown`]: WeaponThrownSchema,
+  [`${NS}:itemPickedUp`]: ItemPickedUpSchema,
   [`${NS}:legendaryActionTaken`]: LegendaryActionTakenSchema,
   [`${NS}:summoned`]: SummonedSchema,
   [`${NS}:legendaryResistanceUsed`]: ActorOnlySchema,
@@ -556,6 +577,19 @@ export function equipped(actor: Actor): string[] {
 }
 
 type Condition = z.infer<typeof ConditionSchema>;
+
+// Advantage limited to its caster, as Reassert Honor's, counts only for that attacker.
+export function forAttacker(
+  effect: ActiveEffect,
+  attackerId: string | undefined,
+): boolean {
+  const { modifier } = effect;
+  return (
+    modifier.kind !== "advantage" ||
+    !modifier.casterOnly ||
+    effect.casterId === attackerId
+  );
+}
 
 export function hasCondition(
   actor: Actor,
@@ -712,8 +746,19 @@ function settleSummons(state: DndState): DndState {
 }
 
 function endCombat(state: DndState): DndState {
+  // Whatever was thrown is gathered up after the fight.
+  const gathered = (state.combat?.dropped ?? []).reduce(
+    (after, { item, by }) =>
+      after.actors[by]
+        ? updateActor(after, by, (actor) => ({
+            ...actor,
+            inventory: [...actor.inventory, item],
+          }))
+        : after,
+    state,
+  );
   const actors = Object.fromEntries(
-    Object.entries(state.actors)
+    Object.entries(gathered.actors)
       .filter(
         ([, actor]) => actor.side === "party" && actor.source.kind !== "summon",
       )
@@ -1153,6 +1198,41 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
               },
             }
           : {}),
+      };
+    }
+    case `${NS}:weaponThrown`: {
+      const data = payload(WeaponThrownSchema, event);
+      const thrown = updateActor(state, data.by, (actor) => ({
+        ...actor,
+        inventory: without(actor.inventory, [data.item]),
+      }));
+      return thrown.combat
+        ? {
+            ...thrown,
+            combat: {
+              ...thrown.combat,
+              dropped: [...(thrown.combat.dropped ?? []), data],
+            },
+          }
+        : thrown;
+    }
+    case `${NS}:itemPickedUp`: {
+      const data = payload(ItemPickedUpSchema, event);
+      const found = state.combat?.dropped?.[data.index];
+      if (!state.combat || !found) return state;
+      const picked = updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        inventory: [...actor.inventory, found.item],
+        usedThisTurn: [...actor.usedThisTurn, PICKED_UP],
+      }));
+      return {
+        ...picked,
+        combat: {
+          ...state.combat,
+          dropped: state.combat.dropped?.filter(
+            (_, index) => index !== data.index,
+          ),
+        },
       };
     }
     case `${NS}:itemUsed`: {

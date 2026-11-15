@@ -696,6 +696,42 @@ describe("levelling up", () => {
     expectReplays(run, registry, "studious", driven);
   });
 
+  it("records the spellcasting ability chosen for a feat, and whose spells take it", async () => {
+    const { registry, run: base } = await loadAdventure("goblin-ambush");
+    const run = withContent(storyRun(base, [[levelUp], [levelUp], [levelUp]]), [
+      FeatSchema.parse({
+        id: "test:feat/gifted",
+        name: "Gifted",
+        category: "general",
+        text: "Test.",
+        choices: [
+          { kind: "spellAbility", id: "ability", from: ["int", "wis", "cha"] },
+          { kind: "spells", id: "spells", count: 1, maxLevel: 1 },
+        ],
+      }),
+    ]);
+    const plan: Plan = [
+      ...FIGHTER.filter(([pattern]) => !String(pattern).includes(":feat")),
+      [/:feat-0$/, "test:feat/gifted"],
+      [/:feat:feat0-ability-0$/, "cha"],
+      [/:feat:feat0-spells-0$/, "srd52:spell/magic-missile"],
+    ];
+    const driven = drive(run, "gifted", plan);
+    const player = actorIn(driven.state);
+    expect(buildOf(player).levels[3]?.answers).toEqual(
+      expect.arrayContaining([
+        { kind: "feats", values: ["test:feat/gifted"] },
+        { kind: "spellAbility", ability: "cha", feat: "test:feat/gifted" },
+        {
+          kind: "spells",
+          values: ["srd52:spell/magic-missile"],
+          feat: "test:feat/gifted",
+        },
+      ]),
+    );
+    expectReplays(run, registry, "gifted", driven);
+  });
+
   it("takes a wizard from 1 to 5, with slots and prepared spells", async () => {
     const run = storyRun(await goblin(), [
       [levelUp],

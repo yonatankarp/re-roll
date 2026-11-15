@@ -3,6 +3,7 @@ import {
   type FrameDef,
   PLAYER_ACTOR,
   type SystemContext,
+  type SystemResult,
   contentKind,
   defineSystem,
   encounterKind,
@@ -127,6 +128,8 @@ import {
 } from "./state.ts";
 import { checkBonus, deriveStats, lookup } from "./stats.ts";
 import { withReveal } from "./fog.ts";
+import { actingEnds } from "./combat/effects.ts";
+import { rescuedCheck } from "./trait-rules.ts";
 
 // Every step ends by revealing what the party sees once its events land, so the fog clears as it happens.
 function revealing(
@@ -144,6 +147,24 @@ function revealing(
   );
 }
 
+// An action anyone can take, such as Dash, ends what ends as the creature acts, as Merge with Shadows' invisibility.
+function tacticEnds(
+  result: SystemResult,
+  actorId: string,
+  context: { readonly state: DndState },
+): SystemResult {
+  const actor = context.state.actors[actorId];
+  const acted = (result.events ?? []).some(
+    (event) => event.kind === `${NS}:budgetSpent`,
+  );
+  return actor && acted
+    ? {
+        ...result,
+        events: [...actingEnds(actor, null), ...(result.events ?? [])],
+      }
+    : result;
+}
+
 function buildReferences(pregen: z.infer<typeof PregenSchema>): string[] {
   return [
     pregen.build.speciesId,
@@ -152,9 +173,7 @@ function buildReferences(pregen: z.infer<typeof PregenSchema>): string[] {
     ...pregen.build.levels.flatMap((level) => [
       level.classId,
       ...level.answers.flatMap((answer) =>
-        answer.kind === "skills" || answer.kind === "abilities"
-          ? []
-          : answer.values,
+        answer.kind === "skills" || !("values" in answer) ? [] : answer.values,
       ),
     ]),
   ];
@@ -166,7 +185,11 @@ function levelReferences(level: z.infer<typeof ClassSchema>["levels"][number]) {
 
 function optionReferences(choices: readonly ChoiceDef[]): readonly string[] {
   return choices.flatMap((choice) =>
-    choice.kind === "option" ? choice.from : [],
+    choice.kind === "option"
+      ? choice.from
+      : choice.kind === "spells"
+        ? [...(choice.from ?? []), ...(choice.listOf ? [choice.listOf] : [])]
+        : [],
   );
 }
 
@@ -258,12 +281,21 @@ export const dnd55e = defineSystem<DndState>({
     feats: contentKind({
       idPrefix: "feat",
       schema: FeatSchema,
-      references: (item) => [...item.grants, ...optionReferences(item.choices)],
+      references: (item) => [
+        ...item.grants,
+        ...optionReferences(item.choices),
+        ...(typeof item.spellAbility === "object"
+          ? [item.spellAbility.like]
+          : []),
+      ],
     }),
     features: contentKind({
       idPrefix: "feature",
       schema: FeatureSchema,
-      references: (item) => Object.values(item.spells ?? {}).flat(),
+      references: (item) =>
+        [item.spells, item.spellsBySlot].flatMap((spells) =>
+          Object.values(spells ?? {}).flat(),
+        ),
     }),
     spells: contentKind({
       idPrefix: "spell",
@@ -398,7 +430,7 @@ export const dnd55e = defineSystem<DndState>({
       schema: TakeActionSchema,
       run: (payload, context: Context) =>
         isTactic(payload.answer)
-          ? runTactic(payload, context)
+          ? tacticEnds(runTactic(payload, context), payload.actor, context)
           : runTakeAction(payload, context),
     }),
     [`${NS}:afterMove`]: frameHandler({
@@ -503,16 +535,19 @@ export const dnd55e = defineSystem<DndState>({
         stats.untrainedArmor && (ability === "str" || ability === "dex"),
       rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
     });
-    const total =
+    const rolled =
       roll.natural +
       checkBonus(stats, player, {
         ability,
         ...("skill" in parsed ? { skill: parsed.skill } : {}),
       });
+    const rescue = rescuedCheck(player, stats, rolled, parsed.dc, context.dice);
+    const total = rolled + rescue.bonus;
     const success = total >= parsed.dc;
     return {
       outcome: success ? "success" : "failure",
       events: [
+        ...rescue.events,
         dndEvent(`${NS}:rollReported`, {
           actor: PLAYER_ACTOR,
           against: "check",

@@ -19,6 +19,7 @@ import {
   frame,
 } from "./state.ts";
 import { HIT_DICE } from "./combat/ids.ts";
+import { hitDieRoll } from "./trait-rules.ts";
 import { gearOptions } from "./gear.ts";
 import { ClassSchema } from "./schemas.ts";
 import {
@@ -27,7 +28,6 @@ import {
   evaluateFormula,
   lookup,
   modifierFor,
-  rollDiceNotation,
 } from "./stats.ts";
 
 type Context = SystemContext<DndState>;
@@ -57,7 +57,7 @@ function spendEvents(
   context: Context,
 ): readonly SystemEvent[] {
   const rolled =
-    rollDiceNotation(`1${die}`, context.dice) + modifierFor(stats, "con");
+    hitDieRoll(die, stats, context.dice) + modifierFor(stats, "con");
   return [
     dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource: HIT_DICE }),
     dndEvent(`${NS}:healed`, {
@@ -84,7 +84,7 @@ export function shortRestEvents(
     )) {
       if (hp >= stats.maxHp) break;
       const die = lookup(context, ClassSchema, classId).hitDie;
-      const rolled = rollDiceNotation(`1${die}`, context.dice);
+      const rolled = hitDieRoll(die, stats, context.dice);
       const amount = Math.min(
         Math.max(1, rolled + modifierFor(stats, "con")),
         stats.maxHp - hp,
@@ -196,12 +196,9 @@ function recovered(
   for (const { id, recharge } of stats.resourceDefs) {
     for (const { on, amount } of recharge) {
       // shortcut: there's no clock, so dawn comes with a Long Rest.
-      // A once-a-turn use left spent when a fight ended comes back with any rest.
+      // A once-a-turn use left spent when a fight ended comes back with any rest, and a Short Rest's with a Long one.
       const applies =
-        on === "turnStart" ||
-        (rest === "short"
-          ? on === "shortRest"
-          : on === "longRest" || on === "dawn");
+        on === "turnStart" || on === "shortRest" || rest === "long";
       if (applies) {
         left.set(id, amount === "all" ? 0 : (left.get(id) ?? 0) - amount);
       }

@@ -378,6 +378,19 @@ const FIXTURES = [
     name,
     category: "origin",
     text: "Test.",
+    ...(id === "test:feat/initiate-cleric"
+      ? {
+          choices: [
+            {
+              kind: "spells",
+              id: "spell",
+              count: 1,
+              maxLevel: 1,
+              list: "srd52:class/cleric",
+            },
+          ],
+        }
+      : {}),
   })),
   ...(
     [
@@ -416,12 +429,159 @@ const FIXTURES = [
     featOr: "darkGift",
   },
   {
+    id: "test:background/gifted",
+    name: "Gifted",
+    abilities: ["str", "dex", "con"],
+    feat: "test:feat/chosen",
+    skills: ["athletics", "survival"],
+    tool: "Test Tools",
+  },
+  {
     id: "test:background/plain",
     name: "Plain",
     abilities: ["str", "dex", "con"],
     feat: "test:feat/initiated",
     skills: ["athletics", "survival"],
     tool: "Test Tools",
+  },
+  {
+    id: "test:species/gifted",
+    name: "Gifted",
+    text: "A test species.",
+    creatureType: "Humanoid",
+    size: "medium",
+    speed: 30,
+    traits: ["test:feature/touched"],
+    choices: [
+      { kind: "spellAbility", id: "spellcasting", from: ["int", "cha"] },
+    ],
+  },
+  trait("touched", [], { spells: { "1": ["srd52:spell/burning-hands"] } }),
+  trait("adept-table", [], {
+    spellsBySlot: {
+      "1": ["srd52:spell/burning-hands"],
+      "2": ["srd52:spell/fear"],
+    },
+  }),
+  {
+    id: "test:feat/touched",
+    name: "Touched",
+    category: "general",
+    text: "Test.",
+    grants: ["test:feature/touched"],
+    abilityIncrease: ["int", "wis", "cha"],
+    spellAbility: "increased",
+  },
+  {
+    id: "test:feat/chosen",
+    name: "Chosen",
+    category: "origin",
+    text: "Test.",
+    choices: [
+      { kind: "spellAbility", id: "ability", from: ["int", "wis", "cha"] },
+      {
+        kind: "spells",
+        id: "spell",
+        count: 1,
+        maxLevel: 1,
+        list: "srd52:class/wizard",
+      },
+    ],
+  },
+  {
+    id: "test:feat/connoisseur",
+    name: "Connoisseur",
+    category: "general",
+    text: "Test.",
+    spellAbility: { like: "test:feat/chosen" },
+    choices: [
+      {
+        kind: "spells",
+        id: "spell",
+        count: 1,
+        maxLevel: 1,
+        listOf: "test:feat/initiate",
+        from: ["srd52:spell/burning-hands", "srd52:spell/cure-wounds"],
+      },
+    ],
+  },
+  trait("warding", [
+    { kind: "schoolCast", school: "abjuration", rider: "ward" },
+  ]),
+  trait("augmenting", [
+    { kind: "schoolCast", school: "abjuration", rider: "augment" },
+  ]),
+  trait("life", [{ kind: "schoolCast", school: "abjuration", rider: "life" }]),
+  trait("fueled", [
+    { kind: "schoolCast", school: "evocation", rider: "fueled" },
+  ]),
+  trait("necrosis", [
+    {
+      kind: "damageRider",
+      damage: "slashing",
+      spells: true,
+      effects: [
+        {
+          kind: "applyCondition",
+          condition: "poisoned",
+          duration: { until: "yourNextTurnStart" },
+        },
+      ],
+    },
+  ]),
+  trait("together", [{ kind: "allySaveAdvantage", abilities: ["str"] }]),
+  trait("bountiful", [
+    { kind: "tempHpBonus", amount: 5 },
+    { kind: "hitDieRolls", highest: true },
+  ]),
+  trait("recovery", [{ kind: "hitDieRolls", floor: 3 }]),
+  trait(
+    "radiance",
+    [{ kind: "maxDamageDice", damage: "radiant", resource: "radiance" }],
+    { resources: [{ id: "radiance", max: { base: 1 }, recharge: [] }] },
+  ),
+  trait(
+    "resistant",
+    [
+      {
+        kind: "saveRescue",
+        abilities: ["wis"],
+        bonusDice: "1d6",
+        magical: true,
+        resource: "resistant",
+      },
+    ],
+    { resources: [{ id: "resistant", max: { base: 1 }, recharge: [] }] },
+  ),
+  trait(
+    "past-life",
+    [{ kind: "checkRescue", bonusDice: "1d6", resource: "past-life" }],
+    { resources: [{ id: "past-life", max: { base: 1 }, recharge: [] }] },
+  ),
+  trait("thrower", [{ kind: "thrownDamage", bonus: 2 }]),
+  trait("bomber", [{ kind: "longShots" }, { kind: "farLobber", feet: 40 }]),
+  {
+    id: "test:item/acid",
+    name: "Acid",
+    type: "gear",
+    activation: {
+      cost: ["action"],
+      targeting: { creatures: 1, range: 20, side: "enemy" },
+      resolution: {
+        kind: "save",
+        ability: "dex",
+        dc: {
+          base: 8,
+          add: [
+            { kind: "abilityMod", ability: "dex" },
+            { kind: "proficiency" },
+          ],
+        },
+        damage: [{ amount: { dice: "2d6" }, type: "acid" }],
+        onFail: [],
+        onSuccess: [],
+      },
+    },
   },
 ];
 

@@ -1,5 +1,6 @@
 import type { ContentAccess, SystemEvent } from "#sdk";
 import { ItemSchema, type Weapon } from "./schemas.ts";
+import { weaponItemId } from "./combat/ids.ts";
 import {
   type Actor,
   INCAPACITATING,
@@ -95,16 +96,13 @@ export function revealEvents(actor: Actor): SystemEvent[] {
     : [];
 }
 
-const WEAPON = "weapon:"; // the prefix of a weapon's action id, set in stats.ts
-
 export function weaponOf(
   actionId: string,
   access: Pick<ContentAccess, "content">,
 ): Weapon | null {
-  if (!actionId.startsWith(WEAPON)) return null;
-  const item = ItemSchema.safeParse(
-    access.content(actionId.slice(WEAPON.length)),
-  ).data;
+  const itemId = weaponItemId(actionId);
+  if (!itemId) return null;
+  const item = ItemSchema.safeParse(access.content(itemId)).data;
   return item?.type === "weapon" ? item : null;
 }
 

@@ -104,8 +104,15 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("level") }), // character level
   z.strictObject({ kind: z.literal("scaling"), key: z.string() }),
-  z.strictObject({ kind: z.literal("spellMod") }),
-  z.strictObject({ kind: z.literal("spellSaveDc") }),
+  // With `ability`, the one a feat's spells use instead of the character's (stats.ts castWith).
+  z.strictObject({
+    kind: z.literal("spellMod"),
+    ability: AbilitySchema.optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("spellSaveDc"),
+    ability: AbilitySchema.optional(),
+  }),
 ]);
 
 export const FormulaSchema = z.strictObject({
@@ -159,6 +166,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     on: RollFlagSchema,
     once: z.boolean().optional(),
     ability: AbilitySchema.optional(),
+    // attacksAgainst only for the effect's caster, as Lords' Alliance Agent's Reassert Honor.
+    casterOnly: z.literal(true).optional(),
   }),
   // "attackers" limits attacksAgainst to creatures of these lowercase types, as with Protection from Evil and Good.
   z.strictObject({
@@ -174,6 +183,11 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     damage: DamageTypeSchema,
   }),
   z.strictObject({ kind: z.literal("immunity"), damage: DamageTypeSchema }),
+  // Can't gain this condition while it lasts, as Lordly Resolve's bolstered targets.
+  z.strictObject({
+    kind: z.literal("conditionImmunity"),
+    condition: ConditionSchema,
+  }),
   z.strictObject({ kind: z.literal("acFormula"), formula: FormulaSchema }),
   // Seeing creatures that have the Invisible condition as if they were visible, as See Invisibility does.
   z.strictObject({ kind: z.literal("seeInvisible") }),
@@ -234,6 +248,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     hpAtMost: z.number().int().min(1).optional(), // only a target with this many Hit Points or fewer
     endsOnDamage: z.boolean().default(false),
     endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature, as Modify Memory's
+    // Ends when the creature attacks or deals damage ("attack"), or takes any action ("action"), as Fade Away's.
+    endsOn: z.enum(["attack", "action"]).optional(),
+    // Taking damage gives it a save to end it, as Dragon Fear's, using the save it came with.
+    saveOnDamage: z.literal(true).optional(),
     // What a failed repeat save turns it into, as a cockatrice's Restrained becoming Petrified.
     secondFailure: z
       .strictObject({
@@ -265,7 +283,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("teleport"),
     feet: z.number().int().min(5),
     movement: z.number().int().min(0).default(0),
+    // A teleport paid for with movement that still provokes nothing, as Portal Step's.
+    provokes: z.literal(false).optional(),
   }),
+  // The Dash action as part of another, as with Adrenaline Rush.
+  z.strictObject({ kind: z.literal("dash") }),
   z.strictObject({ kind: z.literal("extraAction") }), // Action Surge
   // Ends one of these conditions on the target, the one that hampers it most, as Lesser Restoration does.
   z.strictObject({
@@ -338,6 +360,8 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       flatBonus: z.number().int().optional(),
       proficient: z.boolean().optional(), // false for a weapon the wielder has no training with
       itemBonus: z.number().int().min(1).optional(), // a magic weapon's own bonus to hit
+      // Beyond this many feet, out to the targeting's range, the roll has Disadvantage, as a thrown weapon's long range.
+      normalRange: z.number().int().min(5).optional(),
     }),
     damage: z.array(DamageSchema).min(1),
     onHit: LeafEffectsSchema,
@@ -430,11 +454,23 @@ export const ActivationSchema = z.strictObject({
     })
     .optional(),
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
+  whileIn: z.literal("shadows").optional(), // only in Dim Light or Darkness, as Merge with Shadows
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
 });
 export type Activation = z.infer<typeof ActivationSchema>;
+
+export const SpellSchoolSchema = z.enum([
+  "abjuration",
+  "conjuration",
+  "divination",
+  "enchantment",
+  "evocation",
+  "illusion",
+  "necromancy",
+  "transmutation",
+]);
 
 export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("modifier"), modifier: ModifierSchema }),
@@ -569,6 +605,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     critical: z.boolean().default(false),
     oncePerTurn: z.boolean().default(false),
     resource: z.string().optional(), // each use spends one, as Putrefy's once per rest
+    spells: z.literal(true).optional(), // a spell's damage triggers it too, as Putrefy's
     effects: z.array(LeafEffectSchema).min(1),
   }),
   // An attack's damage of these types lessened while the bearer wears this armor, as with Heavy Armor Master.
@@ -609,6 +646,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     abilities: z.array(AbilitySchema).default([]),
     conditions: z.array(ConditionSchema).default([]),
     bonus: FormulaSchema.optional(),
+    // A die rolled and added instead, when its highest roll could be enough, as Spell Resistant's 1d6.
+    bonusDice: DiceSchema.optional(),
+    magical: z.literal(true).optional(), // only a save against a spell, as Magic Resistant
     reaction: z.boolean().default(false),
     resource: z.string(),
   }),
@@ -618,7 +658,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Sentinel.
   z.strictObject({ kind: z.literal("sentinel") }),
   // Advantage on attack rolls against a creature the bearer has grappled, as with Grappler.
-  z.strictObject({ kind: z.literal("grappledAdvantage") }),
+  // With `allies`, the bearer's allies have it too, as with Street Justice's Headlock.
+  z.strictObject({
+    kind: z.literal("grappledAdvantage"),
+    allies: z.literal(true).optional(),
+  }),
   // Once a turn, one damage die of a hit of this type is rolled again, and a Critical Hit rolls one more die, as
   // with Piercer.
   z.strictObject({ kind: z.literal("damageReroll"), damage: DamageTypeSchema }),
@@ -693,6 +737,58 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("spellRerollOnes"),
     damage: DamageTypeSchema,
   }),
+  // This much added to the damage of a weapon thrown with a ranged attack, as with Thrown Weapon Fighting.
+  z.strictObject({
+    kind: z.literal("thrownDamage"),
+    bonus: z.number().int().min(1),
+  }),
+  // A thrown weapon's long range has no Disadvantage, as with Bomber's Long Shots.
+  z.strictObject({ kind: z.literal("longShots") }),
+  // Casting a spell of this school, as an Arcana Unleashed adept's: with a slot, Temporary Hit Points of twice its
+  // level ("ward"), up to two Hit Point Dice of healing plus its level ("life") or 5 feet of Speed a level this turn
+  // ("augment"); once a turn up to two Hit Point Dice added to its damage ("fueled"); or a bonus to keep
+  // Concentration on it ("persistent"). combat/school.ts.
+  z.strictObject({
+    kind: z.literal("schoolCast"),
+    school: SpellSchoolSchema,
+    rider: z.enum(["ward", "life", "augment", "fueled", "persistent"]),
+  }),
+  // A failed ability check gets this die added when it could be enough, spending a use, as Reborn's Knowledge from a
+  // Past Life.
+  z.strictObject({
+    kind: z.literal("checkRescue"),
+    bonusDice: DiceSchema,
+    resource: z.string(),
+  }),
+  // Advantage on saves with these abilities while within 5 feet of an ally that can act, for the bearer and that
+  // ally, as Order's Resilience's Stronger Together.
+  z.strictObject({
+    kind: z.literal("allySaveAdvantage"),
+    abilities: z.array(AbilitySchema).min(1),
+  }),
+  // This many more Temporary Hit Points whenever it gains some, as Boon of Bountiful Health's Augmented Health.
+  z.strictObject({
+    kind: z.literal("tempHpBonus"),
+    amount: z.number().int().min(1),
+  }),
+  // Its Hit Point Dice rolled to heal count at least `floor`, or with `highest` as their highest number, as Bloodlust's
+  // Powerful Recovery and Boon of Bountiful Health's Superior Recuperation.
+  z.strictObject({
+    kind: z.literal("hitDieRolls"),
+    floor: z.number().int().min(2).optional(),
+    highest: z.literal(true).optional(),
+  }),
+  // A damage roll of this type uses the highest number on each die, spending a use, as Powerful Radiance.
+  z.strictObject({
+    kind: z.literal("maxDamageDice"),
+    damage: DamageTypeSchema,
+    resource: z.string(),
+  }),
+  // A vial or flask is thrown this far, as with Bomber's Far Lobber.
+  z.strictObject({
+    kind: z.literal("farLobber"),
+    feet: z.number().int().min(5),
+  }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
 
@@ -726,6 +822,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
   perTier: ScaleStepSchema.optional(),
   // Spells it always gives, from the character level in the key.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.
+  spellsBySlot: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched.
   freeCast: z.literal(true).optional(),
   // Its damage is added to a hit's, so it takes that hit's damage type, as a Battle Master maneuver's die does.
@@ -744,17 +842,6 @@ export const FeatureSchema = ContentEntrySchema.extend({
   choices: z.lazy(() => z.array(ChoiceDefSchema)).default([]), // asked when it's taken as a class option
 }).strict();
 export type Feature = z.infer<typeof FeatureSchema>;
-
-export const SpellSchoolSchema = z.enum([
-  "abjuration",
-  "conjuration",
-  "divination",
-  "enchantment",
-  "evocation",
-  "illusion",
-  "necromancy",
-  "transmutation",
-]);
 
 export const ChoiceDefSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("subclass"), id: z.string() }),
@@ -792,6 +879,15 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     schools: z.array(SpellSchoolSchema).min(1).optional(),
     ritual: z.boolean().optional(), // only spells with the Ritual tag
     freeCast: z.literal(true).optional(), // each leveled spell picked is also cast once per Long Rest without a slot
+    from: z.array(ContentIdSchema).min(1).optional(), // only these, as a feat's own table
+    // The list of the version of this feat the character took, as "the list you chose for Magic Initiate".
+    listOf: ContentIdSchema.optional(),
+  }),
+  // The spellcasting ability of the feat's spells, as Magic Initiate's "Intelligence, Wisdom, or Charisma".
+  z.strictObject({
+    kind: z.literal("spellAbility"),
+    id: z.string(),
+    from: z.array(AbilitySchema).min(1),
   }),
   z.strictObject({
     kind: z.literal("option"),
@@ -877,6 +973,16 @@ export const FeatSchema = ContentEntrySchema.extend({
   abilityIncrease: z.array(AbilitySchema).min(1).optional(), // its Ability Score Increase: +1 to one of these
   // Its prerequisite, met by any of these: the species, a trait or lineage it has, or a feat taken.
   requires: z.array(ContentIdSchema).min(1).optional(),
+  // The spellcasting ability of the spells it gives: this one, the one it raised ("increased"), the one chosen for
+  // a feat taken earlier (`like`, matched by id or by version as Magic Initiate's), or with none, its spellAbility
+  // choice, else the character's own.
+  spellAbility: z
+    .union([
+      AbilitySchema,
+      z.literal("increased"),
+      z.strictObject({ like: ContentIdSchema }),
+    ])
+    .optional(),
 }).strict();
 export type Feat = z.infer<typeof FeatSchema>;
 
@@ -950,6 +1056,13 @@ export const WeaponSchema = ItemBaseSchema.extend({
   // A magic weapon made from a plain one, as a +2 Longsword: the plain weapon, and its own bonuses.
   baseWeapon: ContentIdSchema.optional(),
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
+  // A Thrown or Ammunition weapon's range in feet: normal, and long with Disadvantage.
+  range: z
+    .strictObject({
+      normal: z.number().int().min(5),
+      long: z.number().int().min(5),
+    })
+    .optional(),
 }).strict();
 export type Weapon = z.infer<typeof WeaponSchema>;
 
@@ -985,6 +1098,8 @@ const GearSchema = ItemBaseSchema.extend({
     ])
     .optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
+  // What using it does, as throwing a flask of Acid: an action that spends the item.
+  activation: ActivationSchema.optional(),
 }).strict();
 
 const ToolSchema = ItemBaseSchema.extend({
@@ -1182,10 +1297,12 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
     kind: z.literal("spells"),
     values: z.array(ContentIdSchema),
     freeCast: z.literal(true).optional(), // from a choice with `freeCast`
+    feat: ContentIdSchema.optional(), // the feat that asked, for its spells' ability
   }),
   z.strictObject({
     kind: z.literal("features"),
     values: z.array(ContentIdSchema),
+    feat: ContentIdSchema.optional(), // the feat or species that asked, for its spells' ability
   }),
   z.strictObject({
     kind: z.literal("weaponMastery"),
@@ -1202,6 +1319,11 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("abilities"),
     increases: AbilityIncreaseSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("spellAbility"),
+    ability: AbilitySchema,
+    feat: ContentIdSchema, // whose spells it's for: a feat, or the species
   }),
 ]);
 
