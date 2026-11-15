@@ -40,6 +40,7 @@ import {
 import { AimSchema, PickSchema } from "./combat/actions.ts";
 import { multiattackExtras } from "./combat/effects.ts";
 import { AVERAGE, makeJudge } from "./worth.ts";
+import { blockedSquares } from "./zones.ts";
 import { TACTIC } from "./tactics.ts";
 
 // The Dodge action (actions.ts), which the party weighs like any other choice.
@@ -92,7 +93,8 @@ export function stepToward(
       );
   // How far it is to walk from a square to a foe, round walls and through difficult terrain, ignoring
   // creatures. On a map with no walls that's the straight distance.
-  const { grid, walls = [] } = state.combat ?? {};
+  const grid = state.combat?.grid;
+  const walls = blockedSquares(state);
   const walkFrom = new Map<string, ReadonlyMap<string, number>>();
   const walk = (from: Square | null, foe: Actor): number => {
     if (!grid || walls.length === 0 || !from || !foe.position) {

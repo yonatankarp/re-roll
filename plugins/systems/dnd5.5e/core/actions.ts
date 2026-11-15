@@ -43,7 +43,7 @@ import { type Square, distanceFeet, pushTo, squareKey } from "./grid.ts";
 export { pushTo };
 import { FLEE } from "./legendary.ts";
 import { finalDamage, rollD20 } from "./rules.ts";
-import { type Ability, type Skill } from "./schemas.ts";
+import { ABILITY_NAMES, type Ability, type Skill } from "./schemas.ts";
 import {
   type ActiveEffect,
   type Actor,
@@ -84,6 +84,8 @@ import {
   weaponOf,
 } from "./tactics.ts";
 import { fogged, knownFoes, partySight } from "./fog.ts";
+import { hasteActing } from "./combat/durations.ts";
+import { placedFlag } from "./zones.ts";
 
 // The 2024 actions anyone can take in a fight besides attacking and casting (Dash, Disengage, Dodge, Help,
 // Hide, Ready, Search, Study, Grapple, Shove, standing up, escaping a grapple), the off-hand attack of a second Light weapon,
@@ -106,6 +108,7 @@ const SHOVE = `${TACTIC}shove`;
 const READY = `${TACTIC}ready`;
 const STAND = `${TACTIC}stand`;
 const ESCAPE = `${TACTIC}escape`;
+const BREAK_OUT = `${TACTIC}break-out`;
 export const OFFHAND = `${TACTIC}offhand`;
 export const POLE_STRIKE = `${TACTIC}pole-strike`;
 const OFFHAND_USED = "offhand";
@@ -218,9 +221,19 @@ function check(
   const stats = deriveStats(actor, context);
   const roll = rollD20(context.dice, {
     advantage:
-      advantage || hasFlag(actor, "advantage", "checks", stats, ability),
+      advantage ||
+      hasFlag(actor, "advantage", "checks", stats, ability) ||
+      placedFlag(actor, "advantage", "checks", context.state, context, ability),
     disadvantage:
       hasFlag(actor, "disadvantage", "checks", stats, ability) ||
+      placedFlag(
+        actor,
+        "disadvantage",
+        "checks",
+        context.state,
+        context,
+        ability,
+      ) ||
       hasCondition(actor, "poisoned", "frightened"),
     rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
   });
@@ -491,6 +504,20 @@ export function tacticOptions(
   options.push(...classOptions(actor, state, access));
   options.push(...bonusTacticOptions(actor, state, stats));
   if (!actor.budget.action) return options;
+  // Shut away, it can only try to get out, as from a Maze.
+  const seal = actor.activeEffects.find(
+    ({ modifier }) => modifier.kind === "sealed",
+  );
+  if (seal) {
+    if (seal.modifier.kind === "sealed" && seal.modifier.escape) {
+      const { ability, dc, skill } = seal.modifier.escape;
+      options.push({
+        id: encodeOption(BREAK_OUT, seal.casterId, seal.sourceId),
+        label: `Try to escape (${ABILITY_NAMES[ability]}, ${capitalized(skill)}, DC ${String(dc)})`,
+      });
+    }
+    return options;
+  }
   // Everyone else's turns are played by tacticalPolicy, so they're offered only what it can pick, which also
   // spares working out every Study and Shove on every monster's turn.
   const full = actor.id === PLAYER_ACTOR;
@@ -506,6 +533,25 @@ export function tacticOptions(
       id: DASH,
       label: `Dash (${String(extra)} ft more this turn)`,
     });
+  }
+  // Haste's additional action: Dash, Disengage or Hide besides its one attack.
+  if (hasteActing(actor)) {
+    options.push({
+      id: DISENGAGE,
+      label: "Disengage (no Opportunity Attacks this turn)",
+    });
+    if (
+      !hasTactic(actor, "hidden") &&
+      !standing(knownFoes(state, actor, access)).some((foe) =>
+        within5(actor, foe),
+      )
+    ) {
+      options.push({
+        id: HIDE,
+        label: `Hide (Stealth, DC ${String(HIDE_DC)})`,
+      });
+    }
+    return options;
   }
   options.push({
     id: DODGE,
@@ -1009,6 +1055,39 @@ export function runTactic(
         frames: done,
       };
     }
+    case BREAK_OUT: {
+      const seal = actor.activeEffects.find(
+        (item) => item.sourceId === detail && item.casterId === targetId,
+      );
+      if (seal?.modifier.kind !== "sealed" || !seal.modifier.escape) {
+        throw new Error(`${actor.id} isn't sealed away by ${targetId}`);
+      }
+      const { ability, dc, skill } = seal.modifier.escape;
+      const rolled = check(
+        actor,
+        skill,
+        ability,
+        dc,
+        () => `Escape (${capitalized(skill)})`,
+        context,
+      );
+      return {
+        events: [
+          spend("action"),
+          ...rolled.events,
+          ...(rolled.success
+            ? [
+                dndEvent(`${NS}:effectEnded`, {
+                  actor: actor.id,
+                  sourceId: seal.sourceId,
+                  casterId: seal.casterId,
+                }),
+              ]
+            : []),
+        ],
+        frames: done,
+      };
+    }
     case ESCAPE: {
       // An Athletics or Acrobatics check, whichever is better, against the grapple's escape DC.
       const grapple = grapplesOn(actor).find(
@@ -1415,6 +1494,11 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   }
   const ids = new Set(decision.options.map((option) => option.id));
   if (ids.has(STAND)) return STAND;
+  // Shut in a Maze, getting out is all there is to do.
+  const breakOut = decision.options.find((option) =>
+    option.id.startsWith(encodeOption(BREAK_OUT, "")),
+  );
+  if (breakOut) return breakOut.id;
   const escapes = decision.options.filter((option) =>
     option.id.startsWith(encodeOption(ESCAPE, "")),
   );

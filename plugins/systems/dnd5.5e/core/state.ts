@@ -6,8 +6,10 @@ import {
   ConditionSchema,
   DamageSchema,
   DamageTypeSchema,
+  AreaEffectSchema,
   LootSchema,
   ModifierSchema,
+  ZoneKindSchema,
 } from "./schemas.ts";
 import { settleForms } from "./forms.ts";
 
@@ -46,6 +48,7 @@ export const FRAME_KINDS = [
   "legendaryAction",
   "legendaryTurn",
   "lingeringTick",
+  "sunlightTick",
   "masteryHit",
   "masteryMiss",
   "metamagic",
@@ -66,6 +69,7 @@ export const FRAME_KINDS = [
   "teleport",
   "useAction",
   "useItem",
+  "zoneTick",
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -103,15 +107,24 @@ const ActiveEffectSchema = z.strictObject({
       kind: z.literal("condition"),
       condition: ConditionSchema,
     }),
+    // Haste's lethargy, waiting for the spell to end (combat/durations.ts).
+    z.strictObject({ kind: z.literal("lethargy") }),
+    // Time Stop: the turns in a row its caster has left, as rolled (combat/durations.ts).
+    z.strictObject({ kind: z.literal("extraTurns"), turns: z.number().int() }),
     // Another creature's shape, by its stat block (core/forms.ts).
     z.strictObject({ kind: z.literal("form"), monster: ContentIdSchema }),
-    // An area a spell left on the map, kept on its caster (core/zones.ts).
+    // An area a spell left on the map, kept on its caster (core/zones.ts). With `follows` it is centred on the
+    // caster wherever it goes; `area` is what it does, with its save DC as cast; `blocks` are a wall's squares.
     z.strictObject({
       kind: z.literal("zone"),
-      zone: z.enum(["darkness", "fog", "thorns", "light", "dim"]),
+      zone: ZoneKindSchema,
       at: z.strictObject({ x: z.number().int(), y: z.number().int() }),
       radius: z.number().int(),
       damage: z.array(DamageSchema).optional(),
+      follows: z.literal(true).optional(),
+      area: AreaEffectSchema.optional(),
+      blocks: z.array(z.string()).optional(),
+      name: z.string().optional(), // the action that left it
     }),
     // What an action anyone can take, such as Dodge, or a weapon mastery, leaves behind (core/tactics.ts).
     z.strictObject({
@@ -123,6 +136,15 @@ const ActiveEffectSchema = z.strictObject({
   ]),
   // "casterNextTurnEnd" becomes "casterTurnEnd" when the caster's next turn starts, and ends with that turn.
   ends: EndsSchema,
+  // When it runs out, counted in rounds: at the start or end of `actor`'s turn in `round`, or once a later round
+  // begins if that turn never comes (combat/durations.ts). Missing in older saves, whose timed effects lasted the fight.
+  lasts: z
+    .strictObject({
+      actor: z.string(),
+      round: z.number().int(),
+      at: z.enum(["start", "end"]),
+    })
+    .optional(),
   repeatSave: z
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
@@ -267,6 +289,7 @@ export const StateSchema = z.strictObject({
       damageToParty: z.number().optional(),
       // The map is covered until the party sees it (fog.ts). Missing in older saves, whose fights show all of it.
       fog: z.literal(true).optional(),
+      sunlight: z.literal(true).optional(), // fought under the sky in daylight (zones.ts)
     })
     .nullable(),
 });
@@ -313,6 +336,7 @@ const CombatStartedSchema = z.strictObject({
   lair: LairSchema.optional(),
   damageToParty: z.number().optional(),
   fog: z.literal(true).optional(),
+  sunlight: z.literal(true).optional(),
 });
 const TreasureFoundSchema = z.strictObject({
   actor: z.string(), // who carries the items
@@ -360,6 +384,7 @@ const BudgetSpentSchema = z.strictObject({
 const ResourceSpentSchema = z.strictObject({
   actor: z.string(),
   resource: z.string(),
+  amount: z.number().int().min(1).optional(), // so many at once, as a zone's damage dealt; one when missing
 });
 const ResourceRestoredSchema = z.strictObject({
   actor: z.string(),
@@ -502,6 +527,9 @@ export const EVENT_SCHEMAS = {
   [`${NS}:traded`]: TradedSchema,
   // A dying creature someone stabilized with the Help action: Stable, as after three successes.
   [`${NS}:stabilized`]: ActorOnlySchema,
+  // The creature whose turn it is takes another, as under Time Stop: its action, Bonus Action, Reaction and
+  // movement come back, and the turn order stays where it is.
+  [`${NS}:turnRepeated`]: ActorOnlySchema,
 } as const;
 
 export type EventKind = keyof typeof EVENT_SCHEMAS;
@@ -874,8 +902,18 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
             ? {}
             : { damageToParty: data.damageToParty }),
           ...(data.fog ? { fog: true as const } : {}),
+          ...(data.sunlight ? { sunlight: true as const } : {}),
         },
       };
+    }
+    case `${NS}:turnRepeated`: {
+      const data = payload(ActorOnlySchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        budget: { action: true, bonusAction: true, reaction: true },
+        usedThisTurn: [],
+        moved: 0,
+      }));
     }
     case `${NS}:combatEnded`:
       return endCombat(state);
@@ -948,7 +986,8 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         ...actor,
         resourcesSpent: {
           ...actor.resourcesSpent,
-          [data.resource]: (actor.resourcesSpent[data.resource] ?? 0) + 1,
+          [data.resource]:
+            (actor.resourcesSpent[data.resource] ?? 0) + (data.amount ?? 1),
         },
       }));
     }

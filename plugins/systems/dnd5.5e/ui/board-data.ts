@@ -90,6 +90,18 @@ export interface Move {
   readonly provokes: number; // how many enemies get an Opportunity Attack
 }
 
+// A lasting area on the map, as the board draws it: a cloud, an aura, light, or a wall's squares.
+export interface AreaView {
+  readonly key: string; // the same area keeps its key as it moves
+  readonly kind: string; // darkness, fog, thorns, light, dim, sunlight, area or wall
+  readonly x: number; // its centre square
+  readonly y: number;
+  readonly reach: number; // squares from the centre to its edge
+  readonly name: string;
+  readonly foe: boolean; // an enemy's, so a harmful area shows as a threat
+  readonly blocks?: readonly string[]; // a wall's squares, as "x,y"
+}
+
 export interface BoardExtra {
   readonly moves?: readonly Move[];
   readonly reach?: Readonly<Record<string, number>>; // melee reach in feet, by creature
@@ -97,6 +109,7 @@ export interface BoardExtra {
   readonly shapes?: Readonly<Record<string, AreaTargeting>>; // the player's area actions, by id
   readonly cover?: Readonly<Record<string, number>>; // +2 or +5 against the player, by creature
   readonly terrain?: Terrain | null; // the battle map's ground, cover and light
+  readonly areas?: readonly AreaView[]; // clouds, auras, light and walls the party knows of
   readonly vitals?: Readonly<Record<string, Vitals>>; // by creature
   // What the party has seen ("x,y" squares), and sees now; missing or null when the whole map shows.
   readonly fog?: {

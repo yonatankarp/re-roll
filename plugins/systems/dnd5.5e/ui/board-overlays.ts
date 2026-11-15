@@ -1,6 +1,7 @@
 import { PLAYER_ACTOR } from "#sdk";
 import { ALL, MOVE, SQUARE, parseOption } from "../core/combat/ids.ts";
 import type { Terrain } from "../core/state.ts";
+import type { AreaView } from "./board-data.ts";
 import {
   type AreaTargeting,
   BACK,
@@ -52,6 +53,58 @@ export function showGround(ctx: BoardContext, terrain: Terrain | null): void {
       ctx.ground.append(square);
     }
   }
+}
+
+// Lasting areas as tinted patches over the squares each covers, kept by key so one that moves with its creature
+// glides along with it, and a wall as its squares. A foe's area shows red and a friend's blue; light glows warm.
+export function showAreas(ctx: BoardContext, areas: readonly AreaView[]): void {
+  const shown = JSON.stringify([areas, ctx.grid]);
+  if (shown === ctx.areasShown) return;
+  ctx.areasShown = shown;
+  const kept = new Map<string, HTMLElement>();
+  for (const node of ctx.areas.children) {
+    if (node instanceof HTMLElement) kept.set(node.dataset.key ?? "", node);
+  }
+  const live = new Set<string>();
+  const grid = ctx.grid;
+  for (const area of grid ? areas : []) {
+    const pieces = area.blocks
+      ? area.blocks.flatMap((key) => {
+          const match = SQUARE.exec(key);
+          return match
+            ? [
+                {
+                  key: `${area.key}|${key}`,
+                  x: Number(match[1]),
+                  y: Number(match[2]),
+                  reach: 0,
+                },
+              ]
+            : [];
+        })
+      : [{ key: area.key, x: area.x, y: area.y, reach: area.reach }];
+    for (const { key, x, y, reach } of pieces) {
+      if (!grid) continue;
+      let node = kept.get(key);
+      if (!node) {
+        node = el("div", "dnd-area");
+        node.dataset.key = key;
+        ctx.areas.append(node);
+      }
+      node.className = `dnd-area ${area.blocks ? "wall" : area.kind}${area.foe ? " foe" : ""}`;
+      node.title = area.name;
+      const left = Math.max(0, x - reach);
+      const top = Math.max(0, y - reach);
+      const right = Math.min(grid.width - 1, x + reach);
+      const bottom = Math.min(grid.height - 1, y + reach);
+      node.style.left = `${String((left / grid.width) * 100)}%`;
+      node.style.top = `${String((top / grid.height) * 100)}%`;
+      node.style.width = `${String(((right - left + 1) / grid.width) * 100)}%`;
+      node.style.height = `${String(((bottom - top + 1) / grid.height) * 100)}%`;
+      live.add(key);
+    }
+  }
+  for (const [key, node] of kept) if (!live.has(key)) node.remove();
 }
 
 // Parchment over what the party has never seen, and a sepia shade over what it saw once but doesn't see now.

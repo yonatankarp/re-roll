@@ -405,6 +405,43 @@ const BOARD_CSS = `
 .dnd-route.risky polyline { stroke: #ff6a55; }
 .dnd-blast { position: absolute; inset: 0; pointer-events: none; }
 .dnd-ground { position: absolute; inset: 0; pointer-events: none; }
+/* Lasting areas: a cloud, an aura, light or a wall. One that moves with its creature glides along with it. */
+.dnd-areas { position: absolute; inset: 0; pointer-events: none; }
+.dnd-area {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 30%;
+  border: 1px dashed rgb(255 240 205 / 45%);
+  transition: left 0.35s ease, top 0.35s ease;
+  animation: dnd-area-in 0.5s ease;
+}
+.dnd-area.darkness { background: rgb(0 0 0 / 58%); border-color: rgb(0 0 0 / 45%); }
+.dnd-area.fog {
+  background: radial-gradient(circle, rgb(232 230 222 / 55%), rgb(210 208 200 / 35%) 70%);
+  border-color: rgb(240 240 235 / 40%);
+}
+.dnd-area.thorns {
+  background: repeating-linear-gradient(45deg, rgb(70 110 40 / 30%) 0 3px, transparent 3px 8px);
+  border-color: rgb(120 160 70 / 55%);
+}
+.dnd-area.light, .dnd-area.dim, .dnd-area.sunlight { border: none; border-radius: 50%; }
+.dnd-area.light { background: radial-gradient(circle, rgb(255 222 150 / 24%), transparent 72%); }
+.dnd-area.dim { background: radial-gradient(circle, rgb(255 210 140 / 12%), transparent 72%); }
+.dnd-area.sunlight { background: radial-gradient(circle, rgb(255 240 170 / 32%), rgb(255 240 170 / 8%) 75%); }
+.dnd-area.area { background: rgb(80 140 255 / 14%); border-color: rgb(130 175 255 / 65%); }
+.dnd-area.area.foe { background: rgb(215 55 35 / 15%); border-color: rgb(255 115 90 / 65%); }
+.dnd-area.wall {
+  border-radius: 2px;
+  border: 1px solid rgb(255 240 205 / 55%);
+  background: rgb(70 60 48 / 78%);
+}
+@keyframes dnd-area-in {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dnd-area { transition: none; animation: none; }
+}
 /* The fog of war, stretched from one pixel a square; the smoothing feathers its edge. */
 .dnd-fog { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .dnd-fog[hidden] { display: none; }

@@ -32,6 +32,17 @@ import { speedOf } from "../tactics.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
 import { encodeOption } from "./ids.ts";
 import { swallowerOf } from "./swallow.ts";
+import { hasteActing, limitsOf } from "./durations.ts";
+import { ownZoneAction } from "./areas.ts";
+import {
+  barredKeys,
+  blockedSquares,
+  inZone,
+  sealed,
+  slowingKeys,
+  zonesOn,
+} from "../zones.ts";
+import { spellLevelOf } from "./dispel.ts";
 import {
   type Ability,
   CompanionSchema,
@@ -103,6 +114,7 @@ export function rollBonus(
   to: "attacks" | "saves" | "checks",
   context: Context,
   skill?: Skill, // the check's skill, for a bonus that only adds to one
+  ability?: Ability, // the save's ability, for a bonus that only adds to one
 ): number {
   const seen = new Set<string>();
   let total = 0;
@@ -110,6 +122,7 @@ export function rollBonus(
     const { modifier } = effect;
     if (modifier.kind !== "bonus" || modifier.to !== to) continue;
     if (modifier.skill && modifier.skill !== skill) continue;
+    if (modifier.ability && modifier.ability !== ability) continue;
     if (seen.has(effect.sourceId)) continue;
     seen.add(effect.sourceId);
     const caster = context.state.actors[effect.casterId] ?? actor;
@@ -125,7 +138,8 @@ export function rollBonus(
     if (
       modifier.kind === "bonus" &&
       modifier.to === to &&
-      (!modifier.skill || modifier.skill === skill)
+      (!modifier.skill || modifier.skill === skill) &&
+      (!modifier.ability || modifier.ability === ability)
     ) {
       total += rollAmount(modifier.amount, stats, context.dice);
     }
@@ -205,7 +219,11 @@ export function moveSquares(
     new Set(
       list.flatMap((item) => (item.position ? [squareKey(item.position)] : [])),
     );
-  const walls = state.combat?.walls ?? [];
+  const walls = blockedSquares(state);
+  // A barrier it can't cross stops it as a wall would, and a zone that slows it costs double.
+  const barred = barredKeys(actor, state);
+  const slowing = slowingKeys(actor, state);
+  const difficult = difficultSquares(state);
   return reachableSquares(
     actor.position,
     speedLeft(actor, stats),
@@ -215,9 +233,10 @@ export function moveSquares(
         others.filter((item) => item.side !== actor.side && !isDown(item)),
       ),
       ...walls,
+      ...barred,
     ]),
-    new Set([...keys(others), ...walls]),
-    difficultSquares(state),
+    new Set([...keys(others), ...walls, ...barred]),
+    slowing.length > 0 ? new Set([...difficult, ...slowing]) : difficult,
     new Set(walls),
   );
 }
@@ -324,8 +343,16 @@ export function canAfford(
   actor: Actor,
   stats: Stats,
 ): boolean {
-  const { carrying } = action.activation;
+  const { carrying, resolution } = action.activation;
   if (carrying && !actor.inventory.includes(carrying)) return false;
+  // Haste's additional action takes only a weapon attack, or Dash, Disengage or Hide (actions.ts).
+  if (
+    hasteActing(actor) &&
+    action.activation.cost.includes("action") &&
+    (resolution.kind !== "attack" || resolution.attack.type !== "weapon")
+  ) {
+    return false;
+  }
   return action.activation.cost.every((cost) => {
     if (cost === "action") return actor.budget.action;
     if (cost === "bonusAction") return actor.budget.bonusAction;
@@ -358,7 +385,30 @@ export function inReach(
     .filter((item) => !isDead(item))
     .filter((item) => fitsType(item, targeting, access))
     .filter((item) => reaches(action, actor, item))
-    .filter((item) => !behindTotalCover(state, actor, item));
+    .filter((item) => !behindTotalCover(state, actor, item))
+    .filter((item) => !walledApart(actor, item, action, state, access));
+}
+
+// Whether something keeps `target` out of `actor`'s reach: either is shut away (Resilient Sphere, Maze), the actor
+// stands in a zone where its spell can't be cast or the target in one its spell can't reach into (Antimagic Field,
+// Globe of Invulnerability).
+export function walledApart(
+  actor: Actor,
+  target: Actor,
+  action: KnownAction,
+  state: DndState,
+  access: ContentAccess,
+): boolean {
+  if (actor.id !== target.id && (sealed(actor) || sealed(target))) return true;
+  const level = spellLevelOf(action.id, actor, access);
+  if (level === null) return false;
+  return zonesOn(target, state, access).some(
+    (zone) =>
+      zone.area?.noSpells === "all" ||
+      (zone.area?.spellShield !== undefined &&
+        level <= zone.area.spellShield &&
+        !inZone(zone, actor.position)),
+  );
 }
 
 // How many creatures, darts or rays an action takes when cast with this slot.
@@ -396,7 +446,8 @@ export function findAction(
 ): KnownAction {
   const action =
     deriveStats(actor, context).actions.find((item) => item.id === id) ??
-    bossAction(actor, id, context);
+    bossAction(actor, id, context) ??
+    ownZoneAction(actor, id, context);
   if (!action) throw new Error(`${actor.id} has no action ${id}`);
   const above = (slotLevel ?? 0) - (action.spellLevel ?? 0);
   return action.upcast
@@ -430,10 +481,13 @@ export function attackRoutine(
   ) {
     return [action.id];
   }
-  return (
+  const routine =
     stats.routines?.[action.id] ??
-    Array<string>(stats.multiattack).fill(action.id)
-  );
+    Array<string>(stats.multiattack).fill(action.id);
+  // Slow, or Haste's extra action, allows one attack.
+  return limitsOf(actor).oneAttack || hasteActing(actor)
+    ? routine.slice(0, 1)
+    : routine;
 }
 
 // The slot a cast spends: the one chosen, or else the lowest that will do.

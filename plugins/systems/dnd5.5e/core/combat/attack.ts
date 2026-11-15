@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { placedFlag } from "../zones.ts";
 import {
   type Actor,
   applyDndEvent,
@@ -433,6 +434,8 @@ export function runAttackRoll(
     unseenAttacker ||
     hasFlag(attacker, "advantage", "attacks", stats, ability) ||
     hasFlag(target, "advantage", "attacksAgainst", targetStats) ||
+    placedFlag(attacker, "advantage", "attacks", state, context, ability) ||
+    placedFlag(target, "advantage", "attacksAgainst", state, context) ||
     invisibleTo(attacker, target) ||
     hasCondition(
       target,
@@ -465,6 +468,8 @@ export function runAttackRoll(
       undefined,
       stats.creatureType,
     ) ||
+    placedFlag(attacker, "disadvantage", "attacks", state, context, ability) ||
+    placedFlag(target, "disadvantage", "attacksAgainst", state, context) ||
     hasCondition(
       attacker,
       "blinded",

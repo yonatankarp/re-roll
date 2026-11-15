@@ -20,7 +20,7 @@ import {
   isDown,
 } from "./state.ts";
 import { hasTactic } from "./tactics.ts";
-import { zonesOf } from "./zones.ts";
+import { blockedSquares, zonesOf } from "./zones.ts";
 import { enemies, moveSquares } from "./combat/queries.ts";
 import { walksOf } from "./combat/movement.ts";
 import { type Context } from "./combat/queries.ts";
@@ -63,11 +63,15 @@ const NOBODY: ReadonlySet<string> = new Set();
 const MAPS_KEPT = 64;
 const lines = new Map<string, Map<string, ReadonlySet<string>>>();
 const mapKeys = new WeakMap<object, string>();
-function linesOf(combat: Combat, grid: Grid): Map<string, ReadonlySet<string>> {
-  const owner = combat.walls ?? grid;
+// A spell's wall makes a new list, so its lines are kept apart from the bare map's.
+function linesOf(
+  walls: readonly string[],
+  grid: Grid,
+): Map<string, ReadonlySet<string>> {
+  const owner = walls.length > 0 ? walls : grid;
   const key =
     mapKeys.get(owner) ??
-    `${String(grid.width)}x${String(grid.height)}:${(combat.walls ?? []).join(";")}`;
+    `${String(grid.width)}x${String(grid.height)}:${walls.join(";")}`;
   mapKeys.set(owner, key);
   const known = lines.get(key);
   if (known) return known;
@@ -76,14 +80,15 @@ function linesOf(combat: Combat, grid: Grid): Map<string, ReadonlySet<string>> {
   lines.set(key, made);
   return made;
 }
-function sightFrom(combat: Combat, from: Square): ReadonlySet<string> {
-  const grid = combat.grid;
+function sightFrom(state: DndState, from: Square): ReadonlySet<string> {
+  const grid = state.combat?.grid;
   if (!grid) return NOBODY;
-  const byOrigin = linesOf(combat, grid);
+  const blocked = blockedSquares(state);
+  const byOrigin = linesOf(blocked, grid);
   const start = squareKey(from);
   const known = byOrigin.get(start);
   if (known) return known;
-  const walls = new Set(combat.walls);
+  const walls = new Set(blocked);
   const seen = new Set([start]);
   const tried = new Set([start]);
   const queue = [from];
@@ -126,8 +131,11 @@ function darkvisionFor(actor: Actor, access: ContentAccess): number {
 // Whether every square in line of sight is plainly seen: no zone, and nothing marked dim or dark.
 function allLit(state: DndState): boolean {
   const terrain = state.combat?.terrain;
+  // Light a spell or a monster sheds changes nothing where all is bright already.
   return (
-    zonesOf(state).length === 0 &&
+    zonesOf(state).every(
+      (zone) => zone.zone !== "darkness" && zone.zone !== "fog",
+    ) &&
     (!terrain ||
       (terrain.light === "bright" &&
         terrain.dim.length === 0 &&
@@ -144,7 +152,7 @@ function seenFrom(
 ): readonly string[] {
   const combat = state.combat;
   if (!combat) return [];
-  const sight = sightFrom(combat, at);
+  const sight = sightFrom(state, at);
   if (allLit(state)) return [...sight];
   const standing = { ...viewer, position: at };
   const feet = darkvisionFor(viewer, access);
@@ -181,7 +189,7 @@ export function partySight(state: DndState, access: ContentAccess): PartySight {
   // The search outward can miss a square the sight rules' own line reaches, such as one along the map's edge,
   // so a foe is also in view when a line runs between it and a party member either way: what can aim at the
   // party, or be aimed at, is seen.
-  const walls = new Set(state.combat?.walls);
+  const walls = new Set(blockedSquares(state));
   const inView = (at: Square): boolean =>
     viewers.some(
       (viewer) =>
@@ -374,7 +382,7 @@ export function searchStep(
     return null;
   }
   const seen = partySight(state, access).squares;
-  const walls = new Set(combat.walls);
+  const walls = new Set(blockedSquares(state));
   const [nearest] = reachableSquares(
     actor.position,
     Infinity,

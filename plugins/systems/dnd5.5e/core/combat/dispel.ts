@@ -7,7 +7,12 @@ import {
   hasCondition,
   NS,
 } from "../state.ts";
-import { type Condition, MonsterSchema, SpellSchema } from "../schemas.ts";
+import {
+  type Condition,
+  MonsterSchema,
+  type Spell,
+  SpellSchema,
+} from "../schemas.ts";
 import { slugOf } from "../import/spells.ts";
 import { distanceFeet, type Square } from "../grid.ts";
 
@@ -51,9 +56,17 @@ export function spellLevelOf(
   caster: Actor | undefined,
   access: ContentAccess,
 ): number | null {
+  return spellOf(sourceId, caster, access)?.level ?? null;
+}
+
+// The spell an action casts: a character's own, or the one a monster's action is named for.
+export function spellOf(
+  sourceId: string,
+  caster: Actor | undefined,
+  access: ContentAccess,
+): Spell | null {
   const own = /^spell:(.+?)(?::free)?$/.exec(sourceId)?.[1];
-  if (own)
-    return SpellSchema.safeParse(access.content(own)).data?.level ?? null;
+  if (own) return SpellSchema.safeParse(access.content(own)).data ?? null;
   const index = /^monster:(\d+)$/.exec(sourceId)?.[1];
   if (index === undefined || caster?.source.kind !== "monster") return null;
   const monster = lookup(access, MonsterSchema, caster.source.statBlockId);
@@ -61,9 +74,7 @@ export function spellLevelOf(
   if (!name) return null;
   const suffix = `:spell/${slugOf(name)}`;
   const id = access.contentIds().find((item) => item.endsWith(suffix));
-  return id
-    ? (SpellSchema.safeParse(access.content(id)).data?.level ?? null)
-    : null;
+  return id ? (SpellSchema.safeParse(access.content(id)).data ?? null) : null;
 }
 
 // A character's spell, or a monster's action that casts one.

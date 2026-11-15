@@ -26,6 +26,7 @@ import { deriveItem } from "./variants.ts";
 import { attackFrames } from "./combat/attack.ts";
 import { movementFrames } from "./combat/movement.ts";
 import { turnFrames } from "./combat/turn.ts";
+import { areaFrames } from "./combat/areas.ts";
 import {
   AfterMoveSchema,
   MasteryHitSchema,
@@ -123,8 +124,10 @@ import {
   StateSchema,
   applyDndEvent,
   dndEvent,
+  frame,
   freshActor,
 } from "./state.ts";
+import { afterActionEvents } from "./combat/durations.ts";
 import { checkBonus, deriveStats, lookup } from "./stats.ts";
 import { withReveal } from "./fog.ts";
 
@@ -392,6 +395,7 @@ export const dnd55e = defineSystem<DndState>({
     ...movementFrames,
     ...attackFrames,
     ...turnFrames,
+    ...areaFrames,
     ...shopFrames,
     ...classOptionFrames,
     [`${NS}:takeAction`]: frameHandler({
@@ -423,10 +427,17 @@ export const dnd55e = defineSystem<DndState>({
     }),
     [`${NS}:afterAction`]: frameHandler({
       schema: ActorPayload,
-      run: (payload, context: Context) =>
-        keepsActing(payload.actor, context)
+      run: (payload, context: Context) => {
+        // Slow's one action, or Haste's extra one, settles first and is looked at again.
+        const actor = context.state.actors[payload.actor];
+        const limited = actor ? afterActionEvents(actor) : [];
+        if (limited.length > 0) {
+          return { events: limited, frames: [frame("afterAction", payload)] };
+        }
+        return keepsActing(payload.actor, context)
           ? {}
-          : runAfterAction(payload, context),
+          : runAfterAction(payload, context);
+      },
     }),
   }),
   settings: [

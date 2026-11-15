@@ -26,7 +26,7 @@ import {
   rollAmount,
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
-import { thornHits } from "../zones.ts";
+import { sealed, thornHits } from "../zones.ts";
 import { concentrationFrame, dealEvents } from "./effects.ts";
 import {
   coverBetween,
@@ -116,6 +116,7 @@ export function provokers(
     if (
       !foe.budget.reaction ||
       isDown(foe) ||
+      sealed(foe) ||
       hasCondition(foe, ...INCAPACITATING) ||
       (disengaged && !hasPassive(deriveStats(foe, access), "sentinel"))
     ) {

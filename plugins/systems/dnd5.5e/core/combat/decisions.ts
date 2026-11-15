@@ -22,6 +22,7 @@ import { AIM_AREA, PICK } from "../targeting.ts";
 import { fleeOptions } from "../legendary.ts";
 import { PregenSchema } from "../schemas.ts";
 import { heroOptions } from "../character-sheet.ts";
+import { silencedSpells } from "../zones.ts";
 import {
   actorOf,
   canAfford,
@@ -46,9 +47,11 @@ function turnOptions(
   }
   const stats = deriveStats(actor, access);
   const options: Decision["options"][number][] = [];
+  const hushed = silencedSpells(actor, state, access);
   for (const action of stats.actions) {
     const { activation } = action;
     if (activation.trigger || !canAfford(action, actor, stats)) continue;
+    if (hushed?.(action)) continue;
     const { targeting } = activation;
     const add = (target: string, label: string): void => {
       options.push(...withUpcasts(action, actor, stats, target, label));

@@ -64,6 +64,7 @@ import {
 } from "./effects.ts";
 import { keepsHidden, metamagicCast } from "../metamagic.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
+import { spellFumble, timeStopEnds } from "./durations.ts";
 
 // Taking an action on a turn: casting it, choosing its targets one by one, or aiming its area.
 
@@ -169,9 +170,19 @@ function castAction(
         context,
       );
   if (counter) return { frames: [counter] };
+  const fumbled = spellFumble(actor, action, context);
+  if (fumbled) {
+    return {
+      events: [...payCosts(action, actor, context, slotLevel), fumbled],
+      frames: [CHECK_END, frame("afterAction", { actor: actor.id })],
+    };
+  }
   const picked = typeof target === "string" ? null : target;
   const targetId = typeof target === "string" ? target : ALL;
   const { projectiles, resolution } = action.activation;
+  const caught = picked
+    ? picked.map((id) => actorOf(state, id))
+    : resolveTargets(targetId, action, actor, context);
   const result: SystemResult =
     projectiles !== undefined && resolution.kind !== "save"
       ? {
@@ -187,9 +198,7 @@ function castAction(
       : resolveAction(
           action,
           actor,
-          picked
-            ? picked.map((id) => actorOf(state, id))
-            : resolveTargets(targetId, action, actor, context),
+          caught,
           context,
           slotLevel,
           false,
@@ -198,6 +207,7 @@ function castAction(
   return {
     events: [
       ...payCosts(action, actor, context, slotLevel),
+      ...timeStopEnds(actor, caught),
       ...lightAttackEvents(actor, actionId, context),
       // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.
       ...(resolution.kind === "attack" || keepsHidden(actor, actionId)

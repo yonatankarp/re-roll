@@ -12,6 +12,7 @@ import {
   closeMenu,
   showCells,
   showFog,
+  showAreas,
   showGround,
   showPickBar,
 } from "./board-overlays.ts";
@@ -66,6 +67,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   reachZone.hidden = true;
   const blast = el("div", "dnd-blast");
   const ground = el("div", "dnd-ground"); // difficult terrain, cover and shadow, faint under everything
+  const areas = el("div", "dnd-areas"); // clouds, auras, light and walls, under the fog
   const fog = document.createElement("canvas");
   fog.className = "dnd-fog";
   fog.setAttribute("aria-hidden", "true");
@@ -79,6 +81,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   pickBar.hidden = true;
   field.append(
     ground,
+    areas,
     fog,
     reachZone,
     blast,
@@ -109,6 +112,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     reachZone,
     blast,
     ground,
+    areas,
     fog,
     routeCost,
     menu,
@@ -118,6 +122,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     decisionSeen: null,
     cursorHome: false,
     groundShown: "",
+    areasShown: "",
     fogShown: "",
     tokens: new Map(),
     queue: [],
@@ -233,6 +238,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     }
     if (settle) {
       showGround(ctx, extraOf(update).terrain ?? null);
+      showAreas(ctx, extraOf(update).areas ?? []);
       // The shield shows the cover a foe has while the player has something to aim at it.
       const aimable = new Set(
         update.decision?.actor === PLAYER_ACTOR
