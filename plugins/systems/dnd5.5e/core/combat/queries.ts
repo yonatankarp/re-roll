@@ -101,7 +101,7 @@ export function hasPassive(stats: Stats, kind: Passive["kind"]): boolean {
 // Effects from one source count once, so casting Bless twice can't add two d4s.
 export function rollBonus(
   actor: Actor,
-  to: "attacks" | "saves" | "checks",
+  to: "attacks" | "saves" | "checks" | "attacksAgainst",
   context: Context,
   skill?: Skill, // the check's skill, for a bonus that only adds to one
 ): number {
@@ -357,7 +357,10 @@ export function inReach(
         )
       : allies(state, actor)
   )
-    .filter((item) => !isDead(item))
+    .filter(
+      (item) =>
+        isDead(item) === ("dead" in targeting && targeting.dead === true),
+    )
     .filter((item) => fitsType(item, targeting, access))
     .filter((item) => reaches(action, actor, item))
     .filter((item) => !behindTotalCover(state, actor, item));

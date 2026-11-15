@@ -583,7 +583,9 @@ export function invisibleTo(target: Actor, viewer: Actor): boolean {
   return (
     hasCondition(target, "invisible") &&
     !viewer.activeEffects.some(
-      ({ modifier }) => modifier.kind === "seeInvisible",
+      ({ modifier }) =>
+        modifier.kind === "seeInvisible" ||
+        (modifier.kind === "darkvision" && modifier.truesight === true),
     )
   );
 }

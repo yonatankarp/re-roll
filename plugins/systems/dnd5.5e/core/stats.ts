@@ -82,6 +82,7 @@ export interface KnownAction {
   readonly upcast?: Spell["upcast"];
   readonly hitType?: true; // its damage takes the type of the hit it adds to, as a maneuver's die does
   readonly rolled?: true; // taken only when a randomAction picks it, as one eye ray
+  readonly concentrates?: true; // casting it starts Concentration even with no lasting effect, as Flame Blade
 }
 
 export interface Stats {
@@ -604,7 +605,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
 
   for (const spellId of untrainedArmor ? [] : knownSpells) {
     const spell: Spell = lookup(access, SpellSchema, spellId);
-    if (spell.activation && doesSomething(spell.activation.resolution)) {
+    const lasting =
+      spell.lasting &&
+      typeof spell.duration === "object" &&
+      "concentration" in spell.duration
+        ? spell.lasting
+        : undefined;
+    if (
+      spell.activation &&
+      (lasting || doesSomething(spell.activation.resolution))
+    ) {
       actions.push({
         id: `spell:${spellId}`,
         name: spell.name,
@@ -618,6 +628,22 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
             : spell.activation,
         spellLevel: spell.level,
         upcast: spell.upcast,
+        ...(lasting ? { concentrates: true as const } : {}),
+      });
+    }
+    // What the spell lets its caster do while it holds, as Flame Blade's attack, is no cast of its own.
+    // shortcut: it's at the spell's own level, not the slot's it was cast with.
+    if (
+      lasting &&
+      [`spell:${spellId}`, `spell:${spellId}:free`].includes(
+        actor.concentratingOn ?? "",
+      )
+    ) {
+      actions.push({
+        id: `lasting:${spellId}`,
+        name: spell.name,
+        activation: lasting,
+        spellLevel: null,
       });
     }
   }

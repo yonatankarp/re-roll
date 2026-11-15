@@ -29,7 +29,11 @@ import {
   rollSave,
 } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { runAdvanceTurn } from "../plugins/systems/dnd5.5e/core/combat/turn.ts";
-import { actorOf } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import {
+  actorOf,
+  inReach,
+} from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import { darkvisionOf } from "../plugins/systems/dnd5.5e/core/sight.ts";
 import { finalDamage } from "../plugins/systems/dnd5.5e/core/rules.ts";
 import { sizeOf } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { choosePolicy } from "../plugins/systems/dnd5.5e/core/policy.ts";
@@ -44,6 +48,7 @@ import {
   type DndState,
   NS,
   applyDndEvent,
+  dndEvent,
   freshActor,
   hasCondition,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
@@ -689,19 +694,19 @@ describe("Shape-Shift", () => {
   });
 });
 
-describe("one-off monster traits and actions", () => {
-  const hitWith = (
-    run: RunContext,
-    target: Actor,
-    damage: readonly { amount: number; type: string }[],
-  ) =>
-    dealEvents(
-      target,
-      damage as never,
-      false,
-      contextOf(run, fight(fighter(run), target), d20s(10).dice),
-    ).events.reduce(applyDndEvent, fight(fighter(run), target));
+const hitWith = (
+  run: RunContext,
+  target: Actor,
+  damage: readonly { amount: number; type: string }[],
+) =>
+  dealEvents(
+    target,
+    damage as never,
+    false,
+    contextOf(run, fight(fighter(run), target), d20s(10).dice),
+  ).events.reduce(applyDndEvent, fight(fighter(run), target));
 
+describe("one-off monster traits and actions", () => {
   it("heals from absorbed fire, even though it's immune to it", async () => {
     const run = await base();
     const after = hitWith(run, monster("absorber", { hp: 100 }), [
@@ -950,5 +955,165 @@ describe("one-off monster traits and actions", () => {
     expect(drain && "payload" in drain && drain.payload.effect).toMatchObject({
       modifier: { amount: { bonus: { base: 4, add: [] } } },
     });
+  });
+});
+
+describe("spells sorted out of #111", () => {
+  const effect = (modifier: object): Actor["activeEffects"][number] => ({
+    sourceId: "spell:test",
+    casterId: PLAYER_ACTOR,
+    modifier: modifier as never,
+    ends: "spellDuration",
+  });
+  const swing = (run: RunContext, target: Actor, natural: number) =>
+    settle(
+      run,
+      fight(fighter(run), target),
+      [attack(PLAYER_ACTOR, "weapon:srd52:item/longsword", target.id)],
+      d20s(natural).dice,
+    );
+
+  it("takes Blade Ward's die off an attack roll, and lets a duplicate take a hit", async () => {
+    const run = await base();
+    // 7 + 5 = 12 hits AC 10; less the 1 Blade Ward rolls it's 11, still a hit.
+    const ward = {
+      ...monster("dummy"),
+      activeEffects: [
+        effect({
+          kind: "bonus",
+          to: "attacksAgainst",
+          amount: { dice: "1d4" },
+          subtract: true,
+        }),
+      ],
+    };
+    const report = swing(run, ward, 7).events.find(
+      (event) => event.kind === `${NS}:rollReported`,
+    );
+    expect(report && "payload" in report && report.payload.total).toBe(11);
+    const images = {
+      ...monster("dummy"),
+      activeEffects: [effect({ kind: "images", count: 3 })],
+    };
+    // Every die but the d20 rolls 1, so no duplicate is hit; a 6 on every die would hit one.
+    expect(damageOf(swing(run, images, 15).events, "dummy")).not.toEqual([]);
+    const sixes: Dice = { below: () => 0, roll: (sides) => sides };
+    const fooled = settle(
+      run,
+      fight(fighter(run), images),
+      [attack(PLAYER_ACTOR, "weapon:srd52:item/longsword", "dummy")],
+      sixes,
+    );
+    expect(damageOf(fooled.events, "dummy")).toEqual([]);
+    const left = fooled.state.actors.dummy?.activeEffects[0]?.modifier;
+    expect(left).toEqual({ kind: "images", count: 2 });
+  });
+
+  it("makes an attacker that fails its save lose the attack on a creature under Sanctuary", async () => {
+    const run = await base();
+    const warded = {
+      ...monster("dummy"),
+      activeEffects: [effect({ kind: "sanctuary", dc: 30 })],
+    };
+    expect(damageOf(swing(run, warded, 15).events, "dummy")).toEqual([]);
+  });
+
+  it("drops to 1 under Death Ward, stabilizes the dying, and slays the weak outright", async () => {
+    const run = await base();
+    const warded: Actor = {
+      ...fighter(run, { hp: 10 }),
+      activeEffects: [effect({ kind: "deathWard" })],
+    };
+    const after = hitWith(run, warded, [{ amount: 300, type: "fire" }]);
+    expect(after.actors[PLAYER_ACTOR]?.hp).toBe(1);
+    expect(after.actors[PLAYER_ACTOR]?.activeEffects).toEqual([]);
+    const dying = fighter(run, { hp: 0 });
+    const context = contextOf(run, fight(dying), d20s(10).dice);
+    expect(
+      leafEvents([{ kind: "stabilize" }], "x", dying, dying, context),
+    ).toEqual([dndEvent(`${NS}:stabilized`, { actor: PLAYER_ACTOR })]);
+    const kill = {
+      id: "spell:test:spell/pwk",
+      name: "Power Word Kill",
+      spellLevel: 9,
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 60, side: "enemy" },
+        resolution: {
+          kind: "automatic",
+          damage: [{ amount: { dice: "12d12" }, type: "psychic" }],
+          effects: [{ kind: "slay", hpAtMost: 100 }],
+        },
+      },
+    } as KnownAction;
+    const weak = monster("dummy", { hp: 90 });
+    const strong = monster("dummy", { hp: 200 });
+    const slain = resolveAction(
+      kill,
+      fighter(run),
+      [weak],
+      contextOf(run, fight(fighter(run), weak), d20s(10).dice),
+    );
+    expect(
+      (slain.events ?? []).reduce(applyDndEvent, fight(fighter(run), weak))
+        .actors.dummy?.hp,
+    ).toBe(0);
+    const hurt = resolveAction(
+      kill,
+      fighter(run),
+      [strong],
+      contextOf(run, fight(fighter(run), strong), d20s(10).dice),
+    );
+    expect(damageOf(hurt.events ?? [], "dummy")).toEqual([12]);
+  });
+
+  it("sees farther with Darkvision, and offers Revivify only a dead ally", async () => {
+    const run = await base();
+    const seer = {
+      ...fighter(run),
+      activeEffects: [effect({ kind: "darkvision", feet: 150 })],
+    };
+    expect(darkvisionOf(seer, run)).toBe(150);
+    const revivify = {
+      id: "spell:test:spell/revivify",
+      name: "Revivify",
+      spellLevel: 3,
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 60, side: "ally", dead: true },
+        resolution: {
+          kind: "automatic",
+          damage: [],
+          effects: [{ kind: "heal", amount: { bonus: { base: 1, add: [] } } }],
+        },
+      },
+    } as KnownAction;
+    const fallen: Actor = {
+      ...freshActor({
+        id: "friend",
+        name: "Friend",
+        side: "party",
+        source: fighter(run).source,
+        hp: 0,
+        inventory: [],
+      }),
+      deathSaves: { successes: 0, failures: 3 },
+    };
+    const state = fight(fighter(run), fallen, monster("dummy"));
+    expect(
+      inReach(revivify, actorOf(state, PLAYER_ACTOR), state, run).map(
+        ({ id }) => id,
+      ),
+    ).toEqual(["friend"]);
+    const revived = resolveAction(
+      revivify,
+      actorOf(state, PLAYER_ACTOR),
+      [fallen],
+      contextOf(run, state, d20s(10).dice),
+    );
+    const back = (revived.events ?? []).reduce(applyDndEvent, state).actors
+      .friend;
+    expect(back?.hp).toBe(1);
+    expect(back?.deathSaves.failures).toBe(0);
   });
 });

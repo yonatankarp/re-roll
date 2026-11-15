@@ -262,8 +262,27 @@ export function dropToOneEvents(
   hit: { readonly type: DamageType; readonly critical: boolean },
   stats: Stats,
 ): SystemEvent[] | null {
+  if (target.hp <= 0 || remaining < 0) return null;
+  // Death Ward holds even against damage that would kill outright, and ends.
+  const ward = target.activeEffects.find(
+    ({ modifier }) => modifier.kind === "deathWard",
+  );
+  if (ward) {
+    return [
+      dndEvent(`${NS}:effectEnded`, {
+        actor: target.id,
+        sourceId: ward.sourceId,
+      }),
+      dndEvent(`${NS}:damaged`, {
+        actor: target.id,
+        amount: amount - remaining - 1,
+        ...hit,
+        massive: false,
+      }),
+    ];
+  }
   const outright = target.side === "party" && remaining >= stats.maxHp;
-  if (target.hp <= 0 || remaining < 0 || outright) return null;
+  if (outright) return null;
   const trait = stats.passives.find(
     (passive) =>
       passive.kind === "dropToOne" &&

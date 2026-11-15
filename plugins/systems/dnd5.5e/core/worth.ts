@@ -6,6 +6,7 @@ import {
   invisibleTo,
   isDead,
   isDown,
+  isStable,
 } from "./state.ts";
 import {
   attackBonus,
@@ -713,7 +714,11 @@ export function makeJudge(context: Context, side: Actor): Judge {
     }
     switch (modifier.kind) {
       case "bonus":
-        if (modifier.subtract) return 0;
+        if (modifier.subtract) {
+          return modifier.to === "attacksAgainst"
+            ? 0.1 * meanFoeThreat * lasting(span) // Blade Ward
+            : 0;
+        }
         return ["attacks", "ac", "saves"].includes(modifier.to)
           ? 0.12 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
           : modifier.to === "maxHp"
@@ -751,6 +756,15 @@ export function makeJudge(context: Context, side: Actor): Judge {
         return foes.some((foe) => invisibleTo(foe, target))
           ? 0.25 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
           : 0;
+      // A duplicate or a ward turns away about a hit in three while it lasts; Death Ward one drop.
+      case "images":
+        return 0.3 * meanFoeThreat * lasting(span);
+      case "sanctuary":
+        return 0.3 * meanFoeThreat * lasting(span);
+      case "deathWard":
+        return 0.2 * meanFoeThreat;
+      case "retaliate":
+        return 0.05 * meanFoeThreat * lasting(span);
       default:
         return 0;
     }
@@ -818,6 +832,10 @@ export function makeJudge(context: Context, side: Actor): Judge {
           ? 0.3 * threat(target) * lasting(span)
           : 0;
       }
+      case "stabilize":
+        return !foe && isDown(target) && !isStable(target)
+          ? 0.3 * meanFoeThreat
+          : 0;
       case "removeCondition":
         return !foe && hasCondition(target, effect.condition)
           ? 0.5 * Math.max(threat(target), meanFoeThreat * 0.5)

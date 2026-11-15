@@ -4282,6 +4282,54 @@ describe("choosing a form", () => {
   });
 });
 
+describe("a spell's lasting action", () => {
+  it("lets the caster attack with a Flame Blade only while concentrating on it", async () => {
+    const run = arenaRun(await base(), {
+      [spell("test-blade")]: {
+        id: spell("test-blade"),
+        name: "Test Blade",
+        level: 2,
+        school: "evocation",
+        classes: [],
+        castingTime: "Bonus Action",
+        range: "Self",
+        components: "V, S",
+        duration: { concentration: true, minutes: 10 },
+        text: "A blade.",
+        automation: "full",
+        activation: {
+          cost: ["bonusAction", "slot"],
+          targeting: { self: true },
+          resolution: { kind: "automatic" },
+        },
+        lasting: {
+          cost: ["action"],
+          targeting: { creatures: 1, range: 5, side: "enemy" },
+          resolution: {
+            kind: "attack",
+            attack: { type: "spell" },
+            damage: [{ amount: { dice: "3d6" }, type: "fire" }],
+          },
+        },
+      },
+    });
+    const caster = hero(run, { spells: ["test-blade"], level: 3 });
+    const ids = (item: Actor) =>
+      deriveStats(item, run).actions.map(({ id }) => id);
+    expect(ids(caster)).toContain(`spell:${spell("test-blade")}`);
+    expect(ids(caster)).not.toContain(`lasting:${spell("test-blade")}`);
+    const cast = settle(
+      run,
+      fight(caster, monster("a")),
+      [act(PLAYER_ACTOR, `spell:${spell("test-blade")}|${PLAYER_ACTOR}`)],
+      LOW,
+    );
+    const holding = actor(cast.state, PLAYER_ACTOR);
+    expect(holding.concentratingOn).toBe(`spell:${spell("test-blade")}`);
+    expect(ids(holding)).toContain(`lasting:${spell("test-blade")}`);
+  });
+});
+
 describe("counterspell", () => {
   const missile = `spell:${spell("magic-missile")}`;
   const counterer = (id: string): Actor =>

@@ -10,6 +10,7 @@ import {
   rollAmount,
   rollDiceNotation,
   saveBonus,
+  spellSaveDc,
 } from "../stats.ts";
 import { metamagicSaves } from "../metamagic.ts";
 import {
@@ -22,6 +23,7 @@ import {
   INCAPACITATING,
   freshActor,
   isDead,
+  isStable,
   NS,
   frame,
 } from "../state.ts";
@@ -671,7 +673,13 @@ export function leafEvents(
         }
         break;
       }
+      case "stabilize":
+        if (target.hp <= 0 && !isDead(target) && !isStable(target)) {
+          events.push(dndEvent(`${NS}:stabilized`, { actor: target.id }));
+        }
+        break;
       case "note":
+      case "slay":
       case "randomAction":
       case "raiseCorpse":
       case "reduceDamage":
@@ -794,9 +802,13 @@ export function resolveTargets(
   const { state } = context;
   const { targeting } = action.activation;
   if ("self" in targeting) return [actor];
+  // Revivify is the one aimed at the dead.
+  const dead = "dead" in targeting && targeting.dead === true;
   const side = (
     targeting.side === "enemy" ? enemies(state, actor) : allies(state, actor)
-  ).filter((item) => !isDead(item) && fitsType(item, targeting, context));
+  ).filter(
+    (item) => isDead(item) === dead && fitsType(item, targeting, context),
+  );
   if ("area" in targeting) {
     const { shape, radius } = targeting.area;
     // Aimed at a square ("@x,y") or a creature ("@id"), an area catches everyone in it, the caster's side too.
@@ -887,7 +899,7 @@ export function resolveAction(
     );
 
   const beginConcentration = (effects: readonly LeafEffect[]): void => {
-    if (!usesConcentration(effects)) return;
+    if (!usesConcentration(effects) && !action.concentrates) return;
     if (actor.concentratingOn !== null) {
       events.push(dndEvent(`${NS}:concentrationEnded`, { actor: actor.id }));
     }
@@ -981,7 +993,26 @@ export function resolveAction(
         );
       }
       const damage = rollSharedDamage(resolution.damage);
+      const slay = resolution.effects.find((effect) => effect.kind === "slay");
       for (const target of targets) {
+        // Power Word Kill: a target with few enough Hit Points dies, and only the others take the damage.
+        if (
+          slay?.kind === "slay" &&
+          target.hp > 0 &&
+          target.hp <= slay.hpAtMost
+        ) {
+          events.push(
+            dndEvent(`${NS}:damaged`, {
+              actor: target.id,
+              amount: target.hp + target.tempHp,
+              type: "psychic",
+              critical: false,
+              massive: true,
+            }),
+            { kind: "actorDefeated", actor: target.id },
+          );
+          continue;
+        }
         applyRolled(target, damage, (amount) => amount);
         events.push(
           ...leafEvents(
@@ -1176,6 +1207,10 @@ function rolledModifier(
   stats: ReturnType<typeof deriveStats>,
   context: Context,
 ): Modifier {
+  // Sanctuary keeps the caster's save DC as it was cast.
+  if (modifier.kind === "sanctuary" && modifier.dc === undefined) {
+    return { ...modifier, dc: spellSaveDc(stats) };
+  }
   if (modifier.kind !== "bonus" || modifier.to !== "maxHp") return modifier;
   if (modifier.amount.dice === undefined) return modifier;
   return {

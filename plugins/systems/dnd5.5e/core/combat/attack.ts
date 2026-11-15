@@ -30,6 +30,7 @@ import {
   deriveStats,
   immuneToCondition,
   type KnownAction,
+  lookup,
   modifierFor,
   passiveModifiers,
   evaluateFormula,
@@ -55,6 +56,7 @@ import {
   type Damage,
   type DamageType,
   ItemSchema,
+  MonsterSchema,
   type Resolution,
 } from "../schemas.ts";
 import {
@@ -396,6 +398,25 @@ export function runAttackRoll(
   if (resolution.kind !== "attack") {
     throw new Error(`${action.id} isn't an attack`);
   }
+  // Sanctuary: an attacker that fails its Wisdom save loses the attack. One warded itself loses the ward by attacking.
+  const ward = target.activeEffects.find(
+    ({ modifier }) => modifier.kind === "sanctuary",
+  );
+  const unwarded = attacker.activeEffects
+    .filter(({ modifier }) => modifier.kind === "sanctuary")
+    .map(({ sourceId }) =>
+      dndEvent(`${NS}:effectEnded`, { actor: attacker.id, sourceId }),
+    );
+  if (ward?.modifier.kind === "sanctuary" && attacker.side !== target.side) {
+    const save = rollSave(
+      attacker,
+      "wis",
+      ward.modifier.dc ?? 10,
+      context,
+      true,
+    );
+    if (!save.saved) return { events: [...unwarded, ...save.events] };
+  }
   const stats = deriveStats(attacker, context);
   const targetStats = deriveStats(target, context);
   const packed =
@@ -507,7 +528,8 @@ export function runAttackRoll(
   const total =
     roll.natural +
     attackBonus(resolution, stats) +
-    rollBonus(attacker, "attacks", context);
+    rollBonus(attacker, "attacks", context) +
+    rollBonus(target, "attacksAgainst", context); // Blade Ward's -1d4
   const cover = coverAgainst(state, attacker, target);
   const ac =
     targetStats.ac +
@@ -551,6 +573,7 @@ export function runAttackRoll(
     ...onceEnded(attacker, "attacks"),
     ...onceEnded(target, "attacksAgainst"),
     ...revealEvents(attacker),
+    ...unwarded,
     // Attacking lowers the attacker's own Diabolic Ward until its next turn.
     ...(stats.passives.some(
       (passive) =>
@@ -599,6 +622,8 @@ export function runAttackRoll(
     };
   }
 
+  const duplicate = imageHit(attacker, target, context);
+  if (duplicate) return { events: [report, ...spent, ...duplicate] };
   const reaction = reactionFor(
     target,
     total,
@@ -938,6 +963,49 @@ export function runApplyHit(
       CHECK_END,
     ],
   };
+}
+
+// Mirror Image: a d6 for each duplicate left, and on a 3 or higher the hit lands on one of them, which is gone.
+// An attacker that is Blinded, or sees by Blindsight or Truesight, isn't fooled.
+function imageHit(
+  attacker: Actor,
+  target: Actor,
+  context: Context,
+): SystemEvent[] | null {
+  const images = target.activeEffects.find(
+    ({ modifier }) => modifier.kind === "images",
+  );
+  if (images?.modifier.kind !== "images") return null;
+  const senses =
+    attacker.source.kind === "monster"
+      ? (lookup(context, MonsterSchema, attacker.source.statBlockId).text ?? "")
+      : "";
+  const fooled =
+    !hasCondition(attacker, "blinded") &&
+    !/\b(?:blindsight|truesight) \d+ ft/i.test(senses) &&
+    !attacker.activeEffects.some(
+      ({ modifier }) => modifier.kind === "darkvision" && modifier.truesight,
+    );
+  const { count } = images.modifier;
+  const rolls = Array.from({ length: count }, () => context.dice.roll(6));
+  if (!fooled || rolls.every((roll) => roll < 3)) return null;
+  return [
+    dndEvent(`${NS}:effectEnded`, {
+      actor: target.id,
+      sourceId: images.sourceId,
+    }),
+    ...(count > 1
+      ? [
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: {
+              ...images,
+              modifier: { kind: "images", count: count - 1 },
+            },
+          }),
+        ]
+      : []),
+  ];
 }
 
 // Damage added to the bearer's next attack only, as Deadly Aim's, is spent by that attack, hit or miss.

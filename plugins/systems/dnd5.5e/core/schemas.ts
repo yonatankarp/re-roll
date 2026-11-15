@@ -146,6 +146,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
       "speed",
       "initiative",
       "maxHp",
+      "attacksAgainst", // an attacker's roll against the bearer, as Blade Ward's -1d4 with `subtract`
     ]),
     amount: AmountSchema,
     once: z.boolean().optional(),
@@ -217,6 +218,28 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("retaliate"),
     damage: z.array(DamageSchema).default([]),
     grapple: z.literal(true).optional(),
+  }),
+  // The first drop to 0 Hit Points is a drop to 1 instead, and the effect ends, as with Death Ward.
+  z.strictObject({ kind: z.literal("deathWard") }),
+  // Dash as a Bonus Action, as Expeditious Retreat gives.
+  z.strictObject({ kind: z.literal("bonusDash") }),
+  // Darkvision this far, and with `truesight` seeing through magical darkness and invisibility, as Darkvision or True
+  // Seeing give.
+  z.strictObject({
+    kind: z.literal("darkvision"),
+    feet: z.number().int().min(5),
+    truesight: z.literal(true).optional(),
+  }),
+  // Illusory duplicates, each of which a hit may land on instead, as Mirror Image's (combat/attack.ts).
+  z.strictObject({
+    kind: z.literal("images"),
+    count: z.number().int().min(1),
+  }),
+  // An attacker must pass a Wisdom save against `dc` (the caster's, filled in as it's cast) or lose the attack, as
+  // Sanctuary.
+  z.strictObject({
+    kind: z.literal("sanctuary"),
+    dc: z.number().int().optional(),
   }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
@@ -361,6 +384,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     times: z.number().int().min(1).default(1),
   }),
   // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
+  // A dying creature becomes Stable, as with Spare the Dying.
+  z.strictObject({ kind: z.literal("stabilize") }),
+  // A target with this many Hit Points or fewer dies outright instead of taking the damage, as Power Word Kill.
+  z.strictObject({
+    kind: z.literal("slay"),
+    hpAtMost: z.number().int().min(1),
+  }),
   z.strictObject({
     kind: z.literal("raiseCorpse"),
     monster: ContentIdSchema,
@@ -437,6 +467,7 @@ export const TargetingSchema = z.union([
     side: SideSchema,
     creatureTypes: z.array(z.string()).optional(), // only these lowercase types can be targeted
     targetConditions: z.array(ConditionSchema).min(1).optional(), // only a creature with one of these, as for Trample
+    dead: z.literal(true).optional(), // only a dead creature, as for Revivify
     // only a creature this size or smaller, as for a giant frog's Swallow
     maxSize: z
       .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
@@ -988,6 +1019,8 @@ export const SpellSchema = ContentEntrySchema.extend({
   text: z.string().min(1),
   automation: AutomationSchema,
   activation: ActivationSchema.optional(),
+  // An action its caster can take while concentrating on it, as Flame Blade's attack or Heat Metal's Bonus Action.
+  lasting: ActivationSchema.optional(),
   // Why a spell with no activation needs none: it takes longer than a turn to cast ("castingTime"), or does
   // nothing a grid fight plays, such as travel, senses, talk or downtime ("utility").
   outOfCombat: z.enum(["castingTime", "utility"]).optional(),
