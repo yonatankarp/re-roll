@@ -1745,9 +1745,9 @@ describe("monster grapples and multiattacks", () => {
     expect(hiderTurn(STEALTHY.id, medium)).toContain("tactic:bonus-hide");
     // A creature its own size isn't enough, nor is a larger one off the line between them.
     expect(hiderTurn(STEALTHY.id, small)).not.toContain("tactic:bonus-hide");
-    expect(
-      hiderTurn(STEALTHY.id, monster("ogre", [8, 9])),
-    ).not.toContain("tactic:bonus-hide");
+    expect(hiderTurn(STEALTHY.id, monster("ogre", [8, 9]))).not.toContain(
+      "tactic:bonus-hide",
+    );
     // Without the trait, a creature in the way gives only Half Cover.
     expect(hiderTurn(SNEAK.id, medium)).not.toContain("tactic:bonus-hide");
   });
