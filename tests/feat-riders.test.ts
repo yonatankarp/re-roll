@@ -14,7 +14,10 @@ import {
   rescuedCheck,
   rescuedSave,
 } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
-import { hasFlag } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import {
+  canAfford,
+  hasFlag,
+} from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import {
   type Actor,
   applyDndEvent,
@@ -24,6 +27,7 @@ import { sceneSwapActions } from "../plugins/systems/dnd5.5e/core/swap.ts";
 import { masteryOf } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import {
   deriveStats,
+  evaluateFormula,
   type KnownAction,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { contextOf, hero, scripted, testRun } from "./feat-fixtures.ts";
@@ -335,5 +339,274 @@ describe("feat and trait riders", () => {
     expect(masteryOf(actor, "weapon:srd52:item/dagger", run)).toBe("nick");
     expect(masteryOf(actor, "weapon:srd52:item/longsword", run)).toBeNull();
     expect(sceneSwapActions(after, run)).toEqual([]);
+  });
+
+  it("pushes and grapples on a hit once a turn on its own turn, as Tavern Brawler and Punch and Grab do", async () => {
+    const run = await testRun();
+    const hit = (used: readonly string[], ownTurn = true) => {
+      const brawler = {
+        ...hero(["brawler"]),
+        position: { x: 0, y: 0 },
+        usedThisTurn: [...used],
+      };
+      const foe = {
+        ...hero([], { id: "foe" }),
+        side: "enemy" as const,
+        hp: 30,
+        position: { x: 1, y: 0 },
+      };
+      const plain = contextOf(
+        run,
+        ownTurn ? [brawler, foe] : [foe, brawler],
+        scripted([]).dice,
+      );
+      const { combat } = plain.state;
+      if (!combat) throw new Error("no fight");
+      const context = {
+        ...plain,
+        state: {
+          ...plain.state,
+          combat: { ...combat, grid: { width: 10, height: 10 } },
+        },
+      };
+      return kinds(
+        run.system.frames[`${NS}:applyHit`]?.run(
+          {
+            attacker: PLAYER_ACTOR,
+            actionId: "feature:test:feature/brawler:0",
+            target: "foe",
+            critical: false,
+            hadAdvantage: false,
+            total: 20,
+            natural: 15,
+          },
+          context,
+        ).events ?? [],
+      );
+    };
+    expect(hit([])).toEqual(
+      expect.arrayContaining([`${NS}:moved`, `${NS}:effectAdded`]),
+    );
+    const again = hit([
+      "onhit:feature:test:feature/brawler:0",
+      "onhit-effects:feature:test:feature/brawler:0",
+    ]);
+    expect(again).not.toContain(`${NS}:moved`);
+    expect(again).not.toContain(`${NS}:effectAdded`);
+    expect(hit([], false)).not.toContain(`${NS}:effectAdded`);
+  });
+
+  it("adds the Proficiency Bonus while Bloodied once a turn, and Advantage after a foe drops, as Boon of Bloodshed", async () => {
+    const run = await testRun();
+    const damage = (hp: number) => {
+      const bearer = { ...hero(["bloodshed"]), hp, position: { x: 0, y: 0 } };
+      const foe = {
+        ...hero([], { id: "foe" }),
+        side: "enemy" as const,
+        hp: 30,
+        position: { x: 1, y: 0 },
+      };
+      const events =
+        run.system.frames[`${NS}:applyHit`]?.run(
+          {
+            attacker: PLAYER_ACTOR,
+            actionId: "weapon:srd52:item/longsword",
+            target: "foe",
+            critical: false,
+            hadAdvantage: false,
+            total: 20,
+            natural: 15,
+          },
+          contextOf(run, [bearer, foe], scripted([4]).dice),
+        ).events ?? [];
+      const hit = events.find((event) => event.kind === `${NS}:damaged`);
+      return hit && "payload" in hit ? hit.payload.amount : 0;
+    };
+    // Longsword 1d8 (4) + Str 3, and 2 more while Bloodied.
+    expect(damage(10)).toBe(7);
+    expect(damage(4)).toBe(9);
+
+    const bearer = { ...hero(["bloodshed"]), position: { x: 0, y: 0 } };
+    const foe = { ...hero([], { id: "foe" }), side: "enemy" as const, hp: 3 };
+    const dropped = dealEvents(
+      foe,
+      [{ amount: 5, type: "fire" }],
+      false,
+      contextOf(run, [bearer, foe], scripted([]).dice),
+    );
+    expect(
+      dropped.events.some(
+        (event) =>
+          event.kind === `${NS}:effectAdded` &&
+          "payload" in event &&
+          event.payload.actor === PLAYER_ACTOR,
+      ),
+    ).toBe(true);
+  });
+
+  it("uses a stat's best modifier, waits for an action, and spends a save's one-off Disadvantage", async () => {
+    const run = await testRun();
+    const stats = deriveStats(hero([]), run);
+    // Str 17 (+3) beats Dex 14 (+2).
+    expect(
+      evaluateFormula(
+        {
+          base: 8,
+          add: [{ kind: "bestAbilityMod", abilities: ["str", "dex"] }],
+        },
+        stats,
+      ),
+    ).toBe(11);
+    const blink: KnownAction = {
+      id: "blink",
+      name: "Blink",
+      activation: {
+        cost: [],
+        afterAction: true,
+        targeting: { self: true },
+        resolution: { kind: "automatic", damage: [], effects: [] },
+      },
+      spellLevel: null,
+    };
+    const actor = hero([]);
+    expect(canAfford(blink, actor, stats)).toBe(false);
+    expect(
+      canAfford(
+        blink,
+        { ...actor, budget: { ...actor.budget, action: false } },
+        stats,
+      ),
+    ).toBe(true);
+    const withered: Actor = {
+      ...actor,
+      activeEffects: [
+        {
+          sourceId: "help:saves",
+          casterId: "ally",
+          modifier: { kind: "disadvantage", on: "saves", once: true },
+          ends: "casterNextTurn",
+        },
+      ],
+    };
+    const { dice, counts } = scripted([]);
+    const save = rollSave(
+      withered,
+      "wis",
+      10,
+      contextOf(run, [withered], dice),
+    );
+    expect(counts[20]).toBe(2);
+    expect(kinds(save.events)).toContain(`${NS}:effectEnded`);
+  });
+
+  it("surges a slot spell's damage, counting 1s and 2s as 3s and knocking the damaged Prone, as Erupting Spellpower", async () => {
+    const run = await testRun();
+    const caster = hero(["overload"]);
+    const foe = { ...hero([], { id: "foe" }), side: "enemy" as const, hp: 30 };
+    const spell: KnownAction = {
+      ...action({
+        kind: "automatic",
+        damage: [{ amount: { dice: "2d6" }, type: "fire" }],
+        effects: [],
+      }),
+      spellLevel: 1,
+    };
+    const { events = [] } = resolveAction(
+      spell,
+      caster,
+      [foe],
+      contextOf(run, [caster, foe], scripted([1, 2]).dice),
+      1,
+    );
+    const hit = events.find((event) => event.kind === `${NS}:damaged`);
+    expect(hit && "payload" in hit ? hit.payload.amount : 0).toBe(6);
+    expect(JSON.stringify(events)).toContain('"condition":"prone"');
+  });
+
+  it("adds 1d8 to a melee hit after moving 10 feet, once a turn, as Charge Attack, and drains with a bite", async () => {
+    const run = await testRun();
+    const hit = (
+      traits: readonly string[],
+      moved: number,
+      actionId: string,
+    ) => {
+      const bearer = {
+        ...hero(traits),
+        hp: 5,
+        moved,
+        position: { x: 0, y: 0 },
+      };
+      const foe = {
+        ...hero([], { id: "foe" }),
+        side: "enemy" as const,
+        hp: 30,
+        position: { x: 1, y: 0 },
+      };
+      return (
+        run.system.frames[`${NS}:applyHit`]?.run(
+          {
+            attacker: PLAYER_ACTOR,
+            actionId,
+            target: "foe",
+            critical: false,
+            hadAdvantage: false,
+            total: 20,
+            natural: 15,
+          },
+          contextOf(run, [bearer, foe], scripted([4, 5]).dice),
+        ).events ?? []
+      ).map((event) => ("payload" in event ? event.payload : {}));
+    };
+    const sword = "weapon:srd52:item/longsword";
+    const amount = (events: readonly Record<string, unknown>[]) =>
+      events.find((payload) => payload.actor === "foe" && "amount" in payload)
+        ?.amount;
+    expect(amount(hit(["charge-attack"], 10, sword))).toBe(12); // 4 + 3 + 1d8 of 5
+    expect(amount(hit(["charge-attack"], 5, sword))).toBe(7);
+    // The bite's 1d4 of 4 heals the biter by what it dealt.
+    const bite = hit(["biter"], 0, "feature:test:feature/biter:0");
+    expect(bite).toContainEqual(
+      expect.objectContaining({ actor: PLAYER_ACTOR, amount: 4 }),
+    );
+    expect(
+      deriveStats(hero(["biter"]), run).actions.map(({ name }) => name),
+    ).toContain("biter (bite)");
+  });
+
+  it("keeps an ally from being pushed with a Reaction, as Stand as One, and retypes a spell, as Cold Fire Magic", async () => {
+    const run = await testRun();
+    const pusher = {
+      ...hero([], { id: "foe" }),
+      side: "enemy" as const,
+      position: { x: 0, y: 0 },
+    };
+    const ally = { ...hero([], { id: "ally" }), position: { x: 1, y: 0 } };
+    const tyro = { ...hero(["stand-as-one"]), position: { x: 1, y: 1 } };
+    const plain = contextOf(run, [pusher, ally, tyro], scripted([]).dice);
+    const { combat } = plain.state;
+    if (!combat) throw new Error("no fight");
+    const context = {
+      ...plain,
+      state: {
+        ...plain.state,
+        combat: { ...combat, grid: { width: 10, height: 10 } },
+      },
+    };
+    const pushed = leafEvents(
+      [{ kind: "forcedMove", feet: 10, direction: "away" }],
+      "push",
+      pusher,
+      ally,
+      context,
+    );
+    expect(
+      pushed.map((event) => ("payload" in event ? event.payload : null)),
+    ).toEqual([
+      expect.objectContaining({ actor: PLAYER_ACTOR, kind: "reaction" }),
+    ]);
+    const spell = deriveStats(hero(["cold-fire"]), run).actions.find(
+      ({ id }) => id === "spell:srd52:spell/burning-hands",
+    );
+    expect(spell?.activation.resolution.damage[0]?.type).toBe("cold");
   });
 });

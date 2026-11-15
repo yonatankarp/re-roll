@@ -28,7 +28,7 @@ import {
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { teleportSquares } from "./combat/movement.ts";
-import { leafEvents } from "./combat/effects.ts";
+import { heldInPlace, leafEvents } from "./combat/effects.ts";
 import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
@@ -286,9 +286,11 @@ function pushEvents(
   by: Actor,
   target: Actor,
   feet: number,
-  state: DndState,
+  context: Context,
 ): SystemEvent[] {
-  const to = pushTo(by.position, target, feet, state);
+  const to = pushTo(by.position, target, feet, context.state);
+  const held = to ? heldInPlace(target, context) : [];
+  if (held.length > 0) return held;
   return to ? [dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 })] : [];
 }
 
@@ -1012,10 +1014,24 @@ export function runTactic(
         helped.side === actor.side
           ? ({ kind: "advantage", on: "checks" } as const)
           : ({ kind: "advantage", on: "attacksAgainst", once: true } as const);
+      // Harper Teamwork's Withering Wordplay: the foe's next save has Disadvantage too.
+      const withering =
+        helped.side !== actor.side && hasPassive(stats, "helpRider")
+          ? [
+              effect(
+                helped.id,
+                `${HELP}:saves`,
+                actor.id,
+                { kind: "disadvantage", on: "saves", once: true },
+                "casterNextTurn",
+              ),
+            ]
+          : [];
       return {
         events: [
           spend("action"),
           effect(helped.id, HELP, actor.id, modifier, "casterNextTurn"),
+          ...withering,
         ],
         frames: done,
       };
@@ -1101,7 +1117,7 @@ export function runTactic(
                 "spellDuration",
               ),
             ]
-          : pushEvents(actor, shoved, 5, state);
+          : pushEvents(actor, shoved, 5, context);
       return {
         events: [spend("action"), ...save.events, ...result],
         frames: done,
@@ -1337,7 +1353,7 @@ export function runMasteryHit(
     }
     case "push":
       return up && sizeOf(target, context) <= SIZES.indexOf("large")
-        ? { events: pushEvents(attacker, target, 10, state) }
+        ? { events: pushEvents(attacker, target, 10, context) }
         : {};
     case "cleave": {
       const reach = meleeReach(action);

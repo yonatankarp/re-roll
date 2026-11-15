@@ -65,7 +65,7 @@ import {
 } from "./effects.ts";
 import { keepsHidden, metamagicCast } from "../metamagic.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
-import { schoolCastEvents } from "./school.ts";
+import { castRiders, schoolCastEvents } from "./school.ts";
 
 // Taking an action on a turn: casting it, choosing its targets one by one, or aiming its area.
 
@@ -211,6 +211,7 @@ function castAction(
     events: [
       ...payCosts(action, actor, context, slotLevel),
       ...schoolCastEvents(actor, action, slotLevel, context),
+      ...castRiders(actor, action, context),
       ...lightAttackEvents(actor, actionId, context),
       // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.
       ...(resolution.kind === "attack" || keepsHidden(actor, actionId)

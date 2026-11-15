@@ -48,6 +48,7 @@ import {
   evaluateFormula,
   rollAmount,
   rollDiceNotation,
+  saveBonus,
   type Stats,
 } from "../stats.ts";
 import { finalDamage, halved, rollD20 } from "../rules.ts";
@@ -1220,8 +1221,38 @@ export function runApplyHit(
   const pierceKey = `reroll:${String(pierced)}`;
   const rerolls =
     pierced !== null && !attacker.usedThisTurn.includes(pierceKey);
+  // Boon of Bloodshed's Power from Pain: once a turn, the Proficiency Bonus more while Bloodied.
+  const pain =
+    hasPassive(stats, "bloodiedDamage") &&
+    attacker.hp * 2 <= stats.maxHp &&
+    !attacker.usedThisTurn.includes(BLOODIED_DAMAGE);
+  if (pain) {
+    events.push(
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: attacker.id,
+        key: BLOODIED_DAMAGE,
+      }),
+    );
+  }
   // The turn's use is spent only when a die is rolled again.
   const pierce = { used: false };
+  // Charger's Charge Attack: once on its turn, a melee hit after moving at least 10 feet adds 1d8.
+  // shortcut: any 10 feet moved this turn counts, not only a straight line toward the target, and it never pushes.
+  const charging =
+    hasPassive(stats, "chargeAttack") &&
+    isMelee(action) &&
+    attacker.moved >= 10 &&
+    inOwnTurn(attacker, context) &&
+    !attacker.usedThisTurn.includes(CHARGE_ATTACK);
+  if (charging) {
+    events.push(
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: attacker.id,
+        key: CHARGE_ATTACK,
+      }),
+    );
+  }
+  const charge = charging ? rollDiceNotation("1d8", dice, multiplier) : 0;
   const maxed = maximized(
     attacker,
     stats,
@@ -1266,7 +1297,10 @@ export function runApplyHit(
         ? rollDiceNotation(`1d${die}`, dice)
         : 0) +
       (index === 0 && type === firstType
-        ? extra + damageBonus(attacker, resolution, stats, context)
+        ? extra +
+          damageBonus(attacker, resolution, stats, context) +
+          (pain ? stats.proficiency : 0) +
+          charge
         : 0) -
       (index === 0 && payload.noModifier && resolution.attack.ability
         ? Math.max(0, modifierFor(stats, resolution.attack.ability))
@@ -1324,6 +1358,10 @@ export function runApplyHit(
     ),
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
+    ...oncePerTurnHit(resolution, action, attacker, target, context),
+    ...drained(resolution, attacker, dealt.dealt, stats),
+    ...feast(attacker, target, stats, context),
+    ...retaliated(attacker, target, action, context),
     ...halted(attacker, target, stats, context),
     ...shieldBash(attacker, target, action, stats, context),
     ...inspiringStrike(attacker, payload.critical, stats, context),
@@ -1476,6 +1514,109 @@ function retaliated(
 }
 
 const PEERLESS_AIM = "peerless-aim";
+const CHARGE_ATTACK = "charge-attack";
+const FEAST = "sanguine-feast";
+
+function hasUse(actor: Actor, stats: Stats, resource: string): boolean {
+  return (
+    (actor.resourcesSpent[resource] ?? 0) < (stats.resources[resource] ?? 0)
+  );
+}
+
+// A Dhampir's Vampiric Bite: the hit heals the biter by the damage it dealt.
+// shortcut: always Drain, never Strengthen.
+function drained(
+  resolution: Extract<Resolution, { kind: "attack" }>,
+  attacker: Actor,
+  dealt: number,
+  stats: Stats,
+): SystemEvent[] {
+  const { drain } = resolution;
+  if (!drain || dealt <= 0 || !hasUse(attacker, stats, drain.resource))
+    return [];
+  return [
+    dndEvent(`${NS}:resourceSpent`, {
+      actor: attacker.id,
+      resource: drain.resource,
+    }),
+    dndEvent(`${NS}:healed`, {
+      actor: attacker.id,
+      amount: Math.min(dealt, stats.maxHp - Math.max(attacker.hp, 0)),
+      max: stats.maxHp,
+    }),
+  ];
+}
+
+// Bloodlust's Sanguine Feast: once a turn, a hit on a Bloodied creature, not a Construct or Undead, heals by a Hit
+// Point Die.
+// shortcut: it's spent whenever it can be, rather than when the bearer is hurt enough to want it.
+function feast(
+  attacker: Actor,
+  target: Actor,
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  const passive = stats.passives.find(({ kind }) => kind === "bloodiedFeast");
+  const targetStats = deriveStats(target, context);
+  if (
+    passive?.kind !== "bloodiedFeast" ||
+    attacker.usedThisTurn.includes(FEAST) ||
+    !hasUse(attacker, stats, passive.resource) ||
+    target.hp * 2 > targetStats.maxHp ||
+    ["construct", "undead"].includes(targetStats.creatureType ?? "") ||
+    attacker.hp >= stats.maxHp
+  ) {
+    return [];
+  }
+  return [
+    dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key: FEAST }),
+    dndEvent(`${NS}:resourceSpent`, {
+      actor: attacker.id,
+      resource: passive.resource,
+    }),
+    ...leafEvents(
+      [
+        {
+          kind: "hitDieHeal",
+          bonus: { base: 0, add: [{ kind: "abilityMod", ability: "con" }] },
+        },
+      ],
+      FEAST,
+      attacker,
+      attacker,
+      context,
+    ),
+  ];
+}
+
+// Flames of Phlegethos' flames, as Fire Shield's: a melee hit from within 5 feet burns the attacker.
+function retaliated(
+  attacker: Actor,
+  target: Actor,
+  action: KnownAction,
+  context: Context,
+): SystemEvent[] {
+  if (!isMelee(action) || !within5(attacker, target)) return [];
+  const stats = deriveStats(target, context);
+  return target.activeEffects.flatMap(({ modifier }) =>
+    modifier.kind === "retaliate"
+      ? dealEvents(
+          attacker,
+          modifier.damage.map(({ amount, type }) => ({
+            amount: finalDamage(
+              rollAmount(amount, stats, context.dice),
+              type,
+              damageResponses(attacker, context),
+            ),
+            type,
+          })),
+          false,
+          context,
+        ).events
+      : [],
+  );
+}
+const BLOODIED_DAMAGE = "bloodied-damage";
 const SHIELD_BASH = "shield-bash";
 
 // Shield Master's Shield Bash: once on the bearer's turn, a melee weapon hit on a creature within 5 feet makes it save
@@ -1521,6 +1662,29 @@ function shieldBash(
 }
 
 // Whether it's the creature's own turn, so a hit on it is a reaction such as an Opportunity Attack.
+// Tavern Brawler's push: effects on a hit once a turn, on the attacker's own turn.
+function oncePerTurnHit(
+  resolution: Extract<Resolution, { kind: "attack" }>,
+  action: KnownAction,
+  attacker: Actor,
+  target: Actor,
+  context: Context,
+): SystemEvent[] {
+  const effects = resolution.onHitOncePerTurn;
+  const key = `onhit-effects:${action.id}`;
+  if (
+    !effects ||
+    attacker.usedThisTurn.includes(key) ||
+    !inOwnTurn(attacker, context)
+  ) {
+    return [];
+  }
+  return [
+    dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key }),
+    ...leafEvents(effects, action.id, attacker, target, context),
+  ];
+}
+
 function inOwnTurn(target: Actor, context: Context): boolean {
   const { combat } = context.state;
   return combat?.order[combat.index] === target.id;
@@ -1680,12 +1844,28 @@ function nestedSave(
   hit: Actor,
   context: Context,
 ): { readonly events: SystemEvent[]; readonly dealt: number } {
-  const save = resolution.onHitSave;
+  const printed = resolution.onHitSave;
   const target = context.state.actors[hit.id];
-  if (!save || !target || isDead(target)) return { events: [], dealt: 0 };
-  if (exemptFrom(save.exempt, target, deriveStats(target, context))) {
+  if (!printed || !target || isDead(target)) return { events: [], dealt: 0 };
+  if (exemptFrom(printed.exempt, target, deriveStats(target, context))) {
     return { events: [], dealt: 0 };
   }
+  const onceKey = `onhit:${action.id}`;
+  const once = printed.oncePerTurn
+    ? attacker.usedThisTurn.includes(onceKey) || !inOwnTurn(attacker, context)
+      ? null
+      : dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key: onceKey })
+    : undefined;
+  if (once === null) return { events: [], dealt: 0 };
+  const save = {
+    ...printed,
+    ability:
+      printed.orDex &&
+      saveBonus(deriveStats(target, context), "dex") >
+        saveBonus(deriveStats(target, context), printed.ability)
+        ? ("dex" as const)
+        : printed.ability,
+  };
   const stats = deriveStats(attacker, context);
   const dc = evaluateFormula(save.dc, stats);
   const rolled = rollSave(
@@ -1735,6 +1915,7 @@ function nestedSave(
   const source = `${action.id}:save`;
   return {
     events: [
+      ...(once ? [once] : []),
       ...rolled.events,
       ...rescued,
       ...damage.events,
