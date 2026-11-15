@@ -965,6 +965,7 @@ export function leafEvents(
       case "strike":
       case "redirect":
       case "negateHit":
+      case "stickWeapon":
       case "split":
       case "swapInitiative":
       case "inspiration":
@@ -1597,6 +1598,8 @@ export function resolveAction(
                 effect.movement,
                 context,
                 effect.provokes,
+                undefined,
+                action.id,
               ),
             );
           }

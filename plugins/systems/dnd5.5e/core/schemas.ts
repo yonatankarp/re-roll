@@ -165,6 +165,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     subtract: z.boolean().optional(), // taken off attack rolls, saves or checks instead, as with Bane
     skill: SkillSchema.optional(), // only checks with this skill, as Pass without Trace's Stealth
     ability: AbilitySchema.optional(), // only saves with this ability, as Slow's Dexterity saves
+    melee: z.literal(true).optional(), // AC against melee attack rolls only, as a pirate admiral's Defensive Stance
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
@@ -257,7 +258,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
       })
       .optional(),
   }),
-  // Kept by a creature that saved against an area, which no longer affects it, as a ghast's Stench.
+  // The bearer can't attack with this action's weapon while it lasts, as one caught by a kuo-toa's Sticky Shield.
+  z.strictObject({ kind: z.literal("stuck"), action: z.string() }),
+  // The bearer can't benefit from the Invisible condition, as with a sahuagin baron's Fiendish Blood.
+  // shortcut: that curse's Fiends sensing the bearer's location isn't read, as only hiding would make it count.
+  z.strictObject({ kind: z.literal("outlined") }),
+  // Kept by a creature that saved against an area or a reaction, which no longer affects it, as a ghast's Stench
+  // or a chain devil's Unnerving Gaze.
   z.strictObject({ kind: z.literal("areaImmunity") }),
   // A flat increase to a weapon's own damage, optionally only with one ability, such as Rage.
   z.strictObject({
@@ -296,7 +303,8 @@ export type Modifier = z.infer<typeof ModifierSchema>;
 export const DurationSchema = z.union([
   z.literal("instantaneous"),
   z.strictObject({ concentration: z.literal(true), minutes: z.number() }),
-  // "its" counts the target's turns, not the caster's, and "turnEnd" is the end of the turn it happens on.
+  // "its" counts the target's turns, not the caster's, and "turnEnd" is the end of the turn it happens on. "rest"
+  // lasts until a Short or Long Rest, which is the whole fight.
   z.strictObject({
     until: z.enum([
       "yourNextTurnStart",
@@ -304,6 +312,7 @@ export const DurationSchema = z.union([
       "itsNextTurnStart",
       "itsNextTurnEnd",
       "turnEnd",
+      "rest",
     ]),
   }),
   z.strictObject({ minutes: z.number() }),
@@ -375,6 +384,22 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     movement: z.number().int().min(0).default(0),
     // A teleport paid for with movement that still provokes nothing, as Portal Step's.
     provokes: z.literal(false).optional(),
+    // Creatures within `within` feet of where it lands, or with `origin` of where it left, get `conditions` and
+    // `modifiers` for `duration`, after a save when `save` is set: Whirlwind of Sand's Blinded, Toxic Escape's
+    // Poisoned, Temporal Disruption's halved Speed. `foes` keeps it to the bearer's foes, the creatures of its choice.
+    around: z
+      .strictObject({
+        origin: z.literal(true).optional(),
+        within: z.number().int().min(5),
+        foes: z.literal(true).optional(),
+        save: z
+          .strictObject({ ability: AbilitySchema, dc: z.number().int() })
+          .optional(),
+        conditions: z.array(ConditionSchema).default([]),
+        modifiers: z.array(ModifierSchema).default([]),
+        duration: DurationSchema,
+      })
+      .optional(),
   }),
   // The Dash action as part of another, as with Adrenaline Rush.
   z.strictObject({ kind: z.literal("dash") }),
@@ -429,11 +454,25 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("dispel"),
     maxLevel: z.number().int().min(0).max(9),
   }),
-  // Lessens the hit that triggered a reaction, such as Uncanny Dodge or Deflect Attacks.
+  // Lessens the hit that triggered a reaction, such as Uncanny Dodge or Deflect Attacks. With `deflect`, damage
+  // brought to 0 is sent at a creature within `range`, which saves or takes `damage`, as Deflect Missile's force.
+  // With `toNear`, what it takes off goes to a creature of that kind within `within` instead, and the reaction needs
+  // one there, as Transfer Harm's podling.
   z.strictObject({
     kind: z.literal("reduceDamage"),
     halve: z.boolean().default(false),
     amount: AmountSchema.optional(),
+    deflect: z
+      .strictObject({
+        range: z.number().int().min(5),
+        ability: AbilitySchema,
+        dc: z.number().int(),
+        damage: z.array(DamageSchema).min(1),
+      })
+      .optional(),
+    toNear: z
+      .strictObject({ monster: ContentIdSchema, within: z.number().int() })
+      .optional(),
   }),
   // Adds to AC against the hit that triggered a reaction only, possibly turning it into a miss, as with Parry.
   z.strictObject({
@@ -461,6 +500,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     action: z.string().optional(),
     advantage: z.boolean().default(false),
     approach: z.boolean().default(false),
+    // A teleport it uses lands within this many feet of the creature that set it off, as with Pursuit.
+    near: z.number().int().min(5).optional(),
   }),
   // A Small or Medium ally within 5 feet trades places with the bearer and becomes the attack's target, as with
   // Redirect Attack; with `charmed`, any Charmed creature there instead.
@@ -468,6 +509,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("redirect"),
     charmed: z.boolean().default(false),
   }),
+  // The weapon of the attack that missed sticks for as long as the grapple this reaction makes holds, as with
+  // Sticky Shield (combat/reactions.ts).
+  z.strictObject({ kind: z.literal("stickWeapon") }),
   // The triggering attack misses instead, as with Jinx on a failed save.
   z.strictObject({ kind: z.literal("negateHit") }),
   // The bearer splits in two, each with half its Hit Points, as a black pudding does, while it has at least `minHp`
@@ -684,12 +728,15 @@ export const ActivationSchema = z.strictObject({
       within: z.number().int().min(5).optional(),
       // Taken after a d20 roll and before its result applies, as with Bountiful Luck or Portent (combat/reactions.ts).
       // `by` is whose roll, from the bearer's side; `when` what it must show: a natural 1, a hit on the bearer or
-      // its ally (`hit`), a failure, or anything; `magical` only a save against a spell or magic.
+      // its ally (`hit`), a failure, or anything; `magical` only a save against a spell or magic. `hitOrFailed` is
+      // a foe's hit on an ally or an ally's failed save, as Defensive Divination answers.
       rolled: z
         .strictObject({
           rolls: z.array(z.enum(["attack", "save", "check"])).min(1),
           by: z.enum(["self", "ally", "selfOrAlly", "foe", "any"]),
-          when: z.enum(["natural1", "hit", "failed", "any"]).default("any"),
+          when: z
+            .enum(["natural1", "hit", "failed", "hitOrFailed", "any"])
+            .default("any"),
           magical: z.literal(true).optional(),
         })
         .optional(),
@@ -710,8 +757,10 @@ export const ActivationSchema = z.strictObject({
       ownSave: z.enum(["failed", "succeeded"]).optional(),
       // With `ownSave`, `missed` or `struck`, only a spell sets it off, as with Spell Reflection.
       bySpell: z.literal(true).optional(),
-      // Taken when a creature within `within` makes a save to keep Concentration, as with Warp Mind.
+      // Taken when a creature within `within` makes a save to keep Concentration, or takes the Study action, as
+      // with Warp Mind.
       concentrationSave: z.literal(true).optional(),
+      studied: z.literal(true).optional(),
       // Taken when an ally within `within` spends Heroic Inspiration, as with Tireless Reveler.
       inspirationSpent: z.literal(true).optional(),
       // Taken right after Initiative is rolled, as with Alert's Initiative Swap.

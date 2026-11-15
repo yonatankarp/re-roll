@@ -31,6 +31,7 @@ import {
 import {
   afterDamage,
   type Edge,
+  playerTakes,
   reactFrames,
   respond,
   type Roll,
@@ -70,6 +71,7 @@ import {
   type Damage,
   type DamageType,
   ItemSchema,
+  type LeafEffect,
   MonsterSchema,
   type Resolution,
 } from "../schemas.ts";
@@ -214,6 +216,36 @@ export function runProjectile(
   };
 }
 
+// A creature of this kind beside the bearer, as the podling Transfer Harm needs.
+function kinNear(
+  bearer: Actor,
+  near: { readonly monster: string; readonly within: number },
+  context: Context,
+): Actor | null {
+  return (
+    Object.values(context.state.actors).find(
+      (item) =>
+        item.id !== bearer.id &&
+        !isDown(item) &&
+        item.source.kind === "monster" &&
+        item.source.statBlockId === near.monster &&
+        distanceFeet(item.position, bearer.position) <= near.within,
+    ) ?? null
+  );
+}
+
+// AC that counts against melee attack rolls only, as Defensive Stance's.
+function meleeAc(target: Actor, action: KnownAction): number {
+  if (meleeReach(action) === null) return 0;
+  const sources = new Map<string, number>();
+  for (const { modifier, sourceId } of target.activeEffects) {
+    if (modifier.kind === "bonus" && modifier.to === "ac" && modifier.melee) {
+      sources.set(sourceId, modifier.amount.bonus?.base ?? 0);
+    }
+  }
+  return [...sources.values()].reduce((sum, bonus) => sum + bonus, 0);
+}
+
 // Reports whether a reaction could still change the result of this attack.
 function reactionFor(
   target: Actor,
@@ -244,15 +276,21 @@ function reactionFor(
         return resolution.onFail.some((effect) => effect.kind === "negateHit");
       }
       if (resolution.kind !== "automatic") return false;
-      if (resolution.effects.some((effect) => effect.kind === "reduceDamage")) {
-        return true;
+      const reduce = resolution.effects.find(
+        (effect) => effect.kind === "reduceDamage",
+      );
+      if (reduce) {
+        return (
+          !reduce.toNear || kinNear(target, reduce.toNear, context) !== null
+        );
       }
       if (critical) return false;
       const acBonus = resolution.effects.reduce((sum, effect) => {
         if (effect.kind === "acAgainstHit") return sum + effect.bonus;
         return effect.kind === "modifier" &&
           effect.modifier.kind === "bonus" &&
-          effect.modifier.to === "ac"
+          effect.modifier.to === "ac" &&
+          (!effect.modifier.melee || melee)
           ? sum + (effect.modifier.amount.bonus?.base ?? 0)
           : sum;
       }, 0);
@@ -279,8 +317,8 @@ function holds(
   );
 }
 
-// An ally's reaction for a target within 5 feet: Protection before the roll, Interception after a hit. It's taken
-// as soon as it can be, the way a companion takes it, so the player isn't asked.
+// An ally's reaction for a target within 5 feet: Protection before the roll, Interception after a hit. A companion
+// takes it as soon as it can; the player is asked.
 function guardFor(
   target: Actor,
   attacker: Actor,
@@ -307,7 +345,18 @@ function guardFor(
         holds(guard, item.activation.trigger.holding, context) &&
         canAfford(item, guard, stats),
     );
-    if (action) return { guard, action };
+    if (
+      action &&
+      (guard.id !== PLAYER_ACTOR ||
+        playerTakes(
+          `${when}:${target.id}`,
+          `${attacker.name} ${when === "allyHit" ? "hits" : "attacks"} ${target.name}. Use ${action.name}?`,
+          action,
+          context,
+        ))
+    ) {
+      return { guard, action };
+    }
   }
   return null;
 }
@@ -323,7 +372,16 @@ function ownTrigger(
     stats.actions.find((item) => {
       const trigger = item.activation.trigger;
       return (
-        trigger?.[when] && !redirects(item) && canAfford(item, actor, stats)
+        trigger?.[when] &&
+        !redirects(item) &&
+        canAfford(item, actor, stats) &&
+        (actor.id !== PLAYER_ACTOR ||
+          playerTakes(
+            when,
+            `You're attacked. Use ${item.name}?`,
+            item,
+            context,
+          ))
       );
     }) ?? null
   );
@@ -566,6 +624,7 @@ function missedFrames(
         actor: hit.target,
         source: hit.attacker,
         ...attackKind(hit, context),
+        ...(attackKind(hit, context).spell ? {} : { weapon: hit.actionId }),
       },
       context,
     ),
@@ -814,7 +873,13 @@ export function runAttackRoll(
     ...(luck
       ? [
           ...payCosts(luck, target, context),
-          ...(resolveAction(luck, target, [target], context).events ?? []),
+          // Limited Foresight's Advantage is against the attacker alone, so it's aimed at it.
+          ...(resolveAction(
+            luck,
+            target,
+            ["self" in luck.activation.targeting ? target : attacker],
+            context,
+          ).events ?? []),
         ]
       : []),
   ];
@@ -837,6 +902,7 @@ export function runAttackRoll(
   const cover = coverAgainst(state, attacker, target);
   const ac =
     targetStats.ac +
+    meleeAc(target, action) +
     (steady.bypassCover && meleeReach(action) === null ? 0 : cover);
   const critFrom = criticalFrom(stats);
   const judge = (natural: number, bonus: number) => {
@@ -1019,6 +1085,8 @@ export const HitSchema = z.object({
   noModifier: z.boolean().optional(),
   poleStrike: z.boolean().optional(),
   riposte: z.string().optional(), // the attack the target makes back if this now misses, as with Riposte ("" for its weapon)
+  deflect: z.string().optional(), // the reaction that sends the force back out if the damage drops to 0, as Deflect Missile
+  transfer: z.string().optional(), // the creature that takes what a reaction took off, as Transfer Harm's podling
 });
 
 export const ReactionSchema = HitSchema.extend({ answer: z.string() });
@@ -1085,9 +1153,23 @@ export function runAfterReaction(
         ...(reduceBy > 0 ? { reduceBy: (hit.reduceBy ?? 0) + reduceBy } : {}),
         ...(acBonus > 0 ? { acBonus: (hit.acBonus ?? 0) + acBonus } : {}),
         ...(strike?.kind === "strike" ? { riposte: strike.action ?? "" } : {}),
+        ...(lessened.some((effect) => effect.deflect)
+          ? { deflect: action.id }
+          : {}),
+        ...transferTo(lessened, target, context),
       }),
     ],
   };
+}
+
+function transferTo(
+  lessened: readonly Extract<LeafEffect, { kind: "reduceDamage" }>[],
+  target: Actor,
+  context: Context,
+): { transfer?: string } {
+  const near = lessened.find((effect) => effect.toNear)?.toNear;
+  const kin = near ? kinNear(target, near, context) : null;
+  return kin ? { transfer: kin.id } : {};
 }
 
 export function runRecheckHit(
@@ -1096,9 +1178,11 @@ export function runRecheckHit(
 ): SystemResult {
   const { state } = context;
   const target = actorOf(state, payload.target);
+  const attacker = actorOf(state, payload.attacker);
   const ac =
     deriveStats(target, context).ac +
-    coverAgainst(state, actorOf(state, payload.attacker), target) +
+    meleeAc(target, findAction(attacker, payload.actionId, context)) +
+    coverAgainst(state, attacker, target) +
     (payload.acBonus ?? 0);
   if (!payload.critical && payload.total < ac) {
     // Riposte: on the miss, the target makes its attack back.
@@ -1345,14 +1429,15 @@ export function runApplyHit(
               armoredReduction(target, targetStats, item.type, context),
           ),
   }));
-  const dealt = dealEvents(
-    target,
-    lessenHits(armored, payload),
-    payload.critical,
-    context,
-  );
+  const lessened = lessenHits(armored, payload);
+  const dealt = dealEvents(target, lessened, payload.critical, context);
+  const passed = passedOn(armored, lessened, payload, attacker, target, {
+    ...context,
+    state: dealt.events.reduce(applyDndEvent, state),
+  });
   events.push(
     ...dealt.events,
+    ...passed.events,
     ...damageRiders(
       attacker,
       target,
@@ -1413,6 +1498,7 @@ export function runApplyHit(
       ...(masteryOf(attacker, action.id, context)
         ? [frame("masteryHit", { ...payload, dealt: dealt.dealt })]
         : []),
+      ...passed.frames,
       ...afterDamage(target, dealt.dealt + nested.dealt, cause, [], landed),
       ...reactFrames({ kind: "struck", actor: target.id, ...cause }, landed),
       ...reactFrames({ kind: "hitOther", actor: target.id, ...cause }, landed),
@@ -1770,6 +1856,77 @@ function halted(
     target,
     context,
   );
+}
+
+// Damage a reaction took off a hit and passed on: Transfer Harm's other half to the podling, or Deflect Missile's
+// force at a foe once the hit is brought to 0.
+function passedOn(
+  hits: readonly { readonly amount: number; readonly type: Damage["type"] }[],
+  lessened: readonly {
+    readonly amount: number;
+    readonly type: Damage["type"];
+  }[],
+  payload: z.infer<typeof HitSchema>,
+  attacker: Actor,
+  target: Actor,
+  context: Context,
+): { readonly events: SystemEvent[]; readonly frames: Frame[] } {
+  const { state } = context;
+  const events: SystemEvent[] = [];
+  const frames: Frame[] = [];
+  const kin = payload.transfer ? state.actors[payload.transfer] : undefined;
+  if (kin) {
+    const taken = hits.map((item, index) => ({
+      type: item.type,
+      amount:
+        Math.max(0, item.amount) - Math.max(0, lessened[index]?.amount ?? 0),
+    }));
+    const dealt = dealEvents(kin, taken, false, context);
+    events.push(...dealt.events);
+    frames.push(...concentrationFrame(kin, dealt.dealt));
+  }
+  const landed = hits.some((item) => item.amount > 0);
+  if (payload.deflect && landed && lessened.every((item) => item.amount <= 0)) {
+    const action = findAction(target, payload.deflect, context);
+    const { resolution } = action.activation;
+    const deflect = (resolution.kind === "automatic" ? resolution.effects : [])
+      .flatMap((effect) => (effect.kind === "reduceDamage" ? [effect] : []))
+      .find((effect) => effect.deflect)?.deflect;
+    // At the attacker when it's in range, else the nearest foe that is.
+    const victim = deflect
+      ? [attacker, ...enemies(state, target)].find(
+          (item) =>
+            item.side !== target.side &&
+            !isDown(item) &&
+            distanceFeet(item.position, target.position) <= deflect.range &&
+            seeing(target, item.position, state, context) !== "none",
+        )
+      : undefined;
+    if (deflect && victim) {
+      const save = rollSave(victim, deflect.ability, deflect.dc, context);
+      events.push(...save.events);
+      if (!save.saved) {
+        const stats = deriveStats(target, context);
+        const responses = damageResponses(victim, context);
+        const dealt = dealEvents(
+          victim,
+          deflect.damage.map(({ amount, type }) => ({
+            amount: finalDamage(
+              rollAmount(amount, stats, context.dice),
+              type,
+              responses,
+            ),
+            type,
+          })),
+          false,
+          context,
+        );
+        events.push(...dealt.events);
+        frames.push(...concentrationFrame(victim, dealt.dealt));
+      }
+    }
+  }
+  return { events, frames };
 }
 
 // Crusher's and Slasher's effects on a creature hit by an attack dealing their damage type.

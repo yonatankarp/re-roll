@@ -314,8 +314,18 @@ export function charmersOf(actor: Actor): ReadonlySet<string> {
 
 export const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
 
+// How many times a creature has split, as a black pudding does (combat/reactions.ts), each one size smaller.
+export const SPLITS = "splits";
+
 // A creature's size, as its index in SIZES.
 export function sizeOf(actor: Actor, access: ContentAccess): number {
+  return Math.max(
+    0,
+    printedSize(actor, access) - (actor.resourcesSpent[SPLITS] ?? 0),
+  );
+}
+
+function printedSize(actor: Actor, access: ContentAccess): number {
   if (actor.source.kind === "monster") {
     const monster = lookup(access, MonsterSchema, actor.source.statBlockId);
     const size = currentShape(monster, actor)?.size ?? monster.size;

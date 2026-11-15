@@ -11,6 +11,7 @@ import {
 import {
   type Actor,
   dndEvent,
+  EffectAddedSchema,
   equipped,
   frame,
   hasCondition,
@@ -31,6 +32,7 @@ import {
 } from "../stats.ts";
 import { rollD20 } from "../rules.ts";
 import { DECLINE } from "./ids.ts";
+import { teleportFrame } from "./movement.ts";
 import {
   actorOf,
   allies,
@@ -38,6 +40,9 @@ import {
   CHECK_END,
   type Context,
   meleeReach,
+  sizeOf,
+  SIZES,
+  SPLITS,
 } from "./queries.ts";
 import {
   leafEvents,
@@ -128,7 +133,9 @@ function matchesRoll(
 ): boolean {
   const rolled = trigger.rolled;
   if (!rolled?.rolls.includes(roll.kind)) return false;
-  if (rolled.magical && !roll.magical) return false;
+  // Defensive Divination's `magical` is for the saves it answers, not the hits.
+  const asSave = rolled.when !== "hitOrFailed" || roll.kind !== "attack";
+  if (rolled.magical && !roll.magical && asSave) return false;
   const self = bearer.id === roll.roller.id;
   const ally = !self && bearer.side === roll.roller.side;
   const foe = bearer.side !== roll.roller.side;
@@ -148,6 +155,12 @@ function matchesRoll(
     // A hit on the bearer, or with `within` on an ally that near it.
     if (subject.id !== bearer.id && trigger.within === undefined) return false;
     if (subject.side !== bearer.side) return false;
+  }
+  if (rolled.when === "hitOrFailed") {
+    if (subject.id === bearer.id || subject.side !== bearer.side) return false;
+    if (roll.kind === "attack" ? !foe || !roll.success : foe || roll.success) {
+      return false;
+    }
   }
   if (rolled.when === "natural1" && roll.natural !== 1) return false;
   if (rolled.when === "failed" && roll.success) return false;
@@ -334,6 +347,7 @@ export const MomentSchema = z.object({
     "turnStart",
     "concentrationSave",
     "saved",
+    "studied",
   ]),
   actor: z.string(), // the creature it happened to, or the one walking or starting its turn
   source: z.string().optional(), // the creature that did it: the damager or the attacker
@@ -343,6 +357,7 @@ export const MomentSchema = z.object({
   spell: z.boolean().optional(), // it came from a spell
   success: z.boolean().optional(), // a save's result, for "saved"
   from: z.object({ x: z.number(), y: z.number() }).optional(), // the square a walker entered from
+  weapon: z.string().optional(), // the action of the weapon attack that missed, for Sticky Shield
   passed: z.array(z.string()).optional(), // creatures that already answered it or turned it down
 });
 export type Moment = z.infer<typeof MomentSchema>;
@@ -477,6 +492,7 @@ function matchesMoment(
     case "endsMove":
     case "turnStart":
     case "concentrationSave":
+    case "studied":
       return (
         trigger[moment.kind] === true &&
         hostile &&
@@ -515,7 +531,12 @@ function strikeReaches(
   if (!target || isDown(target) || isDead(target)) return false;
   if (strike.approach) return true;
   const attack = strikeAction(bearer, strike.action, context);
-  const reach = attack ? (meleeReach(attack) ?? rangeOf(attack)) : null;
+  const jump = attack && teleportOf(attack);
+  const reach = jump
+    ? jump.feet + (strike.near ?? 0)
+    : attack
+      ? (meleeReach(attack) ?? rangeOf(attack))
+      : null;
   return (
     reach !== null && distanceFeet(bearer.position, target.position) <= reach
   );
@@ -570,11 +591,28 @@ function responderTo(
         ready(bearer, item, stats) &&
         inRange(bearer, item, culprit(moment, context, item)) &&
         strikeReaches(bearer, item, culprit(moment, context, item), context) &&
-        !healsCulprit(item, culprit(moment, context, item), context),
+        !healsCulprit(item, culprit(moment, context, item), context) &&
+        !shrugsOff(culprit(moment, context, item), item, bearer),
     );
     if (action) return { reactor: bearer, action };
   }
   return null;
+}
+
+// A creature that saved against this bearer's reaction and so stopped minding it, as with Unnerving Gaze.
+function shrugsOff(
+  target: Actor | undefined,
+  action: KnownAction,
+  bearer: Actor,
+): boolean {
+  return (
+    target?.activeEffects.some(
+      ({ modifier, sourceId, casterId }) =>
+        modifier.kind === "areaImmunity" &&
+        sourceId === action.id &&
+        casterId === bearer.id,
+    ) ?? false
+  );
 }
 
 // Hellish Rebuke's fire on an iron golem would only heal it, so it isn't offered.
@@ -663,6 +701,7 @@ export function takeReaction(
   const result = resolveAction(action, reactor, targets, context);
   events.push(...(result.events ?? []));
   frames.push(...(result.frames ?? []));
+  events.push(...stuckEvents(action, moment, target, result.events ?? []));
   for (const effect of effectsOf(action)) {
     if (effect.kind === "strike" && target && !isDown(target)) {
       const attack = strikeAction(reactor, effect.action, context);
@@ -704,6 +743,21 @@ export function takeReaction(
             target: target.id,
           }),
         );
+      } else if (effect.near !== undefined && teleportOf(attack)) {
+        // Pursuit: the Teleport lands near the creature that set it off.
+        const jump = teleportOf(attack);
+        if (jump) {
+          frames.push(
+            teleportFrame(
+              reactor,
+              jump.feet,
+              jump.movement,
+              context,
+              jump.provokes,
+              { actor: target.id, feet: effect.near },
+            ),
+          );
+        }
       } else {
         // Another action it uses, as a nalfeshnee's Teleport, costs nothing more than the Reaction.
         const used = resolveAction(
@@ -722,9 +776,50 @@ export function takeReaction(
   return { events, frames };
 }
 
+// Sticky Shield: the weapon that missed sticks for as long as the grapple the reaction made holds.
+function stuckEvents(
+  action: KnownAction,
+  moment: Moment,
+  target: Actor | undefined,
+  events: readonly SystemEvent[],
+): SystemEvent[] {
+  if (
+    !moment.weapon ||
+    !target ||
+    !effectsOf(action).some((effect) => effect.kind === "stickWeapon")
+  ) {
+    return [];
+  }
+  return events.flatMap((event) => {
+    const added = EffectAddedSchema.safeParse(
+      event.kind === `${NS}:effectAdded` && "payload" in event
+        ? event.payload
+        : undefined,
+    ).data;
+    const { effect } = added ?? {};
+    return added?.actor === target.id &&
+      effect?.sourceId === action.id &&
+      effect.modifier.kind === "condition" &&
+      effect.modifier.condition === "grappled"
+      ? [
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: {
+              ...effect,
+              modifier: { kind: "stuck", action: moment.weapon ?? "" },
+            },
+          }),
+        ]
+      : [];
+  });
+}
+
+const teleportOf = (action: KnownAction) =>
+  effectsOf(action).find((effect) => effect.kind === "teleport");
+
 // A creature that splits: it keeps half its Hit Points, and a copy with the other half stands next to it. Each
-// split is counted on both halves, so they stop once they've shrunk as far as they can.
-const SPLITS = "splits";
+// split is counted on both halves, which makes each one size smaller (sizeOf), so they stop once they've shrunk as
+// far as they can.
 
 function splitEvents(
   actor: Actor,
@@ -733,7 +828,14 @@ function splitEvents(
   context: Context,
 ): SystemEvent[] {
   const done = actor.resourcesSpent[SPLITS] ?? 0;
-  if (actor.hp < minHp || !actor.position || done >= times) return [];
+  if (
+    actor.hp < minHp ||
+    !actor.position ||
+    done >= times ||
+    sizeOf(actor, context) < SIZES.indexOf("medium")
+  ) {
+    return [];
+  }
   const half = Math.floor(actor.hp / 2);
   const square = besideSquare(
     { ...actor, position: actor.position },

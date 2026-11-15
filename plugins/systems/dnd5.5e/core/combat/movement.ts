@@ -35,6 +35,7 @@ import {
   resolveAction,
 } from "./effects.ts";
 import { afterDamage, reactFrames } from "./reactions.ts";
+import { leafEvents, rollSave } from "./effects.ts";
 import {
   coverBetween,
   distanceFeet,
@@ -387,7 +388,9 @@ export function teleportSquares(
   movement: number,
   state: DndState,
   access: ContentAccess,
+  near?: Near, // only squares this close to another creature, as Pursuit's
 ): readonly Square[] {
+  const close = near ? state.actors[near.actor]?.position : undefined;
   const grid = state.combat?.grid;
   const from = actor.position;
   if (!grid || !from) return [];
@@ -411,6 +414,7 @@ export function teleportSquares(
       const key = squareKey(square);
       if (
         distanceFeet(from, square) <= feet &&
+        (!near || (close && distanceFeet(close, square) <= near.feet)) &&
         !blocked.has(key) &&
         !taken.has(key) &&
         coverBetween(from, square, blocked, noCover, new Set()) !== "total" &&
@@ -426,6 +430,9 @@ export function teleportSquares(
   );
 }
 
+const NearSchema = z.object({ actor: z.string(), feet: z.number() });
+type Near = z.infer<typeof NearSchema>;
+
 // The square a teleport or jump lands on, chosen like a move.
 export function teleportFrame(
   actor: Actor,
@@ -433,6 +440,8 @@ export function teleportFrame(
   movement: number,
   context: Context,
   provokes = true,
+  near?: Near,
+  actionId?: string, // the action it's part of, for what happens round it (aroundTeleport)
 ): Frame {
   const squares = teleportSquares(
     actor,
@@ -440,6 +449,7 @@ export function teleportFrame(
     movement,
     context.state,
     context,
+    near,
   );
   return awaitDecision({
     id: `${NS}:teleportTo:${actor.id}:${String(actor.moved)}`,
@@ -457,7 +467,64 @@ export function teleportFrame(
       feet,
       movement,
       ...(provokes ? {} : { provokes }),
+      ...(near ? { near } : {}),
+      ...(actionId ? { actionId } : {}),
     }),
+  });
+}
+
+// What a teleport does to the creatures round the square it lands on or leaves, as Whirlwind of Sand's Blinded.
+function aroundTeleport(
+  actor: Actor,
+  actionId: string | undefined,
+  to: Square,
+  context: Context,
+): SystemEvent[] {
+  const action = deriveStats(actor, context).actions.find(
+    (item) => item.id === actionId,
+  );
+  const { resolution } = action?.activation ?? {};
+  const effects = resolution?.kind === "automatic" ? resolution.effects : [];
+  const around = effects.find((effect) => effect.kind === "teleport")?.around;
+  if (!action || !around || !actor.position) return [];
+  const at = around.origin ? actor.position : to;
+  return Object.values(context.state.actors).flatMap((target) => {
+    if (
+      target.id === actor.id ||
+      isDown(target) ||
+      !target.position ||
+      (around.foes && target.side === actor.side) ||
+      distanceFeet(target.position, at) > around.within
+    ) {
+      return [];
+    }
+    const save = around.save
+      ? rollSave(target, around.save.ability, around.save.dc, context, true)
+      : null;
+    if (save?.saved) return save.events;
+    return [
+      ...(save?.events ?? []),
+      ...leafEvents(
+        [
+          ...around.conditions.map((condition) => ({
+            kind: "applyCondition" as const,
+            condition,
+            duration: around.duration,
+            repeatSave: false,
+            endsOnDamage: false,
+          })),
+          ...around.modifiers.map((modifier) => ({
+            kind: "modifier" as const,
+            modifier,
+            duration: around.duration,
+          })),
+        ],
+        action.id,
+        actor,
+        target,
+        context,
+      ),
+    ];
   });
 }
 
@@ -466,6 +533,8 @@ export const TeleportSchema = z.object({
   feet: z.number(),
   movement: z.number(),
   provokes: z.boolean().optional(), // false for movement spent that provokes nothing, as Portal Step's
+  near: NearSchema.optional(),
+  actionId: z.string().optional(),
   answer: z.string(),
 });
 
@@ -484,12 +553,15 @@ export function runTeleport(
     payload.movement,
     state,
     context,
+    payload.near,
   );
   if (!open.some((square) => squareKey(square) === payload.answer)) {
     throw new Error(`${actor.name} can't land on ${payload.answer}`);
   }
   const jump = payload.movement > 0;
-  const events: SystemEvent[] = [];
+  const events: SystemEvent[] = [
+    ...aroundTeleport(actor, payload.actionId, to, context),
+  ];
   const frames: Frame[] = [];
   for (const { foe, melee } of jump && payload.provokes !== false
     ? provokers(actor, to, state, context, [to])

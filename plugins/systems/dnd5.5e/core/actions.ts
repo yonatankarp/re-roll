@@ -1,4 +1,4 @@
-import { afterDamage, settleRoll } from "./combat/reactions.ts";
+import { afterDamage, reactFrames, settleRoll } from "./combat/reactions.ts";
 import {
   type ContentAccess,
   type Decision,
@@ -1028,7 +1028,10 @@ export function runTactic(
           ...rolled.events,
           ...keenSpent(actor, keen, rolled.success),
         ],
-        frames: done,
+        frames: [
+          ...reactFrames({ kind: "studied", actor: actor.id }, context),
+          ...done,
+        ],
       };
     }
     case HELP: {
