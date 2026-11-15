@@ -11,3 +11,9 @@ fi
 
 npm run typecheck
 npm run lint
+
+# CI's format:check checks every file; checking only the staged ones keeps this quick.
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ -n "$staged" ]; then
+  echo "$staged" | tr '\n' '\0' | xargs -0 npx prettier --check --ignore-unknown
+fi
