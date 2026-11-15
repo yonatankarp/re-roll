@@ -13,7 +13,6 @@ import {
   type Context,
   provokers,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
-import { resolveAction } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import {
   shapeOf,
   weakestBeast,
@@ -23,11 +22,22 @@ import {
   shapesIn,
   shapeShiftActions,
 } from "../plugins/systems/dnd5.5e/core/import/shapes.ts";
-import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import {
+  dealEvents,
+  leafEvents,
+  resolveAction,
+  rollSave,
+} from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { runAdvanceTurn } from "../plugins/systems/dnd5.5e/core/combat/turn.ts";
+import { actorOf } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import { finalDamage } from "../plugins/systems/dnd5.5e/core/rules.ts";
 import { sizeOf } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { choosePolicy } from "../plugins/systems/dnd5.5e/core/policy.ts";
 import { nextDndDecision } from "../plugins/systems/dnd5.5e/core/combat.ts";
-import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import {
+  damageResponses,
+  deriveStats,
+} from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { PregenSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
   type Actor,
@@ -35,6 +45,7 @@ import {
   NS,
   applyDndEvent,
   freshActor,
+  hasCondition,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import type { KnownAction } from "../plugins/systems/dnd5.5e/core/stats.ts";
 
@@ -114,6 +125,128 @@ const BLOCKS = [
     text: "CR 5 (XP 1,800; PB +3)",
     passives: [{ kind: "immutableForm" }],
   }),
+  statBlock("test:monster/absorber", {
+    passives: [
+      { kind: "modifier", modifier: { kind: "immunity", damage: "fire" } },
+      { kind: "absorb", damage: ["fire"] },
+    ],
+  }),
+  statBlock("test:monster/pudding", {
+    passives: [
+      {
+        kind: "modifier",
+        modifier: {
+          kind: "retaliate",
+          damage: [{ amount: { dice: "1d8" }, type: "acid" }],
+          grapple: true,
+        },
+      },
+    ],
+  }),
+  statBlock("test:monster/devil", {
+    passives: [{ kind: "ward", suppressed: "attacking" }],
+  }),
+  statBlock("test:monster/horror", {
+    passives: [
+      { kind: "spellImmunity", spells: ["test:spell/zap"] },
+      { kind: "stoneRestoration", hp: 50 },
+    ],
+  }),
+  statBlock("test:monster/berserk", {
+    passives: [
+      {
+        kind: "saveAdvantage",
+        abilities: ["str", "dex", "con", "int", "wis", "cha"],
+        bloodied: true,
+      },
+      {
+        kind: "onDamage",
+        damage: ["fire"],
+        modifiers: [{ kind: "disadvantage", on: "attacks" }],
+      },
+      { kind: "reactive" },
+    ],
+  }),
+  statBlock("test:monster/troll", {
+    hp: 100,
+    passives: [
+      {
+        kind: "severedLimbs",
+        monster: "test:monster/dummy",
+        slashing: 15,
+        resource: "day:loathsome-limbs",
+        uses: 4,
+      },
+      { kind: "regeneration", hp: 15 },
+    ],
+  }),
+  statBlock("test:monster/beholder", {
+    actions: [
+      {
+        name: "Eye Rays",
+        activation: {
+          cost: ["action"],
+          targeting: { creatures: 1, range: 120, side: "enemy" },
+          resolution: {
+            kind: "automatic",
+            effects: [
+              { kind: "randomAction", of: ["Ray A", "Ray B"], times: 2 },
+            ],
+          },
+        },
+      },
+      ...["Ray A", "Ray B"].map((name) => ({
+        name,
+        rolled: true,
+        activation: {
+          cost: [],
+          targeting: { creatures: 1, range: 120, side: "enemy" },
+          resolution: {
+            kind: "automatic",
+            damage: [
+              { amount: { bonus: { base: 3, add: [] } }, type: "force" },
+            ],
+          },
+        },
+      })),
+    ],
+  }),
+  statBlock("test:monster/wraith", {
+    actions: [
+      {
+        name: "Create Specter",
+        activation: {
+          cost: ["action"],
+          targeting: { self: true },
+          resolution: {
+            kind: "automatic",
+            effects: [
+              {
+                kind: "raiseCorpse",
+                monster: "test:monster/dummy",
+                range: 10,
+                creatureTypes: ["humanoid"],
+              },
+            ],
+          },
+        },
+      },
+    ],
+  }),
+  { ...statBlock("test:monster/corpse"), creatureType: "humanoid" },
+  {
+    id: "test:spell/zap",
+    name: "Zap",
+    level: 1,
+    school: "evocation",
+    classes: [],
+    castingTime: "Action",
+    range: "60 feet",
+    components: "V",
+    duration: "instantaneous",
+    text: "Zap.",
+    automation: "full",
+  },
   // A werewolf in small: Bite in wolf shape only, Club in its true one only, and a Shape-Shift to each.
   statBlock("test:monster/were", {
     actions: [
@@ -553,5 +686,269 @@ describe("Shape-Shift", () => {
       ["vampire", { walk: 40, fly: 40 }],
       ["bat", { walk: 5, fly: 30 }],
     ]);
+  });
+});
+
+describe("one-off monster traits and actions", () => {
+  const hitWith = (
+    run: RunContext,
+    target: Actor,
+    damage: readonly { amount: number; type: string }[],
+  ) =>
+    dealEvents(
+      target,
+      damage as never,
+      false,
+      contextOf(run, fight(fighter(run), target), d20s(10).dice),
+    ).events.reduce(applyDndEvent, fight(fighter(run), target));
+
+  it("heals from absorbed fire, even though it's immune to it", async () => {
+    const run = await base();
+    const after = hitWith(run, monster("absorber", { hp: 100 }), [
+      { amount: -12, type: "fire" },
+    ]);
+    expect(after.actors.absorber?.hp).toBe(112);
+    // finalDamage turns the absorbed type into the negative amount dealEvents heals with.
+    expect(
+      finalDamage(12, "fire", damageResponses(monster("absorber"), run)),
+    ).toBe(-12);
+  });
+
+  it("burns and holds a creature that hits it in melee", async () => {
+    const run = await base();
+    const state = fight(
+      fighter(run, { at: [4, 5] }),
+      monster("pudding", { at: [5, 5] }),
+    );
+    const swing = settle(
+      run,
+      state,
+      [attack(PLAYER_ACTOR, "weapon:srd52:item/longsword", "pudding")],
+      d20s(15).dice,
+    );
+    expect(damageOf(swing.events, PLAYER_ACTOR)).toEqual([1]);
+    expect(hasCondition(actorOf(swing.state, PLAYER_ACTOR), "grappled")).toBe(
+      true,
+    );
+  });
+
+  it("is harder to hit until it attacks, and again from its next turn", async () => {
+    const run = await base();
+    const { dice, count } = d20s(15);
+    const state = fight(fighter(run), monster("devil"));
+    settle(
+      run,
+      state,
+      [attack(PLAYER_ACTOR, "weapon:srd52:item/longsword", "devil")],
+      dice,
+    );
+    expect(count()).toBe(2);
+    const attacked = settle(
+      run,
+      state,
+      [attack("devil", "monster:0", PLAYER_ACTOR)],
+      d20s(15).dice,
+    );
+    const counted = d20s(15);
+    settle(
+      run,
+      attacked.state,
+      [attack(PLAYER_ACTOR, "weapon:srd52:item/longsword", "devil")],
+      counted.dice,
+    );
+    expect(counted.count()).toBe(1);
+  });
+
+  it("lets the spells it names pass it by, and turns to stone instead of dropping", async () => {
+    const run = await base();
+    const zap = {
+      id: "spell:test:spell/zap",
+      name: "Zap",
+      spellLevel: 1,
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 60, side: "enemy" },
+        resolution: {
+          kind: "automatic",
+          damage: [{ amount: { bonus: { base: 40, add: [] } }, type: "force" }],
+          effects: [],
+        },
+      },
+    } as KnownAction;
+    const horror = monster("horror", { hp: 30 });
+    const state = fight(fighter(run), horror);
+    const context = contextOf(run, state, d20s(10).dice);
+    expect(
+      resolveAction(zap, actorOf(state, PLAYER_ACTOR), [horror], context)
+        .events ?? [],
+    ).toEqual([]);
+    const stone = hitWith(run, horror, [{ amount: 40, type: "force" }]).actors
+      .horror;
+    expect(stone?.hp).toBe(50);
+    expect(stone && hasCondition(stone, "petrified")).toBe(true);
+  });
+
+  it("saves with Advantage while Bloodied, flinches from fire, and reacts on every turn", async () => {
+    const run = await base();
+    const rolls = (hp: number): number => {
+      const { dice, count } = d20s(10);
+      rollSave(
+        monster("berserk", { hp }),
+        "dex",
+        15,
+        contextOf(run, fight(monster("berserk", { hp })), dice),
+      );
+      return count();
+    };
+    expect(rolls(500)).toBe(1);
+    expect(rolls(200)).toBe(2);
+    const burnt = hitWith(run, monster("berserk"), [
+      { amount: 5, type: "fire" },
+    ]).actors.berserk;
+    expect(
+      burnt?.activeEffects.some(
+        ({ modifier }) =>
+          modifier.kind === "disadvantage" && modifier.on === "attacks",
+      ),
+    ).toBe(true);
+    const spent: Actor = {
+      ...monster("berserk"),
+      budget: { action: true, bonusAction: true, reaction: false },
+    };
+    const next = runAdvanceTurn(
+      contextOf(run, fight(fighter(run), spent), d20s(10).dice),
+    );
+    expect(
+      (next.events ?? []).reduce(applyDndEvent, fight(fighter(run), spent))
+        .actors.berserk?.budget.reaction,
+    ).toBe(true);
+  });
+
+  it("loses a limb to a heavy slash while Bloodied, and grows it back as it heals", async () => {
+    const run = await base();
+    const troll = monster("troll", { hp: 60, at: [5, 5] });
+    const state = fight(fighter(run, { at: [4, 5] }), troll);
+    const cut = dealEvents(
+      troll,
+      [{ amount: 15, type: "slashing" }],
+      false,
+      contextOf(run, state, d20s(10).dice),
+    ).events.reduce(applyDndEvent, state);
+    expect(cut.actors.troll?.exhaustion).toBe(1);
+    expect(cut.actors["troll:limb-1"]?.side).toBe("enemy");
+    expect(cut.combat?.order).toEqual([PLAYER_ACTOR, "troll", "troll:limb-1"]);
+    const healed = runAdvanceTurn(contextOf(run, cut, d20s(10).dice));
+    expect(
+      (healed.events ?? []).reduce(applyDndEvent, cut).actors.troll?.exhaustion,
+    ).toBe(0);
+  });
+
+  it("rolls its eye rays, never the same one twice in a turn", async () => {
+    const run = await base();
+    const beholder = monster("beholder");
+    const state = fight(fighter(run), beholder);
+    let next = 0;
+    const dice: Dice = { below: () => 0, roll: () => [1, 1, 2][next++] ?? 1 };
+    const rays = settle(
+      run,
+      state,
+      [attack("beholder", "monster:0", PLAYER_ACTOR)].map((item) => ({
+        ...item,
+        kind: `${NS}:useAction`,
+        payload: {
+          actor: "beholder",
+          actionId: "monster:0",
+          target: PLAYER_ACTOR,
+        },
+      })),
+      dice,
+    );
+    expect(damageOf(rays.events, PLAYER_ACTOR)).toEqual([3, 3]);
+    expect(rays.state.actors.beholder?.usedThisTurn).toEqual([
+      "rolled:Ray A",
+      "rolled:Ray B",
+    ]);
+    const decision = nextDndDecision(
+      { ...state, combat: state.combat && { ...state.combat, index: 1 } },
+      run,
+    );
+    expect(decision?.options.some(({ id }) => id.startsWith("monster:1"))).toBe(
+      false,
+    );
+  });
+
+  it("raises a fallen humanoid beside it on its side", async () => {
+    const run = await base();
+    const corpse = {
+      ...monster("corpse", { at: [6, 5] }),
+      hp: 0,
+      side: "party" as const,
+      deathSaves: { successes: 0, failures: 3 },
+    };
+    const wraith = monster("wraith", { at: [5, 5] });
+    const state = fight(fighter(run, { at: [1, 1] }), wraith, corpse);
+    const raised = settle(
+      run,
+      state,
+      [
+        {
+          kind: `${NS}:useAction`,
+          payload: { actor: "wraith", actionId: "monster:0", target: "wraith" },
+        },
+      ],
+      d20s(10).dice,
+    );
+    const risen = raised.state.actors["corpse:risen"];
+    expect(risen?.side).toBe("enemy");
+    expect(risen?.position).toEqual({ x: 6, y: 5 });
+    expect(raised.state.combat?.order.indexOf("corpse:risen")).toBe(
+      (raised.state.combat?.order.indexOf("wraith") ?? 0) + 1,
+    );
+  });
+
+  it("can't heal under Negative Energy, and a drained maximum is rolled once", async () => {
+    const run = await base();
+    const hurt: Actor = {
+      ...fighter(run, { hp: 10 }),
+      activeEffects: [
+        {
+          sourceId: "x",
+          casterId: "x",
+          modifier: { kind: "noHealing" },
+          ends: "spellDuration",
+        },
+      ],
+    };
+    const context = contextOf(run, fight(hurt), d20s(10).dice);
+    expect(
+      leafEvents(
+        [{ kind: "heal", amount: { dice: "2d8" } }],
+        "y",
+        hurt,
+        hurt,
+        context,
+      ),
+    ).toEqual([]);
+    const [drain] = leafEvents(
+      [
+        {
+          kind: "modifier",
+          modifier: {
+            kind: "bonus",
+            to: "maxHp",
+            amount: { dice: "4d6" },
+            subtract: true,
+          },
+          duration: { minutes: 1 },
+        },
+      ],
+      "z",
+      hurt,
+      hurt,
+      context,
+    );
+    expect(drain && "payload" in drain && drain.payload.effect).toMatchObject({
+      modifier: { amount: { bonus: { base: 4, add: [] } } },
+    });
   });
 });

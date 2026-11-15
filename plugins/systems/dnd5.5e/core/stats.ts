@@ -81,6 +81,7 @@ export interface KnownAction {
   readonly spellLevel: number | null;
   readonly upcast?: Spell["upcast"];
   readonly hitType?: true; // its damage takes the type of the hit it adds to, as a maneuver's die does
+  readonly rolled?: true; // taken only when a randomAction picks it, as one eye ray
 }
 
 export interface Stats {
@@ -1027,6 +1028,7 @@ function statBlockStats(
                 name: action.name,
                 activation: action.activation,
                 spellLevel: null,
+                ...(action.rolled ? { rolled: true as const } : {}),
               },
             ]
           : [],
@@ -1433,6 +1435,7 @@ export function damageResponses(
   readonly resistances: readonly DamageType[];
   readonly vulnerabilities: readonly DamageType[];
   readonly immunities: readonly DamageType[];
+  readonly absorbs: readonly DamageType[];
 } {
   const resistances: DamageType[] = [];
   const vulnerabilities: DamageType[] = [];
@@ -1464,5 +1467,8 @@ export function damageResponses(
       vulnerabilities.push(modifier.damage);
     if (modifier.kind === "immunity") immunities.push(modifier.damage);
   }
-  return { adjustments: [], resistances, vulnerabilities, immunities };
+  const absorbs = stats.passives.flatMap((passive) =>
+    passive.kind === "absorb" ? passive.damage : [],
+  );
+  return { adjustments: [], resistances, vulnerabilities, immunities, absorbs };
 }

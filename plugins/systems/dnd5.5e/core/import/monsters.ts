@@ -1436,7 +1436,7 @@ function parseBlock(
     // Charge: "The troll moves up to half its Speed straight toward an enemy it can see." A Dash toward the foes,
     // which is where a monster's moves go.
     const charge =
-      /^[^.]*?\bmoves up to (half )?its Speed(?: or (?:its )?\w+ Speed)? straight toward an enemy it can (?:see|sense)\.?$/.exec(
+      /^[^.]*?\bmoves up to (half )?its Speed(?: or (?:its )?\w+ Speed)? straight toward an enemy it can (?:see|sense)( without provoking Opportunity Attacks)?\.?$/.exec(
         text.trim(),
       );
     if (section === "bonus actions" && charge && !label.includes("(")) {
@@ -1444,6 +1444,7 @@ function parseBlock(
         kind: "bonusTactics",
         tactics: ["dash"],
         ...(charge[1] ? { half: true as const } : {}),
+        ...(charge[2] ? { safe: true as const } : {}),
       });
       continue;
     }

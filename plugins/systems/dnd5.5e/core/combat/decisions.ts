@@ -48,7 +48,9 @@ function turnOptions(
   const options: Decision["options"][number][] = [];
   for (const action of stats.actions) {
     const { activation } = action;
-    if (activation.trigger || !canAfford(action, actor, stats)) continue;
+    // An eye ray is only taken when Eye Rays rolls it.
+    if (activation.trigger || action.rolled || !canAfford(action, actor, stats))
+      continue;
     const { targeting } = activation;
     const add = (target: string, label: string): void => {
       options.push(...withUpcasts(action, actor, stats, target, label));

@@ -56,6 +56,10 @@ describe("a multiattack's other actions", () => {
       "monster:2",
       "monster:2",
     ]);
+    // Making no attacks, it doesn't come with a Bite.
+    expect(
+      multiattackUses(monster("The coiler uses Hiss twice."), "Bite"),
+    ).toEqual([]);
   });
 
   it("leaves out another routine to choose instead", () => {

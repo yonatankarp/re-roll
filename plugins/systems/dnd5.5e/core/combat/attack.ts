@@ -28,6 +28,7 @@ import {
   attackBonus,
   damageResponses,
   deriveStats,
+  immuneToCondition,
   type KnownAction,
   modifierFor,
   passiveModifiers,
@@ -67,6 +68,8 @@ import {
   evades,
   steadyShot,
   traitAttackAdvantage,
+  WARD_DOWN,
+  warded,
   weaponDamageDice,
 } from "../trait-rules.ts";
 import {
@@ -473,7 +476,8 @@ export function runAttackRoll(
       "prone",
       "restrained",
     ) ||
-    invisibleTo(target, attacker);
+    invisibleTo(target, attacker) ||
+    warded(target, targetStats);
   // Lucky: the target spends a Luck Point on its own once it's badly hurt or the attacker has Advantage.
   const luck =
     hampered ||
@@ -547,6 +551,18 @@ export function runAttackRoll(
     ...onceEnded(attacker, "attacks"),
     ...onceEnded(target, "attacksAgainst"),
     ...revealEvents(attacker),
+    // Attacking lowers the attacker's own Diabolic Ward until its next turn.
+    ...(stats.passives.some(
+      (passive) =>
+        passive.kind === "ward" && passive.suppressed === "attacking",
+    )
+      ? [
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: attacker.id,
+            key: WARD_DOWN,
+          }),
+        ]
+      : []),
   ];
   const hit = {
     attacker: attacker.id,
@@ -576,7 +592,7 @@ export function runAttackRoll(
       return { ...reroll, events: [...guarded, ...(reroll.events ?? [])] };
     }
     return {
-      events: [report, ...spent],
+      events: [report, ...spent, ...onceHitEnded(attacker)],
       ...(masteryOf(attacker, action.id, context)
         ? { frames: [frame("masteryMiss", hit)] }
         : {}),
@@ -843,10 +859,14 @@ export function runApplyHit(
   const targetStats = deriveStats(target, context);
   const armored = hits.map((item) => ({
     ...item,
-    amount: Math.max(
-      0,
-      item.amount - armoredReduction(target, targetStats, item.type, context),
-    ),
+    amount:
+      item.amount < 0
+        ? item.amount // absorbed
+        : Math.max(
+            0,
+            item.amount -
+              armoredReduction(target, targetStats, item.type, context),
+          ),
   }));
   const dealt = dealEvents(
     target,
@@ -870,6 +890,8 @@ export function runApplyHit(
     ...shieldBash(attacker, target, action, stats, context),
     ...inspiringStrike(attacker, payload.critical, stats, context),
     ...(dealt.dealt > 0 ? reassertHonor(attacker, target, context) : []),
+    ...onceHitEnded(attacker),
+    ...(isMelee(action) ? retaliated(attacker, target, context) : []),
   );
   // The save sees the target as the hit left it.
   const afterHit = events.reduce(applyDndEvent, state);
@@ -916,6 +938,59 @@ export function runApplyHit(
       CHECK_END,
     ],
   };
+}
+
+// Damage added to the bearer's next attack only, as Deadly Aim's, is spent by that attack, hit or miss.
+function onceHitEnded(attacker: Actor): SystemEvent[] {
+  return attacker.activeEffects.flatMap(({ modifier, sourceId }) =>
+    modifier.kind === "hitDamage" && modifier.once
+      ? [dndEvent(`${NS}:effectEnded`, { actor: attacker.id, sourceId })]
+      : [],
+  );
+}
+
+// A melee hit on a creature that strikes back, as a black pudding's acid or a mimic's glue, rolled with its numbers.
+function retaliated(
+  attacker: Actor,
+  target: Actor,
+  context: Context,
+): SystemEvent[] {
+  const stats = deriveStats(target, context);
+  const backs = [
+    ...target.activeEffects.map((effect) => effect.modifier),
+    ...passiveModifiers(stats.passives),
+  ].flatMap((modifier) => (modifier.kind === "retaliate" ? [modifier] : []));
+  if (backs.length === 0 || isDown(attacker)) return [];
+  const responses = damageResponses(attacker, context);
+  const hits = backs.flatMap(({ damage }) =>
+    damage.map(({ amount, type }) => ({
+      amount: finalDamage(
+        rollAmount(amount, stats, context.dice),
+        type,
+        responses,
+      ),
+      type,
+    })),
+  );
+  const events = dealEvents(attacker, hits, false, context).events;
+  if (
+    backs.some(({ grapple }) => grapple) &&
+    !hasCondition(attacker, "grappled") &&
+    !immuneToCondition(deriveStats(attacker, context), "grappled")
+  ) {
+    events.push(
+      dndEvent(`${NS}:effectAdded`, {
+        actor: attacker.id,
+        effect: {
+          sourceId: `${target.id}:adhesive`,
+          casterId: target.id,
+          modifier: { kind: "condition", condition: "grappled" },
+          ends: "spellDuration",
+        },
+      }),
+    );
+  }
+  return events;
 }
 
 const PEERLESS_AIM = "peerless-aim";

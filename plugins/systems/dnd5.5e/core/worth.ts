@@ -33,7 +33,7 @@ import { seesThrough } from "./sight.ts";
 import { formOf, formsFor } from "./forms.ts";
 import { legendOf } from "./legendary.ts";
 import { summonedActors } from "./combat/summon.ts";
-import { nextHitDie, steadyShot } from "./trait-rules.ts";
+import { nextHitDie, steadyShot, warded } from "./trait-rules.ts";
 import {
   aimsFor,
   allies,
@@ -205,7 +205,8 @@ export function makeJudge(context: Context, side: Actor): Judge {
         "prone",
         "restrained",
       ) ||
-      invisibleTo(target, attacker);
+      invisibleTo(target, attacker) ||
+      warded(target, stats(target));
     return Number(up) - Number(down);
   };
 

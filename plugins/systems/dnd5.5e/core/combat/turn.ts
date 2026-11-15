@@ -8,7 +8,9 @@ import {
 import {
   type Actor,
   applyDndEvent,
+  cannotHeal,
   dndEvent,
+  type DndState,
   hasCondition,
   INCAPACITATING,
   isDead,
@@ -45,6 +47,7 @@ import {
   combatEnded,
   type Context,
   currentActor,
+  hasPassive,
 } from "./queries.ts";
 import { concentrationFrame, dealEvents, rollSave } from "./effects.ts";
 import { releasedGrapples } from "./grapple.ts";
@@ -342,6 +345,7 @@ export function runAdvanceTurn(
   const events = [
     ...finished,
     ...(next ? regenerationEvents(next, context) : []),
+    ...reactiveEvents(after, context),
   ];
   const ticks = next ? lingeringFrames(next, "turnStart") : [];
   return ticks.length > 0
@@ -357,10 +361,34 @@ function regenerationEvents(actor: Actor, context: Context): SystemEvent[] {
     (sum, passive) => sum + (passive.kind === "regeneration" ? passive.hp : 0),
     0,
   );
-  const amount = Math.min(hp, stats.maxHp - actor.hp);
-  return amount > 0
-    ? [dndEvent(`${NS}:healed`, { actor: actor.id, amount, max: stats.maxHp })]
-    : [];
+  const amount = cannotHeal(actor) ? 0 : Math.min(hp, stats.maxHp - actor.hp);
+  if (amount <= 0) return [];
+  // shortcut: all of a troll's Exhaustion is taken as its missing limbs, which grow back as it heals.
+  const regrown =
+    actor.exhaustion > 0 && hasPassive(stats, "severedLimbs")
+      ? [
+          dndEvent(`${NS}:exhaustionChanged`, {
+            actor: actor.id,
+            levels: -actor.exhaustion,
+          }),
+        ]
+      : [];
+  return [
+    dndEvent(`${NS}:healed`, { actor: actor.id, amount, max: stats.maxHp }),
+    ...regrown,
+  ];
+}
+
+// Reactive: a creature that has one Reaction on every turn gets it back as each turn starts.
+function reactiveEvents(state: DndState, context: Context): SystemEvent[] {
+  return Object.values(state.actors).flatMap((actor) =>
+    !actor.budget.reaction &&
+    !isDown(actor) &&
+    actor.source.kind === "monster" &&
+    hasPassive(deriveStats(actor, context), "reactive")
+      ? [dndEvent(`${NS}:reactionRegained`, { actor: actor.id })]
+      : [],
+  );
 }
 
 // shortcut: the roll happens at the end of the monster's turn rather than the start of its next one,

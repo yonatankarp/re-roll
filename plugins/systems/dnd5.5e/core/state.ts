@@ -460,6 +460,12 @@ const LairActionTakenSchema = z.strictObject({
   name: z.string(),
 });
 // A creature joining a fight already under way, standing where `actor.position` says, its turn right after `after`'s.
+// Levels of Exhaustion gained (or lost, below 0), as a troll's severed limbs give and regrowing takes away.
+const ExhaustionChangedSchema = z.strictObject({
+  actor: z.string(),
+  levels: z.number().int(),
+});
+
 const SummonedSchema = z.strictObject({
   actor: ActorSchema,
   after: z.string(),
@@ -479,6 +485,8 @@ export const EVENT_SCHEMAS = {
   [`${NS}:damageShareLowered`]: DamageShareLoweredSchema,
   [`${NS}:budgetSpent`]: BudgetSpentSchema,
   [`${NS}:actionRegained`]: ActorOnlySchema,
+  [`${NS}:reactionRegained`]: ActorOnlySchema,
+  [`${NS}:exhaustionChanged`]: ExhaustionChangedSchema,
   [`${NS}:resourceSpent`]: ResourceSpentSchema,
   [`${NS}:resourceRestored`]: ResourceRestoredSchema,
   [`${NS}:oncePerTurnUsed`]: OncePerTurnSchema,
@@ -587,6 +595,13 @@ export const INCAPACITATING: readonly Condition[] = [
   "stunned",
   "unconscious",
 ];
+
+// Under an effect that stops it regaining Hit Points, as a death tyrant's Negative Energy Cone.
+export function cannotHeal(actor: Actor): boolean {
+  return actor.activeEffects.some(
+    ({ modifier }) => modifier.kind === "noHealing",
+  );
+}
 
 export function isDown(actor: Actor): boolean {
   return actor.hp <= 0;
@@ -949,6 +964,19 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         payload(ActorOnlySchema, event).actor,
         (actor) => ({ ...actor, budget: { ...actor.budget, action: true } }),
       );
+    case `${NS}:reactionRegained`:
+      return updateActor(
+        state,
+        payload(ActorOnlySchema, event).actor,
+        (actor) => ({ ...actor, budget: { ...actor.budget, reaction: true } }),
+      );
+    case `${NS}:exhaustionChanged`: {
+      const data = payload(ExhaustionChangedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        exhaustion: Math.min(6, Math.max(0, actor.exhaustion + data.levels)),
+      }));
+    }
     case `${NS}:resourceSpent`: {
       const data = payload(ResourceSpentSchema, event);
       return updateActor(state, data.actor, (actor) => ({

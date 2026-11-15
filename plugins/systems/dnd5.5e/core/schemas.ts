@@ -199,6 +199,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     dealtBy: z.enum(["bearer", "caster"]),
     weaponOnly: z.boolean().default(false),
     damage: DamageSchema,
+    once: z.boolean().optional(), // ends after the bearer's next attack roll, as a bandit crime lord's Deadly Aim
   }),
   // A flat increase to a weapon's own damage, optionally only with one ability, such as Rage.
   z.strictObject({
@@ -206,6 +207,16 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     amount: AmountSchema,
     ability: AbilitySchema.optional(),
     subtract: z.boolean().optional(), // a penalty, as a gold dragon's Weakening Breath
+  }),
+  // Regaining no Hit Points, as in a death tyrant's Negative Energy Cone.
+  z.strictObject({ kind: z.literal("noHealing") }),
+  // A creature that hits the bearer with a melee attack takes this damage, and with `grapple` is Grappled by it,
+  // as a black pudding's Corrosive Form, a mimic's Adhesive or Fire Shield.
+  // shortcut: the grapple's escape DC is the bearer's Unarmed Strike one (combat/grapple.ts), not a printed number.
+  z.strictObject({
+    kind: z.literal("retaliate"),
+    damage: z.array(DamageSchema).default([]),
+    grapple: z.literal(true).optional(),
   }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
@@ -342,6 +353,21 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("hitDieHeal"), bonus: FormulaSchema }),
   // The bearer takes another of its stat block's own shapes, by name, or goes back to its true one (core/forms.ts).
   z.strictObject({ kind: z.literal("shapeShift"), shape: z.string().min(1) }),
+  // One of the bearer's own actions picked at random, `times` over, never one already used this turn, at the same
+  // target, as a beholder zombie's Eye Rays (combat/effects.ts). Those actions are marked `rolled`.
+  z.strictObject({
+    kind: z.literal("randomAction"),
+    of: z.array(z.string().min(1)).min(2),
+    times: z.number().int().min(1).default(1),
+  }),
+  // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
+  z.strictObject({
+    kind: z.literal("raiseCorpse"),
+    monster: ContentIdSchema,
+    range: z.number().int().min(5),
+    creatureTypes: z.array(z.string()).min(1),
+    all: z.boolean().default(false), // every such corpse, not one
+  }),
 ]);
 export type LeafEffect = z.infer<typeof LeafEffectSchema>;
 
@@ -509,6 +535,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("saveAdvantage"),
     abilities: z.array(AbilitySchema).default([]),
     conditions: z.array(ConditionSchema).default([]),
+    bloodied: z.literal(true).optional(), // only while Bloodied, as with Bloodied Frenzy
   }),
   // Heroic Inspiration as a rest ends, for the bearer or for its allies, as with Resourceful or Musician.
   z.strictObject({
@@ -544,6 +571,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("bonusTactics"),
     tactics: z.array(z.enum(["dash", "disengage", "hide", "dodge"])).min(1),
     half: z.literal(true).optional(), // its Dash adds half its Speed, as a troll's Charge
+    safe: z.literal(true).optional(), // its Dash provokes no Opportunity Attacks, as a warrior commander's Tactical Charge
     resource: z.string().optional(), // each use spends one, as Timely Retreat's
   }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
@@ -716,6 +744,49 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("spellRerollOnes"),
     damage: DamageTypeSchema,
+  }),
+  // Damage of these types heals the bearer instead, as an iron golem's Fire Absorption.
+  z.strictObject({
+    kind: z.literal("absorb"),
+    damage: z.array(DamageTypeSchema).min(1),
+  }),
+  // Taking damage of these types puts these on the bearer until the end of its next turn, as a yeti's Fear of Fire.
+  z.strictObject({
+    kind: z.literal("onDamage"),
+    damage: z.array(DamageTypeSchema).min(1),
+    modifiers: z.array(ModifierSchema).min(1),
+  }),
+  // Attack rolls against the bearer have Disadvantage, except until its next turn after it makes one ("attacking"),
+  // as a harvester devil's Diabolic Ward, or while it's Incapacitated, as an unspeakable horror's form.
+  z.strictObject({
+    kind: z.literal("ward"),
+    suppressed: z.enum(["attacking", "incapacitated"]),
+  }),
+  // These spells do nothing to the bearer, as a helmed horror's Spell Immunity.
+  z.strictObject({
+    kind: z.literal("spellImmunity"),
+    spells: z.array(ContentIdSchema).min(1),
+  }),
+  // A Reaction on every turn, as a marilith's Reactive.
+  z.strictObject({ kind: z.literal("reactive") }),
+  // Dropping to 0 Hit Points while not Petrified turns it to stone with this many Hit Points, as a vampire warden.
+  z.strictObject({
+    kind: z.literal("stoneRestoration"),
+    hp: z.number().int().min(1),
+  }),
+  // A condition it always has, as an invisible stalker's Invisibility.
+  z.strictObject({
+    kind: z.literal("innateCondition"),
+    condition: ConditionSchema,
+  }),
+  // A hit of `slashing` or more Slashing damage while Bloodied severs a limb that fights as this monster, at a level
+  // of Exhaustion each until it next regains Hit Points, as a troll's Loathsome Limbs.
+  z.strictObject({
+    kind: z.literal("severedLimbs"),
+    monster: ContentIdSchema,
+    slashing: z.number().int().min(1),
+    resource: z.string(), // counts the limbs lost
+    uses: z.number().int().min(1), // the most it can lose, as "(4/Day)"
   }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
@@ -1128,6 +1199,7 @@ export const MonsterSchema = ContentEntrySchema.extend({
         recharge: z.number().int().min(2).max(6).optional(), // ready again on this d6 roll or higher
         perDay: z.number().int().min(1).optional(), // uses of its resource cost, back after a Long Rest
         shapes: z.array(z.string().min(1)).min(1).optional(), // the shapes it can be used in, as "(Wolf Form Only)"
+        rolled: z.literal(true).optional(), // taken only when a randomAction picks it, as one eye ray
         activation: ActivationSchema,
       }),
     )

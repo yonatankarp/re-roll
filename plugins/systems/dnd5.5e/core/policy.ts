@@ -2,6 +2,7 @@ import {
   type Actor,
   hasCondition,
   INCAPACITATING,
+  isDead,
   isDown,
   NS,
 } from "./state.ts";
@@ -291,6 +292,28 @@ export function moveOf(action: KnownAction) {
   return resolution.kind === "automatic"
     ? resolution.effects.find((item) => item.kind === "teleport")
     : undefined;
+}
+
+function raisesCorpse(
+  action: KnownAction,
+  actor: Actor,
+  context: Context,
+): boolean {
+  const { resolution } = action.activation;
+  if (resolution.kind !== "automatic") return false;
+  return resolution.effects.some(
+    (effect) =>
+      effect.kind === "raiseCorpse" &&
+      Object.values(context.state.actors).some(
+        (item) =>
+          isDead(item) &&
+          context.state.actors[`${item.id}:risen`] === undefined &&
+          distanceFeet(actor.position, item.position) <= effect.range &&
+          effect.creatureTypes.includes(
+            deriveStats(item, context).creatureType ?? "",
+          ),
+      ),
+  );
 }
 
 function shiftOf(action: KnownAction) {
@@ -758,6 +781,11 @@ export function choosePolicy(decision: Decision, context: Context): string {
         routineSize(b.action) - routineSize(a.action),
     )[0];
   if (attack) return attack.option.id;
+  // Nothing to attack: a wraith raises a corpse near it as a Specter, when one lies there.
+  const raise = parsed.find(({ action }) =>
+    raisesCorpse(action, actor, context),
+  );
+  if (raise) return raise.option.id;
   // Nothing in reach yet: walk closer while there's still an action to use when it gets there.
   if (
     actor.budget.action &&

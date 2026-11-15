@@ -45,9 +45,10 @@ export function startCombat(
     const statBlock = lookup(context, MonsterSchema, monster);
     const slug = monster.slice(monster.lastIndexOf("/") + 1);
     for (let index = 1; index <= count; index += 1) {
-      monsters.push(
-        freshActor({
-          id: `${encounter.id}:${slug}-${String(index)}`,
+      const id = `${encounter.id}:${slug}-${String(index)}`;
+      monsters.push({
+        ...freshActor({
+          id,
           name:
             count > 1 ? `${statBlock.name} ${String(index)}` : statBlock.name,
           side: "enemy",
@@ -55,7 +56,23 @@ export function startCombat(
           hp: statBlock.hp,
           inventory: [],
         }),
-      );
+        // A condition it always has, as an invisible stalker's Invisibility.
+        activeEffects: statBlock.passives.flatMap((passive) =>
+          passive.kind === "innateCondition"
+            ? [
+                {
+                  sourceId: `${id}:innate`,
+                  casterId: id,
+                  modifier: {
+                    kind: "condition" as const,
+                    condition: passive.condition,
+                  },
+                  ends: "spellDuration" as const,
+                },
+              ]
+            : [],
+        ),
+      });
     }
   }
 

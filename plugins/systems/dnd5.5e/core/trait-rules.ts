@@ -52,11 +52,13 @@ export function traitSaveAdvantage(
   stats: Stats,
   ability: Ability,
   conditions: readonly string[],
+  bloodied = false,
 ): boolean {
   // A save to keep Concentration names "concentration" among its conditions.
   return stats.passives.some(
     (passive) =>
       (passive.kind === "saveAdvantage" &&
+        (!passive.bloodied || bloodied) &&
         (passive.abilities.includes(ability) ||
           passive.conditions.some((condition) =>
             conditions.includes(condition),
@@ -348,4 +350,23 @@ export function nextHitDie(actor: Actor, access: ContentAccess): string | null {
   if (actor.source.kind !== "character") return null;
   const entry = actor.source.build?.levels[actor.resourcesSpent[HIT_DICE] ?? 0];
   return entry ? lookup(access, ClassSchema, entry.classId).hitDie : null;
+}
+
+export const WARD_DOWN = "ward-down";
+
+// Diabolic Ward or Incomprehensible Form: attacks against the bearer have Disadvantage, except after it attacked this
+// round (until its next turn starts), or while it's Incapacitated, as the trait says.
+export function warded(target: Actor, stats: Stats): boolean {
+  return stats.passives.some(
+    (passive) =>
+      passive.kind === "ward" &&
+      !(
+        passive.suppressed === "attacking" &&
+        target.usedThisTurn.includes(WARD_DOWN)
+      ) &&
+      !(
+        passive.suppressed === "incapacitated" &&
+        hasCondition(target, ...INCAPACITATING)
+      ),
+  );
 }

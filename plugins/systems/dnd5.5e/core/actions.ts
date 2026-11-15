@@ -781,6 +781,12 @@ export function runTactic(
             },
             "casterNextTurn",
           ),
+          // A Tactical Charge moves without provoking Opportunity Attacks.
+          ...(stats.passives.some(
+            (passive) => passive.kind === "bonusTactics" && passive.safe,
+          )
+            ? [self("disengage")]
+            : []),
         ],
       };
     }
