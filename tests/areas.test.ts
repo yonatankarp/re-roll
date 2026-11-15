@@ -813,3 +813,37 @@ describe("reading areas from stat blocks", () => {
     });
   });
 });
+
+describe("reading slowing and bolstering auras", () => {
+  const row = (name: string) =>
+    `<tr><th>${name}</th><td>10</td><td>0</td><td>0</td></tr>`;
+  const parse = (label: string, text: string) => {
+    const [parsed] = parseMonstersFromHtml(
+      `<div class="stat-block"><h3>Test Knight</h3><p>Medium Humanoid, Lawful Evil</p><p><strong>AC</strong> 18</p><p><strong>HP</strong> 60 (9d8)</p><p><strong>Speed</strong> 30 ft.</p><table>${["Str", "Dex", "Con", "Int", "Wis", "Cha"].map(row).join("")}</table><p class="monster-header">Traits</p><p><strong><em>${label}.</em></strong> ${text}</p><p class="monster-header">Actions</p><p><strong><em>Mace.</em></strong> Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Bludgeoning damage.</p></div>`,
+      "my-book",
+    );
+    return MonsterSchema.parse(parsed?.entry).passives;
+  };
+
+  it("reads halved Speeds as ground that slows its foes, and Temporary Hit Points for its allies of a kind", () => {
+    expect(
+      parse(
+        "Mire",
+        "Creatures in a 10-foot Emanation originating from the knight have their Speeds halved while in the Emanation.",
+      )[0],
+    ).toMatchObject({ kind: "aura", area: { side: "enemy", difficult: true } });
+    expect(
+      parse(
+        "Tune-Up",
+        "At the end of each of the knight’s turns, each of its Construct allies in a 5-foot Emanation originating from the knight gains 5 Temporary Hit Points.",
+      )[0],
+    ).toMatchObject({
+      kind: "aura",
+      area: {
+        side: "ally",
+        creatureTypes: ["construct"],
+        when: "ownerTurnEnd",
+      },
+    });
+  });
+});

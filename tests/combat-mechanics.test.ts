@@ -359,26 +359,41 @@ describe("lingering damage", () => {
     expect(damageOf(saved.events, "a")).toEqual([10]);
   });
 
+  // Spirit Guardians is an area round its caster now (zones.ts), so nothing sits on the foes it caught.
   it("ends with the caster's Concentration, on everyone", async () => {
     const run = arenaRun(await base(), {});
+    const at = (item: Actor, x: number): Actor => ({
+      ...item,
+      position: { x, y: 0 },
+    });
+    const start = fight(
+      at(hero(run, { spells: ["spirit-guardians"] }), 0),
+      at(monster("a"), 1),
+      at(monster("b"), 2),
+    );
     const cast = settle(
       run,
-      fight(
-        hero(run, { spells: ["spirit-guardians"] }),
-        monster("a"),
-        monster("b"),
-      ),
+      {
+        ...start,
+        combat: start.combat
+          ? { ...start.combat, grid: { width: 10, height: 10 } }
+          : null,
+      },
       [act(PLAYER_ACTOR, `spell:${spell("spirit-guardians")}|all`)],
       LOW,
     );
     expect(damageOf(cast.events)).toEqual([]);
-    expect(actor(cast.state, "b").activeEffects).toHaveLength(1);
+    expect(actor(cast.state, "b").activeEffects).toEqual([]);
+    expect(
+      actor(cast.state, PLAYER_ACTOR).activeEffects.map(
+        ({ modifier }) => modifier.kind,
+      ),
+    ).toEqual(["zone"]);
     const ended = applyDndEvent(
       cast.state,
       dndEvent(`${NS}:concentrationEnded`, { actor: PLAYER_ACTOR }),
     );
-    expect(actor(ended, "a").activeEffects).toEqual([]);
-    expect(actor(ended, "b").activeEffects).toEqual([]);
+    expect(actor(ended, PLAYER_ACTOR).activeEffects).toEqual([]);
   });
 
   it("doesn't let the same spell from two casters hit twice in a turn", async () => {

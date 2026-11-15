@@ -110,7 +110,33 @@
     through it. An affected creature can cast spells or make attacks with Ranged
     or Reach weapons through the barrier. If you move so that an affected
     creature is forced to pass through the barrier, the spell ends.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: emanation
+        radius: 10
+      range: self
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: area
+          radius: 10
+          duration:
+            concentration: true
+            minutes: 60
+          follows: true
+    area:
+      barrier: true
+      exceptTypes:
+        - undead
+        - construct
 - id: srd52:spell/arcane-lock
   name: Arcane Lock
   level: 2
@@ -979,7 +1005,44 @@
     Dexterity saving throw, taking 20 Radiant damage on a failed save or half as
     much damage on a successful one. The guardian vanishes when it has dealt a
     total of 60 damage.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 10
+      range: 30
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: area
+          radius: 10
+          duration:
+            minutes: 480
+    area:
+      side: enemy
+      when: turnStart
+      maxDamage: 60
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              bonus:
+                base: 20
+            type: radiant
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
 - id: srd52:spell/hallow
   name: Hallow
   level: 5
@@ -1577,7 +1640,26 @@
     failed save, the condition ends, and the creature teleports to another plane
     of existence (GM’s choice). Additional Effects: This layer is destroyed by
     Dispel Magic."
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 15
+      range: 60
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: wall
+          radius: 15
+          duration:
+            minutes: 10
 - id: srd52:spell/protection-from-energy
   name: Protection from Energy
   level: 3
@@ -1836,7 +1918,50 @@
     succeed on a Constitution saving throw or have the Poisoned condition until
     the end of the current turn. While Poisoned in this way, the creature can’t
     take an action or a Bonus Action.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 20
+      range: 90
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: fog
+          radius: 20
+          duration:
+            concentration: true
+            minutes: 1
+    area:
+      when: turnStart
+      disperses: true
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage: []
+        onSuccessDamage: none
+        onFail:
+          - kind: applyCondition
+            condition: poisoned
+            duration:
+              until: turnEnd
+          - kind: modifier
+            modifier:
+              kind: actionLimit
+              noActions: true
+            duration:
+              until: turnEnd
+        onSuccess: []
 - id: srd52:spell/summon-dragon
   name: Summon Dragon
   level: 5
@@ -1914,7 +2039,22 @@
     it, affects a creature other than you or an object being worn or carried by
     someone other than you. In addition, the spell ends if you move to a place
     more than 1,000 feet from the location where you cast it.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: extraTurns
+          turns:
+            dice: 1d4
+            bonus:
+              base: 1
 - id: srd52:spell/true-polymorph
   name: True Polymorph
   level: 9
@@ -2011,7 +2151,27 @@
     be dispelled by Dispel Magic. A Disintegrate spell destroys the wall
     instantly, however. The wall also extends into the Ethereal Plane and blocks
     ethereal travel through the wall.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 10
+      range: 120
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: wall
+          radius: 10
+          duration:
+            concentration: true
+            minutes: 10
 - id: srd52:spell/water-breathing
   name: Water Breathing
   level: 3
@@ -2151,7 +2311,31 @@
     suppressed counts against its duration. Dispel Magic has no effect on the
     aura, and the auras created by different Antimagic Field spells don’t
     nullify each other.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: emanation
+        radius: 10
+      range: self
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: area
+          radius: 10
+          duration:
+            concentration: true
+            minutes: 60
+          follows: true
+    area:
+      noSpells: all
+      self: true
 - id: srd52:spell/arcane-sword
   name: Arcane Sword
   level: 7
@@ -2579,7 +2763,26 @@
     something opaque, such as a bowl or helm, blocks the sunlight. If any of
     this spell’s area overlaps with an area of Darkness created by a spell of
     level 3 or lower, that other spell is dispelled.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 60
+      range: 60
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: sunlight
+          radius: 60
+          duration:
+            minutes: 60
 - id: srd52:spell/detect-magic
   name: Detect Magic
   level: 1
@@ -3713,7 +3916,32 @@
     Speed. Similarly, the globe can be picked up and moved by other creatures. A
     Disintegrate spell targeting the globe destroys it without harming anything
     inside.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 30
+      side: enemy
+      maxSize: large
+    resolution:
+      kind: save
+      ability: dex
+      dc:
+        add:
+          - kind: spellSaveDc
+      damage: []
+      onSuccessDamage: none
+      onFail:
+        - kind: modifier
+          modifier:
+            kind: sealed
+          duration:
+            concentration: true
+            minutes: 1
+      onSuccess: []
 - id: srd52:spell/rope-trick
   name: Rope Trick
   level: 2
@@ -3975,6 +4203,13 @@
           condition: blinded
           duration:
             until: yourNextTurnStart
+        - kind: zone
+          zone: sunlight
+          radius: 30
+          duration:
+            concentration: true
+            minutes: 1
+          follows: true
 - id: srd52:spell/teleport
   name: Teleport
   level: 7
@@ -4536,7 +4771,51 @@
     damage of the spirit’s type. On a successful save, the target isn’t
     Restrained by the spirit. Using a Higher-Level Spell Slot. The damage
     increases by 1d8 for each spell slot level above 5."
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 5
+      range: 60
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: area
+          radius: 5
+          duration:
+            concentration: true
+            minutes: 10
+    area:
+      side: enemy
+      when: turnStart
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 8d8
+            type: lightning
+        onSuccessDamage: none
+        onFail:
+          - kind: applyCondition
+            condition: restrained
+            duration:
+              concentration: true
+              minutes: 10
+        onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
 - id: srd52:spell/contagion
   name: Contagion
   level: 5
@@ -5007,7 +5286,29 @@
     strong wind (such as one created by Gust of Wind) disperses it. Using a
     Higher-Level Spell Slot. The fog’s radius increases by 20 feet for each
     spell slot level above 1.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 20
+      range: 120
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: fog
+          radius: 20
+          duration:
+            concentration: true
+            minutes: 60
+    area:
+      disperses: true
 - id: srd52:spell/freezing-sphere
   name: Freezing Sphere
   level: 6
@@ -5526,7 +5827,29 @@
     escapes, and the spell ends. When the spell ends, the target reappears in
     the space it left or, if that space is occupied, in the nearest unoccupied
     space.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 60
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sealed
+            escape:
+              ability: int
+              dc: 20
+              skill: investigation
+          duration:
+            concentration: true
+            minutes: 10
 - id: srd52:spell/mind-blank
   name: Mind Blank
   level: 8
@@ -6001,23 +6324,30 @@
       kind: automatic
       damage: []
       effects:
-        - kind: modifier
+        - kind: zone
+          zone: area
+          radius: 15
           duration:
             concentration: true
             minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 3d8
-                type: radiant
-            save:
-              ability: wis
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+          follows: true
+    area:
+      side: enemy
+      when: turnEnd
+      difficult: true
+      resolution:
+        kind: save
+        ability: wis
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 3d8
+            type: radiant
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d8
@@ -6268,7 +6598,27 @@
     maintain your Concentration on this spell for its full duration, the wall
     becomes permanent and can’t be dispelled. Otherwise, the wall disappears
     when the spell ends.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 10
+      range: 120
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: wall
+          radius: 10
+          duration:
+            concentration: true
+            minutes: 10
 - id: srd52:spell/web
   name: Web
   level: 2
@@ -7017,7 +7367,43 @@
     hound attempts to bite one enemy within 5 feet of it. That enemy must
     succeed on a Dexterity saving throw or take 4d8 Force damage. On your later
     turns, you can take a Magic action to move the hound up to 30 feet.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 5
+      range: 30
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: area
+          radius: 5
+          duration:
+            minutes: 480
+    area:
+      side: enemy
+      when: ownerTurnStart
+      targets: 1
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 4d8
+            type: force
+        onSuccessDamage: none
+        onFail: []
+        onSuccess: []
 - id: srd52:spell/find-steed
   name: Find Steed
   level: 2
@@ -7335,7 +7721,43 @@
     attack only), Dash, Disengage, Hide, or Utilize action. When the spell ends,
     the target is Incapacitated and has a Speed of 0 until the end of its next
     turn, as a wave of lethargy washes over it.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 30
+      side: ally
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: hasted
+          duration:
+            concentration: true
+            minutes: 1
+        - kind: modifier
+          modifier:
+            kind: bonus
+            to: ac
+            amount:
+              bonus:
+                base: 2
+          duration:
+            concentration: true
+            minutes: 1
+        - kind: modifier
+          modifier:
+            kind: advantage
+            on: saves
+            ability: dex
+          duration:
+            concentration: true
+            minutes: 1
 - id: srd52:spell/heroes-feast
   name: Heroes’ Feast
   level: 6
@@ -8863,7 +9285,38 @@
     attack). In addition, the ground in the Emanation is Difficult Terrain for
     your enemies. Using a Higher-Level Spell Slot. The damage increases by 1d8
     for each spell slot level above 4.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: area
+          radius: 15
+          duration:
+            concentration: true
+            minutes: 10
+          follows: true
+        - kind: modifier
+          modifier:
+            kind: hitDamage
+            dealtBy: bearer
+            damage:
+              amount:
+                dice: 2d8
+              type: fire
+          duration:
+            concentration: true
+            minutes: 10
+    area:
+      side: enemy
+      difficult: true
 - id: srd52:spell/continual-flame
   name: Continual Flame
   level: 2
@@ -9261,7 +9714,26 @@
     the creature doesn’t exit the cage and wastes the spell or effect. The cage
     also extends into the Ethereal Plane, blocking ethereal travel. This spell
     can’t be dispelled by Dispel Magic.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: cube
+        radius: 10
+      range: 100
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sealed
+          duration:
+            minutes: 60
 - id: srd52:spell/gate
   name: Gate
   level: 9
@@ -9315,7 +9787,31 @@
     them. Similarly, the area within the barrier is excluded from areas of
     effect created by such spells. Using a Higher-Level Spell Slot. The barrier
     blocks spells of 1 level higher for each spell slot level above 6.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: emanation
+        radius: 10
+      range: self
+      side: ally
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: area
+          radius: 10
+          duration:
+            concentration: true
+            minutes: 1
+          follows: true
+    area:
+      spellShield: 5
+      self: true
 - id: srd52:spell/greater-restoration
   name: Greater Restoration
   level: 5
@@ -10099,7 +10595,29 @@
     creature or object entirely inside the Sphere has Immunity to Thunder
     damage, and creatures have the Deafened condition while entirely inside it.
     Casting a spell that includes a Verbal component is impossible there.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 20
+      range: 120
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: area
+          radius: 20
+          duration:
+            concentration: true
+            minutes: 10
+    area:
+      noSpells: verbal
 - id: srd52:spell/slow
   name: Slow
   level: 3
@@ -10124,7 +10642,7 @@
     chance the spell fails as a result of the target making the spell’s gestures
     too slowly. An affected target repeats the save at the end of each of its
     turns, ending the spell on itself on a success.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -10141,15 +10659,36 @@
           - kind: spellSaveDc
       onFail:
         - kind: modifier
-          duration:
+          duration: &a1
             concentration: true
             minutes: 1
+          repeatSave: true
           modifier:
             kind: bonus
             to: ac
             amount:
               bonus:
                 base: -2
+        - kind: modifier
+          duration: *a1
+          repeatSave: true
+          modifier:
+            kind: bonus
+            to: saves
+            ability: dex
+            amount:
+              bonus:
+                base: -2
+        - kind: modifier
+          duration: *a1
+          repeatSave: true
+          modifier:
+            kind: actionLimit
+            oneAction: true
+            noReactions: true
+            oneAttack: true
+            speed: half
+            spellFailure: 25
 - id: srd52:spell/speak-with-plants
   name: Speak with Plants
   level: 3

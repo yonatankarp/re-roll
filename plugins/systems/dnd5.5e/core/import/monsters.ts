@@ -1313,6 +1313,73 @@ function areaTrait(
       },
     ];
   }
+  // Aura of Dread, Impossible Geometry: ground that slows, maybe with damage for whoever starts its turn there.
+  const slowing =
+    /^(?:Creatures in a (\d+)-foot Emanation originating from [^.]+? have their Speeds halved while in the Emanation\.(?: The [^.]+? can designate creatures to be unaffected by the aura\.)?|Ground, air, and water in a (\d+)-foot Emanation originating from [^.]+? is Difficult Terrain\.(?: A creature that starts its turn in the Emanation takes \d+ \((\d+d\d+)\) (\w+) damage\.)?)$/.exec(
+      text,
+    );
+  if (slowing) {
+    const [, halved, ground, dice, type = ""] = slowing;
+    return [
+      {
+        kind: "aura",
+        name,
+        zone: "area",
+        radius: Number(halved ?? ground),
+        area: {
+          ...(halved ? { side: "enemy" as const } : {}),
+          difficult: true,
+          ...(dice
+            ? {
+                when: "turnStart" as const,
+                resolution: {
+                  kind: "automatic" as const,
+                  damage: [
+                    {
+                      amount: { dice },
+                      type: type.toLowerCase() as Damage["type"],
+                    },
+                  ],
+                  effects: [],
+                },
+              }
+            : {}),
+        },
+      },
+    ];
+  }
+  // Bolster Inventions: Temporary Hit Points for its allies of a kind as its turn ends.
+  const bolster =
+    /^At the end of each of [^.]+? turns, each of (?:its|his|her) (\w+) allies in a (\d+)-foot Emanation originating from [^.]+? gains (\d+) Temporary Hit Points\./.exec(
+      text,
+    );
+  if (bolster) {
+    const [, type = "", radius, amount] = bolster;
+    return [
+      {
+        kind: "aura",
+        name,
+        zone: "area",
+        radius: Number(radius),
+        area: {
+          side: "ally",
+          creatureTypes: [type.toLowerCase()],
+          when: "ownerTurnEnd",
+          resolution: {
+            kind: "automatic",
+            damage: [],
+            effects: [
+              {
+                kind: "tempHp",
+                amount: { bonus: { base: Number(amount), add: [] } },
+              },
+            ],
+          },
+          ...awake,
+        },
+      },
+    ];
+  }
   // Death Burst, Death Throes: a save where it falls.
   const burst = /^The [^.]+? (?:explodes|bursts) when it dies\.\s*(.*)$/s.exec(
     text,
