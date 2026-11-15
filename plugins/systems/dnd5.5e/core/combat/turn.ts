@@ -13,6 +13,7 @@ import {
   cannotHeal,
   dndEvent,
   type DndState,
+  familiarOwner,
   hasCondition,
   INCAPACITATING,
   isDead,
@@ -160,8 +161,10 @@ function fightOver(context: Context): SystemResult {
     );
     if (freed.length > 0) return { events: freed };
   }
+  // A familiar can't fight on alone.
   const partyStanding = fighters.some(
-    (actor) => actor.side === "party" && !isDown(actor),
+    (actor) =>
+      actor.side === "party" && !isDown(actor) && familiarOwner(actor) === null,
   );
   // The story follows the player's character, so their death ends the run even if companions win.
   const playerDead = isDead(actorOf(state, PLAYER_ACTOR));

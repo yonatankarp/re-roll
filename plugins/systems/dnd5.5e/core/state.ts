@@ -233,6 +233,16 @@ const ActorSchema = z.strictObject({
     z.strictObject({
       kind: z.literal("monster"),
       statBlockId: ContentIdSchema,
+      // A character's familiar in a fight (combat/familiar.ts): its owner, its Hit Point maximum as found, the
+      // owner's features that give it something, and the owner's numbers those read, such as its spell save DC.
+      familiarOf: z
+        .strictObject({
+          owner: z.string(),
+          maxHp: z.number().int(),
+          features: z.array(ContentIdSchema),
+          scaling: z.record(z.string(), z.number().int()),
+        })
+        .optional(),
     }),
     // A creature a spell brought, by a companion stat block (stats.ts), with its caster's numbers as cast.
     z.strictObject({
@@ -278,6 +288,15 @@ const ActorSchema = z.strictObject({
   swapped: z.array(z.string()).optional(),
   // Damage taken this turn from creatures it has swallowed. Missing until there is some.
   insideDamage: z.number().int().optional(),
+  // The character's familiar between fights: its form and Hit Points, 0 once it has dropped until it is found
+  // again. Missing until it is first found.
+  familiar: z
+    .strictObject({
+      form: ContentIdSchema,
+      hp: z.number().int(),
+      maxHp: z.number().int(),
+    })
+    .optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -373,6 +392,8 @@ const CombatStartedSchema = z.strictObject({
   damageToParty: z.number().optional(),
   fog: z.literal(true).optional(),
   sunlight: z.literal(true).optional(),
+  // The party's familiars, who join with Initiative of their own (combat/familiar.ts).
+  familiars: z.array(ActorSchema).optional(),
 });
 const TreasureFoundSchema = z.strictObject({
   actor: z.string(), // who carries the items
@@ -530,6 +551,13 @@ const ExhaustionChangedSchema = z.strictObject({
   levels: z.number().int(),
 });
 
+// A character finds its familiar again, at full Hit Points (combat/familiar.ts).
+const FamiliarFoundSchema = z.strictObject({
+  actor: z.string(),
+  form: ContentIdSchema,
+  maxHp: z.number().int(),
+});
+
 const SummonedSchema = z.strictObject({
   actor: ActorSchema,
   after: z.string(),
@@ -578,6 +606,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:itemPickedUp`]: ItemPickedUpSchema,
   [`${NS}:legendaryActionTaken`]: LegendaryActionTakenSchema,
   [`${NS}:summoned`]: SummonedSchema,
+  [`${NS}:familiarFound`]: FamiliarFoundSchema,
   [`${NS}:legendaryResistanceUsed`]: ActorOnlySchema,
   [`${NS}:lairActionTaken`]: LairActionTakenSchema,
   [`${NS}:surpriseSet`]: z.strictObject({ side: SurpriseSchema }),
@@ -718,11 +747,19 @@ export function isDown(actor: Actor): boolean {
   return actor.hp <= 0;
 }
 
+// The character whose familiar this is, or null for any other creature.
+export function familiarOwner(actor: Actor): string | null {
+  return actor.source.kind === "monster"
+    ? (actor.source.familiarOf?.owner ?? null)
+    : null;
+}
+
 export function isDead(actor: Actor): boolean {
   if (actor.hp > 0) return false;
   return (
     actor.side === "enemy" ||
     actor.source.kind === "summon" ||
+    familiarOwner(actor) !== null ||
     actor.deathSaves.failures >= 3
   );
 }
@@ -852,10 +889,24 @@ function endCombat(state: DndState): DndState {
         : after,
     state,
   );
+  // A familiar's Hit Points go back to its owner, to carry into the next fight.
+  const kept = Object.values(gathered.actors).reduce((after, actor) => {
+    const owner = familiarOwner(actor);
+    const held = owner ? after.actors[owner]?.familiar : undefined;
+    return owner && held
+      ? updateActor(after, owner, (item) => ({
+          ...item,
+          familiar: { ...held, hp: Math.max(0, actor.hp) },
+        }))
+      : after;
+  }, gathered);
   const actors = Object.fromEntries(
-    Object.entries(gathered.actors)
+    Object.entries(kept.actors)
       .filter(
-        ([, actor]) => actor.side === "party" && actor.source.kind !== "summon",
+        ([, actor]) =>
+          actor.side === "party" &&
+          actor.source.kind !== "summon" &&
+          familiarOwner(actor) === null,
       )
       .map(([id, actor]) => [
         id,
@@ -999,7 +1050,12 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       const data = payload(CombatStartedSchema, event);
       const actors = {
         ...state.actors,
-        ...Object.fromEntries(data.monsters.map((item) => [item.id, item])),
+        ...Object.fromEntries(
+          [...data.monsters, ...(data.familiars ?? [])].map((item) => [
+            item.id,
+            item,
+          ]),
+        ),
       };
       // The surprise was for this fight, so it's spent now.
       const rest = Object.fromEntries(
@@ -1062,6 +1118,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           [data.map]: [...(seen[data.map] ?? []), ...data.cells],
         },
       };
+    }
+    case `${NS}:familiarFound`: {
+      const data = payload(FamiliarFoundSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        familiar: { form: data.form, hp: data.maxHp, maxHp: data.maxHp },
+      }));
     }
     case `${NS}:summoned`: {
       const data = payload(SummonedSchema, event);

@@ -21,6 +21,7 @@ import {
 import { HIT_DICE } from "./combat/ids.ts";
 import { hitDieRoll } from "./trait-rules.ts";
 import { gearOptions } from "./gear.ts";
+import { familiarFoundEvents } from "./combat/familiar.ts";
 import { ClassSchema } from "./schemas.ts";
 import {
   type Stats,
@@ -226,6 +227,7 @@ function runFinishRest(
       }),
       ...restInspiration(party(context.state), rest, context),
       ...(rest === "long" ? restItems(party(context.state), context) : []),
+      ...familiarFoundEvents(party(context.state), context, rest),
       dndEvent(`${NS}:restFinished`, { rest }),
     ],
   };

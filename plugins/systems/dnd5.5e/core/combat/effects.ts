@@ -21,6 +21,7 @@ import {
   type DndState,
   hasCondition,
   INCAPACITATING,
+  familiarOwner,
   freshActor,
   isDead,
   isStable,
@@ -109,6 +110,8 @@ import {
   hasPassive,
   reaches,
   rollBonus,
+  SIZES,
+  sizeOf,
   slotToSpend,
   spellSource,
   walledApart,
@@ -646,9 +649,31 @@ export function leafEvents(
 ): SystemEvent[] {
   const stats = deriveStats(caster, context);
   // Healing Rerolls: a healing die that rolls 1 is rolled again.
-  const healDice = hasPassive(stats, "healingRerolls")
+  const rerolled = hasPassive(stats, "healingRerolls")
     ? rerollingOnes(context.dice)
     : context.dice;
+  // A Soothing Familiar's Healing Beacon: a healer beside it treats low rolls as its floor.
+  const floor = Math.max(
+    0,
+    ...allies(context.state, caster).flatMap((item) =>
+      item.id === caster.id || isDown(item)
+        ? []
+        : deriveStats(item, context).passives.flatMap((passive) =>
+            passive.kind === "healDieFloor" &&
+            distanceFeet(item.position, caster.position) <= passive.within
+              ? [passive.at]
+              : [],
+          ),
+    ),
+  );
+  const healDice =
+    floor > 0
+      ? {
+          ...rerolled,
+          roll: (sides: number) =>
+            Math.max(Math.min(floor, sides), rerolled.roll(sides)),
+        }
+      : rerolled;
   const level = slotLevel === undefined ? {} : { level: slotLevel };
   const events: SystemEvent[] = [];
   // Taking the target out of a grapple and into the caster swallows it (combat/swallow.ts).
@@ -771,7 +796,9 @@ export function leafEvents(
               modifier.kind === "conditionImmunity" &&
               modifier.condition === effect.condition,
           ) ||
-          (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost)
+          (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost) ||
+          (effect.maxSize !== undefined &&
+            sizeOf(target, context) > SIZES.indexOf(effect.maxSize))
         )
           break;
         const conditionSave = effect.endSave
@@ -955,6 +982,7 @@ export function leafEvents(
       case "raiseCorpse":
       case "reduceDamage":
       case "acAgainstHit":
+      case "commandFamiliar":
       case "teleport":
       case "zone":
       case "summon":
@@ -977,6 +1005,48 @@ export function leafEvents(
     }
   }
   return events;
+}
+
+// The owner's familiar within range takes the commanded action with its Reaction, as with Energy Pulse.
+export function commandedFamiliar(
+  effect: Extract<LeafEffect, { kind: "commandFamiliar" }>,
+  owner: Actor,
+  state: DndState,
+): Actor | null {
+  return (
+    Object.values(state.actors).find(
+      (item) =>
+        familiarOwner(item) === owner.id &&
+        !isDown(item) &&
+        item.budget.reaction &&
+        !hasCondition(item, ...INCAPACITATING) &&
+        distanceFeet(owner.position, item.position) <= effect.range,
+    ) ?? null
+  );
+}
+
+function commandedResult(
+  effect: Extract<LeafEffect, { kind: "commandFamiliar" }>,
+  owner: Actor,
+  context: Context,
+): SystemResult {
+  const familiar = commandedFamiliar(effect, owner, context.state);
+  const action =
+    familiar &&
+    deriveStats(familiar, context).actions.find(
+      (item) => item.name === effect.action,
+    );
+  if (!familiar || !action) return {};
+  const result = resolveAction(
+    action,
+    familiar,
+    resolveTargets(ALL, action, familiar, context),
+    context,
+  );
+  return {
+    events: [...payCosts(action, familiar, context), ...(result.events ?? [])],
+    frames: result.frames ?? [],
+  };
 }
 
 // The zones a spell leaves, once for the whole cast, where the area was aimed or round the caster, whoever it
@@ -1542,6 +1612,11 @@ export function resolveAction(
         }
         if (effect.kind === "raiseCorpse") {
           events.push(...raisedEvents(effect, actor, context));
+        }
+        if (effect.kind === "commandFamiliar") {
+          const commanded = commandedResult(effect, actor, context);
+          events.push(...(commanded.events ?? []));
+          frames.push(...(commanded.frames ?? []));
         }
       }
       events.push(

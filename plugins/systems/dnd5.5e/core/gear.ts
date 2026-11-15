@@ -45,12 +45,12 @@ function itemOf(access: ContentAccess, id: string) {
   return lookup(access, ItemSchema, id);
 }
 
-// The party's living members, its summons left out.
+// The party's living members, its summons and familiars left out.
 function partySize(state: DndState): number {
   return Object.values(state.actors).filter(
     (actor) =>
       actor.side === "party" &&
-      actor.source.kind !== "summon" &&
+      actor.source.kind === "character" &&
       !isDead(actor),
   ).length;
 }
