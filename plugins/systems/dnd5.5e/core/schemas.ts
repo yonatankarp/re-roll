@@ -190,6 +190,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     on: RollFlagSchema,
     once: z.boolean().optional(),
     ability: AbilitySchema.optional(),
+    // only on saves to avoid or end these conditions, as a sivis scribe's Words of Reason
+    conditions: z.array(ConditionSchema).min(1).optional(),
+    magical: z.literal(true).optional(), // only on saves against spells and magic, as Circle of Power
     // attacksAgainst only for the effect's caster, as Lords' Alliance Agent's Reassert Honor.
     casterOnly: z.literal(true).optional(),
   }),
@@ -245,6 +248,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     dealtBy: z.enum(["bearer", "caster"]),
     weaponOnly: z.boolean().default(false),
     damage: DamageSchema,
+    within: z.number().int().min(5).optional(), // only against a creature this near the bearer
+    // the type picked for each hit, the one the target resists least, as Conjure Minor Elementals' acid to lightning
+    types: z.array(DamageTypeSchema).min(2).optional(),
     once: z.boolean().optional(), // ends after the bearer's next attack roll, as a bandit crime lord's Deadly Aim
   }),
   // Limits on what the bearer can do on its turns, as Slow gives: `oneAction` is an action or a Bonus Action, not
@@ -273,6 +279,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
         skill: SkillSchema,
       })
       .optional(),
+    // it can teleport out after a save of this ability against its caster's spell save DC, as from a Forcecage
+    teleportSave: AbilitySchema.optional(),
+    rolls: z.literal(true).optional(), // it moves at half Speed, its prison with it, as Resilient Sphere's
   }),
   // The bearer is this far up, lifted by the effect of the same source without ":aloft", and falls once that's gone,
   // as with Reverse Gravity (combat/falling.ts).
@@ -511,6 +520,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     duration: DurationSchema,
     damage: z.array(DamageSchema).optional(),
     follows: z.literal(true).optional(),
+    perSlot: z.number().int().min(5).optional(), // feet more radius for each slot level above the spell's
+    bare: z.literal(true).optional(), // it carries none of the spell's area, which another of its zones does
+    // its area's damage takes one of these types, which the caster picks as it casts (combat/damage-choice.ts), as
+    // Conjure Elemental's element
+    choose: z.array(DamageTypeSchema).min(2).optional(),
+    // a wall that encloses a creature lets it make this save to get out first, as Wall of Stone's Dexterity
+    escape: AbilitySchema.optional(),
   }),
   // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
   // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe. A caster
@@ -678,6 +694,14 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
   // A dying creature becomes Stable, as with Spare the Dying.
   z.strictObject({ kind: z.literal("stabilize") }),
+  // Moves the bearer's area of the spell `source` to where this is aimed, as Moonbeam moved with a Magic action.
+  z.strictObject({ kind: z.literal("moveZone"), source: z.string() }),
+  // The target takes its Reaction to make a melee attack against a creature in its reach, one of its own side
+  // first, or takes this damage when none is, as a gallows speaker's Aura of Violence.
+  z.strictObject({
+    kind: z.literal("forcedAttack"),
+    otherwise: z.array(DamageSchema).default([]),
+  }),
   // A target with this many Hit Points or fewer dies outright instead of taking the damage, as Power Word Kill.
   z.strictObject({
     kind: z.literal("slay"),
@@ -784,6 +808,26 @@ export const AreaEffectSchema = z.strictObject({
     .enum(["turnStart", "turnEnd", "ownerTurnStart", "ownerTurnEnd"])
     .optional(),
   resolution: ResolutionSchema.optional(),
+  // it also acts on a creature that walks into it, and on each creature only once a turn, as Spirit Guardians
+  enters: z.literal(true).optional(),
+  bloodied: z.literal(true).optional(), // only on Bloodied creatures, as a Dead Three scion's Culling Aura
+  // a success against a spell or magic that halves damage takes none, as Circle of Power
+  magicWard: z.literal(true).optional(),
+  // spellShield blocks one level higher for each slot level above the spell's, as Globe of Invulnerability
+  shieldGrows: z.literal(true).optional(),
+  // conditions those it affects have while in it, as Silence's Deafened
+  conditions: z.array(ConditionSchema).min(1).optional(),
+  // it moves this far away from its owner as each of the owner's turns starts, as Cloudkill
+  drifts: z.number().int().min(5).optional(),
+  // its owner can take an action on later turns to move it up to this far, as Moonbeam's Magic action
+  moves: z.number().int().min(5).optional(),
+  // while a creature has a condition from it, it acts only on that one, with this as that creature's turns start,
+  // as Conjure Elemental's spirit holding the one it Restrained
+  holding: ResolutionSchema.optional(),
+  // a spell cast in it fails and is wasted unless the caster makes this save, as a haunting revenant's Haunted Zone
+  foilsSpells: z
+    .strictObject({ ability: AbilitySchema, dc: z.number().int().min(1) })
+    .optional(),
   targets: z.number().int().min(1).optional(),
   grants: z.array(ModifierSchema).min(1).optional(),
   noHealing: z.literal(true).optional(), // no Hit Points regained in it, as Life Suppression
@@ -985,6 +1029,21 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     zone: ZoneKindSchema.default("area"),
     radius: z.number().int().min(5),
     area: AreaEffectSchema.default({}),
+  }),
+  // What happens round the bearer when it takes damage of these types, once a turn, as a spore of Moander's
+  // Explosive Core.
+  z.strictObject({
+    kind: z.literal("damageBurst"),
+    name: z.string().min(1),
+    damage: z.array(DamageTypeSchema).min(1),
+    radius: z.number().int().min(5),
+    resolution: ResolutionSchema,
+  }),
+  // Conditions it has inside fog or mist and outside it, as a mist horror's One with the Mists.
+  z.strictObject({
+    kind: z.literal("fogBound"),
+    inside: z.array(ConditionSchema).default([]),
+    outside: z.array(ConditionSchema).default([]),
   }),
   // What happens round the square where the bearer dies, as a flaming skeleton's Death Burst.
   z.strictObject({

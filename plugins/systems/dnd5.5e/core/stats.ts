@@ -55,6 +55,7 @@ import { type Caster, multiclassSlots } from "./multiclass.ts";
 import { holdsConcentration, withMetamagic } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
 import { THROW_PREFIX, WEAPON_PREFIX, weaponItemId } from "./combat/ids.ts";
+import { zoneModifiers } from "./zones.ts";
 
 // Content is frozen once loaded, so each entry is checked against a schema only once.
 const parsed = new WeakMap<object, Map<z.ZodType, unknown>>();
@@ -723,8 +724,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     savingThrows: 0,
     spellAttack: 0,
   };
+  // In an Antimagic Field, magic items don't work.
+  const antimagic = actor.suppressed !== undefined;
   for (const [itemId, item] of worn) {
-    if (item.type !== "magicItem") continue;
+    if (item.type !== "magicItem" || antimagic) continue;
     if (item.attunement && !attuned.includes(itemId)) continue;
     // An entry with versions counts as its first, as older saves hold; content names a version as `<id>--<n>` (variants.ts).
     for (const { to, amount } of item.bonuses ??
@@ -790,7 +793,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       const own = (to: "attack" | "damage"): number =>
         Math.max(
           magic[to],
-          ...(weapon.bonuses ?? [])
+          ...(antimagic ? [] : (weapon.bonuses ?? []))
             .filter((bonus) => bonus.to === to)
             .map((bonus) => bonus.amount),
         );
@@ -1489,13 +1492,53 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
           ...changed,
           actions: changed.actions.filter((action) => !stuck.has(action.id)),
         };
+  const moving = zoneMoves(actor);
+  const moved =
+    moving.length > 0
+      ? { ...free, actions: [...free.actions, ...moving] }
+      : free;
   return speed === 0 && maxHp === 0
-    ? free
+    ? moved
     : {
-        ...free,
+        ...moved,
         speed: Math.max(0, stats.speed + speed),
         maxHp: stats.maxHp + maxHp,
       };
+}
+
+export const MOVE_ZONE = "zone-move:";
+
+// An action to move an area the bearer keeps, as Moonbeam's Magic action. shortcut: its reach is counted from the
+// bearer, not from where the area stands.
+function zoneMoves(actor: Actor): KnownAction[] {
+  const seen = new Set<string>();
+  return actor.activeEffects.flatMap(
+    ({ sourceId, modifier }): KnownAction[] => {
+      if (modifier.kind !== "zone" || !modifier.area?.moves) return [];
+      if (modifier.follows || seen.has(sourceId)) return [];
+      seen.add(sourceId);
+      return [
+        {
+          id: `${MOVE_ZONE}${sourceId}`,
+          name: `Move ${modifier.name ?? "the area"}`,
+          activation: {
+            cost: ["action"],
+            targeting: {
+              area: { shape: "sphere", radius: modifier.radius },
+              range: modifier.area.moves,
+              side: "enemy",
+            },
+            resolution: {
+              kind: "automatic",
+              damage: [],
+              effects: [{ kind: "moveZone", source: sourceId }],
+            },
+          },
+          spellLevel: null,
+        },
+      ];
+    },
+  );
 }
 
 // What spells on the creature do to its actions: a weapon changed by Shillelagh or True Strike, an action given
@@ -1970,6 +2013,13 @@ export function scaleActivation(
           },
         };
       }
+      // An extra hit's damage grows too, as Conjure Minor Elementals'.
+      if (effect.kind === "modifier" && effect.modifier.kind === "hitDamage") {
+        const [scaled] = damage([effect.modifier.damage]);
+        return scaled
+          ? { ...effect, modifier: { ...effect.modifier, damage: scaled } }
+          : effect;
+      }
       return effect.kind === "modifier" &&
         effect.modifier.kind === "lingeringDamage"
         ? {
@@ -2016,8 +2066,14 @@ export function scaleActivation(
       ? { trigger: { ...trigger, replacesHit: damage(trigger.replacesHit) } }
       : {}),
     resolution: scaled(activation.resolution),
-    ...(area?.resolution
-      ? { area: { ...area, resolution: scaled(area.resolution) } }
+    ...(area?.resolution || area?.holding
+      ? {
+          area: {
+            ...area,
+            ...(area.resolution ? { resolution: scaled(area.resolution) } : {}),
+            ...(area.holding ? { holding: scaled(area.holding) } : {}),
+          },
+        }
       : {}),
   };
 }
@@ -2083,6 +2139,9 @@ export function damageResponses(
   for (const modifier of [
     ...actor.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
+    // What the spells' areas it stands in give it, as Silence's Immunity to Thunder damage. Monster auras grant
+    // none, so their stat blocks aren't read on every hit.
+    ...(access.state ? zoneModifiers(actor, access.state) : []),
   ]) {
     if (modifier.kind === "resistance") resistances.push(modifier.damage);
     if (modifier.kind === "vulnerability")

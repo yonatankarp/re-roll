@@ -1470,14 +1470,16 @@ export function runApplyHit(
   const hits = [
     ...(firstType ? [{ amount: totalDealt, type: firstType }] : []),
     ...absorbed,
-    ...hitRiders(attacker, target, resolution).map(({ amount, type }) => ({
-      amount: finalDamage(
-        rollAmount(amount, stats, dice, multiplier),
+    ...hitRiders(attacker, target, resolution, responses).map(
+      ({ amount, type }) => ({
+        amount: finalDamage(
+          rollAmount(amount, stats, dice, multiplier),
+          type,
+          responses,
+        ),
         type,
-        responses,
-      ),
-      type,
-    })),
+      }),
+    ),
   ];
   const targetStats = deriveStats(target, context);
   const armored = hits.map((item) => ({
@@ -2015,12 +2017,22 @@ function hitRiders(
   attacker: Actor,
   target: Actor,
   resolution: Extract<Resolution, { kind: "attack" }>,
+  responses: ReturnType<typeof damageResponses>,
 ): readonly Damage[] {
   const seen = new Set<string>();
   const carried = [
     ...attacker.activeEffects.map((effect) => ({ effect, by: "bearer" })),
     ...target.activeEffects.map((effect) => ({ effect, by: "caster" })),
   ];
+  // The type the target takes most from: vulnerable, then plain, then resisted, never immune if another will do.
+  const worth = (type: Damage["type"]): number =>
+    responses.immunities.includes(type) || responses.absorbs.includes(type)
+      ? 0
+      : responses.resistances.includes(type)
+        ? 1
+        : responses.vulnerabilities.includes(type)
+          ? 3
+          : 2;
   return carried.flatMap(({ effect, by }) => {
     const { modifier, sourceId, casterId } = effect;
     if (
@@ -2028,12 +2040,17 @@ function hitRiders(
       modifier.dealtBy !== by ||
       (by === "caster" && casterId !== attacker.id) ||
       (modifier.weaponOnly && resolution.attack.type !== "weapon") ||
+      (modifier.within !== undefined &&
+        distanceFeet(attacker.position, target.position) > modifier.within) ||
       seen.has(sourceId)
     ) {
       return [];
     }
     seen.add(sourceId);
-    return [modifier.damage];
+    const [type = modifier.damage.type] = [...(modifier.types ?? [])].sort(
+      (a, b) => worth(b) - worth(a),
+    );
+    return [{ ...modifier.damage, type }];
   });
 }
 

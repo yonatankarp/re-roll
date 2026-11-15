@@ -51,6 +51,7 @@ export const FRAME_KINDS = [
   "legendaryTurn",
   "lingeringTick",
   "sunlightTick",
+  "damageBurst",
   "masteryHit",
   "masteryMiss",
   "metamagic",
@@ -81,6 +82,7 @@ export const FRAME_KINDS = [
   "useItem",
   "zoneTick",
   "chooseDamageType",
+  "chooseZoneType",
   "replaceHit",
   "confusedTurn",
   "copySpell",
@@ -279,6 +281,9 @@ const ActorSchema = z.strictObject({
   usedThisTurn: z.array(z.string()),
   resourcesSpent: z.record(z.string(), z.number().int()),
   activeEffects: z.array(ActiveEffectSchema),
+  // Spell and item effects held off while it stands in an Antimagic Field, its magic items' powers with them
+  // (zones.ts). Missing outside one.
+  suppressed: z.array(ActiveEffectSchema).optional(),
   concentratingOn: z.string().nullable(),
   inventory: z.array(ContentIdSchema),
   // Copies in `inventory` carried in the pack rather than worn or wielded. Missing in older saves, where all is worn.
@@ -611,6 +616,25 @@ export const EVENT_SCHEMAS = {
   // The creature whose turn it is takes another, as under Time Stop: its action, Bonus Action, Reaction and
   // movement come back, and the turn order stays where it is.
   [`${NS}:turnRepeated`]: ActorOnlySchema,
+  // A creature in an Antimagic Field: these effects stop working until it leaves, and so do its magic items.
+  [`${NS}:effectsSuppressed`]: z.strictObject({
+    actor: z.string(),
+    sourceIds: z.array(z.string()),
+  }),
+  // An area moved, as Cloudkill drifting or Moonbeam moved: its owner's zone from that spell now centres here.
+  [`${NS}:zoneMoved`]: z.strictObject({
+    actor: z.string(),
+    sourceId: z.string(),
+    to: SquareSchema,
+  }),
+  // Out of the field again: what was held off works once more.
+  [`${NS}:effectsRestored`]: ActorOnlySchema,
+  // The caster's pick of its area's element, as Conjure Elemental's: the owner's zone from that spell now does this.
+  [`${NS}:zoneRetyped`]: z.strictObject({
+    actor: z.string(),
+    sourceId: z.string(),
+    area: AreaEffectSchema,
+  }),
   // A creature left with this many Hit Points, as a black pudding's half after it splits.
   [`${NS}:hpSet`]: z.strictObject({ actor: z.string(), hp: z.number().int() }),
   // Two creatures trading places in the Initiative order, as with Alert's Initiative Swap.
@@ -843,6 +867,15 @@ function removeConcentration(state: DndState, casterId: string): DndState {
           (effect) =>
             effect.ends !== "concentration" || effect.casterId !== casterId,
         ),
+        ...(actor.suppressed
+          ? {
+              suppressed: actor.suppressed.filter(
+                (effect) =>
+                  effect.ends !== "concentration" ||
+                  effect.casterId !== casterId,
+              ),
+            }
+          : {}),
         concentratingOn: id === casterId ? null : actor.concentratingOn,
       },
     ]),
@@ -884,7 +917,7 @@ function endCombat(state: DndState): DndState {
       .filter(
         ([, actor]) => actor.side === "party" && actor.source.kind !== "summon",
       )
-      .map(([id, actor]) => [
+      .map(([id, { suppressed: _held, ...actor }]) => [
         id,
         {
           ...actor,
@@ -1062,6 +1095,68 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         },
       };
     }
+    case `${NS}:effectsSuppressed`: {
+      const { actor: id, sourceIds } = payload(
+        EVENT_SCHEMAS[`${NS}:effectsSuppressed`],
+        event,
+      );
+      return updateActor(state, id, (actor) => ({
+        ...actor,
+        activeEffects: actor.activeEffects.filter(
+          (effect) => !sourceIds.includes(effect.sourceId),
+        ),
+        suppressed: [
+          ...(actor.suppressed ?? []),
+          ...actor.activeEffects.filter((effect) =>
+            sourceIds.includes(effect.sourceId),
+          ),
+        ],
+      }));
+    }
+    case `${NS}:zoneMoved`: {
+      const {
+        actor: id,
+        sourceId,
+        to,
+      } = payload(EVENT_SCHEMAS[`${NS}:zoneMoved`], event);
+      return updateActor(state, id, (actor) => ({
+        ...actor,
+        activeEffects: actor.activeEffects.map((effect) =>
+          effect.sourceId === sourceId &&
+          effect.modifier.kind === "zone" &&
+          !effect.modifier.follows
+            ? { ...effect, modifier: { ...effect.modifier, at: to } }
+            : effect,
+        ),
+      }));
+    }
+    case `${NS}:zoneRetyped`: {
+      const {
+        actor: id,
+        sourceId,
+        area,
+      } = payload(EVENT_SCHEMAS[`${NS}:zoneRetyped`], event);
+      return updateActor(state, id, (actor) => ({
+        ...actor,
+        activeEffects: actor.activeEffects.map((effect) =>
+          effect.sourceId === sourceId &&
+          effect.modifier.kind === "zone" &&
+          effect.modifier.area
+            ? { ...effect, modifier: { ...effect.modifier, area } }
+            : effect,
+        ),
+      }));
+    }
+    case `${NS}:effectsRestored`: {
+      const id = payload(ActorOnlySchema, event).actor;
+      return updateActor(state, id, (actor) => {
+        const { suppressed, ...rest } = actor;
+        return {
+          ...rest,
+          activeEffects: [...actor.activeEffects, ...(suppressed ?? [])],
+        };
+      });
+    }
     case `${NS}:turnRepeated`: {
       const data = payload(ActorOnlySchema, event);
       return updateActor(state, data.actor, (actor) => ({
@@ -1238,13 +1333,15 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
     }
     case `${NS}:effectEnded`: {
       const data = payload(EffectEndedSchema, event);
+      const kept = (effect: ActiveEffect): boolean =>
+        effect.sourceId !== data.sourceId ||
+        (data.casterId !== undefined && effect.casterId !== data.casterId);
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
-        activeEffects: actor.activeEffects.filter(
-          (effect) =>
-            effect.sourceId !== data.sourceId ||
-            (data.casterId !== undefined && effect.casterId !== data.casterId),
-        ),
+        activeEffects: actor.activeEffects.filter(kept),
+        ...(actor.suppressed
+          ? { suppressed: actor.suppressed.filter(kept) }
+          : {}),
       }));
     }
     case `${NS}:conditionRemoved`: {
