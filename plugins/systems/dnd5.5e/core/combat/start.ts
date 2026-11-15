@@ -1,5 +1,10 @@
+import { initiativeSwapFrames, inspirationEchoes } from "./reactions.ts";
 import { type Battlemap, type Loot, MonsterSchema } from "../schemas.ts";
-import { type EncounterOptions, type SystemResult } from "#sdk";
+import {
+  type EncounterOptions,
+  type SystemEvent,
+  type SystemResult,
+} from "#sdk";
 import {
   type Actor,
   applyDndEvent,
@@ -10,7 +15,13 @@ import {
 } from "../state.ts";
 import { deriveStats, lookup } from "../stats.ts";
 import { rollD20 } from "../rules.ts";
-import { placeOnMap, placeSides, type Square, wallKeys } from "../grid.ts";
+import {
+  openedCorners,
+  placeOnMap,
+  placeSides,
+  type Square,
+  wallKeys,
+} from "../grid.ts";
 import { terrainOf } from "../sight.ts";
 import { lairTurns } from "../legendary.ts";
 import { type Context, hasPassive } from "./queries.ts";
@@ -29,6 +40,7 @@ export function startCombat(
     readonly loot?: Loot | undefined;
     readonly lair?: boolean | undefined;
     readonly surprise?: "party" | "enemies" | undefined;
+    readonly sunlight?: true | undefined;
   },
   context: Context,
   { canFlee, defeatContinues }: EncounterOptions,
@@ -45,9 +57,10 @@ export function startCombat(
     const statBlock = lookup(context, MonsterSchema, monster);
     const slug = monster.slice(monster.lastIndexOf("/") + 1);
     for (let index = 1; index <= count; index += 1) {
-      monsters.push(
-        freshActor({
-          id: `${encounter.id}:${slug}-${String(index)}`,
+      const id = `${encounter.id}:${slug}-${String(index)}`;
+      monsters.push({
+        ...freshActor({
+          id,
           name:
             count > 1 ? `${statBlock.name} ${String(index)}` : statBlock.name,
           side: "enemy",
@@ -55,7 +68,23 @@ export function startCombat(
           hp: statBlock.hp,
           inventory: [],
         }),
-      );
+        // A condition it always has, as an invisible stalker's Invisibility.
+        activeEffects: statBlock.passives.flatMap((passive) =>
+          passive.kind === "innateCondition"
+            ? [
+                {
+                  sourceId: `${id}:innate`,
+                  casterId: id,
+                  modifier: {
+                    kind: "condition" as const,
+                    condition: passive.condition,
+                  },
+                  ends: "spellDuration" as const,
+                },
+              ]
+            : [],
+        ),
+      });
     }
   }
 
@@ -125,6 +154,11 @@ export function startCombat(
         party.map((actor) => actor.id),
         monsters.map((actor) => actor.id),
       );
+  const startsOf = (list: readonly Actor[]): Square[] =>
+    list.flatMap((actor) => positions[actor.id] ?? []);
+  const openCorners = battlemap
+    ? openedCorners(walls, grid, startsOf(party), startsOf(monsters))
+    : [];
 
   const started = {
     encounter: encounter.id,
@@ -135,6 +169,7 @@ export function startCombat(
     ...(battlemap
       ? {
           walls: [...walls],
+          ...(openCorners.length > 0 ? { openCorners } : {}),
           ...(terrain ? { terrain } : {}),
           map: {
             image: battlemap.image,
@@ -148,6 +183,7 @@ export function startCombat(
     ...(canFlee ? { canFlee } : {}),
     ...(defeatContinues ? { defeatContinues } : {}),
     ...(encounter.loot ? { loot: encounter.loot } : {}),
+    ...(encounter.sunlight ? { sunlight: true as const } : {}),
     ...(surprised ? { surprised } : {}),
     ...(lair ? { lair } : {}),
   };
@@ -166,17 +202,22 @@ export function startCombat(
     events: [
       { kind: "encounterStarted", encounter: encounter.id },
       ...(rallier
-        ? [dndEvent(`${NS}:inspirationSpent`, { actor: rallier.id })]
+        ? [
+            dndEvent(`${NS}:inspirationSpent`, { actor: rallier.id }),
+            ...inspirationEchoes(rallier, context),
+          ]
         : []),
       dndEvent(`${NS}:combatStarted`, {
         ...started,
         ...(lowered ? { damageToParty: share } : {}),
       }),
+      ...party.flatMap((actor) => initiativeRecharge(actor, context)),
     ],
-    // With nobody on 20 or more, the lair acts before anyone.
-    ...(lair?.at === 0
-      ? {
-          frames: lairTurns(
+    // Alert's Initiative Swap comes first. With nobody on 20 or more, the lair acts before anyone.
+    frames: [
+      ...initiativeSwapFrames(party, context),
+      ...(lair?.at === 0
+        ? lairTurns(
             {
               ...context.state,
               actors: Object.fromEntries(
@@ -186,8 +227,23 @@ export function startCombat(
             },
             "start",
             context,
-          ),
-        }
-      : {}),
+          )
+        : []),
+    ],
   };
+}
+
+// Uses that come back when Initiative is rolled, as Second Chance's.
+function initiativeRecharge(actor: Actor, context: Context): SystemEvent[] {
+  return deriveStats(actor, context).resourceDefs.flatMap((resource) =>
+    (actor.resourcesSpent[resource.id] ?? 0) > 0 &&
+    resource.recharge.some(({ on }) => on === "initiative")
+      ? [
+          dndEvent(`${NS}:resourceRestored`, {
+            actor: actor.id,
+            resource: resource.id,
+          }),
+        ]
+      : [],
+  );
 }

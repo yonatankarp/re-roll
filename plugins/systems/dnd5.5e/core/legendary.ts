@@ -25,6 +25,7 @@ import {
   resolveTargets,
 } from "./combat.ts";
 import { distanceFeet, rangeFeet } from "./grid.ts";
+import { aimSquare } from "./combat/effects.ts";
 import { legendaryOf } from "./import/monsters.ts";
 import { type LeafEffect, MonsterSchema } from "./schemas.ts";
 import {
@@ -318,11 +319,15 @@ function takeEvents(
       );
       continue;
     }
+    // A zone it leaves goes where the area was aimed.
     const result = resolveAction(
       action,
       mover,
       resolveTargets(answerTarget, action, mover, after),
       after,
+      undefined,
+      false,
+      aimSquare(answerTarget, state) ?? undefined,
     );
     events.push(...(result.events ?? []));
     frames.push(...(result.frames ?? []));

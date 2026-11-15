@@ -3,6 +3,7 @@ import {
   type Actor,
   hasCondition,
   INCAPACITATING,
+  isDead,
   isDown,
   NS,
 } from "./state.ts";
@@ -20,7 +21,7 @@ import { coverBonus, coverFor, difficultSquares } from "./sight.ts";
 import { type Decision } from "#sdk";
 import { ADD, AIM_AREA, BACK, CONFIRM, nextPick, PICK } from "./targeting.ts";
 import { chooseBossAction, FLEE } from "./legendary.ts";
-import { DECLINE, MOVE, parseOption, STAY } from "./combat/ids.ts";
+import { DECLINE, MOVE, parseOption, PICK_UP, STAY } from "./combat/ids.ts";
 import { changed, gearOptions } from "./gear.ts";
 import {
   actorOf,
@@ -41,7 +42,9 @@ import {
 import { AimSchema, PickSchema } from "./combat/actions.ts";
 import { multiattackExtras } from "./combat/effects.ts";
 import { AVERAGE, makeJudge } from "./worth.ts";
+import { blockedSquares, blockingSet, zoneHarm } from "./zones.ts";
 import { TACTIC } from "./tactics.ts";
+import { SHAPE } from "./forms.ts";
 
 // The Dodge action (actions.ts), which the party weighs like any other choice.
 const DODGE = `${TACTIC}dodge`;
@@ -93,7 +96,8 @@ export function stepToward(
       );
   // How far it is to walk from a square to a foe, round walls and through difficult terrain, ignoring
   // creatures. On a map with no walls, or for a creature that goes through them, that's the straight distance.
-  const { grid, walls = [] } = state.combat ?? {};
+  const grid = state.combat?.grid;
+  const walls = blockedSquares(state);
   const through = throughOf(stats);
   const overGround = [...speedsOf(actor, stats).keys()].some(crossesDifficult);
   const walkFrom = new Map<string, ReadonlyMap<string, number>>();
@@ -117,7 +121,7 @@ export function stepToward(
           new Set(walls),
           new Set(),
           overGround ? new Set() : difficultSquares(state),
-          new Set(walls),
+          blockingSet(state),
           { squeeze: through.squeeze },
         ).map((item) => [squareKey(item.square), item.feet]),
       );
@@ -151,8 +155,9 @@ export function stepToward(
   const squares = [...gaps.keys()];
   const closest = Math.min(...gaps.values());
   if (squares.length === 0 || closest >= now) return null;
-  // Of the squares that get it closest, the one off difficult terrain and nearest. One that fights from range
-  // also wants the most cover from its foes; a melee creature is going up to them anyway.
+  // Of the squares that get it closest, the one out of harm's way (a foe's cloud or aura, sunlight that burns
+  // it), then off difficult terrain and nearest. One that fights from range also wants the most cover from its
+  // foes; a melee creature is going up to them anyway.
   const difficult = difficultSquares(state);
   const ranged = reach > 10;
   const ranked = squares
@@ -175,8 +180,15 @@ export function stepToward(
           )
         : 0,
       rough: Number(difficult.has(squareKey(item.square))),
+      harm: zoneHarm(actor, item.square, state, context),
     }))
-    .sort((a, b) => b.cover - a.cover || a.rough - b.rough || a.feet - b.feet);
+    .sort(
+      (a, b) =>
+        a.harm - b.harm ||
+        b.cover - a.cover ||
+        a.rough - b.rough ||
+        a.feet - b.feet,
+    );
   return ranked[0]?.square ?? null;
 }
 
@@ -239,9 +251,16 @@ function approach(actor: Actor, context: Context): Square | null {
   const squares = [...moveSquares(actor, state, stats, context)].sort(
     (a, b) => a.feet - b.feet,
   );
-  // The best attack it can reach this turn, by the shortest walk; else it heads for the best of all.
+  // The best attack it can reach this turn, by the shortest walk out of harm's way; else it heads for the best
+  // of all.
   for (const option of better) {
-    const square = squares.find((item) => hitsFrom(item.square, option));
+    const [square] = squares
+      .filter((item) => hitsFrom(item.square, option))
+      .map((item) => ({
+        ...item,
+        harm: zoneHarm(actor, item.square, state, context),
+      }))
+      .sort((a, b) => a.harm - b.harm || a.feet - b.feet);
     if (square) return square.square;
   }
   const [best] = better;
@@ -303,6 +322,80 @@ export function moveOf(action: KnownAction) {
   return resolution.kind === "automatic"
     ? resolution.effects.find((item) => item.kind === "teleport")
     : undefined;
+}
+
+function raisesCorpse(
+  action: KnownAction,
+  actor: Actor,
+  context: Context,
+): boolean {
+  const { resolution } = action.activation;
+  if (resolution.kind !== "automatic") return false;
+  return resolution.effects.some(
+    (effect) =>
+      effect.kind === "raiseCorpse" &&
+      Object.values(context.state.actors).some(
+        (item) =>
+          isDead(item) &&
+          context.state.actors[`${item.id}:risen`] === undefined &&
+          distanceFeet(actor.position, item.position) <= effect.range &&
+          effect.creatureTypes.includes(
+            deriveStats(item, context).creatureType ?? "",
+          ),
+      ),
+  );
+}
+
+function shiftOf(action: KnownAction) {
+  const { resolution } = action.activation;
+  return resolution.kind === "automatic"
+    ? resolution.effects.find((item) => item.kind === "shapeShift")
+    : undefined;
+}
+
+// What taking one of its shapes adds to the most its Action's attacks deal at once, as if every one hit.
+// shortcut: a shape's Speed or Fly Speed counts for nothing, so a monster only shifts for its attacks.
+function shapeGain(actor: Actor, shape: string, context: Context): number {
+  const best = (item: Actor): number => {
+    const stats = deriveStats(item, context);
+    return Math.max(
+      0,
+      ...stats.actions
+        .filter(
+          ({ activation }) =>
+            activation.cost.includes("action") &&
+            activation.resolution.kind === "attack",
+        )
+        .map((action) =>
+          attackRoutine(action, item, stats).reduce((total, id) => {
+            const made = stats.actions.find((known) => known.id === id);
+            const { resolution } = made?.activation ?? action.activation;
+            return resolution.kind === "attack"
+              ? resolution.damage.reduce(
+                  (sum, { amount }) => sum + rollAmount(amount, stats, AVERAGE),
+                  total,
+                )
+              : total;
+          }, 0),
+        ),
+    );
+  };
+  const others = actor.activeEffects.filter(
+    ({ sourceId }) => sourceId !== SHAPE,
+  );
+  const shifted: Actor = {
+    ...actor,
+    activeEffects: [
+      ...others,
+      {
+        sourceId: SHAPE,
+        casterId: actor.id,
+        modifier: { kind: "shape", shape },
+        ends: "spellDuration",
+      },
+    ],
+  };
+  return best(shifted) - best(actor);
 }
 
 // A save that comes with a hit, or a condition left by an action that deals no damage.
@@ -473,6 +566,8 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (decision.id.startsWith(`${NS}:reaction:`)) return first.id;
   if (decision.id.startsWith(`${NS}:inspiration:`)) return first.id;
   if (decision.id.startsWith(`${NS}:deathSave:`)) return first.id;
+  if (decision.id.startsWith(`${NS}:form:`)) return first.id; // the strongest form
+
   if (/^dnd5\.5e:(legendary|lair):/.test(decision.id)) {
     return chooseBossAction(decision, context);
   }
@@ -529,6 +624,9 @@ export function choosePolicy(decision: Decision, context: Context): string {
     bestAim.set(action.id, score);
     return score;
   };
+  // A weapon within reach on the ground is picked up first, since it's free.
+  const pickUp = decision.options.find(({ id }) => id.startsWith(PICK_UP));
+  if (pickUp && actor.side === "party") return pickUp.id;
   // A hidden option, such as a potion at full health, only answers older saves.
   const parsed = decision.options.flatMap((option) => {
     if (option.hidden) return [];
@@ -536,10 +634,48 @@ export function choosePolicy(decision: Decision, context: Context): string {
     const action = stats.actions.find((item) => item.id === actionId);
     const target = state.actors[targetId];
     const worth = action && targetId === AIM_AREA ? worthOf(action) : null;
-    return action && (worth === null || worth > 0)
+    const shift = action ? shiftOf(action) : undefined;
+    return action &&
+      (worth === null || worth > 0) &&
+      (!shift || shapeGain(actor, shift.shape, context) > 0)
       ? [{ option, action, target, targetId, slot, worth }]
       : [];
   });
+  // A shape whose attacks hit harder is taken before the attacks are.
+  const shifting = parsed
+    .flatMap((item) => {
+      const shift = shiftOf(item.action);
+      return shift
+        ? [{ ...item, gain: shapeGain(actor, shift.shape, context) }]
+        : [];
+    })
+    .sort((a, b) => b.gain - a.gain)[0];
+  if (shifting && actor.budget.action) return shifting.option.id;
+  // A Bonus Action that sets up its own next attack, as Deadly Aim, comes before the attack, with a foe in reach.
+  const primer = parsed.find(({ action, target }) => {
+    const { cost, resolution } = action.activation;
+    return (
+      actor.source.kind === "monster" &&
+      target?.id === actor.id &&
+      cost.includes("bonusAction") &&
+      resolution.kind === "automatic" &&
+      resolution.effects.some(
+        (item) =>
+          item.kind === "modifier" &&
+          item.modifier.kind === "advantage" &&
+          item.modifier.on === "attacks" &&
+          item.modifier.once === true,
+      ) &&
+      !actor.activeEffects.some(({ sourceId }) => sourceId === action.id)
+    );
+  });
+  if (
+    primer &&
+    actor.budget.action &&
+    (actor.position === null || reachesFrom(actor, actor.position, context))
+  ) {
+    return primer.option.id;
+  }
 
   // Slots go on fights that need them: the enemies left must outlast the caster's own HP, and a healer keeps its last slot.
   const foesHp = knownFoes(state, actor, context)
@@ -703,6 +839,11 @@ export function choosePolicy(decision: Decision, context: Context): string {
         routineSize(b.action) - routineSize(a.action),
     )[0];
   if (attack) return attack.option.id;
+  // Nothing to attack: a wraith raises a corpse near it as a Specter, when one lies there.
+  const raise = parsed.find(({ action }) =>
+    raisesCorpse(action, actor, context),
+  );
+  if (raise) return raise.option.id;
   // Nothing in reach yet: walk closer while there's still an action to use when it gets there.
   if (
     actor.budget.action &&

@@ -14,11 +14,13 @@ import { canUse, foundText } from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
 import { partySight, revealedSquares, unseenFoe } from "../core/fog.ts";
 import { coins } from "../core/shop.ts";
+import { SHAPE } from "../core/forms.ts";
 import { shop } from "./shop.ts";
 import { creation, featureInPlay } from "./creation.ts";
 import { sheetCreation } from "./creation-sheet.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
-import type { BoardExtra, FightMap } from "./board-data.ts";
+import type { AreaView, BoardExtra, FightMap } from "./board-data.ts";
+import { zonesOf } from "../core/zones.ts";
 import { dndCue } from "./cues.ts";
 import { GLOSSARY_TERMS } from "../core/glossary.ts";
 import {
@@ -328,12 +330,54 @@ function actionSummary(action: KnownAction, stats: Stats): string {
 }
 
 // Effects and concentration store ids such as "spell:srd52:spell/bless", which also name the content.
+const ZONE_WORDS: Readonly<Record<string, string>> = {
+  darkness: "magical darkness",
+  fog: "a heavy cloud",
+  thorns: "thorns",
+  light: "bright light",
+  dim: "dim light",
+  sunlight: "sunlight",
+};
+
+// The lasting areas the party knows of: its own, and a foe's where the party sees the foe or the area's middle.
+function areaViews(state: DndState, access: ContentAccess): AreaView[] {
+  const sight = state.combat?.fog ? partySight(state, access) : null;
+  return zonesOf(state, access).flatMap((zone) => {
+    const owner = state.actors[zone.owner];
+    if (!owner) return [];
+    const foe = owner.side !== "party";
+    if (
+      foe &&
+      sight &&
+      !sight.foes.has(owner.id) &&
+      !sight.squares.has(`${String(zone.at.x)},${String(zone.at.y)}`)
+    ) {
+      return [];
+    }
+    return [
+      {
+        key: `${zone.owner}|${zone.sourceId}|${zone.zone}|${String(zone.radius)}`,
+        kind: zone.zone,
+        x: zone.at.x,
+        y: zone.at.y,
+        reach: Math.floor(zone.radius / 5),
+        name: zone.name ?? sourceName(access, zone.sourceId),
+        foe,
+        ...(zone.blocks ? { blocks: [...zone.blocks] } : {}),
+      },
+    ];
+  });
+}
+
 function sourceName(access: ContentAccess, source: string): string {
   const tactic = tacticSourceName(source);
   if (tactic) return tactic;
+  // A monster's aura or burst is named for its trait.
+  const trait = /^(?:aura|burst):(.+)$/.exec(source)?.[1];
+  if (trait) return trait;
   const id = source
     .replace(/^(spell|feature):/, "")
-    .replace(/:(\d+|free)$/, "");
+    .replace(/(?::(?:\d+|free|lethargy))+$/, "");
   const named = NamedSchema.safeParse(access.content(id));
   return named.success ? named.data.name : "an effect";
 }
@@ -847,6 +891,7 @@ function combat(
       shapes,
       cover,
       terrain: state.combat.terrain ?? null,
+      areas: areaViews(state, access),
       map: fightMap(state.combat, encounter),
       fog: revealed && {
         revealed: [...revealed],
@@ -1110,6 +1155,10 @@ function describe(
       const data = EVENT_SCHEMAS["dnd5.5e:tempHpGained"].parse(payload);
       return `${name(data.actor)} gains ${String(data.amount)} temporary HP.`;
     }
+    case "dnd5.5e:turnRepeated": {
+      const data = EVENT_SCHEMAS["dnd5.5e:turnRepeated"].parse(payload);
+      return `Time stands still: ${name(data.actor)} takes another turn.`;
+    }
     case "dnd5.5e:budgetSpent": {
       // A reaction taken on its own, as Interception is, says which it was.
       const data = EVENT_SCHEMAS["dnd5.5e:budgetSpent"].parse(payload);
@@ -1125,8 +1174,21 @@ function describe(
       if (effect.modifier.kind === "form") {
         return `${name(actor)} turns into ${sourceName(access, effect.modifier.monster)}.`;
       }
+      if (effect.modifier.kind === "shape") {
+        return `${name(actor)} takes its ${effect.modifier.shape} shape.`;
+      }
       if (effect.modifier.kind === "zone") {
-        return `${sourceName(access, effect.sourceId)} fills a ${String(effect.modifier.radius)}-foot radius with ${effect.modifier.zone}.`;
+        const { zone, radius } = effect.modifier;
+        const what = sourceName(access, effect.sourceId);
+        const feet = `${String(radius)}-foot radius`;
+        if (zone === "wall") return `${what} raises a wall round a ${feet}.`;
+        return zone === "area"
+          ? `${what} takes hold in a ${feet}.`
+          : `${what} fills a ${feet} with ${ZONE_WORDS[zone]}.`;
+      }
+      if (effect.modifier.kind === "lethargy") return null; // its own line comes when Haste ends
+      if (effect.modifier.kind === "areaImmunity") {
+        return `${name(actor)} can't be affected by ${sourceName(access, effect.sourceId)} again.`;
       }
       return effect.modifier.kind === "condition"
         ? `${name(actor)} is ${effect.modifier.condition}.`
@@ -1138,7 +1200,14 @@ function describe(
     }
     case "dnd5.5e:effectEnded": {
       const data = EVENT_SCHEMAS["dnd5.5e:effectEnded"].parse(payload);
-      return `${sourceName(access, data.sourceId)} ends on ${name(data.actor)}.`;
+      return data.sourceId === SHAPE
+        ? `${name(data.actor)} returns to its true shape.`
+        : `${sourceName(access, data.sourceId)} ends on ${name(data.actor)}.`;
+    }
+    case "dnd5.5e:exhaustionChanged": {
+      const data = EVENT_SCHEMAS["dnd5.5e:exhaustionChanged"].parse(payload);
+      const levels = Math.abs(data.levels);
+      return `${name(data.actor)} ${data.levels > 0 ? "gains" : "loses"} ${String(levels)} level${levels === 1 ? "" : "s"} of Exhaustion.`;
     }
     case "dnd5.5e:conditionRemoved": {
       const data = EVENT_SCHEMAS["dnd5.5e:conditionRemoved"].parse(payload);

@@ -336,6 +336,33 @@ export const gearEffects = {
 };
 
 const UseItemSchema = z.object({ actor: z.string(), item: z.string() });
+const ThrowWeaponSchema = z.object({
+  actor: z.string(),
+  item: z.string(),
+  target: z.string(),
+});
+
+// A thrown weapon lands where its target stood, hit or miss.
+// shortcut: in a fight without a grid it lands at 0,0, and comes back when the fight ends.
+function throwWeapon(
+  payload: z.infer<typeof ThrowWeaponSchema>,
+  context: Context,
+): SystemResult {
+  const { actors } = context.state;
+  const thrower = actors[payload.actor];
+  if (!thrower || !equipped(thrower).includes(payload.item)) return {};
+  const at = actors[payload.target]?.position ??
+    thrower.position ?? { x: 0, y: 0 };
+  return {
+    events: [
+      dndEvent(`${NS}:weaponThrown`, {
+        item: payload.item,
+        at,
+        by: thrower.id,
+      }),
+    ],
+  };
+}
 
 export const gearFrames = {
   [`${NS}:useItem`]: frameHandler({
@@ -343,6 +370,10 @@ export const gearFrames = {
     run: (payload, _context: Context) => ({
       events: [dndEvent(`${NS}:itemUsed`, payload)],
     }),
+  }),
+  [`${NS}:throwWeapon`]: frameHandler({
+    schema: ThrowWeaponSchema,
+    run: throwWeapon,
   }),
   [`${NS}:gearStep`]: frameHandler({ schema: StepSchema, run: runGearStep }),
   [`${NS}:gearAnswer`]: frameHandler({

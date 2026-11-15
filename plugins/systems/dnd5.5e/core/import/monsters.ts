@@ -7,6 +7,7 @@ import type {
   Passive,
   Resolution,
 } from "../schemas.ts";
+import { reactionOf } from "./monster-reactions.ts";
 import {
   ABILITY_NAMES as ABILITIES,
   ConditionSchema,
@@ -26,6 +27,7 @@ import {
   spellLookup,
 } from "./monster-spells.ts";
 import { plainText, slugOf } from "./spells.ts";
+import { formsOnly, shapesIn, shapeShiftActions } from "./shapes.ts";
 
 type AbilityKey = keyof typeof ABILITIES;
 
@@ -204,6 +206,7 @@ function modifiersIn(text: string): LeafEffect[] {
     ...(REPEAT_SAVE.test(text) ? { repeatSave: true } : {}),
   });
   return [
+    ...actionLimitIn(text),
     ...(ability
       ? (["attacks", "saves", "checks"] as const).map((on) =>
           leaf({ kind: "disadvantage", on, ability }),
@@ -218,6 +221,53 @@ function modifiersIn(text: string): LeafEffect[] {
           }),
         ]
       : []),
+  ];
+}
+
+// "can't take Reactions; its Speed is halved; and it can take either an action or a Bonus Action on its turn, not
+// both", as a copper dragon's Slowing Breath: Slow's limits, until its next turn or for a minute of repeated saves.
+function actionLimitIn(text: string): LeafEffect[] {
+  const oneAction =
+    /\bcan take either an action or a Bonus Action on its turns?, not both\b/i.test(
+      text,
+    );
+  const noReactions = /\bcan[’']t take Reactions\b/i.test(text);
+  // A roll for what it does instead, as an umber hulk's Confusing Gaze, is more than these limits.
+  if (
+    (!oneAction && !noReactions) ||
+    /\bto determine what it does\b/i.test(text)
+  ) {
+    return [];
+  }
+  const speed = /\bSpeed is halved\b/i.test(text)
+    ? ("half" as const)
+    : /\bSpeed is reduced to 0\b/i.test(text)
+      ? ("none" as const)
+      : undefined;
+  // "until the end of its next turn" counts the target's turns; "of the enforcer's next turn" the monster's.
+  const [, edge = "", whose = ""] =
+    /\buntil the (start|end) of ([^.;]*?)\s*next turn\b/i.exec(text) ?? [];
+  const theirs = /^(?:its|the target[’']s|their)$/i.test(whose.trim());
+  const start = edge.toLowerCase() === "start";
+  const until = theirs
+    ? start
+      ? ("itsNextTurnStart" as const)
+      : ("itsNextTurnEnd" as const)
+    : start
+      ? ("yourNextTurnStart" as const)
+      : ("yourNextTurnEnd" as const);
+  return [
+    {
+      kind: "modifier",
+      modifier: {
+        kind: "actionLimit",
+        ...(oneAction ? { oneAction: true } : {}),
+        ...(noReactions ? { noReactions: true } : {}),
+        ...(speed ? { speed } : {}),
+      },
+      duration: edge ? { until } : { minutes: 1 },
+      ...(REPEAT_SAVE.test(text) ? { repeatSave: true } : {}),
+    },
   ];
 }
 
@@ -310,8 +360,9 @@ function conditionsIn(text: string, left: string[]): LeafEffect[] {
 }
 
 const STATE_LEAD =
-  /^\s*While (?:swallowed|engulfed|trapped|grafted|Restrained|Poisoned)(?: in this way)?,\s*/i;
-const WHILE_CONDITION = /^\s*While (Restrained|Poisoned)(?: in this way)?,/i;
+  /^\s*While (?:swallowed|engulfed|trapped|grafted|Restrained|Poisoned|Frightened)(?: in this way)?,\s*/i;
+const WHILE_CONDITION =
+  /^\s*While (Restrained|Poisoned|Frightened)(?: in this way)?,/i;
 
 // "… takes 10 (3d6) Acid damage at the start of each of the monster's turns" while swallowed. shortcut: it ticks on the
 // bearer's own turn rather than the monster's, which is one turn's difference at most.
@@ -641,7 +692,7 @@ function newerSave(text: string): string {
   )}${success}`;
 }
 
-function parseSave(input: string, left: string[]): ParsedAction | null {
+export function parseSave(input: string, left: string[]): ParsedAction | null {
   const text = SAVE_START.test(input) ? input : newerSave(input);
   // "The ape hurls a boulder at a point within 90 feet. Dexterity Saving Throw: …": the lead-in says where.
   const at = text.search(SAVE_START);
@@ -1109,10 +1160,16 @@ function guardOf(text: string): {
     : null;
 }
 
+// "(Recharge 5–6)" as the lowest roll that brings it back.
+function rechargeOf(label: string): number | undefined {
+  const low = /\(Recharge (\d)/.exec(label)?.[1];
+  return low ? Number(low) : undefined;
+}
+
 // Traits a grid fight never needs: breathing, telepathy and talk, senses for things the fight doesn't have, carrying,
 // objects and homes, and coming back to life days later somewhere else.
 const NO_COMBAT_TRAIT =
-  /^(?:Amphibious|Water Breathing|Hold Breath|Limited Amphibiousness|Unusual Nature|Air Envelope|Mimicry|Siege Monster|Forbiddance|Beast of Burden|Increased Carrying Capacity|Inscrutable|Shielded Mind|Telepathic Shroud|Treasure Sense|Iron Scent|Lie Detector|Divine Awareness|Detect Life|Ethereal Sight|Sense Magic|Disintegration|Soul Gem|Spirit Jar|Wishes|Vampiric Connection|Podling Link|Bound|Semblance of Life|Speak with .+|.*Telepathy|Telepathic Bond)$/;
+  /^(?:Amphibious|Water Breathing|Hold Breath|Limited Amphibiousness|Unusual Nature|Air Envelope|Mimicry|Siege Monster|Forbiddance|Beast of Burden|Increased Carrying Capacity|Inscrutable|Shielded Mind|Telepathic Shroud|Treasure Sense|Iron Scent|Lie Detector|Divine Awareness|Detect Life|Ethereal Sight|Sense Magic|Disintegration|Soul Gem|Spirit Jar|Wishes|Vampiric Connection|Podling Link|Bound|Semblance of Life|Speak with .+|.*Telepathy|Telepathic Bond|Vampire Weakness|Running Water|Stake to the Heart|Astral Implosion)$/;
 
 function noCombatTrait(label: string, text: string): boolean {
   const name = label.replace(/\s*\(.*$/, "");
@@ -1127,6 +1184,7 @@ function noCombatTrait(label: string, text: string): boolean {
 
 // What a trait read as a passive still leaves out.
 function traitLeftOut(label: string): string | null {
+  if (label === "Sun Sickness") return "its death after an hour in sunlight";
   if (label === "Fey Ancestry") return "immunity to magical sleep";
   if (label === "Greater Magic Resistance") {
     return "succeeding on every save against spells";
@@ -1145,7 +1203,9 @@ function traitLeftOut(label: string): string | null {
   if (label === "Ephemeral Movement") {
     return "moving without Opportunity Attacks";
   }
-  if (label === "Bloodied Frenzy") return "Advantage on saving throws";
+  if (label === "Corrosive Form")
+    return "what it does to weapons and ammunition";
+  if (label === "Greater Lightning Absorption") return "its Speed increase";
   return null;
 }
 
@@ -1161,8 +1221,9 @@ function moveThroughOf(text: string): Passive | null {
     /\benter (?:a|an enemy[’']s|a creature[’']s) space and stop there\b/.test(
       text,
     );
-  const earth =
-    /\bburrow through nonmagical, unworked earth and stone\b/.test(text);
+  const earth = /\bburrow through nonmagical, unworked earth and stone\b/.test(
+    text,
+  );
   const rock = /\bburrow through solid rock at half its Burrow Speed\b/.test(
     text,
   );
@@ -1188,8 +1249,324 @@ function moveThroughOf(text: string): Passive | null {
 // Traits whose whole effect on the grid is a Speed the stat block already gives, as Spider Climb's Climb Speed.
 const BY_SPEEDS = /^Spider Climb$/;
 
+// "until the start of its next turn" in an aura's save is the target's turn, which the aura catches it on.
+function theirTurns(effects: readonly LeafEffect[]): LeafEffect[] {
+  return effects.map((effect) =>
+    (effect.kind === "applyCondition" || effect.kind === "modifier") &&
+    typeof effect.duration === "object" &&
+    "until" in effect.duration &&
+    effect.duration.until === "yourNextTurnStart"
+      ? { ...effect, duration: { until: "itsNextTurnStart" } }
+      : effect,
+  );
+}
+
+const IMMUNE_AFTER =
+  /\bis immune to (?:this|the) [^.]*? for (?:24 hours|1 hour|\d+ hours?)\b/i;
+const AWAKE =
+  /\b(?:while|unless|provided) (?:it|he|she|they|the [^.,]+?) (?:doesn[’']t have|has) the Incapacitated condition\b|\bcan[’']t use this trait if (?:it|he|she|they) (?:has|have) the Incapacitated condition\b|\bdoesn[’']t function if [^.]+? has the Incapacitated condition\b/i;
+
+// Traits that are areas: an aura that acts on whoever starts or ends a turn in it or on everyone in it as the
+// monster's turn ends, one that gives those in it Advantage or stops their healing, the light it sheds, and a
+// burst where it dies. Light or sunlight that hampers it is read here too. Null for any other trait.
+function areaTrait(
+  label: string,
+  text: string,
+  left: string[],
+): Passive[] | null {
+  const name = label.replace(/\s*\(.*$/, "");
+  const awake = AWAKE.test(text) ? { awake: true as const } : {};
+  const light =
+    /\bsheds Bright Light in a (\d+)-foot radius and Dim Light for an additional (\d+) feet\b/.exec(
+      text,
+    );
+  if (light) {
+    const bright = Number(light[1]);
+    return [
+      { kind: "aura", name, zone: "light", radius: bright, area: {} },
+      {
+        kind: "aura",
+        name,
+        zone: "dim",
+        radius: bright + Number(light[2]),
+        area: {},
+      },
+    ];
+  }
+  const suppressed =
+    /^Creatures within (\d+) feet of [^.]+? can[’']t regain Hit Points\.?$/.exec(
+      text,
+    );
+  if (suppressed) {
+    return [
+      {
+        kind: "aura",
+        name,
+        zone: "area",
+        radius: Number(suppressed[1]),
+        area: { noHealing: true },
+      },
+    ];
+  }
+  // Marshal Undead, Inspiring Presence, Aura of Authority.
+  const presence =
+    /^(?:(Undead) creatures|Creatures|Allies) of [^.]*?choice(?: \(excluding (?:itself|himself|herself)\))? in a (\d+)-foot Emanation originating from [^.]+? have Advantage on (attack rolls and saving throws|attack rolls|saving throws)(?: unless [^.]+? has the Incapacitated condition)?\./.exec(
+      text,
+    ) ??
+    /^While in a (\d+)-foot Emanation originating from (?:the )?[^.,]+?, (?:the )?[^.,]+? and (?:its|his|her) allies have Advantage on (attack rolls and saving throws)\b/.exec(
+      text,
+    );
+  if (presence) {
+    const self = presence[0].startsWith("While");
+    const [type, radius, rolls = ""] = self
+      ? [undefined, presence[1], presence[2]]
+      : [presence[1], presence[2], presence[3]];
+    const grants: Modifier[] = [
+      ...(rolls.includes("attack rolls")
+        ? [{ kind: "advantage", on: "attacks" } as const]
+        : []),
+      ...(rolls.includes("saving throws")
+        ? [{ kind: "advantage", on: "saves" } as const]
+        : []),
+    ];
+    return [
+      {
+        kind: "aura",
+        name,
+        zone: "area",
+        radius: Number(radius),
+        area: {
+          side: "ally",
+          grants,
+          ...(type ? { creatureTypes: [type.toLowerCase()] } : {}),
+          ...(self ? { self: true as const } : {}),
+          ...awake,
+        },
+      },
+    ];
+  }
+  // Fire Aura, Heat Aura: damage to everyone close by as its turn ends.
+  const burning =
+    /^At the end of each of [^.]+? turns, each creature( of [^.]+? choice)? in an? (\d+)-foot Emanation originating from [^.]+? takes \d+ \((\d+d\d+)\) (\w+) damage(?: unless [^.]+? has the Incapacitated condition)?\.(.*)$/s.exec(
+      text,
+    );
+  if (burning) {
+    const [, chosen, radius, dice = "", type = ""] = burning;
+    if ((burning[5] ?? "").trim()) left.push("what else it does");
+    const damageType = type.toLowerCase() as Damage["type"];
+    return [
+      {
+        kind: "aura",
+        name,
+        zone: "area",
+        radius: Number(radius),
+        area: {
+          ...(chosen ? { side: "enemy" as const } : {}),
+          when: "ownerTurnEnd",
+          resolution: {
+            kind: "automatic",
+            damage: [{ amount: { dice }, type: damageType }],
+            effects: [],
+          },
+          ...awake,
+        },
+      },
+    ];
+  }
+  // Aura of Dread, Impossible Geometry: ground that slows, maybe with damage for whoever starts its turn there.
+  const slowing =
+    /^(?:Creatures in a (\d+)-foot Emanation originating from [^.]+? have their Speeds halved while in the Emanation\.(?: The [^.]+? can designate creatures to be unaffected by the aura\.)?|Ground, air, and water in a (\d+)-foot Emanation originating from [^.]+? is Difficult Terrain\.(?: A creature that starts its turn in the Emanation takes \d+ \((\d+d\d+)\) (\w+) damage\.)?)$/.exec(
+      text,
+    );
+  if (slowing) {
+    const [, halved, ground, dice, type = ""] = slowing;
+    return [
+      {
+        kind: "aura",
+        name,
+        zone: "area",
+        radius: Number(halved ?? ground),
+        area: {
+          ...(halved ? { side: "enemy" as const } : {}),
+          difficult: true,
+          ...(dice
+            ? {
+                when: "turnStart" as const,
+                resolution: {
+                  kind: "automatic" as const,
+                  damage: [
+                    {
+                      amount: { dice },
+                      type: type.toLowerCase() as Damage["type"],
+                    },
+                  ],
+                  effects: [],
+                },
+              }
+            : {}),
+        },
+      },
+    ];
+  }
+  // Bolster Inventions: Temporary Hit Points for its allies of a kind as its turn ends.
+  const bolster =
+    /^At the end of each of [^.]+? turns, each of (?:its|his|her) (\w+) allies in a (\d+)-foot Emanation originating from [^.]+? gains (\d+) Temporary Hit Points\./.exec(
+      text,
+    );
+  if (bolster) {
+    const [, type = "", radius, amount] = bolster;
+    return [
+      {
+        kind: "aura",
+        name,
+        zone: "area",
+        radius: Number(radius),
+        area: {
+          side: "ally",
+          creatureTypes: [type.toLowerCase()],
+          when: "ownerTurnEnd",
+          resolution: {
+            kind: "automatic",
+            damage: [],
+            effects: [
+              {
+                kind: "tempHp",
+                amount: { bonus: { base: Number(amount), add: [] } },
+              },
+            ],
+          },
+          ...awake,
+        },
+      },
+    ];
+  }
+  // Death Burst, Death Throes: a save where it falls.
+  const burst = /^The [^.]+? (?:explodes|bursts) when it dies\.\s*(.*)$/s.exec(
+    text,
+  );
+  if (burst) {
+    const parsed = parseSaveFrom(burst[1] ?? "", "", left);
+    const area = (parsed?.targeting ?? {}) as {
+      area?: { radius?: number };
+    };
+    if (!parsed || area.area?.radius === undefined) return null;
+    return [
+      {
+        kind: "deathBurst",
+        name,
+        radius: area.area.radius,
+        resolution: parsed.resolution,
+      },
+    ];
+  }
+  // Stench, Terrifying Aura: a save for whoever starts or ends its turn in it, or for everyone in it as the
+  // monster's turn ends.
+  const at = text.search(SAVE_START);
+  const saving = at >= 0 ? text.slice(at) : "";
+  const turn =
+    /\b(any|each) (creature|enemy)\b[^.]*?\b(starts|ends) its turn in (?:an? (\d+)-foot Emanation|the (?:aura|area))/i.exec(
+      saving,
+    ) ??
+    /\beach (creature)\b() in an? (\d+)-foot Emanation originating from [^.]+? at the end of [^.]+? turn\b/i.exec(
+      saving,
+    );
+  if (!turn) return null;
+  const radius = Number(
+    turn[4] ??
+      (turn[3] && /^\d+$/.test(turn[3]) ? turn[3] : undefined) ??
+      /\bin a (\d+)-foot Emanation\b/.exec(text)?.[1],
+  );
+  if (!radius) return null;
+  const parsed = parseSaveFrom(
+    saving.replace(IMMUNE_AFTER, "is unaffected"),
+    "",
+    left,
+  );
+  if (parsed?.resolution.kind !== "save") return null;
+  const when = /\bstarts its turn\b/i.test(turn[0])
+    ? ("turnStart" as const)
+    : /\bends its turn\b/i.test(turn[0])
+      ? ("turnEnd" as const)
+      : ("ownerTurnEnd" as const);
+  const immune = IMMUNE_AFTER.test(saving);
+  return [
+    {
+      kind: "aura",
+      name,
+      zone: "area",
+      radius,
+      area: {
+        ...(/enemy/i.test(turn[2] ?? "") ? { side: "enemy" as const } : {}),
+        when,
+        resolution: {
+          ...parsed.resolution,
+          onFail: theirTurns(parsed.resolution.onFail),
+          onSuccess: immune
+            ? [
+                {
+                  kind: "modifier",
+                  modifier: { kind: "areaImmunity" },
+                  duration: { minutes: 1440 },
+                },
+              ]
+            : [],
+        },
+        ...awake,
+      },
+    },
+  ];
+}
+
+// In sunlight, or in Bright Light: Disadvantage on its rolls, and damage as its turn starts there.
+function lightTrait(text: string): Passive | null {
+  const hampered =
+    /\bWhile in (sunlight|Bright Light), [^.]+? has Disadvantage on (D20 Tests|ability checks and attack rolls|attack rolls and ability checks|attack rolls)\./.exec(
+      text,
+    );
+  if (!hampered) return null;
+  const rolls = hampered[2] ?? "";
+  const disadvantage = [
+    ...(/attack|D20/.test(rolls) ? (["attacks"] as const) : []),
+    ...(rolls.includes("D20") ? (["saves"] as const) : []),
+    ...(/check|D20/.test(rolls) ? (["checks"] as const) : []),
+  ];
+  const burn =
+    /\btakes (\d+) Radiant damage if it starts its turn in sunlight\b/.exec(
+      text,
+    )?.[1];
+  return {
+    kind: "lightSensitive",
+    light: hampered[1] === "sunlight" ? "sunlight" : "bright",
+    disadvantage,
+    damage: burn
+      ? [
+          {
+            amount: { bonus: { base: Number(burn), add: [] } },
+            type: "radiant",
+          },
+        ]
+      : [],
+  };
+}
+
 // The traits the engine already knows how to play, or null for one it doesn't.
-function traitPassive(label: string, text: string): Passive | null {
+export function traitPassive(label: string, text: string): Passive | null {
+  const sensitive = lightTrait(text);
+  if (sensitive) return sensitive;
+  // Living Shadow: Resistance in Dim Light or Darkness.
+  const shadow =
+    /^While in Dim Light or Darkness, [^.]+? has Resistance to damage that isn[’']t ([^.]+)\.$/.exec(
+      text,
+    )?.[1];
+  if (shadow) {
+    return {
+      kind: "resistAll",
+      while: "shadows",
+      except: DAMAGE_TYPES.filter((type) =>
+        new RegExp(`\\b${type}\\b`, "i").test(shadow),
+      ),
+    };
+  }
   if (/^(?:Greater |Superior )?Magic Resistance$/.test(label)) {
     return { kind: "magicResistance" };
   }
@@ -1230,6 +1607,80 @@ function traitPassive(label: string, text: string): Passive | null {
     return { kind: "attackAdvantage", when: "targetFrightened" };
   }
   if (label === "Immutable Form") return { kind: "immutableForm" };
+  const absorbed =
+    /\bregains a number of Hit Points equal to the (\w+) damage dealt\b/.exec(
+      text,
+    )?.[1];
+  const absorbedType = DAMAGE_TYPES.find(
+    (type) => type === absorbed?.toLowerCase(),
+  );
+  if (label.endsWith("Absorption") && absorbedType) {
+    return { kind: "absorb", damage: [absorbedType] };
+  }
+  if (
+    /^Attack rolls against [^.]+ have Disadvantage\. If [^.]+ makes an attack roll, this trait is suppressed/.test(
+      text,
+    )
+  ) {
+    return { kind: "ward", suppressed: "attacking" };
+  }
+  if (
+    /^Attack rolls against [^.]+ have Disadvantage\. This trait is suppressed while [^.]+ has the Incapacitated condition/.test(
+      text,
+    )
+  ) {
+    return { kind: "ward", suppressed: "incapacitated" };
+  }
+  if (/\bcan take one Reaction on every turn of combat\b/.test(text)) {
+    return { kind: "reactive" };
+  }
+  if (/^The [^.]+ has the Invisible condition\.?$/.test(text)) {
+    return { kind: "innateCondition", condition: "invisible" };
+  }
+  const flinch =
+    /^If the [^.]+ takes (\w+) damage, it has Disadvantage on attack rolls and ability checks until the end of its next turn\.?$/.exec(
+      text,
+    )?.[1];
+  const flinchType = DAMAGE_TYPES.find(
+    (type) => type === flinch?.toLowerCase(),
+  );
+  if (flinchType) {
+    return {
+      kind: "onDamage",
+      damage: [flinchType],
+      modifiers: [
+        { kind: "disadvantage", on: "attacks" },
+        { kind: "disadvantage", on: "checks" },
+      ],
+    };
+  }
+  const corrosive =
+    /^A creature that hits [^.]+ with a melee attack roll takes \d+ \((\d+d\d+)\) (\w+) damage\./.exec(
+      text,
+    );
+  const corrosiveType = DAMAGE_TYPES.find(
+    (type) => type === corrosive?.[2]?.toLowerCase(),
+  );
+  if (corrosive?.[1] && corrosiveType) {
+    return {
+      kind: "modifier",
+      modifier: {
+        kind: "retaliate",
+        damage: [{ amount: { dice: corrosive[1] }, type: corrosiveType }],
+      },
+    };
+  }
+  if (/^The [^.]+ adheres to anything that touches it\./.test(text)) {
+    return {
+      kind: "modifier",
+      modifier: { kind: "retaliate", damage: [], grapple: true },
+    };
+  }
+  const stone =
+    /drops to 0 Hit Points while it doesn[’']t have the Petrified condition, it turns to stone, regains (\d+) Hit Points/.exec(
+      text,
+    )?.[1];
+  if (stone) return { kind: "stoneRestoration", hp: Number(stone) };
   if (
     label === "Fey Ancestry" &&
     /Advantage on saving throws (?:it makes )?to avoid or end the Charmed condition/i.test(
@@ -1339,9 +1790,16 @@ function parseBlock(
     const own = casterIn(text, scores, proficiency);
     return own.mod === null ? { ...blockCaster, ...nonNull(own) } : own;
   };
+  // Where each entry's actions start, with the shapes its label limits them to.
+  const marks: { at: number; forms: readonly string[] | undefined }[] = [];
+  const shapePassives: { forms: readonly string[]; passive: Passive }[] = [];
   for (const [index, paragraph] of paragraphs.entries()) {
     const attributes = paragraph[1] ?? "";
     const inner = paragraph[2] ?? "";
+    marks.push({
+      at: actions.length,
+      forms: formsOnly(entryOf(inner)?.label ?? ""),
+    });
     if (/monster-header|Stat-Block-Heading/.test(attributes)) {
       section = plainText(inner)
         .toLowerCase()
@@ -1397,11 +1855,33 @@ function parseBlock(
     }
     // Older books print traits before any heading.
     if (section === "traits" || section === "") {
-      const passive = traitPassive(label, text);
-      const left = passive ? traitLeftOut(label) : null;
-      if (passive) passives.push(passive);
+      const leftOut: string[] = [];
+      const placed = areaTrait(label, text, leftOut);
+      const passive = placed ? null : traitPassive(label, text);
+      const left = passive
+        ? traitLeftOut(label)
+        : leftOut.length > 0
+          ? [...new Set(leftOut)].join(", ")
+          : null;
+      const forms = formsOnly(label);
+      if (passive && forms) shapePassives.push({ forms, passive });
+      else if (passive) passives.push(passive);
+      if (placed) passives.push(...placed);
+      // "While Bloodied, … has Advantage on attack rolls and saving throws."
+      if (
+        passive?.kind === "attackAdvantage" &&
+        passive.when === "bloodied" &&
+        /\bAdvantage on attack rolls and saving throws\b/.test(text)
+      ) {
+        passives.push({
+          kind: "saveAdvantage",
+          abilities: ["str", "dex", "con", "int", "wis", "cha"],
+          conditions: [],
+          bloodied: true,
+        });
+      }
       if (left) notes.push(`partial: ${label}: left out ${left}`);
-      if (!passive && !BY_SPEEDS.test(label)) {
+      if (!passive && !placed && !BY_SPEEDS.test(label)) {
         notes.push(
           `${noCombatTrait(label, text) ? "no combat use" : "not automated"}: ${label}`,
         );
@@ -1442,7 +1922,37 @@ function parseBlock(
       actions.push(...reactions);
       continue;
     }
-    const guard = section === "reactions" ? guardOf(text) : null;
+    // "Trigger: … Response: …" the engine answers (import/monster-reactions.ts), or else a Parry-shaped guard.
+    const reaction =
+      section === "reactions" ? reactionOf(text, parseSave) : null;
+    const guard = section === "reactions" && !reaction ? guardOf(text) : null;
+    if (reaction) {
+      const name = label.replace(/\s*\(.*$/, "");
+      for (const reason of new Set(reaction.left)) {
+        notes.push(`partial: ${name}: left out ${reason}`);
+      }
+      actions.push({
+        name,
+        ...(reactionDays ? { perDay: Number(reactionDays) } : {}),
+        ...(rechargeOf(label) ? { recharge: rechargeOf(label) } : {}),
+        activation: {
+          cost: [
+            "reaction",
+            ...(reactionDays || rechargeOf(label)
+              ? [
+                  {
+                    resource: `${reactionDays ? "day" : "recharge"}:${slugOf(name)}`,
+                  },
+                ]
+              : []),
+          ],
+          trigger: reaction.trigger,
+          targeting: reaction.targeting,
+          resolution: reaction.resolution,
+        },
+      });
+      continue;
+    }
     if (guard) {
       const name = label.replace(/\s*\(.*$/, "");
       if (guard.left) notes.push(`partial: ${name}: left out ${guard.left}`);
@@ -1489,7 +1999,7 @@ function parseBlock(
     // Charge: "The troll moves up to half its Speed straight toward an enemy it can see." A Dash toward the foes,
     // which is where a monster's moves go.
     const charge =
-      /^[^.]*?\bmoves up to (half )?its Speed(?: or (?:its )?\w+ Speed)? straight toward an enemy it can (?:see|sense)\.?$/.exec(
+      /^[^.]*?\bmoves up to (half )?its Speed(?: or (?:its )?\w+ Speed)? straight toward an enemy it can (?:see|sense)( without provoking Opportunity Attacks)?\.?$/.exec(
         text.trim(),
       );
     if (section === "bonus actions" && charge && !label.includes("(")) {
@@ -1497,6 +2007,7 @@ function parseBlock(
         kind: "bonusTactics",
         tactics: ["dash"],
         ...(charge[1] ? { half: true as const } : {}),
+        ...(charge[2] ? { safe: true as const } : {}),
       });
       continue;
     }
@@ -1626,6 +2137,26 @@ function parseBlock(
       recharge = undefined;
     }
   }
+  for (const [index, { at, forms }] of marks.entries()) {
+    if (!forms) continue;
+    for (const action of actions.slice(at, marks[index + 1]?.at)) {
+      Object.assign(action as object, { shapes: forms });
+    }
+  }
+  const shaped = shapesIn(lines, size);
+  const shapes = shaped?.shapes.map((shape) => ({
+    ...shape,
+    passives: shapePassives.flatMap(({ forms, passive }) =>
+      forms.includes(shape.name) ? [passive] : [],
+    ),
+  }));
+  if (shaped && shapes) {
+    actions.push(...shapeShiftActions(shapes, shaped.cost));
+    const left = notes.findIndex((note) => note.endsWith(": Shape-Shift"));
+    if (left >= 0) notes.splice(left, 1);
+  } else {
+    passives.push(...shapePassives.map(({ passive }) => passive));
+  }
   // The block can still be read, and the creature fights like any other: it just never has an option but to pass.
   if (actions.length === 0 && (!secondPass || dependsOnCaster(lines))) {
     return null;
@@ -1691,6 +2222,7 @@ function parseBlock(
       ),
       multiattack,
       actions,
+      ...(shapes ? { shapes } : {}),
       ...legendary.fields,
       text: lines.join("\n"),
     },
@@ -1706,7 +2238,7 @@ export function teleportOf(
 ): { feet: number; movement: number; rest: string; others?: true } | null {
   // "teleports itself or a willing creature it can see within 10 feet of itself up to 120 feet": only itself.
   const teleport =
-    /^(?:The )?[^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)?( itself or a willing creature [^.]*?)? up to (\d+) feet to an unoccupied space (?:it|he|she|they|the [^.]+?) can see(?:[.,]| and)\s*(.*)$/s.exec(
+    /^(?:The )?[^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)?( itself or a willing (?:creature|demon|devil|ally) [^.]*?)? up to (\d+) feet to an unoccupied space (?:it|he|she|they|the [^.]+?) can see(?:[.,]| and)\s*(.*)$/s.exec(
       text.trim(),
     );
   if (teleport) {

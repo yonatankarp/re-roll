@@ -18,7 +18,14 @@ import {
 import { type Actor, type DndState, type Terrain, isDead } from "./state.ts";
 import { deriveStats, lookup } from "./stats.ts";
 import { swallowerOf } from "./combat/swallow.ts";
-import { glows, lit, obscuring, thornKeys, type ZoneKind } from "./zones.ts";
+import {
+  blockingSet,
+  glows,
+  lit,
+  obscuring,
+  thornKeys,
+  type ZoneKind,
+} from "./zones.ts";
 
 // A map's codes as squares, or nothing for a map that marks none, so fights on older maps stay as they were.
 export function terrainOf(map: Battlemap): Terrain | null {
@@ -80,7 +87,7 @@ export function coverFor(
   return coverBetween(
     from,
     target.position,
-    setOf(state.combat?.walls),
+    blockingSet(state),
     {
       half: setOf(terrain?.half),
       threeQuarters: setOf(terrain?.threeQuarters),
@@ -97,16 +104,17 @@ export function coverBonus(cover: Cover): number {
 export function lightAt(
   square: Square | null,
   state: DndState,
+  access?: ContentAccess, // for the light monsters shed, as a flameskull's
 ): "bright" | "dim" | "dark" {
   const terrain = state.combat?.terrain;
-  if (!terrain || !square || lit(square, state)) return "bright";
+  if (!terrain || !square || lit(square, state, access)) return "bright";
   const key = squareKey(square);
   const ground = setOf(terrain.dark).has(key)
     ? "dark"
     : setOf(terrain.dim).has(key)
       ? "dim"
       : terrain.light;
-  return ground === "dark" && glows(square, state) ? "dim" : ground;
+  return ground === "dark" && glows(square, state, access) ? "dim" : ground;
 }
 
 const SEES_IN_DARK = /\b(?:darkvision|blindsight|truesight) (\d+) ft/gi;
@@ -115,6 +123,22 @@ const SEES_IN_DARK = /\b(?:darkvision|blindsight|truesight) (\d+) ft/gi;
 // Truesight from its stat block's senses. 0 for none.
 // shortcut: Blindsight and Truesight count as Darkvision, so magical darkness and invisibility aren't told apart.
 export function darkvisionOf(actor: Actor, access: ContentAccess): number {
+  return Math.max(ownDarkvision(actor, access), effectSight(actor, false));
+}
+
+// Darkvision or True Seeing cast on the creature: how far it sees, and with `truesight` only Truesight's.
+function effectSight(actor: Actor, truesight: boolean): number {
+  return Math.max(
+    0,
+    ...actor.activeEffects.flatMap(({ modifier }) =>
+      modifier.kind === "darkvision" && (!truesight || modifier.truesight)
+        ? [modifier.feet]
+        : [],
+    ),
+  );
+}
+
+function ownDarkvision(actor: Actor, access: ContentAccess): number {
   if (actor.source.kind === "monster") {
     const { text = "" } = lookup(
       access,
@@ -181,6 +205,7 @@ export function seesThrough(
           passive.kind === "seesInDarkness" ? [passive.feet] : [],
         )
       : []),
+    zone === "darkness" ? effectSight(viewer, true) : 0,
   );
 }
 
@@ -201,7 +226,7 @@ export function seeing(
       ? "clear"
       : "none";
   }
-  const light = lightAt(at, state);
+  const light = lightAt(at, state, access);
   if (light === "bright") return "clear";
   const feet = darkvision ?? darkvisionOf(viewer, access);
   const inRange = feet > 0 && distanceFeet(viewer.position, at) <= feet;

@@ -11,6 +11,17 @@ export const DECLINE = "decline";
 export const MOVE = "move"; // the turn option that asks where to go
 export const STAY = "stay";
 export const ITEM_PREFIX = "item:"; // an action that uses up the item, such as a potion
+export const WEAPON_PREFIX = "weapon:"; // an attack with a weapon carried
+export const THROW_PREFIX = "throw:"; // a ranged attack throwing a Thrown weapon, which leaves the hand
+export const PICK_UP = "pickUp"; // picking a thrown weapon up from the ground: "pickUp|<index in combat.dropped>"
+
+// The weapon behind a weapon attack or a throw, or "" for any other action.
+export function weaponItemId(actionId: string): string {
+  for (const prefix of [WEAPON_PREFIX, THROW_PREFIX]) {
+    if (actionId.startsWith(prefix)) return actionId.slice(prefix.length);
+  }
+  return "";
+}
 export const AIM = "@"; // an area aimed at a square ("@x,y") or a creature ("@" and its id)
 export const SQUARE = /^(\d+),(\d+)$/; // a move or aim option's id
 

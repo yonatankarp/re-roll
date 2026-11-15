@@ -1,9 +1,15 @@
 import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
 import { carriedWeight, carryingCapacity, encumberedSpeed } from "./carry.ts";
-import { type Actor, type DndState, equipped, hasCondition } from "./state.ts";
+import {
+  type Actor,
+  type DndState,
+  effectiveBuild,
+  equipped,
+  hasCondition,
+} from "./state.ts";
 import { lightAt } from "./sight.ts";
-import { formOf } from "./forms.ts";
+import { currentShape, formKept, formOf, usableIn } from "./forms.ts";
 import {
   ALL_SKILLS,
   DAMAGE_TYPES,
@@ -32,6 +38,7 @@ import {
   type Resolution,
   type ScaleStep,
   type Skill,
+  type Species,
   SpeciesSchema,
   SubclassSchema,
   type Subclass,
@@ -46,6 +53,7 @@ import { featureRules, grantedSpells } from "./feature-rules.ts";
 import { type Caster, multiclassSlots } from "./multiclass.ts";
 import { holdsConcentration, withMetamagic } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
+import { THROW_PREFIX, WEAPON_PREFIX } from "./combat/ids.ts";
 
 // Content is frozen once loaded, so each entry is checked against a schema only once.
 const parsed = new WeakMap<object, Map<z.ZodType, unknown>>();
@@ -81,6 +89,8 @@ export interface KnownAction {
   readonly spellLevel: number | null;
   readonly upcast?: Spell["upcast"];
   readonly hitType?: true; // its damage takes the type of the hit it adds to, as a maneuver's die does
+  readonly rolled?: true; // taken only when a randomAction picks it, as one eye ray
+  readonly concentrates?: true; // casting it starts Concentration even with no lasting effect, as Flame Blade
 }
 
 export interface Stats {
@@ -240,6 +250,128 @@ function raisedByFeat(
   );
 }
 
+// The spellcasting ability of each spell a feat gives, where the feat names one: fixed, the one it raised, the one
+// chosen for it, or the one chosen for a feat taken before (`like`).
+function featSpellAbilities(
+  build: CharacterBuild,
+  originFeats: readonly string[],
+  species: Species,
+  access: ContentAccess,
+): ReadonlyMap<string, Ability> {
+  const byFeat = new Map<string, Ability>();
+  const taken: [string, CharacterBuild["levels"][number]["answers"]][] = [];
+  for (const id of originFeats)
+    taken.push([id, build.levels[0]?.answers ?? []]);
+  for (const entry of build.levels) {
+    for (const answer of entry.answers) {
+      if (answer.kind === "spellAbility")
+        byFeat.set(answer.feat, answer.ability);
+      if (answer.kind === "feats") {
+        for (const id of answer.values) taken.push([id, entry.answers]);
+      }
+    }
+  }
+  const feats = taken.map(([id, answers]) => ({
+    id,
+    answers,
+    feat: lookup(access, FeatSchema, id),
+  }));
+  for (const { id, answers, feat } of feats) {
+    const rule = feat.spellAbility;
+    if (typeof rule === "string" && rule !== "increased") byFeat.set(id, rule);
+    if (rule === "increased") {
+      const raised = answers.flatMap((answer) =>
+        answer.kind === "abilities"
+          ? (Object.keys(answer.increases) as Ability[])
+          : [],
+      );
+      const ability = raised.find(
+        (item) => feat.abilityIncrease?.includes(item) ?? true,
+      );
+      if (ability) byFeat.set(id, ability);
+    }
+  }
+  for (const { id, feat } of feats) {
+    const rule = feat.spellAbility;
+    if (typeof rule !== "object") continue;
+    const earlier = [...byFeat].find(
+      ([other]) => other === rule.like || other.startsWith(`${rule.like}-`),
+    );
+    if (earlier) byFeat.set(id, earlier[1]);
+  }
+
+  const bySpell = new Map<string, Ability>();
+  const featureSpells = (ids: readonly string[], ability: Ability) => {
+    for (const grant of ids) {
+      const feature = FeatureSchema.safeParse(access.content(grant)).data;
+      for (const spells of [feature?.spells, feature?.spellsBySlot]) {
+        for (const spell of Object.values(spells ?? {}).flat()) {
+          bySpell.set(spell, ability);
+        }
+      }
+    }
+  };
+  for (const entry of build.levels) {
+    for (const answer of entry.answers) {
+      const ability =
+        (answer.kind === "spells" || answer.kind === "features") && answer.feat
+          ? byFeat.get(answer.feat)
+          : undefined;
+      if (!ability) continue;
+      // A species' lineage, picked as an option, gives its spells with the species' ability.
+      if (answer.kind === "features") featureSpells(answer.values, ability);
+      else if (answer.kind === "spells") {
+        for (const spell of answer.values) bySpell.set(spell, ability);
+      }
+    }
+  }
+  for (const { id, feat } of feats) {
+    const ability = byFeat.get(id);
+    if (ability) featureSpells(feat.grants, ability);
+  }
+  const own = byFeat.get(species.id);
+  if (own) featureSpells(species.traits, own);
+  return bySpell;
+}
+
+// Cold Fire Magic: a spell's damage takes another type.
+function retyped(activation: Activation, type: DamageType): Activation {
+  const { resolution } = activation;
+  const swap = <T extends { readonly type: DamageType }>(list: readonly T[]) =>
+    list.map((item) => ({ ...item, type }));
+  return {
+    ...activation,
+    resolution:
+      resolution.kind === "attack" && resolution.onHitSave
+        ? {
+            ...resolution,
+            damage: swap(resolution.damage),
+            onHitSave: {
+              ...resolution.onHitSave,
+              damage: swap(resolution.onHitSave.damage),
+            },
+          }
+        : { ...resolution, damage: swap(resolution.damage) },
+  };
+}
+
+// A feat's spell cast with its own ability: its save DC, spell attack and spellcasting modifier.
+function castWith(activation: Activation, ability: Ability): Activation {
+  const mapped = (value: unknown, key = ""): unknown => {
+    if (Array.isArray(value)) return value.map((item) => mapped(item));
+    if (value === null || typeof value !== "object") return value;
+    const copy: Record<string, unknown> = Object.fromEntries(
+      Object.entries(value).map(([name, item]) => [name, mapped(item, name)]),
+    );
+    const spellTerm = copy.kind === "spellMod" || copy.kind === "spellSaveDc";
+    const spellAttack = key === "attack" && copy.type === "spell";
+    return (spellTerm || spellAttack) && copy.ability === undefined
+      ? { ...copy, ability }
+      : copy;
+  };
+  return mapped(activation) as Activation;
+}
+
 function bestMentalAbility(abilities: AbilityScores): Ability {
   return (["int", "wis", "cha"] as const).reduce<Ability>(
     (best, ability) => (abilities[ability] > abilities[best] ? ability : best),
@@ -251,21 +383,26 @@ function collectFeatureData(
   access: ContentAccess,
   featureIds: readonly string[],
   level = 1,
+  highestSlot = 0,
+  feats: ReadonlySet<string> = new Set(),
 ): {
   passives: Passive[];
   actions: KnownAction[];
   resources: Feature["resources"];
   spells: string[];
   free: string[];
+  retype: Record<string, DamageType>;
 } {
   const passives: Passive[] = [];
   const actions: KnownAction[] = [];
   const resources: Feature["resources"] = [];
   const spells = featureIds.flatMap((id) => grantedSpells(id, level));
   const free: string[] = [];
+  const retype: Record<string, DamageType> = {};
   for (const id of featureIds) {
     const feature = featureRules(lookup(access, FeatureSchema, id));
     if ((feature.fromLevel ?? 1) > level) continue;
+    Object.assign(retype, feature.retype);
     passives.push(...feature.passives);
     resources.push(...feature.resources);
     for (const [from, ids] of Object.entries(feature.spells ?? {})) {
@@ -273,10 +410,21 @@ function collectFeatureData(
       spells.push(...ids);
       if (feature.freeCast) free.push(...ids);
     }
+    const { preparedWith } = feature;
+    for (const [slot, ids] of Object.entries({
+      ...feature.spellsBySlot,
+      ...(preparedWith && feats.has(preparedWith.feat)
+        ? preparedWith.spells
+        : {}),
+    })) {
+      if (Number(slot) <= highestSlot) spells.push(...ids);
+    }
     feature.activations.forEach((activation, index) => {
       actions.push({
         id: `feature:${id}:${String(index)}`,
-        name: feature.name,
+        name: activation.label
+          ? `${feature.name} (${activation.label})`
+          : feature.name,
         activation: feature.perTier
           ? scaleActivation(activation, feature.perTier, cantripTier(level))
           : activation,
@@ -286,7 +434,7 @@ function collectFeatureData(
       });
     });
   }
-  return { passives, actions, resources, spells, free };
+  return { passives, actions, resources, spells, free, retype };
 }
 
 export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
@@ -313,9 +461,11 @@ export function weaponActivation(
     (finesse && abilityModifier(abilities.dex) > abilityModifier(abilities.str))
       ? "dex"
       : "str";
+  // shortcut: an Ammunition weapon without its range in the data reaches 80 feet with no long range.
+  const range = ranged ? (weapon.range ?? { normal: 80, long: 80 }) : null;
   return {
     cost: ["action"],
-    targeting: { creatures: 1, range: ranged ? 80 : 5, side: "enemy" },
+    targeting: { creatures: 1, range: range?.long ?? 5, side: "enemy" },
     resolution: {
       kind: "attack",
       attack: {
@@ -323,6 +473,9 @@ export function weaponActivation(
         ability,
         ...(proficient ? {} : { proficient }),
         ...(itemBonus > 0 ? { itemBonus } : {}),
+        ...(range && range.normal < range.long
+          ? { normalRange: range.normal }
+          : {}),
       },
       damage: [
         {
@@ -338,6 +491,49 @@ export function weaponActivation(
       ],
       onHit: [],
       onMiss: [],
+    },
+  };
+}
+
+// Throwing a Thrown weapon: its melee attack made at range, with Disadvantage past its normal range.
+function thrownActivation(
+  melee: Activation,
+  range: NonNullable<Weapon["range"]>,
+  passives: readonly Passive[],
+): Activation {
+  const { resolution } = melee;
+  if (resolution.kind !== "attack") return melee;
+  const bonus = passives.reduce(
+    (sum, passive) =>
+      passive.kind === "thrownDamage" ? sum + passive.bonus : sum,
+    0,
+  );
+  const longShots = passives.some(({ kind }) => kind === "longShots");
+  return {
+    ...melee,
+    targeting: { creatures: 1, range: range.long, side: "enemy" },
+    resolution: {
+      ...resolution,
+      attack: {
+        ...resolution.attack,
+        ...(longShots || range.normal >= range.long
+          ? {}
+          : { normalRange: range.normal }),
+      },
+      damage: resolution.damage.map((damage, index) =>
+        index === 0 && bonus > 0
+          ? {
+              ...damage,
+              amount: {
+                ...damage.amount,
+                bonus: {
+                  base: (damage.amount.bonus?.base ?? 0) + bonus,
+                  add: damage.amount.bonus?.add ?? [],
+                },
+              },
+            }
+          : damage,
+      ),
     },
   };
 }
@@ -380,10 +576,8 @@ function attacksFrom(featureId: string): number {
 const isPactMagic = (id: string): boolean => id.endsWith("pact-magic");
 
 function characterStats(actor: Actor, access: ContentAccess): Stats {
-  if (actor.source.kind !== "character" || !actor.source.build) {
-    throw new Error(`${actor.id} has no character build`);
-  }
-  const { build } = actor.source;
+  const build = effectiveBuild(actor);
+  if (!build) throw new Error(`${actor.id} has no character build`);
   const background = lookup(access, BackgroundSchema, build.backgroundId);
   const species = lookup(access, SpeciesSchema, build.speciesId);
 
@@ -543,7 +737,19 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
-  const fromFeatures = collectFeatureData(access, [...featureIds], level);
+  const fromFeatures = collectFeatureData(
+    access,
+    [...featureIds],
+    level,
+    slots.findLastIndex((count) => count > 0) + 1,
+    featIds,
+  );
+  const castingAbility = featSpellAbilities(
+    build,
+    replaced ? [] : [background.feat],
+    species,
+    access,
+  );
   const armorBases: number[] = [];
   const flatBonus = magic.ac;
   let shield = 0;
@@ -555,7 +761,13 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       access,
       untrainedArmor ? undefined : caster?.spellcasting,
     );
-    if (usable) actions.push(usable);
+    if (usable) {
+      actions.push(
+        item.type === "gear"
+          ? farLobbed(usable, fromFeatures.passives)
+          : usable,
+      );
+    }
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
       const dex = abilityModifier(abilities.dex);
@@ -581,19 +793,31 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
             .filter((bonus) => bonus.to === to)
             .map((bonus) => bonus.amount),
         );
+      const activation = weaponActivation(
+        weapon,
+        abilities,
+        martialTraining || classes.some((def) => weaponProficient(def, weapon)),
+        own("damage"),
+        own("attack") - magic.attack,
+      );
       actions.push({
-        id: `weapon:${itemId}`,
+        id: `${WEAPON_PREFIX}${itemId}`,
         name: item.name,
-        activation: weaponActivation(
-          weapon,
-          abilities,
-          martialTraining ||
-            classes.some((def) => weaponProficient(def, weapon)),
-          own("damage"),
-          own("attack") - magic.attack,
-        ),
+        activation,
         spellLevel: null,
       });
+      if (weapon.properties.includes("thrown") && weapon.range) {
+        actions.push({
+          id: `${THROW_PREFIX}${itemId}`,
+          name: `Throw ${item.name}`,
+          activation: thrownActivation(
+            activation,
+            weapon.range,
+            fromFeatures.passives,
+          ),
+          spellLevel: null,
+        });
+      }
     }
   }
 
@@ -603,24 +827,61 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   }
   for (const spellId of fromFeatures.free) freeSpells.add(spellId);
   const freeCasts = untrainedArmor ? [] : freeCastActions(freeSpells, access);
-  actions.push(...freeCasts.map(({ action }) => action));
+  actions.push(
+    ...freeCasts.map(({ action }) => {
+      // Its id is "spell:<spell>:free".
+      const ability = castingAbility.get(action.id.slice(6, -5));
+      return ability
+        ? { ...action, activation: castWith(action.activation, ability) }
+        : action;
+    }),
+  );
 
   for (const spellId of untrainedArmor ? [] : knownSpells) {
     const spell: Spell = lookup(access, SpellSchema, spellId);
-    if (spell.activation && doesSomething(spell.activation.resolution)) {
+    const lasting =
+      spell.lasting &&
+      typeof spell.duration === "object" &&
+      "concentration" in spell.duration
+        ? spell.lasting
+        : undefined;
+    if (
+      spell.activation &&
+      (lasting || doesSomething(spell.activation.resolution))
+    ) {
+      const activation =
+        spell.level === 0 && spell.cantrip
+          ? scaleActivation(
+              spell.activation,
+              spell.cantrip.perTier,
+              cantripTier(level),
+            )
+          : spell.activation;
+      const ability = castingAbility.get(spellId);
+      const type = fromFeatures.retype[spellId];
+      const cast = ability ? castWith(activation, ability) : activation;
       actions.push({
         id: `spell:${spellId}`,
         name: spell.name,
-        activation:
-          spell.level === 0 && spell.cantrip
-            ? scaleActivation(
-                spell.activation,
-                spell.cantrip.perTier,
-                cantripTier(level),
-              )
-            : spell.activation,
+        activation: type ? retyped(cast, type) : cast,
         spellLevel: spell.level,
         upcast: spell.upcast,
+        ...(lasting ? { concentrates: true as const } : {}),
+      });
+    }
+    // What the spell lets its caster do while it holds, as Flame Blade's attack, is no cast of its own.
+    // shortcut: it's at the spell's own level, not the slot's it was cast with.
+    if (
+      lasting &&
+      [`spell:${spellId}`, `spell:${spellId}:free`].includes(
+        actor.concentratingOn ?? "",
+      )
+    ) {
+      actions.push({
+        id: `lasting:${spellId}`,
+        name: spell.name,
+        activation: lasting,
+        spellLevel: null,
       });
     }
   }
@@ -703,7 +964,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     routines: null,
     creatureType: species.creatureType.toLowerCase(),
     initiative: abilityModifier(abilities.dex) - 2 * actor.exhaustion,
-    scaling,
+    // Proficiency Bonus as a scaling key, for dice that number it, as Healing Hands' d4s.
+    scaling: { ...scaling, proficiency: proficiencyBonus(level) },
     features: [...featureIds],
     resourceDefs: [
       ...fromFeatures.resources,
@@ -784,6 +1046,14 @@ function itemAction(
       spellLevel: null,
     };
   }
+  if (item.type === "gear" && item.activation) {
+    return {
+      id: `item:${itemId}`,
+      name: `Throw ${item.name}`,
+      activation: item.activation,
+      spellLevel: null,
+    };
+  }
   // shortcut: any spellcaster can read any scroll, with their own spellcasting numbers rather than the scroll's.
   if (item.type !== "magicItem" || !item.spell || !spellcasting) return null;
   const spell = lookup(access, SpellSchema, item.spell);
@@ -798,6 +1068,34 @@ function itemAction(
       cost: spell.activation.cost.filter((cost) => cost !== "slot"),
     },
     spellLevel: spell.level,
+  };
+}
+
+// Bomber's Far Lobber: a vial or flask thrown farther.
+function farLobbed(
+  action: KnownAction,
+  passives: readonly Passive[],
+): KnownAction {
+  const { targeting } = action.activation;
+  const feet = Math.max(
+    0,
+    ...passives.map((passive) =>
+      passive.kind === "farLobber" ? passive.feet : 0,
+    ),
+  );
+  if (
+    !("creatures" in targeting) ||
+    typeof targeting.range !== "number" ||
+    targeting.range >= feet
+  ) {
+    return action;
+  }
+  return {
+    ...action,
+    activation: {
+      ...action.activation,
+      targeting: { ...targeting, range: feet },
+    },
   };
 }
 
@@ -887,6 +1185,19 @@ function multiattackRoutines(
   return routines;
 }
 
+function mapRoutines(
+  routines: Readonly<Record<string, readonly string[]>> | null,
+  map: (id: string, chosen: string) => string,
+): Readonly<Record<string, readonly string[]>> | null {
+  if (!routines) return null;
+  return Object.fromEntries(
+    Object.entries(routines).map(([chosen, ids]) => [
+      chosen,
+      ids.map((id) => map(id, chosen)),
+    ]),
+  );
+}
+
 function monsterStats(actor: Actor, access: ContentAccess): Stats {
   if (actor.source.kind !== "monster") {
     throw new Error(`${actor.id} is not a monster`);
@@ -966,6 +1277,25 @@ function statBlockStats(
   access: ContentAccess,
 ): Stats {
   const fromFeatures = collectFeatureData(access, monster.features);
+  const shape = currentShape(monster, actor);
+  const usable = new Set(
+    monster.actions.flatMap((action, index) =>
+      usableIn(action, shape) ? [`monster:${String(index)}`] : [],
+    ),
+  );
+  const passives = [
+    ...monster.passives,
+    ...(shape?.passives ?? []),
+    ...fromFeatures.passives,
+  ];
+  // A Multiattack printed for other shapes only isn't there, and a routine's attack this shape can't make is the
+  // chosen one again.
+  const routines =
+    shape?.multiattack === false
+      ? null
+      : mapRoutines(multiattackRoutines(monster), (id, chosen) =>
+          usable.has(id) ? id : chosen,
+        );
   return {
     abilities: monster.abilities,
     proficiency: monster.proficiency,
@@ -975,9 +1305,9 @@ function statBlockStats(
     ac: bestAc(actor, monster.abilities, {
       armorBases: [monster.ac],
       flatBonus: 0,
-      passives: [...monster.passives, ...fromFeatures.passives],
+      passives,
     }),
-    speed: Math.max(0, monster.speed - 5 * actor.exhaustion),
+    speed: Math.max(0, (shape?.speed ?? monster.speed) - 5 * actor.exhaustion),
     savingThrows: monster.saves,
     skills: [],
     expertise: [],
@@ -990,21 +1320,28 @@ function statBlockStats(
         ),
       ),
     ),
-    passives: [...monster.passives, ...fromFeatures.passives],
+    passives,
     actions: [
-      ...monster.actions.map((action, index) => ({
-        id: `monster:${String(index)}`,
-        name: action.name,
-        activation: action.activation,
-        spellLevel: null,
-      })),
+      ...monster.actions.flatMap((action, index) =>
+        usable.has(`monster:${String(index)}`)
+          ? [
+              {
+                id: `monster:${String(index)}`,
+                name: action.name,
+                activation: action.activation,
+                spellLevel: null,
+                ...(action.rolled ? { rolled: true as const } : {}),
+              },
+            ]
+          : [],
+      ),
       ...fromFeatures.actions,
     ],
     multiattack: Math.max(
-      monster.multiattack,
-      ...passiveAttacks([...monster.passives, ...fromFeatures.passives]),
+      shape?.multiattack === false ? 1 : monster.multiattack,
+      ...passiveAttacks(passives),
     ),
-    routines: multiattackRoutines(monster),
+    routines,
     creatureType: monster.creatureType?.toLowerCase(),
     initiative: monster.initiative - 2 * actor.exhaustion,
     scaling: {},
@@ -1072,16 +1409,43 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
       : actor.source.kind === "summon"
         ? summonStats(actor, access)
         : characterStats(actor, access);
-  // A form's stat block replaces the creature's own, but it keeps its creature type and Hit Point maximum.
+  // A form's stat block replaces the creature's own, but it keeps its creature type and Hit Point maximum, and with
+  // Shapechange its Intelligence, Wisdom and Charisma and its spellcasting.
   const form = formOf(actor);
-  const stats = form
+  const keep = formKept(actor);
+  const shaped = form
+    ? monsterStats(
+        { ...actor, source: { kind: "monster", statBlockId: form } },
+        access,
+      )
+    : null;
+  const stats = shaped
     ? {
-        ...monsterStats(
-          { ...actor, source: { kind: "monster", statBlockId: form } },
-          access,
-        ),
+        ...shaped,
         creatureType: own.creatureType,
         maxHp: own.maxHp,
+        ...(keep.includes("mind")
+          ? {
+              abilities: {
+                ...shaped.abilities,
+                int: own.abilities.int,
+                wis: own.abilities.wis,
+                cha: own.abilities.cha,
+              },
+            }
+          : {}),
+        ...(keep.includes("spells")
+          ? {
+              actions: [
+                ...shaped.actions,
+                ...own.actions.filter(({ spellLevel }) => spellLevel !== null),
+              ],
+              spellAbility: own.spellAbility,
+              slots: own.slots,
+              pactMagic: own.pactMagic,
+              proficiency: Math.max(shaped.proficiency, own.proficiency),
+            }
+          : {}),
       }
     : own;
   const speed = effectBonus(actor, "speed");
@@ -1125,7 +1489,10 @@ export function attackBonus(
   const { attack } = resolution;
   const exhaustion = 2 * stats.exhaustion;
   if (attack.flatBonus !== undefined) return attack.flatBonus - exhaustion;
-  const ability = attack.type === "spell" ? stats.spellAbility : attack.ability;
+  const ability =
+    attack.type === "spell"
+      ? (attack.ability ?? stats.spellAbility)
+      : attack.ability;
   const proficiency = attack.proficient === false ? 0 : stats.proficiency;
   const item =
     attack.type === "spell"
@@ -1188,11 +1555,20 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
       case "scaling":
         total += stats.scaling[term.key] ?? 0;
         break;
+      case "bestAbilityMod":
+        total += Math.max(
+          ...term.abilities.map((ability) => modifierFor(stats, ability)),
+        );
+        break;
       case "spellMod":
-        total += spellModifier(stats);
+        total += term.ability
+          ? modifierFor(stats, term.ability)
+          : spellModifier(stats);
         break;
       case "spellSaveDc":
-        total += spellSaveDc(stats);
+        total += term.ability
+          ? 8 + stats.proficiency + modifierFor(stats, term.ability)
+          : spellSaveDc(stats);
         break;
       default:
         term satisfies never;
@@ -1308,40 +1684,41 @@ export function scaleActivation(
           }
         : effect;
     });
-  const { resolution } = activation;
-  switch (resolution.kind) {
-    case "automatic":
-      return {
-        ...activation,
-        resolution: {
+  const scaled = (resolution: Resolution): Resolution => {
+    switch (resolution.kind) {
+      case "automatic":
+        return {
           ...resolution,
           damage: damage(resolution.damage),
           effects: effects(resolution.effects),
-        },
-      };
-    case "attack":
-      return {
-        ...activation,
-        resolution: {
+        };
+      case "attack":
+        return {
           ...resolution,
           damage: damage(resolution.damage),
           onHit: effects(resolution.onHit),
           onMiss: effects(resolution.onMiss),
-        },
-      };
-    case "save":
-      return {
-        ...activation,
-        resolution: {
+        };
+      case "save":
+        return {
           ...resolution,
           damage: damage(resolution.damage),
           onFail: effects(resolution.onFail),
           onSuccess: effects(resolution.onSuccess),
-        },
-      };
-    default:
-      return resolution satisfies never;
-  }
+        };
+      default:
+        return resolution satisfies never;
+    }
+  };
+  // What an area it leaves does later grows with the slot too, as Spirit Guardians' damage does.
+  const { area } = activation;
+  return {
+    ...activation,
+    resolution: scaled(activation.resolution),
+    ...(area?.resolution
+      ? { area: { ...area, resolution: scaled(area.resolution) } }
+      : {}),
+  };
 }
 
 // Dice whose 1s are rolled again once, the new roll standing, as with Healing Rerolls or Tavern Brawler.
@@ -1379,6 +1756,7 @@ export function damageResponses(
   readonly resistances: readonly DamageType[];
   readonly vulnerabilities: readonly DamageType[];
   readonly immunities: readonly DamageType[];
+  readonly absorbs: readonly DamageType[];
 } {
   const resistances: DamageType[] = [];
   const vulnerabilities: DamageType[] = [];
@@ -1394,7 +1772,7 @@ export function damageResponses(
       passive.while === "bloodied"
         ? actor.hp * 2 <= stats.maxHp
         : access.state !== undefined &&
-          lightAt(actor.position, access.state) !== "bright";
+          lightAt(actor.position, access.state, access) !== "bright";
     if (active) {
       resistances.push(
         ...DAMAGE_TYPES.filter((type) => !passive.except.includes(type)),
@@ -1410,5 +1788,8 @@ export function damageResponses(
       vulnerabilities.push(modifier.damage);
     if (modifier.kind === "immunity") immunities.push(modifier.damage);
   }
-  return { adjustments: [], resistances, vulnerabilities, immunities };
+  const absorbs = stats.passives.flatMap((passive) =>
+    passive.kind === "absorb" ? passive.damage : [],
+  );
+  return { adjustments: [], resistances, vulnerabilities, immunities, absorbs };
 }

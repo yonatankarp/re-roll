@@ -23,6 +23,7 @@ import {
   runLingeringTick,
   startCombat,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
+import { STAND_OFF_ROUNDS } from "../plugins/systems/dnd5.5e/core/combat/turn.ts";
 import {
   PASS,
   STAY,
@@ -33,8 +34,10 @@ import {
   codeKeys,
   coverBetween,
   distanceFeet,
+  openedCorners,
   placeSides,
   reachableSquares,
+  wallSet,
 } from "../plugins/systems/dnd5.5e/core/grid.ts";
 import {
   coverFor,
@@ -64,6 +67,8 @@ import {
   withTactics,
 } from "../plugins/systems/dnd5.5e/core/actions.ts";
 import {
+  ActivationSchema,
+  type Battlemap,
   BattlemapSchema,
   ClassSchema,
   MonsterSchema,
@@ -359,26 +364,41 @@ describe("lingering damage", () => {
     expect(damageOf(saved.events, "a")).toEqual([10]);
   });
 
+  // Spirit Guardians is an area round its caster now (zones.ts), so nothing sits on the foes it caught.
   it("ends with the caster's Concentration, on everyone", async () => {
     const run = arenaRun(await base(), {});
+    const at = (item: Actor, x: number): Actor => ({
+      ...item,
+      position: { x, y: 0 },
+    });
+    const start = fight(
+      at(hero(run, { spells: ["spirit-guardians"] }), 0),
+      at(monster("a"), 1),
+      at(monster("b"), 2),
+    );
     const cast = settle(
       run,
-      fight(
-        hero(run, { spells: ["spirit-guardians"] }),
-        monster("a"),
-        monster("b"),
-      ),
+      {
+        ...start,
+        combat: start.combat
+          ? { ...start.combat, grid: { width: 10, height: 10 } }
+          : null,
+      },
       [act(PLAYER_ACTOR, `spell:${spell("spirit-guardians")}|all`)],
       LOW,
     );
     expect(damageOf(cast.events)).toEqual([]);
-    expect(actor(cast.state, "b").activeEffects).toHaveLength(1);
+    expect(actor(cast.state, "b").activeEffects).toEqual([]);
+    expect(
+      actor(cast.state, PLAYER_ACTOR).activeEffects.map(
+        ({ modifier }) => modifier.kind,
+      ),
+    ).toEqual(["zone"]);
     const ended = applyDndEvent(
       cast.state,
       dndEvent(`${NS}:concentrationEnded`, { actor: PLAYER_ACTOR }),
     );
-    expect(actor(ended, "a").activeEffects).toEqual([]);
-    expect(actor(ended, "b").activeEffects).toEqual([]);
+    expect(actor(ended, PLAYER_ACTOR).activeEffects).toEqual([]);
   });
 
   it("doesn't let the same spell from two casters hit twice in a turn", async () => {
@@ -3022,6 +3042,44 @@ describe("battle map ground, cover and light", () => {
     ).toBe(0);
   });
 
+  it("opens the wall corner that is a start area's only way out, for walking and for sight", () => {
+    // The party's corner leads out only between two wall corners, which meet at the point (2, 2).
+    const rows = ["..#..", "..#..", "##...", "....."];
+    const walls = codeKeys(rows, "#");
+    const grid = { width: 5, height: 4 };
+    const party = [{ x: 0, y: 0 }];
+    const opened = openedCorners(walls, grid, party, [{ x: 4, y: 3 }]);
+    expect(opened).toEqual(["2,2"]);
+    const shut = new Set(walls);
+    const open = wallSet({ walls, openCorners: opened });
+    const walks = (corners: ReadonlySet<string>) =>
+      reachableSquares(
+        { x: 0, y: 0 },
+        Infinity,
+        grid,
+        shut,
+        new Set(),
+        new Set(),
+        corners,
+      ).some(({ square }) => square.x === 4 && square.y === 3);
+    expect(walks(shut)).toBe(false);
+    expect(walks(open)).toBe(true);
+    const nothing = {
+      half: new Set<string>(),
+      threeQuarters: new Set<string>(),
+    };
+    const sight = (corners: ReadonlySet<string>) =>
+      coverBetween({ x: 0, y: 0 }, { x: 4, y: 3 }, corners, nothing, new Set());
+    expect(sight(shut)).toBe("total");
+    expect(sight(open)).toBe(5);
+    // A party that can already walk to a foe, or one shut in by whole walls, opens nothing.
+    expect(openedCorners(walls, grid, party, [{ x: 1, y: 1 }])).toEqual([]);
+    const split = codeKeys(["..#..", "..#..", "..#.."], "#");
+    expect(
+      openedCorners(split, { width: 5, height: 3 }, party, [{ x: 4, y: 0 }]),
+    ).toEqual([]);
+  });
+
   it("works out cover from walls, cover squares and creatures in the way", () => {
     const cover = (
       rows: readonly string[],
@@ -3304,6 +3362,84 @@ describe("battle map ground, cover and light", () => {
     expect(choosePolicy(decision, contextOf(run, state, HIGH))).toBe(
       "monster:0|ally",
     );
+  });
+
+  it("ends a stand-off, where neither side can reach the other, though the player is down and stable", async () => {
+    // Before, the turns came round for ever with no decision for the player, and the kernel gave up.
+    const run = arenaRun(await base(), {});
+    const fallen = {
+      ...hero(run),
+      hp: 0,
+      deathSaves: { successes: 3, failures: 0 },
+    };
+    const party = [fallen, hero(run, { id: "ally" })];
+    // Drawn by hand, as a book map's check refuses one whose party can't walk to a foe.
+    const battlemap: Battlemap = {
+      image: "assets/map.png",
+      imageWidth: 700,
+      imageHeight: 300,
+      crop: { x: 0, y: 0, width: 700, height: 300 },
+      columns: 7,
+      rows: 3,
+      walls: ["...#...", "...#...", "...#..."],
+      party: [
+        [0, 1],
+        [1, 1],
+      ],
+      monsters: [[6, 1]],
+    };
+    const play = (canFlee: boolean) => {
+      const started = startCombat(
+        {
+          id: "e",
+          monsters: [{ monster: "srd52:monster/dummy", count: 1 }],
+          battlemap,
+          loot: { gold: 10, items: [] },
+        },
+        contextOf(run, fight(...party), HIGH),
+        { canFlee, defeatContinues: false },
+      );
+      let state = (started.events ?? []).reduce<DndState>(
+        (current, event) => applyDndEvent(current, event),
+        {
+          actors: Object.fromEntries(party.map((item) => [item.id, item])),
+          combat: null,
+        },
+      );
+      const dice = createDice(rngFromSeed("stand-off"));
+      const events: SystemEvent[] = [];
+      let turns = 0;
+      for (; turns < 200 && state.combat; turns += 1) {
+        const decision = nextDndDecision(state, run);
+        if (!decision) break;
+        const answer = (asked: Decision, now: DndState): string =>
+          choosePolicy(asked, contextOf(run, now, dice));
+        const result = settle(
+          run,
+          state,
+          [
+            {
+              kind: decision.resume.kind,
+              payload: {
+                ...decision.resume.payload,
+                answer: answer(decision, state),
+              },
+            },
+          ],
+          dice,
+          answer,
+        );
+        events.push(...result.events);
+        state = result.state;
+      }
+      expect(state.combat).toBeNull();
+      expect(turns).toBeLessThanOrEqual(STAND_OFF_ROUNDS * 2 + 2);
+      expect(kinds(events)).not.toContain(`${NS}:treasureFound`);
+      return events.find((event) => event.kind === "encounterEnded");
+    };
+    // The party withdraws where the story lets it flee, and otherwise the story goes on as after a win.
+    expect(play(true)).toMatchObject({ outcome: "flee" });
+    expect(play(false)).not.toHaveProperty("outcome");
   });
 
   it("plays a whole fight on a map with cover to the end", async () => {
@@ -4125,10 +4261,20 @@ describe("ending, hiding and reshaping spells", () => {
       }),
     });
     const caster = hero(run);
-    const target = { ...hero(run, { id: "b" }), concentratingOn: "spell:x" };
+    const target: Actor = {
+      ...hero(run, { id: "b" }),
+      side: "enemy",
+      concentratingOn: "spell:x",
+    };
     const state = fight(caster, target);
     const events = leafEvents(
-      [{ kind: "polymorph", duration: { concentration: true, minutes: 60 } }],
+      [
+        {
+          kind: "polymorph",
+          duration: { concentration: true, minutes: 60 },
+          tempHp: true,
+        },
+      ],
       "spell:polymorph",
       caster,
       target,
@@ -4156,6 +4302,166 @@ describe("ending, hiding and reshaping spells", () => {
     expect(back.tempHp).toBe(0);
     expect(back.hp).toBe(target.hp - 2);
     expect(back.activeEffects).toEqual([]);
+  });
+});
+
+describe("choosing a form", () => {
+  const blocks = {
+    "srd52:monster/test-bear": dummy("srd52:monster/test-bear", {
+      name: "Test Bear",
+      size: "large",
+      creatureType: "beast",
+      hp: 30,
+      text: "CR 2 (XP 450; PB +2)",
+    }),
+    "srd52:monster/test-whale": dummy("srd52:monster/test-whale", {
+      name: "Test Whale",
+      size: "gargantuan",
+      creatureType: "beast",
+      hp: 90,
+      text: "CR 3 (XP 700; PB +2)",
+    }),
+    "srd52:monster/test-dragon": dummy("srd52:monster/test-dragon", {
+      name: "Test Dragon",
+      size: "huge",
+      creatureType: "dragon",
+      hp: 120,
+      text: "CR 8 (XP 3,900; PB +3)",
+    }),
+    "srd52:monster/test-golem": dummy("srd52:monster/test-golem", {
+      name: "Test Golem",
+      creatureType: "construct",
+      hp: 150,
+      text: "CR 9 (XP 5,000; PB +4)",
+    }),
+  };
+  const shapechange = (effect: Record<string, unknown>) => ({
+    id: "spell:test-shapechange",
+    name: "Shapechange",
+    spellLevel: 9,
+    activation: ActivationSchema.parse({
+      cost: ["action"],
+      targeting: { self: true },
+      resolution: {
+        kind: "automatic",
+        effects: [
+          {
+            kind: "polymorph",
+            duration: { concentration: true, minutes: 60 },
+            ...effect,
+          },
+        ],
+      },
+    }),
+  });
+
+  it("lets a caster pick its own form, the strongest first, and keep its mind and spells", async () => {
+    const run = arenaRun(await base(), blocks);
+    const caster = hero(run, { spells: ["magic-missile"], level: 9 });
+    const state = fight(caster, monster("a"));
+    const cast = resolveAction(
+      shapechange({
+        forms: { except: ["construct", "undead"] },
+        keep: ["mind", "spells"],
+      }),
+      caster,
+      [caster],
+      contextOf(run, state, LOW),
+    );
+    const started = (cast.events ?? []).reduce(applyDndEvent, state);
+    const chosen = settle(run, started, cast.frames ?? [], LOW);
+    const [decision] = chosen.decisions;
+    expect(decision?.id).toBe(`${NS}:form:${PLAYER_ACTOR}`);
+    const crs = (decision?.options ?? []).map(({ label }) =>
+      Number(/CR ([\d/]+)/.exec(label)?.[1]?.split("/")[0]),
+    );
+    expect(crs).toEqual([...crs].sort((a, b) => b - a));
+    expect(decision?.options[0]?.id).toBe("srd52:monster/test-dragon");
+    const formed = actor(chosen.state, PLAYER_ACTOR);
+    expect(formed.concentratingOn).toBe("spell:test-shapechange");
+    expect(formed.tempHp).toBeGreaterThan(0);
+    const stats = deriveStats(formed, run);
+    expect(stats.abilities.int).toBe(deriveStats(caster, run).abilities.int);
+    expect(stats.actions.map(({ id }) => id)).toContain(
+      `spell:${spell("magic-missile")}`,
+    );
+  });
+
+  it("gives an ally a form within the spell's own limits", async () => {
+    const run = arenaRun(await base(), blocks);
+    const caster = hero(run);
+    const friend = hero(run, { id: "b" });
+    const state = fight(caster, friend, monster("a"));
+    const animal = shapechange({
+      forms: { types: ["beast"], maxCr: 4, maxSize: "large" },
+      keep: ["mind"],
+    });
+    const cast = resolveAction(
+      animal,
+      caster,
+      [friend],
+      contextOf(run, state, LOW),
+    );
+    const chosen = settle(run, state, cast.frames ?? [], LOW);
+    const formed = actor(chosen.state, "b");
+    const stats = deriveStats(formed, run);
+    expect(stats.creatureType).toBe(deriveStats(friend, run).creatureType);
+    expect(stats.actions.some(({ spellLevel }) => spellLevel !== null)).toBe(
+      false,
+    );
+    const form = formed.activeEffects.find(
+      ({ modifier }) => modifier.kind === "form",
+    );
+    const id = form?.modifier.kind === "form" ? form.modifier.monster : "";
+    expect(id).toBe("srd52:monster/test-bear");
+  });
+});
+
+describe("a spell's lasting action", () => {
+  it("lets the caster attack with a Flame Blade only while concentrating on it", async () => {
+    const run = arenaRun(await base(), {
+      [spell("test-blade")]: {
+        id: spell("test-blade"),
+        name: "Test Blade",
+        level: 2,
+        school: "evocation",
+        classes: [],
+        castingTime: "Bonus Action",
+        range: "Self",
+        components: "V, S",
+        duration: { concentration: true, minutes: 10 },
+        text: "A blade.",
+        automation: "full",
+        activation: {
+          cost: ["bonusAction", "slot"],
+          targeting: { self: true },
+          resolution: { kind: "automatic" },
+        },
+        lasting: {
+          cost: ["action"],
+          targeting: { creatures: 1, range: 5, side: "enemy" },
+          resolution: {
+            kind: "attack",
+            attack: { type: "spell" },
+            damage: [{ amount: { dice: "3d6" }, type: "fire" }],
+          },
+        },
+      },
+    });
+    const caster = hero(run, { spells: ["test-blade"], level: 3 });
+    const ids = (item: Actor) =>
+      deriveStats(item, run).actions.map(({ id }) => id);
+    expect(ids(caster)).toContain(`spell:${spell("test-blade")}`);
+    expect(ids(caster)).not.toContain(`lasting:${spell("test-blade")}`);
+    const cast = settle(
+      run,
+      fight(caster, monster("a")),
+      [act(PLAYER_ACTOR, `spell:${spell("test-blade")}|${PLAYER_ACTOR}`)],
+      LOW,
+    );
+    const holding = actor(cast.state, PLAYER_ACTOR);
+    expect(holding.concentratingOn).toBe(`spell:${spell("test-blade")}`);
+    expect(ids(holding)).toContain(`lasting:${spell("test-blade")}`);
   });
 });
 

@@ -1,3 +1,4 @@
+import { afterDamage, settleRoll } from "./combat/reactions.ts";
 import {
   type ContentAccess,
   type Decision,
@@ -27,7 +28,7 @@ import {
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { teleportSquares } from "./combat/movement.ts";
-import { leafEvents } from "./combat/effects.ts";
+import { heldInPlace, leafEvents } from "./combat/effects.ts";
 import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
@@ -43,8 +44,9 @@ import { type Square, distanceFeet, pushTo, squareKey } from "./grid.ts";
 export { pushTo };
 import { FLEE } from "./legendary.ts";
 import { finalDamage, rollD20 } from "./rules.ts";
-import { type Ability, type Skill } from "./schemas.ts";
+import { ABILITY_NAMES, type Ability, type Skill } from "./schemas.ts";
 import {
+  applyDndEvent,
   type ActiveEffect,
   type Actor,
   type DndState,
@@ -84,6 +86,8 @@ import {
   weaponOf,
 } from "./tactics.ts";
 import { fogged, knownFoes, partySight } from "./fog.ts";
+import { hasteActing } from "./combat/durations.ts";
+import { placedFlag } from "./zones.ts";
 
 // The 2024 actions anyone can take in a fight besides attacking and casting (Dash, Disengage, Dodge, Help,
 // Hide, Ready, Search, Study, Grapple, Shove, standing up, escaping a grapple), the off-hand attack of a second Light weapon,
@@ -106,6 +110,7 @@ const SHOVE = `${TACTIC}shove`;
 const READY = `${TACTIC}ready`;
 const STAND = `${TACTIC}stand`;
 const ESCAPE = `${TACTIC}escape`;
+const BREAK_OUT = `${TACTIC}break-out`;
 export const OFFHAND = `${TACTIC}offhand`;
 export const POLE_STRIKE = `${TACTIC}pole-strike`;
 const OFFHAND_USED = "offhand";
@@ -216,19 +221,49 @@ function check(
   events: SystemEvent[];
 } {
   const stats = deriveStats(actor, context);
-  const roll = rollD20(context.dice, {
+  const edge = {
     advantage:
-      advantage || hasFlag(actor, "advantage", "checks", stats, ability),
+      advantage ||
+      hasFlag(actor, "advantage", "checks", stats, ability) ||
+      placedFlag(actor, "advantage", "checks", context.state, context, ability),
     disadvantage:
       hasFlag(actor, "disadvantage", "checks", stats, ability) ||
+      placedFlag(
+        actor,
+        "disadvantage",
+        "checks",
+        context.state,
+        context,
+        ability,
+      ) ||
       hasCondition(actor, "poisoned", "frightened"),
+  };
+  const first = rollD20(context.dice, {
+    ...edge,
     rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
   });
-  const total =
-    roll.natural +
+  const base =
     checkBonus(stats, actor, { ability, skill }) +
     rollBonus(actor, "checks", context, skill);
-  const success = total >= dc;
+  const judge = (natural: number, bonus: number) => ({
+    total: natural + base + bonus,
+    success: natural + base + bonus >= dc,
+  });
+  // Reactions to the roll before it lands, as Bountiful Luck (combat/reactions.ts).
+  const settled = settleRoll(
+    {
+      roller: actor,
+      kind: "check",
+      natural: first.natural,
+      goal: dc,
+      ...judge(first.natural, 0),
+    },
+    edge,
+    judge,
+    context,
+  );
+  const roll = { natural: settled.natural };
+  const { total, success } = judge(settled.natural, settled.bonus);
   const helped = actor.activeEffects.some(
     ({ sourceId, modifier }) =>
       sourceId === HELP &&
@@ -239,6 +274,7 @@ function check(
     success,
     total,
     events: [
+      ...settled.events,
       dndEvent(`${NS}:rollReported`, {
         actor: actor.id,
         against: "check",
@@ -263,9 +299,11 @@ function pushEvents(
   by: Actor,
   target: Actor,
   feet: number,
-  state: DndState,
+  context: Context,
 ): SystemEvent[] {
-  const to = pushTo(by.position, target, feet, state);
+  const to = pushTo(by.position, target, feet, context.state);
+  const held = to ? heldInPlace(target, context) : [];
+  if (held.length > 0) return held;
   return to ? [dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 })] : [];
 }
 
@@ -398,6 +436,13 @@ function bonusTacticCost(
   stats: Stats,
   tactic: "dash" | "disengage" | "hide" | "dodge",
 ): SystemEvent[] | null {
+  // Expeditious Retreat's Dash as a Bonus Action costs nothing more.
+  if (
+    tactic === "dash" &&
+    actor.activeEffects.some(({ modifier }) => modifier.kind === "bonusDash")
+  ) {
+    return [];
+  }
   let cost: SystemEvent[] | null = null;
   for (const passive of stats.passives) {
     if (passive.kind !== "bonusTactics" || !passive.tactics.includes(tactic)) {
@@ -491,6 +536,20 @@ export function tacticOptions(
   options.push(...classOptions(actor, state, access));
   options.push(...bonusTacticOptions(actor, state, stats));
   if (!actor.budget.action) return options;
+  // Shut away, it can only try to get out, as from a Maze.
+  const seal = actor.activeEffects.find(
+    ({ modifier }) => modifier.kind === "sealed",
+  );
+  if (seal) {
+    if (seal.modifier.kind === "sealed" && seal.modifier.escape) {
+      const { ability, dc, skill } = seal.modifier.escape;
+      options.push({
+        id: encodeOption(BREAK_OUT, seal.casterId, seal.sourceId),
+        label: `Try to escape (${ABILITY_NAMES[ability]}, ${capitalized(skill)}, DC ${String(dc)})`,
+      });
+    }
+    return options;
+  }
   // Everyone else's turns are played by tacticalPolicy, so they're offered only what it can pick, which also
   // spares working out every Study and Shove on every monster's turn.
   const full = actor.id === PLAYER_ACTOR;
@@ -506,6 +565,25 @@ export function tacticOptions(
       id: DASH,
       label: `Dash (${String(extra)} ft more this turn)`,
     });
+  }
+  // Haste's additional action: Dash, Disengage or Hide besides its one attack.
+  if (hasteActing(actor)) {
+    options.push({
+      id: DISENGAGE,
+      label: "Disengage (no Opportunity Attacks this turn)",
+    });
+    if (
+      !hasTactic(actor, "hidden") &&
+      !standing(knownFoes(state, actor, access)).some((foe) =>
+        within5(actor, foe),
+      )
+    ) {
+      options.push({
+        id: HIDE,
+        label: `Hide (Stealth, DC ${String(HIDE_DC)})`,
+      });
+    }
+    return options;
   }
   options.push({
     id: DODGE,
@@ -781,6 +859,12 @@ export function runTactic(
             },
             "casterNextTurn",
           ),
+          // A Tactical Charge moves without provoking Opportunity Attacks.
+          ...(stats.passives.some(
+            (passive) => passive.kind === "bonusTactics" && passive.safe,
+          )
+            ? [self("disengage")]
+            : []),
         ],
       };
     }
@@ -976,10 +1060,24 @@ export function runTactic(
         helped.side === actor.side
           ? ({ kind: "advantage", on: "checks" } as const)
           : ({ kind: "advantage", on: "attacksAgainst", once: true } as const);
+      // Harper Teamwork's Withering Wordplay: the foe's next save has Disadvantage too.
+      const withering =
+        helped.side !== actor.side && hasPassive(stats, "helpRider")
+          ? [
+              effect(
+                helped.id,
+                `${HELP}:saves`,
+                actor.id,
+                { kind: "disadvantage", on: "saves", once: true },
+                "casterNextTurn",
+              ),
+            ]
+          : [];
       return {
         events: [
           spend("action"),
           effect(helped.id, HELP, actor.id, modifier, "casterNextTurn"),
+          ...withering,
         ],
         frames: done,
       };
@@ -1005,6 +1103,39 @@ export function runTactic(
                   "spellDuration",
                 ),
               ]),
+        ],
+        frames: done,
+      };
+    }
+    case BREAK_OUT: {
+      const seal = actor.activeEffects.find(
+        (item) => item.sourceId === detail && item.casterId === targetId,
+      );
+      if (seal?.modifier.kind !== "sealed" || !seal.modifier.escape) {
+        throw new Error(`${actor.id} isn't sealed away by ${targetId}`);
+      }
+      const { ability, dc, skill } = seal.modifier.escape;
+      const rolled = check(
+        actor,
+        skill,
+        ability,
+        dc,
+        () => `Escape (${capitalized(skill)})`,
+        context,
+      );
+      return {
+        events: [
+          spend("action"),
+          ...rolled.events,
+          ...(rolled.success
+            ? [
+                dndEvent(`${NS}:effectEnded`, {
+                  actor: actor.id,
+                  sourceId: seal.sourceId,
+                  casterId: seal.casterId,
+                }),
+              ]
+            : []),
         ],
         frames: done,
       };
@@ -1065,7 +1196,7 @@ export function runTactic(
                 "spellDuration",
               ),
             ]
-          : pushEvents(actor, shoved, 5, state);
+          : pushEvents(actor, shoved, 5, context);
       return {
         events: [spend("action"), ...save.events, ...result],
         frames: done,
@@ -1301,7 +1432,7 @@ export function runMasteryHit(
     }
     case "push":
       return up && sizeOf(target, context) <= SIZES.indexOf("large")
-        ? { events: pushEvents(attacker, target, 10, state) }
+        ? { events: pushEvents(attacker, target, 10, context) }
         : {};
     case "cleave": {
       const reach = meleeReach(action);
@@ -1367,7 +1498,23 @@ export function runMasteryMiss(
     false,
     context,
   );
-  return { events, frames: [...concentrationFrame(target, dealt), CHECK_END] };
+  return {
+    events,
+    frames: [
+      ...afterDamage(
+        target,
+        dealt,
+        {
+          source: attacker.id,
+          types: [type],
+          melee: meleeReach(action) !== null,
+        },
+        concentrationFrame(target, dealt),
+        { ...context, state: events.reduce(applyDndEvent, context.state) },
+      ),
+      CHECK_END,
+    ],
+  };
 }
 
 // Where a creature that spent its action on a Dash walks: toward the foe it means to fight next turn.
@@ -1415,6 +1562,11 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   }
   const ids = new Set(decision.options.map((option) => option.id));
   if (ids.has(STAND)) return STAND;
+  // Shut in a Maze, getting out is all there is to do.
+  const breakOut = decision.options.find((option) =>
+    option.id.startsWith(encodeOption(BREAK_OUT, "")),
+  );
+  if (breakOut) return breakOut.id;
   const escapes = decision.options.filter((option) =>
     option.id.startsWith(encodeOption(ESCAPE, "")),
   );

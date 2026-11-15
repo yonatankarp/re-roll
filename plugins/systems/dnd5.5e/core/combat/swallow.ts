@@ -4,6 +4,7 @@ import { lookup } from "../stats.ts";
 import { MonsterSchema } from "../schemas.ts";
 import { distanceFeet, nearestOpen, type Square, squareKey } from "../grid.ts";
 import { type Context } from "./queries.ts";
+import { blockedSquares } from "../zones.ts";
 import { rollSave } from "./effects.ts";
 
 // Swallowed: a monster took the creature out of its grapple and into itself (Swallow, a gug's Chew). The effects
@@ -80,7 +81,7 @@ function releaseEvents(
           from,
           grid,
           new Set([
-            ...(state.combat?.walls ?? []),
+            ...blockedSquares(state),
             ...Object.values(state.actors).flatMap((item) =>
               item.id !== held.id && item.position && !isDown(item)
                 ? [squareKey(item.position)]

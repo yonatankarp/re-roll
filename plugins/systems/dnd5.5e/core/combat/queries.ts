@@ -4,6 +4,8 @@ import {
   type Actor,
   dndEvent,
   type DndState,
+  equipped,
+  forAttacker,
   hasCondition,
   INCAPACITATING,
   isDead,
@@ -38,8 +40,20 @@ import {
   throughOf,
 } from "../movement-modes.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
-import { encodeOption } from "./ids.ts";
+import { encodeOption, THROW_PREFIX, weaponItemId } from "./ids.ts";
 import { swallowerOf } from "./swallow.ts";
+import { hasteActing, limitsOf } from "./durations.ts";
+import { ownZoneAction } from "./areas.ts";
+import {
+  barredKeys,
+  blockedSquares,
+  blockingSet,
+  inZone,
+  sealed,
+  slowingKeys,
+  zonesOn,
+} from "../zones.ts";
+import { spellLevelOf } from "./dispel.ts";
 import {
   type Ability,
   CompanionSchema,
@@ -49,6 +63,7 @@ import {
   type Targeting,
 } from "../schemas.ts";
 import { bossAction } from "../legendary.ts";
+import { currentShape } from "../forms.ts";
 import { aimScore, aimSquares, caughtBy } from "../targeting.ts";
 
 // Questions about a fight that change nothing: who is an ally or a foe, what reaches, what an actor can afford.
@@ -86,9 +101,12 @@ export function hasFlag(
   stats: Stats,
   ability?: Ability,
   attackerType?: string, // the attacker's creature type, for attacksAgainst
+  attackerId?: string, // for attacksAgainst, which a caster's own Advantage needs
 ): boolean {
   return [
-    ...actor.activeEffects.map((effect) => effect.modifier),
+    ...actor.activeEffects
+      .filter((effect) => forAttacker(effect, attackerId))
+      .map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
   ].some(
     (modifier) =>
@@ -108,9 +126,10 @@ export function hasPassive(stats: Stats, kind: Passive["kind"]): boolean {
 // Effects from one source count once, so casting Bless twice can't add two d4s.
 export function rollBonus(
   actor: Actor,
-  to: "attacks" | "saves" | "checks",
+  to: "attacks" | "saves" | "checks" | "attacksAgainst",
   context: Context,
   skill?: Skill, // the check's skill, for a bonus that only adds to one
+  ability?: Ability, // the save's ability, for a bonus that only adds to one
 ): number {
   const seen = new Set<string>();
   let total = 0;
@@ -118,6 +137,7 @@ export function rollBonus(
     const { modifier } = effect;
     if (modifier.kind !== "bonus" || modifier.to !== to) continue;
     if (modifier.skill && modifier.skill !== skill) continue;
+    if (modifier.ability && modifier.ability !== ability) continue;
     if (seen.has(effect.sourceId)) continue;
     seen.add(effect.sourceId);
     const caster = context.state.actors[effect.casterId] ?? actor;
@@ -133,7 +153,8 @@ export function rollBonus(
     if (
       modifier.kind === "bonus" &&
       modifier.to === to &&
-      (!modifier.skill || modifier.skill === skill)
+      (!modifier.skill || modifier.skill === skill) &&
+      (!modifier.ability || modifier.ability === ability)
     ) {
       total += rollAmount(modifier.amount, stats, context.dice);
     }
@@ -257,10 +278,21 @@ export function groundFor(
   readonly overTerrain: boolean; // crosses difficult terrain at no extra cost, however it moves
 } {
   const through = throughOf(stats);
+  // shortcut: going through walls means the map's own; a wall a spell raises stops it as it does anyone.
   const walls = state.combat?.walls ?? [];
-  const blocked = new Set(through.walls ? [] : walls);
-  const occupied = new Set(walls);
-  const costly = new Set(through.costly ? walls : []);
+  const solid = blockedSquares(state);
+  const mapWalls = new Set(walls);
+  // A barrier it can't cross stops it as a wall would, and a zone that slows it costs double however it moves.
+  const barred = barredKeys(actor, state, access);
+  const blocked = new Set([
+    ...(through.walls ? solid.filter((key) => !mapWalls.has(key)) : solid),
+    ...barred,
+  ]);
+  const occupied = new Set([...solid, ...barred]);
+  const costly = new Set([
+    ...(through.costly ? walls : []),
+    ...slowingKeys(actor, state, access),
+  ]);
   for (const other of Object.values(state.actors)) {
     if (other.id === actor.id || !other.position || isDead(other)) continue;
     const key = squareKey(other.position);
@@ -275,7 +307,7 @@ export function groundFor(
     occupied,
     terrain: difficultSquares(state),
     costly,
-    walls: new Set(walls),
+    walls: blockingSet(state),
     squeeze: through.squeeze,
     overTerrain: through.terrain,
   };
@@ -386,7 +418,8 @@ export const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
 // A creature's size, as its index in SIZES.
 export function sizeOf(actor: Actor, access: ContentAccess): number {
   if (actor.source.kind === "monster") {
-    const { size } = lookup(access, MonsterSchema, actor.source.statBlockId);
+    const monster = lookup(access, MonsterSchema, actor.source.statBlockId);
+    const size = currentShape(monster, actor)?.size ?? monster.size;
     return SIZES.indexOf(size ?? "medium");
   }
   if (actor.source.kind === "summon") {
@@ -420,8 +453,17 @@ export function canAfford(
   actor: Actor,
   stats: Stats,
 ): boolean {
-  const { carrying } = action.activation;
+  const { carrying, afterAction, resolution } = action.activation;
   if (carrying && !actor.inventory.includes(carrying)) return false;
+  if (afterAction && actor.budget.action) return false;
+  // Haste's additional action takes only a weapon attack, or Dash, Disengage or Hide (actions.ts).
+  if (
+    hasteActing(actor) &&
+    action.activation.cost.includes("action") &&
+    (resolution.kind !== "attack" || resolution.attack.type !== "weapon")
+  ) {
+    return false;
+  }
   return action.activation.cost.every((cost) => {
     if (cost === "action") return actor.budget.action;
     if (cost === "bonusAction") return actor.budget.bonusAction;
@@ -451,10 +493,36 @@ export function inReach(
         )
       : allies(state, actor)
   )
-    .filter((item) => !isDead(item))
+    .filter(
+      (item) =>
+        isDead(item) === ("dead" in targeting && targeting.dead === true),
+    )
     .filter((item) => fitsType(item, targeting, access))
     .filter((item) => reaches(action, actor, item))
-    .filter((item) => !behindTotalCover(state, actor, item));
+    .filter((item) => !behindTotalCover(state, actor, item))
+    .filter((item) => !walledApart(actor, item, action, state, access));
+}
+
+// Whether something keeps `target` out of `actor`'s reach: either is shut away (Resilient Sphere, Maze), the actor
+// stands in a zone where its spell can't be cast or the target in one its spell can't reach into (Antimagic Field,
+// Globe of Invulnerability).
+export function walledApart(
+  actor: Actor,
+  target: Actor,
+  action: KnownAction,
+  state: DndState,
+  access: ContentAccess,
+): boolean {
+  if (actor.id !== target.id && (sealed(actor) || sealed(target))) return true;
+  const level = spellLevelOf(action.id, actor, access);
+  if (level === null) return false;
+  return zonesOn(target, state, access).some(
+    (zone) =>
+      zone.area?.noSpells === "all" ||
+      (zone.area?.spellShield !== undefined &&
+        level <= zone.area.spellShield &&
+        !inZone(zone, actor.position)),
+  );
 }
 
 // How many creatures, darts or rays an action takes when cast with this slot.
@@ -492,7 +560,8 @@ export function findAction(
 ): KnownAction {
   const action =
     deriveStats(actor, context).actions.find((item) => item.id === id) ??
-    bossAction(actor, id, context);
+    bossAction(actor, id, context) ??
+    ownZoneAction(actor, id, context);
   if (!action) throw new Error(`${actor.id} has no action ${id}`);
   const above = (slotLevel ?? 0) - (action.spellLevel ?? 0);
   return action.upcast
@@ -526,10 +595,23 @@ export function attackRoutine(
   ) {
     return [action.id];
   }
-  return (
+  // Each throw lets go of one weapon, so it throws no more than it holds.
+  const held = action.id.startsWith(THROW_PREFIX)
+    ? throwsLeft(actor, action.id)
+    : stats.multiattack;
+  const routine =
     stats.routines?.[action.id] ??
-    Array<string>(stats.multiattack).fill(action.id)
-  );
+    Array<string>(Math.min(stats.multiattack, held)).fill(action.id);
+  // Slow, or Haste's extra action, allows one attack.
+  return limitsOf(actor).oneAttack || hasteActing(actor)
+    ? routine.slice(0, 1)
+    : routine;
+}
+
+// The copies of a throw's weapon the actor holds.
+export function throwsLeft(actor: Actor, actionId: string): number {
+  const itemId = weaponItemId(actionId);
+  return equipped(actor).filter((id) => id === itemId).length;
 }
 
 // The slot a cast spends: the one chosen, or else the lowest that will do.
@@ -608,7 +690,7 @@ export function carriesExtraDice(
   access: Pick<ContentAccess, "content">,
 ): boolean {
   if (attacker.source.kind !== "character") return true;
-  const itemId = action.id.startsWith("weapon:") ? action.id.slice(7) : "";
+  const itemId = weaponItemId(action.id);
   const item =
     itemId && access.content(itemId)
       ? lookup(access, ItemSchema, itemId)

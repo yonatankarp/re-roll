@@ -2,12 +2,15 @@ import { ContentIdSchema, type Frame, type SystemEvent } from "#sdk";
 import { z } from "zod";
 import {
   AbilitySchema,
+  type CharacterBuild,
   CharacterBuildSchema,
   ConditionSchema,
   DamageSchema,
   DamageTypeSchema,
+  AreaEffectSchema,
   LootSchema,
   ModifierSchema,
+  ZoneKindSchema,
 } from "./schemas.ts";
 import { settleForms } from "./forms.ts";
 
@@ -32,6 +35,7 @@ export const FRAME_KINDS = [
   "checkCombatEnd",
   "companionsSpend",
   "concentrationSave",
+  "chooseForm",
   "counterspell",
   "endTurn",
   "escape",
@@ -46,6 +50,7 @@ export const FRAME_KINDS = [
   "legendaryAction",
   "legendaryTurn",
   "lingeringTick",
+  "sunlightTick",
   "masteryHit",
   "masteryMiss",
   "metamagic",
@@ -54,7 +59,10 @@ export const FRAME_KINDS = [
   "pickTargets",
   "precision",
   "projectile",
+  "react",
+  "reactAnswer",
   "recheckHit",
+  "rollReaction",
   "shopAnswer",
   "shopStep",
   "shortRestAnswer",
@@ -62,10 +70,15 @@ export const FRAME_KINDS = [
   "sheetAnswer",
   "sheetStep",
   "smite",
+  "swapInitiative",
   "takeAction",
   "teleport",
+  "throwWeapon",
+  "swapStep",
+  "swapAnswer",
   "useAction",
   "useItem",
+  "zoneTick",
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -73,6 +86,7 @@ export function frame(kind: FrameKind, payload: Frame["payload"] = {}): Frame {
   return { kind: `${NS}:${kind}`, payload };
 }
 export const LEGENDARY_USE = "legendary";
+export const PICKED_UP = "pickedUp"; // in usedThisTurn: the one free pick-up of a turn
 export const LEGENDARY_RESISTANCE = "legendaryResistance";
 
 export const TACTICS = [
@@ -103,15 +117,30 @@ const ActiveEffectSchema = z.strictObject({
       kind: z.literal("condition"),
       condition: ConditionSchema,
     }),
+    // Haste's lethargy, waiting for the spell to end (combat/durations.ts).
+    z.strictObject({ kind: z.literal("lethargy") }),
+    // Time Stop: the turns in a row its caster has left, as rolled (combat/durations.ts).
+    z.strictObject({ kind: z.literal("extraTurns"), turns: z.number().int() }),
     // Another creature's shape, by its stat block (core/forms.ts).
-    z.strictObject({ kind: z.literal("form"), monster: ContentIdSchema }),
-    // An area a spell left on the map, kept on its caster (core/zones.ts).
+    z.strictObject({
+      kind: z.literal("form"),
+      monster: ContentIdSchema,
+      keep: z.array(z.enum(["mind", "spells"])).optional(), // what it keeps of its own (stats.ts)
+    }),
+    // One of its own stat block's other shapes, by name, as a werewolf's wolf form (core/forms.ts).
+    z.strictObject({ kind: z.literal("shape"), shape: z.string() }),
+    // An area a spell left on the map, kept on its caster (core/zones.ts). With `follows` it is centred on the
+    // caster wherever it goes; `area` is what it does, with its save DC as cast; `blocks` are a wall's squares.
     z.strictObject({
       kind: z.literal("zone"),
-      zone: z.enum(["darkness", "fog", "thorns", "light", "dim"]),
+      zone: ZoneKindSchema,
       at: z.strictObject({ x: z.number().int(), y: z.number().int() }),
       radius: z.number().int(),
       damage: z.array(DamageSchema).optional(),
+      follows: z.literal(true).optional(),
+      area: AreaEffectSchema.optional(),
+      blocks: z.array(z.string()).optional(),
+      name: z.string().optional(), // the action that left it
     }),
     // What an action anyone can take, such as Dodge, or a weapon mastery, leaves behind (core/tactics.ts).
     z.strictObject({
@@ -123,11 +152,25 @@ const ActiveEffectSchema = z.strictObject({
   ]),
   // "casterNextTurnEnd" becomes "casterTurnEnd" when the caster's next turn starts, and ends with that turn.
   ends: EndsSchema,
+  // When it runs out, counted in rounds: at the start or end of `actor`'s turn in `round`, or once a later round
+  // begins if that turn never comes (combat/durations.ts). Missing in older saves, whose timed effects lasted the fight.
+  lasts: z
+    .strictObject({
+      actor: z.string(),
+      round: z.number().int(),
+      at: z.enum(["start", "end"]),
+    })
+    .optional(),
   repeatSave: z
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
   endsOnDamage: z.boolean().optional(),
   endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
+  endsOn: z.enum(["attack", "action"]).optional(), // ends when the creature attacks or deals damage, or acts
+  // Taking damage gives this save, ending it on a success, as Dragon Fear's.
+  saveOnDamage: z
+    .strictObject({ ability: AbilitySchema, dc: z.number().int() })
+    .optional(),
   level: z.number().int().optional(), // the slot a spell was cast with, when it was given one
   // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
   swallowed: z.boolean().optional(),
@@ -145,6 +188,11 @@ export type ActiveEffect = z.infer<typeof ActiveEffectSchema>;
 const SquareSchema = z.strictObject({
   x: z.number().int(),
   y: z.number().int(),
+});
+const DroppedSchema = z.strictObject({
+  item: ContentIdSchema,
+  at: SquareSchema,
+  by: z.string(), // who threw it
 });
 const GridSchema = z.strictObject({
   width: z.number().int(),
@@ -224,6 +272,10 @@ const ActorSchema = z.strictObject({
   // Where the creature stands in a fight, null outside one. Saves from before the grid have none.
   position: SquareSchema.nullable().default(null),
   moved: z.number().int().default(0), // feet moved this turn
+  // Build answers picked again after a Long Rest, by "<level>:<answer>" index (swap.ts), and those changed since the
+  // last one. Missing until a first swap.
+  swaps: z.record(z.string(), z.array(z.string())).optional(),
+  swapped: z.array(z.string()).optional(),
   // Damage taken this turn from creatures it has swallowed. Missing until there is some.
   insideDamage: z.number().int().optional(),
 });
@@ -258,6 +310,9 @@ export const StateSchema = z.strictObject({
       defeatContinues: z.boolean().optional(),
       grid: GridSchema.optional(),
       walls: z.array(z.string()).optional(), // squares no one can enter, as "x,y"
+      openCorners: z.array(z.string()).optional(), // wall corners opened as the fight started (grid.ts)
+      // Rounds begun since anyone last took damage. Missing in older saves and before the first round ends.
+      calmRounds: z.number().int().optional(),
       terrain: TerrainSchema.optional(),
       map: FightMapSchema.optional(),
       loot: LootSchema.optional(), // found if the party wins
@@ -267,6 +322,9 @@ export const StateSchema = z.strictObject({
       damageToParty: z.number().optional(),
       // The map is covered until the party sees it (fog.ts). Missing in older saves, whose fights show all of it.
       fog: z.literal(true).optional(),
+      sunlight: z.literal(true).optional(), // fought under the sky in daylight (zones.ts)
+      // Weapons thrown and lying where they landed, until picked up. They go back to their throwers as it ends.
+      dropped: z.array(DroppedSchema).optional(),
     })
     .nullable(),
 });
@@ -306,6 +364,7 @@ const CombatStartedSchema = z.strictObject({
   grid: GridSchema.optional(),
   positions: z.record(z.string(), SquareSchema).optional(),
   walls: z.array(z.string()).optional(),
+  openCorners: z.array(z.string()).optional(),
   terrain: TerrainSchema.optional(),
   map: FightMapSchema.optional(),
   loot: LootSchema.optional(),
@@ -313,6 +372,7 @@ const CombatStartedSchema = z.strictObject({
   lair: LairSchema.optional(),
   damageToParty: z.number().optional(),
   fog: z.literal(true).optional(),
+  sunlight: z.literal(true).optional(),
 });
 const TreasureFoundSchema = z.strictObject({
   actor: z.string(), // who carries the items
@@ -334,6 +394,16 @@ const TradedSchema = z.strictObject({
   bought: z.boolean(), // false for sold
   priceCp: z.number().int().min(0),
   stowed: z.boolean(), // bought gear goes in the pack, as found gear does
+});
+const WeaponThrownSchema = DroppedSchema;
+const ItemPickedUpSchema = z.strictObject({
+  actor: z.string(),
+  index: z.number().int().min(0), // in combat.dropped
+});
+const AnswerSwappedSchema = z.strictObject({
+  actor: z.string(),
+  key: z.string(), // "<level>:<answer>" in its build
+  values: z.array(z.string()),
 });
 const ItemUsedSchema = z.strictObject({
   actor: z.string(),
@@ -360,6 +430,7 @@ const BudgetSpentSchema = z.strictObject({
 const ResourceSpentSchema = z.strictObject({
   actor: z.string(),
   resource: z.string(),
+  amount: z.number().int().min(1).optional(), // so many at once, as a zone's damage dealt; one when missing
 });
 const ResourceRestoredSchema = z.strictObject({
   actor: z.string(),
@@ -453,6 +524,12 @@ const LairActionTakenSchema = z.strictObject({
   name: z.string(),
 });
 // A creature joining a fight already under way, standing where `actor.position` says, its turn right after `after`'s.
+// Levels of Exhaustion gained (or lost, below 0), as a troll's severed limbs give and regrowing takes away.
+const ExhaustionChangedSchema = z.strictObject({
+  actor: z.string(),
+  levels: z.number().int(),
+});
+
 const SummonedSchema = z.strictObject({
   actor: ActorSchema,
   after: z.string(),
@@ -472,6 +549,8 @@ export const EVENT_SCHEMAS = {
   [`${NS}:damageShareLowered`]: DamageShareLoweredSchema,
   [`${NS}:budgetSpent`]: BudgetSpentSchema,
   [`${NS}:actionRegained`]: ActorOnlySchema,
+  [`${NS}:reactionRegained`]: ActorOnlySchema,
+  [`${NS}:exhaustionChanged`]: ExhaustionChangedSchema,
   [`${NS}:resourceSpent`]: ResourceSpentSchema,
   [`${NS}:resourceRestored`]: ResourceRestoredSchema,
   [`${NS}:oncePerTurnUsed`]: OncePerTurnSchema,
@@ -494,6 +573,9 @@ export const EVENT_SCHEMAS = {
   [`${NS}:goldSpent`]: GoldSpentSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
+  [`${NS}:weaponThrown`]: WeaponThrownSchema,
+  [`${NS}:answerSwapped`]: AnswerSwappedSchema,
+  [`${NS}:itemPickedUp`]: ItemPickedUpSchema,
   [`${NS}:legendaryActionTaken`]: LegendaryActionTakenSchema,
   [`${NS}:summoned`]: SummonedSchema,
   [`${NS}:legendaryResistanceUsed`]: ActorOnlySchema,
@@ -502,6 +584,16 @@ export const EVENT_SCHEMAS = {
   [`${NS}:traded`]: TradedSchema,
   // A dying creature someone stabilized with the Help action: Stable, as after three successes.
   [`${NS}:stabilized`]: ActorOnlySchema,
+  // The creature whose turn it is takes another, as under Time Stop: its action, Bonus Action, Reaction and
+  // movement come back, and the turn order stays where it is.
+  [`${NS}:turnRepeated`]: ActorOnlySchema,
+  // A creature left with this many Hit Points, as a black pudding's half after it splits.
+  [`${NS}:hpSet`]: z.strictObject({ actor: z.string(), hp: z.number().int() }),
+  // Two creatures trading places in the Initiative order, as with Alert's Initiative Swap.
+  [`${NS}:initiativeSwapped`]: z.strictObject({
+    actor: z.string(),
+    with: z.string(),
+  }),
 } as const;
 
 export type EventKind = keyof typeof EVENT_SCHEMAS;
@@ -532,6 +624,25 @@ export function freshActor(
   };
 }
 
+// A character's build with the answers picked again after a Long Rest in place of the first ones (swap.ts).
+export function effectiveBuild(actor: Actor): CharacterBuild | null {
+  const build = actor.source.kind === "character" ? actor.source.build : null;
+  const { swaps } = actor;
+  if (!build || !swaps) return build;
+  return {
+    ...build,
+    levels: build.levels.map((entry, level) => ({
+      ...entry,
+      answers: entry.answers.map((answer, index) => {
+        const values = swaps[`${String(level)}:${String(index)}`];
+        return values && "values" in answer
+          ? ({ ...answer, values } as typeof answer)
+          : answer;
+      }),
+    })),
+  };
+}
+
 // Removes one copy of each id in `taken`, so two daggers stay two daggers.
 export function without(
   list: readonly string[],
@@ -553,6 +664,19 @@ export function equipped(actor: Actor): string[] {
 
 type Condition = z.infer<typeof ConditionSchema>;
 
+// Advantage limited to its caster, as Reassert Honor's, counts only for that attacker.
+export function forAttacker(
+  effect: ActiveEffect,
+  attackerId: string | undefined,
+): boolean {
+  const { modifier } = effect;
+  return (
+    modifier.kind !== "advantage" ||
+    !modifier.casterOnly ||
+    effect.casterId === attackerId
+  );
+}
+
 export function hasCondition(
   actor: Actor,
   ...conditions: readonly Condition[]
@@ -568,7 +692,9 @@ export function invisibleTo(target: Actor, viewer: Actor): boolean {
   return (
     hasCondition(target, "invisible") &&
     !viewer.activeEffects.some(
-      ({ modifier }) => modifier.kind === "seeInvisible",
+      ({ modifier }) =>
+        modifier.kind === "seeInvisible" ||
+        (modifier.kind === "darkvision" && modifier.truesight === true),
     )
   );
 }
@@ -580,6 +706,13 @@ export const INCAPACITATING: readonly Condition[] = [
   "stunned",
   "unconscious",
 ];
+
+// Under an effect that stops it regaining Hit Points, as a death tyrant's Negative Energy Cone.
+export function cannotHeal(actor: Actor): boolean {
+  return actor.activeEffects.some(
+    ({ modifier }) => modifier.kind === "noHealing",
+  );
+}
 
 export function isDown(actor: Actor): boolean {
   return actor.hp <= 0;
@@ -660,7 +793,17 @@ function advanceTurn(state: DndState): DndState {
       },
     ]),
   );
-  return { ...state, actors, combat: { ...combat, index, round } };
+  const calmRounds = (combat.calmRounds ?? 0) + round - combat.round;
+  return {
+    ...state,
+    actors,
+    combat: {
+      ...combat,
+      index,
+      round,
+      ...(calmRounds > 0 ? { calmRounds } : {}),
+    },
+  };
 }
 
 function removeConcentration(state: DndState, casterId: string): DndState {
@@ -698,8 +841,19 @@ function settleSummons(state: DndState): DndState {
 }
 
 function endCombat(state: DndState): DndState {
+  // Whatever was thrown is gathered up after the fight.
+  const gathered = (state.combat?.dropped ?? []).reduce(
+    (after, { item, by }) =>
+      after.actors[by]
+        ? updateActor(after, by, (actor) => ({
+            ...actor,
+            inventory: [...actor.inventory, item],
+          }))
+        : after,
+    state,
+  );
   const actors = Object.fromEntries(
-    Object.entries(state.actors)
+    Object.entries(gathered.actors)
       .filter(
         ([, actor]) => actor.side === "party" && actor.source.kind !== "summon",
       )
@@ -829,6 +983,8 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
               tempHp: 0,
               deathSaves: { successes: 0, failures: 0 },
               exhaustion: Math.max(0, actor.exhaustion - 1),
+              // Each Long Rest allows its swaps again.
+              ...(actor.swapped ? { swapped: [] } : {}),
             },
       );
     }
@@ -866,6 +1022,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           ...(data.defeatContinues ? { defeatContinues: true } : {}),
           ...(data.grid ? { grid: data.grid } : {}),
           ...(data.walls ? { walls: data.walls } : {}),
+          ...(data.openCorners ? { openCorners: data.openCorners } : {}),
           ...(data.terrain ? { terrain: data.terrain } : {}),
           ...(data.map ? { map: data.map } : {}),
           ...(data.loot ? { loot: data.loot } : {}),
@@ -874,8 +1031,18 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
             ? {}
             : { damageToParty: data.damageToParty }),
           ...(data.fog ? { fog: true as const } : {}),
+          ...(data.sunlight ? { sunlight: true as const } : {}),
         },
       };
+    }
+    case `${NS}:turnRepeated`: {
+      const data = payload(ActorOnlySchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        budget: { action: true, bonusAction: true, reaction: true },
+        usedThisTurn: [],
+        moved: 0,
+      }));
     }
     case `${NS}:combatEnded`:
       return endCombat(state);
@@ -942,13 +1109,27 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         payload(ActorOnlySchema, event).actor,
         (actor) => ({ ...actor, budget: { ...actor.budget, action: true } }),
       );
+    case `${NS}:reactionRegained`:
+      return updateActor(
+        state,
+        payload(ActorOnlySchema, event).actor,
+        (actor) => ({ ...actor, budget: { ...actor.budget, reaction: true } }),
+      );
+    case `${NS}:exhaustionChanged`: {
+      const data = payload(ExhaustionChangedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        exhaustion: Math.min(6, Math.max(0, actor.exhaustion + data.levels)),
+      }));
+    }
     case `${NS}:resourceSpent`: {
       const data = payload(ResourceSpentSchema, event);
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         resourcesSpent: {
           ...actor.resourcesSpent,
-          [data.resource]: (actor.resourcesSpent[data.resource] ?? 0) + 1,
+          [data.resource]:
+            (actor.resourcesSpent[data.resource] ?? 0) + (data.amount ?? 1),
         },
       }));
     }
@@ -974,9 +1155,14 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
     }
     case `${NS}:damaged`: {
       const data = payload(DamagedSchema, event);
-      return updateActor(state, data.actor, (actor) =>
+      const hurt = updateActor(state, data.actor, (actor) =>
         applyDamage(actor, data.amount, data.critical, data.massive),
       );
+      const { combat } = hurt;
+      if (!combat?.calmRounds || data.amount <= 0) return hurt;
+      const calm = { ...combat };
+      delete calm.calmRounds;
+      return { ...hurt, combat: calm };
     }
     case `${NS}:damagedFromInside`: {
       const data = payload(DamagedFromInsideSchema, event);
@@ -984,6 +1170,21 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         ...actor,
         insideDamage: (actor.insideDamage ?? 0) + data.amount,
       }));
+    }
+    case `${NS}:hpSet`: {
+      const data = payload(EVENT_SCHEMAS[`${NS}:hpSet`], event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        hp: data.hp,
+      }));
+    }
+    case `${NS}:initiativeSwapped`: {
+      const data = payload(EVENT_SCHEMAS[`${NS}:initiativeSwapped`], event);
+      const { combat } = state;
+      if (!combat) return state;
+      const swap = (id: string): string =>
+        id === data.actor ? data.with : id === data.with ? data.actor : id;
+      return { ...state, combat: { ...combat, order: combat.order.map(swap) } };
     }
     case `${NS}:healed`: {
       const data = payload(HealedSchema, event);
@@ -1133,6 +1334,49 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
               },
             }
           : {}),
+      };
+    }
+    case `${NS}:answerSwapped`: {
+      const data = payload(AnswerSwappedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        swaps: { ...actor.swaps, [data.key]: data.values },
+        swapped: [...(actor.swapped ?? []), data.key],
+      }));
+    }
+    case `${NS}:weaponThrown`: {
+      const data = payload(WeaponThrownSchema, event);
+      const thrown = updateActor(state, data.by, (actor) => ({
+        ...actor,
+        inventory: without(actor.inventory, [data.item]),
+      }));
+      return thrown.combat
+        ? {
+            ...thrown,
+            combat: {
+              ...thrown.combat,
+              dropped: [...(thrown.combat.dropped ?? []), data],
+            },
+          }
+        : thrown;
+    }
+    case `${NS}:itemPickedUp`: {
+      const data = payload(ItemPickedUpSchema, event);
+      const found = state.combat?.dropped?.[data.index];
+      if (!state.combat || !found) return state;
+      const picked = updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        inventory: [...actor.inventory, found.item],
+        usedThisTurn: [...actor.usedThisTurn, PICKED_UP],
+      }));
+      return {
+        ...picked,
+        combat: {
+          ...state.combat,
+          dropped: state.combat.dropped?.filter(
+            (_, index) => index !== data.index,
+          ),
+        },
       };
     }
     case `${NS}:itemUsed`: {

@@ -46,6 +46,7 @@ export interface DamageResponse {
   readonly resistances?: readonly DamageType[];
   readonly vulnerabilities?: readonly DamageType[];
   readonly immunities?: readonly DamageType[];
+  readonly absorbs?: readonly DamageType[]; // healing instead, as an iron golem's Fire Absorption
 }
 
 // SRD order: adjustments, then Resistance (rounded down), then Vulnerability.
@@ -55,6 +56,8 @@ export function finalDamage(
   type: DamageType,
   response: DamageResponse,
 ): number {
+  // Absorbed damage comes back as a negative amount, which damageEvents turns into healing.
+  if (response.absorbs?.includes(type)) return -Math.max(0, amount);
   if (response.immunities?.includes(type)) return 0;
   const adjusted = (response.adjustments ?? []).reduce(
     (total, adjustment) => total + adjustment,
