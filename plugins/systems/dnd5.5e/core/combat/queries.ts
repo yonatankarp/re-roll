@@ -3,6 +3,7 @@ import { leashed } from "./duel.ts";
 import { knownFoes, knows } from "../fog.ts";
 import {
   type Actor,
+  controllingRider,
   dndEvent,
   type DndState,
   equipped,
@@ -11,6 +12,7 @@ import {
   INCAPACITATING,
   isDead,
   isDown,
+  mountOf,
   NS,
   frame,
 } from "../state.ts";
@@ -241,6 +243,15 @@ export function speedsLeft(
   );
 }
 
+// The mount a creature rides and controls, which carries it when it moves, or null.
+export function ridden(actor: Actor, state: DndState): Actor | null {
+  const id = mountOf(actor);
+  const mount = id ? state.actors[id] : undefined;
+  return mount && !isDown(mount) && controllingRider(state, mount.id) === actor
+    ? mount
+    : null;
+}
+
 export function speedLeft(actor: Actor, stats: Stats): number {
   return Math.max(...speedsLeft(actor, stats).values());
 }
@@ -373,6 +384,10 @@ export function moveSquares(
   const grid = state.combat?.grid;
   const from = actor.position;
   if (!grid || !from) return [];
+  // A rider goes where its mount can, with the mount's Speed.
+  const mount = ridden(actor, state);
+  if (mount)
+    return moveSquares(mount, state, deriveStats(mount, access), access);
   const ground = groundFor(actor, state, access, stats);
   const jump = jumpOf(stats);
   const walking =

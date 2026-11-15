@@ -140,6 +140,7 @@ import { checkBonus, deriveStats, lookup } from "./stats.ts";
 import { withReveal } from "./fog.ts";
 import { actingEnds } from "./combat/effects.ts";
 import { rescuedCheck } from "./trait-rules.ts";
+import { familiarHelpUse } from "./combat/familiar.ts";
 
 // Every step ends by revealing what the party sees once its events land, so the fog clears as it happens.
 function revealing(
@@ -555,8 +556,15 @@ export const dnd55e = defineSystem<DndState>({
     const stats = deriveStats(player, context);
     const ability =
       "skill" in parsed ? SKILL_ABILITIES[parsed.skill] : parsed.ability;
+    // Helpful Friend: the familiar beside the player gives a proficient skill Advantage.
+    const befriended = familiarHelpUse(
+      player,
+      stats,
+      "skill" in parsed ? parsed.skill : undefined,
+      context.state,
+    );
     const edge = {
-      advantage: false,
+      advantage: befriended !== null,
       disadvantage:
         stats.untrainedArmor && (ability === "str" || ability === "dex"),
     };
@@ -593,6 +601,7 @@ export const dnd55e = defineSystem<DndState>({
     return {
       outcome: success ? "success" : "failure",
       events: [
+        ...(befriended ? [befriended] : []),
         ...settled.events,
         ...rescue.events,
         dndEvent(`${NS}:rollReported`, {

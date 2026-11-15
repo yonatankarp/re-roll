@@ -28,6 +28,8 @@ import {
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { teleportSquares } from "./combat/movement.ts";
+import { familiarHelpUse } from "./combat/familiar.ts";
+import { mountEvents, mountOptions } from "./combat/mounts.ts";
 import { heldInPlace, leafEvents } from "./combat/effects.ts";
 import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
@@ -61,6 +63,7 @@ import {
   dndEvent,
   equipped,
   hasCondition,
+  familiarOwner,
   isDead,
   isDown,
   isStable,
@@ -227,9 +230,11 @@ function check(
   events: SystemEvent[];
 } {
   const stats = deriveStats(actor, context);
+  const befriended = familiarHelpUse(actor, stats, skill, context.state);
   const edge = {
     advantage:
       advantage ||
+      befriended !== null ||
       hasFlag(actor, "advantage", "checks", stats, ability) ||
       placedFlag(actor, "advantage", "checks", context.state, context, ability),
     disadvantage:
@@ -280,6 +285,7 @@ function check(
     success,
     total,
     events: [
+      ...(befriended ? [befriended] : []),
       ...settled.events,
       dndEvent(`${NS}:rollReported`, {
         actor: actor.id,
@@ -577,6 +583,7 @@ export function tacticOptions(
       label: `Stand up (${String(half)} ft of movement)`,
     });
   }
+  options.push(...mountOptions(actor, state, access));
   options.push(...bonusAttackOptions(actor, state, access, stats));
   options.push(...classOptions(actor, state, access));
   options.push(...bonusTacticOptions(actor, state, access, stats));
@@ -659,7 +666,8 @@ export function tacticOptions(
       label: `Escape ${grappler ? `${grappler.name}'s` : "the"} grapple (Athletics or Acrobatics, DC ${String(escapeDc(grapple, state, access))})`,
     });
   }
-  if (!full) return options;
+  // A familiar can't attack, but it can Help and take its other actions, which tacticalPolicy weighs for it.
+  if (!full && familiarOwner(actor) === null) return options;
   options.push({
     id: DISENGAGE,
     label: "Disengage (no Opportunity Attacks this turn)",
@@ -701,6 +709,7 @@ export function tacticOptions(
       label: `Help ${friend.name} with a check`,
     });
   }
+  if (!full) return options;
   const dc = String(saveDc(stats, "str"));
   const size = sizeOf(actor, access);
   // A Grapple or Shove is an Unarmed Strike against a creature no more than one size larger.
@@ -837,6 +846,8 @@ export function runTactic(
     return target;
   };
 
+  const mounted = mountEvents(actor, kind, targetId, state, context);
+  if (mounted) return { events: mounted };
   switch (kind) {
     case STAND:
       return {

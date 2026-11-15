@@ -4,6 +4,7 @@ import {
   type Actor,
   hasCondition,
   INCAPACITATING,
+  familiarOwner,
   invisibleTo,
   isDead,
   isDown,
@@ -30,7 +31,12 @@ import { dodging, grappledAwayFrom } from "./tactics.ts";
 import { grapplesOn } from "./combat/grapple.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX, THROW_PREFIX } from "./combat/ids.ts";
-import { DAMAGE_TO_PARTY, damageToParty } from "./combat/effects.ts";
+import {
+  commandedFamiliar,
+  DAMAGE_TO_PARTY,
+  damageToParty,
+  resolveTargets,
+} from "./combat/effects.ts";
 import { cureFor, dispellable, spellLevelOf } from "./combat/dispel.ts";
 import { difficultSquares, seesThrough } from "./sight.ts";
 import { crossesDifficult, speedsOf, tremorsenseOf } from "./movement-modes.ts";
@@ -54,6 +60,8 @@ import {
   inReach,
   meleeReach,
   moveSquares,
+  SIZES,
+  sizeOf,
   reaches,
   slotLevelFor,
   targetCount,
@@ -924,7 +932,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
           hasCondition(target, condition) ||
           immuneToCondition(stats(target), condition) ||
           isDown(target) ||
-          (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost)
+          (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost) ||
+          (effect.maxSize !== undefined &&
+            sizeOf(target, context) > SIZES.indexOf(effect.maxSize))
         ) {
           return 0;
         }
@@ -1067,6 +1077,22 @@ export function makeJudge(context: Context, side: Actor): Judge {
               0,
             )
           : 0;
+      // What the familiar's commanded action does from where it stands, as Energy Pulse's burst.
+      case "commandFamiliar": {
+        const familiar =
+          target.id === actor.id
+            ? commandedFamiliar(effect, actor, state)
+            : null;
+        const commanded =
+          familiar &&
+          stats(familiar).actions.find((item) => item.name === effect.action);
+        return familiar && commanded
+          ? resolveTargets(ALL, commanded, familiar, context).reduce(
+              (sum, item) => sum + worthOn(familiar, item, commanded),
+              0,
+            )
+          : 0;
+      }
       // Thorns: about two squares of them walked by each creature caught. Darkness or fog: worth something only
       // to a caster who sees through it, against the foes it hides.
       case "zone":
@@ -1329,7 +1355,8 @@ export function damageToPartyFor(context: Context): number {
   // The run ends with the player's character, so a party leaning on a player near 0 HP is closer to losing
   // than its total HP says: count the player as holding only its own share of the foes' damage.
   const party = Object.values(context.state.actors).filter(
-    (actor) => actor.side === "party" && !isDown(actor),
+    (actor) =>
+      actor.side === "party" && !isDown(actor) && familiarOwner(actor) === null,
   );
   const player = context.state.actors[PLAYER_ACTOR];
   const total = party.reduce((sum, actor) => sum + actor.hp, 0);

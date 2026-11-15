@@ -27,6 +27,7 @@ import { lairTurns } from "../legendary.ts";
 import { type Context, hasPassive } from "./queries.ts";
 import { DAMAGE_TO_PARTY } from "./effects.ts";
 import { damageToPartyFor } from "../worth.ts";
+import { familiarActors, familiarFoundEvents } from "./familiar.ts";
 
 export function startCombat(
   encounter: {
@@ -88,6 +89,14 @@ export function startCombat(
     }
   }
 
+  // Familiars are found before the fight, and join it beside their owners, without counting towards its size.
+  const found = familiarFoundEvents(party, context, "fight");
+  const foundState = found.reduce(applyDndEvent, context.state);
+  const familiars = familiarActors(
+    party.flatMap((actor) => foundState.actors[actor.id] ?? []),
+    { ...context, state: foundState },
+  );
+
   // The story's word on surprise, such as from a Stealth check, beats the encounter's own.
   const surprised = context.state.surprise ?? encounter.surprise;
   const caught = { party: "party", enemies: "enemy" }[surprised ?? "party"];
@@ -97,26 +106,29 @@ export function startCombat(
       actor.heroicInspiration &&
       hasPassive(deriveStats(actor, context), "initiativeInspiration"),
   );
-  const rolled = [...party, ...monsters].map((actor, position) => {
-    const stats = deriveStats(actor, context);
-    const edge = {
-      advantage:
-        (rallier !== undefined && actor.side === "party") ||
-        hasPassive(stats, "initiativeAdvantage"),
-      disadvantage: Boolean(surprised) && actor.side === caught,
-      rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
-    };
-    const first = rollD20(context.dice, edge).natural;
-    // Survivor's Hypervigilance rolls a low one again, and the new roll stands.
-    const low = Math.max(
-      0,
-      ...stats.passives.flatMap((passive) =>
-        passive.kind === "initiativeReroll" ? [passive.atMost] : [],
-      ),
-    );
-    const natural = first <= low ? rollD20(context.dice, edge).natural : first;
-    return { id: actor.id, position, total: natural + stats.initiative };
-  });
+  const rolled = [...party, ...familiars, ...monsters].map(
+    (actor, position) => {
+      const stats = deriveStats(actor, context);
+      const edge = {
+        advantage:
+          (rallier !== undefined && actor.side === "party") ||
+          hasPassive(stats, "initiativeAdvantage"),
+        disadvantage: Boolean(surprised) && actor.side === caught,
+        rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
+      };
+      const first = rollD20(context.dice, edge).natural;
+      // Survivor's Hypervigilance rolls a low one again, and the new roll stands.
+      const low = Math.max(
+        0,
+        ...stats.passives.flatMap((passive) =>
+          passive.kind === "initiativeReroll" ? [passive.atMost] : [],
+        ),
+      );
+      const natural =
+        first <= low ? rollD20(context.dice, edge).natural : first;
+      return { id: actor.id, position, total: natural + stats.initiative };
+    },
+  );
   // Ties keep their listed order, so the result is the same on every machine.
   const sorted = rolled.sort(
     (a, b) => b.total - a.total || a.position - b.position,
@@ -138,7 +150,7 @@ export function startCombat(
           grid: mapGrid,
           positions: {
             ...placeOnMap(
-              party.map((actor) => actor.id),
+              [...party, ...familiars].map((actor) => actor.id),
               battlemap.party.map(toSquare),
               mapGrid,
               taken,
@@ -153,7 +165,7 @@ export function startCombat(
         };
       })()
     : placeSides(
-        party.map((actor) => actor.id),
+        [...party, ...familiars].map((actor) => actor.id),
         monsters.map((actor) => actor.id),
       );
   const startsOf = (list: readonly Actor[]): Square[] =>
@@ -188,21 +200,20 @@ export function startCombat(
     ...(encounter.sunlight ? { sunlight: true as const } : {}),
     ...(surprised ? { surprised } : {}),
     ...(lair ? { lair } : {}),
+    ...(familiars.length > 0 ? { familiars } : {}),
   };
   // Weighed as the fight starts, with everyone in it the party can see, and kept: a fight's share never
   // changes once begun.
   const share = damageToPartyFor({
     ...context,
-    state: applyDndEvent(
-      context.state,
-      dndEvent(`${NS}:combatStarted`, started),
-    ),
+    state: applyDndEvent(foundState, dndEvent(`${NS}:combatStarted`, started)),
   });
   const lowered = share < DAMAGE_TO_PARTY[context.state.difficulty ?? "normal"];
 
   return {
     events: [
       { kind: "encounterStarted", encounter: encounter.id },
+      ...found,
       ...(rallier
         ? [
             dndEvent(`${NS}:inspirationSpent`, { actor: rallier.id }),

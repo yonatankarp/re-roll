@@ -3,6 +3,7 @@ import {
   type Actor,
   hasCondition,
   INCAPACITATING,
+  familiarOwner,
   isDead,
   isDown,
   NS,
@@ -49,6 +50,54 @@ import { damageTypePolicy, zoneTypePolicy } from "./combat/damage-choice.ts";
 
 // The Dodge action (actions.ts), which the party weighs like any other choice.
 const DODGE = `${TACTIC}dodge`;
+const HELP = `${TACTIC}help`;
+
+// The foe a familiar helps against: one its side's fighters stand beside, else the one nearest its owner.
+function helpTarget(actor: Actor, context: Context): Actor | null {
+  const { state } = context;
+  const foes = knownFoes(state, actor, context).filter(
+    (item) => !isDown(item) && item.position,
+  );
+  const fighters = allies(state, actor).filter(
+    (item) => !isDown(item) && familiarOwner(item) === null,
+  );
+  const owner = state.actors[familiarOwner(actor) ?? ""];
+  const engaged = foes.filter((foe) =>
+    fighters.some((item) => within5(item, foe)),
+  );
+  const from = engaged.length > 0 ? actor : (owner ?? actor);
+  return (
+    [...(engaged.length > 0 ? engaged : foes)].sort(
+      (a, b) =>
+        distanceFeet(from.position, a.position) -
+        distanceFeet(from.position, b.position),
+    )[0] ?? null
+  );
+}
+
+// A familiar's turn: Help against the foe its side is fighting, walking up to it first.
+function familiarChoice(
+  decision: Decision,
+  actor: Actor,
+  context: Context,
+): string | null {
+  const target = helpTarget(actor, context);
+  const helps = decision.options.filter((option) => {
+    const [id, foe] = parseOption(option.id);
+    return id === HELP && foe && actor.side !== context.state.actors[foe]?.side;
+  });
+  const help =
+    helps.find((option) => parseOption(option.id)[1] === target?.id) ??
+    helps[0];
+  if (help) return help.id;
+  const moving = decision.options.some((option) => option.id === MOVE);
+  return moving &&
+    actor.budget.action &&
+    target &&
+    stepToward(actor, context, { foe: target, reach: 5 })
+    ? MOVE
+    : null;
+}
 
 // How companions and monsters choose in a fight, and how the bot plays the player.
 
@@ -77,7 +126,7 @@ export function stepToward(
       canAfford(action, actor, stats) &&
       !(holding && concentrates(action)),
   );
-  if (offensive.length === 0) return null;
+  if (offensive.length === 0 && !toward) return null;
   const reach =
     toward?.reach ??
     Math.max(
@@ -583,9 +632,12 @@ export function choosePolicy(decision: Decision, context: Context): string {
 
   const actor = actorOf(state, decision.actor);
   if (decision.id.startsWith(`${NS}:moveTo:`)) {
-    const square =
-      (actor.side === "party" ? approach(actor, context) : null) ??
-      stepToward(actor, context);
+    const helped =
+      familiarOwner(actor) === null ? null : helpTarget(actor, context);
+    const square = helped
+      ? stepToward(actor, context, { foe: helped, reach: 5 })
+      : ((actor.side === "party" ? approach(actor, context) : null) ??
+        stepToward(actor, context));
     return square ? squareKey(square) : STAY;
   }
   // A teleport or jump lands where a foe is in reach, nearest one first, as its options are listed.
@@ -702,6 +754,11 @@ export function choosePolicy(decision: Decision, context: Context): string {
 
   // The party plays by worth. Monsters keep the simple rules below, so the books' fights stay as hard as written.
   if (actor.side === "party" && decision.id.startsWith(`${NS}:turn:`)) {
+    const familiar =
+      familiarOwner(actor) === null
+        ? null
+        : familiarChoice(decision, actor, context);
+    if (familiar) return familiar;
     const moving = decision.options.some((option) => option.id === MOVE);
     if (moving && actor.budget.action && approach(actor, context)) return MOVE;
     const chosen = partyChoice(parsed, decision.options, actor, context);

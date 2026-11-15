@@ -131,6 +131,9 @@ export interface Stats {
   readonly itemBonuses: Readonly<
     Record<"attack" | "spellAttack" | "savingThrows", number>
   >;
+  // A character's familiar, from a spell it knows that gives one (combat/familiar.ts), with the ability it casts
+  // that spell with.
+  readonly familiar?: { readonly form: string; readonly ability: Ability };
 }
 
 export function passiveModifiers(
@@ -983,6 +986,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   };
   return {
     ...partial,
+    ...familiarFrom(knownSpells, castingAbility, access, partial.spellAbility),
     maxHp: partial.maxHp + passiveBonus(partial, "maxHp"),
     initiative: partial.initiative + passiveBonus(partial, "initiative"),
     speed: Math.max(
@@ -999,6 +1003,25 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       ]),
     ),
   };
+}
+
+function familiarFrom(
+  knownSpells: ReadonlySet<string>,
+  castingAbility: ReadonlyMap<string, Ability>,
+  access: ContentAccess,
+  spellAbility: Ability | null,
+): Pick<Stats, "familiar"> {
+  for (const spellId of knownSpells) {
+    const { familiar } = lookup(access, SpellSchema, spellId);
+    if (!familiar) continue;
+    return {
+      familiar: {
+        form: familiar.form,
+        ability: castingAbility.get(spellId) ?? spellAbility ?? "int",
+      },
+    };
+  }
+  return {};
 }
 
 // shortcut: a speed bonus doesn't check the armor it needs, such as Fast Movement's.
@@ -1206,11 +1229,37 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
   if (actor.source.kind !== "monster") {
     throw new Error(`${actor.id} is not a monster`);
   }
-  return statBlockStats(
+  const stats = statBlockStats(
     actor,
     lookup(access, MonsterSchema, actor.source.statBlockId),
     access,
   );
+  const { familiarOf } = actor.source;
+  if (!familiarOf) return stats;
+  // A familiar can't attack, is a Fey, and has what its owner's features give it, reading its owner's numbers.
+  const boons = familiarOf.features.flatMap(
+    (id) => lookup(access, FeatureSchema, id).familiar ?? [],
+  );
+  return {
+    ...stats,
+    maxHp: familiarOf.maxHp,
+    creatureType: "fey",
+    passives: [...stats.passives, ...boons.flatMap((boon) => boon.passives)],
+    actions: [
+      ...stats.actions.filter(
+        ({ activation }) => activation.resolution.kind !== "attack",
+      ),
+      ...boons.flatMap((boon) =>
+        boon.actions.map(({ name, activation }) => ({
+          id: `familiar:${name}`,
+          name,
+          activation,
+          spellLevel: null,
+        })),
+      ),
+    ],
+    scaling: { ...stats.scaling, ...familiarOf.scaling },
+  };
 }
 
 // A summoned creature: its companion's numbers at the spell's level, and its caster's spell attack and save DC.
@@ -1409,6 +1458,7 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "zone" ||
       effect.kind === "polymorph" ||
       effect.kind === "summon" ||
+      effect.kind === "commandFamiliar" ||
       effect.kind === "counter" ||
       effect.kind === "extraAction" ||
       effect.kind === "reduceDamage" ||

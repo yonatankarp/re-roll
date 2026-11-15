@@ -136,6 +136,8 @@ const ActiveEffectSchema = z.strictObject({
       monster: ContentIdSchema,
       keep: z.array(z.enum(["mind", "spells"])).optional(), // what it keeps of its own (stats.ts)
     }),
+    // Riding its caster as a mount (combat/mounts.ts).
+    z.strictObject({ kind: z.literal("riding") }),
     // One of its own stat block's other shapes, by name, as a werewolf's wolf form (core/forms.ts).
     z.strictObject({ kind: z.literal("shape"), shape: z.string() }),
     // An area a spell left on the map, kept on its caster (core/zones.ts). With `follows` it is centred on the
@@ -250,6 +252,16 @@ const ActorSchema = z.strictObject({
     z.strictObject({
       kind: z.literal("monster"),
       statBlockId: ContentIdSchema,
+      // A character's familiar in a fight (combat/familiar.ts): its owner, its Hit Point maximum as found, the
+      // owner's features that give it something, and the owner's numbers those read, such as its spell save DC.
+      familiarOf: z
+        .strictObject({
+          owner: z.string(),
+          maxHp: z.number().int(),
+          features: z.array(ContentIdSchema),
+          scaling: z.record(z.string(), z.number().int()),
+        })
+        .optional(),
       lacks: z.array(z.string()).optional(), // actions it was made without, as an animated tree's Animate Trees
     }),
     // A creature a spell brought, by a companion stat block (stats.ts), with its caster's numbers as cast.
@@ -299,6 +311,15 @@ const ActorSchema = z.strictObject({
   swapped: z.array(z.string()).optional(),
   // Damage taken this turn from creatures it has swallowed. Missing until there is some.
   insideDamage: z.number().int().optional(),
+  // The character's familiar between fights: its form and Hit Points, 0 once it has dropped until it is found
+  // again. Missing until it is first found.
+  familiar: z
+    .strictObject({
+      form: ContentIdSchema,
+      hp: z.number().int(),
+      maxHp: z.number().int(),
+    })
+    .optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -394,6 +415,8 @@ const CombatStartedSchema = z.strictObject({
   damageToParty: z.number().optional(),
   fog: z.literal(true).optional(),
   sunlight: z.literal(true).optional(),
+  // The party's familiars, who join with Initiative of their own (combat/familiar.ts).
+  familiars: z.array(ActorSchema).optional(),
 });
 const TreasureFoundSchema = z.strictObject({
   actor: z.string(), // who carries the items
@@ -551,6 +574,13 @@ const ExhaustionChangedSchema = z.strictObject({
   levels: z.number().int(),
 });
 
+// A character finds its familiar again, at full Hit Points (combat/familiar.ts).
+const FamiliarFoundSchema = z.strictObject({
+  actor: z.string(),
+  form: ContentIdSchema,
+  maxHp: z.number().int(),
+});
+
 const SummonedSchema = z.strictObject({
   actor: ActorSchema,
   after: z.string(),
@@ -607,6 +637,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:itemPickedUp`]: ItemPickedUpSchema,
   [`${NS}:legendaryActionTaken`]: LegendaryActionTakenSchema,
   [`${NS}:summoned`]: SummonedSchema,
+  [`${NS}:familiarFound`]: FamiliarFoundSchema,
   [`${NS}:legendaryResistanceUsed`]: ActorOnlySchema,
   [`${NS}:lairActionTaken`]: LairActionTakenSchema,
   [`${NS}:surpriseSet`]: z.strictObject({ side: SurpriseSchema }),
@@ -769,11 +800,43 @@ export function isDown(actor: Actor): boolean {
   return actor.hp <= 0;
 }
 
+// The mount a creature rides, by id, or null.
+export function mountOf(actor: Actor): string | null {
+  return (
+    actor.activeEffects.find(({ modifier }) => modifier.kind === "riding")
+      ?.casterId ?? null
+  );
+}
+
+// The rider controlling this mount: one riding it that can act. A controlled mount moves as its rider directs, on
+// its rider's turn, and has no turn of its own.
+export function controllingRider(
+  state: DndState,
+  mountId: string,
+): Actor | null {
+  return (
+    Object.values(state.actors).find(
+      (item) =>
+        mountOf(item) === mountId &&
+        !isDown(item) &&
+        !hasCondition(item, ...INCAPACITATING),
+    ) ?? null
+  );
+}
+
+// The character whose familiar this is, or null for any other creature.
+export function familiarOwner(actor: Actor): string | null {
+  return actor.source.kind === "monster"
+    ? (actor.source.familiarOf?.owner ?? null)
+    : null;
+}
+
 export function isDead(actor: Actor): boolean {
   if (actor.hp > 0) return false;
   return (
     actor.side === "enemy" ||
     actor.source.kind === "summon" ||
+    familiarOwner(actor) !== null ||
     actor.deathSaves.failures >= 3
   );
 }
@@ -810,9 +873,19 @@ function advanceTurn(state: DndState): DndState {
       round += 1;
     }
     const next = state.actors[combat.order[index] ?? ""];
-    if (next && !isDead(next) && !isStable(next)) break;
+    if (
+      next &&
+      !isDead(next) &&
+      !isStable(next) &&
+      !controllingRider(state, next.id)
+    ) {
+      break;
+    }
   }
   const nextId = combat.order[index] ?? "";
+  // A controlled mount's turn comes with its rider's.
+  const nextActor = state.actors[nextId];
+  const nextMount = nextActor ? mountOf(nextActor) : null;
   const endingId = combat.order[combat.index];
   const actors = Object.fromEntries(
     Object.entries(state.actors).map(([id, actor]) => [
@@ -834,7 +907,7 @@ function advanceTurn(state: DndState): DndState {
               ? { ...effect, ends: "casterTurnEnd" as const }
               : effect,
           ),
-        ...(id === nextId
+        ...(id === nextId || id === nextMount
           ? {
               budget: { action: true, bonusAction: true, reaction: true },
               usedThisTurn: [],
@@ -912,10 +985,24 @@ function endCombat(state: DndState): DndState {
         : after,
     state,
   );
+  // A familiar's Hit Points go back to its owner, to carry into the next fight.
+  const kept = Object.values(gathered.actors).reduce((after, actor) => {
+    const owner = familiarOwner(actor);
+    const held = owner ? after.actors[owner]?.familiar : undefined;
+    return owner && held
+      ? updateActor(after, owner, (item) => ({
+          ...item,
+          familiar: { ...held, hp: Math.max(0, actor.hp) },
+        }))
+      : after;
+  }, gathered);
   const actors = Object.fromEntries(
-    Object.entries(gathered.actors)
+    Object.entries(kept.actors)
       .filter(
-        ([, actor]) => actor.side === "party" && actor.source.kind !== "summon",
+        ([, actor]) =>
+          actor.side === "party" &&
+          actor.source.kind !== "summon" &&
+          familiarOwner(actor) === null,
       )
       .map(([id, { suppressed: _held, ...actor }]) => [
         id,
@@ -1059,7 +1146,12 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       const data = payload(CombatStartedSchema, event);
       const actors = {
         ...state.actors,
-        ...Object.fromEntries(data.monsters.map((item) => [item.id, item])),
+        ...Object.fromEntries(
+          [...data.monsters, ...(data.familiars ?? [])].map((item) => [
+            item.id,
+            item,
+          ]),
+        ),
       };
       // The surprise was for this fight, so it's spent now.
       const rest = Object.fromEntries(
@@ -1185,6 +1277,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         },
       };
     }
+    case `${NS}:familiarFound`: {
+      const data = payload(FamiliarFoundSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        familiar: { form: data.form, hp: data.maxHp, maxHp: data.maxHp },
+      }));
+    }
     case `${NS}:summoned`: {
       const data = payload(SummonedSchema, event);
       const { combat } = state;
@@ -1212,11 +1311,32 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return advanceTurn(state);
     case `${NS}:moved`: {
       const data = payload(MovedSchema, event);
-      return updateActor(state, data.actor, (actor) => ({
+      const moved = updateActor(state, data.actor, (actor) => ({
         ...actor,
         position: data.to,
         moved: actor.moved + data.feet,
+        // A rider moved off its mount by anything but the mount is no longer riding it.
+        activeEffects: mountOf(actor)
+          ? actor.activeEffects.filter(({ modifier, casterId }) => {
+              const spot = state.actors[casterId]?.position;
+              return (
+                modifier.kind !== "riding" ||
+                (spot?.x === data.to.x && spot.y === data.to.y)
+              );
+            })
+          : actor.activeEffects,
       }));
+      // Riders go where their mount goes.
+      return Object.values(moved.actors).reduce(
+        (after, item) =>
+          mountOf(item) === data.actor
+            ? updateActor(after, item.id, (rider) => ({
+                ...rider,
+                position: data.to,
+              }))
+            : after,
+        moved,
+      );
     }
     case `${NS}:budgetSpent`: {
       const data = payload(BudgetSpentSchema, event);

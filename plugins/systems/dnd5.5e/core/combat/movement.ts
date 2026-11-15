@@ -66,6 +66,7 @@ import {
   hasPassive,
   meleeReach,
   moveSquares,
+  ridden,
   speedLeft,
   squareName,
 } from "./queries.ts";
@@ -131,8 +132,12 @@ export function provokers(
   path?: readonly Square[],
 ): readonly { readonly foe: Actor; readonly melee: KnownAction }[] {
   if (hasPassive(deriveStats(actor, access), "noOpportunityAttacks")) return [];
-  // Sentinel's Guardian: Disengage doesn't stop a Sentinel's Opportunity Attack.
-  const disengaged = hasTactic(actor, "disengage");
+  // Sentinel's Guardian: Disengage doesn't stop a Sentinel's Opportunity Attack. A mount's Disengage covers its
+  // rider. shortcut: either one's covers both.
+  const mount = ridden(actor, state);
+  const disengaged =
+    hasTactic(actor, "disengage") ||
+    (mount !== null && hasTactic(mount, "disengage"));
   const walk = path
     ? undefined
     : walksOf(actor, state, access).get(squareKey(to));
@@ -403,15 +408,20 @@ export function runFinishMove(
   }
   // An Opportunity Attack that halted or grabbed the walker, as Sentinel's does, keeps it where it stood. A teleport
   // costs no movement, so nothing stops it.
-  if (payload.feet > 0 && speedLeft(actor, deriveStats(actor, context)) <= 0) {
+  // A rider's walk is its mount's, which carries it.
+  const walker = ridden(actor, context.state) ?? actor;
+  if (
+    payload.feet > 0 &&
+    speedLeft(walker, deriveStats(walker, context)) <= 0
+  ) {
     return {};
   }
   const moved = dndEvent(`${NS}:moved`, {
-    actor: actor.id,
+    actor: walker.id,
     to: { x: payload.x, y: payload.y },
     feet: payload.feet,
   });
-  const walker = { ...actor, position: { x: payload.x, y: payload.y } };
+  const arrived = { ...actor, position: { x: payload.x, y: payload.y } };
   // A walk into or out of an Antimagic Field, or one carrying it, holds off or brings back spells and items.
   const fields =
     zonesOf(context.state).some(
@@ -428,17 +438,18 @@ export function runFinishMove(
   return {
     events: [
       moved,
-      // Only those it still holds come along, as an Opportunity Attack may have broken a grapple.
+      // Only those it still holds come along, as an Opportunity Attack may have broken a grapple. A rider's walk drags
+      // what its mount holds. shortcut: not what the rider holds, until a rider can grapple from the saddle.
       ...dragEvents({
         drag: (payload.dragged ?? []).filter(({ actor: id }) => {
           const held = context.state.actors[id];
           return (
             held !== undefined &&
-            grapplesOn(held).some(({ casterId }) => casterId === actor.id)
+            grapplesOn(held).some(({ casterId }) => casterId === walker.id)
           );
         }),
       }),
-      ...fogBoundEvents(walker, context),
+      ...fogBoundEvents(arrived, context),
       ...(fields ? placedEvents(applyDndEvent(context.state, moved)) : []),
     ],
   };

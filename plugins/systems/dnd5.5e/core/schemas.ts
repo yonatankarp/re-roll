@@ -431,6 +431,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .strictObject({ ability: AbilitySchema, dc: FormulaSchema })
       .optional(),
     hpAtMost: z.number().int().min(1).optional(), // only a target with this many Hit Points or fewer
+    // only a target this size or smaller, as an Energy Pulse knocks only a Medium or smaller creature Prone
+    maxSize: z
+      .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
+      .optional(),
     endsOnDamage: z.boolean().default(false),
     endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature, as Modify Memory's
     // Ends when the creature attacks or deals damage ("attack"), or takes any action ("action"), as Fade Away's.
@@ -581,7 +585,15 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // Adds to AC against the hit that triggered a reaction only, possibly turning it into a miss, as with Parry.
   z.strictObject({
     kind: z.literal("acAgainstHit"),
-    bonus: z.number().int().min(1),
+    // A formula is the reactor's, as a familiar's Intercept Attack adding its owner's Proficiency Bonus.
+    bonus: z.union([z.number().int().min(1), FormulaSchema]),
+  }),
+  // The caster's familiar takes its action of this name, which has the `commanded` trigger, spending its Reaction,
+  // when it is within `range` feet, as a familiar's Energy Pulse (combat/familiar.ts).
+  z.strictObject({
+    kind: z.literal("commandFamiliar"),
+    action: z.string().min(1),
+    range: z.number().int().min(5),
   }),
   // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts).
   z.strictObject({ kind: z.literal("counter") }),
@@ -966,6 +978,8 @@ export const ActivationSchema = z.strictObject({
       inspirationSpent: z.literal(true).optional(),
       // Taken right after Initiative is rolled, as with Alert's Initiative Swap.
       initiative: z.literal(true).optional(),
+      // Taken only when its owner's `commandFamiliar` effect calls for it, never on its own.
+      commanded: z.literal(true).optional(),
     })
     .optional(),
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
@@ -1258,6 +1272,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // A healing die that rolls 1 is rolled again and the new roll stands, as with Healer's Healing Rerolls.
   z.strictObject({ kind: z.literal("healingRerolls") }),
+  // An ally within `within` feet of the bearer treats a healing die's roll below `at` as `at`, as with a Soothing
+  // Familiar's Healing Beacon.
+  z.strictObject({
+    kind: z.literal("healDieFloor"),
+    at: z.number().int().min(2),
+    within: z.number().int().min(5),
+  }),
   // This much off the price of nonmagical items the bearer buys, as with Crafter.
   z.strictObject({
     kind: z.literal("shopDiscount"),
@@ -1318,6 +1339,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Advantage on the check of a Search or Study action, spending a use of the resource only when it succeeds, as
   // with Sharp Eye.
   z.strictObject({ kind: z.literal("sharpEye"), resource: z.string() }),
+  // Advantage on a check with a skill the bearer is proficient in while its familiar is within 5 feet, spending a
+  // use of the resource, as with Familiar Friend's Helpful Friend. Out of a fight the familiar is always beside it.
+  z.strictObject({ kind: z.literal("familiarHelp"), resource: z.string() }),
+  // Another creature at least one size smaller can ride the bearer as a controlled mount (combat/mounts.ts), as a
+  // Find Steed steed.
+  z.strictObject({ kind: z.literal("rideable") }),
   // Proficiency in every skill, as with Boon of Skill's All-Around Adept.
   z.strictObject({ kind: z.literal("allSkills") }),
   // The Dash action adds this many feet more, as with Charger's Improved Dash.
@@ -1614,6 +1641,22 @@ export const FeatureSchema = ContentEntrySchema.extend({
     })
     .optional(),
   choices: z.lazy(() => z.array(ChoiceDefSchema)).default([]), // asked when it's taken as a class option
+  // What it gives the bearer's familiar (combat/familiar.ts): Hit Points added to its maximum when it is found,
+  // worked out from the bearer's numbers, and passives and actions of its own.
+  familiar: z
+    .strictObject({
+      hp: FormulaSchema.optional(),
+      passives: z.array(PassiveSchema).default([]),
+      actions: z
+        .array(
+          z.strictObject({
+            name: z.string().min(1),
+            activation: ActivationSchema,
+          }),
+        )
+        .default([]),
+    })
+    .optional(),
 }).strict();
 export type Feature = z.infer<typeof FeatureSchema>;
 
@@ -1799,6 +1842,9 @@ export const SpellSchema = ContentEntrySchema.extend({
   // Why a spell with no activation needs none: it takes longer than a turn to cast ("castingTime"), or does
   // nothing a grid fight plays, such as travel, senses, talk or downtime ("utility").
   outOfCombat: z.enum(["castingTime", "utility"]).optional(),
+  // Knowing it gives the caster a familiar in this monster's form, which joins each fight (combat/familiar.ts).
+  // shortcut: the form is the one given here rather than the caster's choice, and its type is Fey.
+  familiar: z.strictObject({ form: ContentIdSchema }).optional(),
   upcast: z
     .strictObject({
       perSlotLevel: ScaleStepSchema,

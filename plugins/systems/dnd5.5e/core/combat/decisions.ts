@@ -22,6 +22,7 @@ import {
 import { distanceFeet } from "../grid.ts";
 import { lightAt } from "../sight.ts";
 import { deriveStats, lookup } from "../stats.ts";
+import { commandedFamiliar } from "./effects.ts";
 import { AIM_AREA, PICK } from "../targeting.ts";
 import { fleeOptions } from "../legendary.ts";
 import { ItemSchema, PregenSchema } from "../schemas.ts";
@@ -32,6 +33,7 @@ import {
   canAfford,
   inReach,
   moveSquares,
+  ridden,
   slotToSpend,
   speedLeft,
   targetCount,
@@ -72,7 +74,15 @@ function turnOptions(
         activation.resolution.kind === "automatic" &&
         activation.resolution.effects.some((item) => item.kind === "heal") &&
         actor.hp >= stats.maxHp;
-      if (full) {
+      // A command for a familiar that isn't near enough to take it does nothing, so it's hidden too.
+      const idle =
+        activation.resolution.kind === "automatic" &&
+        activation.resolution.effects.some(
+          (item) =>
+            item.kind === "commandFamiliar" &&
+            !commandedFamiliar(item, actor, state),
+        );
+      if (full || idle) {
         options.push({
           id: encodeOption(action.id, actor.id),
           label: action.name,
@@ -138,9 +148,14 @@ function turnOptions(
     });
   }
   if (moveSquares(actor, state, stats, access).length > 0) {
+    // A rider moves with its mount's Speed.
+    const mount = ridden(actor, state);
+    const left = mount
+      ? speedLeft(mount, deriveStats(mount, access))
+      : speedLeft(actor, stats);
     options.push({
       id: MOVE,
-      label: `Move (${String(speedLeft(actor, stats))} ft left)`,
+      label: `Move (${String(left)} ft left)`,
     });
   }
   options.push(...fleeOptions(actor, state, access));

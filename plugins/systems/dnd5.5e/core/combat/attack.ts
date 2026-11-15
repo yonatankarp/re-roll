@@ -74,6 +74,7 @@ import { conditionsApplied } from "../legendary.ts";
 import {
   type Damage,
   type DamageType,
+  type Formula,
   ItemSchema,
   type LeafEffect,
   MonsterSchema,
@@ -221,6 +222,11 @@ export function runProjectile(
   };
 }
 
+// A reaction's AC bonus against a hit: a number, or a formula of the reactor's.
+function acBonusOf(bonus: number | Formula, stats: Stats): number {
+  return typeof bonus === "number" ? bonus : evaluateFormula(bonus, stats);
+}
+
 // A creature of this kind beside the bearer, as the podling Transfer Harm needs.
 function kinNear(
   bearer: Actor,
@@ -295,7 +301,9 @@ function reactionFor(
       }
       if (critical) return false;
       const acBonus = resolution.effects.reduce((sum, effect) => {
-        if (effect.kind === "acAgainstHit") return sum + effect.bonus;
+        if (effect.kind === "acAgainstHit") {
+          return sum + acBonusOf(effect.bonus, stats);
+        }
         return effect.kind === "modifier" &&
           effect.modifier.kind === "bonus" &&
           effect.modifier.to === "ac" &&
@@ -682,7 +690,9 @@ function intercepted(
   );
   const acBonus = effects.reduce(
     (sum, effect) =>
-      effect.kind === "acAgainstHit" ? sum + effect.bonus : sum,
+      effect.kind === "acAgainstHit"
+        ? sum + acBonusOf(effect.bonus, stats)
+        : sum,
     0,
   );
   // A lasting AC bonus goes on the target, and the hit is checked again once it's there.
@@ -1194,7 +1204,9 @@ export function runAfterReaction(
     resolution.kind === "automatic" ? resolution.effects : []
   ).reduce(
     (sum, effect) =>
-      effect.kind === "acAgainstHit" ? sum + effect.bonus : sum,
+      effect.kind === "acAgainstHit"
+        ? sum + acBonusOf(effect.bonus, stats)
+        : sum,
     0,
   );
   // The rest of the attack is held here and rechecked once the reaction has taken effect.
