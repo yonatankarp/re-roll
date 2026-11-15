@@ -129,7 +129,7 @@ through the real level-up decisions, and each feature gained is checked against 
 | Druid | 1 | Druidic | text-only | out of combat only: skills, tools or languages |
 | Druid | 1 | Primal Order | text-only | needs a choice between the orders at level-up |
 | Druid | 2 | Wild Shape | partial | resource wild-shape max 2; bonusAction+wild-shape: tempHp |
-| Druid | 2 | Wild Companion | text-only | needs summoned familiars |
+| Druid | 2 | Wild Companion | text-only | no mechanics |
 | Druid | 3 | Druid Subclass | working | level choice: subclass |
 | Druid | 4 | Ability Score Improvement | working | level choice: feat |
 | Druid | 5 | Wild Resurgence | text-only | needs a way to regain spell slots |
@@ -255,7 +255,7 @@ through the real level-up decisions, and each feature gained is checked against 
 | Paladin | 3 | Paladin Subclass | working | level choice: subclass |
 | Paladin | 4 | Ability Score Improvement | working | level choice: feat |
 | Paladin | 5 | Extra Attack | working | attacks per action: 2 |
-| Paladin | 5 | Faithful Steed | text-only | needs summoned mounts |
+| Paladin | 5 | Faithful Steed | text-only | no mechanics |
 | Paladin | 6 | Aura of Protection | partial | passive: bonus |
 | Paladin | 9 | Abjure Foes | partial | action+paladin-channel-divinity: condition frightened |
 | Paladin | 10 | Aura of Courage | text-only | no mechanics |
