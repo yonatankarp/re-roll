@@ -860,6 +860,16 @@ export function makeJudge(context: Context, side: Actor): Judge {
           ![...speeds.keys()].some(crossesDifficult);
         return faster || rough ? 0.08 * own * lasting(span) : 0;
       }
+      // Freedom of Movement helps one held in a grapple, or one slowed by the map's rough ground.
+      case "unhindered": {
+        const speeds = speedsOf(target, stats(target));
+        const rough =
+          difficultSquares(state).size > 0 &&
+          ![...speeds.keys()].some(crossesDifficult);
+        return rough || hasCondition(target, "grappled")
+          ? 0.08 * own * lasting(span)
+          : 0;
+      }
       // Tremorsense finds foes the party can't see, in fog.
       case "tremorsense":
         return target.side === "party" &&

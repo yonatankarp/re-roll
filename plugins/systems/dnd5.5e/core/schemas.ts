@@ -284,8 +284,15 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     rolls: z.literal(true).optional(), // it moves at half Speed, its prison with it, as Resilient Sphere's
   }),
   // The bearer is this far up, lifted by the effect of the same source without ":aloft", and falls once that's gone,
-  // as with Reverse Gravity (combat/falling.ts).
-  z.strictObject({ kind: z.literal("aloft"), feet: z.number().int() }),
+  // as with Reverse Gravity (combat/falling.ts). With `mode` it went up itself, flying or climbing, and stays while it
+  // has that Speed (and, flying, while it isn't Prone or Incapacitated, unless it can hover). `gentle` comes down
+  // unhurt, as from Levitate.
+  z.strictObject({
+    kind: z.literal("aloft"),
+    feet: z.number().int(),
+    mode: z.enum(["fly", "climb"]).optional(),
+    gentle: z.literal(true).optional(),
+  }),
   // The bearer can't attack with this action's weapon while it lasts, as one caught by a kuo-toa's Sticky Shield.
   z.strictObject({ kind: z.literal("stuck"), action: z.string() }),
   // The bearer can't benefit from the Invisible condition, as with a sahuagin baron's Fiendish Blood.
@@ -307,7 +314,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("movementMode"),
     mode: z.enum(["fly", "climb", "burrow"]),
     feet: z.number().int().min(5).optional(),
+    hover: z.literal(true).optional(), // a flyer that doesn't fall while Prone or Incapacitated, as with Fly
+    ceiling: z.literal(true).optional(), // a climber that goes along ceilings, not only walls, as with Spider Climb
   }),
+  // Difficult Terrain costs it no extra movement, and it escapes a grapple with 5 feet of movement, as with Freedom of
+  // Movement.
+  z.strictObject({ kind: z.literal("unhindered") }),
   // Knowing where creatures on the ground are, this far, through walls and darkness, as Stonecunning's Tremorsense.
   z.strictObject({
     kind: z.literal("tremorsense"),
@@ -431,6 +443,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .strictObject({ ability: AbilitySchema, dc: FormulaSchema })
       .optional(),
     hpAtMost: z.number().int().min(1).optional(), // only a target with this many Hit Points or fewer
+    web: z.literal(true).optional(), // webs hold it, which a Web Walker ignores, as with Web
     // only a target this size or smaller, as an Energy Pulse knocks only a Medium or smaller creature Prone
     maxSize: z
       .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
@@ -636,6 +649,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("lift"),
     feet: z.number().int().min(10),
     duration: DurationSchema,
+    gentle: z.literal(true).optional(), // floats down unhurt once it ends, as with Levitate
     grab: z
       .strictObject({ ability: AbilitySchema, dc: FormulaSchema })
       .optional(),
@@ -1103,7 +1117,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("jump"),
     feet: z.number().int().min(5).optional(),
     runUp: z.number().int().min(0).default(10),
+    ability: z.literal("dex").optional(), // jumps by Dexterity instead of Strength, as a cat's Jumper
   }),
+  // Webs never hold it (applyCondition `web`), as a spider's Web Walker.
+  z.strictObject({ kind: z.literal("webWalker") }),
   // Leaving a foe's reach never provokes an Opportunity Attack, as with Flyby or Agile.
   z.strictObject({ kind: z.literal("noOpportunityAttacks") }),
   // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
@@ -1454,6 +1471,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("shareSpace"),
     who: z.enum(["allies", "self"]),
     cover: z.boolean().default(false),
+    // What a creature takes when the bearer first enters its space on a move, as a fire elemental's Fire Form.
+    burn: z.array(DamageSchema).optional(),
   }),
   // Its area spells spare itself and up to `creatures` others of its side, as an evoker's Evocation Sculptor.
   z.strictObject({

@@ -1234,16 +1234,7 @@ function traitLeftOut(label: string): string | null {
     return "Disadvantage on spell attacks against it";
   }
   if (label === "Displacement") return "its end while Incapacitated";
-  if (/^(?:Swarm|Air Form|Water Form|Two-Dimensionality)$/.test(label)) {
-    return "stopping in another creature's space";
-  }
-  if (label === "Fire Form") {
-    return "stopping in another creature's space, and its Fire damage there";
-  }
   if (label === "Tunneler") return "the tunnel it leaves";
-  if (label === "Ephemeral Movement") {
-    return "moving without Opportunity Attacks";
-  }
   if (label === "Corrosive Form")
     return "what it does to weapons and ammunition";
   if (label === "Greater Lightning Absorption") return "its Speed increase";
@@ -1285,6 +1276,34 @@ function moveThroughOf(text: string): Passive | null {
     open: /\bvice versa\b/.test(text),
     terrain,
   };
+}
+
+// What a trait that moves through creatures adds: stopping in their space, as a swarm or an elemental's form does,
+// burning those it enters with Fire Form, or moving without Opportunity Attacks.
+function movingExtras(label: string, text: string): Passive[] {
+  if (/^(?:Swarm|Air Form|Water Form|Two-Dimensionality)$/.test(label)) {
+    return [{ kind: "shareSpace", who: "self", cover: false }];
+  }
+  const burn =
+    label === "Fire Form"
+      ? /\benters a creature[’']s space on a turn, that creature takes \d+ \((\d+d\d+)\) Fire damage\b/.exec(
+          text,
+        )?.[1]
+      : undefined;
+  if (burn) {
+    return [
+      {
+        kind: "shareSpace",
+        who: "self",
+        cover: false,
+        burn: [{ amount: { dice: burn }, type: "fire" }],
+      },
+    ];
+  }
+  return label === "Ephemeral Movement" &&
+    /\bmovement doesn[’']t provoke Opportunity Attacks\b/.test(text)
+    ? [{ kind: "noOpportunityAttacks" }]
+    : [];
 }
 
 // Traits whose whole effect on the grid is a Speed the stat block already gives, as Spider Climb's Climb Speed.
@@ -1914,8 +1933,22 @@ export function traitPassive(label: string, text: string): Passive | null {
     };
   }
   if (label === "Pack Tactics") return { kind: "packTactics" };
+  if (
+    label === "Web Walker" &&
+    /\bignores movement restrictions caused by webs\b/.test(text)
+  ) {
+    return { kind: "webWalker" };
+  }
   const through = moveThroughOf(text);
   if (through) return through;
+  if (
+    label === "Jumper" &&
+    /\bjump distance is determined using its Dexterity rather than its Strength\b/.test(
+      text,
+    )
+  ) {
+    return { kind: "jump", runUp: 10, ability: "dex" };
+  }
   const leap =
     /\bLong Jump is up to (\d+) feet\b[^.]*\bwith or without a running start\b/.exec(
       text,
@@ -2193,7 +2226,7 @@ function parseBlock(
           : null;
       const forms = formsOnly(label);
       if (passive && forms) shapePassives.push({ forms, passive });
-      else if (passive) passives.push(passive);
+      else if (passive) passives.push(passive, ...movingExtras(label, text));
       if (placed) passives.push(...placed);
       // "While Bloodied, … has Advantage on attack rolls and saving throws."
       if (

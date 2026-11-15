@@ -1000,6 +1000,22 @@ describe("monster traits read as passives", () => {
           "Spider Climb",
           "The beast can climb difficult surfaces, including along ceilings, without needing to make an ability check.",
         ),
+        entry(
+          "Fire Form",
+          "The beast can move through a space as narrow as 1 inch without expending extra movement to do so, and it can enter a creature’s space and stop there. The first time it enters a creature’s space on a turn, that creature takes 5 (1d10) Fire damage.",
+        ),
+        entry(
+          "Ephemeral Movement",
+          "The beast can move through other creatures and objects as if they were Difficult Terrain, and its movement doesn’t provoke Opportunity Attacks. It takes 5 (1d10) Force damage if it ends its turn inside an object.",
+        ),
+        entry(
+          "Jumper",
+          "The beast’s jump distance is determined using its Dexterity rather than its Strength.",
+        ),
+        entry(
+          "Web Walker",
+          "The beast ignores movement restrictions caused by webs, and it knows the location of any other creature in contact with the same web.",
+        ),
       ].join(""),
     );
     const through = (fields: object) => ({
@@ -1011,19 +1027,29 @@ describe("monster traits read as passives", () => {
       terrain: false,
       ...fields,
     });
+    const shares = { kind: "shareSpace", who: "self", cover: false };
     expect(MonsterSchema.parse(parsed?.entry).passives).toEqual([
       through({ creatures: "any", squeeze: true, open: true }),
+      shares,
       through({ creatures: "any", walls: true, costly: true }),
       through({ creatures: "any", squeeze: true }),
+      shares,
       through({ walls: true }),
       through({ walls: true, costly: true }),
       { kind: "jump", feet: 20, runUp: 0 },
       { kind: "jump", feet: 25, runUp: 10 },
+      through({ creatures: "any", squeeze: true }),
+      {
+        ...shares,
+        burn: [{ amount: { dice: "1d10" }, type: "fire" }],
+      },
+      through({ creatures: "any", walls: true, costly: true }),
+      { kind: "noOpportunityAttacks" },
+      { kind: "jump", runUp: 10, ability: "dex" },
+      { kind: "webWalker" },
     ]);
     // Spider Climb is the stat block's Climb Speed, so nothing is left out.
     expect(parsed?.notes).toEqual([
-      "partial: Swarm: left out stopping in another creature's space",
-      "partial: Air Form: left out stopping in another creature's space",
       "partial: Tunneler: left out the tunnel it leaves",
     ]);
   });

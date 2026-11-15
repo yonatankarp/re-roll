@@ -60,6 +60,7 @@ export const FRAME_KINDS = [
   "pickTargets",
   "precision",
   "fall",
+  "changeHeight",
   "projectile",
   "react",
   "reactAnswer",

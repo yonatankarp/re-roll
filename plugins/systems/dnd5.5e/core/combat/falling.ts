@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  type ContentAccess,
   frameHandler,
   PLAYER_ACTOR,
   type Frame,
@@ -34,24 +35,148 @@ import {
   leafEvents,
   rollSave,
 } from "./effects.ts";
-import { canAfford, type Context } from "./queries.ts";
+import { climbsCeilings, hovers, speedsOf } from "../movement-modes.ts";
+import { speedOf } from "../tactics.ts";
+import { canAfford, type Context, speedsLeft } from "./queries.ts";
 import { afterDamage, playerTakes, reactionCosts } from "./reactions.ts";
 
-// Falling. Reverse Gravity lifts creatures up and drops them once it ends; a fall deals 1d6 Bludgeoning per 10 feet,
-// at most 20d6, and leaves the creature Prone, unless a reaction such as Feather Fall lets it down gently.
-// shortcut: the grid has no height. A lifted creature is out of reach of those below it (reaches), and nothing
-// else reads how high it is.
+// Height and falling. A flyer or a climber goes up on its turn, and Reverse Gravity or Levitate lifts creatures up.
+// One up there is that much farther from those below (reaches, provokers). A lifted creature falls once its lift
+// ends, and a flyer once it's Prone, Incapacitated or can't move, unless it hovers, or once it loses its Fly Speed.
+// A fall deals 1d6 Bludgeoning per 10 feet, at most 20d6, and leaves the creature Prone, unless a reaction such as
+// Feather Fall lets it down gently, or Levitate floats it down.
+// shortcut: a square holds the creatures above it as well as those on the ground, so one up there still blocks the
+// way and takes a space.
 
 const ALOFT = ":aloft";
+// The source of a height a creature reached on its own Speed.
+export const FLIGHT = "flight";
+const STEP = 10;
 
-// How far up a creature is: its lift's height while what holds it there lasts, else 0.
+// How far up a creature is: its height while what holds it there lasts, else 0. One that went up itself stays until
+// it lands or falls (fallFrames).
 export function heightOf(actor: Actor): number {
   const aloft = actor.activeEffects.find(
     ({ modifier }) => modifier.kind === "aloft",
   );
-  return aloft?.modifier.kind === "aloft" && held(actor, aloft)
+  return aloft?.modifier.kind === "aloft" &&
+    (aloft.modifier.mode !== undefined || held(actor, aloft))
     ? aloft.modifier.feet
     : 0;
+}
+
+// The Speed it went up with, while it's up on its own.
+export function aloftMode(actor: Actor): "fly" | "climb" | null {
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind === "aloft" && modifier.mode) return modifier.mode;
+  }
+  return null;
+}
+
+// Whether a creature up on its own stays there: it still has that Speed and can move, and a flyer isn't Prone or
+// Incapacitated unless it hovers. A climber holds on the same way.
+function staysUp(
+  actor: Actor,
+  mode: "fly" | "climb",
+  access: ContentAccess,
+): boolean {
+  const stats = deriveStats(actor, access);
+  const feet = speedsOf(actor, stats).get(mode) ?? 0;
+  const stuck =
+    feet <= 0 ||
+    speedOf(actor, { ...stats, speed: feet }) <= 0 ||
+    hasCondition(actor, "grappled", "restrained");
+  const down = isDown(actor) || hasCondition(actor, "prone", ...INCAPACITATING);
+  return mode === "fly" && hovers(actor, stats) ? feet > 0 : !stuck && !down;
+}
+
+// Going up or down `STEP` feet with a fly or climb Speed, which costs that much movement: up from where it stands
+// (a climber beside a wall, or anywhere if it climbs ceilings), or down while it's up on its own.
+export function heightChoices(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+): readonly { readonly mode: "fly" | "climb"; readonly up: boolean }[] {
+  if (!state.combat || !actor.position) return [];
+  const height = heightOf(actor);
+  const own = aloftMode(actor);
+  if (height > 0 && !own) return []; // held up by a spell
+  const stats = deriveStats(actor, access);
+  const left = speedsLeft(actor, stats);
+  const choices: { mode: "fly" | "climb"; up: boolean }[] = [];
+  for (const mode of ["fly", "climb"] as const) {
+    if ((own && own !== mode) || (left.get(mode) ?? 0) < STEP) continue;
+    const grips =
+      mode === "fly" ||
+      climbsCeilings(actor, stats) ||
+      besideWall(actor, state);
+    if (grips && staysUp(actor, mode, access)) choices.push({ mode, up: true });
+    if (own === mode) choices.push({ mode, up: false });
+  }
+  return choices;
+}
+
+const HeightSchema = z.object({
+  actor: z.string(),
+  mode: z.enum(["fly", "climb"]),
+  up: z.boolean(),
+});
+
+// One such step, after the Opportunity Attacks it provokes, unless one of them stopped or felled it.
+function runChangeHeight(
+  payload: z.infer<typeof HeightSchema>,
+  context: Context,
+): SystemResult {
+  const actor = context.state.actors[payload.actor];
+  if (!actor || isDown(actor) || isDead(actor)) return {};
+  const left = speedsLeft(actor, deriveStats(actor, context)).get(payload.mode);
+  if (
+    (left ?? 0) < STEP ||
+    (payload.up && !staysUp(actor, payload.mode, context))
+  )
+    return {};
+  return { events: heightEvents(actor, payload) };
+}
+
+// The events of one such step: the new height, and the movement it costs.
+export function heightEvents(
+  actor: Actor,
+  { mode, up }: { readonly mode: "fly" | "climb"; readonly up: boolean },
+): SystemEvent[] {
+  const feet = heightOf(actor) + (up ? STEP : -STEP);
+  return [
+    ...(aloftMode(actor)
+      ? [
+          dndEvent(`${NS}:effectEnded`, {
+            actor: actor.id,
+            sourceId: FLIGHT,
+            casterId: actor.id,
+          }),
+        ]
+      : []),
+    ...(feet > 0
+      ? [
+          dndEvent(`${NS}:effectAdded`, {
+            actor: actor.id,
+            effect: {
+              sourceId: FLIGHT,
+              casterId: actor.id,
+              modifier: { kind: "aloft", feet, mode },
+              ends: "spellDuration",
+            },
+          }),
+        ]
+      : []),
+    ...(actor.position
+      ? [
+          dndEvent(`${NS}:moved`, {
+            actor: actor.id,
+            to: actor.position,
+            feet: STEP,
+          }),
+        ]
+      : []),
+  ];
 }
 
 function held(actor: Actor, aloft: Actor["activeEffects"][number]): boolean {
@@ -66,7 +191,7 @@ function held(actor: Actor, aloft: Actor["activeEffects"][number]): boolean {
 // spell is gone and it falls (fallFrames). One beside a wall may grab hold of it instead.
 // shortcut: there are no ceilings to strike, and a creature that walks into the area later isn't lifted.
 export function liftEvents(
-  { feet, duration, grab }: Extract<LeafEffect, { kind: "lift" }>,
+  { feet, duration, grab, gentle }: Extract<LeafEffect, { kind: "lift" }>,
   sourceId: string,
   caster: Actor,
   target: Actor,
@@ -106,7 +231,7 @@ export function liftEvents(
       effect: {
         sourceId: `${sourceId}${ALOFT}`,
         casterId: caster.id,
-        modifier: { kind: "aloft", feet },
+        modifier: { kind: "aloft", feet, ...(gentle ? { gentle } : {}) },
         ends: "spellDuration",
       },
     }),
@@ -125,21 +250,34 @@ function besideWall(actor: Actor, state: DndState): boolean {
   return false;
 }
 
-// The creatures whose lift has ended fall together, one frame for each height, so one Feather Fall can catch them.
-export function fallFrames(state: DndState): Frame[] {
-  const heights = new Map<number, string[]>();
-  for (const actor of Object.values(state.actors)) {
+// The creatures whose lift has ended or who can't stay up fall together, one frame for each height, so one Feather
+// Fall can catch them. Those Levitate held float down in a frame of their own.
+export function fallFrames(context: Context): Frame[] {
+  const heights = new Map<string, string[]>();
+  for (const actor of Object.values(context.state.actors)) {
     const aloft = actor.activeEffects.find(
       ({ modifier }) => modifier.kind === "aloft",
     );
-    if (aloft?.modifier.kind !== "aloft" || held(actor, aloft)) continue;
-    const { feet } = aloft.modifier;
-    heights.set(feet, [...(heights.get(feet) ?? []), actor.id]);
+    if (aloft?.modifier.kind !== "aloft") continue;
+    const { feet, mode, gentle } = aloft.modifier;
+    if (mode ? staysUp(actor, mode, context) : held(actor, aloft)) continue;
+    const key = `${String(feet)}${gentle ? ":gentle" : ""}`;
+    heights.set(key, [...(heights.get(key) ?? []), actor.id]);
   }
-  return [...heights].map(([feet, actors]) => frame("fall", { actors, feet }));
+  return [...heights].map(([key, actors]) =>
+    frame("fall", {
+      actors,
+      feet: Number.parseInt(key, 10),
+      ...(key.endsWith(":gentle") ? { gentle: true } : {}),
+    }),
+  );
 }
 
-const FallSchema = z.object({ actors: z.array(z.string()), feet: z.number() });
+const FallSchema = z.object({
+  actors: z.array(z.string()),
+  feet: z.number(),
+  gentle: z.boolean().optional(), // floats down unhurt, as from Levitate
+});
 
 // A reaction that answers a fall, and those of the fallers it can catch: on its own side, within its reach and seen.
 function catcher(
@@ -210,6 +348,7 @@ export function runFall(
         : [],
     ),
   );
+  if (payload.gentle) return { events };
   // Feather Fall: each bearer that can catches some of its side's fallers, the player once asked.
   const safe = new Set<string>();
   const passed: string[] = [];
@@ -284,4 +423,8 @@ export function runFall(
 
 export const fallingFrames = {
   [`${NS}:fall`]: frameHandler({ schema: FallSchema, run: runFall }),
+  [`${NS}:changeHeight`]: frameHandler({
+    schema: HeightSchema,
+    run: runChangeHeight,
+  }),
 };

@@ -914,6 +914,8 @@ export function leafEvents(
               modifier.condition === effect.condition,
           ) ||
           (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost) ||
+          (effect.web &&
+            hasPassive(deriveStats(target, context), "webWalker")) ||
           (effect.maxSize !== undefined &&
             sizeOf(target, context) > SIZES.indexOf(effect.maxSize))
         )

@@ -132,8 +132,8 @@ export function runCheckCombatEnd(context: Context): SystemResult {
     ...releasedSwallows(context.state, context),
   ];
   const result = fightOver(context);
-  // Those whose Reverse Gravity just ended fall (combat/falling.ts).
-  const falls = context.state.combat ? fallFrames(context.state) : [];
+  // Those whose lift just ended, or who can't stay up, fall (combat/falling.ts).
+  const falls = context.state.combat ? fallFrames(context) : [];
   return {
     ...result,
     events: [...released, ...(result.events ?? [])],

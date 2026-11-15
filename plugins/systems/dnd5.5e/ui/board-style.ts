@@ -120,6 +120,7 @@ const BOARD_CSS = `
 @keyframes dnd-pulse { 50% { opacity: 0.3; } }
 .dnd-token.down { filter: grayscale(1) brightness(0.6); opacity: 0.7; }
 .dnd-token.is-hidden { opacity: 0.55; }
+.dnd-token.aloft .dnd-disc { translate: 0 -5px; filter: drop-shadow(0 7px 3px rgb(0 0 0 / 45%)); }
 .dnd-token.is-dodging .dnd-disc { outline: 2px dashed rgb(207 227 255 / 85%); outline-offset: 3px; }
 .dnd-token[data-marks]:not([data-marks=""])::before {
   content: attr(data-marks);
