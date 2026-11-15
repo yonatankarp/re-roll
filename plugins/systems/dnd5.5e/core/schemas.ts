@@ -522,7 +522,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     follows: z.literal(true).optional(),
     perSlot: z.number().int().min(5).optional(), // feet more radius for each slot level above the spell's
     bare: z.literal(true).optional(), // it carries none of the spell's area, which another of its zones does
-    // its area's damage takes one of these types, picked as cast: the one the caster's foes resist least, as
+    // its area's damage takes one of these types, which the caster picks as it casts (combat/damage-choice.ts), as
     // Conjure Elemental's element
     choose: z.array(DamageTypeSchema).min(2).optional(),
     // a wall that encloses a creature lets it make this save to get out first, as Wall of Stone's Dexterity
