@@ -296,6 +296,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     halve: z.boolean().default(false),
     amount: AmountSchema.optional(),
   }),
+  // Adds to AC against the hit that triggered a reaction only, possibly turning it into a miss, as with Parry.
+  z.strictObject({
+    kind: z.literal("acAgainstHit"),
+    bonus: z.number().int().min(1),
+  }),
   // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts).
   z.strictObject({ kind: z.literal("counter") }),
   // Creatures that join the fight on the caster's side, using a companion stat block's `play` numbers at the
@@ -331,6 +336,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       ability: AbilitySchema.optional(),
       flatBonus: z.number().int().optional(),
       proficient: z.boolean().optional(), // false for a weapon the wielder has no training with
+      itemBonus: z.number().int().min(1).optional(), // a magic weapon's own bonus to hit
     }),
     damage: z.array(DamageSchema).min(1),
     onHit: LeafEffectsSchema,
@@ -402,6 +408,7 @@ export const ActivationSchema = z.strictObject({
   trigger: z
     .strictObject({
       hitByAttack: z.literal(true).optional(),
+      melee: z.literal(true).optional(), // only a melee attack's hit triggers it, as with Parry
       targetedBySpell: z.string().optional(),
       // Taken when a foe it can see within the activation's range casts a spell, as with Counterspell.
       spellCast: z.literal(true).optional(),
@@ -439,6 +446,21 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     oncePerTurn: z.boolean().default(false),
   }),
   z.strictObject({ kind: z.literal("packTactics") }),
+  // Leaving a foe's reach never provokes an Opportunity Attack, as with Flyby or Agile.
+  z.strictObject({ kind: z.literal("noOpportunityAttacks") }),
+  // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
+  // save, as a displacer beast's Avoidance does, instead of Dexterity saves only.
+  z.strictObject({
+    kind: z.literal("evasion"),
+    anySave: z.boolean().default(false),
+  }),
+  // Advantage on attack rolls while Bloodied, against a target missing Hit Points, or against a Frightened one.
+  z.strictObject({
+    kind: z.literal("attackAdvantage"),
+    when: z.enum(["bloodied", "targetHurt", "targetFrightened"]),
+  }),
+  // Its shape can't change, so Polymorph does nothing to it, as with a golem's Immutable Form.
+  z.strictObject({ kind: z.literal("immutableForm") }),
   z.strictObject({ kind: z.literal("undeadFortitude") }),
   z.strictObject({ kind: z.literal("magicResistance") }),
   z.strictObject({
@@ -840,6 +862,11 @@ const ItemBaseSchema = ContentEntrySchema.extend({
   weightLb: z.number().min(0).optional(),
 });
 
+const MagicBonusSchema = z.strictObject({
+  to: z.enum(["attack", "damage", "ac", "savingThrows", "spellAttack"]),
+  amount: z.number().int().min(1),
+});
+
 export const WeaponSchema = ItemBaseSchema.extend({
   type: z.literal("weapon"),
   category: z.enum(["simple", "martial"]),
@@ -867,6 +894,9 @@ export const WeaponSchema = ItemBaseSchema.extend({
     "topple",
     "vex",
   ]),
+  // A magic weapon made from a plain one, as a +2 Longsword: the plain weapon, and its own bonuses.
+  baseWeapon: ContentIdSchema.optional(),
+  bonuses: z.array(MagicBonusSchema).min(1).optional(),
 }).strict();
 export type Weapon = z.infer<typeof WeaponSchema>;
 
@@ -919,11 +949,6 @@ const RaritySchema = z.enum([
   "artifact",
 ]);
 
-const MagicBonusSchema = z.strictObject({
-  to: z.enum(["attack", "damage", "ac", "savingThrows", "spellAttack"]),
-  amount: z.number().int().min(1),
-});
-
 // Numbers read from the book's text. The engine doesn't apply them yet, so `automation` says what actually happens.
 const MagicItemSchema = ItemBaseSchema.extend({
   type: z.literal("magicItem"),
@@ -946,7 +971,7 @@ const MagicItemSchema = ItemBaseSchema.extend({
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
-  // Set when one entry covers several rarities, such as +1, +2 or +3.
+  // Set when one entry covers several rarities, such as +1, +2 or +3. Content names one as `<id>--<n>` (variants.ts).
   variants: z
     .array(
       z.strictObject({

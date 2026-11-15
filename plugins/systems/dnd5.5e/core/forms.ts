@@ -20,6 +20,17 @@ export function challengeOf(monster: Monster): number | null {
   return over === undefined ? Number(whole) : Number(whole) / Number(over);
 }
 
+// Immutable Form: a stat block that says its shape can't change.
+function immutable(actor: Actor, access: ContentAccess): boolean {
+  if (actor.source.kind !== "monster") return false;
+  const monster = MonsterSchema.safeParse(
+    access.content(actor.source.statBlockId),
+  ).data;
+  return (
+    monster?.passives.some(({ kind }) => kind === "immutableForm") ?? false
+  );
+}
+
 // A character's level, or a monster's Challenge Rating.
 export function levelOrChallenge(actor: Actor, access: ContentAccess): number {
   if (actor.source.kind === "character") {
@@ -63,6 +74,7 @@ export function weakestBeast(
   target: Actor,
   access: ContentAccess,
 ): { readonly id: string; readonly hp: number } | null {
+  if (immutable(target, access)) return null;
   const limit = levelOrChallenge(target, access);
   return beasts(access).find((beast) => beast.cr <= limit) ?? null;
 }

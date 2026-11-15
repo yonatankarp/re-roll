@@ -106,6 +106,7 @@ export function provokers(
   access: ContentAccess,
   path?: readonly Square[],
 ): readonly { readonly foe: Actor; readonly melee: KnownAction }[] {
+  if (hasPassive(deriveStats(actor, access), "noOpportunityAttacks")) return [];
   // Sentinel's Guardian: Disengage doesn't stop a Sentinel's Opportunity Attack.
   const disengaged = hasTactic(actor, "disengage");
   const walked = path ??

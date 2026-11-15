@@ -35,6 +35,13 @@ describe("golden saves", () => {
       const { registry, run } = await open(adventure);
       const loaded = loadSave(text, registry, run);
       if (!loaded.ok) throw new Error(loaded.error);
+      // Every item carried still resolves now that ids can name an item's version (variants.ts).
+      const { actors } = loaded.state.system as {
+        actors: Record<string, { inventory: string[] }>;
+      };
+      for (const id of Object.values(actors).flatMap((a) => a.inventory)) {
+        expect(registry.content(id), id).toBeDefined();
+      }
       // Real content edits since a golden still warn; the content hash must add no warning the old
       // raw-text hash wouldn't have given.
       const save = JSON.parse(text) as {
