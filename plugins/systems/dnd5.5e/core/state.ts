@@ -64,6 +64,7 @@ export const FRAME_KINDS = [
   "smite",
   "takeAction",
   "teleport",
+  "throwWeapon",
   "useAction",
   "useItem",
 ] as const;
@@ -73,6 +74,7 @@ export function frame(kind: FrameKind, payload: Frame["payload"] = {}): Frame {
   return { kind: `${NS}:${kind}`, payload };
 }
 export const LEGENDARY_USE = "legendary";
+export const PICKED_UP = "pickedUp"; // in usedThisTurn: the one free pick-up of a turn
 export const LEGENDARY_RESISTANCE = "legendaryResistance";
 
 export const TACTICS = [
@@ -145,6 +147,11 @@ export type ActiveEffect = z.infer<typeof ActiveEffectSchema>;
 const SquareSchema = z.strictObject({
   x: z.number().int(),
   y: z.number().int(),
+});
+const DroppedSchema = z.strictObject({
+  item: ContentIdSchema,
+  at: SquareSchema,
+  by: z.string(), // who threw it
 });
 const GridSchema = z.strictObject({
   width: z.number().int(),
@@ -267,6 +274,8 @@ export const StateSchema = z.strictObject({
       damageToParty: z.number().optional(),
       // The map is covered until the party sees it (fog.ts). Missing in older saves, whose fights show all of it.
       fog: z.literal(true).optional(),
+      // Weapons thrown and lying where they landed, until picked up. They go back to their throwers as it ends.
+      dropped: z.array(DroppedSchema).optional(),
     })
     .nullable(),
 });
@@ -334,6 +343,11 @@ const TradedSchema = z.strictObject({
   bought: z.boolean(), // false for sold
   priceCp: z.number().int().min(0),
   stowed: z.boolean(), // bought gear goes in the pack, as found gear does
+});
+const WeaponThrownSchema = DroppedSchema;
+const ItemPickedUpSchema = z.strictObject({
+  actor: z.string(),
+  index: z.number().int().min(0), // in combat.dropped
 });
 const ItemUsedSchema = z.strictObject({
   actor: z.string(),
@@ -494,6 +508,8 @@ export const EVENT_SCHEMAS = {
   [`${NS}:goldSpent`]: GoldSpentSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
+  [`${NS}:weaponThrown`]: WeaponThrownSchema,
+  [`${NS}:itemPickedUp`]: ItemPickedUpSchema,
   [`${NS}:legendaryActionTaken`]: LegendaryActionTakenSchema,
   [`${NS}:summoned`]: SummonedSchema,
   [`${NS}:legendaryResistanceUsed`]: ActorOnlySchema,
@@ -698,8 +714,19 @@ function settleSummons(state: DndState): DndState {
 }
 
 function endCombat(state: DndState): DndState {
+  // Whatever was thrown is gathered up after the fight.
+  const gathered = (state.combat?.dropped ?? []).reduce(
+    (after, { item, by }) =>
+      after.actors[by]
+        ? updateActor(after, by, (actor) => ({
+            ...actor,
+            inventory: [...actor.inventory, item],
+          }))
+        : after,
+    state,
+  );
   const actors = Object.fromEntries(
-    Object.entries(state.actors)
+    Object.entries(gathered.actors)
       .filter(
         ([, actor]) => actor.side === "party" && actor.source.kind !== "summon",
       )
@@ -1133,6 +1160,41 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
               },
             }
           : {}),
+      };
+    }
+    case `${NS}:weaponThrown`: {
+      const data = payload(WeaponThrownSchema, event);
+      const thrown = updateActor(state, data.by, (actor) => ({
+        ...actor,
+        inventory: without(actor.inventory, [data.item]),
+      }));
+      return thrown.combat
+        ? {
+            ...thrown,
+            combat: {
+              ...thrown.combat,
+              dropped: [...(thrown.combat.dropped ?? []), data],
+            },
+          }
+        : thrown;
+    }
+    case `${NS}:itemPickedUp`: {
+      const data = payload(ItemPickedUpSchema, event);
+      const found = state.combat?.dropped?.[data.index];
+      if (!state.combat || !found) return state;
+      const picked = updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        inventory: [...actor.inventory, found.item],
+        usedThisTurn: [...actor.usedThisTurn, PICKED_UP],
+      }));
+      return {
+        ...picked,
+        combat: {
+          ...state.combat,
+          dropped: state.combat.dropped?.filter(
+            (_, index) => index !== data.index,
+          ),
+        },
       };
     }
     case `${NS}:itemUsed`: {

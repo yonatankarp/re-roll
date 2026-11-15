@@ -378,6 +378,19 @@ const FIXTURES = [
     name,
     category: "origin",
     text: "Test.",
+    ...(id === "test:feat/initiate-cleric"
+      ? {
+          choices: [
+            {
+              kind: "spells",
+              id: "spell",
+              count: 1,
+              maxLevel: 1,
+              list: "srd52:class/cleric",
+            },
+          ],
+        }
+      : {}),
   })),
   ...(
     [
@@ -422,6 +435,80 @@ const FIXTURES = [
     feat: "test:feat/initiated",
     skills: ["athletics", "survival"],
     tool: "Test Tools",
+  },
+  trait("touched", [], { spells: { "1": ["srd52:spell/burning-hands"] } }),
+  trait("adept-table", [], {
+    spellsBySlot: {
+      "1": ["srd52:spell/burning-hands"],
+      "2": ["srd52:spell/fear"],
+    },
+  }),
+  {
+    id: "test:feat/touched",
+    name: "Touched",
+    category: "general",
+    text: "Test.",
+    grants: ["test:feature/touched"],
+    abilityIncrease: ["int", "wis", "cha"],
+    spellAbility: "increased",
+  },
+  {
+    id: "test:feat/chosen",
+    name: "Chosen",
+    category: "origin",
+    text: "Test.",
+    choices: [
+      { kind: "spellAbility", id: "ability", from: ["int", "wis", "cha"] },
+      {
+        kind: "spells",
+        id: "spell",
+        count: 1,
+        maxLevel: 1,
+        list: "srd52:class/wizard",
+      },
+    ],
+  },
+  {
+    id: "test:feat/connoisseur",
+    name: "Connoisseur",
+    category: "general",
+    text: "Test.",
+    spellAbility: { like: "test:feat/chosen" },
+    choices: [
+      {
+        kind: "spells",
+        id: "spell",
+        count: 1,
+        maxLevel: 1,
+        listOf: "test:feat/initiate",
+        from: ["srd52:spell/burning-hands", "srd52:spell/cure-wounds"],
+      },
+    ],
+  },
+  trait("thrower", [{ kind: "thrownDamage", bonus: 2 }]),
+  trait("bomber", [{ kind: "longShots" }, { kind: "farLobber", feet: 40 }]),
+  {
+    id: "test:item/acid",
+    name: "Acid",
+    type: "gear",
+    activation: {
+      cost: ["action"],
+      targeting: { creatures: 1, range: 20, side: "enemy" },
+      resolution: {
+        kind: "save",
+        ability: "dex",
+        dc: {
+          base: 8,
+          add: [
+            { kind: "abilityMod", ability: "dex" },
+            { kind: "proficiency" },
+          ],
+        },
+        damage: [{ amount: { dice: "2d6" }, type: "acid" }],
+        onFail: [],
+        onSuccess: [],
+      },
+    },
   },
 ];
 

@@ -449,9 +449,14 @@ export function runAttackRoll(
     traitAttackAdvantage(stats, attacker, target, targetStats);
   // Protection: an ally's Shield gives this roll, and the others against the target, Disadvantage.
   const shielded = guardFor(target, attacker, "allyAttacked", context);
+  const { normalRange } = resolution.attack;
+  const longRange =
+    normalRange !== undefined &&
+    distanceFeet(attacker.position, target.position) > normalRange;
   const hampered =
     shielded !== null ||
     crowded ||
+    longRange ||
     unseenTarget ||
     proneFar ||
     dodging(target) ||

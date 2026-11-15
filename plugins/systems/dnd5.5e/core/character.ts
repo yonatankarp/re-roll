@@ -15,6 +15,7 @@ import {
 import { z } from "zod";
 import {
   ABILITIES,
+  ABILITY_NAMES,
   type Ability,
   AbilitySchema,
   type AbilityScores,
@@ -486,9 +487,26 @@ function originChoices(
     ...species,
     ...backgroundFeat,
     ...feats.flatMap((id, index) =>
-      prefixed(`feat${String(index)}`, lookup(access, FeatSchema, id).choices),
+      owned(
+        lookup(access, FeatSchema, id),
+        prefixed(
+          `feat${String(index)}`,
+          lookup(access, FeatSchema, id).choices,
+        ),
+      ),
     ),
   ];
+}
+
+// The feat that asks each of a step's choices, when its spells have their own ability, so an answer can say whose
+// spells it's for.
+const choiceOwners = new WeakMap<ChoiceDef, string>();
+function owned<T extends ChoiceDef>(feat: Feat, choices: readonly T[]) {
+  const own =
+    feat.spellAbility !== undefined ||
+    feat.choices.some(({ kind }) => kind === "spellAbility");
+  for (const choice of own ? choices : []) choiceOwners.set(choice, feat.id);
+  return choices;
 }
 
 // Each spell choice looks at every spell, and companions make many of them when a run starts.
@@ -520,6 +538,22 @@ function classSpells(
     if (listed && !byName.has(spell.name)) byName.set(spell.name, spell);
   }
   return [...byName.values()];
+}
+
+// The spell list of the version of a feat taken, as Magic Initiate (Cleric) gives the Cleric's.
+function versionList(
+  featId: string,
+  feats: readonly string[],
+  access: ContentAccess,
+): string | undefined {
+  const version = feats.find(
+    (id) => id === featId || id.startsWith(`${featId}-`),
+  );
+  if (!version) return undefined;
+  for (const choice of lookup(access, FeatSchema, version).choices) {
+    if (choice.kind === "spells" && choice.list) return choice.list;
+  }
+  return undefined;
 }
 
 function skillLabel(skill: string): string {
@@ -646,9 +680,18 @@ export function choiceOptions(
     }
     case "spells": {
       const had = taken("spells");
-      const spells = classSpells(access, choice.list).filter(
+      const listed = choice.from ? new Set(choice.from) : null;
+      const list = choice.listOf
+        ? versionList(
+            choice.listOf,
+            [...taken("feats"), background.feat],
+            access,
+          )
+        : choice.list;
+      const spells = classSpells(access, list).filter(
         (spell) =>
           !had.has(spell.id) &&
+          (listed?.has(spell.id) ?? true) &&
           (choice.schools?.includes(spell.school) ?? true) &&
           (!choice.ritual || spell.ritual) &&
           (choice.maxLevel === 0
@@ -674,6 +717,21 @@ export function choiceOptions(
             (works(spell) ? "" : " (story only)"),
         })),
         prefer: spells.filter(works).map((spell) => spell.id),
+      };
+    }
+    case "spellAbility": {
+      const scores = buildAbilities(
+        base ?? originBuild(draft, placeholderEntry(classDef)),
+      );
+      return {
+        what: "your spellcasting ability for its spells",
+        options: choice.from.map((id) => ({ id, label: ABILITY_NAMES[id] })),
+        // The highest score, as a companion would cast with.
+        prefer: [
+          choice.from.reduce((best, item) =>
+            scores[item] > scores[best] ? item : best,
+          ),
+        ],
       };
     }
     case "option": {
@@ -816,10 +874,13 @@ function stepChoices(
   const featChoices = [...choices, ...optionChoices].flatMap((choice) =>
     choice.kind === "feat"
       ? (draft.picks[choice.id] ?? []).flatMap((id, index) =>
-          lookup(access, FeatSchema, id).choices.map((own) => ({
-            ...own,
-            id: `${choice.id}:feat${String(index)}-${own.id}`,
-          })),
+          owned(
+            lookup(access, FeatSchema, id),
+            lookup(access, FeatSchema, id).choices.map((own) => ({
+              ...own,
+              id: `${choice.id}:feat${String(index)}-${own.id}`,
+            })),
+          ),
         )
       : [],
   );
@@ -937,8 +998,15 @@ function answersOf(
             kind: "spells",
             values,
             ...(choice.freeCast ? { freeCast: true } : {}),
+            ...(choiceOwners.has(choice)
+              ? { feat: choiceOwners.get(choice) }
+              : {}),
           },
         ];
+      case "spellAbility": {
+        const feat = choiceOwners.get(choice);
+        return feat ? [{ kind: "spellAbility", ability: values[0], feat }] : [];
+      }
       case "weaponMastery":
         return [{ kind: "weaponMastery", values }];
       case "option":

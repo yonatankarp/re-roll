@@ -104,8 +104,15 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("level") }), // character level
   z.strictObject({ kind: z.literal("scaling"), key: z.string() }),
-  z.strictObject({ kind: z.literal("spellMod") }),
-  z.strictObject({ kind: z.literal("spellSaveDc") }),
+  // With `ability`, the one a feat's spells use instead of the character's (stats.ts castWith).
+  z.strictObject({
+    kind: z.literal("spellMod"),
+    ability: AbilitySchema.optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("spellSaveDc"),
+    ability: AbilitySchema.optional(),
+  }),
 ]);
 
 export const FormulaSchema = z.strictObject({
@@ -338,6 +345,8 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       flatBonus: z.number().int().optional(),
       proficient: z.boolean().optional(), // false for a weapon the wielder has no training with
       itemBonus: z.number().int().min(1).optional(), // a magic weapon's own bonus to hit
+      // Beyond this many feet, out to the targeting's range, the roll has Disadvantage, as a thrown weapon's long range.
+      normalRange: z.number().int().min(5).optional(),
     }),
     damage: z.array(DamageSchema).min(1),
     onHit: LeafEffectsSchema,
@@ -693,6 +702,18 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("spellRerollOnes"),
     damage: DamageTypeSchema,
   }),
+  // This much added to the damage of a weapon thrown with a ranged attack, as with Thrown Weapon Fighting.
+  z.strictObject({
+    kind: z.literal("thrownDamage"),
+    bonus: z.number().int().min(1),
+  }),
+  // A thrown weapon's long range has no Disadvantage, as with Bomber's Long Shots.
+  z.strictObject({ kind: z.literal("longShots") }),
+  // A vial or flask is thrown this far, as with Bomber's Far Lobber.
+  z.strictObject({
+    kind: z.literal("farLobber"),
+    feet: z.number().int().min(5),
+  }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
 
@@ -726,6 +747,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
   perTier: ScaleStepSchema.optional(),
   // Spells it always gives, from the character level in the key.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.
+  spellsBySlot: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched.
   freeCast: z.literal(true).optional(),
   // Its damage is added to a hit's, so it takes that hit's damage type, as a Battle Master maneuver's die does.
@@ -792,6 +815,15 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     schools: z.array(SpellSchoolSchema).min(1).optional(),
     ritual: z.boolean().optional(), // only spells with the Ritual tag
     freeCast: z.literal(true).optional(), // each leveled spell picked is also cast once per Long Rest without a slot
+    from: z.array(ContentIdSchema).min(1).optional(), // only these, as a feat's own table
+    // The list of the version of this feat the character took, as "the list you chose for Magic Initiate".
+    listOf: ContentIdSchema.optional(),
+  }),
+  // The spellcasting ability of the feat's spells, as Magic Initiate's "Intelligence, Wisdom, or Charisma".
+  z.strictObject({
+    kind: z.literal("spellAbility"),
+    id: z.string(),
+    from: z.array(AbilitySchema).min(1),
   }),
   z.strictObject({
     kind: z.literal("option"),
@@ -877,6 +909,16 @@ export const FeatSchema = ContentEntrySchema.extend({
   abilityIncrease: z.array(AbilitySchema).min(1).optional(), // its Ability Score Increase: +1 to one of these
   // Its prerequisite, met by any of these: the species, a trait or lineage it has, or a feat taken.
   requires: z.array(ContentIdSchema).min(1).optional(),
+  // The spellcasting ability of the spells it gives: this one, the one it raised ("increased"), the one chosen for
+  // a feat taken earlier (`like`, matched by id or by version as Magic Initiate's), or with none, its spellAbility
+  // choice, else the character's own.
+  spellAbility: z
+    .union([
+      AbilitySchema,
+      z.literal("increased"),
+      z.strictObject({ like: ContentIdSchema }),
+    ])
+    .optional(),
 }).strict();
 export type Feat = z.infer<typeof FeatSchema>;
 
@@ -950,6 +992,13 @@ export const WeaponSchema = ItemBaseSchema.extend({
   // A magic weapon made from a plain one, as a +2 Longsword: the plain weapon, and its own bonuses.
   baseWeapon: ContentIdSchema.optional(),
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
+  // A Thrown or Ammunition weapon's range in feet: normal, and long with Disadvantage.
+  range: z
+    .strictObject({
+      normal: z.number().int().min(5),
+      long: z.number().int().min(5),
+    })
+    .optional(),
 }).strict();
 export type Weapon = z.infer<typeof WeaponSchema>;
 
@@ -985,6 +1034,8 @@ const GearSchema = ItemBaseSchema.extend({
     ])
     .optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
+  // What using it does, as throwing a flask of Acid: an action that spends the item.
+  activation: ActivationSchema.optional(),
 }).strict();
 
 const ToolSchema = ItemBaseSchema.extend({
@@ -1182,6 +1233,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
     kind: z.literal("spells"),
     values: z.array(ContentIdSchema),
     freeCast: z.literal(true).optional(), // from a choice with `freeCast`
+    feat: ContentIdSchema.optional(), // the feat that asked, for its spells' ability
   }),
   z.strictObject({
     kind: z.literal("features"),
@@ -1202,6 +1254,11 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("abilities"),
     increases: AbilityIncreaseSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("spellAbility"),
+    ability: AbilitySchema,
+    feat: ContentIdSchema, // whose spells it's for
   }),
 ]);
 

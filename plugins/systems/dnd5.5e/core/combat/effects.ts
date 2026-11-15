@@ -51,7 +51,7 @@ import {
   traitSaveAdvantage,
 } from "../trait-rules.ts";
 import { dodging } from "../tactics.ts";
-import { AIM, ALL, HIT_DICE } from "./ids.ts";
+import { AIM, ALL, HIT_DICE, THROW_PREFIX, weaponItemId } from "./ids.ts";
 import { inArea, parseSquare, pushTo, type Square } from "../grid.ts";
 import { caughtBy } from "../targeting.ts";
 import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
@@ -891,6 +891,7 @@ export function resolveAction(
       break;
     }
     case "attack": {
+      const thrown: Frame[] = [];
       for (const target of targets) {
         for (const actionId of attackRoutine(action, actor, stats)) {
           frames.push(
@@ -901,8 +902,19 @@ export function resolveAction(
               ...(slotLevel === undefined ? {} : { slotLevel }),
             }),
           );
+          // Let go once the rolls are done, since each looks the weapon up again.
+          if (actionId.startsWith(THROW_PREFIX)) {
+            thrown.push(
+              frame("throwWeapon", {
+                actor: actor.id,
+                item: weaponItemId(actionId),
+                target: target.id,
+              }),
+            );
+          }
         }
       }
+      frames.push(...thrown);
       frames.push(...multiattackFrames(action, actor, targets[0], context));
       break;
     }

@@ -63,6 +63,7 @@
     damage: { dice: 1d4, type: piercing },
     properties: [finesse, light, thrown],
     mastery: nick,
+    range: { normal: 20, long: 60 },
   }
 - {
     id: "srd52:item/chain-mail",

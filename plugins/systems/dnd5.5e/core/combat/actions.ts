@@ -16,6 +16,7 @@ import {
   MOVE,
   parseOption,
   PASS,
+  PICK_UP,
   STAY,
 } from "./ids.ts";
 import {
@@ -132,6 +133,16 @@ export function runTakeAction(
   if (payload.answer === FLEE) return runFlee(actor, context);
 
   const [actionId = "", targetId = "", slot] = parseOption(payload.answer);
+  if (actionId === PICK_UP) {
+    return {
+      events: [
+        dndEvent(`${NS}:itemPickedUp`, {
+          actor: actor.id,
+          index: Number(targetId),
+        }),
+      ],
+    };
+  }
   if (targetId === PICK) {
     return { frames: [pickFrame(actor, actionId, slot, [], context)] };
   }

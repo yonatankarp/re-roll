@@ -14,7 +14,7 @@ import {
   hasCondition,
 } from "./state.ts";
 import { type Stats, deriveStats, evaluateFormula, lookup } from "./stats.ts";
-import { HIT_DICE } from "./combat/ids.ts";
+import { HIT_DICE, weaponItemId } from "./combat/ids.ts";
 
 // Species traits and feats that change rolls combat makes, kept out of combat.ts behind one call each.
 
@@ -110,7 +110,7 @@ export function weaponDamageDice(
   if (!stats.passives.some(({ kind }) => kind === "greatWeaponFighting")) {
     return dice;
   }
-  const itemId = actionId.startsWith("weapon:") ? actionId.slice(7) : "";
+  const itemId = weaponItemId(actionId);
   const item =
     itemId && access.content(itemId)
       ? lookup(access, ItemSchema, itemId)

@@ -5,6 +5,7 @@ import {
   INCAPACITATING,
   isDown,
   NS,
+  PICKED_UP,
   frame,
 } from "../state.ts";
 import { type ContentAccess, type Decision, PLAYER_ACTOR } from "#sdk";
@@ -16,11 +17,13 @@ import {
   ITEM_PREFIX,
   MOVE,
   PASS,
+  PICK_UP,
 } from "./ids.ts";
+import { distanceFeet } from "../grid.ts";
 import { deriveStats, lookup } from "../stats.ts";
 import { AIM_AREA, PICK } from "../targeting.ts";
 import { fleeOptions } from "../legendary.ts";
-import { PregenSchema } from "../schemas.ts";
+import { ItemSchema, PregenSchema } from "../schemas.ts";
 import { heroOptions } from "../character-sheet.ts";
 import {
   actorOf,
@@ -113,6 +116,17 @@ function turnOptions(
         });
       }
     }
+  }
+  // One weapon lying within 5 feet can be picked up a turn, for free.
+  if (!actor.usedThisTurn.includes(PICKED_UP)) {
+    (state.combat?.dropped ?? []).forEach((drop, index) => {
+      if (actor.position && distanceFeet(actor.position, drop.at) <= 5) {
+        options.push({
+          id: encodeOption(PICK_UP, index),
+          label: `Pick up ${lookup(access, ItemSchema, drop.item).name}`,
+        });
+      }
+    });
   }
   if (moveSquares(actor, state, stats).length > 0) {
     options.push({

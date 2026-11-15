@@ -152,9 +152,7 @@ function buildReferences(pregen: z.infer<typeof PregenSchema>): string[] {
     ...pregen.build.levels.flatMap((level) => [
       level.classId,
       ...level.answers.flatMap((answer) =>
-        answer.kind === "skills" || answer.kind === "abilities"
-          ? []
-          : answer.values,
+        answer.kind === "skills" || !("values" in answer) ? [] : answer.values,
       ),
     ]),
   ];
@@ -166,7 +164,11 @@ function levelReferences(level: z.infer<typeof ClassSchema>["levels"][number]) {
 
 function optionReferences(choices: readonly ChoiceDef[]): readonly string[] {
   return choices.flatMap((choice) =>
-    choice.kind === "option" ? choice.from : [],
+    choice.kind === "option"
+      ? choice.from
+      : choice.kind === "spells"
+        ? [...(choice.from ?? []), ...(choice.listOf ? [choice.listOf] : [])]
+        : [],
   );
 }
 
@@ -258,12 +260,21 @@ export const dnd55e = defineSystem<DndState>({
     feats: contentKind({
       idPrefix: "feat",
       schema: FeatSchema,
-      references: (item) => [...item.grants, ...optionReferences(item.choices)],
+      references: (item) => [
+        ...item.grants,
+        ...optionReferences(item.choices),
+        ...(typeof item.spellAbility === "object"
+          ? [item.spellAbility.like]
+          : []),
+      ],
     }),
     features: contentKind({
       idPrefix: "feature",
       schema: FeatureSchema,
-      references: (item) => Object.values(item.spells ?? {}).flat(),
+      references: (item) =>
+        [item.spells, item.spellsBySlot].flatMap((spells) =>
+          Object.values(spells ?? {}).flat(),
+        ),
     }),
     spells: contentKind({
       idPrefix: "spell",
