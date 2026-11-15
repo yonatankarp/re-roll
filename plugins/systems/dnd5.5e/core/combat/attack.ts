@@ -81,6 +81,7 @@ import {
   enemies,
   exemptFrom,
   findAction,
+  fitsType,
   hasFlag,
   hasPassive,
   isMelee,
@@ -1290,9 +1291,12 @@ export function runAfterHit(
   const target = actorOf(state, payload.target);
   const stats = deriveStats(attacker, context);
   const hitWith = findAction(attacker, payload.actionId, context);
-  const options = smitesFor(hitWith, attacker, stats).flatMap((action) =>
-    withUpcasts(action, attacker, stats, target.id, action.name),
-  );
+  // One limited to a size or type, as Hill's Tumble to Large or smaller, is offered only for a target that fits.
+  const options = smitesFor(hitWith, attacker, stats)
+    .filter((action) => fitsType(target, action.activation.targeting, context))
+    .flatMap((action) =>
+      withUpcasts(action, attacker, stats, target.id, action.name),
+    );
   if (isDown(target) || isDown(attacker) || options.length === 0) return {};
   return {
     frames: [
