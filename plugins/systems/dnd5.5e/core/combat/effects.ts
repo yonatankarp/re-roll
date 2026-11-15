@@ -92,6 +92,7 @@ import { summonEvents } from "./summon.ts";
 import { fueledDamage } from "./school.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
+import { headDamageEvents } from "./heads.ts";
 import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
@@ -107,6 +108,8 @@ import {
   fitsType,
   hasFlag,
   hasPassive,
+  inReach,
+  isMelee,
   reaches,
   rollBonus,
   slotToSpend,
@@ -251,7 +254,7 @@ function afterDamageEvents(
   stats: ReturnType<typeof deriveStats>,
   context: Context,
 ): SystemEvent[] {
-  const events: SystemEvent[] = [];
+  const events: SystemEvent[] = headDamageEvents(target, amount, type, stats);
   for (const passive of stats.passives) {
     if (passive.kind === "onDamage" && passive.damage.includes(type)) {
       for (const modifier of passive.modifiers) {
@@ -360,12 +363,54 @@ function takenEvents(
       }),
     ];
   }
+  // Suppressed Lycanthropy: the creature that drops comes back at once as another, or as itself again.
+  const reborn = deriveStats(target, context).passives.find(
+    (passive) => passive.kind === "reborn",
+  );
+  if (
+    reborn?.kind === "reborn" &&
+    target.hp > 0 &&
+    remaining >= 0 &&
+    target.source.kind === "monster" &&
+    !target.id.endsWith(":reborn") // only once
+  ) {
+    const id = reborn.monster ?? target.source.statBlockId;
+    const monster = lookup(context, MonsterSchema, id);
+    const hp = reborn.hp === "full" ? monster.hp : Math.floor(monster.hp / 2);
+    return [
+      dndEvent(`${NS}:damaged`, {
+        actor: target.id,
+        amount: amount - remaining,
+        type,
+        critical,
+        massive: false,
+      }),
+      { kind: "actorDefeated", actor: target.id },
+      dndEvent(`${NS}:summoned`, {
+        actor: {
+          ...freshActor({
+            id: `${target.id}:reborn`,
+            name: reborn.monster ? monster.name : target.name,
+            side: target.side,
+            source: { kind: "monster", statBlockId: id },
+            hp,
+            inventory: [],
+          }),
+          position: target.position,
+        },
+        after: target.id,
+      }),
+    ];
+  }
   const fortitude =
     target.hp > 0 &&
     remaining >= 0 &&
     !critical &&
-    type !== "radiant" &&
-    hasPassive(deriveStats(target, context), "undeadFortitude")
+    deriveStats(target, context).passives.some(
+      (passive) =>
+        passive.kind === "undeadFortitude" &&
+        !(passive.except ?? ["radiant"]).includes(type),
+    )
       ? rollSave(target, "con", 5 + amount, context)
       : null;
   if (fortitude?.saved) {
@@ -948,9 +993,34 @@ export function leafEvents(
           events.push(dndEvent(`${NS}:stabilized`, { actor: target.id }));
         }
         break;
+      case "exhaustion":
+        events.push(
+          dndEvent(`${NS}:exhaustionChanged`, {
+            actor: target.id,
+            levels: effect.levels,
+          }),
+        );
+        break;
+      // On a failed save, or a creature already at 0 Hit Points, as Steal Body or Consume Life. An automatic one
+      // is worked out with its damage (resolveAction).
+      case "slay":
+        if (!isDead(target) && target.hp <= effect.hpAtMost) {
+          events.push(
+            dndEvent(`${NS}:damaged`, {
+              actor: target.id,
+              amount: Math.max(0, target.hp) + target.tempHp,
+              type: "psychic",
+              critical: false,
+              massive: true,
+            }),
+            { kind: "actorDefeated", actor: target.id },
+          );
+        }
+        break;
       case "note":
       case "disperse":
-      case "slay":
+      case "animate":
+      case "reactionAttack":
       case "randomAction":
       case "raiseCorpse":
       case "reduceDamage":
@@ -1189,7 +1259,12 @@ export function rollSave(
         context,
         ability,
       ) ||
-      (ability === "dex" && hasCondition(target, "restrained")),
+      (ability === "dex" && hasCondition(target, "restrained")) ||
+      stats.passives.some(
+        (passive) =>
+          passive.kind === "saveDisadvantage" &&
+          passive.conditions.some((condition) => conditions.includes(condition)),
+      ),
   };
   const roll = rollD20(context.dice, {
     ...edge,
@@ -1300,7 +1375,8 @@ export function resolveTargets(
   const side = (
     targeting.side === "enemy" ? enemies(state, actor) : allies(state, actor)
   ).filter(
-    (item) => isDead(item) === dead && fitsType(item, targeting, context),
+    (item) =>
+      isDead(item) === dead && fitsType(item, targeting, context, actor),
   );
   if ("area" in targeting) {
     const { shape, radius } = targeting.area;
@@ -1314,7 +1390,7 @@ export function resolveTargets(
         targeting,
         actor,
         aim,
-        areaPool(targeting, context),
+        areaPool(targeting, context, actor),
       ).filter(
         (item) =>
           item.id === actor.id ||
@@ -1359,7 +1435,14 @@ export function resolveAction(
   // A helmed horror's Spell Immunity: the spells it names pass it by.
   const spell = isSpell(action, actor, context) ? action.name : null;
   const targets = spell
-    ? aimedAt.filter((target) => !immuneToSpell(target, spell, context))
+    ? sculpted(
+        aimedAt.filter(
+          (target) => !immuneToSpell(target, spell, context, action),
+        ),
+        action,
+        actor,
+        stats,
+      )
     : aimedAt;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
   const rerolled = rerolledTypes(stats, action.spellLevel !== null);
@@ -1543,6 +1626,9 @@ export function resolveAction(
         if (effect.kind === "raiseCorpse") {
           events.push(...raisedEvents(effect, actor, context));
         }
+        if (effect.kind === "animate") {
+          events.push(...animatedEvents(effect, actor, context));
+        }
       }
       events.push(
         ...zoneEvents(
@@ -1618,6 +1704,11 @@ export function resolveAction(
             const rolled = rolledActions(effect, actor, target, context);
             events.push(...rolled.events);
             frames.push(...rolled.frames);
+          }
+          if (effect.kind === "reactionAttack") {
+            const struck = reactionAttack(target, context);
+            events.push(...struck.events);
+            frames.push(...struck.frames);
           }
         }
       }
@@ -1868,6 +1959,82 @@ function rolledActions(
   return { events, frames };
 }
 
+// A creature spends its Reaction on one melee attack at the weakest foe in its reach, as Incite Rampage gives.
+function reactionAttack(
+  target: Actor,
+  context: Context,
+): { events: SystemEvent[]; frames: Frame[] } {
+  if (!target.budget.reaction || isDown(target)) {
+    return { events: [], frames: [] };
+  }
+  const { actions } = deriveStats(target, context);
+  const melee = actions.find(
+    (action) =>
+      action.activation.resolution.kind === "attack" &&
+      action.activation.cost.includes("action") &&
+      isMelee(action),
+  );
+  const foe = melee
+    ? [...inReach(melee, target, context.state, context)].sort(
+        (a, b) => a.hp - b.hp,
+      )[0]
+    : undefined;
+  if (!melee || !foe) return { events: [], frames: [] };
+  return {
+    events: [
+      dndEvent(`${NS}:budgetSpent`, { actor: target.id, kind: "reaction" }),
+    ],
+    frames: [
+      frame("useAction", {
+        actor: target.id,
+        actionId: melee.id,
+        target: foe.id,
+      }),
+    ],
+  };
+}
+
+// Copies of a monster, or another stat block, come to life next to the bearer, as Animate Trees or Soul Tattoo.
+// shortcut: they stay until they drop, not until the bearer dies or moves too far away.
+function animatedEvents(
+  effect: Extract<LeafEffect, { kind: "animate" }>,
+  actor: Actor,
+  context: Context,
+): SystemEvent[] {
+  if (actor.source.kind !== "monster") return [];
+  const id = effect.monster ?? actor.source.statBlockId;
+  const monster = lookup(context, MonsterSchema, id);
+  const open = [
+    ...teleportSquares(actor, effect.range, 0, context.state, context),
+  ].sort(
+    (a, b) =>
+      distanceFeet(actor.position, a) - distanceFeet(actor.position, b),
+  );
+  const made = Object.keys(context.state.actors).filter((key) =>
+    key.startsWith(`${actor.id}:animated-`),
+  ).length;
+  return open.slice(0, effect.count).map((square, index) =>
+    dndEvent(`${NS}:summoned`, {
+      actor: {
+        ...freshActor({
+          id: `${actor.id}:animated-${String(made + index + 1)}`,
+          name: `${monster.name} ${String(made + index + 1)}`,
+          side: actor.side,
+          source: {
+            kind: "monster",
+            statBlockId: id,
+            ...(effect.lacks.length > 0 ? { lacks: effect.lacks } : {}),
+          },
+          hp: monster.hp,
+          inventory: [],
+        }),
+        position: square,
+      },
+      after: actor.id,
+    }),
+  );
+}
+
 // A corpse rises in its own square, on the raiser's side, taking its turns right after the raiser's.
 // shortcut: how long it has been dead, and how many the raiser already controls, aren't counted.
 function raisedEvents(
@@ -1906,16 +2073,48 @@ function raisedEvents(
 }
 
 // Spell Immunity names spells by id; a spell is known here by its name, as a monster's cast of it carries.
+// Reflective Carapace adds every spell that makes a ranged attack roll.
+// shortcut: the carapace's 6 that turns the spell back on its caster is left out; the spell only misses it.
 function immuneToSpell(
   target: Actor,
   spell: string,
   context: Context,
+  action: KnownAction,
 ): boolean {
+  const { resolution } = action.activation;
+  const rangedAttack =
+    resolution.kind === "attack" &&
+    resolution.attack.type === "spell" &&
+    !isMelee(action);
   return deriveStats(target, context).passives.some(
     (passive) =>
       passive.kind === "spellImmunity" &&
-      passive.spells.some(
-        (id) => SpellSchema.safeParse(context.content(id)).data?.name === spell,
-      ),
+      ((passive.rangedAttacks === true && rangedAttack) ||
+        passive.spells.some(
+          (id) =>
+            SpellSchema.safeParse(context.content(id)).data?.name === spell,
+        )),
   );
+}
+
+// Evocation Sculptor: an area spell passes over the caster and up to that many of its side, who save and take nothing.
+function sculpted(
+  targets: readonly Actor[],
+  action: KnownAction,
+  actor: Actor,
+  stats: ReturnType<typeof deriveStats>,
+): readonly Actor[] {
+  const sculptor = stats.passives.find(
+    (passive) => passive.kind === "sculptor",
+  );
+  if (sculptor?.kind !== "sculptor" || !("area" in action.activation.targeting)) {
+    return targets;
+  }
+  let spared = 0;
+  return targets.filter((target) => {
+    if (target.side !== actor.side) return true;
+    if (target.id === actor.id) return false;
+    spared += 1;
+    return spared > sculptor.creatures;
+  });
 }
