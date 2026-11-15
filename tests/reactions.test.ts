@@ -1,4 +1,5 @@
-import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
+import { PLAYER_ACTOR, type Question, type SystemEvent } from "#sdk";
+import { DECLINE } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
 import { describe, expect, it } from "vitest";
 import {
   dealEvents,
@@ -222,6 +223,80 @@ describe("reactions to a d20 roll before it lands", () => {
     expect(save.saved).toBe(true);
     expect(payloads(save.events, "saveRolled")).toEqual([
       expect.objectContaining({ natural: 18 }),
+    ]);
+  });
+});
+
+describe("the player's say on reactions in the middle of a step", () => {
+  // A context that can ask, answering every question as `answer` says and keeping what was asked.
+  const asking = (
+    context: ReturnType<typeof at>,
+    answer: (question: Question) => string,
+  ) => {
+    const asked: Question[] = [];
+    return {
+      asked,
+      context: {
+        ...context,
+        ask: (question: Question) => {
+          asked.push(question);
+          return answer(question);
+        },
+      },
+    };
+  };
+
+  it("asks before spending a Luck Point on a failed save, and keeps the roll when the player declines", async () => {
+    const run = await testRun();
+    const bearer = hero(["lucky-saves"]);
+    const take = asking(
+      at(row([bearer]), scripted([3, 18]).dice, run),
+      (question) => question.options[0]?.id ?? "",
+    );
+    expect(rollSave(bearer, "con", 15, take.context).saved).toBe(true);
+    expect(take.asked.map((item) => item.id)).toEqual([
+      `${NS}:reaction:${PLAYER_ACTOR}:save:${PLAYER_ACTOR}`,
+    ]);
+    expect(take.asked[0]?.prompt).toContain("You roll 3");
+    const decline = asking(
+      at(row([bearer]), scripted([3, 18]).dice, run),
+      () => DECLINE,
+    );
+    const kept = rollSave(bearer, "con", 15, decline.context);
+    expect(kept.saved).toBe(false);
+    expect(payloads(kept.events, "resourceSpent")).toEqual([]);
+  });
+
+  it("asks the player about Vitality Ward before the damage lands, but not a companion", async () => {
+    const run = await testRun();
+    const player = asking(
+      contextOf(run, [hero(["ward"])], scripted([3, 3]).dice),
+      () => DECLINE,
+    );
+    const full = dealEvents(
+      hero(["ward"]),
+      [{ amount: 10, type: "necrotic" }],
+      false,
+      player.context,
+    );
+    expect(player.asked).toHaveLength(1);
+    expect(payloads(full.events, "damaged")).toEqual([
+      expect.objectContaining({ amount: 10 }),
+    ]);
+    const friend = friendOf(["ward"]);
+    const companion = asking(
+      contextOf(run, [hero([]), friend], scripted([3, 3]).dice),
+      () => DECLINE,
+    );
+    const warded = dealEvents(
+      friend,
+      [{ amount: 10, type: "necrotic" }],
+      false,
+      companion.context,
+    );
+    expect(companion.asked).toEqual([]);
+    expect(payloads(warded.events, "damaged")).toEqual([
+      expect.objectContaining({ amount: 4 }),
     ]);
   });
 });

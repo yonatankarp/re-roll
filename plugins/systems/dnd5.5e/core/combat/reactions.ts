@@ -251,9 +251,32 @@ export function respond(
   return { events: reactionCosts(reactor, action, context), natural, bonus };
 }
 
-// Settles a roll made inside other work, where nobody can be asked: everyone answers it by tactics, the player
-// too, as Guarded Mind and Interception are taken.
-// shortcut: the player isn't asked about saves and checks, since they're rolled in the middle of an effect.
+const ROLL_WORDS = { attack: "an attack", save: "a save", check: "a check" };
+
+// Asks the player whether to take a reaction in the middle of a step, as Lucky on a save. The step is run again
+// once they answer (SystemContext.ask). Where nobody can be asked, it's taken, as tactics only offer what helps.
+export function playerTakes(
+  key: string,
+  prompt: string,
+  action: KnownAction,
+  context: Context,
+): boolean {
+  if (!context.ask) return true;
+  return (
+    context.ask({
+      id: `${NS}:reaction:${PLAYER_ACTOR}:${key}`,
+      actor: PLAYER_ACTOR,
+      prompt,
+      options: [
+        { id: action.id, label: action.name },
+        { id: DECLINE, label: "Let it stand" },
+      ],
+    }) !== DECLINE
+  );
+}
+
+// Settles a roll made inside other work, a save or a check: monsters and companions answer it by tactics, and
+// the player is asked.
 export function settleRoll(
   roll: Roll,
   edge: Edge,
@@ -275,6 +298,17 @@ export function settleRoll(
     const found = rollResponder(current, passed, context);
     if (!found) break;
     passed.push(found.reactor.id);
+    if (
+      found.reactor.id === PLAYER_ACTOR &&
+      !playerTakes(
+        `${roll.kind}:${roll.roller.id}`,
+        `${roll.roller.id === PLAYER_ACTOR ? "You roll" : `${roll.roller.name} rolls`} ${String(current.natural)} (${String(current.total)}) on ${ROLL_WORDS[roll.kind]} against ${String(roll.goal)}: ${current.success ? "a success" : "a failure"}. Use ${found.action.name}?`,
+        found.action,
+        context,
+      )
+    ) {
+      continue;
+    }
     const taken = respond(found.reactor, found.action, current, edge, context);
     events.push(...taken.events);
     bonus += taken.bonus;
@@ -808,8 +842,8 @@ export function afterDamage(
   ];
 }
 
-// Before damage lands: a reaction that lessens it, as Vitality Ward or Elemental Absorption does, taken whenever it
-// applies.
+// Before damage lands: a reaction that lessens it, as Vitality Ward or Elemental Absorption does. The player is
+// asked; anyone else takes it whenever it applies.
 export function beforeDamage(
   target: Actor,
   amount: number,
@@ -827,7 +861,18 @@ export function beforeDamage(
       ready(target, item, stats)
     );
   });
-  if (!action) return { amount, events: [] };
+  if (
+    !action ||
+    (target.id === PLAYER_ACTOR &&
+      !playerTakes(
+        `damage:${type}`,
+        `${String(amount)} ${type} damage is coming. Use ${action.name}?`,
+        action,
+        context,
+      ))
+  ) {
+    return { amount, events: [] };
+  }
   let left = amount;
   for (const effect of effectsOf(action)) {
     if (effect.kind === "resistTrigger") left = Math.floor(left / 2);

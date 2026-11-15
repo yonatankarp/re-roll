@@ -12,6 +12,7 @@ import { PLAYER_ACTOR, isNarrativeEvent } from "../kernel/events.ts";
 import type {
   ContentEntry,
   GameSystem,
+  Question,
   RestOption,
   SceneAction,
 } from "../kernel/system.ts";
@@ -21,6 +22,8 @@ import {
   StoryEffectSchema,
   type StoryEffect,
 } from "./adventure.ts";
+
+type Ask = (question: Question) => string;
 
 export interface RunContext {
   readonly system: GameSystem;
@@ -266,6 +269,7 @@ function runResolveChoice(
   state: GameState,
   dice: Dice,
   payload: z.infer<typeof ResolveChoiceSchema>,
+  ask?: Ask,
 ): StoryResult {
   const scene = findScene(run, payload.scene);
   if (payload.answer.startsWith(REST_OPTION_PREFIX)) {
@@ -302,6 +306,7 @@ function runResolveChoice(
     dice,
     content: run.content,
     contentIds: run.contentIds,
+    ...(ask ? { ask } : {}),
   });
   assertOwnEvents(run, result.events);
   return {
@@ -321,6 +326,7 @@ function runApplyEffects(
   state: GameState,
   dice: Dice,
   effects: readonly StoryEffect[],
+  ask?: Ask,
 ): StoryResult {
   const [effect, ...rest] = effects;
   if (!effect) return {};
@@ -333,6 +339,7 @@ function runApplyEffects(
     dice,
     content: run.content,
     contentIds: run.contentIds,
+    ...(ask ? { ask } : {}),
   };
 
   switch (effect.kind) {
@@ -508,6 +515,7 @@ export function runStoryFrame(
   state: GameState,
   dice: Dice,
   frame: Frame,
+  ask?: Ask,
 ): StoryResult {
   switch (frame.kind) {
     case "story:resolveChoice":
@@ -516,6 +524,7 @@ export function runStoryFrame(
         state,
         dice,
         ResolveChoiceSchema.parse(frame.payload),
+        ask,
       );
     case "story:applyEffects":
       return runApplyEffects(
@@ -523,6 +532,7 @@ export function runStoryFrame(
         state,
         dice,
         ApplyEffectsSchema.parse(frame.payload).effects,
+        ask,
       );
     case "story:afterEncounter":
       return runAfterEncounter(
