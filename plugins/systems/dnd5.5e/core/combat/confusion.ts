@@ -18,7 +18,9 @@ import { strikeAction } from "./reactions.ts";
 // or Reaction (core/schemas.ts "confused").
 
 export const confusedBy = (actor: Actor) =>
-  actor.activeEffects.find(({ modifier }) => modifier.kind === "confused");
+  actor.activeEffects.find(
+    ({ modifier }) => modifier.kind === "confused" && modifier.spell,
+  );
 
 const HELD: LeafEffect = {
   kind: "modifier",

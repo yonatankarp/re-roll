@@ -754,7 +754,7 @@ describe("rolled outcomes", () => {
         {
           sourceId: `spell:${srd("confusion")}`,
           casterId: PLAYER_ACTOR,
-          modifier: { kind: "confused" },
+          modifier: { kind: "confused", spell: true },
           ends: "concentration",
           repeatSave: { ability: "wis", dc: 15 },
         },

@@ -9437,6 +9437,7 @@
         - kind: modifier
           modifier:
             kind: confused
+            spell: true
           duration:
             concentration: true
             minutes: 1

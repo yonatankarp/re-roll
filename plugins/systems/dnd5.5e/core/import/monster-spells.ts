@@ -340,10 +340,10 @@ export function spellcastingActions(
 }
 
 // "The priest casts Bless, Dispel Magic, or Healing Word, using …", or "uses Spellcasting to cast Fear": each spell
-// is an option of the same action.
+// is an option of the same action. A name followed by a bare "cast" is read too, as a slip in one printing has it.
 export const castItems = (text: string): string[] =>
   namesIn(
-    /\b(?:casts|to cast) (.+?)(?:,? (?:using|requiring|with|on|targeting|twice|at|in response)\b|\.(?:\s|$)|$)/.exec(
+    /\b(?:casts|to cast|[A-Z]\w+ (?:[A-Z]\w+ )?cast) (.+?)(?:,? (?:using|requiring|with|on|targeting|twice|at|in response)\b|\.(?:\s|$)|$)/.exec(
       text,
     )?.[1] ?? "",
   );
