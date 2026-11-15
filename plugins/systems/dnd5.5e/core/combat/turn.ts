@@ -8,6 +8,7 @@ import {
 } from "#sdk";
 import {
   type Actor,
+  type ActiveEffect,
   applyDndEvent,
   dndEvent,
   hasCondition,
@@ -41,6 +42,7 @@ import {
 } from "../trait-rules.ts";
 import {
   actorOf,
+  hasPassive,
   canAfford,
   CHECK_END,
   combatEnded,
@@ -49,11 +51,50 @@ import {
 } from "./queries.ts";
 import { concentrationFrame, dealEvents, rollSave } from "./effects.ts";
 import { releasedGrapples } from "./grapple.ts";
+import { distanceFeet } from "../grid.ts";
 import { regurgitationEvents, releasedSwallows } from "./swallow.ts";
 
 // The turn order: ending a fight, lingering effects, and the start and end of each turn.
 
 // Run after nearly every step of a fight, so it's also where grapples whose grappler fell or moved away end.
+// Harper Teamwork's Inspiring Willpower: saving out of Frightened or Paralyzed frees an ally within 30 feet of it too.
+function sharedRecovery(
+  saver: Actor,
+  modifier: ActiveEffect["modifier"],
+  context: Context,
+): SystemEvent[] {
+  if (
+    modifier.kind !== "condition" ||
+    (modifier.condition !== "frightened" &&
+      modifier.condition !== "paralyzed") ||
+    !hasPassive(deriveStats(saver, context), "sharedRecovery")
+  ) {
+    return [];
+  }
+  const { condition } = modifier;
+  const ally = Object.values(context.state.actors).find(
+    (other) =>
+      other.id !== saver.id &&
+      other.side === saver.side &&
+      distanceFeet(other.position, saver.position) <= 30 &&
+      hasCondition(other, condition),
+  );
+  const held = ally?.activeEffects.find(
+    (effect) =>
+      effect.modifier.kind === "condition" &&
+      effect.modifier.condition === condition,
+  );
+  return ally && held
+    ? [
+        dndEvent(`${NS}:effectEnded`, {
+          actor: ally.id,
+          sourceId: held.sourceId,
+          casterId: held.casterId,
+        }),
+      ]
+    : [];
+}
+
 export function runCheckCombatEnd(context: Context): SystemResult {
   const released = [
     ...releasedGrapples(context.state, context),
@@ -311,6 +352,9 @@ export function runFinishTurn(context: Context): SystemResult {
           casterId,
         }),
       );
+    }
+    if (!worse && (rolled.saved || resisted || rescued.length > 0)) {
+      events.push(...sharedRecovery(target, modifier, context));
     }
     // A second failure leaves the worse condition instead, with no more saves.
     if (

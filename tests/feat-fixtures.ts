@@ -738,6 +738,61 @@ const FIXTURES = [
       { kind: "weaponMastery", id: "mastery", count: 1, swap: "longRest" },
     ],
   },
+  trait("brawler", [], {
+    activations: [
+      {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "weapon", ability: "str" },
+          damage: [{ amount: { dice: "1d4" }, type: "bludgeoning" }],
+          onHitOncePerTurn: [
+            { kind: "forcedMove", feet: 5, direction: "away" },
+          ],
+          onHitSave: {
+            ability: "str",
+            orDex: true,
+            oncePerTurn: true,
+            dc: { base: 30 },
+            onFail: [
+              {
+                kind: "applyCondition",
+                condition: "grappled",
+                duration: { minutes: 1 },
+              },
+            ],
+          },
+        },
+      },
+    ],
+  }),
+  trait("bloodshed", [{ kind: "bloodiedDamage" }, { kind: "killAdvantage" }]),
+  trait("overload", [{ kind: "spellOverload", resource: "overload" }], {
+    resources: [{ id: "overload", max: { base: 1 }, recharge: [] }],
+  }),
+  trait("charge-attack", [{ kind: "chargeAttack" }]),
+  trait("stand-as-one", [{ kind: "standAsOne" }]),
+  trait("biter", [], {
+    resources: [{ id: "bite", max: { base: 1 }, recharge: [] }],
+    activations: [
+      {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "weapon", ability: "str" },
+          damage: [{ amount: { dice: "1d4" }, type: "piercing" }],
+          drain: { resource: "bite" },
+        },
+        label: "bite",
+      },
+    ],
+  }),
+  trait("cold-fire", [], {
+    spells: { "1": ["srd52:spell/burning-hands"] },
+    retype: { "srd52:spell/burning-hands": "cold" },
+  }),
   trait("together", [{ kind: "allySaveAdvantage", abilities: ["str"] }]),
   trait("bountiful", [
     { kind: "tempHpBonus", amount: 5 },

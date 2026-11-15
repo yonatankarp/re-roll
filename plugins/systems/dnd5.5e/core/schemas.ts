@@ -104,6 +104,11 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("level") }), // character level
   z.strictObject({ kind: z.literal("scaling"), key: z.string() }),
+  // The best of these abilities' modifiers, as "the score increased by this feat" when the feat raised one of them.
+  z.strictObject({
+    kind: z.literal("bestAbilityMod"),
+    abilities: z.array(AbilitySchema).min(1),
+  }),
   // With `ability`, the one a feat's spells use instead of the character's (stats.ts castWith).
   z.strictObject({
     kind: z.literal("spellMod"),
@@ -183,6 +188,11 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     damage: DamageTypeSchema,
   }),
   z.strictObject({ kind: z.literal("immunity"), damage: DamageTypeSchema }),
+  // A creature within 5 feet that hits the bearer with a melee attack takes this, as Flames of Phlegethos' flames.
+  z.strictObject({
+    kind: z.literal("retaliate"),
+    damage: z.array(DamageSchema).min(1),
+  }),
   // Can't gain this condition while it lasts, as Lordly Resolve's bolstered targets.
   z.strictObject({
     kind: z.literal("conditionImmunity"),
@@ -418,8 +428,15 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
         onFail: LeafEffectsSchema,
         onSuccess: LeafEffectsSchema,
         exempt: z.array(z.string()).optional(),
+        // Only once a turn, on the attacker's own turn, as Feral Pounce's Shove or Punch and Grab's Grapple.
+        oncePerTurn: z.literal(true).optional(),
+        orDex: z.literal(true).optional(), // the target saves with Strength or Dexterity, whichever is better
       })
       .optional(),
+    // Effects on a hit once a turn, on the attacker's own turn, as Tavern Brawler's push.
+    onHitOncePerTurn: z.array(LeafEffectSchema).min(1).optional(),
+    // A hit heals the attacker by the damage dealt, spending a use, as a Dhampir's Vampiric Bite.
+    drain: z.strictObject({ resource: z.string() }).optional(),
   }),
   z.strictObject({
     kind: z.literal("save"),
@@ -542,6 +559,8 @@ export const ActivationSchema = z.strictObject({
     .optional(),
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
   whileIn: z.literal("shadows").optional(), // only in Dim Light or Darkness, as Merge with Shadows
+  afterAction: z.literal(true).optional(), // only once the bearer has taken its action, as Blink Steps
+  label: z.string().min(1).optional(), // added to its feature's name, to tell two of a feature's activations apart
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
@@ -874,6 +893,33 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     damage: DamageTypeSchema,
     resource: z.string(),
   }),
+  // Once a turn, an attack made while Bloodied deals the Proficiency Bonus more, as Boon of Bloodshed's Power from Pain.
+  z.strictObject({ kind: z.literal("bloodiedDamage") }),
+  // An enemy dropping to 0 Hit Points gives the bearer's next attack Advantage, as Boon of Bloodshed's Killer's
+  // Fortune.
+  z.strictObject({ kind: z.literal("killAdvantage") }),
+  // Helping an attack on an enemy also gives it Disadvantage on its next save, as Harper Teamwork.
+  z.strictObject({ kind: z.literal("helpRider") }),
+  // Ending Frightened or Paralyzed on itself with a save ends it on an ally within 30 feet, as Inspiring Willpower.
+  z.strictObject({ kind: z.literal("sharedRecovery") }),
+  // A slot spell's damage dice count 1s and 2s as 3s and knock the damaged Prone, spending a use, as Boon of Erupting
+  // Spellpower.
+  z.strictObject({ kind: z.literal("spellOverload"), resource: z.string() }),
+  // Once on its turn, a melee hit after moving 10 feet closer to the target adds 1d8, as Charger's Charge Attack.
+  z.strictObject({ kind: z.literal("chargeAttack") }),
+  // Casting a spell that deals this type puts these effects on the bearer, as Flames of Phlegethos' flames.
+  z.strictObject({
+    kind: z.literal("castRider"),
+    damage: DamageTypeSchema,
+    effects: z.array(LeafEffectSchema).min(1),
+  }),
+  // A Long Rest leaves one of this item with the bearer, as Vampire's Plaything's Decanting.
+  z.strictObject({ kind: z.literal("restItem"), item: ContentIdSchema }),
+  // A Reaction keeps an ally within 5 feet from being pushed or pulled, as Tyro of the Gauntlet's Stand as One.
+  z.strictObject({ kind: z.literal("standAsOne") }),
+  // Once a turn, hitting a Bloodied creature that isn't a Construct or Undead spends a Hit Point Die to heal its roll
+  // plus the Constitution modifier, spending a use, as Bloodlust's Sanguine Feast.
+  z.strictObject({ kind: z.literal("bloodiedFeast"), resource: z.string() }),
   // A vial or flask is thrown this far, as with Bomber's Far Lobber.
   z.strictObject({
     kind: z.literal("farLobber"),
@@ -915,6 +961,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.
   spellsBySlot: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  // These spells' damage takes this type instead, as Rimekin's Cold Fire Magic.
+  retype: z.record(ContentIdSchema, DamageTypeSchema).optional(),
   // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched.
   freeCast: z.literal(true).optional(),
   // Its damage is added to a hit's, so it takes that hit's damage type, as a Battle Master maneuver's die does.
@@ -1197,6 +1245,8 @@ const GearSchema = ItemBaseSchema.extend({
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
   // What using it does, as throwing a flask of Acid: an action that spends the item.
   activation: ActivationSchema.optional(),
+  // Uses before it's gone, spent by activations that need it carried, as a Healer's Kit's ten.
+  uses: z.number().int().min(1).optional(),
 }).strict();
 
 const ToolSchema = ItemBaseSchema.extend({
