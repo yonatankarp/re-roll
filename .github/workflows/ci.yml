@@ -24,7 +24,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # Type-aware lint of the whole repo needs a little more than the default heap on macOS runners.
       - run: npm run lint
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run format:check
       - run: npm run check-pack
       - run: npm run check-pack:fixtures
