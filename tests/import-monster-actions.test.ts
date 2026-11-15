@@ -1021,6 +1021,7 @@ describe("monster traits read as passives", () => {
       { kind: "attackAdvantage", when: "targetFrightened" },
       { kind: "immutableForm" },
       { kind: "saveAdvantage", abilities: [], conditions: ["charmed"] },
+      { kind: "spellImmunity", spells: ["srd52:spell/sleep"] },
       { kind: "rerollOnes" },
       { kind: "magicResistance" },
       {
@@ -1029,7 +1030,6 @@ describe("monster traits read as passives", () => {
       },
     ]);
     expect(parsed?.notes).toEqual([
-      "partial: Fey Ancestry: left out immunity to magical sleep",
       "partial: Greater Magic Resistance: left out succeeding on every save against spells",
       "partial: Displacement: left out its end while Incapacitated",
     ]);
