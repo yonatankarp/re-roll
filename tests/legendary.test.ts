@@ -35,6 +35,7 @@ import {
   freshActor,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import type { KnownAction } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { makeJudge } from "../plugins/systems/dnd5.5e/core/worth.ts";
 
 const HIGH: Dice = { below: () => 0, roll: (sides) => sides };
 const LOW: Dice = { below: () => 0, roll: () => 1 };
@@ -408,6 +409,26 @@ describe("legendary actions", () => {
       state = result.state;
     }
     expect(taken).toBe(3);
+  });
+
+  it("count in the damage a round the tactics judge a legend by, more in its lair", async () => {
+    const plain = boss({ legendary: undefined });
+    const threat = async (
+      entry: Record<string, unknown>,
+      lair?: { at: number },
+    ): Promise<number> => {
+      const run = withContent(await base(), {
+        "goblin-ambush:monster/chief": entry,
+      });
+      const legend = chief();
+      const state = fight([hero(), legend], lair ? { lair } : {});
+      return makeJudge(contextOf(run, state, HIGH), legend).threat(legend);
+    };
+    const bite = await threat(plain);
+    expect(bite).toBeGreaterThan(0);
+    // Two uses of Snap, one Bite each; Roar deals no damage.
+    expect(await threat(boss())).toBeCloseTo(3 * bite);
+    expect(await threat(boss(), { at: 4 })).toBeCloseTo(4 * bite);
   });
 });
 
