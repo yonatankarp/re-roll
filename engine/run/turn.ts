@@ -45,6 +45,7 @@ export function createRunContext(
     adventure,
     content: registry.content,
     contentIds: registry.contentIds,
+    setting: adventure.setting,
   };
 }
 
@@ -244,6 +245,7 @@ function settle(
     dice,
     content: run.content,
     contentIds: run.contentIds,
+    setting: run.setting,
   });
 
   for (let work = 0; work < MAX_WORK_PER_STEP; work += 1) {
@@ -346,6 +348,7 @@ export function startRun(
     dice: world,
     content: run.content,
     contentIds: run.contentIds,
+    setting: run.setting,
   });
 
   const variants: Record<string, string> = {};

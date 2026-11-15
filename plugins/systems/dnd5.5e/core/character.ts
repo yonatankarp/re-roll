@@ -544,7 +544,7 @@ function classSpells(
 }
 
 // A feat's Prerequisite line beyond other feats and species: an ability score, Spellcasting or armor training, from
-// the classes taken so far and this one.
+// the classes taken so far and this one, and the campaign, from the adventure's setting.
 function meetsPrerequisite(
   feat: Feat,
   base: CharacterBuild | null,
@@ -553,6 +553,8 @@ function meetsPrerequisite(
 ): boolean {
   const needs = feat.prerequisite;
   if (!needs) return true;
+  if (needs.campaign !== undefined && needs.campaign !== access.setting)
+    return false;
   const classes = [
     classDef,
     ...(base?.levels ?? []).map((entry) =>
