@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  fueledDamage,
+  schoolCastEvents,
+} from "../plugins/systems/dnd5.5e/core/combat/school.ts";
+import { NS } from "../plugins/systems/dnd5.5e/core/state.ts";
 import { choiceOptions } from "../plugins/systems/dnd5.5e/core/character.ts";
 import { ClassSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
@@ -7,7 +12,13 @@ import {
   lookup,
   type Stats,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
-import { type Answers, hero, testRun } from "./feat-fixtures.ts";
+import {
+  type Answers,
+  contextOf,
+  hero,
+  scripted,
+  testRun,
+} from "./feat-fixtures.ts";
 
 const BURNING_HANDS = "srd52:spell/burning-hands";
 
@@ -174,5 +185,61 @@ describe("spell-table feats", () => {
     expect(wizard(1)).toContain(`spell:${BURNING_HANDS}`);
     expect(wizard(1)).not.toContain("spell:srd52:spell/fear");
     expect(wizard(3)).toContain("spell:srd52:spell/fear");
+  });
+
+  it("rides on casting a spell of the adept's school with a slot", async () => {
+    const run = await testRun();
+    const MAGE_ARMOR = {
+      id: "spell:srd52:spell/mage-armor",
+      name: "Mage Armor",
+      activation: {
+        cost: ["action" as const, "slot" as const],
+        targeting: { self: true as const },
+        resolution: { kind: "automatic" as const, damage: [], effects: [] },
+      },
+      spellLevel: 1,
+    };
+    const cast = (traits: readonly string[], slot?: number, hp = 10) => {
+      const actor = { ...hero(traits, { level: 3 }), hp };
+      const { dice } = scripted([4, 6]);
+      return schoolCastEvents(
+        actor,
+        MAGE_ARMOR,
+        slot,
+        contextOf(run, [actor], dice),
+      ).map((event) => [event.kind, "payload" in event ? event.payload : null]);
+    };
+    expect(cast(["warding"], 2)).toEqual([
+      [`${NS}:tempHpGained`, { actor: "player", amount: 4 }],
+    ]);
+    expect(cast(["warding"])).toEqual([]); // cast without a slot
+    expect(cast(["augmenting"], 2)[0]?.[1]).toMatchObject({
+      effect: {
+        modifier: { kind: "bonus", to: "speed" },
+        ends: "casterTurnEnd",
+      },
+    });
+    // Two Hit Point Dice of 4 and 6, plus the slot's level 2, healed while hurt.
+    expect(cast(["life"], 2, 5).map(([kind]) => kind)).toEqual([
+      `${NS}:resourceSpent`,
+      `${NS}:resourceSpent`,
+      `${NS}:healed`,
+    ]);
+    expect(cast(["life"], 2, 5)[2]?.[1]).toMatchObject({ amount: 12 });
+
+    const FIREBALL = { ...MAGE_ARMOR, id: "spell:srd52:spell/fireball" };
+    const fuel = (used: readonly string[]) => {
+      const actor = {
+        ...hero(["fueled"], { level: 3 }),
+        usedThisTurn: [...used],
+      };
+      return fueledDamage(
+        actor,
+        FIREBALL,
+        contextOf(run, [actor], scripted([7, 3]).dice),
+      ).bonus;
+    };
+    expect(fuel([])).toBe(10);
+    expect(fuel(["fueled"])).toBe(0);
   });
 });

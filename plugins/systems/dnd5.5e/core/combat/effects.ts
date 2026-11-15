@@ -57,6 +57,7 @@ import { caughtBy } from "../targeting.ts";
 import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
 import { teleportFrame } from "./movement.ts";
 import { summonEvents } from "./summon.ts";
+import { fueledDamage } from "./school.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
@@ -736,16 +737,23 @@ export function resolveAction(
     );
   };
 
-  const rollSharedDamage = (list: readonly Damage[]) =>
-    list.map(({ amount, type }) => ({
-      total: rollAmount(
-        amount,
-        stats,
-        masteredDice(context.dice, type, mastered, rerolled),
-        critical ? 2 : 1,
-      ),
+  const rollSharedDamage = (list: readonly Damage[]) => {
+    const fuel =
+      list.length > 0
+        ? fueledDamage(actor, action, context)
+        : { bonus: 0, events: [] };
+    events.push(...fuel.events);
+    return list.map(({ amount, type }, index) => ({
+      total:
+        rollAmount(
+          amount,
+          stats,
+          masteredDice(context.dice, type, mastered, rerolled),
+          critical ? 2 : 1,
+        ) + (index === 0 ? fuel.bonus : 0),
       type,
     }));
+  };
 
   switch (resolution.kind) {
     case "automatic": {

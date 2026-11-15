@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { concentrationBonus } from "./school.ts";
 import {
   type Actor,
   applyDndEvent,
@@ -1370,7 +1371,7 @@ export function runConcentrationSave(
     : rollSave(
         actor,
         "con",
-        payload.dc,
+        payload.dc - concentrationBonus(actor, context),
         context,
         false,
         0,

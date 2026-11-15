@@ -445,6 +445,17 @@ export const ActivationSchema = z.strictObject({
 });
 export type Activation = z.infer<typeof ActivationSchema>;
 
+export const SpellSchoolSchema = z.enum([
+  "abjuration",
+  "conjuration",
+  "divination",
+  "enchantment",
+  "evocation",
+  "illusion",
+  "necromancy",
+  "transmutation",
+]);
+
 export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("modifier"), modifier: ModifierSchema }),
   z.strictObject({
@@ -709,6 +720,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // A thrown weapon's long range has no Disadvantage, as with Bomber's Long Shots.
   z.strictObject({ kind: z.literal("longShots") }),
+  // Casting a spell of this school, as an Arcana Unleashed adept's: with a slot, Temporary Hit Points of twice its
+  // level ("ward"), up to two Hit Point Dice of healing plus its level ("life") or 5 feet of Speed a level this turn
+  // ("augment"); once a turn up to two Hit Point Dice added to its damage ("fueled"); or a bonus to keep
+  // Concentration on it ("persistent"). combat/school.ts.
+  z.strictObject({
+    kind: z.literal("schoolCast"),
+    school: SpellSchoolSchema,
+    rider: z.enum(["ward", "life", "augment", "fueled", "persistent"]),
+  }),
   // A vial or flask is thrown this far, as with Bomber's Far Lobber.
   z.strictObject({
     kind: z.literal("farLobber"),
@@ -767,17 +787,6 @@ export const FeatureSchema = ContentEntrySchema.extend({
   choices: z.lazy(() => z.array(ChoiceDefSchema)).default([]), // asked when it's taken as a class option
 }).strict();
 export type Feature = z.infer<typeof FeatureSchema>;
-
-export const SpellSchoolSchema = z.enum([
-  "abjuration",
-  "conjuration",
-  "divination",
-  "enchantment",
-  "evocation",
-  "illusion",
-  "necromancy",
-  "transmutation",
-]);
 
 export const ChoiceDefSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("subclass"), id: z.string() }),

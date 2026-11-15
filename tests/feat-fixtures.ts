@@ -485,6 +485,16 @@ const FIXTURES = [
       },
     ],
   },
+  trait("warding", [
+    { kind: "schoolCast", school: "abjuration", rider: "ward" },
+  ]),
+  trait("augmenting", [
+    { kind: "schoolCast", school: "abjuration", rider: "augment" },
+  ]),
+  trait("life", [{ kind: "schoolCast", school: "abjuration", rider: "life" }]),
+  trait("fueled", [
+    { kind: "schoolCast", school: "evocation", rider: "fueled" },
+  ]),
   trait("thrower", [{ kind: "thrownDamage", bonus: 2 }]),
   trait("bomber", [{ kind: "longShots" }, { kind: "farLobber", feet: 40 }]),
   {
