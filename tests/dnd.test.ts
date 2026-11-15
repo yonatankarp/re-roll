@@ -1544,7 +1544,8 @@ describe("encounter outcomes in real fights", () => {
     expect(seen.fled).toBeGreaterThan(0);
     expect(seen.captured).toBeGreaterThan(0);
     expect(seen.road).toBeGreaterThan(0);
-  }, 30_000);
+    // 80 fights take about 6 s, and CI's coverage run about five times that.
+  }, 60_000);
 
   it("replays exactly, from inputs and from a save", async () => {
     const { registry, run } = await outcomesRun();
