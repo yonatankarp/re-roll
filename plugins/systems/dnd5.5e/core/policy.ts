@@ -21,7 +21,7 @@ import { coverBonus, coverFor, difficultSquares } from "./sight.ts";
 import { type Decision } from "#sdk";
 import { ADD, AIM_AREA, BACK, CONFIRM, nextPick, PICK } from "./targeting.ts";
 import { chooseBossAction, FLEE } from "./legendary.ts";
-import { DECLINE, MOVE, parseOption, STAY } from "./combat/ids.ts";
+import { DECLINE, MOVE, parseOption, PICK_UP, STAY } from "./combat/ids.ts";
 import { changed, gearOptions } from "./gear.ts";
 import {
   actorOf,
@@ -595,6 +595,9 @@ export function choosePolicy(decision: Decision, context: Context): string {
     bestAim.set(action.id, score);
     return score;
   };
+  // A weapon within reach on the ground is picked up first, since it's free.
+  const pickUp = decision.options.find(({ id }) => id.startsWith(PICK_UP));
+  if (pickUp && actor.side === "party") return pickUp.id;
   // A hidden option, such as a potion at full health, only answers older saves.
   const parsed = decision.options.flatMap((option) => {
     if (option.hidden) return [];

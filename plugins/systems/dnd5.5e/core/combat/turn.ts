@@ -1,3 +1,4 @@
+import { afterDamage, reactFrames } from "./reactions.ts";
 import {
   type Frame,
   PLAYER_ACTOR,
@@ -214,7 +215,23 @@ export function runLingeringTick(
       }),
     );
   }
-  return { events, frames: [...concentrationFrame(target, dealt), CHECK_END] };
+  return {
+    events,
+    frames: [
+      ...afterDamage(
+        target,
+        dealt,
+        {
+          ...(caster ? { source: caster.id } : {}),
+          types: damage.map(({ type }) => type),
+          spell: effect.sourceId.startsWith("spell:"),
+        },
+        concentrationFrame(target, dealt),
+        { ...context, state: events.reduce(applyDndEvent, state) },
+      ),
+      CHECK_END,
+    ],
+  };
 }
 
 // A monster killed by something at the start of its own turn has no turn to take.
@@ -278,6 +295,7 @@ export function runFinishTurn(context: Context): SystemResult {
             deriveStats(target, context),
             rolled.events,
             events,
+            context.dice,
           );
     events.push(...rescued);
     const worse = (
@@ -362,8 +380,18 @@ export function runAdvanceTurn(
     ...reactiveEvents(after, context),
   ];
   const ticks = next ? lingeringFrames(next, "turnStart") : [];
-  return ticks.length > 0
-    ? { events, frames: [...ticks, frame("afterTurnStart", {})] }
+  // A reaction to a creature starting its turn nearby, as with Unnerving Gaze.
+  const watched = next
+    ? reactFrames(
+        { kind: "turnStart", actor: next.id },
+        { ...context, state: events.reduce(applyDndEvent, state) },
+      )
+    : [];
+  return ticks.length + watched.length > 0
+    ? {
+        events,
+        frames: [...ticks, ...watched, frame("afterTurnStart", {})],
+      }
     : { events };
 }
 

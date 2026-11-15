@@ -4,6 +4,8 @@ import {
   type Actor,
   dndEvent,
   type DndState,
+  equipped,
+  forAttacker,
   hasCondition,
   INCAPACITATING,
   isDead,
@@ -31,7 +33,7 @@ import {
 } from "../grid.ts";
 import { speedOf } from "../tactics.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
-import { encodeOption } from "./ids.ts";
+import { encodeOption, THROW_PREFIX, weaponItemId } from "./ids.ts";
 import { swallowerOf } from "./swallow.ts";
 import {
   type Ability,
@@ -80,9 +82,12 @@ export function hasFlag(
   stats: Stats,
   ability?: Ability,
   attackerType?: string, // the attacker's creature type, for attacksAgainst
+  attackerId?: string, // for attacksAgainst, which a caster's own Advantage needs
 ): boolean {
   return [
-    ...actor.activeEffects.map((effect) => effect.modifier),
+    ...actor.activeEffects
+      .filter((effect) => forAttacker(effect, attackerId))
+      .map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
   ].some(
     (modifier) =>
@@ -436,10 +441,20 @@ export function attackRoutine(
   ) {
     return [action.id];
   }
+  // Each throw lets go of one weapon, so it throws no more than it holds.
+  const held = action.id.startsWith(THROW_PREFIX)
+    ? throwsLeft(actor, action.id)
+    : stats.multiattack;
   return (
     stats.routines?.[action.id] ??
-    Array<string>(stats.multiattack).fill(action.id)
+    Array<string>(Math.min(stats.multiattack, held)).fill(action.id)
   );
+}
+
+// The copies of a throw's weapon the actor holds.
+export function throwsLeft(actor: Actor, actionId: string): number {
+  const itemId = weaponItemId(actionId);
+  return equipped(actor).filter((id) => id === itemId).length;
 }
 
 // The slot a cast spends: the one chosen, or else the lowest that will do.
@@ -518,7 +533,7 @@ export function carriesExtraDice(
   access: Pick<ContentAccess, "content">,
 ): boolean {
   if (attacker.source.kind !== "character") return true;
-  const itemId = action.id.startsWith("weapon:") ? action.id.slice(7) : "";
+  const itemId = weaponItemId(action.id);
   const item =
     itemId && access.content(itemId)
       ? lookup(access, ItemSchema, itemId)

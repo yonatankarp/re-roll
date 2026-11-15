@@ -1,10 +1,17 @@
-import { PLAYER_ACTOR } from "#sdk";
+import {
+  AWAIT_FRAME,
+  type Decision,
+  type Frame,
+  PLAYER_ACTOR,
+  type SystemEvent,
+} from "#sdk";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import type { Dice } from "../engine/kernel/dice.ts";
 import type { RunContext } from "../engine/run/turn.ts";
 import type { CharacterBuild } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
   type Actor,
+  applyDndEvent,
   type DndState,
   freshActor,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
@@ -18,6 +25,26 @@ export const trait = (id: string, passives: readonly object[], extra = {}) => ({
   passives,
   ...extra,
 });
+const reacting = (
+  id: string,
+  cost: readonly unknown[],
+  trigger: object,
+  effects: readonly object[],
+  targeting: object = { self: true },
+) =>
+  trait(id, [], {
+    resources: [
+      { id, max: { base: 1 }, recharge: [{ on: "longRest", amount: "all" }] },
+    ],
+    activations: [
+      {
+        cost: [...cost, { resource: id }],
+        trigger,
+        targeting,
+        resolution: { kind: "automatic", effects },
+      },
+    ],
+  });
 const FIXTURES = [
   {
     id: "test:species/plain",
@@ -142,6 +169,179 @@ const FIXTURES = [
           kind: "automatic",
           damage: [{ amount: { dice: "1d8" }, type: "thunder" }],
           effects: [],
+        },
+      },
+    ],
+  }),
+  // Reactions to rolls, damage, walks and attacks on others (combat/reactions.ts).
+  reacting(
+    "bountiful-luck",
+    ["reaction"],
+    {
+      rolled: {
+        rolls: ["attack", "save", "check"],
+        by: "ally",
+        when: "natural1",
+      },
+      within: 30,
+    },
+    [{ kind: "reroll" }],
+  ),
+  reacting(
+    "second-chance",
+    ["reaction"],
+    {
+      rolled: { rolls: ["attack"], by: "foe", when: "hit" },
+    },
+    [{ kind: "reroll" }],
+  ),
+  reacting(
+    "fate",
+    [],
+    {
+      rolled: { rolls: ["attack", "save", "check"], by: "any", when: "any" },
+      within: 60,
+    },
+    [{ kind: "rollBonus", amount: { dice: "2d4" }, either: true }],
+  ),
+  reacting(
+    "lucky-saves",
+    [],
+    {
+      rolled: { rolls: ["save", "check"], by: "self", when: "failed" },
+    },
+    [{ kind: "reroll" }],
+  ),
+  reacting(
+    "omen",
+    ["reaction"],
+    {
+      rolled: {
+        rolls: ["attack", "save", "check"],
+        by: "selfOrAlly",
+        when: "any",
+      },
+    },
+    [{ kind: "replaceRoll" }],
+  ),
+  reacting(
+    "polearm",
+    ["reaction"],
+    { entersReach: true },
+    [{ kind: "strike" }],
+    {
+      creatures: 1,
+      range: 10,
+      side: "enemy",
+    },
+  ),
+  reacting(
+    "guardian",
+    ["reaction"],
+    { foeHitsOther: true, within: 5 },
+    [{ kind: "strike" }],
+    {
+      creatures: 1,
+      range: 5,
+      side: "enemy",
+    },
+  ),
+  reacting(
+    "retaliate",
+    ["reaction"],
+    { struck: true, melee: true, within: 5 },
+    [{ kind: "strike" }],
+    {
+      creatures: 1,
+      range: 5,
+      side: "enemy",
+    },
+  ),
+  reacting(
+    "ward",
+    ["reaction"],
+    { damaged: true, before: true, damagedBy: ["necrotic"] },
+    [
+      {
+        kind: "reduceDamage",
+        halve: false,
+        amount: { dice: "1d6", diceCount: "proficiency" },
+      },
+    ],
+  ),
+  reacting("reveler", [], { inspirationSpent: true, within: 60 }, [
+    { kind: "inspiration" },
+  ]),
+  reacting("alert-swap", [], { initiative: true }, [
+    { kind: "swapInitiative" },
+  ]),
+  reacting("swap", ["reaction"], { attacked: true }, [{ kind: "redirect" }]),
+  reacting("split", ["reaction"], { damaged: true, damagedBy: ["slashing"] }, [
+    { kind: "split", minHp: 10, times: 1 },
+  ]),
+  reacting("riposte", ["reaction"], { hitByAttack: true, melee: true }, [
+    { kind: "acAgainstHit", bonus: 10 },
+    { kind: "strike" },
+  ]),
+  reacting("pursue", ["reaction"], { endsMove: true, within: 120 }, [
+    { kind: "teleport", feet: 60, movement: 0 },
+  ]),
+  reacting(
+    "slash",
+    ["reaction"],
+    { otherDamaged: "bloodied", within: 40 },
+    [{ kind: "strike", approach: true }],
+    { creatures: 1, range: 40, side: "enemy" },
+  ),
+  trait("corrode", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { ownSave: "failed" },
+        targeting: { creatures: 1, range: 120, side: "enemy" },
+        resolution: {
+          kind: "automatic",
+          damage: [{ amount: { dice: "1d6" }, type: "psychic" }],
+          effects: [],
+        },
+      },
+    ],
+  }),
+  trait("war-caster", [{ kind: "reactiveSpell" }], {
+    spells: { "1": ["srd52:spell/fire-bolt"] },
+  }),
+  trait("jinx", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { hitByAttack: true },
+        targeting: { creatures: 1, range: 120, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "wis",
+          dc: { base: 30, add: [] },
+          onFail: [{ kind: "negateHit" }],
+        },
+      },
+    ],
+  }),
+  trait("gaze", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { turnStart: true, within: 30 },
+        targeting: { creatures: 1, range: 30, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "wis",
+          dc: { base: 30, add: [] },
+          onFail: [
+            {
+              kind: "applyCondition",
+              condition: "frightened",
+              duration: { until: "yourNextTurnStart" },
+            },
+          ],
         },
       },
     ],
@@ -378,6 +578,19 @@ const FIXTURES = [
     name,
     category: "origin",
     text: "Test.",
+    ...(id === "test:feat/initiate-cleric"
+      ? {
+          choices: [
+            {
+              kind: "spells",
+              id: "spell",
+              count: 1,
+              maxLevel: 1,
+              list: "srd52:class/cleric",
+            },
+          ],
+        }
+      : {}),
   })),
   ...(
     [
@@ -416,12 +629,168 @@ const FIXTURES = [
     featOr: "darkGift",
   },
   {
+    id: "test:background/gifted",
+    name: "Gifted",
+    abilities: ["str", "dex", "con"],
+    feat: "test:feat/chosen",
+    skills: ["athletics", "survival"],
+    tool: "Test Tools",
+  },
+  {
     id: "test:background/plain",
     name: "Plain",
     abilities: ["str", "dex", "con"],
     feat: "test:feat/initiated",
     skills: ["athletics", "survival"],
     tool: "Test Tools",
+  },
+  {
+    id: "test:species/gifted",
+    name: "Gifted",
+    text: "A test species.",
+    creatureType: "Humanoid",
+    size: "medium",
+    speed: 30,
+    traits: ["test:feature/touched"],
+    choices: [
+      { kind: "spellAbility", id: "spellcasting", from: ["int", "cha"] },
+    ],
+  },
+  trait("touched", [], { spells: { "1": ["srd52:spell/burning-hands"] } }),
+  trait("adept-table", [], {
+    spellsBySlot: {
+      "1": ["srd52:spell/burning-hands"],
+      "2": ["srd52:spell/fear"],
+    },
+  }),
+  {
+    id: "test:feat/touched",
+    name: "Touched",
+    category: "general",
+    text: "Test.",
+    grants: ["test:feature/touched"],
+    abilityIncrease: ["int", "wis", "cha"],
+    spellAbility: "increased",
+  },
+  {
+    id: "test:feat/chosen",
+    name: "Chosen",
+    category: "origin",
+    text: "Test.",
+    choices: [
+      { kind: "spellAbility", id: "ability", from: ["int", "wis", "cha"] },
+      {
+        kind: "spells",
+        id: "spell",
+        count: 1,
+        maxLevel: 1,
+        list: "srd52:class/wizard",
+      },
+    ],
+  },
+  {
+    id: "test:feat/connoisseur",
+    name: "Connoisseur",
+    category: "general",
+    text: "Test.",
+    spellAbility: { like: "test:feat/chosen" },
+    choices: [
+      {
+        kind: "spells",
+        id: "spell",
+        count: 1,
+        maxLevel: 1,
+        listOf: "test:feat/initiate",
+        from: ["srd52:spell/burning-hands", "srd52:spell/cure-wounds"],
+      },
+    ],
+  },
+  trait("warding", [
+    { kind: "schoolCast", school: "abjuration", rider: "ward" },
+  ]),
+  trait("augmenting", [
+    { kind: "schoolCast", school: "abjuration", rider: "augment" },
+  ]),
+  trait("life", [{ kind: "schoolCast", school: "abjuration", rider: "life" }]),
+  trait("fueled", [
+    { kind: "schoolCast", school: "evocation", rider: "fueled" },
+  ]),
+  trait("necrosis", [
+    {
+      kind: "damageRider",
+      damage: "slashing",
+      spells: true,
+      effects: [
+        {
+          kind: "applyCondition",
+          condition: "poisoned",
+          duration: { until: "yourNextTurnStart" },
+        },
+      ],
+    },
+  ]),
+  {
+    id: "test:feat/master",
+    name: "Master",
+    category: "general",
+    text: "Test.",
+    choices: [
+      { kind: "weaponMastery", id: "mastery", count: 1, swap: "longRest" },
+    ],
+  },
+  trait("together", [{ kind: "allySaveAdvantage", abilities: ["str"] }]),
+  trait("bountiful", [
+    { kind: "tempHpBonus", amount: 5 },
+    { kind: "hitDieRolls", highest: true },
+  ]),
+  trait("recovery", [{ kind: "hitDieRolls", floor: 3 }]),
+  trait(
+    "radiance",
+    [{ kind: "maxDamageDice", damage: "radiant", resource: "radiance" }],
+    { resources: [{ id: "radiance", max: { base: 1 }, recharge: [] }] },
+  ),
+  trait(
+    "resistant",
+    [
+      {
+        kind: "saveRescue",
+        abilities: ["wis"],
+        bonusDice: "1d6",
+        magical: true,
+        resource: "resistant",
+      },
+    ],
+    { resources: [{ id: "resistant", max: { base: 1 }, recharge: [] }] },
+  ),
+  trait(
+    "past-life",
+    [{ kind: "checkRescue", bonusDice: "1d6", resource: "past-life" }],
+    { resources: [{ id: "past-life", max: { base: 1 }, recharge: [] }] },
+  ),
+  trait("thrower", [{ kind: "thrownDamage", bonus: 2 }]),
+  trait("bomber", [{ kind: "longShots" }, { kind: "farLobber", feet: 40 }]),
+  {
+    id: "test:item/acid",
+    name: "Acid",
+    type: "gear",
+    activation: {
+      cost: ["action"],
+      targeting: { creatures: 1, range: 20, side: "enemy" },
+      resolution: {
+        kind: "save",
+        ability: "dex",
+        dc: {
+          base: 8,
+          add: [
+            { kind: "abilityMod", ability: "dex" },
+            { kind: "proficiency" },
+          ],
+        },
+        damage: [{ amount: { dice: "2d6" }, type: "acid" }],
+        onFail: [],
+        onSuccess: [],
+      },
+    },
   },
 ];
 
@@ -509,3 +878,44 @@ export function contextOf(
 }
 
 export const NO_EDGE = { advantage: false, disadvantage: false };
+
+// Runs frames to the end, answering each decision as `answer` says (the first option by default), and keeps what
+// they produced.
+export function settle(
+  run: RunContext,
+  start: readonly Actor[] | DndState,
+  frames: readonly Frame[],
+  dice: Dice,
+  answer: (decision: Decision) => string = (decision) =>
+    decision.options[0]?.id ?? "",
+): { state: DndState; events: SystemEvent[]; decisions: Decision[] } {
+  let state = "actors" in start ? start : contextOf(run, start, dice).state;
+  const events: SystemEvent[] = [];
+  const decisions: Decision[] = [];
+  const stack = [...frames].reverse();
+  for (let top = stack.pop(); top; top = stack.pop()) {
+    if (top.kind === AWAIT_FRAME) {
+      const { decision } = top.payload as { decision: Decision };
+      decisions.push(decision);
+      stack.push({
+        kind: decision.resume.kind,
+        payload: { ...decision.resume.payload, answer: answer(decision) },
+      });
+      continue;
+    }
+    const definition = run.system.frames[top.kind];
+    if (!definition) throw new Error(`Unknown frame ${top.kind}`);
+    const result = definition.run(top.payload, {
+      state,
+      dice,
+      content: run.content,
+      contentIds: run.contentIds,
+    });
+    for (const event of result.events ?? []) {
+      events.push(event);
+      state = applyDndEvent(state, event);
+    }
+    stack.push(...[...(result.frames ?? [])].reverse());
+  }
+  return { state, events, decisions };
+}

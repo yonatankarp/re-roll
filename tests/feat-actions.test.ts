@@ -24,6 +24,7 @@ import {
 import {
   type Actor,
   type DndState,
+  frame,
   NS,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import {
@@ -45,6 +46,7 @@ import {
   contextOf,
   hero,
   scripted,
+  settle,
   testRun,
 } from "./feat-fixtures.ts";
 
@@ -469,13 +471,20 @@ describe("feats and traits of round 5", () => {
     const run = await testRun();
     const hitBearer = (traits: readonly string[]) => {
       const bearer = at(hero(traits), { hp: 30 });
-      const result = run.system.frames[`${NS}:applyHit`]?.run(
-        { ...HIT, attacker: "foe", actionId: LONGSWORD, target: PLAYER_ACTOR },
-        contextOf(run, [bearer, foeOf()], scripted([]).dice),
+      const { events } = settle(
+        run,
+        [bearer, foeOf()],
+        [
+          frame("applyHit", {
+            ...HIT,
+            attacker: "foe",
+            actionId: LONGSWORD,
+            target: PLAYER_ACTOR,
+          }),
+        ],
+        scripted([]).dice,
       );
-      return effectsAdded(result?.events ?? []).map(
-        ({ modifier }) => modifier.damage,
-      );
+      return effectsAdded(events).map(({ modifier }) => modifier.damage);
     };
     expect(hitBearer(["toughened"])).toEqual([
       "bludgeoning",

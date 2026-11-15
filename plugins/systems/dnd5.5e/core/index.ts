@@ -3,6 +3,7 @@ import {
   type FrameDef,
   PLAYER_ACTOR,
   type SystemContext,
+  type SystemResult,
   contentKind,
   defineSystem,
   encounterKind,
@@ -26,6 +27,7 @@ import { deriveItem } from "./variants.ts";
 import { attackFrames } from "./combat/attack.ts";
 import { movementFrames } from "./combat/movement.ts";
 import { formFrames } from "./combat/form-choice.ts";
+import { reactionFrames, settleRoll } from "./combat/reactions.ts";
 import { turnFrames } from "./combat/turn.ts";
 import {
   AfterMoveSchema,
@@ -77,6 +79,7 @@ import {
   sheetFrames,
 } from "./character-sheet.ts";
 import { gearEffects, gearFrames, sceneGearActions } from "./gear.ts";
+import { sceneSwapActions, swapEffects, swapFrames } from "./swap.ts";
 import { sceneEffects, scenePredicates } from "./scene.ts";
 import { gearPolicy, isGearDecision } from "./policy.ts";
 import { legendaryFrames, surpriseEffects } from "./legendary.ts";
@@ -128,6 +131,8 @@ import {
 } from "./state.ts";
 import { checkBonus, deriveStats, lookup } from "./stats.ts";
 import { withReveal } from "./fog.ts";
+import { actingEnds } from "./combat/effects.ts";
+import { rescuedCheck } from "./trait-rules.ts";
 
 // Every step ends by revealing what the party sees once its events land, so the fog clears as it happens.
 function revealing(
@@ -145,6 +150,24 @@ function revealing(
   );
 }
 
+// An action anyone can take, such as Dash, ends what ends as the creature acts, as Merge with Shadows' invisibility.
+function tacticEnds(
+  result: SystemResult,
+  actorId: string,
+  context: { readonly state: DndState },
+): SystemResult {
+  const actor = context.state.actors[actorId];
+  const acted = (result.events ?? []).some(
+    (event) => event.kind === `${NS}:budgetSpent`,
+  );
+  return actor && acted
+    ? {
+        ...result,
+        events: [...actingEnds(actor, null), ...(result.events ?? [])],
+      }
+    : result;
+}
+
 function buildReferences(pregen: z.infer<typeof PregenSchema>): string[] {
   return [
     pregen.build.speciesId,
@@ -153,9 +176,7 @@ function buildReferences(pregen: z.infer<typeof PregenSchema>): string[] {
     ...pregen.build.levels.flatMap((level) => [
       level.classId,
       ...level.answers.flatMap((answer) =>
-        answer.kind === "skills" || answer.kind === "abilities"
-          ? []
-          : answer.values,
+        answer.kind === "skills" || !("values" in answer) ? [] : answer.values,
       ),
     ]),
   ];
@@ -167,7 +188,11 @@ function levelReferences(level: z.infer<typeof ClassSchema>["levels"][number]) {
 
 function optionReferences(choices: readonly ChoiceDef[]): readonly string[] {
   return choices.flatMap((choice) =>
-    choice.kind === "option" ? choice.from : [],
+    choice.kind === "option"
+      ? choice.from
+      : choice.kind === "spells"
+        ? [...(choice.from ?? []), ...(choice.listOf ? [choice.listOf] : [])]
+        : [],
   );
 }
 
@@ -259,12 +284,21 @@ export const dnd55e = defineSystem<DndState>({
     feats: contentKind({
       idPrefix: "feat",
       schema: FeatSchema,
-      references: (item) => [...item.grants, ...optionReferences(item.choices)],
+      references: (item) => [
+        ...item.grants,
+        ...optionReferences(item.choices),
+        ...(typeof item.spellAbility === "object"
+          ? [item.spellAbility.like]
+          : []),
+      ],
     }),
     features: contentKind({
       idPrefix: "feature",
       schema: FeatureSchema,
-      references: (item) => Object.values(item.spells ?? {}).flat(),
+      references: (item) =>
+        [item.spells, item.spellsBySlot].flatMap((spells) =>
+          Object.values(spells ?? {}).flat(),
+        ),
     }),
     spells: contentKind({
       idPrefix: "spell",
@@ -345,6 +379,7 @@ export const dnd55e = defineSystem<DndState>({
     ...characterEffects,
     ...restEffects,
     ...gearEffects,
+    ...swapEffects,
     ...surpriseEffects,
     ...shopEffects,
     ...sceneEffects,
@@ -388,10 +423,12 @@ export const dnd55e = defineSystem<DndState>({
     ...sheetFrames,
     ...restFrames,
     ...gearFrames,
+    ...swapFrames,
     ...legendaryFrames,
     ...actionFrames,
     ...movementFrames,
     ...formFrames,
+    ...reactionFrames,
     ...attackFrames,
     ...turnFrames,
     ...shopFrames,
@@ -400,7 +437,7 @@ export const dnd55e = defineSystem<DndState>({
       schema: TakeActionSchema,
       run: (payload, context: Context) =>
         isTactic(payload.answer)
-          ? runTactic(payload, context)
+          ? tacticEnds(runTactic(payload, context), payload.actor, context)
           : runTakeAction(payload, context),
     }),
     [`${NS}:afterMove`]: frameHandler({
@@ -499,22 +536,46 @@ export const dnd55e = defineSystem<DndState>({
     const stats = deriveStats(player, context);
     const ability =
       "skill" in parsed ? SKILL_ABILITIES[parsed.skill] : parsed.ability;
-    const roll = rollD20(context.dice, {
+    const edge = {
       advantage: false,
       disadvantage:
         stats.untrainedArmor && (ability === "str" || ability === "dex"),
+    };
+    const first = rollD20(context.dice, {
+      ...edge,
       rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
     });
-    const total =
-      roll.natural +
-      checkBonus(stats, player, {
-        ability,
-        ...("skill" in parsed ? { skill: parsed.skill } : {}),
-      });
+    const base = checkBonus(stats, player, {
+      ability,
+      ...("skill" in parsed ? { skill: parsed.skill } : {}),
+    });
+    const judge = (natural: number, bonus: number) => ({
+      total: natural + base + bonus,
+      success: natural + base + bonus >= parsed.dc,
+    });
+    // A companion's Bountiful Luck or the player's Lucky may answer it (combat/reactions.ts).
+    const settled = settleRoll(
+      {
+        roller: player,
+        kind: "check",
+        natural: first.natural,
+        goal: parsed.dc,
+        ...judge(first.natural, 0),
+      },
+      edge,
+      judge,
+      context,
+    );
+    const roll = { natural: settled.natural };
+    const rolled = judge(settled.natural, settled.bonus).total;
+    const rescue = rescuedCheck(player, stats, rolled, parsed.dc, context.dice);
+    const total = rolled + rescue.bonus;
     const success = total >= parsed.dc;
     return {
       outcome: success ? "success" : "failure",
       events: [
+        ...settled.events,
+        ...rescue.events,
         dndEvent(`${NS}:rollReported`, {
           actor: PLAYER_ACTOR,
           against: "check",
@@ -537,7 +598,10 @@ export const dnd55e = defineSystem<DndState>({
   nextDecision: (state, access) =>
     withTactics(nextDndDecision(state, access), state, access),
   rests: availableRests,
-  sceneActions: sceneGearActions,
+  sceneActions: (state, access) => [
+    ...sceneGearActions(state, access),
+    ...sceneSwapActions(state, access),
+  ],
   decidePolicy: (decision, context) =>
     decision.id.endsWith(`:build:${decision.actor}:${SHEET_KEY}`)
       ? ACCEPT // the sheet is always a sound, recommended build

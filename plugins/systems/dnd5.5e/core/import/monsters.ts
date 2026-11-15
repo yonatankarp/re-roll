@@ -7,6 +7,7 @@ import type {
   Passive,
   Resolution,
 } from "../schemas.ts";
+import { reactionOf } from "./monster-reactions.ts";
 import {
   ABILITY_NAMES as ABILITIES,
   ConditionSchema,
@@ -1110,6 +1111,12 @@ function guardOf(text: string): {
     : null;
 }
 
+// "(Recharge 5–6)" as the lowest roll that brings it back.
+function rechargeOf(label: string): number | undefined {
+  const low = /\(Recharge (\d)/.exec(label)?.[1];
+  return low ? Number(low) : undefined;
+}
+
 // Traits a grid fight never needs: breathing, telepathy and talk, senses for things the fight doesn't have, carrying,
 // objects and homes, and coming back to life days later somewhere else.
 const NO_COMBAT_TRAIT =
@@ -1478,7 +1485,37 @@ function parseBlock(
       actions.push(...reactions);
       continue;
     }
-    const guard = section === "reactions" ? guardOf(text) : null;
+    // "Trigger: … Response: …" the engine answers (import/monster-reactions.ts), or else a Parry-shaped guard.
+    const reaction =
+      section === "reactions" ? reactionOf(text, parseSave) : null;
+    const guard = section === "reactions" && !reaction ? guardOf(text) : null;
+    if (reaction) {
+      const name = label.replace(/\s*\(.*$/, "");
+      for (const reason of new Set(reaction.left)) {
+        notes.push(`partial: ${name}: left out ${reason}`);
+      }
+      actions.push({
+        name,
+        ...(reactionDays ? { perDay: Number(reactionDays) } : {}),
+        ...(rechargeOf(label) ? { recharge: rechargeOf(label) } : {}),
+        activation: {
+          cost: [
+            "reaction",
+            ...(reactionDays || rechargeOf(label)
+              ? [
+                  {
+                    resource: `${reactionDays ? "day" : "recharge"}:${slugOf(name)}`,
+                  },
+                ]
+              : []),
+          ],
+          trigger: reaction.trigger,
+          targeting: reaction.targeting,
+          resolution: reaction.resolution,
+        },
+      });
+      continue;
+    }
     if (guard) {
       const name = label.replace(/\s*\(.*$/, "");
       if (guard.left) notes.push(`partial: ${name}: left out ${guard.left}`);
