@@ -249,6 +249,7 @@ export function groundFor(
   readonly costly: ReadonlySet<string>; // squares that cost double however it moves
   readonly walls: ReadonlySet<string>;
   readonly squeeze: boolean;
+  readonly overTerrain: boolean; // crosses difficult terrain at no extra cost, however it moves
 } {
   const stats = deriveStats(actor, access);
   const through = throughOf(stats);
@@ -272,6 +273,7 @@ export function groundFor(
     costly,
     walls: new Set(walls),
     squeeze: through.squeeze,
+    overTerrain: through.terrain,
   };
 }
 
@@ -300,7 +302,7 @@ export function moveSquares(
       grid,
       ground.blocked,
       ground.occupied,
-      crossesDifficult(mode) ? ground.costly : walking,
+      crossesDifficult(mode) || ground.overTerrain ? ground.costly : walking,
       ground.walls,
       { squeeze: ground.squeeze, jump },
     );

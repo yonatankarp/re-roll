@@ -156,9 +156,7 @@ export function runMove(
     state,
     deriveStats(actor, context),
     context,
-  ).find(
-    ({ square }) => squareKey(square) === payload.answer,
-  );
+  ).find(({ square }) => squareKey(square) === payload.answer);
   if (!step) throw new Error(`${actor.name} can't reach ${payload.answer}`);
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];

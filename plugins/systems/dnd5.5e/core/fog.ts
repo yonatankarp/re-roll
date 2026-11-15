@@ -5,6 +5,7 @@ import {
   type Grid,
   type Square,
   coverBetween,
+  distanceFeet,
   parseSquare,
   reachableSquares,
   squareKey,
@@ -22,6 +23,7 @@ import {
 import { hasTactic } from "./tactics.ts";
 import { zonesOf } from "./zones.ts";
 import { enemies, moveSquares } from "./combat/queries.ts";
+import { speedsOf, tremorsenseOf } from "./movement-modes.ts";
 import { walksOf } from "./combat/movement.ts";
 import { type Context } from "./combat/queries.ts";
 import { DAMAGE_TO_PARTY } from "./combat/effects.ts";
@@ -193,10 +195,26 @@ export function partySight(state: DndState, access: ContentAccess): PartySight {
         seeing(viewer, at, state, access, darkvisionFor(viewer, access)) !==
           "none",
     );
+  // Tremorsense finds a foe on the ground in range, through walls and darkness, hidden or not.
+  // shortcut: the ground is taken to be stone, and anything with a Fly Speed to be off it.
+  const feels = viewers.flatMap((viewer) => {
+    const stats = deriveStats(viewer, access);
+    const feet = tremorsenseOf(viewer, stats);
+    return feet > 0 && viewer.position ? [{ at: viewer.position, feet }] : [];
+  });
+  const felt = (actor: Actor): boolean =>
+    feels.length > 0 &&
+    !speedsOf(actor, deriveStats(actor, access)).has("fly") &&
+    feels.some(({ at, feet }) => distanceFeet(at, actor.position) <= feet);
   const foes = new Set<string>();
   for (const actor of Object.values(state.actors)) {
     // A foe that has hidden isn't seen, even where its square is.
     if (actor.side === "party" || !actor.position) continue;
+    if (felt(actor)) {
+      foes.add(actor.id);
+      squares.add(squareKey(actor.position));
+      continue;
+    }
     if (hasTactic(actor, "hidden")) continue;
     const key = squareKey(actor.position);
     if (squares.has(key) || inView(actor.position)) {

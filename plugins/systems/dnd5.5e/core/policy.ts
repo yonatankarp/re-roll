@@ -1,8 +1,4 @@
-import {
-  crossesDifficult,
-  speedsOf,
-  throughOf,
-} from "./movement-modes.ts";
+import { crossesDifficult, speedsOf, throughOf } from "./movement-modes.ts";
 import {
   type Actor,
   hasCondition,
@@ -102,7 +98,13 @@ export function stepToward(
   const overGround = [...speedsOf(actor, stats).keys()].some(crossesDifficult);
   const walkFrom = new Map<string, ReadonlyMap<string, number>>();
   const walk = (from: Square | null, foe: Actor): number => {
-    if (!grid || walls.length === 0 || through.walls || !from || !foe.position) {
+    if (
+      !grid ||
+      walls.length === 0 ||
+      through.walls ||
+      !from ||
+      !foe.position
+    ) {
       return distanceFeet(from, foe.position);
     }
     let field = walkFrom.get(foe.id);

@@ -112,7 +112,9 @@ export interface Stats {
   readonly untrainedArmor: boolean;
   readonly exhaustion: number; // each level takes 2 from every d20 test and 5 feet from speed
   // A stat block's Speeds besides walking. Others come from effects (core/movement-modes.ts).
-  readonly speeds: Readonly<Partial<Record<"fly" | "climb" | "burrow", number>>>;
+  readonly speeds: Readonly<
+    Partial<Record<"fly" | "climb" | "burrow", number>>
+  >;
   // From magic items worn, and attuned where they need it.
   readonly itemBonuses: Readonly<
     Record<"attack" | "spellAttack" | "savingThrows", number>

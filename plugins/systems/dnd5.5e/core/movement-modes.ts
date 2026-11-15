@@ -62,6 +62,7 @@ export function throughOf(stats: Stats): Through {
       !all.some((item) => item.walls && !item.costly),
     squeeze: all.some((item) => item.squeeze || item.walls),
     open: all.some((item) => item.open),
+    terrain: all.some((item) => item.terrain),
   };
 }
 

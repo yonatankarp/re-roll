@@ -29,7 +29,8 @@ import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX } from "./combat/ids.ts";
 import { DAMAGE_TO_PARTY, damageToParty } from "./combat/effects.ts";
 import { cureFor, dispellable } from "./combat/dispel.ts";
-import { seesThrough } from "./sight.ts";
+import { difficultSquares, seesThrough } from "./sight.ts";
+import { crossesDifficult, speedsOf, tremorsenseOf } from "./movement-modes.ts";
 import { formOf, weakestBeast } from "./forms.ts";
 import { legendOf } from "./legendary.ts";
 import { summonedActors } from "./combat/summon.ts";
@@ -37,6 +38,7 @@ import { nextHitDie, steadyShot } from "./trait-rules.ts";
 import {
   aimsFor,
   allies,
+  enemies,
   attackRoutine,
   canAfford,
   carriesExtraDice,
@@ -634,7 +636,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
       });
     return (
       reachesFrom(foe.position) ||
-      moveSquares(foe, state, own, context).some(({ square }) => reachesFrom(square))
+      moveSquares(foe, state, own, context).some(({ square }) =>
+        reachesFrom(square),
+      )
     );
   };
 
@@ -749,6 +753,24 @@ export function makeJudge(context: Context, side: Actor): Judge {
       case "seeInvisible":
         return foes.some((foe) => invisibleTo(foe, target))
           ? 0.25 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
+          : 0;
+      // A new Speed helps one that's faster with it, or that crosses the map's rough ground with it.
+      case "movementMode": {
+        const speeds = speedsOf(target, stats(target));
+        if (speeds.has(modifier.mode)) return 0;
+        const faster =
+          (modifier.feet ?? stats(target).speed) > Math.max(...speeds.values());
+        const rough =
+          difficultSquares(state).size > 0 &&
+          ![...speeds.keys()].some(crossesDifficult);
+        return faster || rough ? 0.08 * own * lasting(span) : 0;
+      }
+      // Tremorsense finds foes the party can't see, in fog.
+      case "tremorsense":
+        return target.side === "party" &&
+          foes.length < standing(enemies(state, side)).length &&
+          tremorsenseOf(target, stats(target)) < modifier.feet
+          ? 0.1 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
           : 0;
       default:
         return 0;
