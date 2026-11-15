@@ -961,6 +961,14 @@ export const FeatureSchema = ContentEntrySchema.extend({
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.
   spellsBySlot: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  // Spells by slot level, as `spellsBySlot`, given only once this feat is taken too, as a Dragonmark's Spells of the
+  // Mark with Potent Dragonmark.
+  preparedWith: z
+    .strictObject({
+      feat: ContentIdSchema,
+      spells: z.record(z.string(), z.array(ContentIdSchema)),
+    })
+    .optional(),
   // These spells' damage takes this type instead, as Rimekin's Cold Fire Magic.
   retype: z.record(ContentIdSchema, DamageTypeSchema).optional(),
   // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched.
@@ -1118,6 +1126,16 @@ export const FeatSchema = ContentEntrySchema.extend({
   abilityIncrease: z.array(AbilitySchema).min(1).optional(), // its Ability Score Increase: +1 to one of these
   // Its prerequisite, met by any of these: the species, a trait or lineage it has, or a feat taken.
   requires: z.array(ContentIdSchema).min(1).optional(),
+  // The rest of its Prerequisite line: a score of 13 or more in one of these abilities, the Spellcasting or Pact
+  // Magic feature, or armor training.
+  prerequisite: z
+    .strictObject({
+      abilities: z.array(AbilitySchema).min(1).optional(),
+      min: z.number().int().min(1).max(30).optional(),
+      spellcasting: z.literal(true).optional(),
+      armor: z.enum(["light", "medium", "heavy"]).optional(),
+    })
+    .optional(),
   // The spellcasting ability of the spells it gives: this one, the one it raised ("increased"), the one chosen for
   // a feat taken earlier (`like`, matched by id or by version as Magic Initiate's), or with none, its spellAbility
   // choice, else the character's own.

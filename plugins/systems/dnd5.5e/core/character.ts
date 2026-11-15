@@ -543,6 +543,42 @@ function classSpells(
   return [...byName.values()];
 }
 
+// A feat's Prerequisite line beyond other feats and species: an ability score, Spellcasting or armor training, from
+// the classes taken so far and this one.
+function meetsPrerequisite(
+  feat: Feat,
+  base: CharacterBuild | null,
+  classDef: ClassDef,
+  access: ContentAccess,
+): boolean {
+  const needs = feat.prerequisite;
+  if (!needs) return true;
+  const classes = [
+    classDef,
+    ...(base?.levels ?? []).map((entry) =>
+      lookup(access, ClassSchema, entry.classId),
+    ),
+  ];
+  const scores = base ? buildAbilities(base) : null;
+  return (
+    (!needs.abilities ||
+      !scores ||
+      needs.abilities.some(
+        (ability) => scores[ability] >= (needs.min ?? 13),
+      )) &&
+    (!needs.spellcasting ||
+      classes.some(
+        (item) =>
+          item.spellcasting !== undefined ||
+          item.levels.some(({ grants }) =>
+            grants.some((id) => id.endsWith("pact-magic")),
+          ),
+      )) &&
+    (needs.armor === undefined ||
+      classes.some(({ armor }) => armor.some((kind) => kind === needs.armor)))
+  );
+}
+
 // The spell list of the version of a feat taken, as Magic Initiate (Cleric) gives the Cleric's.
 function versionList(
   featId: string,
@@ -617,12 +653,13 @@ export function choiceOptions(
             other.id.startsWith(`${item.id}-`) &&
             other.name.startsWith(`${item.name} (`),
         );
+      // General feats come at level 4 and epic boons at 19, which is where the class levels offer them.
       const feats = all.filter(
         (item) =>
           fits(item) &&
           (item.requires?.some((id) => held.has(id)) ?? true) &&
+          meetsPrerequisite(item, base, classDef, access) &&
           !versioned(item) &&
-          // shortcut: prerequisites other than `requires`, such as a level, are only in the text and aren't checked.
           (!had.has(item.id) || item.text.includes("Repeatable")),
       );
       if (forBackground) {

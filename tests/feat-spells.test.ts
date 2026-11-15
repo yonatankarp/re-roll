@@ -220,6 +220,38 @@ describe("spell-table feats", () => {
     expect(wizard(3)).toContain("spell:srd52:spell/fear");
   });
 
+  it("prepares a mark's spells only with Potent Dragonmark", async () => {
+    const run = await testRun();
+    const spells = (feats: readonly string[]) => {
+      const actor = hero(["marked"]);
+      const build =
+        actor.source.kind === "character" ? actor.source.build : null;
+      if (!build) throw new Error("no build");
+      return deriveStats(
+        {
+          ...actor,
+          source: {
+            kind: "character",
+            build: {
+              ...build,
+              levels: build.levels.map((entry) => ({
+                ...entry,
+                classId: "srd52:class/wizard",
+                answers: [
+                  ...entry.answers,
+                  { kind: "feats" as const, values: [...feats] },
+                ],
+              })),
+            },
+          },
+        },
+        run,
+      ).actions.map(({ id }) => id);
+    };
+    expect(spells(["test:feat/greater"])).toContain(`spell:${BURNING_HANDS}`);
+    expect(spells([])).not.toContain(`spell:${BURNING_HANDS}`);
+  });
+
   it("rides on casting a spell of the adept's school with a slot", async () => {
     const run = await testRun();
     const MAGE_ARMOR = {
@@ -300,5 +332,31 @@ describe("spell-table feats", () => {
     expect(answers).toContainEqual(
       expect.objectContaining({ kind: "spells", feat: "test:feat/chosen" }),
     );
+  });
+
+  it("offers a feat only to a character that meets its scores, Spellcasting and armor training", async () => {
+    const run = await testRun();
+    const offered = (classId: string) => {
+      const actor = hero([], { level: 3 });
+      const build =
+        actor.source.kind === "character" ? actor.source.build : null;
+      if (!build) throw new Error("no build");
+      const levels = build.levels.map((entry) => ({ ...entry, classId }));
+      return choiceOptions(
+        { kind: "feat", id: "feat", category: "general" },
+        { picks: {}, scores: [] },
+        { ...build, levels },
+        lookup(run, ClassSchema, classId),
+        run,
+      ).options.map(({ id }) => id);
+    };
+    // The hero has Str 17, Int 8 and Wis 12; a fighter has heavy armor, a wizard Spellcasting.
+    const fighter = offered("srd52:class/fighter");
+    expect(fighter).toContain("test:feat/strong");
+    expect(fighter).not.toContain("test:feat/clever");
+    expect(fighter).not.toContain("test:feat/caster");
+    const wizard = offered("srd52:class/wizard");
+    expect(wizard).toContain("test:feat/caster");
+    expect(wizard).not.toContain("test:feat/strong");
   });
 });

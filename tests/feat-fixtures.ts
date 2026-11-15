@@ -793,6 +793,33 @@ const FIXTURES = [
     spells: { "1": ["srd52:spell/burning-hands"] },
     retype: { "srd52:spell/burning-hands": "cold" },
   }),
+  {
+    id: "test:feat/clever",
+    name: "Clever",
+    category: "general",
+    text: "Test.",
+    prerequisite: { abilities: ["int", "wis"], min: 13 },
+  },
+  {
+    id: "test:feat/strong",
+    name: "Strong",
+    category: "general",
+    text: "Test.",
+    prerequisite: { abilities: ["str"], min: 13, armor: "heavy" },
+  },
+  {
+    id: "test:feat/caster",
+    name: "Caster",
+    category: "general",
+    text: "Test.",
+    prerequisite: { spellcasting: true },
+  },
+  trait("marked", [], {
+    preparedWith: {
+      feat: "test:feat/greater",
+      spells: { "1": ["srd52:spell/burning-hands"] },
+    },
+  }),
   trait("together", [{ kind: "allySaveAdvantage", abilities: ["str"] }]),
   trait("bountiful", [
     { kind: "tempHpBonus", amount: 5 },

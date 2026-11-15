@@ -295,8 +295,8 @@ export const dnd55e = defineSystem<DndState>({
       idPrefix: "feature",
       schema: FeatureSchema,
       references: (item) =>
-        [item.spells, item.spellsBySlot].flatMap((spells) =>
-          Object.values(spells ?? {}).flat(),
+        [item.spells, item.spellsBySlot, item.preparedWith?.spells].flatMap(
+          (spells) => Object.values(spells ?? {}).flat(),
         ),
     }),
     spells: contentKind({
