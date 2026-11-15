@@ -1133,6 +1133,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // A 1 on the d20 of a D20 Test is rolled again, and the new roll stands, as with Halfling Luck.
   z.strictObject({ kind: z.literal("rerollOnes") }),
+  // A creature at least one size larger is cover enough to Hide behind, as with Naturally Stealthy.
+  z.strictObject({ kind: z.literal("hideBehindLarger") }),
   // Once a turn, a weapon hit's damage dice are rolled twice and the higher kept, as with Savage Attacker.
   z.strictObject({ kind: z.literal("savageAttacker") }),
   // Proficiency in these saving throws, or with `increased` in the one its feat raised, as with Resilient.
