@@ -65,6 +65,28 @@ export function placeSides(
   return { grid: { width, height }, positions };
 }
 
+// A wall corner a fight opened (`openedCorners`), keyed by the grid point where its four squares meet. It sits
+// in the same set as the walls, so walking and sight both let a step or a line through it.
+function openKey(x: number, y: number): string {
+  return `open:${String(x)},${String(y)}`;
+}
+
+// The walls of a fight's map, with the corners it opened.
+export function wallSet(
+  combat:
+    | {
+        readonly walls?: readonly string[] | undefined;
+        readonly openCorners?: readonly string[] | undefined;
+      }
+    | null
+    | undefined,
+): Set<string> {
+  return new Set([
+    ...(combat?.walls ?? []),
+    ...(combat?.openCorners ?? []).map((corner) => `open:${corner}`),
+  ]);
+}
+
 // A diagonal step between two walls that meet at a corner, which would slip through a wall drawn as a
 // diagonal line of squares. Two creatures there don't close it, as the rules let a creature squeeze by.
 export function cutsCorner(
@@ -77,8 +99,66 @@ export function cutsCorner(
     dx !== 0 &&
     dy !== 0 &&
     walls.has(squareKey({ x: from.x + dx, y: from.y })) &&
-    walls.has(squareKey({ x: from.x, y: from.y + dy }))
+    walls.has(squareKey({ x: from.x, y: from.y + dy })) &&
+    !walls.has(openKey(from.x + Math.max(dx, 0), from.y + Math.max(dy, 0)))
   );
+}
+
+// The wall corners to open as a fight starts, so the party isn't boxed in on its start squares: a book map's
+// walls, drawn square by square, can leave a start area whose only way out is between two wall corners. Each
+// round opens every such corner leading out of where the party can walk, until it can walk to a foe. A party
+// shut in by whole walls stays shut in.
+export function openedCorners(
+  walls: readonly string[],
+  grid: Grid,
+  party: readonly Square[],
+  foes: readonly Square[],
+): string[] {
+  const blocked = new Set(walls);
+  const opened: string[] = [];
+  for (;;) {
+    const corners = wallSet({ walls, openCorners: opened });
+    const region = new Set(
+      party.flatMap((start) => [
+        squareKey(start),
+        ...reachableSquares(
+          start,
+          Infinity,
+          grid,
+          blocked,
+          new Set(),
+          new Set(),
+          corners,
+        ).map((item) => squareKey(item.square)),
+      ]),
+    );
+    if (foes.length === 0 || foes.some((foe) => region.has(squareKey(foe)))) {
+      return opened;
+    }
+    const out: string[] = [];
+    for (let y = 1; y < grid.height; y += 1) {
+      for (let x = 1; x < grid.width; x += 1) {
+        // The four squares round the point (x, y): a pinch has walls on one diagonal and open squares on the other.
+        const [a, b, c, d] = [
+          squareKey({ x: x - 1, y: y - 1 }),
+          squareKey({ x, y: y - 1 }),
+          squareKey({ x: x - 1, y }),
+          squareKey({ x, y }),
+        ];
+        const joins = (p: string, q: string, w1: string, w2: string) =>
+          blocked.has(w1) &&
+          blocked.has(w2) &&
+          !blocked.has(p) &&
+          !blocked.has(q) &&
+          region.has(p) !== region.has(q);
+        if (joins(a, d, b, c) || joins(b, c, a, d)) {
+          out.push(`${String(x)},${String(y)}`);
+        }
+      }
+    }
+    if (out.length === 0) return opened;
+    opened.push(...out);
+  }
 }
 
 // Every square a creature can end its move on, with what it costs. It can pass allies but not enemies,
@@ -304,7 +384,7 @@ function throughPinch(
       Math.sign(dx) === Math.sign(dy)
         ? wall(px, py - 1) && wall(px - 1, py)
         : wall(px - 1, py - 1) && wall(px, py);
-    if (pinched) return true;
+    if (pinched && !walls.has(openKey(px, py))) return true;
   }
   return false;
 }
@@ -435,7 +515,7 @@ export function pushTo(
   const dx = Math.sign(start.x - from.x);
   const dy = Math.sign(start.y - from.y);
   if (dx === 0 && dy === 0) return null;
-  const walls = new Set(state.combat?.walls ?? []);
+  const walls = wallSet(state.combat);
   const blocked = new Set([
     ...walls,
     ...Object.values(state.actors).flatMap((item) =>
