@@ -14,6 +14,7 @@ import { canUse, foundText } from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
 import { partySight, revealedSquares, unseenFoe } from "../core/fog.ts";
 import { coins } from "../core/shop.ts";
+import { SHAPE } from "../core/forms.ts";
 import { shop } from "./shop.ts";
 import { creation, featureInPlay } from "./creation.ts";
 import { sheetCreation } from "./creation-sheet.ts";
@@ -1173,6 +1174,9 @@ function describe(
       if (effect.modifier.kind === "form") {
         return `${name(actor)} turns into ${sourceName(access, effect.modifier.monster)}.`;
       }
+      if (effect.modifier.kind === "shape") {
+        return `${name(actor)} takes its ${effect.modifier.shape} shape.`;
+      }
       if (effect.modifier.kind === "zone") {
         const { zone, radius } = effect.modifier;
         const what = sourceName(access, effect.sourceId);
@@ -1196,7 +1200,14 @@ function describe(
     }
     case "dnd5.5e:effectEnded": {
       const data = EVENT_SCHEMAS["dnd5.5e:effectEnded"].parse(payload);
-      return `${sourceName(access, data.sourceId)} ends on ${name(data.actor)}.`;
+      return data.sourceId === SHAPE
+        ? `${name(data.actor)} returns to its true shape.`
+        : `${sourceName(access, data.sourceId)} ends on ${name(data.actor)}.`;
+    }
+    case "dnd5.5e:exhaustionChanged": {
+      const data = EVENT_SCHEMAS["dnd5.5e:exhaustionChanged"].parse(payload);
+      const levels = Math.abs(data.levels);
+      return `${name(data.actor)} ${data.levels > 0 ? "gains" : "loses"} ${String(levels)} level${levels === 1 ? "" : "s"} of Exhaustion.`;
     }
     case "dnd5.5e:conditionRemoved": {
       const data = EVENT_SCHEMAS["dnd5.5e:conditionRemoved"].parse(payload);

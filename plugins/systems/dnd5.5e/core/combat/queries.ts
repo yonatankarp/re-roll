@@ -55,6 +55,7 @@ import {
   type Targeting,
 } from "../schemas.ts";
 import { bossAction } from "../legendary.ts";
+import { currentShape } from "../forms.ts";
 import { aimScore, aimSquares, caughtBy } from "../targeting.ts";
 
 // Questions about a fight that change nothing: who is an ally or a foe, what reaches, what an actor can afford.
@@ -117,7 +118,7 @@ export function hasPassive(stats: Stats, kind: Passive["kind"]): boolean {
 // Effects from one source count once, so casting Bless twice can't add two d4s.
 export function rollBonus(
   actor: Actor,
-  to: "attacks" | "saves" | "checks",
+  to: "attacks" | "saves" | "checks" | "attacksAgainst",
   context: Context,
   skill?: Skill, // the check's skill, for a bonus that only adds to one
   ability?: Ability, // the save's ability, for a bonus that only adds to one
@@ -316,7 +317,8 @@ export const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
 // A creature's size, as its index in SIZES.
 export function sizeOf(actor: Actor, access: ContentAccess): number {
   if (actor.source.kind === "monster") {
-    const { size } = lookup(access, MonsterSchema, actor.source.statBlockId);
+    const monster = lookup(access, MonsterSchema, actor.source.statBlockId);
+    const size = currentShape(monster, actor)?.size ?? monster.size;
     return SIZES.indexOf(size ?? "medium");
   }
   if (actor.source.kind === "summon") {
@@ -390,7 +392,10 @@ export function inReach(
         )
       : allies(state, actor)
   )
-    .filter((item) => !isDead(item))
+    .filter(
+      (item) =>
+        isDead(item) === ("dead" in targeting && targeting.dead === true),
+    )
     .filter((item) => fitsType(item, targeting, access))
     .filter((item) => reaches(action, actor, item))
     .filter((item) => !behindTotalCover(state, actor, item))

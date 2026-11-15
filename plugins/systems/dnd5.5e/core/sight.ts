@@ -123,6 +123,22 @@ const SEES_IN_DARK = /\b(?:darkvision|blindsight|truesight) (\d+) ft/gi;
 // Truesight from its stat block's senses. 0 for none.
 // shortcut: Blindsight and Truesight count as Darkvision, so magical darkness and invisibility aren't told apart.
 export function darkvisionOf(actor: Actor, access: ContentAccess): number {
+  return Math.max(ownDarkvision(actor, access), effectSight(actor, false));
+}
+
+// Darkvision or True Seeing cast on the creature: how far it sees, and with `truesight` only Truesight's.
+function effectSight(actor: Actor, truesight: boolean): number {
+  return Math.max(
+    0,
+    ...actor.activeEffects.flatMap(({ modifier }) =>
+      modifier.kind === "darkvision" && (!truesight || modifier.truesight)
+        ? [modifier.feet]
+        : [],
+    ),
+  );
+}
+
+function ownDarkvision(actor: Actor, access: ContentAccess): number {
   if (actor.source.kind === "monster") {
     const { text = "" } = lookup(
       access,
@@ -189,6 +205,7 @@ export function seesThrough(
           passive.kind === "seesInDarkness" ? [passive.feet] : [],
         )
       : []),
+    zone === "darkness" ? effectSight(viewer, true) : 0,
   );
 }
 

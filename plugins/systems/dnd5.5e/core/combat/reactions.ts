@@ -23,6 +23,7 @@ import { distanceFeet, squareKey, type Square } from "../grid.ts";
 import { seeing } from "../sight.ts";
 import { DamageTypeSchema, type LeafEffect, WeaponSchema } from "../schemas.ts";
 import {
+  damageResponses,
   deriveStats,
   type KnownAction,
   rollAmount,
@@ -534,11 +535,24 @@ function responderTo(
         ) &&
         ready(bearer, item, stats) &&
         inRange(bearer, item, culprit(moment, context, item)) &&
-        strikeReaches(bearer, item, culprit(moment, context, item), context),
+        strikeReaches(bearer, item, culprit(moment, context, item), context) &&
+        !healsCulprit(item, culprit(moment, context, item), context),
     );
     if (action) return { reactor: bearer, action };
   }
   return null;
+}
+
+// Hellish Rebuke's fire on an iron golem would only heal it, so it isn't offered.
+function healsCulprit(
+  action: KnownAction,
+  target: Actor | undefined,
+  context: Context,
+): boolean {
+  const { resolution, targeting } = action.activation;
+  if (!target || "self" in targeting || !("damage" in resolution)) return false;
+  const { absorbs } = damageResponses(target, context);
+  return resolution.damage.some(({ type }) => absorbs.includes(type));
 }
 
 // The frame that offers this moment's reactions, or none when nobody could take one.

@@ -41,7 +41,9 @@ import {
   attackBonus,
   damageResponses,
   deriveStats,
+  immuneToCondition,
   type KnownAction,
+  lookup,
   modifierFor,
   passiveModifiers,
   evaluateFormula,
@@ -64,7 +66,13 @@ import {
   onceEnded,
 } from "../class-rules.ts";
 import { conditionsApplied } from "../legendary.ts";
-import { type Damage, ItemSchema, type Resolution } from "../schemas.ts";
+import {
+  type Damage,
+  type DamageType,
+  ItemSchema,
+  MonsterSchema,
+  type Resolution,
+} from "../schemas.ts";
 import {
   armoredReduction,
   holdsShield,
@@ -78,6 +86,8 @@ import {
   evades,
   steadyShot,
   traitAttackAdvantage,
+  WARD_DOWN,
+  warded,
   weaponDamageDice,
 } from "../trait-rules.ts";
 import {
@@ -643,6 +653,25 @@ export function runAttackRoll(
   if (resolution.kind !== "attack") {
     throw new Error(`${action.id} isn't an attack`);
   }
+  // Sanctuary: an attacker that fails its Wisdom save loses the attack. One warded itself loses the ward by attacking.
+  const ward = target.activeEffects.find(
+    ({ modifier }) => modifier.kind === "sanctuary",
+  );
+  const unwarded = attacker.activeEffects
+    .filter(({ modifier }) => modifier.kind === "sanctuary")
+    .map(({ sourceId }) =>
+      dndEvent(`${NS}:effectEnded`, { actor: attacker.id, sourceId }),
+    );
+  if (ward?.modifier.kind === "sanctuary" && attacker.side !== target.side) {
+    const save = rollSave(
+      attacker,
+      "wis",
+      ward.modifier.dc ?? 10,
+      context,
+      true,
+    );
+    if (!save.saved) return { events: [...unwarded, ...save.events] };
+  }
   const stats = deriveStats(attacker, context);
   const targetStats = deriveStats(target, context);
   const packed =
@@ -763,7 +792,8 @@ export function runAttackRoll(
       "prone",
       "restrained",
     ) ||
-    invisibleTo(target, attacker);
+    invisibleTo(target, attacker) ||
+    warded(target, targetStats);
   // Lucky: the target spends a Luck Point on its own once it's badly hurt or the attacker has Advantage.
   const luck =
     held ||
@@ -801,7 +831,9 @@ export function runAttackRoll(
   const hadDisadvantage = edge.disadvantage && !edge.advantage;
   const base =
     held?.base ??
-    attackBonus(resolution, stats) + rollBonus(attacker, "attacks", context);
+    attackBonus(resolution, stats) +
+      rollBonus(attacker, "attacks", context) +
+      rollBonus(target, "attacksAgainst", context); // Blade Ward's -1d4
   const cover = coverAgainst(state, attacker, target);
   const ac =
     targetStats.ac +
@@ -875,6 +907,19 @@ export function runAttackRoll(
     ...actingEnds(attacker, action),
     ...onceEnded(target, "attacksAgainst", attacker.id),
     ...revealEvents(attacker),
+    ...unwarded,
+    // Attacking lowers the attacker's own Diabolic Ward until its next turn.
+    ...(stats.passives.some(
+      (passive) =>
+        passive.kind === "ward" && passive.suppressed === "attacking",
+    )
+      ? [
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: attacker.id,
+            key: WARD_DOWN,
+          }),
+        ]
+      : []),
   ];
   const hit = {
     attacker: attacker.id,
@@ -917,7 +962,7 @@ export function runAttackRoll(
       };
     }
     return {
-      events: [report, ...spent],
+      events: [report, ...spent, ...onceHitEnded(attacker)],
       frames: [
         ...(masteryOf(attacker, action.id, context)
           ? [frame("masteryMiss", hit)]
@@ -927,6 +972,8 @@ export function runAttackRoll(
     };
   }
 
+  const duplicate = imageHit(attacker, target, context);
+  if (duplicate) return { events: [report, ...spent, ...duplicate] };
   const reaction = reactionFor(
     target,
     total,
@@ -1117,6 +1164,7 @@ export function runApplyHit(
 
   const events: SystemEvent[] = [];
   let totalDealt = 0;
+  const absorbed: { amount: number; type: DamageType }[] = [];
   const firstType = resolution.damage[0]?.type;
 
   // Add dice-based extra damage such as Sneak Attack to the first damage roll.
@@ -1263,7 +1311,9 @@ export function runApplyHit(
         ? Math.max(0, modifierFor(stats, resolution.attack.ability))
         : 0);
     const final = finalDamage(Math.max(0, rolled), type, responses);
-    totalDealt += final;
+    // Damage it absorbs heals it on its own, rather than taking from the rest of the hit.
+    if (final < 0) absorbed.push({ amount: final, type });
+    else totalDealt += final;
   });
   if (pierce.used) {
     events.push(
@@ -1273,6 +1323,7 @@ export function runApplyHit(
 
   const hits = [
     ...(firstType ? [{ amount: totalDealt, type: firstType }] : []),
+    ...absorbed,
     ...hitRiders(attacker, target, resolution).map(({ amount, type }) => ({
       amount: finalDamage(
         rollAmount(amount, stats, dice, multiplier),
@@ -1285,10 +1336,14 @@ export function runApplyHit(
   const targetStats = deriveStats(target, context);
   const armored = hits.map((item) => ({
     ...item,
-    amount: Math.max(
-      0,
-      item.amount - armoredReduction(target, targetStats, item.type, context),
-    ),
+    amount:
+      item.amount < 0
+        ? item.amount // absorbed
+        : Math.max(
+            0,
+            item.amount -
+              armoredReduction(target, targetStats, item.type, context),
+          ),
   }));
   const dealt = dealEvents(
     target,
@@ -1316,6 +1371,7 @@ export function runApplyHit(
     ...shieldBash(attacker, target, action, stats, context),
     ...inspiringStrike(attacker, payload.critical, stats, context),
     ...(dealt.dealt > 0 ? reassertHonor(attacker, target, context) : []),
+    ...onceHitEnded(attacker),
   );
   // The save sees the target as the hit left it.
   const afterHit = events.reduce(applyDndEvent, state);
@@ -1363,6 +1419,105 @@ export function runApplyHit(
       CHECK_END,
     ],
   };
+}
+
+// Mirror Image: a d6 for each duplicate left, and on a 3 or higher the hit lands on one of them, which is gone.
+// An attacker that is Blinded, or sees by Blindsight or Truesight, isn't fooled.
+function imageHit(
+  attacker: Actor,
+  target: Actor,
+  context: Context,
+): SystemEvent[] | null {
+  const images = target.activeEffects.find(
+    ({ modifier }) => modifier.kind === "images",
+  );
+  if (images?.modifier.kind !== "images") return null;
+  const senses =
+    attacker.source.kind === "monster"
+      ? (lookup(context, MonsterSchema, attacker.source.statBlockId).text ?? "")
+      : "";
+  const fooled =
+    !hasCondition(attacker, "blinded") &&
+    !/\b(?:blindsight|truesight) \d+ ft/i.test(senses) &&
+    !attacker.activeEffects.some(
+      ({ modifier }) => modifier.kind === "darkvision" && modifier.truesight,
+    );
+  const { count } = images.modifier;
+  const rolls = Array.from({ length: count }, () => context.dice.roll(6));
+  if (!fooled || rolls.every((roll) => roll < 3)) return null;
+  return [
+    dndEvent(`${NS}:effectEnded`, {
+      actor: target.id,
+      sourceId: images.sourceId,
+    }),
+    ...(count > 1
+      ? [
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: {
+              ...images,
+              modifier: { kind: "images", count: count - 1 },
+            },
+          }),
+        ]
+      : []),
+  ];
+}
+
+// Damage added to the bearer's next attack only, as Deadly Aim's, is spent by that attack, hit or miss.
+function onceHitEnded(attacker: Actor): SystemEvent[] {
+  return attacker.activeEffects.flatMap(({ modifier, sourceId }) =>
+    modifier.kind === "hitDamage" && modifier.once
+      ? [dndEvent(`${NS}:effectEnded`, { actor: attacker.id, sourceId })]
+      : [],
+  );
+}
+
+// A melee hit from within 5 feet on a creature that strikes back, as Fire Shield's or Flames of Phlegethos' flames, a black
+// pudding's acid or a mimic's glue, rolled with the bearer's numbers.
+function retaliated(
+  attacker: Actor,
+  target: Actor,
+  action: KnownAction,
+  context: Context,
+): SystemEvent[] {
+  if (!isMelee(action) || !within5(attacker, target)) return [];
+  const stats = deriveStats(target, context);
+  const backs = [
+    ...target.activeEffects.map((effect) => effect.modifier),
+    ...passiveModifiers(stats.passives),
+  ].flatMap((modifier) => (modifier.kind === "retaliate" ? [modifier] : []));
+  if (backs.length === 0 || isDown(attacker)) return [];
+  const responses = damageResponses(attacker, context);
+  const hits = backs.flatMap(({ damage }) =>
+    damage.map(({ amount, type }) => ({
+      amount: finalDamage(
+        rollAmount(amount, stats, context.dice),
+        type,
+        responses,
+      ),
+      type,
+    })),
+  );
+  const events = dealEvents(attacker, hits, false, context).events;
+  if (
+    backs.some(({ grapple }) => grapple) &&
+    !hasCondition(attacker, "grappled") &&
+    !immuneToCondition(deriveStats(attacker, context), "grappled")
+  ) {
+    events.push(
+      dndEvent(`${NS}:effectAdded`, {
+        actor: attacker.id,
+        effect: {
+          sourceId: `${target.id}:adhesive`,
+          casterId: target.id,
+          modifier: { kind: "condition", condition: "grappled" },
+          ends: "spellDuration",
+        },
+      }),
+    );
+  }
+  return events;
 }
 
 const PEERLESS_AIM = "peerless-aim";
@@ -1441,33 +1596,6 @@ function feast(
   ];
 }
 
-// Flames of Phlegethos' flames, as Fire Shield's: a melee hit from within 5 feet burns the attacker.
-function retaliated(
-  attacker: Actor,
-  target: Actor,
-  action: KnownAction,
-  context: Context,
-): SystemEvent[] {
-  if (!isMelee(action) || !within5(attacker, target)) return [];
-  const stats = deriveStats(target, context);
-  return target.activeEffects.flatMap(({ modifier }) =>
-    modifier.kind === "retaliate"
-      ? dealEvents(
-          attacker,
-          modifier.damage.map(({ amount, type }) => ({
-            amount: finalDamage(
-              rollAmount(amount, stats, context.dice),
-              type,
-              damageResponses(attacker, context),
-            ),
-            type,
-          })),
-          false,
-          context,
-        ).events
-      : [],
-  );
-}
 const BLOODIED_DAMAGE = "bloodied-damage";
 const SHIELD_BASH = "shield-bash";
 
@@ -1652,6 +1780,7 @@ function lessenHits<T extends { readonly amount: number }>(
 ): T[] {
   let left = reduceBy;
   return hits.map((item) => {
+    if (item.amount < 0) return item; // absorbed: it heals, and nothing lessens that
     const amount = halve ? halved(item.amount) : item.amount;
     const after = Math.max(0, amount - left);
     left -= amount - after;
