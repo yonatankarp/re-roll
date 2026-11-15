@@ -329,6 +329,9 @@ export function runFinishTurn(context: Context): SystemResult {
 }
 
 // The next turn begins, with its start-of-turn effects.
+// A minute of fighting with no one hurt, after which a fight ends as a stand-off.
+export const STAND_OFF_ROUNDS = 10;
+
 export function runAdvanceTurn(
   context: Context,
   ending: readonly SystemEvent[] = [],
@@ -339,6 +342,17 @@ export function runAdvanceTurn(
   // Look ahead through the same events, so nothing happens at all unless the next creature has a start-of-turn effect.
   let after = state;
   for (const event of finished) after = applyDndEvent(after, event);
+  // A stand-off: nobody has taken damage for a minute, as when neither side can reach or see the other.
+  // The party withdraws where the story allows it; otherwise the fight ends as won, without treasure, since
+  // that's the only outcome sure to lead the story on rather than back to the scene that started the fight.
+  if ((after.combat?.calmRounds ?? 0) >= STAND_OFF_ROUNDS) {
+    return {
+      events: [
+        ...finished,
+        ...combatEnded(state, state.combat.canFlee ? "flee" : undefined),
+      ],
+    };
+  }
   const next = currentActor(after);
   const events = [
     ...finished,

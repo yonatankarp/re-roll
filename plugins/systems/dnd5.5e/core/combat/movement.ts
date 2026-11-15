@@ -34,6 +34,7 @@ import {
   parseSquare,
   type Square,
   squareKey,
+  wallSet,
 } from "../grid.ts";
 import { seeing } from "../sight.ts";
 import { hasTactic } from "../tactics.ts";
@@ -248,13 +249,13 @@ export function teleportSquares(
   state: DndState,
   access: ContentAccess,
 ): readonly Square[] {
-  const { grid, walls = [] } = state.combat ?? {};
+  const grid = state.combat?.grid;
   const from = actor.position;
   if (!grid || !from) return [];
   if (movement > 0 && speedLeft(actor, deriveStats(actor, access)) < movement) {
     return [];
   }
-  const blocked = new Set(walls);
+  const blocked = wallSet(state.combat);
   const taken = new Set(
     Object.values(state.actors).flatMap((item) =>
       item.position && !isDown(item) ? [squareKey(item.position)] : [],

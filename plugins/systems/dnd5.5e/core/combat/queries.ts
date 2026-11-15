@@ -29,6 +29,7 @@ import {
   reachableSquares,
   type Square,
   squareKey,
+  wallSet,
 } from "../grid.ts";
 import { speedOf } from "../tactics.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
@@ -223,7 +224,7 @@ export function moveSquares(
     ]),
     new Set([...keys(others), ...walls]),
     difficultSquares(state),
-    new Set(walls),
+    wallSet(state.combat),
   );
 }
 
