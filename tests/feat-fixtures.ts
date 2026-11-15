@@ -224,6 +224,107 @@ const FIXTURES = [
       },
     ],
   }),
+  trait("charger", [{ kind: "dashBonus", feet: 10 }]),
+  trait("hop", [{ kind: "quickStand" }]),
+  trait("fortitude", [{ kind: "dodgeHeal" }]),
+  trait("dual", [{ kind: "dualWielder" }]),
+  trait("pole", [{ kind: "poleStrike" }]),
+  trait("shield-master", [{ kind: "shieldBash" }, { kind: "interposeShield" }]),
+  trait("prowess", [{ kind: "peerlessAim" }]),
+  trait("fortune", [{ kind: "saveReroll" }]),
+  trait("night", [
+    { kind: "resistAll", while: "shadows", except: ["psychic", "radiant"] },
+  ]),
+  trait("desperate", [
+    { kind: "resistAll", while: "bloodied", except: ["force"] },
+  ]),
+  trait("elven", [{ kind: "elvenAccuracy" }]),
+  trait("iron-mind", [{ kind: "unshakableFocus" }]),
+  trait("phlegethos", [{ kind: "spellRerollOnes", damage: "fire" }]),
+  trait("adept-all", [{ kind: "allSkills" }]),
+  trait("recall", [{ kind: "slotRecall" }]),
+  trait(
+    "retreat",
+    [
+      {
+        kind: "bonusTactics",
+        tactics: ["dash", "disengage"],
+        resource: "retreat",
+      },
+    ],
+    {
+      resources: [
+        {
+          id: "retreat",
+          max: { base: 1 },
+          recharge: [{ on: "longRest", amount: "all" }],
+        },
+      ],
+    },
+  ),
+  trait("shadow-dodge", [{ kind: "bonusTactics", tactics: ["dodge"] }]),
+  trait("toughened", [], {
+    resources: [
+      {
+        id: "tough",
+        max: { base: 1 },
+        recharge: [{ on: "shortRest", amount: "all" }],
+      },
+    ],
+    activations: [
+      {
+        cost: ["reaction", { resource: "tough" }],
+        trigger: {
+          damaged: true,
+          damagedBy: ["bludgeoning", "piercing", "slashing"],
+        },
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: ["bludgeoning", "piercing", "slashing"].map((damage) => ({
+            kind: "modifier",
+            duration: { until: "yourNextTurnStart" },
+            modifier: { kind: "resistance", damage },
+          })),
+        },
+      },
+    ],
+  }),
+  trait(
+    "putrefy",
+    [
+      {
+        kind: "damageRider",
+        damage: "slashing",
+        resource: "rot",
+        effects: [
+          {
+            kind: "applyCondition",
+            condition: "poisoned",
+            duration: { until: "yourNextTurnStart" },
+          },
+        ],
+      },
+    ],
+    {
+      resources: [
+        {
+          id: "rot",
+          max: { base: 1 },
+          recharge: [{ on: "shortRest", amount: "all" }],
+        },
+      ],
+    },
+  ),
+  {
+    id: "test:item/spear",
+    name: "Spear",
+    type: "weapon",
+    category: "simple",
+    damage: { dice: "1d6", type: "piercing" },
+    properties: ["thrown", "versatile"],
+    mastery: "sap",
+  },
   {
     id: "test:item/kit",
     name: "Kit",

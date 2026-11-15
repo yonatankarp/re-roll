@@ -18,6 +18,35 @@ import { HIT_DICE } from "./combat/ids.ts";
 
 // Species traits and feats that change rolls combat makes, kept out of combat.ts behind one call each.
 
+// Whether the creature has a Shield equipped, as Shield Master needs.
+export function holdsShield(
+  actor: Actor,
+  access: Pick<ContentAccess, "content">,
+): boolean {
+  return equipped(actor).some(
+    (id) => ItemSchema.safeParse(access.content(id)).data?.type === "shield",
+  );
+}
+
+// Shield Master's Interpose Shield: a Dexterity save that halves damage takes none instead, for the Reaction, while
+// the creature holds a Shield. The Reaction's event, or null when it can't.
+export function interposedShield(
+  target: Actor,
+  stats: Stats,
+  access: Pick<ContentAccess, "content">,
+): SystemEvent | null {
+  return stats.passives.some((passive) => passive.kind === "interposeShield") &&
+    target.budget.reaction &&
+    !hasCondition(target, ...INCAPACITATING) &&
+    holdsShield(target, access)
+    ? dndEvent(`${NS}:budgetSpent`, {
+        actor: target.id,
+        kind: "reaction",
+        label: "Interpose Shield",
+      })
+    : null;
+}
+
 // Advantage on a save from a trait, such as Gnomish Cunning, or Brave against a save that would frighten.
 export function traitSaveAdvantage(
   stats: Stats,
@@ -148,13 +177,36 @@ export function masteredDice(
   dice: Dice,
   type: DamageType,
   mastered: readonly DamageType[],
+  rerolled: readonly DamageType[] = [],
 ): Dice {
-  return mastered.includes(type)
+  // Flames of Phlegethos: a 1 on a die of its type is rolled again, and the new roll stands.
+  const once: Dice = rerolled.includes(type)
     ? {
         below: (count) => dice.below(count),
-        roll: (sides) => Math.max(2, dice.roll(sides)),
+        roll: (sides) => {
+          const value = dice.roll(sides);
+          return value === 1 ? dice.roll(sides) : value;
+        },
       }
     : dice;
+  return mastered.includes(type)
+    ? {
+        below: (count) => once.below(count),
+        roll: (sides) => Math.max(2, once.roll(sides)),
+      }
+    : once;
+}
+
+// The damage types whose 1s the bearer's spells roll again, as with Flames of Phlegethos.
+export function rerolledTypes(
+  stats: Stats,
+  spell: boolean,
+): readonly DamageType[] {
+  return spell
+    ? stats.passives.flatMap((passive) =>
+        passive.kind === "spellRerollOnes" ? [passive.damage] : [],
+      )
+    : [];
 }
 
 // The conditions a repeated save would end, so that a trait such as Fey Ancestry gives its Advantage there as well.

@@ -133,19 +133,34 @@ export function masteryOf(
 // An attack with a Light weapon lets a second Light weapon attack after it (actions.ts).
 export const LIGHT_USED = "light:";
 
+// An attack with a polearm lets Polearm Master's Pole Strike follow it (actions.ts).
+export const POLE_USED = "pole";
+export const POLE_STRUCK = "pole-struck";
+
+// Pole Strike's weapons: a Quarterstaff, a Spear, or one that is Heavy with Reach. Matched by name, as masteries are.
+export function isPolearm(weapon: Weapon): boolean {
+  return (
+    ["Quarterstaff", "Spear"].includes(weapon.name) ||
+    (weapon.properties.includes("heavy") && weapon.properties.includes("reach"))
+  );
+}
+
 export function lightAttackEvents(
   actor: Actor,
   actionId: string,
   access: Pick<ContentAccess, "content">,
 ): SystemEvent[] {
-  return weaponOf(actionId, access)?.properties.includes("light")
-    ? [
-        dndEvent(`${NS}:oncePerTurnUsed`, {
-          actor: actor.id,
-          key: `${LIGHT_USED}${actionId}`,
-        }),
-      ]
-    : [];
+  const weapon = weaponOf(actionId, access);
+  const used = (key: string) =>
+    dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key });
+  return [
+    ...(weapon?.properties.includes("light")
+      ? [used(`${LIGHT_USED}${actionId}`)]
+      : []),
+    ...(weapon && isPolearm(weapon) && !actor.usedThisTurn.includes(POLE_USED)
+      ? [used(POLE_USED)]
+      : []),
+  ];
 }
 
 // How each reads on a creature, in the log, its marks and the board's cues.
