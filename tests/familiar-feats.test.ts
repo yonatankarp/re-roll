@@ -8,7 +8,9 @@ import { systems } from "../app/systems.ts";
 import { createPlayStorage } from "../engine/platform/node/storage.ts";
 import { loadRun, scanPlugins } from "../engine/run/loader.ts";
 import { createRunContext, type RunContext } from "../engine/run/turn.ts";
+import { groundFor } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { startCombat } from "../plugins/systems/dnd5.5e/core/combat/start.ts";
+import { squareKey } from "../plugins/systems/dnd5.5e/core/grid.ts";
 import {
   type Actor,
   applyDndEvent,
@@ -161,5 +163,29 @@ describe.skipIf(!BOOKS)("Arcana Unleashed familiar feats", () => {
       8 + stats.proficiency + modifierFor(stats, "wis"),
     );
     expect(own.scaling.ownerProficiency).toBe(stats.proficiency);
+    // Phase Walk: through walls, at double cost, though it can't stop in one.
+    if (!started.combat || !familiar.position) throw new Error("No fight");
+    const wall = squareKey({
+      x: familiar.position.x + 1,
+      y: familiar.position.y,
+    });
+    const walled = {
+      ...started,
+      combat: { ...started.combat, walls: [wall] },
+    };
+    const ground = groundFor(familiar, walled, run, own);
+    expect([
+      ground.blocked.has(wall),
+      ground.occupied.has(wall),
+      ground.costly.has(wall),
+    ]).toEqual([false, true, true]);
+    expect(own.passives).toContainEqual(
+      expect.objectContaining({
+        kind: "moveThrough",
+        creatures: "any",
+        walls: true,
+        costly: true,
+      }),
+    );
   });
 });
