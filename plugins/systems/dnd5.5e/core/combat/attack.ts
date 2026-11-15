@@ -777,6 +777,7 @@ export function runApplyHit(
 
   const events: SystemEvent[] = [];
   let totalDealt = 0;
+  const absorbed: { amount: number; type: DamageType }[] = [];
   const firstType = resolution.damage[0]?.type;
 
   // Add dice-based extra damage such as Sneak Attack to the first damage roll.
@@ -867,11 +868,14 @@ export function runApplyHit(
         ? Math.max(0, modifierFor(stats, resolution.attack.ability))
         : 0);
     const final = finalDamage(Math.max(0, rolled), type, responses);
-    totalDealt += final;
+    // Damage it absorbs heals it on its own, rather than taking from the rest of the hit.
+    if (final < 0) absorbed.push({ amount: final, type });
+    else totalDealt += final;
   });
 
   const hits = [
     ...(firstType ? [{ amount: totalDealt, type: firstType }] : []),
+    ...absorbed,
     ...hitRiders(attacker, target, resolution).map(({ amount, type }) => ({
       amount: finalDamage(
         rollAmount(amount, stats, dice, multiplier),
@@ -1252,6 +1256,7 @@ function lessenHits<T extends { readonly amount: number }>(
 ): T[] {
   let left = reduceBy;
   return hits.map((item) => {
+    if (item.amount < 0) return item; // absorbed: it heals, and nothing lessens that
     const amount = halve ? halved(item.amount) : item.amount;
     const after = Math.max(0, amount - left);
     left -= amount - after;

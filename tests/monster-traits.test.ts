@@ -136,6 +136,23 @@ const BLOCKS = [
       { kind: "absorb", damage: ["fire"] },
     ],
   }),
+  statBlock("test:monster/flamer", {
+    actions: [
+      {
+        ...club,
+        activation: {
+          ...club.activation,
+          resolution: {
+            ...club.activation.resolution,
+            damage: [
+              { amount: { dice: "1d6" }, type: "slashing" },
+              { amount: { dice: "2d6" }, type: "fire" },
+            ],
+          },
+        },
+      },
+    ],
+  }),
   statBlock("test:monster/pudding", {
     passives: [
       {
@@ -713,6 +730,16 @@ describe("one-off monster traits and actions", () => {
       { amount: -12, type: "fire" },
     ]);
     expect(after.actors.absorber?.hp).toBe(112);
+    // A hit that is part slashing, part fire: the slashing hurts and the fire heals.
+    const absorber = monster("absorber", { hp: 100 });
+    const struck = settle(
+      run,
+      fight(fighter(run), monster("flamer"), absorber),
+      [attack("flamer", "monster:0", "absorber")],
+      d20s(15).dice,
+    );
+    expect(damageOf(struck.events, "absorber")).toEqual([1]);
+    expect(struck.state.actors.absorber?.hp).toBe(101);
     // finalDamage turns the absorbed type into the negative amount dealEvents heals with.
     expect(
       finalDamage(12, "fire", damageResponses(monster("absorber"), run)),
