@@ -24,7 +24,7 @@ import {
   rollAmount,
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
-import { distanceFeet, type Square } from "../grid.ts";
+import { distanceFeet, type Square, squareKey } from "../grid.ts";
 import { lightAt } from "../sight.ts";
 import {
   affects,
@@ -38,7 +38,7 @@ import {
   zonesOn,
 } from "../zones.ts";
 import { isSpell } from "./dispel.ts";
-import { CHECK_END, type Context } from "./queries.ts";
+import { CHECK_END, type Context, currentActor } from "./queries.ts";
 import {
   concentrationFrame,
   dealEvents,
@@ -173,7 +173,24 @@ export function areaEntry(
     const into = zones.filter(
       (zone) => inZone(zone, square) && !inZone(zone, from),
     );
-    if (into.length > 0) return { index, zones: into };
+    if (into.length > 0) {
+      // A walk can't stop in another creature's space, so it stops on the next square it can, the last if need be.
+      // shortcut: the area acts there only if that square is in it too.
+      const taken = new Set(
+        Object.values(state.actors).flatMap((item) =>
+          item.id !== walker.id && item.position && !isDead(item)
+            ? [squareKey(item.position)]
+            : [],
+        ),
+      );
+      let stop = index;
+      while (stop < path.length - 1) {
+        const at = path[stop];
+        if (at && !taken.has(squareKey(at))) break;
+        stop += 1;
+      }
+      return { index: stop, zones: into };
+    }
   }
   return null;
 }
@@ -343,13 +360,17 @@ export function runZoneTick(
           }),
         )
       : []),
-    // What it puts on a creature as its turn ends is first saved against at the end of its next turn.
-    ...acting.map((target) =>
-      dndEvent(`${NS}:oncePerTurnUsed`, {
-        actor: target.id,
-        key: `${FRESH}${zone.sourceId}`,
-      }),
-    ),
+    // What it puts on a creature as its own turn ends is first saved against at the end of its next turn.
+    ...(zone.area?.when === "turnEnd"
+      ? acting
+          .filter((target) => currentActor(state)?.id === target.id)
+          .map((target) =>
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: target.id,
+              key: `${FRESH}${zone.sourceId}`,
+            }),
+          )
+      : []),
   ];
   const result = resolveAction(action, owner, acting, context, zone.level);
   const events = [...marks, ...(result.events ?? [])];

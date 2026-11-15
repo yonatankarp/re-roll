@@ -2579,7 +2579,7 @@
     creature makes this save only once per turn. The Sphere moves 10 feet away
     from you at the start of each of your turns. Using a Higher-Level Spell
     Slot. The damage increases by 1d8 for each spell slot level above 5.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -3932,7 +3932,7 @@
     Speed. Similarly, the globe can be picked up and moved by other creatures. A
     Disintegrate spell targeting the globe destroys it without harming anything
     inside.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -4809,6 +4809,11 @@
           duration:
             concentration: true
             minutes: 10
+          choose:
+            - lightning
+            - thunder
+            - fire
+            - cold
     area:
       side: enemy
       when: turnStart
@@ -5319,7 +5324,7 @@
     strong wind (such as one created by Gust of Wind) disperses it. Using a
     Higher-Level Spell Slot. The fog’s radius increases by 20 feet for each
     spell slot level above 1.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -9823,7 +9828,7 @@
     them. Similarly, the area within the barrier is excluded from areas of
     effect created by such spells. Using a Higher-Level Spell Slot. The barrier
     blocks spells of 1 level higher for each spell slot level above 6.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -10621,7 +10626,7 @@
     creature or object entirely inside the Sphere has Immunity to Thunder
     damage, and creatures have the Deafened condition while entirely inside it.
     Casting a spell that includes a Verbal component is impossible there.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -10644,6 +10649,8 @@
             minutes: 10
     area:
       noSpells: verbal
+      conditions:
+        - deafened
       grants:
         - kind: immunity
           damage: thunder

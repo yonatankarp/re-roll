@@ -166,6 +166,50 @@ export function antimagicEvents(state: DndState): SystemEvent[] {
   });
 }
 
+const PLACED = "placed:";
+
+// The conditions spells' areas put on those in them while there, as Silence's Deafened: added for each creature that
+// stands in one and ended for each that left it, checked where Antimagic Field's are.
+export function placedConditionEvents(state: DndState): SystemEvent[] {
+  const placing = castZones(state).filter((zone) => zone.area?.conditions);
+  return Object.values(state.actors).flatMap((actor): SystemEvent[] => {
+    const had = actor.activeEffects.filter(({ sourceId }) =>
+      sourceId.startsWith(PLACED),
+    );
+    if (placing.length === 0 && had.length === 0) return [];
+    const wanted = placing.filter(
+      (zone) => inZone(zone, actor.position) && affects(zone, actor, state),
+    );
+    const keys = new Set(wanted.map((zone) => `${PLACED}${zone.sourceId}`));
+    const ended = [...new Set(had.map((effect) => effect.sourceId))]
+      .filter((sourceId) => !keys.has(sourceId))
+      .map((sourceId) =>
+        dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId }),
+      );
+    const added = wanted
+      .filter(
+        (zone) =>
+          !had.some(
+            (effect) => effect.sourceId === `${PLACED}${zone.sourceId}`,
+          ),
+      )
+      .flatMap((zone) =>
+        (zone.area?.conditions ?? []).map((condition) =>
+          dndEvent(`${NS}:effectAdded`, {
+            actor: actor.id,
+            effect: {
+              sourceId: `${PLACED}${zone.sourceId}`,
+              casterId: zone.owner,
+              modifier: { kind: "condition", condition },
+              ends: "spellDuration",
+            },
+          }),
+        ),
+      );
+    return [...ended, ...added];
+  });
+}
+
 export const sealed = (actor: Actor): boolean =>
   actor.activeEffects.some(({ modifier }) => modifier.kind === "sealed");
 

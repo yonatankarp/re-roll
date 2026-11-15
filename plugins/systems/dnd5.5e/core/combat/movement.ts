@@ -29,6 +29,7 @@ import {
 import { finalDamage } from "../rules.ts";
 import {
   antimagicEvents,
+  placedConditionEvents,
   blockingSet,
   sealed,
   thornHits,
@@ -263,6 +264,12 @@ function watchesMoves(walker: Actor, context: Context): boolean {
   );
 }
 
+// What standing in Antimagic Field or Silence holds off or puts on a creature, after a walk.
+const placedEvents = (state: DndState): SystemEvent[] => [
+  ...antimagicEvents(state),
+  ...placedConditionEvents(state),
+];
+
 // Leaving an enemy's reach gives it an Opportunity Attack, made before the move, so falling stops it.
 export function runMove(
   payload: z.infer<typeof MoveSchema>,
@@ -388,13 +395,21 @@ export function runFinishMove(
   const walker = { ...actor, position: { x: payload.x, y: payload.y } };
   // A walk into or out of an Antimagic Field, or one carrying it, holds off or brings back spells and items.
   const fields =
-    zonesOf(context.state).some((zone) => zone.area?.noSpells === "all") ||
-    Object.values(context.state.actors).some((item) => item.suppressed);
+    zonesOf(context.state).some(
+      (zone) => zone.area?.noSpells === "all" || zone.area?.conditions,
+    ) ||
+    Object.values(context.state.actors).some(
+      (item) =>
+        item.suppressed ||
+        item.activeEffects.some(({ sourceId }) =>
+          sourceId.startsWith("placed:"),
+        ),
+    );
   return {
     events: [
       moved,
       ...fogBoundEvents(walker, context),
-      ...(fields ? antimagicEvents(applyDndEvent(context.state, moved)) : []),
+      ...(fields ? placedEvents(applyDndEvent(context.state, moved)) : []),
     ],
   };
 }

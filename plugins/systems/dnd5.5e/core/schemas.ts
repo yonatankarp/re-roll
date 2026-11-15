@@ -409,6 +409,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     follows: z.literal(true).optional(),
     perSlot: z.number().int().min(5).optional(), // feet more radius for each slot level above the spell's
     bare: z.literal(true).optional(), // it carries none of the spell's area, which another of its zones does
+    // its area's damage takes one of these types, picked as cast: the one the caster's foes resist least, as
+    // Conjure Elemental's element
+    choose: z.array(DamageTypeSchema).min(2).optional(),
     // a wall that encloses a creature lets it make this save to get out first, as Wall of Stone's Dexterity
     escape: AbilitySchema.optional(),
   }),
@@ -626,6 +629,8 @@ export const AreaEffectSchema = z.strictObject({
   magicWard: z.literal(true).optional(),
   // spellShield blocks one level higher for each slot level above the spell's, as Globe of Invulnerability
   shieldGrows: z.literal(true).optional(),
+  // conditions those it affects have while in it, as Silence's Deafened
+  conditions: z.array(ConditionSchema).min(1).optional(),
   // it moves this far away from its owner as each of the owner's turns starts, as Cloudkill
   drifts: z.number().int().min(5).optional(),
   // its owner can take an action on later turns to move it up to this far, as Moonbeam's Magic action

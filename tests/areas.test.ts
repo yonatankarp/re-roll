@@ -55,6 +55,7 @@ import {
   affects,
   antimagicEvents,
   blockedSquares,
+  placedConditionEvents,
   placedFlag,
   zonesOf,
 } from "../plugins/systems/dnd5.5e/core/zones.ts";
@@ -333,6 +334,11 @@ const MONSTERS: Record<string, Readonly<Record<string, unknown>>> = {
   "test:monster/misty": statBlock("test:monster/misty", {
     passives: [
       { kind: "fogBound", inside: ["invisible"], outside: ["incapacitated"] },
+    ],
+  }),
+  "test:monster/grounded": statBlock("test:monster/grounded", {
+    passives: [
+      { kind: "modifier", modifier: { kind: "immunity", damage: "lightning" } },
     ],
   }),
 };
@@ -934,6 +940,38 @@ describe("walking into an area", () => {
     expect(damageTo(next.events, "foe")).toEqual([7]);
   });
 
+  it("stops a walk for the area's save on the first square it can stand on, past an ally's", async () => {
+    const run = await arena();
+    const start = fight(
+      hero(run, 0, 0),
+      monster("foe", "zombie", 0, 6),
+      monster("p", "zombie", 1, 5),
+      monster("q", "zombie", 1, 6),
+      monster("r", "zombie", 1, 7),
+    );
+    const cast = resolveAction(
+      beam(10),
+      actor(start, PLAYER_ACTOR),
+      [],
+      contextOf(run, start, LOW),
+      3,
+      false,
+      { x: 3, y: 6 },
+    );
+    const lit = apply(start, cast.events ?? []);
+    const theirs: DndState = lit.combat
+      ? { ...lit, combat: { ...lit.combat, index: 1 } }
+      : lit;
+    const walked = settle(
+      run,
+      theirs,
+      [frame("move", { actor: "foe", answer: "6,6" })],
+      LOW,
+    );
+    expect(damageTo(walked.events, "foe")).toEqual([7]);
+    expect(actor(walked.state, "foe").position).toEqual({ x: 6, y: 6 });
+  });
+
   it("acts on a foe a moving area is brought up to, as Spirit Guardians", async () => {
     const run = await arena();
     const start = fight(hero(run, 0, 0), monster("foe", "zombie", 8, 0));
@@ -1365,6 +1403,92 @@ describe("what a slot or a circle changes in an area", () => {
     const back = actor(apply(away, antimagicEvents(away)), PLAYER_ACTOR);
     expect(back.activeEffects).toHaveLength(1);
     expect(back.suppressed).toBeUndefined();
+  });
+
+  it("deafens whoever stands in Silence, until it leaves", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 5, 5));
+    const quiet = cast(
+      run,
+      start,
+      zoneSpell({}, { noSpells: "verbal", conditions: ["deafened"] }),
+      3,
+    );
+    const deaf = apply(quiet, placedConditionEvents(quiet));
+    expect(hasCondition(actor(deaf, "foe"), "deafened")).toBe(true);
+    expect(hasCondition(actor(deaf, PLAYER_ACTOR), "deafened")).toBe(false);
+    const away = apply(deaf, [
+      dndEvent(`${NS}:moved`, { actor: "foe", to: { x: 11, y: 11 }, feet: 0 }),
+    ]);
+    const heard = apply(away, placedConditionEvents(away));
+    expect(hasCondition(actor(heard, "foe"), "deafened")).toBe(false);
+  });
+
+  it("picks the element its caster's foes resist least", async () => {
+    const run = await arena();
+    const spirit = zoneSpell(
+      { choose: ["lightning", "thunder"] },
+      {
+        side: "enemy",
+        when: "turnStart",
+        resolution: {
+          ...save(30, []),
+          damage: [{ amount: { dice: "1d8" }, type: "lightning" }],
+        },
+      },
+    );
+    const types = (block: string): readonly string[] => {
+      const start = fight(hero(run, 0, 0), monster("foe", block, 11, 11));
+      const zone = zonesOf(cast(run, start, spirit, 3))[0];
+      return zone?.area?.resolution?.damage.map((item) => item.type) ?? [];
+    };
+    expect(types("zombie")).toEqual(["lightning"]);
+    expect(types("grounded")).toEqual(["thunder"]);
+  });
+
+  it("ends the first casting of a Concentration spell when it's cast again", async () => {
+    const run = await arena();
+    const start = fight(
+      hero(run, 0, 0),
+      monster("a", "zombie", 1, 0),
+      monster("b", "zombie", 2, 0),
+    );
+    const curse = spell("Curse", {
+      cost: ["action", "slot"],
+      targeting: { creatures: 1, range: 60, side: "enemy" },
+      resolution: {
+        kind: "automatic",
+        damage: [],
+        effects: [
+          effect(
+            { kind: "disadvantage", on: "attacks" },
+            { concentration: true, minutes: 1 },
+          ),
+        ],
+      },
+    });
+    const once = apply(
+      start,
+      resolveAction(
+        curse,
+        actor(start, PLAYER_ACTOR),
+        [actor(start, "a")],
+        contextOf(run, start, LOW),
+        3,
+      ).events ?? [],
+    );
+    const twice = apply(
+      once,
+      resolveAction(
+        curse,
+        actor(once, PLAYER_ACTOR),
+        [actor(once, "b")],
+        contextOf(run, once, LOW),
+        3,
+      ).events ?? [],
+    );
+    expect(actor(twice, "a").activeEffects).toEqual([]);
+    expect(actor(twice, "b").activeEffects).toHaveLength(1);
   });
 
   it("gives Immunity to Thunder damage inside Silence", async () => {

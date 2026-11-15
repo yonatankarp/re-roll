@@ -68,7 +68,11 @@ import {
   sunlightFrames,
   zoneFrames,
 } from "./areas.ts";
-import { antimagicEvents, healingStopped } from "../zones.ts";
+import {
+  antimagicEvents,
+  healingStopped,
+  placedConditionEvents,
+} from "../zones.ts";
 
 // The turn order: ending a fight, lingering effects, and the start and end of each turn.
 
@@ -498,6 +502,7 @@ export function runAdvanceTurn(
     ...(next ? regenerationEvents(next, context) : []),
     ...(next ? fogBoundEvents(next, { ...context, state: after }) : []),
     ...antimagicEvents(after),
+    ...placedConditionEvents(after),
     ...drifted.events,
     ...reactiveEvents(after, context),
   ];

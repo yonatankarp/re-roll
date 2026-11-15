@@ -1827,8 +1827,9 @@ export function damageResponses(
   for (const modifier of [
     ...actor.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
-    // What the areas it stands in give it, as Silence's Immunity to Thunder damage.
-    ...(access.state ? zoneModifiers(actor, access.state, access) : []),
+    // What the spells' areas it stands in give it, as Silence's Immunity to Thunder damage. Monster auras grant
+    // none, so their stat blocks aren't read on every hit.
+    ...(access.state ? zoneModifiers(actor, access.state) : []),
   ]) {
     if (modifier.kind === "resistance") resistances.push(modifier.damage);
     if (modifier.kind === "vulnerability")

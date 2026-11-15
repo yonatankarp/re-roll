@@ -1039,8 +1039,13 @@ function zoneEvents(
           dc: { base: evaluateFormula(printed.dc, stats), add: [] },
         }
       : printed;
-  const resolution = fixed(area?.resolution);
-  const holding = fixed(area?.holding);
+  const element = (
+    effects.find((effect) => effect.kind === "zone" && effect.choose) as
+      Extract<LeafEffect, { kind: "zone" }> | undefined
+  )?.choose;
+  const type = element ? leastResisted(element, actor, context) : undefined;
+  const resolution = retyped(fixed(area?.resolution), type);
+  const holding = retyped(fixed(area?.holding), type);
   for (const effect of effects) {
     if (effect.kind !== "zone") continue;
     // A higher slot widens it, as Fog Cloud's 20 feet a level.
@@ -1098,6 +1103,46 @@ function zoneEvents(
     );
   }
   return events;
+}
+
+// The damage type of `types` its foes in the fight resist least, as a caster picking Conjure Elemental's element.
+// shortcut: picked for the player too, rather than asked.
+function leastResisted(
+  types: readonly DamageType[],
+  caster: Actor,
+  context: Context,
+): DamageType {
+  const foes = enemies(context.state, caster).filter((foe) => !isDead(foe));
+  const worth = (type: DamageType): number =>
+    foes.reduce((sum, foe) => {
+      const responses = damageResponses(foe, context);
+      return (
+        sum +
+        (responses.immunities.includes(type) || responses.absorbs.includes(type)
+          ? 0
+          : responses.resistances.includes(type)
+            ? 1
+            : responses.vulnerabilities.includes(type)
+              ? 3
+              : 2)
+      );
+    }, 0);
+  const [best = types[0] ?? "force"] = [...types].sort(
+    (a, b) => worth(b) - worth(a),
+  );
+  return best;
+}
+
+// A resolution whose damage all takes `type`, when one was picked.
+function retyped(
+  resolution: Resolution | undefined,
+  type: DamageType | undefined,
+): Resolution | undefined {
+  if (!resolution || !type) return resolution;
+  return {
+    ...resolution,
+    damage: resolution.damage.map((item) => ({ ...item, type })),
+  };
 }
 
 // Moves the bearer's area of a spell to `to`, with the ticks on whoever it moves onto, as Moonbeam's.
@@ -1515,8 +1560,14 @@ export function resolveAction(
 
   const beginConcentration = (effects: readonly LeafEffect[]): void => {
     if (!usesConcentration(effects) && !action.concentrates) return;
-    // An area acting later keeps the Concentration its spell began, as Conjure Elemental's spirit restraining.
-    if (actor.concentratingOn === spellSource(action)) return;
+    // An area acting later, at no cost, keeps the Concentration its spell began, as Conjure Elemental's spirit
+    // restraining. A recast still begins it anew.
+    if (
+      action.activation.cost.length === 0 &&
+      actor.concentratingOn === spellSource(action)
+    ) {
+      return;
+    }
     if (actor.concentratingOn !== null) {
       events.push(dndEvent(`${NS}:concentrationEnded`, { actor: actor.id }));
     }
