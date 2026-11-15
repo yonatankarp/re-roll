@@ -275,6 +275,7 @@ export function runFinishTurn(context: Context): SystemResult {
             deriveStats(target, context),
             rolled.events,
             events,
+            context.dice,
           );
     events.push(...rescued);
     const worse = (

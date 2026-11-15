@@ -130,6 +130,11 @@ const ActiveEffectSchema = z.strictObject({
     .optional(),
   endsOnDamage: z.boolean().optional(),
   endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
+  endsOn: z.enum(["attack", "action"]).optional(), // ends when the creature attacks or deals damage, or acts
+  // Taking damage gives this save, ending it on a success, as Dragon Fear's.
+  saveOnDamage: z
+    .strictObject({ ability: AbilitySchema, dc: z.number().int() })
+    .optional(),
   level: z.number().int().optional(), // the slot a spell was cast with, when it was given one
   // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
   swallowed: z.boolean().optional(),
@@ -568,6 +573,19 @@ export function equipped(actor: Actor): string[] {
 }
 
 type Condition = z.infer<typeof ConditionSchema>;
+
+// Advantage limited to its caster, as Reassert Honor's, counts only for that attacker.
+export function forAttacker(
+  effect: ActiveEffect,
+  attackerId: string | undefined,
+): boolean {
+  const { modifier } = effect;
+  return (
+    modifier.kind !== "advantage" ||
+    !modifier.casterOnly ||
+    effect.casterId === attackerId
+  );
+}
 
 export function hasCondition(
   actor: Actor,

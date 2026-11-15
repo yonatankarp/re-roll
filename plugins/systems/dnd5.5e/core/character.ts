@@ -467,10 +467,8 @@ function originChoices(
   if (base || !draft.speciesId || !draft.backgroundId) return [];
   const prefixed = (owner: string, choices: readonly ChoiceDef[]) =>
     choices.map((choice) => ({ ...choice, id: `${owner}-${choice.id}` }));
-  const species = prefixed(
-    "species",
-    lookup(access, SpeciesSchema, draft.speciesId).choices,
-  );
+  const speciesDef = lookup(access, SpeciesSchema, draft.speciesId);
+  const species = owned(speciesDef, prefixed("species", speciesDef.choices));
   const background = lookup(access, BackgroundSchema, draft.backgroundId);
   // A background that gives its feat or one of a category asks which, as Haunted One does with a Dark Gift.
   const backgroundFeat: ChoiceDef[] = background.featOr
@@ -501,7 +499,10 @@ function originChoices(
 // The feat that asks each of a step's choices, when its spells have their own ability, so an answer can say whose
 // spells it's for.
 const choiceOwners = new WeakMap<ChoiceDef, string>();
-function owned<T extends ChoiceDef>(feat: Feat, choices: readonly T[]) {
+function owned<T extends ChoiceDef>(
+  feat: Pick<Feat, "id" | "choices"> & { readonly spellAbility?: unknown },
+  choices: readonly T[],
+) {
   const own =
     feat.spellAbility !== undefined ||
     feat.choices.some(({ kind }) => kind === "spellAbility");
@@ -1010,7 +1011,15 @@ function answersOf(
       case "weaponMastery":
         return [{ kind: "weaponMastery", values }];
       case "option":
-        return [{ kind: "features", values }];
+        return [
+          {
+            kind: "features",
+            values,
+            ...(choiceOwners.has(choice)
+              ? { feat: choiceOwners.get(choice) }
+              : {}),
+          },
+        ];
       case "feat": {
         const [increase] = picks[`${choice.id}:increase`] ?? [];
         return [

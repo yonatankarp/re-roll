@@ -495,6 +495,35 @@ const FIXTURES = [
   trait("fueled", [
     { kind: "schoolCast", school: "evocation", rider: "fueled" },
   ]),
+  trait("together", [{ kind: "allySaveAdvantage", abilities: ["str"] }]),
+  trait("bountiful", [
+    { kind: "tempHpBonus", amount: 5 },
+    { kind: "hitDieRolls", highest: true },
+  ]),
+  trait("recovery", [{ kind: "hitDieRolls", floor: 3 }]),
+  trait(
+    "radiance",
+    [{ kind: "maxDamageDice", damage: "radiant", resource: "radiance" }],
+    { resources: [{ id: "radiance", max: { base: 1 }, recharge: [] }] },
+  ),
+  trait(
+    "resistant",
+    [
+      {
+        kind: "saveRescue",
+        abilities: ["wis"],
+        bonusDice: "1d6",
+        magical: true,
+        resource: "resistant",
+      },
+    ],
+    { resources: [{ id: "resistant", max: { base: 1 }, recharge: [] }] },
+  ),
+  trait(
+    "past-life",
+    [{ kind: "checkRescue", bonusDice: "1d6", resource: "past-life" }],
+    { resources: [{ id: "past-life", max: { base: 1 }, recharge: [] }] },
+  ),
   trait("thrower", [{ kind: "thrownDamage", bonus: 2 }]),
   trait("bomber", [{ kind: "longShots" }, { kind: "farLobber", feet: 40 }]),
   {

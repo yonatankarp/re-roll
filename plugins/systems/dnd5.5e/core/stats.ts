@@ -32,6 +32,7 @@ import {
   type Resolution,
   type ScaleStep,
   type Skill,
+  type Species,
   SpeciesSchema,
   SubclassSchema,
   type Subclass,
@@ -242,6 +243,7 @@ function raisedByFeat(
 function featSpellAbilities(
   build: CharacterBuild,
   originFeats: readonly string[],
+  species: Species,
   access: ContentAccess,
 ): ReadonlyMap<string, Ability> {
   const byFeat = new Map<string, Ability>();
@@ -287,21 +289,8 @@ function featSpellAbilities(
   }
 
   const bySpell = new Map<string, Ability>();
-  for (const entry of build.levels) {
-    for (const answer of entry.answers) {
-      const ability =
-        answer.kind === "spells" && answer.feat
-          ? byFeat.get(answer.feat)
-          : undefined;
-      if (answer.kind === "spells" && ability) {
-        for (const spell of answer.values) bySpell.set(spell, ability);
-      }
-    }
-  }
-  for (const { id, feat } of feats) {
-    const ability = byFeat.get(id);
-    if (!ability) continue;
-    for (const grant of feat.grants) {
+  const featureSpells = (ids: readonly string[], ability: Ability) => {
+    for (const grant of ids) {
       const feature = FeatureSchema.safeParse(access.content(grant)).data;
       for (const spells of [feature?.spells, feature?.spellsBySlot]) {
         for (const spell of Object.values(spells ?? {}).flat()) {
@@ -309,7 +298,27 @@ function featSpellAbilities(
         }
       }
     }
+  };
+  for (const entry of build.levels) {
+    for (const answer of entry.answers) {
+      const ability =
+        (answer.kind === "spells" || answer.kind === "features") && answer.feat
+          ? byFeat.get(answer.feat)
+          : undefined;
+      if (!ability) continue;
+      // A species' lineage, picked as an option, gives its spells with the species' ability.
+      if (answer.kind === "features") featureSpells(answer.values, ability);
+      else if (answer.kind === "spells") {
+        for (const spell of answer.values) bySpell.set(spell, ability);
+      }
+    }
   }
+  for (const { id, feat } of feats) {
+    const ability = byFeat.get(id);
+    if (ability) featureSpells(feat.grants, ability);
+  }
+  const own = byFeat.get(species.id);
+  if (own) featureSpells(species.traits, own);
   return bySpell;
 }
 
@@ -694,6 +703,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const castingAbility = featSpellAbilities(
     build,
     replaced ? [] : [background.feat],
+    species,
     access,
   );
   const armorBases: number[] = [];
@@ -883,7 +893,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     routines: null,
     creatureType: species.creatureType.toLowerCase(),
     initiative: abilityModifier(abilities.dex) - 2 * actor.exhaustion,
-    scaling,
+    // Proficiency Bonus as a scaling key, for dice that number it, as Healing Hands' d4s.
+    scaling: { ...scaling, proficiency: proficiencyBonus(level) },
     features: [...featureIds],
     resourceDefs: [
       ...fromFeatures.resources,

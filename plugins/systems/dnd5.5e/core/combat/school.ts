@@ -5,11 +5,11 @@ import {
   deriveStats,
   type KnownAction,
   lookup,
-  rollDiceNotation,
   spellModifier,
   type Stats,
 } from "../stats.ts";
 import { HIT_DICE } from "./ids.ts";
+import { hitDieRoll } from "../trait-rules.ts";
 import type { Context } from "./queries.ts";
 
 // The Arcana Unleashed adepts' riders on casting a spell of their school (passive `schoolCast`).
@@ -47,8 +47,9 @@ function spendHitDice(
   const entries = build?.levels.slice(spent, spent + count) ?? [];
   let total = 0;
   for (const entry of entries) {
-    total += rollDiceNotation(
-      `1${lookup(context, ClassSchema, entry.classId).hitDie}`,
+    total += hitDieRoll(
+      lookup(context, ClassSchema, entry.classId).hitDie,
+      deriveStats(actor, context),
       context.dice,
     );
   }

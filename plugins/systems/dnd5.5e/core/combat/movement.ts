@@ -292,6 +292,7 @@ export function teleportFrame(
   feet: number,
   movement: number,
   context: Context,
+  provokes = true,
 ): Frame {
   const squares = teleportSquares(
     actor,
@@ -311,7 +312,12 @@ export function teleportFrame(
       })),
       { id: STAY, label: "Stay where you are" },
     ],
-    resume: frame("teleport", { actor: actor.id, feet, movement }),
+    resume: frame("teleport", {
+      actor: actor.id,
+      feet,
+      movement,
+      ...(provokes ? {} : { provokes }),
+    }),
   });
 }
 
@@ -319,6 +325,7 @@ export const TeleportSchema = z.object({
   actor: z.string(),
   feet: z.number(),
   movement: z.number(),
+  provokes: z.boolean().optional(), // false for movement spent that provokes nothing, as Portal Step's
   answer: z.string(),
 });
 
@@ -344,7 +351,7 @@ export function runTeleport(
   const jump = payload.movement > 0;
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];
-  for (const { foe, melee } of jump
+  for (const { foe, melee } of jump && payload.provokes !== false
     ? provokers(actor, to, state, context, [to])
     : []) {
     events.push(

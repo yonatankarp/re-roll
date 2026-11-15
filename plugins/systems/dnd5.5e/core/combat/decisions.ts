@@ -20,6 +20,7 @@ import {
   PICK_UP,
 } from "./ids.ts";
 import { distanceFeet } from "../grid.ts";
+import { lightAt } from "../sight.ts";
 import { deriveStats, lookup } from "../stats.ts";
 import { AIM_AREA, PICK } from "../targeting.ts";
 import { fleeOptions } from "../legendary.ts";
@@ -52,6 +53,9 @@ function turnOptions(
   for (const action of stats.actions) {
     const { activation } = action;
     if (activation.trigger || !canAfford(action, actor, stats)) continue;
+    if (activation.whileIn && lightAt(actor.position, state) === "bright") {
+      continue;
+    }
     const { targeting } = activation;
     const add = (target: string, label: string): void => {
       options.push(...withUpcasts(action, actor, stats, target, label));

@@ -13,7 +13,13 @@ import {
   equipped,
   hasCondition,
 } from "./state.ts";
-import { type Stats, deriveStats, evaluateFormula, lookup } from "./stats.ts";
+import {
+  type Stats,
+  deriveStats,
+  evaluateFormula,
+  lookup,
+  rollDiceNotation,
+} from "./stats.ts";
 import { HIT_DICE, weaponItemId } from "./combat/ids.ts";
 
 // Species traits and feats that change rolls combat makes, kept out of combat.ts behind one call each.
@@ -293,6 +299,8 @@ export function rescuedSave(
   stats: Stats,
   rolled: readonly SystemEvent[],
   pending: readonly SystemEvent[],
+  dice?: Dice, // for a rescue that rolls, as Spell Resistant's 1d6
+  magical = false, // the save is against a spell
 ): SystemEvent[] {
   const roll = rolled.findLast((event) => event.kind === `${NS}:saveRolled`);
   const { total, dc } =
@@ -315,6 +323,11 @@ export function rescuedSave(
         passive.conditions.some((condition) => conditions.includes(condition))
       ) ||
       (passive.bonus && total + evaluateFormula(passive.bonus, stats) < dc) ||
+      (passive.magical && !magical) ||
+      (passive.bonusDice &&
+        (!dice ||
+          total + rollDiceNotation(passive.bonusDice, HIGHEST) < dc ||
+          total + rollDiceNotation(passive.bonusDice, dice) < dc)) ||
       (passive.reaction &&
         (!target.budget.reaction ||
           hasCondition(target, ...INCAPACITATING) ||
@@ -341,6 +354,76 @@ export function rescuedSave(
     }
   }
   return [];
+}
+
+// Knowledge from a Past Life: a failed check gets a die added when its highest could be enough.
+export function rescuedCheck(
+  actor: Actor,
+  stats: Stats,
+  total: number,
+  dc: number,
+  dice: Dice,
+): { readonly bonus: number; readonly events: SystemEvent[] } {
+  if (total >= dc) return { bonus: 0, events: [] };
+  for (const passive of stats.passives) {
+    if (
+      passive.kind !== "checkRescue" ||
+      (actor.resourcesSpent[passive.resource] ?? 0) >=
+        (stats.resources[passive.resource] ?? 0) ||
+      total + rollDiceNotation(passive.bonusDice, HIGHEST) < dc
+    ) {
+      continue;
+    }
+    return {
+      bonus: rollDiceNotation(passive.bonusDice, dice),
+      events: [
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: actor.id,
+          resource: passive.resource,
+        }),
+      ],
+    };
+  }
+  return { bonus: 0, events: [] };
+}
+
+// Powerful Radiance: the first damage roll of its type uses each die's highest number, spending a use.
+// shortcut: it's used on the first such roll, rather than one the bearer picks.
+export function maximized(
+  actor: Actor,
+  stats: Stats,
+  types: readonly DamageType[],
+): { readonly type: DamageType; readonly events: SystemEvent[] } | null {
+  for (const passive of stats.passives) {
+    if (
+      passive.kind === "maxDamageDice" &&
+      types.includes(passive.damage) &&
+      (actor.resourcesSpent[passive.resource] ?? 0) <
+        (stats.resources[passive.resource] ?? 0)
+    ) {
+      return {
+        type: passive.damage,
+        events: [
+          dndEvent(`${NS}:resourceSpent`, {
+            actor: actor.id,
+            resource: passive.resource,
+          }),
+        ],
+      };
+    }
+  }
+  return null;
+}
+export const HIGHEST: Dice = { below: () => 0, roll: (sides) => sides };
+
+// A Hit Point Die rolled to heal, at least a floor or at its highest, as Bloodlust or Boon of Bountiful Health gives.
+export function hitDieRoll(die: string, stats: Stats, dice: Dice): number {
+  const sides = Number(die.slice(1));
+  const rules = stats.passives.flatMap((passive) =>
+    passive.kind === "hitDieRolls" ? [passive] : [],
+  );
+  if (rules.some(({ highest }) => highest)) return sides;
+  return Math.max(dice.roll(sides), ...rules.map(({ floor = 1 }) => floor));
 }
 
 // The die a character's next unspent Hit Point Die is, in level order as resting spends them, or null for none.

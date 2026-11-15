@@ -60,7 +60,9 @@ import {
 import {
   armoredReduction,
   holdsShield,
+  HIGHEST,
   masteredDice,
+  maximized,
   masteredTypes,
   rerolledTypes,
   piercing,
@@ -93,6 +95,7 @@ import {
 } from "./queries.ts";
 import {
   concentrationFrame,
+  damageRiders,
   dealEvents,
   leafEvents,
   payCosts,
@@ -434,7 +437,15 @@ export function runAttackRoll(
     packed ||
     unseenAttacker ||
     hasFlag(attacker, "advantage", "attacks", stats, ability) ||
-    hasFlag(target, "advantage", "attacksAgainst", targetStats) ||
+    hasFlag(
+      target,
+      "advantage",
+      "attacksAgainst",
+      targetStats,
+      undefined,
+      undefined,
+      attacker.id,
+    ) ||
     invisibleTo(attacker, target) ||
     hasCondition(
       target,
@@ -448,6 +459,18 @@ export function runAttackRoll(
     (hasCondition(target, "prone") && close) ||
     (hasPassive(stats, "grappledAdvantage") &&
       grapplesOn(target).some(({ casterId }) => casterId === attacker.id)) ||
+    // Street Justice's Headlock: allies too, against a creature the bearer grapples.
+    grapplesOn(target).some(({ casterId }) => {
+      const grappler = state.actors[casterId];
+      return (
+        grappler !== undefined &&
+        casterId !== attacker.id &&
+        grappler.side === attacker.side &&
+        deriveStats(grappler, context).passives.some(
+          (passive) => passive.kind === "grappledAdvantage" && passive.allies,
+        )
+      );
+    }) ||
     traitAttackAdvantage(stats, attacker, target, targetStats);
   // Protection: an ally's Shield gives this roll, and the others against the target, Disadvantage.
   const shielded = guardFor(target, attacker, "allyAttacked", context);
@@ -552,7 +575,7 @@ export function runAttackRoll(
         ]
       : []),
     ...onceEnded(attacker, "attacks"),
-    ...onceEnded(target, "attacksAgainst"),
+    ...onceEnded(target, "attacksAgainst", attacker.id),
     ...revealEvents(attacker),
   ];
   const hit = {
@@ -792,7 +815,6 @@ export function runApplyHit(
   }
   // Piercer: once a turn, a low die of the first damage of its type is rolled again, and a Critical Hit with it
   // rolls one more die.
-  // shortcut: the turn's use is spent on the first piercing hit even when no die is low enough to roll again.
   const piercer = stats.passives.find(
     (passive) =>
       passive.kind === "damageReroll" &&
@@ -805,22 +827,46 @@ export function runApplyHit(
   const pierceKey = `reroll:${String(pierced)}`;
   const rerolls =
     pierced !== null && !attacker.usedThisTurn.includes(pierceKey);
-  if (rerolls) {
-    events.push(
-      dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key: pierceKey }),
-    );
-  }
+  // The turn's use is spent only when a die is rolled again.
+  const pierce = { used: false };
+  const maxed = maximized(
+    attacker,
+    stats,
+    resolution.damage.map(({ type }) => type),
+  );
+  events.push(...(maxed?.events ?? []));
+  const maxIndex = resolution.damage.findIndex(
+    ({ type }) => type === maxed?.type,
+  );
   const weaponDice = weaponDamageDice(dice, action.id, stats, context);
   resolution.damage.forEach(({ amount, type }, index) => {
     const pierces = index === pierceIndex;
     const die = /d(\d+)/.exec(amount.dice ?? "")?.[1];
-    const roll = () =>
-      rollAmount(
-        pierces && rerolls ? { ...amount, reroll: 1 } : amount,
+    const roll = () => {
+      const inner =
+        index === maxIndex
+          ? HIGHEST
+          : masteredDice(weaponDice, type, mastered, rerolled);
+      if (!(pierces && rerolls)) {
+        return rollAmount(amount, stats, inner, multiplier);
+      }
+      let count = 0;
+      const total = rollAmount(
+        { ...amount, reroll: 1 },
         stats,
-        masteredDice(weaponDice, type, mastered, rerolled),
+        {
+          below: (count) => inner.below(count),
+          roll: (sides) => {
+            count += 1;
+            return inner.roll(sides);
+          },
+        },
         multiplier,
       );
+      const printed = Number(/^(\d+)d/.exec(amount.dice ?? "")?.[1] ?? 0);
+      if (count > printed * multiplier) pierce.used = true;
+      return total;
+    };
     const rolled =
       ((savage || exploit) && index === 0 ? Math.max(roll(), roll()) : roll()) +
       (pierces && payload.critical && die
@@ -835,6 +881,11 @@ export function runApplyHit(
     const final = finalDamage(Math.max(0, rolled), type, responses);
     totalDealt += final;
   });
+  if (pierce.used) {
+    events.push(
+      dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key: pierceKey }),
+    );
+  }
 
   const hits = [
     ...(firstType ? [{ amount: totalDealt, type: firstType }] : []),
@@ -866,7 +917,7 @@ export function runApplyHit(
     ...damageRiders(
       attacker,
       target,
-      resolution,
+      new Set(resolution.damage.map(({ type }) => type)),
       payload.critical,
       stats,
       context,
@@ -1014,7 +1065,6 @@ function inspiringStrike(
 }
 
 // Lords' Alliance Agent's Reassert Honor: an enemy that damages an ally beside the bearer is easier to hit.
-// shortcut: anyone's next attack on it gets the Advantage, as with Help, not only the bearer's.
 function reassertHonor(
   attacker: Actor,
   target: Actor,
@@ -1033,7 +1083,12 @@ function reassertHonor(
             {
               kind: "modifier",
               duration: { until: "yourNextTurnEnd" },
-              modifier: { kind: "advantage", on: "attacksAgainst", once: true },
+              modifier: {
+                kind: "advantage",
+                on: "attacksAgainst",
+                once: true,
+                casterOnly: true,
+              },
             },
           ],
           "reassert-honor",
@@ -1075,40 +1130,6 @@ function halted(
 }
 
 // Crusher's and Slasher's effects on a creature hit by an attack dealing their damage type.
-function damageRiders(
-  attacker: Actor,
-  target: Actor,
-  resolution: Extract<Resolution, { kind: "attack" }>,
-  critical: boolean,
-  stats: Stats,
-  context: Context,
-): SystemEvent[] {
-  const types = new Set(resolution.damage.map(({ type }) => type));
-  return stats.passives.flatMap((passive) => {
-    if (passive.kind !== "damageRider" || !types.has(passive.damage)) return [];
-    if (passive.critical && !critical) return [];
-    const key = `rider:${passive.damage}:${String(passive.critical)}`;
-    if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return [];
-    const { resource } = passive;
-    if (
-      resource &&
-      (attacker.resourcesSpent[resource] ?? 0) >=
-        (stats.resources[resource] ?? 0)
-    ) {
-      return [];
-    }
-    return [
-      ...(passive.oncePerTurn
-        ? [dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key })]
-        : []),
-      ...(resource
-        ? [dndEvent(`${NS}:resourceSpent`, { actor: attacker.id, resource })]
-        : []),
-      ...leafEvents(passive.effects, key, attacker, target, context),
-    ];
-  });
-}
-
 // shortcut: a reaction lessens the damage after Resistance rather than before it, which only matters to rounding.
 function lessenHits<T extends { readonly amount: number }>(
   hits: readonly T[],
@@ -1185,6 +1206,8 @@ function nestedSave(
         deriveStats(target, context),
         rolled.events,
         [],
+        context.dice,
+        action.spellLevel !== null,
       );
   const succeeded = rolled.saved || rescued.length > 0;
   const responses = damageResponses(target, context);

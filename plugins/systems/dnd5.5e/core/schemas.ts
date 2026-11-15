@@ -166,6 +166,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     on: RollFlagSchema,
     once: z.boolean().optional(),
     ability: AbilitySchema.optional(),
+    // attacksAgainst only for the effect's caster, as Lords' Alliance Agent's Reassert Honor.
+    casterOnly: z.literal(true).optional(),
   }),
   // "attackers" limits attacksAgainst to creatures of these lowercase types, as with Protection from Evil and Good.
   z.strictObject({
@@ -181,6 +183,11 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     damage: DamageTypeSchema,
   }),
   z.strictObject({ kind: z.literal("immunity"), damage: DamageTypeSchema }),
+  // Can't gain this condition while it lasts, as Lordly Resolve's bolstered targets.
+  z.strictObject({
+    kind: z.literal("conditionImmunity"),
+    condition: ConditionSchema,
+  }),
   z.strictObject({ kind: z.literal("acFormula"), formula: FormulaSchema }),
   // Seeing creatures that have the Invisible condition as if they were visible, as See Invisibility does.
   z.strictObject({ kind: z.literal("seeInvisible") }),
@@ -241,6 +248,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     hpAtMost: z.number().int().min(1).optional(), // only a target with this many Hit Points or fewer
     endsOnDamage: z.boolean().default(false),
     endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature, as Modify Memory's
+    // Ends when the creature attacks or deals damage ("attack"), or takes any action ("action"), as Fade Away's.
+    endsOn: z.enum(["attack", "action"]).optional(),
+    // Taking damage gives it a save to end it, as Dragon Fear's, using the save it came with.
+    saveOnDamage: z.literal(true).optional(),
     // What a failed repeat save turns it into, as a cockatrice's Restrained becoming Petrified.
     secondFailure: z
       .strictObject({
@@ -272,7 +283,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("teleport"),
     feet: z.number().int().min(5),
     movement: z.number().int().min(0).default(0),
+    // A teleport paid for with movement that still provokes nothing, as Portal Step's.
+    provokes: z.literal(false).optional(),
   }),
+  // The Dash action as part of another, as with Adrenaline Rush.
+  z.strictObject({ kind: z.literal("dash") }),
   z.strictObject({ kind: z.literal("extraAction") }), // Action Surge
   // Ends one of these conditions on the target, the one that hampers it most, as Lesser Restoration does.
   z.strictObject({
@@ -439,6 +454,7 @@ export const ActivationSchema = z.strictObject({
     })
     .optional(),
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
+  whileIn: z.literal("shadows").optional(), // only in Dim Light or Darkness, as Merge with Shadows
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
@@ -629,6 +645,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     abilities: z.array(AbilitySchema).default([]),
     conditions: z.array(ConditionSchema).default([]),
     bonus: FormulaSchema.optional(),
+    // A die rolled and added instead, when its highest roll could be enough, as Spell Resistant's 1d6.
+    bonusDice: DiceSchema.optional(),
+    magical: z.literal(true).optional(), // only a save against a spell, as Magic Resistant
     reaction: z.boolean().default(false),
     resource: z.string(),
   }),
@@ -638,7 +657,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Sentinel.
   z.strictObject({ kind: z.literal("sentinel") }),
   // Advantage on attack rolls against a creature the bearer has grappled, as with Grappler.
-  z.strictObject({ kind: z.literal("grappledAdvantage") }),
+  // With `allies`, the bearer's allies have it too, as with Street Justice's Headlock.
+  z.strictObject({
+    kind: z.literal("grappledAdvantage"),
+    allies: z.literal(true).optional(),
+  }),
   // Once a turn, one damage die of a hit of this type is rolled again, and a Critical Hit rolls one more die, as
   // with Piercer.
   z.strictObject({ kind: z.literal("damageReroll"), damage: DamageTypeSchema }),
@@ -728,6 +751,37 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("schoolCast"),
     school: SpellSchoolSchema,
     rider: z.enum(["ward", "life", "augment", "fueled", "persistent"]),
+  }),
+  // A failed ability check gets this die added when it could be enough, spending a use, as Reborn's Knowledge from a
+  // Past Life.
+  z.strictObject({
+    kind: z.literal("checkRescue"),
+    bonusDice: DiceSchema,
+    resource: z.string(),
+  }),
+  // Advantage on saves with these abilities while within 5 feet of an ally that can act, for the bearer and that
+  // ally, as Order's Resilience's Stronger Together.
+  z.strictObject({
+    kind: z.literal("allySaveAdvantage"),
+    abilities: z.array(AbilitySchema).min(1),
+  }),
+  // This many more Temporary Hit Points whenever it gains some, as Boon of Bountiful Health's Augmented Health.
+  z.strictObject({
+    kind: z.literal("tempHpBonus"),
+    amount: z.number().int().min(1),
+  }),
+  // Its Hit Point Dice rolled to heal count at least `floor`, or with `highest` as their highest number, as Bloodlust's
+  // Powerful Recovery and Boon of Bountiful Health's Superior Recuperation.
+  z.strictObject({
+    kind: z.literal("hitDieRolls"),
+    floor: z.number().int().min(2).optional(),
+    highest: z.literal(true).optional(),
+  }),
+  // A damage roll of this type uses the highest number on each die, spending a use, as Powerful Radiance.
+  z.strictObject({
+    kind: z.literal("maxDamageDice"),
+    damage: DamageTypeSchema,
+    resource: z.string(),
   }),
   // A vial or flask is thrown this far, as with Bomber's Far Lobber.
   z.strictObject({
@@ -1247,6 +1301,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("features"),
     values: z.array(ContentIdSchema),
+    feat: ContentIdSchema.optional(), // the feat or species that asked, for its spells' ability
   }),
   z.strictObject({
     kind: z.literal("weaponMastery"),
@@ -1267,7 +1322,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("spellAbility"),
     ability: AbilitySchema,
-    feat: ContentIdSchema, // whose spells it's for
+    feat: ContentIdSchema, // whose spells it's for: a feat, or the species
   }),
 ]);
 

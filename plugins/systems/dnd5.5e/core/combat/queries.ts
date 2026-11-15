@@ -5,6 +5,7 @@ import {
   dndEvent,
   type DndState,
   equipped,
+  forAttacker,
   hasCondition,
   INCAPACITATING,
   isDead,
@@ -79,9 +80,12 @@ export function hasFlag(
   stats: Stats,
   ability?: Ability,
   attackerType?: string, // the attacker's creature type, for attacksAgainst
+  attackerId?: string, // for attacksAgainst, which a caster's own Advantage needs
 ): boolean {
   return [
-    ...actor.activeEffects.map((effect) => effect.modifier),
+    ...actor.activeEffects
+      .filter((effect) => forAttacker(effect, attackerId))
+      .map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
   ].some(
     (modifier) =>
