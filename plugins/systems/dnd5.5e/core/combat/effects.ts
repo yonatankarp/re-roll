@@ -60,7 +60,13 @@ import { summonEvents } from "./summon.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
-import { formOf, weakestBeast } from "../forms.ts";
+import {
+  currentShape,
+  formOf,
+  SHAPE,
+  shapeOf,
+  weakestBeast,
+} from "../forms.ts";
 import {
   actorOf,
   allies,
@@ -470,6 +476,41 @@ export function leafEvents(
           ...dispelEvents(target, effect.maxLevel, context.state, context),
         );
         break;
+      case "shapeShift": {
+        const shapes =
+          target.source.kind === "monster"
+            ? lookup(context, MonsterSchema, target.source.statBlockId).shapes
+            : undefined;
+        const index =
+          shapes?.findIndex((shape) => shape.name === effect.shape) ?? -1;
+        const now = shapeOf(target);
+        if (!shapes || index < 0 || (now ?? shapes[0]?.name) === effect.shape) {
+          break;
+        }
+        if (now !== null) {
+          events.push(
+            dndEvent(`${NS}:effectEnded`, {
+              actor: target.id,
+              sourceId: SHAPE,
+            }),
+          );
+        }
+        // The true shape, listed first, is having no other.
+        if (index > 0) {
+          events.push(
+            dndEvent(`${NS}:effectAdded`, {
+              actor: target.id,
+              effect: {
+                sourceId: SHAPE,
+                casterId: target.id,
+                modifier: { kind: "shape", shape: effect.shape },
+                ends: "spellDuration",
+              },
+            }),
+          );
+        }
+        break;
+      }
       case "extraAction":
         events.push(dndEvent(`${NS}:actionRegained`, { actor: target.id }));
         break;
@@ -929,7 +970,12 @@ export function multiattackExtras(
     return [];
   }
   const monster = lookup(context, MonsterSchema, actor.source.statBlockId);
-  return multiattackUses(monster, action.name);
+  const usable = new Set(
+    deriveStats(actor, context).actions.map(({ id }) => id),
+  );
+  return currentShape(monster, actor)?.multiattack === false
+    ? []
+    : multiattackUses(monster, action.name).filter((id) => usable.has(id));
 }
 
 // Those actions, taken once the attacks are done.

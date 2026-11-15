@@ -41,6 +41,7 @@ import { AimSchema, PickSchema } from "./combat/actions.ts";
 import { multiattackExtras } from "./combat/effects.ts";
 import { AVERAGE, makeJudge } from "./worth.ts";
 import { TACTIC } from "./tactics.ts";
+import { SHAPE } from "./forms.ts";
 
 // The Dodge action (actions.ts), which the party weighs like any other choice.
 const DODGE = `${TACTIC}dodge`;
@@ -292,6 +293,58 @@ export function moveOf(action: KnownAction) {
     : undefined;
 }
 
+function shiftOf(action: KnownAction) {
+  const { resolution } = action.activation;
+  return resolution.kind === "automatic"
+    ? resolution.effects.find((item) => item.kind === "shapeShift")
+    : undefined;
+}
+
+// What taking one of its shapes adds to the most its Action's attacks deal at once, as if every one hit.
+// shortcut: a shape's Speed or Fly Speed counts for nothing, so a monster only shifts for its attacks.
+function shapeGain(actor: Actor, shape: string, context: Context): number {
+  const best = (item: Actor): number => {
+    const stats = deriveStats(item, context);
+    return Math.max(
+      0,
+      ...stats.actions
+        .filter(
+          ({ activation }) =>
+            activation.cost.includes("action") &&
+            activation.resolution.kind === "attack",
+        )
+        .map((action) =>
+          attackRoutine(action, item, stats).reduce((total, id) => {
+            const made = stats.actions.find((known) => known.id === id);
+            const { resolution } = made?.activation ?? action.activation;
+            return resolution.kind === "attack"
+              ? resolution.damage.reduce(
+                  (sum, { amount }) => sum + rollAmount(amount, stats, AVERAGE),
+                  total,
+                )
+              : total;
+          }, 0),
+        ),
+    );
+  };
+  const others = actor.activeEffects.filter(
+    ({ sourceId }) => sourceId !== SHAPE,
+  );
+  const shifted: Actor = {
+    ...actor,
+    activeEffects: [
+      ...others,
+      {
+        sourceId: SHAPE,
+        casterId: actor.id,
+        modifier: { kind: "shape", shape },
+        ends: "spellDuration",
+      },
+    ],
+  };
+  return best(shifted) - best(actor);
+}
+
 // A save that comes with a hit, or a condition left by an action that deals no damage.
 function weighed(action: KnownAction): boolean {
   const { resolution } = action.activation;
@@ -523,10 +576,23 @@ export function choosePolicy(decision: Decision, context: Context): string {
     const action = stats.actions.find((item) => item.id === actionId);
     const target = state.actors[targetId];
     const worth = action && targetId === AIM_AREA ? worthOf(action) : null;
-    return action && (worth === null || worth > 0)
+    const shift = action ? shiftOf(action) : undefined;
+    return action &&
+      (worth === null || worth > 0) &&
+      (!shift || shapeGain(actor, shift.shape, context) > 0)
       ? [{ option, action, target, targetId, slot, worth }]
       : [];
   });
+  // A shape whose attacks hit harder is taken before the attacks are.
+  const shifting = parsed
+    .flatMap((item) => {
+      const shift = shiftOf(item.action);
+      return shift
+        ? [{ ...item, gain: shapeGain(actor, shift.shape, context) }]
+        : [];
+    })
+    .sort((a, b) => b.gain - a.gain)[0];
+  if (shifting && actor.budget.action) return shifting.option.id;
 
   // Slots go on fights that need them: the enemies left must outlast the caster's own HP, and a healer keeps its last slot.
   const foesHp = knownFoes(state, actor, context)

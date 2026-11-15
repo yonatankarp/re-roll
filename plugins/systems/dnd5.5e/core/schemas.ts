@@ -318,6 +318,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // The target spends one of its Hit Point Dice and regains what it rolls plus `bonus`, as with Healer's Battle Medic.
   z.strictObject({ kind: z.literal("hitDieHeal"), bonus: FormulaSchema }),
+  // The bearer takes another of its stat block's own shapes, by name, or goes back to its true one (core/forms.ts).
+  z.strictObject({ kind: z.literal("shapeShift"), shape: z.string().min(1) }),
 ]);
 export type LeafEffect = z.infer<typeof LeafEffectSchema>;
 
@@ -1103,10 +1105,35 @@ export const MonsterSchema = ContentEntrySchema.extend({
         name: z.string().min(1),
         recharge: z.number().int().min(2).max(6).optional(), // ready again on this d6 roll or higher
         perDay: z.number().int().min(1).optional(), // uses of its resource cost, back after a Long Rest
+        shapes: z.array(z.string().min(1)).min(1).optional(), // the shapes it can be used in, as "(Wolf Form Only)"
         activation: ActivationSchema,
       }),
     )
     .default([]), // empty when nothing it does can be automated, as for a creature that only has traits
+  // Every shape its Shape-Shift takes, its true one first: what each changes from the stat block (core/forms.ts).
+  shapes: z
+    .array(
+      z.strictObject({
+        name: z.string().min(1), // lowercase, as its "(… Form Only)" entries name it
+        size: z
+          .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
+          .optional(),
+        speed: z.number().int().optional(), // walking
+        speeds: z
+          .strictObject({
+            walk: z.number().int(),
+            fly: z.number().int().optional(),
+            swim: z.number().int().optional(),
+            climb: z.number().int().optional(),
+            burrow: z.number().int().optional(),
+          })
+          .optional(),
+        passives: z.array(PassiveSchema).default([]), // traits printed for this shape only
+        multiattack: z.boolean().default(true), // false when its Multiattack is printed for other shapes only
+      }),
+    )
+    .min(2)
+    .optional(),
   // Taken right after another creature's turn, spending uses that come back at the start of its own.
   legendary: z
     .strictObject({

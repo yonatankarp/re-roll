@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { carriedWeight, carryingCapacity, encumberedSpeed } from "./carry.ts";
 import { type Actor, type DndState, equipped, hasCondition } from "./state.ts";
 import { lightAt } from "./sight.ts";
-import { formOf } from "./forms.ts";
+import { currentShape, formOf, usableIn } from "./forms.ts";
 import {
   ALL_SKILLS,
   DAMAGE_TYPES,
@@ -882,6 +882,19 @@ function multiattackRoutines(
   return routines;
 }
 
+function mapRoutines(
+  routines: Readonly<Record<string, readonly string[]>> | null,
+  map: (id: string, chosen: string) => string,
+): Readonly<Record<string, readonly string[]>> | null {
+  if (!routines) return null;
+  return Object.fromEntries(
+    Object.entries(routines).map(([chosen, ids]) => [
+      chosen,
+      ids.map((id) => map(id, chosen)),
+    ]),
+  );
+}
+
 function monsterStats(actor: Actor, access: ContentAccess): Stats {
   if (actor.source.kind !== "monster") {
     throw new Error(`${actor.id} is not a monster`);
@@ -961,6 +974,25 @@ function statBlockStats(
   access: ContentAccess,
 ): Stats {
   const fromFeatures = collectFeatureData(access, monster.features);
+  const shape = currentShape(monster, actor);
+  const usable = new Set(
+    monster.actions.flatMap((action, index) =>
+      usableIn(action, shape) ? [`monster:${String(index)}`] : [],
+    ),
+  );
+  const passives = [
+    ...monster.passives,
+    ...(shape?.passives ?? []),
+    ...fromFeatures.passives,
+  ];
+  // A Multiattack printed for other shapes only isn't there, and a routine's attack this shape can't make is the
+  // chosen one again.
+  const routines =
+    shape?.multiattack === false
+      ? null
+      : mapRoutines(multiattackRoutines(monster), (id, chosen) =>
+          usable.has(id) ? id : chosen,
+        );
   return {
     abilities: monster.abilities,
     proficiency: monster.proficiency,
@@ -970,9 +1002,9 @@ function statBlockStats(
     ac: bestAc(actor, monster.abilities, {
       armorBases: [monster.ac],
       flatBonus: 0,
-      passives: [...monster.passives, ...fromFeatures.passives],
+      passives,
     }),
-    speed: Math.max(0, monster.speed - 5 * actor.exhaustion),
+    speed: Math.max(0, (shape?.speed ?? monster.speed) - 5 * actor.exhaustion),
     savingThrows: monster.saves,
     skills: [],
     expertise: [],
@@ -985,21 +1017,27 @@ function statBlockStats(
         ),
       ),
     ),
-    passives: [...monster.passives, ...fromFeatures.passives],
+    passives,
     actions: [
-      ...monster.actions.map((action, index) => ({
-        id: `monster:${String(index)}`,
-        name: action.name,
-        activation: action.activation,
-        spellLevel: null,
-      })),
+      ...monster.actions.flatMap((action, index) =>
+        usable.has(`monster:${String(index)}`)
+          ? [
+              {
+                id: `monster:${String(index)}`,
+                name: action.name,
+                activation: action.activation,
+                spellLevel: null,
+              },
+            ]
+          : [],
+      ),
       ...fromFeatures.actions,
     ],
     multiattack: Math.max(
-      monster.multiattack,
-      ...passiveAttacks([...monster.passives, ...fromFeatures.passives]),
+      shape?.multiattack === false ? 1 : monster.multiattack,
+      ...passiveAttacks(passives),
     ),
-    routines: multiattackRoutines(monster),
+    routines,
     creatureType: monster.creatureType?.toLowerCase(),
     initiative: monster.initiative - 2 * actor.exhaustion,
     scaling: {},

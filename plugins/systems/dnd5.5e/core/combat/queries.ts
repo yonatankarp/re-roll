@@ -41,6 +41,7 @@ import {
   type Targeting,
 } from "../schemas.ts";
 import { bossAction } from "../legendary.ts";
+import { currentShape } from "../forms.ts";
 import { aimScore, aimSquares, caughtBy } from "../targeting.ts";
 
 // Questions about a fight that change nothing: who is an ally or a foe, what reaches, what an actor can afford.
@@ -290,7 +291,8 @@ export const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
 // A creature's size, as its index in SIZES.
 export function sizeOf(actor: Actor, access: ContentAccess): number {
   if (actor.source.kind === "monster") {
-    const { size } = lookup(access, MonsterSchema, actor.source.statBlockId);
+    const monster = lookup(access, MonsterSchema, actor.source.statBlockId);
+    const size = currentShape(monster, actor)?.size ?? monster.size;
     return SIZES.indexOf(size ?? "medium");
   }
   if (actor.source.kind === "summon") {

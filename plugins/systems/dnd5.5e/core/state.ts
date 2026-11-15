@@ -105,6 +105,8 @@ const ActiveEffectSchema = z.strictObject({
     }),
     // Another creature's shape, by its stat block (core/forms.ts).
     z.strictObject({ kind: z.literal("form"), monster: ContentIdSchema }),
+    // One of its own stat block's other shapes, by name, as a werewolf's wolf form (core/forms.ts).
+    z.strictObject({ kind: z.literal("shape"), shape: z.string() }),
     // An area a spell left on the map, kept on its caster (core/zones.ts).
     z.strictObject({
       kind: z.literal("zone"),

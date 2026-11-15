@@ -26,6 +26,7 @@ import {
   spellLookup,
 } from "./monster-spells.ts";
 import { plainText, slugOf } from "./spells.ts";
+import { formsOnly, shapesIn, shapeShiftActions } from "./shapes.ts";
 
 type AbilityKey = keyof typeof ABILITIES;
 
@@ -1276,9 +1277,16 @@ function parseBlock(
     const own = casterIn(text, scores, proficiency);
     return own.mod === null ? { ...blockCaster, ...nonNull(own) } : own;
   };
+  // Where each entry's actions start, with the shapes its label limits them to.
+  const marks: { at: number; forms: readonly string[] | undefined }[] = [];
+  const shapePassives: { forms: readonly string[]; passive: Passive }[] = [];
   for (const [index, paragraph] of paragraphs.entries()) {
     const attributes = paragraph[1] ?? "";
     const inner = paragraph[2] ?? "";
+    marks.push({
+      at: actions.length,
+      forms: formsOnly(entryOf(inner)?.label ?? ""),
+    });
     if (/monster-header|Stat-Block-Heading/.test(attributes)) {
       section = plainText(inner)
         .toLowerCase()
@@ -1336,7 +1344,9 @@ function parseBlock(
     if (section === "traits" || section === "") {
       const passive = traitPassive(label, text);
       const left = passive ? traitLeftOut(label) : null;
-      if (passive) passives.push(passive);
+      const forms = formsOnly(label);
+      if (passive && forms) shapePassives.push({ forms, passive });
+      else if (passive) passives.push(passive);
       if (left) notes.push(`partial: ${label}: left out ${left}`);
       if (!passive) {
         notes.push(
@@ -1563,6 +1573,26 @@ function parseBlock(
       recharge = undefined;
     }
   }
+  for (const [index, { at, forms }] of marks.entries()) {
+    if (!forms) continue;
+    for (const action of actions.slice(at, marks[index + 1]?.at)) {
+      Object.assign(action as object, { shapes: forms });
+    }
+  }
+  const shaped = shapesIn(lines, size);
+  const shapes = shaped?.shapes.map((shape) => ({
+    ...shape,
+    passives: shapePassives.flatMap(({ forms, passive }) =>
+      forms.includes(shape.name) ? [passive] : [],
+    ),
+  }));
+  if (shaped && shapes) {
+    actions.push(...shapeShiftActions(shapes, shaped.cost));
+    const left = notes.findIndex((note) => note.endsWith(": Shape-Shift"));
+    if (left >= 0) notes.splice(left, 1);
+  } else {
+    passives.push(...shapePassives.map(({ passive }) => passive));
+  }
   // The block can still be read, and the creature fights like any other: it just never has an option but to pass.
   if (actions.length === 0 && (!secondPass || dependsOnCaster(lines))) {
     return null;
@@ -1628,6 +1658,7 @@ function parseBlock(
       ),
       multiattack,
       actions,
+      ...(shapes ? { shapes } : {}),
       ...legendary.fields,
       text: lines.join("\n"),
     },

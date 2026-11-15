@@ -104,3 +104,32 @@ export function settleForms(before: DndState, after: DndState): DndState {
   }
   return actors === after.actors ? after : { ...after, actors };
 }
+
+// A stat block's own shapes, as a werewolf's wolf and hybrid: every Shape-Shift effect shares one source, so the
+// next one replaces it, and the true shape (the first) is having none.
+export const SHAPE = "shape";
+
+type Shape = NonNullable<Monster["shapes"]>[number];
+
+export function shapeOf(actor: Actor): string | null {
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind === "shape") return modifier.shape;
+  }
+  return null;
+}
+
+// The shape a monster is in, or null for a stat block with only one.
+export function currentShape(monster: Monster, actor: Actor): Shape | null {
+  const { shapes } = monster;
+  if (!shapes) return null;
+  const name = shapeOf(actor);
+  return shapes.find((shape) => shape.name === name) ?? shapes[0] ?? null;
+}
+
+// An action printed "(Wolf or Hybrid Form Only)" is out of reach in any other shape.
+export function usableIn(
+  action: Monster["actions"][number],
+  shape: Shape | null,
+): boolean {
+  return !action.shapes || !shape || action.shapes.includes(shape.name);
+}

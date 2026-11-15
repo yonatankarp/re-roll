@@ -14,7 +14,20 @@ import {
   provokers,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import { resolveAction } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
-import { weakestBeast } from "../plugins/systems/dnd5.5e/core/forms.ts";
+import {
+  shapeOf,
+  weakestBeast,
+} from "../plugins/systems/dnd5.5e/core/forms.ts";
+import {
+  formsOnly,
+  shapesIn,
+  shapeShiftActions,
+} from "../plugins/systems/dnd5.5e/core/import/shapes.ts";
+import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { sizeOf } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import { choosePolicy } from "../plugins/systems/dnd5.5e/core/policy.ts";
+import { nextDndDecision } from "../plugins/systems/dnd5.5e/core/combat.ts";
+import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { PregenSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
   type Actor,
@@ -100,6 +113,37 @@ const BLOCKS = [
   statBlock("test:monster/golem", {
     text: "CR 5 (XP 1,800; PB +3)",
     passives: [{ kind: "immutableForm" }],
+  }),
+  // A werewolf in small: Bite in wolf shape only, Club in its true one only, and a Shape-Shift to each.
+  statBlock("test:monster/were", {
+    actions: [
+      { ...club, shapes: ["humanoid"] },
+      {
+        ...club,
+        name: "Bite",
+        shapes: ["wolf"],
+        activation: {
+          ...club.activation,
+          resolution: {
+            ...club.activation.resolution,
+            damage: [{ amount: { dice: "4d6" }, type: "piercing" }],
+          },
+        },
+      },
+      ...shapeShiftActions(
+        [{ name: "humanoid" }, { name: "wolf" }] as never,
+        "bonusAction",
+      ),
+    ],
+    shapes: [
+      { name: "humanoid", speed: 30 },
+      {
+        name: "wolf",
+        size: "large",
+        speed: 40,
+        passives: [{ kind: "noOpportunityAttacks" }],
+      },
+    ],
   }),
 ];
 
@@ -399,5 +443,115 @@ describe("Flyby and Immutable Form", () => {
     const run = await base();
     expect(weakestBeast(monster("dummy"), run)).not.toBeNull();
     expect(weakestBeast(monster("golem"), run)).toBeNull();
+  });
+});
+
+describe("Shape-Shift", () => {
+  const shift = (shape: string) => [{ kind: "shapeShift" as const, shape }];
+
+  it("takes a shape with its size, Speed, traits and actions, and goes back", async () => {
+    const run = await base();
+    const were = monster("were");
+    const state = fight(fighter(run), were);
+    const context = contextOf(run, state, d20s(10).dice);
+    const names = (item: Actor) =>
+      deriveStats(item, run).actions.map(({ name }) => name);
+    expect(names(were)).toContain("Club");
+    expect(names(were)).not.toContain("Bite");
+    const wolf = leafEvents(shift("wolf"), "x", were, were, context).reduce(
+      applyDndEvent,
+      state,
+    ).actors.were;
+    if (!wolf) throw new Error("No wolf");
+    expect(shapeOf(wolf)).toBe("wolf");
+    expect(names(wolf)).toContain("Bite");
+    expect(names(wolf)).not.toContain("Club");
+    expect(deriveStats(wolf, run).speed).toBe(40);
+    expect(sizeOf(wolf, run)).toBeGreaterThan(sizeOf(were, run));
+    expect(deriveStats(wolf, run).passives).toContainEqual({
+      kind: "noOpportunityAttacks",
+    });
+    const back = leafEvents(shift("humanoid"), "x", wolf, wolf, {
+      ...context,
+      state: { ...state, actors: { ...state.actors, were: wolf } },
+    }).reduce(applyDndEvent, state).actors.were;
+    expect(back && shapeOf(back)).toBeNull();
+    // Already in that shape: nothing happens.
+    expect(leafEvents(shift("humanoid"), "x", were, were, context)).toEqual([]);
+  });
+
+  it("shifts first when its other shape hits harder, and never for nothing", async () => {
+    const run = await base();
+    const choose = (were: Actor): string => {
+      const state = fight(fighter(run, { at: [4, 5] }), {
+        ...were,
+        position: { x: 5, y: 5 },
+      });
+      const decision = nextDndDecision(
+        { ...state, combat: state.combat && { ...state.combat, index: 1 } },
+        run,
+      );
+      if (!decision) throw new Error("No decision");
+      return choosePolicy(decision, contextOf(run, state, d20s(10).dice));
+    };
+    expect(choose(monster("were"))).toMatch(/^monster:3\b/);
+    const wolf: Actor = {
+      ...monster("were"),
+      activeEffects: [
+        {
+          sourceId: "shape",
+          casterId: "were",
+          modifier: { kind: "shape", shape: "wolf" },
+          ends: "spellDuration",
+        },
+      ],
+    };
+    expect(choose(wolf)).toMatch(/^monster:1\b/);
+  });
+
+  it("reads the shapes from the stat block's text", () => {
+    expect(formsOnly("Bite (Wolf or Hybrid Form Only)")).toEqual([
+      "wolf",
+      "hybrid",
+    ]);
+    expect(formsOnly("Magic Allergy (Individual Form Only; 1/Day)")).toEqual([
+      "individual",
+    ]);
+    const read = shapesIn(
+      [
+        "Speed 30 ft., 40 ft. (wolf form only)",
+        "Actions",
+        "Multiattack (Wolf or Hybrid Form Only). The werewolf makes two attacks.",
+        "Bite (Wolf or Hybrid Form Only). Melee Attack Roll: +5, reach 5 ft.",
+        "Bonus Actions",
+        "Shape-Shift. The werewolf shape-shifts into a Large wolf-humanoid hybrid or a Medium wolf, or it returns to its true humanoid form.",
+      ],
+      "medium",
+    );
+    expect(read?.cost).toBe("bonusAction");
+    expect(
+      read?.shapes.map(({ name, size, speed, multiattack }) => [
+        name,
+        size,
+        speed,
+        multiattack,
+      ]),
+    ).toEqual([
+      ["humanoid", "medium", 30, false],
+      ["hybrid", "large", 30, true],
+      ["wolf", "medium", 40, true],
+    ]);
+    const bat = shapesIn(
+      [
+        "Speed 40 ft., Fly 40 ft.",
+        "Bonus Actions",
+        "Shape-Shift. If the vampire isn’t in sunlight, it shape-shifts into a Tiny bat (Speed 5 ft., Fly Speed 30 ft.), or it returns to its vampire form.",
+      ],
+      "medium",
+    );
+    expect(bat?.shapes.map(({ name, speeds }) => [name, speeds])).toEqual([
+      ["vampire", { walk: 40, fly: 40 }],
+      ["bat", { walk: 5, fly: 30 }],
+    ]);
   });
 });
