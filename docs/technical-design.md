@@ -330,6 +330,8 @@ export interface Frame {
 
 `step` works through frames until the stack is empty or a decision is needed, then waits for the next input. A game can be saved at any moment, including halfway through an attack.
 
+A step that needs the player's answer partway through, as a save that Lucky could reroll, calls the context's `ask`. The engine sets the step aside and keeps nothing it did, not even its dice. It waits on the question, then runs the step again from the start in a `kernel:replay` frame that holds the step and the answers so far. The step rolls the same dice again and reaches the same question, so the answer fits. Handlers have to stay pure for this. Story frames get `ask` too, so a scene's check can ask.
+
 ### 6.3 Decisions
 
 All decisions use one interface. The UI answers for the player, the system's `decidePolicy` answers for companions and opponents, and the test bot answers with random valid options. The engine doesn't know which one it's talking to.
@@ -727,7 +729,10 @@ The other reactions are answered in `combat/reactions.ts`, through the same hook
 - **A moment**, offered by a `react` frame: damage taken (`damaged`, now from any source, with `within`, `damagedBy`, `melee`), an attack that hits (`struck`) or misses (`missed`) the bearer, a foe hitting someone else (`foeHitsOther`), a Bloodied creature hurt (`otherDamaged`), a walk entering reach (`entersReach`) or ending nearby (`endsMove`), a turn starting nearby (`turnStart`), a save to keep Concentration (`concentrationSave`), and the bearer's own save against a creature's effect (`ownSave`). A `strike` effect answers with one attack, or an Opportunity Attack; `split` halves a creature into two.
 - **Before damage lands** (`damaged` with `before`), as Vitality Ward or Elemental Absorption.
 
-The player decides an attack-roll reaction or a moment's reaction through a `dnd5.5e:reaction:` decision, and the attack roll waits in its payload (`rolled`) until they answer. Monsters and companions decide by tactics. Saves and checks are rolled in the middle of other work, so reactions to them, and before damage, are taken by tactics for the player too. A walk that enters a reaction's reach stops on that square, takes the reaction, then goes on as a `move` with `rest`.
+The player decides every reaction through a `dnd5.5e:reaction:` decision. The attack roll waits in its payload (`rolled`) until they answer. Saves, checks, damage about to land, falls and a failed save against a spell are asked in the middle of their step through `ask` (`playerTakes`). Monsters and companions decide by tactics.
+
+- **A fall** (`falls`), as Feather Fall: Reverse Gravity's `lift` holds creatures up, and out of reach of those below, until it ends. Then everyone it held falls together (`combat/falling.ts`) and takes 1d6 per 10 feet, unless a `slowFall` reaction catches them.
+- **A table** on the activation (`table`), as Mythal Ward's, rolled as the reaction is taken. It's taken before a spell attack's hit or a failed save against a spell lands, so a row can turn the spell aside. A walk that enters a reaction's reach stops on that square, takes the reaction, then goes on as a `move` with `rest`.
 
 A hit on a creature during that creature's own turn counts as an Opportunity Attack, for Sentinel's Halt and Zhentarim Ruffian's damage. A walk whose Speed drops to 0 before it finishes, from Halt or a grapple, ends where it started.
 

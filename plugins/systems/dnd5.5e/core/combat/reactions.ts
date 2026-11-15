@@ -11,6 +11,7 @@ import {
 import {
   type Actor,
   dndEvent,
+  EffectAddedSchema,
   equipped,
   frame,
   hasCondition,
@@ -31,6 +32,7 @@ import {
 } from "../stats.ts";
 import { rollD20 } from "../rules.ts";
 import { DECLINE } from "./ids.ts";
+import { teleportFrame } from "./movement.ts";
 import {
   actorOf,
   allies,
@@ -38,6 +40,9 @@ import {
   CHECK_END,
   type Context,
   meleeReach,
+  sizeOf,
+  SIZES,
+  SPLITS,
 } from "./queries.ts";
 import {
   leafEvents,
@@ -128,7 +133,9 @@ function matchesRoll(
 ): boolean {
   const rolled = trigger.rolled;
   if (!rolled?.rolls.includes(roll.kind)) return false;
-  if (rolled.magical && !roll.magical) return false;
+  // Defensive Divination's `magical` is for the saves it answers, not the hits.
+  const asSave = rolled.when !== "hitOrFailed" || roll.kind !== "attack";
+  if (rolled.magical && !roll.magical && asSave) return false;
   const self = bearer.id === roll.roller.id;
   const ally = !self && bearer.side === roll.roller.side;
   const foe = bearer.side !== roll.roller.side;
@@ -148,6 +155,12 @@ function matchesRoll(
     // A hit on the bearer, or with `within` on an ally that near it.
     if (subject.id !== bearer.id && trigger.within === undefined) return false;
     if (subject.side !== bearer.side) return false;
+  }
+  if (rolled.when === "hitOrFailed") {
+    if (subject.id === bearer.id || subject.side !== bearer.side) return false;
+    if (roll.kind === "attack" ? !foe || !roll.success : foe || roll.success) {
+      return false;
+    }
   }
   if (rolled.when === "natural1" && roll.natural !== 1) return false;
   if (rolled.when === "failed" && roll.success) return false;
@@ -251,9 +264,32 @@ export function respond(
   return { events: reactionCosts(reactor, action, context), natural, bonus };
 }
 
-// Settles a roll made inside other work, where nobody can be asked: everyone answers it by tactics, the player
-// too, as Guarded Mind and Interception are taken.
-// shortcut: the player isn't asked about saves and checks, since they're rolled in the middle of an effect.
+const ROLL_WORDS = { attack: "an attack", save: "a save", check: "a check" };
+
+// Asks the player whether to take a reaction in the middle of a step, as Lucky on a save. The step is run again
+// once they answer (SystemContext.ask). Where nobody can be asked, it's taken, as tactics only offer what helps.
+export function playerTakes(
+  key: string,
+  prompt: string,
+  action: KnownAction,
+  context: Context,
+): boolean {
+  if (!context.ask) return true;
+  return (
+    context.ask({
+      id: `${NS}:reaction:${PLAYER_ACTOR}:${key}`,
+      actor: PLAYER_ACTOR,
+      prompt,
+      options: [
+        { id: action.id, label: action.name },
+        { id: DECLINE, label: "Let it stand" },
+      ],
+    }) !== DECLINE
+  );
+}
+
+// Settles a roll made inside other work, a save or a check: monsters and companions answer it by tactics, and
+// the player is asked.
 export function settleRoll(
   roll: Roll,
   edge: Edge,
@@ -275,6 +311,17 @@ export function settleRoll(
     const found = rollResponder(current, passed, context);
     if (!found) break;
     passed.push(found.reactor.id);
+    if (
+      found.reactor.id === PLAYER_ACTOR &&
+      !playerTakes(
+        `${roll.kind}:${roll.roller.id}`,
+        `${roll.roller.id === PLAYER_ACTOR ? "You roll" : `${roll.roller.name} rolls`} ${String(current.natural)} (${String(current.total)}) on ${ROLL_WORDS[roll.kind]} against ${String(roll.goal)}: ${current.success ? "a success" : "a failure"}. Use ${found.action.name}?`,
+        found.action,
+        context,
+      )
+    ) {
+      continue;
+    }
     const taken = respond(found.reactor, found.action, current, edge, context);
     events.push(...taken.events);
     bonus += taken.bonus;
@@ -300,6 +347,7 @@ export const MomentSchema = z.object({
     "turnStart",
     "concentrationSave",
     "saved",
+    "studied",
   ]),
   actor: z.string(), // the creature it happened to, or the one walking or starting its turn
   source: z.string().optional(), // the creature that did it: the damager or the attacker
@@ -309,6 +357,7 @@ export const MomentSchema = z.object({
   spell: z.boolean().optional(), // it came from a spell
   success: z.boolean().optional(), // a save's result, for "saved"
   from: z.object({ x: z.number(), y: z.number() }).optional(), // the square a walker entered from
+  weapon: z.string().optional(), // the action of the weapon attack that missed, for Sticky Shield
   passed: z.array(z.string()).optional(), // creatures that already answered it or turned it down
 });
 export type Moment = z.infer<typeof MomentSchema>;
@@ -414,6 +463,7 @@ function matchesMoment(
     case "saved":
       return (
         self &&
+        !trigger.before &&
         trigger.ownSave === (moment.success ? "succeeded" : "failed") &&
         kindOk &&
         source !== undefined &&
@@ -443,6 +493,7 @@ function matchesMoment(
     case "endsMove":
     case "turnStart":
     case "concentrationSave":
+    case "studied":
       return (
         trigger[moment.kind] === true &&
         hostile &&
@@ -481,7 +532,12 @@ function strikeReaches(
   if (!target || isDown(target) || isDead(target)) return false;
   if (strike.approach) return true;
   const attack = strikeAction(bearer, strike.action, context);
-  const reach = attack ? (meleeReach(attack) ?? rangeOf(attack)) : null;
+  const jump = attack && teleportOf(attack);
+  const reach = jump
+    ? jump.feet + (strike.near ?? 0)
+    : attack
+      ? (meleeReach(attack) ?? rangeOf(attack))
+      : null;
   return (
     reach !== null && distanceFeet(bearer.position, target.position) <= reach
   );
@@ -536,11 +592,28 @@ function responderTo(
         ready(bearer, item, stats) &&
         inRange(bearer, item, culprit(moment, context, item)) &&
         strikeReaches(bearer, item, culprit(moment, context, item), context) &&
-        !healsCulprit(item, culprit(moment, context, item), context),
+        !healsCulprit(item, culprit(moment, context, item), context) &&
+        !shrugsOff(culprit(moment, context, item), item, bearer),
     );
     if (action) return { reactor: bearer, action };
   }
   return null;
+}
+
+// A creature that saved against this bearer's reaction and so stopped minding it, as with Unnerving Gaze.
+function shrugsOff(
+  target: Actor | undefined,
+  action: KnownAction,
+  bearer: Actor,
+): boolean {
+  return (
+    target?.activeEffects.some(
+      ({ modifier, sourceId, casterId }) =>
+        modifier.kind === "areaImmunity" &&
+        sourceId === action.id &&
+        casterId === bearer.id,
+    ) ?? false
+  );
 }
 
 // Hellish Rebuke's fire on an iron golem would only heal it, so it isn't offered.
@@ -629,6 +702,7 @@ export function takeReaction(
   const result = resolveAction(action, reactor, targets, context);
   events.push(...(result.events ?? []));
   frames.push(...(result.frames ?? []));
+  events.push(...stuckEvents(action, moment, target, result.events ?? []));
   for (const effect of effectsOf(action)) {
     if (effect.kind === "strike" && target && !isDown(target)) {
       const attack = strikeAction(reactor, effect.action, context);
@@ -670,6 +744,21 @@ export function takeReaction(
             target: target.id,
           }),
         );
+      } else if (effect.near !== undefined && teleportOf(attack)) {
+        // Pursuit: the Teleport lands near the creature that set it off.
+        const jump = teleportOf(attack);
+        if (jump) {
+          frames.push(
+            teleportFrame(
+              reactor,
+              jump.feet,
+              jump.movement,
+              context,
+              jump.provokes,
+              { actor: target.id, feet: effect.near },
+            ),
+          );
+        }
       } else {
         // Another action it uses, as a nalfeshnee's Teleport, costs nothing more than the Reaction.
         const used = resolveAction(
@@ -688,9 +777,50 @@ export function takeReaction(
   return { events, frames };
 }
 
+// Sticky Shield: the weapon that missed sticks for as long as the grapple the reaction made holds.
+function stuckEvents(
+  action: KnownAction,
+  moment: Moment,
+  target: Actor | undefined,
+  events: readonly SystemEvent[],
+): SystemEvent[] {
+  if (
+    !moment.weapon ||
+    !target ||
+    !effectsOf(action).some((effect) => effect.kind === "stickWeapon")
+  ) {
+    return [];
+  }
+  return events.flatMap((event) => {
+    const added = EffectAddedSchema.safeParse(
+      event.kind === `${NS}:effectAdded` && "payload" in event
+        ? event.payload
+        : undefined,
+    ).data;
+    const { effect } = added ?? {};
+    return added?.actor === target.id &&
+      effect?.sourceId === action.id &&
+      effect.modifier.kind === "condition" &&
+      effect.modifier.condition === "grappled"
+      ? [
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: {
+              ...effect,
+              modifier: { kind: "stuck", action: moment.weapon ?? "" },
+            },
+          }),
+        ]
+      : [];
+  });
+}
+
+const teleportOf = (action: KnownAction) =>
+  effectsOf(action).find((effect) => effect.kind === "teleport");
+
 // A creature that splits: it keeps half its Hit Points, and a copy with the other half stands next to it. Each
-// split is counted on both halves, so they stop once they've shrunk as far as they can.
-const SPLITS = "splits";
+// split is counted on both halves, which makes each one size smaller (sizeOf), so they stop once they've shrunk as
+// far as they can.
 
 function splitEvents(
   actor: Actor,
@@ -699,7 +829,14 @@ function splitEvents(
   context: Context,
 ): SystemEvent[] {
   const done = actor.resourcesSpent[SPLITS] ?? 0;
-  if (actor.hp < minHp || !actor.position || done >= times) return [];
+  if (
+    actor.hp < minHp ||
+    !actor.position ||
+    done >= times ||
+    sizeOf(actor, context) < SIZES.indexOf("medium")
+  ) {
+    return [];
+  }
   const half = Math.floor(actor.hp / 2);
   const square = besideSquare(
     { ...actor, position: actor.position },
@@ -808,8 +945,8 @@ export function afterDamage(
   ];
 }
 
-// Before damage lands: a reaction that lessens it, as Vitality Ward or Elemental Absorption does, taken whenever it
-// applies.
+// Before damage lands: a reaction that lessens it, as Vitality Ward or Elemental Absorption does. The player is
+// asked; anyone else takes it whenever it applies.
 export function beforeDamage(
   target: Actor,
   amount: number,
@@ -827,7 +964,18 @@ export function beforeDamage(
       ready(target, item, stats)
     );
   });
-  if (!action) return { amount, events: [] };
+  if (
+    !action ||
+    (target.id === PLAYER_ACTOR &&
+      !playerTakes(
+        `damage:${type}`,
+        `${String(amount)} ${type} damage is coming. Use ${action.name}?`,
+        action,
+        context,
+      ))
+  ) {
+    return { amount, events: [] };
+  }
   let left = amount;
   for (const effect of effectsOf(action)) {
     if (effect.kind === "resistTrigger") left = Math.floor(left / 2);
@@ -843,6 +991,153 @@ export function beforeDamage(
       ...reactionCosts(target, action, context),
       ...leafEvents(lifted, action.id, target, target, context),
     ],
+  };
+}
+
+// A reaction's table, as Mythal Ward's: the die picks a row, which is resolved at those it names. `negate` says the
+// spell that set it off does nothing to the bearer.
+export function rollOnTable(
+  action: KnownAction,
+  bearer: Actor,
+  source: Actor | undefined,
+  spellLevel: number,
+  context: Context,
+): {
+  readonly events: SystemEvent[];
+  readonly frames: Frame[];
+  readonly negate: boolean;
+} {
+  const { table } = action.activation;
+  if (!table) return { events: [], frames: [], negate: false };
+  const die = context.dice.roll(table.die);
+  const events: SystemEvent[] = [
+    dndEvent(`${NS}:rollReported`, {
+      actor: bearer.id,
+      against: bearer.id,
+      natural: die,
+      total: die,
+      target: 0,
+      success: true,
+      label: action.name,
+    }),
+  ];
+  const row = table.rows.find((item) => item.min <= die && die <= item.max);
+  if (!row?.resolution) {
+    return { events, frames: [], negate: row?.negate === true };
+  }
+  const within = row.within;
+  const targets = [
+    ...(row.targets.includes("self") ? [bearer] : []),
+    ...(row.targets.includes("source") && source ? [source] : []),
+    ...(within === undefined
+      ? []
+      : Object.values(context.state.actors).filter(
+          (item) =>
+            !isDown(item) && !isDead(item) && near(bearer, item, within),
+        )),
+  ].filter(
+    (item, index, list) =>
+      list.findIndex((other) => other.id === item.id) === index,
+  );
+  const { resolution } = row;
+  const scaled =
+    row.perSpellLevel && "damage" in resolution
+      ? {
+          ...resolution,
+          damage: resolution.damage.map((item) => ({
+            ...item,
+            amount: {
+              ...item.amount,
+              ...(item.amount.dice
+                ? {
+                    dice: item.amount.dice.replace(
+                      /^(\d+)d/,
+                      (_, count: string) =>
+                        `${String(Number(count) * Math.max(1, spellLevel))}d`,
+                    ),
+                  }
+                : {}),
+            },
+          })),
+        }
+      : resolution;
+  const rolled = resolveAction(
+    {
+      ...action,
+      activation: {
+        ...action.activation,
+        cost: [],
+        targeting: { self: true },
+        resolution: scaled,
+      },
+    },
+    bearer,
+    targets,
+    context,
+  );
+  return {
+    events: [...events, ...(rolled.events ?? [])],
+    frames: [...(rolled.frames ?? [])],
+    negate: row.negate === true,
+  };
+}
+
+// A spell turned aside by Mythal Ward gives its slot back.
+export function slotRefund(
+  caster: Actor,
+  spell: KnownAction,
+  level: number,
+): SystemEvent[] {
+  return level > 0 && spell.activation.cost.includes("slot")
+    ? [
+        dndEvent(`${NS}:resourceRestored`, {
+          actor: caster.id,
+          resource: `slot:${String(level)}`,
+          amount: 1,
+        }),
+      ]
+    : [];
+}
+
+// A reaction taken before a failed save against a spell lands, as Mythal Ward: the player is asked; anyone else
+// takes it.
+export function beforeFailedSave(
+  target: Actor,
+  caster: Actor,
+  spellLevel: number,
+  context: Context,
+): {
+  readonly events: SystemEvent[];
+  readonly frames: Frame[];
+  readonly negate: boolean;
+} {
+  const none = { events: [], frames: [], negate: false };
+  if (!context.state.combat || target.id === caster.id) return none;
+  const stats = deriveStats(target, context);
+  const action = stats.actions.find((item) => {
+    const trigger = item.activation.trigger;
+    return (
+      trigger?.ownSave === "failed" &&
+      trigger.before === true &&
+      ready(target, item, stats)
+    );
+  });
+  if (
+    !action ||
+    (target.id === PLAYER_ACTOR &&
+      !playerTakes(
+        "failedSave",
+        `You fail the save against ${caster.name}'s spell. Use ${action.name}?`,
+        action,
+        context,
+      ))
+  ) {
+    return none;
+  }
+  const rolled = rollOnTable(action, target, caster, spellLevel, context);
+  return {
+    ...rolled,
+    events: [...reactionCosts(target, action, context), ...rolled.events],
   };
 }
 

@@ -1,3 +1,4 @@
+import { crossesDifficult, speedsOf, throughOf } from "./movement-modes.ts";
 import {
   type Actor,
   hasCondition,
@@ -95,12 +96,20 @@ export function stepToward(
         (item) => !isDown(item) && item.position,
       );
   // How far it is to walk from a square to a foe, round walls and through difficult terrain, ignoring
-  // creatures. On a map with no walls that's the straight distance.
+  // creatures. On a map with no walls, or for a creature that goes through them, that's the straight distance.
   const grid = state.combat?.grid;
   const walls = blockedSquares(state);
+  const through = throughOf(stats);
+  const overGround = [...speedsOf(actor, stats).keys()].some(crossesDifficult);
   const walkFrom = new Map<string, ReadonlyMap<string, number>>();
   const walk = (from: Square | null, foe: Actor): number => {
-    if (!grid || walls.length === 0 || !from || !foe.position) {
+    if (
+      !grid ||
+      walls.length === 0 ||
+      through.walls ||
+      !from ||
+      !foe.position
+    ) {
       return distanceFeet(from, foe.position);
     }
     let field = walkFrom.get(foe.id);
@@ -112,8 +121,9 @@ export function stepToward(
           grid,
           new Set(walls),
           new Set(),
-          difficultSquares(state),
+          overGround ? new Set() : difficultSquares(state),
           blockingSet(state),
+          { squeeze: through.squeeze },
         ).map((item) => [squareKey(item.square), item.feet]),
       );
       walkFrom.set(foe.id, field);
@@ -165,6 +175,7 @@ export function stepToward(
                   foe.position,
                   { ...actor, position: item.square },
                   [foe.id],
+                  context,
                 ),
               ),
             0,

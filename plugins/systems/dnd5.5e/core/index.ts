@@ -26,6 +26,7 @@ import { actionFrames } from "./combat/actions.ts";
 import { deriveItem } from "./variants.ts";
 import { attackFrames } from "./combat/attack.ts";
 import { movementFrames } from "./combat/movement.ts";
+import { fallingFrames } from "./combat/falling.ts";
 import { formFrames } from "./combat/form-choice.ts";
 import { damageChoiceFrames } from "./combat/damage-choice.ts";
 import { confusionFrames } from "./combat/confusion.ts";
@@ -433,6 +434,7 @@ export const dnd55e = defineSystem<DndState>({
     ...legendaryFrames,
     ...actionFrames,
     ...movementFrames,
+    ...fallingFrames,
     ...formFrames,
     ...damageChoiceFrames,
     ...confusionFrames,

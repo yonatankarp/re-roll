@@ -13,6 +13,7 @@ export {
   CHECK_END,
   combatEnded,
   type Context,
+  dragEvents,
   enemies,
   fitsType,
   hasFlag,

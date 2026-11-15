@@ -12,7 +12,11 @@ import {
   isNamespacedEvent,
 } from "../kernel/events.ts";
 import type { Registry } from "./loader.ts";
-import { AWAIT_FRAME } from "../kernel/system.ts";
+import {
+  AWAIT_FRAME,
+  REPLAY_FRAME,
+  ReplayPayloadSchema,
+} from "../kernel/system.ts";
 import {
   type RunContext,
   applyEvent,
@@ -204,6 +208,12 @@ function checkFrame(run: RunContext, frame: Frame): string | null {
     return awaited.success
       ? checkResume(run, awaited.data.decision)
       : "The save waits on a decision that can't be read";
+  }
+  if (frame.kind === REPLAY_FRAME) {
+    const replay = ReplayPayloadSchema.safeParse(frame.payload);
+    return replay.success
+      ? checkFrame(run, replay.data.frame)
+      : "The save waits on an answer to a step that can't be read";
   }
   if (frame.kind.startsWith(STORY_FRAME_PREFIX)) return null; // the engine's own
   const definition = run.system.frames[frame.kind];

@@ -1,3 +1,4 @@
+import { PLAYER_ACTOR } from "#sdk";
 import type {
   BoardUpdate,
   Combatant,
@@ -183,9 +184,23 @@ export function layout(ctx: BoardContext): void {
   }
   ctx.field.classList.toggle("gridded", ctx.grid !== null);
   const sides = new Map<string, Token[]>();
+  // Creatures sharing a square, as a rider on its mount or an ally under a tree's branches, stand side by side in it.
+  const squares = new Map<string, Token[]>();
+  for (const token of ctx.tokens.values()) {
+    if (token.x === null || token.y === null) continue;
+    const key = `${String(token.x)},${String(token.y)}`;
+    squares.set(key, [...(squares.get(key) ?? []), token]);
+  }
   for (const token of ctx.tokens.values()) {
     if (ctx.grid && token.x !== null && token.y !== null) {
-      token.node.style.left = `${String(((token.x + 0.5) / ctx.grid.width) * 100)}%`;
+      const there = squares.get(`${String(token.x)},${String(token.y)}`) ?? [];
+      const shift =
+        there.length > 1
+          ? (there.indexOf(token) - (there.length - 1) / 2) *
+            (0.6 / there.length)
+          : 0;
+      token.node.classList.toggle("shared", there.length > 1);
+      token.node.style.left = `${String(((token.x + 0.5 + shift) / ctx.grid.width) * 100)}%`;
       token.node.style.top = `${String(((token.y + 0.5) / ctx.grid.height) * 100)}%`;
       // Near an edge, the tooltip opens inwards, clear of the caption and the frame.
       token.node.classList.toggle("high", token.y < 2);
@@ -214,5 +229,18 @@ export function tokenAt(
   x: number,
   y: number,
 ): [string, Token] | undefined {
-  return [...ctx.tokens].find(([, token]) => token.x === x && token.y === y);
+  return tokensAt(ctx, x, y)[0];
+}
+
+// Every token on a square, the others before the player's own, as two can share one.
+export function tokensAt(
+  ctx: BoardContext,
+  x: number,
+  y: number,
+): [string, Token][] {
+  return [...ctx.tokens]
+    .filter(([, token]) => token.x === x && token.y === y)
+    .sort(
+      ([a], [b]) => Number(a === PLAYER_ACTOR) - Number(b === PLAYER_ACTOR),
+    );
 }

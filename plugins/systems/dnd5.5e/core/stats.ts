@@ -122,6 +122,10 @@ export interface Stats {
   // Wearing armor without training: Disadvantage on Strength and Dexterity rolls, and no spellcasting.
   readonly untrainedArmor: boolean;
   readonly exhaustion: number; // each level takes 2 from every d20 test and 5 feet from speed
+  // A stat block's Speeds besides walking. Others come from effects (core/movement-modes.ts).
+  readonly speeds: Readonly<
+    Partial<Record<"fly" | "climb" | "burrow", number>>
+  >;
   // From magic items worn, and attuned where they need it.
   readonly itemBonuses: Readonly<
     Record<"attack" | "spellAttack" | "savingThrows", number>
@@ -168,7 +172,7 @@ function bestAc(
   }
   let bonus = fixed.reduce(
     (total, modifier) =>
-      modifier.kind === "bonus" && modifier.to === "ac"
+      modifier.kind === "bonus" && modifier.to === "ac" && !modifier.melee
         ? total + (modifier.amount.bonus?.base ?? 0)
         : total,
     context.flatBonus,
@@ -176,7 +180,7 @@ function bestAc(
   const seen = new Set<string>();
   for (const effect of actor.activeEffects) {
     const { modifier } = effect;
-    if (modifier.kind === "bonus" && modifier.to === "ac") {
+    if (modifier.kind === "bonus" && modifier.to === "ac" && !modifier.melee) {
       if (!seen.has(effect.sourceId)) bonus += modifier.amount.bonus?.base ?? 0;
       seen.add(effect.sourceId);
     }
@@ -972,6 +976,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     untrainedArmor,
     exhaustion: actor.exhaustion,
     itemBonuses: magic,
+    speeds: {},
   };
   return {
     ...partial,
@@ -1358,6 +1363,12 @@ function statBlockStats(
     untrainedArmor: false,
     exhaustion: actor.exhaustion,
     itemBonuses: { attack: 0, spellAttack: 0, savingThrows: 0 },
+    speeds: Object.fromEntries(
+      (["fly", "climb", "burrow"] as const).flatMap((mode) => {
+        const feet = monster.speeds?.[mode];
+        return feet ? [[mode, Math.max(0, feet - 5 * actor.exhaustion)]] : [];
+      }),
+    ),
   };
 }
 
@@ -1465,13 +1476,25 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
     : own;
   const speed = effectBonus(actor, "speed");
   const maxHp = effectBonus(actor, "maxHp");
+  const stuck = new Set(
+    actor.activeEffects.flatMap(({ modifier }) =>
+      modifier.kind === "stuck" ? [modifier.action] : [],
+    ),
+  );
   const changed = withEffectActions(stats, actor, access);
+  const free =
+    stuck.size === 0
+      ? changed
+      : {
+          ...changed,
+          actions: changed.actions.filter((action) => !stuck.has(action.id)),
+        };
   return speed === 0 && maxHp === 0
-    ? changed
+    ? free
     : {
-        ...changed,
-        speed: Math.max(0, changed.speed + speed),
-        maxHp: changed.maxHp + maxHp,
+        ...free,
+        speed: Math.max(0, stats.speed + speed),
+        maxHp: stats.maxHp + maxHp,
       };
 }
 

@@ -58,6 +58,7 @@ export const FRAME_KINDS = [
   "move",
   "pickTargets",
   "precision",
+  "fall",
   "projectile",
   "react",
   "reactAnswer",
@@ -472,7 +473,7 @@ const TempHpSchema = z.strictObject({
   actor: z.string(),
   amount: z.number().int(),
 });
-const EffectAddedSchema = z.strictObject({
+export const EffectAddedSchema = z.strictObject({
   actor: z.string(),
   effect: ActiveEffectSchema,
 });
@@ -714,6 +715,9 @@ export function hasCondition(
 export function invisibleTo(target: Actor, viewer: Actor): boolean {
   return (
     hasCondition(target, "invisible") &&
+    !target.activeEffects.some(
+      ({ modifier }) => modifier.kind === "outlined",
+    ) &&
     !viewer.activeEffects.some(
       ({ modifier }) =>
         modifier.kind === "seeInvisible" ||

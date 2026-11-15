@@ -30,6 +30,7 @@ export type {
   SceneAction,
   StoryEffectDef,
   StoryPredicateDef,
+  Question,
   SystemContext,
   SystemDefinition,
   SystemResult,

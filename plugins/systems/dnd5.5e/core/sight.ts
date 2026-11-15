@@ -65,13 +65,51 @@ export function difficultSquares(state: DndState): ReadonlySet<string> {
   return thorns.length > 0 ? new Set([...ground, ...thorns]) : ground;
 }
 
+// Whether `actor` stands in the space of an ally whose trait gives it Half Cover there, as Overhanging Branches does.
+function coveredByHost(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+): boolean {
+  const at = actor.position;
+  if (!at) return false;
+  return Object.values(state.actors).some(
+    (host) =>
+      host.id !== actor.id &&
+      host.side === actor.side &&
+      host.source.kind === "monster" &&
+      !isDead(host) &&
+      host.position?.x === at.x &&
+      host.position.y === at.y &&
+      lookup(access, MonsterSchema, host.source.statBlockId).passives.some(
+        (passive) =>
+          passive.kind === "shareSpace" &&
+          passive.who === "allies" &&
+          passive.cover,
+      ),
+  );
+}
+
 // The cover `target` has against something coming from `from`. Creatures in the way count, except the target and
-// anyone listed in `ignore`, such as the attacker.
+// anyone listed in `ignore`, such as the attacker. With `access`, so does an ally's space that covers it.
 export function coverFor(
   state: DndState,
   from: Square | null,
   target: Actor,
   ignore: readonly string[] = [],
+  access?: ContentAccess,
+): Cover {
+  const found = squaresCover(state, from, target, ignore);
+  return found !== "total" && access && coveredByHost(target, state, access)
+    ? (Math.max(found, 2) as Cover)
+    : found;
+}
+
+function squaresCover(
+  state: DndState,
+  from: Square | null,
+  target: Actor,
+  ignore: readonly string[],
 ): Cover {
   const terrain = state.combat?.terrain;
   const creatures = new Set(
@@ -240,10 +278,11 @@ export function coverAgainst(
   state: DndState,
   actor: Actor,
   target: Actor,
+  access?: ContentAccess,
 ): number {
   return swallowerOf(actor) === target.id
     ? 0
-    : coverBonus(coverFor(state, actor.position, target, [actor.id]));
+    : coverBonus(coverFor(state, actor.position, target, [actor.id], access));
 }
 
 // Whether total cover keeps `target` out of reach of anything `actor` aims at it.

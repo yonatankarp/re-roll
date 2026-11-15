@@ -89,6 +89,8 @@ import {
   besideSquare,
   reactFrames,
   settleRoll,
+  beforeFailedSave,
+  slotRefund,
 } from "./reactions.ts";
 import { summonEvents } from "./summon.ts";
 import { fueledDamage } from "./school.ts";
@@ -96,6 +98,7 @@ import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { headDamageEvents } from "./heads.ts";
 import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
+import { liftEvents } from "./falling.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
@@ -807,6 +810,15 @@ export function leafEvents(
         break;
       }
       case "tempHp":
+        if (effect.reaction) {
+          if (!target.budget.reaction || isDown(target)) break;
+          events.push(
+            dndEvent(`${NS}:budgetSpent`, {
+              actor: target.id,
+              kind: "reaction",
+            }),
+          );
+        }
         events.push(
           dndEvent(`${NS}:tempHpGained`, {
             actor: target.id,
@@ -1107,6 +1119,9 @@ export function leafEvents(
           events.push(dndEvent(`${NS}:stabilized`, { actor: target.id }));
         }
         break;
+      case "lift":
+        events.push(...liftEvents(effect, sourceId, caster, target, context));
+        break;
       case "exhaustion":
         events.push(
           dndEvent(`${NS}:exhaustionChanged`, {
@@ -1150,6 +1165,8 @@ export function leafEvents(
       case "strike":
       case "redirect":
       case "negateHit":
+      case "stickWeapon":
+      case "slowFall":
       case "split":
       case "swapInitiative":
       case "inspiration":
@@ -1812,6 +1829,8 @@ export function resolveAction(
                 effect.movement,
                 context,
                 effect.provokes,
+                undefined,
+                action.id,
               ),
             );
           }
@@ -1869,6 +1888,8 @@ export function resolveAction(
       break;
     }
     case "save": {
+      // Mythal Ward's 20 turns the whole spell aside, so what it has done so far is dropped (beforeFailedSave).
+      const unspent = { events: events.length, frames: frames.length };
       beginConcentration(resolution.onFail);
       // A zone the spell leaves is left before the saves, so a cloud's first save comes from the cast.
       events.push(
@@ -1900,7 +1921,7 @@ export function resolveAction(
               dc,
               context,
               action.spellLevel !== null,
-              coverAgainst(context.state, actor, target),
+              coverAgainst(context.state, actor, target, context),
               conditionsApplied(resolution.onFail),
               heightened === target.id,
               resolution.advantage,
@@ -1930,6 +1951,26 @@ export function resolveAction(
               );
         events.push(...rescued);
         const saved = rolledSave || resisted !== null || rescued.length > 0;
+        // Mythal Ward: a reaction before the failed save lands, which may make the spell do nothing to the target.
+        if (!saved && action.spellLevel !== null) {
+          const warded = beforeFailedSave(
+            target,
+            actor,
+            slotLevel ?? action.spellLevel,
+            context,
+          );
+          if (warded.negate) {
+            events.length = unspent.events;
+            frames.length = unspent.frames;
+            events.push(
+              ...warded.events,
+              ...slotRefund(actor, action, slotLevel ?? action.spellLevel),
+            );
+            break;
+          }
+          events.push(...warded.events);
+          frames.push(...warded.frames);
+        }
         const evaded =
           resolution.onSuccessDamage === "half" &&
           evades(target, resolution.ability, context);
