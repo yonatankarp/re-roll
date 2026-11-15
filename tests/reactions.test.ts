@@ -1,4 +1,10 @@
-import { PLAYER_ACTOR, type Question, type SystemEvent } from "#sdk";
+import {
+  awaitDecision,
+  PLAYER_ACTOR,
+  type Question,
+  type SystemEvent,
+} from "#sdk";
+import { startRun, step } from "../engine/run/turn.ts";
 import { DECLINE } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
 import { describe, expect, it } from "vitest";
 import {
@@ -271,6 +277,66 @@ describe("the player's say on reactions in the middle of a step", () => {
     const kept = rollSave(bearer, "con", 15, decline.context);
     expect(kept.saved).toBe(false);
     expect(payloads(kept.events, "resourceSpent")).toEqual([]);
+  });
+
+  it("waits through the engine on the player's answer, then runs the step again with the same dice", async () => {
+    const run = await testRun();
+    const started = startRun(run, "ask-lucky");
+    const player = {
+      ...hero(["lucky-saves"]),
+      concentratingOn: "srd52:spell/bless",
+    };
+    // A save to keep Concentration the player can't make without Lucky, waiting to be rolled.
+    const state = {
+      ...started.state,
+      system: row([player, foeOf()]),
+      stack: [
+        awaitDecision({
+          id: "test:go",
+          actor: PLAYER_ACTOR,
+          prompt: "Go",
+          options: [{ id: "go", label: "Go" }],
+          resume: {
+            kind: `${NS}:concentrationSave`,
+            payload: { actor: PLAYER_ACTOR, dc: 30 },
+          },
+        }),
+      ],
+    };
+    const asked = step(run, state, {
+      kind: "answer",
+      decisionId: "test:go",
+      optionId: "go",
+    });
+    if (!asked.ok) throw new Error(asked.error);
+    const lucky = `${NS}:reaction:${PLAYER_ACTOR}:save:${PLAYER_ACTOR}`;
+    expect(asked.pending?.id).toBe(lucky);
+    expect(asked.state.rng).toStrictEqual(state.rng);
+    const shown = Number(
+      /You roll (\d+)/.exec(asked.pending?.prompt ?? "")?.[1],
+    );
+    const answer = (optionId: string) => {
+      const done = step(run, asked.state, {
+        kind: "answer",
+        decisionId: lucky,
+        optionId,
+      });
+      if (!done.ok) throw new Error(done.error);
+      const system = done.state.system as DndState;
+      return {
+        rolled: done.events.flatMap((event) =>
+          "payload" in event && event.kind === `${NS}:saveRolled`
+            ? [(event.payload as { natural: number }).natural]
+            : [],
+        ),
+        spent: system.actors[PLAYER_ACTOR]?.resourcesSpent["lucky-saves"],
+      };
+    };
+    // Declined, the roll the player was shown stands; taken, a Luck Point goes on another roll.
+    expect(answer(DECLINE)).toEqual({ rolled: [shown], spent: undefined });
+    expect(answer(asked.pending?.options[0]?.id ?? "")).toMatchObject({
+      spent: 1,
+    });
   });
 
   it("asks the player about Vitality Ward before the damage lands, but not a companion", async () => {
