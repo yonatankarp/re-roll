@@ -27,6 +27,7 @@ export interface RunContext {
   readonly adventure: Adventure;
   readonly content: (id: string) => ContentEntry | undefined;
   readonly contentIds: () => readonly string[];
+  readonly setting?: string | undefined; // the adventure's
 }
 
 export interface StoryResult {
@@ -302,6 +303,7 @@ function runResolveChoice(
     dice,
     content: run.content,
     contentIds: run.contentIds,
+    setting: run.setting,
   });
   assertOwnEvents(run, result.events);
   return {
@@ -333,6 +335,7 @@ function runApplyEffects(
     dice,
     content: run.content,
     contentIds: run.contentIds,
+    setting: run.setting,
   };
 
   switch (effect.kind) {
