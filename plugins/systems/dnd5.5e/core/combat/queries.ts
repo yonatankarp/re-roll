@@ -1,4 +1,5 @@
 import { type ContentAccess, type SystemContext, type SystemEvent } from "#sdk";
+import { leashed } from "./duel.ts";
 import { knownFoes, knows } from "../fog.ts";
 import {
   type Actor,
@@ -33,6 +34,7 @@ import {
   SQUARE_FEET,
   squareKey,
 } from "../grid.ts";
+import { heightOf } from "./falling.ts";
 import { speedOf } from "../tactics.ts";
 import { heldBy } from "./grapple.ts";
 import {
@@ -117,6 +119,9 @@ export function hasFlag(
       modifier.kind === kind &&
       modifier.on === on &&
       (!modifier.ability || modifier.ability === ability) &&
+      // Advantage only against some conditions is the save's to weigh (placedFlag).
+      (!("conditions" in modifier) || !modifier.conditions) &&
+      (!("magical" in modifier) || !modifier.magical) &&
       (!("attackers" in modifier) ||
         !modifier.attackers ||
         modifier.attackers.includes(attackerType ?? "")),
@@ -206,7 +211,11 @@ export function reaches(
   const inside = swallowerOf(actor);
   if (inside !== undefined)
     return inside === target.id || target.id === actor.id;
-  const distance = distanceFeet(actor.position, target.position);
+  // A creature lifted by Reverse Gravity is that much farther from those below it (combat/falling.ts).
+  const distance = Math.max(
+    distanceFeet(actor.position, target.position),
+    Math.abs(heightOf(actor) - heightOf(target)),
+  );
   if ("area" in targeting && targeting.range === "self") {
     return distance <= targeting.area.radius;
   }
@@ -413,7 +422,11 @@ export function moveSquares(
   const holds = heldBy(actor, state, access).filter(
     ({ held }) => !isDead(held),
   );
-  if (holds.length === 0) return [...plain.values()];
+  // Compelled Duel keeps its target within reach of the caster.
+  const tooFar = leashed(actor, state);
+  if (holds.length === 0) {
+    return [...plain.values()].filter(({ square }) => !tooFar(square));
+  }
   const own = sizeOf(actor, access);
   const light = ({ held }: { readonly held: Actor }): boolean => {
     const size = sizeOf(held, access);
@@ -421,14 +434,16 @@ export function moveSquares(
   };
   const dragging =
     hasPassive(stats, "abduct") || holds.every(light) ? plain : search(2);
-  return [...plain.values()].map((walk) => {
-    const near = holds.every(
-      ({ held, feet }) => distanceFeet(walk.square, held.position) <= feet,
-    );
-    const dragged = near ? undefined : dragging.get(squareKey(walk.square));
-    const drag = dragged && dragSquares(dragged, from, holds, state);
-    return dragged && drag ? { ...dragged, drag } : walk;
-  });
+  return [...plain.values()]
+    .map((walk) => {
+      const near = holds.every(
+        ({ held, feet }) => distanceFeet(walk.square, held.position) <= feet,
+      );
+      const dragged = near ? undefined : dragging.get(squareKey(walk.square));
+      const drag = dragged && dragSquares(dragged, from, holds, state);
+      return dragged && drag ? { ...dragged, drag } : walk;
+    })
+    .filter(({ square }) => !tooFar(square));
 }
 
 // Where each grappled creature ends up: on the squares the walk left behind, last first, or else beside its end, each
@@ -558,8 +573,18 @@ export function charmersOf(actor: Actor): ReadonlySet<string> {
 
 export const SIZES = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
 
+// How many times a creature has split, as a black pudding does (combat/reactions.ts), each one size smaller.
+export const SPLITS = "splits";
+
 // A creature's size, as its index in SIZES.
 export function sizeOf(actor: Actor, access: ContentAccess): number {
+  return Math.max(
+    0,
+    printedSize(actor, access) - (actor.resourcesSpent[SPLITS] ?? 0),
+  );
+}
+
+function printedSize(actor: Actor, access: ContentAccess): number {
   if (actor.source.kind === "monster") {
     const monster = lookup(access, MonsterSchema, actor.source.statBlockId);
     const size = currentShape(monster, actor)?.size ?? monster.size;
@@ -735,6 +760,30 @@ export function areaPool(
 }
 
 // A cast keeps its slot level in the frames it leaves behind, so later steps roll the same dice.
+// A weapon stuck to a kuo-toa's shield isn't offered, but steps already under way still look it up.
+function stuckAction(
+  actor: Actor,
+  id: string,
+  context: Context,
+): KnownAction | undefined {
+  return isStuck(actor, id)
+    ? deriveStats(
+        {
+          ...actor,
+          activeEffects: actor.activeEffects.filter(
+            ({ modifier }) => modifier.kind !== "stuck",
+          ),
+        },
+        context,
+      ).actions.find((item) => item.id === id)
+    : undefined;
+}
+
+export const isStuck = (actor: Actor, actionId: string): boolean =>
+  actor.activeEffects.some(
+    ({ modifier }) => modifier.kind === "stuck" && modifier.action === actionId,
+  );
+
 export function findAction(
   actor: Actor,
   id: string,
@@ -744,7 +793,8 @@ export function findAction(
   const action =
     deriveStats(actor, context).actions.find((item) => item.id === id) ??
     bossAction(actor, id, context) ??
-    ownZoneAction(actor, id, context);
+    ownZoneAction(actor, id, context) ??
+    stuckAction(actor, id, context);
   if (!action) throw new Error(`${actor.id} has no action ${id}`);
   const above = (slotLevel ?? 0) - (action.spellLevel ?? 0);
   return action.upcast

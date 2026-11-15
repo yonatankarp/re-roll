@@ -27,7 +27,14 @@ import {
   rollAmount,
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
-import { blockingSet, sealed, thornHits } from "../zones.ts";
+import {
+  antimagicEvents,
+  placedConditionEvents,
+  blockingSet,
+  sealed,
+  thornHits,
+  zonesOf,
+} from "../zones.ts";
 import {
   concentrationFrame,
   dealEvents,
@@ -35,6 +42,8 @@ import {
   resolveAction,
 } from "./effects.ts";
 import { afterDamage, reactFrames } from "./reactions.ts";
+import { areaEntry, entryFrames, fogBoundEvents } from "./areas.ts";
+import { leafEvents, rollSave } from "./effects.ts";
 import {
   coverBetween,
   distanceFeet,
@@ -269,6 +278,12 @@ function watchesMoves(walker: Actor, context: Context): boolean {
   );
 }
 
+// What standing in Antimagic Field or Silence holds off or puts on a creature, after a walk.
+const placedEvents = (state: DndState): SystemEvent[] => [
+  ...antimagicEvents(state),
+  ...placedConditionEvents(state),
+];
+
 // Leaving an enemy's reach gives it an Opportunity Attack, made before the move, so falling stops it.
 export function runMove(
   payload: z.infer<typeof MoveSchema>,
@@ -278,6 +293,7 @@ export function runMove(
   const actor = actorOf(state, payload.actor);
   const to = parseSquare(payload.answer);
   if (payload.answer === STAY || !to) return {};
+  if (payload.rest && isDown(actor)) return {};
   const step = moveSquares(
     actor,
     state,
@@ -290,9 +306,12 @@ export function runMove(
   }
   // A walk into the reach of a reaction such as Polearm Master's stops on the square it enters, for the reaction,
   // and then goes on from there.
+  // So does a walk into an area that acts on whoever enters it, as Moonbeam, for its save.
   const entered = enteredAt(actor, step.path, context);
-  const cut = entered === null ? undefined : step.path[entered];
-  if (entered !== null && cut && entered < step.path.length - 1) {
+  const entry = areaEntry(actor, step.path, context);
+  const at = Math.min(entered ?? Infinity, entry?.index ?? Infinity);
+  const cut = step.path[at];
+  if (cut && at < step.path.length - 1) {
     return {
       frames: [
         frame("move", { actor: actor.id, answer: squareKey(cut) }),
@@ -348,6 +367,7 @@ export function runMove(
         feet: step.feet,
         ...(step.drag ? { dragged: step.drag } : {}),
       }),
+      ...entryFrames(actor, actor.position, to, entry?.zones ?? [], context),
       ...(entered !== null && from
         ? [frame("react", { kind: "entered", actor: actor.id, from })]
         : []),
@@ -396,13 +416,28 @@ export function runFinishMove(
   ) {
     return {};
   }
+  const moved = dndEvent(`${NS}:moved`, {
+    actor: walker.id,
+    to: { x: payload.x, y: payload.y },
+    feet: payload.feet,
+  });
+  const arrived = { ...actor, position: { x: payload.x, y: payload.y } };
+  // A walk into or out of an Antimagic Field, or one carrying it, holds off or brings back spells and items.
+  const fields =
+    zonesOf(context.state).some(
+      (zone) =>
+        zone.area?.noSpells === "all" || zone.area?.conditions !== undefined,
+    ) ||
+    Object.values(context.state.actors).some(
+      (item) =>
+        item.suppressed !== undefined ||
+        item.activeEffects.some(({ sourceId }) =>
+          sourceId.startsWith("placed:"),
+        ),
+    );
   return {
     events: [
-      dndEvent(`${NS}:moved`, {
-        actor: walker.id,
-        to: { x: payload.x, y: payload.y },
-        feet: payload.feet,
-      }),
+      moved,
       // Only those it still holds come along, as an Opportunity Attack may have broken a grapple. A rider's walk drags
       // what its mount holds. shortcut: not what the rider holds, until a rider can grapple from the saddle.
       ...dragEvents({
@@ -414,6 +449,8 @@ export function runFinishMove(
           );
         }),
       }),
+      ...fogBoundEvents(arrived, context),
+      ...(fields ? placedEvents(applyDndEvent(context.state, moved)) : []),
     ],
   };
 }
@@ -426,7 +463,9 @@ export function teleportSquares(
   movement: number,
   state: DndState,
   access: ContentAccess,
+  near?: Near, // only squares this close to another creature, as Pursuit's
 ): readonly Square[] {
+  const close = near ? state.actors[near.actor]?.position : undefined;
   const grid = state.combat?.grid;
   const from = actor.position;
   if (!grid || !from) return [];
@@ -450,6 +489,7 @@ export function teleportSquares(
       const key = squareKey(square);
       if (
         distanceFeet(from, square) <= feet &&
+        (!near || (close && distanceFeet(close, square) <= near.feet)) &&
         !blocked.has(key) &&
         !taken.has(key) &&
         coverBetween(from, square, blocked, noCover, new Set()) !== "total" &&
@@ -465,6 +505,9 @@ export function teleportSquares(
   );
 }
 
+const NearSchema = z.object({ actor: z.string(), feet: z.number() });
+type Near = z.infer<typeof NearSchema>;
+
 // The square a teleport or jump lands on, chosen like a move.
 export function teleportFrame(
   actor: Actor,
@@ -472,6 +515,8 @@ export function teleportFrame(
   movement: number,
   context: Context,
   provokes = true,
+  near?: Near,
+  actionId?: string, // the action it's part of, for what happens round it (aroundTeleport)
 ): Frame {
   const squares = teleportSquares(
     actor,
@@ -479,6 +524,7 @@ export function teleportFrame(
     movement,
     context.state,
     context,
+    near,
   );
   return awaitDecision({
     id: `${NS}:teleportTo:${actor.id}:${String(actor.moved)}`,
@@ -496,7 +542,64 @@ export function teleportFrame(
       feet,
       movement,
       ...(provokes ? {} : { provokes }),
+      ...(near ? { near } : {}),
+      ...(actionId ? { actionId } : {}),
     }),
+  });
+}
+
+// What a teleport does to the creatures round the square it lands on or leaves, as Whirlwind of Sand's Blinded.
+function aroundTeleport(
+  actor: Actor,
+  actionId: string | undefined,
+  to: Square,
+  context: Context,
+): SystemEvent[] {
+  const action = deriveStats(actor, context).actions.find(
+    (item) => item.id === actionId,
+  );
+  const { resolution } = action?.activation ?? {};
+  const effects = resolution?.kind === "automatic" ? resolution.effects : [];
+  const around = effects.find((effect) => effect.kind === "teleport")?.around;
+  if (!action || !around || !actor.position) return [];
+  const at = around.origin ? actor.position : to;
+  return Object.values(context.state.actors).flatMap((target) => {
+    if (
+      target.id === actor.id ||
+      isDown(target) ||
+      !target.position ||
+      (around.foes && target.side === actor.side) ||
+      distanceFeet(target.position, at) > around.within
+    ) {
+      return [];
+    }
+    const save = around.save
+      ? rollSave(target, around.save.ability, around.save.dc, context, true)
+      : null;
+    if (save?.saved) return save.events;
+    return [
+      ...(save?.events ?? []),
+      ...leafEvents(
+        [
+          ...around.conditions.map((condition) => ({
+            kind: "applyCondition" as const,
+            condition,
+            duration: around.duration,
+            repeatSave: false,
+            endsOnDamage: false,
+          })),
+          ...around.modifiers.map((modifier) => ({
+            kind: "modifier" as const,
+            modifier,
+            duration: around.duration,
+          })),
+        ],
+        action.id,
+        actor,
+        target,
+        context,
+      ),
+    ];
   });
 }
 
@@ -505,6 +608,8 @@ export const TeleportSchema = z.object({
   feet: z.number(),
   movement: z.number(),
   provokes: z.boolean().optional(), // false for movement spent that provokes nothing, as Portal Step's
+  near: NearSchema.optional(),
+  actionId: z.string().optional(),
   answer: z.string(),
 });
 
@@ -523,12 +628,15 @@ export function runTeleport(
     payload.movement,
     state,
     context,
+    payload.near,
   );
   if (!open.some((square) => squareKey(square) === payload.answer)) {
     throw new Error(`${actor.name} can't land on ${payload.answer}`);
   }
   const jump = payload.movement > 0;
-  const events: SystemEvent[] = [];
+  const events: SystemEvent[] = [
+    ...aroundTeleport(actor, payload.actionId, to, context),
+  ];
   const frames: Frame[] = [];
   for (const { foe, melee } of jump && payload.provokes !== false
     ? provokers(actor, to, state, context, [to])

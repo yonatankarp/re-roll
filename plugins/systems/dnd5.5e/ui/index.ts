@@ -129,7 +129,7 @@ function actionDetail(
   return [
     actionNumbers(action, stats),
     upcast
-      ? `Each slot level above ${String(action.spellLevel)} adds ${"addDice" in upcast ? `${upcast.addDice} damage` : `${String(upcast.addTargets)} target${upcast.addTargets > 1 ? "s" : ""}`}.`
+      ? `${"every" in upcast && upcast.every ? `Every ${String(upcast.every)} slot levels` : "Each slot level"} above ${String(action.spellLevel)} adds ${"addDice" in upcast ? `${upcast.addDice} damage` : "addRadius" in upcast ? `${String(upcast.addRadius)} feet to its radius` : `${String(upcast.addTargets)} target${upcast.addTargets > 1 ? "s" : ""}`}.`
       : "",
     source?.text ?? "",
   ]
@@ -1163,6 +1163,10 @@ function describe(
     case "dnd5.5e:tempHpGained": {
       const data = EVENT_SCHEMAS["dnd5.5e:tempHpGained"].parse(payload);
       return `${name(data.actor)} gains ${String(data.amount)} temporary HP.`;
+    }
+    case "dnd5.5e:dieRolled": {
+      const data = EVENT_SCHEMAS["dnd5.5e:dieRolled"].parse(payload);
+      return `${name(data.actor)} rolls ${String(data.rolled)} on a d${String(data.die)} for ${data.label}.`;
     }
     case "dnd5.5e:turnRepeated": {
       const data = EVENT_SCHEMAS["dnd5.5e:turnRepeated"].parse(payload);

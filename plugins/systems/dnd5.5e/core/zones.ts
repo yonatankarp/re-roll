@@ -6,12 +6,15 @@ import type {
   Modifier,
   ZoneKind,
 } from "./schemas.ts";
+import type { SystemEvent } from "#sdk";
 import {
   type Actor,
   type DndState,
+  dndEvent,
   hasCondition,
   INCAPACITATING,
   isDead,
+  NS,
 } from "./state.ts";
 import { distanceFeet, type Square, squareKey, wallSet } from "./grid.ts";
 import { deriveStats, type KnownAction, type Stats } from "./stats.ts";
@@ -128,6 +131,85 @@ export function zonesOf(
 export const inZone = (zone: Zone, square: Square | null): boolean =>
   square !== null && distanceFeet(zone.at, square) <= zone.radius;
 
+// Inside an Antimagic Field, where no other spell's area reaches (its own and ones like it aside).
+export const inAntimagic = (actor: Actor, state: DndState): boolean =>
+  castZones(state).some(
+    (zone) => zone.area?.noSpells === "all" && inZone(zone, actor.position),
+  );
+
+// The events that hold off the spell and item effects of every creature in an Antimagic Field, and bring them back
+// for those out of it again. Its own zones aren't held, since they act where they were cast.
+// shortcut: checked as turns start and after moves, so a field that ends works on until then, and an effect that ran
+// out while held off ends at its next check.
+export function antimagicEvents(state: DndState): SystemEvent[] {
+  const field = castZones(state).some((zone) => zone.area?.noSpells === "all");
+  return Object.values(state.actors).flatMap((actor): SystemEvent[] => {
+    const inside = field && inAntimagic(actor, state);
+    if (!inside) {
+      return actor.suppressed
+        ? [dndEvent(`${NS}:effectsRestored`, { actor: actor.id })]
+        : [];
+    }
+    const sourceIds = [
+      ...new Set(
+        actor.activeEffects.flatMap(({ sourceId, modifier }) =>
+          (sourceId.startsWith("spell:") || sourceId.startsWith("item:")) &&
+          modifier.kind !== "zone"
+            ? [sourceId]
+            : [],
+        ),
+      ),
+    ];
+    return !actor.suppressed || sourceIds.length > 0
+      ? [dndEvent(`${NS}:effectsSuppressed`, { actor: actor.id, sourceIds })]
+      : [];
+  });
+}
+
+const PLACED = "placed:";
+
+// The conditions spells' areas put on those in them while there, as Silence's Deafened: added for each creature that
+// stands in one and ended for each that left it, checked where Antimagic Field's are.
+export function placedConditionEvents(state: DndState): SystemEvent[] {
+  const placing = castZones(state).filter((zone) => zone.area?.conditions);
+  return Object.values(state.actors).flatMap((actor): SystemEvent[] => {
+    const had = actor.activeEffects.filter(({ sourceId }) =>
+      sourceId.startsWith(PLACED),
+    );
+    if (placing.length === 0 && had.length === 0) return [];
+    const wanted = placing.filter(
+      (zone) => inZone(zone, actor.position) && affects(zone, actor, state),
+    );
+    const keys = new Set(wanted.map((zone) => `${PLACED}${zone.sourceId}`));
+    const ended = [...new Set(had.map((effect) => effect.sourceId))]
+      .filter((sourceId) => !keys.has(sourceId))
+      .map((sourceId) =>
+        dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId }),
+      );
+    const added = wanted
+      .filter(
+        (zone) =>
+          !had.some(
+            (effect) => effect.sourceId === `${PLACED}${zone.sourceId}`,
+          ),
+      )
+      .flatMap((zone) =>
+        (zone.area?.conditions ?? []).map((condition) =>
+          dndEvent(`${NS}:effectAdded`, {
+            actor: actor.id,
+            effect: {
+              sourceId: `${PLACED}${zone.sourceId}`,
+              casterId: zone.owner,
+              modifier: { kind: "condition", condition },
+              ends: "spellDuration",
+            },
+          }),
+        ),
+      );
+    return [...ended, ...added];
+  });
+}
+
 export const sealed = (actor: Actor): boolean =>
   actor.activeEffects.some(({ modifier }) => modifier.kind === "sealed");
 
@@ -156,9 +238,22 @@ export function affects(
   const owner = state.actors[zone.owner];
   const area = zone.area ?? {};
   if (!owner || isDead(actor) || sealed(actor)) return false;
+  if (
+    zone.sourceId.startsWith("spell:") &&
+    zone.area?.noSpells !== "all" &&
+    inAntimagic(actor, state)
+  ) {
+    return false;
+  }
   if (zone.follows && actor.id === owner.id && !area.self) return false;
   if (area.side === "enemy" && actor.side === owner.side) return false;
   if (area.side === "ally" && actor.side !== owner.side) return false;
+  if (
+    area.bloodied &&
+    (!access || actor.hp * 2 > statsOf(actor, access).maxHp)
+  ) {
+    return false;
+  }
   if (area.grappling && !grappleBetween(owner, actor)) return false;
   if (area.creatureTypes || area.exceptTypes) {
     const type = access ? statsOf(actor, access).creatureType : undefined;
@@ -200,6 +295,18 @@ export function zoneModifiers(
     (zone) => zone.area?.grants ?? [],
   );
 }
+
+// Immunity to a condition the zones `actor` stands in give it, as a questing knight's Aura of Bravery.
+export const zoneImmune = (
+  actor: Actor,
+  condition: string,
+  state: DndState,
+  access?: ContentAccess,
+): boolean =>
+  zoneModifiers(actor, state, access).some(
+    (modifier) =>
+      modifier.kind === "conditionImmunity" && modifier.condition === condition,
+  );
 
 // The zone that hides a square, darkness before fog, or undefined.
 export function obscuring(
@@ -348,6 +455,8 @@ export function placedFlag(
   state: DndState,
   access: ContentAccess,
   ability?: Ability,
+  conditions: readonly string[] = [], // what the save would put on it or end, for Advantage only against those
+  magical = false, // a save against a spell or magic
 ): boolean {
   if (!state.combat || !actor.position) return false;
   const given =
@@ -356,7 +465,11 @@ export function placedFlag(
       (modifier) =>
         modifier.kind === kind &&
         modifier.on === on &&
-        (!modifier.ability || modifier.ability === ability),
+        (!modifier.ability || modifier.ability === ability) &&
+        (!("conditions" in modifier) ||
+          !modifier.conditions ||
+          modifier.conditions.some((item) => conditions.includes(item))) &&
+        (!("magical" in modifier) || !modifier.magical || magical),
     );
   // Light sensitivity is a stat block's trait, so a character is never asked for it.
   if (
@@ -406,8 +519,8 @@ export function silencedSpells(
   };
 }
 
-// How many harmful things would act on `actor` at `at`: a foe's zone that acts on those in it, and sunlight that
-// burns it. Movement ranks squares by it, so a creature closes in without standing in a cloud it needn't.
+// How many harmful things would act on `actor` at `at`: a zone that acts on those in it, its side's own clouds too
+// unless the zone is only for allies, and sunlight that burns it. Movement ranks squares by it, so a creature closes in without standing in a cloud it needn't.
 export function zoneHarm(
   actor: Actor,
   at: Square,
@@ -418,7 +531,7 @@ export function zoneHarm(
     (zone) =>
       zone.area?.resolution !== undefined &&
       zone.area.when !== undefined &&
-      state.actors[zone.owner]?.side !== actor.side &&
+      zone.area.side !== "ally" &&
       inZone(zone, at) &&
       affects(zone, actor, state, access),
   ).length;

@@ -1028,6 +1028,7 @@
     area:
       side: enemy
       when: turnStart
+      enters: true
       maxDamage: 60
       resolution:
         kind: save
@@ -1473,41 +1474,30 @@
           type: radiant
       onSuccessDamage: half
       onFail:
-        - kind: modifier
+        - kind: zone
+          zone: dim
+          radius: 5
           duration:
             concentration: true
             minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 2d10
-                type: radiant
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 2d10
-                type: radiant
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+      onSuccess: []
+    area:
+      when: turnEnd
+      enters: true
+      moves: 60
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 2d10
+            type: radiant
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d10
@@ -1660,6 +1650,42 @@
           radius: 15
           duration:
             minutes: 10
+          bare: true
+        - kind: zone
+          zone: area
+          radius: 35
+          duration:
+            minutes: 10
+        - kind: zone
+          zone: light
+          radius: 115
+          duration:
+            minutes: 10
+          bare: true
+        - kind: zone
+          zone: dim
+          radius: 215
+          duration:
+            minutes: 10
+          bare: true
+    area:
+      side: enemy
+      when: turnStart
+      enters: true
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage: []
+        onSuccessDamage: none
+        onFail:
+          - kind: applyCondition
+            condition: blinded
+            duration:
+              minutes: 1
+        onSuccess: []
 - id: srd52:spell/protection-from-energy
   name: Protection from Energy
   level: 3
@@ -1676,7 +1702,31 @@
     minutes: 60
   text: "For the duration, the willing creature you touch has Resistance to one
     damage type of your choice: Acid, Cold, Fire, Lightning, or Thunder."
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: touch
+      side: ally
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: resistance
+            damage: acid
+          duration:
+            concentration: true
+            minutes: 60
+          choose:
+            - acid
+            - cold
+            - fire
+            - lightning
+            - thunder
 - id: srd52:spell/ray-of-enfeeblement
   name: Ray of Enfeeblement
   level: 2
@@ -2553,7 +2603,7 @@
     creature makes this save only once per turn. The Sphere moves 10 feet away
     from you at the start of each of your turns. Using a Higher-Level Spell
     Slot. The damage increases by 1d8 for each spell slot level above 5.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -2576,41 +2626,31 @@
           type: poison
       onSuccessDamage: half
       onFail:
-        - kind: modifier
+        - kind: zone
+          zone: fog
+          radius: 20
           duration:
             concentration: true
             minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 5d8
-                type: poison
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 5d8
-                type: poison
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+      onSuccess: []
+    area:
+      when: turnEnd
+      enters: true
+      drifts: 10
+      disperses: true
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 5d8
+            type: poison
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d8
@@ -3916,7 +3956,7 @@
     Speed. Similarly, the globe can be picked up and moved by other creatures. A
     Disintegrate spell targeting the globe destroys it without harming anything
     inside.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -3938,6 +3978,7 @@
         - kind: modifier
           modifier:
             kind: sealed
+            rolls: true
           duration:
             concentration: true
             minutes: 1
@@ -4065,7 +4106,29 @@
     ends early if you cast it again or if you let go of the weapon. Cantrip
     Upgrade. The damage die changes when you reach levels 5 (d10), 11 (d12), and
     17 (2d6).
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - bonusAction
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: weaponSpell
+            weapons:
+              - srd52:item/quarterstaff
+            spellAbility: true
+            dice:
+              - 1d8
+              - 1d10
+              - 1d12
+              - 2d6
+            type: force
+          duration:
+            minutes: 1
 - id: srd52:spell/simulacrum
   name: Simulacrum
   level: 7
@@ -4443,7 +4506,18 @@
     doing nothing more than light activity, your remaining recovery time
     decreases by 2 days. Finally, there is a 33 percent chance that you are
     unable to cast Wish ever again if you suffer this stress."
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      effects:
+        - kind: copySpell
+          maxLevel: 8
 - id: srd52:spell/aid
   name: Aid
   level: 2
@@ -4792,9 +4866,30 @@
           duration:
             concentration: true
             minutes: 10
+          choose:
+            - lightning
+            - thunder
+            - fire
+            - cold
     area:
       side: enemy
       when: turnStart
+      enters: true
+      holding:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 4d8
+            type: lightning
+        onSuccessDamage: none
+        onFail: []
+        onSuccess:
+          - kind: removeCondition
+            condition: restrained
       resolution:
         kind: save
         ability: dex
@@ -5042,7 +5137,54 @@
     taking 3d6 damage of the chosen type on a failed save or half as much damage
     on a successful one. Using a Higher-Level Spell Slot. The damage increases
     by 1d6 for each spell slot level above 2.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - bonusAction
+      - slot
+    targeting:
+      creatures: 1
+      range: touch
+      side: ally
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: grantedAction
+            damage: acid
+          duration:
+            concentration: true
+            minutes: 1
+          choose:
+            - acid
+            - cold
+            - fire
+            - lightning
+            - poison
+  granted:
+    cost:
+      - action
+    targeting:
+      area:
+        shape: cone
+        radius: 15
+      range: self
+      side: enemy
+    resolution:
+      kind: save
+      ability: dex
+      dc:
+        add:
+          - kind: spellSaveDc
+      damage:
+        - amount:
+            dice: 3d6
+          type: acid
+      onSuccessDamage: half
+  upcast:
+    perSlotLevel:
+      addDice: 1d6
 - id: srd52:spell/elementalism
   name: Elementalism
   level: 0
@@ -5286,7 +5428,7 @@
     strong wind (such as one created by Gust of Wind) disperses it. Using a
     Higher-Level Spell Slot. The fog’s radius increases by 20 feet for each
     spell slot level above 1.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -5304,6 +5446,7 @@
         - kind: zone
           zone: fog
           radius: 20
+          perSlot: 20
           duration:
             concentration: true
             minutes: 60
@@ -5606,41 +5749,31 @@
           type: fire
       onSuccessDamage: half
       onFail:
-        - kind: modifier
+        - kind: zone
+          zone: fog
+          radius: 20
           duration:
             concentration: true
             minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 10d8
-                type: fire
-            save:
-              ability: dex
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 10d8
-                type: fire
-            save:
-              ability: dex
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+      onSuccess: []
+    area:
+      when: turnEnd
+      enters: true
+      drifts: 10
+      disperses: true
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 10d8
+            type: fire
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
 - id: srd52:spell/invisibility
   name: Invisibility
   level: 2
@@ -6096,7 +6229,38 @@
     Thunder. When the creature takes damage of the chosen type before the spell
     ends, the creature reduces the total damage taken by 1d4. A creature can
     benefit from this spell only once per turn."
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+    targeting:
+      creatures: 1
+      range: touch
+      side: ally
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: damageReduction
+            damage: acid
+            amount:
+              dice: 1d4
+          duration:
+            concentration: true
+            minutes: 1
+          choose:
+            - acid
+            - bludgeoning
+            - cold
+            - fire
+            - lightning
+            - necrotic
+            - piercing
+            - poison
+            - radiant
+            - slashing
+            - thunder
 - id: srd52:spell/sacred-flame
   name: Sacred Flame
   level: 0
@@ -6334,6 +6498,7 @@
     area:
       side: enemy
       when: turnEnd
+      enters: true
       difficult: true
       resolution:
         kind: save
@@ -6616,6 +6781,7 @@
         - kind: zone
           zone: wall
           radius: 10
+          escape: dex
           duration:
             concentration: true
             minutes: 10
@@ -8683,7 +8849,24 @@
     type (your choice). Cantrip Upgrade. Whether you deal Radiant damage or the
     weapon’s normal damage type, the attack deals extra Radiant damage when you
     reach levels 5 (1d6), 11 (2d6), and 17 (3d6).
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+    targeting:
+      creatures: 1
+      range: 5
+      side: enemy
+    resolution:
+      kind: automatic
+      effects:
+        - kind: weaponAttack
+          change:
+            spellAbility: true
+            type: radiant
+            extra:
+              type: radiant
+              perTier: 1d6
 - id: srd52:spell/vitriolic-sphere
   name: Vitriolic Sphere
   level: 4
@@ -9264,7 +9447,43 @@
     each of its turns, an affected target repeats the save, ending the spell on
     itself on a success. Using a Higher-Level Spell Slot. The Sphere’s radius
     increases by 5 feet for each spell slot level above 4."
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 10
+      range: 90
+      side: enemy
+    resolution:
+      kind: save
+      ability: wis
+      dc:
+        add:
+          - kind: spellSaveDc
+      onFail:
+        - kind: modifier
+          modifier:
+            kind: confused
+            spell: true
+          duration:
+            concentration: true
+            minutes: 1
+          repeatSave: true
+        - kind: modifier
+          modifier:
+            kind: actionLimit
+            noReactions: true
+          duration:
+            concentration: true
+            minutes: 1
+          repeatSave: true
+  upcast:
+    perSlotLevel:
+      addRadius: 5
 - id: srd52:spell/conjure-minor-elementals
   name: Conjure Minor Elementals
   level: 4
@@ -9286,6 +9505,9 @@
     your enemies. Using a Higher-Level Spell Slot. The damage increases by 1d8
     for each spell slot level above 4.
   automation: partial
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
   activation:
     cost:
       - action
@@ -9311,6 +9533,12 @@
               amount:
                 dice: 2d8
               type: fire
+            within: 15
+            types:
+              - acid
+              - cold
+              - fire
+              - lightning
           duration:
             concentration: true
             minutes: 10
@@ -9636,7 +9864,38 @@
     you hits you with a melee attack roll, the shield erupts with flame. The
     attacker takes 2d8 Fire damage from a warm shield or 2d8 Cold damage from a
     chill shield.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: resistance
+            damage: cold
+          duration:
+            minutes: 10
+          choose:
+            - cold
+            - fire
+        - kind: modifier
+          modifier:
+            kind: retaliate
+            damage:
+              - amount:
+                  dice: 2d8
+                type: fire
+          duration:
+            minutes: 10
+          choose:
+            - fire
+            - cold
 - id: srd52:spell/flesh-to-stone
   name: Flesh to Stone
   level: 6
@@ -9732,6 +9991,7 @@
         - kind: modifier
           modifier:
             kind: sealed
+            teleportSave: cha
           duration:
             minutes: 60
 - id: srd52:spell/gate
@@ -9787,7 +10047,7 @@
     them. Similarly, the area within the barrier is excluded from areas of
     effect created by such spells. Using a Higher-Level Spell Slot. The barrier
     blocks spells of 1 level higher for each spell slot level above 6.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -9811,6 +10071,7 @@
           follows: true
     area:
       spellShield: 5
+      shieldGrows: true
       self: true
 - id: srd52:spell/greater-restoration
   name: Greater Restoration
@@ -9995,41 +10256,30 @@
           type: piercing
       onSuccessDamage: half
       onFail:
-        - kind: modifier
+        - kind: zone
+          zone: area
+          radius: 20
           duration:
             concentration: true
             minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 4d10
-                type: piercing
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 4d10
-                type: piercing
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+      onSuccess: []
+    area:
+      when: turnEnd
+      enters: true
+      difficult: true
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 4d10
+            type: piercing
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d10
@@ -10371,7 +10621,163 @@
     condition ends, and the creature teleports to another plane of existence
     (GM’s choice). Special. The target is struck by two rays. Roll twice,
     rerolling any 8."
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: cone
+        radius: 60
+      range: self
+      side: enemy
+    resolution:
+      kind: automatic
+      effects:
+        - kind: randomAction
+          of:
+            - Red
+            - Orange
+            - Yellow
+            - Green
+            - Blue
+            - Indigo
+            - Violet
+          repeats: true
+          twiceOnTop: true
+  rolled:
+    - label: Red
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 12d6
+            type: fire
+        onSuccessDamage: half
+    - label: Orange
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 12d6
+            type: acid
+        onSuccessDamage: half
+    - label: Yellow
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 12d6
+            type: lightning
+        onSuccessDamage: half
+    - label: Green
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 12d6
+            type: poison
+        onSuccessDamage: half
+    - label: Blue
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 12d6
+            type: cold
+        onSuccessDamage: half
+    - label: Indigo
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        onFail:
+          - kind: applyCondition
+            condition: restrained
+            duration:
+              minutes: 1440
+            endSave:
+              ability: con
+              dc:
+                add:
+                  - kind: spellSaveDc
+            secondFailure:
+              condition: petrified
+              duration:
+                minutes: 1440
+              count: 3
+    - label: Violet
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        onFail:
+          - kind: applyCondition
+            condition: blinded
+            duration:
+              minutes: 1
+            banish:
+              ability: wis
 - id: srd52:spell/project-image
   name: Project Image
   level: 7
@@ -10595,7 +11001,7 @@
     creature or object entirely inside the Sphere has Immunity to Thunder
     damage, and creatures have the Deafened condition while entirely inside it.
     Casting a spell that includes a Verbal component is impossible there.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -10618,6 +11024,11 @@
             minutes: 10
     area:
       noSpells: verbal
+      conditions:
+        - deafened
+      grants:
+        - kind: immunity
+          damage: thunder
 - id: srd52:spell/slow
   name: Slow
   level: 3
@@ -10966,8 +11377,8 @@
       - slot
     targeting:
       area:
-        shape: line
-        radius: 60
+        shape: sphere
+        radius: 10
       range: 120
       side: enemy
     resolution:
@@ -10982,29 +11393,23 @@
           type: fire
       onSuccessDamage: half
       onFail:
-        - kind: modifier
+        - kind: zone
+          zone: area
+          radius: 10
           duration:
             concentration: true
             minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 5d8
-                type: fire
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 5d8
-                type: fire
+      onSuccess: []
+    area:
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: automatic
+        damage:
+          - amount:
+              dice: 5d8
+            type: fire
+        effects: []
   upcast:
     perSlotLevel:
       addDice: 1d8

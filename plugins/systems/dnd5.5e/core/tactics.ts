@@ -52,11 +52,12 @@ export function walkSpeed(actor: Actor, stats: Stats): number {
     stats.speed - (hasTactic(actor, "slowed") ? 10 : 0),
   );
   const { speed: limit } = limitsOf(actor);
-  // Shut away, it goes nowhere.
-  const shut = actor.activeEffects.some(
-    ({ modifier }) => modifier.kind === "sealed",
+  // Shut away, it goes nowhere, unless it rolls its prison along, as in Resilient Sphere, at half Speed.
+  const seals = actor.activeEffects.flatMap(({ modifier }) =>
+    modifier.kind === "sealed" ? [modifier] : [],
   );
-  if (limit === "none" || shut) return 0;
+  if (limit === "none" || seals.some((seal) => !seal.rolls)) return 0;
+  if (seals.length > 0) return Math.floor(speed / 10) * 5;
   const hasted = actor.activeEffects.some(
     ({ modifier }) => modifier.kind === "hasted",
   );

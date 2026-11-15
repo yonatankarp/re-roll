@@ -34,16 +34,28 @@ import {
   NS,
   applyDndEvent,
   dndEvent,
+  frame,
   freshActor,
   hasCondition,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import {
+  damageResponses,
   deriveStats,
   type KnownAction,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import {
+  fogBoundEvents,
+  runZoneTick,
+  spellFoiled,
+  zoneFrames,
+} from "../plugins/systems/dnd5.5e/core/combat/areas.ts";
+import { afterDamage } from "../plugins/systems/dnd5.5e/core/combat/reactions.ts";
 import { walkSpeed } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import {
+  affects,
+  antimagicEvents,
   blockedSquares,
+  placedConditionEvents,
   placedFlag,
   zonesOf,
 } from "../plugins/systems/dnd5.5e/core/zones.ts";
@@ -199,6 +211,134 @@ const MONSTERS: Record<string, Readonly<Record<string, unknown>>> = {
         disadvantage: ["attacks", "checks"],
         damage: [{ amount: { bonus: { base: 20 } }, type: "radiant" }],
       },
+    ],
+  }),
+  "test:monster/knight": statBlock("test:monster/knight", {
+    passives: [
+      {
+        kind: "aura",
+        name: "Courage",
+        radius: 10,
+        area: {
+          side: "ally",
+          self: true,
+          grants: [{ kind: "conditionImmunity", condition: "frightened" }],
+        },
+      },
+    ],
+  }),
+  "test:monster/scribe": statBlock("test:monster/scribe", {
+    passives: [
+      {
+        kind: "aura",
+        name: "Calm",
+        radius: 10,
+        area: {
+          side: "ally",
+          awake: true,
+          grants: [{ kind: "advantage", on: "saves", conditions: ["charmed"] }],
+        },
+      },
+    ],
+  }),
+  "test:monster/culler": statBlock("test:monster/culler", {
+    passives: [
+      {
+        kind: "aura",
+        name: "Cull",
+        radius: 10,
+        area: {
+          bloodied: true,
+          when: "ownerTurnEnd",
+          resolution: save(30, [
+            {
+              kind: "modifier",
+              modifier: { kind: "noHealing" },
+              duration: { until: "yourNextTurnStart" },
+            },
+          ]),
+        },
+      },
+    ],
+  }),
+  "test:monster/haunt": statBlock("test:monster/haunt", {
+    passives: [
+      {
+        kind: "aura",
+        name: "Haunt",
+        radius: 10,
+        area: { foilsSpells: { ability: "con", dc: 30 } },
+      },
+    ],
+  }),
+  "test:monster/spore": statBlock("test:monster/spore", {
+    passives: [
+      {
+        kind: "damageBurst",
+        name: "Core",
+        damage: ["fire"],
+        radius: 5,
+        resolution: {
+          kind: "automatic",
+          damage: [{ amount: { bonus: { base: 4 } }, type: "fire" }],
+          effects: [],
+        },
+      },
+    ],
+  }),
+  "test:monster/speaker": statBlock("test:monster/speaker", {
+    passives: [
+      {
+        kind: "aura",
+        name: "Violence",
+        radius: 15,
+        area: {
+          side: "enemy",
+          when: "ownerTurnEnd",
+          resolution: save(30, [
+            {
+              kind: "forcedAttack",
+              otherwise: [{ amount: { bonus: { base: 6 } }, type: "psychic" }],
+            },
+          ]),
+        },
+      },
+    ],
+  }),
+  "test:monster/possessor": statBlock("test:monster/possessor", {
+    passives: [
+      {
+        kind: "aura",
+        name: "Grasp",
+        radius: 5,
+        area: {
+          when: "turnEnd",
+          resolution: save(30, [
+            {
+              kind: "applyCondition",
+              condition: "charmed",
+              duration: { minutes: 1 },
+              repeatSave: true,
+            },
+            {
+              kind: "modifier",
+              modifier: { kind: "actionLimit", speed: "none" },
+              duration: { minutes: 1 },
+              repeatSave: true,
+            },
+          ]),
+        },
+      },
+    ],
+  }),
+  "test:monster/misty": statBlock("test:monster/misty", {
+    passives: [
+      { kind: "fogBound", inside: ["invisible"], outside: ["incapacitated"] },
+    ],
+  }),
+  "test:monster/grounded": statBlock("test:monster/grounded", {
+    passives: [
+      { kind: "modifier", modifier: { kind: "immunity", damage: "lightning" } },
     ],
   }),
 };
@@ -714,6 +854,668 @@ describe("areas spells leave", () => {
   });
 });
 
+const beam = (radius: number, follows = false): KnownAction =>
+  spell("Beam", {
+    cost: ["action", "slot"],
+    targeting: follows
+      ? { area: { shape: "emanation", radius }, range: "self", side: "enemy" }
+      : { area: { shape: "sphere", radius }, range: 120, side: "enemy" },
+    resolution: {
+      kind: "automatic",
+      damage: [],
+      effects: [
+        {
+          kind: "zone",
+          zone: "area",
+          radius,
+          duration: { concentration: true, minutes: 1 },
+          ...(follows ? { follows: true } : {}),
+        },
+      ],
+    },
+    area: {
+      side: "enemy",
+      when: "turnEnd",
+      enters: true,
+      resolution: {
+        ...save(30, []),
+        damage: [{ amount: { bonus: { base: 7 } }, type: "radiant" }],
+      },
+    },
+  });
+
+describe("walking into an area", () => {
+  it("acts on a creature that walks through it, once a turn, and again on a later turn", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 0, 6));
+    const cast = resolveAction(
+      beam(10),
+      actor(start, PLAYER_ACTOR),
+      [],
+      contextOf(run, start, LOW),
+      3,
+      false,
+      { x: 3, y: 6 },
+    );
+    const lit = apply(start, cast.events ?? []);
+    const theirs: DndState = lit.combat
+      ? { ...lit, combat: { ...lit.combat, index: 1 } }
+      : lit;
+    const walked = settle(
+      run,
+      theirs,
+      [frame("move", { actor: "foe", answer: "6,6" })],
+      LOW,
+    );
+    expect(damageTo(walked.events, "foe")).toEqual([7]);
+    expect(actor(walked.state, "foe").position).toEqual({ x: 6, y: 6 });
+    // In and staying put: the walk in was this turn's save, so ending the turn there is not another.
+    const stopped = settle(
+      run,
+      theirs,
+      [frame("move", { actor: "foe", answer: "3,6" })],
+      LOW,
+    );
+    expect(damageTo(stopped.events, "foe")).toEqual([7]);
+    const ended = settle(
+      run,
+      stopped.state,
+      zoneFrames(
+        actor(stopped.state, "foe"),
+        "end",
+        contextOf(run, stopped.state, LOW),
+      ),
+      LOW,
+    );
+    expect(damageTo(ended.events, "foe")).toEqual([]);
+    const later: DndState = stopped.state.combat
+      ? { ...stopped.state, combat: { ...stopped.state.combat, round: 2 } }
+      : stopped.state;
+    const next = settle(
+      run,
+      later,
+      zoneFrames(actor(later, "foe"), "end", contextOf(run, later, LOW)),
+      LOW,
+    );
+    expect(damageTo(next.events, "foe")).toEqual([7]);
+  });
+
+  it("stops a walk for the area's save on the first square it can stand on, past an ally's", async () => {
+    const run = await arena();
+    const start = fight(
+      hero(run, 0, 0),
+      monster("foe", "zombie", 0, 6),
+      monster("p", "zombie", 1, 5),
+      monster("q", "zombie", 1, 6),
+      monster("r", "zombie", 1, 7),
+    );
+    const cast = resolveAction(
+      beam(10),
+      actor(start, PLAYER_ACTOR),
+      [],
+      contextOf(run, start, LOW),
+      3,
+      false,
+      { x: 3, y: 6 },
+    );
+    const lit = apply(start, cast.events ?? []);
+    const theirs: DndState = lit.combat
+      ? { ...lit, combat: { ...lit.combat, index: 1 } }
+      : lit;
+    const walked = settle(
+      run,
+      theirs,
+      [frame("move", { actor: "foe", answer: "6,6" })],
+      LOW,
+    );
+    expect(damageTo(walked.events, "foe")).toEqual([7]);
+    expect(actor(walked.state, "foe").position).toEqual({ x: 6, y: 6 });
+  });
+
+  it("acts on a foe a moving area is brought up to, as Spirit Guardians", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 8, 0));
+    const cast = resolveAction(
+      beam(15, true),
+      actor(start, PLAYER_ACTOR),
+      [],
+      contextOf(run, start, LOW),
+      3,
+      false,
+    );
+    const guarded = apply(start, cast.events ?? []);
+    const walked = settle(
+      run,
+      guarded,
+      [frame("move", { actor: PLAYER_ACTOR, answer: "5,0" })],
+      LOW,
+    );
+    expect(damageTo(walked.events, "foe")).toEqual([7]);
+    expect(damageTo(walked.events, PLAYER_ACTOR)).toEqual([]);
+  });
+});
+
+describe("one-off auras", () => {
+  const ally = (id: string, block: string, x: number, y: number): Actor => ({
+    ...monster(id, block, x, y),
+  });
+  const frightened: LeafEffect = {
+    kind: "applyCondition",
+    condition: "frightened",
+    duration: { minutes: 1 },
+    repeatSave: false,
+    endsOnDamage: false,
+  };
+
+  it("keeps allies in a brave aura from being frightened, and not those outside it", async () => {
+    const run = await arena();
+    const state = fight(
+      hero(run, 0, 0),
+      monster("knight", "knight", 5, 5),
+      ally("near", "zombie", 6, 5),
+      ally("far", "zombie", 11, 11),
+    );
+    const context = contextOf(run, state, LOW);
+    const me = actor(state, PLAYER_ACTOR);
+    const on = (id: string) =>
+      apply(
+        state,
+        leafEvents([frightened], "x", me, actor(state, id), context),
+      );
+    expect(hasCondition(actor(on("near"), "near"), "frightened")).toBe(false);
+    expect(hasCondition(actor(on("knight"), "knight"), "frightened")).toBe(
+      false,
+    );
+    expect(hasCondition(actor(on("far"), "far"), "frightened")).toBe(true);
+  });
+
+  it("gives Advantage only on saves against the conditions it names", async () => {
+    const run = await arena();
+    const state = fight(
+      hero(run, 0, 0),
+      monster("scribe", "scribe", 5, 5),
+      ally("near", "zombie", 6, 5),
+    );
+    const context = contextOf(run, state, LOW);
+    const near = actor(state, "near");
+    const flag = (conditions: readonly string[]) =>
+      placedFlag(
+        near,
+        "advantage",
+        "saves",
+        state,
+        context,
+        undefined,
+        conditions,
+      );
+    expect(flag(["charmed"])).toBe(true);
+    expect(flag(["frightened"])).toBe(false);
+    expect(flag([])).toBe(false);
+  });
+
+  it("stops healing only for the Bloodied as its owner's turn ends", async () => {
+    const run = await arena();
+    const state = fight(
+      monster("culler", "culler", 0, 0),
+      { ...monster("hurt", "zombie", 1, 0), hp: 200 },
+      monster("fresh", "zombie", 0, 1),
+      hero(run, 11, 11),
+    );
+    const context = contextOf(run, state, LOW);
+    const ticks = zoneFrames(actor(state, "culler"), "end", context);
+    const after = settle(run, state, ticks, LOW).state;
+    const noHealing = (id: string) =>
+      actor(after, id).activeEffects.some(
+        ({ modifier }) => modifier.kind === "noHealing",
+      );
+    expect(noHealing("hurt")).toBe(true);
+    expect(noHealing("fresh")).toBe(false);
+  });
+
+  it("foils a spell cast close to a haunting creature unless the caster saves", async () => {
+    const run = await arena();
+    const state = fight(hero(run, 1, 0), monster("haunt", "haunt", 0, 0));
+    const bolt = spell("Bolt", {
+      cost: ["action"],
+      targeting: { creatures: 1, range: 60, side: "enemy" },
+      resolution: {
+        kind: "automatic",
+        damage: [{ amount: { bonus: { base: 5 } }, type: "fire" }],
+        effects: [],
+      },
+    });
+    const near = spellFoiled(
+      actor(state, PLAYER_ACTOR),
+      bolt,
+      contextOf(run, state, LOW),
+    );
+    expect(near?.failed).toBe(true);
+    const away = fight(hero(run, 6, 0), monster("haunt", "haunt", 0, 0));
+    expect(
+      spellFoiled(actor(away, PLAYER_ACTOR), bolt, contextOf(run, away, LOW)),
+    ).toBeNull();
+  });
+
+  it("bursts on fire damage, once a turn, so two neighbours don't set each other off forever", async () => {
+    const run = await arena();
+    const state = fight(
+      hero(run, 0, 0),
+      monster("a", "spore", 1, 0),
+      monster("b", "spore", 2, 0),
+    );
+    const context = contextOf(run, state, LOW);
+    const frames = afterDamage(
+      actor(state, "a"),
+      5,
+      { types: ["fire"] },
+      [],
+      context,
+    );
+    const { events } = settle(run, state, frames, LOW);
+    expect(damageTo(events, PLAYER_ACTOR)).toEqual([4]);
+    expect(damageTo(events, "b")).toEqual([4]);
+    expect(damageTo(events, "a")).toEqual([4]);
+    expect(
+      afterDamage(actor(state, "a"), 5, { types: ["cold"] }, [], context),
+    ).toEqual([]);
+  });
+
+  it("makes a foe in it attack its own ally with its Reaction, or hurts it when none is in reach", async () => {
+    const run = await arena();
+    const state = fight(
+      monster("speaker", "speaker", 0, 0),
+      hero(run, 1, 0),
+      hero(run, 2, 0, "friend"),
+    );
+    const context = contextOf(run, state, LOW);
+    const [tick] = zoneFrames(actor(state, "speaker"), "end", context);
+    if (!tick) throw new Error("No tick");
+    const result = runZoneTick(
+      tick.payload as Parameters<typeof runZoneTick>[0],
+      context,
+    );
+    const attacks = (result.frames ?? []).filter(
+      (item) => item.kind === `${NS}:attackRoll`,
+    );
+    expect(attacks.map((item) => item.payload)).toContainEqual(
+      expect.objectContaining({ attacker: PLAYER_ACTOR, target: "friend" }),
+    );
+    const alone = fight(monster("speaker", "speaker", 0, 0), hero(run, 2, 0));
+    const lonely = contextOf(run, alone, LOW);
+    const [far] = zoneFrames(actor(alone, "speaker"), "end", lonely);
+    if (!far) throw new Error("No tick");
+    const hurt = runZoneTick(
+      far.payload as Parameters<typeof runZoneTick>[0],
+      lonely,
+    );
+    expect(damageTo(hurt.events ?? [], PLAYER_ACTOR)).toEqual([6]);
+  });
+
+  it("charms and roots whoever ends its turn in it, with the first save to end it a turn later", async () => {
+    const run = await arena();
+    const start = fight(
+      hero(run, 1, 0),
+      monster("possessor", "possessor", 0, 0),
+    );
+    const ticks = zoneFrames(
+      actor(start, PLAYER_ACTOR),
+      "end",
+      contextOf(run, start, LOW),
+    );
+    const { state } = settle(
+      run,
+      start,
+      [...ticks, frameOf("finishTurn")],
+      HIGH,
+    );
+    const me = actor(state, PLAYER_ACTOR);
+    expect(hasCondition(me, "charmed")).toBe(true);
+    expect(walkSpeed(me, deriveStats(me, contextOf(run, state, LOW)))).toBe(0);
+  });
+
+  it("makes a fog-bound creature Invisible in fog and Incapacitated out of it", async () => {
+    const run = await arena();
+    const out = fight(hero(run, 0, 0), monster("misty", "misty", 6, 6));
+    const outside = apply(
+      out,
+      fogBoundEvents(actor(out, "misty"), contextOf(run, out, LOW)),
+    );
+    expect(hasCondition(actor(outside, "misty"), "incapacitated")).toBe(true);
+    const cloud = spell("Fog", {
+      cost: ["action"],
+      targeting: {
+        area: { shape: "sphere", radius: 10 },
+        range: 60,
+        side: "enemy",
+      },
+      resolution: {
+        kind: "automatic",
+        damage: [],
+        effects: [
+          {
+            kind: "zone",
+            zone: "fog",
+            radius: 10,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ],
+      },
+    });
+    const cast = resolveAction(
+      cloud,
+      actor(outside, PLAYER_ACTOR),
+      [],
+      contextOf(run, outside, LOW),
+      1,
+      false,
+      { x: 6, y: 6 },
+    );
+    const fogged = apply(outside, cast.events ?? []);
+    const inside = apply(
+      fogged,
+      fogBoundEvents(actor(fogged, "misty"), contextOf(run, fogged, LOW)),
+    );
+    expect(hasCondition(actor(inside, "misty"), "incapacitated")).toBe(false);
+    expect(hasCondition(actor(inside, "misty"), "invisible")).toBe(true);
+  });
+});
+
+describe("what a slot or a circle changes in an area", () => {
+  const zoneSpell = (
+    zone: Record<string, unknown>,
+    area: Record<string, unknown>,
+    follows = false,
+  ): KnownAction =>
+    spell("Shape", {
+      cost: ["action", "slot"],
+      targeting: follows
+        ? {
+            area: { shape: "emanation", radius: 10 },
+            range: "self",
+            side: "ally",
+          }
+        : { area: { shape: "sphere", radius: 10 }, range: 120, side: "enemy" },
+      resolution: {
+        kind: "automatic",
+        damage: [],
+        effects: [
+          {
+            kind: "zone",
+            zone: "area",
+            radius: 10,
+            duration: { concentration: true, minutes: 1 },
+            ...(follows ? { follows: true } : {}),
+            ...zone,
+          },
+        ],
+      },
+      area,
+    });
+  const cast = (
+    run: RunContext,
+    start: DndState,
+    action: KnownAction,
+    slot: number,
+  ) =>
+    apply(
+      start,
+      resolveAction(
+        action,
+        actor(start, PLAYER_ACTOR),
+        [],
+        contextOf(run, start, LOW),
+        slot,
+        false,
+        { x: 5, y: 5 },
+      ).events ?? [],
+    );
+
+  it("widens a fog with the slot, and raises the level a globe blocks", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 11, 11));
+    const wide = cast(
+      run,
+      start,
+      zoneSpell({ perSlot: 20 }, { disperses: true }),
+      5,
+    );
+    expect(zonesOf(wide)[0]?.radius).toBe(50);
+    const globe = cast(
+      run,
+      start,
+      zoneSpell({}, { spellShield: 5, shieldGrows: true, self: true }, true),
+      5,
+    );
+    expect(zonesOf(globe)[0]?.area?.spellShield).toBe(7);
+  });
+
+  it("gives Advantage only on magical saves in a circle, and no damage on a success that halves it", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 5, 5), monster("foe", "zombie", 0, 0));
+    const circled = cast(
+      run,
+      start,
+      zoneSpell(
+        {},
+        {
+          side: "ally",
+          self: true,
+          magicWard: true,
+          grants: [{ kind: "advantage", on: "saves", magical: true }],
+        },
+        true,
+      ),
+      5,
+    );
+    const context = contextOf(run, circled, HIGH);
+    const me = actor(circled, PLAYER_ACTOR);
+    expect(
+      placedFlag(
+        me,
+        "advantage",
+        "saves",
+        circled,
+        context,
+        undefined,
+        [],
+        true,
+      ),
+    ).toBe(true);
+    expect(placedFlag(me, "advantage", "saves", circled, context)).toBe(false);
+    const blast = spell("Blast", {
+      cost: ["action", "slot"],
+      targeting: { creatures: 1, range: 60, side: "enemy" },
+      resolution: {
+        kind: "save",
+        ability: "dex",
+        dc: { base: 5, add: [] },
+        damage: [{ amount: { bonus: { base: 10, add: [] } }, type: "fire" }],
+        onSuccessDamage: "half",
+        onFail: [],
+        onSuccess: [],
+      },
+    });
+    const hit = resolveAction(blast, actor(circled, "foe"), [me], context, 3);
+    expect(damageTo(hit.events ?? [], PLAYER_ACTOR)).toEqual([]);
+  });
+
+  it("holds off spells and magic items in an Antimagic Field, and no other spell's area reaches in", async () => {
+    const run = await arena();
+    const ring = "srd52:item/ring-of-protection";
+    const blessed = {
+      ...hero(run, 5, 5),
+      inventory: [ring],
+      attuned: [ring],
+      activeEffects: [
+        {
+          sourceId: "spell:test:spell/bless",
+          casterId: PLAYER_ACTOR,
+          ends: "spellDuration" as const,
+          modifier: {
+            kind: "bonus" as const,
+            to: "saves" as const,
+            amount: { dice: "1d4" },
+          },
+        },
+      ],
+    };
+    const start = fight(blessed, monster("foe", "zombie", 6, 5));
+    const field = apply(
+      start,
+      resolveAction(
+        zoneSpell({}, { noSpells: "all", self: true }, true),
+        actor(start, "foe"),
+        [],
+        contextOf(run, start, LOW),
+        8,
+      ).events ?? [],
+    );
+    const held = apply(field, antimagicEvents(field));
+    const me = actor(held, PLAYER_ACTOR);
+    expect(me.activeEffects).toEqual([]);
+    expect(me.suppressed).toHaveLength(1);
+    const context = contextOf(run, held, LOW);
+    expect(deriveStats(me, context).ac).toBe(
+      deriveStats(actor(start, PLAYER_ACTOR), context).ac - 1,
+    );
+    const cloud = apply(
+      held,
+      resolveAction(
+        zoneSpell({}, { when: "turnStart", resolution: save(30, []) }),
+        actor(held, PLAYER_ACTOR),
+        [],
+        context,
+        3,
+        false,
+        { x: 5, y: 5 },
+      ).events ?? [],
+    );
+    const cloudZone = zonesOf(cloud).find(
+      (zone) => zone.owner === PLAYER_ACTOR,
+    );
+    if (!cloudZone) throw new Error("No cloud");
+    expect(affects(cloudZone, actor(cloud, PLAYER_ACTOR), cloud, context)).toBe(
+      false,
+    );
+    const away = apply(held, [
+      dndEvent(`${NS}:moved`, { actor: "foe", to: { x: 11, y: 11 }, feet: 0 }),
+    ]);
+    const back = actor(apply(away, antimagicEvents(away)), PLAYER_ACTOR);
+    expect(back.activeEffects).toHaveLength(1);
+    expect(back.suppressed).toBeUndefined();
+  });
+
+  it("deafens whoever stands in Silence, until it leaves", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 5, 5));
+    const quiet = cast(
+      run,
+      start,
+      zoneSpell({}, { noSpells: "verbal", conditions: ["deafened"] }),
+      3,
+    );
+    const deaf = apply(quiet, placedConditionEvents(quiet));
+    expect(hasCondition(actor(deaf, "foe"), "deafened")).toBe(true);
+    expect(hasCondition(actor(deaf, PLAYER_ACTOR), "deafened")).toBe(false);
+    const away = apply(deaf, [
+      dndEvent(`${NS}:moved`, { actor: "foe", to: { x: 11, y: 11 }, feet: 0 }),
+    ]);
+    const heard = apply(away, placedConditionEvents(away));
+    expect(hasCondition(actor(heard, "foe"), "deafened")).toBe(false);
+  });
+
+  it("picks the element its caster's foes resist least", async () => {
+    const run = await arena();
+    const spirit = zoneSpell(
+      { choose: ["lightning", "thunder"] },
+      {
+        side: "enemy",
+        when: "turnStart",
+        resolution: {
+          ...save(30, []),
+          damage: [{ amount: { dice: "1d8" }, type: "lightning" }],
+        },
+      },
+    );
+    const types = (block: string): readonly string[] => {
+      const start = fight(hero(run, 0, 0), monster("foe", block, 11, 11));
+      const zone = zonesOf(cast(run, start, spirit, 3))[0];
+      return zone?.area?.resolution?.damage.map((item) => item.type) ?? [];
+    };
+    expect(types("zombie")).toEqual(["lightning"]);
+    expect(types("grounded")).toEqual(["thunder"]);
+  });
+
+  it("ends the first casting of a Concentration spell when it's cast again", async () => {
+    const run = await arena();
+    const start = fight(
+      hero(run, 0, 0),
+      monster("a", "zombie", 1, 0),
+      monster("b", "zombie", 2, 0),
+    );
+    const curse = spell("Curse", {
+      cost: ["action", "slot"],
+      targeting: { creatures: 1, range: 60, side: "enemy" },
+      resolution: {
+        kind: "automatic",
+        damage: [],
+        effects: [
+          effect(
+            { kind: "disadvantage", on: "attacks" },
+            { concentration: true, minutes: 1 },
+          ),
+        ],
+      },
+    });
+    const once = apply(
+      start,
+      resolveAction(
+        curse,
+        actor(start, PLAYER_ACTOR),
+        [actor(start, "a")],
+        contextOf(run, start, LOW),
+        3,
+      ).events ?? [],
+    );
+    const twice = apply(
+      once,
+      resolveAction(
+        curse,
+        actor(once, PLAYER_ACTOR),
+        [actor(once, "b")],
+        contextOf(run, once, LOW),
+        3,
+      ).events ?? [],
+    );
+    expect(actor(twice, "a").activeEffects).toEqual([]);
+    expect(actor(twice, "b").activeEffects).toHaveLength(1);
+  });
+
+  it("gives Immunity to Thunder damage inside Silence", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 5, 5));
+    const quiet = cast(
+      run,
+      start,
+      zoneSpell(
+        {},
+        {
+          noSpells: "verbal",
+          grants: [{ kind: "immunity", damage: "thunder" }],
+        },
+      ),
+      3,
+    );
+    const context = contextOf(run, quiet, LOW);
+    expect(damageResponses(actor(quiet, "foe"), context).immunities).toContain(
+      "thunder",
+    );
+    expect(
+      damageResponses(actor(quiet, PLAYER_ACTOR), context).immunities,
+    ).not.toContain("thunder");
+  });
+});
+
 describe("sealed away and Time Stop", () => {
   it("puts a sealed foe out of reach, and ends the fight when only sealed foes are left", async () => {
     const run = await arena();
@@ -791,6 +1593,103 @@ describe("reading areas from stat blocks", () => {
       name: "Reek",
       radius: 10,
       area: { when: "turnStart", resolution: { kind: "save" } },
+    });
+  });
+
+  it("reads the one-off auras: immunity, Advantage against conditions, the Bloodied, a foiled spell, a burst on damage, a forced attack, a charm that roots, and fog", () => {
+    expect(
+      parse(
+        "Steadfast",
+        "Creatures of the fiend’s choice in a 20-foot Emanation originating from it have Immunity to the Frightened condition while there.",
+      )[0],
+    ).toMatchObject({
+      radius: 20,
+      area: {
+        side: "ally",
+        grants: [{ kind: "conditionImmunity", condition: "frightened" }],
+      },
+    });
+    expect(
+      parse(
+        "Soothing",
+        "Allies in a 10-foot Emanation originating from the fiend have Advantage on saving throws to avoid or end the Charmed condition.",
+      )[0],
+    ).toMatchObject({
+      area: {
+        grants: [{ kind: "advantage", on: "saves", conditions: ["charmed"] }],
+      },
+    });
+    expect(
+      parse(
+        "Thinning",
+        "Constitution Saving Throw: DC 12, each Bloodied creature in a 10-foot Emanation originating from the fiend at the end of the fiend’s turn. Failure: The target can’t regain Hit Points until the start of the fiend’s next turn.",
+      )[0],
+    ).toMatchObject({
+      area: {
+        bloodied: true,
+        when: "ownerTurnEnd",
+        resolution: {
+          onFail: [
+            {
+              modifier: { kind: "noHealing" },
+              duration: { until: "yourNextTurnStart" },
+            },
+          ],
+        },
+      },
+    });
+    expect(
+      parse(
+        "Spell Sink",
+        "Constitution Saving Throw: DC 12, any creature that casts a spell while inside the fiend’s space. Failure: The spell fails and is wasted.",
+      )[0],
+    ).toMatchObject({ area: { foilsSpells: { ability: "con", dc: 12 } } });
+    expect(
+      parse(
+        "Volatile",
+        "When the fiend is subjected to Cold damage, each creature in a 5-foot Emanation originating from the fiend takes 3 (1d6) Cold damage.",
+      )[0],
+    ).toMatchObject({ kind: "damageBurst", damage: ["cold"], radius: 5 });
+    expect(
+      parse(
+        "Rage",
+        "At the end of each of the fiend’s turns, each creature of the fiend’s choice in a 10-foot Emanation originating from the fiend suffers the following effect. Wisdom Saving Throw: DC 12. Failure: The target takes a Reaction to make a melee attack roll against a creature within reach. If no creature is within reach, the target takes 3 (1d6) Psychic damage.",
+      )[0],
+    ).toMatchObject({
+      area: {
+        side: "enemy",
+        when: "ownerTurnEnd",
+        resolution: { dc: { base: 12 }, onFail: [{ kind: "forcedAttack" }] },
+      },
+    });
+    const [clinging] = parse(
+      "Clinging",
+      "Spectral hands circle the fiend in a 5-foot Emanation originating from it. A creature that ends its turn in this area is subjected to the following effect. Charisma Saving Throw: DC 11. Failure: The target has the Charmed condition. While the creature is Charmed in this way, its Speed is reduced to 0. The target repeats the save at the end of each of its turns, ending the effect on itself on a success. After 1 minute, it succeeds automatically.",
+    );
+    expect(clinging).toMatchObject({
+      radius: 5,
+      area: {
+        when: "turnEnd",
+        resolution: {
+          onFail: [
+            { kind: "applyCondition", condition: "charmed", repeatSave: true },
+            {
+              modifier: { kind: "actionLimit", speed: "none" },
+              repeatSave: true,
+            },
+          ],
+        },
+      },
+    });
+    expect(
+      parse(
+        "Fogborn",
+        "While the fiend is in fog or mist, it has the Invisible condition. The fiend has the Incapacitated condition while it is outside an area of fog or mist.",
+      )[0],
+    ).toEqual({
+      kind: "fogBound",
+      inside: ["invisible"],
+      outside: ["incapacitated"],
     });
   });
 
