@@ -44,7 +44,6 @@ import {
 } from "../trait-rules.ts";
 import {
   actorOf,
-  hasPassive,
   canAfford,
   CHECK_END,
   combatEnded,

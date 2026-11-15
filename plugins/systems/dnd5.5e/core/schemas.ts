@@ -189,10 +189,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     damage: DamageTypeSchema,
   }),
   z.strictObject({ kind: z.literal("immunity"), damage: DamageTypeSchema }),
-  // A creature within 5 feet that hits the bearer with a melee attack takes this, as Flames of Phlegethos' flames.
+  // A creature within 5 feet that hits the bearer with a melee attack takes this, as Flames of Phlegethos' flames, Fire
+  // Shield or a black pudding's Corrosive Form, and with `grapple` is Grappled by the bearer, as by a mimic's Adhesive.
+  // shortcut: the grapple's escape DC is the bearer's Unarmed Strike one (combat/grapple.ts), not a printed number.
   z.strictObject({
     kind: z.literal("retaliate"),
-    damage: z.array(DamageSchema).min(1),
+    damage: z.array(DamageSchema).default([]),
+    grapple: z.literal(true).optional(),
   }),
   // Can't gain this condition while it lasts, as Lordly Resolve's bolstered targets.
   z.strictObject({
@@ -235,14 +238,6 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   }),
   // Regaining no Hit Points, as in a death tyrant's Negative Energy Cone.
   z.strictObject({ kind: z.literal("noHealing") }),
-  // A creature that hits the bearer with a melee attack takes this damage, and with `grapple` is Grappled by it,
-  // as a black pudding's Corrosive Form, a mimic's Adhesive or Fire Shield.
-  // shortcut: the grapple's escape DC is the bearer's Unarmed Strike one (combat/grapple.ts), not a printed number.
-  z.strictObject({
-    kind: z.literal("retaliate"),
-    damage: z.array(DamageSchema).default([]),
-    grapple: z.literal(true).optional(),
-  }),
   // The first drop to 0 Hit Points is a drop to 1 instead, and the effect ends, as with Death Ward.
   z.strictObject({ kind: z.literal("deathWard") }),
   // Dash as a Bonus Action, as Expeditious Retreat gives.

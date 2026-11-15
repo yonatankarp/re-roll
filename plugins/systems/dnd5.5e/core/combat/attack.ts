@@ -1367,7 +1367,6 @@ export function runApplyHit(
     ...inspiringStrike(attacker, payload.critical, stats, context),
     ...(dealt.dealt > 0 ? reassertHonor(attacker, target, context) : []),
     ...onceHitEnded(attacker),
-    ...(isMelee(action) ? retaliated(attacker, target, context) : []),
   );
   // The save sees the target as the hit left it.
   const afterHit = events.reduce(applyDndEvent, state);
@@ -1469,12 +1468,15 @@ function onceHitEnded(attacker: Actor): SystemEvent[] {
   );
 }
 
-// A melee hit on a creature that strikes back, as a black pudding's acid or a mimic's glue, rolled with its numbers.
+// A melee hit from within 5 feet on a creature that strikes back, as Fire Shield's or Flames of Phlegethos' flames, a black
+// pudding's acid or a mimic's glue, rolled with the bearer's numbers.
 function retaliated(
   attacker: Actor,
   target: Actor,
+  action: KnownAction,
   context: Context,
 ): SystemEvent[] {
+  if (!isMelee(action) || !within5(attacker, target)) return [];
   const stats = deriveStats(target, context);
   const backs = [
     ...target.activeEffects.map((effect) => effect.modifier),
@@ -1589,33 +1591,6 @@ function feast(
   ];
 }
 
-// Flames of Phlegethos' flames, as Fire Shield's: a melee hit from within 5 feet burns the attacker.
-function retaliated(
-  attacker: Actor,
-  target: Actor,
-  action: KnownAction,
-  context: Context,
-): SystemEvent[] {
-  if (!isMelee(action) || !within5(attacker, target)) return [];
-  const stats = deriveStats(target, context);
-  return target.activeEffects.flatMap(({ modifier }) =>
-    modifier.kind === "retaliate"
-      ? dealEvents(
-          attacker,
-          modifier.damage.map(({ amount, type }) => ({
-            amount: finalDamage(
-              rollAmount(amount, stats, context.dice),
-              type,
-              damageResponses(attacker, context),
-            ),
-            type,
-          })),
-          false,
-          context,
-        ).events
-      : [],
-  );
-}
 const BLOODIED_DAMAGE = "bloodied-damage";
 const SHIELD_BASH = "shield-bash";
 
