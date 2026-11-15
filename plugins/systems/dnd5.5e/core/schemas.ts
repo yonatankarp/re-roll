@@ -264,7 +264,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // The bearer can't attack with this action's weapon while it lasts, as one caught by a kuo-toa's Sticky Shield.
   z.strictObject({ kind: z.literal("stuck"), action: z.string() }),
   // The bearer can't benefit from the Invisible condition, as with a sahuagin baron's Fiendish Blood.
-  // shortcut: that curse's Fiends sensing the bearer's location isn't read, as only hiding would make it count.
+  // Its Fiends sensing the bearer's location adds nothing, since hiding is the Invisible condition too.
   z.strictObject({ kind: z.literal("outlined") }),
   // Kept by a creature that saved against an area or a reaction, which no longer affects it, as a ghast's Stench
   // or a chain devil's Unnerving Gaze.
