@@ -31,7 +31,7 @@ import {
   FeatureSchema,
   ItemSchema,
   type Item,
-  SKILL_ABILITIES,
+  ALL_SKILLS,
   type Skill,
   SpeciesSchema,
   SpellSchema,
@@ -68,7 +68,6 @@ const XP_FOR_LEVEL = [
   0, 300, 900, 2700, 6500, 14000, 23000, 34000, 48000, 64000, 85000, 100000,
   120000, 140000, 165000, 195000, 225000, 265000, 305000, 355000,
 ] as const;
-const ALL_SKILLS = Object.keys(SKILL_ABILITIES) as [Skill, ...Skill[]];
 
 export function levelForXp(xp: number): number {
   return XP_FOR_LEVEL.filter((needed) => xp >= needed).length;
@@ -315,6 +314,14 @@ function answered(
   return (build?.levels ?? []).flatMap((entry) =>
     entry.answers.flatMap((answer) =>
       answer.kind === kind && "values" in answer ? answer.values : [],
+    ),
+  );
+}
+
+function expertiseOf(build: CharacterBuild | null): readonly string[] {
+  return (build?.levels ?? []).flatMap((entry) =>
+    entry.answers.flatMap((answer) =>
+      answer.kind === "skills" && answer.expertise ? answer.values : [],
     ),
   );
 }
@@ -602,8 +609,14 @@ export function choiceOptions(
     }
     case "skills": {
       const had = taken("skills");
-      const known = choice.from.filter(
-        (skill) => !had.has(skill) && !background.skills.includes(skill),
+      const proficient = (skill: Skill) =>
+        had.has(skill) || background.skills.includes(skill);
+      const expert = new Set(expertiseOf(base));
+      const known = choice.from.filter((skill) =>
+        choice.expertise
+          ? !expert.has(skill) &&
+            (choice.expertise === "any" || proficient(skill))
+          : !proficient(skill),
       );
       return {
         what: "a skill",
@@ -911,7 +924,13 @@ function answersOf(
       case "subclass":
         return [{ kind: "subclass", values }];
       case "skills":
-        return [{ kind: "skills", values }];
+        return [
+          {
+            kind: "skills",
+            values,
+            ...(choice.expertise ? { expertise: true } : {}),
+          },
+        ];
       case "spells":
         return [
           {

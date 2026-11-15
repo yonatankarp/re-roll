@@ -50,11 +50,18 @@ import {
   onceEnded,
 } from "../class-rules.ts";
 import { conditionsApplied } from "../legendary.ts";
-import { type Damage, ItemSchema, type Resolution } from "../schemas.ts";
+import {
+  type Damage,
+  type DamageType,
+  ItemSchema,
+  type Resolution,
+} from "../schemas.ts";
 import {
   armoredReduction,
+  holdsShield,
   masteredDice,
   masteredTypes,
+  rerolledTypes,
   piercing,
   rescuedSave,
   evades,
@@ -99,6 +106,7 @@ export const AttackSchema = z.object({
   target: z.string(),
   slotLevel: z.number().optional(),
   noModifier: z.boolean().optional(), // an off-hand or Cleave attack, whose damage leaves out the ability modifier
+  poleStrike: z.boolean().optional(), // Polearm Master's attack with the other end: a d4 of Bludgeoning
 });
 
 // Who a projectile or later attack actually goes for, given who is still standing.
@@ -253,13 +261,18 @@ function ownTrigger(
   actor: Actor,
   when: "attacked" | "damaged",
   context: Context,
+  types: readonly DamageType[] = [],
 ): KnownAction | null {
   const stats = deriveStats(actor, context);
   return (
-    stats.actions.find(
-      (item) =>
-        item.activation.trigger?.[when] && canAfford(item, actor, stats),
-    ) ?? null
+    stats.actions.find((item) => {
+      const trigger = item.activation.trigger;
+      return (
+        trigger?.[when] &&
+        (trigger.damagedBy?.some((type) => types.includes(type)) ?? true) &&
+        canAfford(item, actor, stats)
+      );
+    }) ?? null
   );
 }
 
@@ -268,6 +281,7 @@ function retaliation(
   bearerId: string,
   attackerId: string,
   context: Context,
+  types: readonly DamageType[],
 ): SystemResult {
   const { state } = context;
   const bearer = state.actors[bearerId];
@@ -282,15 +296,24 @@ function retaliation(
   ) {
     return {};
   }
-  const action = ownTrigger(bearer, "damaged", context);
+  const action = ownTrigger(bearer, "damaged", context, types);
   if (!action) return {};
   const { targeting } = action.activation;
+  // One for the bearer itself, as Fade Away's, needs no range.
+  const self = "self" in targeting;
   const range =
     "range" in targeting && typeof targeting.range === "number"
       ? targeting.range
       : 5;
-  if (distanceFeet(bearer.position, attacker.position) > range) return {};
-  const result = resolveAction(action, bearer, [attacker], context);
+  if (!self && distanceFeet(bearer.position, attacker.position) > range) {
+    return {};
+  }
+  const result = resolveAction(
+    action,
+    bearer,
+    [self ? bearer : attacker],
+    context,
+  );
   return {
     events: [...guardCosts(bearer, action, context), ...(result.events ?? [])],
     frames: result.frames ?? [],
@@ -473,6 +496,7 @@ export function runAttackRoll(
     advantage,
     disadvantage,
     rerollOnes: hasPassive(stats, "rerollOnes"),
+    thirdDie: ability !== "str" && hasPassive(stats, "elvenAccuracy"),
   });
   const hadAdvantage = advantage && !disadvantage;
   const hadDisadvantage = disadvantage && !advantage;
@@ -485,7 +509,14 @@ export function runAttackRoll(
     targetStats.ac +
     (steady.bypassCover && meleeReach(action) === null ? 0 : cover);
   const critFrom = criticalFrom(stats);
-  const hits = roll.natural >= critFrom || (roll.natural !== 1 && total >= ac);
+  const struck =
+    roll.natural >= critFrom || (roll.natural !== 1 && total >= ac);
+  // Boon of Combat Prowess's Peerless Aim: a miss hits instead, once until the bearer's next turn starts.
+  const aimed =
+    !struck &&
+    hasPassive(stats, "peerlessAim") &&
+    !attacker.usedThisTurn.includes(PEERLESS_AIM);
+  const hits = struck || aimed;
   // A hit from within 5 feet on a Paralyzed or Unconscious target is a Critical Hit.
   const critical =
     roll.natural >= critFrom ||
@@ -505,6 +536,14 @@ export function runAttackRoll(
   // An effect like Guiding Bolt's lasts only until the next attack roll it applies to.
   const spent = [
     ...guarded,
+    ...(aimed
+      ? [
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: attacker.id,
+            key: PEERLESS_AIM,
+          }),
+        ]
+      : []),
     ...onceEnded(attacker, "attacks"),
     ...onceEnded(target, "attacksAgainst"),
     ...revealEvents(attacker),
@@ -522,6 +561,7 @@ export function runAttackRoll(
       ? {}
       : { slotLevel: payload.slotLevel }),
     ...(payload.noModifier ? { noModifier: true } : {}),
+    ...(payload.poleStrike ? { poleStrike: true } : {}),
   };
 
   if (!hits) {
@@ -589,6 +629,7 @@ export const HitSchema = z.object({
   reduceBy: z.number().optional(), // set by a reaction like Deflect Attacks
   acBonus: z.number().optional(), // set by a reaction like Parry, against this hit only
   noModifier: z.boolean().optional(),
+  poleStrike: z.boolean().optional(),
 });
 
 export const ReactionSchema = HitSchema.extend({ answer: z.string() });
@@ -655,6 +696,20 @@ export function runRecheckHit(
   return { events: guard.events, frames: [frame("applyHit", guard.hit)] };
 }
 
+// Pole Strike hits with the weapon's other end, whose damage die is a d4 of Bludgeoning.
+function poleEnd(
+  resolution: Extract<Resolution, { kind: "attack" }>,
+): Extract<Resolution, { kind: "attack" }> {
+  return {
+    ...resolution,
+    damage: resolution.damage.map((item, index) =>
+      index === 0
+        ? { amount: { ...item.amount, dice: "1d4" }, type: "bludgeoning" }
+        : item,
+    ),
+  };
+}
+
 export function runApplyHit(
   payload: z.infer<typeof HitSchema>,
   context: Context,
@@ -668,13 +723,15 @@ export function runApplyHit(
     context,
     payload.slotLevel,
   );
-  const { resolution } = action.activation;
-  if (resolution.kind !== "attack") {
+  const printed = action.activation.resolution;
+  if (printed.kind !== "attack") {
     throw new Error(`${action.id} isn't an attack`);
   }
+  const resolution = payload.poleStrike ? poleEnd(printed) : printed;
   const stats = deriveStats(attacker, context);
   const multiplier = payload.critical ? 2 : 1;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
+  const rerolled = rerolledTypes(stats, action.spellLevel !== null);
   const responses = piercing(damageResponses(target, context), mastered, stats);
 
   const events: SystemEvent[] = [];
@@ -754,7 +811,7 @@ export function runApplyHit(
       rollAmount(
         pierces && rerolls ? { ...amount, reroll: 1 } : amount,
         stats,
-        masteredDice(weaponDice, type, mastered),
+        masteredDice(weaponDice, type, mastered, rerolled),
         multiplier,
       );
     const rolled =
@@ -810,6 +867,7 @@ export function runApplyHit(
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
     ...halted(attacker, target, stats, context),
+    ...shieldBash(attacker, target, action, stats, context),
     ...inspiringStrike(attacker, payload.critical, stats, context),
     ...(dealt.dealt > 0 ? reassertHonor(attacker, target, context) : []),
   );
@@ -822,10 +880,15 @@ export function runApplyHit(
   events.push(...nested.events);
   const thunder =
     dealt.dealt + nested.dealt > 0
-      ? retaliation(target.id, attacker.id, {
-          ...context,
-          state: nested.events.reduce(applyDndEvent, afterHit),
-        })
+      ? retaliation(
+          target.id,
+          attacker.id,
+          {
+            ...context,
+            state: nested.events.reduce(applyDndEvent, afterHit),
+          },
+          armored.flatMap((item) => (item.amount > 0 ? [item.type] : [])),
+        )
       : {};
   events.push(...(thunder.events ?? []));
   return {
@@ -853,6 +916,51 @@ export function runApplyHit(
       CHECK_END,
     ],
   };
+}
+
+const PEERLESS_AIM = "peerless-aim";
+const SHIELD_BASH = "shield-bash";
+
+// Shield Master's Shield Bash: once on the bearer's turn, a melee weapon hit on a creature within 5 feet makes it save
+// with Strength against 8 + Strength modifier + Proficiency Bonus, or be knocked Prone.
+// shortcut: it always knocks Prone rather than pushing 5 feet, since Prone helps the party more.
+function shieldBash(
+  attacker: Actor,
+  target: Actor,
+  action: KnownAction,
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  if (
+    !hasPassive(stats, "shieldBash") ||
+    attacker.usedThisTurn.includes(SHIELD_BASH) ||
+    !inOwnTurn(attacker, context) ||
+    !isMelee(action) ||
+    !within5(attacker, target) ||
+    isDown(target) ||
+    !holdsShield(attacker, context)
+  ) {
+    return [];
+  }
+  const dc = 8 + modifierFor(stats, "str") + stats.proficiency;
+  const save = rollSave(target, "str", dc, context, false, 0, ["prone"]);
+  return [
+    dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key: SHIELD_BASH }),
+    ...save.events,
+    ...(save.saved
+      ? []
+      : [
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: {
+              sourceId: SHIELD_BASH,
+              casterId: attacker.id,
+              modifier: { kind: "condition", condition: "prone" },
+              ends: "spellDuration",
+            },
+          }),
+        ]),
+  ];
 }
 
 // Whether it's the creature's own turn, so a hit on it is a reaction such as an Opportunity Attack.
@@ -974,9 +1082,20 @@ function damageRiders(
     if (passive.critical && !critical) return [];
     const key = `rider:${passive.damage}:${String(passive.critical)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return [];
+    const { resource } = passive;
+    if (
+      resource &&
+      (attacker.resourcesSpent[resource] ?? 0) >=
+        (stats.resources[resource] ?? 0)
+    ) {
+      return [];
+    }
     return [
       ...(passive.oncePerTurn
         ? [dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key })]
+        : []),
+      ...(resource
+        ? [dndEvent(`${NS}:resourceSpent`, { actor: attacker.id, resource })]
         : []),
       ...leafEvents(passive.effects, key, attacker, target, context),
     ];
@@ -1233,6 +1352,13 @@ export function runConcentrationSave(
 ): SystemResult {
   const actor = actorOf(context.state, payload.actor);
   if (actor.concentratingOn === null) return {};
+  // Boon of the Iron Mind: damage alone never breaks the bearer's Concentration.
+  if (
+    !isDown(actor) &&
+    hasPassive(deriveStats(actor, context), "unshakableFocus")
+  ) {
+    return {};
+  }
   // Being down ends Concentration outright, as does any failed save.
   const save = isDown(actor)
     ? null

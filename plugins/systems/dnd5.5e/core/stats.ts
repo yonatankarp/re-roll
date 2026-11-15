@@ -1,9 +1,11 @@
 import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
 import { carriedWeight, carryingCapacity, encumberedSpeed } from "./carry.ts";
-import { type Actor, equipped, hasCondition } from "./state.ts";
+import { type Actor, type DndState, equipped, hasCondition } from "./state.ts";
+import { lightAt } from "./sight.ts";
 import { formOf } from "./forms.ts";
 import {
+  ALL_SKILLS,
   DAMAGE_TYPES,
   ABILITIES,
   type Ability,
@@ -91,6 +93,7 @@ export interface Stats {
   readonly speed: number;
   readonly savingThrows: readonly Ability[];
   readonly skills: readonly Skill[];
+  readonly expertise: readonly Skill[]; // skills whose Proficiency Bonus is doubled
   readonly spellAbility: Ability | null;
   readonly slots: readonly number[];
   readonly resources: Readonly<Record<string, number>>;
@@ -385,6 +388,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const level = build.levels.length;
   const classLevels: Record<string, number> = {};
   const skills = new Set<Skill>(background.skills);
+  const expertise = new Set<Skill>();
   const knownSpells = new Set<string>();
   const freeSpells = new Set<string>(); // also cast once per Long Rest without a slot
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
@@ -424,7 +428,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     scaling = { ...scaling, ...levelData.scaling };
     for (const answer of entry.answers) {
       if (answer.kind === "skills") {
-        for (const skill of answer.values) skills.add(skill);
+        for (const skill of answer.values) {
+          (answer.expertise ? expertise : skills).add(skill);
+        }
       } else if (answer.kind === "spells") {
         for (const spell of answer.values) {
           knownSpells.add(spell);
@@ -644,7 +650,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ),
       ]),
     ],
-    skills: [...skills],
+    skills: fromFeatures.passives.some(
+      (passive) => passive.kind === "allSkills",
+    )
+      ? ALL_SKILLS
+      : [...skills],
+    expertise: [...expertise],
     // shortcut: a character with no Spellcasting casts the spells a feat or trait gives with the best of
     // Intelligence, Wisdom or Charisma, as if it had chosen that one.
     spellAbility:
@@ -964,6 +975,7 @@ function statBlockStats(
     speed: Math.max(0, monster.speed - 5 * actor.exhaustion),
     savingThrows: monster.saves,
     skills: [],
+    expertise: [],
     spellAbility: null,
     slots: [],
     resources: Object.fromEntries(
@@ -1130,11 +1142,12 @@ export function checkBonus(
   actor: Actor,
   check: { readonly ability: Ability; readonly skill?: Skill },
 ): number {
-  const proficient =
-    check.skill !== undefined && stats.skills.includes(check.skill);
+  const { skill } = check;
+  const proficient = skill !== undefined && stats.skills.includes(skill);
+  const expert = skill !== undefined && stats.expertise.includes(skill);
   return (
     modifierFor(stats, check.ability) +
-    (proficient ? stats.proficiency : 0) -
+    (proficient ? stats.proficiency * (expert ? 2 : 1) : 0) -
     2 * actor.exhaustion
   );
 }
@@ -1349,7 +1362,7 @@ export function rollAmount(
 
 export function damageResponses(
   actor: Actor,
-  access: ContentAccess,
+  access: ContentAccess & { readonly state?: DndState },
 ): {
   readonly adjustments: readonly number[];
   readonly resistances: readonly DamageType[];
@@ -1361,9 +1374,25 @@ export function damageResponses(
   const immunities: DamageType[] = [];
   // Petrified gives Resistance to all damage.
   if (hasCondition(actor, "petrified")) resistances.push(...DAMAGE_TYPES);
+  const stats = deriveStats(actor, access);
+  // Resistance to all but some types while Bloodied, or in Dim Light or Darkness, as Boon of Desperate Resilience or
+  // Boon of the Night Spirit's Shadowy Form gives.
+  for (const passive of stats.passives) {
+    if (passive.kind !== "resistAll") continue;
+    const active =
+      passive.while === "bloodied"
+        ? actor.hp * 2 <= stats.maxHp
+        : access.state !== undefined &&
+          lightAt(actor.position, access.state) !== "bright";
+    if (active) {
+      resistances.push(
+        ...DAMAGE_TYPES.filter((type) => !passive.except.includes(type)),
+      );
+    }
+  }
   for (const modifier of [
     ...actor.activeEffects.map((effect) => effect.modifier),
-    ...passiveModifiers(deriveStats(actor, access).passives),
+    ...passiveModifiers(stats.passives),
   ]) {
     if (modifier.kind === "resistance") resistances.push(modifier.damage);
     if (modifier.kind === "vulnerability")

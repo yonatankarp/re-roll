@@ -42,8 +42,10 @@ import {
   dropToOneEvents,
   masteredDice,
   masteredTypes,
+  rerolledTypes,
   nextHitDie,
   piercing,
+  interposedShield,
   evades,
   rescuedSave,
   traitSaveAdvantage,
@@ -90,12 +92,25 @@ export function payCosts(
         dndEvent(`${NS}:budgetSpent`, { actor: actor.id, kind: cost }),
       );
     } else if (cost === "slot") {
-      events.push(
-        dndEvent(`${NS}:resourceSpent`, {
-          actor: actor.id,
-          resource: `slot:${String(slotLevel ?? slotToSpend(action, actor, deriveStats(actor, context)) ?? action.spellLevel ?? 1)}`,
-        }),
-      );
+      const stats = deriveStats(actor, context);
+      const level =
+        slotLevel ??
+        slotToSpend(action, actor, stats) ??
+        action.spellLevel ??
+        1;
+      // Boon of Spell Recall: a d4 that matches a level 1-4 slot keeps the slot.
+      const recalled =
+        level <= 4 &&
+        hasPassive(stats, "slotRecall") &&
+        context.dice.roll(4) === level;
+      if (!recalled) {
+        events.push(
+          dndEvent(`${NS}:resourceSpent`, {
+            actor: actor.id,
+            resource: `slot:${String(level)}`,
+          }),
+        );
+      }
     } else {
       events.push(
         dndEvent(`${NS}:resourceSpent`, {
@@ -393,10 +408,12 @@ export function leafEvents(
             },
           }),
         );
-        // Being Incapacitated ends Concentration.
+        // Being Incapacitated ends Concentration; with Boon of the Iron Mind only Petrified or Unconscious does.
         if (
           INCAPACITATING.includes(effect.condition) &&
-          target.concentratingOn !== null
+          target.concentratingOn !== null &&
+          (["petrified", "unconscious"].includes(effect.condition) ||
+            !hasPassive(deriveStats(target, context), "unshakableFocus"))
         ) {
           events.push(
             dndEvent(`${NS}:concentrationEnded`, { actor: target.id }),
@@ -524,20 +541,47 @@ export function rollSave(
     rollBonus(target, "saves", context) +
     (ability === "dex" ? cover : 0);
   const saved = total >= dc;
-  return {
-    saved,
-    events: [
-      dndEvent(`${NS}:saveRolled`, {
-        actor: target.id,
-        ability,
-        natural: roll.natural,
-        total,
-        dc,
-        success: saved,
-      }),
-    ],
-  };
+  const rolled = dndEvent(`${NS}:saveRolled`, {
+    actor: target.id,
+    ability,
+    natural: roll.natural,
+    total,
+    dc,
+    success: saved,
+  });
+  // Boon of Fortune's Favor: a failed save is rolled again, once until the bearer's next turn starts.
+  if (
+    !saved &&
+    hasPassive(stats, "saveReroll") &&
+    !target.usedThisTurn.includes(SAVE_REROLL)
+  ) {
+    const again = rollSave(
+      { ...target, usedThisTurn: [...target.usedThisTurn, SAVE_REROLL] },
+      ability,
+      dc,
+      context,
+      magical,
+      cover,
+      conditions,
+      disadvantage,
+      advantage,
+    );
+    return {
+      saved: again.saved,
+      events: [
+        rolled,
+        dndEvent(`${NS}:oncePerTurnUsed`, {
+          actor: target.id,
+          key: SAVE_REROLL,
+        }),
+        ...again.events,
+      ],
+    };
+  }
+  return { saved, events: [rolled] };
 }
+
+const SAVE_REROLL = "save-reroll";
 
 // The square an answer aims at ("@x,y" or "@id"), or null for one that aims at no square.
 export function aimSquare(
@@ -613,6 +657,7 @@ export function resolveAction(
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];
   const mastered = masteredTypes(stats, action.spellLevel !== null);
+  const rerolled = rerolledTypes(stats, action.spellLevel !== null);
   // Another spell aimed at a creature ends what lasts only until one is, as Modify Memory's charm.
   const spellEnds = targets.flatMap((target) =>
     [
@@ -696,7 +741,7 @@ export function resolveAction(
       total: rollAmount(
         amount,
         stats,
-        masteredDice(context.dice, type, mastered),
+        masteredDice(context.dice, type, mastered, rerolled),
         critical ? 2 : 1,
       ),
       type,
@@ -812,10 +857,22 @@ export function resolveAction(
         const evaded =
           resolution.onSuccessDamage === "half" &&
           evades(target, resolution.ability, context);
+        const interposed =
+          saved &&
+          !evaded &&
+          damage.length > 0 &&
+          resolution.ability === "dex" &&
+          resolution.onSuccessDamage === "half" &&
+          !spared.has(target.id)
+            ? interposedShield(target, deriveStats(target, context), context)
+            : null;
+        if (interposed) events.push(interposed);
         applyRolled(target, damage, (amount) => {
           if (evaded) return saved ? 0 : halved(amount);
           if (!saved || resolution.onSuccessDamage === "full") return amount;
-          return resolution.onSuccessDamage === "half" && !spared.has(target.id)
+          return resolution.onSuccessDamage === "half" &&
+            !spared.has(target.id) &&
+            !interposed
             ? halved(amount)
             : 0;
         });
