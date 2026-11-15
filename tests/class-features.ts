@@ -323,7 +323,12 @@ export function classify(
     const when = activation.trigger ? " (triggered)" : "";
     reasons.push(`${cost || "free"}${when}: ${counted(kinds)}`);
   }
-  const spells = grantedSpells(feature.id, stats.level).length;
+  const spells = [
+    ...grantedSpells(feature.id, stats.level),
+    ...Object.entries(feature.spells ?? {}).flatMap(([from, ids]) =>
+      Number(from) <= stats.level ? ids : [],
+    ),
+  ].length;
   if (spells > 0) reasons.push(`always-prepared spells: ${String(spells)}`);
   if (reasons.length === feature.resources.length) {
     return {
