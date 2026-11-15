@@ -37,6 +37,7 @@ import {
   type Roll,
   rollOnTable,
   rollResponder,
+  slotRefund,
   strikeAction,
 } from "./reactions.ts";
 import {
@@ -104,6 +105,7 @@ import {
   enemies,
   exemptFrom,
   findAction,
+  isStuck,
   fitsType,
   hasFlag,
   hasPassive,
@@ -236,8 +238,8 @@ function kinNear(
 }
 
 // AC that counts against melee attack rolls only, as Defensive Stance's.
-function meleeAc(target: Actor, action: KnownAction): number {
-  if (meleeReach(action) === null) return 0;
+function meleeAc(target: Actor, melee: boolean): number {
+  if (!melee) return 0;
   const sources = new Map<string, number>();
   for (const { modifier, sourceId } of target.activeEffects) {
     if (modifier.kind === "bonus" && modifier.to === "ac" && modifier.melee) {
@@ -703,9 +705,10 @@ export function runAttackRoll(
   const attacker = actorOf(state, payload.attacker);
   if (isDead(attacker) || isDown(attacker)) return {};
 
-  // A later attack in a multiattack moves on if its first target has already fallen.
+  // A later attack in a multiattack moves on if its first target has already fallen, and one with a weapon that
+  // got stuck, as to Sticky Shield, isn't made.
   const target = aimAt(payload.target, attacker, state);
-  if (!target) return {};
+  if (!target || isStuck(attacker, payload.actionId)) return {};
 
   const action = findAction(
     attacker,
@@ -907,7 +910,7 @@ export function runAttackRoll(
   const cover = coverAgainst(state, attacker, target);
   const ac =
     targetStats.ac +
-    meleeAc(target, action) +
+    meleeAc(target, meleeReach(action) !== null) +
     (steady.bypassCover && meleeReach(action) === null ? 0 : cover);
   const critFrom = criticalFrom(stats);
   const judge = (natural: number, bonus: number) => {
@@ -1148,6 +1151,11 @@ export function runAfterReaction(
         ...payCosts(action, target, context),
         ...(result.events ?? []),
         ...table.events,
+        ...slotRefund(
+          attacker,
+          attack,
+          payload.slotLevel ?? attack.spellLevel ?? 0,
+        ),
       ],
       frames: [...table.frames, ...missedFrames(hit, context)],
     };
@@ -1217,7 +1225,7 @@ export function runRecheckHit(
   const attacker = actorOf(state, payload.attacker);
   const ac =
     deriveStats(target, context).ac +
-    meleeAc(target, findAction(attacker, payload.actionId, context)) +
+    meleeAc(target, attackKind(payload, context).melee) +
     coverAgainst(state, attacker, target) +
     (payload.acBonus ?? 0);
   if (!payload.critical && payload.total < ac) {

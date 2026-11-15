@@ -1082,6 +1082,23 @@ export function rollOnTable(
   };
 }
 
+// A spell turned aside by Mythal Ward gives its slot back.
+export function slotRefund(
+  caster: Actor,
+  spell: KnownAction,
+  level: number,
+): SystemEvent[] {
+  return level > 0 && spell.activation.cost.includes("slot")
+    ? [
+        dndEvent(`${NS}:resourceRestored`, {
+          actor: caster.id,
+          resource: `slot:${String(level)}`,
+          amount: 1,
+        }),
+      ]
+    : [];
+}
+
 // A reaction taken before a failed save against a spell lands, as Mythal Ward: the player is asked; anyone else
 // takes it.
 export function beforeFailedSave(

@@ -313,8 +313,8 @@ describe("a reaction's table, as Mythal Ward's", () => {
     name: "Zap",
     spellLevel: 3,
     activation: ActivationSchema.parse({
-      cost: [],
-      targeting: { creatures: 1, range: 60, side: "enemy" },
+      cost: ["slot"],
+      targeting: { creatures: 2, range: 60, side: "enemy" },
       resolution: {
         kind: "save",
         ability: "dex",
@@ -340,10 +340,23 @@ describe("a reaction's table, as Mythal Ward's", () => {
   const hurt = (events: readonly SystemEvent[], actor: string) =>
     payloads(events, "damaged").filter((item) => item.actor === actor);
 
-  it("turns aside a failed save against a spell on a 20", async () => {
-    const { events } = await zapped([1, 20]);
+  it("turns aside a failed save against a spell on a 20, for everyone it caught, and gives its slot back", async () => {
+    const run = await testRun();
+    const player = hero(["mythal"]);
+    const friend = friendOf();
+    const foe = foeOf();
+    const { events = [] } = resolveAction(
+      zap,
+      foe,
+      [friend, player],
+      at(row([player, friend, foe]), scripted([1, 1, 20]).dice, run),
+    );
     expect(labels(events)).toEqual(["mythal"]);
     expect(hurt(events, PLAYER_ACTOR)).toEqual([]);
+    expect(hurt(events, "friend")).toEqual([]);
+    expect(payloads(events, "resourceRestored")).toEqual([
+      { actor: "foe", resource: "slot:3", amount: 1 },
+    ]);
   });
 
   it("gives +2 AC, or a burst with a d8 for each of the spell's levels, before the failed save lands", async () => {

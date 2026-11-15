@@ -488,12 +488,19 @@ describe("the rest of what reactions do", () => {
   it("sticks the weapon that missed, so it can't be used while the grapple holds, as Sticky Shield does", async () => {
     const run = await base();
     const state = fight(fighter(run, [0, 0]), monster("sticky", [1, 0]));
-    const { state: after } = settle(
+    // Extra Attack's second swing is already queued when the first misses, and isn't made.
+    const { state: after, events } = settle(
       run,
       state,
-      [attack(PLAYER_ACTOR, SWORD, "sticky")],
+      [
+        attack(PLAYER_ACTOR, SWORD, "sticky"),
+        attack(PLAYER_ACTOR, SWORD, "sticky"),
+      ],
       d20s(2),
     );
+    expect(
+      events.filter((event) => event.kind === `${NS}:rollReported`),
+    ).toHaveLength(1);
     const player = after.actors[PLAYER_ACTOR];
     if (!player) throw new Error("no player");
     expect(hasCondition(player, "grappled")).toBe(true);

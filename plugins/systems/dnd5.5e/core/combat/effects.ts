@@ -88,6 +88,7 @@ import {
   reactFrames,
   settleRoll,
   beforeFailedSave,
+  slotRefund,
 } from "./reactions.ts";
 import { summonEvents } from "./summon.ts";
 import { fueledDamage } from "./school.ts";
@@ -1642,6 +1643,8 @@ export function resolveAction(
       break;
     }
     case "save": {
+      // Mythal Ward's 20 turns the whole spell aside, so what it has done so far is dropped (beforeFailedSave).
+      const unspent = { events: events.length, frames: frames.length };
       beginConcentration(resolution.onFail);
       // A zone the spell leaves is left before the saves, so a cloud's first save comes from the cast.
       events.push(
@@ -1711,9 +1714,17 @@ export function resolveAction(
             slotLevel ?? action.spellLevel,
             context,
           );
+          if (warded.negate) {
+            events.length = unspent.events;
+            frames.length = unspent.frames;
+            events.push(
+              ...warded.events,
+              ...slotRefund(actor, action, slotLevel ?? action.spellLevel),
+            );
+            break;
+          }
           events.push(...warded.events);
           frames.push(...warded.frames);
-          if (warded.negate) continue;
         }
         const evaded =
           resolution.onSuccessDamage === "half" &&
