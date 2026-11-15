@@ -296,6 +296,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     halve: z.boolean().default(false),
     amount: AmountSchema.optional(),
   }),
+  // Adds to AC against the hit that triggered a reaction only, possibly turning it into a miss, as with Parry.
+  z.strictObject({
+    kind: z.literal("acAgainstHit"),
+    bonus: z.number().int().min(1),
+  }),
   // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts).
   z.strictObject({ kind: z.literal("counter") }),
   // Creatures that join the fight on the caster's side, using a companion stat block's `play` numbers at the
@@ -402,6 +407,7 @@ export const ActivationSchema = z.strictObject({
   trigger: z
     .strictObject({
       hitByAttack: z.literal(true).optional(),
+      melee: z.literal(true).optional(), // only a melee attack's hit triggers it, as with Parry
       targetedBySpell: z.string().optional(),
       // Taken when a foe it can see within the activation's range casts a spell, as with Counterspell.
       spellCast: z.literal(true).optional(),
@@ -439,6 +445,21 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     oncePerTurn: z.boolean().default(false),
   }),
   z.strictObject({ kind: z.literal("packTactics") }),
+  // Leaving a foe's reach never provokes an Opportunity Attack, as with Flyby or Agile.
+  z.strictObject({ kind: z.literal("noOpportunityAttacks") }),
+  // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
+  // save, as a displacer beast's Avoidance does, instead of Dexterity saves only.
+  z.strictObject({
+    kind: z.literal("evasion"),
+    anySave: z.boolean().default(false),
+  }),
+  // Advantage on attack rolls while Bloodied, against a target missing Hit Points, or against a Frightened one.
+  z.strictObject({
+    kind: z.literal("attackAdvantage"),
+    when: z.enum(["bloodied", "targetHurt", "targetFrightened"]),
+  }),
+  // Its shape can't change, so Polymorph does nothing to it, as with a golem's Immutable Form.
+  z.strictObject({ kind: z.literal("immutableForm") }),
   z.strictObject({ kind: z.literal("undeadFortitude") }),
   z.strictObject({ kind: z.literal("magicResistance") }),
   z.strictObject({

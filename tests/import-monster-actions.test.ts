@@ -885,3 +885,252 @@ describe("monster actions read in round 4", () => {
     });
   });
 });
+
+describe("legendary actions that cast a spell", () => {
+  const caster = `${header("Actions")}${entry(
+    "Club",
+    "Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Bludgeoning damage.",
+  )}${entry(
+    "Spellcasting",
+    "The caster casts one of the following spells, using Intelligence as the spellcasting ability (spell save DC 15):",
+  )}<p>At Will: Frost Needle</p>${header("Legendary Actions")}<p>Legendary Action Uses: 3. Right after another creature’s turn, the caster spends a use on one of these.</p>`;
+
+  it("reads the spell, at the level it names, with the block's numbers and no cost of its own", () => {
+    const monster = parse(
+      `${caster}${entry(
+        "Flare",
+        "The caster uses Spellcasting to cast Ember Burst (level 5 version). The caster can’t take this action again until the start of its next turn.",
+      )}${entry(
+        "Hex Bolt",
+        "The caster casts Frost Needle or Ember Burst, using the same spellcasting ability as Spellcasting.",
+      )}`,
+    );
+    const actions = monster.legendary?.actions ?? [];
+    expect(actions.map((item) => item.name)).toEqual([
+      "Flare",
+      "Hex Bolt (Frost Needle)",
+      "Hex Bolt (Ember Burst)",
+    ]);
+    expect(actions[0]).toMatchObject({
+      oncePerRound: true,
+      activation: {
+        cost: [],
+        resolution: {
+          kind: "save",
+          dc: { base: 15 },
+          damage: [{ amount: { dice: "8d6" } }],
+        },
+      },
+    });
+    expect(actions[1]?.activation?.resolution).toMatchObject({
+      attack: { type: "spell", flatBonus: 7 },
+    });
+  });
+
+  it("notes what a cast leaves out, and keeps a flight as its move", () => {
+    const [parsed] = parseMonstersFromHtml(
+      block(
+        "Test Caster",
+        `${caster}${entry(
+          "Cold Turn",
+          "The caster uses Spellcasting to cast Ember Burst, and if the target fails its save, it also has the Stunned condition.",
+        )}${entry(
+          "Veiled Flight",
+          "The caster uses Spellcasting to cast Frost Needle, and it can fly up to half its Fly Speed.",
+        )}`,
+      ),
+      "my-book",
+      knownIds,
+      contentOf,
+    );
+    expect(parsed?.notes).toContain(
+      "partial: Cold Turn: left out what follows it",
+    );
+    expect(parsed?.notes.join(" ")).not.toContain("Veiled Flight");
+    const legend = MonsterSchema.parse(parsed?.entry).legendary;
+    expect(legend?.actions[1]).toMatchObject({ moves: true });
+  });
+});
+
+describe("monster traits read as passives", () => {
+  const traits = (items: string) =>
+    parseMonstersFromHtml(
+      block(
+        "Test Beast",
+        `${header("Traits")}${items}${header("Actions")}${entry(
+          "Club",
+          "Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Bludgeoning damage.",
+        )}`,
+      ),
+      "my-book",
+    )[0];
+
+  it("reads movement, saves and Advantage traits", () => {
+    const parsed = traits(
+      [
+        entry(
+          "Flyby",
+          "The beast doesn’t provoke an Opportunity Attack when it flies out of an enemy’s reach.",
+        ),
+        entry(
+          "Evasion",
+          "If the beast is subjected to an effect that allows it to make a Dexterity saving throw to take only half damage, it takes no damage on a success and half on a failure.",
+        ),
+        entry(
+          "Blood Frenzy",
+          "The beast has Advantage on attack rolls against any creature that doesn’t have all its Hit Points.",
+        ),
+        entry(
+          "Bloodied Frenzy",
+          "While Bloodied, the beast has Advantage on attack rolls and saving throws.",
+        ),
+        entry(
+          "Terrorizer",
+          "The beast has Advantage on attack rolls against targets that have the Frightened condition.",
+        ),
+        entry("Immutable Form", "The beast can’t shape-shift."),
+        entry(
+          "Fey Ancestry",
+          "The beast has Advantage on saving throws it makes to avoid or end the Charmed condition, and magic can’t put it to sleep.",
+        ),
+        entry(
+          "Lucky",
+          "When the beast rolls a 1 on the d20 of a D20 Test, it rerolls the die and uses the new roll.",
+        ),
+        entry(
+          "Greater Magic Resistance",
+          "The beast automatically succeeds on saves against spells.",
+        ),
+        entry(
+          "Displacement",
+          "Attack rolls against the beast have Disadvantage.",
+        ),
+      ].join(""),
+    );
+    expect(MonsterSchema.parse(parsed?.entry).passives).toEqual([
+      { kind: "noOpportunityAttacks" },
+      { kind: "evasion", anySave: false },
+      { kind: "attackAdvantage", when: "targetHurt" },
+      { kind: "attackAdvantage", when: "bloodied" },
+      { kind: "attackAdvantage", when: "targetFrightened" },
+      { kind: "immutableForm" },
+      { kind: "saveAdvantage", abilities: [], conditions: ["charmed"] },
+      { kind: "rerollOnes" },
+      { kind: "magicResistance" },
+      {
+        kind: "modifier",
+        modifier: { kind: "disadvantage", on: "attacksAgainst" },
+      },
+    ]);
+    expect(parsed?.notes).toEqual([
+      "partial: Bloodied Frenzy: left out Advantage on saving throws",
+      "partial: Fey Ancestry: left out immunity to magical sleep",
+      "partial: Greater Magic Resistance: left out succeeding on every save against spells",
+      "partial: Displacement: left out its end while Incapacitated",
+    ]);
+  });
+
+  it("reads Avoidance as Evasion on every save", () => {
+    const parsed = traits(
+      entry(
+        "Avoidance",
+        "If the beast is subjected to an effect that allows it to make a saving throw to take only half damage, it takes none on a success.",
+      ),
+    );
+    expect(MonsterSchema.parse(parsed?.entry).passives).toEqual([
+      { kind: "evasion", anySave: true },
+    ]);
+  });
+
+  it("marks traits a grid fight never needs, and leaves the rest as not automated", () => {
+    const parsed = traits(
+      [
+        entry("Amphibious", "The beast can breathe air and water."),
+        entry(
+          "Abyssal Restoration",
+          "If the beast dies, it revives with all its Hit Points in 1d10 days far away.",
+        ),
+        entry("Shark Telepathy", "The beast can talk to sharks."),
+        entry("Last Stand", "If the beast dies, it explodes."),
+        entry("Spider Climb", "The beast can climb difficult surfaces."),
+      ].join(""),
+    );
+    expect(parsed?.notes).toEqual([
+      "no combat use: Amphibious",
+      "no combat use: Abyssal Restoration",
+      "no combat use: Shark Telepathy",
+      "not automated: Last Stand",
+      "not automated: Spider Climb",
+    ]);
+  });
+
+  it("reads traits an older book prints before any heading", () => {
+    const [parsed] = parseMonstersFromHtml(
+      block(
+        "Old Beast",
+        `${entry("Amphibious", "The beast can breathe air and water.")}${entry(
+          "Flyby",
+          "The beast doesn't provoke opportunity attacks when it flies out of an enemy's reach.",
+        )}${header("Actions")}${entry(
+          "Club",
+          "Melee Weapon Attack: +4 to hit, reach 5 ft., one target. Hit: 4 (1d6 + 1) bludgeoning damage.",
+        )}`,
+      ),
+      "my-book",
+    );
+    expect(parsed?.notes).toEqual(["no combat use: Amphibious"]);
+    expect(MonsterSchema.parse(parsed?.entry).passives).toEqual([
+      { kind: "noOpportunityAttacks" },
+    ]);
+  });
+});
+
+describe("monster reactions to being hit", () => {
+  const club = entry(
+    "Club",
+    "Melee Attack Roll: +4, reach 5 ft. Hit: 4 (1d6 + 1) Bludgeoning damage.",
+  );
+  it("reads Parry, Uncanny Dodge and an AC reaction that does more", () => {
+    const [parsed] = parseMonstersFromHtml(
+      block(
+        "Test Duelist",
+        `${header("Actions")}${club}${header("Reactions")}${[
+          entry(
+            "Parry",
+            "Trigger: The duelist is hit by a melee attack roll while holding a weapon. Response: The duelist adds 3 to its AC against that attack, possibly causing it to miss.",
+          ),
+          entry(
+            "Uncanny Dodge (2/Day)",
+            "Trigger: The duelist is hit by an attack roll. Response: The duelist halves the damage (round down) it takes from that attack.",
+          ),
+          entry(
+            "Riposte",
+            "Trigger: The duelist is hit by a melee attack roll. Response: The duelist adds 2 to its AC against that attack, possibly causing it to miss. On a miss, it strikes back.",
+          ),
+        ].join("")}`,
+      ),
+      "my-book",
+    );
+    const monster = MonsterSchema.parse(parsed?.entry);
+    expect(byName(monster, "Parry")?.activation).toMatchObject({
+      cost: ["reaction"],
+      trigger: { hitByAttack: true, melee: true },
+      targeting: { self: true },
+      resolution: { effects: [{ kind: "acAgainstHit", bonus: 3 }] },
+    });
+    expect(byName(monster, "Uncanny Dodge")).toMatchObject({
+      perDay: 2,
+      activation: {
+        cost: ["reaction", { resource: "day:uncanny-dodge" }],
+        trigger: { hitByAttack: true },
+        resolution: { effects: [{ kind: "reduceDamage", halve: true }] },
+      },
+    });
+    expect(
+      byName(monster, "Uncanny Dodge")?.activation.trigger?.melee,
+    ).toBeUndefined();
+    expect(parsed?.notes).toEqual([
+      "partial: Riposte: left out an attack on a miss",
+    ]);
+  });
+});
