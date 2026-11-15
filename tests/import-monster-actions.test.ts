@@ -1030,6 +1030,25 @@ describe("monster traits read as passives", () => {
     ]);
   });
 
+  it("reads other wordings of Bloodied Fury and Regeneration", () => {
+    const parsed = traits(
+      [
+        entry(
+          "Bloodied Fury",
+          "The beast has Advantage on melee attack rolls while it is Bloodied.",
+        ),
+        entry(
+          "Regeneration",
+          "The beast gains 5 Hit Points at the start of each of its turns. If it takes Fire damage, this trait doesn’t function at the start of its next turn.",
+        ),
+      ].join(""),
+    );
+    expect(MonsterSchema.parse(parsed?.entry).passives).toEqual([
+      { kind: "attackAdvantage", when: "bloodied" },
+      { kind: "regeneration", hp: 5, stoppedBy: ["fire"] },
+    ]);
+  });
+
   it("reads Avoidance as Evasion on every save", () => {
     const parsed = traits(
       entry(

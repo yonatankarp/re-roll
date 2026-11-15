@@ -1164,6 +1164,9 @@ function traitPassive(label: string, text: string): Passive | null {
   if (
     /^While Bloodied, [^.,]+ has Advantage on attack rolls(?: and saving throws)?\.?$/i.test(
       text,
+    ) ||
+    /has Advantage on (?:melee )?attack rolls while (?:it|he|she|they) (?:is|are) Bloodied\.?$/.test(
+      text,
     )
   ) {
     return { kind: "attackAdvantage", when: "bloodied" };
@@ -1198,7 +1201,7 @@ function traitPassive(label: string, text: string): Passive | null {
   }
   if (label === "Pack Tactics") return { kind: "packTactics" };
   if (label === "Undead Fortitude") return { kind: "undeadFortitude" };
-  const regains = /\bregains (\d+) Hit Points\b/.exec(text)?.[1];
+  const regains = /\b(?:re)?gains (\d+) Hit Points\b/.exec(text)?.[1];
   if (!/^Regeneration\b/.test(label) || !regains) return null;
   const words = new Set(text.toLowerCase().match(/[a-z]+/g) ?? []);
   return {
