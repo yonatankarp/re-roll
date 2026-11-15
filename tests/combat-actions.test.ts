@@ -273,6 +273,14 @@ const pinner = (exempt: readonly string[]) =>
 const SNEAK = dummy("test:monster/sneak", {
   passives: [{ kind: "bonusTactics", tactics: ["dash", "disengage", "hide"] }],
 });
+// The same, Small and Naturally Stealthy.
+const STEALTHY = dummy("test:monster/stealthy", {
+  size: "small",
+  passives: [
+    { kind: "bonusTactics", tactics: ["hide"] },
+    { kind: "hideBehindLarger" },
+  ],
+});
 
 // Teleports 40 feet, or jumps 30 for 10 feet of movement.
 const mover = (name: string, movement: number) => ({
@@ -388,6 +396,8 @@ function arena(base: RunContext): RunContext {
     [TOAD.id]: TOAD,
     [FROG.id]: FROG,
     [SNEAK.id]: SNEAK,
+    [STEALTHY.id]: STEALTHY,
+    "test:monster/imp": dummy("test:monster/imp", { size: "small" }),
     [BLINKER.id]: BLINKER,
     [LEAPER.id]: LEAPER,
     [HUMAN_PINNER.id]: HUMAN_PINNER,
@@ -805,7 +815,28 @@ describe("actions anyone can take", () => {
 
   it("Hide makes you Invisible until you attack, and a Search can find you", async () => {
     const run = await base();
-    const state = fight([fighter(run, { at: [0, 0] }), monster("foe", [6, 0])]);
+    const open = fight([fighter(run, { at: [0, 0] }), monster("foe", [6, 0])]);
+    // In plain sight there's nowhere to hide: it takes Three-Quarters Cover, or darkness the foe can't see into.
+    expect(optionIds(run, open)).not.toContain("tactic:hide");
+    const withTerrain = (
+      threeQuarters: readonly string[],
+      light: "bright" | "dark",
+    ): DndState => ({
+      ...open,
+      combat: open.combat && {
+        ...open.combat,
+        terrain: {
+          difficult: [],
+          half: [],
+          threeQuarters: [...threeQuarters],
+          dim: [],
+          dark: [],
+          light,
+        },
+      },
+    });
+    expect(optionIds(run, withTerrain([], "dark"))).toContain("tactic:hide");
+    const state = withTerrain(["3,0"], "bright");
     expect(optionIds(run, state)).toContain("tactic:hide");
     const failed = settle(run, state, [act(PLAYER_ACTOR, "tactic:hide")], LOW);
     expect(hasCondition(who(failed.state, PLAYER_ACTOR), "invisible")).toBe(
@@ -1666,8 +1697,7 @@ describe("monster grapples and multiattacks", () => {
         dndEvent(`${NS}:budgetSpent`, { actor: "sneak", kind: "action" }),
       );
     const open = spent(sneakTurn([12, 5]));
-    expect(optionIds(run, open)).toContain("tactic:bonus-hide");
-    expect(choose(open)).not.toBe("tactic:bonus-hide");
+    expect(optionIds(run, open)).not.toContain("tactic:bonus-hide");
     const covered: DndState = {
       ...open,
       combat: open.combat && {
@@ -1691,6 +1721,35 @@ describe("monster grapples and multiattacks", () => {
     ).state;
     expect(hasCondition(who(hidden, "sneak"), "invisible")).toBe(true);
     expect(who(hidden, "sneak").budget.bonusAction).toBe(false);
+  });
+
+  it("Naturally Stealthy hides behind a creature at least one size larger", async () => {
+    const run = await base();
+    const hiderTurn = (
+      statBlockId: string,
+      blocker?: Actor,
+    ): readonly string[] => {
+      const state = fight([
+        fighter(run, { at: [5, 5] }),
+        monster("hider", [12, 5], statBlockId),
+        ...(blocker ? [blocker] : []),
+      ]);
+      return optionIds(run, {
+        ...state,
+        combat: state.combat && { ...state.combat, index: 1 },
+      });
+    };
+    const medium = monster("ogre", [8, 5]);
+    const small = monster("imp", [8, 5], "test:monster/imp");
+    expect(hiderTurn(STEALTHY.id)).not.toContain("tactic:bonus-hide");
+    expect(hiderTurn(STEALTHY.id, medium)).toContain("tactic:bonus-hide");
+    // A creature its own size isn't enough, nor is a larger one off the line between them.
+    expect(hiderTurn(STEALTHY.id, small)).not.toContain("tactic:bonus-hide");
+    expect(
+      hiderTurn(STEALTHY.id, monster("ogre", [8, 9])),
+    ).not.toContain("tactic:bonus-hide");
+    // Without the trait, a creature in the way gives only Half Cover.
+    expect(hiderTurn(SNEAK.id, medium)).not.toContain("tactic:bonus-hide");
   });
 
   it("teleports or leaps into reach when walking won't get there", async () => {
