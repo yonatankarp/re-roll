@@ -3,7 +3,7 @@ import type { z } from "zod";
 import { carriedWeight, carryingCapacity, encumberedSpeed } from "./carry.ts";
 import { type Actor, type DndState, equipped, hasCondition } from "./state.ts";
 import { lightAt } from "./sight.ts";
-import { currentShape, formOf, usableIn } from "./forms.ts";
+import { currentShape, formKept, formOf, usableIn } from "./forms.ts";
 import {
   ALL_SKILLS,
   DAMAGE_TYPES,
@@ -1099,16 +1099,43 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
       : actor.source.kind === "summon"
         ? summonStats(actor, access)
         : characterStats(actor, access);
-  // A form's stat block replaces the creature's own, but it keeps its creature type and Hit Point maximum.
+  // A form's stat block replaces the creature's own, but it keeps its creature type and Hit Point maximum, and with
+  // Shapechange its Intelligence, Wisdom and Charisma and its spellcasting.
   const form = formOf(actor);
-  const stats = form
+  const keep = formKept(actor);
+  const shaped = form
+    ? monsterStats(
+        { ...actor, source: { kind: "monster", statBlockId: form } },
+        access,
+      )
+    : null;
+  const stats = shaped
     ? {
-        ...monsterStats(
-          { ...actor, source: { kind: "monster", statBlockId: form } },
-          access,
-        ),
+        ...shaped,
         creatureType: own.creatureType,
         maxHp: own.maxHp,
+        ...(keep.includes("mind")
+          ? {
+              abilities: {
+                ...shaped.abilities,
+                int: own.abilities.int,
+                wis: own.abilities.wis,
+                cha: own.abilities.cha,
+              },
+            }
+          : {}),
+        ...(keep.includes("spells")
+          ? {
+              actions: [
+                ...shaped.actions,
+                ...own.actions.filter(({ spellLevel }) => spellLevel !== null),
+              ],
+              spellAbility: own.spellAbility,
+              slots: own.slots,
+              pactMagic: own.pactMagic,
+              proficiency: Math.max(shaped.proficiency, own.proficiency),
+            }
+          : {}),
       }
     : own;
   const speed = effectBonus(actor, "speed");

@@ -284,8 +284,30 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     damage: z.array(DamageSchema).optional(),
   }),
   // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
-  // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe.
-  z.strictObject({ kind: z.literal("polymorph"), duration: DurationSchema }),
+  // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe. A caster
+  // choosing for itself or an ally picks the form (core/forms.ts), as Shapechange or Animal Shapes.
+  z.strictObject({
+    kind: z.literal("polymorph"),
+    duration: DurationSchema,
+    // Which stat blocks it can become, when not only Beasts: `types` (lowercase; any when left out), never `except`,
+    // and at most `maxCr` and `maxSize` instead of the target's own level or Challenge Rating.
+    forms: z
+      .strictObject({
+        types: z.array(z.string()).min(1).optional(),
+        except: z.array(z.string()).min(1).optional(),
+        maxCr: z.number().min(0).optional(),
+        maxSize: z
+          .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
+          .optional(),
+      })
+      .optional(),
+    // What the creature keeps of its own: its Intelligence, Wisdom and Charisma ("mind"), and its spellcasting.
+    keep: z
+      .array(z.enum(["mind", "spells"]))
+      .min(1)
+      .optional(),
+    tempHp: z.boolean().default(true), // the form's Hit Points as Temporary Hit Points
+  }),
   // Ends every spell of this level or lower that is on the target, as Dispel Magic does.
   z.strictObject({
     kind: z.literal("dispel"),

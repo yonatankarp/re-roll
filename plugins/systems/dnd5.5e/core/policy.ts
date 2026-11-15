@@ -513,6 +513,8 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (decision.id.startsWith(`${NS}:reaction:`)) return first.id;
   if (decision.id.startsWith(`${NS}:inspiration:`)) return first.id;
   if (decision.id.startsWith(`${NS}:deathSave:`)) return first.id;
+  if (decision.id.startsWith(`${NS}:form:`)) return first.id; // the strongest form
+
   if (/^dnd5\.5e:(legendary|lair):/.test(decision.id)) {
     return chooseBossAction(decision, context);
   }

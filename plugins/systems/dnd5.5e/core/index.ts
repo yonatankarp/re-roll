@@ -25,6 +25,7 @@ import { actionFrames } from "./combat/actions.ts";
 import { deriveItem } from "./variants.ts";
 import { attackFrames } from "./combat/attack.ts";
 import { movementFrames } from "./combat/movement.ts";
+import { formFrames } from "./combat/form-choice.ts";
 import { turnFrames } from "./combat/turn.ts";
 import {
   AfterMoveSchema,
@@ -390,6 +391,7 @@ export const dnd55e = defineSystem<DndState>({
     ...legendaryFrames,
     ...actionFrames,
     ...movementFrames,
+    ...formFrames,
     ...attackFrames,
     ...turnFrames,
     ...shopFrames,

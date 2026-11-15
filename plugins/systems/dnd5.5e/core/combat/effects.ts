@@ -60,13 +60,8 @@ import { summonEvents } from "./summon.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
-import {
-  currentShape,
-  formOf,
-  SHAPE,
-  shapeOf,
-  weakestBeast,
-} from "../forms.ts";
+import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
+import { formEvents, formFrame } from "./form-choice.ts";
 import {
   actorOf,
   allies,
@@ -444,29 +439,22 @@ export function leafEvents(
         }
         break;
       }
+      // A foe takes the weakest form allowed; the caster picks one for itself or an ally (resolveAction).
       case "polymorph": {
-        const beast =
-          formOf(target) === null ? weakestBeast(target, context) : null;
-        if (!beast) break;
-        events.push(
-          dndEvent(`${NS}:effectAdded`, {
-            actor: target.id,
-            effect: {
-              sourceId,
-              casterId: caster.id,
-              modifier: { kind: "form", monster: beast.id },
-              ends: effectEnds(effect.duration),
-            },
-          }),
-          dndEvent(`${NS}:tempHpGained`, {
-            actor: target.id,
-            amount: beast.hp,
-          }),
-        );
-        // A Beast's shape can't keep up a spell, since it can't cast one.
-        if (target.concentratingOn !== null) {
+        const form =
+          formOf(target) === null && target.side !== caster.side
+            ? formsFor(effect, target, context)[0]
+            : undefined;
+        if (form) {
           events.push(
-            dndEvent(`${NS}:concentrationEnded`, { actor: target.id }),
+            ...formEvents(
+              effect,
+              sourceId,
+              caster,
+              target,
+              form,
+              effectEnds(effect.duration),
+            ),
           );
         }
         break;
@@ -835,13 +823,27 @@ export function resolveAction(
             slotLevel,
           ),
         );
-        // Where it lands is chosen, as a move is.
+        // Where it lands is chosen, as a move is, and so is a form for a friend.
         for (const effect of resolution.effects) {
           if (effect.kind === "teleport" && target.id === actor.id) {
             frames.push(
               teleportFrame(actor, effect.feet, effect.movement, context),
             );
           }
+          const choice =
+            effect.kind === "polymorph" &&
+            target.side === actor.side &&
+            formOf(target) === null
+              ? formFrame(
+                  effect,
+                  spellSource(action),
+                  actor,
+                  target,
+                  effectEnds(effect.duration),
+                  context,
+                )
+              : null;
+          if (choice) frames.push(choice);
         }
       }
       break;

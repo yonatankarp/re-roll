@@ -32,6 +32,7 @@ export const FRAME_KINDS = [
   "checkCombatEnd",
   "companionsSpend",
   "concentrationSave",
+  "chooseForm",
   "counterspell",
   "endTurn",
   "escape",
@@ -104,7 +105,11 @@ const ActiveEffectSchema = z.strictObject({
       condition: ConditionSchema,
     }),
     // Another creature's shape, by its stat block (core/forms.ts).
-    z.strictObject({ kind: z.literal("form"), monster: ContentIdSchema }),
+    z.strictObject({
+      kind: z.literal("form"),
+      monster: ContentIdSchema,
+      keep: z.array(z.enum(["mind", "spells"])).optional(), // what it keeps of its own (stats.ts)
+    }),
     // One of its own stat block's other shapes, by name, as a werewolf's wolf form (core/forms.ts).
     z.strictObject({ kind: z.literal("shape"), shape: z.string() }),
     // An area a spell left on the map, kept on its caster (core/zones.ts).

@@ -1,5 +1,5 @@
 import type { ContentAccess } from "#sdk";
-import { type Monster, MonsterSchema } from "./schemas.ts";
+import { type LeafEffect, type Monster, MonsterSchema } from "./schemas.ts";
 import type { Actor, DndState } from "./state.ts";
 
 // Another creature's shape, as Polymorph gives: the form's stat block replaces the creature's own while it keeps its
@@ -10,6 +10,14 @@ export function formOf(actor: Actor): string | null {
     if (modifier.kind === "form") return modifier.monster;
   }
   return null;
+}
+
+// What a creature in another's form keeps of its own, as Shapechange's spellcasting.
+export function formKept(actor: Actor): readonly ("mind" | "spells")[] {
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind === "form") return modifier.keep ?? [];
+  }
+  return [];
 }
 
 // "CR 1/4 (XP 50; PB +2)" in the stat block's text.
@@ -42,16 +50,20 @@ export function levelOrChallenge(actor: Actor, access: ContentAccess): number {
   return monster ? (challengeOf(monster) ?? 0) : 0;
 }
 
-const beastsBySource = new WeakMap<
-  object,
-  readonly { id: string; cr: number; hp: number }[]
->();
+interface FormBlock {
+  readonly id: string;
+  readonly name: string;
+  readonly cr: number;
+  readonly hp: number;
+  readonly type: string;
+  readonly size: number;
+}
 
-// Every Beast in the loaded content with its Challenge Rating, weakest first, read once per content.
-function beasts(
-  access: ContentAccess,
-): readonly { id: string; cr: number; hp: number }[] {
-  const known = beastsBySource.get(access.content);
+const blocksBySource = new WeakMap<object, readonly FormBlock[]>();
+
+// Every stat block in the loaded content with a Challenge Rating, weakest first, read once per content.
+function formBlocks(access: ContentAccess): readonly FormBlock[] {
+  const known = blocksBySource.get(access.content);
   if (known) return known;
   const list = access
     .contentIds()
@@ -59,13 +71,47 @@ function beasts(
     .flatMap((id) => {
       const monster = MonsterSchema.safeParse(access.content(id)).data;
       const cr = monster ? challengeOf(monster) : null;
-      return monster?.creatureType === "beast" && cr !== null
-        ? [{ id, cr, hp: monster.hp }]
+      return monster && cr !== null
+        ? [
+            {
+              id,
+              name: monster.name,
+              cr,
+              hp: monster.hp,
+              type: monster.creatureType?.toLowerCase() ?? "",
+              size: SIZE_ORDER.indexOf(monster.size ?? "medium"),
+            },
+          ]
         : [];
     })
     .sort((a, b) => a.cr - b.cr || a.hp - b.hp || (a.id < b.id ? -1 : 1));
-  beastsBySource.set(access.content, list);
+  blocksBySource.set(access.content, list);
   return list;
+}
+
+const SIZE_ORDER = ["tiny", "small", "medium", "large", "huge", "gargantuan"];
+
+export type Polymorph = Extract<LeafEffect, { kind: "polymorph" }>;
+
+// The stat blocks a polymorph can turn the target into, weakest first: Beasts unless it says otherwise, up to the
+// target's level or Challenge Rating unless it sets its own limit.
+export function formsFor(
+  effect: Pick<Polymorph, "forms">,
+  target: Actor,
+  access: ContentAccess,
+): readonly FormBlock[] {
+  if (immutable(target, access)) return [];
+  const { forms } = effect;
+  const types = forms ? forms.types : ["beast"];
+  const limit = forms?.maxCr ?? levelOrChallenge(target, access);
+  const size = forms?.maxSize ? SIZE_ORDER.indexOf(forms.maxSize) : 5;
+  return formBlocks(access).filter(
+    (block) =>
+      block.cr <= limit &&
+      block.size <= size &&
+      (!types || types.includes(block.type)) &&
+      !forms?.except?.includes(block.type),
+  );
 }
 
 // The form a hostile caster gives: the weakest Beast the target's level or Challenge Rating allows, or null.
@@ -74,9 +120,7 @@ export function weakestBeast(
   target: Actor,
   access: ContentAccess,
 ): { readonly id: string; readonly hp: number } | null {
-  if (immutable(target, access)) return null;
-  const limit = levelOrChallenge(target, access);
-  return beasts(access).find((beast) => beast.cr <= limit) ?? null;
+  return formsFor({}, target, access)[0] ?? null;
 }
 
 // Settles a form after an event: a form that ended takes its Temporary Hit Points with it, and running out of
