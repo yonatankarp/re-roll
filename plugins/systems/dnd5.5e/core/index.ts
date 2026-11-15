@@ -77,6 +77,7 @@ import {
   sheetFrames,
 } from "./character-sheet.ts";
 import { gearEffects, gearFrames, sceneGearActions } from "./gear.ts";
+import { sceneSwapActions, swapEffects, swapFrames } from "./swap.ts";
 import { sceneEffects, scenePredicates } from "./scene.ts";
 import { gearPolicy, isGearDecision } from "./policy.ts";
 import { legendaryFrames, surpriseEffects } from "./legendary.ts";
@@ -376,6 +377,7 @@ export const dnd55e = defineSystem<DndState>({
     ...characterEffects,
     ...restEffects,
     ...gearEffects,
+    ...swapEffects,
     ...surpriseEffects,
     ...shopEffects,
     ...sceneEffects,
@@ -419,6 +421,7 @@ export const dnd55e = defineSystem<DndState>({
     ...sheetFrames,
     ...restFrames,
     ...gearFrames,
+    ...swapFrames,
     ...legendaryFrames,
     ...actionFrames,
     ...movementFrames,
@@ -570,7 +573,10 @@ export const dnd55e = defineSystem<DndState>({
   nextDecision: (state, access) =>
     withTactics(nextDndDecision(state, access), state, access),
   rests: availableRests,
-  sceneActions: sceneGearActions,
+  sceneActions: (state, access) => [
+    ...sceneGearActions(state, access),
+    ...sceneSwapActions(state, access),
+  ],
   decidePolicy: (decision, context) =>
     decision.id.endsWith(`:build:${decision.actor}:${SHEET_KEY}`)
       ? ACCEPT // the sheet is always a sound, recommended build

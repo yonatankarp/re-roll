@@ -7,6 +7,7 @@ import {
   NS,
   type TACTICS,
   dndEvent,
+  effectiveBuild,
   hasCondition,
 } from "./state.ts";
 import type { Stats } from "./stats.ts";
@@ -113,7 +114,7 @@ export function masteryOf(
   actionId: string,
   access: Pick<ContentAccess, "content">,
 ): Weapon["mastery"] | null {
-  const build = actor.source.kind === "character" ? actor.source.build : null;
+  const build = effectiveBuild(actor);
   const weapon = weaponOf(actionId, access);
   if (!build || !weapon) return null;
   const mastered = build.levels.flatMap((level) =>

@@ -2,6 +2,7 @@ import { ContentIdSchema, type Frame, type SystemEvent } from "#sdk";
 import { z } from "zod";
 import {
   AbilitySchema,
+  type CharacterBuild,
   CharacterBuildSchema,
   ConditionSchema,
   DamageSchema,
@@ -65,6 +66,8 @@ export const FRAME_KINDS = [
   "takeAction",
   "teleport",
   "throwWeapon",
+  "swapStep",
+  "swapAnswer",
   "useAction",
   "useItem",
 ] as const;
@@ -236,6 +239,10 @@ const ActorSchema = z.strictObject({
   // Where the creature stands in a fight, null outside one. Saves from before the grid have none.
   position: SquareSchema.nullable().default(null),
   moved: z.number().int().default(0), // feet moved this turn
+  // Build answers picked again after a Long Rest, by "<level>:<answer>" index (swap.ts), and those changed since the
+  // last one. Missing until a first swap.
+  swaps: z.record(z.string(), z.array(z.string())).optional(),
+  swapped: z.array(z.string()).optional(),
   // Damage taken this turn from creatures it has swallowed. Missing until there is some.
   insideDamage: z.number().int().optional(),
 });
@@ -357,6 +364,11 @@ const WeaponThrownSchema = DroppedSchema;
 const ItemPickedUpSchema = z.strictObject({
   actor: z.string(),
   index: z.number().int().min(0), // in combat.dropped
+});
+const AnswerSwappedSchema = z.strictObject({
+  actor: z.string(),
+  key: z.string(), // "<level>:<answer>" in its build
+  values: z.array(z.string()),
 });
 const ItemUsedSchema = z.strictObject({
   actor: z.string(),
@@ -518,6 +530,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
   [`${NS}:weaponThrown`]: WeaponThrownSchema,
+  [`${NS}:answerSwapped`]: AnswerSwappedSchema,
   [`${NS}:itemPickedUp`]: ItemPickedUpSchema,
   [`${NS}:legendaryActionTaken`]: LegendaryActionTakenSchema,
   [`${NS}:summoned`]: SummonedSchema,
@@ -554,6 +567,25 @@ export function freshActor(
     concentratingOn: null,
     position: null,
     moved: 0,
+  };
+}
+
+// A character's build with the answers picked again after a Long Rest in place of the first ones (swap.ts).
+export function effectiveBuild(actor: Actor): CharacterBuild | null {
+  const build = actor.source.kind === "character" ? actor.source.build : null;
+  const { swaps } = actor;
+  if (!build || !swaps) return build;
+  return {
+    ...build,
+    levels: build.levels.map((entry, level) => ({
+      ...entry,
+      answers: entry.answers.map((answer, index) => {
+        const values = swaps[`${String(level)}:${String(index)}`];
+        return values && "values" in answer
+          ? ({ ...answer, values } as typeof answer)
+          : answer;
+      }),
+    })),
   };
 }
 
@@ -888,6 +920,8 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
               tempHp: 0,
               deathSaves: { successes: 0, failures: 0 },
               exhaustion: Math.max(0, actor.exhaustion - 1),
+              // Each Long Rest allows its swaps again.
+              ...(actor.swapped ? { swapped: [] } : {}),
             },
       );
     }
@@ -1199,6 +1233,14 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
             }
           : {}),
       };
+    }
+    case `${NS}:answerSwapped`: {
+      const data = payload(AnswerSwappedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        swaps: { ...actor.swaps, [data.key]: data.values },
+        swapped: [...(actor.swapped ?? []), data.key],
+      }));
     }
     case `${NS}:weaponThrown`: {
       const data = payload(WeaponThrownSchema, event);

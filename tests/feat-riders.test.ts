@@ -15,7 +15,13 @@ import {
   rescuedSave,
 } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
 import { hasFlag } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
-import { type Actor, NS } from "../plugins/systems/dnd5.5e/core/state.ts";
+import {
+  type Actor,
+  applyDndEvent,
+  NS,
+} from "../plugins/systems/dnd5.5e/core/state.ts";
+import { sceneSwapActions } from "../plugins/systems/dnd5.5e/core/swap.ts";
+import { masteryOf } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import {
   deriveStats,
   type KnownAction,
@@ -282,5 +288,52 @@ describe("feat and trait riders", () => {
       contextOf(run, [afraid], scripted([15]).dice),
     );
     expect(kinds(events)).toContain(`${NS}:effectEnded`);
+  });
+
+  it("changes a feat's pick after a Long Rest, beside the scene's choices, as Weapon Master's weapons", async () => {
+    const run = await testRun();
+    const master = hero([], {
+      answers: [
+        { kind: "feats", values: ["test:feat/master"] },
+        {
+          kind: "weaponMastery",
+          values: ["srd52:item/longsword"],
+          feat: "test:feat/master",
+        },
+      ],
+    });
+    const { state } = contextOf(run, [master], scripted([]).dice);
+    const resting = { ...state, combat: null };
+    // Not before a Long Rest, then once after one.
+    expect(sceneSwapActions(resting, run)).toEqual([]);
+    const rested = { ...resting, sinceLongRest: 8 };
+    const [action] = sceneSwapActions(rested, run);
+    expect(action?.args).toEqual({ key: "0:2" });
+    const context = { ...run, state: rested, dice: scripted([]).dice };
+    const step = run.system.frames[`${NS}:swapStep`]?.run(
+      { actor: PLAYER_ACTOR, key: "0:2" },
+      context,
+    );
+    const decision = step?.frames?.[0]?.payload as {
+      decision: { options: { id: string }[] };
+    };
+    const ids = decision.decision.options.map(({ id }) => id);
+    expect(ids).toContain("srd52:item/dagger");
+    expect(ids).not.toContain("srd52:item/longsword");
+    const swapped = run.system.frames[`${NS}:swapAnswer`]?.run(
+      {
+        actor: PLAYER_ACTOR,
+        key: "0:2",
+        drop: "srd52:item/longsword",
+        answer: "srd52:item/dagger",
+      },
+      context,
+    );
+    const after = (swapped?.events ?? []).reduce(applyDndEvent, rested);
+    const actor = after.actors[PLAYER_ACTOR];
+    if (!actor) throw new Error("no actor");
+    expect(masteryOf(actor, "weapon:srd52:item/dagger", run)).toBe("nick");
+    expect(masteryOf(actor, "weapon:srd52:item/longsword", run)).toBeNull();
+    expect(sceneSwapActions(after, run)).toEqual([]);
   });
 });

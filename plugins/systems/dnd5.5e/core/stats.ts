@@ -1,7 +1,13 @@
 import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
 import { carriedWeight, carryingCapacity, encumberedSpeed } from "./carry.ts";
-import { type Actor, type DndState, equipped, hasCondition } from "./state.ts";
+import {
+  type Actor,
+  type DndState,
+  effectiveBuild,
+  equipped,
+  hasCondition,
+} from "./state.ts";
 import { lightAt } from "./sight.ts";
 import { formOf } from "./forms.ts";
 import {
@@ -531,10 +537,8 @@ function attacksFrom(featureId: string): number {
 const isPactMagic = (id: string): boolean => id.endsWith("pact-magic");
 
 function characterStats(actor: Actor, access: ContentAccess): Stats {
-  if (actor.source.kind !== "character" || !actor.source.build) {
-    throw new Error(`${actor.id} has no character build`);
-  }
-  const { build } = actor.source;
+  const build = effectiveBuild(actor);
+  if (!build) throw new Error(`${actor.id} has no character build`);
   const background = lookup(access, BackgroundSchema, build.backgroundId);
   const species = lookup(access, SpeciesSchema, build.speciesId);
 
