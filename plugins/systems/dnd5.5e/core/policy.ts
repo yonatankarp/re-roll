@@ -1,4 +1,9 @@
 import {
+  crossesDifficult,
+  speedsOf,
+  throughOf,
+} from "./movement-modes.ts";
+import {
   type Actor,
   hasCondition,
   INCAPACITATING,
@@ -91,11 +96,13 @@ export function stepToward(
         (item) => !isDown(item) && item.position,
       );
   // How far it is to walk from a square to a foe, round walls and through difficult terrain, ignoring
-  // creatures. On a map with no walls that's the straight distance.
+  // creatures. On a map with no walls, or for a creature that goes through them, that's the straight distance.
   const { grid, walls = [] } = state.combat ?? {};
+  const through = throughOf(stats);
+  const overGround = [...speedsOf(actor, stats).keys()].some(crossesDifficult);
   const walkFrom = new Map<string, ReadonlyMap<string, number>>();
   const walk = (from: Square | null, foe: Actor): number => {
-    if (!grid || walls.length === 0 || !from || !foe.position) {
+    if (!grid || walls.length === 0 || through.walls || !from || !foe.position) {
       return distanceFeet(from, foe.position);
     }
     let field = walkFrom.get(foe.id);
@@ -107,8 +114,9 @@ export function stepToward(
           grid,
           new Set(walls),
           new Set(),
-          difficultSquares(state),
+          overGround ? new Set() : difficultSquares(state),
           new Set(walls),
+          { squeeze: through.squeeze },
         ).map((item) => [squareKey(item.square), item.feet]),
       );
       walkFrom.set(foe.id, field);
@@ -133,7 +141,10 @@ export function stepToward(
   }
   const now = gap(actor.position);
   const gaps = new Map(
-    moveSquares(actor, state, stats).map((item) => [item, gap(item.square)]),
+    moveSquares(actor, state, stats, context).map((item) => [
+      item,
+      gap(item.square),
+    ]),
   );
   const squares = [...gaps.keys()];
   const closest = Math.min(...gaps.values());
@@ -223,7 +234,7 @@ function approach(actor: Actor, context: Context): Square | null {
   const better = options
     .filter((option) => option.worth > 1.2 * now)
     .sort((a, b) => b.worth - a.worth);
-  const squares = [...moveSquares(actor, state, stats)].sort(
+  const squares = [...moveSquares(actor, state, stats, context)].sort(
     (a, b) => a.feet - b.feet,
   );
   // The best attack it can reach this turn, by the shortest walk; else it heads for the best of all.

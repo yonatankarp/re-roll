@@ -114,7 +114,7 @@ function turnOptions(
       }
     }
   }
-  if (moveSquares(actor, state, stats).length > 0) {
+  if (moveSquares(actor, state, stats, access).length > 0) {
     options.push({
       id: MOVE,
       label: `Move (${String(speedLeft(actor, stats))} ft left)`,

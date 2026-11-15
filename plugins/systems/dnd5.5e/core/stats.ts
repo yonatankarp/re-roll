@@ -111,6 +111,8 @@ export interface Stats {
   // Wearing armor without training: Disadvantage on Strength and Dexterity rolls, and no spellcasting.
   readonly untrainedArmor: boolean;
   readonly exhaustion: number; // each level takes 2 from every d20 test and 5 feet from speed
+  // A stat block's Speeds besides walking. Others come from effects (core/movement-modes.ts).
+  readonly speeds: Readonly<Partial<Record<"fly" | "climb" | "burrow", number>>>;
   // From magic items worn, and attuned where they need it.
   readonly itemBonuses: Readonly<
     Record<"attack" | "spellAttack" | "savingThrows", number>
@@ -709,6 +711,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     untrainedArmor,
     exhaustion: actor.exhaustion,
     itemBonuses: magic,
+    speeds: {},
   };
   return {
     ...partial,
@@ -1009,6 +1012,12 @@ function statBlockStats(
     untrainedArmor: false,
     exhaustion: actor.exhaustion,
     itemBonuses: { attack: 0, spellAttack: 0, savingThrows: 0 },
+    speeds: Object.fromEntries(
+      (["fly", "climb", "burrow"] as const).flatMap((mode) => {
+        const feet = monster.speeds?.[mode];
+        return feet ? [[mode, Math.max(0, feet - 5 * actor.exhaustion)]] : [];
+      }),
+    ),
   };
 }
 

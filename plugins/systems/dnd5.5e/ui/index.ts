@@ -785,7 +785,7 @@ function combat(
   // Only onto squares the party has seen, so the shading doesn't trace what's still in the fog.
   const moves =
     player && acting === PLAYER_ACTOR
-      ? moveSquares(player, state, deriveStats(player, access)).flatMap(
+      ? moveSquares(player, state, deriveStats(player, access), access).flatMap(
           ({ square, feet, path }) =>
             revealed && !revealed.has(squareKey(square))
               ? []
