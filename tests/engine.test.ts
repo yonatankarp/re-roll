@@ -1415,3 +1415,174 @@ describe("party resources", () => {
     expect(loaded.state).toStrictEqual(paid.state);
   });
 });
+
+describe("asking the player in the middle of a step", () => {
+  const AsksStateSchema = z.object({
+    rolled: z.array(z.number().int()),
+    checked: z.string(),
+  });
+  type AsksState = z.infer<typeof AsksStateSchema>;
+  const keepOrAgain = [
+    { id: "keep", label: "Keep" },
+    { id: "again", label: "Roll again" },
+  ];
+  // A step that rolls, asks whether to roll again, rolls a second die and asks once more, as a fireball's saves
+  // could ask about Lucky for the player and then again for an ally.
+  const asksSystem = defineSystem<AsksState>({
+    id: "asks",
+    version: "1.0.0",
+    sdk: "^1",
+    contentKinds: {},
+    checkSchema: z.object({}),
+    encounters: encounterKind({ schema: z.object({ id: z.string() }) }),
+    outcomes: { keys: ["kept", "again"] },
+    stateSchema: AsksStateSchema,
+    eventSchemas: {
+      "asks:rolled": z.object({ dice: z.array(z.number().int()) }),
+      "asks:checked": z.object({ answer: z.string() }),
+    },
+    storyEffects: {},
+    storyPredicates: {},
+    frames: {
+      "asks:roll": frameHandler({
+        schema: z.object({}),
+        run: (_, { dice, ask }: SystemContext<AsksState>) => {
+          const question = (id: string, roll: number) =>
+            ask?.({
+              id,
+              actor: PLAYER_ACTOR,
+              prompt: `You rolled ${String(roll)}`,
+              options: keepOrAgain,
+            }) ?? "keep";
+          let first = dice.roll(20);
+          if (question("asks:first", first) === "again") first = dice.roll(20);
+          const second = dice.roll(20);
+          const last = question("asks:second", second);
+          return {
+            events: [
+              {
+                kind: "asks:rolled",
+                payload: { dice: [first, second, last === "again" ? 1 : 0] },
+              },
+            ],
+          };
+        },
+      }),
+    },
+    createRun: () => ({ rolled: [], checked: "" }),
+    resolveCheck: (_, { dice, ask }) => {
+      const roll = dice.roll(20);
+      const answer =
+        ask?.({
+          id: "asks:check",
+          actor: PLAYER_ACTOR,
+          prompt: `You rolled ${String(roll)}`,
+          options: keepOrAgain,
+        }) ?? "keep";
+      return {
+        outcome: answer === "keep" ? "kept" : "again",
+        events: [{ kind: "asks:checked", payload: { answer } }],
+      };
+    },
+    startEncounter: () => ({ frames: [{ kind: "asks:roll", payload: {} }] }),
+    applyEvent: (state, event) =>
+      event.kind === "asks:rolled"
+        ? { ...state, rolled: (event.payload as { dice: number[] }).dice }
+        : event.kind === "asks:checked"
+          ? { ...state, checked: (event.payload as { answer: string }).answer }
+          : state,
+    nextDecision: () => null,
+    decidePolicy: (decision) => decision.options[0]?.id ?? "",
+  });
+
+  const loadAsks = () =>
+    loadInline(
+      {
+        "encounters.yaml": "- { id: fight }\n",
+        "scenes.yaml": `
+- id: start
+  text: Start.
+  choices:
+    - label: Fight
+      effects:
+        - { kind: startEncounter, encounter: fight }
+        - { kind: goto, scene: end }
+    - label: Check
+      check: {}
+      results:
+        kept: [{ kind: goto, scene: end }]
+        again: [{ kind: goto, scene: end }]
+- { id: end, text: End. }
+`,
+      },
+      asksSystem,
+    );
+  const shown = (result: StepResult) =>
+    Number(result.pending?.prompt.replace("You rolled ", ""));
+  const rolled = (result: StepResult) =>
+    (result.state.system as AsksState).rolled;
+
+  it("asks twice in one step, then runs it again with the same dice and both answers", async () => {
+    const { run } = await loadAsks();
+    const started = startRun(run, "ask");
+    const firstAsk = choose(run, started, "0");
+    expect(firstAsk.pending?.id).toBe("asks:first");
+    // Nothing the step did before asking is kept, not even its dice.
+    expect(firstAsk.state.rng).toStrictEqual(started.state.rng);
+    const first = shown(firstAsk);
+    const kept = choose(run, firstAsk, "keep");
+    expect(kept.pending?.id).toBe("asks:second");
+    const second = shown(kept);
+    const done = choose(run, kept, "again");
+    expect(rolled(done)).toEqual([first, second, 1]);
+    expect(done.state.story.scene).toBe("end");
+    // Rolling again takes a new die, and the second roll comes after it.
+    const rerolled = choose(run, choose(run, firstAsk, "again"), "keep");
+    expect(rolled(rerolled)[0]).not.toBeUndefined();
+    expect(rolled(rerolled)[2]).toBe(0);
+  });
+
+  it("asks in the middle of a scene's check", async () => {
+    const { run } = await loadAsks();
+    const asked = choose(run, startRun(run, "ask"), "1");
+    expect(asked.pending?.id).toBe("asks:check");
+    const done = choose(run, asked, "again");
+    expect((done.state.system as AsksState).checked).toBe("again");
+    expect(done.state.story.scene).toBe("end");
+  });
+
+  it("resumes identically from a save made while a step waits on an answer", async () => {
+    const { run, registry } = await loadAsks();
+    const started = startRun(run, "ask");
+    const first = choose(run, started, "0");
+    const second = choose(run, first, "keep");
+    const log: LogEntry[] = [
+      { input: { kind: "start" }, events: started.events },
+      {
+        input: {
+          kind: "answer",
+          decisionId: started.pending?.id ?? "",
+          optionId: "0",
+        },
+        events: first.events,
+      },
+      {
+        input: { kind: "answer", decisionId: "asks:first", optionId: "keep" },
+        events: second.events,
+      },
+    ];
+    const text = JSON.stringify(createSave(registry, "inline", "ask", log));
+    const loaded = loadSave(text, registry, run);
+    if (!loaded.ok) throw new Error(loaded.error);
+    expect(loaded.state).toStrictEqual(second.state);
+    expect(pendingDecision(run, loaded.state)?.id).toBe("asks:second");
+    const answer = {
+      kind: "answer" as const,
+      decisionId: "asks:second",
+      optionId: "keep",
+    };
+    expect(step(run, loaded.state, answer)).toStrictEqual(
+      step(run, second.state, answer),
+    );
+  });
+});

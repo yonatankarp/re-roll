@@ -1,6 +1,12 @@
 import { z } from "zod";
 import type { Dice } from "./dice.ts";
-import type { Decision, Frame, JsonObject, SystemEvent } from "./events.ts";
+import {
+  type Decision,
+  type Frame,
+  FrameSchema,
+  type JsonObject,
+  type SystemEvent,
+} from "./events.ts";
 import {
   CARET_RANGE_PATTERN,
   VERSION_PATTERN,
@@ -112,7 +118,40 @@ export interface SystemContext<S> {
   readonly content: (id: string) => ContentEntry | undefined;
   readonly contentIds: () => readonly string[];
   readonly setting?: string | undefined; // the adventure's, as ContentAccess has it
+  // Asks the player in the middle of a step, as for Lucky on a save, and returns their answer. The step is set
+  // aside and run again from the start once they answer, with the same dice, so it must stay pure. Missing where
+  // nobody can be asked, as in a policy's or a test's context.
+  readonly ask?: (question: Question) => string;
 }
+
+export type Question = Omit<Decision, "resume">;
+
+// Thrown by `ask` to set the step aside until the player answers; only the engine catches it.
+export class Asked extends Error {
+  readonly question: Question;
+  readonly answers: readonly Answer[]; // those this step had already used
+
+  constructor(question: Question, answers: readonly Answer[]) {
+    super(`Waiting on ${question.id}`);
+    this.question = question;
+    this.answers = answers;
+  }
+}
+
+export interface Answer {
+  readonly id: string;
+  readonly answer: string;
+}
+
+// A step set aside by `ask`: the frame itself, and the answers it has had so far, in the order it asked.
+export const REPLAY_FRAME = "kernel:replay";
+
+export const ReplayPayloadSchema = z.object({
+  frame: FrameSchema,
+  answers: z.array(z.object({ id: z.string(), answer: z.string() })),
+  asked: z.string(), // the question the player is answering now
+  answer: z.string(),
+});
 
 // Handlers report what happened and never change state, so saves can replay them.
 export interface SystemResult {

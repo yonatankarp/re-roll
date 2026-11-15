@@ -171,7 +171,7 @@ function bestAc(
   }
   let bonus = fixed.reduce(
     (total, modifier) =>
-      modifier.kind === "bonus" && modifier.to === "ac"
+      modifier.kind === "bonus" && modifier.to === "ac" && !modifier.melee
         ? total + (modifier.amount.bonus?.base ?? 0)
         : total,
     context.flatBonus,
@@ -179,7 +179,7 @@ function bestAc(
   const seen = new Set<string>();
   for (const effect of actor.activeEffects) {
     const { modifier } = effect;
-    if (modifier.kind === "bonus" && modifier.to === "ac") {
+    if (modifier.kind === "bonus" && modifier.to === "ac" && !modifier.melee) {
       if (!seen.has(effect.sourceId)) bonus += modifier.amount.bonus?.base ?? 0;
       seen.add(effect.sourceId);
     }
@@ -1472,10 +1472,22 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
     : own;
   const speed = effectBonus(actor, "speed");
   const maxHp = effectBonus(actor, "maxHp");
+  const stuck = new Set(
+    actor.activeEffects.flatMap(({ modifier }) =>
+      modifier.kind === "stuck" ? [modifier.action] : [],
+    ),
+  );
+  const free =
+    stuck.size === 0
+      ? stats
+      : {
+          ...stats,
+          actions: stats.actions.filter((action) => !stuck.has(action.id)),
+        };
   return speed === 0 && maxHp === 0
-    ? stats
+    ? free
     : {
-        ...stats,
+        ...free,
         speed: Math.max(0, stats.speed + speed),
         maxHp: stats.maxHp + maxHp,
       };

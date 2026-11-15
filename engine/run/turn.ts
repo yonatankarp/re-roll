@@ -27,7 +27,15 @@ import {
 } from "../kernel/events.ts";
 import { z } from "zod";
 import type { Registry } from "./loader.ts";
-import { AWAIT_FRAME } from "../kernel/system.ts";
+import {
+  type Answer,
+  Asked,
+  AWAIT_FRAME,
+  awaitDecision,
+  type Question,
+  REPLAY_FRAME,
+  ReplayPayloadSchema,
+} from "../kernel/system.ts";
 
 // Far beyond any real chain of rules, so hitting it means a handler is looping.
 const MAX_WORK_PER_STEP = 10_000;
@@ -184,6 +192,39 @@ function answerEvents(
   ];
 }
 
+// The player's answers to a step's questions, given back in the order it asks them. A question past those, or
+// one that no longer matches, sets the step aside to ask it.
+function asker(answers: readonly Answer[]): (question: Question) => string {
+  let index = 0;
+  return (question) => {
+    const given = answers[index];
+    if (given?.id === question.id) {
+      index += 1;
+      return given.answer;
+    }
+    throw new Asked(question, answers.slice(0, index));
+  };
+}
+
+// Waits on the question, then runs the step it came from again, with every answer so far.
+function asking(asked: Asked, stacked: Frame | undefined): GameEvent {
+  if (!stacked) throw new Error("Only a step can ask the player");
+  const frame =
+    stacked.kind === REPLAY_FRAME
+      ? ReplayPayloadSchema.parse(stacked.payload).frame
+      : stacked;
+  return {
+    kind: "framePushed",
+    frame: awaitDecision({
+      ...asked.question,
+      resume: {
+        kind: REPLAY_FRAME,
+        payload: { frame, answers: [...asked.answers], asked: asked.question.id },
+      },
+    }),
+  };
+}
+
 export interface StepResult {
   readonly state: GameState;
   readonly events: readonly GameEvent[];
@@ -211,7 +252,16 @@ function settle(
     work: (dice: RecordingDice, context: GameState) => StoryResult,
   ): void => {
     const dice = createDice(state.rng.play);
-    const result = work(dice, state);
+    let result: StoryResult;
+    try {
+      result = work(dice, state);
+    } catch (error) {
+      if (!(error instanceof Asked) || !popFrame) throw error;
+      // The step waits on the player. Nothing it did is kept, not even its dice, so running it again with the
+      // answer rolls the same.
+      emit([{ kind: "framePopped" }, asking(error, state.stack.at(-1))]);
+      return;
+    }
     const produced = result.events ?? [];
     const frames = result.frames ?? [];
     const rolls = dice.rolls();
@@ -240,12 +290,17 @@ function settle(
     emit(recorded);
   };
 
-  const systemContext = (dice: RecordingDice, current: GameState) => ({
+  const systemContext = (
+    dice: RecordingDice,
+    current: GameState,
+    ask?: (question: Question) => string,
+  ) => ({
     state: current.system,
     dice,
     content: run.content,
     contentIds: run.contentIds,
     setting: run.setting,
+    ...(ask ? { ask } : {}),
   });
 
   for (let work = 0; work < MAX_WORK_PER_STEP; work += 1) {
@@ -253,14 +308,24 @@ function settle(
       return { state, events, pending: null };
     }
 
-    const top = state.stack.at(-1);
+    const stacked = state.stack.at(-1);
+    const replay =
+      stacked?.kind === REPLAY_FRAME
+        ? ReplayPayloadSchema.parse(stacked.payload)
+        : null;
+    const top = replay ? replay.frame : stacked;
+    const ask = asker(
+      replay
+        ? [...replay.answers, { id: replay.asked, answer: replay.answer }]
+        : [],
+    );
     if (top && top.kind !== AWAIT_FRAME && !isStoryFrame(top)) {
       const definition = run.system.frames[top.kind];
       if (!definition) throw new Error(`Unknown frame ${top.kind}`);
       handle(true, (dice, current) => {
         const result = definition.run(
           top.payload,
-          systemContext(dice, current),
+          systemContext(dice, current, ask),
         );
         assertOwnEvents(run, result.events);
         return result;
@@ -289,7 +354,9 @@ function settle(
     }
 
     if (top) {
-      handle(true, (dice, current) => runStoryFrame(run, current, dice, top));
+      handle(true, (dice, current) =>
+        runStoryFrame(run, current, dice, top, ask),
+      );
       continue;
     }
 
