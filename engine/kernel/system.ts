@@ -56,6 +56,11 @@ function parser<T>(
 export interface ContentKind {
   readonly idPrefix: string;
   readonly parse: (raw: unknown) => Parsed<ContentEntry>;
+  // An entry for an id no file lists, built from the ones that do, such as one version of an item with several.
+  readonly derive?: (
+    id: string,
+    access: ContentAccess,
+  ) => ContentEntry | undefined;
 }
 
 // The closure keeps each kind's exact type, so the engine never needs to cast entries.
@@ -63,10 +68,21 @@ export function contentKind<T extends ContentEntry>(definition: {
   readonly idPrefix: string;
   readonly schema: z.ZodType<T>;
   readonly references?: (entry: T) => readonly string[];
+  readonly derive?: (id: string, access: ContentAccess) => T | undefined;
 }): ContentKind {
+  const { derive, schema } = definition;
   return {
     idPrefix: definition.idPrefix,
-    parse: parser(definition.schema, definition.references),
+    parse: parser(schema, definition.references),
+    // A derived entry is checked like a listed one, so a bug building it can't reach play.
+    ...(derive
+      ? {
+          derive: (id: string, access: ContentAccess) => {
+            const built = derive(id, access);
+            return built && schema.safeParse(built).success ? built : undefined;
+          },
+        }
+      : {}),
   };
 }
 
