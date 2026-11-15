@@ -18,6 +18,7 @@ import {
   combatEnded,
   enemies,
   fitsType,
+  dragEvents,
   moveSquares,
   provokers,
   reaches,
@@ -276,6 +277,7 @@ function stepEvents(
           to: best.square,
           feet: best.feet,
         }),
+        ...dragEvents(best),
       ]
     : [];
 }

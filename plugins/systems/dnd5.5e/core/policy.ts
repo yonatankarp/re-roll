@@ -174,6 +174,7 @@ export function stepToward(
                   foe.position,
                   { ...actor, position: item.square },
                   [foe.id],
+                  context,
                 ),
               ),
             0,

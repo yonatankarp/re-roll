@@ -28,7 +28,7 @@ import {
   showRoute,
   squareAt,
 } from "./board-overlays.ts";
-import { tokenAt } from "./board-tokens.ts";
+import { tokenAt, tokensAt } from "./board-tokens.ts";
 
 // Clicks, drags and keys on the board: each answers an option the list below also offers.
 
@@ -134,8 +134,12 @@ export function placeCursor(ctx: BoardContext, x: number, y: number): void {
   }
   const name = squareName(ctx.cursor.x, ctx.cursor.y);
   if (found) {
-    const [, token] = found;
-    ctx.said.textContent = `${name}: ${token.name}, ${String(Math.max(0, token.hp))} of ${String(token.maxHp)} HP.`;
+    ctx.said.textContent = `${name}: ${tokensAt(ctx, ctx.cursor.x, ctx.cursor.y)
+      .map(
+        ([, token]) =>
+          `${token.name}, ${String(Math.max(0, token.hp))} of ${String(token.maxHp)} HP`,
+      )
+      .join("; ")}.`;
   } else {
     ctx.said.textContent = cell
       ? `${name}: ${cell.title}.`
@@ -319,10 +323,19 @@ export function wireInput(ctx: BoardContext): void {
       ctx.host.answer(BACK);
     } else if ((event.key === "Enter" || event.key === " ") && ctx.cursor) {
       event.preventDefault();
-      const found = tokenAt(ctx, ctx.cursor.x, ctx.cursor.y);
+      const here = tokensAt(ctx, ctx.cursor.x, ctx.cursor.y);
       const cell = cellNodeAt(ctx, ctx.cursor.x, ctx.cursor.y);
+      // On a shared square, each press opens the next creature's menu that has something to do.
+      const shown = here.findIndex(([id]) => id === ctx.menuFor);
+      const found =
+        [...here.slice(shown + 1), ...here.slice(0, shown + 1)].find(
+          ([id, token]) => {
+            openMenu(ctx, id, token.node);
+            return !ctx.menu.hidden;
+          },
+        ) ?? here[0];
       if (found) {
-        openMenu(ctx, found[0], found[1].node);
+        ctx.menuFor = found[0];
         const first = ctx.menu.querySelector<HTMLElement>("button");
         if (first && !ctx.menu.hidden) first.focus();
         else ctx.said.textContent = "Nothing to do there.";

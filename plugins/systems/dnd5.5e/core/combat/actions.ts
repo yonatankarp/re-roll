@@ -122,9 +122,9 @@ export function runTakeAction(
           actor: actor.id,
           prompt: `Where does ${actor.name} move?`,
           options: [
-            ...squares.map(({ square, feet }) => ({
+            ...squares.map(({ square, feet, drag }) => ({
               id: squareKey(square),
-              label: `${squareName(square)} (${String(feet)} ft)`,
+              label: `${squareName(square)} (${String(feet)} ft${drag ? `, dragging ${drag.map(({ actor: id }) => state.actors[id]?.name ?? id).join(" and ")}` : ""})`,
             })),
             { id: STAY, label: "Stay where you are" },
           ],
