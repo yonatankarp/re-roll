@@ -223,14 +223,18 @@ function passes(
 ): boolean {
   if (other.side === mover.side || isDown(other)) return true;
   if (hasCondition(other, ...INCAPACITATING)) return true;
-  if (through.creatures === "any" || throughOf(deriveStats(other, access)).open)
-    return true;
+  if (through.creatures === "any") return true;
   const size = sizeOf(other, access);
   const own = sizeOf(mover, access);
   return (
     size === 0 ||
     Math.abs(size - own) >= 2 ||
-    (through.creatures === "larger" && size > own)
+    (through.creatures === "larger" && size > own) ||
+    // Only a stat block opens its space, as a swarm's, so it's read without working out the creature's stats.
+    (other.source.kind === "monster" &&
+      lookup(access, MonsterSchema, other.source.statBlockId).passives.some(
+        (passive) => passive.kind === "moveThrough" && passive.open,
+      ))
   );
 }
 
@@ -242,6 +246,7 @@ export function groundFor(
   actor: Actor,
   state: DndState,
   access: ContentAccess,
+  stats: Stats = deriveStats(actor, access),
 ): {
   readonly blocked: ReadonlySet<string>;
   readonly occupied: ReadonlySet<string>;
@@ -251,7 +256,6 @@ export function groundFor(
   readonly squeeze: boolean;
   readonly overTerrain: boolean; // crosses difficult terrain at no extra cost, however it moves
 } {
-  const stats = deriveStats(actor, access);
   const through = throughOf(stats);
   const walls = state.combat?.walls ?? [];
   const blocked = new Set(through.walls ? [] : walls);
@@ -287,7 +291,7 @@ export function moveSquares(
 ): ReturnType<typeof reachableSquares> {
   const grid = state.combat?.grid;
   if (!grid || !actor.position) return [];
-  const ground = groundFor(actor, state, access);
+  const ground = groundFor(actor, state, access, stats);
   const jump = jumpOf(stats);
   const walking =
     ground.costly.size === 0
