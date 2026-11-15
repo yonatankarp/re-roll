@@ -30,6 +30,7 @@ import {
   type Square,
   squareKey,
 } from "../grid.ts";
+import { heightOf } from "./falling.ts";
 import { speedOf } from "../tactics.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
 import { encodeOption, THROW_PREFIX, weaponItemId } from "./ids.ts";
@@ -194,7 +195,11 @@ export function reaches(
   const inside = swallowerOf(actor);
   if (inside !== undefined)
     return inside === target.id || target.id === actor.id;
-  const distance = distanceFeet(actor.position, target.position);
+  // A creature lifted by Reverse Gravity is that much farther from those below it (combat/falling.ts).
+  const distance = Math.max(
+    distanceFeet(actor.position, target.position),
+    Math.abs(heightOf(actor) - heightOf(target)),
+  );
   if ("area" in targeting && targeting.range === "self") {
     return distance <= targeting.area.radius;
   }

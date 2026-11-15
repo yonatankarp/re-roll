@@ -87,12 +87,14 @@ import {
   beforeDamage,
   reactFrames,
   settleRoll,
+  beforeFailedSave,
 } from "./reactions.ts";
 import { summonEvents } from "./summon.ts";
 import { fueledDamage } from "./school.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
+import { liftEvents } from "./falling.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
@@ -948,6 +950,18 @@ export function leafEvents(
           events.push(dndEvent(`${NS}:stabilized`, { actor: target.id }));
         }
         break;
+      case "lift":
+        events.push(
+          ...liftEvents(
+            effect.feet,
+            effect.duration,
+            sourceId,
+            caster,
+            target,
+            context,
+          ),
+        );
+        break;
       case "note":
       case "disperse":
       case "slay":
@@ -966,6 +980,7 @@ export function leafEvents(
       case "redirect":
       case "negateHit":
       case "stickWeapon":
+      case "slowFall":
       case "split":
       case "swapInitiative":
       case "inspiration":
@@ -1688,6 +1703,18 @@ export function resolveAction(
               );
         events.push(...rescued);
         const saved = rolledSave || resisted !== null || rescued.length > 0;
+        // Mythal Ward: a reaction before the failed save lands, which may make the spell do nothing to the target.
+        if (!saved && action.spellLevel !== null) {
+          const warded = beforeFailedSave(
+            target,
+            actor,
+            slotLevel ?? action.spellLevel,
+            context,
+          );
+          events.push(...warded.events);
+          frames.push(...warded.frames);
+          if (warded.negate) continue;
+        }
         const evaded =
           resolution.onSuccessDamage === "half" &&
           evades(target, resolution.ability, context);

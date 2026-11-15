@@ -258,6 +258,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
       })
       .optional(),
   }),
+  // The bearer is this far up, lifted by the effect of the same source without ":aloft", and falls once that's gone,
+  // as with Reverse Gravity (combat/falling.ts).
+  z.strictObject({ kind: z.literal("aloft"), feet: z.number().int() }),
   // The bearer can't attack with this action's weapon while it lasts, as one caught by a kuo-toa's Sticky Shield.
   z.strictObject({ kind: z.literal("stuck"), action: z.string() }),
   // The bearer can't benefit from the Invisible condition, as with a sahuagin baron's Fiendish Blood.
@@ -514,6 +517,18 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("stickWeapon") }),
   // The triggering attack misses instead, as with Jinx on a failed save.
   z.strictObject({ kind: z.literal("negateHit") }),
+  // Lifts the target `feet` up, where it can't move and nothing below reaches it, until `duration` is over and it
+  // falls, as with Reverse Gravity (combat/falling.ts).
+  z.strictObject({
+    kind: z.literal("lift"),
+    feet: z.number().int().min(10),
+    duration: DurationSchema,
+  }),
+  // Up to `creatures` falling creatures land without taking damage, as with Feather Fall (combat/falling.ts).
+  z.strictObject({
+    kind: z.literal("slowFall"),
+    creatures: z.number().int().min(1).default(5),
+  }),
   // The bearer splits in two, each with half its Hit Points, as a black pudding does, while it has at least `minHp`
   // and has split fewer than `times` times (once for each size it can shrink).
   z.strictObject({
@@ -715,7 +730,8 @@ export const ActivationSchema = z.strictObject({
       // Taken right after a creature's attack damages the bearer, against that creature, as with Storm's Thunder.
       damaged: z.literal(true).optional(),
       damagedBy: z.array(DamageTypeSchema).min(1).optional(), // only damage of these types, as with Delicious Pain
-      // With `damaged`, taken before the damage applies, so it can lessen it, as with Vitality Ward.
+      // With `damaged`, taken before the damage applies, so it can lessen it, as with Vitality Ward. With `ownSave`,
+      // taken before a failed save's effect lands, as with Mythal Ward.
       before: z.literal(true).optional(),
       // With `damaged` and `damagedBy`, damage of any type that leaves the bearer Bloodied also counts, as with a
       // black pudding's Split.
@@ -761,6 +777,9 @@ export const ActivationSchema = z.strictObject({
       // with Warp Mind.
       concentrationSave: z.literal(true).optional(),
       studied: z.literal(true).optional(),
+      // Taken when the bearer or a creature it can see within `within` (60 feet unless set) falls, as with Feather
+      // Fall.
+      falls: z.literal(true).optional(),
       // Taken when an ally within `within` spends Heroic Inspiration, as with Tireless Reveler.
       inspirationSpent: z.literal(true).optional(),
       // Taken right after Initiative is rolled, as with Alert's Initiative Swap.
@@ -775,6 +794,28 @@ export const ActivationSchema = z.strictObject({
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
   area: AreaEffectSchema.optional(), // what the zone its resolution leaves does later
+  // Rolled on as the reaction is taken, as Mythal Ward's table (combat/reactions.ts rollOnTable). The row the die
+  // lands on is resolved at the bearer (`self`), the creature that set it off (`source`), and with `within` each
+  // creature that near the bearer. `perSpellLevel` multiplies its damage dice by the level of the spell that set it
+  // off; `negate` makes that spell do nothing to the bearer.
+  table: z
+    .strictObject({
+      die: z.number().int().min(2),
+      rows: z
+        .array(
+          z.strictObject({
+            min: z.number().int().min(1),
+            max: z.number().int().min(1),
+            targets: z.array(z.enum(["self", "source"])).default([]),
+            within: z.number().int().min(5).optional(),
+            perSpellLevel: z.literal(true).optional(),
+            negate: z.literal(true).optional(),
+            resolution: ResolutionSchema.optional(),
+          }),
+        )
+        .min(1),
+    })
+    .optional(),
 });
 export type Activation = z.infer<typeof ActivationSchema>;
 

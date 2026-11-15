@@ -35,6 +35,7 @@ import {
   reactFrames,
   respond,
   type Roll,
+  rollOnTable,
   rollResponder,
   strikeAction,
 } from "./reactions.ts";
@@ -254,6 +255,7 @@ function reactionFor(
   context: Context,
   critical: boolean,
   melee: boolean,
+  spell = false,
 ): KnownAction | null {
   if (
     !target.budget.reaction ||
@@ -270,6 +272,9 @@ function reactionFor(
         return false;
       if (activation.trigger.melee && !melee) return false;
       if (activation.trigger.ranged && melee) return false;
+      if (activation.trigger.bySpell && !spell) return false;
+      // Mythal Ward's table may turn the spell aside, so a spell attack's hit is always offered to it.
+      if (activation.table) return true;
       const { resolution } = activation;
       // Jinx or Warding Charm: the attacker's save may make even a Critical Hit miss.
       if (resolution.kind === "save") {
@@ -1047,6 +1052,7 @@ export function runAttackRoll(
     context,
     critical,
     meleeReach(action) !== null,
+    action.spellLevel !== null,
   );
   if (reaction) {
     return {
@@ -1121,6 +1127,31 @@ export function runAfterReaction(
     };
   }
   const result = resolveAction(action, target, [target], context);
+  // Mythal Ward's table: its row lands before the hit is checked again, and may turn the spell aside.
+  const attacker = actorOf(state, payload.attacker);
+  const attack = findAction(
+    attacker,
+    payload.actionId,
+    context,
+    payload.slotLevel,
+  );
+  const table = rollOnTable(
+    action,
+    target,
+    attacker,
+    payload.slotLevel ?? attack.spellLevel ?? 0,
+    context,
+  );
+  if (table.negate) {
+    return {
+      events: [
+        ...payCosts(action, target, context),
+        ...(result.events ?? []),
+        ...table.events,
+      ],
+      frames: [...table.frames, ...missedFrames(hit, context)],
+    };
+  }
   const strike =
     resolution.kind === "automatic"
       ? resolution.effects.find((effect) => effect.kind === "strike")
@@ -1144,9 +1175,14 @@ export function runAfterReaction(
   );
   // The rest of the attack is held here and rechecked once the reaction has taken effect.
   return {
-    events: [...payCosts(action, target, context), ...(result.events ?? [])],
+    events: [
+      ...payCosts(action, target, context),
+      ...(result.events ?? []),
+      ...table.events,
+    ],
     frames: [
       ...(result.frames ?? []),
+      ...table.frames,
       frame("recheckHit", {
         ...hit,
         ...(lessened.some((effect) => effect.halve) ? { halve: true } : {}),

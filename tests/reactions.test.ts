@@ -3,8 +3,14 @@ import { DECLINE } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
 import { describe, expect, it } from "vitest";
 import {
   dealEvents,
+  resolveAction,
   rollSave,
 } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { ActivationSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import {
+  deriveStats,
+  type KnownAction,
+} from "../plugins/systems/dnd5.5e/core/stats.ts";
 import {
   afterDamage,
   initiativeSwapFrames,
@@ -298,6 +304,91 @@ describe("the player's say on reactions in the middle of a step", () => {
     expect(payloads(warded.events, "damaged")).toEqual([
       expect.objectContaining({ amount: 4 }),
     ]);
+  });
+});
+
+describe("a reaction's table, as Mythal Ward's", () => {
+  const zap: KnownAction = {
+    id: "test:spell/zap",
+    name: "Zap",
+    spellLevel: 3,
+    activation: ActivationSchema.parse({
+      cost: [],
+      targeting: { creatures: 1, range: 60, side: "enemy" },
+      resolution: {
+        kind: "save",
+        ability: "dex",
+        dc: { base: 30 },
+        damage: [{ amount: { bonus: { base: 9 } }, type: "fire" }],
+        onFail: [],
+      },
+    }),
+  };
+  const zapped = async (dice: readonly number[]) => {
+    const run = await testRun();
+    const player = hero(["mythal"]);
+    const foe = foeOf();
+    const scripted_ = scripted(dice);
+    const result = resolveAction(
+      zap,
+      foe,
+      [player],
+      at(row([player, foe]), scripted_.dice, run),
+    );
+    return { events: result.events ?? [], counts: scripted_.counts };
+  };
+  const hurt = (events: readonly SystemEvent[], actor: string) =>
+    payloads(events, "damaged").filter((item) => item.actor === actor);
+
+  it("turns aside a failed save against a spell on a 20", async () => {
+    const { events } = await zapped([1, 20]);
+    expect(labels(events)).toEqual(["mythal"]);
+    expect(hurt(events, PLAYER_ACTOR)).toEqual([]);
+  });
+
+  it("gives +2 AC, or a burst with a d8 for each of the spell's levels, before the failed save lands", async () => {
+    const shielded = await zapped([1, 7]);
+    const raised = payloads(shielded.events, "effectAdded").map(
+      (item) => item.effect as { modifier: { kind: string; to?: string } },
+    );
+    expect(raised.map(({ modifier }) => modifier)).toContainEqual(
+      expect.objectContaining({ kind: "bonus", to: "ac" }),
+    );
+    expect(hurt(shielded.events, PLAYER_ACTOR)).toEqual([
+      expect.objectContaining({ amount: 9, type: "fire" }),
+    ]);
+    // Zap is level 3: three d8s at 2 each, failed by both the player and the foe beside them.
+    const burst = await zapped([1, 1, 2, 2, 2, 1, 1]);
+    expect(burst.counts[8]).toBe(3);
+    expect(hurt(burst.events, "foe")).toEqual([
+      expect.objectContaining({ amount: 6, type: "force" }),
+    ]);
+  });
+
+  it("turns aside a spell attack that hits on a 20", async () => {
+    const run = await testRun();
+    const caster = foeOf(["war-caster"]);
+    const bolt = deriveStats(caster, run).actions.find(
+      (item) => item.name === "Fire Bolt",
+    );
+    if (!bolt) throw new Error("no Fire Bolt");
+    const { events, decisions } = settle(
+      run,
+      row([hero(["mythal"]), caster]),
+      [
+        frame("attackRoll", {
+          attacker: "foe",
+          actionId: bolt.id,
+          target: PLAYER_ACTOR,
+        }),
+      ],
+      // A ranged spell from 5 feet has Disadvantage: two d20s, then the table's.
+      scripted([15, 15, 20]).dice,
+    );
+    expect(decisions.map((item) => item.id)).toEqual([
+      `${NS}:reaction:${PLAYER_ACTOR}`,
+    ]);
+    expect(hurt(events, PLAYER_ACTOR)).toEqual([]);
   });
 });
 

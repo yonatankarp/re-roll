@@ -463,6 +463,7 @@ function matchesMoment(
     case "saved":
       return (
         self &&
+        !trigger.before &&
         trigger.ownSave === (moment.success ? "succeeded" : "failed") &&
         kindOk &&
         source !== undefined &&
@@ -990,6 +991,136 @@ export function beforeDamage(
       ...reactionCosts(target, action, context),
       ...leafEvents(lifted, action.id, target, target, context),
     ],
+  };
+}
+
+// A reaction's table, as Mythal Ward's: the die picks a row, which is resolved at those it names. `negate` says the
+// spell that set it off does nothing to the bearer.
+export function rollOnTable(
+  action: KnownAction,
+  bearer: Actor,
+  source: Actor | undefined,
+  spellLevel: number,
+  context: Context,
+): {
+  readonly events: SystemEvent[];
+  readonly frames: Frame[];
+  readonly negate: boolean;
+} {
+  const { table } = action.activation;
+  if (!table) return { events: [], frames: [], negate: false };
+  const die = context.dice.roll(table.die);
+  const events: SystemEvent[] = [
+    dndEvent(`${NS}:rollReported`, {
+      actor: bearer.id,
+      against: bearer.id,
+      natural: die,
+      total: die,
+      target: 0,
+      success: true,
+      label: action.name,
+    }),
+  ];
+  const row = table.rows.find((item) => item.min <= die && die <= item.max);
+  if (!row?.resolution) {
+    return { events, frames: [], negate: row?.negate === true };
+  }
+  const within = row.within;
+  const targets = [
+    ...(row.targets.includes("self") ? [bearer] : []),
+    ...(row.targets.includes("source") && source ? [source] : []),
+    ...(within === undefined
+      ? []
+      : Object.values(context.state.actors).filter(
+          (item) =>
+            !isDown(item) && !isDead(item) && near(bearer, item, within),
+        )),
+  ].filter(
+    (item, index, list) =>
+      list.findIndex((other) => other.id === item.id) === index,
+  );
+  const { resolution } = row;
+  const scaled =
+    row.perSpellLevel && "damage" in resolution
+      ? {
+          ...resolution,
+          damage: resolution.damage.map((item) => ({
+            ...item,
+            amount: {
+              ...item.amount,
+              ...(item.amount.dice
+                ? {
+                    dice: item.amount.dice.replace(
+                      /^(\d+)d/,
+                      (_, count: string) =>
+                        `${String(Number(count) * Math.max(1, spellLevel))}d`,
+                    ),
+                  }
+                : {}),
+            },
+          })),
+        }
+      : resolution;
+  const rolled = resolveAction(
+    {
+      ...action,
+      activation: {
+        ...action.activation,
+        cost: [],
+        targeting: { self: true },
+        resolution: scaled,
+      },
+    },
+    bearer,
+    targets,
+    context,
+  );
+  return {
+    events: [...events, ...(rolled.events ?? [])],
+    frames: [...(rolled.frames ?? [])],
+    negate: row.negate === true,
+  };
+}
+
+// A reaction taken before a failed save against a spell lands, as Mythal Ward: the player is asked; anyone else
+// takes it.
+export function beforeFailedSave(
+  target: Actor,
+  caster: Actor,
+  spellLevel: number,
+  context: Context,
+): {
+  readonly events: SystemEvent[];
+  readonly frames: Frame[];
+  readonly negate: boolean;
+} {
+  const none = { events: [], frames: [], negate: false };
+  if (!context.state.combat || target.id === caster.id) return none;
+  const stats = deriveStats(target, context);
+  const action = stats.actions.find((item) => {
+    const trigger = item.activation.trigger;
+    return (
+      trigger?.ownSave === "failed" &&
+      trigger.before === true &&
+      ready(target, item, stats)
+    );
+  });
+  if (
+    !action ||
+    (target.id === PLAYER_ACTOR &&
+      !playerTakes(
+        "failedSave",
+        `You fail the save against ${caster.name}'s spell. Use ${action.name}?`,
+        action,
+        context,
+      ))
+  ) {
+    return none;
+  }
+  const rolled = rollOnTable(action, target, caster, spellLevel, context);
+  return {
+    ...rolled,
+    events: [...reactionCosts(target, action, context), ...rolled.events],
   };
 }
 

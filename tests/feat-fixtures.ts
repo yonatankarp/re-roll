@@ -310,6 +310,63 @@ const FIXTURES = [
   trait("war-caster", [{ kind: "reactiveSpell" }], {
     spells: { "1": ["srd52:spell/fire-bolt"] },
   }),
+  // A table rolled as the reaction is taken, as Mythal Ward's: a burst scaled by the spell's level, +2 AC, or the
+  // spell turned aside.
+  trait("mythal", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: {
+          hitByAttack: true,
+          bySpell: true,
+          ownSave: "failed",
+          before: true,
+        },
+        targeting: { self: true },
+        resolution: { kind: "automatic", effects: [] },
+        table: {
+          die: 20,
+          rows: [
+            {
+              min: 1,
+              max: 5,
+              within: 15,
+              perSpellLevel: true,
+              resolution: {
+                kind: "save",
+                ability: "dex",
+                dc: { base: 30 },
+                damage: [{ amount: { dice: "1d8" }, type: "force" }],
+                onSuccessDamage: "half",
+                onFail: [],
+              },
+            },
+            {
+              min: 6,
+              max: 10,
+              targets: ["self"],
+              resolution: {
+                kind: "automatic",
+                effects: [
+                  {
+                    kind: "modifier",
+                    modifier: {
+                      kind: "bonus",
+                      to: "ac",
+                      amount: { bonus: { base: 2 } },
+                    },
+                    duration: { minutes: 1 },
+                  },
+                ],
+              },
+            },
+            { min: 11, max: 19 },
+            { min: 20, max: 20, negate: true },
+          ],
+        },
+      },
+    ],
+  }),
   trait("jinx", [], {
     activations: [
       {

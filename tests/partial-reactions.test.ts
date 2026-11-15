@@ -11,6 +11,9 @@ import { AWAIT_FRAME } from "../engine/kernel/system.ts";
 import type { RunContext } from "../engine/run/turn.ts";
 import type { Context } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import { sizeOf } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { heightOf } from "../plugins/systems/dnd5.5e/core/combat/falling.ts";
+import { inReach } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import {
   reactFrames,
   rollResponder,
@@ -251,6 +254,14 @@ const BLOCKS = [
       { endsMove: true, within: 120 },
       FOE,
       auto([{ kind: "strike", action: "Hop", near: 10 }]),
+    ),
+  ]),
+  statBlock("catcher", [
+    reaction(
+      { falls: true, within: 60 },
+      SELF,
+      auto([{ kind: "slowFall", creatures: 5 }]),
+      "Feather Fall",
     ),
   ]),
   statBlock(
@@ -674,5 +685,88 @@ describe("the rest of what reactions do", () => {
       ],
     };
     expect(invisibleTo(outlined, viewer)).toBe(false);
+  });
+});
+
+describe("falling", () => {
+  // Reverse Gravity's lift on these creatures, as the spell's caster, the player, puts it there.
+  function lifted(run: RunContext, state: DndState, ids: readonly string[]) {
+    const caster = state.actors[PLAYER_ACTOR];
+    if (!caster) throw new Error("no caster");
+    return ids.reduce((after, id) => {
+      const target = after.actors[id];
+      if (!target) throw new Error(`no ${id}`);
+      return leafEvents(
+        [{ kind: "lift", feet: 60, duration: { minutes: 1 } }],
+        "rg",
+        caster,
+        target,
+        contextOf(run, after, d20s(10)),
+      ).reduce(applyDndEvent, after);
+    }, state);
+  }
+  const ended = (state: DndState, ids: readonly string[]) =>
+    ids.reduce(
+      (after, id) =>
+        applyDndEvent(after, {
+          kind: `${NS}:effectEnded`,
+          payload: { actor: id, sourceId: "rg", casterId: PLAYER_ACTOR },
+        }),
+      state,
+    );
+
+  it("lifts a creature out of reach of those below until the spell ends, then drops it for 1d6 per 10 feet and Prone", async () => {
+    const run = await base();
+    const start = fight(fighter(run, [0, 0]), monster("pod", [1, 0]));
+    const up = lifted(run, start, ["pod"]);
+    const pod = up.actors.pod;
+    const player = up.actors[PLAYER_ACTOR];
+    if (!pod || !player) throw new Error("missing");
+    expect(heightOf(pod)).toBe(60);
+    const sword = deriveStats(player, run).actions.find(
+      (item) => item.id === SWORD,
+    );
+    if (!sword) throw new Error("no sword");
+    expect(inReach(sword, player, up, run)).toEqual([]);
+    // Nothing falls while the spell holds it up.
+    const holding = settle(
+      run,
+      up,
+      [{ kind: `${NS}:checkCombatEnd`, payload: {} }],
+      d20s(10),
+    );
+    expect(damageOf(holding.events, "pod")).toEqual([]);
+    const { state, events } = settle(
+      run,
+      ended(up, ["pod"]),
+      [{ kind: `${NS}:checkCombatEnd`, payload: {} }],
+      d20s(10),
+    );
+    expect(damageOf(events, "pod")).toEqual([6]);
+    const landed = state.actors.pod;
+    expect(landed && hasCondition(landed, "prone")).toBe(true);
+    expect(landed && heightOf(landed)).toBe(0);
+  });
+
+  it("lets its own side down gently with Feather Fall, and only its side", async () => {
+    const run = await base();
+    const start = fight(
+      fighter(run, [0, 0]),
+      monster("pod", [1, 0]),
+      monster("catcher", [3, 0]),
+    );
+    const down = ended(lifted(run, start, ["pod", PLAYER_ACTOR]), [
+      "pod",
+      PLAYER_ACTOR,
+    ]);
+    const { state, events } = settle(
+      run,
+      down,
+      [{ kind: `${NS}:checkCombatEnd`, payload: {} }],
+      d20s(10),
+    );
+    expect(damageOf(events, "pod")).toEqual([]);
+    expect(damageOf(events, PLAYER_ACTOR)).toEqual([6]);
+    expect(state.actors.catcher?.budget.reaction).toBe(false);
   });
 });

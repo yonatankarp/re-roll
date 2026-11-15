@@ -61,6 +61,7 @@ import {
   turnStartEvents,
 } from "./durations.ts";
 import { burstResult, sunlightFrames, zoneFrames } from "./areas.ts";
+import { fallFrames } from "./falling.ts";
 import { healingStopped } from "../zones.ts";
 
 // The turn order: ending a fight, lingering effects, and the start and end of each turn.
@@ -112,9 +113,13 @@ export function runCheckCombatEnd(context: Context): SystemResult {
     ...releasedSwallows(context.state, context),
   ];
   const result = fightOver(context);
-  return released.length > 0
-    ? { ...result, events: [...released, ...(result.events ?? [])] }
-    : result;
+  // Those whose Reverse Gravity just ended fall (combat/falling.ts).
+  const falls = context.state.combat ? fallFrames(context.state) : [];
+  return {
+    ...result,
+    events: [...released, ...(result.events ?? [])],
+    frames: [...falls, ...(result.frames ?? [])],
+  };
 }
 
 // Sealed away past the stand-off window, or for good.
