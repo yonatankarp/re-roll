@@ -97,6 +97,7 @@ import { fueledDamage } from "./school.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
+import { movedFrames } from "./areas.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
@@ -976,6 +977,7 @@ export function leafEvents(
       case "inspiration":
       case "resistTrigger":
       case "forcedAttack":
+      case "moveZone":
         // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit, and
         // a teleport's square by its own decision and a zone once for the whole spell (resolveAction).
         break;
@@ -1096,6 +1098,27 @@ function zoneEvents(
     );
   }
   return events;
+}
+
+// Moves the bearer's area of a spell to `to`, with the ticks on whoever it moves onto, as Moonbeam's.
+function movedZone(
+  source: string,
+  actor: Actor,
+  to: Square,
+  context: Context,
+): { readonly events: SystemEvent[]; readonly frames: Frame[] } {
+  const zones = zonesOf(context.state).filter(
+    (zone) => zone.owner === actor.id && zone.sourceId === source,
+  );
+  if (zones.length === 0) return { events: [], frames: [] };
+  return {
+    events: [
+      dndEvent(`${NS}:zoneMoved`, { actor: actor.id, sourceId: source, to }),
+    ],
+    frames: zones.flatMap((zone) =>
+      movedFrames({ ...zone, at: to }, zone.at, context),
+    ),
+  };
 }
 
 // A creature the wall shuts in can save to get out first, spending its Reaction on a walk to the nearest open square
@@ -1632,6 +1655,13 @@ export function resolveAction(
   switch (resolution.kind) {
     case "automatic": {
       beginConcentration(resolution.effects);
+      for (const effect of resolution.effects) {
+        if (effect.kind === "moveZone" && aim) {
+          const moved = movedZone(effect.source, actor, aim, context);
+          events.push(...moved.events);
+          frames.push(...moved.frames);
+        }
+      }
       for (const effect of resolution.effects) {
         if (effect.kind === "summon") {
           events.push(

@@ -1442,13 +1442,53 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
     : own;
   const speed = effectBonus(actor, "speed");
   const maxHp = effectBonus(actor, "maxHp");
+  const moving = zoneMoves(actor);
+  const moved =
+    moving.length > 0
+      ? { ...stats, actions: [...stats.actions, ...moving] }
+      : stats;
   return speed === 0 && maxHp === 0
-    ? stats
+    ? moved
     : {
-        ...stats,
-        speed: Math.max(0, stats.speed + speed),
-        maxHp: stats.maxHp + maxHp,
+        ...moved,
+        speed: Math.max(0, moved.speed + speed),
+        maxHp: moved.maxHp + maxHp,
       };
+}
+
+export const MOVE_ZONE = "zone-move:";
+
+// An action to move an area the bearer keeps, as Moonbeam's Magic action. shortcut: its reach is counted from the
+// bearer, not from where the area stands.
+function zoneMoves(actor: Actor): KnownAction[] {
+  const seen = new Set<string>();
+  return actor.activeEffects.flatMap(
+    ({ sourceId, modifier }): KnownAction[] => {
+      if (modifier.kind !== "zone" || !modifier.area?.moves) return [];
+      if (modifier.follows || seen.has(sourceId)) return [];
+      seen.add(sourceId);
+      return [
+        {
+          id: `${MOVE_ZONE}${sourceId}`,
+          name: `Move ${modifier.name ?? "the area"}`,
+          activation: {
+            cost: ["action"],
+            targeting: {
+              area: { shape: "sphere", radius: modifier.radius },
+              range: modifier.area.moves,
+              side: "enemy",
+            },
+            resolution: {
+              kind: "automatic",
+              damage: [],
+              effects: [{ kind: "moveZone", source: sourceId }],
+            },
+          },
+          spellLevel: null,
+        },
+      ];
+    },
+  );
 }
 
 // A spell's flat Speed or Hit Point maximum increase, as with Longstrider or Aid, counted once per source.

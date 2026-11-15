@@ -62,6 +62,7 @@ import {
 } from "./durations.ts";
 import {
   burstResult,
+  driftResult,
   FRESH,
   fogBoundEvents,
   sunlightFrames,
@@ -487,6 +488,9 @@ export function runAdvanceTurn(
   const expired = starting ? expiredEvents(after, starting.id, "start") : [];
   for (const event of expired) after = applyDndEvent(after, event);
   const next = currentActor(after);
+  const drifted = next
+    ? driftResult(next, { ...context, state: after })
+    : { events: [], frames: [] };
   const events = [
     ...finished,
     ...expired,
@@ -494,11 +498,13 @@ export function runAdvanceTurn(
     ...(next ? regenerationEvents(next, context) : []),
     ...(next ? fogBoundEvents(next, { ...context, state: after }) : []),
     ...antimagicEvents(after),
+    ...drifted.events,
     ...reactiveEvents(after, context),
   ];
   const starts = { ...context, state: after };
   const ticks = next
     ? [
+        ...drifted.frames,
         ...lingeringFrames(next, "turnStart"),
         ...sunlightFrames(next, starts),
         ...zoneFrames(next, "start", starts),

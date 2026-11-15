@@ -596,6 +596,12 @@ export const EVENT_SCHEMAS = {
     actor: z.string(),
     sourceIds: z.array(z.string()),
   }),
+  // An area moved, as Cloudkill drifting or Moonbeam moved: its owner's zone from that spell now centres here.
+  [`${NS}:zoneMoved`]: z.strictObject({
+    actor: z.string(),
+    sourceId: z.string(),
+    to: SquareSchema,
+  }),
   // Out of the field again: what was held off works once more.
   [`${NS}:effectsRestored`]: ActorOnlySchema,
   // A creature left with this many Hit Points, as a black pudding's half after it splits.
@@ -1071,6 +1077,23 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
             sourceIds.includes(effect.sourceId),
           ),
         ],
+      }));
+    }
+    case `${NS}:zoneMoved`: {
+      const {
+        actor: id,
+        sourceId,
+        to,
+      } = payload(EVENT_SCHEMAS[`${NS}:zoneMoved`], event);
+      return updateActor(state, id, (actor) => ({
+        ...actor,
+        activeEffects: actor.activeEffects.map((effect) =>
+          effect.sourceId === sourceId &&
+          effect.modifier.kind === "zone" &&
+          !effect.modifier.follows
+            ? { ...effect, modifier: { ...effect.modifier, at: to } }
+            : effect,
+        ),
       }));
     }
     case `${NS}:effectsRestored`: {

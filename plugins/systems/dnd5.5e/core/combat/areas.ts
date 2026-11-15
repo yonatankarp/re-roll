@@ -216,6 +216,82 @@ export function entryFrames(
   return [...into.map((zone) => tick(zone, [walker.id])), ...swept];
 }
 
+// The ticks of an area that acts on whoever it reaches, moved from `from`: on the creatures it now covers and didn't,
+// as Moonbeam moved onto a foe.
+export function movedFrames(
+  zone: Zone,
+  from: Square,
+  context: ContentAccess & { readonly state: DndState },
+): Frame[] {
+  const { state } = context;
+  if (!zone.area?.enters || !zone.area.resolution) return [];
+  const before = { ...zone, at: from };
+  const reached = Object.values(state.actors).filter(
+    (item) =>
+      item.position !== null &&
+      !inZone(before, item.position) &&
+      inZone(zone, item.position) &&
+      !caught(zone, item, state) &&
+      affects(zone, item, state, context),
+  );
+  return reached.length > 0
+    ? [
+        frame("zoneTick", {
+          owner: zone.owner,
+          sourceId: zone.sourceId,
+          targets: reached.map((item) => item.id),
+        }),
+      ]
+    : [];
+}
+
+// The areas `owner` keeps that drift away from it as its turn starts, as Cloudkill's 10 feet: where each goes, and
+// the ticks on whoever it moves onto. shortcut: Incendiary Cloud's chosen direction is away from its caster too.
+export function driftResult(
+  owner: Actor,
+  context: ContentAccess & { readonly state: DndState },
+): { readonly events: SystemEvent[]; readonly frames: Frame[] } {
+  const { state } = context;
+  const grid = state.combat?.grid;
+  const events: SystemEvent[] = [];
+  const frames: Frame[] = [];
+  const seen = new Set<string>();
+  for (const zone of zonesOf(state)) {
+    const feet = zone.area?.drifts;
+    if (!feet || zone.owner !== owner.id || zone.follows || !owner.position) {
+      continue;
+    }
+    if (seen.has(zone.sourceId)) continue;
+    seen.add(zone.sourceId);
+    const steps = Math.floor(feet / 5);
+    const dx = Math.sign(zone.at.x - owner.position.x);
+    const dy = Math.sign(zone.at.y - owner.position.y);
+    const clamp = (value: number, size: number): number =>
+      Math.max(0, Math.min(size - 1, value));
+    const to = {
+      x: clamp(
+        zone.at.x + (dx === 0 && dy === 0 ? 1 : dx) * steps,
+        grid?.width ?? Infinity,
+      ),
+      y: clamp(zone.at.y + dy * steps, grid?.height ?? Infinity),
+    };
+    if (to.x === zone.at.x && to.y === zone.at.y) continue;
+    events.push(
+      dndEvent(`${NS}:zoneMoved`, {
+        actor: owner.id,
+        sourceId: zone.sourceId,
+        to,
+      }),
+    );
+    for (const item of zonesOf(state).filter(
+      (other) => other.owner === owner.id && other.sourceId === zone.sourceId,
+    )) {
+      frames.push(...movedFrames({ ...item, at: to }, item.at, context));
+    }
+  }
+  return { events, frames };
+}
+
 export const ZoneTickSchema = z.object({
   owner: z.string(),
   sourceId: z.string(),

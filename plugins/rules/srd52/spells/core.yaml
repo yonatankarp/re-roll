@@ -1484,6 +1484,7 @@
     area:
       when: turnEnd
       enters: true
+      moves: 60
       resolution:
         kind: save
         ability: con
@@ -2611,6 +2612,7 @@
     area:
       when: turnEnd
       enters: true
+      drifts: 10
       disperses: true
       resolution:
         kind: save
@@ -5648,6 +5650,7 @@
     area:
       when: turnEnd
       enters: true
+      drifts: 10
       disperses: true
       resolution:
         kind: save

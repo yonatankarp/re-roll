@@ -466,6 +466,51 @@ describe("lingering damage", () => {
   const restrained = (state: DndState, id: string): boolean =>
     hasCondition(actor(state, id), "restrained");
 
+  it("drifts Cloudkill away from its caster as the caster's turn starts, and moves Moonbeam with an action", async () => {
+    const run = arenaRun(await base(), {});
+    const start = onGrid(
+      [hero(run, { spells: ["cloudkill", "moonbeam"], level: 9 }), 0, 0],
+      [monster("a"), 12, 0],
+    );
+    const cloud = settle(
+      run,
+      start,
+      [act(PLAYER_ACTOR, `spell:${spell("cloudkill")}|@6,0`)],
+      LOW,
+    );
+    expect(damageOf(cloud.events, "a")).toEqual([]);
+    const drifted = settle(run, turnOf(cloud.state, 1), [endTurn], LOW);
+    expect(zonesOf(drifted.state)[0]?.at).toEqual({ x: 8, y: 0 });
+    expect(damageOf(drifted.events, "a")).toEqual([5]);
+    const beam = settle(
+      run,
+      start,
+      [act(PLAYER_ACTOR, `spell:${spell("moonbeam")}|@3,3`)],
+      LOW,
+    );
+    const mine = turnOf(
+      {
+        ...beam.state,
+        actors: {
+          ...beam.state.actors,
+          [PLAYER_ACTOR]: {
+            ...actor(beam.state, PLAYER_ACTOR),
+            budget: { action: true, bonusAction: true, reaction: true },
+          },
+        },
+      },
+      0,
+    );
+    const moved = settle(
+      run,
+      mine,
+      [act(PLAYER_ACTOR, `zone-move:spell:${spell("moonbeam")}|@11,0`)],
+      LOW,
+    );
+    expect(zonesOf(moved.state)[0]?.at).toEqual({ x: 11, y: 0 });
+    expect(damageOf(moved.events, "a")).toEqual([2]);
+  });
+
   it("holds one creature at a time in Conjure Elemental, and hurts or frees it as its turns start", async () => {
     const run = arenaRun(await base(), {});
     const start = onGrid(

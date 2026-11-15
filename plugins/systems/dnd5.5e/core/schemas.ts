@@ -526,6 +526,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
   // A dying creature becomes Stable, as with Spare the Dying.
   z.strictObject({ kind: z.literal("stabilize") }),
+  // Moves the bearer's area of the spell `source` to where this is aimed, as Moonbeam moved with a Magic action.
+  z.strictObject({ kind: z.literal("moveZone"), source: z.string() }),
   // The target takes its Reaction to make a melee attack against a creature in its reach, one of its own side
   // first, or takes this damage when none is, as a gallows speaker's Aura of Violence.
   z.strictObject({
@@ -624,6 +626,10 @@ export const AreaEffectSchema = z.strictObject({
   magicWard: z.literal(true).optional(),
   // spellShield blocks one level higher for each slot level above the spell's, as Globe of Invulnerability
   shieldGrows: z.literal(true).optional(),
+  // it moves this far away from its owner as each of the owner's turns starts, as Cloudkill
+  drifts: z.number().int().min(5).optional(),
+  // its owner can take an action on later turns to move it up to this far, as Moonbeam's Magic action
+  moves: z.number().int().min(5).optional(),
   // while a creature has a condition from it, it acts only on that one, with this as that creature's turns start,
   // as Conjure Elemental's spirit holding the one it Restrained
   holding: ResolutionSchema.optional(),
