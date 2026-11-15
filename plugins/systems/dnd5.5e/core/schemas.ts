@@ -1398,13 +1398,14 @@ export const FeatSchema = ContentEntrySchema.extend({
   // Its prerequisite, met by any of these: the species, a trait or lineage it has, or a feat taken.
   requires: z.array(ContentIdSchema).min(1).optional(),
   // The rest of its Prerequisite line: a score of 13 or more in one of these abilities, the Spellcasting or Pact
-  // Magic feature, or armor training.
+  // Magic feature, armor training, or a campaign in a setting, matched with the adventure's.
   prerequisite: z
     .strictObject({
       abilities: z.array(AbilitySchema).min(1).optional(),
       min: z.number().int().min(1).max(30).optional(),
       spellcasting: z.literal(true).optional(),
       armor: z.enum(["light", "medium", "heavy"]).optional(),
+      campaign: z.enum(["eberron", "ravenloft"]).optional(),
     })
     .optional(),
   // The spellcasting ability of the spells it gives: this one, the one it raised ("increased"), the one chosen for

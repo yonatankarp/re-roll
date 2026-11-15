@@ -508,8 +508,8 @@ export const dnd55e = defineSystem<DndState>({
       ],
     },
   ],
-  createRun: ({ settings, actors, dice, content, contentIds }) => {
-    const access = { content, contentIds };
+  createRun: ({ settings, actors, dice, content, contentIds, setting }) => {
+    const access = { content, contentIds, setting };
     const state: Record<string, Actor> = {};
     const takenClasses = new Set<string>();
     for (const { id, name, role } of actors) {
