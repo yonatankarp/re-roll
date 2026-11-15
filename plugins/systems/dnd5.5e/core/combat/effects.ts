@@ -766,13 +766,14 @@ export function leafEvents(
         );
         break;
       case "dash":
+      case "disengage":
         events.push(
           dndEvent(`${NS}:effectAdded`, {
             actor: target.id,
             effect: {
               sourceId,
               casterId: caster.id,
-              modifier: { kind: "tactic", tactic: "dash" },
+              modifier: { kind: "tactic", tactic: effect.kind },
               ends: "casterNextTurn",
             },
           }),
@@ -862,6 +863,28 @@ export function leafEvents(
             },
           }),
         );
+        // Prone Deficiency: an odd roll leaves the creature knocked down Incapacitated until it saves.
+        const deficient = deriveStats(target, context).passives.find(
+          (passive) => passive.kind === "proneDeficiency",
+        );
+        if (
+          effect.condition === "prone" &&
+          deficient?.kind === "proneDeficiency" &&
+          context.dice.roll(2) === 1
+        ) {
+          events.push(
+            dndEvent(`${NS}:effectAdded`, {
+              actor: target.id,
+              effect: {
+                sourceId: `${target.id}:prone-deficiency`,
+                casterId: target.id,
+                modifier: { kind: "condition", condition: "incapacitated" },
+                ends: "spellDuration",
+                repeatSave: { ability: deficient.ability, dc: deficient.dc },
+              },
+            }),
+          );
+        }
         // Being Incapacitated ends Concentration; with Boon of the Iron Mind only Petrified or Unconscious does.
         if (
           INCAPACITATING.includes(effect.condition) &&
@@ -912,11 +935,44 @@ export function leafEvents(
         }
         break;
       }
-      case "dispel":
+      case "dispel": {
         events.push(
           ...dispelEvents(target, effect.maxLevel, context.state, context),
         );
+        // Shutdown: the dispelled construct may fall Unconscious.
+        const shutdown = deriveStats(target, context).passives.find(
+          (passive) => passive.kind === "dispelShutdown",
+        );
+        if (shutdown?.kind === "dispelShutdown") {
+          const saved = rollSave(
+            target,
+            "con",
+            spellSaveDc(stats),
+            context,
+            true,
+          );
+          events.push(...saved.events);
+          if (!saved.saved) {
+            events.push(
+              dndEvent(`${NS}:effectAdded`, {
+                actor: target.id,
+                effect: {
+                  sourceId,
+                  casterId: caster.id,
+                  modifier: {
+                    kind: "condition",
+                    condition: shutdown.condition,
+                  },
+                  ends: "spellDuration",
+                  ...lastsFor({ minutes: 1 }, caster, target, context.state),
+                  endsOnDamage: true,
+                },
+              }),
+            );
+          }
+        }
         break;
+      }
       case "shapeShift": {
         const shapes =
           target.source.kind === "monster"
@@ -1263,7 +1319,9 @@ export function rollSave(
       stats.passives.some(
         (passive) =>
           passive.kind === "saveDisadvantage" &&
-          passive.conditions.some((condition) => conditions.includes(condition)),
+          passive.conditions.some((condition) =>
+            conditions.includes(condition),
+          ),
       ),
   };
   const roll = rollD20(context.dice, {
@@ -2007,8 +2065,7 @@ function animatedEvents(
   const open = [
     ...teleportSquares(actor, effect.range, 0, context.state, context),
   ].sort(
-    (a, b) =>
-      distanceFeet(actor.position, a) - distanceFeet(actor.position, b),
+    (a, b) => distanceFeet(actor.position, a) - distanceFeet(actor.position, b),
   );
   const made = Object.keys(context.state.actors).filter((key) =>
     key.startsWith(`${actor.id}:animated-`),
@@ -2107,7 +2164,10 @@ function sculpted(
   const sculptor = stats.passives.find(
     (passive) => passive.kind === "sculptor",
   );
-  if (sculptor?.kind !== "sculptor" || !("area" in action.activation.targeting)) {
+  if (
+    sculptor?.kind !== "sculptor" ||
+    !("area" in action.activation.targeting)
+  ) {
     return targets;
   }
   let spared = 0;

@@ -1288,7 +1288,9 @@ function statBlockStats(
     ...monster.passives,
     ...(shape?.passives ?? []),
     ...fromFeatures.passives,
-  ].filter((passive) => bloodied || !("bloodied" in passive && passive.bloodied));
+  ].filter(
+    (passive) => bloodied || !("bloodied" in passive && passive.bloodied),
+  );
   // A Multiattack printed for other shapes only isn't there, and a routine's attack this shape can't make is the
   // chosen one again.
   const routines =

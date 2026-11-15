@@ -492,9 +492,7 @@ export function runAdvanceTurn(
     ...reactiveEvents(after, context),
   ];
   const starts = { ...context, state: after };
-  const mad = next
-    ? madnessStart(next, starts)
-    : { events: [], frames: [] };
+  const mad = next ? madnessStart(next, starts) : { events: [], frames: [] };
   events.push(...mad.events);
   const ticks = next
     ? [

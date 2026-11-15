@@ -294,6 +294,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // against a random creature in reach, and it takes no Reactions, as an umber hulk's Confusing Gaze (combat/turn.ts).
   // shortcut: the 5-6 random walk is spent standing still, as wandering off is close to doing nothing on the grid.
   z.strictObject({ kind: z.literal("confused") }),
+  // No rule of its own: a curse, a mark or a hold that another of its giver's actions looks for (a targeting's
+  // `afflicted`), as a nightmare's Haunter's Spear curse.
+  z.strictObject({ kind: z.literal("mark") }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
 
@@ -380,8 +383,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     // A teleport paid for with movement that still provokes nothing, as Portal Step's.
     provokes: z.literal(false).optional(),
   }),
-  // The Dash action as part of another, as with Adrenaline Rush.
+  // The Dash action as part of another, as with Adrenaline Rush, or the Disengage action, as a clay golem's Hasten.
   z.strictObject({ kind: z.literal("dash") }),
+  z.strictObject({ kind: z.literal("disengage") }),
   z.strictObject({ kind: z.literal("extraAction") }), // Action Surge
   // Ends one of these conditions on the target, the one that hampers it most, as Lesser Restoration does.
   z.strictObject({
@@ -1109,6 +1113,21 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("reborn"),
     monster: ContentIdSchema.optional(),
     hp: z.enum(["full", "half"]),
+  }),
+  // Advantage on its Initiative roll, as an asteroid spider's False Appearance gives one that lies still.
+  z.strictObject({ kind: z.literal("initiativeAdvantage") }),
+  // Knocked Prone, an odd roll of a die leaves it Incapacitated until it passes this save at the end of a turn, as a
+  // flumph's Prone Deficiency.
+  z.strictObject({
+    kind: z.literal("proneDeficiency"),
+    ability: AbilitySchema,
+    dc: z.number().int(),
+  }),
+  // Dispel Magic aimed at it is a Constitution save against the caster's spell save DC, or this condition for a
+  // minute or until it takes damage, as a clockwork horror's Shutdown.
+  z.strictObject({
+    kind: z.literal("dispelShutdown"),
+    condition: ConditionSchema,
   }),
   // Disadvantage on saves against these conditions, as a shoggoth's Susceptible to Charm.
   z.strictObject({

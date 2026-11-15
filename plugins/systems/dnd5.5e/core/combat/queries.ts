@@ -347,7 +347,11 @@ export function fitsType(
   ) {
     return false;
   }
-  if (targeting.afflicted && by && !afflictedBy(item, by, targeting.afflicted, access)) {
+  if (
+    targeting.afflicted &&
+    by &&
+    !afflictedBy(item, by, targeting.afflicted, access)
+  ) {
     return false;
   }
   const largest = "maxSize" in targeting ? targeting.maxSize : undefined;
