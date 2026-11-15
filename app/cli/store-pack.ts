@@ -69,18 +69,37 @@ if (repo !== undefined) {
       "Content packages for the Re-roll Store, made by npm run store:pack.",
     );
   }
-  // The index goes last, so it never lists a zip that isn't up yet.
-  const files = [...zips.keys()].map((file) => join(out, file));
-  if (files.length > 0)
-    gh("release", "upload", STORE_TAG, "-R", repo, "--clobber", ...files);
-  gh(
-    "release",
-    "upload",
-    STORE_TAG,
-    "-R",
-    repo,
-    "--clobber",
-    join(out, STORE_INDEX),
+  // What the release holds now, by GitHub's own SHA-256 of each file, so unchanged zips aren't sent again.
+  const published = new Map(
+    gh(
+      "api",
+      `repos/${repo}/releases/tags/${STORE_TAG}`,
+      "-q",
+      '.assets[] | select(.state == "uploaded") | [.name, .digest] | @tsv',
+    )
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split("\t") as [string, string]),
   );
-  console.log(`Published to ${repo}'s ${STORE_TAG} release`);
+  // One file at a time, each tried a few times, as a long upload can stall and GitHub then drops it.
+  const upload = (file: string): void => {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        gh("release", "upload", STORE_TAG, "-R", repo, "--clobber", file);
+        return;
+      } catch (error) {
+        if (attempt === 3) throw error;
+        console.warn(`Retrying ${file} after: ${String(error).split("\n")[0]}`);
+      }
+    }
+  };
+  const changed = index.packages.filter(
+    ({ file, sha256 }) => published.get(file) !== `sha256:${sha256}`,
+  );
+  for (const { file } of changed) upload(join(out, file));
+  // The index goes last, so it never lists a zip that isn't up yet.
+  upload(join(out, STORE_INDEX));
+  console.log(
+    `Published to ${repo}'s ${STORE_TAG} release: ${String(changed.length)} of ${String(index.packages.length)} packages changed`,
+  );
 }
