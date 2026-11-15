@@ -16,6 +16,7 @@ import { dependsOnCaster, statBlocksIn } from "./book.ts";
 import {
   type Caster,
   castActions,
+  type MonsterAction,
   castItems,
   nothingToCast,
   casterIn,
@@ -915,9 +916,11 @@ function actionsMade(
 
 // Legendary actions, Legendary Resistance and lair actions, from the stat block's paragraphs as plain text.
 // Older imports keep only that text, so the game reads them the same way at run time.
+// `cast` reads "uses Spellcasting to cast Fear" as the spell's own effects, when the block's spells are known.
 export function legendaryOf(
   lines: readonly string[],
   actionNames: readonly string[],
+  cast?: (text: string) => readonly MonsterAction[],
 ): { readonly fields: Record<string, unknown>; readonly notes: string[] } {
   const fields: Record<string, unknown> = {};
   const notes: string[] = [];
@@ -966,6 +969,29 @@ export function legendaryOf(
       continue;
     }
     const made = activation ? [] : actionsMade(text, actionNames, left);
+    const spells = activation || made.length > 0 ? [] : (cast?.(text) ?? []);
+    if (spells.length > 0) {
+      const sentence = /[^.]*\bcasts?\b[^.]*\./.exec(text)?.[0] ?? "";
+      // shortcut: "it can fly up to half its Fly Speed" moves it as half its Speed does.
+      const flies = /\bcan fly up to half \w+ Fly Speed\b/.test(sentence);
+      const rest = text
+        .replace(sentence, "")
+        .replace(/[^.]*can’?'?t take this action again[^.]*\.\s*/, "")
+        .trim();
+      if (rest || /, and (?!(?:it|he|she) can fly up to half)/.test(sentence)) {
+        notes.push(`partial: ${name}: left out what follows it`);
+      }
+      for (const spell of spells) {
+        legendary.push({
+          name: spells.length > 1 ? `${name} (${spell.name})` : name,
+          cost: Number(/\(Costs (\d+) Actions\)/i.exec(label)?.[1] ?? 1),
+          oncePerRound: /again until the start of \w+ next turn/i.test(text),
+          moves: flies,
+          activation: { ...spell.activation, cost: [] },
+        });
+      }
+      continue;
+    }
     const move = activation || made.length > 0 ? null : teleportOf(text);
     if (move?.rest) left.push("what follows it");
     if (move?.others) left.push("teleporting a willing creature");
@@ -1042,12 +1068,142 @@ function defencesOf(lines: readonly string[]): Passive[] {
   return passives;
 }
 
+// "Trigger: The knight is hit by a melee attack roll while holding a weapon. Response: The knight adds 2 to its
+// AC against that attack", or "…halves the damage (round down) it takes from that attack."
+// shortcut: a monster is taken to hold its weapons, so "while holding a weapon" is always met.
+function guardOf(text: string): {
+  readonly melee: boolean;
+  readonly effect: LeafEffect;
+  readonly left: string | null;
+} | null {
+  const trigger =
+    /^Trigger: [^.:]*? is hit by an? (melee )?attack roll(?: while holding a weapon)?[.:]\s*Response: (.*)$/s.exec(
+      text.trim(),
+    );
+  if (!trigger) return null;
+  const [, melee, response = ""] = trigger;
+  const ac =
+    /^[^.]*? adds (\d+) to (?:its|his|her|their) AC against (?:that attack|melee attack rolls \(including the triggering attack\)[^.]*), (?:possibly|potentially) causing (?:it|the attacks) to miss\.\s*(.*)$/s.exec(
+      response,
+    );
+  if (ac) {
+    const rest = ac[2] ?? "";
+    return {
+      melee: Boolean(melee),
+      effect: { kind: "acAgainstHit", bonus: Number(ac[1]) },
+      left: response.includes("until the start of")
+        ? "the bonus lasting until its next turn"
+        : rest
+          ? "an attack on a miss"
+          : null,
+    };
+  }
+  return /^[^.]*? halves the damage(?: \(round down\))? (?:it|he|she|they) takes? from that attack\.?$/.test(
+    response.trim(),
+  )
+    ? {
+        melee: Boolean(melee),
+        effect: { kind: "reduceDamage", halve: true },
+        left: null,
+      }
+    : null;
+}
+
+// Traits a grid fight never needs: breathing, telepathy and talk, senses for things the fight doesn't have, carrying,
+// objects and homes, and coming back to life days later somewhere else.
+const NO_COMBAT_TRAIT =
+  /^(?:Amphibious|Water Breathing|Hold Breath|Limited Amphibiousness|Unusual Nature|Air Envelope|Mimicry|Siege Monster|Forbiddance|Beast of Burden|Increased Carrying Capacity|Inscrutable|Shielded Mind|Telepathic Shroud|Treasure Sense|Iron Scent|Lie Detector|Divine Awareness|Detect Life|Ethereal Sight|Sense Magic|Disintegration|Soul Gem|Spirit Jar|Wishes|Vampiric Connection|Podling Link|Bound|Semblance of Life|Speak with .+|.*Telepathy|Telepathic Bond)$/;
+
+function noCombatTrait(label: string, text: string): boolean {
+  const name = label.replace(/\s*\(.*$/, "");
+  return (
+    NO_COMBAT_TRAIT.test(name) ||
+    (/(?:Restoration|Immortality|Rejuvenation)$/.test(name) &&
+      /\b(?:revives?|re-?forms|gains a new body|regains all its Hit Points in \d)/.test(
+        text,
+      ))
+  );
+}
+
+// What a trait read as a passive still leaves out.
+function traitLeftOut(label: string): string | null {
+  if (label === "Fey Ancestry") return "immunity to magical sleep";
+  if (label === "Greater Magic Resistance") {
+    return "succeeding on every save against spells";
+  }
+  if (label === "Superior Magic Resistance") {
+    return "Disadvantage on spell attacks against it";
+  }
+  if (label === "Displacement") return "its end while Incapacitated";
+  if (label === "Bloodied Frenzy") return "Advantage on saving throws";
+  return null;
+}
+
 // The traits the engine already knows how to play, or null for one it doesn't.
 function traitPassive(label: string, text: string): Passive | null {
-  if (label === "Magic Resistance") return { kind: "magicResistance" };
+  if (/^(?:Greater |Superior )?Magic Resistance$/.test(label)) {
+    return { kind: "magicResistance" };
+  }
+  if (
+    /doesn[’']t provoke (?:an )?Opportunity Attacks? when it (?:flies|moves) out of an enemy[’']s reach/i.test(
+      text,
+    )
+  ) {
+    return { kind: "noOpportunityAttacks" };
+  }
+  const evasion =
+    /subjected to an effect that allows \w+ to make an? (Dexterity )?saving throw to take only half damage/i.exec(
+      text,
+    );
+  if (evasion) return { kind: "evasion", anySave: !evasion[1] };
+  if (
+    /Advantage on (?:melee )?attack rolls against any creature that doesn[’']t have all its Hit Points/i.test(
+      text,
+    )
+  ) {
+    return { kind: "attackAdvantage", when: "targetHurt" };
+  }
+  if (
+    /^While Bloodied, [^.,]+ has Advantage on attack rolls(?: and saving throws)?\.?$/i.test(
+      text,
+    ) ||
+    /has Advantage on (?:melee )?attack rolls while (?:it|he|she|they) (?:is|are) Bloodied\.?$/.test(
+      text,
+    )
+  ) {
+    return { kind: "attackAdvantage", when: "bloodied" };
+  }
+  if (
+    /Advantage on attack rolls against (?:targets|creatures) that have the Frightened condition/i.test(
+      text,
+    )
+  ) {
+    return { kind: "attackAdvantage", when: "targetFrightened" };
+  }
+  if (label === "Immutable Form") return { kind: "immutableForm" };
+  if (
+    label === "Fey Ancestry" &&
+    /Advantage on saving throws (?:it makes )?to avoid or end the Charmed condition/i.test(
+      text,
+    )
+  ) {
+    return { kind: "saveAdvantage", abilities: [], conditions: ["charmed"] };
+  }
+  if (label === "Lucky" && /\brolls a 1 on the d20\b/.test(text)) {
+    return { kind: "rerollOnes" };
+  }
+  if (
+    label === "Displacement" &&
+    /^Attack rolls against [^.]+ have Disadvantage/.test(text)
+  ) {
+    return {
+      kind: "modifier",
+      modifier: { kind: "disadvantage", on: "attacksAgainst" },
+    };
+  }
   if (label === "Pack Tactics") return { kind: "packTactics" };
   if (label === "Undead Fortitude") return { kind: "undeadFortitude" };
-  const regains = /\bregains (\d+) Hit Points\b/.exec(text)?.[1];
+  const regains = /\b(?:re)?gains (\d+) Hit Points\b/.exec(text)?.[1];
   if (!/^Regeneration\b/.test(label) || !regains) return null;
   const words = new Set(text.toLowerCase().match(/[a-z]+/g) ?? []);
   return {
@@ -1144,7 +1300,7 @@ function parseBlock(
     if (
       spells &&
       /^(?:Innate )?Spellcasting\b/.test(label) &&
-      ["traits", "actions", "bonus actions"].includes(section)
+      ["", "traits", "actions", "bonus actions"].includes(section)
     ) {
       const following = paragraphs.slice(index + 1);
       const end = following.findIndex(
@@ -1161,7 +1317,7 @@ function parseBlock(
       ].join("\n");
       const listed = spellcastingActions(
         entryText,
-        section === "traits" ? [] : [costOf(section)],
+        section === "traits" || section === "" ? [] : [costOf(section)],
         casterFor(text),
         spells,
         notes,
@@ -1176,10 +1332,17 @@ function parseBlock(
       actions.push(...listed);
       continue;
     }
-    if (section === "traits") {
+    // Older books print traits before any heading.
+    if (section === "traits" || section === "") {
       const passive = traitPassive(label, text);
+      const left = passive ? traitLeftOut(label) : null;
       if (passive) passives.push(passive);
-      else notes.push(`not automated: ${label}`);
+      if (left) notes.push(`partial: ${label}: left out ${left}`);
+      if (!passive) {
+        notes.push(
+          `${noCombatTrait(label, text) ? "no combat use" : "not automated"}: ${label}`,
+        );
+      }
       continue;
     }
     if (/^multiattack/i.test(label)) {
@@ -1214,6 +1377,32 @@ function parseBlock(
         : [];
     if (reactions.length > 0) {
       actions.push(...reactions);
+      continue;
+    }
+    const guard = section === "reactions" ? guardOf(text) : null;
+    if (guard) {
+      const name = label.replace(/\s*\(.*$/, "");
+      if (guard.left) notes.push(`partial: ${name}: left out ${guard.left}`);
+      actions.push({
+        name,
+        ...(reactionDays ? { perDay: Number(reactionDays) } : {}),
+        activation: {
+          cost: [
+            "reaction",
+            ...(reactionDays ? [{ resource: `day:${slugOf(name)}` }] : []),
+          ],
+          trigger: {
+            hitByAttack: true,
+            ...(guard.melee ? { melee: true } : {}),
+          },
+          targeting: { self: true },
+          resolution: {
+            kind: "automatic",
+            damage: [],
+            effects: [guard.effect],
+          },
+        },
+      });
       continue;
     }
     if (section !== "actions" && section !== "bonus actions") {
@@ -1382,6 +1571,10 @@ function parseBlock(
   const legendary = legendaryOf(
     lines,
     actions.map((action) => (action as { readonly name: string }).name),
+    spells
+      ? (text) =>
+          castActions(text, { cost: [] }, casterFor(text), spells, notes)
+      : undefined,
   );
   notes.push(...legendary.notes);
 

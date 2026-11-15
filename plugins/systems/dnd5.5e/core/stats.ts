@@ -1026,6 +1026,7 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "counter" ||
       effect.kind === "extraAction" ||
       effect.kind === "reduceDamage" ||
+      effect.kind === "acAgainstHit" ||
       effect.kind === "teleport" ||
       effect.kind === "forcedMove" ||
       (effect.kind === "applyCondition" &&
