@@ -58,11 +58,13 @@ export function traitSaveAdvantage(
   stats: Stats,
   ability: Ability,
   conditions: readonly string[],
+  bloodied = false,
 ): boolean {
   // A save to keep Concentration names "concentration" among its conditions.
   return stats.passives.some(
     (passive) =>
       (passive.kind === "saveAdvantage" &&
+        (!passive.bloodied || bloodied) &&
         (passive.abilities.includes(ability) ||
           passive.conditions.some((condition) =>
             conditions.includes(condition),
@@ -266,8 +268,27 @@ export function dropToOneEvents(
   hit: { readonly type: DamageType; readonly critical: boolean },
   stats: Stats,
 ): SystemEvent[] | null {
+  if (target.hp <= 0 || remaining < 0) return null;
+  // Death Ward holds even against damage that would kill outright, and ends.
+  const ward = target.activeEffects.find(
+    ({ modifier }) => modifier.kind === "deathWard",
+  );
+  if (ward) {
+    return [
+      dndEvent(`${NS}:effectEnded`, {
+        actor: target.id,
+        sourceId: ward.sourceId,
+      }),
+      dndEvent(`${NS}:damaged`, {
+        actor: target.id,
+        amount: amount - remaining - 1,
+        ...hit,
+        massive: false,
+      }),
+    ];
+  }
   const outright = target.side === "party" && remaining >= stats.maxHp;
-  if (target.hp <= 0 || remaining < 0 || outright) return null;
+  if (outright) return null;
   const trait = stats.passives.find(
     (passive) =>
       passive.kind === "dropToOne" &&
@@ -431,4 +452,23 @@ export function nextHitDie(actor: Actor, access: ContentAccess): string | null {
   if (actor.source.kind !== "character") return null;
   const entry = actor.source.build?.levels[actor.resourcesSpent[HIT_DICE] ?? 0];
   return entry ? lookup(access, ClassSchema, entry.classId).hitDie : null;
+}
+
+export const WARD_DOWN = "ward-down";
+
+// Diabolic Ward or Incomprehensible Form: attacks against the bearer have Disadvantage, except after it attacked this
+// round (until its next turn starts), or while it's Incapacitated, as the trait says.
+export function warded(target: Actor, stats: Stats): boolean {
+  return stats.passives.some(
+    (passive) =>
+      passive.kind === "ward" &&
+      !(
+        passive.suppressed === "attacking" &&
+        target.usedThisTurn.includes(WARD_DOWN)
+      ) &&
+      !(
+        passive.suppressed === "incapacitated" &&
+        hasCondition(target, ...INCAPACITATING)
+      ),
+  );
 }

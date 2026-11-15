@@ -7,7 +7,7 @@ const escaped = (text: string): string =>
 // monster's actions ("monster:<index>"), in the order printed. multiattackRoutines in stats.ts covers the attacks;
 // combat's attack case takes these after them. Of "uses Hiss or Squeeze", the first it has is taken, and
 // "can replace one attack with …" is a swap, not an addition, so it's left out. Given the attack chosen, only
-// the routine naming it counts; a routine naming no attack ("makes two attacks and uses …") fits any.
+// the routine naming it counts; a routine naming no attack ("makes two attacks and uses …") fits any that makes attacks.
 export function multiattackUses(
   monster: Monster,
   attack?: string,
@@ -30,7 +30,8 @@ export function multiattackUses(
       : (routines.find((text) => names(text, chosen)) ??
         (routines.some((text) => attacks.some((name) => names(text, name)))
           ? undefined
-          : routines[0]));
+          : // "uses Eye Rays twice" makes no attacks, so it doesn't come with the Bite chosen.
+            routines.find((text) => /\battacks?\b/i.test(text))));
   if (routine === undefined) return [];
   const others = monster.actions.flatMap(({ name, activation }, index) =>
     activation.resolution.kind === "attack"

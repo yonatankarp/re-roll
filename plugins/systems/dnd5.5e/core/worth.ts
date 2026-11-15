@@ -6,6 +6,7 @@ import {
   invisibleTo,
   isDead,
   isDown,
+  isStable,
 } from "./state.ts";
 import {
   attackBonus,
@@ -30,10 +31,10 @@ import { ALL, ITEM_PREFIX, THROW_PREFIX } from "./combat/ids.ts";
 import { DAMAGE_TO_PARTY, damageToParty } from "./combat/effects.ts";
 import { cureFor, dispellable } from "./combat/dispel.ts";
 import { seesThrough } from "./sight.ts";
-import { formOf, weakestBeast } from "./forms.ts";
+import { formOf, formsFor } from "./forms.ts";
 import { legendOf } from "./legendary.ts";
 import { summonedActors } from "./combat/summon.ts";
-import { nextHitDie, steadyShot } from "./trait-rules.ts";
+import { nextHitDie, steadyShot, warded } from "./trait-rules.ts";
 import {
   aimsFor,
   allies,
@@ -206,7 +207,8 @@ export function makeJudge(context: Context, side: Actor): Judge {
         "prone",
         "restrained",
       ) ||
-      invisibleTo(target, attacker);
+      invisibleTo(target, attacker) ||
+      warded(target, stats(target));
     return Number(up) - Number(down);
   };
 
@@ -461,6 +463,28 @@ export function makeJudge(context: Context, side: Actor): Judge {
     return total;
   };
 
+  // Eye Rays: what the rays it rolls deal, on average, for each roll it makes.
+  const rolledDamage = (
+    step: KnownAction,
+    own: Stats,
+    against: (steps: readonly KnownAction[]) => number,
+  ): number | null => {
+    const { resolution } = step.activation;
+    const rolled =
+      resolution.kind === "automatic"
+        ? resolution.effects.find((item) => item.kind === "randomAction")
+        : undefined;
+    if (rolled?.kind !== "randomAction") return null;
+    const picks = own.actions.filter(
+      (item) => rolled.of.includes(item.name) && harms(item),
+    );
+    return picks.length > 0
+      ? (picks.reduce((total, pick) => total + against([pick]), 0) *
+          rolled.times) /
+          rolled.of.length
+      : 0;
+  };
+
   // Legendary actions come back every round, so a legend's round adds the most its uses can deal.
   // shortcut: a made action's recharge and lair actions aren't counted; count them if bosses still play harder than judged.
   const legendaryRound = (
@@ -486,15 +510,21 @@ export function makeJudge(context: Context, side: Actor): Judge {
               const found = own.actions.find((action) => action.name === name);
               return found ? [found] : [];
             });
+        const rolled = steps.reduce(
+          (total, step) => total + (rolledDamage(step, own, against) ?? 0),
+          0,
+        );
         const harmful = steps.filter(harms);
         const area = harmful.some(
           (step) => "area" in step.activation.targeting,
         );
         return {
           ...item,
-          damage: harmful.length
-            ? against(harmful) * (area ? Math.min(2, foeCount) : 1)
-            : 0,
+          damage:
+            rolled +
+            (harmful.length
+              ? against(harmful) * (area ? Math.min(2, foeCount) : 1)
+              : 0),
         };
       })
       .filter((item) => item.damage > 0)
@@ -526,6 +556,13 @@ export function makeJudge(context: Context, side: Actor): Judge {
     let best = 0;
     for (const action of own.actions) {
       const { cost, targeting, projectiles } = action.activation;
+      const rolled = cost.includes("action")
+        ? rolledDamage(action, own, against)
+        : null;
+      if (rolled !== null) {
+        best = Math.max(best, rolled);
+        continue;
+      }
       if (!harms(action) || !cost.includes("action")) continue;
       if (free && cost.some((item) => item !== "action")) continue;
       // Resources and slots it still has, whatever is left of this turn.
@@ -713,7 +750,11 @@ export function makeJudge(context: Context, side: Actor): Judge {
     }
     switch (modifier.kind) {
       case "bonus":
-        if (modifier.subtract) return 0;
+        if (modifier.subtract) {
+          return modifier.to === "attacksAgainst"
+            ? 0.1 * meanFoeThreat * lasting(span) // Blade Ward
+            : 0;
+        }
         return ["attacks", "ac", "saves"].includes(modifier.to)
           ? 0.12 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
           : modifier.to === "maxHp"
@@ -751,6 +792,15 @@ export function makeJudge(context: Context, side: Actor): Judge {
         return foes.some((foe) => invisibleTo(foe, target))
           ? 0.25 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
           : 0;
+      // A duplicate or a ward turns away about a hit in three while it lasts; Death Ward one drop.
+      case "images":
+        return 0.3 * meanFoeThreat * lasting(span);
+      case "sanctuary":
+        return 0.3 * meanFoeThreat * lasting(span);
+      case "deathWard":
+        return 0.2 * meanFoeThreat;
+      case "retaliate":
+        return 0.05 * meanFoeThreat * lasting(span);
       default:
         return 0;
     }
@@ -818,6 +868,10 @@ export function makeJudge(context: Context, side: Actor): Judge {
           ? 0.3 * threat(target) * lasting(span)
           : 0;
       }
+      case "stabilize":
+        return !foe && isDown(target) && !isStable(target)
+          ? 0.3 * meanFoeThreat
+          : 0;
       case "removeCondition":
         return !foe && hasCondition(target, effect.condition)
           ? 0.5 * Math.max(threat(target), meanFoeThreat * 0.5)
@@ -831,15 +885,42 @@ export function makeJudge(context: Context, side: Actor): Judge {
       }
       // A foe in a weak Beast's shape has lost most of what it does, like an Incapacitated one, until its
       // borrowed Hit Points run out.
-      case "polymorph":
-        return foe &&
-          !isDown(target) &&
-          formOf(target) === null &&
-          weakestBeast(target, context) !== null
-          ? 0.8 *
-              Math.max(threat(target), 0.25 * meanFoeThreat) *
-              lasting(rounds(effect.duration, saved, false, false))
-          : 0;
+      // A friend in a stronger shape deals more each round it lasts, with the form's Hit Points to spend first.
+      case "polymorph": {
+        if (isDown(target) || formOf(target) !== null) return 0;
+        const forms = formsFor(effect, target, context);
+        if (foe) {
+          return forms.length > 0
+            ? 0.8 *
+                Math.max(threat(target), 0.25 * meanFoeThreat) *
+                lasting(rounds(effect.duration, saved, false, false))
+            : 0;
+        }
+        const best = forms.at(-1);
+        if (!best) return 0;
+        const formed: Actor = {
+          ...target,
+          activeEffects: [
+            ...target.activeEffects,
+            {
+              sourceId: action.id,
+              casterId: actor.id,
+              modifier: {
+                kind: "form",
+                monster: best.id,
+                ...(effect.keep ? { keep: effect.keep } : {}),
+              },
+              ends: "spellDuration",
+            },
+          ],
+        };
+        return (
+          rate *
+            Math.max(0, threat(formed) - threat(target)) *
+            Math.min(horizon, rounds(effect.duration, 0, false, false)) +
+          (effect.tempHp ? 0.5 * healWorth(target, best.hp) : 0)
+        );
+      }
       // Ending a foe's help or an ally's harm is worth about what the effect was doing, a round or two of it.
       case "dispel":
         return dispellable(

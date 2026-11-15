@@ -33,6 +33,7 @@ export const FRAME_KINDS = [
   "checkCombatEnd",
   "companionsSpend",
   "concentrationSave",
+  "chooseForm",
   "counterspell",
   "endTurn",
   "escape",
@@ -113,7 +114,13 @@ const ActiveEffectSchema = z.strictObject({
       condition: ConditionSchema,
     }),
     // Another creature's shape, by its stat block (core/forms.ts).
-    z.strictObject({ kind: z.literal("form"), monster: ContentIdSchema }),
+    z.strictObject({
+      kind: z.literal("form"),
+      monster: ContentIdSchema,
+      keep: z.array(z.enum(["mind", "spells"])).optional(), // what it keeps of its own (stats.ts)
+    }),
+    // One of its own stat block's other shapes, by name, as a werewolf's wolf form (core/forms.ts).
+    z.strictObject({ kind: z.literal("shape"), shape: z.string() }),
     // An area a spell left on the map, kept on its caster (core/zones.ts).
     z.strictObject({
       kind: z.literal("zone"),
@@ -492,6 +499,12 @@ const LairActionTakenSchema = z.strictObject({
   name: z.string(),
 });
 // A creature joining a fight already under way, standing where `actor.position` says, its turn right after `after`'s.
+// Levels of Exhaustion gained (or lost, below 0), as a troll's severed limbs give and regrowing takes away.
+const ExhaustionChangedSchema = z.strictObject({
+  actor: z.string(),
+  levels: z.number().int(),
+});
+
 const SummonedSchema = z.strictObject({
   actor: ActorSchema,
   after: z.string(),
@@ -511,6 +524,8 @@ export const EVENT_SCHEMAS = {
   [`${NS}:damageShareLowered`]: DamageShareLoweredSchema,
   [`${NS}:budgetSpent`]: BudgetSpentSchema,
   [`${NS}:actionRegained`]: ActorOnlySchema,
+  [`${NS}:reactionRegained`]: ActorOnlySchema,
+  [`${NS}:exhaustionChanged`]: ExhaustionChangedSchema,
   [`${NS}:resourceSpent`]: ResourceSpentSchema,
   [`${NS}:resourceRestored`]: ResourceRestoredSchema,
   [`${NS}:oncePerTurnUsed`]: OncePerTurnSchema,
@@ -649,7 +664,9 @@ export function invisibleTo(target: Actor, viewer: Actor): boolean {
   return (
     hasCondition(target, "invisible") &&
     !viewer.activeEffects.some(
-      ({ modifier }) => modifier.kind === "seeInvisible",
+      ({ modifier }) =>
+        modifier.kind === "seeInvisible" ||
+        (modifier.kind === "darkvision" && modifier.truesight === true),
     )
   );
 }
@@ -661,6 +678,13 @@ export const INCAPACITATING: readonly Condition[] = [
   "stunned",
   "unconscious",
 ];
+
+// Under an effect that stops it regaining Hit Points, as a death tyrant's Negative Energy Cone.
+export function cannotHeal(actor: Actor): boolean {
+  return actor.activeEffects.some(
+    ({ modifier }) => modifier.kind === "noHealing",
+  );
+}
 
 export function isDown(actor: Actor): boolean {
   return actor.hp <= 0;
@@ -1047,6 +1071,19 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         payload(ActorOnlySchema, event).actor,
         (actor) => ({ ...actor, budget: { ...actor.budget, action: true } }),
       );
+    case `${NS}:reactionRegained`:
+      return updateActor(
+        state,
+        payload(ActorOnlySchema, event).actor,
+        (actor) => ({ ...actor, budget: { ...actor.budget, reaction: true } }),
+      );
+    case `${NS}:exhaustionChanged`: {
+      const data = payload(ExhaustionChangedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        exhaustion: Math.min(6, Math.max(0, actor.exhaustion + data.levels)),
+      }));
+    }
     case `${NS}:resourceSpent`: {
       const data = payload(ResourceSpentSchema, event);
       return updateActor(state, data.actor, (actor) => ({

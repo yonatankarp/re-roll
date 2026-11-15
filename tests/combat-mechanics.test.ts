@@ -67,6 +67,7 @@ import {
   withTactics,
 } from "../plugins/systems/dnd5.5e/core/actions.ts";
 import {
+  ActivationSchema,
   type Battlemap,
   BattlemapSchema,
   ClassSchema,
@@ -4245,10 +4246,20 @@ describe("ending, hiding and reshaping spells", () => {
       }),
     });
     const caster = hero(run);
-    const target = { ...hero(run, { id: "b" }), concentratingOn: "spell:x" };
+    const target: Actor = {
+      ...hero(run, { id: "b" }),
+      side: "enemy",
+      concentratingOn: "spell:x",
+    };
     const state = fight(caster, target);
     const events = leafEvents(
-      [{ kind: "polymorph", duration: { concentration: true, minutes: 60 } }],
+      [
+        {
+          kind: "polymorph",
+          duration: { concentration: true, minutes: 60 },
+          tempHp: true,
+        },
+      ],
       "spell:polymorph",
       caster,
       target,
@@ -4276,6 +4287,166 @@ describe("ending, hiding and reshaping spells", () => {
     expect(back.tempHp).toBe(0);
     expect(back.hp).toBe(target.hp - 2);
     expect(back.activeEffects).toEqual([]);
+  });
+});
+
+describe("choosing a form", () => {
+  const blocks = {
+    "srd52:monster/test-bear": dummy("srd52:monster/test-bear", {
+      name: "Test Bear",
+      size: "large",
+      creatureType: "beast",
+      hp: 30,
+      text: "CR 2 (XP 450; PB +2)",
+    }),
+    "srd52:monster/test-whale": dummy("srd52:monster/test-whale", {
+      name: "Test Whale",
+      size: "gargantuan",
+      creatureType: "beast",
+      hp: 90,
+      text: "CR 3 (XP 700; PB +2)",
+    }),
+    "srd52:monster/test-dragon": dummy("srd52:monster/test-dragon", {
+      name: "Test Dragon",
+      size: "huge",
+      creatureType: "dragon",
+      hp: 120,
+      text: "CR 8 (XP 3,900; PB +3)",
+    }),
+    "srd52:monster/test-golem": dummy("srd52:monster/test-golem", {
+      name: "Test Golem",
+      creatureType: "construct",
+      hp: 150,
+      text: "CR 9 (XP 5,000; PB +4)",
+    }),
+  };
+  const shapechange = (effect: Record<string, unknown>) => ({
+    id: "spell:test-shapechange",
+    name: "Shapechange",
+    spellLevel: 9,
+    activation: ActivationSchema.parse({
+      cost: ["action"],
+      targeting: { self: true },
+      resolution: {
+        kind: "automatic",
+        effects: [
+          {
+            kind: "polymorph",
+            duration: { concentration: true, minutes: 60 },
+            ...effect,
+          },
+        ],
+      },
+    }),
+  });
+
+  it("lets a caster pick its own form, the strongest first, and keep its mind and spells", async () => {
+    const run = arenaRun(await base(), blocks);
+    const caster = hero(run, { spells: ["magic-missile"], level: 9 });
+    const state = fight(caster, monster("a"));
+    const cast = resolveAction(
+      shapechange({
+        forms: { except: ["construct", "undead"] },
+        keep: ["mind", "spells"],
+      }),
+      caster,
+      [caster],
+      contextOf(run, state, LOW),
+    );
+    const started = (cast.events ?? []).reduce(applyDndEvent, state);
+    const chosen = settle(run, started, cast.frames ?? [], LOW);
+    const [decision] = chosen.decisions;
+    expect(decision?.id).toBe(`${NS}:form:${PLAYER_ACTOR}`);
+    const crs = (decision?.options ?? []).map(({ label }) =>
+      Number(/CR ([\d/]+)/.exec(label)?.[1]?.split("/")[0]),
+    );
+    expect(crs).toEqual([...crs].sort((a, b) => b - a));
+    expect(decision?.options[0]?.id).toBe("srd52:monster/test-dragon");
+    const formed = actor(chosen.state, PLAYER_ACTOR);
+    expect(formed.concentratingOn).toBe("spell:test-shapechange");
+    expect(formed.tempHp).toBeGreaterThan(0);
+    const stats = deriveStats(formed, run);
+    expect(stats.abilities.int).toBe(deriveStats(caster, run).abilities.int);
+    expect(stats.actions.map(({ id }) => id)).toContain(
+      `spell:${spell("magic-missile")}`,
+    );
+  });
+
+  it("gives an ally a form within the spell's own limits", async () => {
+    const run = arenaRun(await base(), blocks);
+    const caster = hero(run);
+    const friend = hero(run, { id: "b" });
+    const state = fight(caster, friend, monster("a"));
+    const animal = shapechange({
+      forms: { types: ["beast"], maxCr: 4, maxSize: "large" },
+      keep: ["mind"],
+    });
+    const cast = resolveAction(
+      animal,
+      caster,
+      [friend],
+      contextOf(run, state, LOW),
+    );
+    const chosen = settle(run, state, cast.frames ?? [], LOW);
+    const formed = actor(chosen.state, "b");
+    const stats = deriveStats(formed, run);
+    expect(stats.creatureType).toBe(deriveStats(friend, run).creatureType);
+    expect(stats.actions.some(({ spellLevel }) => spellLevel !== null)).toBe(
+      false,
+    );
+    const form = formed.activeEffects.find(
+      ({ modifier }) => modifier.kind === "form",
+    );
+    const id = form?.modifier.kind === "form" ? form.modifier.monster : "";
+    expect(id).toBe("srd52:monster/test-bear");
+  });
+});
+
+describe("a spell's lasting action", () => {
+  it("lets the caster attack with a Flame Blade only while concentrating on it", async () => {
+    const run = arenaRun(await base(), {
+      [spell("test-blade")]: {
+        id: spell("test-blade"),
+        name: "Test Blade",
+        level: 2,
+        school: "evocation",
+        classes: [],
+        castingTime: "Bonus Action",
+        range: "Self",
+        components: "V, S",
+        duration: { concentration: true, minutes: 10 },
+        text: "A blade.",
+        automation: "full",
+        activation: {
+          cost: ["bonusAction", "slot"],
+          targeting: { self: true },
+          resolution: { kind: "automatic" },
+        },
+        lasting: {
+          cost: ["action"],
+          targeting: { creatures: 1, range: 5, side: "enemy" },
+          resolution: {
+            kind: "attack",
+            attack: { type: "spell" },
+            damage: [{ amount: { dice: "3d6" }, type: "fire" }],
+          },
+        },
+      },
+    });
+    const caster = hero(run, { spells: ["test-blade"], level: 3 });
+    const ids = (item: Actor) =>
+      deriveStats(item, run).actions.map(({ id }) => id);
+    expect(ids(caster)).toContain(`spell:${spell("test-blade")}`);
+    expect(ids(caster)).not.toContain(`lasting:${spell("test-blade")}`);
+    const cast = settle(
+      run,
+      fight(caster, monster("a")),
+      [act(PLAYER_ACTOR, `spell:${spell("test-blade")}|${PLAYER_ACTOR}`)],
+      LOW,
+    );
+    const holding = actor(cast.state, PLAYER_ACTOR);
+    expect(holding.concentratingOn).toBe(`spell:${spell("test-blade")}`);
+    expect(ids(holding)).toContain(`lasting:${spell("test-blade")}`);
   });
 });
 

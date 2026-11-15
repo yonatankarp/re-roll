@@ -9,7 +9,7 @@ import {
   hasCondition,
 } from "./state.ts";
 import { lightAt } from "./sight.ts";
-import { formOf } from "./forms.ts";
+import { currentShape, formKept, formOf, usableIn } from "./forms.ts";
 import {
   ALL_SKILLS,
   DAMAGE_TYPES,
@@ -89,6 +89,8 @@ export interface KnownAction {
   readonly spellLevel: number | null;
   readonly upcast?: Spell["upcast"];
   readonly hitType?: true; // its damage takes the type of the hit it adds to, as a maneuver's die does
+  readonly rolled?: true; // taken only when a randomAction picks it, as one eye ray
+  readonly concentrates?: true; // casting it starts Concentration even with no lasting effect, as Flame Blade
 }
 
 export interface Stats {
@@ -833,7 +835,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
 
   for (const spellId of untrainedArmor ? [] : knownSpells) {
     const spell: Spell = lookup(access, SpellSchema, spellId);
-    if (spell.activation && doesSomething(spell.activation.resolution)) {
+    const lasting =
+      spell.lasting &&
+      typeof spell.duration === "object" &&
+      "concentration" in spell.duration
+        ? spell.lasting
+        : undefined;
+    if (
+      spell.activation &&
+      (lasting || doesSomething(spell.activation.resolution))
+    ) {
       const activation =
         spell.level === 0 && spell.cantrip
           ? scaleActivation(
@@ -851,6 +862,22 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         activation: type ? retyped(cast, type) : cast,
         spellLevel: spell.level,
         upcast: spell.upcast,
+        ...(lasting ? { concentrates: true as const } : {}),
+      });
+    }
+    // What the spell lets its caster do while it holds, as Flame Blade's attack, is no cast of its own.
+    // shortcut: it's at the spell's own level, not the slot's it was cast with.
+    if (
+      lasting &&
+      [`spell:${spellId}`, `spell:${spellId}:free`].includes(
+        actor.concentratingOn ?? "",
+      )
+    ) {
+      actions.push({
+        id: `lasting:${spellId}`,
+        name: spell.name,
+        activation: lasting,
+        spellLevel: null,
       });
     }
   }
@@ -1153,6 +1180,19 @@ function multiattackRoutines(
   return routines;
 }
 
+function mapRoutines(
+  routines: Readonly<Record<string, readonly string[]>> | null,
+  map: (id: string, chosen: string) => string,
+): Readonly<Record<string, readonly string[]>> | null {
+  if (!routines) return null;
+  return Object.fromEntries(
+    Object.entries(routines).map(([chosen, ids]) => [
+      chosen,
+      ids.map((id) => map(id, chosen)),
+    ]),
+  );
+}
+
 function monsterStats(actor: Actor, access: ContentAccess): Stats {
   if (actor.source.kind !== "monster") {
     throw new Error(`${actor.id} is not a monster`);
@@ -1232,6 +1272,25 @@ function statBlockStats(
   access: ContentAccess,
 ): Stats {
   const fromFeatures = collectFeatureData(access, monster.features);
+  const shape = currentShape(monster, actor);
+  const usable = new Set(
+    monster.actions.flatMap((action, index) =>
+      usableIn(action, shape) ? [`monster:${String(index)}`] : [],
+    ),
+  );
+  const passives = [
+    ...monster.passives,
+    ...(shape?.passives ?? []),
+    ...fromFeatures.passives,
+  ];
+  // A Multiattack printed for other shapes only isn't there, and a routine's attack this shape can't make is the
+  // chosen one again.
+  const routines =
+    shape?.multiattack === false
+      ? null
+      : mapRoutines(multiattackRoutines(monster), (id, chosen) =>
+          usable.has(id) ? id : chosen,
+        );
   return {
     abilities: monster.abilities,
     proficiency: monster.proficiency,
@@ -1241,9 +1300,9 @@ function statBlockStats(
     ac: bestAc(actor, monster.abilities, {
       armorBases: [monster.ac],
       flatBonus: 0,
-      passives: [...monster.passives, ...fromFeatures.passives],
+      passives,
     }),
-    speed: Math.max(0, monster.speed - 5 * actor.exhaustion),
+    speed: Math.max(0, (shape?.speed ?? monster.speed) - 5 * actor.exhaustion),
     savingThrows: monster.saves,
     skills: [],
     expertise: [],
@@ -1256,21 +1315,28 @@ function statBlockStats(
         ),
       ),
     ),
-    passives: [...monster.passives, ...fromFeatures.passives],
+    passives,
     actions: [
-      ...monster.actions.map((action, index) => ({
-        id: `monster:${String(index)}`,
-        name: action.name,
-        activation: action.activation,
-        spellLevel: null,
-      })),
+      ...monster.actions.flatMap((action, index) =>
+        usable.has(`monster:${String(index)}`)
+          ? [
+              {
+                id: `monster:${String(index)}`,
+                name: action.name,
+                activation: action.activation,
+                spellLevel: null,
+                ...(action.rolled ? { rolled: true as const } : {}),
+              },
+            ]
+          : [],
+      ),
       ...fromFeatures.actions,
     ],
     multiattack: Math.max(
-      monster.multiattack,
-      ...passiveAttacks([...monster.passives, ...fromFeatures.passives]),
+      shape?.multiattack === false ? 1 : monster.multiattack,
+      ...passiveAttacks(passives),
     ),
-    routines: multiattackRoutines(monster),
+    routines,
     creatureType: monster.creatureType?.toLowerCase(),
     initiative: monster.initiative - 2 * actor.exhaustion,
     scaling: {},
@@ -1332,16 +1398,43 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
       : actor.source.kind === "summon"
         ? summonStats(actor, access)
         : characterStats(actor, access);
-  // A form's stat block replaces the creature's own, but it keeps its creature type and Hit Point maximum.
+  // A form's stat block replaces the creature's own, but it keeps its creature type and Hit Point maximum, and with
+  // Shapechange its Intelligence, Wisdom and Charisma and its spellcasting.
   const form = formOf(actor);
-  const stats = form
+  const keep = formKept(actor);
+  const shaped = form
+    ? monsterStats(
+        { ...actor, source: { kind: "monster", statBlockId: form } },
+        access,
+      )
+    : null;
+  const stats = shaped
     ? {
-        ...monsterStats(
-          { ...actor, source: { kind: "monster", statBlockId: form } },
-          access,
-        ),
+        ...shaped,
         creatureType: own.creatureType,
         maxHp: own.maxHp,
+        ...(keep.includes("mind")
+          ? {
+              abilities: {
+                ...shaped.abilities,
+                int: own.abilities.int,
+                wis: own.abilities.wis,
+                cha: own.abilities.cha,
+              },
+            }
+          : {}),
+        ...(keep.includes("spells")
+          ? {
+              actions: [
+                ...shaped.actions,
+                ...own.actions.filter(({ spellLevel }) => spellLevel !== null),
+              ],
+              spellAbility: own.spellAbility,
+              slots: own.slots,
+              pactMagic: own.pactMagic,
+              proficiency: Math.max(shaped.proficiency, own.proficiency),
+            }
+          : {}),
       }
     : own;
   const speed = effectBonus(actor, "speed");
@@ -1651,6 +1744,7 @@ export function damageResponses(
   readonly resistances: readonly DamageType[];
   readonly vulnerabilities: readonly DamageType[];
   readonly immunities: readonly DamageType[];
+  readonly absorbs: readonly DamageType[];
 } {
   const resistances: DamageType[] = [];
   const vulnerabilities: DamageType[] = [];
@@ -1682,5 +1776,8 @@ export function damageResponses(
       vulnerabilities.push(modifier.damage);
     if (modifier.kind === "immunity") immunities.push(modifier.damage);
   }
-  return { adjustments: [], resistances, vulnerabilities, immunities };
+  const absorbs = stats.passives.flatMap((passive) =>
+    passive.kind === "absorb" ? passive.damage : [],
+  );
+  return { adjustments: [], resistances, vulnerabilities, immunities, absorbs };
 }

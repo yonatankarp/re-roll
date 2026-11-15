@@ -27,6 +27,7 @@ import {
   spellLookup,
 } from "./monster-spells.ts";
 import { plainText, slugOf } from "./spells.ts";
+import { formsOnly, shapesIn, shapeShiftActions } from "./shapes.ts";
 
 type AbilityKey = keyof typeof ABILITIES;
 
@@ -642,7 +643,7 @@ function newerSave(text: string): string {
   )}${success}`;
 }
 
-function parseSave(input: string, left: string[]): ParsedAction | null {
+export function parseSave(input: string, left: string[]): ParsedAction | null {
   const text = SAVE_START.test(input) ? input : newerSave(input);
   // "The ape hurls a boulder at a point within 90 feet. Dexterity Saving Throw: …": the lead-in says where.
   const at = text.search(SAVE_START);
@@ -1142,12 +1143,14 @@ function traitLeftOut(label: string): string | null {
     return "Disadvantage on spell attacks against it";
   }
   if (label === "Displacement") return "its end while Incapacitated";
-  if (label === "Bloodied Frenzy") return "Advantage on saving throws";
+  if (label === "Corrosive Form")
+    return "what it does to weapons and ammunition";
+  if (label === "Greater Lightning Absorption") return "its Speed increase";
   return null;
 }
 
 // The traits the engine already knows how to play, or null for one it doesn't.
-function traitPassive(label: string, text: string): Passive | null {
+export function traitPassive(label: string, text: string): Passive | null {
   if (/^(?:Greater |Superior )?Magic Resistance$/.test(label)) {
     return { kind: "magicResistance" };
   }
@@ -1188,6 +1191,80 @@ function traitPassive(label: string, text: string): Passive | null {
     return { kind: "attackAdvantage", when: "targetFrightened" };
   }
   if (label === "Immutable Form") return { kind: "immutableForm" };
+  const absorbed =
+    /\bregains a number of Hit Points equal to the (\w+) damage dealt\b/.exec(
+      text,
+    )?.[1];
+  const absorbedType = DAMAGE_TYPES.find(
+    (type) => type === absorbed?.toLowerCase(),
+  );
+  if (label.endsWith("Absorption") && absorbedType) {
+    return { kind: "absorb", damage: [absorbedType] };
+  }
+  if (
+    /^Attack rolls against [^.]+ have Disadvantage\. If [^.]+ makes an attack roll, this trait is suppressed/.test(
+      text,
+    )
+  ) {
+    return { kind: "ward", suppressed: "attacking" };
+  }
+  if (
+    /^Attack rolls against [^.]+ have Disadvantage\. This trait is suppressed while [^.]+ has the Incapacitated condition/.test(
+      text,
+    )
+  ) {
+    return { kind: "ward", suppressed: "incapacitated" };
+  }
+  if (/\bcan take one Reaction on every turn of combat\b/.test(text)) {
+    return { kind: "reactive" };
+  }
+  if (/^The [^.]+ has the Invisible condition\.?$/.test(text)) {
+    return { kind: "innateCondition", condition: "invisible" };
+  }
+  const flinch =
+    /^If the [^.]+ takes (\w+) damage, it has Disadvantage on attack rolls and ability checks until the end of its next turn\.?$/.exec(
+      text,
+    )?.[1];
+  const flinchType = DAMAGE_TYPES.find(
+    (type) => type === flinch?.toLowerCase(),
+  );
+  if (flinchType) {
+    return {
+      kind: "onDamage",
+      damage: [flinchType],
+      modifiers: [
+        { kind: "disadvantage", on: "attacks" },
+        { kind: "disadvantage", on: "checks" },
+      ],
+    };
+  }
+  const corrosive =
+    /^A creature that hits [^.]+ with a melee attack roll takes \d+ \((\d+d\d+)\) (\w+) damage\./.exec(
+      text,
+    );
+  const corrosiveType = DAMAGE_TYPES.find(
+    (type) => type === corrosive?.[2]?.toLowerCase(),
+  );
+  if (corrosive?.[1] && corrosiveType) {
+    return {
+      kind: "modifier",
+      modifier: {
+        kind: "retaliate",
+        damage: [{ amount: { dice: corrosive[1] }, type: corrosiveType }],
+      },
+    };
+  }
+  if (/^The [^.]+ adheres to anything that touches it\./.test(text)) {
+    return {
+      kind: "modifier",
+      modifier: { kind: "retaliate", damage: [], grapple: true },
+    };
+  }
+  const stone =
+    /drops to 0 Hit Points while it doesn[’']t have the Petrified condition, it turns to stone, regains (\d+) Hit Points/.exec(
+      text,
+    )?.[1];
+  if (stone) return { kind: "stoneRestoration", hp: Number(stone) };
   if (
     label === "Fey Ancestry" &&
     /Advantage on saving throws (?:it makes )?to avoid or end the Charmed condition/i.test(
@@ -1283,9 +1360,16 @@ function parseBlock(
     const own = casterIn(text, scores, proficiency);
     return own.mod === null ? { ...blockCaster, ...nonNull(own) } : own;
   };
+  // Where each entry's actions start, with the shapes its label limits them to.
+  const marks: { at: number; forms: readonly string[] | undefined }[] = [];
+  const shapePassives: { forms: readonly string[]; passive: Passive }[] = [];
   for (const [index, paragraph] of paragraphs.entries()) {
     const attributes = paragraph[1] ?? "";
     const inner = paragraph[2] ?? "";
+    marks.push({
+      at: actions.length,
+      forms: formsOnly(entryOf(inner)?.label ?? ""),
+    });
     if (/monster-header|Stat-Block-Heading/.test(attributes)) {
       section = plainText(inner)
         .toLowerCase()
@@ -1343,7 +1427,22 @@ function parseBlock(
     if (section === "traits" || section === "") {
       const passive = traitPassive(label, text);
       const left = passive ? traitLeftOut(label) : null;
-      if (passive) passives.push(passive);
+      const forms = formsOnly(label);
+      if (passive && forms) shapePassives.push({ forms, passive });
+      else if (passive) passives.push(passive);
+      // "While Bloodied, … has Advantage on attack rolls and saving throws."
+      if (
+        passive?.kind === "attackAdvantage" &&
+        passive.when === "bloodied" &&
+        /\bAdvantage on attack rolls and saving throws\b/.test(text)
+      ) {
+        passives.push({
+          kind: "saveAdvantage",
+          abilities: ["str", "dex", "con", "int", "wis", "cha"],
+          conditions: [],
+          bloodied: true,
+        });
+      }
       if (left) notes.push(`partial: ${label}: left out ${left}`);
       if (!passive) {
         notes.push(
@@ -1463,7 +1562,7 @@ function parseBlock(
     // Charge: "The troll moves up to half its Speed straight toward an enemy it can see." A Dash toward the foes,
     // which is where a monster's moves go.
     const charge =
-      /^[^.]*?\bmoves up to (half )?its Speed(?: or (?:its )?\w+ Speed)? straight toward an enemy it can (?:see|sense)\.?$/.exec(
+      /^[^.]*?\bmoves up to (half )?its Speed(?: or (?:its )?\w+ Speed)? straight toward an enemy it can (?:see|sense)( without provoking Opportunity Attacks)?\.?$/.exec(
         text.trim(),
       );
     if (section === "bonus actions" && charge && !label.includes("(")) {
@@ -1471,6 +1570,7 @@ function parseBlock(
         kind: "bonusTactics",
         tactics: ["dash"],
         ...(charge[1] ? { half: true as const } : {}),
+        ...(charge[2] ? { safe: true as const } : {}),
       });
       continue;
     }
@@ -1600,6 +1700,26 @@ function parseBlock(
       recharge = undefined;
     }
   }
+  for (const [index, { at, forms }] of marks.entries()) {
+    if (!forms) continue;
+    for (const action of actions.slice(at, marks[index + 1]?.at)) {
+      Object.assign(action as object, { shapes: forms });
+    }
+  }
+  const shaped = shapesIn(lines, size);
+  const shapes = shaped?.shapes.map((shape) => ({
+    ...shape,
+    passives: shapePassives.flatMap(({ forms, passive }) =>
+      forms.includes(shape.name) ? [passive] : [],
+    ),
+  }));
+  if (shaped && shapes) {
+    actions.push(...shapeShiftActions(shapes, shaped.cost));
+    const left = notes.findIndex((note) => note.endsWith(": Shape-Shift"));
+    if (left >= 0) notes.splice(left, 1);
+  } else {
+    passives.push(...shapePassives.map(({ passive }) => passive));
+  }
   // The block can still be read, and the creature fights like any other: it just never has an option but to pass.
   if (actions.length === 0 && (!secondPass || dependsOnCaster(lines))) {
     return null;
@@ -1665,6 +1785,7 @@ function parseBlock(
       ),
       multiattack,
       actions,
+      ...(shapes ? { shapes } : {}),
       ...legendary.fields,
       text: lines.join("\n"),
     },
@@ -1680,7 +1801,7 @@ export function teleportOf(
 ): { feet: number; movement: number; rest: string; others?: true } | null {
   // "teleports itself or a willing creature it can see within 10 feet of itself up to 120 feet": only itself.
   const teleport =
-    /^(?:The )?[^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)?( itself or a willing creature [^.]*?)? up to (\d+) feet to an unoccupied space (?:it|he|she|they|the [^.]+?) can see(?:[.,]| and)\s*(.*)$/s.exec(
+    /^(?:The )?[^.]*? (?:magically )?teleports(?:, along with any equipment it is wearing or carrying,)?( itself or a willing (?:creature|demon|devil|ally) [^.]*?)? up to (\d+) feet to an unoccupied space (?:it|he|she|they|the [^.]+?) can see(?:[.,]| and)\s*(.*)$/s.exec(
       text.trim(),
     );
   if (teleport) {

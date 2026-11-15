@@ -423,6 +423,13 @@ function bonusTacticCost(
   stats: Stats,
   tactic: "dash" | "disengage" | "hide" | "dodge",
 ): SystemEvent[] | null {
+  // Expeditious Retreat's Dash as a Bonus Action costs nothing more.
+  if (
+    tactic === "dash" &&
+    actor.activeEffects.some(({ modifier }) => modifier.kind === "bonusDash")
+  ) {
+    return [];
+  }
   let cost: SystemEvent[] | null = null;
   for (const passive of stats.passives) {
     if (passive.kind !== "bonusTactics" || !passive.tactics.includes(tactic)) {
@@ -806,6 +813,12 @@ export function runTactic(
             },
             "casterNextTurn",
           ),
+          // A Tactical Charge moves without provoking Opportunity Attacks.
+          ...(stats.passives.some(
+            (passive) => passive.kind === "bonusTactics" && passive.safe,
+          )
+            ? [self("disengage")]
+            : []),
         ],
       };
     }
