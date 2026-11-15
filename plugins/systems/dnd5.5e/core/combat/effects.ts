@@ -107,7 +107,7 @@ import { liftEvents } from "./falling.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
-import { damageTypeFrame } from "./damage-choice.ts";
+import { damageTypeFrame, zoneTypeFrame } from "./damage-choice.ts";
 import { weaponAttackResult } from "./weapon-spell.ts";
 import { duelBroken, duelDamaged } from "./duel.ts";
 import { wishFrame } from "./wish.ts";
@@ -1310,8 +1310,8 @@ function zoneEvents(
 }
 
 // The damage type of `types` its foes in the fight resist least, as a caster picking Conjure Elemental's element.
-// shortcut: picked for the player too, rather than asked.
-function leastResisted(
+// The area starts with it, and the caster is then asked (combat/damage-choice.ts).
+export function leastResisted(
   types: readonly DamageType[],
   caster: Actor,
   context: Context,
@@ -1338,7 +1338,7 @@ function leastResisted(
 }
 
 // A resolution whose damage all takes `type`, when one was picked.
-function retyped(
+export function retyped(
   resolution: Resolution | undefined,
   type: DamageType | undefined,
 ): Resolution | undefined {
@@ -1957,6 +1957,12 @@ export function resolveAction(
           slotLevel,
         ),
       );
+      const element = zoneTypeFrame(
+        resolution.effects,
+        spellSource(action),
+        actor,
+      );
+      if (element) frames.push(element);
       const damage = rollSharedDamage(resolution.damage);
       const slay = resolution.effects.find((effect) => effect.kind === "slay");
       for (const target of targets) {
@@ -2081,6 +2087,12 @@ export function resolveAction(
           slotLevel,
         ),
       );
+      const element = zoneTypeFrame(
+        [...resolution.onFail, ...resolution.onSuccess],
+        spellSource(action),
+        actor,
+      );
+      if (element) frames.push(element);
       const dc = evaluateFormula(resolution.dc, stats);
       // Damage against several targets at once is rolled once for all of them.
       const damage = rollSharedDamage(resolution.damage);

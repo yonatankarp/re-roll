@@ -2,13 +2,14 @@ import { awaitDecision, type Decision, type Frame, frameHandler } from "#sdk";
 import { z } from "zod";
 import {
   type DamageType,
+  DamageTypeSchema,
   type LeafEffect,
   LeafEffectSchema,
   type Modifier,
 } from "../schemas.ts";
-import { type Actor, frame, isDown, NS } from "../state.ts";
+import { type Actor, dndEvent, frame, isDown, NS } from "../state.ts";
 import { damageResponses, deriveStats } from "../stats.ts";
-import { leafEvents } from "./effects.ts";
+import { leafEvents, leastResisted, retyped } from "./effects.ts";
 import { type Context, enemies } from "./queries.ts";
 
 // The damage type a caster picks as it casts, as Protection from Energy's, kept in the effect it gives.
@@ -133,6 +134,46 @@ export function damageTypePolicy(decision: Decision, context: Context): string {
   );
 }
 
+// The element of the area the cast left, as Conjure Elemental's, asked once the area stands.
+export function zoneTypeFrame(
+  effects: readonly LeafEffect[],
+  sourceId: string,
+  caster: Actor,
+): Frame | null {
+  const zone = effects.find(
+    (effect) => effect.kind === "zone" && effect.choose !== undefined,
+  );
+  const choose = zone?.kind === "zone" ? zone.choose : undefined;
+  if (!choose) return null;
+  return awaitDecision({
+    id: `${NS}:zoneType:${caster.id}`,
+    actor: caster.id,
+    prompt: "Which element?",
+    options: choose.map((type) => ({
+      id: type,
+      label: `${type.charAt(0).toUpperCase()}${type.slice(1)} damage`,
+    })),
+    resume: frame("chooseZoneType", { caster: caster.id, sourceId, choose }),
+  });
+}
+
+export function zoneTypePolicy(decision: Decision, context: Context): string {
+  const { caster, choose } = ChooseZoneTypeSchema.omit({
+    answer: true,
+  }).parse(decision.resume.payload);
+  const actor = context.state.actors[caster];
+  return actor
+    ? leastResisted(choose, actor, context)
+    : (decision.options[0]?.id ?? "");
+}
+
+const ChooseZoneTypeSchema = z.object({
+  caster: z.string(),
+  sourceId: z.string(),
+  choose: z.array(DamageTypeSchema),
+  answer: z.string(),
+});
+
 const ChooseDamageTypeSchema = z.object({
   effects: z.array(LeafEffectSchema),
   sourceId: z.string(),
@@ -143,6 +184,39 @@ const ChooseDamageTypeSchema = z.object({
 });
 
 export const damageChoiceFrames = {
+  [`${NS}:chooseZoneType`]: frameHandler({
+    schema: ChooseZoneTypeSchema,
+    run: (payload, context: Context) => {
+      const type = DamageTypeSchema.parse(payload.answer);
+      if (!payload.choose.includes(type)) {
+        throw new Error(`${payload.answer} isn't offered`);
+      }
+      const zone = context.state.actors[payload.caster]?.activeEffects.find(
+        ({ sourceId, modifier }) =>
+          sourceId === payload.sourceId &&
+          modifier.kind === "zone" &&
+          modifier.area !== undefined,
+      )?.modifier;
+      const area = zone?.kind === "zone" ? zone.area : undefined;
+      // The spell may have ended before the answer, as when Concentration broke.
+      if (!area) return {};
+      const resolution = retyped(area.resolution, type);
+      const holding = retyped(area.holding, type);
+      return {
+        events: [
+          dndEvent(`${NS}:zoneRetyped`, {
+            actor: payload.caster,
+            sourceId: payload.sourceId,
+            area: {
+              ...area,
+              ...(resolution ? { resolution } : {}),
+              ...(holding ? { holding } : {}),
+            },
+          }),
+        ],
+      };
+    },
+  }),
   [`${NS}:chooseDamageType`]: frameHandler({
     schema: ChooseDamageTypeSchema,
     run: (payload, context: Context) => {

@@ -538,6 +538,35 @@ describe("lingering damage", () => {
     );
   });
 
+  it("asks Conjure Elemental's caster for its element, and its area deals that", async () => {
+    const run = arenaRun(await base(), {});
+    const start = onGrid(
+      [hero(run, { spells: ["conjure-elemental"], level: 9 }), 0, 0],
+      [monster("a"), 5, 5],
+    );
+    const cast = settle(
+      run,
+      start,
+      [act(PLAYER_ACTOR, `spell:${spell("conjure-elemental")}|@5,5`)],
+      LOW,
+      (decision) =>
+        decision.id.startsWith(`${NS}:zoneType:`)
+          ? "cold"
+          : (decision.options[0]?.id ?? ""),
+    );
+    const asked = cast.decisions.find(({ id }) =>
+      id.startsWith(`${NS}:zoneType:`),
+    );
+    expect(asked?.options.map(({ id }) => id)).toEqual([
+      "lightning",
+      "thunder",
+      "fire",
+      "cold",
+    ]);
+    const area = zonesOf(cast.state)[0]?.area;
+    expect(area?.holding?.damage.map(({ type }) => type)).toEqual(["cold"]);
+  });
+
   it("lets a foe shut in by Wall of Stone save to get out first", async () => {
     const run = arenaRun(await base(), {});
     const start = onGrid(

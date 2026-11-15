@@ -82,6 +82,7 @@ export const FRAME_KINDS = [
   "useItem",
   "zoneTick",
   "chooseDamageType",
+  "chooseZoneType",
   "replaceHit",
   "confusedTurn",
   "copySpell",
@@ -628,6 +629,12 @@ export const EVENT_SCHEMAS = {
   }),
   // Out of the field again: what was held off works once more.
   [`${NS}:effectsRestored`]: ActorOnlySchema,
+  // The caster's pick of its area's element, as Conjure Elemental's: the owner's zone from that spell now does this.
+  [`${NS}:zoneRetyped`]: z.strictObject({
+    actor: z.string(),
+    sourceId: z.string(),
+    area: AreaEffectSchema,
+  }),
   // A creature left with this many Hit Points, as a black pudding's half after it splits.
   [`${NS}:hpSet`]: z.strictObject({ actor: z.string(), hp: z.number().int() }),
   // Two creatures trading places in the Initiative order, as with Alert's Initiative Swap.
@@ -1119,6 +1126,23 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           effect.modifier.kind === "zone" &&
           !effect.modifier.follows
             ? { ...effect, modifier: { ...effect.modifier, at: to } }
+            : effect,
+        ),
+      }));
+    }
+    case `${NS}:zoneRetyped`: {
+      const {
+        actor: id,
+        sourceId,
+        area,
+      } = payload(EVENT_SCHEMAS[`${NS}:zoneRetyped`], event);
+      return updateActor(state, id, (actor) => ({
+        ...actor,
+        activeEffects: actor.activeEffects.map((effect) =>
+          effect.sourceId === sourceId &&
+          effect.modifier.kind === "zone" &&
+          effect.modifier.area
+            ? { ...effect, modifier: { ...effect.modifier, area } }
             : effect,
         ),
       }));
