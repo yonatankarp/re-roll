@@ -258,6 +258,9 @@ export const StateSchema = z.strictObject({
       defeatContinues: z.boolean().optional(),
       grid: GridSchema.optional(),
       walls: z.array(z.string()).optional(), // squares no one can enter, as "x,y"
+      openCorners: z.array(z.string()).optional(), // wall corners opened as the fight started (grid.ts)
+      // Rounds begun since anyone last took damage. Missing in older saves and before the first round ends.
+      calmRounds: z.number().int().optional(),
       terrain: TerrainSchema.optional(),
       map: FightMapSchema.optional(),
       loot: LootSchema.optional(), // found if the party wins
@@ -306,6 +309,7 @@ const CombatStartedSchema = z.strictObject({
   grid: GridSchema.optional(),
   positions: z.record(z.string(), SquareSchema).optional(),
   walls: z.array(z.string()).optional(),
+  openCorners: z.array(z.string()).optional(),
   terrain: TerrainSchema.optional(),
   map: FightMapSchema.optional(),
   loot: LootSchema.optional(),
@@ -660,7 +664,17 @@ function advanceTurn(state: DndState): DndState {
       },
     ]),
   );
-  return { ...state, actors, combat: { ...combat, index, round } };
+  const calmRounds = (combat.calmRounds ?? 0) + round - combat.round;
+  return {
+    ...state,
+    actors,
+    combat: {
+      ...combat,
+      index,
+      round,
+      ...(calmRounds > 0 ? { calmRounds } : {}),
+    },
+  };
 }
 
 function removeConcentration(state: DndState, casterId: string): DndState {
@@ -866,6 +880,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           ...(data.defeatContinues ? { defeatContinues: true } : {}),
           ...(data.grid ? { grid: data.grid } : {}),
           ...(data.walls ? { walls: data.walls } : {}),
+          ...(data.openCorners ? { openCorners: data.openCorners } : {}),
           ...(data.terrain ? { terrain: data.terrain } : {}),
           ...(data.map ? { map: data.map } : {}),
           ...(data.loot ? { loot: data.loot } : {}),
@@ -974,9 +989,14 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
     }
     case `${NS}:damaged`: {
       const data = payload(DamagedSchema, event);
-      return updateActor(state, data.actor, (actor) =>
+      const hurt = updateActor(state, data.actor, (actor) =>
         applyDamage(actor, data.amount, data.critical, data.massive),
       );
+      const { combat } = hurt;
+      if (!combat?.calmRounds || data.amount <= 0) return hurt;
+      const calm = { ...combat };
+      delete calm.calmRounds;
+      return { ...hurt, combat: calm };
     }
     case `${NS}:damagedFromInside`: {
       const data = payload(DamagedFromInsideSchema, event);
