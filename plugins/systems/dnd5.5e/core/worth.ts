@@ -29,7 +29,7 @@ import { grapplesOn } from "./combat/grapple.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX } from "./combat/ids.ts";
 import { DAMAGE_TO_PARTY, damageToParty } from "./combat/effects.ts";
-import { cureFor, dispellable } from "./combat/dispel.ts";
+import { cureFor, dispellable, spellLevelOf } from "./combat/dispel.ts";
 import { seesThrough } from "./sight.ts";
 import { formOf, weakestBeast } from "./forms.ts";
 import { legendOf } from "./legendary.ts";
@@ -931,6 +931,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
       // to a caster who sees through it, against the foes it hides.
       case "zone":
         if (effect.zone === "wall") return wallWorth(actor, target, foe);
+        if (effect.zone === "sunlight") return sunlightWorth(target, foe);
         if (action.activation.area) {
           return areaWorth(action, actor, target, effect.follows === true);
         }
@@ -973,14 +974,43 @@ export function makeJudge(context: Context, side: Actor): Judge {
           activation: { ...action.activation, resolution: area.resolution },
         })
       : 0;
+    // Silence or an Antimagic Field keeps a foe that casts from casting there.
+    const casts =
+      area.noSpells !== undefined &&
+      foe &&
+      stats(target).actions.some(
+        (item) => spellLevelOf(item.id, target, context) !== null,
+      );
     return (
       each * stay +
       (area.grants ?? []).reduce(
         (sum, modifier) => sum + modifierWorth(modifier, target, foe, stay),
         0,
       ) +
-      (area.difficult && foe ? 0.05 * threat(target) : 0)
+      (area.difficult && foe ? 0.05 * threat(target) : 0) +
+      (casts ? 0.3 * threat(target) * lasting(stay) : 0)
     );
+  };
+
+  // Sunlight on a foe it hampers: Disadvantage on its rolls, and the damage it takes there each turn.
+  const sunlightWorth = (target: Actor, foe: boolean): number => {
+    if (!foe) return 0;
+    const stay = Math.min(horizon, 2);
+    return stats(target).passives.reduce((sum, passive) => {
+      if (passive.kind !== "lightSensitive" || passive.light !== "sunlight") {
+        return sum;
+      }
+      const hampered = passive.disadvantage.includes("attacks") ? 0.35 : 0.1;
+      return (
+        sum +
+        hampered * threat(target) * lasting(stay) +
+        hurtWorth(
+          target,
+          stay * averageDamage(target, target, passive.damage),
+          true,
+        )
+      );
+    }, 0);
   };
 
   // A wall round the area keeps the foes inside from the party for a while, and a friend inside with them.

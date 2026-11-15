@@ -40,7 +40,7 @@ import {
 import { AimSchema, PickSchema } from "./combat/actions.ts";
 import { multiattackExtras } from "./combat/effects.ts";
 import { AVERAGE, makeJudge } from "./worth.ts";
-import { blockedSquares } from "./zones.ts";
+import { blockedSquares, zoneHarm } from "./zones.ts";
 import { TACTIC } from "./tactics.ts";
 
 // The Dodge action (actions.ts), which the party weighs like any other choice.
@@ -140,8 +140,9 @@ export function stepToward(
   const squares = [...gaps.keys()];
   const closest = Math.min(...gaps.values());
   if (squares.length === 0 || closest >= now) return null;
-  // Of the squares that get it closest, the one off difficult terrain and nearest. One that fights from range
-  // also wants the most cover from its foes; a melee creature is going up to them anyway.
+  // Of the squares that get it closest, the one out of harm's way (a foe's cloud or aura, sunlight that burns
+  // it), then off difficult terrain and nearest. One that fights from range also wants the most cover from its
+  // foes; a melee creature is going up to them anyway.
   const difficult = difficultSquares(state);
   const ranged = reach > 10;
   const ranked = squares
@@ -164,8 +165,15 @@ export function stepToward(
           )
         : 0,
       rough: Number(difficult.has(squareKey(item.square))),
+      harm: zoneHarm(actor, item.square, state, context),
     }))
-    .sort((a, b) => b.cover - a.cover || a.rough - b.rough || a.feet - b.feet);
+    .sort(
+      (a, b) =>
+        a.harm - b.harm ||
+        b.cover - a.cover ||
+        a.rough - b.rough ||
+        a.feet - b.feet,
+    );
   return ranked[0]?.square ?? null;
 }
 
@@ -228,9 +236,16 @@ function approach(actor: Actor, context: Context): Square | null {
   const squares = [...moveSquares(actor, state, stats)].sort(
     (a, b) => a.feet - b.feet,
   );
-  // The best attack it can reach this turn, by the shortest walk; else it heads for the best of all.
+  // The best attack it can reach this turn, by the shortest walk out of harm's way; else it heads for the best
+  // of all.
   for (const option of better) {
-    const square = squares.find((item) => hitsFrom(item.square, option));
+    const [square] = squares
+      .filter((item) => hitsFrom(item.square, option))
+      .map((item) => ({
+        ...item,
+        harm: zoneHarm(actor, item.square, state, context),
+      }))
+      .sort((a, b) => a.harm - b.harm || a.feet - b.feet);
     if (square) return square.square;
   }
   const [best] = better;

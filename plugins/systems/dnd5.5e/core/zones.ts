@@ -353,3 +353,31 @@ export function silencedSpells(
     return kinds.has("all") || /\bV\b/.test(spell.components);
   };
 }
+
+// How many harmful things would act on `actor` at `at`: a foe's zone that acts on those in it, and sunlight that
+// burns it. Movement ranks squares by it, so a creature closes in without standing in a cloud it needn't.
+export function zoneHarm(
+  actor: Actor,
+  at: Square,
+  state: DndState,
+  access: ContentAccess,
+): number {
+  const zones = zonesOf(state, access).filter(
+    (zone) =>
+      zone.area?.resolution !== undefined &&
+      zone.area.when !== undefined &&
+      state.actors[zone.owner]?.side !== actor.side &&
+      inZone(zone, at) &&
+      affects(zone, actor, state, access),
+  ).length;
+  const burns =
+    actor.source.kind !== "character" &&
+    deriveStats(actor, access).passives.some(
+      (passive) =>
+        passive.kind === "lightSensitive" &&
+        passive.damage.length > 0 &&
+        passive.light === "sunlight" &&
+        sunlit(at, state),
+    );
+  return zones + (burns ? 1 : 0);
+}
