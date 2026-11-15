@@ -313,6 +313,15 @@ function retaliation(
   if (!self && distanceFeet(bearer.position, attacker.position) > range) {
     return {};
   }
+  // Hellish Rebuke's fire on an iron golem would only heal it, so it's held back.
+  const { resolution } = action.activation;
+  const absorbs = self ? [] : damageResponses(attacker, context).absorbs;
+  if (
+    "damage" in resolution &&
+    resolution.damage.some(({ type }) => absorbs.includes(type))
+  ) {
+    return {};
+  }
   const result = resolveAction(
     action,
     bearer,
