@@ -13,7 +13,7 @@ import {
   equipped,
   hasCondition,
 } from "./state.ts";
-import { type Stats, evaluateFormula, lookup } from "./stats.ts";
+import { type Stats, deriveStats, evaluateFormula, lookup } from "./stats.ts";
 import { HIT_DICE } from "./combat/ids.ts";
 
 // Species traits and feats that change rolls combat makes, kept out of combat.ts behind one call each.
@@ -63,6 +63,39 @@ export function traitSaveAdvantage(
           ))) ||
       (passive.kind === "concentrationAdvantage" &&
         conditions.includes("concentration")),
+  );
+}
+
+// Evasion: a save for half damage the bearer can still dodge, unless it's Incapacitated.
+export function evades(
+  target: Actor,
+  ability: Ability,
+  access: ContentAccess,
+): boolean {
+  return (
+    !hasCondition(target, ...INCAPACITATING) &&
+    deriveStats(target, access).passives.some(
+      (passive) =>
+        passive.kind === "evasion" && (passive.anySave || ability === "dex"),
+    )
+  );
+}
+
+// Blood Frenzy, Bloodied Fury and the like: Advantage on attack rolls in a state the trait names.
+export function traitAttackAdvantage(
+  stats: Stats,
+  attacker: Actor,
+  target: Actor,
+  targetStats: Stats,
+): boolean {
+  return stats.passives.some(
+    (passive) =>
+      passive.kind === "attackAdvantage" &&
+      (passive.when === "bloodied"
+        ? attacker.hp * 2 <= stats.maxHp
+        : passive.when === "targetHurt"
+          ? target.hp < targetStats.maxHp
+          : hasCondition(target, "frightened")),
   );
 }
 

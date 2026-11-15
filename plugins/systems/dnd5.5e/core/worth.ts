@@ -30,7 +30,7 @@ import { ALL, ITEM_PREFIX } from "./combat/ids.ts";
 import { DAMAGE_TO_PARTY, damageToParty } from "./combat/effects.ts";
 import { cureFor, dispellable } from "./combat/dispel.ts";
 import { seesThrough } from "./sight.ts";
-import { formOf } from "./forms.ts";
+import { formOf, weakestBeast } from "./forms.ts";
 import { summonedActors } from "./combat/summon.ts";
 import { nextHitDie, steadyShot } from "./trait-rules.ts";
 import {
@@ -777,7 +777,10 @@ export function makeJudge(context: Context, side: Actor): Judge {
       // A foe in a weak Beast's shape has lost most of what it does, like an Incapacitated one, until its
       // borrowed Hit Points run out.
       case "polymorph":
-        return foe && !isDown(target) && formOf(target) === null
+        return foe &&
+          !isDown(target) &&
+          formOf(target) === null &&
+          weakestBeast(target, context) !== null
           ? 0.8 *
               Math.max(threat(target), 0.25 * meanFoeThreat) *
               lasting(rounds(effect.duration, saved, false, false))

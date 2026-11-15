@@ -46,6 +46,7 @@ import {
   nextHitDie,
   piercing,
   interposedShield,
+  evades,
   rescuedSave,
   traitSaveAdvantage,
 } from "../trait-rules.ts";
@@ -487,6 +488,7 @@ export function leafEvents(
       }
       case "note":
       case "reduceDamage":
+      case "acAgainstHit":
       case "teleport":
       case "zone":
       case "summon":
@@ -852,8 +854,12 @@ export function resolveAction(
               );
         events.push(...rescued);
         const saved = rolledSave || resisted !== null || rescued.length > 0;
+        const evaded =
+          resolution.onSuccessDamage === "half" &&
+          evades(target, resolution.ability, context);
         const interposed =
           saved &&
+          !evaded &&
           damage.length > 0 &&
           resolution.ability === "dex" &&
           resolution.onSuccessDamage === "half" &&
@@ -862,6 +868,7 @@ export function resolveAction(
             : null;
         if (interposed) events.push(interposed);
         applyRolled(target, damage, (amount) => {
+          if (evaded) return saved ? 0 : halved(amount);
           if (!saved || resolution.onSuccessDamage === "full") return amount;
           return resolution.onSuccessDamage === "half" &&
             !spared.has(target.id) &&

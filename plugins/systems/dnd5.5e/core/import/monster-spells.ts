@@ -324,10 +324,11 @@ export function spellcastingActions(
   });
 }
 
-// "The priest casts Bless, Dispel Magic, or Healing Word, using …": each spell is an option of the same action.
+// "The priest casts Bless, Dispel Magic, or Healing Word, using …", or "uses Spellcasting to cast Fear": each spell
+// is an option of the same action.
 export const castItems = (text: string): string[] =>
   namesIn(
-    /\bcasts (.+?)(?:,? (?:using|requiring|with|on|targeting|twice|at|in response)\b|\.(?:\s|$)|$)/.exec(
+    /\b(?:casts|to cast) (.+?)(?:,? (?:using|requiring|with|on|targeting|twice|at|in response)\b|\.(?:\s|$)|$)/.exec(
       text,
     )?.[1] ?? "",
   );

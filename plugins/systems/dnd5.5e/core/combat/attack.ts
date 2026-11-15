@@ -64,7 +64,9 @@ import {
   rerolledTypes,
   piercing,
   rescuedSave,
+  evades,
   steadyShot,
+  traitAttackAdvantage,
   weaponDamageDice,
 } from "../trait-rules.ts";
 import {
@@ -169,6 +171,7 @@ function reactionFor(
   ac: number,
   context: Context,
   critical: boolean,
+  melee: boolean,
 ): KnownAction | null {
   if (
     !target.budget.reaction ||
@@ -183,6 +186,7 @@ function reactionFor(
       const { activation } = action;
       if (!activation.trigger?.hitByAttack || !canAfford(action, target, stats))
         return false;
+      if (activation.trigger.melee && !melee) return false;
       const { resolution } = activation;
       if (resolution.kind !== "automatic") return false;
       if (resolution.effects.some((effect) => effect.kind === "reduceDamage")) {
@@ -190,6 +194,7 @@ function reactionFor(
       }
       if (critical) return false;
       const acBonus = resolution.effects.reduce((sum, effect) => {
+        if (effect.kind === "acAgainstHit") return sum + effect.bonus;
         return effect.kind === "modifier" &&
           effect.modifier.kind === "bonus" &&
           effect.modifier.to === "ac"
@@ -440,7 +445,8 @@ export function runAttackRoll(
     ) ||
     (hasCondition(target, "prone") && close) ||
     (hasPassive(stats, "grappledAdvantage") &&
-      grapplesOn(target).some(({ casterId }) => casterId === attacker.id));
+      grapplesOn(target).some(({ casterId }) => casterId === attacker.id)) ||
+    traitAttackAdvantage(stats, attacker, target, targetStats);
   // Protection: an ally's Shield gives this roll, and the others against the target, Disadvantage.
   const shielded = guardFor(target, attacker, "allyAttacked", context);
   const hampered =
@@ -577,7 +583,14 @@ export function runAttackRoll(
     };
   }
 
-  const reaction = reactionFor(target, total, ac, context, critical);
+  const reaction = reactionFor(
+    target,
+    total,
+    ac,
+    context,
+    critical,
+    meleeReach(action) !== null,
+  );
   if (reaction) {
     return {
       events: [report, ...spent],
@@ -614,6 +627,7 @@ export const HitSchema = z.object({
   slotLevel: z.number().optional(),
   halve: z.boolean().optional(), // set by a reaction like Uncanny Dodge
   reduceBy: z.number().optional(), // set by a reaction like Deflect Attacks
+  acBonus: z.number().optional(), // set by a reaction like Parry, against this hit only
   noModifier: z.boolean().optional(),
   poleStrike: z.boolean().optional(),
 });
@@ -645,6 +659,13 @@ export function runAfterReaction(
       (effect.amount ? rollAmount(effect.amount, stats, context.dice) : 0),
     0,
   );
+  const acBonus = (
+    resolution.kind === "automatic" ? resolution.effects : []
+  ).reduce(
+    (sum, effect) =>
+      effect.kind === "acAgainstHit" ? sum + effect.bonus : sum,
+    0,
+  );
   // The rest of the attack is held here and rechecked once the reaction has taken effect.
   return {
     events: [...payCosts(action, target, context), ...(result.events ?? [])],
@@ -654,6 +675,7 @@ export function runAfterReaction(
         ...hit,
         ...(lessened.some((effect) => effect.halve) ? { halve: true } : {}),
         ...(reduceBy > 0 ? { reduceBy: (hit.reduceBy ?? 0) + reduceBy } : {}),
+        ...(acBonus > 0 ? { acBonus: (hit.acBonus ?? 0) + acBonus } : {}),
       }),
     ],
   };
@@ -667,7 +689,8 @@ export function runRecheckHit(
   const target = actorOf(state, payload.target);
   const ac =
     deriveStats(target, context).ac +
-    coverAgainst(state, actorOf(state, payload.attacker), target);
+    coverAgainst(state, actorOf(state, payload.attacker), target) +
+    (payload.acBonus ?? 0);
   if (!payload.critical && payload.total < ac) return {};
   const guard = intercepted(payload, context);
   return { events: guard.events, frames: [frame("applyHit", guard.hit)] };
@@ -1163,11 +1186,15 @@ function nestedSave(
     save.damage.flatMap(({ amount, type }) => {
       const total = rollAmount(amount, stats, context.dice);
       const scaled =
-        !succeeded || save.onSuccessDamage === "full"
-          ? total
-          : save.onSuccessDamage === "half"
-            ? halved(total)
-            : 0;
+        save.onSuccessDamage === "half" && evades(target, save.ability, context)
+          ? succeeded
+            ? 0
+            : halved(total)
+          : !succeeded || save.onSuccessDamage === "full"
+            ? total
+            : save.onSuccessDamage === "half"
+              ? halved(total)
+              : 0;
       return scaled > 0
         ? [{ amount: finalDamage(scaled, type, responses), type }]
         : [];
