@@ -4,7 +4,11 @@ import {
   schoolCastEvents,
 } from "../plugins/systems/dnd5.5e/core/combat/school.ts";
 import { NS } from "../plugins/systems/dnd5.5e/core/state.ts";
-import { choiceOptions } from "../plugins/systems/dnd5.5e/core/character.ts";
+import {
+  choiceOptions,
+  levelEntry,
+} from "../plugins/systems/dnd5.5e/core/character.ts";
+import { completeDraft } from "../plugins/systems/dnd5.5e/core/character-sheet.ts";
 import { ClassSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
   deriveStats,
@@ -241,5 +245,31 @@ describe("spell-table feats", () => {
     };
     expect(fuel([])).toBe(10);
     expect(fuel(["fueled"])).toBe(0);
+  });
+
+  it("fills the ability a background's feat asks when the sheet completes a hero", async () => {
+    const run = await testRun();
+    const draft = completeDraft(
+      {
+        classId: "srd52:class/fighter",
+        speciesId: "test:species/plain",
+        backgroundId: "test:background/gifted",
+        scores: [],
+        picks: {},
+      },
+      "standard",
+      run,
+    );
+    const { answers } = levelEntry(draft, null, run);
+    // A companion's pick: the best of Int, Wis or Cha.
+    expect(answers).toContainEqual(
+      expect.objectContaining({
+        kind: "spellAbility",
+        feat: "test:feat/chosen",
+      }),
+    );
+    expect(answers).toContainEqual(
+      expect.objectContaining({ kind: "spells", feat: "test:feat/chosen" }),
+    );
   });
 });

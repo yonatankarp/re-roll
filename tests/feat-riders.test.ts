@@ -93,36 +93,60 @@ describe("feat and trait riders", () => {
     expect(against("someone")).toBe(false);
   });
 
-  it("puts a damage rider on the first creature a spell damages, as Putrefy does on a spell", async () => {
+  it("puts a spell's damage rider on the first creature it damages, as Putrefy does, and no attack-only rider", async () => {
     const run = await testRun();
-    const caster = hero(["hamstring"]);
-    const foes = ["a", "b"].map((id) => ({
-      ...hero([], { id }),
+    const added = (traits: readonly string[]) => {
+      const caster = hero(traits);
+      const foes = ["a", "b"].map((id) => ({
+        ...hero([], { id }),
+        side: "enemy" as const,
+        hp: 30,
+      }));
+      const spell: KnownAction = {
+        ...action({
+          kind: "automatic",
+          damage: [{ amount: { dice: "1d6" }, type: "slashing" }],
+          effects: [],
+        }),
+        spellLevel: 1,
+      };
+      const { events = [] } = resolveAction(
+        spell,
+        caster,
+        foes,
+        contextOf(run, [caster, ...foes], scripted([]).dice),
+      );
+      return events.filter((event) => event.kind === `${NS}:effectAdded`)
+        .length;
+    };
+    expect(added(["necrosis"])).toBe(1);
+    expect(added(["hamstring"])).toBe(0); // its rider is for attacks only
+  });
+
+  it("keeps an invisibility's Advantage on the attack that ends it", async () => {
+    const run = await testRun();
+    const attacker = {
+      ...hero([]),
+      position: { x: 0, y: 0 },
+      activeEffects: [invisible("attack")],
+    };
+    const foe = {
+      ...hero([], { id: "foe" }),
       side: "enemy" as const,
       hp: 30,
-    }));
-    const spell: KnownAction = {
-      ...action({
-        kind: "automatic",
-        damage: [{ amount: { dice: "1d6" }, type: "slashing" }],
-        effects: [],
-      }),
-      spellLevel: 1,
+      position: { x: 1, y: 0 },
     };
-    const { events = [] } = resolveAction(
-      spell,
-      caster,
-      foes,
-      contextOf(run, [caster, ...foes], scripted([]).dice),
+    const { dice, counts } = scripted([]);
+    const rolled = run.system.frames[`${NS}:attackRoll`]?.run(
+      {
+        attacker: PLAYER_ACTOR,
+        actionId: "weapon:srd52:item/longsword",
+        target: "foe",
+      },
+      contextOf(run, [attacker, foe], dice),
     );
-    // Hamstring's once-a-turn rider, on the first foe only.
-    expect(
-      events.filter(
-        (event) =>
-          event.kind === `${NS}:oncePerTurnUsed` ||
-          event.kind === `${NS}:effectAdded`,
-      ),
-    ).toHaveLength(2);
+    expect(counts[20]).toBe(2);
+    expect(kinds(rolled?.events ?? [])).toContain(`${NS}:effectEnded`);
   });
 
   it("gives Advantage on Strength saves beside an ally, for the bearer and the ally, as Stronger Together does", async () => {

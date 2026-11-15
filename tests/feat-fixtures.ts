@@ -429,6 +429,14 @@ const FIXTURES = [
     featOr: "darkGift",
   },
   {
+    id: "test:background/gifted",
+    name: "Gifted",
+    abilities: ["str", "dex", "con"],
+    feat: "test:feat/chosen",
+    skills: ["athletics", "survival"],
+    tool: "Test Tools",
+  },
+  {
     id: "test:background/plain",
     name: "Plain",
     abilities: ["str", "dex", "con"],
@@ -494,6 +502,20 @@ const FIXTURES = [
   trait("life", [{ kind: "schoolCast", school: "abjuration", rider: "life" }]),
   trait("fueled", [
     { kind: "schoolCast", school: "evocation", rider: "fueled" },
+  ]),
+  trait("necrosis", [
+    {
+      kind: "damageRider",
+      damage: "slashing",
+      spells: true,
+      effects: [
+        {
+          kind: "applyCondition",
+          condition: "poisoned",
+          duration: { until: "yourNextTurnStart" },
+        },
+      ],
+    },
   ]),
   trait("together", [{ kind: "allySaveAdvantage", abilities: ["str"] }]),
   trait("bountiful", [

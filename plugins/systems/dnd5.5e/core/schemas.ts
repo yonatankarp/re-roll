@@ -605,6 +605,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     critical: z.boolean().default(false),
     oncePerTurn: z.boolean().default(false),
     resource: z.string().optional(), // each use spends one, as Putrefy's once per rest
+    spells: z.literal(true).optional(), // a spell's damage triggers it too, as Putrefy's
     effects: z.array(LeafEffectSchema).min(1),
   }),
   // An attack's damage of these types lessened while the bearer wears this armor, as with Heavy Armor Master.

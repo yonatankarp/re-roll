@@ -97,7 +97,11 @@ export function payCosts(
   context: Context,
   slotLevel?: number,
 ): SystemEvent[] {
-  const events: SystemEvent[] = [...actingEnds(actor, action)];
+  // An attack ends them once rolled, so its own roll still has their Advantage (attack.ts).
+  const events: SystemEvent[] =
+    action.activation.resolution.kind === "attack"
+      ? []
+      : actingEnds(actor, action);
   for (const cost of action.activation.cost) {
     if (cost === "action" || cost === "bonusAction" || cost === "reaction") {
       events.push(
@@ -334,9 +338,11 @@ export function damageRiders(
   critical: boolean,
   stats: Stats,
   context: Context,
+  spell = false, // from a spell's damage, which only a rider with `spells` takes
 ): SystemEvent[] {
   return stats.passives.flatMap((passive) => {
     if (passive.kind !== "damageRider" || !types.has(passive.damage)) return [];
+    if (spell && !passive.spells) return [];
     if (passive.critical && !critical) return [];
     const key = `rider:${passive.damage}:${String(passive.critical)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return [];
@@ -883,6 +889,7 @@ export function resolveAction(
           false,
           stats,
           context,
+          true,
         ),
       );
     }

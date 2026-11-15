@@ -94,6 +94,7 @@ import {
   withUpcasts,
 } from "./queries.ts";
 import {
+  actingEnds,
   concentrationFrame,
   damageRiders,
   dealEvents,
@@ -575,6 +576,7 @@ export function runAttackRoll(
         ]
       : []),
     ...onceEnded(attacker, "attacks"),
+    ...actingEnds(attacker, action),
     ...onceEnded(target, "attacksAgainst", attacker.id),
     ...revealEvents(attacker),
   ];
