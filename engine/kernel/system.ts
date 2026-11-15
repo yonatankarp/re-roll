@@ -117,6 +117,7 @@ export interface SystemContext<S> {
   readonly dice: Dice;
   readonly content: (id: string) => ContentEntry | undefined;
   readonly contentIds: () => readonly string[];
+  readonly setting?: string | undefined; // the adventure's, as ContentAccess has it
   // Asks the player in the middle of a step, as for Lucky on a save, and returns their answer. The step is set
   // aside and run again from the start once they answer, with the same dice, so it must stay pure. Missing where
   // nobody can be asked, as in a policy's or a test's context.
@@ -247,12 +248,15 @@ export interface RunSetup {
   readonly dice: Dice;
   readonly content: (id: string) => ContentEntry | undefined;
   readonly contentIds: () => readonly string[];
+  readonly setting?: string | undefined; // the adventure's, as ContentAccess has it
 }
 
 export interface ContentAccess {
   readonly content: (id: string) => ContentEntry | undefined;
   // Highest-precedence plugin first, then by id, so when two plugins name the same thing the first one wins.
   readonly contentIds: () => readonly string[];
+  // The world the adventure is set in, such as "ravenloft", for content that needs one. None outside a run.
+  readonly setting?: string | undefined;
 }
 
 export interface ImportSource {

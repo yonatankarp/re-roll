@@ -53,6 +53,7 @@ export function createRunContext(
     adventure,
     content: registry.content,
     contentIds: registry.contentIds,
+    setting: adventure.setting,
   };
 }
 
@@ -298,6 +299,7 @@ function settle(
     dice,
     content: run.content,
     contentIds: run.contentIds,
+    setting: run.setting,
     ...(ask ? { ask } : {}),
   });
 
@@ -413,6 +415,7 @@ export function startRun(
     dice: world,
     content: run.content,
     contentIds: run.contentIds,
+    setting: run.setting,
   });
 
   const variants: Record<string, string> = {};
