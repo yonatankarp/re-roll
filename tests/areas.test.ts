@@ -34,6 +34,7 @@ import {
   NS,
   applyDndEvent,
   dndEvent,
+  frame,
   freshActor,
   hasCondition,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
@@ -41,6 +42,7 @@ import {
   deriveStats,
   type KnownAction,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { zoneFrames } from "../plugins/systems/dnd5.5e/core/combat/areas.ts";
 import { walkSpeed } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import {
   blockedSquares,
@@ -711,6 +713,115 @@ describe("areas spells leave", () => {
       context,
     ).map((item) => `${String(item.square.x)},${String(item.square.y)}`);
     expect(squares).not.toContain("4,5");
+  });
+});
+
+const beam = (radius: number, follows = false): KnownAction =>
+  spell("Beam", {
+    cost: ["action", "slot"],
+    targeting: follows
+      ? { area: { shape: "emanation", radius }, range: "self", side: "enemy" }
+      : { area: { shape: "sphere", radius }, range: 120, side: "enemy" },
+    resolution: {
+      kind: "automatic",
+      damage: [],
+      effects: [
+        {
+          kind: "zone",
+          zone: "area",
+          radius,
+          duration: { concentration: true, minutes: 1 },
+          ...(follows ? { follows: true } : {}),
+        },
+      ],
+    },
+    area: {
+      side: "enemy",
+      when: "turnEnd",
+      enters: true,
+      resolution: {
+        ...save(30, []),
+        damage: [{ amount: { bonus: { base: 7 } }, type: "radiant" }],
+      },
+    },
+  });
+
+describe("walking into an area", () => {
+  it("acts on a creature that walks through it, once a turn, and again on a later turn", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 0, 6));
+    const cast = resolveAction(
+      beam(10),
+      actor(start, PLAYER_ACTOR),
+      [],
+      contextOf(run, start, LOW),
+      3,
+      false,
+      { x: 3, y: 6 },
+    );
+    const lit = apply(start, cast.events ?? []);
+    const theirs: DndState = lit.combat
+      ? { ...lit, combat: { ...lit.combat, index: 1 } }
+      : lit;
+    const walked = settle(
+      run,
+      theirs,
+      [frame("move", { actor: "foe", answer: "6,6" })],
+      LOW,
+    );
+    expect(damageTo(walked.events, "foe")).toEqual([7]);
+    expect(actor(walked.state, "foe").position).toEqual({ x: 6, y: 6 });
+    // In and staying put: the walk in was this turn's save, so ending the turn there is not another.
+    const stopped = settle(
+      run,
+      theirs,
+      [frame("move", { actor: "foe", answer: "3,6" })],
+      LOW,
+    );
+    expect(damageTo(stopped.events, "foe")).toEqual([7]);
+    const ended = settle(
+      run,
+      stopped.state,
+      zoneFrames(
+        actor(stopped.state, "foe"),
+        "end",
+        contextOf(run, stopped.state, LOW),
+      ),
+      LOW,
+    );
+    expect(damageTo(ended.events, "foe")).toEqual([]);
+    const later: DndState = stopped.state.combat
+      ? { ...stopped.state, combat: { ...stopped.state.combat, round: 2 } }
+      : stopped.state;
+    const next = settle(
+      run,
+      later,
+      zoneFrames(actor(later, "foe"), "end", contextOf(run, later, LOW)),
+      LOW,
+    );
+    expect(damageTo(next.events, "foe")).toEqual([7]);
+  });
+
+  it("acts on a foe a moving area is brought up to, as Spirit Guardians", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 8, 0));
+    const cast = resolveAction(
+      beam(15, true),
+      actor(start, PLAYER_ACTOR),
+      [],
+      contextOf(run, start, LOW),
+      3,
+      false,
+    );
+    const guarded = apply(start, cast.events ?? []);
+    const walked = settle(
+      run,
+      guarded,
+      [frame("move", { actor: PLAYER_ACTOR, answer: "5,0" })],
+      LOW,
+    );
+    expect(damageTo(walked.events, "foe")).toEqual([7]);
+    expect(damageTo(walked.events, PLAYER_ACTOR)).toEqual([]);
   });
 });
 

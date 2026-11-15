@@ -598,6 +598,8 @@ export const AreaEffectSchema = z.strictObject({
     .enum(["turnStart", "turnEnd", "ownerTurnStart", "ownerTurnEnd"])
     .optional(),
   resolution: ResolutionSchema.optional(),
+  // it also acts on a creature that walks into it, and on each creature only once a turn, as Spirit Guardians
+  enters: z.literal(true).optional(),
   targets: z.number().int().min(1).optional(),
   grants: z.array(ModifierSchema).min(1).optional(),
   noHealing: z.literal(true).optional(), // no Hit Points regained in it, as Life Suppression

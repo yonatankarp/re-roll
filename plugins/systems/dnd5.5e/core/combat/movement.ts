@@ -35,6 +35,7 @@ import {
   resolveAction,
 } from "./effects.ts";
 import { afterDamage, reactFrames } from "./reactions.ts";
+import { areaEntry, entryFrames } from "./areas.ts";
 import {
   coverBetween,
   distanceFeet,
@@ -265,6 +266,7 @@ export function runMove(
   const actor = actorOf(state, payload.actor);
   const to = parseSquare(payload.answer);
   if (payload.answer === STAY || !to) return {};
+  if (payload.rest && isDown(actor)) return {};
   const step = moveSquares(
     actor,
     state,
@@ -277,9 +279,12 @@ export function runMove(
   }
   // A walk into the reach of a reaction such as Polearm Master's stops on the square it enters, for the reaction,
   // and then goes on from there.
+  // So does a walk into an area that acts on whoever enters it, as Moonbeam, for its save.
   const entered = enteredAt(actor, step.path, context);
-  const cut = entered === null ? undefined : step.path[entered];
-  if (entered !== null && cut && entered < step.path.length - 1) {
+  const entry = areaEntry(actor, step.path, context);
+  const at = Math.min(entered ?? Infinity, entry?.index ?? Infinity);
+  const cut = step.path[at];
+  if (cut && at < step.path.length - 1) {
     return {
       frames: [
         frame("move", { actor: actor.id, answer: squareKey(cut) }),
@@ -334,6 +339,7 @@ export function runMove(
         y: to.y,
         feet: step.feet,
       }),
+      ...entryFrames(actor, actor.position, to, entry?.zones ?? [], context),
       ...(entered !== null && from
         ? [frame("react", { kind: "entered", actor: actor.id, from })]
         : []),

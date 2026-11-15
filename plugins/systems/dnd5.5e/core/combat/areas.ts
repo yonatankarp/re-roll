@@ -22,7 +22,7 @@ import {
   rollAmount,
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
-import { distanceFeet } from "../grid.ts";
+import { distanceFeet, type Square } from "../grid.ts";
 import { lightAt } from "../sight.ts";
 import {
   affects,
@@ -129,6 +129,83 @@ export function zoneFrames(
   return frames;
 }
 
+// Kept in a creature's usedThisTurn: an area that acts on whoever enters it has caught it on this turn, so it acts
+// on it only once a turn. The turn is in the key, since the mark stays until the creature's own turn clears it.
+export function caughtKey(zone: Zone, state: DndState): string {
+  const round = state.combat?.round ?? 0;
+  const index = state.combat?.index ?? 0;
+  return `area:${zone.owner}|${zone.sourceId}@${String(round)}.${String(index)}`;
+}
+
+const caught = (zone: Zone, actor: Actor, state: DndState): boolean =>
+  zone.area?.enters === true &&
+  actor.usedThisTurn.includes(caughtKey(zone, state));
+
+const entering = (state: DndState): readonly Zone[] =>
+  zonesOf(state).filter((zone) => zone.area?.enters && zone.area.resolution);
+
+// Where a walk first takes `walker` into an area that acts on whoever enters it, as Moonbeam: the index on the
+// path, and the areas it enters there.
+export function areaEntry(
+  walker: Actor,
+  path: readonly Square[],
+  context: ContentAccess & { readonly state: DndState },
+): { readonly index: number; readonly zones: readonly Zone[] } | null {
+  const { state } = context;
+  const zones = entering(state).filter(
+    (zone) =>
+      !caught(zone, walker, state) && affects(zone, walker, state, context),
+  );
+  if (zones.length === 0) return null;
+  for (let index = 0; index < path.length; index += 1) {
+    const square = path[index] ?? null;
+    const from = index === 0 ? walker.position : (path[index - 1] ?? null);
+    const into = zones.filter(
+      (zone) => inZone(zone, square) && !inZone(zone, from),
+    );
+    if (into.length > 0) return { index, zones: into };
+  }
+  return null;
+}
+
+// The ticks of the areas `walker` has walked into, and of its own moving areas that now reach creatures they didn't
+// as it set out from `from`, as Spirit Guardians brought up to a foe.
+// shortcut: a moving area is judged where the walk ends, so a creature it only passes over isn't caught.
+export function entryFrames(
+  walker: Actor,
+  from: Square | null,
+  to: Square,
+  into: readonly Zone[],
+  context: ContentAccess & { readonly state: DndState },
+): Frame[] {
+  const { state } = context;
+  const tick = (zone: Zone, targets: readonly string[]): Frame =>
+    frame("zoneTick", { owner: zone.owner, sourceId: zone.sourceId, targets });
+  const swept = entering(state).flatMap((zone) => {
+    if (!zone.follows || zone.owner !== walker.id || !from) return [];
+    const before = { ...zone, at: from };
+    const after = { ...zone, at: to };
+    const reached = Object.values(state.actors).filter(
+      (item) =>
+        item.id !== walker.id &&
+        item.position !== null &&
+        !inZone(before, item.position) &&
+        inZone(after, item.position) &&
+        !caught(zone, item, state) &&
+        affects(zone, item, state, context),
+    );
+    return reached.length > 0
+      ? [
+          tick(
+            zone,
+            reached.map((item) => item.id),
+          ),
+        ]
+      : [];
+  });
+  return [...into.map((zone) => tick(zone, [walker.id])), ...swept];
+}
+
 export const ZoneTickSchema = z.object({
   owner: z.string(),
   sourceId: z.string(),
@@ -151,14 +228,23 @@ export function runZoneTick(
     const target = state.actors[id];
     return target &&
       inZone(zone, target.position) &&
-      affects(zone, target, state, context)
+      affects(zone, target, state, context) &&
+      !caught(zone, target, state)
       ? [target]
       : [];
   });
   const action = zoneAction(zone, zone.name ?? "");
   if (targets.length === 0 || !action) return {};
+  const marks = zone.area?.enters
+    ? targets.map((target) =>
+        dndEvent(`${NS}:oncePerTurnUsed`, {
+          actor: target.id,
+          key: caughtKey(zone, state),
+        }),
+      )
+    : [];
   const result = resolveAction(action, owner, targets, context, zone.level);
-  const events = [...(result.events ?? [])];
+  const events = [...marks, ...(result.events ?? [])];
   const { maxDamage } = zone.area ?? {};
   if (maxDamage !== undefined) {
     const dealt = events.reduce(
