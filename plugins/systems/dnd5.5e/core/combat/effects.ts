@@ -8,6 +8,7 @@ import {
   modifierFor,
   rerollingOnes,
   rollAmount,
+  wishedKey,
   saveBonus,
   spellSaveDc,
   type Stats,
@@ -101,6 +102,10 @@ import { liftEvents } from "./falling.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
+import { damageTypeFrame } from "./damage-choice.ts";
+import { weaponAttackResult } from "./weapon-spell.ts";
+import { duelBroken, duelDamaged } from "./duel.ts";
+import { wishFrame } from "./wish.ts";
 import {
   actorOf,
   allies,
@@ -135,6 +140,17 @@ export function payCosts(
       ? []
       : actingEnds(actor, action)),
     ...kitUse(actor, action, context),
+    // Wish's copy is cast once.
+    ...actor.activeEffects.flatMap(({ modifier }) =>
+      modifier.kind === "wished" && action.id === `spell:${modifier.spell}`
+        ? [
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: actor.id,
+              key: wishedKey(modifier.spell),
+            }),
+          ]
+        : [],
+    ),
   ];
   for (const cost of action.activation.cost) {
     if (cost === "action" || cost === "bonusAction" || cost === "reaction") {
@@ -555,13 +571,18 @@ export function dealEvents(
   let dealt = 0;
   for (const hit of hits) {
     const current = state.actors[target.id] ?? target;
+    const reduced = reducedHit(current, hit.amount, hit.type, {
+      ...context,
+      state,
+    });
     // A reaction such as Vitality Ward may lessen it before it lands.
-    const lessened = beforeDamage(current, hit.amount, hit.type, {
+    const lessened = beforeDamage(current, reduced.amount, hit.type, {
       ...context,
       state,
     });
     const { amount, type } = { ...hit, amount: lessened.amount };
     for (const event of [
+      ...reduced.events,
       ...lessened.events,
       ...damageEvents(current, amount, type, critical, { ...context, state }),
     ]) {
@@ -615,6 +636,35 @@ export function dealEvents(
     }
   }
   return { events, dealt };
+}
+
+// Resistance (the cantrip): damage of the type picked is cut by a die, once a turn.
+function reducedHit(
+  target: Actor,
+  amount: number,
+  type: Damage["type"],
+  context: Context,
+): { amount: number; events: SystemEvent[] } {
+  const effect = target.activeEffects.find(
+    ({ modifier }) =>
+      modifier.kind === "damageReduction" && modifier.damage === type,
+  );
+  const { combat } = context.state;
+  if (effect?.modifier.kind !== "damageReduction" || amount <= 0) {
+    return { amount, events: [] };
+  }
+  // usedThisTurn clears only as the bearer's own turn starts, so the key names the turn.
+  const key = `${effect.sourceId}@${String(combat?.round ?? 0)}:${String(combat?.index ?? 0)}`;
+  if (target.usedThisTurn.includes(key)) return { amount, events: [] };
+  const cut = rollAmount(
+    effect.modifier.amount,
+    deriveStats(target, context),
+    context.dice,
+  );
+  return {
+    amount: Math.max(0, amount - cut),
+    events: [dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key })],
+  };
 }
 
 // A timed spell's minutes, and a turn of the target's, are counted in rounds by its `lasts` (lastsFor).
@@ -793,6 +843,7 @@ export function leafEvents(
         );
         break;
       case "modifier":
+        if (effect.choose) break; // given once its type is picked (combat/damage-choice.ts)
         events.push(
           dndEvent(`${NS}:effectAdded`, {
             actor: target.id,
@@ -861,11 +912,17 @@ export function leafEvents(
               ...(effect.saveOnDamage && conditionSave
                 ? { saveOnDamage: conditionSave }
                 : {}),
+              ...(effect.banish && save
+                ? { banish: { ability: effect.banish.ability, dc: save.dc } }
+                : {}),
               ...(effect.secondFailure && conditionSave
                 ? {
                     secondFailure: {
                       condition: effect.secondFailure.condition,
                       ends: effectEnds(effect.secondFailure.duration),
+                      ...(effect.secondFailure.count
+                        ? { count: effect.secondFailure.count }
+                        : {}),
                       ...(effect.secondFailure.endsOnDamage
                         ? { endsOnDamage: true }
                         : {}),
@@ -1114,6 +1171,8 @@ export function leafEvents(
       case "swapInitiative":
       case "inspiration":
       case "resistTrigger":
+      case "weaponAttack":
+      case "copySpell":
         // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit, and
         // a teleport's square by its own decision and a zone once for the whole spell (resolveAction).
         break;
@@ -1541,6 +1600,7 @@ export function resolveAction(
   if (spellEnds.length > 0 && isSpell(action, actor, context)) {
     events.push(...spellEnds);
   }
+  if (spell) events.push(...duelBroken(actor, targets, context.state));
 
   const usesConcentration = (effects: readonly LeafEffect[]): boolean =>
     effects.some(
@@ -1593,6 +1653,7 @@ export function resolveAction(
     events.push(
       ...result.events,
       ...insideDamageEvents(actor, target, result.dealt),
+      ...duelDamaged(actor, target, result.dealt, context.state),
     );
     // Boon of Erupting Spellpower: each creature the surging spell damages is knocked Prone.
     if (overload.prone && result.dealt > 0) {
@@ -1750,6 +1811,14 @@ export function resolveAction(
             slotLevel,
           ),
         );
+        const typed = damageTypeFrame(
+          resolution.effects,
+          spellSource(action),
+          actor,
+          target,
+          slotLevel,
+        );
+        if (typed) frames.push(typed);
         // Where it lands is chosen, as a move is, and so is a form for a friend.
         for (const effect of resolution.effects) {
           if (effect.kind === "teleport" && target.id === actor.id) {
@@ -1779,8 +1848,30 @@ export function resolveAction(
                 )
               : null;
           if (choice) frames.push(choice);
+          if (effect.kind === "copySpell" && target.id === actor.id) {
+            const wish = wishFrame(effect, spellSource(action), actor, context);
+            if (wish) frames.push(wish);
+          }
+          if (effect.kind === "weaponAttack") {
+            const made = weaponAttackResult(
+              effect,
+              spellSource(action),
+              actor,
+              target,
+              context,
+            );
+            events.push(...made.events);
+            frames.push(...made.frames);
+          }
           if (effect.kind === "randomAction") {
-            const rolled = rolledActions(effect, actor, target, context);
+            const rolled = rolledActions(
+              effect,
+              action,
+              actor,
+              target,
+              context,
+              slotLevel,
+            );
             events.push(...rolled.events);
             frames.push(...rolled.frames);
           }
@@ -2008,8 +2099,11 @@ function rolledModifier(
   stats: ReturnType<typeof deriveStats>,
   context: Context,
 ): Modifier {
-  // Sanctuary keeps the caster's save DC as it was cast.
-  if (modifier.kind === "sanctuary" && modifier.dc === undefined) {
+  // Sanctuary keeps the caster's save DC as it was cast, as does an action a spell gives.
+  if (
+    (modifier.kind === "sanctuary" || modifier.kind === "grantedAction") &&
+    modifier.dc === undefined
+  ) {
     return { ...modifier, dc: spellSaveDc(stats) };
   }
   if (modifier.kind !== "bonus" || modifier.to !== "maxHp") return modifier;
@@ -2028,12 +2122,16 @@ function rolledModifier(
 // Each roll picks one of the actions it names, rolling again for one already used this turn, as Eye Rays do.
 function rolledActions(
   effect: Extract<LeafEffect, { kind: "randomAction" }>,
+  action: KnownAction,
   actor: Actor,
   target: Actor,
   context: Context,
+  slotLevel: number | undefined,
 ): { events: SystemEvent[]; frames: Frame[] } {
+  const rays = spellRolls(action, context);
+  if (rays) return rolledRays(effect, rays, actor, target, context, slotLevel);
   const known = deriveStats(actor, context).actions;
-  const used = new Set(actor.usedThisTurn);
+  const used = new Set(effect.repeats ? [] : actor.usedThisTurn);
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];
   for (let time = 0; time < effect.times; time += 1) {
@@ -2059,6 +2157,72 @@ function rolledActions(
         }),
       );
     }
+  }
+  return { events, frames };
+}
+
+// A spell's own rolled activations, as Prismatic Spray's rays, each made as the spell itself, named by its label.
+function spellRolls(
+  action: KnownAction,
+  context: Context,
+): readonly (KnownAction & { readonly label: string })[] | null {
+  if (!action.id.startsWith("spell:")) return null;
+  const spell = SpellSchema.safeParse(
+    context.content(action.id.replace(/^spell:/, "").replace(/:free$/, "")),
+  ).data;
+  return (
+    spell?.rolled?.map((activation) => ({
+      id: action.id,
+      name: action.name,
+      label: activation.label ?? "",
+      activation,
+      spellLevel: action.spellLevel,
+    })) ?? null
+  );
+}
+
+// Each target gets its own roll among them, and with `twiceOnTop` the die's top face strikes it with two,
+// rolling that face again.
+function rolledRays(
+  effect: Extract<LeafEffect, { kind: "randomAction" }>,
+  rays: readonly (KnownAction & { readonly label: string })[],
+  actor: Actor,
+  target: Actor,
+  context: Context,
+  slotLevel: number | undefined,
+): { events: SystemEvent[]; frames: Frame[] } {
+  const sides = effect.of.length + (effect.twiceOnTop ? 1 : 0);
+  const events: SystemEvent[] = [];
+  const frames: Frame[] = [];
+  const roll = (): number => {
+    const value = context.dice.roll(sides);
+    events.push(
+      dndEvent(`${NS}:dieRolled`, {
+        actor: target.id,
+        die: sides,
+        rolled: value,
+        label: rays[0]?.name ?? "",
+      }),
+    );
+    return value;
+  };
+  const first = roll();
+  const picks: number[] = [];
+  if (effect.twiceOnTop && first === sides) {
+    while (picks.length < 2) {
+      const again = roll();
+      if (again !== sides) picks.push(again);
+    }
+  } else {
+    picks.push(first);
+  }
+  // shortcut: a creature struck by two rays saves against each.
+  for (const pick of picks) {
+    const ray = rays.find(({ label }) => label === effect.of[pick - 1]);
+    if (!ray) continue;
+    const result = resolveAction(ray, actor, [target], context, slotLevel);
+    events.push(...(result.events ?? []));
+    frames.push(...(result.frames ?? []));
   }
   return { events, frames };
 }

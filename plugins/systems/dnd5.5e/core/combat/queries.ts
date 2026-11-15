@@ -1,4 +1,5 @@
 import { type ContentAccess, type SystemContext, type SystemEvent } from "#sdk";
+import { leashed } from "./duel.ts";
 import { knownFoes, knows } from "../fog.ts";
 import {
   type Actor,
@@ -403,7 +404,11 @@ export function moveSquares(
   const holds = heldBy(actor, state, access).filter(
     ({ held }) => !isDead(held),
   );
-  if (holds.length === 0) return [...plain.values()];
+  // Compelled Duel keeps its target within reach of the caster.
+  const tooFar = leashed(actor, state);
+  if (holds.length === 0) {
+    return [...plain.values()].filter(({ square }) => !tooFar(square));
+  }
   const own = sizeOf(actor, access);
   const light = ({ held }: { readonly held: Actor }): boolean => {
     const size = sizeOf(held, access);
@@ -411,14 +416,16 @@ export function moveSquares(
   };
   const dragging =
     hasPassive(stats, "abduct") || holds.every(light) ? plain : search(2);
-  return [...plain.values()].map((walk) => {
-    const near = holds.every(
-      ({ held, feet }) => distanceFeet(walk.square, held.position) <= feet,
-    );
-    const dragged = near ? undefined : dragging.get(squareKey(walk.square));
-    const drag = dragged && dragSquares(dragged, from, holds, state);
-    return dragged && drag ? { ...dragged, drag } : walk;
-  });
+  return [...plain.values()]
+    .map((walk) => {
+      const near = holds.every(
+        ({ held, feet }) => distanceFeet(walk.square, held.position) <= feet,
+      );
+      const dragged = near ? undefined : dragging.get(squareKey(walk.square));
+      const drag = dragged && dragSquares(dragged, from, holds, state);
+      return dragged && drag ? { ...dragged, drag } : walk;
+    })
+    .filter(({ square }) => !tooFar(square));
 }
 
 // Where each grappled creature ends up: on the squares the walk left behind, last first, or else beside its end, each

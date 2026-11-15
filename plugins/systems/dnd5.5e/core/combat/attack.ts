@@ -16,6 +16,8 @@ import {
   frame,
 } from "../state.ts";
 import { ALL, DECLINE, parseOption } from "./ids.ts";
+import { aroundHit, replaceHitFrame, runReplaceHit } from "./ranged-smite.ts";
+import { duelBroken, duelDamaged, duelHampers } from "./duel.ts";
 import { distanceFeet } from "../grid.ts";
 import { grapplesOn } from "./grapple.ts";
 import { behindTotalCover, coverAgainst, seeing } from "../sight.ts";
@@ -619,6 +621,20 @@ function attackKind(
   return { melee, ranged: !melee, spell: action.spellLevel !== null };
 }
 
+// What follows a miss: its weapon's mastery, as Graze, and what answers it.
+export function missOutcome(
+  hit: z.infer<typeof HitSchema>,
+  context: Context,
+): Frame[] {
+  const attacker = actorOf(context.state, hit.attacker);
+  return [
+    ...(masteryOf(attacker, hit.actionId, context)
+      ? [frame("masteryMiss", hit)]
+      : []),
+    ...missedFrames(hit, context),
+  ];
+}
+
 // What answers an attack that missed its target, as Sticky Shield does.
 function missedFrames(
   hit: z.infer<typeof HitSchema>,
@@ -839,6 +855,7 @@ export function runAttackRoll(
     unseenTarget ||
     proneFar ||
     dodging(target) ||
+    duelHampers(attacker, target) ||
     grappledAwayFrom(attacker, target) ||
     hasFlag(attacker, "disadvantage", "attacks", stats, ability) ||
     hasFlag(
@@ -967,6 +984,7 @@ export function runAttackRoll(
   });
   // An effect like Guiding Bolt's lasts only until the next attack roll it applies to.
   const spent = [
+    ...duelBroken(attacker, [target], state),
     ...guarded,
     ...window.events,
     ...(aimed
@@ -1035,14 +1053,11 @@ export function runAttackRoll(
         events: [...guarded, ...window.events, ...(reroll.events ?? [])],
       };
     }
+    // Lightning Arrow takes the miss's place, so what a miss sets off waits on the answer.
+    const instead = replaceHitFrame(hit, false, context);
     return {
       events: [report, ...spent, ...onceHitEnded(attacker)],
-      frames: [
-        ...(masteryOf(attacker, action.id, context)
-          ? [frame("masteryMiss", hit)]
-          : []),
-        ...missedFrames(hit, context),
-      ],
+      frames: instead ? [instead] : missOutcome(hit, context),
     };
   }
 
@@ -1094,6 +1109,7 @@ export const HitSchema = z.object({
   noModifier: z.boolean().optional(),
   poleStrike: z.boolean().optional(),
   riposte: z.string().optional(), // the attack the target makes back if this now misses, as with Riposte ("" for its weapon)
+  kept: z.boolean().optional(), // a spell to take the hit's place, as Lightning Arrow, was already offered
   deflect: z.string().optional(), // the reaction that sends the force back out if the damage drops to 0, as Deflect Missile
   transfer: z.string().optional(), // the creature that takes what a reaction took off, as Transfer Harm's podling
 });
@@ -1270,6 +1286,8 @@ export function runApplyHit(
   payload: z.infer<typeof HitSchema>,
   context: Context,
 ): SystemResult {
+  const instead = payload.kept ? null : replaceHitFrame(payload, true, context);
+  if (instead) return { frames: [instead] };
   const { state, dice } = context;
   const attacker = actorOf(state, payload.attacker);
   const target = actorOf(state, payload.target);
@@ -1500,6 +1518,7 @@ export function runApplyHit(
     ...shieldBash(attacker, target, action, stats, context),
     ...inspiringStrike(attacker, payload.critical, stats, context),
     ...(dealt.dealt > 0 ? reassertHonor(attacker, target, context) : []),
+    ...duelDamaged(attacker, target, dealt.dealt, state),
     ...onceHitEnded(attacker),
   );
   // The save sees the target as the hit left it.
@@ -1594,10 +1613,12 @@ function imageHit(
   ];
 }
 
-// Damage added to the bearer's next attack only, as Deadly Aim's, is spent by that attack, hit or miss.
+// Damage added to the bearer's next attack only, as Deadly Aim's, is spent by that attack, hit or miss, as is
+// True Strike's change to it.
 function onceHitEnded(attacker: Actor): SystemEvent[] {
   return attacker.activeEffects.flatMap(({ modifier, sourceId }) =>
-    modifier.kind === "hitDamage" && modifier.once
+    (modifier.kind === "hitDamage" || modifier.kind === "weaponSpell") &&
+    modifier.once
       ? [dndEvent(`${NS}:effectEnded`, { actor: attacker.id, sourceId })]
       : [],
   );
@@ -2154,8 +2175,10 @@ function smitesFor(
     const { trigger } = action.activation;
     return (
       trigger?.afterHit !== undefined &&
+      !trigger.replacesHit && // offered before the hit lands instead (combat/ranged-smite.ts)
       canAfford(action, attacker, stats) &&
-      (trigger.afterHit === "weapon" || isMelee(hitWith))
+      (trigger.afterHit === "weapon" ||
+        (trigger.afterHit === "meleeWeapon") === isMelee(hitWith))
     );
   });
 }
@@ -2219,14 +2242,15 @@ export function runSmite(
     findAction(attacker, actionId, context, slotLevel),
     findAction(attacker, payload.actionId, context),
   );
-  // A smite's damage is part of the attack, so a Critical Hit doubles its dice too.
+  // A smite's damage is part of the attack, so a Critical Hit doubles its dice too, but not a save's round the target.
   const result = resolveAction(
     action,
     attacker,
-    [target],
+    aroundHit(action, attacker, target, context),
     context,
     slotLevel,
-    payload.critical,
+    payload.critical && action.activation.resolution.kind !== "save",
+    target.position ?? undefined,
   );
   return {
     events: [
@@ -2300,6 +2324,10 @@ export const attackFrames = {
     run: runAfterHit,
   }),
   [`${NS}:smite`]: frameHandler({ schema: SmiteSchema, run: runSmite }),
+  [`${NS}:replaceHit`]: frameHandler({
+    schema: HitSchema.extend({ landed: z.boolean(), answer: z.string() }),
+    run: runReplaceHit,
+  }),
   [`${NS}:rollReaction`]: frameHandler({
     schema: RollReactionSchema,
     run: runRollReaction,

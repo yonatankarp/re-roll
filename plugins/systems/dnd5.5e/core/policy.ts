@@ -45,6 +45,7 @@ import { AVERAGE, makeJudge } from "./worth.ts";
 import { blockedSquares, blockingSet, zoneHarm } from "./zones.ts";
 import { TACTIC } from "./tactics.ts";
 import { SHAPE } from "./forms.ts";
+import { damageTypePolicy } from "./combat/damage-choice.ts";
 
 // The Dodge action (actions.ts), which the party weighs like any other choice.
 const DODGE = `${TACTIC}dodge`;
@@ -568,6 +569,10 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (decision.id.startsWith(`${NS}:inspiration:`)) return first.id;
   if (decision.id.startsWith(`${NS}:deathSave:`)) return first.id;
   if (decision.id.startsWith(`${NS}:form:`)) return first.id; // the strongest form
+  if (decision.id.startsWith(`${NS}:wish:`)) return first.id; // the highest level
+  if (decision.id.startsWith(`${NS}:damageType:`)) {
+    return damageTypePolicy(decision, context);
+  }
 
   if (/^dnd5\.5e:(legendary|lair):/.test(decision.id)) {
     return chooseBossAction(decision, context);

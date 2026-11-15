@@ -48,12 +48,13 @@ import {
   SpellSchema,
   WeaponSchema,
   type Weapon,
+  type WeaponChange,
 } from "./schemas.ts";
 import { featureRules, grantedSpells } from "./feature-rules.ts";
 import { type Caster, multiclassSlots } from "./multiclass.ts";
 import { holdsConcentration, withMetamagic } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
-import { THROW_PREFIX, WEAPON_PREFIX } from "./combat/ids.ts";
+import { THROW_PREFIX, WEAPON_PREFIX, weaponItemId } from "./combat/ids.ts";
 
 // Content is frozen once loaded, so each entry is checked against a schema only once.
 const parsed = new WeakMap<object, Map<z.ZodType, unknown>>();
@@ -1411,6 +1412,9 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "acAgainstHit" ||
       effect.kind === "teleport" ||
       effect.kind === "forcedMove" ||
+      effect.kind === "weaponAttack" ||
+      effect.kind === "randomAction" ||
+      effect.kind === "copySpell" ||
       (effect.kind === "applyCondition" &&
         effect.condition !== "deafened" &&
         effect.condition !== "grappled"),
@@ -1477,12 +1481,13 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
       modifier.kind === "stuck" ? [modifier.action] : [],
     ),
   );
+  const changed = withEffectActions(stats, actor, access);
   const free =
     stuck.size === 0
-      ? stats
+      ? changed
       : {
-          ...stats,
-          actions: stats.actions.filter((action) => !stuck.has(action.id)),
+          ...changed,
+          actions: changed.actions.filter((action) => !stuck.has(action.id)),
         };
   return speed === 0 && maxHp === 0
     ? free
@@ -1491,6 +1496,217 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
         speed: Math.max(0, stats.speed + speed),
         maxHp: stats.maxHp + maxHp,
       };
+}
+
+// What spells on the creature do to its actions: a weapon changed by Shillelagh or True Strike, an action given
+// by Dragon's Breath, and a spell's weapon attack reaching as far as the weapons it can use.
+function withEffectActions(
+  stats: Stats,
+  actor: Actor,
+  access: ContentAccess,
+): Stats {
+  // Most creatures have none of these, and stats are derived often.
+  if (
+    !actor.activeEffects.some(
+      ({ modifier }) =>
+        modifier.kind === "weaponSpell" ||
+        modifier.kind === "grantedAction" ||
+        modifier.kind === "wished",
+    ) &&
+    !stats.actions.some((action) =>
+      weaponAttackOf(action.activation.resolution),
+    )
+  ) {
+    return stats;
+  }
+  const granted: KnownAction[] = [];
+  let actions = stats.actions;
+  for (const { modifier, sourceId, level } of actor.activeEffects) {
+    if (modifier.kind === "wished") {
+      const id = `spell:${modifier.spell}`;
+      const spell = lookup(access, SpellSchema, modifier.spell);
+      // Once cast it's no longer offered, yet stays to be found until the turn is over, as its attacks need it.
+      const cast = actor.usedThisTurn.includes(wishedKey(modifier.spell));
+      const known = actions.some((action) => action.id === id);
+      const copy = (
+        activation: Activation,
+      ): Omit<KnownAction, "id" | "name"> => ({
+        activation: { ...activation, cost: [] },
+        spellLevel: spell.level,
+        ...(spell.upcast ? { upcast: spell.upcast } : {}),
+        ...(cast ? { rolled: true as const } : {}),
+      });
+      if (known && !cast) {
+        actions = actions.map((action) =>
+          action.id === id ? { ...action, ...copy(action.activation) } : action,
+        );
+      } else if (!known && spell.activation) {
+        actions = [
+          ...actions,
+          { id, name: spell.name, ...copy(spell.activation) },
+        ];
+      }
+    }
+    if (modifier.kind === "weaponSpell") {
+      actions = actions.map(
+        (action) => changedWeapon(action, modifier, stats, access) ?? action,
+      );
+    }
+    if (modifier.kind !== "grantedAction") continue;
+    const spell = lookup(
+      access,
+      SpellSchema,
+      sourceId.replace(/^spell:/, "").replace(/:free$/, ""),
+    );
+    if (!spell.granted) continue;
+    const scaled = spell.upcast
+      ? scaleActivation(
+          spell.granted,
+          spell.upcast.perSlotLevel,
+          (level ?? spell.level) - spell.level,
+        )
+      : spell.granted;
+    const { resolution } = scaled;
+    granted.push({
+      id: `granted:${sourceId}`,
+      name: spell.name,
+      activation: retyped(
+        resolution.kind === "save" && modifier.dc !== undefined
+          ? {
+              ...scaled,
+              resolution: { ...resolution, dc: { base: modifier.dc, add: [] } },
+            }
+          : scaled,
+        modifier.damage,
+      ),
+      spellLevel: null,
+    });
+  }
+  const reaching = actions.flatMap((action) => {
+    const attack = weaponAttackOf(action.activation.resolution);
+    const { targeting } = action.activation;
+    if (!attack || !("creatures" in targeting)) return [action];
+    const ranges = actions.flatMap((item) => {
+      const reach = item.activation.targeting;
+      return weaponFits(item, attack.change, access) && "creatures" in reach
+        ? [typeof reach.range === "number" ? reach.range : 5]
+        : [];
+    });
+    // With no weapon to make it with, it can't be cast.
+    if (ranges.length === 0) return [];
+    return [
+      {
+        ...action,
+        activation: {
+          ...action.activation,
+          targeting: { ...targeting, range: Math.max(...ranges) },
+        },
+      },
+    ];
+  });
+  return actions === stats.actions &&
+    granted.length === 0 &&
+    reaching.length === actions.length &&
+    reaching.every((action, index) => action === actions[index])
+    ? stats
+    : { ...stats, actions: [...reaching, ...granted] };
+}
+
+// In usedThisTurn once Wish's copy of the spell has been cast.
+export const wishedKey = (spell: string): string => `wished:${spell}`;
+
+export function weaponAttackOf(
+  resolution: Resolution,
+): Extract<LeafEffect, { kind: "weaponAttack" }> | undefined {
+  if (resolution.kind !== "automatic") return undefined;
+  const found = resolution.effects.find(
+    (effect) => effect.kind === "weaponAttack",
+  );
+  return found?.kind === "weaponAttack" ? found : undefined;
+}
+
+// A weapon attack of the creature's own that a spell's change applies to: only the weapons it names (or a magic
+// one made from them), and with `ranged` only one firing ammunition.
+export function weaponFits(
+  action: KnownAction,
+  change: WeaponChange,
+  access: ContentAccess,
+): boolean {
+  if (!action.id.startsWith(WEAPON_PREFIX)) return false;
+  const weapon = WeaponSchema.safeParse(
+    access.content(weaponItemId(action.id)),
+  ).data;
+  if (!weapon) return false;
+  if (change.ranged && !weapon.properties.includes("ammunition")) return false;
+  const ids = [weaponItemId(action.id), weapon.baseWeapon ?? ""];
+  return !change.weapons || ids.some((id) => change.weapons?.includes(id));
+}
+
+// The weapon attack as the spell makes it: its spellcasting ability, its die, its damage type and its extra damage.
+// shortcut: the spell's damage type always stands in for the weapon's, where the caster may keep the weapon's.
+function changedWeapon(
+  action: KnownAction,
+  change: WeaponChange,
+  stats: Stats,
+  access: ContentAccess,
+): KnownAction | null {
+  const { resolution } = action.activation;
+  if (resolution.kind !== "attack" || !weaponFits(action, change, access)) {
+    return null;
+  }
+  const [main, ...rest] = resolution.damage;
+  if (!main) return null;
+  const from = resolution.attack.ability;
+  const ability =
+    change.spellAbility && stats.spellAbility ? stats.spellAbility : from;
+  const tier = cantripTier(stats.level);
+  const die = change.dice?.[Math.min(tier, change.dice.length - 1)];
+  const { bonus } = main.amount;
+  const [count = 1, sides = 6] = (change.extra?.perTier ?? "1d6")
+    .split("d")
+    .map(Number);
+  return {
+    ...action,
+    activation: {
+      ...action.activation,
+      resolution: {
+        ...resolution,
+        attack: { ...resolution.attack, ...(ability ? { ability } : {}) },
+        damage: [
+          {
+            type: change.type ?? main.type,
+            amount: {
+              ...main.amount,
+              ...(die ? { dice: die } : {}),
+              ...(bonus
+                ? {
+                    bonus: {
+                      ...bonus,
+                      add: bonus.add.map((term) =>
+                        term.kind === "abilityMod" &&
+                        term.ability === from &&
+                        ability
+                          ? { ...term, ability }
+                          : term,
+                      ),
+                    },
+                  }
+                : {}),
+            },
+          },
+          ...rest,
+          ...(change.extra && tier > 0
+            ? [
+                {
+                  amount: { dice: `${String(count * tier)}d${String(sides)}` },
+                  type: change.extra.type,
+                },
+              ]
+            : []),
+        ],
+      },
+    },
+  };
 }
 
 // A spell's flat Speed or Hit Point maximum increase, as with Longstrider or Aid, counted once per source.
@@ -1681,6 +1897,21 @@ export function scaleActivation(
   times: number,
 ): Activation {
   if (times <= 0) return activation;
+  if ("addRadius" in step) {
+    const { targeting } = activation;
+    return "area" in targeting
+      ? {
+          ...activation,
+          targeting: {
+            ...targeting,
+            area: {
+              ...targeting.area,
+              radius: targeting.area.radius + step.addRadius * times,
+            },
+          },
+        }
+      : activation;
+  }
   if ("addTargets" in step) {
     const more = step.addTargets * times;
     const { projectiles, targeting } = activation;
@@ -1694,17 +1925,49 @@ export function scaleActivation(
         }
       : activation;
   }
+  const steps = step.every
+    ? Math.min(step.max ?? times, Math.floor(times / step.every))
+    : times;
+  if (steps <= 0) return activation;
   const damage = (list: readonly Damage[]): Damage[] =>
     list.map((item) => ({
       ...item,
-      amount: addDice(item.amount, step.addDice, times),
+      amount: addDice(item.amount, step.addDice, steps),
     }));
   const effects = (list: readonly LeafEffect[]): LeafEffect[] =>
     list.map((effect) => {
       if (effect.kind === "heal" || effect.kind === "tempHp") {
         return {
           ...effect,
-          amount: addDice(effect.amount, step.addDice, times),
+          amount: addDice(effect.amount, step.addDice, steps),
+        };
+      }
+      if (effect.kind === "modifier" && effect.modifier.kind === "hitDamage") {
+        const [hit] = damage([effect.modifier.damage]);
+        return hit
+          ? { ...effect, modifier: { ...effect.modifier, damage: hit } }
+          : effect;
+      }
+      const { addBonus } = step;
+      if (
+        addBonus &&
+        effect.kind === "modifier" &&
+        effect.modifier.kind === "bonus" &&
+        effect.modifier.amount.dice === undefined
+      ) {
+        const { bonus } = effect.modifier.amount;
+        return {
+          ...effect,
+          modifier: {
+            ...effect.modifier,
+            amount: {
+              ...effect.modifier.amount,
+              bonus: {
+                base: (bonus?.base ?? 0) + addBonus * steps,
+                add: bonus?.add ?? [],
+              },
+            },
+          },
         };
       }
       return effect.kind === "modifier" &&
@@ -1744,10 +2007,14 @@ export function scaleActivation(
         return resolution satisfies never;
     }
   };
-  // What an area it leaves does later grows with the slot too, as Spirit Guardians' damage does.
-  const { area } = activation;
+  // What an area it leaves does later grows with the slot too, as Spirit Guardians' damage does, and so does
+  // what strikes in a hit's place, as Lightning Arrow's.
+  const { area, trigger } = activation;
   return {
     ...activation,
+    ...(trigger?.replacesHit
+      ? { trigger: { ...trigger, replacesHit: damage(trigger.replacesHit) } }
+      : {}),
     resolution: scaled(activation.resolution),
     ...(area?.resolution
       ? { area: { ...area, resolution: scaled(area.resolution) } }

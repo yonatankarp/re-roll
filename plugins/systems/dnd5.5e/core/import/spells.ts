@@ -741,6 +741,10 @@ export const spellImportKind: ImportKind = {
         text: facts.description || facts.name,
         automation,
         ...(activation ? { activation } : {}),
+        // A reviewed spell's other actions come with its mechanics.
+        ...(reviewed?.lasting ? { lasting: reviewed.lasting } : {}),
+        ...(reviewed?.granted ? { granted: reviewed.granted } : {}),
+        ...(reviewed?.rolled ? { rolled: reviewed.rolled } : {}),
         ...(upcast ? { upcast } : {}),
         ...(cantrip ? { cantrip } : {}),
       },

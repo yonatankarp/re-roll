@@ -143,6 +143,22 @@ export const DamageSchema = z.strictObject({
 });
 export type Damage = z.infer<typeof DamageSchema>;
 
+// How a spell changes the weapon attacks it makes or lasts on (combat/weapon-spell.ts): only these weapons (by id,
+// or the plain weapon of a magic one) or ranged ones, made with the spellcasting ability, with `dice` in place of
+// the weapon's own (one for each tier from character level 1, 5, 11 and 17, the last listed standing), dealing
+// `type` in place of the weapon's own, and `extra` damage of `perTier` dice for each tier reached past the first.
+export const WeaponChangeSchema = z.strictObject({
+  weapons: z.array(ContentIdSchema).min(1).optional(),
+  ranged: z.literal(true).optional(), // only a weapon that fires ammunition, as Swift Quiver's
+  spellAbility: z.literal(true).optional(),
+  dice: z.array(DiceSchema).min(1).optional(),
+  type: DamageTypeSchema.optional(),
+  extra: z
+    .strictObject({ type: DamageTypeSchema, perTier: DiceSchema })
+    .optional(),
+});
+export type WeaponChange = z.infer<typeof WeaponChangeSchema>;
+
 // "attacksAgainst" sits on the creature being attacked, as with Faerie Fire or Blur.
 const RollFlagSchema = z.enum(["attacks", "saves", "checks", "attacksAgainst"]);
 
@@ -312,10 +328,43 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("sanctuary"),
     dc: z.number().int().optional(),
   }),
+  // Damage of this type the bearer takes is cut by `amount`, once a turn, as with Resistance (the cantrip).
+  z.strictObject({
+    kind: z.literal("damageReduction"),
+    damage: DamageTypeSchema,
+    amount: AmountSchema,
+  }),
+  // The bearer can take its spell's `granted` action, dealing this type at the save DC it was cast with (filled in
+  // as it's cast), as Dragon's Breath's breath.
+  z.strictObject({
+    kind: z.literal("grantedAction"),
+    damage: DamageTypeSchema,
+    dc: z.number().int().optional(),
+  }),
+  // The bearer's weapon attacks are changed while it lasts, as by Shillelagh; with `once`, only its next one, as
+  // True Strike's.
+  z.strictObject({
+    kind: z.literal("weaponSpell"),
+    ...WeaponChangeSchema.shape,
+    once: z.literal(true).optional(),
+  }),
+  // Disadvantage on attacks against anyone but the effect's caster, and no moving willingly more than `feet` from
+  // it, as Compelled Duel's; what the caster does can end it (combat/duel.ts).
+  z.strictObject({
+    kind: z.literal("duel"),
+    feet: z.number().int().min(5).default(30),
+  }),
+  // The bearer can cast this spell once without its costs, as Wish's copy of it (combat/wish.ts).
+  z.strictObject({ kind: z.literal("wished"), spell: ContentIdSchema }),
   // At the start of each of its turns the bearer rolls a d8: on 1-6 it does nothing, on 7-8 it makes a melee attack
   // against a random creature in reach, and it takes no Reactions, as an umber hulk's Confusing Gaze (combat/turn.ts).
   // shortcut: the 5-6 random walk is spent standing still, as wandering off is close to doing nothing on the grid.
-  z.strictObject({ kind: z.literal("confused") }),
+  // With `spell`, the d10 of Confusion the spell instead, whose 1 walks off and whose 9-10 acts freely
+  // (combat/confusion.ts).
+  z.strictObject({
+    kind: z.literal("confused"),
+    spell: z.literal(true).optional(),
+  }),
   // No rule of its own: a curse, a mark or a hold that another of its giver's actions looks for (a targeting's
   // `afflicted`), as a nightmare's Haunter's Spear curse.
   z.strictObject({ kind: z.literal("mark") }),
@@ -385,8 +434,14 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
         condition: ConditionSchema,
         duration: DurationSchema,
         endsOnDamage: z.boolean().default(false),
+        // Saves of a kind it takes: this many failures leave the worse condition, and as many successes end it,
+        // whatever their order, as Prismatic Spray's indigo ray.
+        count: z.number().int().min(2).optional(),
       })
       .optional(),
+    // A save with this ability as the caster's next turn starts: a success ends it, and a failure ends it and
+    // sends the creature away for good, shut away as `sealed` is, as Prismatic Spray's violet ray.
+    banish: z.strictObject({ ability: AbilitySchema }).optional(),
   }),
   z.strictObject({
     kind: z.literal("removeCondition"),
@@ -397,6 +452,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     modifier: ModifierSchema,
     duration: DurationSchema,
     repeatSave: z.boolean().optional(), // as an applyCondition's
+    // The caster picks the modifier's damage type from these as it casts (combat/damage-choice.ts), as with
+    // Protection from Energy. A cast's lists of the same length are picked together, by place, as Fire Shield's
+    // warm or chill shield sets both its Resistance and its flames.
+    choose: z.array(DamageTypeSchema).min(2).optional(),
   }),
   z.strictObject({
     kind: z.literal("forcedMove"),
@@ -593,10 +652,28 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("shapeShift"), shape: z.string().min(1) }),
   // One of the bearer's own actions picked at random, `times` over, never one already used this turn, at the same
   // target, as a beholder zombie's Eye Rays (combat/effects.ts). Those actions are marked `rolled`.
+  // A spell's own `rolled` activations are picked from instead, by label, as Prismatic Spray's rays, where
+  // `repeats` lets each target get any of them, and `twiceOnTop` rolls a die one larger than the list whose top
+  // face picks two, rolling that face again.
   z.strictObject({
     kind: z.literal("randomAction"),
     of: z.array(z.string().min(1)).min(2),
     times: z.number().int().min(1).default(1),
+    repeats: z.literal(true).optional(),
+    twiceOnTop: z.literal(true).optional(),
+  }),
+  // The caster makes `times` attacks with a weapon of its own that reaches the target, changed as `change` says,
+  // as True Strike or Swift Quiver (combat/weapon-spell.ts).
+  z.strictObject({
+    kind: z.literal("weaponAttack"),
+    times: z.number().int().min(1).default(1),
+    change: WeaponChangeSchema.default({}),
+  }),
+  // The caster picks another spell of this level or lower that plays on the grid, and it takes effect without its
+  // costs, as Wish's (combat/wish.ts).
+  z.strictObject({
+    kind: z.literal("copySpell"),
+    maxLevel: z.number().int().min(0).max(9),
   }),
   // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
   // A dying creature becomes Stable, as with Spare the Dying.
@@ -772,8 +849,12 @@ export const ActivationSchema = z.strictObject({
       targetedBySpell: z.string().optional(),
       // Taken when a foe it can see within the activation's range casts a spell, as with Counterspell.
       spellCast: z.literal(true).optional(),
-      // Taken right after hitting with a weapon, as with the smite spells.
-      afterHit: z.enum(["weapon", "meleeWeapon"]).optional(),
+      // Taken right after hitting with a weapon, as with the smite spells. An area it targets is centred on the
+      // creature hit, as Hail of Thorns' is.
+      afterHit: z.enum(["weapon", "meleeWeapon", "rangedWeapon"]).optional(),
+      // With `afterHit`, taken as the attack hits or misses, in place of what it does: the target takes this, or
+      // half on a miss, and an area is round the target without it, as Lightning Arrow.
+      replacesHit: z.array(DamageSchema).min(1).optional(),
       // Taken for another creature within 5 feet that a creature the bearer can see attacks, before the roll, or hits,
       // as with Protection and Interception. It's taken as soon as it can be.
       allyAttacked: z.literal(true).optional(),
@@ -1419,8 +1500,16 @@ export const ResourceDefSchema = z.strictObject({
 });
 
 const ScaleStepSchema = z.union([
-  z.strictObject({ addDice: DiceSchema }),
+  // With `every`, once for each that many levels, at most `max` times; `addBonus` also raises a flat bonus a modifier
+  // gives, as Elemental Weapon's +1 to hit becomes +2 with its 1d4 becoming 2d4.
+  z.strictObject({
+    addDice: DiceSchema,
+    every: z.number().int().min(2).optional(),
+    max: z.number().int().min(1).optional(),
+    addBonus: z.number().int().min(1).optional(),
+  }),
   z.strictObject({ addTargets: z.number().int().min(1) }),
+  z.strictObject({ addRadius: z.number().int().min(5) }), // an area's radius, as Confusion's Sphere
 ]);
 export type ScaleStep = z.infer<typeof ScaleStepSchema>;
 
@@ -1642,6 +1731,10 @@ export const SpellSchema = ContentEntrySchema.extend({
   activation: ActivationSchema.optional(),
   // An action its caster can take while concentrating on it, as Flame Blade's attack or Heat Metal's Bonus Action.
   lasting: ActivationSchema.optional(),
+  // An action its target can take while a `grantedAction` it gave lasts, as Dragon's Breath's breath.
+  granted: ActivationSchema.optional(),
+  // What its `randomAction` picks from, each named by its label, as Prismatic Spray's rays.
+  rolled: z.array(ActivationSchema).min(2).optional(),
   // Why a spell with no activation needs none: it takes longer than a turn to cast ("castingTime"), or does
   // nothing a grid fight plays, such as travel, senses, talk or downtime ("utility").
   outOfCombat: z.enum(["castingTime", "utility"]).optional(),

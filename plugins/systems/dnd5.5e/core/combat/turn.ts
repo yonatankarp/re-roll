@@ -1,4 +1,6 @@
 import { afterDamage, reactFrames } from "./reactions.ts";
+import { duelStrayed } from "./duel.ts";
+import { confusedBy } from "./confusion.ts";
 import {
   type Frame,
   PLAYER_ACTOR,
@@ -398,14 +400,36 @@ export function runFinishTurn(context: Context): SystemResult {
             context.dice,
           );
     events.push(...rescued);
-    const worse = (
+    const holder =
       target.activeEffects.find(
         (item) =>
           item.sourceId === sourceId &&
           item.casterId === casterId &&
           item.secondFailure,
-      ) ?? effect
-    ).secondFailure;
+      ) ?? effect;
+    const worse = holder.secondFailure;
+    // Saves of a kind are counted until there are enough of one, as for Prismatic Spray's indigo ray.
+    if (worse?.count) {
+      const passed = rolled.saved || resisted !== null || rescued.length > 0;
+      const tally = {
+        saved: (holder.tally?.saved ?? 0) + (passed ? 1 : 0),
+        failed: (holder.tally?.failed ?? 0) + (passed ? 0 : 1),
+      };
+      if (tally.saved < worse.count && tally.failed < worse.count) {
+        events.push(
+          dndEvent(`${NS}:effectEnded`, {
+            actor: target.id,
+            sourceId,
+            casterId,
+          }),
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: { ...holder, tally },
+          }),
+        );
+        continue;
+      }
+    }
     if (rolled.saved || resisted || rescued.length > 0 || worse) {
       events.push(
         dndEvent(`${NS}:effectEnded`, {
@@ -442,6 +466,7 @@ export function runFinishTurn(context: Context): SystemResult {
   }
   const ending = [
     ...events,
+    ...(actor ? duelStrayed(actor, state) : []),
     ...regurgitationEvents(context),
     ...(actor ? rechargeEvents(actor, context) : []),
     ...(actor ? regrowEvents(actor, context) : []),
@@ -492,6 +517,7 @@ export function runAdvanceTurn(
   const events = [
     ...finished,
     ...expired,
+    ...(next ? banishEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
     ...reactiveEvents(after, context),
@@ -505,6 +531,7 @@ export function runAdvanceTurn(
         ...lingeringFrames(next, "turnStart"),
         ...sunlightFrames(next, starts),
         ...zoneFrames(next, "start", starts),
+        ...(confusedBy(next) ? [frame("confusedTurn", {})] : []),
       ]
     : [];
   // A reaction to a creature starting its turn nearby, as with Unnerving Gaze.
@@ -520,6 +547,42 @@ export function runAdvanceTurn(
         frames: [...ticks, ...watched, frame("afterTurnStart", {})],
       }
     : { events };
+}
+
+// Prismatic Spray's violet ray: as the caster's next turn starts, each creature it blinded saves again, and a
+// failure sends it to another plane for good, shut away as a sealed creature is.
+function banishEvents(caster: Actor, context: Context): SystemEvent[] {
+  return Object.values(context.state.actors).flatMap((actor) => {
+    const effect = actor.activeEffects.find(
+      (item) => item.banish && item.casterId === caster.id,
+    );
+    if (!effect?.banish || isDead(actor)) return [];
+    const { sourceId, casterId } = effect;
+    const save = rollSave(
+      actor,
+      effect.banish.ability,
+      effect.banish.dc,
+      context,
+      true,
+    );
+    return [
+      ...save.events,
+      dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId, casterId }),
+      ...(save.saved
+        ? []
+        : [
+            dndEvent(`${NS}:effectAdded`, {
+              actor: actor.id,
+              effect: {
+                sourceId,
+                casterId,
+                modifier: { kind: "sealed" },
+                ends: "spellDuration",
+              },
+            }),
+          ]),
+    ];
+  });
 }
 
 // shortcut: Regeneration isn't stopped by the damage types that should stop it, as no damage type taken is kept yet.
