@@ -1063,15 +1063,7 @@ export function leafEvents(
         }
         break;
       case "lift":
-        events.push(
-          ...liftEvents(
-            effect,
-            sourceId,
-            caster,
-            target,
-            context,
-          ),
-        );
+        events.push(...liftEvents(effect, sourceId, caster, target, context));
         break;
       case "exhaustion":
         events.push(

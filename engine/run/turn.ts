@@ -219,7 +219,11 @@ function asking(asked: Asked, stacked: Frame | undefined): GameEvent {
       ...asked.question,
       resume: {
         kind: REPLAY_FRAME,
-        payload: { frame, answers: [...asked.answers], asked: asked.question.id },
+        payload: {
+          frame,
+          answers: [...asked.answers],
+          asked: asked.question.id,
+        },
       },
     }),
   };
