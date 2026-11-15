@@ -229,7 +229,7 @@ function targetOptions(
     .filter(
       (foe) =>
         !isDown(foe) &&
-        fitsType(foe, targeting, context) &&
+        fitsType(foe, targeting, context, actor) &&
         (reaches(lead, actor, foe) ||
           distanceFeet(actor.position, foe.position) <= range + steps),
     )
@@ -250,10 +250,18 @@ function stepEvents(
 ): SystemEvent[] {
   if (steps <= 0 || !target || reaches(lead, actor, target)) return [];
   const stats = deriveStats(actor, context);
+  // Half of each of its Speeds, as half its Speed is `steps`.
+  const half = (feet: number) => Math.floor((feet * steps) / stats.speed);
   const squares = moveSquares(
     { ...actor, moved: 0 },
     context.state,
-    { ...stats, speed: steps },
+    {
+      ...stats,
+      speed: steps,
+      speeds: Object.fromEntries(
+        Object.entries(stats.speeds).map(([mode, feet]) => [mode, half(feet)]),
+      ),
+    },
     context,
   );
   const best = [...squares].sort(

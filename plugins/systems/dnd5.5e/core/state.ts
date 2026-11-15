@@ -120,6 +120,8 @@ const ActiveEffectSchema = z.strictObject({
     }),
     // Haste's lethargy, waiting for the spell to end (combat/durations.ts).
     z.strictObject({ kind: z.literal("lethargy") }),
+    // Gone berserk, as a flesh golem's Berserk, until it's no longer Bloodied (combat/madness.ts).
+    z.strictObject({ kind: z.literal("berserk") }),
     // Time Stop: the turns in a row its caster has left, as rolled (combat/durations.ts).
     z.strictObject({ kind: z.literal("extraTurns"), turns: z.number().int() }),
     // Another creature's shape, by its stat block (core/forms.ts).
@@ -234,6 +236,7 @@ const ActorSchema = z.strictObject({
     z.strictObject({
       kind: z.literal("monster"),
       statBlockId: ContentIdSchema,
+      lacks: z.array(z.string()).optional(), // actions it was made without, as an animated tree's Animate Trees
     }),
     // A creature a spell brought, by a companion stat block (stats.ts), with its caster's numbers as cast.
     z.strictObject({

@@ -276,6 +276,18 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     ability: AbilitySchema.optional(),
     subtract: z.boolean().optional(), // a penalty, as a gold dragon's Weakening Breath
   }),
+  // A Speed of another kind, as a Fly Speed: these feet, or without them equal to the bearer's Speed
+  // (core/movement-modes.ts).
+  z.strictObject({
+    kind: z.literal("movementMode"),
+    mode: z.enum(["fly", "climb", "burrow"]),
+    feet: z.number().int().min(5).optional(),
+  }),
+  // Knowing where creatures on the ground are, this far, through walls and darkness, as Stonecunning's Tremorsense.
+  z.strictObject({
+    kind: z.literal("tremorsense"),
+    feet: z.number().int().min(5),
+  }),
   // Regaining no Hit Points, as in a death tyrant's Negative Energy Cone.
   z.strictObject({ kind: z.literal("noHealing") }),
   // The first drop to 0 Hit Points is a drop to 1 instead, and the effect ends, as with Death Ward.
@@ -300,6 +312,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("sanctuary"),
     dc: z.number().int().optional(),
   }),
+  // At the start of each of its turns the bearer rolls a d8: on 1-6 it does nothing, on 7-8 it makes a melee attack
+  // against a random creature in reach, and it takes no Reactions, as an umber hulk's Confusing Gaze (combat/turn.ts).
+  // shortcut: the 5-6 random walk is spent standing still, as wandering off is close to doing nothing on the grid.
+  z.strictObject({ kind: z.literal("confused") }),
+  // No rule of its own: a curse, a mark or a hold that another of its giver's actions looks for (a targeting's
+  // `afflicted`), as a nightmare's Haunter's Spear curse.
+  z.strictObject({ kind: z.literal("mark") }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
 
@@ -404,8 +423,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       })
       .optional(),
   }),
-  // The Dash action as part of another, as with Adrenaline Rush.
+  // The Dash action as part of another, as with Adrenaline Rush, or the Disengage action, as a clay golem's Hasten.
   z.strictObject({ kind: z.literal("dash") }),
+  z.strictObject({ kind: z.literal("disengage") }),
   z.strictObject({ kind: z.literal("extraAction") }), // Action Surge
   // Ends one of these conditions on the target, the one that hampers it most, as Lesser Restoration does.
   z.strictObject({
@@ -580,6 +600,27 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("slay"),
     hpAtMost: z.number().int().min(1),
   }),
+  // The target gains this many levels of Exhaustion, as a sphinx's Weight of Years.
+  z.strictObject({
+    kind: z.literal("exhaustion"),
+    levels: z.number().int().min(1),
+  }),
+  // `count` of this monster (the bearer's own stat block when left out) come to life in open squares within `range`
+  // on the bearer's side, without the actions named in `lacks`, taking their turns right after the bearer's, as a
+  // treant's Animate Trees or a priest's Soul Tattoo.
+  z.strictObject({
+    kind: z.literal("animate"),
+    monster: ContentIdSchema.optional(),
+    count: z.number().int().min(1).default(1),
+    range: z.number().int().min(5),
+    lacks: z.array(z.string().min(1)).default([]),
+  }),
+  // The target spends its Reaction on one melee attack against a foe in its reach, as a gnoll pack lord's Incite
+  // Rampage.
+  z.strictObject({ kind: z.literal("reactionAttack") }),
+  // The target spends its Reaction to move up to its Speed beside its nearest foe, without provoking Opportunity
+  // Attacks, as Ez d'Avenir's Inspiring Rally.
+  z.strictObject({ kind: z.literal("reactionMove") }),
   z.strictObject({
     kind: z.literal("raiseCorpse"),
     monster: ContentIdSchema,
@@ -671,6 +712,7 @@ export const AreaEffectSchema = z.strictObject({
   self: z.literal(true).optional(), // a moving area that covers its own bearer too, as Globe of Invulnerability
   maxDamage: z.number().int().min(1).optional(), // it ends once it has dealt this much, as Guardian of Faith
   disperses: z.literal(true).optional(), // a strong wind ends it, as Fog Cloud or Stinking Cloud
+  grappling: z.literal(true).optional(), // only creatures its owner grapples or that grapple it, as Barbed Hide
 });
 export type AreaEffect = z.infer<typeof AreaEffectSchema>;
 
@@ -696,6 +738,10 @@ export const TargetingSchema = z.union([
     maxSize: z
       .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
       .optional(),
+    bloodied: z.literal(true).optional(), // only a Bloodied creature, as for a gnoll's Rampage
+    downed: z.literal(true).optional(), // only a living creature at 0 Hit Points, as for a will-o'-wisp's Consume Life
+    // only a creature under an effect of the bearer's action of this name, as a nightmare's spear curse for Narcotize
+    afflicted: z.string().min(1).optional(),
   }),
   z.strictObject({
     area: z.strictObject({
@@ -705,6 +751,8 @@ export const TargetingSchema = z.union([
     range: RangeSchema,
     side: SideSchema,
     creatureTypes: z.array(z.string()).optional(),
+    targetConditions: z.array(ConditionSchema).min(1).optional(), // only those with one of these, as Intensify Poison
+    afflicted: z.string().min(1).optional(), // as a creature target's, as an arch-hag's Witch Strike
   }),
 ]);
 export type Targeting = z.infer<typeof TargetingSchema>;
@@ -833,8 +881,15 @@ export const SpellSchoolSchema = z.enum([
   "transmutation",
 ]);
 
+// `bloodied` on a passive means it only holds while the bearer is Bloodied, as a cultist of Myrkul's Nearer to the Dead.
+const WhileBloodied = z.literal(true).optional();
+
 export const PassiveSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("modifier"), modifier: ModifierSchema }),
+  z.strictObject({
+    kind: z.literal("modifier"),
+    modifier: ModifierSchema,
+    bloodied: WhileBloodied,
+  }),
   // An area round the bearer that moves with it, as a ghast's Stench, a balor's Fire Aura or a flameskull's
   // Illumination ("light" or "dim" for the light it sheds).
   z.strictObject({
@@ -869,6 +924,26 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     oncePerTurn: z.boolean().default(false),
   }),
   z.strictObject({ kind: z.literal("packTactics") }),
+  // Moving through other creatures' spaces or through walls, as a swarm, a ghost's Incorporeal Movement or Halfling
+  // Nimbleness: `creatures` any, or only ones larger than it; `walls` through walls, at double cost with `costly`;
+  // `squeeze` slips between walls meeting at a corner; `open` lets others through its own space, as a swarm's;
+  // `terrain` crosses difficult terrain at no extra cost, as Freedom of Movement or a gas spore's Rolling Mass.
+  z.strictObject({
+    kind: z.literal("moveThrough"),
+    creatures: z.enum(["any", "larger"]).optional(),
+    walls: z.boolean().default(false),
+    costly: z.boolean().default(false),
+    squeeze: z.boolean().default(false),
+    open: z.boolean().default(false),
+    terrain: z.boolean().default(false),
+  }),
+  // A longer Long Jump, as a frog's Standing Leap (`feet` 20, `runUp` 0) or Athlete's Jumping (`runUp` 5): its feet
+  // after a run-up of `runUp` feet, instead of the Strength score after 10.
+  z.strictObject({
+    kind: z.literal("jump"),
+    feet: z.number().int().min(5).optional(),
+    runUp: z.number().int().min(0).default(10),
+  }),
   // Leaving a foe's reach never provokes an Opportunity Attack, as with Flyby or Agile.
   z.strictObject({ kind: z.literal("noOpportunityAttacks") }),
   // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
@@ -884,17 +959,26 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Its shape can't change, so Polymorph does nothing to it, as with a golem's Immutable Form.
   z.strictObject({ kind: z.literal("immutableForm") }),
-  z.strictObject({ kind: z.literal("undeadFortitude") }),
+  // `except` is the damage it never holds against (Radiant when left out), as a wonder's Mechanical Determination's
+  // Lightning.
+  z.strictObject({
+    kind: z.literal("undeadFortitude"),
+    except: z.array(DamageTypeSchema).min(1).optional(),
+  }),
   z.strictObject({ kind: z.literal("magicResistance") }),
   z.strictObject({
     kind: z.literal("conditionImmunity"),
     condition: ConditionSchema,
+    bloodied: WhileBloodied,
   }),
-  // Hit Points regained at the start of each of its turns, as a troll does.
+  // Hit Points regained at the start of each of its turns, as a troll does. With `cures` it also ends the condition
+  // that hampers it most, as an inquisitor's Metabolic Control.
   z.strictObject({
     kind: z.literal("regeneration"),
     hp: z.number().int().min(1),
     stoppedBy: z.array(DamageTypeSchema).default([]), // damage that stops it for a turn
+    bloodied: WhileBloodied,
+    cures: z.literal(true).optional(),
   }),
   // A Critical Hit on this natural roll or higher, as with Improved Critical.
   z.strictObject({
@@ -915,7 +999,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     allies: z.boolean().default(false),
   }),
   // Dropping to 1 Hit Point instead of 0 while the resource lasts, as with Relentless Endurance.
-  z.strictObject({ kind: z.literal("dropToOne"), resource: z.string() }),
+  // With `effects` it gains these as it does, for the rest of the fight, as Boon of Misty Escape's Gaseous Form.
+  z.strictObject({
+    kind: z.literal("dropToOne"),
+    resource: z.string(),
+    effects: z.array(ModifierSchema).default([]),
+  }),
   // Changes to the bearer's damaging cantrip that deals the most, as Agonizing, Repelling Blast or Eldritch Spear do:
   // damage added to each roll, effects on a hit, and range for each level of a class.
   z.strictObject({
@@ -1145,9 +1234,57 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     suppressed: z.enum(["attacking", "incapacitated"]),
   }),
   // These spells do nothing to the bearer, as a helmed horror's Spell Immunity.
+  // With `rangedAttacks`, every spell that makes a ranged attack roll too, as a tarrasque's Reflective Carapace.
   z.strictObject({
     kind: z.literal("spellImmunity"),
     spells: z.array(ContentIdSchema).min(1),
+    rangedAttacks: z.literal(true).optional(),
+  }),
+  // Dropping to 0 Hit Points the first time, it comes back at once as this monster (its own stat block when left
+  // out) with all or half its Hit Points, as Gennifer's Suppressed Lycanthropy or a priest of Osybus's tattoo.
+  z.strictObject({
+    kind: z.literal("reborn"),
+    monster: ContentIdSchema.optional(),
+    hp: z.enum(["full", "half"]),
+  }),
+  // Advantage on its Initiative roll, as an asteroid spider's False Appearance gives one that lies still.
+  z.strictObject({ kind: z.literal("initiativeAdvantage") }),
+  // Knocked Prone, an odd roll of a die leaves it Incapacitated until it passes this save at the end of a turn, as a
+  // flumph's Prone Deficiency.
+  z.strictObject({
+    kind: z.literal("proneDeficiency"),
+    ability: AbilitySchema,
+    dc: z.number().int(),
+  }),
+  // Dispel Magic aimed at it is a Constitution save against the caster's spell save DC, or this condition for a
+  // minute or until it takes damage, as a clockwork horror's Shutdown.
+  z.strictObject({
+    kind: z.literal("dispelShutdown"),
+    condition: ConditionSchema,
+  }),
+  // Disadvantage on saves against these conditions, as a shoggoth's Susceptible to Charm.
+  z.strictObject({
+    kind: z.literal("saveDisadvantage"),
+    conditions: z.array(ConditionSchema).min(1),
+  }),
+  // Starting its turn Bloodied, a 6 on a d6 makes it berserk until it isn't Bloodied: it attacks the nearest creature
+  // it can see, friend or foe, as a flesh golem's Berserk (combat/turn.ts).
+  z.strictObject({ kind: z.literal("berserk") }),
+  // Its area spells spare itself and up to `creatures` others of its side, as an evoker's Evocation Sculptor.
+  z.strictObject({
+    kind: z.literal("sculptor"),
+    creatures: z.number().int().min(1),
+  }),
+  // A hydra's heads: `heads` to begin with, one dies to `damage` or more in a turn, each dead one grows `regrow` back
+  // at its turn's end unless it took a `stoppedBy` type, healing `heal`. It makes one bite and, beyond the first, has
+  // one Opportunity Attack Reaction a head (combat/heads.ts).
+  z.strictObject({
+    kind: z.literal("heads"),
+    heads: z.number().int().min(1),
+    damage: z.number().int().min(1),
+    regrow: z.number().int().min(1),
+    heal: z.number().int().min(0),
+    stoppedBy: z.array(DamageTypeSchema).default([]),
   }),
   // A Reaction on every turn, as a marilith's Reactive.
   z.strictObject({ kind: z.literal("reactive") }),
