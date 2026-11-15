@@ -59,7 +59,7 @@ export function escapeDc(
 }
 
 // How far a grapple holds: the reach or range of what made it, and at least 5 feet.
-function holdFeet(
+export function holdFeet(
   grapple: ActiveEffect,
   grappler: Actor,
   access: ContentAccess,
@@ -100,5 +100,20 @@ export function releasedGrapples(
             }),
           ];
     });
+  });
+}
+
+// The creatures this one holds in a grapple, each with how far that grapple reaches.
+export function heldBy(
+  grappler: Actor,
+  state: DndState,
+  access: ContentAccess,
+): readonly { readonly held: Actor; readonly feet: number }[] {
+  return Object.values(state.actors).flatMap((held) => {
+    if (held.id === grappler.id || !held.position) return [];
+    const feet = grapplesOn(held)
+      .filter((grapple) => grapple.casterId === grappler.id)
+      .map((grapple) => holdFeet(grapple, grappler, access));
+    return feet.length > 0 ? [{ held, feet: Math.min(...feet) }] : [];
   });
 }

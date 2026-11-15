@@ -118,6 +118,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     menu,
     pickBar,
     cursor: null,
+    menuFor: null,
     howTo: "unseen",
     decisionSeen: null,
     cursorHome: false,

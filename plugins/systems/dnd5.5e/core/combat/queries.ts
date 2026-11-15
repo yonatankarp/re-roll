@@ -28,10 +28,12 @@ import {
   rangeFeet,
   reachableSquares,
   type Square,
+  SQUARE_FEET,
   squareKey,
 } from "../grid.ts";
 import { heightOf } from "./falling.ts";
 import { speedOf } from "../tactics.ts";
+import { heldBy } from "./grapple.ts";
 import {
   crossesDifficult,
   jumpOf,
@@ -264,10 +266,29 @@ function passes(
   );
 }
 
+// A stat block's own traits, read without working out the creature's stats, or none for a character.
+function statBlockPassives(
+  actor: Actor,
+  access: ContentAccess,
+): readonly Passive[] {
+  return actor.source.kind === "monster"
+    ? lookup(access, MonsterSchema, actor.source.statBlockId).passives
+    : [];
+}
+
+function sharesSpace(
+  passives: readonly Passive[],
+  who: "allies" | "self",
+): boolean {
+  return passives.some(
+    (passive) => passive.kind === "shareSpace" && passive.who === who,
+  );
+}
+
 // The ground as one creature moving finds it: what it can't enter, where it can't stop, and what costs double.
 // Another creature's space costs double unless it's an ally's or a Tiny one's. Walls it passes through can't be
-// stopped in. shortcut: nobody may stop in another's space, a swarm included; let two share a square once the board
-// can draw them.
+// stopped in, nor another's space unless a trait shares it (shareSpace). shortcut: a swarm's space can be passed but
+// not stopped in.
 export function groundFor(
   actor: Actor,
   state: DndState,
@@ -298,14 +319,25 @@ export function groundFor(
     ...(through.costly ? walls : []),
     ...slowingKeys(actor, state, access),
   ]);
+  const enters = sharesSpace(stats.passives, "self");
+  const there = new Map<string, Actor[]>();
   for (const other of Object.values(state.actors)) {
     if (other.id === actor.id || !other.position || isDead(other)) continue;
     const key = squareKey(other.position);
-    occupied.add(key);
-    if (!passes(actor, through, other, access)) blocked.add(key);
+    there.set(key, [...(there.get(key) ?? []), other]);
+    if (!enters && !passes(actor, through, other, access)) blocked.add(key);
     else if (other.side !== actor.side && sizeOf(other, access) > 0) {
       costly.add(key);
     }
+  }
+  // It may stop in another's space with Whirling Form, or in an ally's that opens it to allies, with only allies there.
+  for (const [key, others] of there) {
+    const hosted =
+      others.every((other) => other.side === actor.side) &&
+      others.some((other) =>
+        sharesSpace(statBlockPassives(other, access), "allies"),
+      );
+    if (!enters && !hosted) occupied.add(key);
   }
   return {
     blocked,
@@ -318,41 +350,137 @@ export function groundFor(
   };
 }
 
+// A square a move ends on, the feet it costs and the walk there. With `drag`, the creatures it grapples come along to
+// these squares.
+export type Walk = ReturnType<typeof reachableSquares>[number] & {
+  readonly drag?: readonly { readonly actor: string; readonly to: Square }[];
+};
+
 // Every square it can move to this turn, in whichever of its Speeds gets there cheapest. A flyer, climber or burrower
-// crosses difficult terrain at no extra cost.
+// crosses difficult terrain at no extra cost. A grappler drags those it holds wherever it goes out of their reach, at
+// double cost unless they're Tiny or two sizes smaller or it has Abduct, and walks farther only by letting go.
+// shortcut: it can't let go to walk somewhere it could drag them to.
 export function moveSquares(
   actor: Actor,
   state: DndState,
   stats: Stats,
   access: ContentAccess,
-): ReturnType<typeof reachableSquares> {
+): readonly Walk[] {
   const grid = state.combat?.grid;
-  if (!grid || !actor.position) return [];
+  const from = actor.position;
+  if (!grid || !from) return [];
   const ground = groundFor(actor, state, access, stats);
   const jump = jumpOf(stats);
   const walking =
     ground.costly.size === 0
       ? ground.terrain
       : new Set([...ground.terrain, ...ground.costly]);
-  const best = new Map<string, ReturnType<typeof reachableSquares>[number]>();
-  for (const [mode, feet] of speedsLeft(actor, stats)) {
-    if (feet <= 0) continue;
-    const found = reachableSquares(
-      actor.position,
-      feet,
-      grid,
-      ground.blocked,
-      ground.occupied,
-      crossesDifficult(mode) || ground.overTerrain ? ground.costly : walking,
-      ground.walls,
-      { squeeze: ground.squeeze, jump },
+  // Each square at its cheapest, with each foot of movement costing `cost` feet.
+  const search = (cost: number): Map<string, Walk> => {
+    const best = new Map<string, Walk>();
+    for (const [mode, left] of speedsLeft(actor, stats)) {
+      const feet = Math.floor(left / cost / SQUARE_FEET) * SQUARE_FEET;
+      if (feet <= 0) continue;
+      const found = reachableSquares(
+        from,
+        feet,
+        grid,
+        ground.blocked,
+        ground.occupied,
+        crossesDifficult(mode) || ground.overTerrain ? ground.costly : walking,
+        ground.walls,
+        { squeeze: ground.squeeze, jump },
+      );
+      for (const item of found) {
+        const key = squareKey(item.square);
+        const walk = { ...item, feet: item.feet * cost };
+        if (walk.feet < (best.get(key)?.feet ?? Infinity)) best.set(key, walk);
+      }
+    }
+    return best;
+  };
+  const plain = search(1);
+  const holds = heldBy(actor, state, access).filter(
+    ({ held }) => !isDead(held),
+  );
+  if (holds.length === 0) return [...plain.values()];
+  const own = sizeOf(actor, access);
+  const light = ({ held }: { readonly held: Actor }): boolean => {
+    const size = sizeOf(held, access);
+    return size === 0 || own - size >= 2;
+  };
+  const dragging =
+    hasPassive(stats, "abduct") || holds.every(light) ? plain : search(2);
+  return [...plain.values()].map((walk) => {
+    const near = holds.every(
+      ({ held, feet }) => distanceFeet(walk.square, held.position) <= feet,
     );
-    for (const item of found) {
-      const key = squareKey(item.square);
-      if (item.feet < (best.get(key)?.feet ?? Infinity)) best.set(key, item);
+    const dragged = near ? undefined : dragging.get(squareKey(walk.square));
+    const drag = dragged && dragSquares(dragged, from, holds, state);
+    return dragged && drag ? { ...dragged, drag } : walk;
+  });
+}
+
+// Where each grappled creature ends up: on the squares the walk left behind, last first, or else beside its end, each
+// on an open square within its grapple's reach of the end. Null if one has nowhere to go.
+function dragSquares(
+  walk: Walk,
+  from: Square,
+  holds: readonly { readonly held: Actor; readonly feet: number }[],
+  state: DndState,
+): { readonly actor: string; readonly to: Square }[] | null {
+  const grid = state.combat?.grid;
+  if (!grid) return null;
+  const moving = new Set(holds.map(({ held }) => held.id));
+  const taken = new Set([
+    ...blockedSquares(state),
+    squareKey(walk.square),
+    ...Object.values(state.actors).flatMap((other) =>
+      other.position && !isDead(other) && !moving.has(other.id)
+        ? [squareKey(other.position)]
+        : [],
+    ),
+  ]);
+  taken.delete(squareKey(from)); // the grappler leaves it
+  const beside: Square[] = [];
+  for (let dy = -1; dy <= 1; dy += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      const square = { x: walk.square.x + dx, y: walk.square.y + dy };
+      if (
+        square.x >= 0 &&
+        square.y >= 0 &&
+        square.x < grid.width &&
+        square.y < grid.height
+      ) {
+        beside.push(square);
+      }
     }
   }
-  return [...best.values()];
+  const trail = [...walk.path.slice(0, -1).reverse(), from];
+  const drag: { actor: string; to: Square }[] = [];
+  for (const { held, feet } of holds) {
+    const near = [...beside].sort(
+      (a, b) => distanceFeet(a, held.position) - distanceFeet(b, held.position),
+    );
+    const to = [...trail, ...near].find(
+      (square) =>
+        !taken.has(squareKey(square)) &&
+        distanceFeet(square, walk.square) <= feet,
+    );
+    if (!to) return null;
+    taken.add(squareKey(to));
+    drag.push({ actor: held.id, to });
+  }
+  return drag;
+}
+
+// The grappled creatures a move drags along, moved without spending their own movement.
+export function dragEvents(walk: {
+  readonly drag?: readonly { readonly actor: string; readonly to: Square }[];
+}): SystemEvent[] {
+  return (walk.drag ?? []).map(({ actor, to }) =>
+    dndEvent(`${NS}:moved`, { actor, to, feet: 0 }),
+  );
 }
 
 // "C7" for the third column of the seventh row, as on a battle map.

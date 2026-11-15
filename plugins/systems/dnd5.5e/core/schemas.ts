@@ -356,7 +356,13 @@ export type ZoneKind = z.infer<typeof ZoneKindSchema>;
 
 export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("heal"), amount: AmountSchema }),
-  z.strictObject({ kind: z.literal("tempHp"), amount: AmountSchema }),
+  // With `reaction` the target spends its Reaction to gain them, and gains none without one, as a death's head tree's
+  // Head Fruits.
+  z.strictObject({
+    kind: z.literal("tempHp"),
+    amount: AmountSchema,
+    reaction: z.literal(true).optional(),
+  }),
   z.strictObject({
     kind: z.literal("applyCondition"),
     condition: ConditionSchema,
@@ -1270,6 +1276,16 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Starting its turn Bloodied, a 6 on a d6 makes it berserk until it isn't Bloodied: it attacks the nearest creature
   // it can see, friend or foe, as a flesh golem's Berserk (combat/turn.ts).
   z.strictObject({ kind: z.literal("berserk") }),
+  // Moving a creature it grapples costs no extra movement, as a bugbear's Abduct (combat/queries.ts).
+  z.strictObject({ kind: z.literal("abduct") }),
+  // Two creatures in one square: with `allies` the bearer's allies may end their moves in its space, with Half Cover
+  // there under `cover`, as a death's head tree's Overhanging Branches; with `self` the bearer may enter any
+  // creature's space and stop there, as a gallows speaker's Whirling Form.
+  z.strictObject({
+    kind: z.literal("shareSpace"),
+    who: z.enum(["allies", "self"]),
+    cover: z.boolean().default(false),
+  }),
   // Its area spells spare itself and up to `creatures` others of its side, as an evoker's Evocation Sculptor.
   z.strictObject({
     kind: z.literal("sculptor"),

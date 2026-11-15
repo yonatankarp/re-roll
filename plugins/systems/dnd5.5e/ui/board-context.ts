@@ -54,6 +54,7 @@ export interface BoardDom {
 
 export interface BoardState {
   cursor: { x: number; y: number } | null;
+  menuFor: string | null; // whose menu Enter last opened, so on a shared square the next press opens the next one's
   // The first player turn of the first fight says how the map works, until the player uses it.
   howTo: "unseen" | "showing" | "done";
   decisionSeen: string | null;
