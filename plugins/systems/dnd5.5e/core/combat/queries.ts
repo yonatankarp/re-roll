@@ -3,6 +3,7 @@ import { leashed } from "./duel.ts";
 import { knownFoes, knows } from "../fog.ts";
 import {
   type Actor,
+  controllingRider,
   dndEvent,
   type DndState,
   equipped,
@@ -11,6 +12,7 @@ import {
   INCAPACITATING,
   isDead,
   isDown,
+  mountOf,
   NS,
   frame,
 } from "../state.ts";
@@ -119,6 +121,9 @@ export function hasFlag(
       modifier.kind === kind &&
       modifier.on === on &&
       (!modifier.ability || modifier.ability === ability) &&
+      // Advantage only against some conditions is the save's to weigh (placedFlag).
+      (!("conditions" in modifier) || !modifier.conditions) &&
+      (!("magical" in modifier) || !modifier.magical) &&
       (!("attackers" in modifier) ||
         !modifier.attackers ||
         modifier.attackers.includes(attackerType ?? "")),
@@ -238,6 +243,15 @@ export function speedsLeft(
         : Math.max(0, speedOf(actor, { ...stats, speed: feet }) - actor.moved),
     ]),
   );
+}
+
+// The mount a creature rides and controls, which carries it when it moves, or null.
+export function ridden(actor: Actor, state: DndState): Actor | null {
+  const id = mountOf(actor);
+  const mount = id ? state.actors[id] : undefined;
+  return mount && !isDown(mount) && controllingRider(state, mount.id) === actor
+    ? mount
+    : null;
 }
 
 export function speedLeft(actor: Actor, stats: Stats): number {
@@ -397,6 +411,10 @@ export function moveSquares(
   const grid = state.combat?.grid;
   const from = actor.position;
   if (!grid || !from) return [];
+  // A rider goes where its mount can, with the mount's Speed.
+  const mount = ridden(actor, state);
+  if (mount)
+    return moveSquares(mount, state, deriveStats(mount, access), access);
   const ground = groundFor(actor, state, access, stats);
   const jump = jumpOf(stats);
   // Up on its own, it moves only in the Speed it went up with; a climber keeps to the squares beside walls unless it

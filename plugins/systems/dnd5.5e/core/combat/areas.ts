@@ -8,33 +8,43 @@ import {
 import { z } from "zod";
 import {
   type Actor,
+  applyDndEvent,
   type DndState,
   dndEvent,
   frame,
   isDead,
   NS,
 } from "../state.ts";
-import type { Resolution } from "../schemas.ts";
+import { MonsterSchema, type Passive, type Resolution } from "../schemas.ts";
 import {
   damageResponses,
   deriveStats,
   type KnownAction,
+  lookup,
   rollAmount,
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
-import { distanceFeet } from "../grid.ts";
+import { distanceFeet, type Square, squareKey } from "../grid.ts";
 import { lightAt } from "../sight.ts";
 import {
   affects,
   statsOf,
   inZone,
+  obscuring,
   sealed,
   sunlit,
   type Zone,
   zonesOf,
+  zonesOn,
 } from "../zones.ts";
-import { CHECK_END, type Context } from "./queries.ts";
-import { concentrationFrame, dealEvents, resolveAction } from "./effects.ts";
+import { isSpell } from "./dispel.ts";
+import { CHECK_END, type Context, currentActor } from "./queries.ts";
+import {
+  concentrationFrame,
+  dealEvents,
+  resolveAction,
+  rollSave,
+} from "./effects.ts";
 
 // Lasting areas acting on the creatures in them as turns start and end, a monster's burst where it dies, and
 // sunlight burning the creatures it harms.
@@ -129,6 +139,176 @@ export function zoneFrames(
   return frames;
 }
 
+// Kept in a creature's usedThisTurn: an area that acts on whoever enters it has caught it on this turn, so it acts
+// on it only once a turn. The turn is in the key, since the mark stays until the creature's own turn clears it.
+export function caughtKey(zone: Zone, state: DndState): string {
+  const round = state.combat?.round ?? 0;
+  const index = state.combat?.index ?? 0;
+  return `area:${zone.owner}|${zone.sourceId}@${String(round)}.${String(index)}`;
+}
+
+const caught = (zone: Zone, actor: Actor, state: DndState): boolean =>
+  zone.area?.enters === true &&
+  actor.usedThisTurn.includes(caughtKey(zone, state));
+
+const entering = (state: DndState): readonly Zone[] =>
+  zonesOf(state).filter((zone) => zone.area?.enters && zone.area.resolution);
+
+// Where a walk first takes `walker` into an area that acts on whoever enters it, as Moonbeam: the index on the
+// path, and the areas it enters there.
+export function areaEntry(
+  walker: Actor,
+  path: readonly Square[],
+  context: ContentAccess & { readonly state: DndState },
+): { readonly index: number; readonly zones: readonly Zone[] } | null {
+  const { state } = context;
+  const zones = entering(state).filter(
+    (zone) =>
+      !caught(zone, walker, state) && affects(zone, walker, state, context),
+  );
+  if (zones.length === 0) return null;
+  for (let index = 0; index < path.length; index += 1) {
+    const square = path[index] ?? null;
+    const from = index === 0 ? walker.position : (path[index - 1] ?? null);
+    const into = zones.filter(
+      (zone) => inZone(zone, square) && !inZone(zone, from),
+    );
+    if (into.length > 0) {
+      // A walk can't stop in another creature's space, so it stops on the next square it can, the last if need be.
+      // shortcut: the area acts there only if that square is in it too.
+      const taken = new Set(
+        Object.values(state.actors).flatMap((item) =>
+          item.id !== walker.id && item.position && !isDead(item)
+            ? [squareKey(item.position)]
+            : [],
+        ),
+      );
+      let stop = index;
+      while (stop < path.length - 1) {
+        const at = path[stop];
+        if (at && !taken.has(squareKey(at))) break;
+        stop += 1;
+      }
+      return { index: stop, zones: into };
+    }
+  }
+  return null;
+}
+
+// The ticks of the areas `walker` has walked into, and of its own moving areas that now reach creatures they didn't
+// as it set out from `from`, as Spirit Guardians brought up to a foe.
+// shortcut: a moving area is judged where the walk ends, so a creature it only passes over isn't caught.
+export function entryFrames(
+  walker: Actor,
+  from: Square | null,
+  to: Square,
+  into: readonly Zone[],
+  context: ContentAccess & { readonly state: DndState },
+): Frame[] {
+  const { state } = context;
+  const tick = (zone: Zone, targets: readonly string[]): Frame =>
+    frame("zoneTick", { owner: zone.owner, sourceId: zone.sourceId, targets });
+  const swept = entering(state).flatMap((zone) => {
+    if (!zone.follows || zone.owner !== walker.id || !from) return [];
+    const before = { ...zone, at: from };
+    const after = { ...zone, at: to };
+    const reached = Object.values(state.actors).filter(
+      (item) =>
+        item.id !== walker.id &&
+        item.position !== null &&
+        !inZone(before, item.position) &&
+        inZone(after, item.position) &&
+        !caught(zone, item, state) &&
+        affects(zone, item, state, context),
+    );
+    return reached.length > 0
+      ? [
+          tick(
+            zone,
+            reached.map((item) => item.id),
+          ),
+        ]
+      : [];
+  });
+  return [...into.map((zone) => tick(zone, [walker.id])), ...swept];
+}
+
+// The ticks of an area that acts on whoever it reaches, moved from `from`: on the creatures it now covers and didn't,
+// as Moonbeam moved onto a foe.
+export function movedFrames(
+  zone: Zone,
+  from: Square,
+  context: ContentAccess & { readonly state: DndState },
+): Frame[] {
+  const { state } = context;
+  if (!zone.area?.enters || !zone.area.resolution) return [];
+  const before = { ...zone, at: from };
+  const reached = Object.values(state.actors).filter(
+    (item) =>
+      item.position !== null &&
+      !inZone(before, item.position) &&
+      inZone(zone, item.position) &&
+      !caught(zone, item, state) &&
+      affects(zone, item, state, context),
+  );
+  return reached.length > 0
+    ? [
+        frame("zoneTick", {
+          owner: zone.owner,
+          sourceId: zone.sourceId,
+          targets: reached.map((item) => item.id),
+        }),
+      ]
+    : [];
+}
+
+// The areas `owner` keeps that drift away from it as its turn starts, as Cloudkill's 10 feet: where each goes, and
+// the ticks on whoever it moves onto. shortcut: Incendiary Cloud's chosen direction is away from its caster too.
+export function driftResult(
+  owner: Actor,
+  context: ContentAccess & { readonly state: DndState },
+): { readonly events: SystemEvent[]; readonly frames: Frame[] } {
+  const { state } = context;
+  const grid = state.combat?.grid;
+  const events: SystemEvent[] = [];
+  const frames: Frame[] = [];
+  const seen = new Set<string>();
+  for (const zone of zonesOf(state)) {
+    const feet = zone.area?.drifts;
+    if (!feet || zone.owner !== owner.id || zone.follows || !owner.position) {
+      continue;
+    }
+    if (seen.has(zone.sourceId)) continue;
+    seen.add(zone.sourceId);
+    const steps = Math.floor(feet / 5);
+    const dx = Math.sign(zone.at.x - owner.position.x);
+    const dy = Math.sign(zone.at.y - owner.position.y);
+    const clamp = (value: number, size: number): number =>
+      Math.max(0, Math.min(size - 1, value));
+    const to = {
+      x: clamp(
+        zone.at.x + (dx === 0 && dy === 0 ? 1 : dx) * steps,
+        grid?.width ?? Infinity,
+      ),
+      y: clamp(zone.at.y + dy * steps, grid?.height ?? Infinity),
+    };
+    if (to.x === zone.at.x && to.y === zone.at.y) continue;
+    events.push(
+      dndEvent(`${NS}:zoneMoved`, {
+        actor: owner.id,
+        sourceId: zone.sourceId,
+        to,
+      }),
+    );
+    for (const item of zonesOf(state).filter(
+      (other) => other.owner === owner.id && other.sourceId === zone.sourceId,
+    )) {
+      frames.push(...movedFrames({ ...item, at: to }, item.at, context));
+    }
+  }
+  return { events, frames };
+}
+
 export const ZoneTickSchema = z.object({
   owner: z.string(),
   sourceId: z.string(),
@@ -142,23 +322,58 @@ export function runZoneTick(
 ): SystemResult {
   const { state } = context;
   const owner = state.actors[payload.owner];
+  // A spell may leave several zones, as Prismatic Wall's wall and light: the one that acts.
   const zone = zonesOf(state, context).find(
     (item) =>
-      item.owner === payload.owner && item.sourceId === payload.sourceId,
+      item.owner === payload.owner &&
+      item.sourceId === payload.sourceId &&
+      item.area?.resolution !== undefined,
   );
   if (!owner || !zone) return {};
   const targets = payload.targets.flatMap((id) => {
     const target = state.actors[id];
     return target &&
       inZone(zone, target.position) &&
-      affects(zone, target, state, context)
+      affects(zone, target, state, context) &&
+      !caught(zone, target, state)
       ? [target]
       : [];
   });
-  const action = zoneAction(zone, zone.name ?? "");
-  if (targets.length === 0 || !action) return {};
-  const result = resolveAction(action, owner, targets, context, zone.level);
-  const events = [...(result.events ?? [])];
+  // A spirit holding the creature it Restrained acts only on that one, as Conjure Elemental's.
+  const held = zone.area?.holding ? heldBy(zone, state) : undefined;
+  const acting = held
+    ? targets.filter((target) => target.id === held.id)
+    : targets;
+  const action = zoneAction(
+    held && zone.area?.holding
+      ? { ...zone, area: { ...zone.area, resolution: zone.area.holding } }
+      : zone,
+    zone.name ?? "",
+  );
+  if (acting.length === 0 || !action) return {};
+  const marks = [
+    ...(zone.area?.enters
+      ? acting.map((target) =>
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: target.id,
+            key: caughtKey(zone, state),
+          }),
+        )
+      : []),
+    // What it puts on a creature as its own turn ends is first saved against at the end of its next turn.
+    ...(zone.area?.when === "turnEnd"
+      ? acting
+          .filter((target) => currentActor(state)?.id === target.id)
+          .map((target) =>
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: target.id,
+              key: `${FRESH}${zone.sourceId}`,
+            }),
+          )
+      : []),
+  ];
+  const result = resolveAction(action, owner, acting, context, zone.level);
+  const events = [...marks, ...(result.events ?? [])];
   const { maxDamage } = zone.area ?? {};
   if (maxDamage !== undefined) {
     const dealt = events.reduce(
@@ -191,6 +406,23 @@ export function runZoneTick(
   }
   return { events, frames: [...(result.frames ?? []), CHECK_END] };
 }
+
+// The creature a zone holds with a condition it gave, if any.
+function heldBy(zone: Zone, state: DndState): Actor | undefined {
+  return Object.values(state.actors).find(
+    (item) =>
+      !isDead(item) &&
+      item.activeEffects.some(
+        ({ sourceId, casterId, modifier }) =>
+          sourceId === zone.sourceId &&
+          casterId === zone.owner &&
+          modifier.kind === "condition",
+      ),
+  );
+}
+
+// Kept in a creature's usedThisTurn: a zone's effects went on it this turn, so they aren't saved against yet.
+export const FRESH = "zone-fresh:";
 
 // Kept on a zone's owner: the damage it has dealt so far.
 export const DEALT = ":dealt";
@@ -260,6 +492,156 @@ function burstAction(
 }
 const AURA_BURST = "burst:";
 
+// A spell cast inside an area that foils spells, as a haunting revenant's Haunted Zone: the caster's save, and
+// whether the spell fails and is wasted. Null where nothing foils it.
+export function spellFoiled(
+  actor: Actor,
+  action: KnownAction,
+  context: Context,
+): { readonly failed: boolean; readonly events: SystemEvent[] } | null {
+  const { state } = context;
+  if (!zonesOf(state, context).some((zone) => zone.area?.foilsSpells)) {
+    return null;
+  }
+  if (!isSpell(action, actor, context)) return null;
+  const foil = zonesOn(actor, state, context).find(
+    (zone) => zone.area?.foilsSpells,
+  )?.area?.foilsSpells;
+  if (!foil) return null;
+  const save = rollSave(actor, foil.ability, foil.dc, context, true);
+  return { failed: !save.saved, events: save.events };
+}
+
+// Whether a monster's stat block has a trait of this kind: a cheap look, kept by the content, before its stats are
+// worked out on every hit or step.
+const blockHas = (
+  actor: Actor,
+  kind: Passive["kind"],
+  access: ContentAccess,
+): boolean =>
+  actor.source.kind === "monster" &&
+  lookup(access, MonsterSchema, actor.source.statBlockId).passives.some(
+    (passive) => passive.kind === kind,
+  );
+
+// Kept in a bearer's usedThisTurn once its damage burst has gone off on a turn, so two bursting neighbours can't set
+// each other off forever.
+const burstKey = (state: DndState): string =>
+  `damage-burst@${String(state.combat?.round ?? 0)}.${String(state.combat?.index ?? 0)}`;
+
+// A creature that bursts on taking damage of a type, as a spore of Moander's Explosive Core, once a turn.
+export function damageBurstFrames(
+  target: Actor,
+  types: readonly string[],
+  context: ContentAccess & { readonly state: DndState },
+): Frame[] {
+  if (!blockHas(target, "damageBurst", context) || isDead(target)) return [];
+  if (target.usedThisTurn.includes(burstKey(context.state))) return [];
+  const bursts = statsOf(target, context).passives.some(
+    (passive) =>
+      passive.kind === "damageBurst" &&
+      passive.damage.some((type) => types.includes(type)),
+  );
+  return bursts
+    ? [frame("damageBurst", { actor: target.id, types: [...types] })]
+    : [];
+}
+
+export function runDamageBurst(
+  payload: { readonly actor: string; readonly types: readonly string[] },
+  context: Context,
+): SystemResult {
+  const { state } = context;
+  const actor = state.actors[payload.actor];
+  if (!actor?.position || actor.usedThisTurn.includes(burstKey(state))) {
+    return {};
+  }
+  const burst = statsOf(actor, context).passives.find(
+    (passive) =>
+      passive.kind === "damageBurst" &&
+      passive.damage.some((type) => payload.types.includes(type)),
+  );
+  if (burst?.kind !== "damageBurst") return {};
+  const targets = Object.values(state.actors).filter(
+    (item) =>
+      item.id !== actor.id &&
+      !isDead(item) &&
+      !sealed(item) &&
+      item.position !== null &&
+      distanceFeet(actor.position, item.position) <= burst.radius,
+  );
+  const mark = dndEvent(`${NS}:oncePerTurnUsed`, {
+    actor: actor.id,
+    key: burstKey(state),
+  });
+  if (targets.length === 0) return { events: [mark] };
+  const marked = { ...context, state: applyDndEvent(state, mark) };
+  const result = resolveAction(
+    burstAction(burst.name, burst.radius, burst.resolution),
+    actor,
+    targets,
+    marked,
+  );
+  return {
+    events: [mark, ...(result.events ?? [])],
+    frames: [...(result.frames ?? []), CHECK_END],
+  };
+}
+
+const FOG_BOUND = ":fog-bound";
+
+// The conditions a creature bound to fog has where it stands, as a mist horror Invisible in fog and Incapacitated
+// out of it: what changes, as its turn starts and after it moves.
+// shortcut: fog that rises or clears round it counts from its next turn or move.
+export function fogBoundEvents(
+  actor: Actor,
+  context: ContentAccess & { readonly state: DndState },
+): SystemEvent[] {
+  if (!blockHas(actor, "fogBound", context) || isDead(actor)) return [];
+  const bound = statsOf(actor, context).passives.find(
+    (passive) => passive.kind === "fogBound",
+  );
+  if (bound?.kind !== "fogBound") return [];
+  const sourceId = `${actor.id}${FOG_BOUND}`;
+  const wanted =
+    obscuring(actor.position, context.state) === "fog"
+      ? bound.inside
+      : bound.outside;
+  const has = actor.activeEffects.flatMap(({ sourceId: id, modifier }) =>
+    id === sourceId && modifier.kind === "condition"
+      ? [modifier.condition]
+      : [],
+  );
+  if (
+    has.length === wanted.length &&
+    wanted.every((condition) => has.includes(condition))
+  ) {
+    return [];
+  }
+  return [
+    ...(has.length > 0
+      ? [
+          dndEvent(`${NS}:effectEnded`, {
+            actor: actor.id,
+            sourceId,
+            casterId: actor.id,
+          }),
+        ]
+      : []),
+    ...wanted.map((condition) =>
+      dndEvent(`${NS}:effectAdded`, {
+        actor: actor.id,
+        effect: {
+          sourceId,
+          casterId: actor.id,
+          modifier: { kind: "condition", condition },
+          ends: "spellDuration",
+        },
+      }),
+    ),
+  ];
+}
+
 // Whether `actor` is in the light that harms it: sunlight, or for Light Sensitivity any Bright Light.
 export function inHarmfulLight(
   actor: Actor,
@@ -316,6 +698,10 @@ export const areaFrames = {
   [`${NS}:zoneTick`]: frameHandler({
     schema: ZoneTickSchema,
     run: runZoneTick,
+  }),
+  [`${NS}:damageBurst`]: frameHandler({
+    schema: z.object({ actor: z.string(), types: z.array(z.string()) }),
+    run: runDamageBurst,
   }),
   [`${NS}:sunlightTick`]: frameHandler({
     schema: z.object({ actor: z.string() }),

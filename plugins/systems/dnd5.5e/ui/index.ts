@@ -45,6 +45,7 @@ import {
   isDead,
   isDown,
   isStable,
+  mountOf,
 } from "../core/state.ts";
 import { parseState } from "./parse-state.ts";
 import {
@@ -875,9 +876,15 @@ function combat(
         })
       : [],
   );
+  // A rider shares its mount's square, so its token says so.
+  const riding = (actor: Actor): string[] => {
+    const mount = state.actors[mountOf(actor) ?? ""];
+    return mount ? [`riding ${mount.name}`] : [];
+  };
   // The conditions shown on a creature, with what's left of a legendary resistance.
   const conditionsHere = (actor: Actor): string[] => [
     ...conditionsOf(actor),
+    ...riding(actor),
     ...(legendOf(actor, access).legendaryResistance
       ? [
           `Legendary Resistance (${String(resistancesLeft(actor, access, state))} left)`,

@@ -273,13 +273,11 @@ const WAITING_ON: Readonly<Record<string, string>> = {
   "cleric-sear-undead": "needs damage added to Turn Undead",
   "druid-druidic": OUT_OF_COMBAT,
   "druid-primal-order": "needs a choice between the orders at level-up",
-  "druid-wild-companion": "needs summoned familiars",
   "druid-wild-resurgence": SLOT_RECOVERY,
   "fighter-tactical-mind": OUT_OF_COMBAT,
   "fighter-tactical-shift": "needs free movement after Second Wind",
   "monk-uncanny-metabolism": "needs Focus Points regained on Initiative",
   "monk-slow-fall": "no falling in fights",
-  "paladin-faithful-steed": "needs summoned mounts",
   "ranger-deft-explorer": OUT_OF_COMBAT,
   "rogue-expertise": OUT_OF_COMBAT,
   "rogue-thieves-cant": OUT_OF_COMBAT,
@@ -325,7 +323,12 @@ export function classify(
     const when = activation.trigger ? " (triggered)" : "";
     reasons.push(`${cost || "free"}${when}: ${counted(kinds)}`);
   }
-  const spells = grantedSpells(feature.id, stats.level).length;
+  const spells = [
+    ...grantedSpells(feature.id, stats.level),
+    ...Object.entries(feature.spells ?? {}).flatMap(([from, ids]) =>
+      Number(from) <= stats.level ? ids : [],
+    ),
+  ].length;
   if (spells > 0) reasons.push(`always-prepared spells: ${String(spells)}`);
   if (reasons.length === feature.resources.length) {
     return {

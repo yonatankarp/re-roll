@@ -15,6 +15,7 @@ import {
   cannotHeal,
   dndEvent,
   type DndState,
+  familiarOwner,
   hasCondition,
   INCAPACITATING,
   isDead,
@@ -63,9 +64,20 @@ import {
   extraTurnEvents,
   turnStartEvents,
 } from "./durations.ts";
-import { burstResult, sunlightFrames, zoneFrames } from "./areas.ts";
+import {
+  burstResult,
+  driftResult,
+  FRESH,
+  fogBoundEvents,
+  sunlightFrames,
+  zoneFrames,
+} from "./areas.ts";
 import { fallFrames } from "./falling.ts";
-import { healingStopped } from "../zones.ts";
+import {
+  antimagicEvents,
+  healingStopped,
+  placedConditionEvents,
+} from "../zones.ts";
 import { madnessStart } from "./madness.ts";
 import { headsLeft, headsOf, regrowEvents } from "./heads.ts";
 
@@ -172,8 +184,10 @@ function fightOver(context: Context): SystemResult {
     );
     if (freed.length > 0) return { events: freed };
   }
+  // A familiar can't fight on alone.
   const partyStanding = fighters.some(
-    (actor) => actor.side === "party" && !isDown(actor),
+    (actor) =>
+      actor.side === "party" && !isDown(actor) && familiarOwner(actor) === null,
   );
   // The story follows the player's character, so their death ends the run even if companions win.
   const playerDead = isDead(actorOf(state, PLAYER_ACTOR));
@@ -357,7 +371,10 @@ export function runFinishTurn(context: Context): SystemResult {
   if (!state.combat) return {};
   const actor = currentActor(state);
   const repeated = (actor?.activeEffects ?? []).flatMap((effect) =>
-    actor && effect.repeatSave && !isDown(actor)
+    actor &&
+    effect.repeatSave &&
+    !isDown(actor) &&
+    !actor.usedThisTurn.includes(`${FRESH}${effect.sourceId}`)
       ? [{ actor, effect, save: effect.repeatSave }]
       : [],
   );
@@ -514,12 +531,19 @@ export function runAdvanceTurn(
   const expired = starting ? expiredEvents(after, starting.id, "start") : [];
   for (const event of expired) after = applyDndEvent(after, event);
   const next = currentActor(after);
+  const drifted = next
+    ? driftResult(next, { ...context, state: after })
+    : { events: [], frames: [] };
   const events = [
     ...finished,
     ...expired,
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
+    ...(next ? fogBoundEvents(next, { ...context, state: after }) : []),
+    ...antimagicEvents(after),
+    ...placedConditionEvents(after),
+    ...drifted.events,
     ...reactiveEvents(after, context),
   ];
   const starts = { ...context, state: after };
@@ -527,6 +551,7 @@ export function runAdvanceTurn(
   events.push(...mad.events);
   const ticks = next
     ? [
+        ...drifted.frames,
         ...mad.frames,
         ...lingeringFrames(next, "turnStart"),
         ...sunlightFrames(next, starts),

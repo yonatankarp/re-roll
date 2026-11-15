@@ -190,6 +190,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     on: RollFlagSchema,
     once: z.boolean().optional(),
     ability: AbilitySchema.optional(),
+    // only on saves to avoid or end these conditions, as a sivis scribe's Words of Reason
+    conditions: z.array(ConditionSchema).min(1).optional(),
+    magical: z.literal(true).optional(), // only on saves against spells and magic, as Circle of Power
     // attacksAgainst only for the effect's caster, as Lords' Alliance Agent's Reassert Honor.
     casterOnly: z.literal(true).optional(),
   }),
@@ -245,6 +248,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     dealtBy: z.enum(["bearer", "caster"]),
     weaponOnly: z.boolean().default(false),
     damage: DamageSchema,
+    within: z.number().int().min(5).optional(), // only against a creature this near the bearer
+    // the type picked for each hit, the one the target resists least, as Conjure Minor Elementals' acid to lightning
+    types: z.array(DamageTypeSchema).min(2).optional(),
     once: z.boolean().optional(), // ends after the bearer's next attack roll, as a bandit crime lord's Deadly Aim
   }),
   // Limits on what the bearer can do on its turns, as Slow gives: `oneAction` is an action or a Bonus Action, not
@@ -273,6 +279,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
         skill: SkillSchema,
       })
       .optional(),
+    // it can teleport out after a save of this ability against its caster's spell save DC, as from a Forcecage
+    teleportSave: AbilitySchema.optional(),
+    rolls: z.literal(true).optional(), // it moves at half Speed, its prison with it, as Resilient Sphere's
   }),
   // The bearer is this far up, lifted by the effect of the same source without ":aloft", and falls once that's gone,
   // as with Reverse Gravity (combat/falling.ts). With `mode` it went up itself, flying or climbing, and stays while it
@@ -435,6 +444,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .optional(),
     hpAtMost: z.number().int().min(1).optional(), // only a target with this many Hit Points or fewer
     web: z.literal(true).optional(), // webs hold it, which a Web Walker ignores, as with Web
+    // only a target this size or smaller, as an Energy Pulse knocks only a Medium or smaller creature Prone
+    maxSize: z
+      .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
+      .optional(),
     endsOnDamage: z.boolean().default(false),
     endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature, as Modify Memory's
     // Ends when the creature attacks or deals damage ("attack"), or takes any action ("action"), as Fade Away's.
@@ -524,6 +537,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     duration: DurationSchema,
     damage: z.array(DamageSchema).optional(),
     follows: z.literal(true).optional(),
+    perSlot: z.number().int().min(5).optional(), // feet more radius for each slot level above the spell's
+    bare: z.literal(true).optional(), // it carries none of the spell's area, which another of its zones does
+    // its area's damage takes one of these types, which the caster picks as it casts (combat/damage-choice.ts), as
+    // Conjure Elemental's element
+    choose: z.array(DamageTypeSchema).min(2).optional(),
+    // a wall that encloses a creature lets it make this save to get out first, as Wall of Stone's Dexterity
+    escape: AbilitySchema.optional(),
   }),
   // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
   // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe. A caster
@@ -578,7 +598,15 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // Adds to AC against the hit that triggered a reaction only, possibly turning it into a miss, as with Parry.
   z.strictObject({
     kind: z.literal("acAgainstHit"),
-    bonus: z.number().int().min(1),
+    // A formula is the reactor's, as a familiar's Intercept Attack adding its owner's Proficiency Bonus.
+    bonus: z.union([z.number().int().min(1), FormulaSchema]),
+  }),
+  // The caster's familiar takes its action of this name, which has the `commanded` trigger, spending its Reaction,
+  // when it is within `range` feet, as a familiar's Energy Pulse (combat/familiar.ts).
+  z.strictObject({
+    kind: z.literal("commandFamiliar"),
+    action: z.string().min(1),
+    range: z.number().int().min(5),
   }),
   // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts).
   z.strictObject({ kind: z.literal("counter") }),
@@ -692,6 +720,14 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
   // A dying creature becomes Stable, as with Spare the Dying.
   z.strictObject({ kind: z.literal("stabilize") }),
+  // Moves the bearer's area of the spell `source` to where this is aimed, as Moonbeam moved with a Magic action.
+  z.strictObject({ kind: z.literal("moveZone"), source: z.string() }),
+  // The target takes its Reaction to make a melee attack against a creature in its reach, one of its own side
+  // first, or takes this damage when none is, as a gallows speaker's Aura of Violence.
+  z.strictObject({
+    kind: z.literal("forcedAttack"),
+    otherwise: z.array(DamageSchema).default([]),
+  }),
   // A target with this many Hit Points or fewer dies outright instead of taking the damage, as Power Word Kill.
   z.strictObject({
     kind: z.literal("slay"),
@@ -798,6 +834,26 @@ export const AreaEffectSchema = z.strictObject({
     .enum(["turnStart", "turnEnd", "ownerTurnStart", "ownerTurnEnd"])
     .optional(),
   resolution: ResolutionSchema.optional(),
+  // it also acts on a creature that walks into it, and on each creature only once a turn, as Spirit Guardians
+  enters: z.literal(true).optional(),
+  bloodied: z.literal(true).optional(), // only on Bloodied creatures, as a Dead Three scion's Culling Aura
+  // a success against a spell or magic that halves damage takes none, as Circle of Power
+  magicWard: z.literal(true).optional(),
+  // spellShield blocks one level higher for each slot level above the spell's, as Globe of Invulnerability
+  shieldGrows: z.literal(true).optional(),
+  // conditions those it affects have while in it, as Silence's Deafened
+  conditions: z.array(ConditionSchema).min(1).optional(),
+  // it moves this far away from its owner as each of the owner's turns starts, as Cloudkill
+  drifts: z.number().int().min(5).optional(),
+  // its owner can take an action on later turns to move it up to this far, as Moonbeam's Magic action
+  moves: z.number().int().min(5).optional(),
+  // while a creature has a condition from it, it acts only on that one, with this as that creature's turns start,
+  // as Conjure Elemental's spirit holding the one it Restrained
+  holding: ResolutionSchema.optional(),
+  // a spell cast in it fails and is wasted unless the caster makes this save, as a haunting revenant's Haunted Zone
+  foilsSpells: z
+    .strictObject({ ability: AbilitySchema, dc: z.number().int().min(1) })
+    .optional(),
   targets: z.number().int().min(1).optional(),
   grants: z.array(ModifierSchema).min(1).optional(),
   noHealing: z.literal(true).optional(), // no Hit Points regained in it, as Life Suppression
@@ -936,6 +992,8 @@ export const ActivationSchema = z.strictObject({
       inspirationSpent: z.literal(true).optional(),
       // Taken right after Initiative is rolled, as with Alert's Initiative Swap.
       initiative: z.literal(true).optional(),
+      // Taken only when its owner's `commandFamiliar` effect calls for it, never on its own.
+      commanded: z.literal(true).optional(),
     })
     .optional(),
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
@@ -999,6 +1057,21 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     zone: ZoneKindSchema.default("area"),
     radius: z.number().int().min(5),
     area: AreaEffectSchema.default({}),
+  }),
+  // What happens round the bearer when it takes damage of these types, once a turn, as a spore of Moander's
+  // Explosive Core.
+  z.strictObject({
+    kind: z.literal("damageBurst"),
+    name: z.string().min(1),
+    damage: z.array(DamageTypeSchema).min(1),
+    radius: z.number().int().min(5),
+    resolution: ResolutionSchema,
+  }),
+  // Conditions it has inside fog or mist and outside it, as a mist horror's One with the Mists.
+  z.strictObject({
+    kind: z.literal("fogBound"),
+    inside: z.array(ConditionSchema).default([]),
+    outside: z.array(ConditionSchema).default([]),
   }),
   // What happens round the square where the bearer dies, as a flaming skeleton's Death Burst.
   z.strictObject({
@@ -1150,6 +1223,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // A 1 on the d20 of a D20 Test is rolled again, and the new roll stands, as with Halfling Luck.
   z.strictObject({ kind: z.literal("rerollOnes") }),
+  // A creature at least one size larger is cover enough to Hide behind, as with Naturally Stealthy.
+  z.strictObject({ kind: z.literal("hideBehindLarger") }),
   // Once a turn, a weapon hit's damage dice are rolled twice and the higher kept, as with Savage Attacker.
   z.strictObject({ kind: z.literal("savageAttacker") }),
   // Proficiency in these saving throws, or with `increased` in the one its feat raised, as with Resilient.
@@ -1214,6 +1289,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // A healing die that rolls 1 is rolled again and the new roll stands, as with Healer's Healing Rerolls.
   z.strictObject({ kind: z.literal("healingRerolls") }),
+  // An ally within `within` feet of the bearer treats a healing die's roll below `at` as `at`, as with a Soothing
+  // Familiar's Healing Beacon.
+  z.strictObject({
+    kind: z.literal("healDieFloor"),
+    at: z.number().int().min(2),
+    within: z.number().int().min(5),
+  }),
   // This much off the price of nonmagical items the bearer buys, as with Crafter.
   z.strictObject({
     kind: z.literal("shopDiscount"),
@@ -1274,6 +1356,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Advantage on the check of a Search or Study action, spending a use of the resource only when it succeeds, as
   // with Sharp Eye.
   z.strictObject({ kind: z.literal("sharpEye"), resource: z.string() }),
+  // Advantage on a check with a skill the bearer is proficient in while its familiar is within 5 feet, spending a
+  // use of the resource, as with Familiar Friend's Helpful Friend. Out of a fight the familiar is always beside it.
+  z.strictObject({ kind: z.literal("familiarHelp"), resource: z.string() }),
+  // Another creature at least one size smaller can ride the bearer as a controlled mount (combat/mounts.ts), as a
+  // Find Steed steed.
+  z.strictObject({ kind: z.literal("rideable") }),
   // Proficiency in every skill, as with Boon of Skill's All-Around Adept.
   z.strictObject({ kind: z.literal("allSkills") }),
   // The Dash action adds this many feet more, as with Charger's Improved Dash.
@@ -1572,6 +1660,22 @@ export const FeatureSchema = ContentEntrySchema.extend({
     })
     .optional(),
   choices: z.lazy(() => z.array(ChoiceDefSchema)).default([]), // asked when it's taken as a class option
+  // What it gives the bearer's familiar (combat/familiar.ts): Hit Points added to its maximum when it is found,
+  // worked out from the bearer's numbers, and passives and actions of its own.
+  familiar: z
+    .strictObject({
+      hp: FormulaSchema.optional(),
+      passives: z.array(PassiveSchema).default([]),
+      actions: z
+        .array(
+          z.strictObject({
+            name: z.string().min(1),
+            activation: ActivationSchema,
+          }),
+        )
+        .default([]),
+    })
+    .optional(),
 }).strict();
 export type Feature = z.infer<typeof FeatureSchema>;
 
@@ -1757,6 +1861,9 @@ export const SpellSchema = ContentEntrySchema.extend({
   // Why a spell with no activation needs none: it takes longer than a turn to cast ("castingTime"), or does
   // nothing a grid fight plays, such as travel, senses, talk or downtime ("utility").
   outOfCombat: z.enum(["castingTime", "utility"]).optional(),
+  // Knowing it gives the caster a familiar in this monster's form, which joins each fight (combat/familiar.ts).
+  // shortcut: the form is the one given here rather than the caster's choice, and its type is Fey.
+  familiar: z.strictObject({ form: ContentIdSchema }).optional(),
   upcast: z
     .strictObject({
       perSlotLevel: ScaleStepSchema,

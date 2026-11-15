@@ -1,5 +1,6 @@
 import type { ParsedImport } from "#sdk";
 import type {
+  AreaEffect,
   Condition,
   Damage,
   LeafEffect,
@@ -215,8 +216,22 @@ function modifiersIn(text: string): LeafEffect[] {
     duration: { minutes: 1 },
     ...(REPEAT_SAVE.test(text) ? { repeatSave: true } : {}),
   });
+  // "can't regain Hit Points until the start of the scion's next turn": its owner's turn, as Culling Aura's.
+  const unhealed =
+    /\bcan[’']t regain Hit Points until the start of the [^.]+?[’']s next turn\b/.test(
+      text,
+    );
   return [
     ...actionLimitIn(text),
+    ...(unhealed
+      ? [
+          {
+            kind: "modifier" as const,
+            modifier: { kind: "noHealing" as const },
+            duration: { until: "yourNextTurnStart" as const },
+          },
+        ]
+      : []),
     ...(ability
       ? (["attacks", "saves", "checks"] as const).map((on) =>
           leaf({ kind: "disadvantage", on, ability }),
@@ -1297,7 +1312,8 @@ const BY_SPEEDS = /^Spider Climb$/;
 // "until the start of its next turn" in an aura's save is the target's turn, which the aura catches it on.
 function theirTurns(effects: readonly LeafEffect[]): LeafEffect[] {
   return effects.map((effect) =>
-    (effect.kind === "applyCondition" || effect.kind === "modifier") &&
+    (effect.kind === "applyCondition" ||
+      (effect.kind === "modifier" && effect.modifier.kind !== "noHealing")) &&
     typeof effect.duration === "object" &&
     "until" in effect.duration &&
     effect.duration.until === "yourNextTurnStart"
@@ -1504,16 +1520,27 @@ function areaTrait(
       },
     ];
   }
+  const placed = guardingTrait(name, text, awake);
+  if (placed) return placed;
   // Stench, Terrifying Aura: a save for whoever starts or ends its turn in it, or for everyone in it as the
-  // monster's turn ends.
+  // monster's turn ends. Culling Aura's acts only on the Bloodied.
+  const bloodied = /\beach Bloodied creature\b/.test(text);
   const at = text.search(SAVE_START);
-  const saving = at >= 0 ? text.slice(at) : "";
+  const saving = (at >= 0 ? text.slice(at) : "").replace(
+    /\beach Bloodied creature\b/,
+    "each creature",
+  );
+  // Possessive Aura names the turn before its save.
+  const lead = at >= 0 ? text.slice(0, at) : "";
   const turn =
     /\b(any|each) (creature|enemy)\b[^.]*?\b(starts|ends) its turn in (?:an? (\d+)-foot Emanation|the (?:aura|area))/i.exec(
       saving,
     ) ??
     /\beach (creature)\b() in an? (\d+)-foot Emanation originating from [^.]+? at the end of [^.]+? turn\b/i.exec(
       saving,
+    ) ??
+    /\b(a) (creature)\b that (starts|ends) its turn in (?:this|the) (?:aura|area)\b/i.exec(
+      lead,
     );
   if (!turn) return null;
   const radius = Number(
@@ -1542,10 +1569,11 @@ function areaTrait(
       radius,
       area: {
         ...(/enemy/i.test(turn[2] ?? "") ? { side: "enemy" as const } : {}),
+        ...(bloodied ? { bloodied: true as const } : {}),
         when,
         resolution: {
           ...parsed.resolution,
-          onFail: theirTurns(parsed.resolution.onFail),
+          onFail: speedless(theirTurns(parsed.resolution.onFail), saving),
           onSuccess: immune
             ? [
                 {
@@ -1560,6 +1588,164 @@ function areaTrait(
       },
     },
   ];
+}
+
+// "While the creature is Charmed in this way, its Speed is reduced to 0": no walking while the condition lasts, gone
+// with it, as Possessive Aura's.
+function speedless(effects: LeafEffect[], text: string): LeafEffect[] {
+  if (!/\bWhile [^.]+? in this way, its Speed is reduced to 0\b/.test(text)) {
+    return effects;
+  }
+  const held = effects.find((effect) => effect.kind === "applyCondition");
+  if (held?.kind !== "applyCondition") return effects;
+  return [
+    ...effects,
+    {
+      kind: "modifier",
+      modifier: { kind: "actionLimit", speed: "none" },
+      duration:
+        typeof held.duration === "object"
+          ? { ...held.duration }
+          : held.duration,
+      ...(held.repeatSave ? { repeatSave: true } : {}),
+    },
+  ];
+}
+
+// The one-off auras: immunity or Advantage for allies in it, a save that foils spells cast inside the creature's
+// space, a burst when it takes damage of a type, a forced Reaction attack as its turn ends, and conditions in and
+// out of fog. Null for any other trait.
+function guardingTrait(
+  name: string,
+  text: string,
+  awake: { readonly awake?: true },
+): Passive[] | null {
+  const aura = (radius: string | undefined, area: AreaEffect): Passive[] => [
+    { kind: "aura", name, zone: "area", radius: Number(radius), area },
+  ];
+  const conditionsOf = (list: string): Condition[] =>
+    list
+      .split(/,\s*|\s+(?:and|or)\s+/)
+      .map((item) => item.trim().toLowerCase())
+      .filter((item): item is Condition =>
+        ConditionSchema.options.includes(item as Condition),
+      );
+  // Aura of Bravery.
+  const brave =
+    /^Creatures of [^.]*?choice in a (\d+)-foot Emanation originating from [^.]+? have Immunity to the ([\w ,]+?) conditions? while there\.$/.exec(
+      text,
+    );
+  if (brave) {
+    return aura(brave[1], {
+      side: "ally",
+      self: true,
+      grants: conditionsOf(brave[2] ?? "").map((condition) => ({
+        kind: "conditionImmunity" as const,
+        condition,
+      })),
+      ...awake,
+    });
+  }
+  // Words of Reason.
+  const reason =
+    /^Allies in a (\d+)-foot Emanation originating from [^.]+? have Advantage on saving throws to avoid or end the ([\w ,]+?) conditions?\./.exec(
+      text,
+    );
+  if (reason) {
+    const conditions = conditionsOf(reason[2] ?? "");
+    return aura(reason[1], {
+      side: "ally",
+      grants: [{ kind: "advantage", on: "saves", conditions }],
+      ...awake,
+    });
+  }
+  // Haunted Zone. shortcut: a creature takes one square, so "inside its space" is within 10 feet of it, as a
+  // Gargantuan creature's 20-foot space.
+  const haunted = new RegExp(
+    `^(${Object.values(ABILITIES).join("|")}) Saving Throw: DC (\\d+), any creature that casts a spell while inside [^.]+? space\\. Failure: The spell fails and is wasted\\.$`,
+  ).exec(text);
+  if (haunted) {
+    const ability = (Object.keys(ABILITIES) as AbilityKey[]).find(
+      (key) => ABILITIES[key] === haunted[1],
+    );
+    if (!ability) return null;
+    return aura("10", {
+      foilsSpells: { ability, dc: Number(haunted[2]) },
+    });
+  }
+  // Explosive Core.
+  const core =
+    /^When [^.]+? is subjected to (\w+) damage, each creature in an? (\d+)-foot Emanation originating from [^.]+? takes \d+ \((\d+d\d+)\) (\w+) damage\.$/.exec(
+      text,
+    );
+  if (core) {
+    const [, trigger = "", radius, dice = "", type = ""] = core;
+    return [
+      {
+        kind: "damageBurst",
+        name,
+        damage: [trigger.toLowerCase() as Damage["type"]],
+        radius: Number(radius),
+        resolution: {
+          kind: "automatic",
+          damage: [
+            { amount: { dice }, type: type.toLowerCase() as Damage["type"] },
+          ],
+          effects: [],
+        },
+      },
+    ];
+  }
+  // Aura of Violence.
+  const violence =
+    /^At the end of each of [^.]+? turns, each creature( of [^.]+? choice)? in an? (\d+)-foot Emanation originating from [^.]+? suffers the following effect\.\s*(.*)$/s.exec(
+      text,
+    );
+  const forced =
+    /\s*Failure: The target takes a Reaction to make a melee attack roll against a creature within reach\. If no creature is within reach, the target takes \d+ \((\d+d\d+)\) (\w+) damage\.$/;
+  const save = /^(\w+) Saving Throw: DC (\d+)\./.exec(violence?.[3] ?? "");
+  const saveAbility = (Object.keys(ABILITIES) as AbilityKey[]).find(
+    (key) => ABILITIES[key] === save?.[1],
+  );
+  if (violence && save && saveAbility && forced.test(violence[3] ?? "")) {
+    const [, dice = "", type = ""] = forced.exec(violence[3] ?? "") ?? [];
+    return aura(violence[2], {
+      ...(violence[1] ? { side: "enemy" as const } : {}),
+      when: "ownerTurnEnd",
+      resolution: {
+        kind: "save",
+        ability: saveAbility,
+        dc: { base: Number(save[2]), add: [] },
+        damage: [],
+        onSuccessDamage: "none",
+        onFail: [
+          {
+            kind: "forcedAttack",
+            otherwise: [
+              { amount: { dice }, type: type.toLowerCase() as Damage["type"] },
+            ],
+          },
+        ],
+        onSuccess: [],
+      },
+      ...awake,
+    });
+  }
+  // One with the Mists.
+  const misty =
+    /^While [^.]+? is in fog or mist, it has the (\w+) condition\. [^.]+? has the (\w+) condition while it is outside an area of fog or mist\.$/.exec(
+      text,
+    );
+  if (misty) {
+    return [
+      {
+        kind: "fogBound",
+        inside: conditionsOf(misty[1] ?? ""),
+        outside: conditionsOf(misty[2] ?? ""),
+      },
+    ];
+  }
+  return null;
 }
 
 // In sunlight, or in Bright Light: Disadvantage on its rolls, and damage as its turn starts there.

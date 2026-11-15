@@ -28,6 +28,8 @@ import {
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { opportunity, provokers, teleportSquares } from "./combat/movement.ts";
+import { familiarHelpUse } from "./combat/familiar.ts";
+import { mountEvents, mountOptions } from "./combat/mounts.ts";
 import { heldInPlace, leafEvents } from "./combat/effects.ts";
 import { heightChoices, heightOf } from "./combat/falling.ts";
 import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
@@ -41,7 +43,13 @@ import {
 } from "./class-options.ts";
 import { escapeDc, grapplesOn } from "./combat/grapple.ts";
 import { unhindered } from "./movement-modes.ts";
-import { type Square, distanceFeet, pushTo, squareKey } from "./grid.ts";
+import {
+  type Square,
+  coverBetween,
+  distanceFeet,
+  pushTo,
+  squareKey,
+} from "./grid.ts";
 
 export { pushTo };
 import { FLEE } from "./legendary.ts";
@@ -57,6 +65,7 @@ import {
   dndEvent,
   equipped,
   hasCondition,
+  familiarOwner,
   isDead,
   isDown,
   isStable,
@@ -228,9 +237,11 @@ function check(
   events: SystemEvent[];
 } {
   const stats = deriveStats(actor, context);
+  const befriended = familiarHelpUse(actor, stats, skill, context.state);
   const edge = {
     advantage:
       advantage ||
+      befriended !== null ||
       hasFlag(actor, "advantage", "checks", stats, ability) ||
       placedFlag(actor, "advantage", "checks", context.state, context, ability),
     disadvantage:
@@ -281,6 +292,7 @@ function check(
     success,
     total,
     events: [
+      ...(befriended ? [befriended] : []),
       ...settled.events,
       dndEvent(`${NS}:rollReported`, {
         actor: actor.id,
@@ -316,6 +328,45 @@ function pushEvents(
 
 function standing(list: readonly Actor[]): readonly Actor[] {
   return list.filter((item) => !isDown(item));
+}
+
+const NO_SQUARES: ReadonlySet<string> = new Set();
+
+// Whether `actor` may Hide: every foe that could see it sees it through at least Three-Quarters Cover or not at
+// all, or, with Naturally Stealthy, past a creature at least one size larger.
+function hiddenFromAll(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+): boolean {
+  const larger = hasPassive(deriveStats(actor, access), "hideBehindLarger")
+    ? Object.values(state.actors).filter(
+        (item) =>
+          item.id !== actor.id &&
+          item.position !== null &&
+          !isDead(item) &&
+          sizeOf(item, access) > sizeOf(actor, access),
+      )
+    : [];
+  return standing(enemies(state, actor)).every((foe) => {
+    if (hasCondition(foe, "blinded")) return true;
+    const cover = coverFor(state, foe.position, actor, [foe.id]);
+    if (cover === 5 || cover === "total") return true;
+    if (seeing(foe, actor.position, state, access) === "none") return true;
+    const between = larger.flatMap((item) =>
+      item.id !== foe.id && item.position ? [squareKey(item.position)] : [],
+    );
+    return (
+      between.length > 0 &&
+      coverBetween(
+        foe.position,
+        actor.position,
+        NO_SQUARES,
+        { half: NO_SQUARES, threeQuarters: NO_SQUARES },
+        new Set(between),
+      ) !== 0
+    );
+  });
 }
 
 function dashBonus(stats: Stats): number {
@@ -474,6 +525,7 @@ function bonusTacticCost(
 function bonusTacticOptions(
   actor: Actor,
   state: DndState,
+  access: ContentAccess,
   stats: Stats,
 ): { id: string; label: string }[] {
   if (!actor.budget.bonusAction) return [];
@@ -506,11 +558,10 @@ function bonusTacticOptions(
       label: "Dodge as a Bonus Action (attacks against you have Disadvantage)",
     });
   }
-  // The same shortcut as the Hide action's: no foe within 5 feet.
   if (
     allowed.has("hide") &&
     !hasTactic(actor, "hidden") &&
-    !standing(enemies(state, actor)).some((foe) => within5(actor, foe))
+    hiddenFromAll(actor, state, access)
   ) {
     options.push({
       id: BONUS_HIDE,
@@ -557,9 +608,10 @@ export function tacticOptions(
       });
     }
   }
+  options.push(...mountOptions(actor, state, access));
   options.push(...bonusAttackOptions(actor, state, access, stats));
   options.push(...classOptions(actor, state, access));
-  options.push(...bonusTacticOptions(actor, state, stats));
+  options.push(...bonusTacticOptions(actor, state, access, stats));
   if (!actor.budget.action) return options;
   // Shut away, it can only try to get out, as from a Maze.
   const seal = actor.activeEffects.find(
@@ -597,12 +649,7 @@ export function tacticOptions(
       id: DISENGAGE,
       label: "Disengage (no Opportunity Attacks this turn)",
     });
-    if (
-      !hasTactic(actor, "hidden") &&
-      !standing(knownFoes(state, actor, access)).some((foe) =>
-        within5(actor, foe),
-      )
-    ) {
+    if (!hasTactic(actor, "hidden") && hiddenFromAll(actor, state, access)) {
       options.push({
         id: HIDE,
         label: `Hide (Stealth, DC ${String(HIDE_DC)})`,
@@ -644,14 +691,13 @@ export function tacticOptions(
       label: `Escape ${grappler ? `${grappler.name}'s` : "the"} grapple (Athletics or Acrobatics, DC ${String(escapeDc(grapple, state, access))})`,
     });
   }
-  if (!full) return options;
+  // A familiar can't attack, but it can Help and take its other actions, which tacticalPolicy weighs for it.
+  if (!full && familiarOwner(actor) === null) return options;
   options.push({
     id: DISENGAGE,
     label: "Disengage (no Opportunity Attacks this turn)",
   });
-  // shortcut: hiding needs only no foe within 5 feet, not Heavy Obscurement or cover. Check cover and light
-  // here once the grid tracks them.
-  if (!hasTactic(actor, "hidden") && near.length === 0) {
+  if (!hasTactic(actor, "hidden") && hiddenFromAll(actor, state, access)) {
     options.push({
       id: HIDE,
       label: `Hide (Stealth, DC ${String(HIDE_DC)})`,
@@ -688,6 +734,7 @@ export function tacticOptions(
       label: `Help ${friend.name} with a check`,
     });
   }
+  if (!full) return options;
   const dc = String(saveDc(stats, "str"));
   const size = sizeOf(actor, access);
   // A Grapple or Shove is an Unarmed Strike against a creature no more than one size larger.
@@ -824,6 +871,8 @@ export function runTactic(
     return target;
   };
 
+  const mounted = mountEvents(actor, kind, targetId, state, context);
+  if (mounted) return { events: mounted };
   switch (kind) {
     case SLIP:
       return {
@@ -1597,20 +1646,6 @@ function dashTarget(actor: Actor, context: Context): Square | null {
   );
 }
 
-// A monster hides as a Bonus Action only where the 2024 rules let it: every foe sees it through at least
-// Three-Quarters Cover, or not at all in the dark.
-function hiddenFromAll(actor: Actor, context: Context): boolean {
-  const { state } = context;
-  return standing(enemies(state, actor)).every((foe) => {
-    const cover = coverFor(state, foe.position, actor, [foe.id]);
-    return (
-      cover === 5 ||
-      cover === "total" ||
-      seeing(foe, actor.position, state, context) === "none"
-    );
-  });
-}
-
 // The system's tactics, with these actions: stand up first, escape a grapple that does more than hold, take
 // the off-hand attack, walk on after a Dash, and spend an action that would otherwise go unused on an escape,
 // a Search, a Dash toward the foe or a Dodge.
@@ -1730,7 +1765,7 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
     if (!step || !reachesFrom(actor, step, context)) return BONUS_DASH;
   }
   if (chosen !== PASS) return chosen;
-  if (ids.has(BONUS_HIDE) && hiddenFromAll(actor, context)) return BONUS_HIDE;
+  if (ids.has(BONUS_HIDE)) return BONUS_HIDE;
   const offhand = decision.options
     .filter(
       (option) =>

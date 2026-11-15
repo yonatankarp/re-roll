@@ -74,6 +74,7 @@ import { conditionsApplied } from "../legendary.ts";
 import {
   type Damage,
   type DamageType,
+  type Formula,
   ItemSchema,
   type LeafEffect,
   MonsterSchema,
@@ -221,6 +222,11 @@ export function runProjectile(
   };
 }
 
+// A reaction's AC bonus against a hit: a number, or a formula of the reactor's.
+function acBonusOf(bonus: number | Formula, stats: Stats): number {
+  return typeof bonus === "number" ? bonus : evaluateFormula(bonus, stats);
+}
+
 // A creature of this kind beside the bearer, as the podling Transfer Harm needs.
 function kinNear(
   bearer: Actor,
@@ -295,7 +301,9 @@ function reactionFor(
       }
       if (critical) return false;
       const acBonus = resolution.effects.reduce((sum, effect) => {
-        if (effect.kind === "acAgainstHit") return sum + effect.bonus;
+        if (effect.kind === "acAgainstHit") {
+          return sum + acBonusOf(effect.bonus, stats);
+        }
         return effect.kind === "modifier" &&
           effect.modifier.kind === "bonus" &&
           effect.modifier.to === "ac" &&
@@ -682,7 +690,9 @@ function intercepted(
   );
   const acBonus = effects.reduce(
     (sum, effect) =>
-      effect.kind === "acAgainstHit" ? sum + effect.bonus : sum,
+      effect.kind === "acAgainstHit"
+        ? sum + acBonusOf(effect.bonus, stats)
+        : sum,
     0,
   );
   // A lasting AC bonus goes on the target, and the hit is checked again once it's there.
@@ -1194,7 +1204,9 @@ export function runAfterReaction(
     resolution.kind === "automatic" ? resolution.effects : []
   ).reduce(
     (sum, effect) =>
-      effect.kind === "acAgainstHit" ? sum + effect.bonus : sum,
+      effect.kind === "acAgainstHit"
+        ? sum + acBonusOf(effect.bonus, stats)
+        : sum,
     0,
   );
   // The rest of the attack is held here and rechecked once the reaction has taken effect.
@@ -1470,14 +1482,16 @@ export function runApplyHit(
   const hits = [
     ...(firstType ? [{ amount: totalDealt, type: firstType }] : []),
     ...absorbed,
-    ...hitRiders(attacker, target, resolution).map(({ amount, type }) => ({
-      amount: finalDamage(
-        rollAmount(amount, stats, dice, multiplier),
+    ...hitRiders(attacker, target, resolution, responses).map(
+      ({ amount, type }) => ({
+        amount: finalDamage(
+          rollAmount(amount, stats, dice, multiplier),
+          type,
+          responses,
+        ),
         type,
-        responses,
-      ),
-      type,
-    })),
+      }),
+    ),
   ];
   const targetStats = deriveStats(target, context);
   const armored = hits.map((item) => ({
@@ -2015,12 +2029,22 @@ function hitRiders(
   attacker: Actor,
   target: Actor,
   resolution: Extract<Resolution, { kind: "attack" }>,
+  responses: ReturnType<typeof damageResponses>,
 ): readonly Damage[] {
   const seen = new Set<string>();
   const carried = [
     ...attacker.activeEffects.map((effect) => ({ effect, by: "bearer" })),
     ...target.activeEffects.map((effect) => ({ effect, by: "caster" })),
   ];
+  // The type the target takes most from: vulnerable, then plain, then resisted, never immune if another will do.
+  const worth = (type: Damage["type"]): number =>
+    responses.immunities.includes(type) || responses.absorbs.includes(type)
+      ? 0
+      : responses.resistances.includes(type)
+        ? 1
+        : responses.vulnerabilities.includes(type)
+          ? 3
+          : 2;
   return carried.flatMap(({ effect, by }) => {
     const { modifier, sourceId, casterId } = effect;
     if (
@@ -2028,12 +2052,17 @@ function hitRiders(
       modifier.dealtBy !== by ||
       (by === "caster" && casterId !== attacker.id) ||
       (modifier.weaponOnly && resolution.attack.type !== "weapon") ||
+      (modifier.within !== undefined &&
+        distanceFeet(attacker.position, target.position) > modifier.within) ||
       seen.has(sourceId)
     ) {
       return [];
     }
     seen.add(sourceId);
-    return [modifier.damage];
+    const [type = modifier.damage.type] = [...(modifier.types ?? [])].sort(
+      (a, b) => worth(b) - worth(a),
+    );
+    return [{ ...modifier.damage, type }];
   });
 }
 

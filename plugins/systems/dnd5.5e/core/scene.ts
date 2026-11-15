@@ -41,7 +41,7 @@ function targets(state: DndState, who: "player" | "party"): Actor[] {
   return Object.values(state.actors).filter(
     (actor) =>
       actor.side === "party" &&
-      actor.source.kind !== "summon" &&
+      actor.source.kind === "character" &&
       !isDead(actor),
   );
 }

@@ -28,7 +28,14 @@ import {
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
 import type { Damage } from "../schemas.ts";
-import { blockingSet, sealed, thornHits } from "../zones.ts";
+import {
+  antimagicEvents,
+  placedConditionEvents,
+  blockingSet,
+  sealed,
+  thornHits,
+  zonesOf,
+} from "../zones.ts";
 import {
   concentrationFrame,
   dealEvents,
@@ -36,6 +43,7 @@ import {
   resolveAction,
 } from "./effects.ts";
 import { afterDamage, reactFrames } from "./reactions.ts";
+import { areaEntry, entryFrames, fogBoundEvents } from "./areas.ts";
 import { leafEvents, rollSave } from "./effects.ts";
 import {
   coverBetween,
@@ -60,6 +68,7 @@ import {
   hasPassive,
   meleeReach,
   moveSquares,
+  ridden,
   speedLeft,
   squareName,
 } from "./queries.ts";
@@ -127,8 +136,12 @@ export function provokers(
   height?: number,
 ): readonly { readonly foe: Actor; readonly melee: KnownAction }[] {
   if (hasPassive(deriveStats(actor, access), "noOpportunityAttacks")) return [];
-  // Sentinel's Guardian: Disengage doesn't stop a Sentinel's Opportunity Attack.
-  const disengaged = hasTactic(actor, "disengage");
+  // Sentinel's Guardian: Disengage doesn't stop a Sentinel's Opportunity Attack. A mount's Disengage covers its
+  // rider. shortcut: either one's covers both.
+  const mount = ridden(actor, state);
+  const disengaged =
+    hasTactic(actor, "disengage") ||
+    (mount !== null && hasTactic(mount, "disengage"));
   const walk = path
     ? undefined
     : walksOf(actor, state, access).get(squareKey(to));
@@ -279,6 +292,12 @@ function watchesMoves(walker: Actor, context: Context): boolean {
   );
 }
 
+// What standing in Antimagic Field or Silence holds off or puts on a creature, after a walk.
+const placedEvents = (state: DndState): SystemEvent[] => [
+  ...antimagicEvents(state),
+  ...placedConditionEvents(state),
+];
+
 // Leaving an enemy's reach gives it an Opportunity Attack, made before the move, so falling stops it.
 export function runMove(
   payload: z.infer<typeof MoveSchema>,
@@ -288,6 +307,7 @@ export function runMove(
   const actor = actorOf(state, payload.actor);
   const to = parseSquare(payload.answer);
   if (payload.answer === STAY || !to) return {};
+  if (payload.rest && isDown(actor)) return {};
   const step = moveSquares(
     actor,
     state,
@@ -300,9 +320,12 @@ export function runMove(
   }
   // A walk into the reach of a reaction such as Polearm Master's stops on the square it enters, for the reaction,
   // and then goes on from there.
+  // So does a walk into an area that acts on whoever enters it, as Moonbeam, for its save.
   const entered = enteredAt(actor, step.path, context);
-  const cut = entered === null ? undefined : step.path[entered];
-  if (entered !== null && cut && entered < step.path.length - 1) {
+  const entry = areaEntry(actor, step.path, context);
+  const at = Math.min(entered ?? Infinity, entry?.index ?? Infinity);
+  const cut = step.path[at];
+  if (cut && at < step.path.length - 1) {
     return {
       frames: [
         frame("move", { actor: actor.id, answer: squareKey(cut) }),
@@ -379,6 +402,7 @@ export function runMove(
         feet: step.feet,
         ...(step.drag ? { dragged: step.drag } : {}),
       }),
+      ...entryFrames(actor, actor.position, to, entry?.zones ?? [], context),
       ...(entered !== null && from
         ? [frame("react", { kind: "entered", actor: actor.id, from })]
         : []),
@@ -419,26 +443,49 @@ export function runFinishMove(
   }
   // An Opportunity Attack that halted or grabbed the walker, as Sentinel's does, keeps it where it stood. A teleport
   // costs no movement, so nothing stops it.
-  if (payload.feet > 0 && speedLeft(actor, deriveStats(actor, context)) <= 0) {
+  // A rider's walk is its mount's, which carries it.
+  const walker = ridden(actor, context.state) ?? actor;
+  if (
+    payload.feet > 0 &&
+    speedLeft(walker, deriveStats(walker, context)) <= 0
+  ) {
     return {};
   }
+  const moved = dndEvent(`${NS}:moved`, {
+    actor: walker.id,
+    to: { x: payload.x, y: payload.y },
+    feet: payload.feet,
+  });
+  const arrived = { ...actor, position: { x: payload.x, y: payload.y } };
+  // A walk into or out of an Antimagic Field, or one carrying it, holds off or brings back spells and items.
+  const fields =
+    zonesOf(context.state).some(
+      (zone) =>
+        zone.area?.noSpells === "all" || zone.area?.conditions !== undefined,
+    ) ||
+    Object.values(context.state.actors).some(
+      (item) =>
+        item.suppressed !== undefined ||
+        item.activeEffects.some(({ sourceId }) =>
+          sourceId.startsWith("placed:"),
+        ),
+    );
   return {
     events: [
-      dndEvent(`${NS}:moved`, {
-        actor: actor.id,
-        to: { x: payload.x, y: payload.y },
-        feet: payload.feet,
-      }),
-      // Only those it still holds come along, as an Opportunity Attack may have broken a grapple.
+      moved,
+      // Only those it still holds come along, as an Opportunity Attack may have broken a grapple. A rider's walk drags
+      // what its mount holds. shortcut: not what the rider holds, until a rider can grapple from the saddle.
       ...dragEvents({
         drag: (payload.dragged ?? []).filter(({ actor: id }) => {
           const held = context.state.actors[id];
           return (
             held !== undefined &&
-            grapplesOn(held).some(({ casterId }) => casterId === actor.id)
+            grapplesOn(held).some(({ casterId }) => casterId === walker.id)
           );
         }),
       }),
+      ...fogBoundEvents(arrived, context),
+      ...(fields ? placedEvents(applyDndEvent(context.state, moved)) : []),
     ],
   };
 }
