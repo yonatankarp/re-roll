@@ -7,6 +7,7 @@ import {
   coverBetween,
   distanceFeet,
   squareKey,
+  wallSet,
 } from "./grid.ts";
 import type { Battlemap } from "./schemas.ts";
 import {
@@ -80,7 +81,7 @@ export function coverFor(
   return coverBetween(
     from,
     target.position,
-    setOf(state.combat?.walls),
+    wallSet(state.combat),
     {
       half: setOf(terrain?.half),
       threeQuarters: setOf(terrain?.threeQuarters),

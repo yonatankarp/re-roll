@@ -15,6 +15,7 @@ import {
   reachableSquares,
   type Square,
   squareKey,
+  wallSet,
 } from "./grid.ts";
 import { coverBonus, coverFor, difficultSquares } from "./sight.ts";
 import { type Decision } from "#sdk";
@@ -110,7 +111,7 @@ export function stepToward(
           new Set(walls),
           new Set(),
           difficultSquares(state),
-          new Set(walls),
+          wallSet(state.combat),
         ).map((item) => [squareKey(item.square), item.feet]),
       );
       walkFrom.set(foe.id, field);
