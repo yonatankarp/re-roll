@@ -954,8 +954,7 @@ export function leafEvents(
       case "lift":
         events.push(
           ...liftEvents(
-            effect.feet,
-            effect.duration,
+            effect,
             sourceId,
             caster,
             target,

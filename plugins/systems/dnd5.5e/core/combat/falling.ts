@@ -6,9 +6,10 @@ import {
   type SystemEvent,
   type SystemResult,
 } from "#sdk";
-import { distanceFeet } from "../grid.ts";
+import { distanceFeet, squareKey } from "../grid.ts";
+import { blockingSet } from "../zones.ts";
 import { finalDamage } from "../rules.ts";
-import type { Duration } from "../schemas.ts";
+import type { LeafEffect } from "../schemas.ts";
 import { seeing } from "../sight.ts";
 import {
   type Actor,
@@ -21,8 +22,18 @@ import {
   isDown,
   NS,
 } from "../state.ts";
-import { damageResponses, deriveStats, type KnownAction } from "../stats.ts";
-import { concentrationFrame, dealEvents, leafEvents } from "./effects.ts";
+import {
+  damageResponses,
+  deriveStats,
+  evaluateFormula,
+  type KnownAction,
+} from "../stats.ts";
+import {
+  concentrationFrame,
+  dealEvents,
+  leafEvents,
+  rollSave,
+} from "./effects.ts";
 import { canAfford, type Context } from "./queries.ts";
 import { afterDamage, playerTakes, reactionCosts } from "./reactions.ts";
 
@@ -52,10 +63,10 @@ function held(actor: Actor, aloft: Actor["activeEffects"][number]): boolean {
 }
 
 // Reverse Gravity's lift: the creature can't move while the spell lasts, and keeps how high it went for when the
-// spell is gone and it falls (fallFrames).
+// spell is gone and it falls (fallFrames). One beside a wall may grab hold of it instead.
+// shortcut: there are no ceilings to strike, and a creature that walks into the area later isn't lifted.
 export function liftEvents(
-  feet: number,
-  duration: Duration,
+  { feet, duration, grab }: Extract<LeafEffect, { kind: "lift" }>,
   sourceId: string,
   caster: Actor,
   target: Actor,
@@ -64,7 +75,19 @@ export function liftEvents(
   if (target.activeEffects.some(({ modifier }) => modifier.kind === "aloft")) {
     return [];
   }
+  const held =
+    grab && besideWall(target, context.state)
+      ? rollSave(
+          target,
+          grab.ability,
+          evaluateFormula(grab.dc, deriveStats(caster, context)),
+          context,
+          true,
+        )
+      : null;
+  if (held?.saved) return held.events;
   return [
+    ...(held?.events ?? []),
     ...leafEvents(
       [
         {
@@ -88,6 +111,18 @@ export function liftEvents(
       },
     }),
   ];
+}
+
+function besideWall(actor: Actor, state: DndState): boolean {
+  const at = actor.position;
+  if (!at) return false;
+  const walls = blockingSet(state);
+  for (let dy = -1; dy <= 1; dy += 1) {
+    for (let dx = -1; dx <= 1; dx += 1) {
+      if (walls.has(squareKey({ x: at.x + dx, y: at.y + dy }))) return true;
+    }
+  }
+  return false;
 }
 
 // The creatures whose lift has ended fall together, one frame for each height, so one Feather Fall can catch them.

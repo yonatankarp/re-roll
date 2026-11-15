@@ -755,6 +755,37 @@ describe("falling", () => {
     expect(landed && heightOf(landed)).toBe(0);
   });
 
+  it("lets a creature beside a wall grab hold instead, on a save", async () => {
+    const run = await base();
+    const start = fight(fighter(run, [0, 0]), monster("pod", [1, 1]));
+    const walled = {
+      ...start,
+      combat: start.combat && { ...start.combat, walls: ["2,1"] },
+    };
+    const caster = walled.actors[PLAYER_ACTOR];
+    const pod = walled.actors.pod;
+    if (!caster || !pod) throw new Error("missing");
+    const lift = (dc: number, state: DndState) =>
+      leafEvents(
+        [
+          {
+            kind: "lift",
+            feet: 60,
+            duration: { minutes: 1 },
+            grab: { ability: "dex", dc: { base: dc, add: [] } },
+          },
+        ],
+        "rg",
+        caster,
+        pod,
+        contextOf(run, state, d20s(10)),
+      ).reduce(applyDndEvent, state);
+    expect(heightOf(lift(5, walled).actors.pod ?? pod)).toBe(0);
+    expect(heightOf(lift(30, walled).actors.pod ?? pod)).toBe(60);
+    // Out in the open there's nothing to grab.
+    expect(heightOf(lift(5, start).actors.pod ?? pod)).toBe(60);
+  });
+
   it("lets its own side down gently with Feather Fall, and only its side", async () => {
     const run = await base();
     const start = fight(

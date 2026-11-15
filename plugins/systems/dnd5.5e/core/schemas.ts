@@ -518,11 +518,14 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // The triggering attack misses instead, as with Jinx on a failed save.
   z.strictObject({ kind: z.literal("negateHit") }),
   // Lifts the target `feet` up, where it can't move and nothing below reaches it, until `duration` is over and it
-  // falls, as with Reverse Gravity (combat/falling.ts).
+  // falls, as with Reverse Gravity (combat/falling.ts). With `grab`, a creature beside a wall may save to hold on.
   z.strictObject({
     kind: z.literal("lift"),
     feet: z.number().int().min(10),
     duration: DurationSchema,
+    grab: z
+      .strictObject({ ability: AbilitySchema, dc: FormulaSchema })
+      .optional(),
   }),
   // Up to `creatures` falling creatures land without taking damage, as with Feather Fall (combat/falling.ts).
   z.strictObject({
