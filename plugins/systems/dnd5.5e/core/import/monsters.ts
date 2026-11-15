@@ -1119,7 +1119,9 @@ function noCombatTrait(label: string, text: string): boolean {
   return (
     NO_COMBAT_TRAIT.test(name) ||
     (/(?:Restoration|Immortality|Rejuvenation)$/.test(name) &&
-      /\b(?:revives?|re-forms|gains a new body)\b/.test(text))
+      /\b(?:revives?|re-?forms|gains a new body|regains all its Hit Points in \d)/.test(
+        text,
+      ))
   );
 }
 

@@ -1070,6 +1070,10 @@ describe("monster traits read as passives", () => {
           "If the beast dies, it revives with all its Hit Points in 1d10 days far away.",
         ),
         entry("Shark Telepathy", "The beast can talk to sharks."),
+        entry(
+          "Undead Restoration",
+          "If the beast is destroyed, it reforms and regains all its Hit Points in 1d10 days.",
+        ),
         entry("Last Stand", "If the beast dies, it explodes."),
         entry("Spider Climb", "The beast can climb difficult surfaces."),
       ].join(""),
@@ -1078,6 +1082,7 @@ describe("monster traits read as passives", () => {
       "no combat use: Amphibious",
       "no combat use: Abyssal Restoration",
       "no combat use: Shark Telepathy",
+      "no combat use: Undead Restoration",
       "not automated: Last Stand",
       "not automated: Spider Climb",
     ]);
