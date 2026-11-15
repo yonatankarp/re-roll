@@ -20,6 +20,7 @@ import {
   rollDiceNotation,
   saveBonus,
   type Stats,
+  weaponFits,
 } from "./stats.ts";
 import { knownFoes } from "./fog.ts";
 import type { Condition, LeafEffect, Modifier, Resolution } from "./schemas.ts";
@@ -51,6 +52,7 @@ import {
   inReach,
   meleeReach,
   moveSquares,
+  reaches,
   slotLevelFor,
   targetCount,
   within5,
@@ -711,6 +713,26 @@ export function makeJudge(context: Context, side: Actor): Judge {
     foe: boolean,
     span: number,
   ): number => {
+    // Confusion takes the turn about two times in three, and Compelled Duel hampers attacks on all but one.
+    if (modifier.kind === "confused") {
+      return (
+        0.6 *
+        modifierWorth(
+          { kind: "actionLimit", noActions: true },
+          target,
+          foe,
+          span,
+        )
+      );
+    }
+    if (modifier.kind === "duel") {
+      return modifierWorth(
+        { kind: "disadvantage", on: "attacks" },
+        target,
+        foe,
+        span,
+      );
+    }
     const own = threat(target);
     if (foe) {
       switch (modifier.kind) {
@@ -992,6 +1014,18 @@ export function makeJudge(context: Context, side: Actor): Judge {
         }
         const span = rounds(effect.duration, saved, false, false);
         return modifierWorth(effect.modifier, target, foe, span);
+      }
+      // True Strike or Swift Quiver: as much as the weapon's own attacks.
+      // shortcut: how the spell changes the attack isn't counted.
+      case "weaponAttack": {
+        const weapon = stats(actor).actions.find(
+          (item) =>
+            weaponFits(item, effect.change, context) &&
+            reaches(item, actor, target),
+        );
+        return weapon && foe
+          ? effect.times * worthOn(actor, target, weapon)
+          : 0;
       }
       case "extraAction":
         return actor.budget.action ? 0 : rate * threat(actor);

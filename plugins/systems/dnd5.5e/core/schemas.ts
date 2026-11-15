@@ -1254,6 +1254,7 @@ export const ResourceDefSchema = z.strictObject({
 const ScaleStepSchema = z.union([
   z.strictObject({ addDice: DiceSchema }),
   z.strictObject({ addTargets: z.number().int().min(1) }),
+  z.strictObject({ addRadius: z.number().int().min(5) }), // an area's radius, as Confusion's Sphere
 ]);
 export type ScaleStep = z.infer<typeof ScaleStepSchema>;
 

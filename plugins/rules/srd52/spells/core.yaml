@@ -9449,6 +9449,9 @@
             concentration: true
             minutes: 1
           repeatSave: true
+  upcast:
+    perSlotLevel:
+      addRadius: 5
 - id: srd52:spell/conjure-minor-elementals
   name: Conjure Minor Elementals
   level: 4

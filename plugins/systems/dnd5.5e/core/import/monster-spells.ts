@@ -132,6 +132,21 @@ function upcast(
   const step = spell.upcast?.perSlotLevel;
   if (times <= 0) return activation;
   if (!step) return null;
+  if ("addRadius" in step) {
+    const { targeting } = activation;
+    return "area" in targeting
+      ? {
+          ...activation,
+          targeting: {
+            ...targeting,
+            area: {
+              ...targeting.area,
+              radius: targeting.area.radius + step.addRadius * times,
+            },
+          },
+        }
+      : null;
+  }
   if ("addTargets" in step) {
     const { targeting } = activation;
     return "creatures" in targeting

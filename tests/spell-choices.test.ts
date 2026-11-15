@@ -735,6 +735,19 @@ describe("rolled outcomes", () => {
   const kinds = (events: readonly SystemEvent[] = []) =>
     events.map((event) => event.kind);
 
+  it("widens Confusion's Sphere by 5 feet for each slot level above 4", async () => {
+    const run = await arena();
+    const hero = caster(run, [srd("confusion")], { level: 9 });
+    const state = fight(hero, foe("a", { x: 5, y: 5 }));
+    const { targeting } = findAction(
+      hero,
+      `spell:${srd("confusion")}`,
+      ctx(run, state, HIGH),
+      6,
+    ).activation;
+    expect("area" in targeting ? targeting.area.radius : 0).toBe(20);
+  });
+
   it("rolls Confusion's d10 as the turn starts and keeps it in an event", async () => {
     const state = await confusedState();
     const still = await confused(state, [4]);

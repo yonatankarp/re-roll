@@ -1837,6 +1837,21 @@ export function scaleActivation(
   times: number,
 ): Activation {
   if (times <= 0) return activation;
+  if ("addRadius" in step) {
+    const { targeting } = activation;
+    return "area" in targeting
+      ? {
+          ...activation,
+          targeting: {
+            ...targeting,
+            area: {
+              ...targeting.area,
+              radius: targeting.area.radius + step.addRadius * times,
+            },
+          },
+        }
+      : activation;
+  }
   if ("addTargets" in step) {
     const more = step.addTargets * times;
     const { projectiles, targeting } = activation;
