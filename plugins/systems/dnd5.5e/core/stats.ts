@@ -1494,7 +1494,9 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
         };
   const moving = zoneMoves(actor);
   const moved =
-    moving.length > 0 ? { ...free, actions: [...free.actions, ...moving] } : free;
+    moving.length > 0
+      ? { ...free, actions: [...free.actions, ...moving] }
+      : free;
   return speed === 0 && maxHp === 0
     ? moved
     : {
