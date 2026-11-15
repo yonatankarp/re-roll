@@ -2,6 +2,7 @@ import { type ContentAccess, type SystemContext, type SystemEvent } from "#sdk";
 import { knownFoes, knows } from "../fog.ts";
 import {
   type Actor,
+  controllingRider,
   dndEvent,
   type DndState,
   equipped,
@@ -10,6 +11,7 @@ import {
   INCAPACITATING,
   isDead,
   isDown,
+  mountOf,
   NS,
   frame,
 } from "../state.ts";
@@ -212,6 +214,15 @@ export function speedLeft(actor: Actor, stats: Stats): number {
     : Math.max(0, speedOf(actor, stats) - actor.moved);
 }
 
+// The mount a creature rides and controls, which carries it when it moves, or null.
+export function ridden(actor: Actor, state: DndState): Actor | null {
+  const id = mountOf(actor);
+  const mount = id ? state.actors[id] : undefined;
+  return mount && !isDown(mount) && controllingRider(state, mount.id) === actor
+    ? mount
+    : null;
+}
+
 export function moveSquares(
   actor: Actor,
   state: DndState,
@@ -220,6 +231,11 @@ export function moveSquares(
 ): ReturnType<typeof reachableSquares> {
   const grid = state.combat?.grid;
   if (!grid || !actor.position) return [];
+  // A rider goes where its mount can, with the mount's Speed.
+  const mount = access ? ridden(actor, state) : null;
+  if (mount && access) {
+    return moveSquares(mount, state, deriveStats(mount, access), access);
+  }
   const others = Object.values(state.actors).filter(
     (item) => item.id !== actor.id && item.position && !isDead(item),
   );

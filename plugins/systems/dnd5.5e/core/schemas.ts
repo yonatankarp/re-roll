@@ -1012,6 +1012,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Advantage on a check with a skill the bearer is proficient in while its familiar is within 5 feet, spending a
   // use of the resource, as with Familiar Friend's Helpful Friend. Out of a fight the familiar is always beside it.
   z.strictObject({ kind: z.literal("familiarHelp"), resource: z.string() }),
+  // Another creature at least one size smaller can ride the bearer as a controlled mount (combat/mounts.ts), as a
+  // Find Steed steed.
+  z.strictObject({ kind: z.literal("rideable") }),
   // Proficiency in every skill, as with Boon of Skill's All-Around Adept.
   z.strictObject({ kind: z.literal("allSkills") }),
   // The Dash action adds this many feet more, as with Charger's Improved Dash.

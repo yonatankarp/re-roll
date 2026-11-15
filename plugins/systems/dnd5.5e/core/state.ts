@@ -127,6 +127,8 @@ const ActiveEffectSchema = z.strictObject({
       monster: ContentIdSchema,
       keep: z.array(z.enum(["mind", "spells"])).optional(), // what it keeps of its own (stats.ts)
     }),
+    // Riding its caster as a mount (combat/mounts.ts).
+    z.strictObject({ kind: z.literal("riding") }),
     // One of its own stat block's other shapes, by name, as a werewolf's wolf form (core/forms.ts).
     z.strictObject({ kind: z.literal("shape"), shape: z.string() }),
     // An area a spell left on the map, kept on its caster (core/zones.ts). With `follows` it is centred on the
@@ -747,6 +749,30 @@ export function isDown(actor: Actor): boolean {
   return actor.hp <= 0;
 }
 
+// The mount a creature rides, by id, or null.
+export function mountOf(actor: Actor): string | null {
+  return (
+    actor.activeEffects.find(({ modifier }) => modifier.kind === "riding")
+      ?.casterId ?? null
+  );
+}
+
+// The rider controlling this mount: one riding it that can act. A controlled mount moves as its rider directs, on
+// its rider's turn, and has no turn of its own.
+export function controllingRider(
+  state: DndState,
+  mountId: string,
+): Actor | null {
+  return (
+    Object.values(state.actors).find(
+      (item) =>
+        mountOf(item) === mountId &&
+        !isDown(item) &&
+        !hasCondition(item, ...INCAPACITATING),
+    ) ?? null
+  );
+}
+
 // The character whose familiar this is, or null for any other creature.
 export function familiarOwner(actor: Actor): string | null {
   return actor.source.kind === "monster"
@@ -796,9 +822,19 @@ function advanceTurn(state: DndState): DndState {
       round += 1;
     }
     const next = state.actors[combat.order[index] ?? ""];
-    if (next && !isDead(next) && !isStable(next)) break;
+    if (
+      next &&
+      !isDead(next) &&
+      !isStable(next) &&
+      !controllingRider(state, next.id)
+    ) {
+      break;
+    }
   }
   const nextId = combat.order[index] ?? "";
+  // A controlled mount's turn comes with its rider's.
+  const nextActor = state.actors[nextId];
+  const nextMount = nextActor ? mountOf(nextActor) : null;
   const endingId = combat.order[combat.index];
   const actors = Object.fromEntries(
     Object.entries(state.actors).map(([id, actor]) => [
@@ -820,7 +856,7 @@ function advanceTurn(state: DndState): DndState {
               ? { ...effect, ends: "casterTurnEnd" as const }
               : effect,
           ),
-        ...(id === nextId
+        ...(id === nextId || id === nextMount
           ? {
               budget: { action: true, bonusAction: true, reaction: true },
               usedThisTurn: [],
@@ -1153,11 +1189,32 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return advanceTurn(state);
     case `${NS}:moved`: {
       const data = payload(MovedSchema, event);
-      return updateActor(state, data.actor, (actor) => ({
+      const moved = updateActor(state, data.actor, (actor) => ({
         ...actor,
         position: data.to,
         moved: actor.moved + data.feet,
+        // A rider moved off its mount by anything but the mount is no longer riding it.
+        activeEffects: mountOf(actor)
+          ? actor.activeEffects.filter(({ modifier, casterId }) => {
+              const spot = state.actors[casterId]?.position;
+              return (
+                modifier.kind !== "riding" ||
+                (spot?.x === data.to.x && spot.y === data.to.y)
+              );
+            })
+          : actor.activeEffects,
       }));
+      // Riders go where their mount goes.
+      return Object.values(moved.actors).reduce(
+        (after, item) =>
+          mountOf(item) === data.actor
+            ? updateActor(after, item.id, (rider) => ({
+                ...rider,
+                position: data.to,
+              }))
+            : after,
+        moved,
+      );
     }
     case `${NS}:budgetSpent`: {
       const data = payload(BudgetSpentSchema, event);

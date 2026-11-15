@@ -54,6 +54,7 @@ import {
   hasPassive,
   meleeReach,
   moveSquares,
+  ridden,
   speedLeft,
   squareName,
 } from "./queries.ts";
@@ -119,8 +120,12 @@ export function provokers(
   path?: readonly Square[],
 ): readonly { readonly foe: Actor; readonly melee: KnownAction }[] {
   if (hasPassive(deriveStats(actor, access), "noOpportunityAttacks")) return [];
-  // Sentinel's Guardian: Disengage doesn't stop a Sentinel's Opportunity Attack.
-  const disengaged = hasTactic(actor, "disengage");
+  // Sentinel's Guardian: Disengage doesn't stop a Sentinel's Opportunity Attack. A mount's Disengage covers its
+  // rider. shortcut: either one's covers both.
+  const mount = ridden(actor, state);
+  const disengaged =
+    hasTactic(actor, "disengage") ||
+    (mount !== null && hasTactic(mount, "disengage"));
   const walked = path ??
     walksOf(actor, state, access).get(squareKey(to)) ?? [to];
   const steps = [actor.position, ...walked];
@@ -365,13 +370,18 @@ export function runFinishMove(
   }
   // An Opportunity Attack that halted or grabbed the walker, as Sentinel's does, keeps it where it stood. A teleport
   // costs no movement, so nothing stops it.
-  if (payload.feet > 0 && speedLeft(actor, deriveStats(actor, context)) <= 0) {
+  // A rider's walk is its mount's, which carries it.
+  const walker = ridden(actor, context.state) ?? actor;
+  if (
+    payload.feet > 0 &&
+    speedLeft(walker, deriveStats(walker, context)) <= 0
+  ) {
     return {};
   }
   return {
     events: [
       dndEvent(`${NS}:moved`, {
-        actor: actor.id,
+        actor: walker.id,
         to: { x: payload.x, y: payload.y },
         feet: payload.feet,
       }),

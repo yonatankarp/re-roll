@@ -29,6 +29,7 @@ import {
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { teleportSquares } from "./combat/movement.ts";
 import { familiarHelpUse } from "./combat/familiar.ts";
+import { mountEvents, mountOptions } from "./combat/mounts.ts";
 import { heldInPlace, leafEvents } from "./combat/effects.ts";
 import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
@@ -537,6 +538,7 @@ export function tacticOptions(
       label: `Stand up (${String(half)} ft of movement)`,
     });
   }
+  options.push(...mountOptions(actor, state, access));
   options.push(...bonusAttackOptions(actor, state, access, stats));
   options.push(...classOptions(actor, state, access));
   options.push(...bonusTacticOptions(actor, state, stats));
@@ -806,6 +808,8 @@ export function runTactic(
     return target;
   };
 
+  const mounted = mountEvents(actor, kind, targetId, state, context);
+  if (mounted) return { events: mounted };
   switch (kind) {
     case STAND:
       return {

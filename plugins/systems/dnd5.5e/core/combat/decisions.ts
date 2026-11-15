@@ -32,6 +32,7 @@ import {
   canAfford,
   inReach,
   moveSquares,
+  ridden,
   slotToSpend,
   speedLeft,
   targetCount,
@@ -138,9 +139,14 @@ function turnOptions(
     });
   }
   if (moveSquares(actor, state, stats, access).length > 0) {
+    // A rider moves with its mount's Speed.
+    const mount = ridden(actor, state);
+    const left = mount
+      ? speedLeft(mount, deriveStats(mount, access))
+      : speedLeft(actor, stats);
     options.push({
       id: MOVE,
-      label: `Move (${String(speedLeft(actor, stats))} ft left)`,
+      label: `Move (${String(left)} ft left)`,
     });
   }
   options.push(...fleeOptions(actor, state, access));
