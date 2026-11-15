@@ -46,10 +46,12 @@ import {
 import { seeing } from "../sight.ts";
 import { hasTactic } from "../tactics.ts";
 import { STAY } from "./ids.ts";
+import { grapplesOn } from "./grapple.ts";
 import {
   actorOf,
   CHECK_END,
   type Context,
+  dragEvents,
   enemies,
   hasPassive,
   meleeReach,
@@ -333,6 +335,7 @@ export function runMove(
         x: to.x,
         y: to.y,
         feet: step.feet,
+        ...(step.drag ? { dragged: step.drag } : {}),
       }),
       ...(entered !== null && from
         ? [frame("react", { kind: "entered", actor: actor.id, from })]
@@ -353,6 +356,15 @@ export const FinishMoveSchema = z.object({
   x: z.number(),
   y: z.number(),
   feet: z.number(),
+  // The creatures it grapples and drags along, and where each ends up.
+  dragged: z
+    .array(
+      z.object({
+        actor: z.string(),
+        to: z.object({ x: z.number(), y: z.number() }),
+      }),
+    )
+    .optional(),
 });
 
 export function runFinishMove(
@@ -374,6 +386,16 @@ export function runFinishMove(
         actor: actor.id,
         to: { x: payload.x, y: payload.y },
         feet: payload.feet,
+      }),
+      // Only those it still holds come along, as an Opportunity Attack may have broken a grapple.
+      ...dragEvents({
+        drag: (payload.dragged ?? []).filter(({ actor: id }) => {
+          const held = context.state.actors[id];
+          return (
+            held !== undefined &&
+            grapplesOn(held).some(({ casterId }) => casterId === actor.id)
+          );
+        }),
       }),
     ],
   };

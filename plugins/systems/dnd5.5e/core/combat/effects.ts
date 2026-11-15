@@ -757,6 +757,15 @@ export function leafEvents(
         break;
       }
       case "tempHp":
+        if (effect.reaction) {
+          if (!target.budget.reaction || isDown(target)) break;
+          events.push(
+            dndEvent(`${NS}:budgetSpent`, {
+              actor: target.id,
+              kind: "reaction",
+            }),
+          );
+        }
         events.push(
           dndEvent(`${NS}:tempHpGained`, {
             actor: target.id,
@@ -1809,7 +1818,7 @@ export function resolveAction(
               dc,
               context,
               action.spellLevel !== null,
-              coverAgainst(context.state, actor, target),
+              coverAgainst(context.state, actor, target, context),
               conditionsApplied(resolution.onFail),
               heightened === target.id,
               resolution.advantage,

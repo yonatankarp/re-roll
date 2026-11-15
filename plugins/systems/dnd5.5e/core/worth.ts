@@ -886,7 +886,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
             );
       }
       case "tempHp":
-        return foe || isDown(target)
+        return foe ||
+          isDown(target) ||
+          (effect.reaction && !target.budget.reaction)
           ? 0
           : 0.5 *
               healWorth(

@@ -138,6 +138,7 @@ const BOARD_CSS = `
   pointer-events: none;
   z-index: 2;
 }
+.dnd-token.shared { scale: 0.72; }
 .dnd-token.down .dnd-disc { transform: rotate(-80deg) scale(0.85); transition: transform 0.4s; }
 /* HP as a ring round the disc, emptying clockwise from the top. */
 .dnd-ring {
