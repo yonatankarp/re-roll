@@ -52,6 +52,8 @@ import {
 import { afterDamage } from "../plugins/systems/dnd5.5e/core/combat/reactions.ts";
 import { walkSpeed } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import {
+  affects,
+  antimagicEvents,
   blockedSquares,
   placedFlag,
   zonesOf,
@@ -1297,6 +1299,72 @@ describe("what a slot or a circle changes in an area", () => {
     });
     const hit = resolveAction(blast, actor(circled, "foe"), [me], context, 3);
     expect(damageTo(hit.events ?? [], PLAYER_ACTOR)).toEqual([]);
+  });
+
+  it("holds off spells and magic items in an Antimagic Field, and no other spell's area reaches in", async () => {
+    const run = await arena();
+    const ring = "srd52:item/ring-of-protection";
+    const blessed = {
+      ...hero(run, 5, 5),
+      inventory: [ring],
+      attuned: [ring],
+      activeEffects: [
+        {
+          sourceId: "spell:test:spell/bless",
+          casterId: PLAYER_ACTOR,
+          ends: "spellDuration" as const,
+          modifier: {
+            kind: "bonus" as const,
+            to: "saves" as const,
+            amount: { dice: "1d4" },
+          },
+        },
+      ],
+    };
+    const start = fight(blessed, monster("foe", "zombie", 6, 5));
+    const field = apply(
+      start,
+      resolveAction(
+        zoneSpell({}, { noSpells: "all", self: true }, true),
+        actor(start, "foe"),
+        [],
+        contextOf(run, start, LOW),
+        8,
+      ).events ?? [],
+    );
+    const held = apply(field, antimagicEvents(field));
+    const me = actor(held, PLAYER_ACTOR);
+    expect(me.activeEffects).toEqual([]);
+    expect(me.suppressed).toHaveLength(1);
+    const context = contextOf(run, held, LOW);
+    expect(deriveStats(me, context).ac).toBe(
+      deriveStats(actor(start, PLAYER_ACTOR), context).ac - 1,
+    );
+    const cloud = apply(
+      held,
+      resolveAction(
+        zoneSpell({}, { when: "turnStart", resolution: save(30, []) }),
+        actor(held, PLAYER_ACTOR),
+        [],
+        context,
+        3,
+        false,
+        { x: 5, y: 5 },
+      ).events ?? [],
+    );
+    const cloudZone = zonesOf(cloud).find(
+      (zone) => zone.owner === PLAYER_ACTOR,
+    );
+    if (!cloudZone) throw new Error("No cloud");
+    expect(affects(cloudZone, actor(cloud, PLAYER_ACTOR), cloud, context)).toBe(
+      false,
+    );
+    const away = apply(held, [
+      dndEvent(`${NS}:moved`, { actor: "foe", to: { x: 11, y: 11 }, feet: 0 }),
+    ]);
+    const back = actor(apply(away, antimagicEvents(away)), PLAYER_ACTOR);
+    expect(back.activeEffects).toHaveLength(1);
+    expect(back.suppressed).toBeUndefined();
   });
 
   it("gives Immunity to Thunder damage inside Silence", async () => {

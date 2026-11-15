@@ -264,6 +264,9 @@ const ActorSchema = z.strictObject({
   usedThisTurn: z.array(z.string()),
   resourcesSpent: z.record(z.string(), z.number().int()),
   activeEffects: z.array(ActiveEffectSchema),
+  // Spell and item effects held off while it stands in an Antimagic Field, its magic items' powers with them
+  // (zones.ts). Missing outside one.
+  suppressed: z.array(ActiveEffectSchema).optional(),
   concentratingOn: z.string().nullable(),
   inventory: z.array(ContentIdSchema),
   // Copies in `inventory` carried in the pack rather than worn or wielded. Missing in older saves, where all is worn.
@@ -588,6 +591,13 @@ export const EVENT_SCHEMAS = {
   // The creature whose turn it is takes another, as under Time Stop: its action, Bonus Action, Reaction and
   // movement come back, and the turn order stays where it is.
   [`${NS}:turnRepeated`]: ActorOnlySchema,
+  // A creature in an Antimagic Field: these effects stop working until it leaves, and so do its magic items.
+  [`${NS}:effectsSuppressed`]: z.strictObject({
+    actor: z.string(),
+    sourceIds: z.array(z.string()),
+  }),
+  // Out of the field again: what was held off works once more.
+  [`${NS}:effectsRestored`]: ActorOnlySchema,
   // A creature left with this many Hit Points, as a black pudding's half after it splits.
   [`${NS}:hpSet`]: z.strictObject({ actor: z.string(), hp: z.number().int() }),
   // Two creatures trading places in the Initiative order, as with Alert's Initiative Swap.
@@ -817,6 +827,15 @@ function removeConcentration(state: DndState, casterId: string): DndState {
           (effect) =>
             effect.ends !== "concentration" || effect.casterId !== casterId,
         ),
+        ...(actor.suppressed
+          ? {
+              suppressed: actor.suppressed.filter(
+                (effect) =>
+                  effect.ends !== "concentration" ||
+                  effect.casterId !== casterId,
+              ),
+            }
+          : {}),
         concentratingOn: id === casterId ? null : actor.concentratingOn,
       },
     ]),
@@ -858,7 +877,7 @@ function endCombat(state: DndState): DndState {
       .filter(
         ([, actor]) => actor.side === "party" && actor.source.kind !== "summon",
       )
-      .map(([id, actor]) => [
+      .map(([id, { suppressed: _held, ...actor }]) => [
         id,
         {
           ...actor,
@@ -1036,6 +1055,34 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         },
       };
     }
+    case `${NS}:effectsSuppressed`: {
+      const { actor: id, sourceIds } = payload(
+        EVENT_SCHEMAS[`${NS}:effectsSuppressed`],
+        event,
+      );
+      return updateActor(state, id, (actor) => ({
+        ...actor,
+        activeEffects: actor.activeEffects.filter(
+          (effect) => !sourceIds.includes(effect.sourceId),
+        ),
+        suppressed: [
+          ...(actor.suppressed ?? []),
+          ...actor.activeEffects.filter((effect) =>
+            sourceIds.includes(effect.sourceId),
+          ),
+        ],
+      }));
+    }
+    case `${NS}:effectsRestored`: {
+      const id = payload(ActorOnlySchema, event).actor;
+      return updateActor(state, id, (actor) => {
+        const { suppressed, ...rest } = actor;
+        return {
+          ...rest,
+          activeEffects: [...actor.activeEffects, ...(suppressed ?? [])],
+        };
+      });
+    }
     case `${NS}:turnRepeated`: {
       const data = payload(ActorOnlySchema, event);
       return updateActor(state, data.actor, (actor) => ({
@@ -1212,13 +1259,15 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
     }
     case `${NS}:effectEnded`: {
       const data = payload(EffectEndedSchema, event);
+      const kept = (effect: ActiveEffect): boolean =>
+        effect.sourceId !== data.sourceId ||
+        (data.casterId !== undefined && effect.casterId !== data.casterId);
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
-        activeEffects: actor.activeEffects.filter(
-          (effect) =>
-            effect.sourceId !== data.sourceId ||
-            (data.casterId !== undefined && effect.casterId !== data.casterId),
-        ),
+        activeEffects: actor.activeEffects.filter(kept),
+        ...(actor.suppressed
+          ? { suppressed: actor.suppressed.filter(kept) }
+          : {}),
       }));
     }
     case `${NS}:conditionRemoved`: {

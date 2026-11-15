@@ -719,8 +719,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     savingThrows: 0,
     spellAttack: 0,
   };
+  // In an Antimagic Field, magic items don't work.
+  const antimagic = actor.suppressed !== undefined;
   for (const [itemId, item] of worn) {
-    if (item.type !== "magicItem") continue;
+    if (item.type !== "magicItem" || antimagic) continue;
     if (item.attunement && !attuned.includes(itemId)) continue;
     // An entry with versions counts as its first, as older saves hold; content names a version as `<id>--<n>` (variants.ts).
     for (const { to, amount } of item.bonuses ??
@@ -786,7 +788,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       const own = (to: "attack" | "damage"): number =>
         Math.max(
           magic[to],
-          ...(weapon.bonuses ?? [])
+          ...(antimagic ? [] : (weapon.bonuses ?? []))
             .filter((bonus) => bonus.to === to)
             .map((bonus) => bonus.amount),
         );

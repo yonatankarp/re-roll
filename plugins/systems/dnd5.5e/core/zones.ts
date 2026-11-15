@@ -6,12 +6,15 @@ import type {
   Modifier,
   ZoneKind,
 } from "./schemas.ts";
+import type { SystemEvent } from "#sdk";
 import {
   type Actor,
   type DndState,
+  dndEvent,
   hasCondition,
   INCAPACITATING,
   isDead,
+  NS,
 } from "./state.ts";
 import { distanceFeet, type Square, squareKey, wallSet } from "./grid.ts";
 import { deriveStats, type KnownAction, type Stats } from "./stats.ts";
@@ -128,6 +131,41 @@ export function zonesOf(
 export const inZone = (zone: Zone, square: Square | null): boolean =>
   square !== null && distanceFeet(zone.at, square) <= zone.radius;
 
+// Inside an Antimagic Field, where no other spell's area reaches (its own and ones like it aside).
+export const inAntimagic = (actor: Actor, state: DndState): boolean =>
+  castZones(state).some(
+    (zone) => zone.area?.noSpells === "all" && inZone(zone, actor.position),
+  );
+
+// The events that hold off the spell and item effects of every creature in an Antimagic Field, and bring them back
+// for those out of it again. Its own zones aren't held, since they act where they were cast.
+// shortcut: checked as turns start and after moves, so a field that ends works on until then, and an effect that ran
+// out while held off ends at its next check.
+export function antimagicEvents(state: DndState): SystemEvent[] {
+  const field = castZones(state).some((zone) => zone.area?.noSpells === "all");
+  return Object.values(state.actors).flatMap((actor): SystemEvent[] => {
+    const inside = field && inAntimagic(actor, state);
+    if (!inside) {
+      return actor.suppressed
+        ? [dndEvent(`${NS}:effectsRestored`, { actor: actor.id })]
+        : [];
+    }
+    const sourceIds = [
+      ...new Set(
+        actor.activeEffects.flatMap(({ sourceId, modifier }) =>
+          (sourceId.startsWith("spell:") || sourceId.startsWith("item:")) &&
+          modifier.kind !== "zone"
+            ? [sourceId]
+            : [],
+        ),
+      ),
+    ];
+    return !actor.suppressed || sourceIds.length > 0
+      ? [dndEvent(`${NS}:effectsSuppressed`, { actor: actor.id, sourceIds })]
+      : [];
+  });
+}
+
 export const sealed = (actor: Actor): boolean =>
   actor.activeEffects.some(({ modifier }) => modifier.kind === "sealed");
 
@@ -142,6 +180,13 @@ export function affects(
   const owner = state.actors[zone.owner];
   const area = zone.area ?? {};
   if (!owner || isDead(actor) || sealed(actor)) return false;
+  if (
+    zone.sourceId.startsWith("spell:") &&
+    zone.area?.noSpells !== "all" &&
+    inAntimagic(actor, state)
+  ) {
+    return false;
+  }
   if (zone.follows && actor.id === owner.id && !area.self) return false;
   if (area.side === "enemy" && actor.side === owner.side) return false;
   if (area.side === "ally" && actor.side !== owner.side) return false;

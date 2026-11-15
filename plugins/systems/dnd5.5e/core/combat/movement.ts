@@ -27,7 +27,13 @@ import {
   rollAmount,
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
-import { blockingSet, sealed, thornHits } from "../zones.ts";
+import {
+  antimagicEvents,
+  blockingSet,
+  sealed,
+  thornHits,
+  zonesOf,
+} from "../zones.ts";
 import {
   concentrationFrame,
   dealEvents,
@@ -380,7 +386,17 @@ export function runFinishMove(
     feet: payload.feet,
   });
   const walker = { ...actor, position: { x: payload.x, y: payload.y } };
-  return { events: [moved, ...fogBoundEvents(walker, context)] };
+  // A walk into or out of an Antimagic Field, or one carrying it, holds off or brings back spells and items.
+  const fields =
+    zonesOf(context.state).some((zone) => zone.area?.noSpells === "all") ||
+    Object.values(context.state.actors).some((item) => item.suppressed);
+  return {
+    events: [
+      moved,
+      ...fogBoundEvents(walker, context),
+      ...(fields ? antimagicEvents(applyDndEvent(context.state, moved)) : []),
+    ],
+  };
 }
 
 // Where a teleport or a jump of `feet` can land: open squares on the map the actor can see, nearest a foe first.
