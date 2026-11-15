@@ -266,6 +266,18 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     ability: AbilitySchema.optional(),
     subtract: z.boolean().optional(), // a penalty, as a gold dragon's Weakening Breath
   }),
+  // A Speed of another kind, as a Fly Speed: these feet, or without them equal to the bearer's Speed
+  // (core/movement-modes.ts).
+  z.strictObject({
+    kind: z.literal("movementMode"),
+    mode: z.enum(["fly", "climb", "burrow"]),
+    feet: z.number().int().min(5).optional(),
+  }),
+  // Knowing where creatures on the ground are, this far, through walls and darkness, as Stonecunning's Tremorsense.
+  z.strictObject({
+    kind: z.literal("tremorsense"),
+    feet: z.number().int().min(5),
+  }),
   // Regaining no Hit Points, as in a death tyrant's Negative Energy Cone.
   z.strictObject({ kind: z.literal("noHealing") }),
   // The first drop to 0 Hit Points is a drop to 1 instead, and the effect ends, as with Death Ward.
@@ -332,7 +344,13 @@ export type ZoneKind = z.infer<typeof ZoneKindSchema>;
 
 export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("heal"), amount: AmountSchema }),
-  z.strictObject({ kind: z.literal("tempHp"), amount: AmountSchema }),
+  // With `reaction` the target spends its Reaction to gain them, and gains none without one, as a death's head tree's
+  // Head Fruits.
+  z.strictObject({
+    kind: z.literal("tempHp"),
+    amount: AmountSchema,
+    reaction: z.literal(true).optional(),
+  }),
   z.strictObject({
     kind: z.literal("applyCondition"),
     condition: ConditionSchema,
@@ -833,6 +851,26 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     oncePerTurn: z.boolean().default(false),
   }),
   z.strictObject({ kind: z.literal("packTactics") }),
+  // Moving through other creatures' spaces or through walls, as a swarm, a ghost's Incorporeal Movement or Halfling
+  // Nimbleness: `creatures` any, or only ones larger than it; `walls` through walls, at double cost with `costly`;
+  // `squeeze` slips between walls meeting at a corner; `open` lets others through its own space, as a swarm's;
+  // `terrain` crosses difficult terrain at no extra cost, as Freedom of Movement or a gas spore's Rolling Mass.
+  z.strictObject({
+    kind: z.literal("moveThrough"),
+    creatures: z.enum(["any", "larger"]).optional(),
+    walls: z.boolean().default(false),
+    costly: z.boolean().default(false),
+    squeeze: z.boolean().default(false),
+    open: z.boolean().default(false),
+    terrain: z.boolean().default(false),
+  }),
+  // A longer Long Jump, as a frog's Standing Leap (`feet` 20, `runUp` 0) or Athlete's Jumping (`runUp` 5): its feet
+  // after a run-up of `runUp` feet, instead of the Strength score after 10.
+  z.strictObject({
+    kind: z.literal("jump"),
+    feet: z.number().int().min(5).optional(),
+    runUp: z.number().int().min(0).default(10),
+  }),
   // Leaving a foe's reach never provokes an Opportunity Attack, as with Flyby or Agile.
   z.strictObject({ kind: z.literal("noOpportunityAttacks") }),
   // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
@@ -888,7 +926,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     allies: z.boolean().default(false),
   }),
   // Dropping to 1 Hit Point instead of 0 while the resource lasts, as with Relentless Endurance.
-  z.strictObject({ kind: z.literal("dropToOne"), resource: z.string() }),
+  // With `effects` it gains these as it does, for the rest of the fight, as Boon of Misty Escape's Gaseous Form.
+  z.strictObject({
+    kind: z.literal("dropToOne"),
+    resource: z.string(),
+    effects: z.array(ModifierSchema).default([]),
+  }),
   // Changes to the bearer's damaging cantrip that deals the most, as Agonizing, Repelling Blast or Eldritch Spear do:
   // damage added to each roll, effects on a hit, and range for each level of a class.
   z.strictObject({
@@ -1167,6 +1210,16 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Starting its turn Bloodied, a 6 on a d6 makes it berserk until it isn't Bloodied: it attacks the nearest creature
   // it can see, friend or foe, as a flesh golem's Berserk (combat/turn.ts).
   z.strictObject({ kind: z.literal("berserk") }),
+  // Moving a creature it grapples costs no extra movement, as a bugbear's Abduct (combat/queries.ts).
+  z.strictObject({ kind: z.literal("abduct") }),
+  // Two creatures in one square: with `allies` the bearer's allies may end their moves in its space, with Half Cover
+  // there under `cover`, as a death's head tree's Overhanging Branches; with `self` the bearer may enter any
+  // creature's space and stop there, as a gallows speaker's Whirling Form.
+  z.strictObject({
+    kind: z.literal("shareSpace"),
+    who: z.enum(["allies", "self"]),
+    cover: z.boolean().default(false),
+  }),
   // Its area spells spare itself and up to `creatures` others of its side, as an evoker's Evocation Sculptor.
   z.strictObject({
     kind: z.literal("sculptor"),

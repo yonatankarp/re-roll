@@ -18,6 +18,7 @@ import {
   combatEnded,
   enemies,
   fitsType,
+  dragEvents,
   moveSquares,
   provokers,
   reaches,
@@ -250,10 +251,18 @@ function stepEvents(
 ): SystemEvent[] {
   if (steps <= 0 || !target || reaches(lead, actor, target)) return [];
   const stats = deriveStats(actor, context);
+  // Half of each of its Speeds, as half its Speed is `steps`.
+  const half = (feet: number) => Math.floor((feet * steps) / stats.speed);
   const squares = moveSquares(
     { ...actor, moved: 0 },
     context.state,
-    { ...stats, speed: steps },
+    {
+      ...stats,
+      speed: steps,
+      speeds: Object.fromEntries(
+        Object.entries(stats.speeds).map(([mode, feet]) => [mode, half(feet)]),
+      ),
+    },
     context,
   );
   const best = [...squares].sort(
@@ -268,6 +277,7 @@ function stepEvents(
           to: best.square,
           feet: best.feet,
         }),
+        ...dragEvents(best),
       ]
     : [];
 }

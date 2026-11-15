@@ -844,7 +844,7 @@ export function runAttackRoll(
     attackBonus(resolution, stats) +
       rollBonus(attacker, "attacks", context) +
       rollBonus(target, "attacksAgainst", context); // Blade Ward's -1d4
-  const cover = coverAgainst(state, attacker, target);
+  const cover = coverAgainst(state, attacker, target, context);
   const ac =
     targetStats.ac +
     (steady.bypassCover && meleeReach(action) === null ? 0 : cover);
@@ -1110,7 +1110,7 @@ export function runRecheckHit(
   const target = actorOf(state, payload.target);
   const ac =
     deriveStats(target, context).ac +
-    coverAgainst(state, actorOf(state, payload.attacker), target) +
+    coverAgainst(state, actorOf(state, payload.attacker), target, context) +
     (payload.acBonus ?? 0);
   if (!payload.critical && payload.total < ac) {
     // Riposte: on the miss, the target makes its attack back.

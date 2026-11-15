@@ -860,7 +860,9 @@ function combat(
       const actor = state.actors[id];
       const bonus =
         player && actor && id !== PLAYER_ACTOR
-          ? coverBonus(coverFor(state, player.position, actor, [PLAYER_ACTOR]))
+          ? coverBonus(
+              coverFor(state, player.position, actor, [PLAYER_ACTOR], access),
+            )
           : 0;
       return bonus > 0 ? [[id, bonus]] : [];
     }),
