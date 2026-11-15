@@ -391,8 +391,8 @@ export function silencedSpells(
   };
 }
 
-// How many harmful things would act on `actor` at `at`: a foe's zone that acts on those in it, and sunlight that
-// burns it. Movement ranks squares by it, so a creature closes in without standing in a cloud it needn't.
+// How many harmful things would act on `actor` at `at`: a zone that acts on those in it, its side's own clouds too
+// unless the zone is only for allies, and sunlight that burns it. Movement ranks squares by it, so a creature closes in without standing in a cloud it needn't.
 export function zoneHarm(
   actor: Actor,
   at: Square,
@@ -403,7 +403,7 @@ export function zoneHarm(
     (zone) =>
       zone.area?.resolution !== undefined &&
       zone.area.when !== undefined &&
-      state.actors[zone.owner]?.side !== actor.side &&
+      zone.area.side !== "ally" &&
       inZone(zone, at) &&
       affects(zone, actor, state, access),
   ).length;

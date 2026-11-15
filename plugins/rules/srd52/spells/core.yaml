@@ -1028,6 +1028,7 @@
     area:
       side: enemy
       when: turnStart
+      enters: true
       maxDamage: 60
       resolution:
         kind: save
@@ -1473,41 +1474,29 @@
           type: radiant
       onSuccessDamage: half
       onFail:
-        - kind: modifier
+        - kind: zone
+          zone: dim
+          radius: 5
           duration:
             concentration: true
             minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 2d10
-                type: radiant
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 2d10
-                type: radiant
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+      onSuccess: []
+    area:
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 2d10
+            type: radiant
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d10
@@ -2576,41 +2565,30 @@
           type: poison
       onSuccessDamage: half
       onFail:
-        - kind: modifier
+        - kind: zone
+          zone: fog
+          radius: 20
           duration:
             concentration: true
             minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 5d8
-                type: poison
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 5d8
-                type: poison
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+      onSuccess: []
+    area:
+      when: turnEnd
+      enters: true
+      disperses: true
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 5d8
+            type: poison
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d8
@@ -5606,41 +5584,30 @@
           type: fire
       onSuccessDamage: half
       onFail:
-        - kind: modifier
+        - kind: zone
+          zone: fog
+          radius: 20
           duration:
             concentration: true
             minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 10d8
-                type: fire
-            save:
-              ability: dex
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 10d8
-                type: fire
-            save:
-              ability: dex
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+      onSuccess: []
+    area:
+      when: turnEnd
+      enters: true
+      disperses: true
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 10d8
+            type: fire
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
 - id: srd52:spell/invisibility
   name: Invisibility
   level: 2
@@ -6334,6 +6301,7 @@
     area:
       side: enemy
       when: turnEnd
+      enters: true
       difficult: true
       resolution:
         kind: save
@@ -9995,41 +9963,30 @@
           type: piercing
       onSuccessDamage: half
       onFail:
-        - kind: modifier
+        - kind: zone
+          zone: area
+          radius: 20
           duration:
             concentration: true
             minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 4d10
-                type: piercing
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 4d10
-                type: piercing
-            save:
-              ability: con
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+      onSuccess: []
+    area:
+      when: turnEnd
+      enters: true
+      difficult: true
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 4d10
+            type: piercing
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d10
@@ -10966,8 +10923,8 @@
       - slot
     targeting:
       area:
-        shape: line
-        radius: 60
+        shape: sphere
+        radius: 10
       range: 120
       side: enemy
     resolution:
@@ -10982,29 +10939,23 @@
           type: fire
       onSuccessDamage: half
       onFail:
-        - kind: modifier
+        - kind: zone
+          zone: area
+          radius: 10
           duration:
             concentration: true
             minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 5d8
-                type: fire
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 5d8
-                type: fire
+      onSuccess: []
+    area:
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: automatic
+        damage:
+          - amount:
+              dice: 5d8
+            type: fire
+        effects: []
   upcast:
     perSlotLevel:
       addDice: 1d8

@@ -55,7 +55,11 @@ import {
   hasFlag,
   rollBonus,
 } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
-import { thornHits, thornKeys } from "../plugins/systems/dnd5.5e/core/zones.ts";
+import {
+  thornHits,
+  thornKeys,
+  zonesOf,
+} from "../plugins/systems/dnd5.5e/core/zones.ts";
 import {
   damageToPartyFor,
   makeJudge,
@@ -332,16 +336,26 @@ describe("lingering damage", () => {
 
   it("hits everyone in Moonbeam when it appears and at the end of each of their turns", async () => {
     const run = arenaRun(await base(), {});
-    const start = fight(
-      hero(run, { spells: ["moonbeam"] }),
-      monster("a"),
-      monster("b"),
+    const at = (item: Actor, x: number): Actor => ({
+      ...item,
+      position: { x, y: 0 },
+    });
+    const placed = fight(
+      at(hero(run, { spells: ["moonbeam"] }), 0),
+      at(monster("a"), 3),
+      at(monster("b"), 4),
     );
+    const start: DndState = placed.combat
+      ? {
+          ...placed,
+          combat: { ...placed.combat, grid: { width: 10, height: 10 } },
+        }
+      : placed;
     // Every die rolls 1, so saves fail and the 2d10 is exactly 2.
     const cast = settle(
       run,
       start,
-      [act(PLAYER_ACTOR, `spell:${spell("moonbeam")}|all`)],
+      [act(PLAYER_ACTOR, `spell:${spell("moonbeam")}|@3,0`)],
       LOW,
     );
     expect(damageOf(cast.events, "a")).toEqual([2]);
@@ -363,6 +377,77 @@ describe("lingering damage", () => {
     const saved = settle(run, onA, [endTurn], HIGH);
     expect(damageOf(saved.events, "a")).toEqual([10]);
   });
+
+  it("rolls a higher slot's dice for Moonbeam's later saves too", async () => {
+    const run = arenaRun(await base(), {});
+    const at = (item: Actor, x: number): Actor => ({
+      ...item,
+      position: { x, y: 0 },
+    });
+    const placed = fight(
+      at(hero(run, { spells: ["moonbeam"], level: 5 }), 0),
+      at(monster("a"), 3),
+    );
+    const start: DndState = placed.combat
+      ? {
+          ...placed,
+          combat: { ...placed.combat, grid: { width: 10, height: 10 } },
+        }
+      : placed;
+    const cast = settle(
+      run,
+      start,
+      [act(PLAYER_ACTOR, `spell:${spell("moonbeam")}|@3,0|3`)],
+      LOW,
+    );
+    expect(damageOf(cast.events, "a")).toEqual([3]);
+    const onA: DndState = {
+      ...cast.state,
+      combat: start.combat && { ...start.combat, index: 1 },
+    };
+    expect(damageOf(settle(run, onA, [endTurn], LOW).events, "a")).toEqual([3]);
+  });
+
+  it.each([
+    ["cloudkill", 9, "fog"],
+    ["insect-plague", 9, "area"],
+    ["incendiary-cloud", 15, "fog"],
+    ["wall-of-fire", 7, "area"],
+  ])(
+    "leaves %s as an area that hurts whoever ends a turn in it",
+    async (slug, level, zone) => {
+      const run = arenaRun(await base(), {});
+      const at = (item: Actor, x: number): Actor => ({
+        ...item,
+        position: { x, y: 0 },
+      });
+      const placed = fight(
+        at(hero(run, { spells: [slug], level }), 0),
+        at(monster("a"), 5),
+      );
+      const start: DndState = placed.combat
+        ? {
+            ...placed,
+            combat: { ...placed.combat, grid: { width: 12, height: 12 } },
+          }
+        : placed;
+      const cast = settle(
+        run,
+        start,
+        [act(PLAYER_ACTOR, `spell:${spell(slug)}|@5,0`)],
+        LOW,
+      );
+      expect(damageOf(cast.events, "a")).toHaveLength(1);
+      expect(zonesOf(cast.state).map((item) => item.zone)).toEqual([zone]);
+      const onA: DndState = {
+        ...cast.state,
+        combat: start.combat && { ...start.combat, index: 1 },
+      };
+      expect(
+        damageOf(settle(run, onA, [endTurn], LOW).events, "a"),
+      ).toHaveLength(1);
+    },
+  );
 
   // Spirit Guardians is an area round its caster now (zones.ts), so nothing sits on the foes it caught.
   it("ends with the caster's Concentration, on everyone", async () => {
@@ -2670,7 +2755,7 @@ describe("replay", () => {
       expect(replayInputs(run, seed, inputs).state).toStrictEqual(state);
       expect(StateSchema.parse(state.system)).toBeDefined();
     }
-    expect(seen).toContain("lingeringDamage");
+    expect(seen).toContain("zone");
     expect(seen).toContain("hitDamage");
     expect(seen).toContain("damaged");
   }, 240_000);
