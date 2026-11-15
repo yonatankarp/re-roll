@@ -6,7 +6,10 @@ import {
   fallFrames,
   heightOf,
 } from "../plugins/systems/dnd5.5e/core/combat/falling.ts";
-import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import {
+  leafEvents,
+  resolveAction,
+} from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { provokers } from "../plugins/systems/dnd5.5e/core/combat/movement.ts";
 import {
   moveSquares,
@@ -18,6 +21,7 @@ import {
   type Actor,
   type DndState,
   NS,
+  applyDndEvent,
   freshActor,
   hasCondition,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
@@ -89,7 +93,18 @@ const FIXTURES = [
 
 async function run(): Promise<RunContext> {
   const base = await testRun();
-  const byId = new Map(FIXTURES.map((entry) => [entry.id, entry]));
+  // A caster of the SRD's Levitate, as encoded.
+  const levitate = base.content("srd52:spell/levitate") as unknown as {
+    readonly activation: unknown;
+  };
+  const byId = new Map(
+    [
+      ...FIXTURES,
+      block("lifter", {
+        actions: [{ name: "Levitate", activation: levitate.activation }],
+      }),
+    ].map((entry) => [entry.id, entry]),
+  );
   return {
     ...base,
     content: (id) => byId.get(id) ?? base.content(id),
@@ -228,6 +243,9 @@ describe("height", () => {
     const flyer = get(state, PLAYER_ACTOR);
     expect(heightOf(flyer)).toBe(20);
     expect(flyer.moved).toBe(20);
+    // Going straight up out of the brute's reach gave it its Opportunity Attack, the first step only.
+    expect(get(state, "brute").budget.reaction).toBe(false);
+    expect(flyer.hp).toBeLessThan(50);
     const brute = get(state, "brute");
     expect(reaches(clubOf(content, brute), brute, flyer)).toBe(false);
     expect(reaches(clubOf(content, flyer), flyer, brute)).toBe(false);
@@ -240,18 +258,22 @@ describe("height", () => {
         ({ foe }) => foe.id,
       ),
     ).toEqual(["brute"]);
-    // Down again, one step at a time.
-    const sink = options(content, state, PLAYER_ACTOR).find((id) =>
+    // Next turn, down again one step at a time.
+    const next = {
+      ...state,
+      actors: { ...state.actors, [PLAYER_ACTOR]: { ...flyer, moved: 0 } },
+    };
+    const sink = options(content, next, PLAYER_ACTOR).find((id) =>
       id.includes("sink"),
     );
     const landed = settle(
       content,
-      state,
+      next,
       [take(PLAYER_ACTOR, sink ?? ""), take(PLAYER_ACTOR, sink ?? "")],
       scripted([]).dice,
     ).state;
     expect(heightOf(get(landed, PLAYER_ACTOR))).toBe(0);
-    expect(get(landed, PLAYER_ACTOR).moved).toBe(40);
+    expect(get(landed, PLAYER_ACTOR).moved).toBe(20);
   });
 
   it("falls once knocked Prone or once its Fly Speed ends, unless it hovers", async () => {
@@ -293,6 +315,51 @@ describe("height", () => {
       "monster:0",
     );
     expect(fallFrames(context(flying([fly, up(30), held])))).toHaveLength(1);
+  });
+
+  it("lifts a creature that fails its save with Levitate, out of reach and unable to move, and floats it down unhurt", async () => {
+    const content = await run();
+    const start = arena([
+      monster("lifter", "lifter", 1, 1),
+      monster("hero", "brute", 2, 1, "party"),
+    ]);
+    const lifter = get(start, "lifter");
+    const action = deriveStats(lifter, content).actions.find(
+      (item) => item.name === "Levitate",
+    );
+    if (!action) throw new Error("Levitate");
+    const cast = resolveAction(action, lifter, [get(start, "hero")], {
+      state: start,
+      dice: scripted([1]).dice,
+      ...content,
+    });
+    const lifted = (cast.events ?? []).reduce(applyDndEvent, start);
+    const hero = get(lifted, "hero");
+    expect(heightOf(hero)).toBe(20);
+    expect(walks(content, lifted, "hero").size).toBe(0);
+    expect(reaches(clubOf(content, hero), hero, lifter)).toBe(false);
+    // The spell ends: down it floats, unhurt and standing.
+    const ended = {
+      ...lifted,
+      actors: {
+        ...lifted.actors,
+        hero: {
+          ...hero,
+          activeEffects: hero.activeEffects.filter(
+            ({ modifier }) => modifier.kind === "aloft",
+          ),
+        },
+      },
+    };
+    const { state } = settle(
+      content,
+      ended,
+      fallFrames({ state: ended, dice: scripted([]).dice, ...content }),
+      scripted([]).dice,
+    );
+    expect(heightOf(get(state, "hero"))).toBe(0);
+    expect(get(state, "hero").hp).toBe(50);
+    expect(hasCondition(get(state, "hero"), "prone")).toBe(false);
   });
 
   it("floats down unhurt once Levitate ends", async () => {

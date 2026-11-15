@@ -116,13 +116,15 @@ export function walksOf(
 // whose reach some step of the walk leaves. Off the grid (fleeing), only where it starts and ends counts.
 // shortcut: the walk is the cheapest one moveSquares finds, not the one that provokes fewest; let a move
 // choose its path once the board lets the player draw one.
-// A jump goes straight there, so `path` is just its end.
+// A jump goes straight there, so `path` is just its end. Flying or climbing straight up or down, `path` is the square
+// it stays on and `height` how high it ends up.
 export function provokers(
   actor: Actor,
   to: Square,
   state: DndState,
   access: ContentAccess,
   path?: readonly Square[],
+  height?: number,
 ): readonly { readonly foe: Actor; readonly melee: KnownAction }[] {
   if (hasPassive(deriveStats(actor, access), "noOpportunityAttacks")) return [];
   // Sentinel's Guardian: Disengage doesn't stop a Sentinel's Opportunity Attack.
@@ -146,15 +148,21 @@ export function provokers(
       return [];
     }
     // One up in the air is that much farther from a foe below it (combat/falling.ts).
-    const rise = Math.abs(heightOf(actor) - heightOf(foe));
-    const far = (square: Square | null): number =>
-      Math.max(distanceFeet(square, foe.position), rise);
+    const far = (index: number): number =>
+      Math.max(
+        distanceFeet(steps[index] ?? null, foe.position),
+        Math.abs(
+          (index === steps.length - 1 && height !== undefined
+            ? height
+            : heightOf(actor)) - heightOf(foe),
+        ),
+      );
     const leaves = (reach: number): boolean =>
       steps.some(
-        (square, index) =>
+        (_, index) =>
           index + 1 < steps.length &&
-          far(square) <= reach &&
-          far(steps[index + 1] ?? null) > reach,
+          far(index) <= reach &&
+          far(index + 1) > reach,
       );
     const melee = deriveStats(foe, access).actions.find((item) => {
       const reach = meleeReach(item);
@@ -172,7 +180,7 @@ export function provokers(
 
 // An Opportunity Attack, or with War Caster a one-target spell of one action cast with the Reaction instead.
 // A caster's companions and monsters cast the first damaging cantrip that reaches, which beats a dagger.
-function opportunity(
+export function opportunity(
   foe: Actor,
   melee: KnownAction,
   walker: Actor,

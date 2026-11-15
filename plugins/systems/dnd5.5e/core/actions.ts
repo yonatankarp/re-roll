@@ -27,9 +27,9 @@ import {
   within5,
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
-import { teleportSquares } from "./combat/movement.ts";
+import { opportunity, provokers, teleportSquares } from "./combat/movement.ts";
 import { heldInPlace, leafEvents } from "./combat/effects.ts";
-import { heightChoices, heightEvents, heightOf } from "./combat/falling.ts";
+import { heightChoices, heightOf } from "./combat/falling.ts";
 import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
@@ -844,14 +844,31 @@ export function runTactic(
             : []),
         ],
       };
+    // Straight up or down out of a foe's reach provokes it, as any move of the creature's own does.
     case RISE:
-    case SINK:
-      return {
-        events: heightEvents(actor, {
-          mode: targetId === "climb" ? "climb" : "fly",
-          up: kind === RISE,
-        }),
+    case SINK: {
+      const step = {
+        mode: targetId === "climb" ? ("climb" as const) : ("fly" as const),
+        up: kind === RISE,
       };
+      const answers = actor.position
+        ? provokers(
+            actor,
+            actor.position,
+            state,
+            context,
+            [actor.position],
+            heightOf(actor) + (step.up ? 10 : -10),
+          ).map(({ foe, melee }) => opportunity(foe, melee, actor, context))
+        : [];
+      return {
+        events: answers.flatMap((answer) => answer.events ?? []),
+        frames: [
+          ...answers.flatMap((answer) => answer.frames ?? []),
+          frame("changeHeight", { actor: actor.id, ...step }),
+        ],
+      };
+    }
     case STAND:
       return {
         events: [

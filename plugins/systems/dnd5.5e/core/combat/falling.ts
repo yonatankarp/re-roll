@@ -116,6 +116,28 @@ export function heightChoices(
   return choices;
 }
 
+const HeightSchema = z.object({
+  actor: z.string(),
+  mode: z.enum(["fly", "climb"]),
+  up: z.boolean(),
+});
+
+// One such step, after the Opportunity Attacks it provokes, unless one of them stopped or felled it.
+function runChangeHeight(
+  payload: z.infer<typeof HeightSchema>,
+  context: Context,
+): SystemResult {
+  const actor = context.state.actors[payload.actor];
+  if (!actor || isDown(actor) || isDead(actor)) return {};
+  const left = speedsLeft(actor, deriveStats(actor, context)).get(payload.mode);
+  if (
+    (left ?? 0) < STEP ||
+    (payload.up && !staysUp(actor, payload.mode, context))
+  )
+    return {};
+  return { events: heightEvents(actor, payload) };
+}
+
 // The events of one such step: the new height, and the movement it costs.
 export function heightEvents(
   actor: Actor,
@@ -401,4 +423,8 @@ export function runFall(
 
 export const fallingFrames = {
   [`${NS}:fall`]: frameHandler({ schema: FallSchema, run: runFall }),
+  [`${NS}:changeHeight`]: frameHandler({
+    schema: HeightSchema,
+    run: runChangeHeight,
+  }),
 };
