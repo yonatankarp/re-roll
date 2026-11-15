@@ -1425,7 +1425,7 @@ function areaTrait(
       },
     ];
   }
-  const placed = guardingTrait(name, text, awake, left);
+  const placed = guardingTrait(name, text, awake);
   if (placed) return placed;
   // Stench, Terrifying Aura: a save for whoever starts or ends its turn in it, or for everyone in it as the
   // monster's turn ends. Culling Aura's acts only on the Bloodied.
@@ -1524,7 +1524,6 @@ function guardingTrait(
   name: string,
   text: string,
   awake: { readonly awake?: true },
-  left: string[],
 ): Passive[] | null {
   const aura = (radius: string | undefined, area: AreaEffect): Passive[] => [
     { kind: "aura", name, zone: "area", radius: Number(radius), area },
@@ -1651,7 +1650,6 @@ function guardingTrait(
       },
     ];
   }
-  void left;
   return null;
 }
 

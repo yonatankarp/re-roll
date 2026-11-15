@@ -512,10 +512,9 @@ describe("lingering damage", () => {
 
   it("rolls a Resilient Sphere at half Speed, and lets a Forcecage's prisoner try to teleport out", async () => {
     const plain = await base();
-    const printed = plain.content("srd52:spell/misty-step") as Record<
-      string,
-      unknown
-    >;
+    const printed = plain.content(
+      "srd52:spell/misty-step",
+    ) as unknown as Record<string, unknown>;
     const run = arenaRun(plain, {
       "srd52:spell/misty-step": {
         ...printed,
