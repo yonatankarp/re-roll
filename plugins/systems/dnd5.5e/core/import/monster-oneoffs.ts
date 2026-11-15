@@ -1587,6 +1587,23 @@ function particularAction(
       left,
     };
   }
+  // "Ez chooses up to six allies within 60 feet. Each target that can hear her can take a Reaction to move up to its
+  // Speed without provoking Opportunity Attacks."
+  const rally =
+    /^[^.]+ chooses up to (\w+) allies within (\d+) feet\. Each target that can hear [^.]+ can take a Reaction to move up to its Speed without provoking Opportunity Attacks\.?$/.exec(
+      text,
+    );
+  if (rally) {
+    left.push("where they move, as each goes beside its nearest foe");
+    return done(
+      {
+        creatures: countOf(rally[1]) ?? 1,
+        range: Number(rally[2]),
+        side: "ally",
+      },
+      automatic([{ kind: "reactionMove" }]),
+    );
+  }
   // "Ez chooses a damage type. Wisdom Saving Throw: DC 15, one target within 30 feet that Ez can see. Failure: The
   // target is cursed. Until the curse ends, the target has Vulnerability to the chosen damage type."
   const vulnerable =

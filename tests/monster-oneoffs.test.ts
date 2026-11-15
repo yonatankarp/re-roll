@@ -198,6 +198,9 @@ const BLOCKS = [
       automatic("Incite", { creatures: 1, range: 60, side: "ally" }, [
         { kind: "reactionAttack" },
       ]),
+      automatic("Rally", { creatures: 1, range: 60, side: "ally" }, [
+        { kind: "reactionMove" },
+      ]),
     ],
   }),
   statBlock("nightmare", {
@@ -686,7 +689,7 @@ describe("monster one-off pieces", () => {
     ).toBe(1);
   });
 
-  it("has an ally spend its Reaction on an attack", async () => {
+  it("has an ally spend its Reaction on an attack, or on a move beside its nearest foe", async () => {
     const run = await base();
     const lord = monster("gnoll", { at: [5, 5] });
     const ally = monster("wolf", { at: [8, 8], name: "ally" });
@@ -706,5 +709,18 @@ describe("monster one-off pieces", () => {
       (incited.events ?? []).reduce(applyDndEvent, state).actors.ally?.budget
         .reaction,
     ).toBe(false);
+    const far = fighter(run, [14, 8]);
+    const rallied = resolveAction(
+      actionOf(run, lord, "Rally"),
+      lord,
+      [ally],
+      contextOf(run, fight(far, lord, ally), fixed(1)),
+    );
+    const moved = (rallied.events ?? []).reduce(
+      applyDndEvent,
+      fight(far, lord, ally),
+    ).actors.ally;
+    expect(moved?.position?.x).toBe(13);
+    expect(moved?.budget.reaction).toBe(false);
   });
 });

@@ -63,7 +63,7 @@ import {
   rescuedSave,
   traitSaveAdvantage,
 } from "../trait-rules.ts";
-import { dodging } from "../tactics.ts";
+import { dodging, speedOf } from "../tactics.ts";
 import { AIM, ALL, HIT_DICE, THROW_PREFIX, weaponItemId } from "./ids.ts";
 import {
   distanceFeet,
@@ -85,6 +85,7 @@ import { teleportFrame, teleportSquares } from "./movement.ts";
 import {
   afterDamage,
   beforeDamage,
+  besideSquare,
   reactFrames,
   settleRoll,
 } from "./reactions.ts";
@@ -1077,6 +1078,7 @@ export function leafEvents(
       case "disperse":
       case "animate":
       case "reactionAttack":
+      case "reactionMove":
       case "randomAction":
       case "raiseCorpse":
       case "reduceDamage":
@@ -1763,6 +1765,9 @@ export function resolveAction(
             events.push(...rolled.events);
             frames.push(...rolled.frames);
           }
+          if (effect.kind === "reactionMove") {
+            events.push(...reactionMove(target, context));
+          }
           if (effect.kind === "reactionAttack") {
             const struck = reactionAttack(target, context);
             events.push(...struck.events);
@@ -2050,6 +2055,26 @@ function reactionAttack(
       }),
     ],
   };
+}
+
+// A creature spends its Reaction to step beside its nearest foe within its Speed, provoking nothing.
+function reactionMove(target: Actor, context: Context): SystemEvent[] {
+  if (!target.budget.reaction || isDown(target) || !target.position) return [];
+  const speed = speedOf(target, deriveStats(target, context));
+  const [foe] = enemies(context.state, target)
+    .filter((item) => !isDown(item) && item.position)
+    .sort(
+      (a, b) =>
+        distanceFeet(target.position, a.position) -
+        distanceFeet(target.position, b.position),
+    );
+  if (!foe || distanceFeet(target.position, foe.position) <= 5) return [];
+  const to = besideSquare(target, foe, context);
+  if (!to || distanceFeet(target.position, to) > speed) return [];
+  return [
+    dndEvent(`${NS}:budgetSpent`, { actor: target.id, kind: "reaction" }),
+    dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 }),
+  ];
 }
 
 // Copies of a monster, or another stat block, come to life next to the bearer, as Animate Trees or Soul Tattoo.

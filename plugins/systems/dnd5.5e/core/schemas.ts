@@ -544,6 +544,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // The target spends its Reaction on one melee attack against a foe in its reach, as a gnoll pack lord's Incite
   // Rampage.
   z.strictObject({ kind: z.literal("reactionAttack") }),
+  // The target spends its Reaction to move up to its Speed beside its nearest foe, without provoking Opportunity
+  // Attacks, as Ez d'Avenir's Inspiring Rally.
+  z.strictObject({ kind: z.literal("reactionMove") }),
   z.strictObject({
     kind: z.literal("raiseCorpse"),
     monster: ContentIdSchema,
