@@ -10616,137 +10616,137 @@
           repeats: true
           twiceOnTop: true
   rolled:
-  - label: Red
-    cost: []
-    targeting:
-      creatures: 1
-      range: 60
-      side: enemy
-    resolution:
-      kind: save
-      ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 12d6
-          type: fire
-      onSuccessDamage: half
-  - label: Orange
-    cost: []
-    targeting:
-      creatures: 1
-      range: 60
-      side: enemy
-    resolution:
-      kind: save
-      ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 12d6
-          type: acid
-      onSuccessDamage: half
-  - label: Yellow
-    cost: []
-    targeting:
-      creatures: 1
-      range: 60
-      side: enemy
-    resolution:
-      kind: save
-      ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 12d6
-          type: lightning
-      onSuccessDamage: half
-  - label: Green
-    cost: []
-    targeting:
-      creatures: 1
-      range: 60
-      side: enemy
-    resolution:
-      kind: save
-      ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 12d6
-          type: poison
-      onSuccessDamage: half
-  - label: Blue
-    cost: []
-    targeting:
-      creatures: 1
-      range: 60
-      side: enemy
-    resolution:
-      kind: save
-      ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 12d6
-          type: cold
-      onSuccessDamage: half
-  - label: Indigo
-    cost: []
-    targeting:
-      creatures: 1
-      range: 60
-      side: enemy
-    resolution:
-      kind: save
-      ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
-      onFail:
-        - kind: applyCondition
-          condition: restrained
-          duration:
-            minutes: 1440
-          endSave:
-            ability: con
-            dc:
-              add:
-                - kind: spellSaveDc
-          secondFailure:
-            condition: petrified
+    - label: Red
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 12d6
+            type: fire
+        onSuccessDamage: half
+    - label: Orange
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 12d6
+            type: acid
+        onSuccessDamage: half
+    - label: Yellow
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 12d6
+            type: lightning
+        onSuccessDamage: half
+    - label: Green
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 12d6
+            type: poison
+        onSuccessDamage: half
+    - label: Blue
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 12d6
+            type: cold
+        onSuccessDamage: half
+    - label: Indigo
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        onFail:
+          - kind: applyCondition
+            condition: restrained
             duration:
               minutes: 1440
-            count: 3
-  - label: Violet
-    cost: []
-    targeting:
-      creatures: 1
-      range: 60
-      side: enemy
-    resolution:
-      kind: save
-      ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
-      onFail:
-        - kind: applyCondition
-          condition: blinded
-          duration:
-            minutes: 1
-          banish:
-            ability: wis
+            endSave:
+              ability: con
+              dc:
+                add:
+                  - kind: spellSaveDc
+            secondFailure:
+              condition: petrified
+              duration:
+                minutes: 1440
+              count: 3
+    - label: Violet
+      cost: []
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        onFail:
+          - kind: applyCondition
+            condition: blinded
+            duration:
+              minutes: 1
+            banish:
+              ability: wis
 - id: srd52:spell/project-image
   name: Project Image
   level: 7
