@@ -27,7 +27,7 @@ import {
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { teleportSquares } from "./combat/movement.ts";
-import { leafEvents } from "./combat/effects.ts";
+import { heldInPlace, leafEvents } from "./combat/effects.ts";
 import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
@@ -263,9 +263,11 @@ function pushEvents(
   by: Actor,
   target: Actor,
   feet: number,
-  state: DndState,
+  context: Context,
 ): SystemEvent[] {
-  const to = pushTo(by.position, target, feet, state);
+  const to = pushTo(by.position, target, feet, context.state);
+  const held = to ? heldInPlace(target, context) : [];
+  if (held.length > 0) return held;
   return to ? [dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 })] : [];
 }
 
@@ -1079,7 +1081,7 @@ export function runTactic(
                 "spellDuration",
               ),
             ]
-          : pushEvents(actor, shoved, 5, state);
+          : pushEvents(actor, shoved, 5, context);
       return {
         events: [spend("action"), ...save.events, ...result],
         frames: done,
@@ -1315,7 +1317,7 @@ export function runMasteryHit(
     }
     case "push":
       return up && sizeOf(target, context) <= SIZES.indexOf("large")
-        ? { events: pushEvents(attacker, target, 10, state) }
+        ? { events: pushEvents(attacker, target, 10, context) }
         : {};
     case "cleave": {
       const reach = meleeReach(action);

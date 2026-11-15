@@ -99,10 +99,12 @@ export function payCosts(
   slotLevel?: number,
 ): SystemEvent[] {
   // An attack ends them once rolled, so its own roll still has their Advantage (attack.ts).
-  const events: SystemEvent[] =
-    action.activation.resolution.kind === "attack"
+  const events: SystemEvent[] = [
+    ...(action.activation.resolution.kind === "attack"
       ? []
-      : actingEnds(actor, action);
+      : actingEnds(actor, action)),
+    ...kitUse(actor, action, context),
+  ];
   for (const cost of action.activation.cost) {
     if (cost === "action" || cost === "bonusAction" || cost === "reaction") {
       events.push(
@@ -245,6 +247,54 @@ export function damageEvents(
 }
 
 // Several hits on one target, reported in turn so each one sees the HP the last one left.
+// Tyro of the Gauntlet's Stand as One: an ally within 5 feet spends its Reaction to keep the target from being moved.
+export function heldInPlace(
+  target: Actor,
+  context: Pick<Context, "state" | "content" | "contentIds">,
+): SystemEvent[] {
+  if (hasCondition(target, ...INCAPACITATING)) return [];
+  const guard = Object.values(context.state.actors).find(
+    (other) =>
+      other.id !== target.id &&
+      other.side === target.side &&
+      other.budget.reaction &&
+      !isDown(other) &&
+      !hasCondition(other, ...INCAPACITATING) &&
+      distanceFeet(other.position, target.position) <= 5 &&
+      hasPassive(deriveStats(other, context), "standAsOne"),
+  );
+  return guard
+    ? [
+        dndEvent(`${NS}:budgetSpent`, {
+          actor: guard.id,
+          kind: "reaction",
+          label: "Stand as One",
+        }),
+      ]
+    : [];
+}
+
+// A Healer's Kit's ten uses: an activation that needs it carried spends one, and the last use spends the kit.
+function kitUse(
+  actor: Actor,
+  action: KnownAction,
+  context: Context,
+): SystemEvent[] {
+  const { carrying } = action.activation;
+  const item = carrying ? context.content(carrying) : undefined;
+  const uses =
+    item && typeof item === "object" && "uses" in item ? Number(item.uses) : 0;
+  if (!carrying || !uses) return [];
+  const key = `uses:${carrying}`;
+  const spent = (actor.resourcesSpent[key] ?? 0) + 1;
+  return spent < uses
+    ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource: key })]
+    : [
+        dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: carrying }),
+        dndEvent(`${NS}:resourceRestored`, { actor: actor.id, resource: key }),
+      ];
+}
+
 // Boon of Erupting Spellpower: a slot spell's surge, spending its use.
 // shortcut: it's used on the first slot spell that deals damage, and comes back with a rest, not on rolling Initiative.
 function overloaded(
@@ -649,7 +699,10 @@ export function leafEvents(
           effect.direction === "away"
             ? pushTo(caster.position, target, effect.feet, context.state)
             : null;
-        if (to) {
+        const held = to ? heldInPlace(target, context) : [];
+        if (held.length > 0) {
+          events.push(...held);
+        } else if (to) {
           events.push(
             dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 }),
           );
@@ -738,12 +791,19 @@ export function rollSave(
     (ability === "dex" ? cover : 0);
   const saved = total >= dc;
   // A save's once-only edge, as Harper Teamwork's Disadvantage, is spent on it.
-  const spent = target.activeEffects.flatMap(({ modifier, sourceId, casterId }) =>
-    (modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
-    modifier.on === "saves" &&
-    modifier.once
-      ? [dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId, casterId })]
-      : [],
+  const spent = target.activeEffects.flatMap(
+    ({ modifier, sourceId, casterId }) =>
+      (modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
+      modifier.on === "saves" &&
+      modifier.once
+        ? [
+            dndEvent(`${NS}:effectEnded`, {
+              actor: target.id,
+              sourceId,
+              casterId,
+            }),
+          ]
+        : [],
   );
   const rolled = dndEvent(`${NS}:saveRolled`, {
     actor: target.id,

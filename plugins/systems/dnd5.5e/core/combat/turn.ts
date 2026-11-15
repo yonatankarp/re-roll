@@ -64,7 +64,8 @@ function sharedRecovery(
 ): SystemEvent[] {
   if (
     modifier.kind !== "condition" ||
-    (modifier.condition !== "frightened" && modifier.condition !== "paralyzed") ||
+    (modifier.condition !== "frightened" &&
+      modifier.condition !== "paralyzed") ||
     !hasPassive(deriveStats(saver, context), "sharedRecovery")
   ) {
     return [];

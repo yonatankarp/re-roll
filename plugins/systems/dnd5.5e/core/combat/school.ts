@@ -10,6 +10,7 @@ import {
 } from "../stats.ts";
 import { HIT_DICE } from "./ids.ts";
 import { hitDieRoll } from "../trait-rules.ts";
+import { leafEvents } from "./effects.ts";
 import type { Context } from "./queries.ts";
 
 // The Arcana Unleashed adepts' riders on casting a spell of their school (passive `schoolCast`).
@@ -142,6 +143,33 @@ export function fueledDamage(
       dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key: FUELED }),
     ],
   };
+}
+
+// Flames of Phlegethos: casting a spell that deals the type puts the rider's effects on the caster.
+export function castRiders(
+  actor: Actor,
+  action: KnownAction,
+  context: Context,
+): SystemEvent[] {
+  if (action.spellLevel === null) return [];
+  const { resolution } = action.activation;
+  const types = new Set([
+    ...resolution.damage.map(({ type }) => type),
+    ...(resolution.kind === "attack" && resolution.onHitSave
+      ? resolution.onHitSave.damage.map(({ type }) => type)
+      : []),
+  ]);
+  return deriveStats(actor, context).passives.flatMap((passive) =>
+    passive.kind === "castRider" && types.has(passive.damage)
+      ? leafEvents(
+          passive.effects,
+          `castRider:${action.id}`,
+          actor,
+          actor,
+          context,
+        )
+      : [],
+  );
 }
 
 // Persistent Conjuration: the bonus to the save to keep Concentration on a Conjuration spell.

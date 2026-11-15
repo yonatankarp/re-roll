@@ -845,6 +845,23 @@ export function runApplyHit(
   }
   // The turn's use is spent only when a die is rolled again.
   const pierce = { used: false };
+  // Charger's Charge Attack: once on its turn, a melee hit after moving at least 10 feet adds 1d8.
+  // shortcut: any 10 feet moved this turn counts, not only a straight line toward the target, and it never pushes.
+  const charging =
+    hasPassive(stats, "chargeAttack") &&
+    isMelee(action) &&
+    attacker.moved >= 10 &&
+    inOwnTurn(attacker, context) &&
+    !attacker.usedThisTurn.includes(CHARGE_ATTACK);
+  if (charging) {
+    events.push(
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: attacker.id,
+        key: CHARGE_ATTACK,
+      }),
+    );
+  }
+  const charge = charging ? rollDiceNotation("1d8", dice, multiplier) : 0;
   const maxed = maximized(
     attacker,
     stats,
@@ -891,7 +908,8 @@ export function runApplyHit(
       (index === 0 && type === firstType
         ? extra +
           damageBonus(attacker, resolution, stats, context) +
-          (pain ? stats.proficiency : 0)
+          (pain ? stats.proficiency : 0) +
+          charge
         : 0) -
       (index === 0 && payload.noModifier && resolution.attack.ability
         ? Math.max(0, modifierFor(stats, resolution.attack.ability))
@@ -943,6 +961,9 @@ export function runApplyHit(
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
     ...oncePerTurnHit(resolution, action, attacker, target, context),
+    ...drained(resolution, attacker, dealt.dealt, stats),
+    ...feast(attacker, target, stats, context),
+    ...retaliated(attacker, target, action, context),
     ...halted(attacker, target, stats, context),
     ...shieldBash(attacker, target, action, stats, context),
     ...inspiringStrike(attacker, payload.critical, stats, context),
@@ -996,6 +1017,108 @@ export function runApplyHit(
 }
 
 const PEERLESS_AIM = "peerless-aim";
+const CHARGE_ATTACK = "charge-attack";
+const FEAST = "sanguine-feast";
+
+function hasUse(actor: Actor, stats: Stats, resource: string): boolean {
+  return (
+    (actor.resourcesSpent[resource] ?? 0) < (stats.resources[resource] ?? 0)
+  );
+}
+
+// A Dhampir's Vampiric Bite: the hit heals the biter by the damage it dealt.
+// shortcut: always Drain, never Strengthen.
+function drained(
+  resolution: Extract<Resolution, { kind: "attack" }>,
+  attacker: Actor,
+  dealt: number,
+  stats: Stats,
+): SystemEvent[] {
+  const { drain } = resolution;
+  if (!drain || dealt <= 0 || !hasUse(attacker, stats, drain.resource))
+    return [];
+  return [
+    dndEvent(`${NS}:resourceSpent`, {
+      actor: attacker.id,
+      resource: drain.resource,
+    }),
+    dndEvent(`${NS}:healed`, {
+      actor: attacker.id,
+      amount: Math.min(dealt, stats.maxHp - Math.max(attacker.hp, 0)),
+      max: stats.maxHp,
+    }),
+  ];
+}
+
+// Bloodlust's Sanguine Feast: once a turn, a hit on a Bloodied creature, not a Construct or Undead, heals by a Hit
+// Point Die.
+// shortcut: it's spent whenever it can be, rather than when the bearer is hurt enough to want it.
+function feast(
+  attacker: Actor,
+  target: Actor,
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  const passive = stats.passives.find(({ kind }) => kind === "bloodiedFeast");
+  const targetStats = deriveStats(target, context);
+  if (
+    passive?.kind !== "bloodiedFeast" ||
+    attacker.usedThisTurn.includes(FEAST) ||
+    !hasUse(attacker, stats, passive.resource) ||
+    target.hp * 2 > targetStats.maxHp ||
+    ["construct", "undead"].includes(targetStats.creatureType ?? "") ||
+    attacker.hp >= stats.maxHp
+  ) {
+    return [];
+  }
+  return [
+    dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key: FEAST }),
+    dndEvent(`${NS}:resourceSpent`, {
+      actor: attacker.id,
+      resource: passive.resource,
+    }),
+    ...leafEvents(
+      [
+        {
+          kind: "hitDieHeal",
+          bonus: { base: 0, add: [{ kind: "abilityMod", ability: "con" }] },
+        },
+      ],
+      FEAST,
+      attacker,
+      attacker,
+      context,
+    ),
+  ];
+}
+
+// Flames of Phlegethos' flames, as Fire Shield's: a melee hit from within 5 feet burns the attacker.
+function retaliated(
+  attacker: Actor,
+  target: Actor,
+  action: KnownAction,
+  context: Context,
+): SystemEvent[] {
+  if (!isMelee(action) || !within5(attacker, target)) return [];
+  const stats = deriveStats(target, context);
+  return target.activeEffects.flatMap(({ modifier }) =>
+    modifier.kind === "retaliate"
+      ? dealEvents(
+          attacker,
+          modifier.damage.map(({ amount, type }) => ({
+            amount: finalDamage(
+              rollAmount(amount, stats, context.dice),
+              type,
+              damageResponses(attacker, context),
+            ),
+            type,
+          })),
+          false,
+          context,
+        ).events
+      : [],
+  );
+}
 const BLOODIED_DAMAGE = "bloodied-damage";
 const SHIELD_BASH = "shield-bash";
 

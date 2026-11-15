@@ -225,9 +225,31 @@ function runFinishRest(
         });
       }),
       ...restInspiration(party(context.state), rest, context),
+      ...(rest === "long" ? restItems(party(context.state), context) : []),
       dndEvent(`${NS}:restFinished`, { rest }),
     ],
   };
+}
+
+// Decanting: a Long Rest leaves the bearer one of the item, put in its pack.
+// shortcut: the last one doesn't evaporate; one already carried, made or bought, is simply kept.
+function restItems(members: readonly Actor[], context: Context): SystemEvent[] {
+  return members.flatMap((actor) =>
+    deriveStats(actor, context).passives.flatMap((passive) =>
+      passive.kind === "restItem" &&
+      context.content(passive.item) &&
+      !actor.inventory.includes(passive.item)
+        ? [
+            dndEvent(`${NS}:treasureFound`, {
+              actor: actor.id,
+              gold: 0,
+              items: [passive.item],
+              stowed: [passive.item],
+            }),
+          ]
+        : [],
+    ),
+  );
 }
 
 // shortcut: Musician inspires every ally, not a number equal to the Proficiency Bonus.

@@ -328,6 +328,27 @@ function featSpellAbilities(
   return bySpell;
 }
 
+// Cold Fire Magic: a spell's damage takes another type.
+function retyped(activation: Activation, type: DamageType): Activation {
+  const { resolution } = activation;
+  const swap = <T extends { readonly type: DamageType }>(list: readonly T[]) =>
+    list.map((item) => ({ ...item, type }));
+  return {
+    ...activation,
+    resolution:
+      resolution.kind === "attack" && resolution.onHitSave
+        ? {
+            ...resolution,
+            damage: swap(resolution.damage),
+            onHitSave: {
+              ...resolution.onHitSave,
+              damage: swap(resolution.onHitSave.damage),
+            },
+          }
+        : { ...resolution, damage: swap(resolution.damage) },
+  };
+}
+
 // A feat's spell cast with its own ability: its save DC, spell attack and spellcasting modifier.
 function castWith(activation: Activation, ability: Ability): Activation {
   const mapped = (value: unknown, key = ""): unknown => {
@@ -363,15 +384,18 @@ function collectFeatureData(
   resources: Feature["resources"];
   spells: string[];
   free: string[];
+  retype: Record<string, DamageType>;
 } {
   const passives: Passive[] = [];
   const actions: KnownAction[] = [];
   const resources: Feature["resources"] = [];
   const spells = featureIds.flatMap((id) => grantedSpells(id, level));
   const free: string[] = [];
+  const retype: Record<string, DamageType> = {};
   for (const id of featureIds) {
     const feature = featureRules(lookup(access, FeatureSchema, id));
     if ((feature.fromLevel ?? 1) > level) continue;
+    Object.assign(retype, feature.retype);
     passives.push(...feature.passives);
     resources.push(...feature.resources);
     for (const [from, ids] of Object.entries(feature.spells ?? {})) {
@@ -385,7 +409,9 @@ function collectFeatureData(
     feature.activations.forEach((activation, index) => {
       actions.push({
         id: `feature:${id}:${String(index)}`,
-        name: feature.name,
+        name: activation.label
+          ? `${feature.name} (${activation.label})`
+          : feature.name,
         activation: feature.perTier
           ? scaleActivation(activation, feature.perTier, cantripTier(level))
           : activation,
@@ -395,7 +421,7 @@ function collectFeatureData(
       });
     });
   }
-  return { passives, actions, resources, spells, free };
+  return { passives, actions, resources, spells, free, retype };
 }
 
 export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
@@ -809,10 +835,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
             )
           : spell.activation;
       const ability = castingAbility.get(spellId);
+      const type = fromFeatures.retype[spellId];
+      const cast = ability ? castWith(activation, ability) : activation;
       actions.push({
         id: `spell:${spellId}`,
         name: spell.name,
-        activation: ability ? castWith(activation, ability) : activation,
+        activation: type ? retyped(cast, type) : cast,
         spellLevel: spell.level,
         upcast: spell.upcast,
       });

@@ -522,4 +522,91 @@ describe("feat and trait riders", () => {
     expect(hit && "payload" in hit ? hit.payload.amount : 0).toBe(6);
     expect(JSON.stringify(events)).toContain('"condition":"prone"');
   });
+
+  it("adds 1d8 to a melee hit after moving 10 feet, once a turn, as Charge Attack, and drains with a bite", async () => {
+    const run = await testRun();
+    const hit = (
+      traits: readonly string[],
+      moved: number,
+      actionId: string,
+    ) => {
+      const bearer = {
+        ...hero(traits),
+        hp: 5,
+        moved,
+        position: { x: 0, y: 0 },
+      };
+      const foe = {
+        ...hero([], { id: "foe" }),
+        side: "enemy" as const,
+        hp: 30,
+        position: { x: 1, y: 0 },
+      };
+      return (
+        run.system.frames[`${NS}:applyHit`]?.run(
+          {
+            attacker: PLAYER_ACTOR,
+            actionId,
+            target: "foe",
+            critical: false,
+            hadAdvantage: false,
+            total: 20,
+            natural: 15,
+          },
+          contextOf(run, [bearer, foe], scripted([4, 5]).dice),
+        ).events ?? []
+      ).map((event) => ("payload" in event ? event.payload : {}));
+    };
+    const sword = "weapon:srd52:item/longsword";
+    const amount = (events: readonly Record<string, unknown>[]) =>
+      events.find((payload) => payload.actor === "foe" && "amount" in payload)
+        ?.amount;
+    expect(amount(hit(["charge-attack"], 10, sword))).toBe(12); // 4 + 3 + 1d8 of 5
+    expect(amount(hit(["charge-attack"], 5, sword))).toBe(7);
+    // The bite's 1d4 of 4 heals the biter by what it dealt.
+    const bite = hit(["biter"], 0, "feature:test:feature/biter:0");
+    expect(bite).toContainEqual(
+      expect.objectContaining({ actor: PLAYER_ACTOR, amount: 4 }),
+    );
+    expect(
+      deriveStats(hero(["biter"]), run).actions.map(({ name }) => name),
+    ).toContain("biter (bite)");
+  });
+
+  it("keeps an ally from being pushed with a Reaction, as Stand as One, and retypes a spell, as Cold Fire Magic", async () => {
+    const run = await testRun();
+    const pusher = {
+      ...hero([], { id: "foe" }),
+      side: "enemy" as const,
+      position: { x: 0, y: 0 },
+    };
+    const ally = { ...hero([], { id: "ally" }), position: { x: 1, y: 0 } };
+    const tyro = { ...hero(["stand-as-one"]), position: { x: 1, y: 1 } };
+    const plain = contextOf(run, [pusher, ally, tyro], scripted([]).dice);
+    const { combat } = plain.state;
+    if (!combat) throw new Error("no fight");
+    const context = {
+      ...plain,
+      state: {
+        ...plain.state,
+        combat: { ...combat, grid: { width: 10, height: 10 } },
+      },
+    };
+    const pushed = leafEvents(
+      [{ kind: "forcedMove", feet: 10, direction: "away" }],
+      "push",
+      pusher,
+      ally,
+      context,
+    );
+    expect(
+      pushed.map((event) => ("payload" in event ? event.payload : null)),
+    ).toEqual([
+      expect.objectContaining({ actor: PLAYER_ACTOR, kind: "reaction" }),
+    ]);
+    const spell = deriveStats(hero(["cold-fire"]), run).actions.find(
+      ({ id }) => id === "spell:srd52:spell/burning-hands",
+    );
+    expect(spell?.activation.resolution.damage[0]?.type).toBe("cold");
+  });
 });
