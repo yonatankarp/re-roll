@@ -123,8 +123,12 @@ export function masteryOf(
       answer.kind === "weaponMastery" ? answer.values : [],
     ),
   );
+  // A +2 Longsword is still a Longsword to master.
+  const name = weapon.baseWeapon
+    ? ItemSchema.safeParse(access.content(weapon.baseWeapon)).data?.name
+    : weapon.name;
   return mastered.some(
-    (id) => ItemSchema.safeParse(access.content(id)).data?.name === weapon.name,
+    (id) => ItemSchema.safeParse(access.content(id)).data?.name === name,
   )
     ? weapon.mastery
     : null;

@@ -22,6 +22,7 @@ import {
   startCombat,
 } from "./combat.ts";
 import { actionFrames } from "./combat/actions.ts";
+import { deriveItem } from "./variants.ts";
 import { attackFrames } from "./combat/attack.ts";
 import { movementFrames } from "./combat/movement.ts";
 import { turnFrames } from "./combat/turn.ts";
@@ -274,6 +275,7 @@ export const dnd55e = defineSystem<DndState>({
       schema: ItemSchema,
       references: (item) =>
         item.type === "magicItem" && item.spell ? [item.spell] : [],
+      derive: deriveItem,
     }),
     monsters: contentKind({
       idPrefix: "monster",
