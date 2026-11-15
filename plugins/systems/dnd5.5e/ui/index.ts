@@ -128,7 +128,7 @@ function actionDetail(
   return [
     actionNumbers(action, stats),
     upcast
-      ? `Each slot level above ${String(action.spellLevel)} adds ${"addDice" in upcast ? `${upcast.addDice} damage` : "addRadius" in upcast ? `${String(upcast.addRadius)} feet to its radius` : `${String(upcast.addTargets)} target${upcast.addTargets > 1 ? "s" : ""}`}.`
+      ? `${"every" in upcast && upcast.every ? `Every ${String(upcast.every)} slot levels` : "Each slot level"} above ${String(action.spellLevel)} adds ${"addDice" in upcast ? `${upcast.addDice} damage` : "addRadius" in upcast ? `${String(upcast.addRadius)} feet to its radius` : `${String(upcast.addTargets)} target${upcast.addTargets > 1 ? "s" : ""}`}.`
       : "",
     source?.text ?? "",
   ]

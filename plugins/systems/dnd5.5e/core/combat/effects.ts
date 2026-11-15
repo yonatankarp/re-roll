@@ -8,6 +8,7 @@ import {
   modifierFor,
   rerollingOnes,
   rollAmount,
+  wishedKey,
   saveBonus,
   spellSaveDc,
   type Stats,
@@ -132,6 +133,17 @@ export function payCosts(
       ? []
       : actingEnds(actor, action)),
     ...kitUse(actor, action, context),
+    // Wish's copy is cast once.
+    ...actor.activeEffects.flatMap(({ modifier }) =>
+      modifier.kind === "wished" && action.id === `spell:${modifier.spell}`
+        ? [
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: actor.id,
+              key: wishedKey(modifier.spell),
+            }),
+          ]
+        : [],
+    ),
   ];
   for (const cost of action.activation.cost) {
     if (cost === "action" || cost === "bonusAction" || cost === "reaction") {

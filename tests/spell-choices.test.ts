@@ -152,6 +152,9 @@ const SPELLS = [
         ],
       },
     },
+    upcast: {
+      perSlotLevel: { addDice: "1d4", every: 2, max: 2, addBonus: 1 },
+    },
   }),
   test("dragon-s-breath", {
     level: 2,
@@ -665,6 +668,34 @@ describe("a damage type picked as the spell is cast", () => {
     ]);
   });
 
+  it("raises Elemental Weapon to +2 and 2d4 with a level 5 slot, and +3 and 3d4 from level 7", async () => {
+    const run = await arena();
+    const hero = caster(run, ["test:spell/elemental-weapon"], { level: 13 });
+    const state = fight(hero, foe("a", { x: 5, y: 5 }));
+    const at = (slot: number) => {
+      const { resolution } = findAction(
+        hero,
+        "spell:test:spell/elemental-weapon",
+        ctx(run, state, HIGH),
+        slot,
+      ).activation;
+      if (resolution.kind !== "automatic") throw new Error("not automatic");
+      return resolution.effects.map((effect) =>
+        effect.kind !== "modifier"
+          ? null
+          : effect.modifier.kind === "bonus"
+            ? effect.modifier.amount.bonus?.base
+            : effect.modifier.kind === "hitDamage"
+              ? effect.modifier.damage.amount.dice
+              : null,
+      );
+    };
+    expect(at(3)).toEqual([1, "1d4"]);
+    expect(at(4)).toEqual([1, "1d4"]);
+    expect(at(6)).toEqual([2, "2d4"]);
+    expect(at(9)).toEqual([3, "3d4"]);
+  });
+
   it("gives Dragon's Breath's target a breath of the chosen type at the caster's DC and slot", async () => {
     const run = await arena();
     const hero = caster(run, ["test:spell/dragon-s-breath"], { level: 5 });
@@ -1035,14 +1066,41 @@ describe("Wish", () => {
       HIGH,
     );
     expect(damageOf(cast.events, "a").length).toBe(1);
-    // Once cast, it's gone, and it spent no slot of its own.
+    // Once cast, it's offered no more, and it spent no slot of its own.
     expect(
-      modifiersOf(cast.state, PLAYER_ACTOR).some(
-        ({ kind }) => kind === "wished",
-      ),
-    ).toBe(false);
+      deriveStats(need(cast.state.actors[PLAYER_ACTOR]), run).actions.find(
+        ({ id }) => id === `spell:${srd("fireball")}`,
+      )?.rolled,
+    ).toBe(true);
     expect(cast.state.actors[PLAYER_ACTOR]?.resourcesSpent).toEqual({
       "slot:9": 1,
     });
+  });
+
+  it("copies a spell that makes an attack roll, which is offered no more once cast", async () => {
+    const run = await arena();
+    const hero = caster(run, [srd("wish")], { level: 17 });
+    const state = fight(hero, foe("a", { x: 4, y: 0 }));
+    const ray = srd("scorching-ray");
+    const wished = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `spell:${srd("wish")}|${PLAYER_ACTOR}`)],
+      HIGH,
+      (decision: Decision) =>
+        decision.id.startsWith(`${NS}:wish:`) ? ray : "",
+    );
+    const cast = settle(
+      run,
+      wished.state,
+      [act(PLAYER_ACTOR, `spell:${ray}|a`)],
+      HIGH,
+    );
+    expect(damageOf(cast.events, "a").length).toBeGreaterThan(1);
+    const after = need(cast.state.actors[PLAYER_ACTOR]);
+    expect(
+      deriveStats(after, run).actions.find(({ id }) => id === `spell:${ray}`)
+        ?.rolled,
+    ).toBe(true);
   });
 });

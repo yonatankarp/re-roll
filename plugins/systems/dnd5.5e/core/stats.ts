@@ -1480,29 +1480,27 @@ function withEffectActions(
     if (modifier.kind === "wished") {
       const id = `spell:${modifier.spell}`;
       const spell = lookup(access, SpellSchema, modifier.spell);
-      const free = (activation: Activation): Activation => ({
-        ...activation,
-        cost: [],
-      });
+      // Once cast it's no longer offered, yet stays to be found until the turn is over, as its attacks need it.
+      const cast = actor.usedThisTurn.includes(wishedKey(modifier.spell));
       const known = actions.some((action) => action.id === id);
-      actions = known
-        ? actions.map((action) =>
-            action.id === id
-              ? { ...action, activation: free(action.activation) }
-              : action,
-          )
-        : spell.activation
-          ? [
-              ...actions,
-              {
-                id,
-                name: spell.name,
-                activation: free(spell.activation),
-                spellLevel: spell.level,
-                upcast: spell.upcast,
-              },
-            ]
-          : actions;
+      const copy = (
+        activation: Activation,
+      ): Omit<KnownAction, "id" | "name"> => ({
+        activation: { ...activation, cost: [] },
+        spellLevel: spell.level,
+        ...(spell.upcast ? { upcast: spell.upcast } : {}),
+        ...(cast ? { rolled: true as const } : {}),
+      });
+      if (known && !cast) {
+        actions = actions.map((action) =>
+          action.id === id ? { ...action, ...copy(action.activation) } : action,
+        );
+      } else if (!known && spell.activation) {
+        actions = [
+          ...actions,
+          { id, name: spell.name, ...copy(spell.activation) },
+        ];
+      }
     }
     if (modifier.kind === "weaponSpell") {
       actions = actions.map(
@@ -1568,6 +1566,9 @@ function withEffectActions(
     ? stats
     : { ...stats, actions: [...reaching, ...granted] };
 }
+
+// In usedThisTurn once Wish's copy of the spell has been cast.
+export const wishedKey = (spell: string): string => `wished:${spell}`;
 
 export function weaponAttackOf(
   resolution: Resolution,
@@ -1879,17 +1880,49 @@ export function scaleActivation(
         }
       : activation;
   }
+  const steps = step.every
+    ? Math.min(step.max ?? times, Math.floor(times / step.every))
+    : times;
+  if (steps <= 0) return activation;
   const damage = (list: readonly Damage[]): Damage[] =>
     list.map((item) => ({
       ...item,
-      amount: addDice(item.amount, step.addDice, times),
+      amount: addDice(item.amount, step.addDice, steps),
     }));
   const effects = (list: readonly LeafEffect[]): LeafEffect[] =>
     list.map((effect) => {
       if (effect.kind === "heal" || effect.kind === "tempHp") {
         return {
           ...effect,
-          amount: addDice(effect.amount, step.addDice, times),
+          amount: addDice(effect.amount, step.addDice, steps),
+        };
+      }
+      if (effect.kind === "modifier" && effect.modifier.kind === "hitDamage") {
+        const [hit] = damage([effect.modifier.damage]);
+        return hit
+          ? { ...effect, modifier: { ...effect.modifier, damage: hit } }
+          : effect;
+      }
+      const { addBonus } = step;
+      if (
+        addBonus &&
+        effect.kind === "modifier" &&
+        effect.modifier.kind === "bonus" &&
+        effect.modifier.amount.dice === undefined
+      ) {
+        const { bonus } = effect.modifier.amount;
+        return {
+          ...effect,
+          modifier: {
+            ...effect.modifier,
+            amount: {
+              ...effect.modifier.amount,
+              bonus: {
+                base: (bonus?.base ?? 0) + addBonus * steps,
+                add: bonus?.add ?? [],
+              },
+            },
+          },
         };
       }
       return effect.kind === "modifier" &&

@@ -8,7 +8,7 @@ import {
   type KnownAction,
   rollAmount,
 } from "../stats.ts";
-import type { HitSchema } from "./attack.ts";
+import { type HitSchema, missOutcome } from "./attack.ts";
 import {
   concentrationFrame,
   dealEvents,
@@ -106,7 +106,9 @@ export function runReplaceHit(
   const { landed, answer, ...hit } = payload;
   if (answer === DECLINE) {
     return {
-      frames: landed ? [frame("applyHit", { ...hit, kept: true })] : [],
+      frames: landed
+        ? [frame("applyHit", { ...hit, kept: true })]
+        : missOutcome(hit, context),
     };
   }
   const { state } = context;

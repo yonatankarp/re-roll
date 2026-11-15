@@ -556,6 +556,20 @@ function attackKind(
   return { melee, ranged: !melee, spell: action.spellLevel !== null };
 }
 
+// What follows a miss: its weapon's mastery, as Graze, and what answers it.
+export function missOutcome(
+  hit: z.infer<typeof HitSchema>,
+  context: Context,
+): Frame[] {
+  const attacker = actorOf(context.state, hit.attacker);
+  return [
+    ...(masteryOf(attacker, hit.actionId, context)
+      ? [frame("masteryMiss", hit)]
+      : []),
+    ...missedFrames(hit, context),
+  ];
+}
+
 // What answers an attack that missed its target, as Sticky Shield does.
 function missedFrames(
   hit: z.infer<typeof HitSchema>,
@@ -965,16 +979,11 @@ export function runAttackRoll(
         events: [...guarded, ...window.events, ...(reroll.events ?? [])],
       };
     }
+    // Lightning Arrow takes the miss's place, so what a miss sets off waits on the answer.
     const instead = replaceHitFrame(hit, false, context);
     return {
       events: [report, ...spent, ...onceHitEnded(attacker)],
-      frames: [
-        ...(instead ? [instead] : []),
-        ...(masteryOf(attacker, action.id, context)
-          ? [frame("masteryMiss", hit)]
-          : []),
-        ...missedFrames(hit, context),
-      ],
+      frames: instead ? [instead] : missOutcome(hit, context),
     };
   }
 

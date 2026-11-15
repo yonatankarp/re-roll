@@ -62,7 +62,6 @@ export const wishFrames = {
             casterId: payload.caster,
             modifier: { kind: "wished", spell: payload.answer },
             ends: "casterNextTurn",
-            endsOn: "action",
           },
         }),
       ],
