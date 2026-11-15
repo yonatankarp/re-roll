@@ -22,7 +22,7 @@ const CHECK = flags.includes("--check");
 const CHECK_BANDS: Readonly<
   Record<string, Readonly<Record<string, readonly [number, number]>>>
 > = {
-  "goblin-ambush": { story: [0, 10], normal: [0, 15], hard: [1, 25] }, // measured 0, 1.5, 5; 0, 0, 3.5 on 2026-11-14
+  "goblin-ambush": { story: [0, 10], normal: [0, 15], hard: [1, 25] }, // measured 0, 1.5, 5; 0, 0, 3.5 on 2026-11-14; 0, 0.2, 4 on 2026-11-15
   "haunted-house": { story: [0, 5], normal: [0, 5], hard: [0, 5] }, // measured 0, 0, 0
 };
 
