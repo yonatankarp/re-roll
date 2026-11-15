@@ -1161,7 +1161,7 @@ function guardOf(text: string): {
 // Traits a grid fight never needs: breathing, telepathy and talk, senses for things the fight doesn't have, carrying,
 // objects and homes, and coming back to life days later somewhere else.
 const NO_COMBAT_TRAIT =
-  /^(?:Amphibious|Water Breathing|Hold Breath|Limited Amphibiousness|Unusual Nature|Air Envelope|Mimicry|Siege Monster|Forbiddance|Beast of Burden|Increased Carrying Capacity|Inscrutable|Shielded Mind|Telepathic Shroud|Treasure Sense|Iron Scent|Lie Detector|Divine Awareness|Detect Life|Ethereal Sight|Sense Magic|Disintegration|Soul Gem|Spirit Jar|Wishes|Vampiric Connection|Podling Link|Bound|Semblance of Life|Speak with .+|.*Telepathy|Telepathic Bond|Vampire Weakness|Running Water|Stake to the Heart)$/;
+  /^(?:Amphibious|Water Breathing|Hold Breath|Limited Amphibiousness|Unusual Nature|Air Envelope|Mimicry|Siege Monster|Forbiddance|Beast of Burden|Increased Carrying Capacity|Inscrutable|Shielded Mind|Telepathic Shroud|Treasure Sense|Iron Scent|Lie Detector|Divine Awareness|Detect Life|Ethereal Sight|Sense Magic|Disintegration|Soul Gem|Spirit Jar|Wishes|Vampiric Connection|Podling Link|Bound|Semblance of Life|Speak with .+|.*Telepathy|Telepathic Bond|Vampire Weakness|Running Water|Stake to the Heart|Astral Implosion)$/;
 
 function noCombatTrait(label: string, text: string): boolean {
   const name = label.replace(/\s*\(.*$/, "");
