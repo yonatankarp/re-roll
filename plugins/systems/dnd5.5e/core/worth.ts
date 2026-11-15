@@ -462,6 +462,28 @@ export function makeJudge(context: Context, side: Actor): Judge {
     return total;
   };
 
+  // Eye Rays: what the rays it rolls deal, on average, for each roll it makes.
+  const rolledDamage = (
+    step: KnownAction,
+    own: Stats,
+    against: (steps: readonly KnownAction[]) => number,
+  ): number | null => {
+    const { resolution } = step.activation;
+    const rolled =
+      resolution.kind === "automatic"
+        ? resolution.effects.find((item) => item.kind === "randomAction")
+        : undefined;
+    if (rolled?.kind !== "randomAction") return null;
+    const picks = own.actions.filter(
+      (item) => rolled.of.includes(item.name) && harms(item),
+    );
+    return picks.length > 0
+      ? (picks.reduce((total, pick) => total + against([pick]), 0) *
+          rolled.times) /
+          rolled.of.length
+      : 0;
+  };
+
   // Legendary actions come back every round, so a legend's round adds the most its uses can deal.
   // shortcut: a made action's recharge and lair actions aren't counted; count them if bosses still play harder than judged.
   const legendaryRound = (
@@ -487,15 +509,21 @@ export function makeJudge(context: Context, side: Actor): Judge {
               const found = own.actions.find((action) => action.name === name);
               return found ? [found] : [];
             });
+        const rolled = steps.reduce(
+          (total, step) => total + (rolledDamage(step, own, against) ?? 0),
+          0,
+        );
         const harmful = steps.filter(harms);
         const area = harmful.some(
           (step) => "area" in step.activation.targeting,
         );
         return {
           ...item,
-          damage: harmful.length
-            ? against(harmful) * (area ? Math.min(2, foeCount) : 1)
-            : 0,
+          damage:
+            rolled +
+            (harmful.length
+              ? against(harmful) * (area ? Math.min(2, foeCount) : 1)
+              : 0),
         };
       })
       .filter((item) => item.damage > 0)
@@ -527,6 +555,13 @@ export function makeJudge(context: Context, side: Actor): Judge {
     let best = 0;
     for (const action of own.actions) {
       const { cost, targeting, projectiles } = action.activation;
+      const rolled = cost.includes("action")
+        ? rolledDamage(action, own, against)
+        : null;
+      if (rolled !== null) {
+        best = Math.max(best, rolled);
+        continue;
+      }
       if (!harms(action) || !cost.includes("action")) continue;
       if (free && cost.some((item) => item !== "action")) continue;
       // Resources and slots it still has, whatever is left of this turn.
