@@ -19,7 +19,7 @@ import { type Actor, type DndState, type Terrain, isDead } from "./state.ts";
 import { deriveStats, lookup } from "./stats.ts";
 import { swallowerOf } from "./combat/swallow.ts";
 import {
-  blockedSquares,
+  blockingSet,
   glows,
   lit,
   obscuring,
@@ -87,7 +87,7 @@ export function coverFor(
   return coverBetween(
     from,
     target.position,
-    setOf(blockedSquares(state)),
+    blockingSet(state),
     {
       half: setOf(terrain?.half),
       threeQuarters: setOf(terrain?.threeQuarters),

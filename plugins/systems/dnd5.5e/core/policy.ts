@@ -40,7 +40,7 @@ import {
 import { AimSchema, PickSchema } from "./combat/actions.ts";
 import { multiattackExtras } from "./combat/effects.ts";
 import { AVERAGE, makeJudge } from "./worth.ts";
-import { blockedSquares, zoneHarm } from "./zones.ts";
+import { blockedSquares, blockingSet, zoneHarm } from "./zones.ts";
 import { TACTIC } from "./tactics.ts";
 
 // The Dodge action (actions.ts), which the party weighs like any other choice.
@@ -110,7 +110,7 @@ export function stepToward(
           new Set(walls),
           new Set(),
           difficultSquares(state),
-          new Set(walls),
+          blockingSet(state),
         ).map((item) => [squareKey(item.square), item.feet]),
       );
       walkFrom.set(foe.id, field);

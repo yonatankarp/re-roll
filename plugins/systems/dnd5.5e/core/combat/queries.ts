@@ -37,6 +37,7 @@ import { ownZoneAction } from "./areas.ts";
 import {
   barredKeys,
   blockedSquares,
+  blockingSet,
   inZone,
   sealed,
   slowingKeys,
@@ -237,7 +238,7 @@ export function moveSquares(
     ]),
     new Set([...keys(others), ...walls, ...barred]),
     slowing.length > 0 ? new Set([...difficult, ...slowing]) : difficult,
-    new Set(walls),
+    blockingSet(state),
   );
 }
 

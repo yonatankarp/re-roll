@@ -10,7 +10,13 @@ import {
 } from "../state.ts";
 import { deriveStats, lookup } from "../stats.ts";
 import { rollD20 } from "../rules.ts";
-import { placeOnMap, placeSides, type Square, wallKeys } from "../grid.ts";
+import {
+  openedCorners,
+  placeOnMap,
+  placeSides,
+  type Square,
+  wallKeys,
+} from "../grid.ts";
 import { terrainOf } from "../sight.ts";
 import { lairTurns } from "../legendary.ts";
 import { type Context, hasPassive } from "./queries.ts";
@@ -126,6 +132,11 @@ export function startCombat(
         party.map((actor) => actor.id),
         monsters.map((actor) => actor.id),
       );
+  const startsOf = (list: readonly Actor[]): Square[] =>
+    list.flatMap((actor) => positions[actor.id] ?? []);
+  const openCorners = battlemap
+    ? openedCorners(walls, grid, startsOf(party), startsOf(monsters))
+    : [];
 
   const started = {
     encounter: encounter.id,
@@ -136,6 +147,7 @@ export function startCombat(
     ...(battlemap
       ? {
           walls: [...walls],
+          ...(openCorners.length > 0 ? { openCorners } : {}),
           ...(terrain ? { terrain } : {}),
           map: {
             image: battlemap.image,

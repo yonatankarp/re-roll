@@ -23,6 +23,7 @@ import {
   runLingeringTick,
   startCombat,
 } from "../plugins/systems/dnd5.5e/core/combat.ts";
+import { STAND_OFF_ROUNDS } from "../plugins/systems/dnd5.5e/core/combat/turn.ts";
 import {
   PASS,
   STAY,
@@ -33,8 +34,10 @@ import {
   codeKeys,
   coverBetween,
   distanceFeet,
+  openedCorners,
   placeSides,
   reachableSquares,
+  wallSet,
 } from "../plugins/systems/dnd5.5e/core/grid.ts";
 import {
   coverFor,
@@ -64,6 +67,7 @@ import {
   withTactics,
 } from "../plugins/systems/dnd5.5e/core/actions.ts";
 import {
+  type Battlemap,
   BattlemapSchema,
   ClassSchema,
   MonsterSchema,
@@ -3037,6 +3041,44 @@ describe("battle map ground, cover and light", () => {
     ).toBe(0);
   });
 
+  it("opens the wall corner that is a start area's only way out, for walking and for sight", () => {
+    // The party's corner leads out only between two wall corners, which meet at the point (2, 2).
+    const rows = ["..#..", "..#..", "##...", "....."];
+    const walls = codeKeys(rows, "#");
+    const grid = { width: 5, height: 4 };
+    const party = [{ x: 0, y: 0 }];
+    const opened = openedCorners(walls, grid, party, [{ x: 4, y: 3 }]);
+    expect(opened).toEqual(["2,2"]);
+    const shut = new Set(walls);
+    const open = wallSet({ walls, openCorners: opened });
+    const walks = (corners: ReadonlySet<string>) =>
+      reachableSquares(
+        { x: 0, y: 0 },
+        Infinity,
+        grid,
+        shut,
+        new Set(),
+        new Set(),
+        corners,
+      ).some(({ square }) => square.x === 4 && square.y === 3);
+    expect(walks(shut)).toBe(false);
+    expect(walks(open)).toBe(true);
+    const nothing = {
+      half: new Set<string>(),
+      threeQuarters: new Set<string>(),
+    };
+    const sight = (corners: ReadonlySet<string>) =>
+      coverBetween({ x: 0, y: 0 }, { x: 4, y: 3 }, corners, nothing, new Set());
+    expect(sight(shut)).toBe("total");
+    expect(sight(open)).toBe(5);
+    // A party that can already walk to a foe, or one shut in by whole walls, opens nothing.
+    expect(openedCorners(walls, grid, party, [{ x: 1, y: 1 }])).toEqual([]);
+    const split = codeKeys(["..#..", "..#..", "..#.."], "#");
+    expect(
+      openedCorners(split, { width: 5, height: 3 }, party, [{ x: 4, y: 0 }]),
+    ).toEqual([]);
+  });
+
   it("works out cover from walls, cover squares and creatures in the way", () => {
     const cover = (
       rows: readonly string[],
@@ -3319,6 +3361,84 @@ describe("battle map ground, cover and light", () => {
     expect(choosePolicy(decision, contextOf(run, state, HIGH))).toBe(
       "monster:0|ally",
     );
+  });
+
+  it("ends a stand-off, where neither side can reach the other, though the player is down and stable", async () => {
+    // Before, the turns came round for ever with no decision for the player, and the kernel gave up.
+    const run = arenaRun(await base(), {});
+    const fallen = {
+      ...hero(run),
+      hp: 0,
+      deathSaves: { successes: 3, failures: 0 },
+    };
+    const party = [fallen, hero(run, { id: "ally" })];
+    // Drawn by hand, as a book map's check refuses one whose party can't walk to a foe.
+    const battlemap: Battlemap = {
+      image: "assets/map.png",
+      imageWidth: 700,
+      imageHeight: 300,
+      crop: { x: 0, y: 0, width: 700, height: 300 },
+      columns: 7,
+      rows: 3,
+      walls: ["...#...", "...#...", "...#..."],
+      party: [
+        [0, 1],
+        [1, 1],
+      ],
+      monsters: [[6, 1]],
+    };
+    const play = (canFlee: boolean) => {
+      const started = startCombat(
+        {
+          id: "e",
+          monsters: [{ monster: "srd52:monster/dummy", count: 1 }],
+          battlemap,
+          loot: { gold: 10, items: [] },
+        },
+        contextOf(run, fight(...party), HIGH),
+        { canFlee, defeatContinues: false },
+      );
+      let state = (started.events ?? []).reduce<DndState>(
+        (current, event) => applyDndEvent(current, event),
+        {
+          actors: Object.fromEntries(party.map((item) => [item.id, item])),
+          combat: null,
+        },
+      );
+      const dice = createDice(rngFromSeed("stand-off"));
+      const events: SystemEvent[] = [];
+      let turns = 0;
+      for (; turns < 200 && state.combat; turns += 1) {
+        const decision = nextDndDecision(state, run);
+        if (!decision) break;
+        const answer = (asked: Decision, now: DndState): string =>
+          choosePolicy(asked, contextOf(run, now, dice));
+        const result = settle(
+          run,
+          state,
+          [
+            {
+              kind: decision.resume.kind,
+              payload: {
+                ...decision.resume.payload,
+                answer: answer(decision, state),
+              },
+            },
+          ],
+          dice,
+          answer,
+        );
+        events.push(...result.events);
+        state = result.state;
+      }
+      expect(state.combat).toBeNull();
+      expect(turns).toBeLessThanOrEqual(STAND_OFF_ROUNDS * 2 + 2);
+      expect(kinds(events)).not.toContain(`${NS}:treasureFound`);
+      return events.find((event) => event.kind === "encounterEnded");
+    };
+    // The party withdraws where the story lets it flee, and otherwise the story goes on as after a win.
+    expect(play(true)).toMatchObject({ outcome: "flee" });
+    expect(play(false)).not.toHaveProperty("outcome");
   });
 
   it("plays a whole fight on a map with cover to the end", async () => {

@@ -13,7 +13,7 @@ import {
   INCAPACITATING,
   isDead,
 } from "./state.ts";
-import { distanceFeet, type Square, squareKey } from "./grid.ts";
+import { distanceFeet, type Square, squareKey, wallSet } from "./grid.ts";
 import { deriveStats, type KnownAction } from "./stats.ts";
 import { spellOf } from "./combat/dispel.ts";
 import { lightAt } from "./sight.ts";
@@ -284,6 +284,14 @@ export function blockedSquares(state: DndState): readonly string[] {
   const all = [...new Set([...walls, ...raised])];
   blocked.set(state, all);
   return all;
+}
+
+// The walls as walking and sight test them: the map's and the spells', with the corners the fight opened (grid.ts).
+export function blockingSet(state: DndState): Set<string> {
+  return wallSet({
+    walls: blockedSquares(state),
+    openCorners: state.combat?.openCorners,
+  });
 }
 
 // The damage each square of a walk takes inside thorny zones, as Spike Growth's per 5 feet travelled there.

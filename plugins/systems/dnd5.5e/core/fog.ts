@@ -20,7 +20,7 @@ import {
   isDown,
 } from "./state.ts";
 import { hasTactic } from "./tactics.ts";
-import { blockedSquares, zonesOf } from "./zones.ts";
+import { blockedSquares, blockingSet, zonesOf } from "./zones.ts";
 import { enemies, moveSquares } from "./combat/queries.ts";
 import { walksOf } from "./combat/movement.ts";
 import { type Context } from "./combat/queries.ts";
@@ -63,16 +63,18 @@ const NOBODY: ReadonlySet<string> = new Set();
 const MAPS_KEPT = 64;
 const lines = new Map<string, Map<string, ReadonlySet<string>>>();
 const mapKeys = new WeakMap<object, string>();
-// A spell's wall makes a new list, so its lines are kept apart from the bare map's.
+// A spell's wall makes a new list, so its lines are kept apart from the bare map's, and so do opened corners.
 function linesOf(
   walls: readonly string[],
+  corners: readonly string[],
   grid: Grid,
 ): Map<string, ReadonlySet<string>> {
   const owner = walls.length > 0 ? walls : grid;
-  const key =
+  const map =
     mapKeys.get(owner) ??
     `${String(grid.width)}x${String(grid.height)}:${walls.join(";")}`;
-  mapKeys.set(owner, key);
+  mapKeys.set(owner, map);
+  const key = corners.length > 0 ? `${map}:${corners.join(";")}` : map;
   const known = lines.get(key);
   if (known) return known;
   if (lines.size >= MAPS_KEPT) lines.delete(lines.keys().next().value ?? "");
@@ -84,11 +86,11 @@ function sightFrom(state: DndState, from: Square): ReadonlySet<string> {
   const grid = state.combat?.grid;
   if (!grid) return NOBODY;
   const blocked = blockedSquares(state);
-  const byOrigin = linesOf(blocked, grid);
+  const byOrigin = linesOf(blocked, state.combat?.openCorners ?? [], grid);
   const start = squareKey(from);
   const known = byOrigin.get(start);
   if (known) return known;
-  const walls = new Set(blocked);
+  const walls = blockingSet(state);
   const seen = new Set([start]);
   const tried = new Set([start]);
   const queue = [from];
@@ -189,7 +191,7 @@ export function partySight(state: DndState, access: ContentAccess): PartySight {
   // The search outward can miss a square the sight rules' own line reaches, such as one along the map's edge,
   // so a foe is also in view when a line runs between it and a party member either way: what can aim at the
   // party, or be aimed at, is seen.
-  const walls = new Set(blockedSquares(state));
+  const walls = blockingSet(state);
   const inView = (at: Square): boolean =>
     viewers.some(
       (viewer) =>
@@ -382,7 +384,7 @@ export function searchStep(
     return null;
   }
   const seen = partySight(state, access).squares;
-  const walls = new Set(blockedSquares(state));
+  const walls = blockingSet(state);
   const [nearest] = reachableSquares(
     actor.position,
     Infinity,
