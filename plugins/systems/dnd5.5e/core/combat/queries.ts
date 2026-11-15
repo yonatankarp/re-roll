@@ -413,14 +413,20 @@ export function walledApart(
   access: ContentAccess,
 ): boolean {
   if (actor.id !== target.id && (sealed(actor) || sealed(target))) return true;
-  const level = spellLevelOf(action.id, actor, access);
-  if (level === null) return false;
-  return zonesOn(target, state, access).some(
+  const guarding = zonesOn(target, state, access).filter(
     (zone) =>
       zone.area?.noSpells === "all" ||
-      (zone.area?.spellShield !== undefined &&
-        level <= zone.area.spellShield &&
-        !inZone(zone, actor.position)),
+      (zone.area?.spellShield !== undefined && !inZone(zone, actor.position)),
+  );
+  if (guarding.length === 0) return false;
+  const level = spellLevelOf(action.id, actor, access);
+  return (
+    level !== null &&
+    guarding.some(
+      (zone) =>
+        zone.area?.noSpells === "all" ||
+        level <= (zone.area?.spellShield ?? -1),
+    )
   );
 }
 
