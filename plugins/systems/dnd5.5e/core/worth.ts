@@ -31,6 +31,7 @@ import { DAMAGE_TO_PARTY, damageToParty } from "./combat/effects.ts";
 import { cureFor, dispellable } from "./combat/dispel.ts";
 import { seesThrough } from "./sight.ts";
 import { formOf, weakestBeast } from "./forms.ts";
+import { legendOf } from "./legendary.ts";
 import { summonedActors } from "./combat/summon.ts";
 import { nextHitDie, steadyShot } from "./trait-rules.ts";
 import {
@@ -459,6 +460,58 @@ export function makeJudge(context: Context, side: Actor): Judge {
     return total;
   };
 
+  // Legendary actions come back every round, so a legend's round adds the most its uses can deal.
+  // shortcut: a made action's recharge and lair actions aren't counted; count them if bosses still play harder than judged.
+  const legendaryRound = (
+    actor: Actor,
+    own: Stats,
+    foeCount: number,
+    against: (steps: readonly KnownAction[]) => number,
+  ): number => {
+    const legendary = legendOf(actor, context).legendary;
+    if (!legendary) return 0;
+    const choices = legendary.actions
+      .map((item, index) => {
+        const steps: readonly KnownAction[] = item.activation
+          ? [
+              {
+                id: `legendary:${String(index)}`,
+                name: item.name,
+                activation: item.activation,
+                spellLevel: null,
+              },
+            ]
+          : (item.makes ?? []).flatMap((name) => {
+              const found = own.actions.find((action) => action.name === name);
+              return found ? [found] : [];
+            });
+        const harmful = steps.filter(harms);
+        const area = harmful.some(
+          (step) => "area" in step.activation.targeting,
+        );
+        return {
+          ...item,
+          damage: harmful.length
+            ? against(harmful) * (area ? Math.min(2, foeCount) : 1)
+            : 0,
+        };
+      })
+      .filter((item) => item.damage > 0)
+      .sort((a, b) => b.damage / b.cost - a.damage / a.cost);
+    let left = state.combat?.lair
+      ? (legendary.usesInLair ?? legendary.uses)
+      : legendary.uses;
+    let total = 0;
+    for (const item of choices) {
+      const times = item.oncePerRound
+        ? Math.min(1, Math.floor(left / item.cost))
+        : Math.floor(left / item.cost);
+      total += times * item.damage;
+      left -= times * item.cost;
+    }
+    return total;
+  };
+
   const roundDamage = (actor: Actor, free: boolean, sure = false): number => {
     const own = stats(actor);
     const foes = standing(knownFoes(state, actor, context)).slice(0, 6);
@@ -496,6 +549,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
             ));
       best = Math.max(best, each * spread);
     }
+    best += legendaryRound(actor, own, foes.length, against);
     // The difficulty setting scales only the damage the party takes (core/combat/effects.ts).
     return actor.side === "party" ? best : best * partyShare;
   };
@@ -1010,8 +1064,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
 // The most pressure (Judge.pressure) a fight may start with at each difficulty. One beyond it, such as a book
 // fight written for a bigger party, has the party take less damage, just enough to bring it down to this;
 // gentler fights keep the difficulty's own share.
-// Measured with the bot on 2026-11-14: Normal at 0.7 puts the hardest book adventures near 30-45% defeats.
-export const MOST_PRESSURE = { story: 0.2, normal: 0.7, hard: 1 } as const;
+// Measured with the bot on 2026-11-15, with fog and legendary actions counted: Normal at 0.8 puts the book
+// adventures whose fights get softened at 17-45% defeats. At 0.7 one fell to 13%, and at 1 it rose to 57%.
+export const MOST_PRESSURE = { story: 0.2, normal: 0.8, hard: 1 } as const;
 
 // The share of damage the party takes in the fight that's starting, with every combatant in `context.state`.
 export function damageToPartyFor(context: Context): number {
