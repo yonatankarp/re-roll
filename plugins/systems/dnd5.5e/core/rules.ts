@@ -14,6 +14,7 @@ export function rollD20(
     readonly advantage: boolean;
     readonly disadvantage: boolean;
     readonly rerollOnes?: boolean;
+    readonly thirdDie?: boolean; // with Advantage, a third d20 too, as Elven Accuracy's reroll gives
   },
 ): D20Roll {
   const roll = () => {
@@ -25,6 +26,13 @@ export function rollD20(
     return { natural: first, rolls: [first] };
   }
   const second = roll();
+  if (options.advantage && options.thirdDie) {
+    const third = roll();
+    return {
+      natural: Math.max(first, second, third),
+      rolls: [first, second, third],
+    };
+  }
   return {
     natural: options.advantage
       ? Math.max(first, second)

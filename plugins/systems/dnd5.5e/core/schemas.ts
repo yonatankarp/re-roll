@@ -35,7 +35,8 @@ export const SKILL_ABILITIES = {
 } as const satisfies Record<string, Ability>;
 export type Skill = keyof typeof SKILL_ABILITIES;
 
-const SKILLS = Object.keys(SKILL_ABILITIES) as [Skill, ...Skill[]];
+export const ALL_SKILLS = Object.keys(SKILL_ABILITIES) as [Skill, ...Skill[]];
+const SKILLS = ALL_SKILLS;
 export const SkillSchema = z.enum(SKILLS);
 
 export const DAMAGE_TYPES = [
@@ -425,6 +426,7 @@ export const ActivationSchema = z.strictObject({
       attacked: z.literal(true).optional(),
       // Taken right after a creature's attack damages the bearer, against that creature, as with Storm's Thunder.
       damaged: z.literal(true).optional(),
+      damagedBy: z.array(DamageTypeSchema).min(1).optional(), // only damage of these types, as with Delicious Pain
     })
     .optional(),
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
@@ -516,8 +518,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Dash, Disengage or Hide as a Bonus Action, as with Cunning Action or a goblin's Nimble Escape.
   z.strictObject({
     kind: z.literal("bonusTactics"),
-    tactics: z.array(z.enum(["dash", "disengage", "hide"])).min(1),
+    tactics: z.array(z.enum(["dash", "disengage", "hide", "dodge"])).min(1),
     half: z.literal(true).optional(), // its Dash adds half its Speed, as a troll's Charge
+    resource: z.string().optional(), // each use spends one, as Timely Retreat's
   }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
   z.strictObject({ kind: z.literal("concentrationAdvantage") }),
@@ -565,6 +568,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     damage: DamageTypeSchema,
     critical: z.boolean().default(false),
     oncePerTurn: z.boolean().default(false),
+    resource: z.string().optional(), // each use spends one, as Putrefy's once per rest
     effects: z.array(LeafEffectSchema).min(1),
   }),
   // An attack's damage of these types lessened while the bearer wears this armor, as with Heavy Armor Master.
@@ -643,6 +647,52 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Advantage on the check of a Search or Study action, spending a use of the resource only when it succeeds, as
   // with Sharp Eye.
   z.strictObject({ kind: z.literal("sharpEye"), resource: z.string() }),
+  // Proficiency in every skill, as with Boon of Skill's All-Around Adept.
+  z.strictObject({ kind: z.literal("allSkills") }),
+  // The Dash action adds this many feet more, as with Charger's Improved Dash.
+  z.strictObject({
+    kind: z.literal("dashBonus"),
+    feet: z.number().int().min(5),
+  }),
+  // Standing up from Prone costs only 5 feet of movement, as with Athlete's Hop Up.
+  z.strictObject({ kind: z.literal("quickStand") }),
+  // Taking the Dodge action spends a Hit Point Die to heal by its roll plus the Constitution modifier, as with Dwarven
+  // Fortitude.
+  z.strictObject({ kind: z.literal("dodgeHeal") }),
+  // After an attack with a Light weapon, the Bonus Action attack can use any melee weapon that isn't Two-Handed, as
+  // with Dual Wielder.
+  z.strictObject({ kind: z.literal("dualWielder") }),
+  // After an attack with a Quarterstaff, a Spear or a Heavy weapon with Reach, a Bonus Action attack with its other
+  // end, as with Polearm Master's Pole Strike.
+  z.strictObject({ kind: z.literal("poleStrike") }),
+  // Shield Master: once on its turn, a melee weapon hit on a creature within 5 feet knocks it Prone unless it passes
+  // a Strength save, and with a Reaction a Dexterity save for half damage takes none, while it holds a Shield.
+  z.strictObject({ kind: z.literal("shieldBash") }),
+  z.strictObject({ kind: z.literal("interposeShield") }),
+  // A miss hits instead, once until the bearer's next turn starts, as with Boon of Combat Prowess's Peerless Aim.
+  z.strictObject({ kind: z.literal("peerlessAim") }),
+  // A failed save is rolled again, once until the bearer's next turn starts, as with Boon of Fortune's Favor.
+  z.strictObject({ kind: z.literal("saveReroll") }),
+  // Resistance to every damage type but these while Bloodied, or while in Dim Light or Darkness ("shadows"), as Boon
+  // of Desperate Resilience or Boon of the Night Spirit's Shadowy Form gives.
+  z.strictObject({
+    kind: z.literal("resistAll"),
+    while: z.enum(["bloodied", "shadows"]),
+    except: z.array(DamageTypeSchema).default([]),
+  }),
+  // An attack roll with Advantage that uses Dexterity, Intelligence, Wisdom or Charisma rolls a third d20, as with
+  // Elven Accuracy.
+  z.strictObject({ kind: z.literal("elvenAccuracy") }),
+  // Damage never calls for a save to keep Concentration, as with Boon of the Iron Mind.
+  z.strictObject({ kind: z.literal("unshakableFocus") }),
+  // A 1 on a damage die of this type for the bearer's spell is rolled again, as with Flames of Phlegethos.
+  // Casting with a level 1-4 slot rolls a d4, and a roll equal to the slot's level keeps it, as with Boon of Spell
+  // Recall.
+  z.strictObject({ kind: z.literal("slotRecall") }),
+  z.strictObject({
+    kind: z.literal("spellRerollOnes"),
+    damage: DamageTypeSchema,
+  }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
 
@@ -724,6 +774,9 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     id: z.string(),
     count: z.number().int().min(1),
     from: z.array(SkillSchema).min(1),
+    // Expertise in the skills picked instead of proficiency: in one the character is proficient in ("proficient"), as
+    // Skill Expert gives, or in any ("any"), when the same feat makes it proficient in all, as Boon of Skill.
+    expertise: z.enum(["proficient", "any"]).optional(),
   }),
   z.strictObject({
     kind: z.literal("weaponMastery"),
@@ -1120,7 +1173,11 @@ const AbilityIncreaseSchema = z.partialRecord(
 );
 
 const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("skills"), values: z.array(SkillSchema) }),
+  z.strictObject({
+    kind: z.literal("skills"),
+    values: z.array(SkillSchema),
+    expertise: z.literal(true).optional(), // from a choice with `expertise`
+  }),
   z.strictObject({
     kind: z.literal("spells"),
     values: z.array(ContentIdSchema),

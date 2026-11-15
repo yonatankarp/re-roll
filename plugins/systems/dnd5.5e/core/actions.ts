@@ -27,6 +27,7 @@ import {
 } from "./combat.ts";
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { teleportSquares } from "./combat/movement.ts";
+import { leafEvents } from "./combat/effects.ts";
 import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
@@ -70,6 +71,9 @@ import {
   GRAPPLE_SOURCE,
   HIDE_SOURCE,
   LIGHT_USED,
+  POLE_STRUCK,
+  POLE_USED,
+  isPolearm,
   MASTERY,
   TACTIC,
   hasTactic,
@@ -91,6 +95,7 @@ const DISENGAGE = `${TACTIC}disengage`;
 export const BONUS_DASH = `${TACTIC}bonus-dash`;
 export const BONUS_DISENGAGE = `${TACTIC}bonus-disengage`;
 export const BONUS_HIDE = `${TACTIC}bonus-hide`;
+export const BONUS_DODGE = `${TACTIC}bonus-dodge`;
 const DODGE = `${TACTIC}dodge`;
 const HIDE = HIDE_SOURCE;
 const SEARCH = `${TACTIC}search`;
@@ -102,6 +107,7 @@ const READY = `${TACTIC}ready`;
 const STAND = `${TACTIC}stand`;
 const ESCAPE = `${TACTIC}escape`;
 export const OFFHAND = `${TACTIC}offhand`;
+export const POLE_STRIKE = `${TACTIC}pole-strike`;
 const OFFHAND_USED = "offhand";
 const NICK_USED = `${MASTERY}nick`;
 const CLEAVE_USED = `${MASTERY}cleave`;
@@ -267,6 +273,14 @@ function standing(list: readonly Actor[]): readonly Actor[] {
   return list.filter((item) => !isDown(item));
 }
 
+function dashBonus(stats: Stats): number {
+  return stats.passives.reduce(
+    (total, passive) =>
+      total + (passive.kind === "dashBonus" ? passive.feet : 0),
+    0,
+  );
+}
+
 function halfSpeed(stats: Stats): number {
   return Math.ceil(stats.speed / 10) * 5;
 }
@@ -296,15 +310,22 @@ function offhandOptions(
   );
   if (used.length === 0 || actor.usedThisTurn.includes(OFFHAND_USED)) return [];
   const carried = equipped(actor);
+  // Dual Wielder: the second weapon can be any melee weapon that isn't Two-Handed.
+  const dual = hasPassive(stats, "dualWielder");
   return stats.actions.flatMap((action) => {
     const weapon = weaponOf(action.id, access);
     const reach = meleeReach(action);
-    if (!weapon?.properties.includes("light") || reach === null) return [];
+    if (!weapon || reach === null) return [];
+    const light = weapon.properties.includes("light");
+    if (!light && !(dual && !weapon.properties.includes("twoHanded"))) {
+      return [];
+    }
     const itemId = action.id.slice(action.id.indexOf(":") + 1);
     const another =
       used.some((id) => id !== action.id) ||
       carried.filter((id) => id === itemId).length > 1;
     const nick =
+      light &&
       masteryOf(actor, action.id, access) === "nick" &&
       !actor.usedThisTurn.includes(NICK_USED);
     if (!another || (!nick && !actor.budget.bonusAction)) return [];
@@ -315,6 +336,47 @@ function offhandOptions(
         label: `Off-hand ${action.name}: ${foe.name} (${String(foe.hp)} HP)${nick ? ", with Nick" : ""}`,
       }));
   });
+}
+
+// Polearm Master's Pole Strike: after attacking with a polearm, a Bonus Action attack with its other end.
+function poleStrikeOptions(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+  stats: Stats,
+): { id: string; label: string }[] {
+  if (
+    !hasPassive(stats, "poleStrike") ||
+    !actor.budget.bonusAction ||
+    !actor.usedThisTurn.includes(POLE_USED) ||
+    actor.usedThisTurn.includes(POLE_STRUCK)
+  ) {
+    return [];
+  }
+  return stats.actions.flatMap((action) => {
+    const weapon = weaponOf(action.id, access);
+    const reach = meleeReach(action);
+    if (!weapon || !isPolearm(weapon) || reach === null) return [];
+    return standing(knownFoes(state, actor, access))
+      .filter((foe) => distanceFeet(actor.position, foe.position) <= reach)
+      .map((foe) => ({
+        id: encodeOption(POLE_STRIKE, foe.id, action.id),
+        label: `Pole Strike with the ${weapon.name}'s other end: ${foe.name} (${String(foe.hp)} HP)`,
+      }));
+  });
+}
+
+// The Bonus Action attacks that follow an attack: off-hand and Pole Strike.
+function bonusAttackOptions(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+  stats: Stats,
+): { id: string; label: string }[] {
+  return [
+    ...offhandOptions(actor, state, access, stats),
+    ...poleStrikeOptions(actor, state, access, stats),
+  ];
 }
 
 function readyable(stats: Stats): readonly KnownAction[] {
@@ -329,6 +391,34 @@ function readyable(stats: Stats): readonly KnownAction[] {
 }
 
 // Dash, Disengage or Hide for the Bonus Action, as far as the bearer's passives allow.
+// What a Bonus Action tactic costs beyond the Bonus Action: nothing ([]), a use of a resource, as Timely Retreat's,
+// or null when nothing lets the bearer take it.
+function bonusTacticCost(
+  actor: Actor,
+  stats: Stats,
+  tactic: "dash" | "disengage" | "hide" | "dodge",
+): SystemEvent[] | null {
+  let cost: SystemEvent[] | null = null;
+  for (const passive of stats.passives) {
+    if (passive.kind !== "bonusTactics" || !passive.tactics.includes(tactic)) {
+      continue;
+    }
+    if (!passive.resource) return [];
+    if (
+      (actor.resourcesSpent[passive.resource] ?? 0) <
+      (stats.resources[passive.resource] ?? 0)
+    ) {
+      cost ??= [
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: actor.id,
+          resource: passive.resource,
+        }),
+      ];
+    }
+  }
+  return cost;
+}
+
 function bonusTacticOptions(
   actor: Actor,
   state: DndState,
@@ -336,12 +426,12 @@ function bonusTacticOptions(
 ): { id: string; label: string }[] {
   if (!actor.budget.bonusAction) return [];
   const allowed = new Set(
-    stats.passives.flatMap((passive) =>
-      passive.kind === "bonusTactics" ? passive.tactics : [],
+    (["dash", "disengage", "hide", "dodge"] as const).filter(
+      (tactic) => bonusTacticCost(actor, stats, tactic) !== null,
     ),
   );
   const options: { id: string; label: string }[] = [];
-  const extra = bonusDashFeet(actor, stats);
+  const extra = bonusDashFeet(actor, stats) + dashBonus(stats);
   if (
     allowed.has("dash") &&
     extra > 0 &&
@@ -356,6 +446,12 @@ function bonusTacticOptions(
     options.push({
       id: BONUS_DISENGAGE,
       label: "Disengage as a Bonus Action (no Opportunity Attacks this turn)",
+    });
+  }
+  if (allowed.has("dodge") && !hasTactic(actor, "dodge")) {
+    options.push({
+      id: BONUS_DODGE,
+      label: "Dodge as a Bonus Action (attacks against you have Disadvantage)",
     });
   }
   // The same shortcut as the Hide action's: no foe within 5 feet.
@@ -391,7 +487,7 @@ export function tacticOptions(
       label: `Stand up (${String(half)} ft of movement)`,
     });
   }
-  options.push(...offhandOptions(actor, state, access, stats));
+  options.push(...bonusAttackOptions(actor, state, access, stats));
   options.push(...classOptions(actor, state, access));
   options.push(...bonusTacticOptions(actor, state, stats));
   if (!actor.budget.action) return options;
@@ -404,7 +500,7 @@ export function tacticOptions(
   const friends = standing(allies(state, actor)).filter(
     (item) => item.id !== actor.id,
   );
-  const extra = walkSpeed(actor, stats);
+  const extra = walkSpeed(actor, stats) + dashBonus(stats);
   if (extra > 0 && !hasCondition(actor, "grappled", "restrained")) {
     options.push({
       id: DASH,
@@ -638,22 +734,42 @@ export function runTactic(
                 dndEvent(`${NS}:moved`, {
                   actor: actor.id,
                   to: actor.position,
-                  feet: halfSpeed(stats),
+                  feet: hasPassive(stats, "quickStand") ? 5 : halfSpeed(stats),
                 }),
               ]
             : []),
         ],
       };
     // Dash and Disengage are for moving, so the turn goes on for it.
-    case DASH:
-      return { events: [spend("action"), self("dash")] };
+    case DASH: {
+      const extra = dashBonus(stats);
+      return {
+        events: [
+          spend("action"),
+          extra > 0
+            ? effect(
+                actor.id,
+                kind,
+                actor.id,
+                {
+                  kind: "tactic",
+                  tactic: "dash",
+                  value: walkSpeed(actor, stats) + extra,
+                },
+                "casterNextTurn",
+              )
+            : self("dash"),
+        ],
+      };
+    }
     case DISENGAGE:
       return { events: [spend("action"), self("disengage")] };
     case BONUS_DASH: {
-      const feet = bonusDashFeet(actor, stats);
+      const feet = bonusDashFeet(actor, stats) + dashBonus(stats);
       return {
         events: [
           spend("bonusAction"),
+          ...(bonusTacticCost(actor, stats, "dash") ?? []),
           effect(
             actor.id,
             kind,
@@ -669,9 +785,46 @@ export function runTactic(
       };
     }
     case BONUS_DISENGAGE:
-      return { events: [spend("bonusAction"), self("disengage")] };
+      return {
+        events: [
+          spend("bonusAction"),
+          ...(bonusTacticCost(actor, stats, "disengage") ?? []),
+          self("disengage"),
+        ],
+      };
+    case BONUS_DODGE:
+      return {
+        events: [
+          spend("bonusAction"),
+          ...(bonusTacticCost(actor, stats, "dodge") ?? []),
+          self("dodge"),
+        ],
+      };
     case DODGE:
-      return { events: [spend("action"), self("dodge")], frames: done };
+      return {
+        events: [
+          spend("action"),
+          self("dodge"),
+          ...(hasPassive(stats, "dodgeHeal")
+            ? leafEvents(
+                [
+                  {
+                    kind: "hitDieHeal",
+                    bonus: {
+                      base: 0,
+                      add: [{ kind: "abilityMod", ability: "con" }],
+                    },
+                  },
+                ],
+                kind,
+                actor,
+                actor,
+                context,
+              )
+            : []),
+        ],
+        frames: done,
+      };
     case READY:
       return {
         events: [
@@ -722,6 +875,9 @@ export function runTactic(
       return {
         events: [
           spend(kind === HIDE ? "action" : "bonusAction"),
+          ...(kind === HIDE
+            ? []
+            : (bonusTacticCost(actor, stats, "hide") ?? [])),
           ...rolled.events,
           ...hidden,
         ],
@@ -943,6 +1099,25 @@ export function runTactic(
         ],
       };
     }
+    case POLE_STRIKE:
+      return {
+        events: [
+          spend("bonusAction"),
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: actor.id,
+            key: POLE_STRUCK,
+          }),
+        ],
+        frames: [
+          frame("attackRoll", {
+            attacker: actor.id,
+            actionId: detail,
+            target: needTarget().id,
+            poleStrike: true,
+          }),
+          ...done,
+        ],
+      };
     default:
       throw new Error(`Unknown action ${payload.answer}`);
   }
@@ -954,8 +1129,12 @@ export function keepsActing(actorId: string, context: Context): boolean {
   if (!actor || !context.state.combat || isDown(actor)) return false;
   if (hasCondition(actor, ...INCAPACITATING)) return false;
   return (
-    offhandOptions(actor, context.state, context, deriveStats(actor, context))
-      .length > 0
+    bonusAttackOptions(
+      actor,
+      context.state,
+      context,
+      deriveStats(actor, context),
+    ).length > 0
   );
 }
 
@@ -1325,7 +1504,11 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   if (chosen !== PASS) return chosen;
   if (ids.has(BONUS_HIDE) && hiddenFromAll(actor, context)) return BONUS_HIDE;
   const offhand = decision.options
-    .filter((option) => option.id.startsWith(encodeOption(OFFHAND, "")))
+    .filter(
+      (option) =>
+        option.id.startsWith(encodeOption(OFFHAND, "")) ||
+        option.id.startsWith(encodeOption(POLE_STRIKE, "")),
+    )
     .sort(
       (a, b) =>
         (state.actors[parseOption(a.id)[1] ?? ""]?.hp ?? 0) -

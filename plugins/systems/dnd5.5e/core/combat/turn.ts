@@ -33,6 +33,7 @@ import { MonsterSchema } from "../schemas.ts";
 import {
   masteredDice,
   masteredTypes,
+  rerolledTypes,
   piercing,
   repeatSaveConditions,
   rescuedSave,
@@ -179,7 +180,20 @@ export function runLingeringTick(
     target,
     damage.map(({ amount, type }) => ({
       amount: finalDamage(
-        scale(rollAmount(amount, stats, masteredDice(dice, type, mastered))),
+        scale(
+          rollAmount(
+            amount,
+            stats,
+            masteredDice(
+              dice,
+              type,
+              mastered,
+              caster
+                ? rerolledTypes(stats, effect.sourceId.startsWith("spell:"))
+                : [],
+            ),
+          ),
+        ),
         type,
         responses,
       ),
