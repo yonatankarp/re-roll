@@ -27,6 +27,7 @@ import {
   rollAmount,
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
+import type { Damage } from "../schemas.ts";
 import { blockingSet, sealed, thornHits } from "../zones.ts";
 import {
   concentrationFrame,
@@ -48,6 +49,7 @@ import { seeing } from "../sight.ts";
 import { hasTactic } from "../tactics.ts";
 import { STAY } from "./ids.ts";
 import { grapplesOn } from "./grapple.ts";
+import { heightOf } from "./falling.ts";
 import {
   actorOf,
   CHECK_END,
@@ -143,12 +145,16 @@ export function provokers(
     ) {
       return [];
     }
+    // One up in the air is that much farther from a foe below it (combat/falling.ts).
+    const rise = Math.abs(heightOf(actor) - heightOf(foe));
+    const far = (square: Square | null): number =>
+      Math.max(distanceFeet(square, foe.position), rise);
     const leaves = (reach: number): boolean =>
       steps.some(
         (square, index) =>
           index + 1 < steps.length &&
-          distanceFeet(square, foe.position) <= reach &&
-          distanceFeet(steps[index + 1] ?? null, foe.position) > reach,
+          far(square) <= reach &&
+          far(steps[index + 1] ?? null) > reach,
       );
     const melee = deriveStats(foe, access).actions.find((item) => {
       const reach = meleeReach(item);
@@ -299,13 +305,15 @@ export function runMove(
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];
   // shortcut: thorns hurt as the walk starts, so damage that drops the walker stops it where it stood.
-  const thorns = thornHits(step.path, state);
-  if (thorns.length > 0) {
-    const stats = deriveStats(actor, context);
-    const responses = damageResponses(actor, context);
-    const hurt = dealEvents(
-      actor,
-      thorns.map(({ amount, type }) => ({
+  // Rolls these hits on a creature, in turn after any before them.
+  let now = state;
+  const hurt = (victim: Actor, hits: readonly Damage[]): void => {
+    if (hits.length === 0) return;
+    const stats = deriveStats(victim, context);
+    const responses = damageResponses(victim, context);
+    const dealt = dealEvents(
+      victim,
+      hits.map(({ amount, type }) => ({
         amount: finalDamage(
           rollAmount(amount, stats, context.dice),
           type,
@@ -314,18 +322,37 @@ export function runMove(
         type,
       })),
       false,
-      context,
+      { ...context, state: now },
     );
-    events.push(...hurt.events);
+    now = dealt.events.reduce(applyDndEvent, now);
+    events.push(...dealt.events);
     frames.push(
       ...afterDamage(
-        actor,
-        hurt.dealt,
-        { types: thorns.map(({ type }) => type) },
-        concentrationFrame(actor, hurt.dealt),
-        { ...context, state: hurt.events.reduce(applyDndEvent, state) },
+        victim,
+        dealt.dealt,
+        { types: hits.map(({ type }) => type) },
+        concentrationFrame(victim, dealt.dealt),
+        { ...context, state: now },
       ),
     );
+  };
+  hurt(actor, thornHits(step.path, state));
+  // Fire Form burns each creature whose space the walk enters. shortcut: once each move, not once each turn.
+  const burn = deriveStats(actor, context).passives.flatMap((passive) =>
+    passive.kind === "shareSpace" ? (passive.burn ?? []) : [],
+  );
+  if (burn.length > 0) {
+    const entered = new Set(step.path.map(squareKey));
+    for (const other of Object.values(state.actors)) {
+      if (
+        other.id !== actor.id &&
+        other.position &&
+        !isDead(other) &&
+        entered.has(squareKey(other.position))
+      ) {
+        hurt(other, burn);
+      }
+    }
   }
   for (const { foe, melee } of provokers(actor, to, state, context)) {
     const answer = opportunity(foe, melee, actor, context);

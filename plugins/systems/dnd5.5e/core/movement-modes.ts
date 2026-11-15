@@ -31,6 +31,34 @@ export function speedsOf(
   return speeds;
 }
 
+// Whether a flying Speed it has lets it hover, so it stays up while Prone or Incapacitated (combat/falling.ts).
+// shortcut: a stat block's "(hover)" isn't read, since monsters never take off on their own.
+export function hovers(actor: Actor, stats: Stats): boolean {
+  return modifiersOf(actor, stats).some(
+    (modifier) =>
+      modifier.kind === "movementMode" &&
+      modifier.mode === "fly" &&
+      modifier.hover === true,
+  );
+}
+
+// Whether it climbs along ceilings as well as walls, as with Spider Climb, so it can go up anywhere.
+export function climbsCeilings(actor: Actor, stats: Stats): boolean {
+  return modifiersOf(actor, stats).some(
+    (modifier) =>
+      modifier.kind === "movementMode" &&
+      modifier.mode === "climb" &&
+      modifier.ceiling === true,
+  );
+}
+
+// Whether Difficult Terrain costs it nothing extra, as with Freedom of Movement.
+export function unhindered(actor: Actor, stats: Stats): boolean {
+  return modifiersOf(actor, stats).some(
+    (modifier) => modifier.kind === "unhindered",
+  );
+}
+
 export function bestSpeed(actor: Actor, stats: Stats): number {
   return Math.max(...speedsOf(actor, stats).values());
 }
@@ -72,10 +100,16 @@ export interface Jump {
   readonly runUp: number;
 }
 
-// A Long Jump: the Strength score in feet after a 10-foot run, or half that standing, unless a trait does better.
-// shortcut: a jump only clears difficult terrain; clearing a creature takes a High Jump, which isn't on the grid.
+// A Long Jump: the Strength score in feet after a 10-foot run, or half that standing, unless a trait does better, as
+// Jumper's Dexterity score. A jump only clears difficult terrain: passing a creature's space is up to their sizes, so
+// the board needs no High Jump.
 export function jumpOf(stats: Stats): Jump {
-  let running = stats.abilities.str;
+  const dex = stats.passives.some(
+    (passive) => passive.kind === "jump" && passive.ability === "dex",
+  );
+  let running = dex
+    ? Math.max(stats.abilities.str, stats.abilities.dex)
+    : stats.abilities.str;
   let runUp = 10;
   for (const passive of stats.passives) {
     if (passive.kind !== "jump") continue;

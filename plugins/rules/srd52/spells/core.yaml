@@ -1920,7 +1920,29 @@
     leaving its hands free. The target also gains a Climb Speed equal to its
     Speed. Using a Higher-Level Spell Slot. You can target one additional
     creature for each spell slot level above 2.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: touch
+      side: ally
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: movementMode
+            mode: climb
+            ceiling: true
+          duration:
+            concentration: true
+            minutes: 60
+  upcast:
+    perSlotLevel:
+      addTargets: 1
 - id: srd52:spell/stinking-cloud
   name: Stinking Cloud
   level: 3
@@ -3148,7 +3170,30 @@
     Speed of 60 feet and can hover. When the spell ends, the target falls if it
     is still aloft unless it can stop the fall. Using a Higher-Level Spell Slot.
     You can target one additional creature for each spell slot level above 3.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: touch
+      side: ally
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: movementMode
+            mode: fly
+            feet: 60
+            hover: true
+          duration:
+            concentration: true
+            minutes: 10
+  upcast:
+    perSlotLevel:
+      addTargets: 1
 - id: srd52:spell/freedom-of-movement
   name: Freedom of Movement
   level: 4
@@ -3169,7 +3214,38 @@
     escape from nonmagical restraints, such as manacles or a creature imposing
     the Grappled condition on it. Using a Higher-Level Spell Slot. You can
     target one additional creature for each spell slot level above 4.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: touch
+      side: ally
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: unhindered
+          duration:
+            minutes: 60
+        - kind: modifier
+          modifier:
+            kind: conditionImmunity
+            condition: paralyzed
+          duration:
+            minutes: 60
+        - kind: modifier
+          modifier:
+            kind: conditionImmunity
+            condition: restrained
+          duration:
+            minutes: 60
+  upcast:
+    perSlotLevel:
+      addTargets: 1
 - id: srd52:spell/gentle-repose
   name: Gentle Repose
   level: 2
@@ -5809,7 +5885,32 @@
     down as part of your move. Otherwise, you can take a Magic action to move
     the target, which must remain within the spell’s range. When the spell ends,
     the target floats gently to the ground if it is still aloft.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 60
+      side: enemy
+    resolution:
+      kind: save
+      ability: con
+      dc:
+        base: 0
+        add:
+          - kind: spellSaveDc
+      damage: []
+      onSuccessDamage: none
+      onFail:
+        - kind: lift
+          feet: 20
+          gentle: true
+          duration:
+            concentration: true
+            minutes: 10
+      onSuccess: []
 - id: srd52:spell/locate-object
   name: Locate Object
   level: 2

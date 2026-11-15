@@ -32,12 +32,14 @@ import {
   SQUARE_FEET,
   squareKey,
 } from "../grid.ts";
-import { heightOf } from "./falling.ts";
+import { aloftMode, heightOf } from "./falling.ts";
 import { speedOf } from "../tactics.ts";
 import { heldBy } from "./grapple.ts";
 import {
+  climbsCeilings,
   crossesDifficult,
   jumpOf,
+  unhindered,
   type Mode,
   speedsOf,
   type Through,
@@ -288,8 +290,7 @@ function sharesSpace(
 
 // The ground as one creature moving finds it: what it can't enter, where it can't stop, and what costs double.
 // Another creature's space costs double unless it's an ally's or a Tiny one's. Walls it passes through can't be
-// stopped in, nor another's space unless a trait shares it (shareSpace). shortcut: a swarm's space can be passed but
-// not stopped in.
+// stopped in, nor another's space unless a trait shares it (shareSpace) or opens it to anyone, as a swarm's.
 export function groundFor(
   actor: Actor,
   state: DndState,
@@ -331,12 +332,18 @@ export function groundFor(
       costly.add(key);
     }
   }
-  // It may stop in another's space with Whirling Form, or in an ally's that opens it to allies, with only allies there.
+  // It may stop in another's space with Whirling Form, in an ally's that opens it to allies with only allies there,
+  // or in a swarm's, which anyone may occupy.
   for (const [key, others] of there) {
     const hosted =
-      others.every((other) => other.side === actor.side) &&
+      (others.every((other) => other.side === actor.side) &&
+        others.some((other) =>
+          sharesSpace(statBlockPassives(other, access), "allies"),
+        )) ||
       others.some((other) =>
-        sharesSpace(statBlockPassives(other, access), "allies"),
+        statBlockPassives(other, access).some(
+          (passive) => passive.kind === "moveThrough" && passive.open,
+        ),
       );
     if (!enters && !hosted) occupied.add(key);
   }
@@ -347,8 +354,28 @@ export function groundFor(
     costly,
     walls: blockingSet(state),
     squeeze: through.squeeze,
-    overTerrain: through.terrain,
+    overTerrain: through.terrain || unhindered(actor, stats),
   };
+}
+
+// The squares with no wall beside them, where a climber has nothing to hold.
+function offWalls(
+  grid: { readonly width: number; readonly height: number },
+  walls: ReadonlySet<string>,
+): Set<string> {
+  const off = new Set<string>();
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      let beside = false;
+      for (let dy = -1; dy <= 1 && !beside; dy += 1) {
+        for (let dx = -1; dx <= 1 && !beside; dx += 1) {
+          beside = walls.has(squareKey({ x: x + dx, y: y + dy }));
+        }
+      }
+      if (!beside) off.add(squareKey({ x, y }));
+    }
+  }
+  return off;
 }
 
 // A square a move ends on, the feet it costs and the walk there. With `drag`, the creatures it grapples come along to
@@ -372,6 +399,16 @@ export function moveSquares(
   if (!grid || !from) return [];
   const ground = groundFor(actor, state, access, stats);
   const jump = jumpOf(stats);
+  // Up on its own, it moves only in the Speed it went up with; a climber keeps to the squares beside walls unless it
+  // goes along ceilings too.
+  const up = aloftMode(actor);
+  const clings =
+    up === "climb" && !climbsCeilings(actor, stats)
+      ? offWalls(grid, ground.walls)
+      : null;
+  const blocked = clings
+    ? new Set([...ground.blocked, ...clings])
+    : ground.blocked;
   const walking =
     ground.costly.size === 0
       ? ground.terrain
@@ -381,12 +418,12 @@ export function moveSquares(
     const best = new Map<string, Walk>();
     for (const [mode, left] of speedsLeft(actor, stats)) {
       const feet = Math.floor(left / cost / SQUARE_FEET) * SQUARE_FEET;
-      if (feet <= 0) continue;
+      if (feet <= 0 || (up && mode !== up)) continue;
       const found = reachableSquares(
         from,
         feet,
         grid,
-        ground.blocked,
+        blocked,
         ground.occupied,
         crossesDifficult(mode) || ground.overTerrain ? ground.costly : walking,
         ground.walls,

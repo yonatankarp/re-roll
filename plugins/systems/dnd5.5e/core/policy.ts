@@ -9,6 +9,7 @@ import {
 } from "./state.ts";
 import { deriveStats, type KnownAction, rollAmount } from "./stats.ts";
 import { knownFoes, searchStep } from "./fog.ts";
+import { heightOf } from "./combat/falling.ts";
 import {
   distanceFeet,
   rangeFeet,
@@ -135,6 +136,8 @@ export function stepToward(
   const gap = (from: Square | null): number =>
     Math.min(
       ...foes.map((foe) => {
+        // A foe up out of reach can't be walked to (combat/falling.ts).
+        if (Math.abs(heightOf(foe) - heightOf(actor)) > reach) return Infinity;
         const distance = distanceFeet(from, foe.position);
         if (distance > reach) return Math.max(0, walk(from, foe) - reach);
         return coverFor(state, from, foe, [actor.id]) === "total"

@@ -29,6 +29,7 @@ import {
 import { encodeOption, parseOption } from "./combat/ids.ts";
 import { teleportSquares } from "./combat/movement.ts";
 import { heldInPlace, leafEvents } from "./combat/effects.ts";
+import { heightChoices, heightEvents, heightOf } from "./combat/falling.ts";
 import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
@@ -39,6 +40,7 @@ import {
   runClassOption,
 } from "./class-options.ts";
 import { escapeDc, grapplesOn } from "./combat/grapple.ts";
+import { unhindered } from "./movement-modes.ts";
 import { type Square, distanceFeet, pushTo, squareKey } from "./grid.ts";
 
 export { pushTo };
@@ -109,7 +111,12 @@ const GRAPPLE = GRAPPLE_SOURCE;
 const SHOVE = `${TACTIC}shove`;
 const READY = `${TACTIC}ready`;
 const STAND = `${TACTIC}stand`;
+// Going up or down 10 feet: `rise:fly`, `sink:climb` and the like (combat/falling.ts).
+const RISE = `${TACTIC}rise`;
+const SINK = `${TACTIC}sink`;
 const ESCAPE = `${TACTIC}escape`;
+// Freedom of Movement's escape from a grapple, for 5 feet of movement.
+const SLIP = `${TACTIC}slip`;
 const BREAK_OUT = `${TACTIC}break-out`;
 export const OFFHAND = `${TACTIC}offhand`;
 export const POLE_STRIKE = `${TACTIC}pole-strike`;
@@ -532,6 +539,24 @@ export function tacticOptions(
       label: `Stand up (${String(half)} ft of movement)`,
     });
   }
+  const height = heightOf(actor);
+  for (const { mode, up } of heightChoices(actor, state, access)) {
+    const to = height + (up ? 10 : -10);
+    options.push({
+      id: encodeOption(up ? RISE : SINK, mode),
+      label: `${mode === "fly" ? "Fly" : "Climb"} ${up ? "up" : "down"} 10 ft (${to > 0 ? `${String(to)} ft up` : "to the ground"}, 10 ft of movement)`,
+    });
+  }
+  // shortcut: every grapple counts as nonmagical, and the 5 feet come from its Speed before the grapple stops it.
+  if (unhindered(actor, stats) && stats.speed - actor.moved >= 5) {
+    for (const grapple of grapplesOn(actor)) {
+      const grappler = state.actors[grapple.casterId];
+      options.push({
+        id: encodeOption(SLIP, grapple.casterId, grapple.sourceId),
+        label: `Slip free of ${grappler ? `${grappler.name}'s` : "the"} grapple (5 ft of movement)`,
+      });
+    }
+  }
   options.push(...bonusAttackOptions(actor, state, access, stats));
   options.push(...classOptions(actor, state, access));
   options.push(...bonusTacticOptions(actor, state, stats));
@@ -800,6 +825,33 @@ export function runTactic(
   };
 
   switch (kind) {
+    case SLIP:
+      return {
+        events: [
+          dndEvent(`${NS}:effectEnded`, {
+            actor: actor.id,
+            sourceId: detail,
+            casterId: targetId,
+          }),
+          ...(actor.position
+            ? [
+                dndEvent(`${NS}:moved`, {
+                  actor: actor.id,
+                  to: actor.position,
+                  feet: 5,
+                }),
+              ]
+            : []),
+        ],
+      };
+    case RISE:
+    case SINK:
+      return {
+        events: heightEvents(actor, {
+          mode: targetId === "climb" ? "climb" : "fly",
+          up: kind === RISE,
+        }),
+      };
     case STAND:
       return {
         events: [
@@ -1565,6 +1617,10 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   }
   const ids = new Set(decision.options.map((option) => option.id));
   if (ids.has(STAND)) return STAND;
+  const slip = decision.options.find((option) =>
+    option.id.startsWith(encodeOption(SLIP, "")),
+  );
+  if (slip) return slip.id;
   // Shut in a Maze, getting out is all there is to do.
   const breakOut = decision.options.find((option) =>
     option.id.startsWith(encodeOption(BREAK_OUT, "")),
