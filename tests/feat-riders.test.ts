@@ -336,4 +336,59 @@ describe("feat and trait riders", () => {
     expect(masteryOf(actor, "weapon:srd52:item/longsword", run)).toBeNull();
     expect(sceneSwapActions(after, run)).toEqual([]);
   });
+
+  it("pushes and grapples on a hit once a turn on its own turn, as Tavern Brawler and Punch and Grab do", async () => {
+    const run = await testRun();
+    const hit = (used: readonly string[], ownTurn = true) => {
+      const brawler = {
+        ...hero(["brawler"]),
+        position: { x: 0, y: 0 },
+        usedThisTurn: [...used],
+      };
+      const foe = {
+        ...hero([], { id: "foe" }),
+        side: "enemy" as const,
+        hp: 30,
+        position: { x: 1, y: 0 },
+      };
+      const plain = contextOf(
+        run,
+        ownTurn ? [brawler, foe] : [foe, brawler],
+        scripted([]).dice,
+      );
+      const { combat } = plain.state;
+      if (!combat) throw new Error("no fight");
+      const context = {
+        ...plain,
+        state: {
+          ...plain.state,
+          combat: { ...combat, grid: { width: 10, height: 10 } },
+        },
+      };
+      return kinds(
+        run.system.frames[`${NS}:applyHit`]?.run(
+          {
+            attacker: PLAYER_ACTOR,
+            actionId: "feature:test:feature/brawler:0",
+            target: "foe",
+            critical: false,
+            hadAdvantage: false,
+            total: 20,
+            natural: 15,
+          },
+          context,
+        ).events ?? [],
+      );
+    };
+    expect(hit([])).toEqual(
+      expect.arrayContaining([`${NS}:moved`, `${NS}:effectAdded`]),
+    );
+    const again = hit([
+      "onhit:feature:test:feature/brawler:0",
+      "onhit-effects:feature:test:feature/brawler:0",
+    ]);
+    expect(again).not.toContain(`${NS}:moved`);
+    expect(again).not.toContain(`${NS}:effectAdded`);
+    expect(hit([], false)).not.toContain(`${NS}:effectAdded`);
+  });
 });

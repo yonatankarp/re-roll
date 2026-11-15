@@ -377,8 +377,13 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
         onFail: LeafEffectsSchema,
         onSuccess: LeafEffectsSchema,
         exempt: z.array(z.string()).optional(),
+        // Only once a turn, on the attacker's own turn, as Feral Pounce's Shove or Punch and Grab's Grapple.
+        oncePerTurn: z.literal(true).optional(),
+        orDex: z.literal(true).optional(), // the target saves with Strength or Dexterity, whichever is better
       })
       .optional(),
+    // Effects on a hit once a turn, on the attacker's own turn, as Tavern Brawler's push.
+    onHitOncePerTurn: LeafEffectsSchema.optional(),
   }),
   z.strictObject({
     kind: z.literal("save"),

@@ -538,6 +538,35 @@ const FIXTURES = [
       { kind: "weaponMastery", id: "mastery", count: 1, swap: "longRest" },
     ],
   },
+  trait("brawler", [], {
+    activations: [
+      {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "weapon", ability: "str" },
+          damage: [{ amount: { dice: "1d4" }, type: "bludgeoning" }],
+          onHitOncePerTurn: [
+            { kind: "forcedMove", feet: 5, direction: "away" },
+          ],
+          onHitSave: {
+            ability: "str",
+            orDex: true,
+            oncePerTurn: true,
+            dc: { base: 30 },
+            onFail: [
+              {
+                kind: "applyCondition",
+                condition: "grappled",
+                duration: { minutes: 1 },
+              },
+            ],
+          },
+        },
+      },
+    ],
+  }),
   trait("together", [{ kind: "allySaveAdvantage", abilities: ["str"] }]),
   trait("bountiful", [
     { kind: "tempHpBonus", amount: 5 },

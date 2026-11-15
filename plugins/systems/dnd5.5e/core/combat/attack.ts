@@ -35,6 +35,7 @@ import {
   evaluateFormula,
   rollAmount,
   rollDiceNotation,
+  saveBonus,
   type Stats,
 } from "../stats.ts";
 import { finalDamage, halved, rollD20 } from "../rules.ts";
@@ -926,6 +927,7 @@ export function runApplyHit(
     ),
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
+    ...oncePerTurnHit(resolution, action, attacker, target, context),
     ...halted(attacker, target, stats, context),
     ...shieldBash(attacker, target, action, stats, context),
     ...inspiringStrike(attacker, payload.critical, stats, context),
@@ -1024,6 +1026,29 @@ function shieldBash(
 }
 
 // Whether it's the creature's own turn, so a hit on it is a reaction such as an Opportunity Attack.
+// Tavern Brawler's push: effects on a hit once a turn, on the attacker's own turn.
+function oncePerTurnHit(
+  resolution: Extract<Resolution, { kind: "attack" }>,
+  action: KnownAction,
+  attacker: Actor,
+  target: Actor,
+  context: Context,
+): SystemEvent[] {
+  const effects = resolution.onHitOncePerTurn;
+  const key = `onhit-effects:${action.id}`;
+  if (
+    !effects ||
+    attacker.usedThisTurn.includes(key) ||
+    !inOwnTurn(attacker, context)
+  ) {
+    return [];
+  }
+  return [
+    dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key }),
+    ...leafEvents(effects, action.id, attacker, target, context),
+  ];
+}
+
 function inOwnTurn(target: Actor, context: Context): boolean {
   const { combat } = context.state;
   return combat?.order[combat.index] === target.id;
@@ -1182,12 +1207,28 @@ function nestedSave(
   hit: Actor,
   context: Context,
 ): { readonly events: SystemEvent[]; readonly dealt: number } {
-  const save = resolution.onHitSave;
+  const printed = resolution.onHitSave;
   const target = context.state.actors[hit.id];
-  if (!save || !target || isDead(target)) return { events: [], dealt: 0 };
-  if (exemptFrom(save.exempt, target, deriveStats(target, context))) {
+  if (!printed || !target || isDead(target)) return { events: [], dealt: 0 };
+  if (exemptFrom(printed.exempt, target, deriveStats(target, context))) {
     return { events: [], dealt: 0 };
   }
+  const onceKey = `onhit:${action.id}`;
+  const once = printed.oncePerTurn
+    ? attacker.usedThisTurn.includes(onceKey) || !inOwnTurn(attacker, context)
+      ? null
+      : dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key: onceKey })
+    : undefined;
+  if (once === null) return { events: [], dealt: 0 };
+  const save = {
+    ...printed,
+    ability:
+      printed.orDex &&
+      saveBonus(deriveStats(target, context), "dex") >
+        saveBonus(deriveStats(target, context), printed.ability)
+        ? ("dex" as const)
+        : printed.ability,
+  };
   const stats = deriveStats(attacker, context);
   const dc = evaluateFormula(save.dc, stats);
   const rolled = rollSave(
@@ -1237,6 +1278,7 @@ function nestedSave(
   const source = `${action.id}:save`;
   return {
     events: [
+      ...(once ? [once] : []),
       ...rolled.events,
       ...rescued,
       ...damage.events,
