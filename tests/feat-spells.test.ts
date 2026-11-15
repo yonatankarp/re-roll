@@ -113,6 +113,35 @@ describe("spell-table feats", () => {
       run,
     );
     expect(dcOf(connoisseur, `spell:${BURNING_HANDS}`)).toBe(10);
+    // A species' choice: its traits' spells take it.
+    const own = hero([]);
+    const speciesBuild =
+      own.source.kind === "character" ? own.source.build : null;
+    if (!speciesBuild) throw new Error("no build");
+    const species = deriveStats(
+      {
+        ...own,
+        source: {
+          kind: "character",
+          build: {
+            ...speciesBuild,
+            speciesId: "test:species/gifted",
+            levels: speciesBuild.levels.map((entry) => ({
+              ...entry,
+              answers: [
+                {
+                  kind: "spellAbility",
+                  ability: "int",
+                  feat: "test:species/gifted",
+                },
+              ],
+            })),
+          },
+        },
+      },
+      run,
+    );
+    expect(dcOf(species, `spell:${BURNING_HANDS}`)).toBe(9);
   });
 
   it("offers spells from the feat's own table, from the list of the version of a feat taken, and asks the ability", async () => {

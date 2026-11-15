@@ -444,6 +444,18 @@ const FIXTURES = [
     skills: ["athletics", "survival"],
     tool: "Test Tools",
   },
+  {
+    id: "test:species/gifted",
+    name: "Gifted",
+    text: "A test species.",
+    creatureType: "Humanoid",
+    size: "medium",
+    speed: 30,
+    traits: ["test:feature/touched"],
+    choices: [
+      { kind: "spellAbility", id: "spellcasting", from: ["int", "cha"] },
+    ],
+  },
   trait("touched", [], { spells: { "1": ["srd52:spell/burning-hands"] } }),
   trait("adept-table", [], {
     spellsBySlot: {
