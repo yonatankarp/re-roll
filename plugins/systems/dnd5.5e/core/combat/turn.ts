@@ -7,6 +7,7 @@ import {
 } from "#sdk";
 import {
   type Actor,
+  type DndState,
   applyDndEvent,
   dndEvent,
   hasCondition,
@@ -55,7 +56,7 @@ import {
   turnStartEvents,
 } from "./durations.ts";
 import { burstResult, sunlightFrames, zoneFrames } from "./areas.ts";
-import { healingStopped, sealed } from "../zones.ts";
+import { healingStopped } from "../zones.ts";
 
 // The turn order: ending a fight, lingering effects, and the start and end of each turn.
 
@@ -73,17 +74,29 @@ export function runCheckCombatEnd(context: Context): SystemResult {
     : result;
 }
 
+// Sealed away past the stand-off window, or for good.
+function shutAway(actor: Actor, state: DndState): boolean {
+  const round = state.combat?.round ?? 0;
+  return actor.activeEffects.some(
+    ({ modifier, lasts }) =>
+      modifier.kind === "sealed" &&
+      (!lasts || lasts.round - round > STAND_OFF_ROUNDS),
+  );
+}
+
 function fightOver(context: Context): SystemResult {
   const { state } = context;
   if (!state.combat) return {};
   const fighters = state.combat.order.map((id) => actorOf(state, id));
-  // shortcut: a foe shut away counts as beaten, even in a prison that would end within the fight, as Resilient
-  // Sphere's minute, so a fight never waits out a Maze or a Forcecage.
+  // A foe shut away for longer than a stand-off takes counts as beaten, so a fight never waits out a Maze or a
+  // Forcecage; a shorter prison, as Resilient Sphere's minute, is waited out.
   const enemyStanding = fighters.some(
-    (actor) => actor.side === "enemy" && !isDown(actor) && !sealed(actor),
+    (actor) =>
+      actor.side === "enemy" && !isDown(actor) && !shutAway(actor, state),
   );
   const partyFree = fighters.some(
-    (actor) => actor.side === "party" && !isDown(actor) && !sealed(actor),
+    (actor) =>
+      actor.side === "party" && !isDown(actor) && !shutAway(actor, state),
   );
   // With the whole party shut away, its foes wait it out: the time passes, and what holds them ends.
   if (!partyFree && enemyStanding) {
@@ -149,8 +162,8 @@ export function runAfterAction(
 }
 
 // One frame per source, as the same spell from two casters doesn't stack and a creature saves only once a turn.
-// shortcut: everyone a zone was cast on stays in it until the effect ends, even after walking out of it;
-// check their square once a zone keeps where it was cast.
+// These are the older cast-time effects, as Moonbeam's: everyone it was cast on keeps it until it ends, wherever it
+// walks. Areas that act on whoever stands in them are zones (combat/areas.ts).
 function lingeringFrames(actor: Actor, when: "turnStart" | "turnEnd"): Frame[] {
   const seen = new Set<string>();
   return actor.activeEffects.flatMap(({ modifier, sourceId }) => {

@@ -135,7 +135,10 @@ export function stepToward(
   }
   const now = gap(actor.position);
   const gaps = new Map(
-    moveSquares(actor, state, stats).map((item) => [item, gap(item.square)]),
+    moveSquares(actor, state, stats, context).map((item) => [
+      item,
+      gap(item.square),
+    ]),
   );
   const squares = [...gaps.keys()];
   const closest = Math.min(...gaps.values());
@@ -233,7 +236,7 @@ function approach(actor: Actor, context: Context): Square | null {
   const better = options
     .filter((option) => option.worth > 1.2 * now)
     .sort((a, b) => b.worth - a.worth);
-  const squares = [...moveSquares(actor, state, stats)].sort(
+  const squares = [...moveSquares(actor, state, stats, context)].sort(
     (a, b) => a.feet - b.feet,
   );
   // The best attack it can reach this turn, by the shortest walk out of harm's way; else it heads for the best

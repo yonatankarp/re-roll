@@ -86,7 +86,7 @@ export function walksOf(
   const found =
     byState.get(state) ??
     new Map(
-      moveSquares(actor, state, deriveStats(actor, access)).map(
+      moveSquares(actor, state, deriveStats(actor, access), access).map(
         ({ square, path }) => [squareKey(square), path],
       ),
     );
@@ -152,9 +152,12 @@ export function runMove(
   const actor = actorOf(state, payload.actor);
   const to = parseSquare(payload.answer);
   if (payload.answer === STAY || !to) return {};
-  const step = moveSquares(actor, state, deriveStats(actor, context)).find(
-    ({ square }) => squareKey(square) === payload.answer,
-  );
+  const step = moveSquares(
+    actor,
+    state,
+    deriveStats(actor, context),
+    context,
+  ).find(({ square }) => squareKey(square) === payload.answer);
   if (!step) throw new Error(`${actor.name} can't reach ${payload.answer}`);
   const events: SystemEvent[] = [];
   const frames: Frame[] = [];

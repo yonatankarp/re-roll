@@ -110,7 +110,7 @@ export function runTakeAction(
     const nearest = (square: Square): number =>
       Math.min(...foes.map((foe) => distanceFeet(square, foe.position)));
     const squares = [
-      ...moveSquares(actor, state, deriveStats(actor, context)),
+      ...moveSquares(actor, state, deriveStats(actor, context), context),
     ].sort((a, b) => nearest(a.square) - nearest(b.square) || a.feet - b.feet);
     return {
       frames: [

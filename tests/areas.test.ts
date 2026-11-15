@@ -181,6 +181,16 @@ const MONSTERS: Record<string, Readonly<Record<string, unknown>>> = {
   "test:monster/zombie": statBlock("test:monster/zombie", {
     creatureType: "undead",
   }),
+  "test:monster/dread": statBlock("test:monster/dread", {
+    passives: [
+      {
+        kind: "aura",
+        name: "Dread",
+        radius: 5,
+        area: { side: "enemy", difficult: true },
+      },
+    ],
+  }),
   "test:monster/vampire": statBlock("test:monster/vampire", {
     passives: [
       {
@@ -694,9 +704,12 @@ describe("areas spells leave", () => {
     expect(actor(walled, "foe").position).toEqual({ x: 6, y: 5 });
     const context = contextOf(run, walled, LOW);
     const me = actor(walled, PLAYER_ACTOR);
-    const squares = moveSquares(me, walled, deriveStats(me, context)).map(
-      (item) => `${String(item.square.x)},${String(item.square.y)}`,
-    );
+    const squares = moveSquares(
+      me,
+      walled,
+      deriveStats(me, context),
+      context,
+    ).map((item) => `${String(item.square.x)},${String(item.square.y)}`);
     expect(squares).not.toContain("4,5");
   });
 });
@@ -845,5 +858,76 @@ describe("reading slowing and bolstering auras", () => {
         when: "ownerTurnEnd",
       },
     });
+  });
+});
+
+describe("areas on the move", () => {
+  const feetTo = (
+    run: RunContext,
+    state: DndState,
+    id: string,
+    key: string,
+  ): number | undefined => {
+    const context = contextOf(run, state, LOW);
+    const mover = actor(state, id);
+    return moveSquares(mover, state, deriveStats(mover, context), context).find(
+      (item) => `${String(item.square.x)},${String(item.square.y)}` === key,
+    )?.feet;
+  };
+
+  it("makes a foe pay double inside an aura that halves its Speed", async () => {
+    const run = await arena();
+    const dread = fight(hero(run, 0, 2), monster("knight", "dread", 3, 3));
+    const plain = fight(hero(run, 0, 2), monster("knight", "zombie", 3, 3));
+    expect(feetTo(run, plain, PLAYER_ACTOR, "3,2")).toBe(15);
+    expect(feetTo(run, dread, PLAYER_ACTOR, "3,2")).toBe(20);
+  });
+
+  it("bars the living from an Antilife Shell and lets the undead in", async () => {
+    const run = await arena();
+    const start = fight(
+      hero(run, 6, 5),
+      monster("zombie", "zombie", 0, 5),
+      monster("living", "stinker", 0, 7),
+    );
+    const shelled = apply(start, [
+      dndEvent(`${NS}:effectAdded`, {
+        actor: PLAYER_ACTOR,
+        effect: {
+          sourceId: "spell:antilife",
+          casterId: PLAYER_ACTOR,
+          modifier: {
+            kind: "zone",
+            zone: "area",
+            at: { x: 6, y: 5 },
+            radius: 10,
+            follows: true,
+            area: { barrier: true, exceptTypes: ["undead", "construct"] },
+          },
+          ends: "concentration",
+        },
+      }),
+    ]);
+    expect(feetTo(run, shelled, "zombie", "4,5")).toBe(20);
+    expect(feetTo(run, shelled, "living", "4,7")).toBeUndefined();
+  });
+
+  it("waits out a seal that ends within a minute instead of calling the fight", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 1, 0));
+    const sphere = apply(start, [
+      dndEvent(`${NS}:effectAdded`, {
+        actor: "foe",
+        effect: {
+          sourceId: "spell:sphere",
+          casterId: PLAYER_ACTOR,
+          modifier: { kind: "sealed" },
+          ends: "concentration",
+          lasts: { actor: PLAYER_ACTOR, round: 11, at: "start" },
+        },
+      }),
+    ]);
+    const { events } = settle(run, sphere, [frameOf("checkCombatEnd")], LOW);
+    expect(kinds(events)).not.toContain(`${NS}:combatEnded`);
   });
 });

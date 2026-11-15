@@ -250,10 +250,12 @@ function stepEvents(
 ): SystemEvent[] {
   if (steps <= 0 || !target || reaches(lead, actor, target)) return [];
   const stats = deriveStats(actor, context);
-  const squares = moveSquares({ ...actor, moved: 0 }, context.state, {
-    ...stats,
-    speed: steps,
-  });
+  const squares = moveSquares(
+    { ...actor, moved: 0 },
+    context.state,
+    { ...stats, speed: steps },
+    context,
+  );
   const best = [...squares].sort(
     (a, b) =>
       distanceFeet(a.square, target.position) -

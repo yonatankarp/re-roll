@@ -637,7 +637,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
       });
     return (
       reachesFrom(foe.position) ||
-      moveSquares(foe, state, own).some(({ square }) => reachesFrom(square))
+      moveSquares(foe, state, own, context).some(({ square }) =>
+        reachesFrom(square),
+      )
     );
   };
 

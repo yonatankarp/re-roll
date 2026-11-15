@@ -254,9 +254,13 @@ export function thornKeys(state: DndState): readonly string[] {
 }
 
 // Squares that cost `mover` double besides the map's own: a zone that halves its Speed, as Spirit Guardians does.
-export function slowingKeys(mover: Actor, state: DndState): readonly string[] {
-  return zonesOf(state).flatMap((zone) =>
-    zone.area?.difficult && affects(zone, mover, state)
+export function slowingKeys(
+  mover: Actor,
+  state: DndState,
+  access?: ContentAccess,
+): readonly string[] {
+  return zonesOf(state, access).flatMap((zone) =>
+    zone.area?.difficult && affects(zone, mover, state, access)
       ? squaresOf(zone, state)
       : [],
   );
@@ -264,9 +268,13 @@ export function slowingKeys(mover: Actor, state: DndState): readonly string[] {
 
 // Squares `mover` can't enter: a barrier against it, as Antilife Shell's.
 // shortcut: a creature already inside when the barrier rises can still walk about in it.
-export function barredKeys(mover: Actor, state: DndState): readonly string[] {
-  return zonesOf(state).flatMap((zone) =>
-    zone.area?.barrier && affects(zone, mover, state)
+export function barredKeys(
+  mover: Actor,
+  state: DndState,
+  access?: ContentAccess,
+): readonly string[] {
+  return zonesOf(state, access).flatMap((zone) =>
+    zone.area?.barrier && affects(zone, mover, state, access)
       ? squaresOf(zone, state)
       : [],
   );

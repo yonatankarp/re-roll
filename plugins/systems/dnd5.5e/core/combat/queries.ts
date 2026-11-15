@@ -210,6 +210,7 @@ export function moveSquares(
   actor: Actor,
   state: DndState,
   stats: Stats,
+  access?: ContentAccess, // for a monster's aura that slows or bars it, and the creature types a zone spares
 ): ReturnType<typeof reachableSquares> {
   const grid = state.combat?.grid;
   if (!grid || !actor.position) return [];
@@ -222,8 +223,8 @@ export function moveSquares(
     );
   const walls = blockedSquares(state);
   // A barrier it can't cross stops it as a wall would, and a zone that slows it costs double.
-  const barred = barredKeys(actor, state);
-  const slowing = slowingKeys(actor, state);
+  const barred = barredKeys(actor, state, access);
+  const slowing = slowingKeys(actor, state, access);
   const difficult = difficultSquares(state);
   return reachableSquares(
     actor.position,

@@ -398,7 +398,7 @@ export function searchStep(
     .sort((a, b) => a.feet - b.feet);
   if (!nearest) return null;
   const moves = new Set(
-    moveSquares(actor, state, deriveStats(actor, access)).map((item) =>
+    moveSquares(actor, state, deriveStats(actor, access), access).map((item) =>
       squareKey(item.square),
     ),
   );
