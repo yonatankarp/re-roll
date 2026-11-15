@@ -229,7 +229,7 @@ function targetOptions(
     .filter(
       (foe) =>
         !isDown(foe) &&
-        fitsType(foe, targeting, context) &&
+        fitsType(foe, targeting, context, actor) &&
         (reaches(lead, actor, foe) ||
           distanceFeet(actor.position, foe.position) <= range + steps),
     )

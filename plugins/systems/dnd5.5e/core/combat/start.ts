@@ -110,7 +110,9 @@ export function startCombat(
     (actor, position) => {
       const stats = deriveStats(actor, context);
       const edge = {
-        advantage: rallier !== undefined && actor.side === "party",
+        advantage:
+          (rallier !== undefined && actor.side === "party") ||
+          hasPassive(stats, "initiativeAdvantage"),
         disadvantage: Boolean(surprised) && actor.side === caught,
         rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
       };

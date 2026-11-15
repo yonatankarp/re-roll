@@ -1989,7 +1989,9 @@ export function runAfterHit(
   const hitWith = findAction(attacker, payload.actionId, context);
   // One limited to a size or type, as Hill's Tumble to Large or smaller, is offered only for a target that fits.
   const options = smitesFor(hitWith, attacker, stats)
-    .filter((action) => fitsType(target, action.activation.targeting, context))
+    .filter((action) =>
+      fitsType(target, action.activation.targeting, context, attacker),
+    )
     .flatMap((action) =>
       withUpcasts(action, attacker, stats, target.id, action.name),
     );

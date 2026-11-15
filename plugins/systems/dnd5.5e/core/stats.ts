@@ -1322,16 +1322,24 @@ function statBlockStats(
 ): Stats {
   const fromFeatures = collectFeatureData(access, monster.features);
   const shape = currentShape(monster, actor);
+  const lacks =
+    actor.source.kind === "monster" ? (actor.source.lacks ?? []) : [];
   const usable = new Set(
     monster.actions.flatMap((action, index) =>
-      usableIn(action, shape) ? [`monster:${String(index)}`] : [],
+      usableIn(action, shape) && !lacks.includes(action.name)
+        ? [`monster:${String(index)}`]
+        : [],
     ),
   );
+  // A passive marked `bloodied` holds only while the creature is.
+  const bloodied = actor.hp * 2 <= monster.hp;
   const passives = [
     ...monster.passives,
     ...(shape?.passives ?? []),
     ...fromFeatures.passives,
-  ];
+  ].filter(
+    (passive) => bloodied || !("bloodied" in passive && passive.bloodied),
+  );
   // A Multiattack printed for other shapes only isn't there, and a routine's attack this shape can't make is the
   // chosen one again.
   const routines =
@@ -1381,8 +1389,11 @@ function statBlockStats(
       ),
       ...fromFeatures.actions,
     ],
+    // A hydra bites once a head.
     multiattack: Math.max(
-      shape?.multiattack === false ? 1 : monster.multiattack,
+      shape?.multiattack === false
+        ? 1
+        : Math.max(1, livingHeads(actor, passives) ?? monster.multiattack),
       ...passiveAttacks(passives),
     ),
     routines,
@@ -1396,6 +1407,17 @@ function statBlockStats(
     exhaustion: actor.exhaustion,
     itemBonuses: { attack: 0, spellAttack: 0, savingThrows: 0 },
   };
+}
+
+// A hydra's heads still living (combat/heads.ts), or null for a creature without them.
+export function livingHeads(
+  actor: Actor,
+  passives: readonly Passive[],
+): number | null {
+  const heads = passives.find((passive) => passive.kind === "heads");
+  if (heads?.kind !== "heads") return null;
+  const spent = actor.resourcesSpent;
+  return heads.heads + (spent["heads:grown"] ?? 0) - (spent["heads:dead"] ?? 0);
 }
 
 // Calculated on demand and never stored, so stats can't drift out of step with choices or gear.
