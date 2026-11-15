@@ -396,11 +396,12 @@ export function runFinishMove(
   // A walk into or out of an Antimagic Field, or one carrying it, holds off or brings back spells and items.
   const fields =
     zonesOf(context.state).some(
-      (zone) => zone.area?.noSpells === "all" || zone.area?.conditions,
+      (zone) =>
+        zone.area?.noSpells === "all" || zone.area?.conditions !== undefined,
     ) ||
     Object.values(context.state.actors).some(
       (item) =>
-        item.suppressed ||
+        item.suppressed !== undefined ||
         item.activeEffects.some(({ sourceId }) =>
           sourceId.startsWith("placed:"),
         ),
