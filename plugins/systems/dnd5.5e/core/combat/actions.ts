@@ -387,8 +387,14 @@ export function runUseAction(
   context: Context,
 ): SystemResult {
   const { state } = context;
-  const actor = actorOf(state, payload.actor);
-  if (!state.combat || isDown(actor) || hasCondition(actor, ...INCAPACITATING))
+  // A fight that ended mid-Multiattack has taken its monsters off the board.
+  const actor = state.actors[payload.actor];
+  if (
+    !state.combat ||
+    !actor ||
+    isDown(actor) ||
+    hasCondition(actor, ...INCAPACITATING)
+  )
     return {};
   const found = findAction(actor, payload.actionId, context);
   const action = {
