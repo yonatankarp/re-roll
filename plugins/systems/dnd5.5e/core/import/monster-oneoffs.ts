@@ -189,7 +189,13 @@ export function oneOffTrait(label: string, text: string): OneOff | null {
   const name = label.replace(/\s*\(.*$/, "");
   const passives = traitPassives(name, text);
   if (passives) {
-    return { actions: [], passives, notes: traitNotes(name) };
+    // A comeback with a random boon, as a priest of Osybus's tattoo, keeps only the comeback.
+    const boon = /\brandom boon\b/.test(text)
+      ? [
+          `partial: ${name}: left out its random boon${/\bis now Undead\b/.test(text) ? " and becoming Undead" : ""}`,
+        ]
+      : [];
+    return { actions: [], passives, notes: [...traitNotes(name), ...boon] };
   }
   if (NO_COMBAT_ONE_OFF.test(name)) {
     return { actions: [], passives: [], notes: [`no combat use: ${label}`] };
@@ -226,7 +232,6 @@ function traitNotes(name: string): string[] {
   const left: Record<string, string> = {
     "Bloodied Wild Magic": "dealing Force damage instead",
     "Spiteful Escape": "its anathema",
-    "Tattoo of Osybus": "its random boon and becoming Undead",
     "Reflective Carapace": "turning a spell back on its caster",
     "Lightning Conduit":
       "passing the damage on and regaining Lightning Discharge",
@@ -1109,13 +1114,11 @@ export function oneOffAction(
     if (parsed.length === steps.length && parsed.length > 1) {
       return {
         actions: parsed.map(({ step, item }) => ({
-          name: `${name} (${step.name})`,
+          name: step.name, // "First Roar", as each was named before it was read
+
           perDay: 1,
           activation: {
-            cost: [
-              COST[section],
-              { resource: `day:${slugOf(`${name} ${step.name}`)}` },
-            ],
+            cost: [COST[section], { resource: `day:${slugOf(step.name)}` }],
             targeting: item.targeting,
             resolution: item.resolution,
           },
@@ -1201,6 +1204,13 @@ function boonOf(text: string): {
     }
   }
   // What else the sentence holds is reported, never guessed at.
+  // A gain shared with others, "and each ally within 30 feet of it gain Advantage on D20 Tests", is left out.
+  const gainSentence = /[^.]*\bgains \d+[^.]*\./.exec(text)?.[0] ?? "";
+  if (
+    /,? and (?:the [^.,]+ and )?each (?:ally|creature)\b/.test(gainSentence)
+  ) {
+    left.push("what it gives others");
+  }
   const rest = text
     .replace(/[^.]*\bgains \d+[^.]*\./, "")
     .replace(/[^.]*\bhas Advantage on ability checks[^.]*\./, "")
@@ -1220,7 +1230,7 @@ function invisibleOf(
 ): { effect: LeafEffect; left: string[] } | null {
   const [first = ""] = text.split(/\.\s/);
   const own =
-    !/\btarget\b/.test(first) &&
+    !/\b(?:target|teleports?)\b/.test(first) &&
     /^(?:The )?[^.]*?\b(?:(?:has|have|gives (?:itself|herself|himself)) the Invisible condition|magically turn invisible)\b/.test(
       first,
     );

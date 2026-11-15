@@ -1728,7 +1728,12 @@ function foldedOptions(found: readonly RegExpMatchArray[]): Paragraph[] {
         : /^(?:First|Second|Third|Fourth|Fifth)\b/.test(entry.label)
           ? /^(?:First|Second|Third|Fourth|Fifth)\b/
           : /./;
-      if (kind.test(entry.label)) {
+      // An attack, a save, a spell or a limited use of its own is the next action, not an option.
+      const own =
+        kind.source === "." &&
+        (/Attack(?: Roll)?:|Saving Throw:|\bcasts\b/.test(entry.text) ||
+          /\((?:Recharge|\d+\/Day)/.test(entry.label));
+      if (!own && kind.test(entry.label)) {
         parent[2] = `${parent[2]} • ${item[2]}`;
         continue;
       }
@@ -1740,7 +1745,9 @@ function foldedOptions(found: readonly RegExpMatchArray[]): Paragraph[] {
       entry &&
       !NOT_AN_OPTION.test(entry.label) &&
       /:\s*$/.test(entry.text) &&
-      !/\bfollowing (?:spells|magical rays)\b/.test(entry.text)
+      /\bone of the following effects\b|\bas detailed below\b|\bsubjected to [^.:]+ effect:\s*$/i.test(
+        entry.text,
+      )
     ) {
       parent = item;
     }
@@ -1776,10 +1783,13 @@ function parseBlock(
       block,
     )?.[1] ?? "",
   );
-  const paragraphs = foldedOptions([
+  const found = [
     ...listsFolded(block).matchAll(/<p\b([^>]*)>([\s\S]*?)<\/p>/g),
-  ]);
+  ];
+  const paragraphs = foldedOptions(found);
   const lines = paragraphs.map((item) => plainText(item[2]));
+  // The stat block as printed, for its text and for what reads it as printed: shapes and legendary actions.
+  const printed = found.map((item) => plainText(item[2] ?? ""));
   const field = (pattern: RegExp): string | undefined =>
     lines.map((line) => pattern.exec(line)?.[1]).find(Boolean);
 
@@ -1848,7 +1858,16 @@ function parseBlock(
     const entry = entryOf(inner);
     if (!entry) continue;
     const { label } = entry;
-    const text = playedVariant(label, entry.text, notes);
+    const folded = playedVariant(label, entry.text, notes);
+    // The general readers take the entry without the options folded under it, which are reported as their own
+    // entries were unless a one-off reader takes them.
+    const [text = "", ...optionTexts] = folded.split(" • ");
+    const leftOptions = () => {
+      for (const option of optionTexts) {
+        const name = /^([^.]{1,60})\./.exec(option)?.[1];
+        if (name) notes.push(`not automated: ${name}`);
+      }
+    };
     // Paragraphs of its own text printed after it, as "While grafted, …", which only the one-off readers take.
     const next = paragraphs
       .slice(index + 1)
@@ -1858,7 +1877,7 @@ function parseBlock(
           /monster-header|Stat-Block-Heading/.test(item[1]),
       );
     const whole = [
-      text,
+      folded,
       ...lines.slice(index + 1, next < 0 ? undefined : index + 1 + next),
     ].join(" ");
     // legendaryOf reads these, and reports what it can't automate.
@@ -1913,6 +1932,7 @@ function parseBlock(
         notes.push(...special.notes);
         continue;
       }
+      leftOptions();
       const leftOut: string[] = [];
       const placed = areaTrait(label, text, leftOut);
       const passive = placed ? null : traitPassive(label, text);
@@ -2094,6 +2114,7 @@ function parseBlock(
       notes.push(...special.notes);
       continue;
     }
+    leftOptions();
     const rechargeOn = /\(Recharge (\d)/.exec(label)?.[1];
     const perDay = /\((\d+)\/Day\b/.exec(label)?.[1];
     const resource = `${perDay ? "day" : "recharge"}:${slugOf(label.replace(/\s*\(.*$/, ""))}`;
@@ -2226,7 +2247,7 @@ function parseBlock(
       Object.assign(action as object, { shapes: forms });
     }
   }
-  const shaped = shapesIn(lines, size);
+  const shaped = shapesIn(printed, size);
   const shapes = shaped?.shapes.map((shape) => ({
     ...shape,
     passives: shapePassives.flatMap(({ forms, passive }) =>
@@ -2246,7 +2267,7 @@ function parseBlock(
   }
   if (actions.length === 0) notes.push("no action could be automated");
   const legendary = legendaryOf(
-    lines,
+    printed,
     actions.map((action) => (action as { readonly name: string }).name),
     spells
       ? (text) =>
@@ -2307,7 +2328,7 @@ function parseBlock(
       actions,
       ...(shapes ? { shapes } : {}),
       ...legendary.fields,
-      text: lines.join("\n"),
+      text: printed.join("\n"),
     },
   };
 }
