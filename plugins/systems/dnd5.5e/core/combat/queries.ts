@@ -31,6 +31,14 @@ import {
   squareKey,
 } from "../grid.ts";
 import { speedOf } from "../tactics.ts";
+import {
+  crossesDifficult,
+  jumpOf,
+  type Mode,
+  speedsOf,
+  type Through,
+  throughOf,
+} from "../movement-modes.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
 import { encodeOption, THROW_PREFIX, weaponItemId } from "./ids.ts";
 import { swallowerOf } from "./swallow.ts";
@@ -205,48 +213,141 @@ export function within5(a: Actor, b: Actor): boolean {
   return distanceFeet(a.position, b.position) <= 5;
 }
 
-export function speedLeft(actor: Actor, stats: Stats): number {
+// The feet left to move in each of its Speeds: that Speed and its Dashes, less what it has moved this turn, as when
+// switching between Speeds.
+export function speedsLeft(
+  actor: Actor,
+  stats: Stats,
+): ReadonlyMap<Mode, number> {
   const held = hasCondition(actor, "grappled", "restrained", ...INCAPACITATING);
-  return held || !actor.position
-    ? 0
-    : Math.max(0, speedOf(actor, stats) - actor.moved);
+  return new Map(
+    [...speedsOf(actor, stats)].map(([mode, feet]) => [
+      mode,
+      held || !actor.position
+        ? 0
+        : Math.max(0, speedOf(actor, { ...stats, speed: feet }) - actor.moved),
+    ]),
+  );
 }
 
+export function speedLeft(actor: Actor, stats: Stats): number {
+  return Math.max(...speedsLeft(actor, stats).values());
+}
+
+// Whether `mover` may pass through `other`'s space: an ally's, an Incapacitated or Tiny creature's, or one two sizes
+// larger or smaller, as the rules allow, or anyone's its traits or the other's let it.
+function passes(
+  mover: Actor,
+  through: Through,
+  other: Actor,
+  access: ContentAccess,
+): boolean {
+  if (other.side === mover.side || isDown(other)) return true;
+  if (hasCondition(other, ...INCAPACITATING)) return true;
+  if (through.creatures === "any") return true;
+  const size = sizeOf(other, access);
+  const own = sizeOf(mover, access);
+  return (
+    size === 0 ||
+    Math.abs(size - own) >= 2 ||
+    (through.creatures === "larger" && size > own) ||
+    // Only a stat block opens its space, as a swarm's, so it's read without working out the creature's stats.
+    (other.source.kind === "monster" &&
+      lookup(access, MonsterSchema, other.source.statBlockId).passives.some(
+        (passive) => passive.kind === "moveThrough" && passive.open,
+      ))
+  );
+}
+
+// The ground as one creature moving finds it: what it can't enter, where it can't stop, and what costs double.
+// Another creature's space costs double unless it's an ally's or a Tiny one's. Walls it passes through can't be
+// stopped in. shortcut: nobody may stop in another's space, a swarm included; let two share a square once the board
+// can draw them.
+export function groundFor(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+  stats: Stats = deriveStats(actor, access),
+): {
+  readonly blocked: ReadonlySet<string>;
+  readonly occupied: ReadonlySet<string>;
+  readonly terrain: ReadonlySet<string>; // difficult terrain on the ground
+  readonly costly: ReadonlySet<string>; // squares that cost double however it moves
+  readonly walls: ReadonlySet<string>;
+  readonly squeeze: boolean;
+  readonly overTerrain: boolean; // crosses difficult terrain at no extra cost, however it moves
+} {
+  const through = throughOf(stats);
+  // shortcut: going through walls means the map's own; a wall a spell raises stops it as it does anyone.
+  const walls = state.combat?.walls ?? [];
+  const solid = blockedSquares(state);
+  const mapWalls = new Set(walls);
+  // A barrier it can't cross stops it as a wall would, and a zone that slows it costs double however it moves.
+  const barred = barredKeys(actor, state, access);
+  const blocked = new Set([
+    ...(through.walls ? solid.filter((key) => !mapWalls.has(key)) : solid),
+    ...barred,
+  ]);
+  const occupied = new Set([...solid, ...barred]);
+  const costly = new Set([
+    ...(through.costly ? walls : []),
+    ...slowingKeys(actor, state, access),
+  ]);
+  for (const other of Object.values(state.actors)) {
+    if (other.id === actor.id || !other.position || isDead(other)) continue;
+    const key = squareKey(other.position);
+    occupied.add(key);
+    if (!passes(actor, through, other, access)) blocked.add(key);
+    else if (other.side !== actor.side && sizeOf(other, access) > 0) {
+      costly.add(key);
+    }
+  }
+  return {
+    blocked,
+    occupied,
+    terrain: difficultSquares(state),
+    costly,
+    walls: blockingSet(state),
+    squeeze: through.squeeze,
+    overTerrain: through.terrain,
+  };
+}
+
+// Every square it can move to this turn, in whichever of its Speeds gets there cheapest. A flyer, climber or burrower
+// crosses difficult terrain at no extra cost.
 export function moveSquares(
   actor: Actor,
   state: DndState,
   stats: Stats,
-  access?: ContentAccess, // for a monster's aura that slows or bars it, and the creature types a zone spares
+  access: ContentAccess,
 ): ReturnType<typeof reachableSquares> {
   const grid = state.combat?.grid;
   if (!grid || !actor.position) return [];
-  const others = Object.values(state.actors).filter(
-    (item) => item.id !== actor.id && item.position && !isDead(item),
-  );
-  const keys = (list: readonly Actor[]): Set<string> =>
-    new Set(
-      list.flatMap((item) => (item.position ? [squareKey(item.position)] : [])),
+  const ground = groundFor(actor, state, access, stats);
+  const jump = jumpOf(stats);
+  const walking =
+    ground.costly.size === 0
+      ? ground.terrain
+      : new Set([...ground.terrain, ...ground.costly]);
+  const best = new Map<string, ReturnType<typeof reachableSquares>[number]>();
+  for (const [mode, feet] of speedsLeft(actor, stats)) {
+    if (feet <= 0) continue;
+    const found = reachableSquares(
+      actor.position,
+      feet,
+      grid,
+      ground.blocked,
+      ground.occupied,
+      crossesDifficult(mode) || ground.overTerrain ? ground.costly : walking,
+      ground.walls,
+      { squeeze: ground.squeeze, jump },
     );
-  const walls = blockedSquares(state);
-  // A barrier it can't cross stops it as a wall would, and a zone that slows it costs double.
-  const barred = barredKeys(actor, state, access);
-  const slowing = slowingKeys(actor, state, access);
-  const difficult = difficultSquares(state);
-  return reachableSquares(
-    actor.position,
-    speedLeft(actor, stats),
-    grid,
-    new Set([
-      ...keys(
-        others.filter((item) => item.side !== actor.side && !isDown(item)),
-      ),
-      ...walls,
-      ...barred,
-    ]),
-    new Set([...keys(others), ...walls, ...barred]),
-    slowing.length > 0 ? new Set([...difficult, ...slowing]) : difficult,
-    blockingSet(state),
-  );
+    for (const item of found) {
+      const key = squareKey(item.square);
+      if (item.feet < (best.get(key)?.feet ?? Infinity)) best.set(key, item);
+    }
+  }
+  return [...best.values()];
 }
 
 // "C7" for the third column of the seventh row, as on a battle map.
