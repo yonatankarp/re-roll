@@ -1,3 +1,4 @@
+import { inspirationEchoes } from "./combat/reactions.ts";
 import {
   PLAYER_ACTOR,
   type SystemContext,
@@ -129,7 +130,10 @@ export function runInspiration(
     };
   }
   return {
-    events: [dndEvent(`${NS}:inspirationSpent`, { actor: attacker.id })],
+    events: [
+      dndEvent(`${NS}:inspirationSpent`, { actor: attacker.id }),
+      ...inspirationEchoes(attacker, context),
+    ],
     frames: [frame("attackRoll", attack)],
   };
 }

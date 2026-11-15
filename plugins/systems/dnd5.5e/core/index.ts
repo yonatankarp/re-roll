@@ -26,6 +26,7 @@ import { actionFrames } from "./combat/actions.ts";
 import { deriveItem } from "./variants.ts";
 import { attackFrames } from "./combat/attack.ts";
 import { movementFrames } from "./combat/movement.ts";
+import { reactionFrames, settleRoll } from "./combat/reactions.ts";
 import { turnFrames } from "./combat/turn.ts";
 import {
   AfterMoveSchema,
@@ -425,6 +426,7 @@ export const dnd55e = defineSystem<DndState>({
     ...legendaryFrames,
     ...actionFrames,
     ...movementFrames,
+    ...reactionFrames,
     ...attackFrames,
     ...turnFrames,
     ...shopFrames,
@@ -532,24 +534,45 @@ export const dnd55e = defineSystem<DndState>({
     const stats = deriveStats(player, context);
     const ability =
       "skill" in parsed ? SKILL_ABILITIES[parsed.skill] : parsed.ability;
-    const roll = rollD20(context.dice, {
+    const edge = {
       advantage: false,
       disadvantage:
         stats.untrainedArmor && (ability === "str" || ability === "dex"),
+    };
+    const first = rollD20(context.dice, {
+      ...edge,
       rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
     });
-    const rolled =
-      roll.natural +
-      checkBonus(stats, player, {
-        ability,
-        ...("skill" in parsed ? { skill: parsed.skill } : {}),
-      });
+    const base = checkBonus(stats, player, {
+      ability,
+      ...("skill" in parsed ? { skill: parsed.skill } : {}),
+    });
+    const judge = (natural: number, bonus: number) => ({
+      total: natural + base + bonus,
+      success: natural + base + bonus >= parsed.dc,
+    });
+    // A companion's Bountiful Luck or the player's Lucky may answer it (combat/reactions.ts).
+    const settled = settleRoll(
+      {
+        roller: player,
+        kind: "check",
+        natural: first.natural,
+        goal: parsed.dc,
+        ...judge(first.natural, 0),
+      },
+      edge,
+      judge,
+      context,
+    );
+    const roll = { natural: settled.natural };
+    const rolled = judge(settled.natural, settled.bonus).total;
     const rescue = rescuedCheck(player, stats, rolled, parsed.dc, context.dice);
     const total = rolled + rescue.bonus;
     const success = total >= parsed.dc;
     return {
       outcome: success ? "success" : "failure",
       events: [
+        ...settled.events,
         ...rescue.events,
         dndEvent(`${NS}:rollReported`, {
           actor: PLAYER_ACTOR,
