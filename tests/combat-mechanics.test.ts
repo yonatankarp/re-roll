@@ -56,6 +56,7 @@ import {
   rollBonus,
 } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import {
+  blockedSquares,
   thornHits,
   thornKeys,
   zonesOf,
@@ -65,7 +66,7 @@ import {
   makeJudge,
   MOST_PRESSURE,
 } from "../plugins/systems/dnd5.5e/core/worth.ts";
-import { speedOf } from "../plugins/systems/dnd5.5e/core/tactics.ts";
+import { speedOf, walkSpeed } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import {
   BONUS_DASH,
   withTactics,
@@ -448,6 +449,128 @@ describe("lingering damage", () => {
       ).toHaveLength(1);
     },
   );
+
+  const onGrid = (...placed: readonly [Actor, number, number][]): DndState => {
+    const state = fight(
+      ...placed.map(([item, x, y]) => ({ ...item, position: { x, y } })),
+    );
+    return state.combat
+      ? {
+          ...state,
+          combat: { ...state.combat, grid: { width: 14, height: 14 } },
+        }
+      : state;
+  };
+  const turnOf = (state: DndState, index: number): DndState =>
+    state.combat ? { ...state, combat: { ...state.combat, index } } : state;
+  const restrained = (state: DndState, id: string): boolean =>
+    hasCondition(actor(state, id), "restrained");
+
+  it("holds one creature at a time in Conjure Elemental, and hurts or frees it as its turns start", async () => {
+    const run = arenaRun(await base(), {});
+    const start = onGrid(
+      [hero(run, { spells: ["conjure-elemental"], level: 9 }), 0, 0],
+      [monster("a"), 5, 5],
+      [monster("b"), 6, 5],
+    );
+    const cast = settle(
+      run,
+      start,
+      [act(PLAYER_ACTOR, `spell:${spell("conjure-elemental")}|@5,5`)],
+      LOW,
+    );
+    // The cast ends the caster's turn, and the spirit seizes the first foe as its turn starts.
+    expect(restrained(cast.state, "a")).toBe(true);
+    expect(damageOf(cast.events, "a")).toEqual([8]);
+    const second = settle(run, cast.state, [endTurn], LOW);
+    expect(restrained(second.state, "b")).toBe(false);
+    expect(damageOf(second.events, "b")).toEqual([]);
+    const back = turnOf(second.state, 0);
+    const hurt = settle(run, back, [endTurn], LOW);
+    expect(damageOf(hurt.events, "a")).toEqual([4]);
+    expect(restrained(settle(run, back, [endTurn], HIGH).state, "a")).toBe(
+      false,
+    );
+  });
+
+  it("lets a foe shut in by Wall of Stone save to get out first", async () => {
+    const run = arenaRun(await base(), {});
+    const start = onGrid(
+      [hero(run, { spells: ["wall-of-stone"], level: 9 }), 0, 0],
+      [monster("a"), 6, 6],
+    );
+    const wall = (dice: Dice) =>
+      settle(
+        run,
+        start,
+        [act(PLAYER_ACTOR, `spell:${spell("wall-of-stone")}|@6,6`)],
+        dice,
+      ).state;
+    expect(actor(wall(LOW), "a").position).toEqual({ x: 6, y: 6 });
+    expect(actor(wall(HIGH), "a").position).not.toEqual({ x: 6, y: 6 });
+  });
+
+  it("rolls a Resilient Sphere at half Speed, and lets a Forcecage's prisoner try to teleport out", async () => {
+    const plain = await base();
+    const printed = plain.content("srd52:spell/misty-step") as Record<
+      string,
+      unknown
+    >;
+    const run = arenaRun(plain, {
+      "srd52:spell/misty-step": {
+        ...printed,
+        automation: "full",
+        activation: {
+          cost: ["bonusAction", "slot"],
+          targeting: { self: true },
+          resolution: {
+            kind: "automatic",
+            damage: [],
+            effects: [{ kind: "teleport", feet: 30 }],
+          },
+        },
+      },
+    });
+    const seal = (modifier: Record<string, unknown>) => ({
+      sourceId: "spell:test",
+      casterId: "a",
+      ends: "spellDuration" as const,
+      modifier: { kind: "sealed" as const, ...modifier },
+    });
+    const me = hero(run, { spells: ["misty-step"], level: 5 });
+    const rolling = { ...me, activeEffects: [seal({ rolls: true })] };
+    expect(walkSpeed(rolling, deriveStats(rolling, run))).toBe(15);
+    const caged = onGrid(
+      [{ ...me, activeEffects: [seal({ teleportSave: "cha" })] }, 0, 0],
+      [hero(run, { id: "friend" }), 3, 3],
+      [monster("a"), 9, 9],
+    );
+    const step = act(
+      PLAYER_ACTOR,
+      `spell:${spell("misty-step")}|${PLAYER_ACTOR}`,
+    );
+    const stuck = settle(run, caged, [step], LOW).state;
+    expect(actor(stuck, PLAYER_ACTOR).activeEffects).toHaveLength(1);
+    expect(actor(stuck, PLAYER_ACTOR).resourcesSpent["slot:2"]).toBe(1);
+    const out = settle(run, caged, [step], HIGH).state;
+    expect(actor(out, PLAYER_ACTOR).activeEffects).toEqual([]);
+  });
+
+  it("blinds a foe that starts its turn near a Prismatic Wall, which no one walks through", async () => {
+    const run = arenaRun(await base(), {});
+    const start = onGrid(
+      [hero(run, { spells: ["prismatic-wall"], level: 17 }), 0, 0],
+      [monster("a"), 10, 6],
+    );
+    const cast = settle(
+      run,
+      start,
+      [act(PLAYER_ACTOR, `spell:${spell("prismatic-wall")}|@6,6`)],
+      LOW,
+    );
+    expect(blockedSquares(cast.state)).toContain("9,6");
+    expect(hasCondition(actor(cast.state, "a"), "blinded")).toBe(true);
+  });
 
   // Spirit Guardians is an area round its caster now (zones.ts), so nothing sits on the foes it caught.
   it("ends with the caster's Concentration, on everyone", async () => {

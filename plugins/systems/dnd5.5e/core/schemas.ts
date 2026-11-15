@@ -262,6 +262,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
         skill: SkillSchema,
       })
       .optional(),
+    // it can teleport out after a save of this ability against its caster's spell save DC, as from a Forcecage
+    teleportSave: AbilitySchema.optional(),
+    rolls: z.literal(true).optional(), // it moves at half Speed, its prison with it, as Resilient Sphere's
   }),
   // Kept by a creature that saved against an area, which no longer affects it, as a ghast's Stench.
   z.strictObject({ kind: z.literal("areaImmunity") }),
@@ -405,6 +408,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     damage: z.array(DamageSchema).optional(),
     follows: z.literal(true).optional(),
     perSlot: z.number().int().min(5).optional(), // feet more radius for each slot level above the spell's
+    bare: z.literal(true).optional(), // it carries none of the spell's area, which another of its zones does
+    // a wall that encloses a creature lets it make this save to get out first, as Wall of Stone's Dexterity
+    escape: AbilitySchema.optional(),
   }),
   // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
   // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe. A caster
@@ -618,6 +624,9 @@ export const AreaEffectSchema = z.strictObject({
   magicWard: z.literal(true).optional(),
   // spellShield blocks one level higher for each slot level above the spell's, as Globe of Invulnerability
   shieldGrows: z.literal(true).optional(),
+  // while a creature has a condition from it, it acts only on that one, with this as that creature's turns start,
+  // as Conjure Elemental's spirit holding the one it Restrained
+  holding: ResolutionSchema.optional(),
   // a spell cast in it fails and is wasted unless the caster makes this save, as a haunting revenant's Haunted Zone
   foilsSpells: z
     .strictObject({ ability: AbilitySchema, dc: z.number().int().min(1) })

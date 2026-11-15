@@ -1649,6 +1649,42 @@
           radius: 15
           duration:
             minutes: 10
+          bare: true
+        - kind: zone
+          zone: area
+          radius: 35
+          duration:
+            minutes: 10
+        - kind: zone
+          zone: light
+          radius: 115
+          duration:
+            minutes: 10
+          bare: true
+        - kind: zone
+          zone: dim
+          radius: 215
+          duration:
+            minutes: 10
+          bare: true
+    area:
+      side: enemy
+      when: turnStart
+      enters: true
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage: []
+        onSuccessDamage: none
+        onFail:
+          - kind: applyCondition
+            condition: blinded
+            duration:
+              minutes: 1
+        onSuccess: []
 - id: srd52:spell/protection-from-energy
   name: Protection from Energy
   level: 3
@@ -3916,6 +3952,7 @@
         - kind: modifier
           modifier:
             kind: sealed
+            rolls: true
           duration:
             concentration: true
             minutes: 1
@@ -4773,6 +4810,22 @@
     area:
       side: enemy
       when: turnStart
+      enters: true
+      holding:
+        kind: save
+        ability: dex
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 4d8
+            type: lightning
+        onSuccessDamage: none
+        onFail: []
+        onSuccess:
+          - kind: removeCondition
+            condition: restrained
       resolution:
         kind: save
         ability: dex
@@ -6585,6 +6638,7 @@
         - kind: zone
           zone: wall
           radius: 10
+          escape: dex
           duration:
             concentration: true
             minutes: 10
@@ -9710,6 +9764,7 @@
         - kind: modifier
           modifier:
             kind: sealed
+            teleportSave: cha
           duration:
             minutes: 60
 - id: srd52:spell/gate

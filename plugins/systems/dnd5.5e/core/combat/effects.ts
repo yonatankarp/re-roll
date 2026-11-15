@@ -45,6 +45,7 @@ import {
   type Modifier,
   MonsterSchema,
   type Passive,
+  type Resolution,
   SpellSchema,
 } from "../schemas.ts";
 import { multiattackUses } from "../multiattack-uses.ts";
@@ -63,7 +64,7 @@ import {
   rescuedSave,
   traitSaveAdvantage,
 } from "../trait-rules.ts";
-import { dodging } from "../tactics.ts";
+import { dodging, walkSpeed } from "../tactics.ts";
 import { AIM, ALL, HIT_DICE, THROW_PREFIX, weaponItemId } from "./ids.ts";
 import {
   distanceFeet,
@@ -1028,13 +1029,16 @@ function zoneEvents(
     printed?.shieldGrows && printed.spellShield !== undefined
       ? { ...printed, spellShield: Math.min(9, printed.spellShield + above) }
       : printed;
-  const resolution =
-    area?.resolution?.kind === "save"
+  // Its saves' DCs are fixed as cast.
+  const fixed = (printed: Resolution | undefined): Resolution | undefined =>
+    printed?.kind === "save"
       ? {
-          ...area.resolution,
-          dc: { base: evaluateFormula(area.resolution.dc, stats), add: [] },
+          ...printed,
+          dc: { base: evaluateFormula(printed.dc, stats), add: [] },
         }
-      : area?.resolution;
+      : printed;
+  const resolution = fixed(area?.resolution);
+  const holding = fixed(area?.holding);
   for (const effect of effects) {
     if (effect.kind !== "zone") continue;
     // A higher slot widens it, as Fog Cloud's 20 feet a level.
@@ -1050,6 +1054,16 @@ function zoneEvents(
       effect.zone === "wall" ? wallRing(centre, radius, context) : null;
     events.push(
       ...(wall?.pushed ?? []),
+      ...(wall && effect.escape
+        ? wallEscapes(
+            centre,
+            radius,
+            effect.escape,
+            actor,
+            wall.squares,
+            context,
+          )
+        : []),
       dndEvent(`${NS}:effectAdded`, {
         actor: actor.id,
         effect: {
@@ -1063,8 +1077,14 @@ function zoneEvents(
             radius,
             ...(effect.damage ? { damage: effect.damage } : {}),
             ...(effect.follows ? { follows: true as const } : {}),
-            ...(area
-              ? { area: { ...area, ...(resolution ? { resolution } : {}) } }
+            ...(area && !effect.bare
+              ? {
+                  area: {
+                    ...area,
+                    ...(resolution ? { resolution } : {}),
+                    ...(holding ? { holding } : {}),
+                  },
+                }
               : {}),
             ...(wall ? { blocks: wall.squares } : {}),
             name: action.name,
@@ -1078,9 +1098,69 @@ function zoneEvents(
   return events;
 }
 
+// A creature the wall shuts in can save to get out first, spending its Reaction on a walk to the nearest open square
+// outside, as Wall of Stone allows. shortcut: only the caster's foes try, since its friends would rather stay.
+function wallEscapes(
+  centre: Square,
+  radius: number,
+  ability: Ability,
+  caster: Actor,
+  wall: readonly string[],
+  context: Context,
+): SystemEvent[] {
+  const { state } = context;
+  const grid = state.combat?.grid;
+  if (!grid) return [];
+  const dc = evaluateFormula(
+    { base: 0, add: [{ kind: "spellSaveDc" }] },
+    deriveStats(caster, context),
+  );
+  const shut = new Set([...blockedSquares(state), ...wall]);
+  const taken = new Set(
+    Object.values(state.actors).flatMap((item) =>
+      item.position && !isDead(item) ? [squareKey(item.position)] : [],
+    ),
+  );
+  const events: SystemEvent[] = [];
+  for (const item of Object.values(state.actors)) {
+    const at = item.position;
+    if (
+      !at ||
+      isDown(item) ||
+      item.side === caster.side ||
+      !item.budget.reaction ||
+      distanceFeet(centre, at) >= radius
+    ) {
+      continue;
+    }
+    const saved = rollSave(item, ability, dc, context);
+    events.push(...saved.events);
+    if (!saved.saved) continue;
+    const reach = walkSpeed(item, deriveStats(item, context));
+    let best: Square | null = null;
+    for (let x = 0; x < grid.width; x += 1) {
+      for (let y = 0; y < grid.height; y += 1) {
+        const square = { x, y };
+        const key = squareKey(square);
+        if (distanceFeet(centre, square) <= radius || shut.has(key)) continue;
+        if (taken.has(key) || distanceFeet(at, square) > reach) continue;
+        if (!best || distanceFeet(at, square) < distanceFeet(at, best)) {
+          best = square;
+        }
+      }
+    }
+    if (!best) continue;
+    taken.add(squareKey(best));
+    events.push(
+      dndEvent(`${NS}:budgetSpent`, { actor: item.id, kind: "reaction" }),
+      dndEvent(`${NS}:moved`, { actor: item.id, to: best, feet: 0 }),
+    );
+  }
+  return events;
+}
+
 // A wall's squares: the edge of the area round `centre`. A creature standing on it is pushed one square in,
 // and where there's no room it stays, leaving a gap.
-// shortcut: Wall of Stone's save to climb out before it closes isn't offered.
 function wallRing(
   centre: Square,
   radius: number,
@@ -1412,6 +1492,8 @@ export function resolveAction(
 
   const beginConcentration = (effects: readonly LeafEffect[]): void => {
     if (!usesConcentration(effects) && !action.concentrates) return;
+    // An area acting later keeps the Concentration its spell began, as Conjure Elemental's spirit restraining.
+    if (actor.concentratingOn === spellSource(action)) return;
     if (actor.concentratingOn !== null) {
       events.push(dndEvent(`${NS}:concentrationEnded`, { actor: actor.id }));
     }

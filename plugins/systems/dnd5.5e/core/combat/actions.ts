@@ -29,7 +29,7 @@ import {
   frame,
 } from "../state.ts";
 import { distanceFeet, type Square, squareKey } from "../grid.ts";
-import { deriveStats } from "../stats.ts";
+import { deriveStats, evaluateFormula, type KnownAction } from "../stats.ts";
 import { rollD20 } from "../rules.ts";
 import { FLEE, runFlee } from "../legendary.ts";
 import {
@@ -62,6 +62,7 @@ import {
   payCosts,
   resolveAction,
   resolveTargets,
+  rollSave,
 } from "./effects.ts";
 import { keepsHidden, metamagicCast } from "../metamagic.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
@@ -155,6 +156,51 @@ export function runTakeAction(
   return castAction(actor, actionId, slot, targetId, context);
 }
 
+// Teleporting out of a prison that allows it, as a Forcecage: a save against its caster's spell save DC first. On a
+// success the prison ends and the teleport goes ahead; on a failure the magic is wasted.
+function caged(
+  actor: Actor,
+  action: KnownAction,
+  context: Context,
+): { readonly failed: boolean; readonly events: SystemEvent[] } | null {
+  const { resolution } = action.activation;
+  if (
+    resolution.kind !== "automatic" ||
+    !resolution.effects.some((effect) => effect.kind === "teleport")
+  ) {
+    return null;
+  }
+  const seal = actor.activeEffects.find(
+    ({ modifier }) => modifier.kind === "sealed" && modifier.teleportSave,
+  );
+  if (seal?.modifier.kind !== "sealed" || !seal.modifier.teleportSave) {
+    return null;
+  }
+  const caster = context.state.actors[seal.casterId];
+  const dc = caster
+    ? evaluateFormula(
+        { base: 0, add: [{ kind: "spellSaveDc" }] },
+        deriveStats(caster, context),
+      )
+    : 10;
+  const save = rollSave(actor, seal.modifier.teleportSave, dc, context, true);
+  return {
+    failed: !save.saved,
+    events: [
+      ...save.events,
+      ...(save.saved
+        ? [
+            dndEvent(`${NS}:effectEnded`, {
+              actor: actor.id,
+              sourceId: seal.sourceId,
+              casterId: seal.casterId,
+            }),
+          ]
+        : []),
+    ],
+  };
+}
+
 // Pays for an action and resolves it, at a target id (a creature, ALL, or an aim) or at chosen creatures.
 // Darts and rays go one each at the chosen ids, which may repeat.
 function castAction(
@@ -184,7 +230,9 @@ function castAction(
       );
   if (counter) return { frames: [counter] };
   const fumbled = spellFumble(actor, action, context);
-  const foiled = fumbled ? null : spellFoiled(actor, action, context);
+  const foiled = fumbled
+    ? null
+    : (spellFoiled(actor, action, context) ?? caged(actor, action, context));
   if (fumbled || foiled?.failed) {
     return {
       events: [

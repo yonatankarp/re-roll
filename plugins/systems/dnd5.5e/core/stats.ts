@@ -1712,8 +1712,14 @@ export function scaleActivation(
   return {
     ...activation,
     resolution: scaled(activation.resolution),
-    ...(area?.resolution
-      ? { area: { ...area, resolution: scaled(area.resolution) } }
+    ...(area?.resolution || area?.holding
+      ? {
+          area: {
+            ...area,
+            ...(area.resolution ? { resolution: scaled(area.resolution) } : {}),
+            ...(area.holding ? { holding: scaled(area.holding) } : {}),
+          },
+        }
       : {}),
   };
 }

@@ -229,9 +229,12 @@ export function runZoneTick(
 ): SystemResult {
   const { state } = context;
   const owner = state.actors[payload.owner];
+  // A spell may leave several zones, as Prismatic Wall's wall and light: the one that acts.
   const zone = zonesOf(state, context).find(
     (item) =>
-      item.owner === payload.owner && item.sourceId === payload.sourceId,
+      item.owner === payload.owner &&
+      item.sourceId === payload.sourceId &&
+      item.area?.resolution !== undefined,
   );
   if (!owner || !zone) return {};
   const targets = payload.targets.flatMap((id) => {
@@ -243,11 +246,21 @@ export function runZoneTick(
       ? [target]
       : [];
   });
-  const action = zoneAction(zone, zone.name ?? "");
-  if (targets.length === 0 || !action) return {};
+  // A spirit holding the creature it Restrained acts only on that one, as Conjure Elemental's.
+  const held = zone.area?.holding ? heldBy(zone, state) : undefined;
+  const acting = held
+    ? targets.filter((target) => target.id === held.id)
+    : targets;
+  const action = zoneAction(
+    held && zone.area?.holding
+      ? { ...zone, area: { ...zone.area, resolution: zone.area.holding } }
+      : zone,
+    zone.name ?? "",
+  );
+  if (acting.length === 0 || !action) return {};
   const marks = [
     ...(zone.area?.enters
-      ? targets.map((target) =>
+      ? acting.map((target) =>
           dndEvent(`${NS}:oncePerTurnUsed`, {
             actor: target.id,
             key: caughtKey(zone, state),
@@ -255,14 +268,14 @@ export function runZoneTick(
         )
       : []),
     // What it puts on a creature as its turn ends is first saved against at the end of its next turn.
-    ...targets.map((target) =>
+    ...acting.map((target) =>
       dndEvent(`${NS}:oncePerTurnUsed`, {
         actor: target.id,
         key: `${FRESH}${zone.sourceId}`,
       }),
     ),
   ];
-  const result = resolveAction(action, owner, targets, context, zone.level);
+  const result = resolveAction(action, owner, acting, context, zone.level);
   const events = [...marks, ...(result.events ?? [])];
   const { maxDamage } = zone.area ?? {};
   if (maxDamage !== undefined) {
@@ -295,6 +308,20 @@ export function runZoneTick(
     }
   }
   return { events, frames: [...(result.frames ?? []), CHECK_END] };
+}
+
+// The creature a zone holds with a condition it gave, if any.
+function heldBy(zone: Zone, state: DndState): Actor | undefined {
+  return Object.values(state.actors).find(
+    (item) =>
+      !isDead(item) &&
+      item.activeEffects.some(
+        ({ sourceId, casterId, modifier }) =>
+          sourceId === zone.sourceId &&
+          casterId === zone.owner &&
+          modifier.kind === "condition",
+      ),
+  );
 }
 
 // Kept in a creature's usedThisTurn: a zone's effects went on it this turn, so they aren't saved against yet.
