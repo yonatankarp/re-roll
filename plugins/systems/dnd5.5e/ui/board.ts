@@ -1,5 +1,6 @@
 import { PLAYER_ACTOR } from "#sdk";
 import { AIM, parseOption } from "../core/combat/ids.ts";
+import { heightOf } from "../core/combat/falling.ts";
 import type { BoardHost, BoardUpdate, ShellUpdate } from "./board-data.ts";
 import {
   type BoardContext,
@@ -219,10 +220,17 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
         setHp(token, actor.hp);
         token.node.classList.toggle("active", actor.active);
         token.node.dataset.side = sideOf(actor);
-        token.notes = [actor.status ?? "", ...actor.conditions].filter(Boolean);
-        // Small marks for the two states that change how to fight a creature: Dodging and Hidden.
+        // How high it is, flying, climbing or lifted (combat/falling.ts).
+        const held = actors[actor.id];
+        const height = held ? heightOf(held) : 0;
+        const up = height > 0 ? [`${String(height)} ft up`] : [];
+        token.notes = [actor.status ?? "", ...up, ...actor.conditions].filter(
+          Boolean,
+        );
+        token.node.classList.toggle("aloft", height > 0);
+        // Small marks for what changes how to fight a creature: its height, Dodging and Hidden.
         const marks = MARKED.filter((mark) => actor.conditions.includes(mark));
-        token.node.dataset.marks = marks.join(" · ");
+        token.node.dataset.marks = [...up, ...marks].join(" · ");
         for (const mark of MARKED) {
           token.node.classList.toggle(`is-${mark}`, marks.includes(mark));
         }

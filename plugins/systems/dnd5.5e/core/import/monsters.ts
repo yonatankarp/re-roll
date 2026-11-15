@@ -1747,6 +1747,12 @@ export function traitPassive(label: string, text: string): Passive | null {
     };
   }
   if (label === "Pack Tactics") return { kind: "packTactics" };
+  if (
+    label === "Web Walker" &&
+    /\bignores movement restrictions caused by webs\b/.test(text)
+  ) {
+    return { kind: "webWalker" };
+  }
   const through = moveThroughOf(text);
   if (through) return through;
   if (

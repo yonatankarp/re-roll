@@ -6,6 +6,7 @@ import {
   fallFrames,
   heightOf,
 } from "../plugins/systems/dnd5.5e/core/combat/falling.ts";
+import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { provokers } from "../plugins/systems/dnd5.5e/core/combat/movement.ts";
 import {
   moveSquares,
@@ -77,6 +78,7 @@ const FIXTURES = [
       },
     ],
   }),
+  block("weaver", { passives: [{ kind: "webWalker" }] }),
   block("swarm", {
     passives: [
       { ...through, open: true },
@@ -397,6 +399,36 @@ describe("sharing a square and other movement traits", () => {
     ]);
     expect(walks(content, state, "hero").has("3,1")).toBe(true);
     expect(walks(content, state, "swarm").has("6,1")).toBe(true);
+  });
+
+  it("isn't held by webs with Web Walker", async () => {
+    const content = await run();
+    const state = arena([
+      monster("weaver", "weaver", 1, 1),
+      monster("brute", "brute", 2, 1),
+      monster("caster", "brute", 5, 1, "party"),
+    ]);
+    const webbed = (id: string, web: boolean) =>
+      leafEvents(
+        [
+          {
+            kind: "applyCondition",
+            condition: "restrained",
+            duration: "instantaneous",
+            repeatSave: false,
+            endsOnDamage: false,
+            ...(web ? { web: true as const } : {}),
+          },
+        ],
+        "web",
+        get(state, "caster"),
+        get(state, id),
+        { state, dice: scripted([]).dice, ...content },
+      ).some((event) => event.kind === `${NS}:effectAdded`);
+    expect(webbed("brute", true)).toBe(true);
+    expect(webbed("weaver", true)).toBe(false);
+    // Other restraints hold it as they would anyone.
+    expect(webbed("weaver", false)).toBe(true);
   });
 
   it("jumps by Dexterity with Jumper", async () => {

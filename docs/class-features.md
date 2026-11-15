@@ -19,7 +19,7 @@ through the real level-up decisions, and each feature gained is checked against 
 | Monk | 4 | 9 | 28 |
 | Paladin | 11 | 8 | 19 |
 | Ranger | 10 | 2 | 26 |
-| Rogue | 5 | 4 | 29 |
+| Rogue | 6 | 4 | 28 |
 | Sorcerer | 9 | 3 | 25 |
 | Warlock | 14 | 4 | 23 |
 | Wizard | 4 | 1 | 25 |
@@ -356,7 +356,7 @@ through the real level-up decisions, and each feature gained is checked against 
 | Rogue (Soulknife) | 13 | Psychic Veil | text-only | no mechanics |
 | Rogue (Soulknife) | 17 | Rend Mind | text-only | no mechanics |
 | Rogue (Thief) | 3 | Fast Hands | text-only | no mechanics |
-| Rogue (Thief) | 3 | Second-Story Work | text-only | no mechanics |
+| Rogue (Thief) | 3 | Second-Story Work | working | passive: movementMode, jump |
 | Rogue (Thief) | 9 | Supreme Sneak | text-only | no mechanics |
 | Rogue (Thief) | 13 | Use Magic Device | text-only | no mechanics |
 | Rogue (Thief) | 17 | Thief’s Reflexes | text-only | no mechanics |

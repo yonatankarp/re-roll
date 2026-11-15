@@ -434,6 +434,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .strictObject({ ability: AbilitySchema, dc: FormulaSchema })
       .optional(),
     hpAtMost: z.number().int().min(1).optional(), // only a target with this many Hit Points or fewer
+    web: z.literal(true).optional(), // webs hold it, which a Web Walker ignores, as with Web
     endsOnDamage: z.boolean().default(false),
     endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature, as Modify Memory's
     // Ends when the creature attacks or deals damage ("attack"), or takes any action ("action"), as Fade Away's.
@@ -1045,6 +1046,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     runUp: z.number().int().min(0).default(10),
     ability: z.literal("dex").optional(), // jumps by Dexterity instead of Strength, as a cat's Jumper
   }),
+  // Webs never hold it (applyCondition `web`), as a spider's Web Walker.
+  z.strictObject({ kind: z.literal("webWalker") }),
   // Leaving a foe's reach never provokes an Opportunity Attack, as with Flyby or Agile.
   z.strictObject({ kind: z.literal("noOpportunityAttacks") }),
   // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every

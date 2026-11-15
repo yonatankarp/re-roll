@@ -1012,6 +1012,10 @@ describe("monster traits read as passives", () => {
           "Jumper",
           "The beast’s jump distance is determined using its Dexterity rather than its Strength.",
         ),
+        entry(
+          "Web Walker",
+          "The beast ignores movement restrictions caused by webs, and it knows the location of any other creature in contact with the same web.",
+        ),
       ].join(""),
     );
     const through = (fields: object) => ({
@@ -1042,6 +1046,7 @@ describe("monster traits read as passives", () => {
       through({ creatures: "any", walls: true, costly: true }),
       { kind: "noOpportunityAttacks" },
       { kind: "jump", runUp: 10, ability: "dex" },
+      { kind: "webWalker" },
     ]);
     // Spider Climb is the stat block's Climb Speed, so nothing is left out.
     expect(parsed?.notes).toEqual([

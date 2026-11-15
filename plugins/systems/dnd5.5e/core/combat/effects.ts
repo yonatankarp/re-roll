@@ -881,7 +881,8 @@ export function leafEvents(
               modifier.kind === "conditionImmunity" &&
               modifier.condition === effect.condition,
           ) ||
-          (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost)
+          (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost) ||
+          (effect.web && hasPassive(deriveStats(target, context), "webWalker"))
         )
           break;
         const conditionSave = effect.endSave
