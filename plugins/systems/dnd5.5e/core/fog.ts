@@ -318,7 +318,8 @@ export function withReveal(
     const walker = before.actors[id];
     const moved = after.actors[id];
     if (!walker || !moved || walker.side !== "party" || feet <= 0) continue;
-    const path = walksOf(walker, before, context).get(squareKey(to)) ?? [];
+    const path =
+      walksOf(walker, before, context).get(squareKey(to))?.path ?? [];
     for (const square of path) {
       for (const key of seenFrom(moved, square, after, context)) seen.add(key);
     }

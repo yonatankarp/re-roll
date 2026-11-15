@@ -1,7 +1,10 @@
 import { PLAYER_ACTOR } from "#sdk";
 import { describe, expect, it } from "vitest";
 import type { RunContext } from "../engine/run/turn.ts";
-import { moveSquares } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import {
+  inReach,
+  moveSquares,
+} from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { resolveAction } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { releasedGrapples } from "../plugins/systems/dnd5.5e/core/combat/grapple.ts";
 import { squareKey } from "../plugins/systems/dnd5.5e/core/grid.ts";
@@ -222,6 +225,8 @@ describe("dragging a grappled creature", () => {
       2,
     );
     expect(releasedGrapples(state, content)).toEqual([]);
+    // It comes along, so it never sees its grappler leave its reach.
+    expect(get(state, PLAYER_ACTOR).budget.reaction).toBe(true);
   });
 });
 
@@ -263,6 +268,22 @@ describe("sharing a square", () => {
       (item) => item.name === "Head Fruits",
     );
     if (!fruits) throw new Error("Head Fruits");
+    // Only the undead ally inside the tree's space can be chosen, not one beside it, nor the tree itself.
+    const beside = arena([
+      ...Object.values(state.actors),
+      monster("ghast", "ghoul", 5, 1),
+    ]);
+    expect(
+      inReach(fruits, tree, beside, content).map((item) => item.id),
+    ).toEqual(["ghoul"]);
+    expect(
+      inReach(
+        fruits,
+        tree,
+        arena([tree, monster("ghast", "ghoul", 5, 1)]),
+        content,
+      ),
+    ).toEqual([]);
     const context = { state, dice: scripted([]).dice, ...content };
     const fed = resolveAction(fruits, tree, [get(state, "ghoul")], context);
     expect(fed.events?.map((event) => event.kind)).toEqual(

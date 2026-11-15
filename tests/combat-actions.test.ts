@@ -945,6 +945,7 @@ describe("actions anyone can take", () => {
     expect(who(dragged.state, PLAYER_ACTOR).moved).toBe(20);
     expect(who(dragged.state, "foe").position).toMatchObject({ x: 4 });
     expect(hasCondition(who(dragged.state, "foe"), "grappled")).toBe(true);
+    expect(who(dragged.state, "foe").budget.reaction).toBe(true);
     const left = settle(run, held, [moveTo(PLAYER_ACTOR, 1, 5)], LOW);
     expect(hasCondition(who(left.state, "foe"), "grappled")).toBe(false);
   });

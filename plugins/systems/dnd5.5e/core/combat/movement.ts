@@ -52,6 +52,7 @@ import {
   CHECK_END,
   type Context,
   dragEvents,
+  type Walk,
   enemies,
   hasPassive,
   meleeReach,
@@ -88,20 +89,20 @@ export function meleeReachOf(
 // The board asks about every square it can walk to, so the walks are found once per actor and state.
 const walks = new WeakMap<
   Actor,
-  WeakMap<DndState, ReadonlyMap<string, readonly Square[]>>
+  WeakMap<DndState, ReadonlyMap<string, Walk>>
 >();
 export function walksOf(
   actor: Actor,
   state: DndState,
   access: ContentAccess,
-): ReadonlyMap<string, readonly Square[]> {
+): ReadonlyMap<string, Walk> {
   const byState = walks.get(actor) ?? new WeakMap();
   walks.set(actor, byState);
   const found =
     byState.get(state) ??
     new Map(
       moveSquares(actor, state, deriveStats(actor, access), access).map(
-        ({ square, path }) => [squareKey(square), path],
+        (walk) => [squareKey(walk.square), walk],
       ),
     );
   byState.set(state, found);
@@ -123,11 +124,16 @@ export function provokers(
   if (hasPassive(deriveStats(actor, access), "noOpportunityAttacks")) return [];
   // Sentinel's Guardian: Disengage doesn't stop a Sentinel's Opportunity Attack.
   const disengaged = hasTactic(actor, "disengage");
-  const walked = path ??
-    walksOf(actor, state, access).get(squareKey(to)) ?? [to];
+  const walk = path
+    ? undefined
+    : walksOf(actor, state, access).get(squareKey(to));
+  const walked = path ?? walk?.path ?? [to];
   const steps = [actor.position, ...walked];
+  // A creature it drags comes along, so the walk never leaves its reach.
+  const dragged = new Set((walk?.drag ?? []).map(({ actor: id }) => id));
   return enemies(state, actor).flatMap((foe) => {
     if (
+      dragged.has(foe.id) ||
       !foe.budget.reaction ||
       isDown(foe) ||
       sealed(foe) ||
