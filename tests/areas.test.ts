@@ -39,6 +39,7 @@ import {
   hasCondition,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import {
+  damageResponses,
   deriveStats,
   type KnownAction,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
@@ -1176,6 +1177,150 @@ describe("one-off auras", () => {
     );
     expect(hasCondition(actor(inside, "misty"), "incapacitated")).toBe(false);
     expect(hasCondition(actor(inside, "misty"), "invisible")).toBe(true);
+  });
+});
+
+describe("what a slot or a circle changes in an area", () => {
+  const zoneSpell = (
+    zone: Record<string, unknown>,
+    area: Record<string, unknown>,
+    follows = false,
+  ): KnownAction =>
+    spell("Shape", {
+      cost: ["action", "slot"],
+      targeting: follows
+        ? {
+            area: { shape: "emanation", radius: 10 },
+            range: "self",
+            side: "ally",
+          }
+        : { area: { shape: "sphere", radius: 10 }, range: 120, side: "enemy" },
+      resolution: {
+        kind: "automatic",
+        damage: [],
+        effects: [
+          {
+            kind: "zone",
+            zone: "area",
+            radius: 10,
+            duration: { concentration: true, minutes: 1 },
+            ...(follows ? { follows: true } : {}),
+            ...zone,
+          },
+        ],
+      },
+      area,
+    });
+  const cast = (
+    run: RunContext,
+    start: DndState,
+    action: KnownAction,
+    slot: number,
+  ) =>
+    apply(
+      start,
+      resolveAction(
+        action,
+        actor(start, PLAYER_ACTOR),
+        [],
+        contextOf(run, start, LOW),
+        slot,
+        false,
+        { x: 5, y: 5 },
+      ).events ?? [],
+    );
+
+  it("widens a fog with the slot, and raises the level a globe blocks", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 11, 11));
+    const wide = cast(
+      run,
+      start,
+      zoneSpell({ perSlot: 20 }, { disperses: true }),
+      5,
+    );
+    expect(zonesOf(wide)[0]?.radius).toBe(50);
+    const globe = cast(
+      run,
+      start,
+      zoneSpell({}, { spellShield: 5, shieldGrows: true, self: true }, true),
+      5,
+    );
+    expect(zonesOf(globe)[0]?.area?.spellShield).toBe(7);
+  });
+
+  it("gives Advantage only on magical saves in a circle, and no damage on a success that halves it", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 5, 5), monster("foe", "zombie", 0, 0));
+    const circled = cast(
+      run,
+      start,
+      zoneSpell(
+        {},
+        {
+          side: "ally",
+          self: true,
+          magicWard: true,
+          grants: [{ kind: "advantage", on: "saves", magical: true }],
+        },
+        true,
+      ),
+      5,
+    );
+    const context = contextOf(run, circled, HIGH);
+    const me = actor(circled, PLAYER_ACTOR);
+    expect(
+      placedFlag(
+        me,
+        "advantage",
+        "saves",
+        circled,
+        context,
+        undefined,
+        [],
+        true,
+      ),
+    ).toBe(true);
+    expect(placedFlag(me, "advantage", "saves", circled, context)).toBe(false);
+    const blast = spell("Blast", {
+      cost: ["action", "slot"],
+      targeting: { creatures: 1, range: 60, side: "enemy" },
+      resolution: {
+        kind: "save",
+        ability: "dex",
+        dc: { base: 5, add: [] },
+        damage: [{ amount: { bonus: { base: 10, add: [] } }, type: "fire" }],
+        onSuccessDamage: "half",
+        onFail: [],
+        onSuccess: [],
+      },
+    });
+    const hit = resolveAction(blast, actor(circled, "foe"), [me], context, 3);
+    expect(damageTo(hit.events ?? [], PLAYER_ACTOR)).toEqual([]);
+  });
+
+  it("gives Immunity to Thunder damage inside Silence", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 5, 5));
+    const quiet = cast(
+      run,
+      start,
+      zoneSpell(
+        {},
+        {
+          noSpells: "verbal",
+          grants: [{ kind: "immunity", damage: "thunder" }],
+        },
+      ),
+      3,
+    );
+    const context = contextOf(run, quiet, LOW);
+    expect(damageResponses(actor(quiet, "foe"), context).immunities).toContain(
+      "thunder",
+    );
+    expect(
+      damageResponses(actor(quiet, PLAYER_ACTOR), context).immunities,
+    ).not.toContain("thunder");
   });
 });
 

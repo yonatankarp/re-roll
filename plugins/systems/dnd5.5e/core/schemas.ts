@@ -175,6 +175,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     ability: AbilitySchema.optional(),
     // only on saves to avoid or end these conditions, as a sivis scribe's Words of Reason
     conditions: z.array(ConditionSchema).min(1).optional(),
+    magical: z.literal(true).optional(), // only on saves against spells and magic, as Circle of Power
     // attacksAgainst only for the effect's caster, as Lords' Alliance Agent's Reassert Honor.
     casterOnly: z.literal(true).optional(),
   }),
@@ -230,6 +231,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     dealtBy: z.enum(["bearer", "caster"]),
     weaponOnly: z.boolean().default(false),
     damage: DamageSchema,
+    within: z.number().int().min(5).optional(), // only against a creature this near the bearer
+    // the type picked for each hit, the one the target resists least, as Conjure Minor Elementals' acid to lightning
+    types: z.array(DamageTypeSchema).min(2).optional(),
     once: z.boolean().optional(), // ends after the bearer's next attack roll, as a bandit crime lord's Deadly Aim
   }),
   // Limits on what the bearer can do on its turns, as Slow gives: `oneAction` is an action or a Bonus Action, not
@@ -400,6 +404,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     duration: DurationSchema,
     damage: z.array(DamageSchema).optional(),
     follows: z.literal(true).optional(),
+    perSlot: z.number().int().min(5).optional(), // feet more radius for each slot level above the spell's
   }),
   // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
   // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe. A caster
@@ -609,6 +614,10 @@ export const AreaEffectSchema = z.strictObject({
   // it also acts on a creature that walks into it, and on each creature only once a turn, as Spirit Guardians
   enters: z.literal(true).optional(),
   bloodied: z.literal(true).optional(), // only on Bloodied creatures, as a Dead Three scion's Culling Aura
+  // a success against a spell or magic that halves damage takes none, as Circle of Power
+  magicWard: z.literal(true).optional(),
+  // spellShield blocks one level higher for each slot level above the spell's, as Globe of Invulnerability
+  shieldGrows: z.literal(true).optional(),
   // a spell cast in it fails and is wasted unless the caster makes this save, as a haunting revenant's Haunted Zone
   foilsSpells: z
     .strictObject({ ability: AbilitySchema, dc: z.number().int().min(1) })

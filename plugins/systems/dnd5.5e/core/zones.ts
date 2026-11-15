@@ -352,6 +352,7 @@ export function placedFlag(
   access: ContentAccess,
   ability?: Ability,
   conditions: readonly string[] = [], // what the save would put on it or end, for Advantage only against those
+  magical = false, // a save against a spell or magic
 ): boolean {
   if (!state.combat || !actor.position) return false;
   const given =
@@ -363,7 +364,8 @@ export function placedFlag(
         (!modifier.ability || modifier.ability === ability) &&
         (!("conditions" in modifier) ||
           !modifier.conditions ||
-          modifier.conditions.some((item) => conditions.includes(item))),
+          modifier.conditions.some((item) => conditions.includes(item))) &&
+        (!("magical" in modifier) || !modifier.magical || magical),
     );
   // Light sensitivity is a stat block's trait, so a character is never asked for it.
   if (

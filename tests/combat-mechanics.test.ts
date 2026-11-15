@@ -1117,6 +1117,50 @@ describe("extra damage riders", () => {
     expect(damage("ally", "a")).toEqual([7]);
   });
 
+  it("adds Conjure Minor Elementals' damage only to hits in its Emanation, and more with a higher slot", async () => {
+    const run = arenaRun(await base(), {});
+    const cme = `spell:${spell("conjure-minor-elementals")}`;
+    const at = (item: Actor, x: number): Actor => ({
+      ...item,
+      position: { x, y: 0 },
+    });
+    const placed = fight(
+      at(hero(run, { spells: ["conjure-minor-elementals"], level: 9 }), 0),
+      at(monster("a"), 1),
+      at(monster("b"), 6),
+    );
+    const start: DndState = placed.combat
+      ? {
+          ...placed,
+          combat: { ...placed.combat, grid: { width: 10, height: 10 } },
+        }
+      : placed;
+    const damage = (slot: string, target: string): number[] => {
+      const cast = settle(
+        run,
+        start,
+        [act(PLAYER_ACTOR, `${cme}|${PLAYER_ACTOR}|${slot}`)],
+        HIGH,
+      );
+      return damageOf(
+        settle(
+          run,
+          cast.state,
+          [
+            {
+              kind: `${NS}:applyHit`,
+              payload: hit(PLAYER_ACTOR, sword, target),
+            },
+          ],
+          HIGH,
+        ).events,
+      );
+    };
+    expect(damage("4", "a")).toEqual([7, 16]);
+    expect(damage("5", "a")).toEqual([7, 24]);
+    expect(damage("4", "b")).toEqual([7]);
+  });
+
   it("limits Divine Favor to weapons, and counts it once", async () => {
     const run = arenaRun(await base(), {});
     const favor = `spell:${spell("divine-favor")}`;

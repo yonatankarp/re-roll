@@ -5282,6 +5282,7 @@
         - kind: zone
           zone: fog
           radius: 20
+          perSlot: 20
           duration:
             concentration: true
             minutes: 60
@@ -9254,6 +9255,9 @@
     your enemies. Using a Higher-Level Spell Slot. The damage increases by 1d8
     for each spell slot level above 4.
   automation: partial
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
   activation:
     cost:
       - action
@@ -9279,6 +9283,12 @@
               amount:
                 dice: 2d8
               type: fire
+            within: 15
+            types:
+              - acid
+              - cold
+              - fire
+              - lightning
           duration:
             concentration: true
             minutes: 10
@@ -9779,6 +9789,7 @@
           follows: true
     area:
       spellShield: 5
+      shieldGrows: true
       self: true
 - id: srd52:spell/greater-restoration
   name: Greater Restoration
@@ -10575,6 +10586,9 @@
             minutes: 10
     area:
       noSpells: verbal
+      grants:
+        - kind: immunity
+          damage: thunder
 - id: srd52:spell/slow
   name: Slow
   level: 3

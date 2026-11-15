@@ -54,6 +54,7 @@ import { type Caster, multiclassSlots } from "./multiclass.ts";
 import { holdsConcentration, withMetamagic } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
 import { THROW_PREFIX, WEAPON_PREFIX } from "./combat/ids.ts";
+import { zoneModifiers } from "./zones.ts";
 
 // Content is frozen once loaded, so each entry is checked against a schema only once.
 const parsed = new WeakMap<object, Map<z.ZodType, unknown>>();
@@ -1662,6 +1663,13 @@ export function scaleActivation(
           amount: addDice(effect.amount, step.addDice, times),
         };
       }
+      // An extra hit's damage grows too, as Conjure Minor Elementals'.
+      if (effect.kind === "modifier" && effect.modifier.kind === "hitDamage") {
+        const [scaled] = damage([effect.modifier.damage]);
+        return scaled
+          ? { ...effect, modifier: { ...effect.modifier, damage: scaled } }
+          : effect;
+      }
       return effect.kind === "modifier" &&
         effect.modifier.kind === "lingeringDamage"
         ? {
@@ -1771,6 +1779,8 @@ export function damageResponses(
   for (const modifier of [
     ...actor.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
+    // What the areas it stands in give it, as Silence's Immunity to Thunder damage.
+    ...(access.state ? zoneModifiers(actor, access.state, access) : []),
   ]) {
     if (modifier.kind === "resistance") resistances.push(modifier.damage);
     if (modifier.kind === "vulnerability")

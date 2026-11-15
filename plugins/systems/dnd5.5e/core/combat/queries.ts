@@ -107,6 +107,7 @@ export function hasFlag(
       (!modifier.ability || modifier.ability === ability) &&
       // Advantage only against some conditions is the save's to weigh (placedFlag).
       (!("conditions" in modifier) || !modifier.conditions) &&
+      (!("magical" in modifier) || !modifier.magical) &&
       (!("attackers" in modifier) ||
         !modifier.attackers ||
         modifier.attackers.includes(attackerType ?? "")),

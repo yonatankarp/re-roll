@@ -80,6 +80,7 @@ import {
   sealed,
   zoneImmune,
   zonesOf,
+  zonesOn,
 } from "../zones.ts";
 import { caughtBy } from "../targeting.ts";
 import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
@@ -1020,7 +1021,13 @@ function zoneEvents(
       }
     }
   }
-  const { area } = action.activation;
+  const above = Math.max(0, (slotLevel ?? 0) - (action.spellLevel ?? 0));
+  const printed = action.activation.area;
+  // A higher slot widens what the area shields, as Globe of Invulnerability's.
+  const area =
+    printed?.shieldGrows && printed.spellShield !== undefined
+      ? { ...printed, spellShield: Math.min(9, printed.spellShield + above) }
+      : printed;
   const resolution =
     area?.resolution?.kind === "save"
       ? {
@@ -1030,15 +1037,17 @@ function zoneEvents(
       : area?.resolution;
   for (const effect of effects) {
     if (effect.kind !== "zone") continue;
-    const key = `${effect.zone}|${String(effect.radius)}`;
+    // A higher slot widens it, as Fog Cloud's 20 feet a level.
+    const radius = effect.radius + (effect.perSlot ?? 0) * above;
+    const key = `${effect.zone}|${String(radius)}`;
     if (placed.has(key)) continue;
     placed.add(key);
     if (effect.zone === "darkness") {
-      events.push(...snuffedLights(at, effect.radius, context));
+      events.push(...snuffedLights(at, radius, context));
     }
     const centre = effect.follows ? (actor.position ?? at) : at;
     const wall =
-      effect.zone === "wall" ? wallRing(centre, effect.radius, context) : null;
+      effect.zone === "wall" ? wallRing(centre, radius, context) : null;
     events.push(
       ...(wall?.pushed ?? []),
       dndEvent(`${NS}:effectAdded`, {
@@ -1051,7 +1060,7 @@ function zoneEvents(
             kind: "zone",
             zone: effect.zone,
             at: centre,
-            radius: effect.radius,
+            radius,
             ...(effect.damage ? { damage: effect.damage } : {}),
             ...(effect.follows ? { follows: true as const } : {}),
             ...(area
@@ -1174,6 +1183,7 @@ export function rollSave(
         context,
         ability,
         conditions,
+        magical,
       ) ||
       (magical && hasPassive(stats, "magicResistance")) ||
       (ability === "dex" && dodging(target)) ||
@@ -1693,7 +1703,11 @@ export function resolveAction(
         const saved = rolledSave || resisted !== null || rescued.length > 0;
         const evaded =
           resolution.onSuccessDamage === "half" &&
-          evades(target, resolution.ability, context);
+          (evades(target, resolution.ability, context) ||
+            (action.spellLevel !== null &&
+              zonesOn(target, context.state, context).some(
+                (zone) => zone.area?.magicWard,
+              )));
         const interposed =
           saved &&
           !evaded &&
