@@ -1,3 +1,4 @@
+import { afterDamage, settleRoll } from "./combat/reactions.ts";
 import {
   type ContentAccess,
   type Decision,
@@ -45,6 +46,7 @@ import { FLEE } from "./legendary.ts";
 import { finalDamage, rollD20 } from "./rules.ts";
 import { type Ability, type Skill } from "./schemas.ts";
 import {
+  applyDndEvent,
   type ActiveEffect,
   type Actor,
   type DndState,
@@ -216,19 +218,39 @@ function check(
   events: SystemEvent[];
 } {
   const stats = deriveStats(actor, context);
-  const roll = rollD20(context.dice, {
+  const edge = {
     advantage:
       advantage || hasFlag(actor, "advantage", "checks", stats, ability),
     disadvantage:
       hasFlag(actor, "disadvantage", "checks", stats, ability) ||
       hasCondition(actor, "poisoned", "frightened"),
+  };
+  const first = rollD20(context.dice, {
+    ...edge,
     rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
   });
-  const total =
-    roll.natural +
+  const base =
     checkBonus(stats, actor, { ability, skill }) +
     rollBonus(actor, "checks", context, skill);
-  const success = total >= dc;
+  const judge = (natural: number, bonus: number) => ({
+    total: natural + base + bonus,
+    success: natural + base + bonus >= dc,
+  });
+  // Reactions to the roll before it lands, as Bountiful Luck (combat/reactions.ts).
+  const settled = settleRoll(
+    {
+      roller: actor,
+      kind: "check",
+      natural: first.natural,
+      goal: dc,
+      ...judge(first.natural, 0),
+    },
+    edge,
+    judge,
+    context,
+  );
+  const roll = { natural: settled.natural };
+  const { total, success } = judge(settled.natural, settled.bonus);
   const helped = actor.activeEffects.some(
     ({ sourceId, modifier }) =>
       sourceId === HELP &&
@@ -239,6 +261,7 @@ function check(
     success,
     total,
     events: [
+      ...settled.events,
       dndEvent(`${NS}:rollReported`, {
         actor: actor.id,
         against: "check",
@@ -1383,7 +1406,23 @@ export function runMasteryMiss(
     false,
     context,
   );
-  return { events, frames: [...concentrationFrame(target, dealt), CHECK_END] };
+  return {
+    events,
+    frames: [
+      ...afterDamage(
+        target,
+        dealt,
+        {
+          source: attacker.id,
+          types: [type],
+          melee: meleeReach(action) !== null,
+        },
+        concentrationFrame(target, dealt),
+        { ...context, state: events.reduce(applyDndEvent, context.state) },
+      ),
+      CHECK_END,
+    ],
+  };
 }
 
 // Where a creature that spent its action on a Dash walks: toward the foe it means to fight next turn.

@@ -55,7 +55,10 @@ export const FRAME_KINDS = [
   "pickTargets",
   "precision",
   "projectile",
+  "react",
+  "reactAnswer",
   "recheckHit",
+  "rollReaction",
   "shopAnswer",
   "shopStep",
   "shortRestAnswer",
@@ -63,6 +66,7 @@ export const FRAME_KINDS = [
   "sheetAnswer",
   "sheetStep",
   "smite",
+  "swapInitiative",
   "takeAction",
   "teleport",
   "throwWeapon",
@@ -540,6 +544,13 @@ export const EVENT_SCHEMAS = {
   [`${NS}:traded`]: TradedSchema,
   // A dying creature someone stabilized with the Help action: Stable, as after three successes.
   [`${NS}:stabilized`]: ActorOnlySchema,
+  // A creature left with this many Hit Points, as a black pudding's half after it splits.
+  [`${NS}:hpSet`]: z.strictObject({ actor: z.string(), hp: z.number().int() }),
+  // Two creatures trading places in the Initiative order, as with Alert's Initiative Swap.
+  [`${NS}:initiativeSwapped`]: z.strictObject({
+    actor: z.string(),
+    with: z.string(),
+  }),
 } as const;
 
 export type EventKind = keyof typeof EVENT_SCHEMAS;
@@ -1083,6 +1094,21 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         ...actor,
         insideDamage: (actor.insideDamage ?? 0) + data.amount,
       }));
+    }
+    case `${NS}:hpSet`: {
+      const data = payload(EVENT_SCHEMAS[`${NS}:hpSet`], event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        hp: data.hp,
+      }));
+    }
+    case `${NS}:initiativeSwapped`: {
+      const data = payload(EVENT_SCHEMAS[`${NS}:initiativeSwapped`], event);
+      const { combat } = state;
+      if (!combat) return state;
+      const swap = (id: string): string =>
+        id === data.actor ? data.with : id === data.with ? data.actor : id;
+      return { ...state, combat: { ...combat, order: combat.order.map(swap) } };
     }
     case `${NS}:healed`: {
       const data = payload(HealedSchema, event);

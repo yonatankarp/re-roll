@@ -68,6 +68,12 @@ import {
 import { caughtBy } from "../targeting.ts";
 import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
 import { teleportFrame } from "./movement.ts";
+import {
+  afterDamage,
+  beforeDamage,
+  reactFrames,
+  settleRoll,
+} from "./reactions.ts";
 import { summonEvents } from "./summon.ts";
 import { fueledDamage } from "./school.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
@@ -336,15 +342,18 @@ export function dealEvents(
   let { state } = context;
   const events: SystemEvent[] = [];
   let dealt = 0;
-  for (const { amount, type } of hits) {
+  for (const hit of hits) {
     const current = state.actors[target.id] ?? target;
-    for (const event of damageEvents(
-      current,
-      amount,
-      type,
-      critical,
-      context,
-    )) {
+    // A reaction such as Vitality Ward may lessen it before it lands.
+    const lessened = beforeDamage(current, hit.amount, hit.type, {
+      ...context,
+      state,
+    });
+    const { amount, type } = { ...hit, amount: lessened.amount };
+    for (const event of [
+      ...lessened.events,
+      ...damageEvents(current, amount, type, critical, { ...context, state }),
+    ]) {
       events.push(event);
       if (state.actors[target.id]) state = applyDndEvent(state, event);
     }
@@ -716,6 +725,16 @@ export function leafEvents(
       case "zone":
       case "summon":
       case "counter":
+      case "reroll":
+      case "rollBonus":
+      case "replaceRoll":
+      case "strike":
+      case "redirect":
+      case "negateHit":
+      case "split":
+      case "swapInitiative":
+      case "inspiration":
+      case "resistTrigger":
         // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit, and
         // a teleport's square by its own decision and a zone once for the whole spell (resolveAction).
         break;
@@ -770,7 +789,7 @@ export function rollSave(
     return { saved: false, events: [] };
   }
   const stats = deriveStats(target, context);
-  const roll = rollD20(context.dice, {
+  const edge = {
     advantage:
       advantage ||
       hasFlag(target, "advantage", "saves", stats, ability) ||
@@ -782,14 +801,34 @@ export function rollSave(
       disadvantage ||
       hasFlag(target, "disadvantage", "saves", stats, ability) ||
       (ability === "dex" && hasCondition(target, "restrained")),
+  };
+  const roll = rollD20(context.dice, {
+    ...edge,
     rerollOnes: hasPassive(stats, "rerollOnes"),
   });
-  const total =
-    roll.natural +
+  const base =
     saveBonus(stats, ability) +
     rollBonus(target, "saves", context) +
     (ability === "dex" ? cover : 0);
-  const saved = total >= dc;
+  // Reactions to the roll before it lands, as Bountiful Luck or Portent (combat/reactions.ts).
+  const judge = (natural: number, bonus: number) => ({
+    total: natural + base + bonus,
+    success: natural + base + bonus >= dc,
+  });
+  const settled = settleRoll(
+    {
+      roller: target,
+      kind: "save",
+      natural: roll.natural,
+      goal: dc,
+      magical,
+      ...judge(roll.natural, 0),
+    },
+    edge,
+    judge,
+    context,
+  );
+  const { total, success: saved } = judge(settled.natural, settled.bonus);
   // A save's once-only edge, as Harper Teamwork's Disadvantage, is spent on it.
   const spent = target.activeEffects.flatMap(
     ({ modifier, sourceId, casterId }) =>
@@ -808,7 +847,7 @@ export function rollSave(
   const rolled = dndEvent(`${NS}:saveRolled`, {
     actor: target.id,
     ability,
-    natural: roll.natural,
+    natural: settled.natural,
     total,
     dc,
     success: saved,
@@ -833,6 +872,7 @@ export function rollSave(
     return {
       saved: again.saved,
       events: [
+        ...settled.events,
         rolled,
         dndEvent(`${NS}:oncePerTurnUsed`, {
           actor: target.id,
@@ -842,7 +882,7 @@ export function rollSave(
       ],
     };
   }
-  return { saved, events: [rolled, ...spent] };
+  return { saved, events: [...settled.events, rolled, ...spent] };
 }
 
 const SAVE_REROLL = "save-reroll";
@@ -1030,10 +1070,20 @@ export function resolveAction(
       );
     }
     frames.push(
-      ...concentrationFrame(
+      ...afterDamage(
         target,
         result.dealt,
-        hasPassive(stats, "concentrationBreaker"),
+        {
+          source: actor.id,
+          types: damage.map(({ type }) => type),
+          spell: action.spellLevel !== null,
+        },
+        concentrationFrame(
+          target,
+          result.dealt,
+          hasPassive(stats, "concentrationBreaker"),
+        ),
+        { ...context, state: events.reduce(applyDndEvent, context.state) },
       ),
     );
   };
@@ -1226,6 +1276,19 @@ export function resolveAction(
             context,
             { ability: resolution.ability, dc },
             slotLevel,
+          ),
+        );
+        // A reaction to how the save went, as Mind Corrosion or Spell Reflection.
+        frames.push(
+          ...reactFrames(
+            {
+              kind: "saved",
+              actor: target.id,
+              source: actor.id,
+              success: saved,
+              spell: action.spellLevel !== null,
+            },
+            context,
           ),
         );
       }
