@@ -107,6 +107,7 @@ export function playRun(
               dice,
               content: run.content,
               contentIds: run.contentIds,
+              setting: run.setting,
             }),
           }
         : choices[dice.below(choices.length)]);
