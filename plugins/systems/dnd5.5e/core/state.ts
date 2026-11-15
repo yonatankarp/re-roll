@@ -79,6 +79,10 @@ export const FRAME_KINDS = [
   "useAction",
   "useItem",
   "zoneTick",
+  "chooseDamageType",
+  "replaceHit",
+  "confusedTurn",
+  "copySpell",
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -180,7 +184,15 @@ const ActiveEffectSchema = z.strictObject({
       condition: ConditionSchema,
       ends: EndsSchema,
       endsOnDamage: z.boolean().optional(),
+      count: z.number().int().optional(), // saves of a kind it takes, as Prismatic Spray's indigo ray
     })
+    .optional(),
+  tally: z
+    .strictObject({ saved: z.number().int(), failed: z.number().int() })
+    .optional(), // the repeat saves made so far, toward secondFailure's count
+  // A save as its caster's next turn starts, whose failure sends the creature away (combat/turn.ts).
+  banish: z
+    .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
 });
 export type ActiveEffect = z.infer<typeof ActiveEffectSchema>;
@@ -567,6 +579,14 @@ export const EVENT_SCHEMAS = {
   [`${NS}:rollReported`]: RollReportSchema,
   [`${NS}:saveReported`]: SaveReportSchema,
   [`${NS}:saveRolled`]: SaveRolledSchema,
+  // A die rolled for what befalls a creature, as Confusion's d10 or Prismatic Spray's d8, kept for the log: what
+  // it decides is in the events that follow.
+  [`${NS}:dieRolled`]: z.strictObject({
+    actor: z.string(),
+    die: z.number().int(),
+    rolled: z.number().int(),
+    label: z.string(),
+  }),
   [`${NS}:inspirationGranted`]: ActorOnlySchema,
   [`${NS}:inspirationSpent`]: ActorOnlySchema,
   [`${NS}:treasureFound`]: TreasureFoundSchema,

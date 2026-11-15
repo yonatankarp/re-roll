@@ -1,4 +1,5 @@
 import { type ContentAccess, type SystemContext, type SystemEvent } from "#sdk";
+import { leashed } from "./duel.ts";
 import { knownFoes, knows } from "../fog.ts";
 import {
   type Actor,
@@ -232,6 +233,7 @@ export function moveSquares(
   const barred = barredKeys(actor, state, access);
   const slowing = slowingKeys(actor, state, access);
   const difficult = difficultSquares(state);
+  const tooFar = leashed(actor, state);
   return reachableSquares(
     actor.position,
     speedLeft(actor, stats),
@@ -246,7 +248,7 @@ export function moveSquares(
     new Set([...keys(others), ...walls, ...barred]),
     slowing.length > 0 ? new Set([...difficult, ...slowing]) : difficult,
     blockingSet(state),
-  );
+  ).filter(({ square }) => !tooFar(square));
 }
 
 // "C7" for the third column of the seventh row, as on a battle map.

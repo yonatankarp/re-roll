@@ -1155,6 +1155,10 @@ function describe(
       const data = EVENT_SCHEMAS["dnd5.5e:tempHpGained"].parse(payload);
       return `${name(data.actor)} gains ${String(data.amount)} temporary HP.`;
     }
+    case "dnd5.5e:dieRolled": {
+      const data = EVENT_SCHEMAS["dnd5.5e:dieRolled"].parse(payload);
+      return `${name(data.actor)} rolls ${String(data.rolled)} on a d${String(data.die)} for ${data.label}.`;
+    }
     case "dnd5.5e:turnRepeated": {
       const data = EVENT_SCHEMAS["dnd5.5e:turnRepeated"].parse(payload);
       return `Time stands still: ${name(data.actor)} takes another turn.`;
