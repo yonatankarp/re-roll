@@ -57,6 +57,7 @@ import {
   rollBonus,
 } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { stepToward } from "../plugins/systems/dnd5.5e/core/policy.ts";
+import { partySight } from "../plugins/systems/dnd5.5e/core/fog.ts";
 import {
   blockedSquares,
   thornHits,
@@ -664,6 +665,7 @@ describe("lingering damage", () => {
       [hero(run, { spells: ["wall-of-fire"], level: 7 }), 0, 0],
       [monster("a"), 7, 5],
       [monster("b"), 5, 5],
+      [hero(run, { id: "friend" }), 5, 7],
     );
     const cast = settle(
       run,
@@ -678,6 +680,15 @@ describe("lingering damage", () => {
     expect(
       coverFor(cast.state, { x: 0, y: 5 }, actor(cast.state, "b"), []),
     ).toBe("total");
+    // One standing in the fire is seen and fought from either side of it, and sees out both ways.
+    const burning = actor(cast.state, "a");
+    expect(coverFor(cast.state, { x: 8, y: 5 }, burning, [])).not.toBe("total");
+    expect(
+      coverFor(cast.state, burning.position, actor(cast.state, "b"), ["a"]),
+    ).not.toBe("total");
+    const seen = partySight(cast.state, run).squares;
+    expect(seen.has("5,6")).toBe(true);
+    expect(seen.has("5,8")).toBe(true);
   });
 
   const layerMove = (state: DndState, id: string, to: string): Frame => ({
