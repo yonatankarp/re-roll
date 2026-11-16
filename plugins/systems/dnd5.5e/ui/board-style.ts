@@ -437,6 +437,14 @@ const BOARD_CSS = `
   border: 1px solid rgb(255 240 205 / 55%);
   background: rgb(70 60 48 / 78%);
 }
+/* Bars that stop walking but not sight, as Forcecage's cage, and a curtain that hides but can be crossed, as fire. */
+.dnd-area.wall.walking {
+  background: repeating-linear-gradient(90deg, rgb(255 240 205 / 60%) 0 2px, transparent 2px 6px);
+}
+.dnd-area.wall.sight {
+  border-style: dashed;
+  background: rgb(200 90 40 / 55%);
+}
 @keyframes dnd-area-in {
   from { opacity: 0; transform: scale(0.85); }
   to { opacity: 1; transform: none; }

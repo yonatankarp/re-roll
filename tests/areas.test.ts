@@ -838,7 +838,7 @@ describe("areas spells leave", () => {
       { x: 5, y: 5 },
     );
     const walled = apply(start, cast.events ?? []);
-    const blocked = new Set(blockedSquares(walled));
+    const blocked = new Set(blockedSquares(walled, "walking"));
     expect(blocked.has("3,5")).toBe(true);
     expect(blocked.has("7,3")).toBe(true);
     expect(actor(walled, "foe").position).toEqual({ x: 6, y: 5 });

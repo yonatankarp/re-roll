@@ -283,6 +283,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     teleportSave: AbilitySchema.optional(),
     rolls: z.literal(true).optional(), // it moves at half Speed, its prison with it, as Resilient Sphere's
   }),
+  // Shut in a cage that stops it walking out but lets sight, attacks and spells through its bars, as Forcecage's
+  // cage, whose walls are its caster's zone. It can teleport out after this save against the caster's spell save DC.
+  z.strictObject({ kind: z.literal("caged"), teleportSave: AbilitySchema }),
   // The bearer is this far up, lifted by the effect of the same source without ":aloft", and falls once that's gone,
   // as with Reverse Gravity (combat/falling.ts). With `mode` it went up itself, flying or climbing, and stays while it
   // has that Speed (and, flying, while it isn't Prone or Incapacitated, unless it can hover). `gentle` comes down
@@ -544,6 +547,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     choose: z.array(DamageTypeSchema).min(2).optional(),
     // a wall that encloses a creature lets it make this save to get out first, as Wall of Stone's Dexterity
     escape: AbilitySchema.optional(),
+    // a wall that stops only walking, as Forcecage's cage, or only sight, as Wall of Fire; both when left out
+    walls: z.enum(["walking", "sight"]).optional(),
   }),
   // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
   // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe. A caster
@@ -866,6 +871,8 @@ export const AreaEffectSchema = z.strictObject({
   maxDamage: z.number().int().min(1).optional(), // it ends once it has dealt this much, as Guardian of Faith
   disperses: z.literal(true).optional(), // a strong wind ends it, as Fog Cloud or Stinking Cloud
   grappling: z.literal(true).optional(), // only creatures its owner grapples or that grapple it, as Barbed Hide
+  // what a creature it affects meets as it walks into the spell's wall, one after another, as Prismatic Wall's layers
+  layers: z.array(ResolutionSchema).min(1).optional(),
 });
 export type AreaEffect = z.infer<typeof AreaEffectSchema>;
 
@@ -1004,6 +1011,17 @@ export const ActivationSchema = z.strictObject({
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
   area: AreaEffectSchema.optional(), // what the zone its resolution leaves does later
+  // Shapes the caster picks between as it casts, as Forcecage's cage or box (combat/actions.ts): the first is the
+  // resolution as written, and another's `effects` take the place of an automatic resolution's effects.
+  shapes: z
+    .array(
+      z.strictObject({
+        name: z.string().min(1),
+        effects: z.array(LeafEffectSchema).optional(),
+      }),
+    )
+    .min(2)
+    .optional(),
   // Rolled on as the reaction is taken, as Mythal Ward's table (combat/reactions.ts rollOnTable). The row the die
   // lands on is resolved at the bearer (`self`), the creature that set it off (`source`), and with `within` each
   // creature that near the bearer. `perSpellLevel` multiplies its damage dice by the level of the spell that set it

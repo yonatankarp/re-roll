@@ -45,6 +45,14 @@ import { AimSchema, PickSchema } from "./combat/actions.ts";
 import { multiattackExtras } from "./combat/effects.ts";
 import { AVERAGE, makeJudge } from "./worth.ts";
 import { blockedSquares, blockingSet, zoneHarm } from "./zones.ts";
+import { layeredSquares } from "./combat/areas.ts";
+
+const crosses = (
+  path: readonly Square[],
+  squares: readonly string[],
+): boolean =>
+  squares.length > 0 &&
+  path.some((square) => squares.includes(squareKey(square)));
 import { TACTIC } from "./tactics.ts";
 import { SHAPE } from "./forms.ts";
 import { damageTypePolicy, zoneTypePolicy } from "./combat/damage-choice.ts";
@@ -148,7 +156,9 @@ export function stepToward(
   // How far it is to walk from a square to a foe, round walls and through difficult terrain, ignoring
   // creatures. On a map with no walls, or for a creature that goes through them, that's the straight distance.
   const grid = state.combat?.grid;
-  const walls = blockedSquares(state);
+  // A wall whose layers would hurt it, as Prismatic Wall's, it walks round as if it were solid.
+  const layered = layeredSquares(actor, context);
+  const walls = [...blockedSquares(state, "walking"), ...layered];
   const through = throughOf(stats);
   const overGround = [...speedsOf(actor, stats).keys()].some(crossesDifficult);
   const walkFrom = new Map<string, ReadonlyMap<string, number>>();
@@ -172,7 +182,7 @@ export function stepToward(
           new Set(walls),
           new Set(),
           overGround ? new Set() : difficultSquares(state),
-          blockingSet(state),
+          blockingSet(state, "walking"),
           { squeeze: through.squeeze },
         ).map((item) => [squareKey(item.square), item.feet]),
       );
@@ -200,10 +210,9 @@ export function stepToward(
   }
   const now = gap(actor.position);
   const gaps = new Map(
-    moveSquares(actor, state, stats, context).map((item) => [
-      item,
-      gap(item.square),
-    ]),
+    moveSquares(actor, state, stats, context)
+      .filter((item) => !crosses(item.path, layered))
+      .map((item) => [item, gap(item.square)]),
   );
   const squares = [...gaps.keys()];
   const closest = Math.min(...gaps.values());
@@ -302,9 +311,10 @@ function approach(actor: Actor, context: Context): Square | null {
   const better = options
     .filter((option) => option.worth > 1.2 * now)
     .sort((a, b) => b.worth - a.worth);
-  const squares = [...moveSquares(actor, state, stats, context)].sort(
-    (a, b) => a.feet - b.feet,
-  );
+  const layered = layeredSquares(actor, context);
+  const squares = moveSquares(actor, state, stats, context)
+    .filter((item) => !crosses(item.path, layered))
+    .sort((a, b) => a.feet - b.feet);
   // The best attack it can reach this turn, by the shortest walk out of harm's way; else it heads for the best
   // of all.
   for (const option of better) {
@@ -622,6 +632,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (decision.id.startsWith(`${NS}:deathSave:`)) return first.id;
   if (decision.id.startsWith(`${NS}:form:`)) return first.id; // the strongest form
   if (decision.id.startsWith(`${NS}:wish:`)) return first.id; // the highest level
+  if (decision.id.startsWith(`${NS}:shape:`)) return first.id; // as written, as Forcecage's box
   if (decision.id.startsWith(`${NS}:damageType:`)) {
     return damageTypePolicy(decision, context);
   }

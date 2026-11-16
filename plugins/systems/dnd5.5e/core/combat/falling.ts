@@ -241,7 +241,7 @@ export function liftEvents(
 function besideWall(actor: Actor, state: DndState): boolean {
   const at = actor.position;
   if (!at) return false;
-  const walls = blockingSet(state);
+  const walls = blockingSet(state, "walking");
   for (let dy = -1; dy <= 1; dy += 1) {
     for (let dx = -1; dx <= 1; dx += 1) {
       if (walls.has(squareKey({ x: at.x + dx, y: at.y + dy }))) return true;

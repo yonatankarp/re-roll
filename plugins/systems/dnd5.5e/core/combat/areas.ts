@@ -13,6 +13,7 @@ import {
   dndEvent,
   frame,
   isDead,
+  isDown,
   NS,
 } from "../state.ts";
 import { MonsterSchema, type Passive, type Resolution } from "../schemas.ts";
@@ -152,7 +153,40 @@ const caught = (zone: Zone, actor: Actor, state: DndState): boolean =>
   actor.usedThisTurn.includes(caughtKey(zone, state));
 
 const entering = (state: DndState): readonly Zone[] =>
-  zonesOf(state).filter((zone) => zone.area?.enters && zone.area.resolution);
+  zonesOf(state).filter(
+    (zone) =>
+      zone.layers !== undefined ||
+      (zone.area?.enters === true && zone.area.resolution !== undefined),
+  );
+
+// Whether `square` is on the wall of a zone whose wall has layers, as Prismatic Wall's.
+const onWall = (zone: Zone, square: Square | null): boolean =>
+  square !== null && (zone.blocks ?? []).includes(squareKey(square));
+
+// Whether a zone acts on `walker` walking into it: a wall's layers spare its caster's side, as Prismatic Wall's
+// spares those the caster designates.
+function entersOn(
+  zone: Zone,
+  walker: Actor,
+  context: ContentAccess & { readonly state: DndState },
+): boolean {
+  const { state } = context;
+  return (
+    !caught(zone, walker, state) &&
+    affects(zone, walker, state, context) &&
+    (!zone.layers || state.actors[zone.owner]?.side !== walker.side)
+  );
+}
+
+// The squares of walls whose layers `walker` would have to cross, which a sensible creature walks round.
+export function layeredSquares(
+  walker: Actor,
+  context: ContentAccess & { readonly state: DndState },
+): readonly string[] {
+  return zonesOf(context.state, context).flatMap((zone) =>
+    zone.layers && entersOn(zone, walker, context) ? (zone.blocks ?? []) : [],
+  );
+}
 
 // Where a walk first takes `walker` into an area that acts on whoever enters it, as Moonbeam: the index on the
 // path, and the areas it enters there.
@@ -162,16 +196,17 @@ export function areaEntry(
   context: ContentAccess & { readonly state: DndState },
 ): { readonly index: number; readonly zones: readonly Zone[] } | null {
   const { state } = context;
-  const zones = entering(state).filter(
-    (zone) =>
-      !caught(zone, walker, state) && affects(zone, walker, state, context),
+  const zones = entering(state).filter((zone) =>
+    entersOn(zone, walker, context),
   );
   if (zones.length === 0) return null;
   for (let index = 0; index < path.length; index += 1) {
     const square = path[index] ?? null;
     const from = index === 0 ? walker.position : (path[index - 1] ?? null);
-    const into = zones.filter(
-      (zone) => inZone(zone, square) && !inZone(zone, from),
+    const into = zones.filter((zone) =>
+      zone.layers
+        ? onWall(zone, square) && !onWall(zone, from)
+        : inZone(zone, square) && !inZone(zone, from),
     );
     if (into.length > 0) {
       // A walk can't stop in another creature's space, so it stops on the next square it can, the last if need be.
@@ -230,7 +265,55 @@ export function entryFrames(
         ]
       : [];
   });
-  return [...into.map((zone) => tick(zone, [walker.id])), ...swept];
+  // A wall's layers act one after another, as Prismatic Wall's, each on its own frame.
+  const crossed = (zone: Zone): Frame[] =>
+    (zone.layers ?? []).map((_, layer) =>
+      frame("wallLayer", {
+        owner: zone.owner,
+        sourceId: zone.sourceId,
+        target: walker.id,
+        layer,
+      }),
+    );
+  return [
+    ...into.flatMap((zone) =>
+      zone.layers ? crossed(zone) : [tick(zone, [walker.id])],
+    ),
+    ...swept,
+  ];
+}
+
+export const WallLayerSchema = z.object({
+  owner: z.string(),
+  sourceId: z.string(),
+  target: z.string(),
+  layer: z.number().int(),
+});
+
+// One layer of a wall acting on a creature crossing it, while the creature is still up and the wall stands.
+export function runWallLayer(
+  payload: z.infer<typeof WallLayerSchema>,
+  context: Context,
+): SystemResult {
+  const { state } = context;
+  const owner = state.actors[payload.owner];
+  const target = state.actors[payload.target];
+  const zone = zonesOf(state, context).find(
+    (item) =>
+      item.owner === payload.owner &&
+      item.sourceId === payload.sourceId &&
+      item.layers !== undefined,
+  );
+  const resolution = zone?.layers?.[payload.layer];
+  if (!owner || !target || !zone || !resolution || isDown(target)) return {};
+  if (sealed(target)) return {};
+  const action = zoneAction({ ...zone, area: { resolution } }, zone.name ?? "");
+  if (!action) return {};
+  const result = resolveAction(action, owner, [target], context, zone.level);
+  return {
+    events: result.events ?? [],
+    frames: [...(result.frames ?? []), CHECK_END],
+  };
 }
 
 // The ticks of an area that acts on whoever it reaches, moved from `from`: on the creatures it now covers and didn't,
@@ -698,6 +781,10 @@ export const areaFrames = {
   [`${NS}:zoneTick`]: frameHandler({
     schema: ZoneTickSchema,
     run: runZoneTick,
+  }),
+  [`${NS}:wallLayer`]: frameHandler({
+    schema: WallLayerSchema,
+    run: runWallLayer,
   }),
   [`${NS}:damageBurst`]: frameHandler({
     schema: z.object({ actor: z.string(), types: z.array(z.string()) }),

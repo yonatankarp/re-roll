@@ -1322,6 +1322,9 @@ function zoneEvents(
   const type = element ? leastResisted(element, actor, context) : undefined;
   const resolution = retyped(fixed(area?.resolution), type);
   const holding = retyped(fixed(area?.holding), type);
+  // A wall's layers go on the wall alone, their DCs fixed too.
+  const { layers, ...kept } = area ?? {};
+  const fixedLayers = layers?.flatMap((layer) => fixed(layer) ?? []);
   for (const effect of effects) {
     if (effect.kind !== "zone") continue;
     // A higher slot widens it, as Fog Cloud's 20 feet a level.
@@ -1334,7 +1337,9 @@ function zoneEvents(
     }
     const centre = effect.follows ? (actor.position ?? at) : at;
     const wall =
-      effect.zone === "wall" ? wallRing(centre, radius, context) : null;
+      effect.zone === "wall"
+        ? wallRing(centre, radius, context, effect.walls !== "sight")
+        : null;
     events.push(
       ...(wall?.pushed ?? []),
       ...(wall && effect.escape
@@ -1363,13 +1368,15 @@ function zoneEvents(
             ...(area && !effect.bare
               ? {
                   area: {
-                    ...area,
+                    ...kept,
                     ...(resolution ? { resolution } : {}),
                     ...(holding ? { holding } : {}),
                   },
                 }
               : {}),
             ...(wall ? { blocks: wall.squares } : {}),
+            ...(wall && effect.walls ? { walls: effect.walls } : {}),
+            ...(wall && fixedLayers ? { layers: fixedLayers } : {}),
             name: action.name,
           },
           ends: effectEnds(effect.duration),
@@ -1459,7 +1466,7 @@ function wallEscapes(
     { base: 0, add: [{ kind: "spellSaveDc" }] },
     deriveStats(caster, context),
   );
-  const shut = new Set([...blockedSquares(state), ...wall]);
+  const shut = new Set([...blockedSquares(state, "walking"), ...wall]);
   const taken = new Set(
     Object.values(state.actors).flatMap((item) =>
       item.position && !isDead(item) ? [squareKey(item.position)] : [],
@@ -1503,12 +1510,13 @@ function wallEscapes(
   return events;
 }
 
-// A wall's squares: the edge of the area round `centre`. A creature standing on it is pushed one square in,
-// and where there's no room it stays, leaving a gap.
+// A wall's squares: the edge of the area round `centre`. A creature standing on one that stops walking is pushed one
+// square in, and where there's no room it stays, leaving a gap; one that only stops sight, as fire, it stands in.
 function wallRing(
   centre: Square,
   radius: number,
   context: Context,
+  pushes: boolean,
 ): { readonly squares: string[]; readonly pushed: SystemEvent[] } {
   const { state } = context;
   const grid = state.combat?.grid;
@@ -1520,7 +1528,10 @@ function wallRing(
         : [],
     ),
   );
-  const walls = new Set(blockedSquares(state));
+  const walls = new Set([
+    ...blockedSquares(state, "walking"),
+    ...blockedSquares(state, "sight"),
+  ]);
   const squares: string[] = [];
   const pushed: SystemEvent[] = [];
   const reach = Math.floor(radius / 5);
@@ -1531,7 +1542,7 @@ function wallRing(
       if (outside || distanceFeet(centre, square) !== radius) continue;
       const key = squareKey(square);
       if (walls.has(key)) continue;
-      const standing = taken.get(key);
+      const standing = pushes ? taken.get(key) : undefined;
       if (standing) {
         const inward = {
           x: x - Math.sign(x - centre.x),

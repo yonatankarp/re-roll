@@ -647,7 +647,7 @@ export function besideSquare(
   const { combat, actors } = context.state;
   if (!combat?.grid || !target.position || !bearer.position) return null;
   const blocked = new Set([
-    ...blockedSquares(context.state),
+    ...blockedSquares(context.state, "walking"),
     ...Object.values(actors).flatMap((item) =>
       item.position && item.id !== bearer.id && !isDown(item)
         ? [squareKey(item.position)]

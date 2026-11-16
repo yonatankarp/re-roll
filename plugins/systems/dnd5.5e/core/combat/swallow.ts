@@ -81,7 +81,7 @@ function releaseEvents(
           from,
           grid,
           new Set([
-            ...blockedSquares(state),
+            ...blockedSquares(state, "walking"),
             ...Object.values(state.actors).flatMap((item) =>
               item.id !== held.id && item.position && !isDown(item)
                 ? [squareKey(item.position)]

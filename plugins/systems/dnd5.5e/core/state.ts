@@ -10,6 +10,7 @@ import {
   AreaEffectSchema,
   LootSchema,
   ModifierSchema,
+  ResolutionSchema,
   ZoneKindSchema,
 } from "./schemas.ts";
 import { settleForms } from "./forms.ts";
@@ -87,6 +88,8 @@ export const FRAME_KINDS = [
   "replaceHit",
   "confusedTurn",
   "copySpell",
+  "wallLayer",
+  "chooseShape",
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -152,6 +155,8 @@ const ActiveEffectSchema = z.strictObject({
       follows: z.literal(true).optional(),
       area: AreaEffectSchema.optional(),
       blocks: z.array(z.string()).optional(),
+      walls: z.enum(["walking", "sight"]).optional(), // what alone its wall stops, when not both
+      layers: z.array(ResolutionSchema).optional(), // what walking into its wall does, in order, its DCs as cast
       name: z.string().optional(), // the action that left it
     }),
     // What an action anyone can take, such as Dodge, or a weapon mastery, leaves behind (core/tactics.ts).

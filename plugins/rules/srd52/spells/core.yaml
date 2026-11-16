@@ -1651,6 +1651,7 @@
           duration:
             minutes: 10
           bare: true
+          walls: sight
         - kind: zone
           zone: area
           radius: 35
@@ -1686,6 +1687,89 @@
             duration:
               minutes: 1
         onSuccess: []
+      layers:
+        - kind: save
+          ability: dex
+          dc:
+            add:
+              - kind: spellSaveDc
+          damage:
+            - amount:
+                dice: 12d6
+              type: fire
+          onSuccessDamage: half
+        - kind: save
+          ability: dex
+          dc:
+            add:
+              - kind: spellSaveDc
+          damage:
+            - amount:
+                dice: 12d6
+              type: acid
+          onSuccessDamage: half
+        - kind: save
+          ability: dex
+          dc:
+            add:
+              - kind: spellSaveDc
+          damage:
+            - amount:
+                dice: 12d6
+              type: lightning
+          onSuccessDamage: half
+        - kind: save
+          ability: dex
+          dc:
+            add:
+              - kind: spellSaveDc
+          damage:
+            - amount:
+                dice: 12d6
+              type: poison
+          onSuccessDamage: half
+        - kind: save
+          ability: dex
+          dc:
+            add:
+              - kind: spellSaveDc
+          damage:
+            - amount:
+                dice: 12d6
+              type: cold
+          onSuccessDamage: half
+        - kind: save
+          ability: dex
+          dc:
+            add:
+              - kind: spellSaveDc
+          onFail:
+            - kind: applyCondition
+              condition: restrained
+              duration:
+                minutes: 1440
+              endSave:
+                ability: con
+                dc:
+                  add:
+                    - kind: spellSaveDc
+              secondFailure:
+                condition: petrified
+                duration:
+                  minutes: 1440
+                count: 3
+        - kind: save
+          ability: dex
+          dc:
+            add:
+              - kind: spellSaveDc
+          onFail:
+            - kind: applyCondition
+              condition: blinded
+              duration:
+                minutes: 1
+              banish:
+                ability: wis
 - id: srd52:spell/protection-from-energy
   name: Protection from Energy
   level: 3
@@ -10095,6 +10179,23 @@
             teleportSave: cha
           duration:
             minutes: 60
+    shapes:
+      - name: Box
+      - name: Cage
+        effects:
+          - kind: modifier
+            modifier:
+              kind: caged
+              teleportSave: cha
+            duration:
+              minutes: 60
+          - kind: zone
+            zone: wall
+            radius: 10
+            duration:
+              minutes: 60
+            bare: true
+            walls: walking
 - id: srd52:spell/gate
   name: Gate
   level: 9
@@ -11500,6 +11601,14 @@
           duration:
             concentration: true
             minutes: 1
+        - kind: zone
+          zone: wall
+          radius: 10
+          duration:
+            concentration: true
+            minutes: 1
+          bare: true
+          walls: sight
       onSuccess: []
     area:
       when: turnEnd

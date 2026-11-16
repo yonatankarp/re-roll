@@ -322,7 +322,7 @@ export function groundFor(
   const through = throughOf(stats);
   // shortcut: going through walls means the map's own; a wall a spell raises stops it as it does anyone.
   const walls = state.combat?.walls ?? [];
-  const solid = blockedSquares(state);
+  const solid = blockedSquares(state, "walking");
   const mapWalls = new Set(walls);
   // A barrier it can't cross stops it as a wall would, and a zone that slows it costs double however it moves.
   const barred = barredKeys(actor, state, access);
@@ -366,7 +366,7 @@ export function groundFor(
     occupied,
     terrain: difficultSquares(state),
     costly,
-    walls: blockingSet(state),
+    walls: blockingSet(state, "walking"),
     squeeze: through.squeeze,
     overTerrain: through.terrain || unhindered(actor, stats),
   };
@@ -495,7 +495,7 @@ function dragSquares(
   if (!grid) return null;
   const moving = new Set(holds.map(({ held }) => held.id));
   const taken = new Set([
-    ...blockedSquares(state),
+    ...blockedSquares(state, "walking"),
     squareKey(walk.square),
     ...Object.values(state.actors).flatMap((other) =>
       other.position && !isDead(other) && !moving.has(other.id)
