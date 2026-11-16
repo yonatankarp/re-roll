@@ -85,7 +85,7 @@ const unique = (keys: readonly string[]): string[] => [
 ];
 
 // The heading as printed first, then without its labels: "Level 3: Rage", "Stone (Luckstone)",
-// "Acid (25 GP)", "The Harpers". Looser keys come after: the singular ("High Elves") and the name
+// "Acid (25 GP)", "The Gilded Hand". Looser keys come after: the singular ("High Elves") and the name
 // inside a wrapper label ("Aasimar Traits", "Bard Spell List").
 export function variants(heading: string): {
   readonly named: readonly string[];
