@@ -37,6 +37,7 @@ export const CounterSchema = z.object({
   actionId: z.string(),
   slot: z.string().optional(),
   target: z.union([z.string(), z.array(z.string())]),
+  shape: z.string().optional(), // the shape it's cast in, for a spell that has several
   counterer: z.string(),
   answer: z.string(),
 });

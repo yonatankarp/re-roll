@@ -53,8 +53,10 @@ import {
 } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import {
   hasFlag,
+  moveSquares,
   rollBonus,
 } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import { stepToward } from "../plugins/systems/dnd5.5e/core/policy.ts";
 import {
   blockedSquares,
   thornHits,
@@ -410,10 +412,10 @@ describe("lingering damage", () => {
   });
 
   it.each([
-    ["cloudkill", 9, "fog"],
-    ["insect-plague", 9, "area"],
-    ["incendiary-cloud", 15, "fog"],
-    ["wall-of-fire", 7, "area"],
+    ["cloudkill", 9, ["fog"]],
+    ["insect-plague", 9, ["area"]],
+    ["incendiary-cloud", 15, ["fog"]],
+    ["wall-of-fire", 7, ["area", "wall"]],
   ])(
     "leaves %s as an area that hurts whoever ends a turn in it",
     async (slug, level, zone) => {
@@ -439,7 +441,7 @@ describe("lingering damage", () => {
         LOW,
       );
       expect(damageOf(cast.events, "a")).toHaveLength(1);
-      expect(zonesOf(cast.state).map((item) => item.zone)).toEqual([zone]);
+      expect(zonesOf(cast.state).map((item) => item.zone)).toEqual(zone);
       const onA: DndState = {
         ...cast.state,
         combat: start.combat && { ...start.combat, index: 1 },
@@ -627,13 +629,68 @@ describe("lingering damage", () => {
     expect(actor(stuck, PLAYER_ACTOR).resourcesSpent["slot:2"]).toBe(1);
     const out = settle(run, caged, [step], HIGH).state;
     expect(actor(out, PLAYER_ACTOR).activeEffects).toEqual([]);
+    // So may one in a Forcecage's cage.
+    const barred = onGrid(
+      [
+        {
+          ...me,
+          activeEffects: [
+            {
+              ...seal({}),
+              modifier: {
+                kind: "caged" as const,
+                teleportSave: "cha" as const,
+              },
+            },
+          ],
+        },
+        0,
+        0,
+      ],
+      [monster("a"), 9, 9],
+    );
+    expect(
+      actor(settle(run, barred, [step], LOW).state, PLAYER_ACTOR).activeEffects,
+    ).toHaveLength(1);
+    expect(
+      actor(settle(run, barred, [step], HIGH).state, PLAYER_ACTOR)
+        .activeEffects,
+    ).toEqual([]);
   });
 
-  it("blinds a foe that starts its turn near a Prismatic Wall, which no one walks through", async () => {
+  it("rings Wall of Fire with fire that hides what's inside but can be walked into", async () => {
     const run = arenaRun(await base(), {});
     const start = onGrid(
-      [hero(run, { spells: ["prismatic-wall"], level: 17 }), 0, 0],
+      [hero(run, { spells: ["wall-of-fire"], level: 7 }), 0, 0],
+      [monster("a"), 7, 5],
+      [monster("b"), 5, 5],
+    );
+    const cast = settle(
+      run,
+      start,
+      [act(PLAYER_ACTOR, `spell:${spell("wall-of-fire")}|@5,5`)],
+      LOW,
+    );
+    // The foe standing in the ring stays there, in the fire, and the ring blocks sight alone.
+    expect(actor(cast.state, "a").position).toEqual({ x: 7, y: 5 });
+    expect(blockedSquares(cast.state, "sight")).toContain("3,5");
+    expect(blockedSquares(cast.state, "walking")).not.toContain("3,5");
+    expect(
+      coverFor(cast.state, { x: 0, y: 5 }, actor(cast.state, "b"), []),
+    ).toBe("total");
+  });
+
+  const layerMove = (state: DndState, id: string, to: string): Frame => ({
+    kind: `${NS}:move`,
+    payload: { actor: id, answer: to },
+  });
+
+  it("blinds a foe that starts its turn near a Prismatic Wall, and puts one walking through it through every layer", async () => {
+    const run = arenaRun(await base(), {});
+    const start = onGrid(
+      [hero(run, { spells: ["prismatic-wall"], level: 17 }), 6, 6],
       [monster("a"), 10, 6],
+      [hero(run, { id: "friend" }), 2, 6],
     );
     const cast = settle(
       run,
@@ -641,8 +698,92 @@ describe("lingering damage", () => {
       [act(PLAYER_ACTOR, `spell:${spell("prismatic-wall")}|@6,6`)],
       LOW,
     );
-    expect(blockedSquares(cast.state)).toContain("9,6");
+    expect(blockedSquares(cast.state, "sight")).toContain("9,6");
+    expect(blockedSquares(cast.state, "walking")).not.toContain("9,6");
     expect(hasCondition(actor(cast.state, "a"), "blinded")).toBe(true);
+    const fresh = turnOf(cast.state, 1);
+    // Failing every save: the five colours' damage, then Indigo's Restrained stops it in the wall, and Violet blinds it.
+    const failed = settle(run, fresh, [layerMove(fresh, "a", "8,6")], LOW);
+    expect(damageOf(failed.events, "a")).toEqual([12, 12, 12, 12, 12]);
+    expect(
+      distanceFeet(actor(failed.state, "a").position, { x: 6, y: 6 }),
+    ).toBe(15);
+    expect(restrained(failed.state, "a")).toBe(true);
+    const effects = actor(failed.state, "a").activeEffects;
+    expect(
+      effects.find(
+        ({ modifier }) =>
+          modifier.kind === "condition" && modifier.condition === "restrained",
+      )?.secondFailure,
+    ).toMatchObject({ condition: "petrified", count: 3 });
+    expect(effects.some(({ banish }) => banish?.ability === "wis")).toBe(true);
+    // Making every save: half damage, nothing else, and it walks on through.
+    const saved = settle(run, fresh, [layerMove(fresh, "a", "8,6")], HIGH);
+    expect(damageOf(saved.events, "a")).toEqual([36, 36, 36, 36, 36]);
+    expect(actor(saved.state, "a").position).toEqual({ x: 8, y: 6 });
+    expect(restrained(saved.state, "a")).toBe(false);
+    // The caster's friends pass through unharmed.
+    const friendly = turnOf(cast.state, 2);
+    const crossed = settle(
+      run,
+      friendly,
+      [layerMove(friendly, "friend", "4,6")],
+      LOW,
+    );
+    expect(damageOf(crossed.events, "friend")).toEqual([]);
+    expect(actor(crossed.state, "friend").position).toEqual({ x: 4, y: 6 });
+    // A foe left to itself walks round the wall rather than through it.
+    const context = contextOf(run, fresh, LOW);
+    const step = stepToward(actor(fresh, "a"), context);
+    expect(step === null || distanceFeet(step, { x: 6, y: 6 }) > 15).toBe(true);
+  });
+
+  it("asks Forcecage's caster for a cage or a box, and a cage stops walking out but not sight", async () => {
+    const run = arenaRun(await base(), {});
+    const start = onGrid(
+      [hero(run, { spells: ["forcecage"], level: 13 }), 0, 6],
+      [monster("a"), 6, 6],
+    );
+    const cast = (shape: string) =>
+      settle(
+        run,
+        start,
+        [act(PLAYER_ACTOR, `spell:${spell("forcecage")}|@6,6`)],
+        LOW,
+        (decision) =>
+          decision.id.startsWith(`${NS}:shape:`)
+            ? shape
+            : (decision.options[0]?.id ?? ""),
+      );
+    const box = cast("Box");
+    const asked = box.decisions.find(({ id }) => id.startsWith(`${NS}:shape:`));
+    expect(asked?.options.map(({ id }) => id)).toEqual(["Box", "Cage"]);
+    const given = (events: readonly SystemEvent[]) =>
+      events.flatMap((event) =>
+        event.kind === `${NS}:effectAdded` &&
+        "payload" in event &&
+        event.payload.actor === "a"
+          ? [
+              (event.payload.effect as Actor["activeEffects"][number]).modifier
+                .kind,
+            ]
+          : [],
+      );
+    // A box shuts the foe away for longer than a stand-off, which ends the fight.
+    expect(given(box.events)).toEqual(["sealed"]);
+    const cage = cast("Cage");
+    expect(given(cage.events)).toEqual(["caged"]);
+    expect(blockedSquares(cage.state, "walking")).toContain("8,6");
+    expect(blockedSquares(cage.state, "sight")).not.toContain("8,6");
+    const caged = actor(cage.state, "a");
+    expect(
+      moveSquares(caged, cage.state, deriveStats(caged, run), run).every(
+        ({ square }) => distanceFeet(square, { x: 6, y: 6 }) < 10,
+      ),
+    ).toBe(true);
+    expect(
+      coverFor(cage.state, { x: 0, y: 6 }, caged, [PLAYER_ACTOR]),
+    ).not.toBe("total");
   });
 
   // Spirit Guardians is an area round its caster now (zones.ts), so nothing sits on the foes it caught.

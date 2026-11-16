@@ -4,6 +4,7 @@ import type {
   AreaEffect,
   Damage,
   Modifier,
+  Resolution,
   ZoneKind,
 } from "./schemas.ts";
 import type { SystemEvent } from "#sdk";
@@ -37,6 +38,8 @@ export interface Zone {
   readonly follows: boolean;
   readonly area?: AreaEffect | undefined;
   readonly blocks?: readonly string[] | undefined; // a wall's squares
+  readonly walls?: Wall | undefined; // what alone its wall stops, when not both walking and sight
+  readonly layers?: readonly Resolution[] | undefined; // what crossing its wall does, in order
   readonly name?: string | undefined; // what made it, for the log and the board
   readonly level?: number | undefined; // the slot its spell was cast with
 }
@@ -80,6 +83,8 @@ function castZones(state: DndState): readonly Zone[] {
               follows: modifier.follows === true,
               area: modifier.area,
               blocks: modifier.blocks,
+              walls: modifier.walls,
+              layers: modifier.layers,
               name: modifier.name,
               level,
             },
@@ -413,24 +418,35 @@ export function barredKeys(
   );
 }
 
-const blocked = new WeakMap<DndState, readonly string[]>();
-// Squares no one can enter or see through: the map's walls and the walls spells raise. With no spell walls it's
-// the map's own list, so whatever is kept by that list stays.
-export function blockedSquares(state: DndState): readonly string[] {
+// What a wall stops: walking (Forcecage's cage), sight (Wall of Fire), or, unless it says, both.
+export type Wall = "walking" | "sight";
+
+const blocked: Record<Wall, WeakMap<DndState, readonly string[]>> = {
+  walking: new WeakMap(),
+  sight: new WeakMap(),
+};
+// Squares no one can walk into, or see through: the map's walls and the walls spells raise that stop it. With no
+// such spell walls it's the map's own list, so whatever is kept by that list stays.
+export function blockedSquares(
+  state: DndState,
+  stops: Wall,
+): readonly string[] {
   const walls = state.combat?.walls ?? [];
-  const raised = zonesOf(state).flatMap((zone) => zone.blocks ?? []);
+  const raised = zonesOf(state).flatMap((zone) =>
+    !zone.walls || zone.walls === stops ? (zone.blocks ?? []) : [],
+  );
   if (raised.length === 0) return walls;
-  const known = blocked.get(state);
+  const known = blocked[stops].get(state);
   if (known) return known;
   const all = [...new Set([...walls, ...raised])];
-  blocked.set(state, all);
+  blocked[stops].set(state, all);
   return all;
 }
 
-// The walls as walking and sight test them: the map's and the spells', with the corners the fight opened (grid.ts).
-export function blockingSet(state: DndState): Set<string> {
+// The walls as walking or sight tests them: the map's and the spells', with the corners the fight opened (grid.ts).
+export function blockingSet(state: DndState, stops: Wall): Set<string> {
   return wallSet({
-    walls: blockedSquares(state),
+    walls: blockedSquares(state, stops),
     openCorners: state.combat?.openCorners,
   });
 }

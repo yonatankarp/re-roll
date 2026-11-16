@@ -100,6 +100,7 @@ export interface AreaView {
   readonly name: string;
   readonly foe: boolean; // an enemy's, so a harmful area shows as a threat
   readonly blocks?: readonly string[]; // a wall's squares, as "x,y"
+  readonly walls?: "walking" | "sight"; // what alone the wall stops, drawn as bars or as a curtain
 }
 
 export interface BoardExtra {

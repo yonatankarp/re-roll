@@ -507,7 +507,7 @@ export function teleportSquares(
   if (movement > 0 && speedLeft(actor, deriveStats(actor, access)) < movement) {
     return [];
   }
-  const blocked = blockingSet(state);
+  const blocked = blockingSet(state, "walking");
   const taken = new Set(
     Object.values(state.actors).flatMap((item) =>
       item.position && !isDown(item) ? [squareKey(item.position)] : [],

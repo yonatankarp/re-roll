@@ -87,12 +87,12 @@ function linesOf(
 function sightFrom(state: DndState, from: Square): ReadonlySet<string> {
   const grid = state.combat?.grid;
   if (!grid) return NOBODY;
-  const blocked = blockedSquares(state);
+  const blocked = blockedSquares(state, "sight");
   const byOrigin = linesOf(blocked, state.combat?.openCorners ?? [], grid);
   const start = squareKey(from);
   const known = byOrigin.get(start);
   if (known) return known;
-  const walls = blockingSet(state);
+  const walls = blockingSet(state, "sight");
   const seen = new Set([start]);
   const tried = new Set([start]);
   const queue = [from];
@@ -193,7 +193,7 @@ export function partySight(state: DndState, access: ContentAccess): PartySight {
   // The search outward can miss a square the sight rules' own line reaches, such as one along the map's edge,
   // so a foe is also in view when a line runs between it and a party member either way: what can aim at the
   // party, or be aimed at, is seen.
-  const walls = blockingSet(state);
+  const walls = blockingSet(state, "sight");
   const inView = (at: Square): boolean =>
     viewers.some(
       (viewer) =>
@@ -403,7 +403,7 @@ export function searchStep(
     return null;
   }
   const seen = partySight(state, access).squares;
-  const walls = blockingSet(state);
+  const walls = blockingSet(state, "walking");
   const [nearest] = reachableSquares(
     actor.position,
     Infinity,

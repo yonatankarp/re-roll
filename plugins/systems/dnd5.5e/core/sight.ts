@@ -125,7 +125,7 @@ function squaresCover(
   return coverBetween(
     from,
     target.position,
-    blockingSet(state),
+    blockingSet(state, "sight"),
     {
       half: setOf(terrain?.half),
       threeQuarters: setOf(terrain?.threeQuarters),

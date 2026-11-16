@@ -551,7 +551,7 @@ export function pushTo(
   const dx = Math.sign(start.x - from.x);
   const dy = Math.sign(start.y - from.y);
   if (dx === 0 && dy === 0) return null;
-  const walls = blockingSet(state);
+  const walls = blockingSet(state, "walking");
   const blocked = new Set([
     ...walls,
     ...Object.values(state.actors).flatMap((item) =>

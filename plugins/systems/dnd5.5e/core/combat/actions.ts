@@ -172,11 +172,15 @@ function caged(
     return null;
   }
   const seal = actor.activeEffects.find(
-    ({ modifier }) => modifier.kind === "sealed" && modifier.teleportSave,
+    ({ modifier }) =>
+      (modifier.kind === "sealed" || modifier.kind === "caged") &&
+      modifier.teleportSave,
   );
-  if (seal?.modifier.kind !== "sealed" || !seal.modifier.teleportSave) {
-    return null;
-  }
+  const ability =
+    seal?.modifier.kind === "sealed" || seal?.modifier.kind === "caged"
+      ? seal.modifier.teleportSave
+      : undefined;
+  if (!seal || !ability) return null;
   const caster = context.state.actors[seal.casterId];
   const dc = caster
     ? evaluateFormula(
@@ -184,7 +188,7 @@ function caged(
         deriveStats(caster, context),
       )
     : 10;
-  const save = rollSave(actor, seal.modifier.teleportSave, dc, context, true);
+  const save = rollSave(actor, ability, dc, context, true);
   return {
     failed: !save.saved,
     events: [
@@ -211,21 +215,39 @@ function castAction(
   target: string | readonly string[],
   context: Context,
   uncountered = false, // a foe has already had its chance to counter it
+  shape?: string, // the shape picked for a spell that has several, as Forcecage's cage or box
 ): SystemResult {
   const { state } = context;
   const slotLevel = slotLevelFor(actor, actionId, slot, context);
-  const action = findAction(actor, actionId, context, slotLevel);
+  const found = findAction(actor, actionId, context, slotLevel);
+  const cast = {
+    actor: actor.id,
+    actionId,
+    ...(slot === undefined ? {} : { slot }),
+    target: typeof target === "string" ? target : [...target],
+  };
+  // The shape is picked first, before anything is paid or countered.
+  const { shapes } = found.activation;
+  if (shapes && shape === undefined) {
+    return {
+      frames: [
+        awaitDecision({
+          id: `${NS}:shape:${actor.id}:${String(state.combat?.round ?? 0)}`,
+          actor: actor.id,
+          prompt: `What shape does ${actor.name} give ${found.name}?`,
+          options: shapes.map(({ name }) => ({ id: name, label: name })),
+          resume: frame("chooseShape", cast),
+        }),
+      ],
+    };
+  }
+  const action = shape === undefined ? found : withShape(found, shape);
   const counter = uncountered
     ? null
     : counterWindow(
         actor,
         action,
-        {
-          actor: actor.id,
-          actionId,
-          ...(slot === undefined ? {} : { slot }),
-          target: typeof target === "string" ? target : [...target],
-        },
+        { ...cast, ...(shape === undefined ? {} : { shape }) },
         slotLevel,
         context,
       );
@@ -302,6 +324,29 @@ function castAction(
     ],
   };
 }
+
+// The action as cast in `shape`: the first is as written, and another's effects replace its resolution's.
+function withShape(action: KnownAction, shape: string): KnownAction {
+  const chosen = action.activation.shapes?.find(({ name }) => name === shape);
+  if (!chosen) throw new Error(`${action.name} has no shape ${shape}`);
+  const { resolution } = action.activation;
+  if (!chosen.effects || resolution.kind !== "automatic") return action;
+  return {
+    ...action,
+    activation: {
+      ...action.activation,
+      resolution: { ...resolution, effects: chosen.effects },
+    },
+  };
+}
+
+export const ShapeSchema = z.object({
+  actor: z.string(),
+  actionId: z.string(),
+  slot: z.string().optional(),
+  target: z.union([z.string(), z.array(z.string())]),
+  answer: z.string(),
+});
 
 export const PickSchema = z.object({
   actor: z.string(),
@@ -512,6 +557,7 @@ export const actionFrames = {
       cast.target,
       context,
       true,
+      cast.shape,
     ),
   ),
   [`${NS}:useAction`]: frameHandler({
@@ -523,4 +569,17 @@ export const actionFrames = {
     run: runPickTargets,
   }),
   [`${NS}:aimArea`]: frameHandler({ schema: AimSchema, run: runAimArea }),
+  [`${NS}:chooseShape`]: frameHandler({
+    schema: ShapeSchema,
+    run: (payload, context: Context) =>
+      castAction(
+        actorOf(context.state, payload.actor),
+        payload.actionId,
+        payload.slot,
+        payload.target,
+        context,
+        false,
+        payload.answer,
+      ),
+  }),
 };

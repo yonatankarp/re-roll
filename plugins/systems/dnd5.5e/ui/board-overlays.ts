@@ -91,7 +91,7 @@ export function showAreas(ctx: BoardContext, areas: readonly AreaView[]): void {
         node.dataset.key = key;
         ctx.areas.append(node);
       }
-      node.className = `dnd-area ${area.blocks ? "wall" : area.kind}${area.foe ? " foe" : ""}`;
+      node.className = `dnd-area ${area.blocks ? `wall${area.walls ? ` ${area.walls}` : ""}` : area.kind}${area.foe ? " foe" : ""}`;
       node.title = area.name;
       const left = Math.max(0, x - reach);
       const top = Math.max(0, y - reach);

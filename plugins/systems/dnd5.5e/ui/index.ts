@@ -365,6 +365,7 @@ function areaViews(state: DndState, access: ContentAccess): AreaView[] {
         name: zone.name ?? sourceName(access, zone.sourceId),
         foe,
         ...(zone.blocks ? { blocks: [...zone.blocks] } : {}),
+        ...(zone.walls ? { walls: zone.walls } : {}),
       },
     ];
   });
