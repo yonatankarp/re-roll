@@ -28,11 +28,14 @@ export const ContentIdSchema = z
 export const ContentEntrySchema = z.object({
   id: ContentIdSchema,
   replaces: ContentIdSchema.optional(),
+  // The library headings this entry describes, by heading id ("phb/0123-section#heading"), for coverage.
+  library: z.array(z.string()).optional(),
 });
 
 export interface ContentEntry {
   readonly id: string;
   readonly replaces?: string | undefined;
+  readonly library?: readonly string[] | undefined;
 }
 
 type Parsed<T> =
@@ -379,6 +382,8 @@ export interface SystemDefinition<S> {
   // Ranks a plugin when entries of the same name collide, lower first. Unset ranks all plugins alike, by id.
   // The adventure being played, and the plugins its manifest's precedence lists, still come first.
   readonly precedence?: (plugin: PluginManifest) => number;
+  // The edition a plugin follows, when the system reads an unset one as something else. Unset: the manifest's.
+  readonly edition?: (plugin: PluginManifest) => string;
   // A book section's kind from the system's own wording, such as "monster" for a stat block, for the import library.
   readonly libraryKind?: (body: string) => string | null;
   readonly htmlParsers?: Readonly<

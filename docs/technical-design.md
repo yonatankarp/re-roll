@@ -1008,6 +1008,7 @@ An independent audit checked 145 encoded spells and 120 monsters against their o
 | Property tests | Engine: any input keeps state valid. D&D plugin: HP stays in range, advantage and disadvantage always cancel, Resistance never stacks |
 | Replay test | Same seed and inputs always produce the same events and final state |
 | `check-pack` | Broken references, unreachable scenes, uncovered outcomes, code in data plugins, automation coverage |
+| Library coverage (in `check-pack`) | Every heading in a book's library links to an entity or is structural. It only reports until #127–#136 land (#126). The matcher is in `engine/tools/coverage.ts`. Each book's rules are in the private `books/coverage/<book>.yaml`, since they name its headings. An entry's `library` field, or the file's `links`, names a link the matcher can't find |
 | Test bot | Each adventure can be finished, with no dead ends or crashes across many seeds |
 | Headless play | The game layer the UI uses offers every choice a decision has, and only those, through whole adventures |
 | Second adventure | The engine is adventure-agnostic: it must work with no engine change |
