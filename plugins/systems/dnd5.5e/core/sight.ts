@@ -125,6 +125,8 @@ function squaresCover(
   return coverBetween(
     from,
     target.position,
+    // shortcut: a wall that stops only sight, as Wall of Fire, is total cover too, so nothing is aimed through
+    // it; tell seeing from aiming here if attacks at unseen creatures across one should play.
     blockingSet(state, "sight"),
     {
       half: setOf(terrain?.half),
