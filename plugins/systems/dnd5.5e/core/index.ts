@@ -254,6 +254,14 @@ const OLDER_BOOKS = new Set([
   "sword-coast-guide",
   "xanathars-guide",
 ]);
+// An unset edition means 2024, apart from the older books listed above.
+const editionOf = ({
+  id,
+  edition,
+}: {
+  id: string;
+  edition?: string | undefined;
+}) => edition ?? (OLDER_BOOKS.has(id) ? "2014" : "2024");
 
 const CharacterChosenPayload = z.object({ answer: z.string() });
 const ActorPayload = z.object({ actor: z.string() });
@@ -349,9 +357,10 @@ export const dnd55e = defineSystem<DndState>({
   }),
   outcomes: { keys: ["success", "failure"] },
   importKinds: { spells: spellImportKind },
-  // An unset edition means 2024, apart from the older books listed above.
-  precedence: ({ id, edition = OLDER_BOOKS.has(id) ? "2014" : "2024" }) => {
-    if (edition === "2014") return LEADING_BOOKS.length + 2;
+  edition: editionOf,
+  precedence: (plugin) => {
+    const { id } = plugin;
+    if (editionOf(plugin) === "2014") return LEADING_BOOKS.length + 2;
     if (id === "srd52") return LEADING_BOOKS.length + 1;
     const index = LEADING_BOOKS.indexOf(id);
     return index === -1 ? LEADING_BOOKS.length : index;
