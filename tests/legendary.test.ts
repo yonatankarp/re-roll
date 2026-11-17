@@ -25,6 +25,7 @@ import {
 } from "../plugins/systems/dnd5.5e/core/legendary.ts";
 import {
   ActivationSchema,
+  LairSchema,
   MonsterSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
@@ -563,6 +564,34 @@ describe("lair actions", () => {
       state = result.state;
     }
     expect(lair).toBe(2); // two rounds
+  });
+
+  // A lair is an entity of its own (#133) holding its regional effects as text. The in-Lair numbers and lair
+  // actions stay on the stat block, so a lair entity naming its owner changes nothing in play.
+  it("still play from the stat block when the lair is an entity of its own", async () => {
+    const lair = {
+      id: "goblin-ambush:lair/chiefs-lair",
+      name: "Chief's Lair",
+      source: "Fixture",
+      text: "",
+      owners: ["goblin-ambush:monster/chief"],
+    };
+    expect(LairSchema.parse(lair).owners).toEqual(lair.owners);
+    const run = withContent(await base(), {
+      "goblin-ambush:monster/chief": boss(),
+      [lair.id]: lair,
+    });
+    const started = startCombat(encounter, contextOf(run, party(), LOW), {
+      canFlee: false,
+      defeatContinues: false,
+    });
+    let state = party();
+    for (const event of started.events ?? [])
+      state = applyDndEvent(state, event);
+    const chief = state.actors["lair:chief-1"];
+    expect(chief && resistancesLeft(chief, run, state)).toBe(3); // its in-Lair number
+    const result = settle(run, state, started.frames ?? [], LOW);
+    expect(named(result.events, "lairActionTaken")).toHaveLength(1);
   });
 
   it("don't happen outside the lair", async () => {

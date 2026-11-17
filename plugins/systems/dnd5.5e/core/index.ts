@@ -113,6 +113,8 @@ import {
   FeatureSchema,
   GLOSSARY_KINDS,
   GlossaryEntrySchema,
+  LairSchema,
+  MonsterFamilySchema,
   HazardSchema,
   ItemSchema,
   MonsterSchema,
@@ -377,6 +379,18 @@ export const dnd55e = defineSystem<DndState>({
       references: buildReferences,
     }),
     ...glossaryKinds(),
+    "monster-families": contentKind({
+      idPrefix: "monster-family",
+      schema: MonsterFamilySchema,
+      lore: true,
+      references: (item) => item.members,
+    }),
+    lairs: contentKind({
+      idPrefix: "lair",
+      schema: LairSchema,
+      lore: true,
+      references: (item) => item.owners,
+    }),
   },
   checkSchema: CheckSchema,
   encounters: encounterKind({
