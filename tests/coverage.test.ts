@@ -58,6 +58,10 @@ describe("the coverage matcher", () => {
   it("tries the heading as printed before stripping its labels", () => {
     expect(variants("Acid (25 GP)").named).toEqual(["acid-25-gp", "acid"]);
     expect(variants("Level 3: Rage").named).toEqual(["level-3-rage", "rage"]);
+    expect(variants("Feature: Moss Haven").named).toEqual([
+      "feature-moss-haven",
+      "moss-haven",
+    ]);
     expect(variants("Aasimar Traits").loose).toContain("aasimar");
     expect(variants("High Elves").loose).toContain("high-elf");
     expect(match("mm", "Yuan-ti Malison (Type 1)")).toBe(

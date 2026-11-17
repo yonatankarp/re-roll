@@ -582,6 +582,71 @@ describe("2014-format books", () => {
   });
 });
 
+// The 2014 Player's Handbook layout: a class, its own Class Features, then its subclasses. Invented, as the rest.
+const handbookPage = `
+  <h1>Chapter 3: Classes</h1>
+  <h2>Barbarian</h2><p>Mossy folk.</p>
+  <h2>Class Features</h2><h4>Hit Points</h4><p>Hit Dice: 1d12</p>
+  <h3>Moss Rage</h3><p>You rage with moss.</p>
+  <h3>Fighting Moss</h3><p>At 2nd level, choose one.</p>
+  <h4>Lichen</h4><p>You hit harder.</p>
+  <h3>Spellcasting</h3><p>You cast.</p><h4>Cantrips</h4><p>You know two.</p>
+  <h2>Moss Paths</h2>
+  <h3>Path of the Bog</h3><p>Some love bogs.</p>
+  <h4 class="Table-Title">Bog Spells</h4><table><tr><th>Level</th><th>Spells</th></tr><tr><td>3rd</td><td>moss bolt</td></tr></table>
+  <h4>Bog Step</h4><p>Starting at 3rd level, you step.</p>
+  <h4 class="Table-Title">Bog Kin</h4><table><tr><th>Kin</th></tr><tr><td>Toad</td></tr></table><p>At 6th level, choose a kin.</p>
+  <h2>Eldritch Invocations</h2><h4>Moss Sight</h4><p>Prerequisite: 5th level</p><p>You see moss.</p>
+  <h1>Chapter 4: Backgrounds</h1>
+  <h2>Moss Keeper</h2><h3>Feature: Moss Haven</h3><p>Keepers shelter you.</p>`;
+
+describe("2014 Player's Handbook layout", () => {
+  const features = parseFeaturesFromHtml(handbookPage, "older-book");
+
+  it("reads each class feature, an option under one, invocations and background features", () => {
+    expect(features.map((item) => item.slug)).toEqual([
+      "barbarian-path-of-the-bog-bog-step",
+      "barbarian-path-of-the-bog-bog-kin",
+      "barbarian-moss-rage",
+      "barbarian-fighting-moss",
+      "barbarian-lichen",
+      "barbarian-spellcasting",
+      "moss-keeper-moss-haven",
+      "warlock-moss-sight",
+    ]);
+    expect(entryOf(features, "barbarian-spellcasting").text).toContain(
+      "You know two.",
+    );
+    expect(entryOf(features, "moss-keeper-moss-haven")).toMatchObject({
+      name: "Moss Haven",
+      automation: "text",
+    });
+  });
+
+  it("reads a subclass with its features' levels, hidden from character creation", () => {
+    const subclasses = parseSubclassesFromHtml(handbookPage, "older-book", [
+      "srd52:class/barbarian",
+    ]);
+    expect(subclasses.map((item) => item.entry)).toMatchObject([
+      {
+        name: "Path of the Bog",
+        class: "srd52:class/barbarian",
+        edition: "2014",
+        levels: [
+          {
+            level: 3,
+            grants: ["older-book:feature/barbarian-path-of-the-bog-bog-step"],
+          },
+          {
+            level: 6,
+            grants: ["older-book:feature/barbarian-path-of-the-bog-bog-kin"],
+          },
+        ],
+      },
+    ]);
+  });
+});
+
 describe("keyed tables and Bastions", () => {
   it("reads a table keyed by character level under a spanning label, and not a class's level table", () => {
     const parsed = parseLookupsFromHtml(
@@ -590,7 +655,9 @@ describe("keyed tables and Bastions", () => {
          <tr><td>Low</td><td>High</td><td></td></tr>
          <tr><td>1st</td><td>25</td><td>50</td></tr></table>
        <table><tr><th>Level</th><th>Features</th></tr><tr><td>1st</td><td>Moss Sense</td></tr></table>
-       <table><tr><th>Level</th><th>Moss XP</th></tr><tr><td>1st</td><td>300</td></tr></table>`,
+       <table><tr><th>Level</th><th>Moss XP</th></tr><tr><td>1st</td><td>300</td></tr></table>
+       <table><tr><th>Check Total</th><th>Moss</th></tr><tr><td>1–5</td><td>None</td></tr></table>
+       <table><tr><th>d10</th><th>Moss</th></tr><tr><td>2 or lower</td><td>One</td></tr><tr><td>3–10</td><td>Two</td></tr></table>`,
       "my-book",
     );
     expect(parsed.map((item) => item.entry)).toMatchObject([
@@ -601,6 +668,14 @@ describe("keyed tables and Bastions", () => {
         rows: [{ key: "1st", cells: ["25", "50"] }],
       },
       { keyedBy: "Level", columns: ["Moss XP"] },
+      { keyedBy: "Check Total", columns: ["Moss"] },
+      {
+        keyedBy: "d10",
+        rows: [
+          { key: "2 or lower", cells: ["One"] },
+          { key: "3–10", cells: ["Two"] },
+        ],
+      },
     ]);
   });
 

@@ -129,7 +129,15 @@ export function parseTablesFromHtml(
   return result;
 }
 
-// Tables keyed by Challenge Rating or by theme, which no die can pick from.
+const LOOKUP_KEY =
+  /^(?:CR|Theme|Challenge|Character Level|Level\/CR|Trap Danger|Trap Level|Check Total|Rarity|Item Rarity|DC|Spell Level|Result|Type)$/;
+
+const isRollTable = (table: string): boolean => {
+  const parsed = parseRollTable(table);
+  return parsed !== null && !("problem" in parsed);
+};
+
+// Tables looked up by a printed key, such as a Challenge Rating, a theme or a check's total, rather than rolled on.
 export function parseLookupsFromHtml(
   html: string,
   pluginId: string,
@@ -151,10 +159,11 @@ export function parseLookupsFromHtml(
       : printed;
     const rows = grouped ? after.slice(1) : after;
     const keyed =
-      /^(?:CR|Theme|Challenge|Character Level|Level\/CR|Trap Danger|Trap Level)$/.test(
-        keyedBy,
-      ) ||
-      (keyedBy === "Level" && columns.some((cell) => /\bXP\b/.test(cell)));
+      LOOKUP_KEY.test(keyedBy) ||
+      (keyedBy === "Level" && columns.some((cell) => /\bXP\b/.test(cell))) ||
+      (keyedBy === "Item" && columns.includes("Attune?")) ||
+      // A roll with a modifier or an open end, as "2 or lower", which no die alone picks from.
+      (/^\d*d(?:\d+|%)\b/i.test(keyedBy) && !isRollTable(match[0]));
     if (!keyed || columns.length === 0) return [];
     const body = rows.filter((row) => row.length === header.length && row[0]);
     if (body.length === 0) return [];
