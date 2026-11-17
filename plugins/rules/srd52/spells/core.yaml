@@ -2416,22 +2416,13 @@
     it, affects a creature other than you or an object being worn or carried by
     someone other than you. In addition, the spell ends if you move to a place
     more than 1,000 feet from the location where you cast it.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      self: true
+    cost: [action, slot]
+    targeting: { self: true }
     resolution:
       kind: automatic
-      damage: []
-      effects:
-        - kind: extraTurns
-          turns:
-            dice: 1d4
-            bonus:
-              base: 1
+      effects: [{ kind: extraTurns, turns: { dice: 1d4, bonus: { base: 1 } } }]
 - id: srd52:spell/true-polymorph
   name: True Polymorph
   level: 9
