@@ -1458,10 +1458,16 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("evasion"),
     anySave: z.boolean().default(false),
   }),
-  // Advantage on attack rolls while Bloodied, against a target missing Hit Points, or against a Frightened one.
+  // Advantage on attack rolls while Bloodied, against a target missing Hit Points, or against a Frightened or Charmed
+  // one, as Treacherous Allure's.
   z.strictObject({
     kind: z.literal("attackAdvantage"),
-    when: z.enum(["bloodied", "targetHurt", "targetFrightened"]),
+    when: z.enum([
+      "bloodied",
+      "targetHurt",
+      "targetFrightened",
+      "targetCharmed",
+    ]),
   }),
   // Its shape can't change, so Polymorph does nothing to it, as with a golem's Immutable Form.
   z.strictObject({ kind: z.literal("immutableForm") }),
@@ -2198,6 +2204,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
       ),
     ])
     .optional(),
+  // Spells it casts only by its free cast, never known, as Genie Magic's level 1 Sorcerer spells, picked as cast.
+  castsOnly: z.array(ContentIdSchema).min(1).optional(),
   // Its cantrip can be replaced after a Long Rest by one from these class lists, as a High Elf's Prestidigitation
   // (swap.ts).
   swapCantrip: z.array(ContentIdSchema).min(1).optional(),
@@ -2286,6 +2294,7 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     // As many picks as the Proficiency Bonus, made between scenes and one more as it rises, as Ritual Caster's
     // (swap.ts). Such a choice and an `ifKnown` one are never asked as the feat is taken, so old saves replay.
     grows: z.literal("proficiency").optional(),
+    late: z.literal(true).optional(), // picked between scenes, as a background's feat added after saves were made
     // Picked between scenes, only by a character who knows this spell from elsewhere, as Light Bringer's Cleric
     // cantrip in place of a Light already known.
     ifKnown: ContentIdSchema.optional(),

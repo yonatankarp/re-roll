@@ -641,7 +641,11 @@ function featSpellAbilities(
     for (const grant of ids) {
       const feature = FeatureSchema.safeParse(access.content(grant)).data;
       const own = feature && swappedSpells(grant, feature, swaps, access);
-      for (const spells of [own, feature?.spellsBySlot]) {
+      for (const spells of [
+        own,
+        feature?.spellsBySlot,
+        { castsOnly: feature?.castsOnly ?? [] },
+      ]) {
         for (const spell of Object.values(spells ?? {}).flat()) {
           bySpell.set(spell, ability);
         }
@@ -769,6 +773,10 @@ function collectFeatureData(
       if (Number(slot) > highestSlot) continue;
       spells.push(...ids);
       if (prepared?.spells[slot] === ids) own.push(...ids);
+    }
+    for (const spell of feature.castsOnly ?? []) {
+      const how = freeCastOf(feature.freeCast, spell);
+      if (how) free.push([spell, how]);
     }
     const extra = prepared?.freeCast;
     if (extra)

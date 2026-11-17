@@ -17,6 +17,7 @@ import {
   type Stats,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { swappable } from "../plugins/systems/dnd5.5e/core/swap.ts";
+import { traitAttackAdvantage } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
 import { hero, scripted, settle, testRun } from "./feat-fixtures.ts";
 
 const BURNING_HANDS = "srd52:spell/burning-hands";
@@ -294,5 +295,68 @@ describe("spells from feats and species", () => {
     expect(
       freeOf(stats, `spell:${BURNING_HANDS}:free`)?.activation.cost,
     ).toContainEqual({ resource: `free:${BURNING_HANDS}` });
+  });
+
+  it("casts a feat's spells only by its free cast, sharing one use, without knowing them", async () => {
+    const run = await testRun();
+    const stats = deriveStats(hero(["wishes"]), run);
+    for (const spell of [BURNING_HANDS, "srd52:spell/magic-missile"]) {
+      expect(
+        freeOf(stats, `spell:${spell}:free`)?.activation.cost,
+      ).toContainEqual({
+        resource: "wishes",
+      });
+      expect(freeOf(stats, `spell:${spell}`)).toBeUndefined();
+    }
+  });
+
+  it("picks a background feat's spells between scenes when saves were made before it asked", async () => {
+    const run = await testRun();
+    const actor = hero([], {
+      answers: [{ kind: "feats", values: ["test:feat/later"] }],
+    });
+    const key = "pick:test:feat/later#cantrips";
+    const once = swap(run, actor, key, ["srd52:spell/fire-bolt"]).actor;
+    expect(swappable(once, run).find((item) => item.key === key)?.open).toBe(
+      true,
+    );
+    const twice = swap(run, once, key, ["srd52:spell/ray-of-frost"]).actor;
+    expect(swappable(twice, run).find((item) => item.key === key)?.open).toBe(
+      false,
+    );
+    expect(spellIds(deriveStats(twice, run))).toEqual(
+      expect.arrayContaining([
+        "spell:srd52:spell/fire-bolt",
+        "spell:srd52:spell/ray-of-frost",
+      ]),
+    );
+  });
+
+  it("has Advantage on attack rolls against a Charmed creature with Treacherous Allure", async () => {
+    const run = await testRun();
+    const target = hero([], { id: "foe" });
+    const charmed: Actor = {
+      ...target,
+      activeEffects: [
+        {
+          sourceId: "test",
+          casterId: PLAYER_ACTOR,
+          modifier: { kind: "condition", condition: "charmed" },
+          ends: "spellDuration",
+        },
+      ],
+    };
+    const edge = (traits: readonly string[], foe: Actor) => {
+      const attacker = hero(traits);
+      return traitAttackAdvantage(
+        deriveStats(attacker, run),
+        attacker,
+        foe,
+        deriveStats(foe, run),
+      );
+    };
+    expect(edge(["allure"], charmed)).toBe(true);
+    expect(edge(["allure"], target)).toBe(false);
+    expect(edge([], charmed)).toBe(false);
   });
 });

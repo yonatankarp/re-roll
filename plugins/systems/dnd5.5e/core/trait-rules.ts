@@ -106,7 +106,10 @@ export function traitAttackAdvantage(
         ? attacker.hp * 2 <= stats.maxHp
         : passive.when === "targetHurt"
           ? target.hp < targetStats.maxHp
-          : hasCondition(target, "frightened")),
+          : hasCondition(
+              target,
+              passive.when === "targetCharmed" ? "charmed" : "frightened",
+            )),
   );
 }
 

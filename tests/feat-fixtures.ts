@@ -669,6 +669,34 @@ const FIXTURES = [
   }),
   trait("bringer", [], { spells: { 1: ["srd52:spell/light"] } }),
   trait("lit", [], { spells: { 1: ["srd52:spell/light"] } }),
+  trait("wishes", [], {
+    resources: [
+      {
+        id: "wishes",
+        max: { base: 1 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+    castsOnly: ["srd52:spell/burning-hands", "srd52:spell/magic-missile"],
+    freeCast: { resource: "wishes" },
+  }),
+  trait("allure", [{ kind: "attackAdvantage", when: "targetCharmed" }]),
+  {
+    id: "test:feat/later",
+    name: "Later",
+    category: "origin",
+    text: "Test.",
+    choices: [
+      {
+        kind: "spells",
+        id: "cantrips",
+        count: 2,
+        maxLevel: 0,
+        list: "srd52:class/wizard",
+        late: true,
+      },
+    ],
+  },
   {
     id: "test:feat/potent",
     name: "Potent",

@@ -516,7 +516,7 @@ function owned<T extends ChoiceDef>(
 export function latePick(choice: ChoiceDef): boolean {
   return (
     choice.kind === "spells" &&
-    (Boolean(choice.grows) || Boolean(choice.ifKnown))
+    (Boolean(choice.late) || Boolean(choice.grows) || Boolean(choice.ifKnown))
   );
 }
 

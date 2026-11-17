@@ -160,15 +160,17 @@ export function swappable(
       const values = actor.swaps?.[key] ?? [];
       const wanted = choice.grows
         ? stats.proficiency
-        : knowsElsewhere(
-              actor,
-              stats,
-              feat?.grants ?? [],
-              choice.ifKnown,
-              access,
-            )
+        : choice.late
           ? choice.count
-          : 0;
+          : knowsElsewhere(
+                actor,
+                stats,
+                feat?.grants ?? [],
+                choice.ifKnown,
+                access,
+              )
+            ? choice.count
+            : 0;
       return [
         {
           key,
