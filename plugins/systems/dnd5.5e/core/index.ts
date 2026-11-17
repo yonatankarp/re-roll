@@ -111,7 +111,10 @@ import {
   type ChoiceDef,
   FeatSchema,
   FeatureSchema,
+  DOWNTIME_KINDS,
+  ENVIRONMENT_KINDS,
   GLOSSARY_KINDS,
+  OPTION_KINDS,
   GlossaryEntrySchema,
   LairSchema,
   MonsterFamilySchema,
@@ -191,9 +194,12 @@ const PLAYED: Partial<Record<string, readonly string[]>> = {
   "weapon-mastery": WeaponMasterySchema.options,
 };
 
-function glossaryKinds() {
+// Text kinds, each entry the glossary's shape: content folder -> id kind.
+function glossaryKinds(
+  kinds: Readonly<Record<string, string>> = GLOSSARY_KINDS,
+) {
   return Object.fromEntries(
-    Object.entries(GLOSSARY_KINDS).map(([folder, idPrefix]) => {
+    Object.entries(kinds).map(([folder, idPrefix]) => {
       const keys = PLAYED[idPrefix];
       return [
         folder,
@@ -371,6 +377,7 @@ export const dnd55e = defineSystem<DndState>({
     bastions: contentKind({ idPrefix: "bastion", schema: BastionEntrySchema }),
     traps: contentKind({ idPrefix: "trap", schema: TrapSchema }),
     hazards: contentKind({ idPrefix: "hazard", schema: HazardSchema }),
+    ...glossaryKinds(ENVIRONMENT_KINDS),
     poisons: contentKind({ idPrefix: "poison", schema: PoisonSchema }),
     budgets: contentKind({ idPrefix: "budget", schema: EncounterBudgetSchema }),
     pregens: contentKind({
@@ -391,6 +398,8 @@ export const dnd55e = defineSystem<DndState>({
       lore: true,
       references: (item) => item.owners,
     }),
+    ...glossaryKinds(DOWNTIME_KINDS),
+    ...glossaryKinds(OPTION_KINDS),
   },
   checkSchema: CheckSchema,
   encounters: encounterKind({

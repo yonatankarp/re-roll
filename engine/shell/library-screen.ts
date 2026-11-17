@@ -1,6 +1,6 @@
 import { OPENING, type ShellContext } from "./context.ts";
 import { button, el } from "./dom.ts";
-import type { LinkRef, RulingRef } from "./session.ts";
+import type { KindRef, LinkRef, RulingRef } from "./session.ts";
 
 // The book library: a book's headings, and the text of the one chosen.
 
@@ -97,6 +97,19 @@ function linkRow(
   );
 }
 
+// What a section is, such as "Disease: Sewer Plague", from its kind's id (#134–#136).
+function kindRow(refs: readonly KindRef[]): HTMLElement {
+  return el(
+    "p",
+    { class: "book-kinds" },
+    ...refs.map((ref) =>
+      el("span", {
+        text: `${ref.kind.charAt(0).toUpperCase()}${ref.kind.slice(1).replace(/-/g, " ")}: ${ref.heading}`,
+      }),
+    ),
+  );
+}
+
 export async function showLibrary(
   ctx: ShellContext,
   books: readonly string[],
@@ -174,14 +187,17 @@ export async function showBook(
   const contents = el("nav", { class: "book-contents" });
   const text = el("pre", { class: "book-text" });
   text.tabIndex = -1;
+  const kindsBox = el("div");
   const rulings = el("div");
   const openSection = async (file: string): Promise<void> => {
-    const [words, refs, links] = await Promise.all([
+    const [words, refs, links, kinds] = await Promise.all([
       ctx.game.readSection(id, file),
       ctx.game.rulings(id, file),
       ctx.game.links(id, file),
+      ctx.game.kinds(id, file),
     ]);
     text.textContent = words;
+    kindsBox.replaceChildren(...(kinds.length > 0 ? [kindRow(kinds)] : []));
     rulings.replaceChildren(
       ...(links.length > 0
         ? [
@@ -222,7 +238,7 @@ export async function showBook(
         "div",
         { class: "book-layout" },
         contents,
-        el("div", {}, text, rulings),
+        el("div", {}, kindsBox, text, rulings),
       ),
     ),
   );

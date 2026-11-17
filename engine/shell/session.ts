@@ -303,6 +303,15 @@ const LinkIndexSchema = z.object({
 });
 export type LinkRef = z.infer<typeof LinkIndexSchema>["links"][string][number];
 
+// A book's index of the sections that are an entity of a text kind, and which (#134–#136).
+const KindIndexSchema = z.object({
+  kinds: z.record(
+    z.string(),
+    z.array(z.object({ heading: z.string(), kind: z.string() })),
+  ),
+});
+export type KindRef = z.infer<typeof KindIndexSchema>["kinds"][string][number];
+
 export interface TermEntry {
   readonly id: string;
   readonly words: readonly string[];
@@ -589,10 +598,30 @@ export function createGame({
   let glossaryText: Promise<string | null> | undefined; // read once, as the books don't change in play
   let rulingIndex:
     Promise<ReadonlyMap<string, readonly RulingRef[]>> | undefined; // likewise
-  const linkIndexes = new Map<
-    string,
-    Promise<Readonly<Record<string, readonly LinkRef[]>>>
-  >(); // likewise, by book
+  const bookIndexes = new Map<string, Promise<unknown>>(); // likewise, by "<book>/<file>"
+  // A book's generated index file, or none: listed first, as reading a missing file is an error in a
+  // browser's console, and a damaged index hides its entries, not the book.
+  const bookIndex = <T>(
+    id: string,
+    name: string,
+    read: (raw: unknown) => T,
+    none: T,
+  ): Promise<T> => {
+    const path = `${LIBRARY}/${id}/${name}`;
+    let index = bookIndexes.get(path) as Promise<T> | undefined;
+    if (!index) {
+      index = storage
+        .list(LIBRARY)
+        .then(async (entries) =>
+          entries.some((entry) => entry.path === path)
+            ? read(JSON.parse((await storage.read(path)) ?? ""))
+            : none,
+        )
+        .catch(() => none);
+      bookIndexes.set(path, index);
+    }
+    return index;
+  };
   // The cover of the book an id such as "phb:background/acolyte" comes from. Spells and features keep
   // none, so a list of them isn't a wall of the same cover.
   const coverOf = (id: string): string | undefined =>
@@ -1098,23 +1127,25 @@ export function createGame({
     // The family, members, lair or owners of what a book's section describes, in the same book (#133).
     async links(id: string, file: string): Promise<readonly LinkRef[]> {
       if (!BARE_NAME.test(id)) return [];
-      let index = linkIndexes.get(id);
-      if (!index) {
-        const path = `${LIBRARY}/${id}/links.json`;
-        index = storage
-          .list(LIBRARY)
-          // Listed first, as reading a missing file is an error in a browser's console.
-          .then(async (entries) =>
-            entries.some((entry) => entry.path === path)
-              ? LinkIndexSchema.parse(
-                  JSON.parse((await storage.read(path)) ?? ""),
-                ).links
-              : {},
-          )
-          .catch(() => ({})); // a damaged index hides its links, not the book
-        linkIndexes.set(id, index);
-      }
-      return (await index)[file] ?? [];
+      const index = await bookIndex(
+        id,
+        "links.json",
+        (raw) => LinkIndexSchema.parse(raw).links,
+        {},
+      );
+      return index[file] ?? [];
+    },
+
+    // Which text kind's entities a book's section is, such as a disease or a lifestyle (#134–#136).
+    async kinds(id: string, file: string): Promise<readonly KindRef[]> {
+      if (!BARE_NAME.test(id)) return [];
+      const index = await bookIndex(
+        id,
+        "kinds.json",
+        (raw) => KindIndexSchema.parse(raw).kinds,
+        {},
+      );
+      return index[file] ?? [];
     },
 
     // The current system's terms that a book in the library explains, or none without the owner's books.

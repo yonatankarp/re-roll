@@ -760,6 +760,15 @@ summary {
   padding-top: 8px;
 }
 
+.book-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 8px;
+  font-family: var(--font-caps);
+  color: var(--muted);
+}
+
 .book-links button {
   padding: 4px 8px;
   font-size: 0.9rem;
