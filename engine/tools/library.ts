@@ -359,3 +359,86 @@ export function buildLibrary(html: string, systemKind?: SystemKind): Library {
   close();
   return { title, files, entries };
 }
+
+const escapeHtml = (text: string): string =>
+  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const inline = (text: string): string =>
+  escapeHtml(text)
+    .replace(/\*\*([^*]+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*\s][^*]*?)\*/g, "<em>$1</em>");
+const cellsOf = (line: string): string[] =>
+  line
+    .replace(/^\|\s?|\s?\|$/g, "")
+    .split(/\s?(?<!\\)\|\s?/)
+    .map((cell) => inline(cell.replace(/\\\|/g, "|")));
+
+// The book page again from its library files, for importers when the saved HTML is gone. Headings,
+// paragraphs, lists and captioned tables come back; a stat block's or sidebar's styling doesn't.
+export function libraryHtml(
+  title: string,
+  sections: readonly { readonly text: string; readonly anchor: string }[],
+): string {
+  const out: string[] = [
+    `<html><head><title>${escapeHtml(title)}</title></head><body>`,
+  ];
+  for (const { text, anchor } of sections) {
+    const blocks = text
+      .trim()
+      .split(/\n\n+/)
+      .map((block) => block.replace(/^> ?/gm, ""));
+    let list: "ul" | "ol" | null = null;
+    let caption = "";
+    for (const [at, block] of blocks.entries()) {
+      const item = /^(-|1\.) (.*)$/s.exec(block);
+      const kind = item ? (item[1] === "-" ? "ul" : "ol") : null;
+      if (list && kind !== list) out.push(`</${list}>`);
+      if (kind && kind !== list) out.push(`<${kind}>`);
+      list = kind;
+      if (item) {
+        out.push(`<li>${inline(item[2] ?? "")}</li>`);
+        continue;
+      }
+      const heading = /^(#{1,6}) (.*)$/.exec(block);
+      if (heading) {
+        const level = String(heading[1]?.length);
+        const id = at === 0 && anchor ? ` id="${escapeHtml(anchor)}"` : "";
+        // A heading right above a table is the table's title, as the book's own styling marks it.
+        const label = blocks[at + 1]?.startsWith("|")
+          ? ' class="Table-Title"'
+          : "";
+        out.push(
+          `<h${level}${id}${label}>${inline(heading[2] ?? "")}</h${level}>`,
+        );
+        continue;
+      }
+      const lines = block.split("\n");
+      if (lines.length > 1 && /^\|( --- \|)+$/.test(lines[1] ?? "")) {
+        const [head = "", , ...rows] = lines;
+        out.push(
+          "<table>",
+          caption ? `<caption>${caption}</caption>` : "",
+          `<tr>${cellsOf(head)
+            .map((cell) => `<th>${cell}</th>`)
+            .join("")}</tr>`,
+          ...rows.map(
+            (row) =>
+              `<tr>${cellsOf(row)
+                .map((cell) => `<td>${cell}</td>`)
+                .join("")}</tr>`,
+          ),
+          "</table>",
+        );
+        caption = "";
+        continue;
+      }
+      const bold = /^\*\*([^*]+)\*\*$/.exec(block);
+      if (bold && blocks[at + 1]?.startsWith("|")) {
+        caption = inline(bold[1] ?? "");
+        continue;
+      }
+      out.push(`<p>${inline(block)}</p>`);
+    }
+    if (list) out.push(`</${list}>`);
+  }
+  return [...out, "</body></html>"].filter(Boolean).join("\n");
+}
