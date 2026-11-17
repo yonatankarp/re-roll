@@ -710,13 +710,19 @@ function collectFeatureData(
 function withRiders(
   actions: readonly KnownAction[],
   passives: readonly Passive[],
+  actor: Actor,
 ): KnownAction[] {
   return actions.map((action) => {
     const { resolution } = action.activation;
     const riders = passives.flatMap((passive) =>
       passive.kind === "activationRider" &&
       action.id.startsWith(`feature:${passive.feature}:`) &&
-      (passive.label === undefined || action.activation.label === passive.label)
+      (passive.label === undefined ||
+        action.activation.label === passive.label) &&
+      (!passive.while ||
+        actor.activeEffects.some(({ sourceId }) =>
+          passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+        ))
         ? [passive]
         : [],
     );
@@ -1384,7 +1390,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     actions: withMetamagic(
       withInvocations(
         withWeaponRiders(
-          withRiders(actions, fromFeatures.passives),
+          withRiders(actions, fromFeatures.passives, actor),
           fromFeatures.passives,
           actor,
           access,
@@ -1458,7 +1464,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         5 * actor.exhaustion,
     ),
     resources: Object.fromEntries(
-      [...fromFeatures.resources, ...pools].map((resource) => [
+      partial.resourceDefs.map((resource) => [
         resource.id,
         evaluateFormula(resource.max, partial),
       ]),
