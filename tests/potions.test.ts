@@ -105,6 +105,21 @@ const ITEMS = [
       },
     ],
   }),
+  item("scroll", { category: "scroll", boundSpell: { as: "scroll" } }),
+  item("staff", {
+    category: "staff",
+    boundSpell: { as: "charges", maxLevel: 8 },
+    resources: [{ id: "staff", max: { base: 6 }, recharge: [] }],
+  }),
+  item("mail", {
+    category: "armor",
+    boundSpell: { as: "charges", schools: ["abjuration", "illusion"] },
+    resources: [{ id: "mail", max: { base: 6 }, recharge: [] }],
+  }),
+  item("tattoo", {
+    category: "wondrousItem",
+    boundSpell: { as: "tattoo", minLevel: 1, maxLevel: 3 },
+  }),
 ];
 
 async function itemRun() {
@@ -125,6 +140,31 @@ const carrying = (items: readonly string[], extra: Partial<Actor> = {}) => ({
   inventory: ["srd52:item/longsword", ...items],
   ...extra,
 });
+// A wizard of `level` carrying these items.
+const wizard = (items: readonly string[], level = 1): Actor => {
+  const base = carrying(items, { ...hero([], { level }) });
+  if (base.source.kind !== "character" || !base.source.build) return base;
+  const { build } = base.source;
+  return {
+    ...base,
+    hp: 30,
+    inventory: ["srd52:item/longsword", ...items],
+    source: {
+      kind: "character",
+      build: {
+        ...build,
+        levels: build.levels.map((entry) => ({
+          ...entry,
+          classId: "srd52:class/wizard",
+        })),
+      },
+    },
+  };
+};
+const saveDc = (action: KnownAction | undefined): number | undefined => {
+  const resolution = action?.activation.resolution;
+  return resolution?.kind === "save" ? resolution.dc.base : undefined;
+};
 const payloads = (events: readonly SystemEvent[], kind: string) =>
   events.flatMap((event) =>
     event.kind === `${NS}:${kind}` && "payload" in event
@@ -277,5 +317,104 @@ describe("magic item riders (#180)", () => {
         (id) => id === "test:item/arrow--1",
       ),
     ).toHaveLength(1);
+  });
+});
+
+describe("spells bound into items (#142, #199)", () => {
+  it("reads a Spell Scroll named by its spell, with the scroll's numbers, on the reader's own list", async () => {
+    const run = await itemRun();
+    const missile = "test:item/scroll--magic-missile";
+    const fire = "test:item/scroll--fireball";
+    const reader = wizard([missile, fire]);
+    const read = actionOf(run, reader, `item:${missile}`);
+    expect(read.name).toBe("Read scroll (Magic Missile)");
+    expect(read.castCheck).toBeUndefined();
+    // Above the reader's slots, a check of DC 10 + the spell's level comes first, and the scroll's DC is 15.
+    const high = actionOf(run, reader, `item:${fire}`);
+    expect(high.castCheck).toEqual({ ability: "int", dc: 13 });
+    expect(saveDc(high)).toBe(15);
+    // A fighter has no spell list to read it from.
+    expect(
+      deriveStats(carrying([missile]), run).actions.some(
+        (action) => action.id === `item:${missile}`,
+      ),
+    ).toBe(false);
+    // A spell nobody has heard of names no item.
+    expect(run.content("test:item/scroll--no-such-spell")).toBeUndefined();
+  });
+
+  it("wastes a scroll whose check fails, and casts it on a success", async () => {
+    const run = await itemRun();
+    const fire = "test:item/scroll--fireball";
+    const reader = { ...wizard([fire]), position: { x: 0, y: 0 } };
+    const foe = {
+      ...hero([], { id: "foe" }),
+      side: "enemy" as const,
+      hp: 40,
+      position: { x: 4, y: 0 },
+    };
+    const cast = (natural: number) =>
+      settle(
+        run,
+        [reader, foe],
+        [
+          frame("castCheck", {
+            actor: PLAYER_ACTOR,
+            actionId: `item:${fire}`,
+            target: "foe",
+          }),
+        ],
+        scripted([natural, 1, 1, 1, 1, 1, 1, 1, 1, 1]).dice,
+        () => "",
+      );
+    const failed = cast(2);
+    expect(payloads(failed.events, "itemUsed")).toEqual([
+      { actor: PLAYER_ACTOR, item: fire },
+    ]);
+    expect(payloads(failed.events, "damaged")).toEqual([]);
+    const passed = cast(19);
+    expect(
+      payloads(passed.events, "damaged").map((item) => item.actor),
+    ).toContain("foe");
+  });
+
+  it("casts an Enspelled item's spell with its charges and the DC its level gives", async () => {
+    const run = await itemRun();
+    const staff = "test:item/staff--fireball";
+    const cast = actionOf(
+      run,
+      carrying([staff]),
+      `spell:srd52:spell/fireball:item:${staff}:1`,
+    );
+    expect(cast.name).toBe("Fireball (staff (Fireball))");
+    expect(saveDc(cast)).toBe(15);
+    expect(cast.activation.cost).toContainEqual({ resource: "staff" });
+    // Armor made from a plain one holds only the schools it allows.
+    const mail = "test:item/mail--1--chain-mail--shield";
+    expect(run.content(mail)).toEqual(
+      expect.objectContaining({
+        type: "armor",
+        name: "mail (Chain Mail) (Shield)",
+      }),
+    );
+    expect(
+      run.content("test:item/mail--1--chain-mail--fireball"),
+    ).toBeUndefined();
+  });
+
+  it("keeps a Thayan Spell Tattoo's spell prepared, and casts it once for free with DC 13 for a non-caster", async () => {
+    const run = await itemRun();
+    const tattoo = "test:item/tattoo--hold-person";
+    const free = actionOf(run, carrying([tattoo]), `item:${tattoo}`);
+    expect(free.activation.cost).not.toContain("slot");
+    expect(saveDc(free)).toBe(13);
+    const known = deriveStats(wizard([tattoo], 3), run).actions.map(
+      (action) => action.id,
+    );
+    expect(known).toContain("spell:srd52:spell/hold-person");
+    expect(run.content("test:item/tattoo--fireball")).toEqual(
+      expect.objectContaining({ name: "tattoo (Fireball)" }),
+    );
+    expect(run.content("test:item/tattoo--wish")).toBeUndefined();
   });
 });

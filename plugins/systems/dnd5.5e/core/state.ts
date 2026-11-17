@@ -85,6 +85,7 @@ export const FRAME_KINDS = [
   "swapAnswer",
   "useAction",
   "useItem",
+  "castCheck",
   "zoneTick",
   "chooseDamageType",
   "chooseZoneType",

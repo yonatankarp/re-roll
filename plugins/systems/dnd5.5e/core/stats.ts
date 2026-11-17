@@ -115,6 +115,13 @@ export interface KnownAction {
   readonly rolled?: true; // taken only when a randomAction picks it, as one eye ray
   readonly concentrates?: true; // casting it starts Concentration even with no lasting effect, as Flame Blade
   readonly ammunition?: string; // the magic ammunition it fires, which a hit spends (combat/attack.ts landHit)
+  // A check made as it's taken, which on a failure wastes it, as reading a Spell Scroll above the reader's level
+  // (combat/actions.ts castAction).
+  readonly castCheck?: {
+    readonly ability: Ability;
+    readonly skill?: Skill;
+    readonly dc: number;
+  };
 }
 
 export interface Stats {
@@ -368,7 +375,10 @@ export function chargesOf(item: Item): {
 // Spells by their names after the plugin, the first loaded of each, so the book that leads plays it. Kept for each
 // run's list of ids, which doesn't change.
 const namedSpells = new WeakMap<readonly string[], Map<string, string>>();
-function spellNamed(slug: string, access: ContentAccess): string | undefined {
+export function spellNamed(
+  slug: string,
+  access: ContentAccess,
+): string | undefined {
   const ids = access.contentIds();
   let bySlug = namedSpells.get(ids);
   if (!bySlug) {
@@ -1246,7 +1256,13 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       itemId,
       item,
       access,
-      untrainedArmor ? undefined : caster?.spellcasting,
+      untrainedArmor || !caster?.spellcasting
+        ? undefined
+        : {
+            classes: Object.keys(classLevels),
+            ability: caster.spellcasting.ability,
+            highest: slots.findLastIndex((count) => count > 0) + 1,
+          },
     );
     if (usable) {
       actions.push(
@@ -1260,6 +1276,15 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ...itemCasts(itemId, item, level, access),
         ...itemUses(itemId, item),
       );
+      // A Thayan Spell Tattoo's spell is always prepared, cast with the bearer's slots.
+      if (
+        item.type === "magicItem" &&
+        item.boundSpell?.as === "tattoo" &&
+        item.spell &&
+        caster?.spellcasting
+      ) {
+        knownSpells.add(item.spell);
+      }
     }
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
@@ -1636,12 +1661,41 @@ export function itemHealing(item: z.infer<typeof ItemSchema>) {
       : undefined;
 }
 
+// A spell's save DC and attack bonus when an item made with it casts it, by the spell's level, as a Spell Scroll's or
+// an Enspelled Staff's.
+export function boundNumbers(level: number): {
+  readonly dc: number;
+  readonly attack: number;
+} {
+  const dc =
+    level <= 2 ? 13 : level <= 4 ? 15 : level <= 6 ? 17 : level <= 8 ? 18 : 19;
+  return { dc, attack: dc - 8 };
+}
+
+// Whether a spell is on one of these classes' spell lists, by their names after the plugin, so any book's Wizard
+// counts. shortcut: a subclass's or feature's own list doesn't count.
+export function onClassList(
+  spell: Spell,
+  classIds: readonly string[],
+): boolean {
+  const slug = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
+  const names = new Set(classIds.map(slug));
+  return spell.classes.some((id) => names.has(slug(id)));
+}
+
 // A potion to drink or a scroll to read, used up once used. Their action ids start "item:", which spends the item.
 function itemAction(
   itemId: string,
   item: z.infer<typeof ItemSchema>,
   access: ContentAccess,
-  spellcasting: unknown,
+  // the reader's spellcasting: its classes, ability and highest slot level
+  reader:
+    | {
+        readonly classes: readonly string[];
+        readonly ability: Ability;
+        readonly highest: number;
+      }
+    | undefined,
 ): KnownAction | null {
   const healing = itemHealing(item);
   if (healing) {
@@ -1683,20 +1737,62 @@ function itemAction(
       spellLevel: null,
     };
   }
-  // shortcut: any spellcaster can read any scroll, with their own spellcasting numbers rather than the scroll's.
-  if (item.type !== "magicItem" || !item.spell || !spellcasting) return null;
+  // A Thayan Spell Tattoo's spell cast once without a slot or components, the tattoo gone after, with the bearer's
+  // spellcasting or else DC 13 and +5.
+  if (
+    item.type === "magicItem" &&
+    item.spell &&
+    item.boundSpell?.as === "tattoo"
+  ) {
+    const spell = lookup(access, SpellSchema, item.spell);
+    if (!spell.activation || !doesSomething(spell.activation.resolution)) {
+      return null;
+    }
+    const activation = reader
+      ? spell.activation
+      : withItemNumbers(spell.activation, 13, 5);
+    return {
+      id: `item:${itemId}`,
+      name: `${spell.name} (${item.name})`,
+      activation: {
+        ...activation,
+        cost: activation.cost.filter(
+          (cost) =>
+            cost !== "slot" && !(typeof cost === "object" && "gold" in cost),
+        ),
+      },
+      spellLevel: spell.level,
+    };
+  }
+  // A Spell Scroll is read by a caster with its spell on their list, with the scroll's numbers. A spell above the
+  // slots they have takes a check of their spellcasting ability first, whose failure wastes the scroll.
+  if (item.type !== "magicItem" || !item.spell || !reader) return null;
   const spell = lookup(access, SpellSchema, item.spell);
-  if (!spell.activation || !doesSomething(spell.activation.resolution)) {
+  if (
+    !spell.activation ||
+    !doesSomething(spell.activation.resolution) ||
+    !onClassList(spell, reader.classes)
+  ) {
     return null;
   }
+  const { dc, attack } = boundNumbers(spell.level);
+  const numbered = withItemNumbers(spell.activation, dc, attack);
   return {
     id: `item:${itemId}`,
     name: `Read ${item.name}`,
     activation: {
-      ...spell.activation,
-      cost: spell.activation.cost.filter((cost) => cost !== "slot"),
+      ...numbered,
+      cost: numbered.cost.filter(
+        (cost) =>
+          cost !== "slot" && !(typeof cost === "object" && "gold" in cost),
+      ),
     },
     spellLevel: spell.level,
+    ...(spell.level > Math.max(reader.highest, 0)
+      ? {
+          castCheck: { ability: reader.ability, dc: 10 + spell.level },
+        }
+      : {}),
   };
 }
 

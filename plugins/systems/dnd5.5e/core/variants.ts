@@ -1,5 +1,6 @@
 import type { ContentAccess } from "#sdk";
-import { type Item, ItemSchema } from "./schemas.ts";
+import { type Item, ItemSchema, SpellSchema } from "./schemas.ts";
+import { boundNumbers, spellNamed } from "./stats.ts";
 
 const SEPARATOR = "--";
 
@@ -13,7 +14,26 @@ export function deriveItem(
   id: string,
   access: ContentAccess,
 ): Item | undefined {
-  const [parentId = "", index = "", baseSlug, ...extra] = id.split(SEPARATOR);
+  const parts = id.split(SEPARATOR);
+  if (parts.length < 2) return undefined;
+  const bound = ItemSchema.safeParse(access.content(parts[0] ?? "")).data;
+  if (bound?.type === "magicItem" && bound.boundSpell) {
+    const inner = parts.slice(0, -1);
+    const made = inner.length === 1 ? bound : version(inner, access);
+    return (
+      made && withSpell(made, bound.boundSpell, parts.at(-1) ?? "", id, access)
+    );
+  }
+  return version(parts, access);
+}
+
+// The version an id's parts name: the entry, its version's number, and the plain item it's made from.
+function version(
+  parts: readonly string[],
+  access: ContentAccess,
+): Item | undefined {
+  const id = parts.join(SEPARATOR);
+  const [parentId = "", index = "", baseSlug, ...extra] = parts;
   if (extra.length > 0 || !/^[1-9]\d*$/.test(index)) return undefined;
   const parent = ItemSchema.safeParse(access.content(parentId)).data;
   if (parent?.type !== "magicItem") return undefined;
@@ -141,3 +161,40 @@ const rarityName = (rarity: string): string =>
   rarity
     .replace(/([A-Z])/g, " $1")
     .replace(/^./, (first) => first.toUpperCase());
+
+// An item with the spell named `slug` bound into it (MagicItemSchema `boundSpell`), or nothing for a spell it can't
+// hold. "Enspelled Staff (Fireball)".
+function withSpell(
+  item: Item,
+  bound: NonNullable<Extract<Item, { type: "magicItem" }>["boundSpell"]>,
+  slug: string,
+  id: string,
+  access: ContentAccess,
+): Item | undefined {
+  const spellId = spellNamed(slug, access);
+  const spell = spellId
+    ? SpellSchema.safeParse(access.content(spellId)).data
+    : undefined;
+  if (
+    !spellId ||
+    !spell ||
+    spell.level < bound.minLevel ||
+    spell.level > bound.maxLevel ||
+    (bound.schools && !bound.schools.includes(spell.school))
+  ) {
+    return undefined;
+  }
+  const name = `${item.name} (${spell.name})`;
+  if (bound.as !== "charges") {
+    return item.type === "magicItem"
+      ? { ...item, id, name, spell: spellId, boundSpell: bound }
+      : undefined;
+  }
+  const cast = { spell: slug, charges: 1, ...boundNumbers(spell.level) };
+  return {
+    ...item,
+    id,
+    name,
+    casts: [...("casts" in item ? (item.casts ?? []) : []), cast],
+  } as Item;
+}

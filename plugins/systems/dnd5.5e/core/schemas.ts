@@ -2949,6 +2949,19 @@ const MagicItemSchema = ItemBaseSchema.extend({
   // An action its user can take while a `grantedAction` its activation gave lasts, as a Potion of Fire Breath's.
   granted: ActivationSchema.optional(),
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
+  // A spell bound into it as it's made, named after its plugin by the content id's last part, as
+  // "dmg:item/enspelled-staff--fireball" or "dmg:item/enspelled-armor--1--chain-mail--shield" (variants.ts), with
+  // the DC and attack its level gives (stats.ts boundNumbers): read once as a Spell Scroll's ("scroll"), cast with
+  // the item's charges as an Enspelled Staff's ("charges"), or kept prepared and cast once without a slot, the item
+  // gone after, as a Thayan Spell Tattoo's ("tattoo"). The levels and schools are those it can hold.
+  boundSpell: z
+    .strictObject({
+      as: z.enum(["scroll", "charges", "tattoo"]),
+      minLevel: z.number().int().min(0).max(9).default(0),
+      maxLevel: z.number().int().min(0).max(9).default(9),
+      schools: z.array(SpellSchoolSchema).min(1).optional(),
+    })
+    .optional(),
   ...ChargedSchema,
   // Set when one entry covers several rarities, such as +1, +2 or +3. Content names one as `<id>--<n>` (variants.ts).
   variants: z

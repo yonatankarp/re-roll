@@ -6,6 +6,7 @@ import {
   PLAYER_ACTOR,
   type SystemEvent,
   type SystemResult,
+  frameHandler,
 } from "#sdk";
 import { z } from "zod";
 import {
@@ -26,11 +27,13 @@ import {
   stepToward,
   within5,
 } from "./combat.ts";
-import { encodeOption, parseOption } from "./combat/ids.ts";
+import { ITEM_PREFIX, encodeOption, parseOption } from "./combat/ids.ts";
+import { CastCheckSchema, castAction } from "./combat/actions.ts";
+import { actorOf, findAction, slotLevelFor } from "./combat/queries.ts";
 import { opportunity, provokers, teleportSquares } from "./combat/movement.ts";
 import { familiarHelpUse } from "./combat/familiar.ts";
 import { mountEvents, mountOptions } from "./combat/mounts.ts";
-import { heldInPlace, leafEvents } from "./combat/effects.ts";
+import { heldInPlace, leafEvents, payCosts } from "./combat/effects.ts";
 import { heightChoices, heightOf } from "./combat/falling.ts";
 import {
   SIZES,
@@ -241,6 +244,63 @@ function reportedSave(
     ],
   };
 }
+
+// The check an action needs as it's taken (KnownAction `castCheck`), as reading a Spell Scroll above the reader's
+// level: a failure pays for it and wastes it, an item with it, and a success takes it.
+export const castCheckFrames = {
+  [`${NS}:castCheck`]: frameHandler({
+    schema: CastCheckSchema,
+    run: (cast, context: Context): SystemResult => {
+      const actor = actorOf(context.state, cast.actor);
+      const slotLevel = slotLevelFor(actor, cast.actionId, cast.slot, context);
+      const action = findAction(actor, cast.actionId, context, slotLevel);
+      const check = action.castCheck;
+      if (!check) throw new Error(`${action.id} needs no check`);
+      const rolled = abilityCheck(
+        actor,
+        check.skill,
+        check.ability,
+        check.dc,
+        (success) => (success ? action.name : `${action.name} fails`),
+        context,
+      );
+      if (rolled.success) {
+        const taken = castAction(
+          actor,
+          cast.actionId,
+          cast.slot,
+          cast.target,
+          context,
+          false,
+          cast.shape,
+          true,
+        );
+        return {
+          ...taken,
+          events: [...rolled.events, ...(taken.events ?? [])],
+        };
+      }
+      return {
+        events: [
+          ...rolled.events,
+          ...payCosts(action, actor, context, slotLevel),
+        ],
+        frames: [
+          ...(cast.actionId.startsWith(ITEM_PREFIX)
+            ? [
+                frame("useItem", {
+                  actor: actor.id,
+                  item: cast.actionId.slice(ITEM_PREFIX.length),
+                }),
+              ]
+            : []),
+          CHECK_END,
+          frame("afterAction", { actor: actor.id }),
+        ],
+      };
+    },
+  }),
+};
 
 // An ability check, in a fight or a scene. Help's Advantage on a check is used up by it.
 export function abilityCheck(
