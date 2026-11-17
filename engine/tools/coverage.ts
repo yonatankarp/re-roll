@@ -78,7 +78,7 @@ export const singular = (s: string): string => {
 };
 
 const LEVEL_LABEL =
-  /^(?:(?:level|lvl)\s*\d+|\d+(?:st|nd|rd|th)[- ]level|cantrip)\s*[:.\-–]\s*/i;
+  /^(?:(?:level|lvl)\s*\d+|\d+(?:st|nd|rd|th)[- ]level|cantrip|feature(?=:))\s*[:.\-–]\s*/i;
 const TRAILING_GROUP = /\s*(?:\([^)]*\)|\[[^\]]*\])\s*$/;
 const WRAPPER =
   /^(?:Variant\s+)?(.+?)\s+(?:Traits|Class Features|Features|Spell List|Expanded Spells|Spells|Feats?|Options)$/i;
@@ -87,7 +87,7 @@ const unique = (keys: readonly string[]): string[] => [
   ...new Set(keys.filter(Boolean)),
 ];
 
-// The heading as printed first, then without its labels: "Level 3: Rage", "Stone (Luckstone)",
+// The heading as printed first, then without its labels: "Level 3: Rage", "Feature: Moss Haven", "Stone (Luckstone)",
 // "Acid (25 GP)", "The Gilded Hand". Looser keys come after: the singular ("High Elves") and the name
 // inside a wrapper label ("Aasimar Traits", "Bard Spell List").
 export function variants(heading: string): {

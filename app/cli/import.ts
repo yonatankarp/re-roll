@@ -1,3 +1,5 @@
+// The systems load first: the glossary reaches the D&D policy and tactics modules, which import each other.
+import { systems } from "../systems.ts";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { formatIssue } from "../../engine/kernel/issues.ts";
@@ -5,7 +7,7 @@ import { loadRun, scanPlugins } from "../../engine/run/loader.ts";
 import { createLlamaClient } from "../../engine/platform/node/llama-client.ts";
 import { createNodeStorage } from "../../engine/platform/node/storage.ts";
 import { checkPlugins } from "../../engine/tools/check-pack.ts";
-import { buildLibrary } from "../../engine/tools/library.ts";
+import { buildLibrary, libraryHtml } from "../../engine/tools/library.ts";
 import { type BookIndex, buildGlossary } from "../../engine/tools/glossary.ts";
 import {
   approveImport,
@@ -18,7 +20,6 @@ import {
   GLOSSARY_TERMS,
 } from "../../plugins/systems/dnd5.5e/core/glossary.ts";
 import { spellTextFromHtml } from "../../plugins/systems/dnd5.5e/core/import/spells.ts";
-import { systems } from "../systems.ts";
 import { PLUGIN_ROOTS } from "./load-adventure.ts";
 
 // Text and images from your own books stay under books/, which git ignores.
@@ -27,7 +28,7 @@ import { PLUGIN_ROOTS } from "./load-adventure.ts";
 //   npm run import -- approve --plugin my-book --kind spells --all
 
 const USAGE = `Usage:
-  npm run import -- parse   --plugin <id> --kind <folder> --input <book.html> [--requires <id>]
+  npm run import -- parse   --plugin <id> --kind <folder> (--input <book.html> | --library <book>) [--requires <id>]
   npm run import -- split   --kind <folder> --input <file>
   npm run import -- extract --input <book.html> --output <file>
   npm run import -- draft   --plugin <id> --kind <folder> --input <file> [--system <id>] [--encodings <file>]
@@ -41,6 +42,7 @@ const { values, positionals } = parseArgs({
     plugin: { type: "string" },
     kind: { type: "string" },
     input: { type: "string" },
+    library: { type: "string" },
     system: { type: "string", default: "dnd5.5e" },
     requires: { type: "string", default: "srd52" },
     slugs: { type: "string" },
@@ -118,6 +120,23 @@ if (!system || !folder || !command) {
 const storage = await createNodeStorage(process.cwd());
 
 async function readInput(): Promise<string> {
+  // A book whose saved page is gone parses from the library files written from it.
+  if (values.library && /^[a-z0-9][a-z0-9-]*$/.test(values.library)) {
+    const root = `books/library/${values.library}`;
+    const index = JSON.parse(await readFile(`${root}/index.json`, "utf8")) as {
+      title: string;
+      entries: { file: string; anchor: string }[];
+    };
+    return libraryHtml(
+      index.title,
+      await Promise.all(
+        index.entries.map(async ({ file, anchor }) => ({
+          text: await readFile(`${root}/${file}`, "utf8"),
+          anchor,
+        })),
+      ),
+    );
+  }
   if (!values.input) {
     console.error(USAGE);
     process.exit(2);
