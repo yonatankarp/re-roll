@@ -803,7 +803,86 @@
     route available. If the target moves to a space at least 60 feet away from
     you where it can’t see you, this effect ends. Sickened. The target has the
     Poisoned condition.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 60
+      side: enemy
+    resolution:
+      kind: save
+      ability: wis
+      dc:
+        add:
+          - kind: spellSaveDc
+      damage: []
+      onSuccessDamage: none
+      onFail:
+        - kind: applyCondition
+          condition: frightened
+          duration:
+            concentration: true
+            minutes: 1
+          flee:
+            far: 60
+          option: Panicked
+        - kind: applyCondition
+          condition: unconscious
+          duration:
+            concentration: true
+            minutes: 1
+          endsOnDamage: true
+          shake: true
+          option: Asleep
+        - kind: applyCondition
+          condition: poisoned
+          duration:
+            concentration: true
+            minutes: 1
+          option: Sickened
+      onSuccess: []
+  lasting:
+    cost:
+      - action
+    targeting:
+      creatures: 1
+      range: 60
+      side: enemy
+    resolution:
+      kind: save
+      ability: wis
+      dc:
+        add:
+          - kind: spellSaveDc
+      damage: []
+      onSuccessDamage: none
+      onFail:
+        - kind: applyCondition
+          condition: frightened
+          duration:
+            concentration: true
+            minutes: 1
+          flee:
+            far: 60
+          option: Panicked
+        - kind: applyCondition
+          condition: unconscious
+          duration:
+            concentration: true
+            minutes: 1
+          endsOnDamage: true
+          shake: true
+          option: Asleep
+        - kind: applyCondition
+          condition: poisoned
+          duration:
+            concentration: true
+            minutes: 1
+          option: Sickened
+      onSuccess: []
 - id: srd52:spell/fear
   name: Fear
   level: 3
@@ -824,7 +903,7 @@
     move. If the creature ends its turn in a space where it doesn’t have line of
     sight to you, the creature makes a Wisdom saving throw. On a successful
     save, the spell ends on that creature.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -842,14 +921,18 @@
         add:
           - kind: spellSaveDc
       damage: []
+      onSuccessDamage: none
       onFail:
+        - kind: drop
         - kind: applyCondition
           condition: frightened
           duration:
             concentration: true
             minutes: 1
+          repeatSave: true
+          flee:
+            unseen: true
       onSuccess: []
-      onSuccessDamage: none
 - id: srd52:spell/find-traps
   name: Find Traps
   level: 2
@@ -2692,7 +2775,7 @@
     every 30 days, the target repeats the save, ending the effect on a success.
     The effect can also be ended by the Greater Restoration, Heal, or Wish
     spell. On a successful save, the target takes half as much damage only.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -2713,8 +2796,12 @@
           type: psychic
       onSuccessDamage: half
       onFail:
-        - kind: note
-          text: Can't cast spells or take the Magic action; repeats save every 30 days
+        - kind: modifier
+          modifier:
+            kind: actionLimit
+            noSpells: true
+          duration:
+            minutes: 43200
       onSuccess: []
 - id: srd52:spell/blight
   name: Blight
@@ -3672,7 +3759,7 @@
     triggered by damage. On a successful save, the spell ends. Using a
     Higher-Level Spell Slot. You can target one additional creature for each
     spell slot level above 1.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -3696,12 +3783,15 @@
             concentration: true
             minutes: 1
           repeatSave: true
+          cantStand: true
+          saveOnDamage: advantage
         - kind: applyCondition
           condition: incapacitated
           duration:
             concentration: true
             minutes: 1
           repeatSave: true
+          saveOnDamage: advantage
       onSuccess: []
   upcast:
     perSlotLevel:
@@ -3726,7 +3816,7 @@
     Incapacitated condition and a Speed of 0. The spell ends for an affected
     creature if it takes any damage or if someone else uses an action to shake
     the creature out of its stupor.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -3752,14 +3842,22 @@
             concentration: true
             minutes: 1
           endsOnDamage: true
+          shake: true
         - kind: applyCondition
           condition: incapacitated
           duration:
             concentration: true
             minutes: 1
           endsOnDamage: true
-        - kind: note
-          text: Speed 0; ends on damage or if shaken out of stupor
+          shake: true
+        - kind: modifier
+          modifier:
+            kind: actionLimit
+            speed: none
+          duration:
+            concentration: true
+            minutes: 1
+          endsOnDamage: true
       onSuccess: []
 - id: srd52:spell/imprisonment
   name: Imprisonment
@@ -3825,7 +3923,67 @@
     and attack rolls, and other creatures have Advantage on attack rolls against
     it. On each of its turns, the target can take an action to collect itself
     and repeat the save, ending the spell on itself on a success.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 30
+      side: enemy
+    resolution:
+      kind: save
+      ability: wis
+      dc:
+        add:
+          - kind: spellSaveDc
+      damage: []
+      onSuccessDamage: none
+      onFail:
+        - kind: applyCondition
+          condition: charmed
+          duration:
+            concentration: true
+            minutes: 1
+          repeatSave: true
+          actionSave: true
+        - kind: modifier
+          modifier:
+            kind: actionLimit
+            speed: none
+          duration:
+            concentration: true
+            minutes: 1
+        - kind: modifier
+          modifier:
+            kind: disadvantage
+            on: attacks
+          duration:
+            concentration: true
+            minutes: 1
+        - kind: modifier
+          modifier:
+            kind: disadvantage
+            on: saves
+            ability: dex
+          duration:
+            concentration: true
+            minutes: 1
+        - kind: modifier
+          modifier:
+            kind: advantage
+            on: attacksAgainst
+          duration:
+            concentration: true
+            minutes: 1
+      onSuccess:
+        - kind: modifier
+          modifier:
+            kind: actionLimit
+            speed: none
+          duration:
+            until: itsNextTurnEnd
 - id: srd52:spell/lesser-restoration
   name: Lesser Restoration
   level: 2
@@ -3858,6 +4016,7 @@
             - deafened
             - paralyzed
             - poisoned
+          disease: true
 - id: srd52:spell/locate-creature
   name: Locate Creature
   level: 4
@@ -4231,7 +4390,36 @@
     its Speed is 0 until the start of your next turn. The Stunned target makes a
     Constitution saving throw at the end of each of its turns, ending the
     condition on itself on a success.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 60
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: applyCondition
+          condition: stunned
+          duration:
+            text: Special
+          hpAtMost: 150
+          endSave:
+            ability: con
+            dc:
+              add:
+                - kind: spellSaveDc
+        - kind: modifier
+          modifier:
+            kind: actionLimit
+            speed: none
+          duration:
+            until: yourNextTurnStart
+          hpAbove: 150
 - id: srd52:spell/private-sanctum
   name: Private Sanctum
   level: 4
@@ -5141,7 +5329,91 @@
     require Concentration, and the duration becomes 8 hours (level 5–6 slot) or
     24 hours (level 7–8 slot). If you use a level 9 spell slot, the spell lasts
     until dispelled."
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: touch
+      side: enemy
+    resolution:
+      kind: save
+      ability: wis
+      dc:
+        add:
+          - kind: spellSaveDc
+      damage: []
+      onSuccessDamage: none
+      onFail:
+        - kind: modifier
+          modifier:
+            kind: mark
+            curse: true
+          duration: &a1
+            concentration: true
+            minutes: 1
+        - kind: modifier
+          modifier:
+            kind: hitDamage
+            dealtBy: caster
+            damage:
+              amount:
+                dice: 1d8
+              type: necrotic
+          duration: *a1
+          option: Necrotic
+        - kind: modifier
+          modifier:
+            kind: disadvantage
+            on: attacks
+            casterOnly: true
+          duration: *a1
+          option: Attacks against you
+        - kind: modifier
+          modifier:
+            kind: dodgeSave
+            ability: wis
+          duration: *a1
+          option: Dodge
+        - kind: modifier
+          modifier:
+            kind: disadvantage
+            on: saves
+          duration: *a1
+          option: Ability
+          pick: &a2
+            - wis
+            - con
+            - dex
+            - str
+            - int
+            - cha
+        - kind: modifier
+          modifier:
+            kind: disadvantage
+            on: checks
+          duration: *a1
+          option: Ability
+          pick: *a2
+      onSuccess: []
+  upcast:
+    perSlotLevel:
+      durations:
+        - at: 1
+          duration:
+            concentration: true
+            minutes: 10
+        - at: 2
+          duration:
+            minutes: 480
+        - at: 4
+          duration:
+            minutes: 1440
+        - at: 6
+          duration:
+            minutes: 525600
 - id: srd52:spell/blindness-deafness
   name: Blindness/Deafness
   level: 2
@@ -5161,7 +5433,7 @@
     the duration. At the end of each of its turns, the target repeats the save,
     ending the spell on itself on a success. Using a Higher-Level Spell Slot.
     You can target one additional creature for each spell slot level above 2.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -5176,12 +5448,22 @@
       dc:
         add:
           - kind: spellSaveDc
+      damage: []
+      onSuccessDamage: none
       onFail:
         - kind: applyCondition
           condition: blinded
           duration:
             minutes: 1
           repeatSave: true
+          option: Blinded
+        - kind: applyCondition
+          condition: deafened
+          duration:
+            minutes: 1
+          repeatSave: true
+          option: Deafened
+      onSuccess: []
   upcast:
     perSlotLevel:
       addTargets: 1
@@ -5274,7 +5556,7 @@
     You launch a dazzling array of flashing, colorful light. Each creature in
     a 15-foot Cone originating from you must succeed on a Constitution saving
     throw or have the Blinded condition until the end of your next turn.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -5297,7 +5579,7 @@
         - kind: applyCondition
           condition: blinded
           duration:
-            until: yourNextTurnStart
+            until: yourNextTurnEnd
       onSuccess: []
 - id: srd52:spell/compulsion
   name: Compulsion
@@ -5435,7 +5717,7 @@
     receives an effect that would end the Poisoned condition, the target must
     succeed on a Constitution saving throw, or the Poisoned condition doesn’t
     end on it.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -5460,6 +5742,26 @@
           condition: poisoned
           duration:
             minutes: 10080
+          repeatSave: true
+          clings: true
+          secondFailure:
+            condition: poisoned
+            duration:
+              minutes: 10080
+            count: 3
+        - kind: modifier
+          modifier:
+            kind: disadvantage
+            on: saves
+          duration:
+            minutes: 10080
+          pick:
+            - wis
+            - con
+            - dex
+            - str
+            - int
+            - cha
       onSuccess: []
 - id: srd52:spell/counterspell
   name: Counterspell
@@ -6220,7 +6522,7 @@
     At the end of each of its turns, the target repeats the save, ending the
     spell on itself on a success. Using a Higher-Level Spell Slot. You can
     target one additional creature for each spell slot level above 5.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -7091,7 +7393,48 @@
     someone within 5 feet of it takes an action to shake it out of the spell’s
     effect. Creatures that don’t sleep, such as elves, or that have Immunity to
     the Exhaustion condition automatically succeed on saves against this spell.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 5
+      range: 60
+      side: enemy
+      choice: true
+    resolution:
+      kind: save
+      ability: wis
+      dc:
+        add:
+          - kind: spellSaveDc
+      damage: []
+      onSuccessDamage: none
+      onFail:
+        - kind: applyCondition
+          condition: incapacitated
+          duration:
+            concentration: true
+            minutes: 1
+          repeatSave: true
+          endsOnDamage: true
+          shake: true
+          secondFailure:
+            condition: unconscious
+            duration:
+              concentration: true
+              minutes: 1
+            endsOnDamage: true
+      onSuccess: []
+      edges:
+        - creatureTypes:
+            - elf
+            - construct
+            - undead
+          roll: succeed
 - id: srd52:spell/speak-with-animals
   name: Speak with Animals
   level: 1
@@ -7637,7 +7980,7 @@
     location on a plane (GM’s choice) associated with its creature type. Using a
     Higher-Level Spell Slot. You can target one additional creature for each
     spell slot level above 4.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -7652,12 +7995,27 @@
       dc:
         add:
           - kind: spellSaveDc
+      damage: []
+      onSuccessDamage: none
       onFail:
         - kind: applyCondition
           condition: incapacitated
           duration:
             concentration: true
             minutes: 1
+        - kind: modifier
+          modifier:
+            kind: sealed
+          duration:
+            concentration: true
+            minutes: 1
+          gone:
+            - aberration
+            - celestial
+            - elemental
+            - fey
+            - fiend
+      onSuccess: []
   upcast:
     perSlotLevel:
       addTargets: 1
@@ -8128,7 +8486,72 @@
     dies. 21–30 The target has the Blinded, Deafened, and Stunned conditions for
     1 hour. 31–40 The target has the Blinded and Deafened conditions for 10
     minutes. 41–50 The target has the Deafened condition for 1 minute.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - bonusAction
+      - slot
+    targeting:
+      area:
+        shape: emanation
+        radius: 30
+      range: self
+      side: enemy
+      choice: true
+    resolution:
+      kind: save
+      ability: cha
+      dc:
+        add:
+          - kind: spellSaveDc
+      damage: []
+      onSuccessDamage: none
+      onFail:
+        - kind: applyCondition
+          condition: blinded
+          duration:
+            minutes: 60
+          hpAbove: 20
+          hpAtMost: 30
+        - kind: applyCondition
+          condition: deafened
+          duration:
+            minutes: 60
+          hpAbove: 20
+          hpAtMost: 30
+        - kind: applyCondition
+          condition: stunned
+          duration:
+            minutes: 60
+          hpAbove: 20
+          hpAtMost: 30
+        - kind: applyCondition
+          condition: blinded
+          duration:
+            minutes: 10
+          hpAbove: 30
+          hpAtMost: 40
+        - kind: applyCondition
+          condition: deafened
+          duration:
+            minutes: 10
+          hpAbove: 30
+          hpAtMost: 40
+        - kind: applyCondition
+          condition: deafened
+          duration:
+            minutes: 1
+          hpAbove: 40
+          hpAtMost: 50
+        - kind: sendAway
+          creatureTypes:
+            - celestial
+            - elemental
+            - fey
+            - fiend
+        - kind: slay
+          hpAtMost: 20
+      onSuccess: []
 - id: srd52:spell/dream
   name: Dream
   level: 5
@@ -8688,7 +9111,7 @@
     At the end of each of its turns, the target repeats the save, ending the
     spell on itself on a success. Using a Higher-Level Spell Slot. You can
     target one additional Humanoid for each spell slot level above 2.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -10238,7 +10661,7 @@
     each of its turns, an affected target repeats the save, ending the spell on
     itself on a success. Using a Higher-Level Spell Slot. The Sphere’s radius
     increases by 5 feet for each spell slot level above 4."
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -10728,7 +11151,7 @@
     collects three of a kind. If you maintain your Concentration on this spell
     for the entire possible duration, the target is Petrified until the
     condition is ended by Greater Restoration or similar magic.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -10743,12 +11166,32 @@
       dc:
         add:
           - kind: spellSaveDc
+      damage: []
+      onSuccessDamage: none
       onFail:
         - kind: applyCondition
           condition: restrained
           duration:
             concentration: true
             minutes: 1
+          repeatSave: true
+          secondFailure:
+            condition: petrified
+            duration:
+              concentration: true
+              minutes: 1
+            count: 3
+      onSuccess:
+        - kind: modifier
+          modifier:
+            kind: actionLimit
+            speed: none
+          duration:
+            until: yourNextTurnStart
+      edges:
+        - creatureTypes:
+            - construct
+          roll: succeed
 - id: srd52:spell/forcecage
   name: Forcecage
   level: 7
@@ -10914,16 +11357,25 @@
     target’s Hit Point maximum"
   automation: full
   activation:
-    cost: [action, slot, { gold: 100 }]
-    targeting: { creatures: 1, range: touch, side: ally }
+    cost:
+      - action
+      - slot
+      - gold: 100
+    targeting:
+      creatures: 1
+      range: touch
+      side: ally
     resolution:
       kind: automatic
       effects:
         - kind: cure
-          conditions: [charmed, petrified]
+          conditions:
+            - charmed
+            - petrified
           curse: true
           maxHp: true
           exhaustion: true
+          befuddled: true
 
 - id: srd52:spell/gust-of-wind
   name: Gust of Wind
@@ -10988,6 +11440,11 @@
           condition: deafened
         - kind: removeCondition
           condition: poisoned
+        - kind: cure
+          conditions:
+            - blinded
+          befuddled: true
+          disease: true
 - id: srd52:spell/heroism
   name: Heroism
   level: 1

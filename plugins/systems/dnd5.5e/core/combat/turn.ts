@@ -3,6 +3,17 @@ import { deathSaveEvents } from "./actions.ts";
 import { duelStrayed } from "./duel.ts";
 import { confusedBy } from "./confusion.ts";
 import {
+  groundedEvents,
+  reverseGravityEvents,
+  turnSaveEvents,
+} from "../environment.ts";
+import {
+  dodgeSaveEvents,
+  fledEvents,
+  fleeingFrom,
+  repeatsNow,
+} from "./fear.ts";
+import {
   type Frame,
   PLAYER_ACTOR,
   type SystemEvent,
@@ -34,6 +45,7 @@ import {
   immuneToCondition,
   lookup,
   rollAmount,
+  rollDiceNotation,
 } from "../stats.ts";
 import { z } from "zod";
 import { finalDamage, halved } from "../rules.ts";
@@ -65,8 +77,10 @@ import {
   dealEvents,
   rollSave,
 } from "./effects.ts";
-import { releasedGrapples } from "./grapple.ts";
+import { grapplesOn, releasedGrapples } from "./grapple.ts";
 import { distanceFeet } from "../grid.ts";
+import { coverFor } from "../sight.ts";
+import { hasTactic, revealEvents, STEALTH_ATTACK } from "../tactics.ts";
 import { regurgitationEvents, releasedSwallows } from "./swallow.ts";
 import {
   expiredEvents,
@@ -298,7 +312,12 @@ export function runLingeringTick(
     ? masteredTypes(stats, effect.sourceId.startsWith("spell:"))
     : [];
   const responses = caster
-    ? piercing(damageResponses(target, context), mastered, stats)
+    ? piercing(
+        damageResponses(target, context),
+        mastered,
+        stats,
+        effect.sourceId,
+      )
     : damageResponses(target, context);
   const { events, dealt } = dealEvents(
     target,
@@ -374,6 +393,24 @@ function endOfTurn(context: Context): SystemResult {
     : runFinishTurn(context);
 }
 
+// Stealth Attack kept the bearer hidden only while it ends the turn behind Three-Quarters or Total Cover from every
+// foe standing.
+function outOfCover(actor: Actor, context: Context): SystemEvent[] {
+  const { state } = context;
+  if (
+    !actor.usedThisTurn.includes(STEALTH_ATTACK) ||
+    !hasTactic(actor, "hidden")
+  ) {
+    return [];
+  }
+  const exposed = Object.values(state.actors).some((foe) => {
+    if (foe.side === actor.side || isDown(foe) || !foe.position) return false;
+    const cover = coverFor(state, foe.position, actor, [foe.id], context);
+    return cover !== 5 && cover !== "total";
+  });
+  return exposed ? revealEvents(actor) : [];
+}
+
 // A target repeats its save at the end of each of its turns, ending that spell's effects on itself on a success.
 export function runFinishTurn(context: Context): SystemResult {
   const { state } = context;
@@ -383,12 +420,13 @@ export function runFinishTurn(context: Context): SystemResult {
     actor &&
     effect.repeatSave &&
     !isDown(actor) &&
-    !actor.usedThisTurn.includes(`${FRESH}${effect.sourceId}`)
+    !actor.usedThisTurn.includes(`${FRESH}${effect.sourceId}`) &&
+    repeatsNow(actor, effect, context)
       ? [{ actor, effect, save: effect.repeatSave }]
       : [],
   );
   const seen = new Set<string>();
-  const events: SystemEvent[] = [];
+  const events: SystemEvent[] = actor ? outOfCover(actor, context) : [];
   for (const { actor: target, effect, save } of repeated) {
     const { sourceId, casterId, modifier } = effect;
     // Each caster's effect is saved against on its own, as two snakes' grapples are two grapples.
@@ -440,6 +478,17 @@ export function runFinishTurn(context: Context): SystemResult {
             },
           );
     events.push(...rescued);
+    // Vision of Elapsing Eons: each failed repeat save is a level of Exhaustion.
+    if (
+      effect.failExhaustion &&
+      !rolled.saved &&
+      !resisted &&
+      rescued.length === 0
+    ) {
+      events.push(
+        dndEvent(`${NS}:exhaustionChanged`, { actor: target.id, levels: 1 }),
+      );
+    }
     const holder =
       target.activeEffects.find(
         (item) =>
@@ -482,7 +531,10 @@ export function runFinishTurn(context: Context): SystemResult {
     if (!worse && (rolled.saved || resisted || rescued.length > 0)) {
       events.push(...sharedRecovery(target, modifier, context));
     }
-    // A second failure leaves the worse condition instead, with no more saves.
+    // A second failure leaves the worse condition instead, with no more saves, and the source's other effects stay,
+    // as Contagion's Disadvantage on the chosen ability's saves.
+    // shortcut: a worse condition kept by Concentration ends with it, so Flesh to Stone held its whole minute doesn't
+    // petrify for good.
     if (
       worse &&
       !rolled.saved &&
@@ -490,6 +542,20 @@ export function runFinishTurn(context: Context): SystemResult {
       rescued.length === 0 &&
       !immuneToCondition(deriveStats(target, context), worse.condition)
     ) {
+      for (const companion of target.activeEffects) {
+        if (
+          companion.sourceId === sourceId &&
+          companion.casterId === casterId &&
+          companion.modifier.kind !== "condition"
+        ) {
+          events.push(
+            dndEvent(`${NS}:effectAdded`, {
+              actor: target.id,
+              effect: companion,
+            }),
+          );
+        }
+      }
       events.push(
         dndEvent(`${NS}:effectAdded`, {
           actor: target.id,
@@ -499,6 +565,11 @@ export function runFinishTurn(context: Context): SystemResult {
             modifier: { kind: "condition", condition: worse.condition },
             ends: worse.ends,
             ...(worse.endsOnDamage ? { endsOnDamage: true } : {}),
+            ...(holder.shake ? { shake: true } : {}),
+            ...(holder.clings ? { clings: holder.clings } : {}),
+            ...(holder.lingers === undefined
+              ? {}
+              : { lingers: holder.lingers }),
           },
         }),
       );
@@ -506,6 +577,8 @@ export function runFinishTurn(context: Context): SystemResult {
   }
   const ending = [
     ...events,
+    ...(actor ? fledEvents(actor, context) : []),
+    ...(actor ? groundedEvents(actor, state) : []),
     ...(actor ? duelStrayed(actor, state) : []),
     ...regurgitationEvents(context),
     ...(actor ? rechargeEvents(actor, context) : []),
@@ -559,6 +632,9 @@ export function runAdvanceTurn(
   const drifted = next
     ? driftResult(next, { ...context, state: after })
     : { events: [], frames: [] };
+  const grappled = next
+    ? grappleDamage(next, { ...context, state: after })
+    : { events: [], frames: [] };
   const events = [
     ...finished,
     ...expired,
@@ -568,8 +644,12 @@ export function runAdvanceTurn(
       ? deathSaveEvents(next, { ...context, state: after })
       : []),
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
+    ...(next ? dodgeSaveEvents(next, { ...context, state: after }) : []),
+    ...(next ? turnSaveEvents(next, { ...context, state: after }) : []),
+    ...(next ? reverseGravityEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
+    ...grappled.events,
     ...(next ? sharedTempHp(next, { ...context, state: after }) : []),
     ...(next ? turnInspiration(next, { ...context, state: after }) : []),
     ...(next ? fogBoundEvents(next, { ...context, state: after }) : []),
@@ -584,6 +664,7 @@ export function runAdvanceTurn(
   const ticks = next
     ? [
         ...drifted.frames,
+        ...grappled.frames,
         ...mad.frames,
         ...lingeringFrames(next, "turnStart"),
         ...sunlightFrames(next, starts),
@@ -598,12 +679,53 @@ export function runAdvanceTurn(
         { ...context, state: events.reduce(applyDndEvent, state) },
       )
     : [];
-  return ticks.length + watched.length > 0
+  // Fleeing comes after the reactions, which may set it off, as Flee, Fools! does.
+  const fleeing =
+    next && (fleeingFrom(next) || watched.length > 0)
+      ? [frame("fleeTurn", {})]
+      : [];
+  return ticks.length + watched.length + fleeing.length > 0
     ? {
         events,
-        frames: [...ticks, ...watched, frame("afterTurnStart", {})],
+        frames: [...ticks, ...watched, ...fleeing, frame("afterTurnStart", {})],
       }
     : { events };
+}
+
+// Unarmed Fighting: damage to one creature the bearer grapples as its turn starts.
+function grappleDamage(
+  actor: Actor,
+  context: Context,
+): { events: SystemEvent[]; frames: Frame[] } {
+  if (isDown(actor) || hasCondition(actor, ...INCAPACITATING)) {
+    return { events: [], frames: [] };
+  }
+  const stats = deriveStats(actor, context);
+  const passive = stats.passives.find((item) => item.kind === "grappleDamage");
+  const held = Object.values(context.state.actors).find(
+    (other) =>
+      !isDead(other) &&
+      grapplesOn(other).some(({ casterId }) => casterId === actor.id),
+  );
+  if (passive?.kind !== "grappleDamage" || !held) {
+    return { events: [], frames: [] };
+  }
+  const { events, dealt } = dealEvents(
+    held,
+    [
+      {
+        amount: finalDamage(
+          rollDiceNotation(passive.dice, context.dice),
+          passive.type,
+          damageResponses(held, context),
+        ),
+        type: passive.type,
+      },
+    ],
+    false,
+    context,
+  );
+  return { events, frames: [...concentrationFrame(held, dealt)] };
 }
 
 // Life-Giving Force: Temporary Hit Points for the ally nearby that has the fewest Hit Points left.

@@ -16,6 +16,8 @@ import {
   dndEvent,
   equipped,
   hasCondition,
+  isDown,
+  mountOf,
 } from "./state.ts";
 import {
   type Stats,
@@ -35,6 +37,7 @@ export interface SaveSource {
   readonly creatureType: string | undefined;
   readonly school: string | null;
   readonly breath: boolean;
+  readonly caster?: string; // who calls for it, for Disadvantage only against its spells (Eldritch Strike)
 }
 
 // The source of a save that this creature's action calls for.
@@ -48,6 +51,7 @@ export function saveSourceOf(
     creatureType: deriveStats(caster, access).creatureType,
     school: schoolOf(actionId, access),
     breath: /breath/i.test(name),
+    caster: caster.id,
   };
 }
 
@@ -150,10 +154,28 @@ export function evades(
 ): boolean {
   return (
     !hasCondition(target, ...INCAPACITATING) &&
-    deriveStats(target, access).passives.some(
+    (deriveStats(target, access).passives.some(
       (passive) =>
         passive.kind === "evasion" && (passive.anySave || ability === "dex"),
-    )
+    ) ||
+      (ability === "dex" && leapsAside(target, access)))
+  );
+}
+
+// Leap Aside: a mount ridden by a creature with Mounted Combatant, neither of them Incapacitated, evades as Evasion.
+function leapsAside(
+  mount: Actor,
+  access: ContentAccess & { readonly state?: DndState },
+): boolean {
+  const { state } = access;
+  return Object.values(state?.actors ?? {}).some(
+    (rider) =>
+      mountOf(rider) === mount.id &&
+      !isDown(rider) &&
+      !hasCondition(rider, ...INCAPACITATING) &&
+      deriveStats(rider, access).passives.some(
+        ({ kind }) => kind === "mountedCombatant",
+      ),
   );
 }
 
@@ -265,11 +287,21 @@ export function masteredTypes(
 // Boon of Irresistible Offense.
 export function piercing<
   T extends { readonly resistances: readonly DamageType[] },
->(responses: T, mastered: readonly DamageType[], stats: Stats): T {
+>(
+  responses: T,
+  mastered: readonly DamageType[],
+  stats: Stats,
+  source = "", // the action or effect source the damage comes from, for `sources`
+): T {
+  const from = (id: string) =>
+    source.startsWith(`feature:${id}:`) || spellOfSource(source) === id;
   const ignored = [
     ...mastered,
     ...stats.passives.flatMap((passive) =>
-      passive.kind === "overcomeResistance" ? passive.damage : [],
+      passive.kind === "overcomeResistance" &&
+      (!passive.sources || passive.sources.some(from))
+        ? passive.damage
+        : [],
     ),
   ];
   return ignored.length === 0
@@ -332,7 +364,16 @@ export function masteredDice(
   type: DamageType,
   mastered: readonly DamageType[],
   rerolled: readonly DamageType[] = [],
+  forceFloor = 0, // an Empowered Force Zone's 3 for every Force die below it (environment.ts)
 ): Dice {
+  if (type === "force" && forceFloor > 0) {
+    const floored = masteredDice(dice, type, mastered, rerolled);
+    return {
+      below: (count) => floored.below(count),
+      roll: (sides) =>
+        Math.max(Math.min(forceFloor, sides), floored.roll(sides)),
+    };
+  }
   // Flames of Phlegethos: a 1 on a die of its type is rolled again, and the new roll stands.
   const once: Dice = rerolled.includes(type)
     ? {
@@ -591,20 +632,27 @@ export function maximized(
   types: readonly DamageType[],
 ): { readonly type: DamageType; readonly events: SystemEvent[] } | null {
   for (const passive of stats.passives) {
-    if (
-      passive.kind === "maxDamageDice" &&
-      types.includes(passive.damage) &&
-      (actor.resourcesSpent[passive.resource] ?? 0) <
-        (stats.resources[passive.resource] ?? 0)
-    ) {
+    if (passive.kind !== "maxDamageDice" || !types.includes(passive.damage)) {
+      continue;
+    }
+    const { resource } = passive;
+    const key = `max-dice:${passive.damage}`;
+    if (resource) {
+      if (
+        (actor.resourcesSpent[resource] ?? 0) < (stats.resources[resource] ?? 0)
+      ) {
+        return {
+          type: passive.damage,
+          events: [
+            dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource }),
+          ],
+        };
+      }
+    } else if (!actor.usedThisTurn.includes(key)) {
+      // Perfect Poisoner: once a turn.
       return {
         type: passive.damage,
-        events: [
-          dndEvent(`${NS}:resourceSpent`, {
-            actor: actor.id,
-            resource: passive.resource,
-          }),
-        ],
+        events: [dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key })],
       };
     }
   }

@@ -21,6 +21,12 @@ import {
   frame,
 } from "./state.ts";
 import { HIT_DICE } from "./combat/ids.ts";
+import {
+  ambientRestEvents,
+  diseaseRestEvents,
+  halvesHitDice,
+  restHampered,
+} from "./environment.ts";
 import { hitDieHealing, hitDieRoll } from "./trait-rules.ts";
 import { gearOptions } from "./gear.ts";
 import { familiarFoundEvents } from "./combat/familiar.ts";
@@ -91,7 +97,11 @@ function spendEvents(
     dndEvent(`${NS}:healed`, {
       actor: actor.id,
       amount: Math.min(
-        hitDieHealing(Math.max(1, rolled), stats) + meal,
+        // Sewer Plague's weakness: half as much while Exhausted.
+        Math.floor(
+          (hitDieHealing(Math.max(1, rolled), stats) + meal) /
+            (halvesHitDice(actor, context) ? 2 : 1),
+        ),
         stats.maxHp - actor.hp,
       ),
       max: stats.maxHp,
@@ -574,12 +584,21 @@ function runFinishRest(
           rest,
           context.dice,
         );
+        // A disease's symptoms, or Pandemonium's winds, may keep the rest from healing or lessening Exhaustion.
+        const hampered =
+          rest === "long"
+            ? restHampered(actor, context)
+            : { keepHp: false, exhaustionFloor: 0 };
         return [
           dndEvent(`${NS}:rested`, {
             actor: actor.id,
             rest,
             maxHp: stats.maxHp,
             resourcesSpent,
+            ...(hampered.keepHp ? { keepHp: true } : {}),
+            ...(hampered.exhaustionFloor > 0
+              ? { exhaustionFloor: hampered.exhaustionFloor }
+              : {}),
           }),
           ...(rest === "short"
             ? recoveryHeal(actor, resourcesSpent, stats, context)
@@ -588,6 +607,7 @@ function runFinishRest(
       }),
       ...restInspiration(members, rest, context),
       ...(rest === "long" ? restItems(members, context) : []),
+      ...(rest === "long" ? afterLongRest(members, context) : []),
       ...familiarFoundEvents(members, context, rest),
       dndEvent(`${NS}:restFinished`, {
         rest,
@@ -595,6 +615,38 @@ function runFinishRest(
       }),
     ],
   };
+}
+
+// After a Long Rest, each member fights its diseases with a save, and the effects around the party do what a rest in
+// them does (environment.ts), each worked out on the member as the rest left it.
+function afterLongRest(
+  members: readonly Actor[],
+  context: Context,
+): SystemEvent[] {
+  const events: SystemEvent[] = [];
+  let state = context.state;
+  for (const member of members) {
+    const rested = applyDndEvent(
+      state,
+      dndEvent(`${NS}:rested`, {
+        actor: member.id,
+        rest: "long",
+        maxHp: deriveStats(member, context).maxHp,
+        resourcesSpent: member.resourcesSpent,
+        ...(restHampered(member, context).keepHp ? { keepHp: true } : {}),
+        exhaustionFloor: restHampered(member, context).exhaustionFloor,
+      }),
+    );
+    const after = rested.actors[member.id] ?? member;
+    for (const event of [
+      ...diseaseRestEvents(after, { ...context, state: rested }),
+      ...ambientRestEvents(after, { ...context, state: rested }),
+    ]) {
+      events.push(event);
+      state = applyDndEvent(state, event);
+    }
+  }
+  return events;
 }
 
 // Decanting: a Long Rest leaves the bearer one of the item, put in its pack.

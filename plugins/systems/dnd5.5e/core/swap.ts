@@ -70,6 +70,30 @@ export function swappable(
   const swapped = actor.swapped ?? [];
   const fromAnswers = build.levels.flatMap((entry, at) =>
     entry.answers.flatMap((answer, index): Swappable[] => {
+      if (answer.kind === "variant") {
+        const feature = FeatureSchema.safeParse(
+          access.content(answer.feature),
+        ).data;
+        // shortcut: changed after a Short Rest too, so it's offered between fights whenever the party has rested.
+        return feature?.variantSwap
+          ? [
+              {
+                key: `${String(at)}:${String(index)}`,
+                owner: feature.name,
+                choices: [
+                  {
+                    kind: "variant",
+                    id: `variant:${feature.id}`,
+                    feature: feature.id,
+                    count: 1,
+                  },
+                ],
+                values: answer.values,
+                open: true,
+              },
+            ]
+          : [];
+      }
       if (!(answer.kind in KINDS) || !("feat" in answer) || !answer.feat) {
         return [];
       }
@@ -229,7 +253,13 @@ export function sceneSwapActions(
     }));
 }
 
-function nameOf(id: string, access: ContentAccess): string {
+function nameOf(id: string, access: ContentAccess, choice?: ChoiceDef): string {
+  if (choice?.kind === "variant") {
+    const feature = FeatureSchema.safeParse(
+      access.content(choice.feature),
+    ).data;
+    return feature?.variants?.find((item) => item.id === id)?.name ?? id;
+  }
   const entry = access.content(id) as { name?: unknown } | undefined;
   return typeof entry?.name === "string" ? entry.name : id;
 }
@@ -299,7 +329,7 @@ function runSwapStep(
         prompt:
           drop === ADD
             ? `${found.owner}: which do you pick?`
-            : `${found.owner}: what takes the place of ${nameOf(drop, context)}?`,
+            : `${found.owner}: what takes the place of ${nameOf(drop, context, found.choices[0])}?`,
         options: [
           ...options.filter((option) => {
             const fresh = !seen.has(option.id);

@@ -27,6 +27,8 @@ export function tradeFits(trade: Trade, action: KnownAction): boolean {
   return (
     (trade.cantrips === true && level === 0) ||
     (level !== null && trade.levels?.includes(level) === true) ||
+    (trade.feature !== undefined &&
+      action.id.startsWith(`feature:${trade.feature}:`)) ||
     (trade.resource !== undefined &&
       cost.some(
         (item) =>

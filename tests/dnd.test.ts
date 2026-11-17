@@ -1,6 +1,6 @@
 import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
 import { describe, expect, it } from "vitest";
-import { runs } from "./depth.ts";
+import { SOAK, runs } from "./depth.ts";
 import { listAdventures, loadAdventure } from "../app/cli/load-adventure.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
 import type { GameState } from "../engine/kernel/events.ts";
@@ -1114,6 +1114,8 @@ describe("playing a D&D adventure", () => {
       } else if (events.some((event) => event.kind === "encounterEnded")) {
         wins += 1;
       }
+      // Defeats are rare, so the unit run stops at the first seed that has shown both.
+      if (!SOAK && wins > 0 && defeats > 0) break;
     }
     expect(wins).toBeGreaterThan(0);
     expect(defeats).toBeGreaterThan(0);
@@ -1540,6 +1542,8 @@ describe("encounter outcomes in real fights", () => {
         ).toBe(true);
         expect(story.flags.won).toBe(story.scene === "road" ? true : undefined);
       }
+      // The unit run stops once every way out has been seen.
+      if (!SOAK && seen.fled && seen.captured && seen.road) break;
     }
     expect(seen.fled).toBeGreaterThan(0);
     expect(seen.captured).toBeGreaterThan(0);

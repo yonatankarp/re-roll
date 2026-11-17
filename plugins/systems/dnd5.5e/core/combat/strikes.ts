@@ -88,6 +88,8 @@ function optionsFor(
           return (
             fits &&
             !chosen.includes(action.id) &&
+            // Stealth Attack only for an attack made from hiding.
+            (!action.activation.keepsHidden || hit.hidden !== undefined) &&
             canAfford(action, attacker, stats) &&
             hitFits(
               trigger?.afterHit ?? "weapon",
