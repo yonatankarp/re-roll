@@ -277,7 +277,21 @@ export function castRiders(
 // shortcut: the spellcasting modifier, rather than the one the feat raised, which it usually is.
 export function concentrationBonus(actor: Actor, context: Context): number {
   const stats = deriveStats(actor, context);
-  return riding(stats, schoolOf(actor.concentratingOn, context), "persistent")
-    ? Math.max(0, spellModifier(stats))
-    : 0;
+  // Bladesong's Focus: a bonus only to these saves.
+  const focus = actor.activeEffects.reduce(
+    (sum, { modifier }) =>
+      modifier.kind === "bonus" &&
+      modifier.to === "saves" &&
+      modifier.concentration
+        ? sum +
+          evaluateFormula(modifier.amount.bonus ?? { base: 0, add: [] }, stats)
+        : sum,
+    0,
+  );
+  return (
+    focus +
+    (riding(stats, schoolOf(actor.concentratingOn, context), "persistent")
+      ? Math.max(0, spellModifier(stats))
+      : 0)
+  );
 }

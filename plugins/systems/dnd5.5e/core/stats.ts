@@ -846,6 +846,24 @@ export function withVariant(
           ...feature.resources,
           ...picked.flatMap((item) => item.resources),
         ],
+        ...(picked.some((item) => item.spells)
+          ? {
+              spells: picked.reduce<Record<string, string[]>>(
+                (all, item) => {
+                  for (const [at, ids] of Object.entries(item.spells ?? {})) {
+                    all[at] = [...(all[at] ?? []), ...ids];
+                  }
+                  return all;
+                },
+                Object.fromEntries(
+                  Object.entries(feature.spells ?? {}).map(([at, ids]) => [
+                    at,
+                    [...ids],
+                  ]),
+                ),
+              ),
+            }
+          : {}),
       }
     : feature;
 }
@@ -1489,12 +1507,17 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
   // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
-  // Durable Magic's bonuses hold only while the bearer concentrates.
+  // Durable Magic's bonuses hold only while the bearer concentrates, and Power of the Wilds' Lion aura only in a Rage.
   const traits = [...itemPassives, ...fromFeatures.passives].filter(
     (passive) =>
-      passive.kind !== "modifier" ||
-      !passive.concentrating ||
-      actor.concentratingOn !== null,
+      (passive.kind !== "modifier" ||
+        !passive.concentrating ||
+        actor.concentratingOn !== null) &&
+      (passive.kind !== "aura" ||
+        !passive.while ||
+        actor.activeEffects.some(({ sourceId }) =>
+          passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+        )),
   );
   const castingAbility = featSpellAbilities(
     build,
@@ -1885,7 +1908,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
               0,
             )
           : 0) -
-        (tooHeavy && load === null ? 10 : 0) -
+        (tooHeavy &&
+        load === null &&
+        !traits.some((passive) => passive.kind === "armorStrength")
+          ? 10
+          : 0) -
         5 * actor.exhaustion,
     ),
     resources: Object.fromEntries(

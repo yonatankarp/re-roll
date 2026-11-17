@@ -654,6 +654,7 @@ export function runAdvanceTurn(
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
     ...(next ? dodgeSaveEvents(next, { ...context, state: after }) : []),
     ...(next ? turnSaveEvents(next, { ...context, state: after }) : []),
+    ...(next ? shakeOffEvents(next, { ...context, state: after }, true) : []),
     ...(next ? reverseGravityEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
@@ -851,11 +852,41 @@ function banishEvents(caster: Actor, context: Context): SystemEvent[] {
 
 // shortcut: Regeneration isn't stopped by the damage types that should stop it, as no damage type taken is kept yet.
 // Self-Restoration: at the end of its turn the bearer ends the worst of these conditions on itself.
-function shakeOffEvents(actor: Actor, context: Context): SystemEvent[] {
+function shakeOffEvents(
+  actor: Actor,
+  context: Context,
+  start = false,
+): SystemEvent[] {
   if (isDown(actor)) return [];
-  return deriveStats(actor, context).passives.flatMap((passive) => {
-    const condition =
-      passive.kind === "shakeOff" ? cureFor(actor, passive.conditions) : null;
+  const stats = deriveStats(actor, context);
+  return stats.passives.flatMap((passive) => {
+    if (passive.kind !== "shakeOff" || (passive.turnStart === true) !== start) {
+      return [];
+    }
+    // Guarded Mind: every one of them ends, for a use of the resource.
+    if (start) {
+      const held = passive.conditions.filter((item) =>
+        hasCondition(actor, item),
+      );
+      const { resource } = passive;
+      if (
+        held.length === 0 ||
+        (resource !== undefined &&
+          (actor.resourcesSpent[resource] ?? 0) >=
+            (stats.resources[resource] ?? 0))
+      ) {
+        return [];
+      }
+      return [
+        ...(resource
+          ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
+          : []),
+        ...held.map((condition) =>
+          dndEvent(`${NS}:conditionRemoved`, { actor: actor.id, condition }),
+        ),
+      ];
+    }
+    const condition = cureFor(actor, passive.conditions);
     return condition
       ? [dndEvent(`${NS}:conditionRemoved`, { actor: actor.id, condition })]
       : [];

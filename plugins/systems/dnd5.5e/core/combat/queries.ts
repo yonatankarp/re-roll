@@ -175,6 +175,7 @@ export function rollBonus(
   for (const effect of actor.activeEffects) {
     const { modifier } = effect;
     if (modifier.kind !== "bonus" || modifier.to !== to) continue;
+    if (modifier.concentration) continue; // Concentration saves count it (combat/school.ts)
     if (modifier.weapon && !weapon) continue;
     if (modifier.skill && modifier.skill !== skill) continue;
     if (modifier.ability && modifier.ability !== ability) continue;
@@ -193,6 +194,7 @@ export function rollBonus(
     if (
       modifier.kind === "bonus" &&
       modifier.to === to &&
+      !modifier.concentration &&
       (!modifier.weapon || weapon) &&
       (!modifier.skill || modifier.skill === skill) &&
       (!modifier.ability || modifier.ability === ability)

@@ -344,6 +344,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     weapon: z.literal(true).optional(), // weapon attack rolls only, as Magic Weapon's
     // AC only while the bearer wears armor ("any"), or Heavy armor, as the Defense feat's or Soul of the Forge's
     armor: z.enum(["any", "heavy"]).optional(),
+    concentration: z.literal(true).optional(), // saves to keep Concentration only, as Bladesong's Focus
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
@@ -399,6 +400,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     oncePerTurn: z.literal(true).optional(),
     able: z.literal(true).optional(),
     halfDealt: DamageTypeSchema.optional(),
+  }),
+  // A creature of the bearer's foes takes this the first time on a turn its walk comes within 5 feet of it, the type
+  // it resists least of `types`, as Elemental Epitome's Destructive Stride (combat/movement.ts).
+  z.strictObject({
+    kind: z.literal("strideDamage"),
+    damage: AmountSchema,
+    types: z.array(DamageTypeSchema).min(1),
   }),
   // The spell's `spheres` actions are the bearer's while it lasts.
   z.strictObject({ kind: z.literal("spheres") }),
@@ -1858,6 +1866,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Illumination ("light" or "dim" for the light it sheds).
   z.strictObject({
     kind: z.literal("aura"),
+    // only while an effect of one of these features' activations is on the bearer, as Power of the Wilds' Lion in a
+    // Rage
+    while: z.array(ContentIdSchema).min(1).optional(),
     name: z.string().min(1),
     zone: ZoneKindSchema.default("area"),
     radius: z.number().int().min(5),
@@ -2320,10 +2331,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Healing dice the bearer rolls for a creature at 0 Hit Points count as their highest faces, as Circle of
   // Mortality.
   z.strictObject({ kind: z.literal("maxHealingAtZero") }),
-  // At the end of each of its turns the bearer ends one of these conditions on itself, as Self-Restoration.
+  // At the end of each of its turns the bearer ends one of these conditions on itself, as Self-Restoration. With
+  // `turnStart`, as its turn starts instead, ending every one of them and spending `resource`, as Guarded Mind.
   z.strictObject({
     kind: z.literal("shakeOff"),
     conditions: z.array(ConditionSchema).min(1),
+    turnStart: z.literal(true).optional(),
+    resource: z.string().min(1).optional(),
   }),
   // An ally within `within` feet of the bearer treats a healing die's roll below `at` as `at`, as with a Soothing
   // Familiar's Healing Beacon.
@@ -2465,6 +2479,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     marked: z.array(ContentIdSchema).min(1),
     dice: DiceSchema,
   }),
+  // Armor's Strength requirement doesn't slow the bearer, as Arcane Armor's.
+  z.strictObject({ kind: z.literal("armorStrength") }),
   // Resistance to the damage of spells, as Spell Resistance.
   z.strictObject({ kind: z.literal("spellDamageResistance") }),
   // A Sneak Attack die that rolls below this counts as this, as Murderous Intent's 3.
@@ -3076,6 +3092,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
         passives: z.array(PassiveSchema).default([]),
         activations: z.array(ActivationSchema).default([]),
         resources: z.array(ResourceDefSchema).default([]),
+        // Spells it gives, from the character level in the key, as Dread Allegiance's cantrip for each of the Dead Three.
+        spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
         // Labels of the followed feature's activations these take the place of, as Perfected Armor's bigger weapons.
         replaces: z.array(z.string().min(1)).min(1).optional(),
       }),

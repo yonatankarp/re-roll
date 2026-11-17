@@ -417,6 +417,44 @@ export function runMove(
       }
     }
   }
+  // Destructive Stride: each foe the walk comes beside takes it, once a turn.
+  const strides = actor.activeEffects.flatMap(({ modifier }) =>
+    modifier.kind === "strideDamage" ? [modifier] : [],
+  );
+  if (strides.length > 0) {
+    const stats = deriveStats(actor, context);
+    for (const foe of enemies(state, actor)) {
+      const key = `stride:${foe.id}`;
+      if (
+        !foe.position ||
+        isDown(foe) ||
+        actor.usedThisTurn.includes(key) ||
+        !step.path.some((square) => distanceFeet(square, foe.position) <= 5)
+      ) {
+        continue;
+      }
+      events.push(dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key }));
+      const responses = damageResponses(foe, context);
+      for (const stride of strides) {
+        const type =
+          [...stride.types].sort(
+            (a, b) =>
+              finalDamage(10, a, responses) - finalDamage(10, b, responses),
+          )[stride.types.length - 1] ?? stride.types[0];
+        if (!type) continue;
+        const amount = rollAmount(stride.damage, stats, context.dice);
+        const dealt = dealEvents(
+          foe,
+          [{ amount: finalDamage(amount, type, responses), type }],
+          false,
+          { ...context, state: now },
+          actor,
+        );
+        now = dealt.events.reduce(applyDndEvent, now);
+        events.push(...dealt.events);
+      }
+    }
+  }
   for (const { foe, melee } of provokers(actor, to, state, context)) {
     const answer = opportunity(foe, melee, actor, context);
     events.push(...(answer.events ?? []));
