@@ -288,12 +288,14 @@ export type RulingRef = z.infer<
   typeof RulingIndexSchema
 >["rulings"][string][number];
 
-// A book's index of where its families' stat blocks and its lairs' owners are, both ways (#133).
+// A book's index of where its families' stat blocks and its lairs' owners are, both ways (#133), and
+// another book's where that book has them (#188).
 const LinkIndexSchema = z.object({
   links: z.record(
     z.string(),
     z.array(
       z.object({
+        book: z.string().optional(), // this book's when left out
         file: z.string(),
         heading: z.string(),
         rel: z.enum(["family", "member", "lair", "owner"]),
@@ -1124,7 +1126,7 @@ export function createGame({
       return (await rulingIndex).get(`${id}/${file}`) ?? [];
     },
 
-    // The family, members, lair or owners of what a book's section describes, in the same book (#133).
+    // The family, members, lair or owners of what a book's section describes (#133), in this book or another (#188).
     async links(id: string, file: string): Promise<readonly LinkRef[]> {
       if (!BARE_NAME.test(id)) return [];
       const index = await bookIndex(

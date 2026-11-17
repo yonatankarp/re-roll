@@ -102,6 +102,31 @@ describe("monster families and lairs", () => {
     ]);
   });
 
+  it("link another book's family or stat block one way, from this book's section (#188)", () => {
+    const away = (id: string) =>
+      id === "other:monster/bogbeast"
+        ? { book: "other", file: "20.md", heading: "Bogbeast" }
+        : id === "other:monster-family/bogbeasts"
+          ? { book: "other", file: "19.md", heading: "Bogbeasts" }
+          : undefined;
+    const index = linksIndex(
+      BOOK,
+      new Map([
+        ...links,
+        ["other:monster-family/bogbeasts", [`${B}:monster/mireling`]],
+      ]),
+      away,
+    );
+    expect(index["08.md"]).toEqual([
+      { file: "01.md", heading: "Gloomwings", rel: "member" },
+      { book: "other", file: "20.md", heading: "Bogbeast", rel: "member" },
+    ]);
+    expect(index["06.md"]).toEqual([
+      { file: "05.md", heading: "Mireling Brood", rel: "family" },
+      { book: "other", file: "19.md", heading: "Bogbeasts", rel: "family" },
+    ]);
+  });
+
   it("parse as entities with their links", () => {
     const entry = {
       id: `${B}:lair/x`,

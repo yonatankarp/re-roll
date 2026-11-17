@@ -958,9 +958,12 @@ export function aimsFor(
   const grid = context.state.combat?.grid;
   if (!("area" in targeting) || !grid || !actor.position) return [];
   // Aimed by what the actor's side knows of: the party doesn't aim at foes in the fog, though the area still
-  // catches them.
-  const pool = areaPool(targeting, context, actor).filter((item) =>
-    knows(context.state, actor, item, context),
+  // catches them. One of creatures of the caster's choice catches only its side.
+  const pool = areaPool(targeting, context, actor).filter(
+    (item) =>
+      knows(context.state, actor, item, context) &&
+      (!targeting.choice ||
+        (item.side === actor.side) === (targeting.side === "ally")),
   );
   return aimSquares(targeting, actor.position, grid)
     .map((square) => {

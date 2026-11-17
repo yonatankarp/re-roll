@@ -2076,7 +2076,7 @@ export function weaponFits(
 }
 
 // The weapon attack as the spell makes it: its spellcasting ability, its die, its damage type and its extra damage.
-// shortcut: the spell's damage type always stands in for the weapon's, where the caster may keep the weapon's.
+// The caster picks the spell's type or the weapon's, whichever the target resists least.
 function changedWeapon(
   action: KnownAction,
   change: WeaponChange,
@@ -2108,6 +2108,9 @@ function changedWeapon(
         damage: [
           {
             type: change.type ?? main.type,
+            ...(change.type && change.type !== main.type
+              ? { types: [change.type, main.type] }
+              : {}),
             amount: {
               ...main.amount,
               ...(die ? { dice: die } : {}),
@@ -2466,6 +2469,14 @@ export function scaleActivation(
           damage: damage(resolution.damage),
           onHit: effects(resolution.onHit),
           onMiss: effects(resolution.onMiss),
+          ...(resolution.burst
+            ? {
+                burst: {
+                  ...resolution.burst,
+                  damage: damage(resolution.burst.damage),
+                },
+              }
+            : {}),
         };
       case "save":
         return {

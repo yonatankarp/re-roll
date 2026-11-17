@@ -537,20 +537,19 @@ export function nearestOpen(
   return null;
 }
 
-// Where a push of so many feet straight away from `from` leaves the target, stopping at walls, creatures and the
-// map's edge. Null when it can't move.
+// Where a push of so many feet straight away from `from` leaves the target, or with `pull` toward it, stopping at
+// walls, creatures and the map's edge. Null when it can't move.
 export function pushTo(
   from: Square | null,
   target: Actor,
   feet: number,
   state: DndState,
+  pull = false,
 ): Square | null {
   const grid = state.combat?.grid;
   const start = target.position;
   if (!grid || !from || !start) return null;
-  const dx = Math.sign(start.x - from.x);
-  const dy = Math.sign(start.y - from.y);
-  if (dx === 0 && dy === 0) return null;
+  if (start.x === from.x && start.y === from.y) return null;
   const walls = blockingSet(state, "walking");
   const blocked = new Set([
     ...walls,
@@ -561,7 +560,12 @@ export function pushTo(
     ),
   ]);
   let at = start;
+  // A pull aims at `from` again with each step, so it doesn't drift past it.
+  const step = (square: Square, axis: "x" | "y"): number =>
+    Math.sign(pull ? from[axis] - square[axis] : start[axis] - from[axis]);
   for (let pushed = 0; pushed < feet; pushed += 5) {
+    const dx = step(at, "x");
+    const dy = step(at, "y");
     const next = { x: at.x + dx, y: at.y + dy };
     const outside =
       next.x < 0 || next.y < 0 || next.x >= grid.width || next.y >= grid.height;

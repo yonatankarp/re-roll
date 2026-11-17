@@ -11,6 +11,7 @@ import { createNodeStorage } from "../../engine/platform/node/storage.ts";
 import { scanPlugins } from "../../engine/run/loader.ts";
 import {
   type Entity,
+  type Verdict,
   checkCoverage,
   indexEntities,
   matchHeading,
@@ -28,6 +29,7 @@ import {
   familyLinks,
   linksIndex,
 } from "../../plugins/systems/dnd5.5e/core/import/families.ts";
+import { skillRows } from "../../plugins/systems/dnd5.5e/core/import/skills.ts";
 import {
   DOWNTIME_KINDS,
   ENVIRONMENT_KINDS,
@@ -58,6 +60,8 @@ const SHOWN_KINDS = new Set<string>([
   ...Object.values(DOWNTIME_KINDS),
   ...Object.values(OPTION_KINDS),
 ]);
+// The 2014 books print a condition or a sense in lower case, unlike an action or a skill ("help", "history").
+const LOWER_CASE = new Set(["condition", "sense"]);
 const plain = (title: string) => title.replace(/[’‘]/g, "'").toLowerCase();
 
 const storage = await createNodeStorage(process.cwd());
@@ -116,7 +120,7 @@ for (const entity of report.entities.filter((e) => e.kind === "monster")) {
 }
 
 // Each book's drafts, and its families' and lairs' links, from where the book nests them.
-const plans = report.books.map(({ book, edition, verdicts }) => {
+const plans = report.books.map(({ book, edition, verdicts, members }) => {
   const record = catalog.plugins.get(book);
   const { drafts, homeless } = draftWorld(
     book,
@@ -154,6 +158,8 @@ const plans = report.books.map(({ book, edition, verdicts }) => {
       (e) => e.plugin === book && (e.kind === "monster" || e.kind === "npc"),
     ),
   });
+  // Where a family's section names its stat blocks only in prose or in another book, the coverage file does.
+  for (const [id, ids] of Object.entries(members)) links.set(id, [...ids]);
   return {
     book,
     edition,
@@ -177,6 +183,28 @@ for (const { book, edition, drafts, links } of plans)
     if (links.get(entry.id)?.some((id) => id.startsWith(`${book}:`)))
       owned.set(nameKey(edition, entry.name), entry.id);
 
+// Each stat block's families in its own book, for a book that prints it too, as the Basic Rules (#188).
+const familiesOf = new Map<string, string[]>();
+const pluginOf = (id: string) => id.slice(0, id.indexOf(":"));
+for (const { links } of plans)
+  for (const [family, ids] of links)
+    for (const id of ids)
+      if (
+        family.includes(":monster-family/") &&
+        pluginOf(id) === pluginOf(family)
+      )
+        familiesOf.set(id, [...(familiesOf.get(id) ?? []), family]);
+// The heading each entity's own book describes it under, as coverage links it.
+const sectionOf = new Map<string, Verdict["heading"]>();
+for (const { verdicts } of report.books)
+  for (const { heading, status, entity } of verdicts)
+    if (
+      status === "linked" &&
+      entity !== undefined &&
+      pluginOf(entity) === heading.book &&
+      !sectionOf.has(entity)
+    )
+      sectionOf.set(entity, heading);
 const counts = new Map<string, number>();
 const rulings: Pick<Entity, "plugin" | "library" | "about">[] =
   report.entities.filter((e) => e.kind === "ruling");
@@ -211,11 +239,24 @@ for (const plan of plans) {
     links.set(id, [
       ...new Set(ids.map((m) => skipped.get(m) ?? m).filter(plan.visible)),
     ]);
+  const indexed = new Map(links);
+  for (const { entity } of placed)
+    if (entity && pluginOf(entity) !== book)
+      for (const family of familiesOf.get(entity) ?? [])
+        indexed.set(family, [
+          ...new Set([...(indexed.get(family) ?? []), entity]),
+        ]);
   const related = linksIndex(
     placed.map((p) =>
       p.entity && skipped.has(p.entity) ? { ...p, entity: undefined } : p,
     ),
-    links,
+    indexed,
+    (id) => {
+      const heading = sectionOf.get(id);
+      return heading && heading.book !== book
+        ? { book: heading.book, file: heading.file, heading: heading.text }
+        : undefined;
+    },
   );
   if (Object.keys(related).length > 0)
     await storage.replaceAtomically(
@@ -248,7 +289,11 @@ for (const plan of plans) {
       written = { ...entry, owners: links.get(entry.id) ?? [] };
     if (kind === "rulings") {
       const found = at.get(entry.library?.[0] ?? "") ?? -1;
-      const about = subjectsOf(verdicts, found, edition, index, bookOf, terms);
+      const about = subjectsOf(verdicts, found, edition, index, bookOf, {
+        terms,
+        kinds: new Set(Object.values(GLOSSARY_KINDS)),
+        lower: LOWER_CASE,
+      });
       written = { ...entry, ...(about.length > 0 ? { about } : {}) };
       rulings.push({ plugin: book, library: entry.library ?? [], about });
     }
@@ -257,6 +302,32 @@ for (const plan of plans) {
       stringify([written], { lineWidth: 0 }),
     );
     counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+
+  // The skills a 2024 book lists in its Skills table, each linked to the heading nearest it: the last in
+  // reading order whose text holds the whole table, not an ability's few (#187).
+  let table: { id: string; rows: ReturnType<typeof skillRows> } | undefined;
+  for (const { heading } of verdicts) {
+    const rows = skillRows(heading.body);
+    if (rows.length > 0 && rows.length >= (table?.rows.length ?? 0))
+      table = { id: heading.id, rows };
+  }
+  const found = table;
+  for (const row of found?.rows ?? []) {
+    const file = `skills/${row.id}.yaml`;
+    if (record.files.includes(file)) continue;
+    const entry = {
+      id: `${book}:skill/${row.id}`,
+      name: row.name,
+      source: titles.get(book) ?? book,
+      text: row.text,
+      library: found ? [found.id] : [],
+    };
+    await storage.replaceAtomically(
+      `${record.root}/${file}`,
+      stringify([entry], { lineWidth: 0 }),
+    );
+    counts.set("skills", (counts.get("skills") ?? 0) + 1);
   }
 }
 for (const [book, sections] of rulingIndex(

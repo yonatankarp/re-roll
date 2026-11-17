@@ -37,6 +37,10 @@ const INDEX = indexEntities([
   entity("old:spell/muffle", "Muffle", "old"),
   { ...entity("hb:condition/muffled", "Muffled"), lore: true },
   { ...entity("hb:rule-term/muffle", "Muffle"), lore: true },
+  entity("hb:monster/husher", "Husher"),
+  { ...entity("hb:monster-family/hushers", "Hushers"), lore: true },
+  { ...entity("hb:rule-term/quiet-steps", "Quiet Steps"), lore: true },
+  { ...entity("hb:variant-rule/loud-rooms", "Loud Rooms"), lore: true },
 ]);
 
 const verdict = (
@@ -83,10 +87,10 @@ describe("what a ruling names", () => {
     ]);
     // A rules term's name is the term, unless the next word says otherwise.
     const terms = new Set(["hush"]);
-    expect(mentions(INDEX, "Is a Hush loud?", "new", terms)).toEqual([]);
-    expect(mentions(INDEX, "Is the Hush spell loud?", "new", terms)).toEqual([
-      "hb:spell/hush",
-    ]);
+    expect(mentions(INDEX, "Is a Hush loud?", "new", { terms })).toEqual([]);
+    expect(
+      mentions(INDEX, "Is the Hush spell loud?", "new", { terms }),
+    ).toEqual(["hb:spell/hush"]);
     // Where the edition has a glossary entity for the term (#132), the name links to it, and only there.
     expect(mentions(INDEX, "Is a Muffle loud?", "new")).toEqual([
       "hb:rule-term/muffle",
@@ -121,6 +125,32 @@ describe("what a ruling names", () => {
     expect(mentions(INDEX, "Can stillness last?", "new")).toEqual([]);
   });
 
+  it("takes only the glossary's kinds as terms, and one lower-case word only of a kind printed that way", () => {
+    const glossary = {
+      kinds: new Set(["condition", "rule-term"]),
+      lower: new Set(["condition"]),
+    };
+    // A family is lore but not a term, so its name doesn't hide the stat block.
+    expect(mentions(INDEX, "Is a Husher loud?", "new", glossary)).toEqual([
+      "hb:monster/husher",
+    ]);
+    expect(
+      mentions(INDEX, "Can a muffled warden attack?", "new", glossary),
+    ).toEqual(["hb:condition/muffled"]);
+    expect(mentions(INDEX, "Can a muffled warden attack?", "new")).toEqual([]);
+    // Lower-case words name a rules term in either number, but not other lore.
+    expect(
+      mentions(INDEX, "Does a quiet step make noise?", "new", glossary),
+    ).toEqual(["hb:rule-term/quiet-steps"]);
+    // A term before a word naming no such thing is the term.
+    expect(
+      mentions(INDEX, "Is a Quiet Step weapon silent?", "new", glossary),
+    ).toEqual(["hb:rule-term/quiet-steps"]);
+    expect(mentions(INDEX, "Are loud rooms loud?", "new", glossary)).toEqual(
+      [],
+    );
+  });
+
   it("names the thing itself over each of its variants", () => {
     expect(mentions(INDEX, "Who can read a Scroll?", "new")).toEqual([
       "hb:item/scroll",
@@ -147,6 +177,7 @@ describe("what a ruling rules on", () => {
     verdict(1, "Handbook", "structural", "structural"),
     verdict(2, "Muffle (p. 4)", "missing", "ruling"),
     verdict(2, "Muffled [Condition] (p. 5)", "missing", "ruling"),
+    verdict(2, "Loud Rooms (p. 6)", "missing", "ruling"),
   ];
   const subjects = (at: number) =>
     subjectsOf(verdicts, at, "new", INDEX, bookOf);
@@ -163,11 +194,15 @@ describe("what a ruling rules on", () => {
     expect(subjects(5)).toEqual(["hb:item/ring-of-quiet"]);
     expect(subjects(7)).toEqual([]);
     expect(
-      subjectsOf(verdicts, 5, "new", INDEX, bookOf, new Set(["ring-of-quiet"])),
+      subjectsOf(verdicts, 5, "new", INDEX, bookOf, {
+        terms: new Set(["ring-of-quiet"]),
+      }),
     ).toEqual([]);
     // A rules term's erratum rules on its glossary entity, not the spell that shares its name.
     expect(subjects(9)).toEqual(["hb:rule-term/muffle"]);
     expect(subjects(10)).toEqual(["hb:condition/muffled"]);
+    // Other lore is the entry where nothing else has its name.
+    expect(subjects(11)).toEqual(["hb:variant-rule/loud-rooms"]);
   });
 
   it("lists each ruling beside the sections that describe what it rules on", () => {

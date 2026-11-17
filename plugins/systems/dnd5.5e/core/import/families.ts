@@ -17,6 +17,7 @@ export interface Look {
 }
 
 export interface LinkRef {
+  readonly book?: string; // another book's section (#188); this book's when left out
   readonly file: string;
   readonly heading: string;
   readonly rel: "family" | "member" | "lair" | "owner"; // what the linked section is to this one
@@ -111,15 +112,28 @@ export function familyLinks(
   return out;
 }
 
-// For each section file, the sections its family, members, lair or owners are in, both ways.
+// Another book's section an entity is in.
+export interface Elsewhere {
+  readonly book: string;
+  readonly file: string;
+  readonly heading: string;
+}
+
+// For each section file, the sections its family, members, lair or owners are in, both ways. A family or a
+// stat block in another book is linked one way, from this book's section (#188).
 export function linksIndex(
   headings: readonly Placed[],
   links: ReadonlyMap<string, readonly string[]>,
+  elsewhere: (id: string) => Elsewhere | undefined = () => undefined,
 ): Record<string, LinkRef[]> {
   const index: Record<string, LinkRef[]> = {};
   const add = (file: string, ref: LinkRef) => {
     const refs = (index[file] ??= []);
-    if (!refs.some((r) => r.file === ref.file && r.rel === ref.rel))
+    if (
+      !refs.some(
+        (r) => r.book === ref.book && r.file === ref.file && r.rel === ref.rel,
+      )
+    )
       refs.push(ref);
   };
   // The first heading naming it after `from`, as a book may name a stat block in an example before it.
@@ -130,10 +144,20 @@ export function linksIndex(
   for (const [id, others] of links) {
     const at = find(id);
     const home = headings[at];
-    if (!home) continue;
     const lair = kindOf(id) === "lair";
+    if (!home) {
+      const away = elsewhere(id);
+      if (!away) continue;
+      for (const other of others) {
+        const there = headings[find(other)];
+        if (there) add(there.file, { ...away, rel: lair ? "lair" : "family" });
+      }
+      continue;
+    }
     for (const other of others) {
       const there = headings[find(other, at)];
+      const away = there ? undefined : elsewhere(other);
+      if (away) add(home.file, { ...away, rel: lair ? "owner" : "member" });
       if (!there || there.file === home.file) continue;
       add(home.file, {
         file: there.file,

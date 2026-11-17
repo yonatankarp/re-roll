@@ -26,6 +26,7 @@ import {
 import { actionFrames } from "./combat/actions.ts";
 import { deriveItem } from "./variants.ts";
 import { attackFrames } from "./combat/attack.ts";
+import { spellRiderFrames } from "./combat/spell-riders.ts";
 import { movementFrames } from "./combat/movement.ts";
 import { fallingFrames } from "./combat/falling.ts";
 import { formFrames } from "./combat/form-choice.ts";
@@ -127,6 +128,8 @@ import {
   PregenSchema,
   RollTableSchema,
   SKILL_ABILITIES,
+  ALL_SKILLS,
+  CREATURE_TYPES,
   ConditionSchema,
   WeaponMasterySchema,
   WeaponPropertySchema,
@@ -187,9 +190,12 @@ function tacticEnds(
     : result;
 }
 
-// The conditions, weapon properties and masteries the engine plays name their glossary entities.
+// The conditions, weapon properties and masteries, skills and creature types the engine plays name their
+// glossary entities.
 const PLAYED: Partial<Record<string, readonly string[]>> = {
   condition: [...ConditionSchema.options, "exhaustion"],
+  skill: ALL_SKILLS.map(glossaryName),
+  "creature-type": CREATURE_TYPES,
   "weapon-property": WeaponPropertySchema.options.map(glossaryName),
   "weapon-mastery": WeaponMasterySchema.options,
 };
@@ -507,6 +513,7 @@ export const dnd55e = defineSystem<DndState>({
     ...wishFrames,
     ...reactionFrames,
     ...attackFrames,
+    ...spellRiderFrames,
     ...turnFrames,
     ...areaFrames,
     ...shopFrames,
