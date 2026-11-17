@@ -202,8 +202,13 @@ function ownDarkvision(actor: Actor, access: ContentAccess): number {
   const species = lookup(access, SpeciesSchema, build.speciesId);
   return Math.max(
     0,
+    // Devil's Sight, or Darkvision a worn item gives, as a Belt of Dwarvenkind's.
     ...deriveStats(actor, access).passives.flatMap((passive) =>
-      passive.kind === "seesInDarkness" ? [passive.feet] : [],
+      passive.kind === "seesInDarkness"
+        ? [passive.feet]
+        : passive.kind === "modifier" && passive.modifier.kind === "darkvision"
+          ? [passive.modifier.feet]
+          : [],
     ),
     ...species.traits.flatMap((id) => {
       const feature = lookup(access, FeatureSchema, id);

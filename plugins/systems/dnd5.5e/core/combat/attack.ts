@@ -245,12 +245,23 @@ function kinNear(
   );
 }
 
-// AC that counts against melee attack rolls only, as Defensive Stance's.
-function meleeAc(target: Actor, melee: boolean): number {
-  if (!melee) return 0;
+// AC that counts against melee attack rolls only, as Defensive Stance's, or ranged ones only, as an Arrow-Catching
+// Shield's.
+function meleeAc(target: Actor, melee: boolean, stats: Stats): number {
   const sources = new Map<string, number>();
-  for (const { modifier, sourceId } of target.activeEffects) {
-    if (modifier.kind === "bonus" && modifier.to === "ac" && modifier.melee) {
+  for (const { modifier, sourceId } of [
+    ...target.activeEffects,
+    // Each passive counts as a source of its own.
+    ...passiveModifiers(stats.passives).map((each, at) => ({
+      modifier: each,
+      sourceId: `passive:${String(at)}`,
+    })),
+  ]) {
+    if (
+      modifier.kind === "bonus" &&
+      modifier.to === "ac" &&
+      (melee ? modifier.melee : modifier.ranged)
+    ) {
       sources.set(sourceId, modifier.amount.bonus?.base ?? 0);
     }
   }
@@ -307,7 +318,8 @@ function reactionFor(
         return effect.kind === "modifier" &&
           effect.modifier.kind === "bonus" &&
           effect.modifier.to === "ac" &&
-          (!effect.modifier.melee || melee)
+          (!effect.modifier.melee || melee) &&
+          (!effect.modifier.ranged || !melee)
           ? sum + (effect.modifier.amount.bonus?.base ?? 0)
           : sum;
       }, 0);
@@ -887,7 +899,14 @@ export function runAttackRoll(
       "restrained",
     ) ||
     invisibleTo(target, attacker) ||
-    warded(target, targetStats);
+    warded(target, targetStats) ||
+    (action.spellLevel !== null &&
+      passiveModifiers(targetStats.passives).some(
+        (modifier) =>
+          modifier.kind === "disadvantage" &&
+          modifier.on === "attacksAgainst" &&
+          modifier.spells,
+      ));
   // Lucky: the target spends a Luck Point on its own once it's badly hurt or the attacker has Advantage.
   const luck =
     held ||
@@ -937,7 +956,7 @@ export function runAttackRoll(
   const cover = coverAgainst(state, attacker, target, context);
   const ac =
     targetStats.ac +
-    meleeAc(target, meleeReach(action) !== null) +
+    meleeAc(target, meleeReach(action) !== null, targetStats) +
     (steady.bypassCover && meleeReach(action) === null ? 0 : cover);
   const critFrom = criticalFrom(stats);
   const judge = (natural: number, bonus: number) => {
@@ -976,12 +995,14 @@ export function runAttackRoll(
     hasPassive(stats, "peerlessAim") &&
     !attacker.usedThisTurn.includes(PEERLESS_AIM);
   const hits = struck || aimed;
-  // A hit from within 5 feet on a Paralyzed or Unconscious target is a Critical Hit.
+  // A hit from within 5 feet on a Paralyzed or Unconscious target is a Critical Hit, unless the target's Adamantine
+  // Armor makes it a normal one.
   const critical =
-    roll.natural >= critFrom ||
-    (hits &&
-      isMelee(action) &&
-      hasCondition(target, "paralyzed", "unconscious"));
+    !hasPassive(targetStats, "noCriticals") &&
+    (roll.natural >= critFrom ||
+      (hits &&
+        isMelee(action) &&
+        hasCondition(target, "paralyzed", "unconscious")));
 
   const report = dndEvent(`${NS}:rollReported`, {
     actor: attacker.id,
@@ -1251,9 +1272,10 @@ export function runRecheckHit(
   const { state } = context;
   const target = actorOf(state, payload.target);
   const attacker = actorOf(state, payload.attacker);
+  const targetStats = deriveStats(target, context);
   const ac =
-    deriveStats(target, context).ac +
-    meleeAc(target, attackKind(payload, context).melee) +
+    targetStats.ac +
+    meleeAc(target, attackKind(payload, context).melee, targetStats) +
     coverAgainst(state, attacker, target, context) +
     (payload.acBonus ?? 0);
   if (!payload.critical && payload.total < ac) {

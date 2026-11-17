@@ -23,6 +23,14 @@ export function deriveItem(
       ? { name: parent.name, bonuses: parent.bonuses }
       : undefined;
   if (!variant) return undefined;
+  const passives = [
+    ...(parent.passives ?? []),
+    ...("passives" in variant ? (variant.passives ?? []) : []),
+  ];
+  const magic = {
+    ...(passives.length > 0 ? { passives } : {}),
+    ...(parent.attunement ? { attunement: true as const } : {}),
+  };
   const bonus = variant.bonuses?.[0]?.amount;
   const plus = bonus !== undefined && /, \+1\b/.test(parent.name);
   const name =
@@ -43,6 +51,7 @@ export function deriveItem(
       ...("healing" in variant && variant.healing
         ? { healing: variant.healing }
         : {}),
+      ...magic,
     };
     delete item.variants;
     return item;
@@ -65,7 +74,9 @@ export function deriveItem(
     : name.endsWith(")")
       ? `${name.slice(0, -1)}, ${base.name})`
       : `${name} (${base.name})`;
-  const bonuses = variant.bonuses ? { bonuses: variant.bonuses } : {};
+  // A version with no bonuses of its own has the item's, as a Dragon Scale Mail's +1 for every kind of dragon.
+  const own = variant.bonuses ?? parent.bonuses;
+  const bonuses = own ? { bonuses: own } : {};
   let item: Item;
   if (base.type === "weapon") {
     item = {
@@ -74,12 +85,10 @@ export function deriveItem(
       name: named,
       baseWeapon: base.id,
       ...bonuses,
-      ...(parent.attunement ? { attunement: true as const } : {}),
+      ...magic,
       ...(parent.returning ? { returning: true as const } : {}),
+      ...(parent.hitDamage ? { hitDamage: parent.hitDamage } : {}),
     };
-  } else if (parent.attunement) {
-    // shortcut: only a weapon keeps its attunement, since armor and Shields have nowhere to check it.
-    return undefined;
   } else if (base.type === "armor") {
     item = {
       ...base,
@@ -87,11 +96,19 @@ export function deriveItem(
       name: named,
       baseArmor: base.id,
       ...bonuses,
+      ...magic,
       ...(parent.anyTraining ? { anyTraining: true as const } : {}),
     };
     if (parent.noStrength) delete item.strength;
   } else if (base.type === "shield") {
-    item = { ...base, id, name: named, baseArmor: base.id, ...bonuses };
+    item = {
+      ...base,
+      id,
+      name: named,
+      baseArmor: base.id,
+      ...bonuses,
+      ...magic,
+    };
   } else {
     return undefined;
   }

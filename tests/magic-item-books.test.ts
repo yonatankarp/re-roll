@@ -19,13 +19,14 @@ import {
   StateSchema,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import {
+  damageResponses,
   deriveStats,
   saveBonus,
   spellSaveDc,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { BOOK_ROOTS } from "./depth.ts";
 
-// A sample of the book's magic items (issue #137), played by a pregen. Skipped where the books aren't present.
+// A sample of the book's magic items (issues #137 and #138), played by a pregen. Skipped where the books aren't present.
 const BOOKS =
   BOOK_ROOTS &&
   existsSync("books/rules/dmg") &&
@@ -120,5 +121,71 @@ describe.skipIf(!BOOKS)("the book's magic items", () => {
       type: "weapon",
       returning: true,
     });
+  });
+});
+
+describe.skipIf(!BOOKS)("the book's magic items' passives", () => {
+  const resists = (actor: Actor) =>
+    [...damageResponses(actor, run).resistances].sort();
+  const kinds = (actor: Actor) =>
+    deriveStats(actor, run).passives.map((passive) => passive.kind);
+
+  it("plays the shipped adventures' Staff of the Spirit Aegis and rings", () => {
+    expect(
+      resists(
+        wearing(["arcana-unleashed-deadfall:item/staff-of-the-spirit-aegis"]),
+      ),
+    ).toEqual(["necrotic"]);
+    expect(kinds(wearing(["dmg:item/ring-of-spell-turning"]))).toEqual(
+      expect.arrayContaining(["magicResistance", "spellTurning"]),
+    );
+    expect(kinds(wearing(["dmg:item/ring-of-regeneration"]))).toContain(
+      "slowRegeneration",
+    );
+  });
+
+  it("resists the type of a Ring or Armor of Resistance's version", () => {
+    expect(resists(wearing(["dmg:item/ring-of-resistance--3"]))).toEqual([
+      "fire",
+    ]);
+    const armor = "dmg:item/armor-of-resistance--5--chain-mail";
+    expect(run.content(armor)).toMatchObject({
+      name: "Armor of Resistance (Lightning, Chain Mail)",
+      type: "armor",
+    });
+    expect(resists(wearing([armor]))).toEqual(["lightning"]);
+    expect(deriveStats(wearing([armor]), run).ac).toBe(16);
+  });
+
+  it("wears Dragon Scale Mail for its AC and its dragon's Resistance", () => {
+    const mail = "dmg:item/dragon-scale-mail--9--scale-mail";
+    expect(deriveStats(wearing([mail]), run).ac).toBe(14 + 1 + 1);
+    expect(resists(wearing([mail]))).toEqual(["cold"]);
+  });
+
+  it("gives a Robe of the Archmagi's AC, spell DC and Magic Resistance", () => {
+    const robe = "dmg:item/robe-of-the-archmagi";
+    const plain = deriveStats(wearing([], "wizard"), run);
+    const robed = deriveStats(wearing([robe], "wizard"), run);
+    expect(robed.ac).toBe(15 + 2); // Dexterity 15 for +2
+    expect(spellSaveDc(robed) - spellSaveDc(plain)).toBe(2);
+    expect(kinds(wearing([robe], "wizard"))).toContain("magicResistance");
+  });
+
+  it("gives Frost Brand's Resistance and Cold, and Adamantine Armor's normal hits", () => {
+    const brand = "dmg:item/frost-brand--1--longsword";
+    expect(resists(wearing([brand]))).toEqual(["fire"]);
+    const action = deriveStats(wearing([brand]), run).actions.find(
+      (each) => each.id === `weapon:${brand}`,
+    );
+    const resolution = action?.activation.resolution;
+    if (resolution?.kind !== "attack") throw new Error("Not an attack");
+    expect(resolution.damage.map((each) => each.type)).toEqual([
+      "slashing",
+      "cold",
+    ]);
+    expect(
+      kinds(wearing(["dmg:item/adamantine-armor--1--chain-mail"])),
+    ).toContain("noCriticals");
   });
 });

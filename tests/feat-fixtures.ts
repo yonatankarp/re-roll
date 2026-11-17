@@ -450,6 +450,8 @@ const FIXTURES = [
     { kind: "initiativeInspiration" },
   ]),
   trait("tyro", [{ kind: "vigilant" }]),
+  // A Weapon of Warning's passive, on a trait.
+  trait("warned", [{ kind: "initiativeAdvantage", allies: true }]),
   trait(
     "survivor",
     [

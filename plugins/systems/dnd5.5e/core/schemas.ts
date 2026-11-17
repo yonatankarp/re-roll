@@ -272,6 +272,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     skill: SkillSchema.optional(), // only checks with this skill, as Pass without Trace's Stealth
     ability: AbilitySchema.optional(), // only saves with this ability, as Slow's Dexterity saves
     melee: z.literal(true).optional(), // AC against melee attack rolls only, as a pirate admiral's Defensive Stance
+    ranged: z.literal(true).optional(), // AC against ranged attack rolls only, as an Arrow-Catching Shield's
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
@@ -295,6 +296,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     ability: AbilitySchema.optional(),
     attackers: z.array(z.string()).min(1).optional(),
     skills: z.array(SkillSchema).min(1).optional(), // only checks with these skills
+    spells: z.literal(true).optional(), // attacksAgainst only from spells, as a Spellguard Shield's
   }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
@@ -1316,6 +1318,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("webWalker") }),
   // Leaving a foe's reach never provokes an Opportunity Attack, as with Flyby or Agile.
   z.strictObject({ kind: z.literal("noOpportunityAttacks") }),
+  // A successful save against a spell of this level or lower means the spell does nothing to the bearer, as a Ring of
+  // Spell Turning's level 7. shortcut: only a spell's own save, not a save its lasting effects call for later.
+  z.strictObject({
+    kind: z.literal("spellTurning"),
+    upTo: z.number().int().min(1).max(9),
+  }),
   // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
   // save, as a displacer beast's Avoidance does, instead of Dexterity saves only.
   z.strictObject({
@@ -1439,6 +1447,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     rests: z.array(z.enum(["short", "long"])).min(1),
     amount: FormulaSchema,
     allies: z.boolean().default(false),
+  }),
+  // Hit Points regained every so many minutes while it has at least 1, as a Ring of Regeneration's 1d6 every 10.
+  // Only rests pass time, so they come over a Short Rest's hour (rest.ts); a Long Rest heals fully anyway.
+  z.strictObject({
+    kind: z.literal("slowRegeneration"),
+    dice: DiceSchema,
+    minutes: z.number().int().min(1),
   }),
   // A Short Rest ends with spent spell slots back, of combined levels up to `levels` and none above 5, spending a use
   // of the resource, as Arcane Recovery (rest.ts).
@@ -1667,8 +1682,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     monster: ContentIdSchema.optional(),
     hp: z.enum(["full", "half"]),
   }),
-  // Advantage on its Initiative roll, as an asteroid spider's False Appearance gives one that lies still.
-  z.strictObject({ kind: z.literal("initiativeAdvantage") }),
+  // Advantage on its Initiative roll, as an asteroid spider's False Appearance gives one that lies still. With `allies`
+  // its allies' too, as a Weapon of Warning's. shortcut: every ally, not only those within 30 feet, since a party
+  // starts a fight together.
+  z.strictObject({
+    kind: z.literal("initiativeAdvantage"),
+    allies: z.literal(true).optional(),
+  }),
+  // A Critical Hit against the bearer is a normal hit, as with Adamantine Armor.
+  z.strictObject({ kind: z.literal("noCriticals") }),
   // Knocked Prone, an odd roll of a die leaves it Incapacitated until it passes this save at the end of a turn, as a
   // flumph's Prone Deficiency.
   z.strictObject({
@@ -2216,6 +2238,8 @@ export const WeaponSchema = ItemBaseSchema.extend({
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   attunement: z.literal(true).optional(), // its bonuses work only while attuned, as a Keyholes Dagger's
   returning: z.literal(true).optional(), // back in hand once thrown, as a Returning Weapon
+  passives: z.array(PassiveSchema).min(1).optional(), // its magic item's, as Frost Brand's Resistance to Fire
+  hitDamage: z.array(DamageSchema).min(1).optional(), // its magic item's, as Frost Brand's 1d6 Cold
   // A Thrown or Ammunition weapon's range in feet: normal, and long with Disadvantage.
   range: z
     .strictObject({
@@ -2237,6 +2261,9 @@ export const ArmorSchema = ItemBaseSchema.extend({
   baseArmor: ContentIdSchema.optional(),
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   anyTraining: z.literal(true).optional(), // worn as if trained with it, as Elven Chain
+  // From its magic item: its bonuses and passives work only while attuned, and its passives, as Armor of Resistance's.
+  attunement: z.literal(true).optional(),
+  passives: z.array(PassiveSchema).min(1).optional(),
 }).strict();
 export type Armor = z.infer<typeof ArmorSchema>;
 
@@ -2245,6 +2272,8 @@ const ShieldItemSchema = ItemBaseSchema.extend({
   bonus: z.number().int(),
   baseArmor: ContentIdSchema.optional(), // a magic Shield's plain one, as a +1 Shield's (variants.ts)
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
+  attunement: z.literal(true).optional(), // as armor's
+  passives: z.array(PassiveSchema).min(1).optional(),
 }).strict();
 
 const GearSchema = ItemBaseSchema.extend({
@@ -2325,6 +2354,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
   noStrength: z.literal(true).optional(),
   // A magic weapon that comes back once thrown, as a Returning Weapon, carried the same way.
   returning: z.literal(true).optional(),
+  // Damage a magic weapon made from it adds on a hit, as Frost Brand's 1d6 Cold, carried the same way.
+  hitDamage: z.array(DamageSchema).min(1).optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
   // Set when one entry covers several rarities, such as +1, +2 or +3. Content names one as `<id>--<n>` (variants.ts).
@@ -2336,6 +2367,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
         bonuses: z.array(MagicBonusSchema).min(1).optional(),
         abilities: z.array(ItemAbilitySchema).min(1).optional(),
         healing: AmountSchema.optional(),
+        // added to the item's own, as a Ring of Resistance's one damage type
+        passives: z.array(PassiveSchema).min(1).optional(),
       }),
     )
     .min(1)
