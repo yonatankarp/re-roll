@@ -2820,7 +2820,7 @@ export const FeatureSchema = ContentEntrySchema.extend({
       step: ScaleStepSchema,
     })
     .optional(),
-  // Spells it always gives, from the character level in the key.
+  // Spells it always gives, from the level in the key: the level of the class that granted it, else the character's.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.
   spellsBySlot: z.record(z.string(), z.array(ContentIdSchema)).optional(),

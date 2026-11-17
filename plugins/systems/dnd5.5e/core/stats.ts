@@ -825,6 +825,7 @@ function collectFeatureData(
   classLevels: Readonly<Record<string, number>> = {},
   variants: Readonly<Record<string, readonly string[]>> = {},
   swaps: Readonly<Record<string, readonly string[]>> = {},
+  grantedBy: ReadonlyMap<string, string> = new Map(),
 ): {
   passives: Passive[];
   actions: KnownAction[];
@@ -836,7 +837,10 @@ function collectFeatureData(
   const passives: Passive[] = [];
   const actions: KnownAction[] = [];
   const resources: Feature["resources"] = [];
-  const spells = featureIds.flatMap((id) => grantedSpells(id, level));
+  // A class or subclass feature's spells come by that class's level, as a subclass table's "Cleric Level".
+  const levelFor = (id: string) =>
+    classLevels[grantedBy.get(id) ?? ""] ?? level;
+  const spells = featureIds.flatMap((id) => grantedSpells(id, levelFor(id)));
   const free: [string, FreeCast][] = [];
   const retype: Record<string, DamageType> = {};
   // Activations a later feature's variant takes the place of, by the feature they're on (`replaces`).
@@ -877,7 +881,7 @@ function collectFeatureData(
     for (const [from, ids] of Object.entries(
       swappedSpells(id, feature, swaps, access) ?? {},
     )) {
-      if (Number(from) > level) continue;
+      if (Number(from) > levelFor(id)) continue;
       own.push(...ids);
       for (const spell of ids) {
         const how = freeCastOf(feature.freeCast, spell);
@@ -1268,6 +1272,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const swaps = actor.swaps ?? {};
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
   const featureIds = new Set<string>(species.traits);
+  const grantedBy = new Map<string, string>(); // the class whose level granted a feature
   const variants: Record<string, string[]> = {}; // the variants picked, by feature
   // A feat picked in place of the background's, as a Dark Gift for Haunted One, is in the first level's answers.
   const replaced =
@@ -1300,7 +1305,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     if (!levelData) {
       throw new Error(`${entry.classId} has no level ${String(classLevel)}`);
     }
-    for (const id of levelData.grants) featureIds.add(id);
+    for (const id of levelData.grants) {
+      featureIds.add(id);
+      grantedBy.set(id, entry.classId);
+    }
     scaling = { ...scaling, ...levelData.scaling };
     for (const answer of entry.answers) {
       if (answer.kind === "skills") {
@@ -1338,7 +1346,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       subclass?.class === entry.classId
         ? subclass.levels.find((item) => item.level === classLevel)
         : undefined;
-    for (const id of subclassLevel?.grants ?? []) featureIds.add(id);
+    for (const id of subclassLevel?.grants ?? []) {
+      featureIds.add(id);
+      grantedBy.set(id, entry.classId);
+    }
     for (const ability of raisedByFeat(entry.answers, access)) {
       raisedSaves.add(ability);
     }
@@ -1443,6 +1454,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     classLevels,
     variants,
     swaps,
+    grantedBy,
   );
   for (const pick of latePicks(
     swaps,
