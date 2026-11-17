@@ -36,6 +36,7 @@ import {
   ItemSchema,
   LootSchema,
   SKILL_ABILITIES,
+  type Duration,
   type ScaleStep,
   type Skill,
   SpeciesSchema,
@@ -120,6 +121,17 @@ function actionNumbers(action: KnownAction, stats: Stats): string {
   }
 }
 
+function durationText(duration: Duration): string {
+  if (typeof duration !== "object") return "instantaneous";
+  if ("until" in duration) return "a turn";
+  if ("text" in duration) return duration.text;
+  const time =
+    duration.minutes >= 60
+      ? `${String(duration.minutes / 60)} hours`
+      : `${String(duration.minutes)} minutes`;
+  return "concentration" in duration ? `${time} with Concentration` : time;
+}
+
 // What a higher slot adds, for the action's details.
 function upcastText(
   step: Exclude<ScaleStep, { slotOnly: true }>,
@@ -130,6 +142,14 @@ function upcastText(
   }
   if ("addTargets" in step) {
     return `Each slot level above ${String(level)} adds ${String(step.addTargets)} target${step.addTargets > 1 ? "s" : ""}.`;
+  }
+  if ("durations" in step) {
+    return `A higher slot makes it last longer: ${step.durations
+      .map(
+        ({ at, duration }) =>
+          `${durationText(duration)} from level ${String(level + at)}`,
+      )
+      .join(", ")}.`;
   }
   const adds = [
     step.addDice
@@ -154,7 +174,7 @@ function actionDetail(
   const source = contentText(
     access,
     itemUseOf(action.id) ??
-      action.id.replace(/^[a-z]+:/, "").replace(/:free$/, ""),
+      action.id.replace(/^[a-z]+:/, "").replace(/:free(?::[a-z0-9-]+)?$/, ""),
   );
   const upcast = action.upcast?.perSlotLevel;
   return [
@@ -599,6 +619,10 @@ function sheets(rawState: unknown, access: ContentAccess) {
   );
   const casts = new Set(between.map(({ id }) => id));
   const companions = between.filter(({ args }) => args.caster !== PLAYER_ACTOR);
+  // A spell's row casts it with its lowest slot, so the player's higher slots get rows of their own.
+  const upcasts = between.filter(
+    ({ args }) => args.caster === PLAYER_ACTOR && args.slot !== undefined,
+  );
   const player = actors[PLAYER_ACTOR];
   if (player?.source.kind !== "character" || !player.source.build) return [];
   return [
@@ -616,6 +640,7 @@ function sheets(rawState: unknown, access: ContentAccess) {
             actor.id === PLAYER_ACTOR ? (gold ?? 0) : null,
             casts,
             actor.id === PLAYER_ACTOR ? companions : [],
+            actor.id === PLAYER_ACTOR ? upcasts : [],
             actor.id === PLAYER_ACTOR ? uses : [],
           ),
         ]
@@ -630,6 +655,7 @@ function sheetOf(
   gold: number | null, // the party's, shown on the player's sheet
   casts: ReadonlySet<string> = new Set(), // scene actions using a spell or feature between fights
   companions: readonly SceneAction[] = [], // the companions' ones, on the player's sheet
+  upcasts: readonly SceneAction[] = [], // the player's own with a higher slot
   uses: readonly SceneAction[] = [], // items used between choices, on the player's sheet
 ) {
   const stats = deriveStats(player, access);
@@ -754,6 +780,14 @@ function sheetOf(
             },
           ]
         : []),
+      {
+        title: "Higher slots",
+        rows: upcasts.map(({ id, label }) => ({
+          label,
+          value: "",
+          option: { id, label: "Cast" },
+        })),
+      },
       {
         title: "Companions' healing",
         rows: companions.map(({ id, label }) => ({

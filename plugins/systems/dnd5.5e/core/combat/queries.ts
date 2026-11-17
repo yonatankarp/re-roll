@@ -50,7 +50,12 @@ import {
   throughOf,
 } from "../movement-modes.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
-import { encodeOption, THROW_PREFIX, weaponItemId } from "./ids.ts";
+import {
+  encodeOption,
+  spellOfSource,
+  THROW_PREFIX,
+  weaponItemId,
+} from "./ids.ts";
 import { markedBy } from "../trait-rules.ts";
 import { swallowerOf } from "./swallow.ts";
 import { hasteActing, limitsOf } from "./durations.ts";
@@ -113,7 +118,9 @@ export function hasFlag(
   stats: Stats,
   ability?: Ability,
   attackerType?: string, // the attacker's creature type, for attacksAgainst
-  attackerId?: string, // for attacksAgainst, which a caster's own Advantage needs
+  // for attacksAgainst, which a caster's own Advantage needs; for attacks, the target, which Disadvantage on attacks
+  // against a caster needs, as Bestow Curse's
+  attackerId?: string,
   skill?: Skill, // the check's skill, for Advantage on only some, as Remarkable Athlete's Athletics
 ): boolean {
   return [
@@ -126,14 +133,22 @@ export function hasFlag(
       modifier.kind === kind &&
       modifier.on === on &&
       (!modifier.ability || modifier.ability === ability) &&
+      (!("except" in modifier) ||
+        !modifier.except ||
+        modifier.except !== ability) &&
       (!("skills" in modifier) ||
         !modifier.skills ||
         (skill !== undefined && modifier.skills.includes(skill))) &&
       // Advantage only against some conditions is the save's to weigh (placedFlag).
       (!("conditions" in modifier) || !modifier.conditions) &&
       (!("magical" in modifier) || !modifier.magical) &&
-      // Disadvantage only on spell attacks is the attack's to weigh (combat/attack.ts).
+      // Disadvantage only on spell attacks is the attack's to weigh (combat/attack.ts), and on ranged weapon attacks,
+      // spell attacks or Concentration saves too.
       (!("spells" in modifier) || !modifier.spells) &&
+      (!("ranged" in modifier) || !modifier.ranged) &&
+      (!("spellAttacks" in modifier) || !modifier.spellAttacks) &&
+      (!("concentration" in modifier) || !modifier.concentration) &&
+      (!("casterSpells" in modifier) || !modifier.casterSpells) &&
       (!("attackers" in modifier) ||
         !modifier.attackers ||
         modifier.attackers.includes(attackerType ?? "")),
@@ -248,7 +263,14 @@ export function speedsLeft(
   actor: Actor,
   stats: Stats,
 ): ReadonlyMap<Mode, number> {
-  const held = hasCondition(actor, "grappled", "restrained", ...INCAPACITATING);
+  // Daze: once it has taken an action or a Bonus Action, it can't move.
+  const dazed =
+    (!actor.budget.action || !actor.budget.bonusAction) &&
+    actor.activeEffects.some(
+      ({ modifier }) => modifier.kind === "actionLimit" && modifier.oneThing,
+    );
+  const held =
+    dazed || hasCondition(actor, "grappled", "restrained", ...INCAPACITATING);
   return new Map(
     [...speedsOf(actor, stats)].map(([mode, feet]) => [
       mode,
@@ -704,6 +726,19 @@ export function canAfford(
   if (action.activation.bloodied && actor.hp * 2 >= stats.maxHp) return false;
   if (action.activation.beforeAction && !actor.budget.action) return false;
   if (!gatesOpen(action, actor)) return false;
+  const limits = limitsOf(actor);
+  // Befuddlement: no spells at all.
+  if (limits.noSpells && action.spellLevel !== null) return false;
+  // Abjure Foes: having moved this turn, it takes no action or Bonus Action.
+  if (
+    limits.oneThing &&
+    actor.moved > 0 &&
+    action.activation.cost.some(
+      (cost) => cost === "action" || cost === "bonusAction",
+    )
+  ) {
+    return false;
+  }
   // Haste's additional action takes only a weapon attack, or Dash, Disengage or Hide (actions.ts).
   if (
     hasteActing(actor) &&
@@ -737,6 +772,18 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
   if (activation.afterCast && !used.includes(CAST_ACTION)) return false;
   if (activation.afterBonusAction && actor.budget.bonusAction) return false;
   if (activation.while && !underEffect(actor, activation.while)) return false;
+  if (
+    activation.withAttack &&
+    !actor.budget.action &&
+    !actor.activeEffects.some(
+      ({ modifier }) =>
+        modifier.kind === "tactic" &&
+        modifier.tactic === "attacksLeft" &&
+        (modifier.value ?? 0) > 0,
+    )
+  ) {
+    return false;
+  }
   const { resolution, cost } = activation;
   if (
     resolution.kind === "automatic" &&
@@ -760,8 +807,24 @@ export function underEffect(actor: Actor, ids: readonly string[]): boolean {
     (id) =>
       actor.activeEffects.some(({ sourceId }) =>
         sourceId.startsWith(`feature:${id}:`),
-      ) || actor.concentratingOn?.replace(/:free$/, "") === `spell:${id}`,
+      ) || spellOfSource(actor.concentratingOn ?? "") === id,
   );
+}
+
+// The melee weapon a Warlock's Pact of the Blade bonds with: the first one it holds.
+export function pactWeaponId(
+  actor: Actor,
+  access: Pick<ContentAccess, "content">,
+): string | undefined {
+  return equipped(actor).find((id) => {
+    const item = ItemSchema.safeParse(access.content(id)).data;
+    // a melee weapon: no ammunition, and a range only for throwing it
+    return (
+      item?.type === "weapon" &&
+      !item.properties.includes("ammunition") &&
+      (item.range === undefined || item.properties.includes("thrown"))
+    );
+  });
 }
 
 // Whether a hit with this action is one a rider of this kind answers (schemas.ts HitKindSchema).
@@ -785,6 +848,9 @@ export function hitFits(
   switch (kind) {
     case "weapon":
       return true;
+    case "pactWeapon":
+    case "heldMelee":
+      return id === pactWeaponId(attacker, access);
     case "meleeWeapon":
       return isMelee(hitWith);
     case "rangedWeapon":
@@ -843,6 +909,27 @@ export function extraFits(
   if (!hitFits(kind, hitWith, attacker, context)) return false;
   if (passive.when === "always") return true;
   if (passive.when === "natural20") return edge.natural === 20;
+  // Rakish Audacity or Insightful Fighting: Sneak Attack without Advantage.
+  if (
+    passive.when === "advantageOrAlly" &&
+    !edge.disadvantage &&
+    deriveStats(attacker, context).passives.some(
+      (item) =>
+        item.kind === "sneakOpening" &&
+        (!item.against || markedBy(target, attacker, item.against)) &&
+        (!item.alone ||
+          (within5(attacker, target) &&
+            !Object.values(state.actors).some(
+              (other) =>
+                other.id !== attacker.id &&
+                other.id !== target.id &&
+                !isDown(other) &&
+                within5(other, attacker),
+            ))),
+    )
+  ) {
+    return true;
+  }
   if (passive.when === "targetHurt") {
     return target.hp < deriveStats(target, context).maxHp;
   }
@@ -1090,7 +1177,8 @@ export function attackRoutine(
     !cost.includes("action") ||
     (actor.source.kind === "character" &&
       resolution.kind === "attack" &&
-      resolution.attack.type === "spell")
+      resolution.attack.type === "spell" &&
+      !action.activation.withExtraAttack)
   ) {
     return [action.id];
   }

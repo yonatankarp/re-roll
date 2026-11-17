@@ -1,3 +1,4 @@
+import { prisonEvents } from "./fear.ts";
 import { z } from "zod";
 import { placedFlag } from "../zones.ts";
 import { concentrationBonus } from "./school.ts";
@@ -12,6 +13,7 @@ import {
   INCAPACITATING,
   isDead,
   isDown,
+  mountOf,
   NS,
   frame,
 } from "../state.ts";
@@ -22,6 +24,7 @@ import {
   gainAdvantageFrame,
   SNEAK_DICE,
 } from "./strikes.ts";
+import { lastsFor } from "./durations.ts";
 import { aroundHit, replaceHitFrame, runReplaceHit } from "./ranged-smite.ts";
 import { againstTarget, missFrames, runApplyMiss } from "./spell-riders.ts";
 import { duelBroken, duelDamaged, duelHampers } from "./duel.ts";
@@ -67,10 +70,15 @@ import {
 } from "../stats.ts";
 import { finalDamage, halved, rollD20 } from "../rules.ts";
 import {
+  CHARGE_FROM,
   dodging,
   grappledAwayFrom,
+  HEW_READY,
+  HIDE_SOURCE,
   masteryOf,
   revealEvents,
+  STEALTH_ATTACK,
+  tacticsOf,
 } from "../tactics.ts";
 import {
   asHit,
@@ -126,6 +134,8 @@ import {
   fitsType,
   hasFlag,
   hasPassive,
+  ridden,
+  underEffect,
   isMelee,
   meleeReach,
   rollBonus,
@@ -142,6 +152,7 @@ import {
   leafEvents,
   payCosts,
   protectedMount,
+  reactionMove,
   resolveAction,
   rollSave,
   typeAgainst,
@@ -949,7 +960,8 @@ export function runAttackRoll(
             )
           );
         }) ||
-        traitAttackAdvantage(stats, attacker, target, targetStats, state)));
+        traitAttackAdvantage(stats, attacker, target, targetStats, state) ||
+        mountedStrike(attacker, target, stats, context)));
   const held = payload.rolled;
   // Redirect Attack: the target trades places with an ally next to it, who takes the attack instead.
   const redirected = held ? null : redirect(attacker, target, context);
@@ -990,7 +1002,15 @@ export function runAttackRoll(
     dodging(target) ||
     duelHampers(attacker, target) ||
     grappledAwayFrom(attacker, target) ||
-    hasFlag(attacker, "disadvantage", "attacks", stats, ability) ||
+    hasFlag(
+      attacker,
+      "disadvantage",
+      "attacks",
+      stats,
+      ability,
+      undefined,
+      target.id,
+    ) ||
     hasFlag(
       target,
       "disadvantage",
@@ -1018,7 +1038,17 @@ export function runAttackRoll(
           modifier.kind === "disadvantage" &&
           modifier.on === "attacksAgainst" &&
           modifier.spells,
-      ));
+      )) ||
+    // A strong wind hampers ranged weapon attacks, and a dampened magic zone spell attacks (environment.ts).
+    passiveModifiers(stats.passives).some(
+      (modifier) =>
+        modifier.kind === "disadvantage" &&
+        modifier.on === "attacks" &&
+        ((modifier.ranged === true &&
+          action.spellLevel === null &&
+          !isMelee(action)) ||
+          (modifier.spellAttacks === true && action.spellLevel !== null)),
+    );
   // Lucky: the target spends a Luck Point on its own once it's badly hurt or the attacker has Advantage.
   const luck =
     held ||
@@ -1102,7 +1132,18 @@ export function runAttackRoll(
     meleeReach(action) === null
       ? 0
       : cover);
-  const critFrom = criticalFrom(stats);
+  const critFrom = Math.min(
+    criticalFrom(stats),
+    ...stats.passives.flatMap((passive) =>
+      passive.kind === "criticalRange" &&
+      (passive.against !== undefined || passive.while !== undefined) &&
+      (!passive.against || markedBy(target, attacker, passive.against)) &&
+      (!passive.while ||
+        (isMelee(action) && underEffect(attacker, passive.while)))
+        ? [passive.from]
+        : [],
+    ),
+  );
   const judge = (natural: number, bonus: number) => {
     const sum = natural + base + bonus;
     return {
@@ -1172,6 +1213,7 @@ export function runAttackRoll(
       : []),
     ...onceEnded(attacker, "attacks"),
     ...actingEnds(attacker, action),
+    ...(isMelee(action) ? prisonEvents(attacker, context) : []),
     ...onceEnded(target, "attacksAgainst", attacker.id),
     ...revealEvents(attacker),
     ...unwarded,
@@ -1188,6 +1230,7 @@ export function runAttackRoll(
         ]
       : []),
   ];
+  const hiddenWith = tacticsOf(attacker, "hidden")[0]?.value;
   const hit = {
     attacker: attacker.id,
     actionId: action.id,
@@ -1203,6 +1246,8 @@ export function runAttackRoll(
     ...(payload.noModifier ? { noModifier: true } : {}),
     ...(payload.poleStrike ? { poleStrike: true } : {}),
     ...(payload.strikes ? { strikes: payload.strikes } : {}),
+    // The Stealth total it attacked from hiding with, for Supreme Sneak's Stealth Attack.
+    ...(hiddenWith === undefined ? {} : { hidden: hiddenWith }),
   };
 
   if (!hits) {
@@ -1287,6 +1332,7 @@ export const HitSchema = z.object({
   riposte: z.string().optional(), // the attack the target makes back if this now misses, as with Riposte ("" for its weapon)
   kept: z.boolean().optional(), // a spell to take the hit's place, as Lightning Arrow, was already offered
   forgone: z.number().optional(), // Sneak Attack dice given up for strike options, as Cunning Strike's
+  hidden: z.number().optional(), // the Stealth total the attacker was hidden with, for Supreme Sneak's Stealth Attack
   strikes: z.array(z.string()).optional(), // the strike options chosen for this hit, resolved after its damage
   deflect: z.string().optional(), // the reaction that sends the force back out if the damage drops to 0, as Deflect Missile
   transfer: z.string().optional(), // the creature that takes what a reaction took off, as Transfer Harm's podling
@@ -1495,10 +1541,47 @@ function poleEnd(
   };
 }
 
+// Mounted Strike: Advantage from the saddle against an unmounted creature next to the mount and smaller than it.
+function mountedStrike(
+  attacker: Actor,
+  target: Actor,
+  stats: Stats,
+  context: Context,
+): boolean {
+  const mount = hasPassive(stats, "mountedCombatant")
+    ? ridden(attacker, context.state)
+    : null;
+  return (
+    mount !== null &&
+    mountOf(target) === null &&
+    distanceFeet(mount.position, target.position) <= 5 &&
+    sizeOf(target, context) < sizeOf(mount, context)
+  );
+}
+
+// Veer: a rider with Mounted Combatant takes a hit meant for its mount.
+// shortcut: taken without asking, whenever the rider has more Hit Points left than the mount.
+function veered(target: Actor, context: Context): Actor | null {
+  const rider = Object.values(context.state.actors).find(
+    (item) => mountOf(item) === target.id,
+  );
+  return rider &&
+    !isDown(rider) &&
+    !hasCondition(rider, ...INCAPACITATING) &&
+    rider.hp > target.hp &&
+    hasPassive(deriveStats(rider, context), "mountedCombatant")
+    ? rider
+    : null;
+}
+
 export function runApplyHit(
   payload: z.infer<typeof HitSchema>,
   context: Context,
 ): SystemResult {
+  const rider = veered(actorOf(context.state, payload.target), context);
+  if (rider) {
+    return runApplyHit({ ...payload, target: rider.id }, context);
+  }
   const instead = payload.kept ? null : replaceHitFrame(payload, true, context);
   if (instead) return { frames: [instead] };
   // Cunning Strike's options are picked before the Sneak Attack dice they give up are rolled.
@@ -1596,8 +1679,24 @@ function landHit(
   if (printed.kind !== "attack") {
     throw new Error(`${action.id} isn't an attack`);
   }
+  // Planar Warrior: all the hit's own damage takes the type the bearer's mark on the target names.
+  const retype = target.activeEffects.find(
+    ({ modifier, casterId }) =>
+      modifier.kind === "hitDamage" &&
+      modifier.retype !== undefined &&
+      casterId === attacker.id,
+  )?.modifier;
+  const shaped = payload.poleStrike ? poleEnd(printed) : printed;
   const resolution = againstTarget(
-    payload.poleStrike ? poleEnd(printed) : printed,
+    retype?.kind === "hitDamage" && retype.retype
+      ? {
+          ...shaped,
+          damage: shaped.damage.map((item) => ({
+            ...item,
+            type: retype.retype ?? item.type,
+          })),
+        }
+      : shaped,
     target,
     context,
   );
@@ -1606,7 +1705,12 @@ function landHit(
   const mastered = masteredTypes(stats, action.spellLevel !== null);
   const floors = flooredTypes(stats, action.spellLevel !== null);
   const rerolled = rerolledTypes(stats, action.spellLevel !== null);
-  const responses = piercing(damageResponses(target, context), mastered, stats);
+  const responses = piercing(
+    damageResponses(target, context),
+    mastered,
+    stats,
+    action.id,
+  );
 
   // Magic ammunition is no longer magical once it hits.
   const events: SystemEvent[] = action.ammunition
@@ -1736,7 +1840,13 @@ function landHit(
       const inner =
         index === maxIndex
           ? HIGHEST
-          : masteredDice(weaponDice, type, floors, rerolled);
+          : masteredDice(
+              weaponDice,
+              type,
+              floors,
+              rerolled,
+              state.combat?.environment?.forceFloor,
+            );
       if (!(pierces && rerolls)) {
         return rollAmount(amount, stats, inner, multiplier);
       }
@@ -1782,12 +1892,13 @@ function landHit(
     );
   }
 
+  events.push(...sideRidersSpent(attacker, target, state));
   const hits = [
     ...(firstType ? [{ amount: totalDealt, type: firstType }] : []),
     ...absorbed,
     ...[
       ...typedExtra,
-      ...hitRiders(attacker, target, resolution, responses),
+      ...hitRiders(attacker, target, resolution, responses, state),
     ].map(({ amount, type }) => ({
       amount: finalDamage(
         rollAmount(amount, stats, dice, multiplier),
@@ -1802,12 +1913,32 @@ function landHit(
     ? deathStruck(attacker, target, stats, context)
     : null;
   if (struck) events.push(...struck.events);
-  const doubled = struck?.doubled
-    ? hits.map((item) => ({
-        ...item,
-        amount: item.amount > 0 ? item.amount * 2 : item.amount,
-      }))
-    : hits;
+  // Enfeebling Arrow: the bearer's weapon attacks deal half damage; Ancestral Protectors' only off its caster.
+  const weakened =
+    resolution.attack.type === "weapon" &&
+    attacker.activeEffects.some(
+      ({ modifier, casterId }) =>
+        modifier.kind === "weakened" &&
+        !(modifier.exceptCaster && casterId === target.id),
+    );
+  // Path to the Grave's curse: the next hit from its caster's side deals double.
+  const exposed = target.activeEffects.some(
+    ({ modifier, casterId }) =>
+      modifier.kind === "exposed" &&
+      state.actors[casterId]?.side === attacker.side,
+  );
+  const doubled =
+    struck?.doubled || exposed
+      ? hits.map((item) => ({
+          ...item,
+          amount: item.amount > 0 ? item.amount * 2 : item.amount,
+        }))
+      : weakened
+        ? hits.map((item) => ({
+            ...item,
+            amount: item.amount > 0 ? halved(item.amount) : item.amount,
+          }))
+        : hits;
   const targetStats = deriveStats(target, context);
   const armored = doubled.map((item) => ({
     ...item,
@@ -1842,7 +1973,7 @@ function landHit(
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
     ...oncePerTurnHit(resolution, action, attacker, target, context),
-    ...drained(resolution, attacker, dealt.dealt, stats),
+    ...drained(resolution, attacker, target, dealt.dealt, stats, context),
     ...feast(attacker, target, stats, context),
     ...retaliated(attacker, target, action, context),
     ...halted(attacker, target, stats, context),
@@ -1859,10 +1990,59 @@ function landHit(
     state: afterHit,
   });
   events.push(...nested.events);
+  // A Poisoner's dose on the weapon: the save it brings, once, on a hit that deals damage.
+  const coating =
+    dealt.dealt > 0 && action.id.startsWith("weapon:")
+      ? attacker.activeEffects.find(
+          ({ modifier }) => modifier.kind === "coating",
+        )
+      : undefined;
+  const coated =
+    coating?.modifier.kind === "coating"
+      ? nestedSave(
+          {
+            ...resolution,
+            onHitSave: {
+              ability: coating.modifier.ability,
+              dc: coating.modifier.dc,
+              damage: coating.modifier.damage,
+              onSuccessDamage: "none",
+              onFail: coating.modifier.condition
+                ? [
+                    {
+                      kind: "applyCondition",
+                      condition: coating.modifier.condition,
+                      duration: { until: "yourNextTurnEnd" },
+                      repeatSave: false,
+                      endsOnDamage: false,
+                    },
+                  ]
+                : [],
+              onSuccess: [],
+            },
+          },
+          { ...action, id: coating.sourceId },
+          attacker,
+          target,
+          { ...context, state: nested.events.reduce(applyDndEvent, afterHit) },
+        )
+      : null;
+  if (coating && coated) {
+    events.push(
+      ...coated.events,
+      dndEvent(`${NS}:effectEnded`, {
+        actor: attacker.id,
+        sourceId: coating.sourceId,
+      }),
+    );
+  }
   // What answers the hit: the damage, the hit itself, and a foe striking someone else, as with Sentinel's Guardian.
   const landed = {
     ...context,
-    state: nested.events.reduce(applyDndEvent, afterHit),
+    state: [...nested.events, ...(coated?.events ?? [])].reduce(
+      applyDndEvent,
+      afterHit,
+    ),
   };
   const how = attackKind(payload, context);
   const cause = {
@@ -1870,8 +2050,22 @@ function landHit(
     types: armored.flatMap((item) => (item.amount > 0 ? [item.type] : [])),
     ...how,
   };
+  // Hew: a Critical Hit or a drop with a melee weapon readies a Bonus Action attack with it.
+  const hew =
+    hasPassive(stats, "hew") &&
+    action.id.startsWith("weapon:") &&
+    isMelee(action) &&
+    (payload.critical || dealt.dealt + nested.dealt >= target.hp)
+      ? [
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: attacker.id,
+            key: `${HEW_READY}${action.id}`,
+          }),
+        ]
+      : [];
   return {
-    events,
+    // Stealth Attack: hidden again until the turn ends, unless it ends out of cover (combat/turn.ts).
+    events: [...events, ...hew, ...stayHidden(payload, attacker, context)],
     frames: [
       ...concentrationFrame(
         target,
@@ -1880,13 +2074,16 @@ function landHit(
       ),
       // The attacker's own choices for its hit come before the target's answers: the strike options picked, then
       // what it can add now.
-      ...(payload.strikes ?? []).map((id) =>
+      ...(payload.strikes ?? []).map((id, index, all) =>
         frame("smite", {
           attacker: attacker.id,
           actionId: action.id,
           target: target.id,
           critical: payload.critical,
           answer: encodeOption(id, target.id),
+          ...(sharedOnce(attacker, id, all.slice(0, index), context)
+            ? { noDamage: true }
+            : {}),
         }),
       ),
       ...(smitesFor(action, attacker, target, stats, context).length > 0
@@ -1963,11 +2160,35 @@ function imageHit(
   ];
 }
 
+// A curse any of its caster's side spends by hitting, as Path to the Grave's, ends once a hit uses it.
+function sideRidersSpent(attacker: Actor, target: Actor, state: DndState) {
+  return target.activeEffects.flatMap(({ modifier, sourceId, casterId }) =>
+    (modifier.kind === "exposed" &&
+      state.actors[casterId]?.side === attacker.side) ||
+    (modifier.kind === "hitDamage" &&
+      ((modifier.dealtBy === "side" &&
+        state.actors[casterId]?.side === attacker.side) ||
+        // Feinting Attack's die, on the creature feinted, goes with the caster's hit.
+        (modifier.dealtBy === "caster" &&
+          modifier.once === true &&
+          casterId === attacker.id)))
+      ? [
+          dndEvent(`${NS}:effectEnded`, {
+            actor: target.id,
+            sourceId,
+            casterId,
+          }),
+        ]
+      : [],
+  );
+}
+
 // Damage added to the bearer's next attack only, as Deadly Aim's, is spent by that attack, hit or miss, as is
 // True Strike's change to it.
 function onceHitEnded(attacker: Actor): SystemEvent[] {
   return attacker.activeEffects.flatMap(({ modifier, sourceId }) =>
-    (modifier.kind === "hitDamage" || modifier.kind === "weaponSpell") &&
+    ((modifier.kind === "hitDamage" && modifier.dealtBy === "bearer") ||
+      modifier.kind === "weaponSpell") &&
     modifier.once
       ? [dndEvent(`${NS}:effectEnded`, { actor: attacker.id, sourceId })]
       : [],
@@ -2031,27 +2252,56 @@ function hasUse(actor: Actor, stats: Stats, resource: string): boolean {
   );
 }
 
-// A Dhampir's Vampiric Bite: the hit heals the biter by the damage it dealt.
-// shortcut: always Drain, never Strengthen.
+// A Dhampir's Vampiric Bite on a creature that isn't a Construct or an Undead: Drain heals the biter by the damage
+// dealt, and Strengthen adds it to the biter's next attack roll or ability check within a minute.
+// shortcut: Drain is taken while the biter is missing that many Hit Points, else Strengthen, without asking.
 function drained(
   resolution: Extract<Resolution, { kind: "attack" }>,
   attacker: Actor,
+  target: Actor,
   dealt: number,
   stats: Stats,
+  context: Context,
 ): SystemEvent[] {
   const { drain } = resolution;
-  if (!drain || dealt <= 0 || !hasUse(attacker, stats, drain.resource))
+  if (
+    !drain ||
+    dealt <= 0 ||
+    !hasUse(attacker, stats, drain.resource) ||
+    exemptFrom(["construct", "undead"], target, deriveStats(target, context))
+  )
     return [];
+  const missing = stats.maxHp - Math.max(attacker.hp, 0);
+  const strengthen = (to: "attacks" | "checks") =>
+    dndEvent(`${NS}:effectAdded`, {
+      actor: attacker.id,
+      effect: {
+        sourceId: `${drain.resource}:strengthen`,
+        casterId: attacker.id,
+        modifier: {
+          kind: "bonus",
+          to,
+          amount: { bonus: { base: dealt, add: [] } },
+          once: true,
+        },
+        ends: "spellDuration",
+        ...lastsFor({ minutes: 1 }, attacker, attacker, context.state),
+      },
+    });
   return [
     dndEvent(`${NS}:resourceSpent`, {
       actor: attacker.id,
       resource: drain.resource,
     }),
-    dndEvent(`${NS}:healed`, {
-      actor: attacker.id,
-      amount: Math.min(dealt, stats.maxHp - Math.max(attacker.hp, 0)),
-      max: stats.maxHp,
-    }),
+    ...(missing >= dealt
+      ? [
+          dndEvent(`${NS}:healed`, {
+            actor: attacker.id,
+            amount: Math.min(dealt, missing),
+            max: stats.maxHp,
+          }),
+        ]
+      : [strengthen("attacks"), strengthen("checks")]),
   ];
 }
 
@@ -2193,7 +2443,10 @@ function inspiringStrike(
         item.id !== attacker.id &&
         !isDead(item) &&
         !item.heroicInspiration &&
-        distanceFeet(attacker.position, item.position) <= 30,
+        distanceFeet(attacker.position, item.position) <= 30 &&
+        // who can see or hear the bearer
+        (seeing(item, attacker.position, context.state, context) !== "none" ||
+          !hasCondition(item, "deafened")),
     )
     .sort(
       (a, b) =>
@@ -2366,8 +2619,11 @@ function hitRiders(
   target: Actor,
   resolution: Extract<Resolution, { kind: "attack" }>,
   responses: ReturnType<typeof damageResponses>,
+  state: DndState,
 ): readonly Damage[] {
   const seen = new Set<string>();
+  const sided = (casterId: string) =>
+    state.actors[casterId]?.side === attacker.side;
   const carried = [
     ...attacker.activeEffects.map((effect) => ({ effect, by: "bearer" })),
     ...target.activeEffects.map((effect) => ({ effect, by: "caster" })),
@@ -2376,8 +2632,10 @@ function hitRiders(
     const { modifier, sourceId, casterId } = effect;
     if (
       modifier.kind !== "hitDamage" ||
-      modifier.dealtBy !== by ||
-      (by === "caster" && casterId !== attacker.id) ||
+      (modifier.dealtBy === "side"
+        ? by !== "caster" || !sided(casterId)
+        : modifier.dealtBy !== by ||
+          (by === "caster" && casterId !== attacker.id)) ||
       (modifier.weaponOnly && resolution.attack.type !== "weapon") ||
       (modifier.unarmed && !resolution.attack.unarmed) ||
       (modifier.within !== undefined &&
@@ -2409,7 +2667,7 @@ function nestedSave(
   if (exemptFrom(printed.exempt, target, deriveStats(target, context))) {
     return { events: [], dealt: 0 };
   }
-  const onceKey = `onhit:${action.id}`;
+  const onceKey = `onhit:${printed.onceKey ?? action.id}`;
   const once = printed.oncePerTurn
     ? attacker.usedThisTurn.includes(onceKey) || !inOwnTurn(attacker, context)
       ? null
@@ -2529,12 +2787,16 @@ function smitesFor(
   target: Actor,
   stats: Stats,
   context: Context,
+  following?: string,
 ): readonly KnownAction[] {
   if (hitWith.activation.resolution.kind !== "attack") return [];
   return stats.actions.filter((action) => {
     const { trigger } = action.activation;
     return (
       trigger?.afterHit !== undefined &&
+      (following === undefined
+        ? trigger.following === undefined
+        : trigger.following?.includes(following) === true) &&
       !trigger.replacesHit && // offered before the hit lands instead (combat/ranged-smite.ts)
       trigger.forgo === undefined && // picked before the damage (combat/strikes.ts)
       !trigger.forgoAdvantage && // picked before the roll
@@ -2544,9 +2806,38 @@ function smitesFor(
       (!trigger.withFeature ||
         hitWith.id.startsWith(`feature:${trigger.withFeature}:`)) &&
       (!trigger.sneakAttack || sneakLanded(attacker, stats)) &&
-      (!trigger.marked || markedBy(target, attacker, trigger.marked))
+      (!trigger.marked || markedBy(target, attacker, trigger.marked)) &&
+      (!trigger.ownTurn || inOwnTurn(attacker, context)) &&
+      (trigger.charge === undefined ||
+        charged(attacker, target, trigger.charge)) &&
+      (!action.activation.withShield || holdsShield(attacker, context)) &&
+      (!trigger.dealing ||
+        hitWith.activation.resolution.damage.some(
+          (item) =>
+            item.type === trigger.dealing ||
+            (item.types ?? []).includes(trigger.dealing ?? item.type),
+        ))
     );
   });
+}
+
+// Charge Attack: the last walk this turn was at least `feet` in a straight line toward the target.
+function charged(attacker: Actor, target: Actor, feet: number): boolean {
+  const last = attacker.usedThisTurn.findLast((key) =>
+    key.startsWith(CHARGE_FROM),
+  );
+  if (!last || !attacker.position || !target.position) return false;
+  const [x = NaN, y = NaN] = last
+    .slice(CHARGE_FROM.length)
+    .split(",")
+    .map(Number);
+  const from = { x, y };
+  const walked = distanceFeet(from, attacker.position);
+  return (
+    walked >= feet &&
+    distanceFeet(from, target.position) >=
+      walked + distanceFeet(attacker.position, target.position) - 5
+  );
 }
 
 // Whether the attacker's Sneak Attack has been dealt this turn, as it is once a hit carries it.
@@ -2614,6 +2905,10 @@ export const AfterHitSchema = z.object({
   target: z.string(),
   critical: z.boolean(),
   total: z.number().optional(), // the attack roll, for an option that must also hit another (`sameRoll`)
+  // A second strike option of one name on a hit adds its effects but not its damage, as Brutal Strike's die.
+  noDamage: z.boolean().optional(),
+  // The feature whose option just landed, so only the options that follow it are offered (`trigger.following`).
+  following: z.string().optional(),
 });
 
 export function runAfterHit(
@@ -2626,22 +2921,28 @@ export function runAfterHit(
   const stats = deriveStats(attacker, context);
   const hitWith = findAction(attacker, payload.actionId, context);
   // One limited to a size or type, as Hill's Tumble to Large or smaller, is offered only for a target that fits.
-  const options = smitesFor(hitWith, attacker, target, stats, context).flatMap(
-    (action) =>
-      action.activation.trigger?.near === undefined
-        ? fitsType(target, action.activation.targeting, context, attacker)
-          ? withUpcasts(action, attacker, stats, target.id, action.name)
-          : []
-        : nearHit(action, attacker, target, payload.total, context).flatMap(
-            (item) =>
-              withUpcasts(
-                action,
-                attacker,
-                stats,
-                item.id,
-                `${action.name}: ${item.name}`,
-              ),
-          ),
+  const options = smitesFor(
+    hitWith,
+    attacker,
+    target,
+    stats,
+    context,
+    payload.following,
+  ).flatMap((action) =>
+    action.activation.trigger?.near === undefined
+      ? fitsType(target, action.activation.targeting, context, attacker)
+        ? withUpcasts(action, attacker, stats, target.id, action.name)
+        : []
+      : nearHit(action, attacker, target, payload.total, context).flatMap(
+          (item) =>
+            withUpcasts(
+              action,
+              attacker,
+              stats,
+              item.id,
+              `${action.name}: ${item.name}`,
+            ),
+        ),
   );
   if (isDown(target) || isDown(attacker) || options.length === 0) return {};
   return {
@@ -2668,39 +2969,179 @@ export function runSmite(
   const attacker = actorOf(state, payload.attacker);
   const [actionId = "", aimed = "", slot] = parseOption(payload.answer);
   const known = findAction(attacker, actionId, context);
-  // One aimed at another creature near the one hit goes for that one.
-  const target = actorOf(
-    state,
-    known.activation.trigger?.near === undefined ? payload.target : aimed,
-  );
+  // One aimed at another creature near the one hit goes for that one, and one on the bearer itself for the bearer.
+  const target =
+    "self" in known.activation.targeting
+      ? attacker
+      : actorOf(
+          state,
+          known.activation.trigger?.near === undefined ? payload.target : aimed,
+        );
   const slotLevel =
     slot === undefined
       ? (slotToSpend(known, attacker, deriveStats(attacker, context)) ??
         undefined)
       : Number(slot);
-  const action = asHit(
+  const found = asHit(
     findAction(attacker, actionId, context, slotLevel),
     findAction(attacker, payload.actionId, context),
   );
+  const action = payload.noDamage
+    ? {
+        ...found,
+        activation: {
+          ...found.activation,
+          resolution: { ...found.activation.resolution, damage: [] },
+        },
+      }
+    : found;
   // A smite's damage is part of the attack, so a Critical Hit doubles its dice too, but not an area's round the target.
   const result = resolveAction(
     action,
     attacker,
-    aroundHit(action, attacker, target, context),
+    [
+      ...aroundHit(action, attacker, target, context),
+      ...alsoStruck(known, attacker, target, payload.target, context),
+    ],
     context,
     slotLevel,
     payload.critical && !("area" in action.activation.targeting),
     target.position ?? undefined,
   );
   const own = action.activation.selfEffects ?? [];
+  // Options that follow this one on the same hit, as Stalker's Flurry's after Dreadful Strike, or Elemental Smite's
+  // after the Divine Smite spell.
+  const featureId =
+    /^feature:(.+):\d+$/.exec(known.id)?.[1] ??
+    (known.id.startsWith("spell:")
+      ? known.id.slice("spell:".length).replace(/:free$/, "")
+      : undefined);
+  const follows =
+    featureId !== undefined &&
+    known.activation.trigger?.following === undefined &&
+    deriveStats(attacker, context).actions.some(
+      ({ activation }) =>
+        activation.trigger?.following?.includes(featureId) === true,
+    );
   return {
     events: [
       ...payCosts(action, attacker, context, slotLevel),
       ...(result.events ?? []),
       ...leafEvents(own, action.id, attacker, attacker, context),
+      // A move as part of the option, as Mobile Flourish's after the push.
+      ...own.flatMap((effect) =>
+        effect.kind === "reactionMove"
+          ? reactionMove(attacker, context, effect, target)
+          : [],
+      ),
     ],
-    frames: [...(result.frames ?? [])],
+    frames: [
+      ...(result.frames ?? []),
+      ...(follows
+        ? [
+            frame("afterHit", {
+              attacker: attacker.id,
+              actionId: payload.actionId,
+              target: payload.target,
+              critical: payload.critical,
+              ...(payload.total === undefined ? {} : { total: payload.total }),
+              following: featureId,
+            }),
+          ]
+        : []),
+    ],
   };
+}
+
+// Whether a strike option shares its once-a-turn name with one picked before it for the same hit, so the hit's
+// extra die isn't rolled twice, as Improved Brutal Strike's two effects.
+function sharedOnce(
+  attacker: Actor,
+  id: string,
+  before: readonly string[],
+  context: Context,
+): boolean {
+  const key = (actionId: string) =>
+    findAction(attacker, actionId, context).activation.oncePerTurn;
+  const own = key(id);
+  return typeof own === "string" && before.some((other) => key(other) === own);
+}
+
+// A strike option with `keepsHidden` picked by an attacker that struck from hiding hides it again.
+function stayHidden(
+  hit: {
+    readonly strikes?: readonly string[] | undefined;
+    readonly hidden?: number | undefined;
+  },
+  attacker: Actor,
+  context: Context,
+): SystemEvent[] {
+  const { hidden } = hit;
+  const keeps =
+    hidden !== undefined &&
+    (hit.strikes ?? []).some(
+      (id) => findAction(attacker, id, context).activation.keepsHidden,
+    );
+  const hide = (modifier: Actor["activeEffects"][number]["modifier"]) =>
+    dndEvent(`${NS}:effectAdded`, {
+      actor: attacker.id,
+      effect: {
+        sourceId: HIDE_SOURCE,
+        casterId: attacker.id,
+        modifier,
+        ends: "spellDuration",
+      },
+    });
+  return keeps
+    ? [
+        hide({ kind: "condition", condition: "invisible" }),
+        hide({ kind: "tactic", tactic: "hidden", value: hidden }),
+        dndEvent(`${NS}:oncePerTurnUsed`, {
+          actor: attacker.id,
+          key: STEALTH_ATTACK,
+        }),
+      ]
+    : [];
+}
+
+// Another creature an afterHit activation lands on through an `alsoStrikes` passive.
+function alsoStruck(
+  known: KnownAction,
+  attacker: Actor,
+  target: Actor,
+  hitId: string,
+  context: Context,
+): readonly Actor[] {
+  const [, featureId] = /^feature:(.+):\d+$/.exec(known.id) ?? [];
+  const passives = deriveStats(attacker, context).passives.filter(
+    (passive) =>
+      passive.kind === "alsoStrikes" &&
+      passive.feature === featureId &&
+      (passive.label === undefined || passive.label === known.activation.label),
+  );
+  return passives.flatMap((passive): Actor[] => {
+    if (passive.kind !== "alsoStrikes") return [];
+    if (passive.other === undefined) {
+      const hit = actorOf(context.state, hitId);
+      return hit.id === target.id || isDown(hit) ? [] : [hit];
+    }
+    const feet = passive.other;
+    const [nearest] = Object.values(context.state.actors)
+      .filter(
+        (other) =>
+          other.id !== target.id &&
+          other.side !== attacker.side &&
+          !isDown(other) &&
+          distanceFeet(attacker.position, other.position) <= feet &&
+          fitsType(other, known.activation.targeting, context, attacker),
+      )
+      .sort(
+        (a, b) =>
+          distanceFeet(target.position, a.position) -
+          distanceFeet(target.position, b.position),
+      );
+    return nearest ? [nearest] : [];
+  });
 }
 
 export const ConcentrationSchema = z.object({
@@ -2716,9 +3157,16 @@ export function runConcentrationSave(
   const actor = actorOf(context.state, payload.actor);
   if (actor.concentratingOn === null) return {};
   // Boon of the Iron Mind: damage alone never breaks the bearer's Concentration.
+  const held = actor.concentratingOn
+    .replace(/^spell:/, "")
+    .replace(/:free$/, "");
   if (
     !isDown(actor) &&
-    hasPassive(deriveStats(actor, context), "unshakableFocus")
+    deriveStats(actor, context).passives.some(
+      (passive) =>
+        passive.kind === "unshakableFocus" &&
+        (!passive.spells || passive.spells.includes(held)),
+    )
   ) {
     return {};
   }
@@ -2733,7 +3181,14 @@ export function runConcentrationSave(
         false,
         0,
         ["concentration"],
-        payload.disadvantage,
+        payload.disadvantage === true ||
+          // An eerie chanting zone hampers Concentration (environment.ts).
+          passiveModifiers(deriveStats(actor, context).passives).some(
+            (modifier) =>
+              modifier.kind === "disadvantage" &&
+              modifier.on === "saves" &&
+              modifier.concentration === true,
+          ),
       );
   // A Ring of Dedicated Focus: Hit Point Dice added to a failed save.
   const rescued =

@@ -25,7 +25,7 @@ export function speedsOf(
   }
   for (const modifier of modifiersOf(actor, stats)) {
     if (modifier.kind !== "movementMode") continue;
-    const feet = modifier.feet ?? stats.speed;
+    const feet = modifier.feet ?? stats.speed * (modifier.times ?? 1);
     speeds.set(modifier.mode, Math.max(speeds.get(modifier.mode) ?? 0, feet));
   }
   return speeds;
@@ -116,8 +116,15 @@ export function jumpOf(stats: Stats): Jump {
     running = Math.max(running, passive.feet ?? running);
     runUp = Math.min(runUp, passive.runUp);
   }
-  const standing = runUp === 0 ? running : Math.floor(running / 2);
-  return { standing, running, runUp };
+  const times = stats.passives.reduce(
+    (product, passive) =>
+      passive.kind === "jump" && passive.times
+        ? product * passive.times
+        : product,
+    1,
+  );
+  const standing = (runUp === 0 ? running : Math.floor(running / 2)) * times;
+  return { standing, running: running * times, runUp };
 }
 
 // How far its Tremorsense reaches, in feet, or 0 with none.

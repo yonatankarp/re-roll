@@ -18,6 +18,8 @@ import { limitsOf } from "./combat/durations.ts";
 
 export const TACTIC = "tactic:"; // option ids and effect sources of those actions
 export const HIDE_SOURCE = `${TACTIC}hide`;
+// Kept hidden after an attack by Stealth Attack this turn, until the turn ends out of cover (combat/turn.ts).
+export const STEALTH_ATTACK = "stealth-attack";
 export const GRAPPLE_SOURCE = `${TACTIC}grapple`;
 export const MASTERY = "mastery:"; // effect sources of weapon masteries
 
@@ -65,7 +67,11 @@ export function walkSpeed(actor: Actor, stats: Stats): number {
     ({ modifier }) => modifier.kind === "hasted",
   );
   const doubled = hasted || limit === "double" ? speed * 2 : speed;
-  return limit === "half" ? Math.floor(doubled / 10) * 5 : doubled;
+  const walked = limit === "half" ? Math.floor(doubled / 10) * 5 : doubled;
+  const { speedMax, oneThing } = limitsOf(actor);
+  // Abjure Foes: having acted this turn, it doesn't move too.
+  if (oneThing && (!actor.budget.action || !actor.budget.bonusAction)) return 0;
+  return speedMax === undefined ? walked : Math.min(walked, speedMax);
 }
 
 // Each Dash adds that Speed again, or the feet it holds, as a Charge's half Speed.
@@ -158,6 +164,11 @@ export const LIGHT_USED = "light:";
 
 // An attack with a polearm lets Polearm Master's Pole Strike follow it (actions.ts).
 export const POLE_USED = "pole";
+// Where the last walk this turn started ("charge-from:x,y"), for a Charge Attack in a straight line.
+export const CHARGE_FROM = "charge-from:";
+// Hew: a crit or a drop with a melee weapon readies its Bonus Action attack ("hew:<action>"), once a turn.
+export const HEW_READY = "hew:";
+export const HEW_USED = "hew-used";
 export const POLE_STRUCK = "pole-struck";
 
 // Pole Strike's weapons: a Quarterstaff, a Spear, or one that is Heavy with Reach. Matched by name, as masteries are.

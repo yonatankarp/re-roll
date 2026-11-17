@@ -22,17 +22,24 @@ export async function listAdventures(): Promise<readonly string[]> {
     .sort();
 }
 
+// Parsing the content takes far longer than a test does, so a process loads each adventure once.
+const loads = new Map<string, Promise<Registry>>();
+
 export async function loadAdventure(
   adventure: string,
 ): Promise<{ readonly registry: Registry; readonly run: RunContext }> {
+  let load = loads.get(adventure);
+  if (!load) loads.set(adventure, (load = loadRegistry(adventure)));
+  const registry = await load;
+  return { registry, run: createRunContext(registry, adventure) };
+}
+
+async function loadRegistry(adventure: string): Promise<Registry> {
   const storage = await createNodeStorage(process.cwd());
   const catalog = await scanPlugins(storage, PLUGIN_ROOTS);
   const loaded = await loadRun(storage, catalog, systems, [adventure]);
   if (!loaded.ok) {
     throw new Error(loaded.issues.map(formatIssue).join("\n"));
   }
-  return {
-    registry: loaded.registry,
-    run: createRunContext(loaded.registry, adventure),
-  };
+  return loaded.registry;
 }

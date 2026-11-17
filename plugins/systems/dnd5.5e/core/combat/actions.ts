@@ -67,6 +67,7 @@ import {
 } from "./queries.ts";
 import {
   aimSquare,
+  leafEvents,
   payCosts,
   resolveAction,
   resolveTargets,
@@ -78,6 +79,7 @@ import { spellFumble, timeStopEnds } from "./durations.ts";
 import { castRiders, schoolCastEvents } from "./school.ts";
 import { tradeEvents } from "./trade.ts";
 import { spellFoiled } from "./areas.ts";
+import { castSaveFoiled } from "./fear.ts";
 
 // Taking an action on a turn: casting it, choosing its targets one by one, or aiming its area.
 
@@ -158,8 +160,12 @@ export function deathSaveEvents(actor: Actor, context: Context): SystemEvent[] {
   {
     const stats = deriveStats(actor, context);
     const { natural } = rollD20(dice, {
-      advantage: hasPassive(stats, "deathSaveAdvantage"),
-      disadvantage: false,
+      advantage: stats.passives.some(
+        (passive) => passive.kind === "deathSaveAdvantage" && !passive.worse,
+      ),
+      disadvantage: stats.passives.some(
+        (passive) => passive.kind === "deathSaveAdvantage" && passive.worse,
+      ),
       rerollOnes: hasPassive(stats, "rerollOnes"),
     });
     // Survivor's 18-20 count as a 20, and a Periapt of Wound Closure turns a failure into a 10.
@@ -319,19 +325,35 @@ export function castAction(
       );
   if (counter) return { frames: [counter] };
   const fumbled = spellFumble(actor, action, context);
-  const foiled = fumbled
+  const pained = fumbled
     ? null
-    : (spellFoiled(actor, action, context) ?? caged(actor, action, context));
-  if (fumbled || foiled?.failed) {
+    : castSaveFoiled(actor, action.spellLevel !== null, context);
+  const foiled =
+    fumbled || pained?.failed
+      ? null
+      : (spellFoiled(actor, action, context) ?? caged(actor, action, context));
+  if (fumbled || pained?.failed || foiled?.failed) {
+    // Power Word Pain keeps the slot of the spell it wastes.
+    const paid = pained?.keepSlot
+      ? {
+          ...action,
+          activation: {
+            ...action.activation,
+            cost: action.activation.cost.filter((cost) => cost !== "slot"),
+          },
+        }
+      : action;
     return {
       events: [
-        ...payCosts(action, actor, context, slotLevel),
+        ...payCosts(paid, actor, context, slotLevel),
         ...(fumbled ? [fumbled] : []),
+        ...(pained?.events ?? []),
         ...(foiled?.events ?? []),
       ],
       frames: [CHECK_END, frame("afterAction", { actor: actor.id })],
     };
   }
+  const passedSaves = pained?.events ?? [];
   const picked = typeof target === "string" ? null : target;
   const targetId = typeof target === "string" ? target : ALL;
   const { projectiles, resolution } = action.activation;
@@ -377,6 +399,7 @@ export function castAction(
             }),
           ]
         : []),
+      ...passedSaves,
       ...(foiled?.events ?? []),
       ...lightAttackEvents(actor, actionId, context),
       // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.
@@ -384,6 +407,10 @@ export function castAction(
         ? []
         : revealEvents(actor)),
       ...(result.events ?? []),
+      ...dealtSelfEffects(action, actor, result.events ?? [], context),
+      ...(action.onceKeys ?? []).map((key) =>
+        dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key }),
+      ),
     ],
     frames: [
       ...(result.frames ?? []),
@@ -402,6 +429,24 @@ export function castAction(
       frame("afterAction", { actor: actor.id }),
     ],
   };
+}
+
+// What a cast's `selfEffects` give the caster once it has hurt another creature, as Improved Blessed Strikes' gift.
+// shortcut: an attack roll left waiting on a reaction lands later and gives nothing.
+function dealtSelfEffects(
+  action: KnownAction,
+  caster: Actor,
+  events: readonly SystemEvent[],
+  context: Context,
+): SystemEvent[] {
+  const own = action.activation.selfEffects;
+  const hurt = events.some(
+    (event) =>
+      event.kind === `${NS}:damaged` &&
+      String(event.payload.actor) !== caster.id &&
+      Number(event.payload.amount) > 0,
+  );
+  return own && hurt ? leafEvents(own, action.id, caster, caster, context) : [];
 }
 
 // The action as cast in `shape`: the first is as written, and another's effects replace its resolution's.

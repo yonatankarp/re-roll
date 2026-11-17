@@ -26,9 +26,12 @@ export function itemCastId(
 
 // A content id, "plugin:kind/name", which holds one colon.
 const ID = "[^:]+:[^:/]+\\/[^:]+";
-const CAST = new RegExp(`^spell:(${ID})(?::free|:item:(${ID}):(\\d+))?$`);
+const CAST = new RegExp(
+  `^spell:(${ID})(?::free(?::[a-z0-9-]+)?|:item:(${ID}):(\\d+))?$`,
+);
 
-// The spell behind an action or a lasting effect's source: "spell:<spell>", alone, with ":free" after it, or with
+// The spell behind an action or a lasting effect's source: "spell:<spell>", alone, with ":free" or
+// ":free:<resource>" after it, or with
 // an item's ":item:<item>:<charges>". Any other ending, as Haste's ":lethargy", is no cast of the spell.
 export function spellOfSource(sourceId: string): string | null {
   return CAST.exec(sourceId)?.[1] ?? null;

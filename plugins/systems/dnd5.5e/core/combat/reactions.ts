@@ -517,7 +517,8 @@ function matchesMoment(
         hostile &&
         near(bearer, subject, trigger.within) &&
         sees(bearer, subject, context) &&
-        (moment.kind !== "turnStart" || sees(subject, bearer, context))
+        (moment.kind !== "turnStart" || sees(subject, bearer, context)) &&
+        (!trigger.frightened || hasCondition(subject, "frightened"))
       );
   }
 }

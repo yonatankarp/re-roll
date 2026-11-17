@@ -93,6 +93,8 @@ export const FRAME_KINDS = [
   "chooseZoneType",
   "replaceHit",
   "confusedTurn",
+  "fleeTurn",
+  "chooseOption",
   "copySpell",
   "wallLayer",
   "chooseShape",
@@ -105,6 +107,7 @@ export const FRAME_KINDS = [
   "givenDiceAnswer",
   "reincarnate", // the player picks what a reincarnated body's species asks for (reincarnate.ts)
   "reincarnateAnswer",
+  "missReroll", // a missed attack rolled again, or at another creature, as Master Duelist or Curving Shot (class-rules.ts)
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -223,8 +226,31 @@ const ActiveEffectSchema = z.strictObject({
   endsOn: z.enum(["attack", "action", "spell"]).optional(),
   // Taking damage gives this save, ending it on a success, as Dragon Fear's.
   saveOnDamage: z
+    .strictObject({
+      ability: AbilitySchema,
+      dc: z.number().int(),
+      advantage: z.literal(true).optional(), // rolled with Advantage, as Hideous Laughter's
+    })
+    .optional(),
+  // As an applyCondition's (core/schemas.ts): fleeing the caster on its turns, ended by another's action, Prone it
+  // can't end, saved against with its action, Exhaustion on a failed repeat save, and ended only after a save.
+  flee: z
+    .strictObject({
+      unseen: z.literal(true).optional(),
+      far: z.number().int().optional(),
+      casterDown: z.literal(true).optional(),
+    })
+    .optional(),
+  shake: z.literal(true).optional(),
+  cantStand: z.literal(true).optional(),
+  actionSave: z.literal(true).optional(),
+  failExhaustion: z.literal(true).optional(),
+  clings: z
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
+  // Hours it outlasts a fight by, counted down by rests, or "cured" for one that lasts until magic ends it (rest.ts).
+  // Missing for an effect that ends with the fight.
+  lingers: z.union([z.number().int(), z.literal("cured")]).optional(),
   level: z.number().int().optional(), // the slot a spell was cast with, when it was given one
   // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
   swallowed: z.boolean().optional(),
@@ -246,6 +272,39 @@ const ActiveEffectSchema = z.strictObject({
     .optional(),
 });
 export type ActiveEffect = z.infer<typeof ActiveEffectSchema>;
+
+// A disease caught (environment.ts): Long Rests left before its symptoms, and its saves so far.
+const DiseaseRecordSchema = z.strictObject({
+  disease: ContentIdSchema,
+  onset: z.number().int().min(0),
+  saved: z.number().int().default(0),
+  failed: z.number().int().default(0),
+  streak: z.number().int().default(0), // successes in a row
+  dc: z.number().int().optional(), // a DC lowered by its saves, as 2014 Cackle Fever's
+  penalty: z.number().int().optional(), // 2014 Sight Rot's growing penalty
+});
+export type DiseaseRecord = z.infer<typeof DiseaseRecordSchema>;
+
+// What the environmental effects a fight is fought in do there (environment.ts): their ids, and what they make of
+// the fight, as worked out when it starts.
+export const FightEnvironmentSchema = z.strictObject({
+  ids: z.array(ContentIdSchema),
+  difficult: z.literal(true).optional(),
+  deadMagic: z.literal(true).optional(),
+  grounded: z.literal(true).optional(),
+  halfFalls: z.literal(true).optional(),
+  forceFloor: z.number().int().optional(),
+  halfDurations: z.literal(true).optional(),
+  turnSave: z
+    .strictObject({
+      ability: AbilitySchema,
+      dc: z.number().int(),
+      condition: ConditionSchema,
+    })
+    .optional(),
+  reverseGravity: z.strictObject({ dc: z.number().int() }).optional(),
+});
+export type FightEnvironment = z.infer<typeof FightEnvironmentSchema>;
 
 const SquareSchema = z.strictObject({
   x: z.number().int(),
@@ -400,6 +459,8 @@ const ActorSchema = z.strictObject({
     .optional(),
   // Days until a clone of it is ready, 0 once it is (Clone). Missing without one.
   clone: z.number().int().min(0).optional(),
+  // The diseases it has caught (environment.ts). Missing while it has none.
+  diseases: z.array(DiseaseRecordSchema).optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -419,6 +480,8 @@ export const StateSchema = z.strictObject({
   // What each merchant has sold, by name, so limited stock stays sold on a later visit.
   shopBought: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   actors: z.record(z.string(), ActorSchema),
+  // The environmental effects the party is in between fights, as a scene set them (environment.ts). Missing in none.
+  ambient: z.array(ContentIdSchema).optional(),
   // Hours since the last Long Rest began. Missing until the first, so the first is always allowed.
   sinceLongRest: z.number().int().optional(),
   surprise: SurpriseSchema.optional(), // set by the story for the next fight, such as after a Stealth check
@@ -447,6 +510,7 @@ export const StateSchema = z.strictObject({
       // The map is covered until the party sees it (fog.ts). Missing in older saves, whose fights show all of it.
       fog: z.literal(true).optional(),
       sunlight: z.literal(true).optional(), // fought under the sky in daylight (zones.ts)
+      environment: FightEnvironmentSchema.optional(), // the environmental effects it's fought in (environment.ts)
       // Weapons thrown and lying where they landed, until picked up. They go back to their throwers as it ends.
       dropped: z.array(DroppedSchema).optional(),
     })
@@ -475,6 +539,9 @@ const RestedSchema = z.strictObject({
   rest: z.enum(["short", "long"]),
   maxHp: z.number().int(),
   resourcesSpent: z.record(z.string(), z.number().int()),
+  // A disease or the winds of Pandemonium keep a Long Rest from healing, or from lessening Exhaustion below this.
+  keepHp: z.literal(true).optional(),
+  exhaustionFloor: z.number().int().optional(),
 });
 // Rests are the only thing that passes time, so they're the clock for the one-Long-Rest-a-day rule.
 export const REST_HOURS = { short: 1, long: 8 } as const;
@@ -500,6 +567,7 @@ const CombatStartedSchema = z.strictObject({
   damageToParty: z.number().optional(),
   fog: z.literal(true).optional(),
   sunlight: z.literal(true).optional(),
+  environment: FightEnvironmentSchema.optional(),
   // The party's familiars, who join with Initiative of their own (combat/familiar.ts).
   familiars: z.array(ActorSchema).optional(),
 });
@@ -531,8 +599,9 @@ const ItemPickedUpSchema = z.strictObject({
 });
 const AnswerSwappedSchema = z.strictObject({
   actor: z.string(),
-  key: z.string(), // "<level>:<answer>" in its build
+  key: z.string(), // "<level>:<answer>" in its build, or "trait:<feature>" for a trait's own cantrip
   values: z.array(z.string()),
+  mark: z.string().optional(), // kept in `swapped` in place of the key, "<feat>@<level>" for a level's swap
 });
 const ItemUsedSchema = z.strictObject({
   actor: z.string(),
@@ -759,6 +828,21 @@ export const EVENT_SCHEMAS = {
   }),
   // Time passed outside a fight, as the party goes to another scene: the dead lie dead that much longer.
   [`${NS}:timePassed`]: z.strictObject({ hours: z.number().int().min(1) }),
+  [`${NS}:environmentEntered`]: z.strictObject({
+    effects: z.array(ContentIdSchema),
+  }),
+  [`${NS}:diseaseCaught`]: z.strictObject({
+    actor: z.string(),
+    record: DiseaseRecordSchema,
+  }),
+  [`${NS}:diseaseChanged`]: z.strictObject({
+    actor: z.string(),
+    record: DiseaseRecordSchema,
+  }),
+  [`${NS}:diseaseCured`]: z.strictObject({
+    actor: z.string(),
+    disease: ContentIdSchema,
+  }),
   [`${NS}:effectAdded`]: EffectAddedSchema,
   [`${NS}:effectEnded`]: EffectEndedSchema,
   [`${NS}:conditionRemoved`]: ConditionRemovedSchema,
@@ -940,7 +1024,7 @@ export function forAttacker(
 ): boolean {
   const { modifier } = effect;
   return (
-    modifier.kind !== "advantage" ||
+    (modifier.kind !== "advantage" && modifier.kind !== "disadvantage") ||
     !modifier.casterOnly ||
     effect.casterId === attackerId
   );
@@ -1061,6 +1145,31 @@ function grownClones(actors: DndState["actors"]): DndState["actors"] {
       id,
       actor.clone && !isDead(actor)
         ? { ...actor, clone: actor.clone - 1 }
+        : actor,
+    ]),
+  );
+}
+
+// Effects that outlast a fight run down with the hours that pass, as a curse's 8 hours (core/combat/effects.ts
+// lingersFor). Those that last until cured stay.
+function lingerLess(
+  actors: DndState["actors"],
+  hours: number,
+): DndState["actors"] {
+  return Object.fromEntries(
+    Object.entries(actors).map(([id, actor]) => [
+      id,
+      actor.activeEffects.some(({ lingers }) => typeof lingers === "number")
+        ? {
+            ...actor,
+            activeEffects: actor.activeEffects.flatMap((effect) =>
+              typeof effect.lingers !== "number"
+                ? [effect]
+                : effect.lingers > hours
+                  ? [{ ...effect, lingers: effect.lingers - hours }]
+                  : [],
+            ),
+          }
         : actor,
     ]),
   );
@@ -1216,6 +1325,31 @@ function settleSummons(state: DndState): DndState {
   return actors === state.actors ? state : { ...state, actors };
 }
 
+// What outlasts a fight, without its count in rounds (lingers): what a foe left on the creature, as a curse, and what
+// lasts until cured, as a disease's symptoms. A curse that hampers attacks against its caster, or hits from it, goes
+// with the caster.
+// shortcut: a friend's long spell, as Mage Armor's 8 hours, still ends with the fight, and repeat saves still being
+// counted when it ends stop where they are, as Contagion's.
+function outlasting(
+  { lasts: _lasts, ...rest }: ActiveEffect,
+  bearer: Actor,
+  state: DndState,
+): ActiveEffect[] {
+  const { modifier, lingers, casterId } = rest;
+  if (lingers === undefined) return [];
+  const caster = state.actors[casterId];
+  if (lingers !== "cured" && (!caster || caster.side === bearer.side))
+    return [];
+  if (
+    ((modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
+      modifier.casterOnly) ||
+    (modifier.kind === "hitDamage" && modifier.dealtBy === "caster")
+  ) {
+    return [];
+  }
+  return [rest];
+}
+
 function endCombat(state: DndState): DndState {
   // Whatever was thrown is gathered up after the fight.
   const gathered = (state.combat?.dropped ?? []).reduce(
@@ -1252,7 +1386,9 @@ function endCombat(state: DndState): DndState {
         id,
         {
           ...actor,
-          activeEffects: [],
+          activeEffects: actor.activeEffects.flatMap((effect) =>
+            outlasting(effect, actor, kept),
+          ),
           concentratingOn: null,
           budget: { action: true, bonusAction: true, reaction: true },
           usedThisTurn: [],
@@ -1374,12 +1510,17 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           : {
               ...lessOrdeal(withoutLoss(actor)),
               resourcesSpent: data.resourcesSpent,
-              hp: data.maxHp,
+              hp: data.keepHp ? actor.hp : data.maxHp,
               tempHp: 0,
               deathSaves: { successes: 0, failures: 0 },
-              exhaustion: Math.max(0, actor.exhaustion - 1),
-              // Each Long Rest allows its swaps again.
-              ...(actor.swapped ? { swapped: [] } : {}),
+              exhaustion: Math.max(
+                Math.min(actor.exhaustion, data.exhaustionFloor ?? 0),
+                actor.exhaustion - 1,
+              ),
+              // Each Long Rest allows its swaps again, though not a level's.
+              ...(actor.swapped
+                ? { swapped: actor.swapped.filter((key) => key.includes("@")) }
+                : {}),
             },
       );
     }
@@ -1389,10 +1530,12 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       const hours = data.hours ?? REST_HOURS[rest];
       const rested = {
         ...state,
-        actors:
+        actors: lingerLess(
           rest === "long"
             ? grownClones(deadLonger(state, hours))
             : deadLonger(state, hours),
+          hours,
+        ),
       };
       if (rest === "long") return { ...rested, sinceLongRest: hours };
       return state.sinceLongRest === undefined
@@ -1441,6 +1584,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
             : { damageToParty: data.damageToParty }),
           ...(data.fog ? { fog: true as const } : {}),
           ...(data.sunlight ? { sunlight: true as const } : {}),
+          ...(data.environment ? { environment: data.environment } : {}),
         },
       };
     }
@@ -1722,12 +1866,56 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         ordeal: data.penalty,
       }));
     }
+    case `${NS}:environmentEntered`: {
+      const { effects } = payload(
+        EVENT_SCHEMAS[`${NS}:environmentEntered`],
+        event,
+      );
+      if (effects.length > 0) return { ...state, ambient: effects };
+      return Object.fromEntries(
+        Object.entries(state).filter(([key]) => key !== "ambient"),
+      ) as DndState;
+    }
+    case `${NS}:diseaseCaught`:
+    case `${NS}:diseaseChanged`: {
+      const { actor: id, record } = payload(
+        EVENT_SCHEMAS[`${NS}:diseaseChanged`],
+        event,
+      );
+      return updateActor(state, id, (actor) => ({
+        ...actor,
+        diseases: [
+          ...(actor.diseases ?? []).filter(
+            (item) => item.disease !== record.disease,
+          ),
+          record,
+        ],
+      }));
+    }
+    case `${NS}:diseaseCured`: {
+      const { actor: id, disease } = payload(
+        EVENT_SCHEMAS[`${NS}:diseaseCured`],
+        event,
+      );
+      return updateActor(state, id, ({ diseases, ...actor }) => {
+        const left = (diseases ?? []).filter(
+          (item) => item.disease !== disease,
+        );
+        return {
+          ...actor,
+          activeEffects: actor.activeEffects.filter(
+            ({ sourceId }) => sourceId !== `disease:${disease}`,
+          ),
+          ...(left.length > 0 ? { diseases: left } : {}),
+        };
+      });
+    }
     case `${NS}:timePassed`: {
       const { hours } = payload(
         z.strictObject({ hours: z.number().int().min(1) }),
         event,
       );
-      return { ...state, actors: deadLonger(state, hours) };
+      return { ...state, actors: lingerLess(deadLonger(state, hours), hours) };
     }
     case `${NS}:reincarnated`: {
       const { actor: id, ...reincarnated } = payload(
@@ -1924,7 +2112,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         swaps: { ...actor.swaps, [data.key]: data.values },
-        swapped: [...(actor.swapped ?? []), data.key],
+        swapped: [...(actor.swapped ?? []), data.mark ?? data.key],
       }));
     }
     case `${NS}:weaponThrown`: {

@@ -47,7 +47,8 @@ export function againstTarget(
       (item) =>
         item.types !== undefined ||
         item.hurtDie !== undefined ||
-        item.vs !== undefined,
+        item.vs !== undefined ||
+        item.except !== undefined,
     )
   ) {
     return resolution;
@@ -58,6 +59,7 @@ export function againstTarget(
   return {
     ...resolution,
     damage: resolution.damage.flatMap((item) => {
+      if (item.except && exemptFrom(item.except, target, met)) return [];
       const type = item.types ? typeAgainst(item.types, responses) : item.type;
       const count = (item.amount.dice ?? "").split("d")[0] ?? "0";
       const amount =
