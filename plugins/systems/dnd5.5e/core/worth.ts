@@ -1,7 +1,8 @@
 import { type Dice, PLAYER_ACTOR } from "#sdk";
-import { placedFlag } from "./zones.ts";
+import { healingStopped, placedFlag } from "./zones.ts";
 import {
   type Actor,
+  cannotHeal,
   hasCondition,
   INCAPACITATING,
   familiarOwner,
@@ -611,11 +612,91 @@ export function makeJudge(context: Context, side: Actor): Judge {
   const freeThreat = cached((actor) => roundDamage(actor, true));
   const hardestRound = cached((actor) => roundDamage(actor, false, true));
 
+  // Eye Rays that hold a foe, as Paralyzing or Sleep: the foes' turns its rolls take each round, on average,
+  // weighed as CONDITION_WORTH weighs them, which threat's damage alone misses.
+  // shortcut: only rolled rays count, since the pressure cap was measured with other holds left out.
+  const rolledHolds = (actor: Actor): number => {
+    const own = stats(actor);
+    const targets = standing(knownFoes(state, actor, context)).slice(0, 6);
+    if (targets.length === 0) return 0;
+    const turnsHeld = (ray: KnownAction): number => {
+      const { resolution } = ray.activation;
+      if (resolution.kind !== "save") return 0;
+      return (
+        targets.reduce((total, target) => {
+          const saved = saveChance(actor, target, ray, resolution);
+          const held = resolution.onFail.reduce((most, effect) => {
+            if (
+              effect.kind !== "applyCondition" ||
+              immuneToCondition(stats(target), effect.condition)
+            ) {
+              return most;
+            }
+            // A fight has about three rounds left to hold it for.
+            const span = effect.endsOnDamage
+              ? 1
+              : typeof effect.duration === "object" &&
+                  "until" in effect.duration
+                ? 1
+                : effect.repeatSave
+                  ? Math.min(3, 1 / Math.max(0.25, saved))
+                  : 3;
+            return Math.max(
+              most,
+              (CONDITION_WORTH[effect.condition] ?? 0) * span,
+            );
+          }, 0);
+          return total + (1 - saved) * held;
+        }, 0) / targets.length
+      );
+    };
+    const rolls = (activation: KnownAction["activation"]): number => {
+      const { resolution } = activation;
+      const rolled =
+        resolution.kind === "automatic"
+          ? resolution.effects.find((item) => item.kind === "randomAction")
+          : undefined;
+      if (rolled?.kind !== "randomAction") return 0;
+      const picks = own.actions.filter((item) => rolled.of.includes(item.name));
+      return (
+        (picks.reduce((total, pick) => total + turnsHeld(pick), 0) *
+          rolled.times) /
+        rolled.of.length
+      );
+    };
+    const main = Math.max(
+      0,
+      ...own.actions
+        .filter((item) => item.activation.cost.includes("action"))
+        .map((item) => rolls(item.activation)),
+    );
+    const legendary = legendOf(actor, context).legendary;
+    const uses = legendary
+      ? state.combat?.lair
+        ? (legendary.usesInLair ?? legendary.uses)
+        : legendary.uses
+      : 0;
+    const glares = Math.max(
+      0,
+      ...(legendary?.actions ?? []).map((item) =>
+        item.activation
+          ? rolls(item.activation) * Math.floor(uses / item.cost)
+          : 0,
+      ),
+    );
+    return main + glares;
+  };
+
   const party = standing(allies(state, side));
   const foes = standing(knownFoes(state, side, context));
   const sum = (list: readonly Actor[], of: (actor: Actor) => number): number =>
     list.reduce((total, item) => total + of(item), 0);
-  const partyDamage = Math.max(1, sum(party, threat));
+  // The party's turns the foes' rays take, as a share of its turns, deal that much less.
+  const held = Math.min(
+    0.75,
+    sum(foes, rolledHolds) / Math.max(1, party.length),
+  );
+  const partyDamage = Math.max(1, sum(party, threat) * (1 - held));
   const foesDamage = Math.max(1, sum(foes, threat));
   const toWin = sum(foes, (item) => item.hp) / partyDamage;
   const toLose = sum(party, (item) => item.hp) / foesDamage;
@@ -913,9 +994,12 @@ export function makeJudge(context: Context, side: Actor): Judge {
     saved: number,
   ): number => {
     const foe = target.side !== actor.side;
+    // A heal does nothing on one that can't regain Hit Points, as under a death tyrant's Negative Energy Cone.
+    const unhealable =
+      cannotHeal(target) || healingStopped(target, state, context);
     switch (effect.kind) {
       case "heal": {
-        if (foe) return 0;
+        if (foe || unhealable) return 0;
         const room = stats(target).maxHp - Math.max(target.hp, 0);
         const each = rollAmount(effect.amount, stats(actor), AVERAGE);
         // A pool heals what it can of the room, a full heal all of it.
@@ -938,7 +1022,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
       }
       case "hitDieHeal": {
         const die = nextHitDie(target, context);
-        return foe || !die
+        return foe || !die || unhealable
           ? 0
           : healWorth(
               target,
