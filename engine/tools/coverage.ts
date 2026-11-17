@@ -158,7 +158,7 @@ export function matchHeading(
   const fits = (entity: Entity) =>
     entity.edition === scope.edition &&
     (!scope.kinds || scope.kinds.includes(entity.kind)) &&
-    // Lore's names are common words (a ship's Helm, Encounters), so another book's needs a rule asking.
+    // Lore's names are common words (a ship's station named for a god, Encounters), so another book's needs a rule asking.
     (!WORLD.has(entity.kind) || sameBook(entity) || scope.kinds !== null) &&
     (asked ||
       !scope.adventure ||

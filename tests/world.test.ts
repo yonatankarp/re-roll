@@ -25,6 +25,7 @@ const verdict = (
 
 describe("drafting world entities", () => {
   it("names each from its heading, takes its parts' text, and links it to what it sits in", () => {
+    // A heading matched only to another book's lore still gets this book's own entity.
     const { drafts, homeless } = draftWorld(
       "bk",
       "A Book",
@@ -37,8 +38,10 @@ describe("drafting world entities", () => {
         verdict(3, "Gloomfen Features", "structural", "structural"),
         verdict(3, "1: Gate", "missing", "area"),
         verdict(2, "The Pale Court", "linked", "pantheon", "bk:pantheon/pale"),
-        verdict(3, "Oth", "missing", "deity"),
+        verdict(3, "Óth", "missing", "deity"),
         verdict(2, "2: Well", "missing", "area"),
+        verdict(2, "Ashvale", "linked", "place", "other:place/ashvale"),
+        verdict(2, "Brindle", "linked", "place", "bk:place/brindle"),
       ],
       new Set(["places/gloomfen.yaml"]),
     );
@@ -77,6 +80,10 @@ describe("drafting world entities", () => {
       [
         "deities/oth.yaml",
         expect.objectContaining({ pantheon: "bk:pantheon/pale" }),
+      ],
+      [
+        "places/ashvale.yaml",
+        expect.objectContaining({ id: "bk:place/ashvale" }),
       ],
     ]);
   });

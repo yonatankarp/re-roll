@@ -65,7 +65,11 @@ export function draftWorld(
   const homeless: string[] = [];
   verdicts.forEach((verdict, at) => {
     const folder = FOLDERS.get(verdict.kind);
-    if (verdict.status !== "missing" || folder === undefined) return;
+    // Each book's lore is its own entity, even where another book's has the same name.
+    const elsewhere =
+      verdict.status === "linked" && !verdict.entity?.startsWith(`${book}:`);
+    if (folder === undefined || (verdict.status !== "missing" && !elsewhere))
+      return;
     const { heading, kind } = verdict;
     const place = above(at, "place");
     if (kind === "area" && place === undefined) {
@@ -73,7 +77,8 @@ export function draftWorld(
       return;
     }
     // An area's id starts with its place's, since many places have a "1. Entrance".
-    const name = slug(heading.text) || "untitled";
+    const name =
+      slug(heading.text.normalize("NFD").replace(/\p{M}/gu, "")) || "untitled";
     const base = kind === "area" && place ? `${tailOf(place)}-${name}` : name;
     let tail = base;
     for (let n = 2; used.has(`${folder}/${tail}.yaml`); n += 1)
