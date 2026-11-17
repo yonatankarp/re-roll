@@ -316,10 +316,14 @@ function freeCastActions(
         slot > spell.level && step
           ? scaleActivation(activation, step, slot - spell.level)
           : activation;
-      const cast =
+      const lasting =
         typeof how === "object" && how.minutes !== undefined
           ? unconcentrated(leveled, how.minutes)
           : leveled;
+      const cast =
+        typeof how === "object" && how.self
+          ? { ...lasting, targeting: { self: true as const } }
+          : lasting;
       const suffix =
         index === 0 ? "" : `:${typeof how === "object" ? how.resource : how}`;
       return [

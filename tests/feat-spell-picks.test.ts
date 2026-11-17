@@ -359,4 +359,16 @@ describe("spells from feats and species", () => {
     expect(edge(["allure"], target)).toBe(false);
     expect(edge([], charmed)).toBe(false);
   });
+
+  it("casts a free spell only on the caster when its trait says so, and with a slot on anyone", async () => {
+    const run = await testRun();
+    const stats = deriveStats(hero(["climber"]), run);
+    const climb = "srd52:spell/spider-climb";
+    expect(freeOf(stats, `spell:${climb}:free`)?.activation.targeting).toEqual({
+      self: true,
+    });
+    expect(freeOf(stats, `spell:${climb}`)?.activation.targeting).not.toEqual({
+      self: true,
+    });
+  });
 });

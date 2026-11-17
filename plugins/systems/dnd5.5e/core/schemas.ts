@@ -2124,6 +2124,7 @@ export const FreeCastSchema = z.union([
     resource: z.string().regex(/^[a-z0-9-]+$/),
     minutes: z.number().int().min(1).optional(),
     slotLevel: z.record(z.string(), z.number().int().min(1).max(9)).optional(),
+    self: z.literal(true).optional(), // cast so only on the caster, as Vampire Touched's Spider Climb
   }),
 ]);
 export type FreeCast = z.infer<typeof FreeCastSchema>;

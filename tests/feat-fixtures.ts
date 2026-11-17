@@ -680,6 +680,17 @@ const FIXTURES = [
     castsOnly: ["srd52:spell/burning-hands", "srd52:spell/magic-missile"],
     freeCast: { resource: "wishes" },
   }),
+  trait("climber", [], {
+    resources: [
+      {
+        id: "climb",
+        max: { base: 1 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+    spells: { 1: ["srd52:spell/spider-climb"] },
+    freeCast: { resource: "climb", self: true },
+  }),
   trait("allure", [{ kind: "attackAdvantage", when: "targetCharmed" }]),
   {
     id: "test:feat/later",
