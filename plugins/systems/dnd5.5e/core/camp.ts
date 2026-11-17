@@ -133,8 +133,8 @@ function castable(
   return stats.actions.filter(
     (action) =>
       usable(action) &&
-      canAfford(between(action), caster, stats) &&
       goldFor(action) <= (state.gold ?? 0) &&
+      canAfford(between(action), caster, stats) &&
       targetsOf(action, caster, state, access).length > 0,
   );
 }
@@ -155,6 +155,11 @@ export function sceneCastActions(
   ) {
     return [];
   }
+  // Most scenes find the party whole, and then nothing here is worth working out.
+  const needy = members(state).some(
+    (item) => item.hp < deriveStats(item, access).maxHp || item.exhaustion > 0,
+  );
+  if (!needy) return [];
   return members(state).flatMap((caster) =>
     castable(caster, state, access).map((action) => ({
       id: castId(caster.id, action.id),
