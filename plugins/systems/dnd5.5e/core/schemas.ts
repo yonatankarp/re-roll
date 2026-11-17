@@ -3075,6 +3075,13 @@ const MagicItemSchema = ItemBaseSchema.extend({
         // added to the item's own too, as a Staff of Skulls' Pulverizing
         activations: ChargedSchema.activations,
         forms: z.array(z.string().min(1)).min(1).optional(), // added too, as a Keyholes Dagger's
+        // in place of the item's own, as an Ioun Stone of Reserve's
+        storesSpells: z
+          .strictObject({
+            levels: z.number().int().min(1),
+            maxLevel: z.number().int().min(1).max(9),
+          })
+          .optional(),
         hitDamage: z.array(DamageSchema).min(1).optional(), // added too
       }),
     )

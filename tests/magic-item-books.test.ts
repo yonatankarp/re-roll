@@ -34,6 +34,7 @@ const BOOKS =
   BOOK_ROOTS &&
   existsSync("books/rules/dmg") &&
   existsSync("books/rules/arcana-unleashed-deadfall") &&
+  existsSync("books/rules/arcana-unleashed") &&
   existsSync("books/rules/eberron-forge-of-the-artificer");
 
 let run: RunContext;
@@ -50,6 +51,7 @@ beforeAll(async () => {
     "phb",
     "dmg",
     "arcana-unleashed-deadfall",
+    "arcana-unleashed",
     "eberron-forge-of-the-artificer",
   ]);
   if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
@@ -358,6 +360,19 @@ describe.skipIf(!BOOKS)("the book's single-use items and riders", () => {
       "unarmed-strike",
     ).activation.resolution;
     expect(strike).toMatchObject({ attack: { itemBonus: 2 } });
+  });
+
+  it("swings a Keyholes Dagger (Many) as a d8 weapon, keeping its lower versions' forms, and absorbs spells with an Ioun Stone", () => {
+    const dagger = "arcana-unleashed:item/keyholes-dagger--3--dagger";
+    const swing = action(wearing([dagger]), `weapon:${dagger}`).activation
+      .resolution;
+    expect(swing).toMatchObject({ damage: [{ amount: { dice: "1d8" } }] });
+    const stone = "dmg:item/ioun-stone--1";
+    const absorb = action(wearing([stone]), `use:${stone}:0`);
+    expect(absorb.activation.trigger).toEqual({ spellCast: true });
+    expect(deriveStats(wearing([stone]), run).resources).toMatchObject({
+      "ioun-stone-absorption": 20,
+    });
   });
 
   it("fires +3 Ammunition, and offers Oil of Sharpness for a Longsword", () => {

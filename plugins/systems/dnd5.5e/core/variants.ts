@@ -105,6 +105,9 @@ function version(
       ...("activation" in variant && variant.activation
         ? { activation: variant.activation }
         : {}),
+      ...("storesSpells" in variant && variant.storesSpells
+        ? { storesSpells: variant.storesSpells }
+        : {}),
       ...("granted" in variant && variant.granted
         ? { granted: variant.granted }
         : {}),
