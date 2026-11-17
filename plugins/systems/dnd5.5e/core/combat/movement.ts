@@ -23,6 +23,7 @@ import {
 import {
   damageResponses,
   deriveStats,
+  evaluateFormula,
   type KnownAction,
   rollAmount,
 } from "../stats.ts";
@@ -612,12 +613,29 @@ function aroundTeleport(
     ) {
       return [];
     }
-    const save = around.save
-      ? rollSave(target, around.save.ability, around.save.dc, context, true)
+    const stats = deriveStats(actor, context);
+    const { save: rule } = around;
+    const save = rule
+      ? rollSave(
+          target,
+          rule.ability,
+          typeof rule.dc === "number"
+            ? rule.dc
+            : evaluateFormula(rule.dc, stats),
+          context,
+          true,
+        )
       : null;
-    if (save?.saved) return save.events;
+    const hits = (around.damage ?? []).map(({ amount, type }) => {
+      const rolled = rollAmount(amount, stats, context.dice);
+      return { amount: save?.saved ? Math.floor(rolled / 2) : rolled, type };
+    });
+    const dealt =
+      hits.length > 0 ? dealEvents(target, hits, false, context).events : [];
+    if (save?.saved) return [...save.events, ...dealt];
     return [
       ...(save?.events ?? []),
+      ...dealt,
       ...leafEvents(
         [
           ...around.conditions.map((condition) => ({
