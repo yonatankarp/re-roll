@@ -17,7 +17,10 @@ import {
   reactionCosts,
   rollResponder,
 } from "../plugins/systems/dnd5.5e/core/combat/reactions.ts";
-import { sceneGearActions } from "../plugins/systems/dnd5.5e/core/gear.ts";
+import {
+  gainRolls,
+  sceneGearActions,
+} from "../plugins/systems/dnd5.5e/core/gear.ts";
 import {
   type Actor,
   type ActiveEffect,
@@ -300,6 +303,44 @@ const ITEMS = [
         duration: { minutes: 5 },
       },
     ]),
+  }),
+  item("beads", {
+    category: "wondrousItem",
+    resources: [
+      {
+        id: "bead-a",
+        max: { base: 0 },
+        recharge: [{ on: "dawn", amount: "all" }],
+      },
+      {
+        id: "bead-b",
+        max: { base: 0 },
+        recharge: [{ on: "dawn", amount: "all" }],
+      },
+    ],
+    split: {
+      count: { dice: "1d4", base: 2 },
+      die: 20,
+      rows: [
+        { min: 1, max: 10, resource: "bead-a" },
+        { min: 11, max: 20, resource: "bead-b" },
+      ],
+    },
+  }),
+  item("helm", {
+    category: "wondrousItem",
+    resources: [{ id: "ruby", max: { base: 0 }, rolled: "2d10", recharge: [] }],
+    whileCharged: [
+      {
+        resource: "ruby",
+        passives: [
+          {
+            kind: "modifier",
+            modifier: { kind: "resistance", damage: "fire" },
+          },
+        ],
+      },
+    ],
   }),
 ];
 
@@ -1030,5 +1071,50 @@ describe("item riders (#180, #199)", () => {
       actor: PLAYER_ACTOR,
       resource: "deterred:foe",
     });
+  });
+});
+
+describe("pieces rolled as an item is found (#199)", () => {
+  it("rolls a Necklace of Prayer Beads' beads and their types as it's found", async () => {
+    const run = await itemRun();
+    const actor = carrying([]);
+    const events = gainRolls(
+      actor,
+      ["test:item/beads"],
+      contextOf(run, [actor], scripted([2, 3, 15, 7, 20]).dice),
+    );
+    // 2 + a d4 of 2: four beads, d20s of 3, 15, 7 and 20.
+    expect(payloads(events, "poolRolled")).toEqual([
+      { actor: PLAYER_ACTOR, resource: "bead-a", amount: 2 },
+      { actor: PLAYER_ACTOR, resource: "bead-b", amount: 2 },
+    ]);
+    const found = after({ ...actor, inventory: ["test:item/beads"] }, events);
+    expect(deriveStats(found, run).resources).toMatchObject({
+      "bead-a": 2,
+      "bead-b": 2,
+    });
+    // Found again, nothing is rolled.
+    expect(
+      gainRolls(
+        found,
+        ["test:item/beads"],
+        contextOf(run, [found], scripted([]).dice),
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps a Helm of Brilliance's Resistance to Fire only while it has a ruby", async () => {
+    const run = await itemRun();
+    const resists = (actor: Actor) =>
+      deriveStats(actor, run).passives.some(
+        (passive) =>
+          passive.kind === "modifier" && passive.modifier.kind === "resistance",
+      );
+    const helmed = {
+      ...carrying(["test:item/helm"]),
+      rolledPools: { ruby: 3 },
+    };
+    expect(resists(helmed)).toBe(true);
+    expect(resists({ ...helmed, resourcesSpent: { ruby: 3 } })).toBe(false);
   });
 });

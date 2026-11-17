@@ -655,14 +655,31 @@ function storedCasts(
 }
 
 // A worn item's own activations (ChargedSchema `activations`), named after it, as a Pearl of Power's.
-function itemUses(itemId: string, item: Item): KnownAction[] {
+function itemUses(itemId: string, item: Item, actor: Actor): KnownAction[] {
   const uses = "activations" in item ? (item.activations ?? []) : [];
-  return uses.map(({ name, activation }, index) => ({
-    id: itemUseId(itemId, index),
-    name: uses.length > 1 ? `${name} (${item.name})` : name,
-    activation,
-    spellLevel: null,
-  }));
+  return uses.flatMap(({ name, activation, whileCharged }, index) =>
+    whileCharged && !charged(actor, item, whileCharged)
+      ? []
+      : [
+          {
+            id: itemUseId(itemId, index),
+            name: uses.length > 1 ? `${name} (${item.name})` : name,
+            activation,
+            spellLevel: null,
+          },
+        ],
+  );
+}
+
+// Whether one of the item's pools has a use left, as a Helm of Brilliance's rubies.
+// shortcut: a pool's maximum here is its base and what was rolled, without terms worked out from the bearer.
+function charged(actor: Actor, item: Item, resource: string): boolean {
+  const def = chargesOf(item).resources.find((pool) => pool.id === resource);
+  if (!def) return false;
+  const most =
+    def.max.base +
+    (actor.rolledPools?.[resource] ?? (def.rolled ? diceCount(def.rolled) : 0));
+  return most - (actor.resourcesSpent[resource] ?? 0) > 0;
 }
 
 // The abilities a level's feat raised, when that feat makes its raised save proficient, as Resilient does.
@@ -1245,6 +1262,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       ? [
           ...("passives" in item ? (item.passives ?? []) : []),
           ...(item.type === "magicItem"
+            ? (item.whileCharged ?? []).flatMap((entry) =>
+                charged(actor, item, entry.resource) ? entry.passives : [],
+              )
+            : []),
+          ...(item.type === "magicItem"
             ? (item.variants?.[0]?.passives ?? [])
             : []),
         ]
@@ -1479,7 +1501,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     if (works(itemId, item) && !untrainedArmor) {
       actions.push(
         ...itemCasts(itemId, item, level, access),
-        ...itemUses(itemId, item),
+        ...itemUses(itemId, item, actor),
         ...storedCasts(itemId, item, actor, access),
       );
       // A Thayan Spell Tattoo's spell is always prepared, cast with the bearer's slots.
@@ -1832,9 +1854,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       partial.resourceDefs.map((resource) => [
         resource.id,
         evaluateFormula(resource.max, partial) +
-          (resource.rolled
-            ? (actor.rolledPools?.[resource.id] ?? diceCount(resource.rolled))
-            : 0),
+          (actor.rolledPools?.[resource.id] ??
+            (resource.rolled ? diceCount(resource.rolled) : 0)),
       ]),
     ),
   };

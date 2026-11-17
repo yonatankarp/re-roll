@@ -2814,13 +2814,49 @@ export type ItemCast = z.infer<typeof ItemCastSchema>;
 // Quarterstaff.
 export const ChargedSchema = {
   resources: z.array(ResourceDefSchema).min(1).optional(),
+  // Pieces rolled as the item is found, each a type its own d`die` row names, counted into that row's pool, as a
+  // Necklace of Prayer Beads' 1d4 + 2 beads of six types (gear.ts gainRolls).
+  split: z
+    .strictObject({
+      count: z.strictObject({
+        dice: DiceSchema,
+        base: z.number().int().min(0),
+      }),
+      die: z.number().int().min(2),
+      rows: z
+        .array(
+          z.strictObject({
+            min: z.number().int().min(1),
+            max: z.number().int().min(1),
+            resource: z.string().min(1),
+          }),
+        )
+        .min(1),
+    })
+    .optional(),
+  // Passives that hold only while one of the item's pools has a use left, as a Helm of Brilliance's Resistance to
+  // Fire while it has a ruby.
+  whileCharged: z
+    .array(
+      z.strictObject({
+        resource: z.string().min(1),
+        passives: z.array(PassiveSchema).min(1),
+      }),
+    )
+    .min(1)
+    .optional(),
   casts: z.array(ItemCastSchema).min(1).optional(),
   // What it does when used, as a Pearl of Power's spell slot back once a dawn (stats.ts itemUses): an activation that
   // spends its pools as a feature's spends its own. shortcut: one on the bearer's person or held works whenever it's
   // worn.
   activations: z
     .array(
-      z.strictObject({ name: z.string().min(1), activation: ActivationSchema }),
+      z.strictObject({
+        name: z.string().min(1),
+        activation: ActivationSchema,
+        // only while this pool of its own has a use left, as a Helm of Brilliance's flames while it has a fire opal
+        whileCharged: z.string().min(1).optional(),
+      }),
     )
     .min(1)
     .optional(),

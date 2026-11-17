@@ -3,6 +3,7 @@ import {
   PLAYER_ACTOR,
   type SceneAction,
   type SystemContext,
+  type SystemEvent,
   type SystemResult,
   awaitDecision,
   frameHandler,
@@ -25,7 +26,9 @@ import {
 import { castFrom, spellOfSource } from "./combat/ids.ts";
 import {
   type Stats,
+  chargesOf,
   deriveStats,
+  rollDiceNotation,
   evaluateFormula,
   itemHealing,
   spellAttackBonus,
@@ -73,9 +76,49 @@ export function treasure(loot: Loot, context: Context): SystemResult {
         items: [...items],
         stowed: items.filter((id) => WORN_TYPES.has(itemOf(context, id).type)),
       }),
+      ...gainRolls(player(context.state), items, context),
     ],
     frames: [frame("gearStep", { step: 0, found: { gold, items } })],
   };
+}
+
+// What an item found rolls for as it's found: its pools' `rolled` dice, as a Helm of Brilliance's 1d10 diamonds,
+// and its `split` pieces' types, as a Necklace of Prayer Beads' beads. A pool already rolled stays as it is.
+export function gainRolls(
+  actor: Actor,
+  items: readonly string[],
+  context: Context,
+): SystemEvent[] {
+  const rolled = new Set(Object.keys(actor.rolledPools ?? {}));
+  const events: SystemEvent[] = [];
+  const set = (resource: string, amount: number) => {
+    rolled.add(resource);
+    events.push(
+      dndEvent(`${NS}:poolRolled`, { actor: actor.id, resource, amount }),
+    );
+  };
+  for (const id of items) {
+    const item = itemOf(context, id);
+    for (const pool of chargesOf(item).resources) {
+      if (pool.rolled && !rolled.has(pool.id)) {
+        set(pool.id, rollDiceNotation(pool.rolled, context.dice));
+      }
+    }
+    const split = "split" in item ? item.split : undefined;
+    if (!split || split.rows.every((row) => rolled.has(row.resource))) continue;
+    const counts = new Map(split.rows.map((row) => [row.resource, 0]));
+    const pieces =
+      split.count.base + rollDiceNotation(split.count.dice, context.dice);
+    for (let piece = 0; piece < pieces; piece += 1) {
+      const face = context.dice.roll(split.die);
+      const row = split.rows.find(
+        (entry) => face >= entry.min && face <= entry.max,
+      );
+      if (row) counts.set(row.resource, (counts.get(row.resource) ?? 0) + 1);
+    }
+    for (const [resource, amount] of counts) set(resource, amount);
+  }
+  return events;
 }
 
 // Whether any of the character's classes trains them with it, or for a scroll, whether they cast spells.
