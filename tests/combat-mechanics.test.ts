@@ -3948,6 +3948,29 @@ describe("battle map ground, cover and light", () => {
     expect(play(false)).not.toHaveProperty("outcome");
   });
 
+  it("keeps a stand-off calm while only Temporary Hit Points take damage", async () => {
+    // Before, refreshed Temporary Hit Points soaking every small hit kept the fight going for ever (#195).
+    const run = arenaRun(await base(), {});
+    const start = fight({ ...hero(run), tempHp: 5 });
+    const calm: DndState = {
+      ...start,
+      combat: start.combat && { ...start.combat, calmRounds: 3 },
+    };
+    const hit = (amount: number) =>
+      applyDndEvent(
+        calm,
+        dndEvent(`${NS}:damaged`, {
+          actor: PLAYER_ACTOR,
+          amount,
+          type: "fire",
+          critical: false,
+          massive: false,
+        }),
+      ).combat?.calmRounds;
+    expect(hit(5)).toBe(3);
+    expect(hit(6)).toBeUndefined();
+  });
+
   it("plays a whole fight on a map with cover to the end", async () => {
     const run = archer(await base(), "archer", { hp: 12 });
     const party = [hero(run), hero(run, { id: "ally" })];

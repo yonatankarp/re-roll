@@ -1457,7 +1457,10 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         applyDamage(actor, data.amount, data.critical, data.massive),
       );
       const { combat } = hurt;
-      if (!combat?.calmRounds || data.amount <= 0) return hurt;
+      // Damage that only Temporary Hit Points take leaves a stand-off calm, or refreshed ones would stall it.
+      const before = state.actors[data.actor];
+      if (!combat?.calmRounds || data.amount <= (before?.tempHp ?? 0))
+        return hurt;
       const calm = { ...combat };
       delete calm.calmRounds;
       return { ...hurt, combat: calm };
