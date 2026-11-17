@@ -3032,6 +3032,83 @@ function strongerTogether(
   return near.length > 0 && (bears(target) || near.some(bears));
 }
 
+// A Helm of Brilliance's Taking Fire Damage: a d20, and on a 1 its gems' beams and the helm's end.
+function backfireEvents(
+  bearer: Actor,
+  types: readonly Damage["type"][],
+  context: Context,
+): SystemEvent[] {
+  const stats = deriveStats(bearer, context);
+  const events: SystemEvent[] = [];
+  for (const passive of stats.passives) {
+    if (
+      passive.kind !== "spellBackfire" ||
+      !types.includes(passive.damage) ||
+      !bearer.inventory.includes(passive.item)
+    ) {
+      continue;
+    }
+    const die = context.dice.roll(passive.die);
+    events.push(
+      dndEvent(`${NS}:dieRolled`, {
+        actor: bearer.id,
+        die: passive.die,
+        rolled: die,
+        label: "Taking Fire Damage",
+      }),
+    );
+    if (die !== 1) continue;
+    const gems = passive.resources.reduce(
+      (sum, resource) =>
+        sum +
+        Math.max(
+          0,
+          (stats.resources[resource] ?? 0) -
+            (bearer.resourcesSpent[resource] ?? 0),
+        ),
+      0,
+    );
+    for (const other of Object.values(context.state.actors)) {
+      if (
+        other.id === bearer.id ||
+        isDown(other) ||
+        isDead(other) ||
+        distanceFeet(bearer.position, other.position) > passive.radius ||
+        gems <= 0
+      ) {
+        continue;
+      }
+      const save = rollSave(other, passive.ability, passive.dc, context, true);
+      events.push(...save.events);
+      if (!save.saved) {
+        events.push(
+          ...dealEvents(
+            other,
+            [
+              {
+                amount: finalDamage(
+                  gems,
+                  passive.type,
+                  damageResponses(other, context),
+                ),
+                type: passive.type,
+              },
+            ],
+            false,
+            context,
+            bearer,
+            true,
+          ).events,
+        );
+      }
+    }
+    events.push(
+      dndEvent(`${NS}:itemUsed`, { actor: bearer.id, item: passive.item }),
+    );
+  }
+  return events;
+}
+
 // Storm's Strength: saves against the caster's spells dealing these types have Disadvantage.
 function stormStrength(action: KnownAction, stats: Stats): boolean {
   if (action.spellLevel === null) return false;
@@ -4029,6 +4106,19 @@ export function resolveAction(
               ? halved(amount)
               : 0;
           });
+        }
+        // A Helm of Brilliance: Fire from a failed save against a spell may set its gems off.
+        if (!saved && !turned && lastDealt > 0 && action.spellLevel !== null) {
+          events.push(
+            ...backfireEvents(
+              target,
+              resolution.damage.map(({ type }) => type),
+              {
+                ...context,
+                state: events.reduce(applyDndEvent, context.state),
+              },
+            ),
+          );
         }
         events.push(
           ...leafEvents(

@@ -2479,6 +2479,20 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     marked: z.array(ContentIdSchema).min(1),
     dice: DiceSchema,
   }),
+  // Damage of this type from a failed save against a spell rolls a d`die`, and on a 1 every other creature within
+  // `radius` saves with `ability` against `dc` or takes `type` damage equal to the uses left of `resources`, and
+  // `item` is spent, as a Helm of Brilliance's beams from its gems (combat/effects.ts).
+  z.strictObject({
+    kind: z.literal("spellBackfire"),
+    damage: DamageTypeSchema,
+    die: z.number().int().min(2).default(20),
+    radius: z.number().int().min(5),
+    ability: AbilitySchema,
+    dc: z.number().int().min(1),
+    type: DamageTypeSchema,
+    resources: z.array(z.string().min(1)).min(1),
+    item: ContentIdSchema,
+  }),
   // Armor's Strength requirement doesn't slow the bearer, as Arcane Armor's.
   z.strictObject({ kind: z.literal("armorStrength") }),
   // Resistance to the damage of spells, as Spell Resistance.
