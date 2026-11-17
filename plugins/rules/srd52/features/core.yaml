@@ -233,9 +233,18 @@
       resolution:
         kind: save
         ability: con
-        dc: { base: 8, add: [{ kind: proficiency }, { kind: abilityMod, ability: dex }] }
+        dc:
+          {
+            base: 8,
+            add: [{ kind: proficiency }, { kind: abilityMod, ability: dex }],
+          }
         onFail:
-          - { kind: applyCondition, condition: poisoned, duration: { minutes: 1 }, repeatSave: true }
+          - {
+              kind: applyCondition,
+              condition: poisoned,
+              duration: { minutes: 1 },
+              repeatSave: true,
+            }
     - label: Trip
       cost: []
       trigger: { afterHit: weapon, forgo: 1 }
@@ -243,7 +252,11 @@
       resolution:
         kind: save
         ability: dex
-        dc: { base: 8, add: [{ kind: proficiency }, { kind: abilityMod, ability: dex }] }
+        dc:
+          {
+            base: 8,
+            add: [{ kind: proficiency }, { kind: abilityMod, ability: dex }],
+          }
         onFail:
           - { kind: applyCondition, condition: prone, duration: { minutes: 1 } }
     - label: Withdraw

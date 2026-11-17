@@ -776,8 +776,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
         return {
           id: item.option.id,
           worth:
-            judge.worth(actor, item.action.id, item.targetId, item.slot) -
-            lost,
+            judge.worth(actor, item.action.id, item.targetId, item.slot) - lost,
         };
       })
       .sort((a, b) => b.worth - a.worth)[0];

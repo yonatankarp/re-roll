@@ -16,13 +16,14 @@ import {
 // asked as the hit lands, and Brutal Strike's take the place of an attack roll's Advantage (`trigger.forgoAdvantage`),
 // asked before the roll. Each one picked is resolved after the hit's damage, as a smite is (attack.ts runSmite).
 
-type Struck = {
+interface Struck {
+  readonly [key: string]: unknown;
   readonly attacker: string;
   readonly actionId: string;
   readonly target: string;
   readonly slotLevel?: number | undefined;
   readonly strikes?: readonly string[] | undefined;
-};
+}
 
 // How many strike options one hit takes.
 export function strikeLimit(stats: Stats): number {

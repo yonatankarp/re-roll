@@ -205,9 +205,11 @@ const placed = (actor: Actor, x = 0): Actor => ({
   position: { x, y: 0 },
 });
 const payloads = (events: readonly SystemEvent[], kind: string) =>
-  events
-    .filter((event) => event.kind === `${NS}:${kind}`)
-    .map((event) => event.payload as Record<string, unknown>);
+  events.flatMap((event) =>
+    event.kind === `${NS}:${kind}` && "payload" in event
+      ? [event.payload as Record<string, unknown>]
+      : [],
+  );
 const hit = (actionId: string, extra = {}): Frame => ({
   kind: `${NS}:applyHit`,
   payload: {
@@ -366,7 +368,7 @@ describe("attack riders", () => {
         {
           sourceId: "ward",
           casterId: "foe",
-          ends: "never",
+          ends: "spellDuration",
           modifier: { kind: "resistance", damage: "radiant" },
         },
       ],
@@ -469,7 +471,10 @@ describe("attack riders", () => {
     expect(mine.state.actors.foe?.activeEffects).toHaveLength(0);
     const theirs = settle(
       run,
-      { ...ownTurn, combat: { ...ownTurn.combat!, index: 1 } },
+      {
+        ...ownTurn,
+        combat: ownTurn.combat && { ...ownTurn.combat, index: 1 },
+      },
       [hit("weapon:srd52:item/longsword", { hadAdvantage: false })],
       scripted([]).dice,
     );
@@ -484,7 +489,10 @@ describe("attack riders", () => {
     expect(traitAttackAdvantage(stats, bearer, target, stats, state)).toBe(
       true,
     );
-    const later = { ...state, combat: { ...state.combat!, round: 2 } };
+    const later = {
+      ...state,
+      combat: state.combat && { ...state.combat, round: 2 },
+    };
     expect(traitAttackAdvantage(stats, bearer, target, stats, later)).toBe(
       false,
     );
@@ -494,7 +502,7 @@ describe("attack riders", () => {
         {
           sourceId: "feature:test:feature/mark:0",
           casterId: PLAYER_ACTOR,
-          ends: "never",
+          ends: "spellDuration",
           modifier: { kind: "mark" },
         },
       ],

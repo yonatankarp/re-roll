@@ -656,7 +656,7 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
         {
           sourceId: "test",
           casterId: PLAYER_ACTOR,
-          ends: "never" as const,
+          ends: "spellDuration" as const,
           modifier: { kind: "advantage" as const, on: "attacks" as const },
         },
       ],
