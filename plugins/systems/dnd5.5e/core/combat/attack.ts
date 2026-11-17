@@ -1485,13 +1485,13 @@ function landHit(
     disadvantage: payload.hadDisadvantage === true,
     natural: payload.natural,
   };
-  let sneaked = false;
+  const sneak = { landed: false };
   stats.passives.forEach((passive, index) => {
     if (passive.kind !== "extraDamage") return;
     const key = `extra:${String(index)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return;
     if (!extraFits(passive, attacker, target, action, edge, context)) return;
-    if (passive.diceCount === SNEAK_DICE) sneaked = true;
+    if (passive.diceCount === SNEAK_DICE) sneak.landed = true;
     // Cunning Strike's options give up some of Sneak Attack's dice before they're rolled.
     const dice_ =
       passive.diceCount === SNEAK_DICE
@@ -1654,7 +1654,9 @@ function landHit(
     })),
   ];
   // Death Strike: a first-round Sneak Attack doubles the hit's damage unless the target saves.
-  const struck = sneaked ? deathStruck(attacker, target, stats, context) : null;
+  const struck = sneak.landed
+    ? deathStruck(attacker, target, stats, context)
+    : null;
   if (struck) events.push(...struck.events);
   const doubled = struck?.doubled
     ? hits.map((item) => ({

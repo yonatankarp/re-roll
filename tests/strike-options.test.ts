@@ -35,7 +35,15 @@ const RECKLESS = "test:feature/reckless";
 
 const FIXTURES = [
   trait("sneak", [
-    { kind: "extraDamage", dice: "3d6", diceCount: "sneakAttackD6", when: "advantage" },
+    {
+      kind: "extraDamage",
+      dice: "3d6",
+      diceCount: "sneakAttackD6",
+      when: "advantage",
+    },
+  ]),
+  trait("death-strike", [
+    { kind: "deathStrike", ability: "con", dc: { base: 30 } },
   ]),
   trait("cunning", [], {
     activations: [
@@ -266,6 +274,27 @@ describe("strike options", () => {
           modifier.kind === "condition" && modifier.condition === "prone",
       ),
     ).toBe(true);
+  });
+
+  it("doubles a first-round Sneak Attack hit when the target fails its save, as Death Strike", () => {
+    const rogue = {
+      ...placed(hero(["sneak", "death-strike"])),
+      inventory: ["srd52:item/shortsword"],
+    };
+    const damage = (round: number) => {
+      const { state } = contextOf(run, [rogue, foe()], scripted([]).dice);
+      const done = settle(
+        run,
+        { ...state, combat: state.combat && { ...state.combat, round } },
+        [hit("weapon:srd52:item/shortsword")],
+        scripted([3, 1, 1, 1, 1]).dice,
+      );
+      return payloads(done.events, "damaged").reduce(
+        (sum, item) => sum + Number(item.amount),
+        0,
+      );
+    };
+    expect(damage(1)).toBe(2 * damage(2));
   });
 
   it("asks nothing when the hit carries no Sneak Attack", () => {
