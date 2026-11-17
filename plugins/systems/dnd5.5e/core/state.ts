@@ -90,6 +90,7 @@ export const FRAME_KINDS = [
   "copySpell",
   "wallLayer",
   "chooseShape",
+  "chooseFocus",
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 

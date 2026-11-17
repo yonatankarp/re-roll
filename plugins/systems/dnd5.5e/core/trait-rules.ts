@@ -4,6 +4,7 @@ import {
   ClassSchema,
   type DamageType,
   ItemSchema,
+  type Skill,
 } from "./schemas.ts";
 import {
   type Actor,
@@ -18,7 +19,9 @@ import {
   deriveStats,
   evaluateFormula,
   lookup,
+  passiveModifiers,
   rollDiceNotation,
+  scaledDice,
 } from "./stats.ts";
 import { HIT_DICE, weaponItemId } from "./combat/ids.ts";
 
@@ -388,26 +391,36 @@ export function rescuedSave(
   return [];
 }
 
-// Knowledge from a Past Life: a failed check gets a die added when its highest could be enough.
+// Knowledge from a Past Life or Tactical Mind: a failed check gets a die added when its highest could be enough.
 export function rescuedCheck(
   actor: Actor,
   stats: Stats,
   total: number,
   dc: number,
   dice: Dice,
+  skill?: Skill,
 ): { readonly bonus: number; readonly events: SystemEvent[] } {
   if (total >= dc) return { bonus: 0, events: [] };
   for (const passive of stats.passives) {
+    if (passive.kind !== "checkRescue") continue;
+    const die =
+      scaledDice(
+        { dice: passive.bonusDice, dieSize: passive.dieSize },
+        stats.scaling,
+      ) ?? passive.bonusDice;
     if (
-      passive.kind !== "checkRescue" ||
       (actor.resourcesSpent[passive.resource] ?? 0) >=
         (stats.resources[passive.resource] ?? 0) ||
-      total + rollDiceNotation(passive.bonusDice, HIGHEST) < dc
+      (passive.skills &&
+        (skill === undefined || !passive.skills.includes(skill))) ||
+      total + rollDiceNotation(die, HIGHEST) < dc
     ) {
       continue;
     }
+    const bonus = rollDiceNotation(die, dice);
+    if (passive.keep && total + bonus < dc) return { bonus, events: [] };
     return {
-      bonus: rollDiceNotation(passive.bonusDice, dice),
+      bonus,
       events: [
         dndEvent(`${NS}:resourceSpent`, {
           actor: actor.id,
@@ -417,6 +430,31 @@ export function rescuedCheck(
     };
   }
   return { bonus: 0, events: [] };
+}
+
+// Reliable Talent or Glibness: the least a check's d20 roll counts as.
+export function checkFloor(
+  actor: Actor,
+  stats: Stats,
+  ability: Ability,
+  skill?: Skill,
+): number {
+  const proficient = skill !== undefined && stats.skills.includes(skill);
+  return Math.max(
+    1,
+    ...[
+      ...actor.activeEffects.map(({ modifier }) => modifier),
+      ...passiveModifiers(stats.passives),
+    ].flatMap((modifier) =>
+      modifier.kind === "checkFloor" &&
+      (!modifier.ability || modifier.ability === ability) &&
+      (!modifier.skills ||
+        (skill !== undefined && modifier.skills.includes(skill))) &&
+      (!modifier.proficient || proficient)
+        ? [modifier.value]
+        : [],
+    ),
+  );
 }
 
 // Powerful Radiance: the first damage roll of its type uses each die's highest number, spending a use.

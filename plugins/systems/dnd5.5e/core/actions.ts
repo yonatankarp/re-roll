@@ -79,7 +79,9 @@ import {
   deriveStats,
   modifierFor,
   saveBonus,
+  scoreFloor,
 } from "./stats.ts";
+import { checkFloor, rescuedCheck } from "./trait-rules.ts";
 import {
   GRAPPLE_SOURCE,
   HIDE_SOURCE,
@@ -111,6 +113,8 @@ export const BONUS_DASH = `${TACTIC}bonus-dash`;
 export const BONUS_DISENGAGE = `${TACTIC}bonus-disengage`;
 export const BONUS_HIDE = `${TACTIC}bonus-hide`;
 export const BONUS_DODGE = `${TACTIC}bonus-dodge`;
+const BONUS_SEARCH = `${TACTIC}bonus-search`;
+const BONUS_STUDY = `${TACTIC}bonus-study`;
 const DODGE = `${TACTIC}dodge`;
 const HIDE = HIDE_SOURCE;
 const SEARCH = `${TACTIC}search`;
@@ -222,10 +226,10 @@ function reportedSave(
   };
 }
 
-// An ability check in a fight. Help's Advantage on a check is used up by it.
-function check(
+// An ability check, in a fight or a scene. Help's Advantage on a check is used up by it.
+export function abilityCheck(
   actor: Actor,
-  skill: Skill,
+  skill: Skill | undefined,
   ability: Ability,
   dc: number,
   label: (success: boolean) => string,
@@ -242,10 +246,29 @@ function check(
     advantage:
       advantage ||
       befriended !== null ||
-      hasFlag(actor, "advantage", "checks", stats, ability) ||
+      hasFlag(
+        actor,
+        "advantage",
+        "checks",
+        stats,
+        ability,
+        undefined,
+        undefined,
+        skill,
+      ) ||
       placedFlag(actor, "advantage", "checks", context.state, context, ability),
     disadvantage:
-      hasFlag(actor, "disadvantage", "checks", stats, ability) ||
+      (stats.untrainedArmor && (ability === "str" || ability === "dex")) ||
+      hasFlag(
+        actor,
+        "disadvantage",
+        "checks",
+        stats,
+        ability,
+        undefined,
+        undefined,
+        skill,
+      ) ||
       placedFlag(
         actor,
         "disadvantage",
@@ -261,11 +284,15 @@ function check(
     rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
   });
   const base =
-    checkBonus(stats, actor, { ability, skill }) +
-    rollBonus(actor, "checks", context, skill);
+    checkBonus(stats, actor, { ability, ...(skill ? { skill } : {}) }) +
+    rollBonus(actor, "checks", context, skill, ability);
+  const floor = checkFloor(actor, stats, ability, skill);
+  const least = scoreFloor(stats, ability);
+  const totalOf = (natural: number, bonus: number) =>
+    Math.max(Math.max(natural, floor) + base + bonus, least);
   const judge = (natural: number, bonus: number) => ({
-    total: natural + base + bonus,
-    success: natural + base + bonus >= dc,
+    total: totalOf(natural, bonus),
+    success: totalOf(natural, bonus) >= dc,
   });
   // Reactions to the roll before it lands, as Bountiful Luck (combat/reactions.ts).
   const settled = settleRoll(
@@ -281,7 +308,11 @@ function check(
     context,
   );
   const roll = { natural: settled.natural };
-  const { total, success } = judge(settled.natural, settled.bonus);
+  const rolled = judge(settled.natural, settled.bonus).total;
+  // A failed check may be rescued, as by Knowledge from a Past Life (trait-rules.ts).
+  const rescue = rescuedCheck(actor, stats, rolled, dc, context.dice, skill);
+  const total = rolled + rescue.bonus;
+  const success = total >= dc;
   const helped = actor.activeEffects.some(
     ({ sourceId, modifier }) =>
       sourceId === HELP &&
@@ -294,6 +325,7 @@ function check(
     events: [
       ...(befriended ? [befriended] : []),
       ...settled.events,
+      ...rescue.events,
       dndEvent(`${NS}:rollReported`, {
         actor: actor.id,
         against: "check",
@@ -492,7 +524,7 @@ function readyable(stats: Stats): readonly KnownAction[] {
 function bonusTacticCost(
   actor: Actor,
   stats: Stats,
-  tactic: "dash" | "disengage" | "hide" | "dodge",
+  tactic: "dash" | "disengage" | "hide" | "dodge" | "search" | "study",
 ): SystemEvent[] | null {
   // Expeditious Retreat's Dash as a Bonus Action costs nothing more.
   if (
@@ -530,7 +562,7 @@ function bonusTacticOptions(
 ): { id: string; label: string }[] {
   if (!actor.budget.bonusAction) return [];
   const allowed = new Set(
-    (["dash", "disengage", "hide", "dodge"] as const).filter(
+    (["dash", "disengage", "hide", "dodge", "search", "study"] as const).filter(
       (tactic) => bonusTacticCost(actor, stats, tactic) !== null,
     ),
   );
@@ -568,7 +600,37 @@ function bonusTacticOptions(
       label: `Hide as a Bonus Action (Stealth, DC ${String(HIDE_DC)})`,
     });
   }
+  if (allowed.has("search") && searchable(actor, state, access)) {
+    options.push({
+      id: BONUS_SEARCH,
+      label: "Search as a Bonus Action (Perception)",
+    });
+  }
+  if (allowed.has("study")) {
+    for (const foe of standing(knownFoes(state, actor, access))) {
+      options.push({
+        id: encodeOption(BONUS_STUDY, foe.id),
+        label: `Study ${foe.name} as a Bonus Action (${capitalized(studySkill(foe, access))})`,
+      });
+    }
+  }
   return options;
+}
+
+// Searching is offered where the party saw a foe slip out of sight, not for one it never knew of.
+function searchable(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+): boolean {
+  const sight = fogged(state) ? partySight(state, access) : null;
+  return enemies(state, actor).some(
+    (foe) =>
+      hasTactic(foe, "hidden") &&
+      (actor.side !== "party" ||
+        !sight ||
+        (foe.position !== null && sight.squares.has(squareKey(foe.position)))),
+  );
 }
 
 export function tacticOptions(
@@ -670,18 +732,7 @@ export function tacticOptions(
       label: `Stabilize ${dying.name} (Medicine, DC ${String(STABILIZE_DC)})`,
     });
   }
-  // Searching is offered where the party saw a foe slip out of sight, not for one it never knew of.
-  const sight = fogged(state) ? partySight(state, access) : null;
-  if (
-    enemies(state, actor).some(
-      (foe) =>
-        hasTactic(foe, "hidden") &&
-        (actor.side !== "party" ||
-          !sight ||
-          (foe.position !== null &&
-            sight.squares.has(squareKey(foe.position)))),
-    )
-  ) {
+  if (searchable(actor, state, access)) {
     options.push({ id: SEARCH, label: "Search for hidden foes (Perception)" });
   }
   for (const grapple of grapplesOn(actor)) {
@@ -854,6 +905,17 @@ export function runTactic(
   const stats = deriveStats(actor, context);
   const spend = (budget: "action" | "bonusAction"): SystemEvent =>
     dndEvent(`${NS}:budgetSpent`, { actor: actor.id, kind: budget });
+  // An action, or the Bonus Action and whatever a passive charges for it, as Observant's Quick Search.
+  const actionOrBonus = (
+    action: boolean,
+    tactic: "search" | "study",
+  ): SystemEvent[] =>
+    action
+      ? [spend("action")]
+      : [
+          spend("bonusAction"),
+          ...(bonusTacticCost(actor, stats, tactic) ?? []),
+        ];
   const self = (
     tactic: "dash" | "disengage" | "dodge" | "ready",
     action?: string,
@@ -1048,7 +1110,7 @@ export function runTactic(
       };
     case HIDE:
     case BONUS_HIDE: {
-      const rolled = check(
+      const rolled = abilityCheck(
         actor,
         "stealth",
         "dex",
@@ -1086,7 +1148,8 @@ export function runTactic(
         frames: done,
       };
     }
-    case SEARCH: {
+    case SEARCH:
+    case BONUS_SEARCH: {
       // A Perception check finds every hidden foe whose Stealth total it matches.
       const hidden = enemies(state, actor).flatMap((foe) => {
         const [mark] = tacticsOf(foe, "hidden");
@@ -1094,7 +1157,7 @@ export function runTactic(
       });
       const lowest = Math.min(HIDE_DC, ...hidden.map(({ dc }) => dc));
       const keen = sharpEye(actor, stats);
-      const rolled = check(
+      const rolled = abilityCheck(
         actor,
         "perception",
         "wis",
@@ -1115,7 +1178,7 @@ export function runTactic(
       );
       return {
         events: [
-          spend("action"),
+          ...actionOrBonus(kind === SEARCH, "search"),
           ...rolled.events,
           ...keenSpent(actor, keen, rolled.success),
           ...found,
@@ -1123,12 +1186,13 @@ export function runTactic(
         frames: done,
       };
     }
-    case STUDY: {
+    case STUDY:
+    case BONUS_STUDY: {
       // shortcut: what's learned is only reported, as nothing else in the rules reads it.
       const studied = needTarget();
       const skill = studySkill(studied, context);
       const keen = sharpEye(actor, stats);
-      const rolled = check(
+      const rolled = abilityCheck(
         actor,
         skill,
         "int",
@@ -1142,7 +1206,7 @@ export function runTactic(
       );
       return {
         events: [
-          spend("action"),
+          ...actionOrBonus(kind === STUDY, "study"),
           ...rolled.events,
           ...keenSpent(actor, keen, rolled.success),
         ],
@@ -1156,7 +1220,7 @@ export function runTactic(
       const helped = needTarget();
       // On a dying creature, a Wisdom (Medicine) check to make it Stable.
       if (helped.side === actor.side && dyingNow(helped)) {
-        const rolled = check(
+        const rolled = abilityCheck(
           actor,
           "medicine",
           "wis",
@@ -1236,7 +1300,7 @@ export function runTactic(
         throw new Error(`${actor.id} isn't sealed away by ${targetId}`);
       }
       const { ability, dc, skill } = seal.modifier.escape;
-      const rolled = check(
+      const rolled = abilityCheck(
         actor,
         skill,
         ability,
@@ -1270,14 +1334,15 @@ export function runTactic(
       const athletics =
         checkBonus(stats, actor, { ability: "str", skill: "athletics" }) >=
         checkBonus(stats, actor, { ability: "dex", skill: "acrobatics" });
-      const rolled = check(
+      const rolled = abilityCheck(
         actor,
         athletics ? "athletics" : "acrobatics",
         athletics ? "str" : "dex",
         escapeDc(grapple, state, context),
         () => `Escape (${athletics ? "Athletics" : "Acrobatics"})`,
         context,
-        hasPassive(stats, "powerfulBuild"),
+        hasPassive(stats, "powerfulBuild") ||
+          hasPassive(stats, "escapeAdvantage"),
       );
       return {
         events: [

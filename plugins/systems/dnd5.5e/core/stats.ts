@@ -700,7 +700,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     for (const answer of entry.answers) {
       if (answer.kind === "skills") {
         for (const skill of answer.values) {
-          (answer.expertise ? expertise : skills).add(skill);
+          (answer.expertise || (answer.orExpertise && skills.has(skill))
+            ? expertise
+            : skills
+          ).add(skill);
         }
       } else if (answer.kind === "spells") {
         for (const spell of answer.values) {
@@ -1032,6 +1035,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     slots,
     resources: {},
     passives: [
+      ...working.flatMap((item) => item.passives ?? []),
       ...fromFeatures.passives.map((passive) =>
         passive.kind === "extraDamage"
           ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
@@ -1070,6 +1074,18 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     // Proficiency Bonus as a scaling key, for dice that number it, as Healing Hands' d4s.
     scaling: {
       ...scaling,
+      ...Object.fromEntries(
+        fromFeatures.passives.flatMap((passive) =>
+          passive.kind === "scalingFloor"
+            ? [
+                [
+                  passive.key,
+                  Math.max(scaling[passive.key] ?? 0, passive.value),
+                ],
+              ]
+            : [],
+        ),
+      ),
       proficiency: proficiencyBonus(level) + magic.proficiency,
     },
     features: [...featureIds],
@@ -1971,12 +1987,28 @@ export function checkBonus(
   const { skill } = check;
   const proficient = skill !== undefined && stats.skills.includes(skill);
   const expert = skill !== undefined && stats.expertise.includes(skill);
+  const half =
+    skill !== undefined &&
+    stats.passives.some(({ kind }) => kind === "halfProficiency");
   return (
     modifierFor(stats, check.ability) +
-    (proficient ? stats.proficiency * (expert ? 2 : 1) : 0) +
+    (proficient
+      ? stats.proficiency * (expert ? 2 : 1)
+      : half
+        ? Math.floor(stats.proficiency / 2)
+        : 0) +
     stats.itemBonuses.checks -
     2 * actor.exhaustion
   );
+}
+
+// The least a check or save with this ability can total, as Indomitable Might's Strength score.
+export function scoreFloor(stats: Stats, ability: Ability): number {
+  return stats.passives.some(
+    (passive) => passive.kind === "scoreFloor" && passive.ability === ability,
+  )
+    ? stats.abilities[ability]
+    : -Infinity;
 }
 
 export function spellSaveDc(stats: Stats): number {

@@ -633,6 +633,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (decision.id.startsWith(`${NS}:form:`)) return first.id; // the strongest form
   if (decision.id.startsWith(`${NS}:wish:`)) return first.id; // the highest level
   if (decision.id.startsWith(`${NS}:shape:`)) return first.id; // as written, as Forcecage's box
+  if (decision.id.startsWith(`${NS}:focus:`)) return first.id; // as listed, the one a fight uses most first
   if (decision.id.startsWith(`${NS}:damageType:`)) {
     return damageTypePolicy(decision, context);
   }
