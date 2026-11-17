@@ -115,6 +115,7 @@ export interface KnownAction {
   readonly rolled?: true; // taken only when a randomAction picks it, as one eye ray
   readonly concentrates?: true; // casting it starts Concentration even with no lasting effect, as Flame Blade
   readonly ammunition?: string; // the magic ammunition it fires, which a hit spends (combat/attack.ts landHit)
+  readonly stored?: string; // the item it's cast from, which no longer holds it once cast (storedCasts)
   // A check made as it's taken, which on a failure wastes it, as reading a Spell Scroll above the reader's level
   // (combat/actions.ts castAction).
   readonly castCheck?: {
@@ -399,6 +400,7 @@ function withItemNumbers(
   activation: Activation,
   dc: number | undefined,
   attack: number | undefined,
+  mod?: number, // the spellcasting modifier, as a stored spell's caster's
 ): Activation {
   const toHit = attack ?? (dc === undefined ? undefined : dc - 8);
   const mapped = (value: unknown, key = ""): unknown => {
@@ -410,11 +412,24 @@ function withItemNumbers(
     const terms = Array.isArray(copy.add)
       ? (copy.add as { readonly kind: string }[])
       : [];
-    if (dc !== undefined && terms.some((term) => term.kind === "spellSaveDc")) {
+    const fixed = (kind: string, amount: number | undefined): boolean =>
+      amount !== undefined && terms.some((term) => term.kind === kind);
+    if (fixed("spellSaveDc", dc) || fixed("spellMod", mod)) {
+      const replaced = terms.filter(
+        (term) =>
+          (term.kind === "spellSaveDc" && dc !== undefined) ||
+          (term.kind === "spellMod" && mod !== undefined),
+      );
       return {
         ...copy,
-        base: (typeof copy.base === "number" ? copy.base : 0) + dc,
-        add: terms.filter((term) => term.kind !== "spellSaveDc"),
+        base:
+          (typeof copy.base === "number" ? copy.base : 0) +
+          replaced.reduce(
+            (total, term) =>
+              total + (term.kind === "spellSaveDc" ? (dc ?? 0) : (mod ?? 0)),
+            0,
+          ),
+        add: terms.filter((term) => !replaced.includes(term)),
       };
     }
     return key === "attack" && copy.type === "spell" && toHit !== undefined
@@ -561,6 +576,53 @@ function unknownSpells(
           dc: rule.dc + (rule.perLevel ? spell.level : 0),
           ...(rule.keepOnFailure ? { keep: rule.resource } : {}),
         },
+      },
+    ];
+  });
+}
+
+// The spells stored in a worn item, each cast once with the slot and numbers it was stored with, as from a Ring of
+// Spell Storing. Two of one spell are one action, which casts the first stored.
+function storedCasts(
+  itemId: string,
+  item: Item,
+  actor: Actor,
+  access: ContentAccess,
+): KnownAction[] {
+  if (item.type !== "magicItem" || !item.storesSpells) return [];
+  const seen = new Set<string>();
+  return (actor.storedSpells?.[itemId] ?? []).flatMap((stored) => {
+    const spell = SpellSchema.safeParse(access.content(stored.spell)).data;
+    if (!spell?.activation || seen.has(stored.spell)) return [];
+    seen.add(stored.spell);
+    const step = spell.upcast?.perSlotLevel;
+    const scaled = step
+      ? scaleActivation(spell.activation, step, stored.level - spell.level)
+      : spell.activation;
+    const numbered = withItemNumbers(
+      scaled,
+      stored.dc,
+      stored.attack,
+      stored.mod,
+    );
+    const lasting =
+      spell.lasting &&
+      typeof spell.duration === "object" &&
+      "concentration" in spell.duration;
+    return [
+      {
+        id: itemCastId(stored.spell, itemId, 0),
+        name: `${spell.name}, level ${String(stored.level)} (${item.name})`,
+        activation: {
+          ...numbered,
+          cost: numbered.cost.filter(
+            (cost) =>
+              cost !== "slot" && !(typeof cost === "object" && "gold" in cost),
+          ),
+        },
+        spellLevel: stored.level,
+        stored: itemId,
+        ...(lasting ? { concentrates: true as const } : {}),
       },
     ];
   });
@@ -1345,6 +1407,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       actions.push(
         ...itemCasts(itemId, item, level, access),
         ...itemUses(itemId, item),
+        ...storedCasts(itemId, item, actor, access),
       );
       // A Thayan Spell Tattoo's spell is always prepared, cast with the bearer's slots.
       if (
@@ -1684,11 +1747,18 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     resources: Object.fromEntries(
       [...fromFeatures.resources, ...pools].map((resource) => [
         resource.id,
-        evaluateFormula(resource.max, partial),
+        evaluateFormula(resource.max, partial) +
+          (resource.rolled
+            ? (actor.rolledPools?.[resource.id] ?? diceCount(resource.rolled))
+            : 0),
       ]),
     ),
   };
 }
+
+// How many dice a notation rolls, the least it can come to: 3 for "3d10".
+export const diceCount = (notation: string): number =>
+  Number(/^(\d+)d/.exec(notation)?.[1] ?? 1);
 
 // The pools of every item carried, stowed or not, so a wand in the pack still regains its charges. Two of one item
 // share theirs.
@@ -2770,6 +2840,12 @@ export function scoreFloor(stats: Stats, ability: Ability): number {
   )
     ? stats.abilities[ability]
     : -Infinity;
+}
+
+export function spellAttackBonus(stats: Stats): number {
+  return (
+    stats.proficiency + spellModifier(stats) + stats.itemBonuses.spellAttack
+  );
 }
 
 export function spellSaveDc(stats: Stats): number {

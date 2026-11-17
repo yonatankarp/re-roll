@@ -136,6 +136,16 @@ const EndsSchema = z.enum([
   "spellDuration",
 ]);
 
+// A spell stored in an item, as cast into a Ring of Spell Storing: its slot level and its caster's numbers.
+const StoredSpellSchema = z.strictObject({
+  spell: z.string(),
+  level: z.number().int().min(1).max(9),
+  dc: z.number().int(),
+  attack: z.number().int(),
+  mod: z.number().int(),
+});
+export type StoredSpell = z.infer<typeof StoredSpellSchema>;
+
 const ActiveEffectSchema = z.strictObject({
   sourceId: z.string(),
   casterId: z.string(),
@@ -358,6 +368,11 @@ const ActorSchema = z.strictObject({
     .optional(),
   // Taken off its D20 Tests after coming back from the dead, one less each Long Rest, as Raise Dead's. Missing at 0.
   ordeal: z.number().int().optional(),
+  // What a pool's `rolled` dice came to, by its id, as a Necklace of Fireballs' beads (ResourceDefSchema).
+  rolledPools: z.record(z.string(), z.number().int()).optional(),
+  // Spells stored in an item carried, by the item's id, with the numbers they were cast with (MagicItemSchema
+  // `storesSpells`).
+  storedSpells: z.record(z.string(), z.array(StoredSpellSchema)).optional(),
   // Hours a dead party member has lain dead, counted by the rests passed since, for a raising's time limit. Missing
   // while alive or just dead. `reposed` stops the count, as Gentle Repose does.
   deadHours: z.number().int().optional(),
@@ -513,6 +528,21 @@ const ItemUsedSchema = z.strictObject({
   item: ContentIdSchema,
 });
 // A score raised for good, by as much as it rose, as by a Manual of Bodily Health.
+const SpellStoredSchema = z.strictObject({
+  actor: z.string(), // who carries the item
+  item: z.string(),
+  stored: z.lazy(() => StoredSpellSchema),
+});
+const StoredSpellUsedSchema = z.strictObject({
+  actor: z.string(),
+  item: z.string(),
+  spell: z.string(),
+});
+const PoolRolledSchema = z.strictObject({
+  actor: z.string(),
+  resource: z.string(),
+  amount: z.number().int(),
+});
 const AbilityRaisedSchema = z.strictObject({
   actor: z.string(),
   ability: AbilitySchema,
@@ -733,6 +763,9 @@ export const EVENT_SCHEMAS = {
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
   [`${NS}:abilityRaised`]: AbilityRaisedSchema,
+  [`${NS}:poolRolled`]: PoolRolledSchema,
+  [`${NS}:spellStored`]: SpellStoredSchema,
+  [`${NS}:storedSpellUsed`]: StoredSpellUsedSchema,
   [`${NS}:weaponThrown`]: WeaponThrownSchema,
   [`${NS}:answerSwapped`]: AnswerSwappedSchema,
   [`${NS}:itemPickedUp`]: ItemPickedUpSchema,
@@ -1910,6 +1943,42 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         inventory: without(actor.inventory, [data.item]),
+      }));
+    }
+    case `${NS}:spellStored`: {
+      const data = payload(SpellStoredSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        storedSpells: {
+          ...actor.storedSpells,
+          [data.item]: [
+            ...(actor.storedSpells?.[data.item] ?? []),
+            data.stored,
+          ],
+        },
+      }));
+    }
+    case `${NS}:storedSpellUsed`: {
+      const data = payload(StoredSpellUsedSchema, event);
+      return updateActor(state, data.actor, (actor) => {
+        const held = actor.storedSpells?.[data.item] ?? [];
+        const at = held.findIndex((entry) => entry.spell === data.spell);
+        return at < 0
+          ? actor
+          : {
+              ...actor,
+              storedSpells: {
+                ...actor.storedSpells,
+                [data.item]: held.filter((_, index) => index !== at),
+              },
+            };
+      });
+    }
+    case `${NS}:poolRolled`: {
+      const data = payload(PoolRolledSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        rolledPools: { ...actor.rolledPools, [data.resource]: data.amount },
       }));
     }
     case `${NS}:abilityRaised`: {

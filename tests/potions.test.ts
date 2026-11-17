@@ -1,7 +1,12 @@
 import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
 import type { RunContext } from "../engine/run/turn.ts";
 import { describe, expect, it } from "vitest";
-import { resolveAction } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import {
+  payCosts,
+  resolveAction,
+} from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { itemUseId } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
+import { sceneGearActions } from "../plugins/systems/dnd5.5e/core/gear.ts";
 import {
   type Actor,
   type ActiveEffect,
@@ -154,6 +159,29 @@ const ITEMS = [
       keepOnFailure: true,
     },
   }),
+  item("jar", {
+    category: "wondrousItem",
+    resources: [{ id: "jar", max: { base: 1 }, rolled: "1d4", recharge: [] }],
+    activations: [
+      {
+        name: "Dose",
+        activation: {
+          cost: ["action", { resource: "jar" }],
+          targeting: { self: true },
+          resolution: {
+            kind: "automatic",
+            effects: [
+              { kind: "heal", amount: { dice: "2d8", bonus: { base: 2 } } },
+            ],
+          },
+        },
+      },
+    ],
+  }),
+  item("ring", {
+    category: "ring",
+    storesSpells: { levels: 5, maxLevel: 5 },
+  }),
 ];
 
 async function itemRun() {
@@ -174,9 +202,19 @@ const carrying = (items: readonly string[], extra: Partial<Actor> = {}) => ({
   inventory: ["srd52:item/longsword", ...items],
   ...extra,
 });
-// A wizard of `level` carrying these items.
-const wizard = (items: readonly string[], level = 1): Actor => {
-  const base = carrying(items, { ...hero([], { level }) });
+// A wizard of `level` carrying these items, who knows these spells.
+const wizard = (
+  items: readonly string[],
+  level = 1,
+  spells: readonly string[] = [],
+): Actor => {
+  const base = carrying(items, {
+    ...hero([], {
+      level,
+      answers:
+        spells.length > 0 ? [{ kind: "spells", values: [...spells] }] : [],
+    }),
+  });
   if (base.source.kind !== "character" || !base.source.build) return base;
   const { build } = base.source;
   return {
@@ -525,5 +563,80 @@ describe("spells an item casts unknown (#199)", () => {
     );
     expect(spent).toContain("slot:1");
     expect(spent).not.toContain("many");
+  });
+});
+
+describe("rolled pools and stored spells (#142, #199)", () => {
+  it("rolls a pool's size once, as it's first spent, as Keoghtom's Ointment's doses", async () => {
+    const run = await itemRun();
+    const actor = carrying(["test:item/jar"], { hp: 5 });
+    expect(deriveStats(actor, run).resources.jar).toBe(2);
+    const dose = actionOf(run, actor, itemUseId("test:item/jar", 0));
+    const events = payCosts(
+      dose,
+      actor,
+      contextOf(run, [actor], scripted([3]).dice),
+    );
+    expect(payloads(events, "poolRolled")).toEqual([
+      { actor: PLAYER_ACTOR, resource: "jar", amount: 3 },
+    ]);
+    const rolled = after(actor, events);
+    expect(deriveStats(rolled, run).resources.jar).toBe(4);
+    // Rolled once only.
+    expect(
+      payloads(
+        payCosts(dose, rolled, contextOf(run, [rolled], scripted([1]).dice)),
+        "poolRolled",
+      ),
+    ).toEqual([]);
+  });
+
+  it("stores a caster's spell in a ring between fights, cast later with the caster's numbers", async () => {
+    const run = await itemRun();
+    const ring = "test:item/ring";
+    const caster = wizard([ring], 3, ["srd52:spell/magic-missile"]);
+    const state = contextOf(run, [caster], scripted([]).dice).state;
+    const options = sceneGearActions({ ...state, combat: null }, run).filter(
+      (option) => option.effect === `${NS}:storeSpell`,
+    );
+    const store = options.find((option) =>
+      option.id.includes("srd52:spell/magic-missile"),
+    );
+    expect(store?.args).toEqual(
+      expect.objectContaining({ slot: 1, item: ring, holder: PLAYER_ACTOR }),
+    );
+    if (!store) throw new Error("No store");
+    const effect = run.system.storyEffects[`${NS}:storeSpell`];
+    const { events = [] } =
+      effect?.apply(store.args, {
+        state: { ...state, combat: null },
+        dice: scripted([]).dice,
+        content: run.content,
+        contentIds: run.contentIds,
+      }) ?? {};
+    expect(payloads(events, "resourceSpent")).toEqual([
+      { actor: PLAYER_ACTOR, resource: "slot:1" },
+    ]);
+    const holding = after(caster, events);
+    const cast = actionOf(
+      run,
+      holding,
+      `spell:srd52:spell/magic-missile:item:${ring}:0`,
+    );
+    expect(cast.activation.cost).not.toContain("slot");
+    expect(cast.stored).toBe(ring);
+    const spent = payCosts(
+      cast,
+      holding,
+      contextOf(run, [holding], scripted([]).dice),
+    );
+    expect(payloads(spent, "storedSpellUsed")).toEqual([
+      { actor: PLAYER_ACTOR, item: ring, spell: "srd52:spell/magic-missile" },
+    ]);
+    expect(
+      deriveStats(after(holding, spent), run).actions.some(
+        (action) => action.id === cast.id,
+      ),
+    ).toBe(false);
   });
 });

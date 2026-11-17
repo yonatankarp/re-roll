@@ -2400,6 +2400,10 @@ export type FreeCast = z.infer<typeof FreeCastSchema>;
 export const ResourceDefSchema = z.strictObject({
   id: z.string().min(1),
   max: FormulaSchema,
+  // Dice rolled once, as it's first spent, and added to `max` for good, as Keoghtom's Ointment's 1d4 + 1 doses
+  // (combat/effects.ts payCosts). Until then they count at their least.
+  // shortcut: a second item with the same pool keeps the first one's roll.
+  rolled: DiceSchema.optional(),
   recharge: z.array(
     z.strictObject({
       // "initiative" comes back as a fight starts, as Boon of Fate's Improve Fate does.
@@ -2964,6 +2968,15 @@ const MagicItemSchema = ItemBaseSchema.extend({
     })
     .optional(),
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
+  // Spells cast into it between fights, up to `levels` levels of them, each of level `maxLevel` or lower, which its
+  // attuned bearer casts with the slot level, DC, attack and modifier they were stored with, as a Ring of Spell
+  // Storing (gear.ts, stats.ts storedCasts). shortcut: it's found empty, rather than holding what the DM chose.
+  storesSpells: z
+    .strictObject({
+      levels: z.number().int().min(1),
+      maxLevel: z.number().int().min(1).max(9),
+    })
+    .optional(),
   // A spell bound into it as it's made, named after its plugin by the content id's last part, as
   // "dmg:item/enspelled-staff--fireball" or "dmg:item/enspelled-armor--1--chain-mail--shield" (variants.ts), with
   // the DC and attack its level gives (stats.ts boundNumbers): read once as a Spell Scroll's ("scroll"), cast with

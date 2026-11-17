@@ -22,10 +22,14 @@ import {
   frame,
   isDead,
 } from "./state.ts";
+import { castFrom, spellOfSource } from "./combat/ids.ts";
 import {
   type Stats,
   deriveStats,
+  evaluateFormula,
   itemHealing,
+  spellAttackBonus,
+  spellSaveDc,
   lookup,
   ownAbilities,
   rollAmount,
@@ -285,6 +289,7 @@ export function sceneGearActions(
           ]
         : [];
     }),
+    ...storeActions(state, access),
     ...[...new Set(actor.inventory)].flatMap((id) => {
       const item = itemOf(access, id);
       return studyGain(actor, item) > 0
@@ -301,6 +306,119 @@ export function sceneGearActions(
     }),
   ];
 }
+
+// Casting a spell into an item a party member carries, as into a Ring of Spell Storing (MagicItemSchema
+// `storesSpells`): each party caster's leveled spells that fit, with the lowest slot they have that the item takes.
+function storeActions(state: DndState, access: ContentAccess): SceneAction[] {
+  const party = Object.values(state.actors).filter(
+    (item) =>
+      item.side === "party" &&
+      item.source.kind === "character" &&
+      !isDead(item) &&
+      item.hp > 0,
+  );
+  return party.flatMap((holder) =>
+    [...new Set(holder.inventory)].flatMap((itemId) => {
+      const item = itemOf(access, itemId);
+      if (item.type !== "magicItem" || !item.storesSpells) return [];
+      const { levels, maxLevel } = item.storesSpells;
+      const room =
+        levels -
+        (holder.storedSpells?.[itemId] ?? []).reduce(
+          (total, stored) => total + stored.level,
+          0,
+        );
+      return party.flatMap((caster) => {
+        const stats = deriveStats(caster, access);
+        return stats.actions.flatMap((action) => {
+          const spell = action.id.startsWith("spell:")
+            ? spellOfSource(action.id)
+            : null;
+          const least = action.spellLevel;
+          if (
+            !spell ||
+            castFrom(action.id) ||
+            least === null ||
+            least < 1 ||
+            !action.activation.cost.includes("slot")
+          ) {
+            return [];
+          }
+          const slot = Array.from(
+            { length: Math.min(maxLevel, room) - least + 1 },
+            (_, index) => least + index,
+          ).find(
+            (level) =>
+              (stats.slots[level - 1] ?? 0) >
+              (caster.resourcesSpent[`slot:${String(level)}`] ?? 0),
+          );
+          if (slot === undefined) return [];
+          const who = caster.id === PLAYER_ACTOR ? "" : `${caster.name}: `;
+          return [
+            {
+              id: `store:${caster.id}:${spell}:${itemId}`,
+              label: `${who}Store ${action.name} in ${item.name}`,
+              effect: `${NS}:storeSpell`,
+              args: {
+                caster: caster.id,
+                holder: holder.id,
+                spell,
+                item: itemId,
+                slot,
+              },
+            },
+          ];
+        });
+      });
+    }),
+  );
+}
+
+// The caster spends the slot, and the item holds the spell with the caster's numbers.
+function storeSpell(
+  args: z.infer<typeof StoreSchema>,
+  context: Context,
+): SystemResult {
+  const offered = storeActions(context.state, context).some(
+    (option) =>
+      option.args.caster === args.caster &&
+      option.args.spell === args.spell &&
+      option.args.item === args.item &&
+      option.args.holder === args.holder,
+  );
+  const caster = context.state.actors[args.caster];
+  if (!offered || !caster) {
+    throw new Error(`${args.caster} can't store ${args.spell} in ${args.item}`);
+  }
+  const stats = deriveStats(caster, context);
+  return {
+    events: [
+      dndEvent(`${NS}:resourceSpent`, {
+        actor: caster.id,
+        resource: `slot:${String(args.slot)}`,
+      }),
+      dndEvent(`${NS}:spellStored`, {
+        actor: args.holder,
+        item: args.item,
+        stored: {
+          spell: args.spell,
+          level: args.slot,
+          dc: spellSaveDc(stats),
+          attack: spellAttackBonus(stats),
+          mod: evaluateFormula({ base: 0, add: [{ kind: "spellMod" }] }, stats),
+        },
+      }),
+    ],
+  };
+}
+
+const StoreSchema = z.object({
+  caster: z.string(),
+  holder: z.string(),
+  spell: z.string(),
+  item: z.string(),
+  slot: z.number().int().min(1).max(9),
+});
 
 // How much studying the item raises the character's own score, which may be nothing once at its maximum.
 function studyGain(actor: Actor, item: z.infer<typeof ItemSchema>): number {
@@ -376,6 +494,11 @@ export const gearEffects = {
     schema: z.object({ item: z.string() }),
     references: ({ item }) => [item],
     apply: ({ item }, context: Context) => drink(item, context),
+  }),
+  [`${NS}:storeSpell`]: storyEffect({
+    schema: StoreSchema,
+    references: ({ item, spell }) => [item, spell],
+    apply: storeSpell,
   }),
   [`${NS}:study`]: storyEffect({
     schema: z.object({ item: z.string() }),

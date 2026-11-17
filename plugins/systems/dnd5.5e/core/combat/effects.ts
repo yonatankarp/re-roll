@@ -231,11 +231,37 @@ export function payCosts(
     } else if ("gold" in cost) {
       events.push(dndEvent(`${NS}:goldSpent`, { gold: cost.gold }));
     } else {
+      // A pool whose size is rolled is rolled as it's first spent, as a Necklace of Fireballs' beads.
+      const rolled = deriveStats(actor, context).resourceDefs.find(
+        (def) => def.id === cost.resource,
+      )?.rolled;
+      if (rolled && actor.rolledPools?.[cost.resource] === undefined) {
+        events.push(
+          dndEvent(`${NS}:poolRolled`, {
+            actor: actor.id,
+            resource: cost.resource,
+            amount: rollDiceNotation(rolled, context.dice),
+          }),
+        );
+      }
       events.push(
         dndEvent(`${NS}:resourceSpent`, {
           actor: actor.id,
           resource: cost.resource,
           ...(cost.count ? { amount: cost.count } : {}),
+        }),
+      );
+    }
+  }
+  // A stored spell leaves the item it's cast from.
+  if (action.stored) {
+    const spell = spellOfSource(action.id);
+    if (spell) {
+      events.push(
+        dndEvent(`${NS}:storedSpellUsed`, {
+          actor: actor.id,
+          item: action.stored,
+          spell,
         }),
       );
     }
