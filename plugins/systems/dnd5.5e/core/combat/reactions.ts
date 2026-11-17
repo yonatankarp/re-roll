@@ -508,6 +508,7 @@ export const MomentSchema = z.object({
   passed: z.array(z.string()).optional(), // creatures that already answered it or turned it down
   dealt: z.number().optional(), // the damage the hit dealt, for "hitOther", as Rebuke the Violent echoes
   conditions: z.array(z.string()).optional(), // what a save was against, for "saved", as Beguiling Twist asks
+  paid: z.boolean().optional(), // the reaction answering it was paid for already, as Elemental Rebuke's on the hit
 });
 export type Moment = z.infer<typeof MomentSchema>;
 
@@ -904,7 +905,9 @@ export function takeReaction(
         : target
           ? [target]
           : [];
-  const events: SystemEvent[] = [...reactionCosts(reactor, action, context)];
+  const events: SystemEvent[] = moment.paid
+    ? []
+    : [...reactionCosts(reactor, action, context)];
   const frames: Frame[] = [];
   const moves = "self" in targeting ? selfMoves(action) : [];
   const result = resolveAction(
@@ -1640,7 +1643,15 @@ export function spellAimedAt(
   const spellId = spellOfSource(spell.id);
   const events: SystemEvent[] = [];
   const kept: Actor[] = [];
+  // A creature aimed at more than once, as by several of Magic Missile's darts, answers once for all of them.
+  const decided = new Map<string, boolean>();
   for (const target of targets) {
+    const before = decided.get(target.id);
+    if (before !== undefined) {
+      if (before) kept.push(target);
+      continue;
+    }
+    decided.set(target.id, false);
     const stats = deriveStats(target, context);
     const action =
       target.side === caster.side
@@ -1666,6 +1677,7 @@ export function spellAimedAt(
           context,
         ))
     ) {
+      decided.set(target.id, true);
       kept.push(target);
       continue;
     }
@@ -1676,6 +1688,7 @@ export function spellAimedAt(
       const save = rollSave(caster, resolution.ability, dc, context);
       events.push(...save.events);
       if (save.saved) {
+        decided.set(target.id, true);
         kept.push(target);
         continue;
       }

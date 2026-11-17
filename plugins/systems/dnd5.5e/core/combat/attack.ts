@@ -1550,6 +1550,7 @@ export function runAfterReaction(
   );
   if (resolution.kind === "save" && halves) {
     return {
+      events: guardCosts(target, action, context),
       frames: [frame("applyHit", { ...hit, halve: true, echo: action.id })],
     };
   }
@@ -2420,6 +2421,7 @@ function landHit(
               reactor: target.id,
               actionId: payload.echo,
               answer: payload.echo,
+              paid: true,
             }),
           ]
         : reactFrames({ kind: "struck", actor: target.id, ...cause }, landed)),

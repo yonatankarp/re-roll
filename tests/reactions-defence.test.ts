@@ -11,6 +11,14 @@ import {
 } from "../plugins/systems/dnd5.5e/core/combat/reactions.ts";
 import { provokers } from "../plugins/systems/dnd5.5e/core/combat/movement.ts";
 import { recovered } from "../plugins/systems/dnd5.5e/core/rest.ts";
+import {
+  canAfford,
+  slotToSpend,
+} from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import {
+  leafEvents,
+  resolveAction,
+} from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import {
   type Actor,
@@ -520,6 +528,145 @@ const MINE = [
     { kind: "sneakFloor", value: 3 },
     { kind: "armorStrength" },
   ]),
+
+  trait("rebuke-and-thunder", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { hitByAttack: true },
+        targeting: { creatures: 1, range: 60, side: "enemy" },
+        selfEffects: [{ kind: "reduceDamage", halve: true }],
+        resolution: {
+          kind: "save",
+          ability: "wis",
+          dc: { base: 30 },
+          damage: [{ amount: { bonus: { base: 1 } }, type: "psychic" }],
+          onFail: [],
+          onSuccess: [],
+        },
+      },
+      {
+        cost: ["reaction"],
+        trigger: { damaged: true },
+        targeting: { creatures: 1, range: 60, side: "enemy" },
+        resolution: {
+          kind: "automatic",
+          damage: [{ amount: { bonus: { base: 7 } }, type: "thunder" }],
+          effects: [],
+        },
+      },
+    ],
+  }),
+  trait("deflector", [], {
+    resources: [
+      {
+        id: "focus",
+        max: { base: 1 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { hitByAttack: true, damagedBy: ["piercing"] },
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "reduceDamage",
+              amount: { bonus: { base: 99 } },
+              deflect: {
+                range: 60,
+                melee: 5,
+                ability: "dex",
+                dc: { base: 40 },
+                damage: [
+                  { amount: { bonus: { base: 6 } }, type: "bludgeoning" },
+                ],
+                resource: "focus",
+                sameType: true,
+              },
+            },
+          ],
+        },
+      },
+    ],
+  }),
+  trait("tiers", [], {
+    classTiers: {
+      class: "srd52:class/fighter",
+      at: [3],
+      step: { addRadius: 20 },
+    },
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { damaged: true, before: true, within: 10 },
+        targeting: { creatures: 1, range: 10, side: "ally" },
+        resolution: {
+          kind: "automatic",
+          effects: [{ kind: "reduceDamage", takes: true }],
+        },
+      },
+    ],
+  }),
+  trait("chosen", [], {
+    variants: [
+      { id: "one", name: "One", spells: { "1": ["srd52:spell/fire-bolt"] } },
+      { id: "two", name: "Two" },
+    ],
+  }),
+  trait("quick-cantrip", [], {
+    spells: { "1": ["srd52:spell/fire-bolt"] },
+    freeCast: { resource: "quick", bonusAction: true },
+    resources: [
+      {
+        id: "quick",
+        max: { base: 2 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+  }),
+  trait(
+    "shaker",
+    [
+      {
+        kind: "shakeOff",
+        conditions: ["frightened"],
+        turnStart: true,
+        resource: "shake",
+      },
+    ],
+    {
+      resources: [
+        {
+          id: "shake",
+          max: { base: 1 },
+          recharge: [{ on: "longRest", amount: "all" }],
+        },
+      ],
+    },
+  ),
+  trait(
+    "helm",
+    [
+      {
+        kind: "spellBackfire",
+        damage: "fire",
+        die: 20,
+        radius: 60,
+        ability: "dex",
+        dc: 30,
+        type: "radiant",
+        resources: ["gems"],
+        item: "srd52:item/longsword",
+      },
+    ],
+    {
+      resources: [{ id: "gems", max: { base: 4 }, recharge: [] }],
+    },
+  ),
 ];
 
 async function mineRun(): Promise<RunContext> {
@@ -1468,5 +1615,260 @@ describe("more reactions and protections", () => {
     expect(
       payloads(events, "damaged").filter((item) => item.actor === "foe"),
     ).toEqual([expect.objectContaining({ amount: 3, type: "fire" })]);
+  });
+});
+
+describe("pieces checked one by one", () => {
+  const HIT0 = {
+    actionId: SWORD,
+    critical: false,
+    hadAdvantage: false,
+    total: 30,
+    natural: 15,
+  };
+
+  it("spends one Reaction on Elemental Rebuke, so no other reaction answers the same hit", async () => {
+    const run = await mineRun();
+    const { events } = settle(
+      run,
+      row([foeOf(), { ...hero(["rebuke-and-thunder"]), hp: 40 }]),
+      [
+        frame("attackRoll", {
+          attacker: "foe",
+          actionId: SWORD,
+          target: PLAYER_ACTOR,
+        }),
+      ],
+      { below: () => 0, roll: (sides) => (sides === 20 ? 15 : 4) },
+    );
+    expect(
+      payloads(events, "budgetSpent").filter(
+        (item) => item.actor === PLAYER_ACTOR && item.kind === "reaction",
+      ),
+    ).toHaveLength(1);
+    expect(
+      payloads(events, "damaged").filter((item) => item.type === "thunder"),
+    ).toEqual([]);
+  });
+
+  it("answers a spell aimed at it twice only once, as Shield does a second dart", async () => {
+    const run = await mineRun();
+    const thief = { ...hero(["thief"]), hp: 30 };
+    const state = row([foeOf(), thief]);
+    const caster = state.actors.foe;
+    if (!caster) throw new Error("missing");
+    const missile = {
+      id: "spell:srd52:spell/magic-missile",
+      name: "Magic Missile",
+      spellLevel: 1,
+      activation: {
+        cost: ["action" as const],
+        targeting: { creatures: 3, range: 120, side: "enemy" as const },
+        resolution: { kind: "automatic" as const, damage: [], effects: [] },
+      },
+    };
+    const aimed = spellAimedAt(
+      missile,
+      caster,
+      [thief, thief, thief],
+      at(state, scripted([2, 2, 2]).dice, run),
+    );
+    expect(aimed.targets).toEqual([]);
+    expect(payloads(aimed.events, "saveRolled")).toHaveLength(1);
+  });
+
+  it("deflects only a type it answers, sending its own type back for a Focus Point", async () => {
+    const run = await mineRun();
+    const me = { ...hero(["deflector"]), hp: 40 };
+    const { events } = settle(
+      run,
+      row([foeOf(), me]),
+      [
+        frame("attackRoll", {
+          attacker: "foe",
+          actionId: SWORD,
+          target: PLAYER_ACTOR,
+        }),
+      ],
+      scripted([15]).dice,
+    );
+    // A longsword's Slashing isn't Piercing, so the reaction isn't offered.
+    expect(
+      payloads(events, "damaged").filter((item) => item.actor === PLAYER_ACTOR),
+    ).toHaveLength(1);
+  });
+
+  it("spends a level 2+ slot for an activation with `minSlot`, and keeps a bearer to cantrips", async () => {
+    const run = await mineRun();
+    const wizard = deriveStats({ ...hero(["song"]), hp: 30 }, run);
+    const song = wizard.actions.find((item) => item.activation.minSlot === 2);
+    if (!song) throw new Error("missing");
+    const caster = { ...hero(["song"]), hp: 30 };
+    const slots = { ...wizard, slots: [4, 2] };
+    expect(slotToSpend(song, caster, slots)).toBe(2);
+    const limited = {
+      ...caster,
+      activeEffects: [
+        {
+          sourceId: "test",
+          casterId: PLAYER_ACTOR,
+          modifier: {
+            kind: "actionLimit" as const,
+            cantripsOnly: true as const,
+          },
+          ends: "spellDuration" as const,
+        },
+      ],
+    };
+    expect(canAfford({ ...song, spellLevel: 1 }, limited, slots)).toBe(false);
+    expect(
+      canAfford(
+        {
+          ...song,
+          spellLevel: 0,
+          activation: { ...song.activation, cost: [] },
+        },
+        limited,
+        slots,
+      ),
+    ).toBe(true);
+  });
+
+  it("grows a reaction's reach at a class level, as Aura of the Guardian at 18", async () => {
+    const run = await mineRun();
+    const reach = (level: number) =>
+      deriveStats(hero(["tiers"], { level }), run).actions.find(
+        (item) => item.activation.trigger?.within !== undefined,
+      )?.activation.trigger?.within;
+    expect(reach(1)).toBe(10);
+    expect(reach(3)).toBe(30);
+  });
+
+  it("gives a picked variant's spells, and casts a cantrip as a Bonus Action for a use", async () => {
+    const run = await mineRun();
+    const chosen = deriveStats(hero(["chosen"]), run);
+    expect(
+      chosen.actions.some((item) => item.id === "spell:srd52:spell/fire-bolt"),
+    ).toBe(true);
+    const quick = deriveStats(hero(["quick-cantrip"]), run).actions.find(
+      (item) => item.id.startsWith("spell:srd52:spell/fire-bolt:free"),
+    );
+    expect(quick?.activation.cost).toEqual([
+      "bonusAction",
+      { resource: "quick" },
+    ]);
+  });
+
+  it("regains twice a slot's level, as Arcane Ward's Bonus Action does", async () => {
+    const run = await mineRun();
+    const ward = { ...hero(["ward"]), resourcesSpent: { ward: 6 } };
+    const events = leafEvents(
+      [{ kind: "regain", resource: "ward", count: 1, perSlot: 2 }],
+      "test",
+      ward,
+      ward,
+      at(row([ward]), scripted([]).dice, run),
+      undefined,
+      2,
+    );
+    expect(payloads(events, "resourceRestored")).toEqual([
+      { actor: PLAYER_ACTOR, resource: "ward", amount: 4 },
+    ]);
+  });
+
+  it("shakes off Frightened as its turn starts for a use, as Guarded Mind", async () => {
+    const run = await mineRun();
+    const scared = {
+      ...hero(["shaker"]),
+      activeEffects: [
+        {
+          sourceId: "test",
+          casterId: "foe",
+          modifier: {
+            kind: "condition" as const,
+            condition: "frightened" as const,
+          },
+          ends: "spellDuration" as const,
+        },
+      ],
+    };
+    const state = row([foeOf(), scared]);
+    const { events } = settle(
+      run,
+      state,
+      [frame("advanceTurn", {})],
+      scripted([]).dice,
+    );
+    expect(payloads(events, "conditionRemoved")).toContainEqual({
+      actor: PLAYER_ACTOR,
+      condition: "frightened",
+    });
+    expect(payloads(events, "resourceSpent")).toContainEqual({
+      actor: PLAYER_ACTOR,
+      resource: "shake",
+    });
+  });
+
+  it("strikes back with half the damage a hit dealt, and resists less once attacked, as Emissary of Redemption", async () => {
+    const run = await mineRun();
+    const me = { ...hero(["emissary"]), hp: 40 };
+    const { events } = settle(
+      run,
+      row([foeOf(), me]),
+      [frame("applyHit", { ...HIT0, attacker: "foe", target: PLAYER_ACTOR })],
+      { below: () => 0, roll: () => 8 },
+    );
+    const mine = payloads(events, "damaged").find(
+      (item) => item.actor === PLAYER_ACTOR,
+    );
+    const theirs = payloads(events, "damaged").find(
+      (item) => item.actor === "foe",
+    );
+    expect(theirs?.type).toBe("radiant");
+    expect(theirs?.amount).toBe(Math.floor(Number(mine?.amount) / 2));
+  });
+});
+
+describe("a helm's gems set off", () => {
+  it("rolls a d20 for fire from a failed save against a spell, and on a 1 its gems strike out and it's spent", async () => {
+    const run = await mineRun();
+    const wearer = { ...hero(["helm"]), hp: 40 };
+    const state = row([foeOf(), wearer]);
+    const caster = state.actors.foe;
+    const target = state.actors[PLAYER_ACTOR];
+    if (!caster || !target) throw new Error("missing");
+    const flame = {
+      id: "spell:srd52:spell/burning-hands",
+      name: "Burning Hands",
+      spellLevel: 1,
+      activation: {
+        cost: [],
+        targeting: { creatures: 1, range: 15, side: "enemy" as const },
+        resolution: {
+          kind: "save" as const,
+          ability: "dex" as const,
+          dc: { base: 30, add: [] },
+          damage: [
+            { amount: { bonus: { base: 6, add: [] } }, type: "fire" as const },
+          ],
+          onSuccessDamage: "half" as const,
+          onFail: [],
+          onSuccess: [],
+        },
+      },
+    };
+    const result = resolveAction(
+      flame,
+      caster,
+      [target],
+      at(state, scripted([2, 1, 2]).dice, run),
+    );
+    const events = result.events ?? [];
+    expect(payloads(events, "damaged")).toContainEqual(
+      expect.objectContaining({ actor: "foe", amount: 4, type: "radiant" }),
+    );
+    expect(payloads(events, "itemUsed")).toEqual([
+      { actor: PLAYER_ACTOR, item: "srd52:item/longsword" },
+    ]);
   });
 });
