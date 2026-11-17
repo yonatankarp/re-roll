@@ -84,6 +84,8 @@ const FIXTURES = [
       "srd52:spell/light",
       "srd52:spell/bless",
       "srd52:spell/cure-wounds",
+      "srd52:spell/shield-of-faith",
+      "srd52:spell/spare-the-dying",
     ],
     levels: [
       { level: 1, slots: [2], scaling: { cantrips: 2, preparedSpells: 2 } },
@@ -388,6 +390,14 @@ describe("class pick swaps", () => {
     expect(
       swappable(swapped, run).find((item) => item.key === "0:1")?.open,
     ).toBe(false);
+    // A level taken before a choice was added to it has no answer for that choice, and its answers keep their own.
+    const older = priest([
+      first,
+      [{ kind: "spells", values: ["srd52:spell/shield-of-faith"] }],
+    ]);
+    expect(
+      swappable(older, run).find((item) => item.key === "1:0")?.choices[0],
+    ).toMatchObject({ id: "spells" });
     // A prepared spell swap offers spells of every level it has slots for now.
     const spells = swappable(two, run).find((item) => item.key === "1:1");
     expect(spells?.choices[0]).toMatchObject({ maxLevel: 1, list: PRIEST });

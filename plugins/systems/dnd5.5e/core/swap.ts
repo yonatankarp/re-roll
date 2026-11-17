@@ -22,6 +22,7 @@ import {
   FeatSchema,
   FeatureSchema,
   SpeciesSchema,
+  SpellSchema,
   SubclassSchema,
 } from "./schemas.ts";
 import {
@@ -78,6 +79,35 @@ const ANSWER_KINDS: Partial<Record<ChoiceDef["kind"], string>> = {
 // Spellcasting's) let it change: one a level, one after each Long Rest, or each after a Long Rest.
 // shortcut: a Wizard swaps in any Wizard spell it has slots for, as the spellbook isn't kept apart from its list.
 // shortcut: "prepare" changes one spell of each level's picks after a Long Rest, not the whole list at once.
+// Whether a pick could have come from this choice.
+function fitsChoice(
+  choice: ChoiceDef,
+  value: string,
+  access: ContentAccess,
+): boolean {
+  if (choice.kind === "option") return choice.from.includes(value);
+  if (choice.kind !== "spells") return true;
+  if (choice.from && !choice.from.includes(value)) return false;
+  const spell = SpellSchema.safeParse(access.content(value)).data;
+  if (!spell) return true;
+  const lists = choice.list ? [choice.list, ...(choice.lists ?? [])] : [];
+  const listed =
+    lists.length === 0 ||
+    (choice.also?.includes(value) ?? false) ||
+    lists.some(
+      (list) =>
+        spell.classes.includes(list) ||
+        ClassSchema.safeParse(access.content(list)).data?.spellList?.includes(
+          value,
+        ),
+    );
+  if (!listed) return false;
+  const { level } = spell;
+  return choice.maxLevel === 0 || (choice.cantrips && level === 0)
+    ? level === 0
+    : level >= (choice.minLevel ?? 1) && level <= choice.maxLevel;
+}
+
 function classPicks(
   build: CharacterBuild,
   access: ContentAccess,
@@ -103,19 +133,6 @@ function classPicks(
       : undefined;
     const rules = { ...subclass?.spellcasting?.swaps, ...classDef.swaps };
     let next = 0;
-    // The answer a choice left, the next of its kind in the level's answers.
-    const answerFor = (choice: ChoiceDef) => {
-      const kind = ANSWER_KINDS[choice.kind];
-      const index = entry.answers.findIndex(
-        (answer, place) => place >= next && answer.kind === kind,
-      );
-      const answer = entry.answers[index];
-      if (!kind || !answer || !("values" in answer)) return null;
-      next = index + 1;
-      return "feat" in answer && answer.feat
-        ? null
-        : { index, values: answer.values };
-    };
     // Prepared spells come from any level the class now has slots for, and the lists its features add by now.
     const now = widening(
       classDef,
@@ -136,6 +153,27 @@ function classPicks(
       return widened.id === "spells" || widened.upToSlots
         ? { ...widened, maxLevel: Math.max(widened.maxLevel, highestSlot) }
         : widened;
+    };
+    // The answer a choice left: the next of its kind in the level's answers whose picks fit it, so a choice added
+    // after the level was taken, which left none, doesn't take another's.
+    const answerFor = (choice: ChoiceDef) => {
+      const kind = ANSWER_KINDS[choice.kind];
+      const index = entry.answers.findIndex(
+        (answer, place) =>
+          place >= next &&
+          answer.kind === kind &&
+          "values" in answer &&
+          ("count" in choice ? answer.values.length === choice.count : true) &&
+          answer.values.every((value) =>
+            fitsChoice(widen(choice), value, access),
+          ),
+      );
+      const answer = entry.answers[index];
+      if (!kind || !answer || !("values" in answer)) return null;
+      next = index + 1;
+      return "feat" in answer && answer.feat
+        ? null
+        : { index, values: answer.values };
     };
     const swap = (
       choice: ChoiceDef,
