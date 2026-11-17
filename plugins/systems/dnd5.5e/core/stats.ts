@@ -206,6 +206,18 @@ function ownAc(
     .reduce((total, bonus) => total + bonus.amount, 0);
 }
 
+// The character's scores after every increase, including those raised for good, as by a Manual of Bodily Health.
+export function ownAbilities(
+  actor: Actor,
+  build: CharacterBuild,
+): AbilityScores {
+  const scores = buildAbilities(build);
+  for (const ability of ABILITIES) {
+    scores[ability] += actor.raised?.[ability] ?? 0;
+  }
+  return scores;
+}
+
 // Scores the items worn set or raise, as Gauntlets of Ogre Power's Strength 19, never lowering one.
 // An entry with versions counts as its first, as with its bonuses.
 function withItemAbilities(
@@ -642,7 +654,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           ? [item]
           : [],
       );
-  const abilities = withItemAbilities(buildAbilities(build), working);
+  const abilities = withItemAbilities(ownAbilities(actor, build), working);
 
   const level = build.levels.length;
   const classLevels: Record<string, number> = {};
@@ -782,16 +794,25 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     spellAttack: 0,
     spellDc: 0,
     checks: 0,
+    proficiency: 0,
   };
   const armored = worn.some(
     ([, item]) => item.type === "armor" || item.type === "shield",
   );
+  const weaponBonuses: { to: string; amount: number; weapons: string[] }[] = [];
+  const weaponTraining = new Set(
+    working.flatMap((item) => item.weaponTraining ?? []),
+  );
   for (const item of working) {
     // An entry with versions counts as its first, as older saves hold; content names a version as `<id>--<n>` (variants.ts).
-    for (const { to, amount, unarmored } of item.bonuses ??
+    for (const { to, amount, unarmored, weapons } of item.bonuses ??
       item.variants?.[0]?.bonuses ??
       []) {
       if (unarmored && armored) continue;
+      if (weapons) {
+        weaponBonuses.push({ to, amount, weapons });
+        continue;
+      }
       // shortcut: a magic weapon isn't a weapon to swing here, so its bonus goes to the weapons carried, the best one once.
       magic[to] =
         to === "attack" || to === "damage"
@@ -854,16 +875,31 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       const own = (to: "attack" | "damage"): number =>
         Math.max(
           magic[to],
-          ...(antimagic ? [] : (weapon.bonuses ?? []))
+          ...(antimagic || (weapon.attunement && !attuned.includes(itemId))
+            ? []
+            : (weapon.bonuses ?? [])
+          )
             .filter((bonus) => bonus.to === to)
             .map((bonus) => bonus.amount),
         );
+      // Bonuses and training an item gives with this kind of weapon, as Bracers of Archery with a Longbow.
+      const kinds = [itemId, weapon.baseWeapon ?? itemId];
+      const scoped = (to: "attack" | "damage"): number =>
+        weaponBonuses
+          .filter(
+            (bonus) =>
+              bonus.to === to &&
+              kinds.some((kind) => bonus.weapons.includes(kind)),
+          )
+          .reduce((total, bonus) => total + bonus.amount, 0);
       const activation = weaponActivation(
         weapon,
         abilities,
-        martialTraining || classes.some((def) => weaponProficient(def, weapon)),
-        own("damage"),
-        own("attack") - magic.attack,
+        martialTraining ||
+          kinds.some((kind) => weaponTraining.has(kind)) ||
+          classes.some((def) => weaponProficient(def, weapon)),
+        own("damage") + scoped("damage"),
+        own("attack") - magic.attack + scoped("attack"),
       );
       actions.push({
         id: `${WEAPON_PREFIX}${itemId}`,
@@ -953,7 +989,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
 
   const partial: Stats = {
     abilities,
-    proficiency: proficiencyBonus(level),
+    proficiency: proficiencyBonus(level) + magic.proficiency,
     level,
     classLevels,
     maxHp,
@@ -1030,7 +1066,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     creatureType: species.creatureType.toLowerCase(),
     initiative: abilityModifier(abilities.dex) - 2 * actor.exhaustion,
     // Proficiency Bonus as a scaling key, for dice that number it, as Healing Hands' d4s.
-    scaling: { ...scaling, proficiency: proficiencyBonus(level) },
+    scaling: {
+      ...scaling,
+      proficiency: proficiencyBonus(level) + magic.proficiency,
+    },
     features: [...featureIds],
     resourceDefs: [
       ...fromFeatures.resources,

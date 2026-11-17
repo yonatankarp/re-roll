@@ -325,7 +325,13 @@ export const dnd55e = defineSystem<DndState>({
       idPrefix: "item",
       schema: ItemSchema,
       references: (item) =>
-        item.type === "magicItem" && item.spell ? [item.spell] : [],
+        item.type === "magicItem"
+          ? [
+              ...(item.spell ? [item.spell] : []),
+              ...(item.weaponTraining ?? []),
+              ...(item.bonuses ?? []).flatMap((bonus) => bonus.weapons ?? []),
+            ]
+          : [],
       derive: deriveItem,
     }),
     monsters: contentKind({

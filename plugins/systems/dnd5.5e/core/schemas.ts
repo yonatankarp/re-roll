@@ -1910,9 +1910,13 @@ const MagicBonusSchema = z.strictObject({
     "spellAttack",
     "spellDc", // spell save DCs, as a Robe of Thayan Arcana's
     "checks", // ability checks, as a Stone of Good Luck's
+    "proficiency", // the Proficiency Bonus, as an Ioun Stone of Mastery's
   ]),
   amount: z.number().int().min(1),
   unarmored: z.literal(true).optional(), // only while wearing no armor and using no Shield, as Bracers of Defense
+  // Only with these weapons, or a magic one made from them, as Bracers of Archery's with a Longbow or Shortbow.
+  // It adds to a magic weapon's own bonus, which other bonuses to attack and damage don't.
+  weapons: z.array(ContentIdSchema).min(1).optional(),
 });
 
 // An ability score an item sets while worn, as Gauntlets of Ogre Power's Strength 19, which does nothing to a higher
@@ -1956,6 +1960,8 @@ export const WeaponSchema = ItemBaseSchema.extend({
   // A magic weapon made from a plain one, as a +2 Longsword: the plain weapon, and its own bonuses.
   baseWeapon: ContentIdSchema.optional(),
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
+  attunement: z.literal(true).optional(), // its bonuses work only while attuned, as a Keyholes Dagger's
+  returning: z.literal(true).optional(), // back in hand once thrown, as a Returning Weapon
   // A Thrown or Ammunition weapon's range in feet: normal, and long with Disadvantage.
   range: z
     .strictObject({
@@ -2046,10 +2052,23 @@ const MagicItemSchema = ItemBaseSchema.extend({
   automation: AutomationSchema,
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   abilities: z.array(ItemAbilitySchema).min(1).optional(),
+  // A score studying it raises for good, as a Manual of Bodily Health's Constitution by 2 to a maximum of 30.
+  // Studying spends its magic, so the item is gone after.
+  study: z
+    .strictObject({
+      ability: AbilitySchema,
+      raise: z.number().int().min(1),
+      max: z.number().int().min(1),
+    })
+    .optional(),
+  // Weapons it trains its wearer with, and magic ones made from them, as Bracers of Archery's Longbow.
+  weaponTraining: z.array(ContentIdSchema).min(1).optional(),
   // Magic armor made from a plain one: worn as if trained with it, as Elven Chain, or with no Strength it needs,
   // as Mithral Armor. Carried into the armor content names as `<id>--<n>--<armor>` (variants.ts).
   anyTraining: z.literal(true).optional(),
   noStrength: z.literal(true).optional(),
+  // A magic weapon that comes back once thrown, as a Returning Weapon, carried the same way.
+  returning: z.literal(true).optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
   // Set when one entry covers several rarities, such as +1, +2 or +3. Content names one as `<id>--<n>` (variants.ts).

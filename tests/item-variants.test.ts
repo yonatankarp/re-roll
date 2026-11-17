@@ -13,7 +13,10 @@ import {
 import { checkPlugins } from "../engine/tools/check-pack.ts";
 import {
   changed,
+  gearEffects,
+  gearFrames,
   gearOptions,
+  sceneGearActions,
   treasure,
 } from "../plugins/systems/dnd5.5e/core/gear.ts";
 import { shopOptions } from "../plugins/systems/dnd5.5e/core/shop.ts";
@@ -147,6 +150,54 @@ const ITEMS = `- id: "variant-test:item/potions"
   text: A test item for spells.
   automation: partial
   bonuses: [{ to: spellAttack, amount: 1 }, { to: spellDc, amount: 1 }]
+- id: "variant-test:item/key-blade"
+  name: Key Blade
+  type: magicItem
+  category: weapon
+  rarity: varies
+  attunement: true
+  text: A test weapon that needs attunement.
+  automation: partial
+  variants:
+    - { name: Key Blade (Three), rarity: uncommon, bonuses: [{ to: attack, amount: 1 }, { to: damage, amount: 1 }] }
+- id: "variant-test:item/homing-weapon"
+  name: Homing Weapon
+  type: magicItem
+  category: weapon
+  rarity: uncommon
+  attunement: false
+  text: A test weapon that comes back.
+  automation: full
+  returning: true
+  bonuses: [{ to: attack, amount: 1 }, { to: damage, amount: 1 }]
+- id: "variant-test:item/archer-bracers"
+  name: Archer Bracers
+  type: magicItem
+  category: wondrousItem
+  rarity: uncommon
+  attunement: false
+  text: A test item for some weapons.
+  automation: full
+  weaponTraining: ["srd52:item/shortbow", "srd52:item/longsword"]
+  bonuses: [{ to: damage, amount: 2, weapons: ["srd52:item/shortbow"] }]
+- id: "variant-test:item/mastery-stone"
+  name: Mastery Stone
+  type: magicItem
+  category: wondrousItem
+  rarity: legendary
+  attunement: false
+  text: A test item for the Proficiency Bonus.
+  automation: full
+  bonuses: [{ to: proficiency, amount: 1 }]
+- id: "variant-test:item/strength-manual"
+  name: Strength Manual
+  type: magicItem
+  category: wondrousItem
+  rarity: veryRare
+  attunement: false
+  text: A test book that raises Strength for good.
+  automation: full
+  study: { ability: str, raise: 2, max: 30 }
 `;
 const STRONG = "variant-test:item/potions--2";
 const SWORD = "variant-test:item/weapon-1-2-or-3--2--longsword";
@@ -475,6 +526,113 @@ describe("magic armor, flat bonuses and ability scores", () => {
     const robed = wizard(["variant-test:item/caster-robe"]);
     expect(spellSaveDc(robed) - spellSaveDc(wizard([]))).toBe(1);
     expect(robed.itemBonuses.spellAttack).toBe(1);
+  });
+});
+
+describe("magic weapons that need attunement or come back, and other item pieces", () => {
+  const attack = (actor: Actor, itemId: string) => {
+    const stats = deriveStats(actor, run);
+    const resolution = stats.actions.find(
+      (each) => each.id === `weapon:${itemId}`,
+    )?.activation.resolution;
+    if (resolution?.kind !== "attack") throw new Error("Not an attack");
+    return {
+      hit: attackBonus(resolution, stats),
+      damage: resolution.damage[0]?.amount.bonus?.base,
+      proficient: resolution.attack.proficient !== false,
+    };
+  };
+
+  it("swings an attuned magic weapon with its bonus only once attuned", () => {
+    const blade = "variant-test:item/key-blade--1--dagger";
+    expect(registry.content(blade)).toMatchObject({
+      name: "Key Blade (Three, Dagger)",
+      type: "weapon",
+      attunement: true,
+    });
+    const { actor } = fighter([blade]);
+    expect(attack(actor, blade).hit).toBe(2 + 3);
+    expect(attack({ ...actor, attuned: [blade] }, blade).hit).toBe(2 + 3 + 1);
+    expect(gearOptions(actor, run)).toContainEqual({
+      id: `attune:${blade}`,
+      label: "Attune to Key Blade (Three, Dagger)",
+    });
+  });
+
+  it("keeps a Returning Weapon in hand once thrown", () => {
+    const homing = "variant-test:item/homing-weapon--1--dagger";
+    expect(registry.content(homing)).toMatchObject({
+      name: "Homing Weapon (Dagger)",
+      returning: true,
+    });
+    const { state } = fighter([homing]);
+    const context = {
+      state,
+      dice: createDice(rngFromSeed("returning")),
+      content: run.content,
+      contentIds: run.contentIds,
+    };
+    const thrown = (item: string) =>
+      gearFrames[`${NS}:throwWeapon`].run(
+        { actor: PLAYER_ACTOR, item, target: PLAYER_ACTOR },
+        context,
+      ).events ?? [];
+    expect(thrown(homing)).toEqual([]);
+    const { state: plain } = fighter(["srd52:item/dagger"]);
+    expect(
+      gearFrames[`${NS}:throwWeapon`].run(
+        {
+          actor: PLAYER_ACTOR,
+          item: "srd52:item/dagger",
+          target: PLAYER_ACTOR,
+        },
+        { ...context, state: plain },
+      ).events,
+    ).toHaveLength(1);
+  });
+
+  it("trains with some weapons and adds to their damage alone", () => {
+    const bracers = "variant-test:item/archer-bracers";
+    const wizard = (items: readonly string[]) =>
+      wearing(items, [], "srd52:pregen/wizard");
+    const sword = "srd52:item/longsword";
+    const bow = "srd52:item/shortbow";
+    expect(attack(wizard([sword]), sword).proficient).toBe(false);
+    expect(attack(wizard([sword, bracers]), sword).proficient).toBe(true);
+    expect(attack(wizard([sword, bracers]), sword).damage).toBe(0);
+    expect(attack(wizard([bow, bracers]), bow).damage).toBe(2);
+  });
+
+  it("raises the Proficiency Bonus", () => {
+    const stone = "variant-test:item/mastery-stone";
+    expect(deriveStats(wearing([stone]), run).proficiency).toBe(3);
+  });
+
+  it("studies a book to raise a score for good, spending the book", () => {
+    const manual = "variant-test:item/strength-manual";
+    const { state } = fighter([manual]);
+    const action = sceneGearActions(state, run).find(
+      (each) => each.id === `study:${manual}`,
+    );
+    expect(action).toMatchObject({
+      label: "Study Strength Manual",
+      rest: true,
+    });
+    const result = gearEffects[`${NS}:study`].apply(
+      { item: manual },
+      {
+        state,
+        dice: createDice(rngFromSeed("study")),
+        content: run.content,
+        contentIds: run.contentIds,
+      },
+    );
+    const after = (result.events ?? []).reduce(applyDndEvent, state);
+    const player = after.actors[PLAYER_ACTOR];
+    if (!player) throw new Error("No player");
+    expect(player.raised).toEqual({ str: 2 });
+    expect(player.inventory).not.toContain(manual);
+    expect(deriveStats(player, run).abilities.str).toBe(19);
   });
 });
 

@@ -47,8 +47,6 @@ export function deriveItem(
     delete item.variants;
     return item;
   }
-  // shortcut: only an item that needs no attunement takes a base, since a plain one has no attunement to check.
-  if (parent.attunement) return undefined;
   const types =
     parent.category === "weapon"
       ? ["weapon"]
@@ -61,13 +59,27 @@ export function deriveItem(
     .map((other) => ItemSchema.safeParse(access.content(other)).data)
     .find((item) => item !== undefined && types.includes(item.type));
   if (base === undefined) return undefined;
+  // "Elven Chain (Chain Shirt)", and a named version's "Wave-Swept Weapon (Barnacled, Longsword)".
   const named = plus
     ? `+${String(bonus)} ${base.name}`
-    : `${name} (${base.name})`;
+    : name.endsWith(")")
+      ? `${name.slice(0, -1)}, ${base.name})`
+      : `${name} (${base.name})`;
   const bonuses = variant.bonuses ? { bonuses: variant.bonuses } : {};
   let item: Item;
   if (base.type === "weapon") {
-    item = { ...base, id, name: named, baseWeapon: base.id, ...bonuses };
+    item = {
+      ...base,
+      id,
+      name: named,
+      baseWeapon: base.id,
+      ...bonuses,
+      ...(parent.attunement ? { attunement: true as const } : {}),
+      ...(parent.returning ? { returning: true as const } : {}),
+    };
+  } else if (parent.attunement) {
+    // shortcut: only a weapon keeps its attunement, since armor and Shields have nowhere to check it.
+    return undefined;
   } else if (base.type === "armor") {
     item = {
       ...base,
