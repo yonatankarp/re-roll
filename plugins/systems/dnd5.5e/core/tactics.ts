@@ -193,6 +193,8 @@ export const TACTIC_WORDS: Readonly<Record<Tactic, string>> = {
   slowed: "slowed",
   metamagic: "shaping a spell",
   exiting: "climbing out",
+  trading: "trading an attack",
+  attacksLeft: "attacking",
 };
 
 // "Help" for tactic:help, "Sap" for mastery:sap.

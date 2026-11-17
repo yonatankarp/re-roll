@@ -718,14 +718,19 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     // Creatures within `within` feet of where it lands, or with `origin` of where it left, get `conditions` and
     // `modifiers` for `duration`, after a save when `save` is set: Whirlwind of Sand's Blinded, Toxic Escape's
     // Poisoned, Temporal Disruption's halved Speed. `foes` keeps it to the bearer's foes, the creatures of its choice.
+    // `damage` is dealt too, half on a successful save, as Warping Implosion's Force; a formula DC is the bearer's.
     around: z
       .strictObject({
         origin: z.literal(true).optional(),
         within: z.number().int().min(5),
         foes: z.literal(true).optional(),
         save: z
-          .strictObject({ ability: AbilitySchema, dc: z.number().int() })
+          .strictObject({
+            ability: AbilitySchema,
+            dc: z.union([z.number().int(), FormulaSchema]),
+          })
           .optional(),
+        damage: z.array(DamageSchema).min(1).optional(),
         conditions: z.array(ConditionSchema).default([]),
         modifiers: z.array(ModifierSchema).default([]),
         duration: DurationSchema,
@@ -733,9 +738,17 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .optional(),
   }),
   // The Dash action as part of another, as with Adrenaline Rush, or the Disengage action, as a clay golem's Hasten.
-  z.strictObject({ kind: z.literal("dash") }),
+  // `half` adds only half the Speed, and `safe` makes the turn's moving provoke no Opportunity Attacks, as
+  // Tactical Shift's move of half the Speed. shortcut: the move comes as Speed for the turn, not at once.
+  z.strictObject({
+    kind: z.literal("dash"),
+    half: z.literal(true).optional(),
+    safe: z.literal(true).optional(),
+  }),
   z.strictObject({ kind: z.literal("disengage") }),
-  z.strictObject({ kind: z.literal("extraAction") }), // Action Surge
+  z.strictObject({ kind: z.literal("dodge") }), // the Dodge action as part of another, as Patient Defense's
+  // Action Surge: once a turn, after the action is spent, and the action it gives can't be a Magic action.
+  z.strictObject({ kind: z.literal("extraAction") }),
   // Ends one of these conditions on the target, the one that hampers it most, as Lesser Restoration does.
   z.strictObject({
     kind: z.literal("cure"),
@@ -890,6 +903,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     minHp: z.number().int().min(1).default(10),
     times: z.number().int().min(1).default(1),
   }),
+  // The bearer and the target trade places, which provokes nothing, as with Bait and Switch.
+  z.strictObject({ kind: z.literal("swapPlaces") }),
   // The bearer trades Initiative with a willing ally, as with Alert's Initiative Swap.
   z.strictObject({ kind: z.literal("swapInitiative") }),
   // The bearer gains Heroic Inspiration, as with Tireless Reveler.
@@ -1269,6 +1284,13 @@ export const ActivationSchema = z.strictObject({
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
   whileIn: z.literal("shadows").optional(), // only in Dim Light or Darkness, as Merge with Shadows
   afterAction: z.literal(true).optional(), // only once the bearer has taken its action, as Blink Steps
+  afterBonusAction: z.literal(true).optional(), // only once it has taken its Bonus Action, as Fleet Step
+  // only after casting a spell with a casting time of an action this turn, as Battle Magic
+  afterCast: z.literal(true).optional(),
+  unmoved: z.literal(true).optional(), // only if the bearer hasn't moved this turn, as Steady Aim
+  // only while an effect of one of these features' activations is on the bearer, as Travel along the Tree in a Rage,
+  // or while it concentrates on one of these spells, as Telekinetic Master's attack
+  while: z.array(ContentIdSchema).min(1).optional(),
   // Only between fights, from the character sheet (camp.ts), as a spell that takes an hour to cast, as Raise Dead.
   outOfCombat: z.literal(true).optional(),
   label: z.string().min(1).optional(), // added to its feature's name, to tell two of a feature's activations apart
@@ -1514,6 +1536,17 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("multiattack"),
     attacks: z.number().int().min(2),
+  }),
+  // The Attack action can trade `attacks` of its attacks for one of these taken with its action (combat/trade.ts):
+  // a cantrip (`cantrips`), a spell of these `levels`, or an activation that spends this `resource`, as Valor's
+  // Extra Attack, War Magic, Improved War Magic and Breath Weapon.
+  // shortcut: any such spell the bearer knows, not only those of one class's list.
+  z.strictObject({
+    kind: z.literal("attackReplacement"),
+    attacks: z.number().int().min(1).default(1),
+    cantrips: z.literal(true).optional(),
+    levels: z.array(z.number().int().min(1).max(9)).min(1).optional(),
+    resource: z.string().min(1).optional(),
   }),
   // A 1 on the d20 of a D20 Test is rolled again, and the new roll stands, as with Halfling Luck.
   z.strictObject({ kind: z.literal("rerollOnes") }),
@@ -1939,9 +1972,19 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Once on its turn, a melee hit after moving 10 feet closer to the target adds 1d8, as Charger's Charge Attack.
   z.strictObject({ kind: z.literal("chargeAttack") }),
   // Casting a spell that deals this type puts these effects on the bearer, as Flames of Phlegethos' flames.
+  // With `school` instead, casting a spell of that school with an action and a spell slot does, as Bewitching
+  // Magic's Misty Step after an Enchantment spell.
   z.strictObject({
     kind: z.literal("castRider"),
-    damage: DamageTypeSchema,
+    damage: DamageTypeSchema.optional(),
+    school: z.array(SpellSchoolSchema).min(1).optional(),
+    effects: z.array(LeafEffectSchema).min(1),
+  }),
+  // Using an activation of this feature also does these to the bearer, as Tactical Shift's move with Second Wind or
+  // Arcane Charge's teleport with Action Surge.
+  z.strictObject({
+    kind: z.literal("activationRider"),
+    feature: ContentIdSchema,
     effects: z.array(LeafEffectSchema).min(1),
   }),
   // A Long Rest leaves one of this item with the bearer, as Vampire's Plaything's Decanting.
@@ -1951,6 +1994,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Once a turn, hitting a Bloodied creature that isn't a Construct or Undead spends a Hit Point Die to heal its roll
   // plus the Constitution modifier, spending a use, as Bloodlust's Sanguine Feast.
   z.strictObject({ kind: z.literal("bloodiedFeast"), resource: z.string() }),
+  // Gear used with an action takes a Bonus Action instead, as with Fast Hands (stats.ts fastHands).
+  z.strictObject({ kind: z.literal("fastHands") }),
   // A vial or flask is thrown this far, as with Bomber's Far Lobber.
   z.strictObject({
     kind: z.literal("farLobber"),

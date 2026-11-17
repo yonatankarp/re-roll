@@ -32,6 +32,7 @@ import {
   isDown,
   NS,
   frame,
+  SURGED,
 } from "../state.ts";
 import {
   type ContentAccess,
@@ -1029,18 +1030,35 @@ export function leafEvents(
         break;
       case "dash":
       case "disengage":
-        events.push(
+      case "dodge": {
+        const tactic = (
+          name: "dash" | "disengage" | "dodge",
+          value?: number,
+        ): SystemEvent =>
           dndEvent(`${NS}:effectAdded`, {
             actor: target.id,
             effect: {
               sourceId,
               casterId: caster.id,
-              modifier: { kind: "tactic", tactic: effect.kind },
+              modifier: {
+                kind: "tactic",
+                tactic: name,
+                ...(value === undefined ? {} : { value }),
+              },
               ends: "casterNextTurn",
             },
-          }),
-        );
+          });
+        const half =
+          effect.kind === "dash" && effect.half
+            ? 5 *
+              Math.floor(walkSpeed(target, deriveStats(target, context)) / 10)
+            : undefined;
+        events.push(tactic(effect.kind, half));
+        if (effect.kind === "dash" && effect.safe) {
+          events.push(tactic("disengage"));
+        }
         break;
+      }
       case "modifier":
         // given once its type, skill or ability is picked (combat/damage-choice.ts, combat/check-choice.ts)
         if (effect.choose || effect.pick) break;
@@ -1296,8 +1314,27 @@ export function leafEvents(
         }
         break;
       }
+      case "swapPlaces":
+        if (caster.position && target.position && caster.id !== target.id) {
+          events.push(
+            dndEvent(`${NS}:moved`, {
+              actor: caster.id,
+              to: target.position,
+              feet: 0,
+            }),
+            dndEvent(`${NS}:moved`, {
+              actor: target.id,
+              to: caster.position,
+              feet: 0,
+            }),
+          );
+        }
+        break;
       case "extraAction":
-        events.push(dndEvent(`${NS}:actionRegained`, { actor: target.id }));
+        events.push(
+          dndEvent(`${NS}:actionRegained`, { actor: target.id }),
+          dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key: SURGED }),
+        );
         break;
       case "extraTurns":
         events.push(

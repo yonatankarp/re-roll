@@ -3,6 +3,7 @@ import { leashed } from "./duel.ts";
 import { knownFoes, knows } from "../fog.ts";
 import {
   type Actor,
+  CAST_ACTION,
   controllingRider,
   dndEvent,
   type DndState,
@@ -15,6 +16,7 @@ import {
   mountOf,
   NS,
   frame,
+  SURGED,
 } from "../state.ts";
 import {
   deriveStats,
@@ -683,6 +685,7 @@ export function canAfford(
   const { carrying, afterAction, resolution } = action.activation;
   if (carrying && !actor.inventory.includes(carrying)) return false;
   if (afterAction && actor.budget.action) return false;
+  if (!gatesOpen(action, actor)) return false;
   // Haste's additional action takes only a weapon attack, or Dash, Disengage or Hide (actions.ts).
   if (
     hasteActing(actor) &&
@@ -703,6 +706,42 @@ export function canAfford(
         (stats.resources[cost.resource] ?? 0)
       );
     }) && poolsLeft(action, actor, stats)
+  );
+}
+
+// What an activation needs this turn beyond its costs: Steady Aim's standing still, Battle Magic's spell, Fleet Step's
+// Bonus Action, Travel along the Tree's Rage, and Action Surge's spent action, once a turn and never for magic.
+function gatesOpen(action: KnownAction, actor: Actor): boolean {
+  const { activation } = action;
+  const used = actor.usedThisTurn;
+  if (activation.unmoved && actor.moved > 0) return false;
+  if (activation.afterCast && !used.includes(CAST_ACTION)) return false;
+  if (activation.afterBonusAction && actor.budget.bonusAction) return false;
+  const lasting = activation.while;
+  if (
+    lasting &&
+    !lasting.some(
+      (id) =>
+        actor.activeEffects.some(({ sourceId }) =>
+          sourceId.startsWith(`feature:${id}:`),
+        ) || actor.concentratingOn?.replace(/:free$/, "") === `spell:${id}`,
+    )
+  ) {
+    return false;
+  }
+  const { resolution, cost } = activation;
+  if (
+    resolution.kind === "automatic" &&
+    resolution.effects.some((effect) => effect.kind === "extraAction") &&
+    (actor.budget.action || used.includes(SURGED))
+  ) {
+    return false;
+  }
+  // shortcut: a magic item's Magic action is still allowed, as items don't say which action they take.
+  return !(
+    used.includes(SURGED) &&
+    action.spellLevel !== null &&
+    cost.includes("action")
   );
 }
 

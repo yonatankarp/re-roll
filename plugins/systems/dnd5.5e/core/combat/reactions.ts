@@ -1179,6 +1179,7 @@ export function initiativeSwapFrames(
   const action = stats.actions.find(
     (item) =>
       item.activation.trigger?.initiative === true &&
+      effectsOf(item).some((effect) => effect.kind === "swapInitiative") &&
       ready(player, item, stats),
   );
   const willing = party.filter(
@@ -1205,6 +1206,58 @@ export function initiativeSwapFrames(
   ];
 }
 
+// A move right after Initiative is rolled, as Unpredictable Movement's, asked once the fight has its grid.
+// shortcut: the move is a jump of the feet it gives, whatever the Initiative roll was.
+export function initiativeMoveFrames(
+  party: readonly Actor[],
+  context: Context,
+): readonly Frame[] {
+  return party.flatMap((actor) =>
+    deriveStats(actor, context).actions.some(
+      (item) =>
+        item.activation.trigger?.initiative === true && initiativeMove(item),
+    )
+      ? [frame("initiativeMove", { actor: actor.id })]
+      : [],
+  );
+}
+
+const initiativeMove = (item: KnownAction) => {
+  const move = effectsOf(item).find((effect) => effect.kind === "teleport");
+  return move?.kind === "teleport" ? move : null;
+};
+
+const ActorOnly = z.object({ actor: z.string() });
+
+function runInitiativeMove(
+  payload: z.infer<typeof ActorOnly>,
+  context: Context,
+): SystemResult {
+  const actor = context.state.actors[payload.actor];
+  if (!actor?.position) return {};
+  const stats = deriveStats(actor, context);
+  const item = stats.actions.find(
+    (action) =>
+      action.activation.trigger?.initiative === true &&
+      initiativeMove(action) &&
+      ready(actor, action, stats),
+  );
+  const move = item && initiativeMove(item);
+  return move
+    ? {
+        frames: [
+          teleportFrame(
+            actor,
+            move.feet,
+            move.movement,
+            context,
+            move.provokes,
+          ),
+        ],
+      }
+    : {};
+}
+
 export const SwapSchema = z.object({ actor: z.string(), answer: z.string() });
 
 export function runSwapInitiative(
@@ -1228,6 +1281,10 @@ export const reactionFrames = {
   [`${NS}:reactAnswer`]: frameHandler({
     schema: ReactAnswerSchema,
     run: runReactAnswer,
+  }),
+  [`${NS}:initiativeMove`]: frameHandler({
+    schema: ActorOnly,
+    run: runInitiativeMove,
   }),
   [`${NS}:swapInitiative`]: frameHandler({
     schema: SwapSchema,

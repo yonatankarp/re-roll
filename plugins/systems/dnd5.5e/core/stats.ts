@@ -533,6 +533,34 @@ function collectFeatureData(
   return { passives, actions, resources, spells, free, retype };
 }
 
+// A feature's activations with the effects other features ride on them, as Tactical Shift's move on Second Wind.
+function withRiders(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+): KnownAction[] {
+  return actions.map((action) => {
+    const { resolution } = action.activation;
+    const extra = passives.flatMap((passive) =>
+      passive.kind === "activationRider" &&
+      action.id.startsWith(`feature:${passive.feature}:`)
+        ? passive.effects
+        : [],
+    );
+    return extra.length === 0 || resolution.kind !== "automatic"
+      ? action
+      : {
+          ...action,
+          activation: {
+            ...action.activation,
+            resolution: {
+              ...resolution,
+              effects: [...resolution.effects, ...extra],
+            },
+          },
+        };
+  });
+}
+
 export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
   if (!classDef.weapons.includes(weapon.category)) return false;
   const limit = classDef.martialWeaponProperties;
@@ -901,7 +929,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       untrainedArmor ? undefined : caster?.spellcasting,
     );
     if (usable) {
-      actions.push(item.type === "gear" ? farLobbed(usable, traits) : usable);
+      actions.push(
+        item.type === "gear"
+          ? fastHands(farLobbed(usable, traits), traits)
+          : usable,
+      );
     }
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
@@ -1104,7 +1136,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         : []),
     ],
     actions: withMetamagic(
-      withInvocations(actions, fromFeatures.passives, abilities, classLevels),
+      withInvocations(
+        withRiders(actions, fromFeatures.passives),
+        fromFeatures.passives,
+        abilities,
+        classLevels,
+      ),
       actor,
       abilityModifier(abilities.cha),
     ),
@@ -1259,6 +1296,24 @@ function itemAction(
       cost: spell.activation.cost.filter((cost) => cost !== "slot"),
     },
     spellLevel: spell.level,
+  };
+}
+
+// Fast Hands: gear used with an action, as a flask of Acid thrown, takes a Bonus Action instead.
+// shortcut: every such use counts as the Utilize action.
+function fastHands(
+  action: KnownAction,
+  passives: readonly Passive[],
+): KnownAction {
+  if (!passives.some((passive) => passive.kind === "fastHands")) return action;
+  return {
+    ...action,
+    activation: {
+      ...action.activation,
+      cost: action.activation.cost.map((cost) =>
+        cost === "action" ? "bonusAction" : cost,
+      ),
+    },
   };
 }
 
