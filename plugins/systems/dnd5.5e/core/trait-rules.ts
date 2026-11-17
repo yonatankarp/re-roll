@@ -292,6 +292,13 @@ export function rescuedSave(
         (resource === undefined || event.payload.resource === resource),
     ).length;
   for (const passive of stats.passives) {
+    const die =
+      passive.kind === "saveRescue" && passive.bonusDice
+        ? (scaledDice(
+            { dice: passive.bonusDice, dieSize: passive.dieSize },
+            stats.scaling,
+          ) ?? passive.bonusDice)
+        : undefined;
     if (
       passive.kind !== "saveRescue" ||
       !(
@@ -300,10 +307,10 @@ export function rescuedSave(
       ) ||
       (passive.bonus && total + evaluateFormula(passive.bonus, stats) < dc) ||
       (passive.magical && !magical) ||
-      (passive.bonusDice &&
+      (die &&
         (!dice ||
-          total + rollDiceNotation(passive.bonusDice, HIGHEST) < dc ||
-          total + rollDiceNotation(passive.bonusDice, dice) < dc)) ||
+          total + rollDiceNotation(die, HIGHEST) < dc ||
+          total + rollDiceNotation(die, dice) < dc)) ||
       (passive.reaction &&
         (!target.budget.reaction ||
           hasCondition(target, ...INCAPACITATING) ||

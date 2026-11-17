@@ -227,6 +227,40 @@ describe("feat and trait riders", () => {
     expect(rescuedCheck(actor, stats, 4, 12, scripted([5]).dice).bonus).toBe(0);
   });
 
+  it("adds Aberrant Fortitude's d4 to a failed Constitution save with a Reaction, a d6 with Greater Aberrant Mark", async () => {
+    const run = await testRun();
+    const failed = [
+      {
+        kind: `${NS}:saveRolled`,
+        payload: { actor: PLAYER_ACTOR, total: 9, dc: 14 },
+      },
+    ] as unknown as SystemEvent[];
+    const rescue = (traits: readonly string[], ability: "con" | "dex") => {
+      const actor = hero(traits);
+      return rescuedSave(
+        actor,
+        ability,
+        [],
+        deriveStats(actor, run),
+        failed,
+        [],
+        scripted([5]).dice,
+      ).map((event) => event.kind);
+    };
+    expect(rescue(["fortitude"], "con")).toEqual([]); // 9 + 4 can't reach 14
+    expect(rescue(["fortitude", "greater-fortitude"], "con")).toEqual([
+      `${NS}:budgetSpent`,
+      `${NS}:resourceSpent`,
+    ]);
+    expect(rescue(["fortitude", "greater-fortitude"], "dex")).toEqual([]);
+    const greater = deriveStats(hero(["fortitude", "greater-fortitude"]), run);
+    expect(
+      greater.resourceDefs
+        .filter((item) => item.id === "fortitude")
+        .flatMap((item) => item.recharge.map((recharge) => recharge.on)),
+    ).toEqual(["longRest", "shortRest"]);
+  });
+
   it("can't be Charmed while bolstered, and Dashes as part of an action, as Lordly Resolve and Adrenaline Rush give", async () => {
     const run = await testRun();
     const bolstered: Actor = {

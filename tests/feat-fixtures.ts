@@ -691,6 +691,41 @@ const FIXTURES = [
     spells: { 1: ["srd52:spell/spider-climb"] },
     freeCast: { resource: "climb", self: true },
   }),
+  trait(
+    "fortitude",
+    [
+      {
+        kind: "saveRescue",
+        abilities: ["con"],
+        bonusDice: "1d4",
+        dieSize: "fortitudeDie",
+        reaction: true,
+        resource: "fortitude",
+      },
+    ],
+    {
+      resources: [
+        {
+          id: "fortitude",
+          max: { base: 1 },
+          recharge: [{ on: "longRest", amount: "all" }],
+        },
+      ],
+    },
+  ),
+  trait(
+    "greater-fortitude",
+    [{ kind: "scalingFloor", key: "fortitudeDie", value: 6 }],
+    {
+      resources: [
+        {
+          id: "fortitude",
+          max: { base: 1 },
+          recharge: [{ on: "shortRest", amount: "all" }],
+        },
+      ],
+    },
+  ),
   trait("allure", [{ kind: "attackAdvantage", when: "targetCharmed" }]),
   {
     id: "test:feat/later",

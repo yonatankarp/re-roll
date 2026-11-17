@@ -1768,8 +1768,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     abilities: z.array(AbilitySchema).default([]),
     conditions: z.array(ConditionSchema).default([]),
     bonus: FormulaSchema.optional(),
-    // A die rolled and added instead, when its highest roll could be enough, as Spell Resistant's 1d6.
+    // A die rolled and added instead, when its highest roll could be enough, as Spell Resistant's 1d6. `dieSize` is a
+    // scaling key for its size, as Greater Aberrant Mark's 1d6 for Aberrant Fortitude's 1d4.
     bonusDice: DiceSchema.optional(),
+    dieSize: z.string().optional(),
     magical: z.literal(true).optional(), // only a save against a spell, as Magic Resistant
     reaction: z.boolean().default(false),
     resource: z.string(),
