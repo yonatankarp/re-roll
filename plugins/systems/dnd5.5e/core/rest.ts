@@ -449,7 +449,8 @@ export function recovered(
     const daily =
       key === HIT_DICE ||
       key === SHORT_REST_GIVEN ||
-      key.startsWith("deterred:"); // Among the Dead's freed attackers
+      key.startsWith("deterred:") || // Among the Dead's freed attackers
+      key.startsWith("emissary:"); // Emissary of Redemption's spared none
     if (
       key === MEAL ||
       (rest === "long" ? slot || daily : slot && stats.pactMagic)

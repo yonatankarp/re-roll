@@ -114,12 +114,15 @@ import {
   zonesOn,
 } from "../zones.ts";
 import { caughtBy } from "../targeting.ts";
-import { behindTotalCover, coverAgainst, coverFor } from "../sight.ts";
+import { behindTotalCover, coverAgainst, coverFor, seeing } from "../sight.ts";
 import { teleportFrame, teleportSquares } from "./movement.ts";
 import {
   afterDamage,
   beforeDamage,
+  counterBeforeSave,
+  preyBonus,
   spellAimedAt,
+  turnedOn,
   besideSquare,
   reactFrames,
   settleRoll,
@@ -1248,16 +1251,20 @@ export function dealEvents(
   critical: boolean,
   context: Context,
   source?: Actor, // the creature dealing it, for a reaction aimed back at it, as Backlash's
+  magical = false, // a spell's, for Magic Absorption
 ): { events: SystemEvent[]; dealt: number } {
   let { state } = context;
   const events: SystemEvent[] = [];
   let dealt = 0;
   for (const hit of hits) {
     const current = state.actors[target.id] ?? target;
-    const reduced = reducedHit(current, hit.amount, hit.type, {
-      ...context,
-      state,
-    });
+    const reduced = reducedHit(
+      current,
+      hit.amount,
+      hit.type,
+      { ...context, state },
+      magical,
+    );
     // A reaction such as Vitality Ward may lessen it before it lands.
     const lessened = beforeDamage(
       current,
@@ -1267,10 +1274,24 @@ export function dealEvents(
       source && (state.actors[source.id] ?? source),
     );
     const { amount, type } = { ...hit, amount: lessened.amount };
+    // Thought Shield: the creature that dealt it takes the same.
+    const mirrored =
+      source &&
+      source.id !== target.id &&
+      amount > 0 &&
+      deriveStats(current, context).passives.some(
+        (passive) => passive.kind === "mirrorDamage" && passive.damage === type,
+      )
+        ? damageEvents(state.actors[source.id] ?? source, amount, type, false, {
+            ...context,
+            state,
+          })
+        : [];
     for (const event of [
       ...reduced.events,
       ...lessened.events,
       ...damageEvents(current, amount, type, critical, { ...context, state }),
+      ...mirrored,
     ]) {
       events.push(event);
       if (state.actors[target.id]) state = applyDndEvent(state, event);
@@ -1386,29 +1407,56 @@ function reducedHit(
   amount: number,
   type: Damage["type"],
   context: Context,
+  magical = false,
 ): { amount: number; events: SystemEvent[] } {
   const targetStats = deriveStats(target, context);
+  // Spell Resistance: a spell's damage is halved, unless the bearer resists its type already.
+  if (
+    magical &&
+    hasPassive(targetStats, "spellDamageResistance") &&
+    !damageResponses(target, context).resistances.includes(type)
+  ) {
+    amount = Math.floor(amount / 2);
+  }
+  const { combat } = context.state;
+  const turnKey = (id: string) =>
+    `${id}@${String(combat?.round ?? 0)}:${String(combat?.index ?? 0)}`;
   const worn = passiveModifiers(targetStats.passives).find(
     (modifier) =>
-      modifier.kind === "damageReduction" && modifier.damage === type,
+      modifier.kind === "damageReduction" &&
+      (modifier.damage === undefined || modifier.damage === type) &&
+      (!modifier.magical || magical) &&
+      (!modifier.oncePerTurn ||
+        !target.usedThisTurn.includes(turnKey("damage-reduction"))) &&
+      (!modifier.able || !hasCondition(target, ...INCAPACITATING)),
   );
+  const wornEvents: SystemEvent[] = [];
   if (worn?.kind === "damageReduction" && amount > 0) {
     amount = Math.max(
       0,
       amount - rollAmount(worn.amount, targetStats, context.dice),
     );
+    if (worn.oncePerTurn) {
+      wornEvents.push(
+        dndEvent(`${NS}:oncePerTurnUsed`, {
+          actor: target.id,
+          key: turnKey("damage-reduction"),
+        }),
+      );
+    }
   }
   const effect = target.activeEffects.find(
     ({ modifier }) =>
       modifier.kind === "damageReduction" && modifier.damage === type,
   );
-  const { combat } = context.state;
   if (effect?.modifier.kind !== "damageReduction" || amount <= 0) {
-    return { amount, events: [] };
+    return { amount, events: wornEvents };
   }
   // usedThisTurn clears only as the bearer's own turn starts, so the key names the turn.
-  const key = `${effect.sourceId}@${String(combat?.round ?? 0)}:${String(combat?.index ?? 0)}`;
-  if (target.usedThisTurn.includes(key)) return { amount, events: [] };
+  const key = turnKey(effect.sourceId);
+  if (target.usedThisTurn.includes(key)) {
+    return { amount, events: wornEvents };
+  }
   const cut = rollAmount(
     effect.modifier.amount,
     deriveStats(target, context),
@@ -1416,7 +1464,10 @@ function reducedHit(
   );
   return {
     amount: Math.max(0, amount - cut),
-    events: [dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key })],
+    events: [
+      ...wornEvents,
+      dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key }),
+    ],
   };
 }
 
@@ -2506,6 +2557,45 @@ export function leafEvents(
           ...sendAwayEvents(effect, sourceId, caster, target, context),
         );
         break;
+      case "foesTake": {
+        // Deflecting Shroud: the nearest foes the caster sees in range.
+        const { range, creatures, damage } = effect;
+        const foes = enemies(context.state, caster)
+          .filter(
+            (item) =>
+              !isDown(item) &&
+              !isDead(item) &&
+              item.position !== undefined &&
+              distanceFeet(caster.position, item.position) <= range &&
+              seeing(caster, item.position, context.state, context) !== "none",
+          )
+          .sort(
+            (a, b) =>
+              distanceFeet(caster.position, a.position) -
+              distanceFeet(caster.position, b.position),
+          )
+          .slice(0, creatures);
+        for (const foe of foes) {
+          const responses = damageResponses(foe, context);
+          events.push(
+            ...dealEvents(
+              foe,
+              damage.map(({ amount, type }) => ({
+                amount: finalDamage(
+                  rollAmount(amount, stats, context.dice),
+                  type,
+                  responses,
+                ),
+                type,
+              })),
+              false,
+              context,
+              caster,
+            ).events,
+          );
+        }
+        break;
+      }
       case "note":
       case "disperse":
       case "animate":
@@ -2954,6 +3044,10 @@ export function rollSave(
   ) {
     return { saved: false, events: [] };
   }
+  // Slayer's Counter: the bearer's attack at its prey first, and a hit makes the save succeed.
+  const countered = counterBeforeSave(target, source?.caster, context);
+  if (countered.hit) return { saved: true, events: countered.events };
+  const counterEvents = countered.events;
   const stats = deriveStats(target, context);
   // Eldritch Strike: Disadvantage only on a save against its caster's spell.
   const against = (effect: Actor["activeEffects"][number]): boolean =>
@@ -3015,6 +3109,7 @@ export function rollSave(
   const base =
     saveBonus(stats, ability) +
     rollBonus(target, "saves", context, undefined, ability) +
+    preyBonus(target, source?.caster, context) +
     (ability === "dex" ? cover : 0);
   const least = scoreFloor(stats, ability); // Indomitable Might
   // Reactions to the roll before it lands, as Bountiful Luck or Portent (combat/reactions.ts).
@@ -3096,7 +3191,10 @@ export function rollSave(
       ],
     };
   }
-  return { saved, events: [...settled.events, rolled, ...spent] };
+  return {
+    saved,
+    events: [...counterEvents, ...settled.events, rolled, ...spent],
+  };
 }
 
 const SAVE_REROLL = "save-reroll";
@@ -3200,6 +3298,7 @@ export function resolveAction(
     ? spellAimedAt(action, actor, aimedAt, context)
     : { targets: aimedAt, events: [] };
   events.push(...aside.events);
+  if (spell) events.push(...turnedOn(actor, aside.targets, stats));
   const targets = spell
     ? sculpted(
         aside.targets.filter(
@@ -3331,6 +3430,7 @@ export function resolveAction(
       false,
       context,
       actor,
+      action.spellLevel !== null,
     );
     lastDealt = result.dealt;
     events.push(

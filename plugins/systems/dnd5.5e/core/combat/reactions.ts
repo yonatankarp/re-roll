@@ -32,14 +32,16 @@ import {
   WeaponSchema,
 } from "../schemas.ts";
 import {
+  attackBonus,
   damageResponses,
   deriveStats,
   evaluateFormula,
   type KnownAction,
   rollAmount,
+  rollDiceNotation,
   type Stats,
 } from "../stats.ts";
-import { rollD20 } from "../rules.ts";
+import { finalDamage, rollD20 } from "../rules.ts";
 import { DECLINE, spellOfSource } from "./ids.ts";
 import { teleportFrame } from "./movement.ts";
 import {
@@ -56,6 +58,7 @@ import {
 } from "./queries.ts";
 import {
   damageEvents,
+  dealEvents,
   ENDURED,
   leafEvents,
   rollSave,
@@ -334,6 +337,9 @@ export function respond(
           from,
         ).filter((event) => event.kind !== `${NS}:budgetSpent`),
       );
+    } else if (effect.kind === "modifier" || effect.kind === "foesTake") {
+      // What comes with it, as Arcane Deflection's cantrips only or Deflecting Shroud's Force.
+      used.push(...leafEvents([effect], action.id, reactor, reactor, context));
     } else if (effect.kind === "succeed") {
       // shortcut: a bonus no DC reaches; a natural 1 on an attack roll becomes a 2 so it can hit.
       natural = Math.max(natural, 2);
@@ -577,9 +583,21 @@ function matchesMoment(
     trigger.conditions.some((item) => moment.conditions?.includes(item));
   switch (moment.kind) {
     case "damaged":
+      // Unwavering Mark: the creature it marked hurt someone else.
+      if (trigger.dueledDamages) {
+        return (
+          !self &&
+          source !== undefined &&
+          source.activeEffects.some(
+            ({ modifier, casterId }) =>
+              modifier.kind === "duel" && casterId === bearer.id,
+          )
+        );
+      }
       if (trigger.otherDamaged === "bloodied" && !self) {
         const max = deriveStats(subject, context).maxHp;
         return (
+          hostile &&
           subject.hp > 0 &&
           subject.hp * 2 <= max &&
           near(bearer, subject, trigger.within) &&
@@ -917,7 +935,11 @@ export function takeReaction(
             [
               {
                 kind: "modifier",
-                modifier: { kind: "damageBonus", amount: effect.damage },
+                modifier: {
+                  kind: "damageBonus",
+                  amount: effect.damage,
+                  once: true,
+                },
                 duration: { until: "turnEnd" },
               },
             ],
@@ -1201,6 +1223,18 @@ export function beforeDamage(
   source?: Actor,
 ): { readonly amount: number; readonly events: SystemEvent[] } {
   if (amount <= 0) return { amount, events: [] };
+  // Emissary of Redemption: Resistance to another creature's damage, unless the bearer has turned on it.
+  if (
+    source &&
+    source.id !== target.id &&
+    !spared(target, source) &&
+    deriveStats(target, context).passives.some(
+      (passive) => passive.kind === "creatureResistance",
+    ) &&
+    !damageResponses(target, context).resistances.includes(type)
+  ) {
+    amount = Math.floor(amount / 2);
+  }
   // Arcane Ward: the bearer's own ward takes what it can first.
   const warded = wardTakes(target, target, amount, context);
   if (warded.amount <= 0 || !context.state.combat) return warded;
@@ -1440,6 +1474,148 @@ function lessen(
     events.push(...(rest.events ?? []));
   }
   return { amount: Math.max(0, left), events };
+}
+
+// Emissary of Redemption: attacking a creature or casting a spell on it ends its protection against that one.
+export function turnedOn(
+  actor: Actor,
+  targets: readonly Actor[],
+  stats: Stats,
+): SystemEvent[] {
+  if (
+    !stats.passives.some((passive) => passive.kind === "creatureResistance")
+  ) {
+    return [];
+  }
+  return targets.flatMap((target) =>
+    target.id !== actor.id && !spared(actor, target)
+      ? [
+          dndEvent(`${NS}:resourceSpent`, {
+            actor: actor.id,
+            resource: `${EMISSARY}${target.id}`,
+          }),
+        ]
+      : [],
+  );
+}
+
+// Emissary of Redemption: a creature the bearer has attacked or cast a spell on since its last Long Rest is spared none
+// of it.
+export const EMISSARY = "emissary:";
+export function spared(bearer: Actor, other: Actor): boolean {
+  return (bearer.resourcesSpent[`${EMISSARY}${other.id}`] ?? 0) > 0;
+}
+
+// Slayer's Counter: before the save its prey calls for, the bearer's weapon attack at it; a hit makes the save succeed.
+// shortcut: the attack is rolled here with no Advantage or Disadvantage, and its damage has no frames of its own.
+export function counterBeforeSave(
+  target: Actor,
+  casterId: string | undefined,
+  context: Context,
+): { readonly events: SystemEvent[]; readonly hit: boolean } {
+  const none = { events: [], hit: false };
+  const caster = casterId ? context.state.actors[casterId] : undefined;
+  if (
+    !caster ||
+    !context.state.combat ||
+    !ready(target, NO_COST, deriveStats(target, context))
+  ) {
+    return none;
+  }
+  const stats = deriveStats(target, context);
+  const counter = stats.passives.find(
+    (passive) =>
+      passive.kind === "saveCounter" &&
+      markedBy(caster, target, passive.marked),
+  );
+  const weapon = strikeAction(target, undefined, context);
+  const reach = weapon ? meleeReach(weapon) : null;
+  if (
+    !counter ||
+    !target.budget.reaction ||
+    !weapon ||
+    weapon.activation.resolution.kind !== "attack" ||
+    reach === null ||
+    distanceFeet(target.position, caster.position) > reach ||
+    (target.id === PLAYER_ACTOR &&
+      !playerTakes(
+        `counter:${caster.id}`,
+        `${caster.name} calls for your save. Attack it first?`,
+        weapon,
+        context,
+      ))
+  ) {
+    return none;
+  }
+  const { resolution } = weapon.activation;
+  const natural = context.dice.roll(20);
+  const total = natural + attackBonus(resolution, stats);
+  const ac = deriveStats(caster, context).ac;
+  const hit = natural === 20 || (natural !== 1 && total >= ac);
+  const events: SystemEvent[] = [
+    dndEvent(`${NS}:budgetSpent`, {
+      actor: target.id,
+      kind: "reaction",
+      label: weapon.name,
+    }),
+    dndEvent(`${NS}:rollReported`, {
+      actor: target.id,
+      against: caster.id,
+      natural,
+      total,
+      target: ac,
+      success: hit,
+      label: weapon.name,
+    }),
+  ];
+  if (hit) {
+    const responses = damageResponses(caster, context);
+    events.push(
+      ...dealEvents(
+        caster,
+        resolution.damage.map(({ amount, type }) => ({
+          amount: finalDamage(
+            rollAmount(amount, stats, context.dice, natural === 20 ? 2 : 1),
+            type,
+            responses,
+          ),
+          type,
+        })),
+        natural === 20,
+        context,
+        target,
+      ).events,
+    );
+  }
+  return { events, hit };
+}
+
+const NO_COST = {
+  id: "",
+  name: "",
+  spellLevel: null,
+  activation: {
+    cost: [],
+    targeting: { self: true },
+    resolution: { kind: "automatic", damage: [], effects: [] },
+  },
+} as unknown as KnownAction;
+
+// Supernatural Defense: the dice a save its prey calls for gains.
+export function preyBonus(
+  target: Actor,
+  casterId: string | undefined,
+  context: Context,
+): number {
+  const caster = casterId ? context.state.actors[casterId] : undefined;
+  if (!caster) return 0;
+  return deriveStats(target, context).passives.reduce(
+    (sum, passive) =>
+      passive.kind === "preyBonus" && markedBy(caster, target, passive.marked)
+        ? sum + rollDiceNotation(passive.dice, context.dice)
+        : sum,
+    0,
+  );
 }
 
 // A foe's spell aimed at the bearer: Shield passes Magic Missile by, and Spell Thief makes the caster save or loses

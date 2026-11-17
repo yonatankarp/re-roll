@@ -722,6 +722,7 @@ export function canAfford(
   const limits = limitsOf(actor);
   // Befuddlement: no spells at all.
   if (limits.noSpells && action.spellLevel !== null) return false;
+  if (limits.cantripsOnly && (action.spellLevel ?? 0) > 0) return false;
   // Abjure Foes: having moved this turn, it takes no action or Bonus Action.
   if (
     limits.oneThing &&

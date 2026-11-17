@@ -39,6 +39,8 @@ import {
   afterDamage,
   type Edge,
   effectsOf,
+  spared,
+  turnedOn,
   withoutMoves,
   playerTakes,
   rollRewards,
@@ -250,8 +252,24 @@ export function runProjectile(
 }
 
 // A reaction's AC bonus against a hit: a number, or a formula of the reactor's.
-function acBonusOf(bonus: number | Formula, stats: Stats): number {
-  return typeof bonus === "number" ? bonus : evaluateFormula(bonus, stats);
+// An AC bonus against one hit: its number or formula, and its die, at its highest unless rolled with `dice`.
+function acBonusOf(
+  effect: {
+    readonly bonus: number | Formula;
+    readonly dice?: string | undefined;
+  },
+  stats: Stats,
+  dice?: Context["dice"],
+): number {
+  const { bonus } = effect;
+  const flat =
+    typeof bonus === "number" ? bonus : evaluateFormula(bonus, stats);
+  const die = effect.dice
+    ? dice
+      ? rollDiceNotation(effect.dice, dice)
+      : Number(effect.dice.split("d")[0]) * Number(effect.dice.split("d")[1])
+    : 0;
+  return flat + die;
 }
 
 // A creature of this kind beside the bearer, as the podling Transfer Harm needs.
@@ -381,7 +399,7 @@ function reactionFor(
       if (critical) return false;
       const acBonus = resolution.effects.reduce((sum, effect) => {
         if (effect.kind === "acAgainstHit") {
-          return sum + acBonusOf(effect.bonus, stats);
+          return sum + acBonusOf(effect, stats);
         }
         return effect.kind === "modifier" &&
           effect.modifier.kind === "bonus" &&
@@ -675,11 +693,30 @@ function redirect(
       canAfford(item, target, stats),
   );
   if (!action) return null;
-  const charmed =
-    action.activation.resolution.kind === "automatic" &&
-    action.activation.resolution.effects.some(
-      (effect) => effect.kind === "redirect" && effect.charmed,
+  const effects =
+    action.activation.resolution.kind === "automatic"
+      ? action.activation.resolution.effects
+      : [];
+  // Misdirection: a creature beside the bearer that stands between it and the attacker takes the attack.
+  if (effects.some((effect) => effect.kind === "redirect" && effect.cover)) {
+    const shield = Object.values(state.actors).find(
+      (item) =>
+        item.id !== target.id &&
+        item.id !== attacker.id &&
+        item.position !== undefined &&
+        !isDown(item) &&
+        !isDead(item) &&
+        within5(item, target) &&
+        distanceFeet(attacker.position, item.position) <
+          distanceFeet(attacker.position, target.position),
     );
+    return shield
+      ? { ally: shield.id, events: guardCosts(target, action, context) }
+      : null;
+  }
+  const charmed = effects.some(
+    (effect) => effect.kind === "redirect" && effect.charmed,
+  );
   const pool = charmed
     ? Object.values(state.actors).filter((item) =>
         hasCondition(item, "charmed"),
@@ -817,7 +854,7 @@ function intercepted(
   const acBonus = effects.reduce(
     (sum, effect) =>
       effect.kind === "acAgainstHit"
-        ? sum + acBonusOf(effect.bonus, stats)
+        ? sum + acBonusOf(effect, stats, dice)
         : sum,
     0,
   );
@@ -1249,6 +1286,7 @@ export function runAttackRoll(
   });
   // An effect like Guiding Bolt's lasts only until the next attack roll it applies to.
   const spent = [
+    ...turnedOn(attacker, [target], stats),
     ...duelBroken(attacker, [target], state),
     ...guarded,
     ...window.events,
@@ -1502,7 +1540,7 @@ export function runAfterReaction(
   ).reduce(
     (sum, effect) =>
       effect.kind === "acAgainstHit"
-        ? sum + acBonusOf(effect.bonus, stats)
+        ? sum + acBonusOf(effect, stats, context.dice)
         : sum,
     0,
   );
@@ -1859,8 +1897,25 @@ function landHit(
       passive.diceCount === SNEAK_DICE
         ? fewerDice(passive.dice, payload.forgone ?? 0)
         : passive.dice;
+    // Murderous Intent: a Sneak Attack die below its floor counts as the floor.
+    const floor =
+      passive.diceCount === SNEAK_DICE
+        ? Math.max(
+            0,
+            ...stats.passives.map((other) =>
+              other.kind === "sneakFloor" ? other.value : 0,
+            ),
+          )
+        : 0;
+    const rolling =
+      floor > 0
+        ? {
+            ...dice,
+            roll: (sides: number) => Math.max(floor, dice.roll(sides)),
+          }
+        : dice;
     const rolled =
-      (dice_ ? rollDiceNotation(dice_, dice, multiplier) : 0) +
+      (dice_ ? rollDiceNotation(dice_, rolling, multiplier) : 0) +
       (passive.bonus ? evaluateFormula(passive.bonus, stats) : 0);
     const type = passive.types
       ? typeAgainst(passive.types, responses)
@@ -2072,6 +2127,7 @@ function landHit(
     payload.critical,
     context,
     attacker,
+    action.spellLevel !== null,
   );
   const passed = passedOn(armored, lessened, payload, attacker, target, {
     ...context,
@@ -2095,7 +2151,7 @@ function landHit(
     ...oncePerTurnHit(resolution, action, attacker, target, context),
     ...drained(resolution, attacker, target, dealt.dealt, stats, context),
     ...feast(attacker, target, stats, context),
-    ...retaliated(attacker, target, action, context),
+    ...retaliated(attacker, target, action, context, dealt.dealt),
     ...halted(attacker, target, stats, context),
     ...shieldBash(attacker, target, action, stats, context),
     ...inspiringStrike(attacker, payload.critical, stats, context),
@@ -2321,7 +2377,8 @@ function sideRidersSpent(attacker: Actor, target: Actor, state: DndState) {
 function onceHitEnded(attacker: Actor): SystemEvent[] {
   return attacker.activeEffects.flatMap(({ modifier, sourceId }) =>
     ((modifier.kind === "hitDamage" && modifier.dealtBy === "bearer") ||
-      modifier.kind === "weaponSpell") &&
+      modifier.kind === "weaponSpell" ||
+      modifier.kind === "damageBonus") &&
     modifier.once
       ? [dndEvent(`${NS}:effectEnded`, { actor: attacker.id, sourceId })]
       : [],
@@ -2335,17 +2392,28 @@ function retaliated(
   target: Actor,
   action: KnownAction,
   context: Context,
+  dealt = 0,
 ): SystemEvent[] {
-  if (!isMelee(action) || !within5(attacker, target)) return [];
+  const close = isMelee(action) && within5(attacker, target);
   const stats = deriveStats(target, context);
+  const onceKey = `retaliate:${attacker.id}`;
   const backs = [
     ...target.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
-  ].flatMap((modifier) => (modifier.kind === "retaliate" ? [modifier] : []));
+  ].flatMap((modifier) =>
+    modifier.kind === "retaliate" &&
+    (close || modifier.anyAttack === true) &&
+    (!modifier.marked || markedBy(attacker, target, modifier.marked)) &&
+    (!modifier.oncePerTurn || !attacker.usedThisTurn.includes(onceKey)) &&
+    (!modifier.able || !hasCondition(target, ...INCAPACITATING)) &&
+    !(modifier.halfDealt && spared(target, attacker))
+      ? [modifier]
+      : [],
+  );
   if (backs.length === 0 || isDown(attacker)) return [];
   const responses = damageResponses(attacker, context);
-  const hits = backs.flatMap(({ damage }) =>
-    damage.map(({ amount, type }) => ({
+  const hits = backs.flatMap(({ damage, halfDealt }) => [
+    ...damage.map(({ amount, type }) => ({
       amount: finalDamage(
         rollAmount(amount, stats, context.dice),
         type,
@@ -2353,8 +2421,26 @@ function retaliated(
       ),
       type,
     })),
-  );
-  const events = dealEvents(attacker, hits, false, context).events;
+    ...(halfDealt && dealt > 1
+      ? [
+          {
+            amount: finalDamage(Math.floor(dealt / 2), halfDealt, responses),
+            type: halfDealt,
+          },
+        ]
+      : []),
+  ]);
+  const events = [
+    ...(backs.some(({ oncePerTurn }) => oncePerTurn)
+      ? [
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: attacker.id,
+            key: onceKey,
+          }),
+        ]
+      : []),
+    ...dealEvents(attacker, hits, false, context).events,
+  ];
   if (
     backs.some(({ grapple }) => grapple) &&
     !hasCondition(attacker, "grappled") &&

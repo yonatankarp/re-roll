@@ -384,10 +384,18 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // A creature within 5 feet that hits the bearer with a melee attack takes this, as Flames of Phlegethos' flames, Fire
   // Shield or a black pudding's Corrosive Form, and with `grapple` is Grappled by the bearer, as by a mimic's Adhesive.
   // shortcut: the grapple's escape DC is the bearer's Unarmed Strike one (combat/grapple.ts), not a printed number.
+  // `anyAttack` answers any attack's hit, from anywhere, as Scornful Rebuke; `marked` only an attacker under the
+  // bearer's effect from these, as Shadowmoor Hexer's Hex; `oncePerTurn` once a turn for each attacker; `able` only
+  // while the bearer isn't Incapacitated; `halfDealt` adds half the damage the hit dealt, as Emissary of Redemption.
   z.strictObject({
     kind: z.literal("retaliate"),
     damage: z.array(DamageSchema).default([]),
     grapple: z.literal(true).optional(),
+    anyAttack: z.literal(true).optional(),
+    marked: z.array(ContentIdSchema).min(1).optional(),
+    oncePerTurn: z.literal(true).optional(),
+    able: z.literal(true).optional(),
+    halfDealt: DamageTypeSchema.optional(),
   }),
   // A spell stolen by Spell Thief: the bearer has it prepared ("stolen") or its caster can't cast it ("lost").
   z.strictObject({
@@ -464,6 +472,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     speed: z.enum(["half", "double", "none"]).optional(),
     spellFailure: z.number().int().min(1).max(100).optional(),
     noSpells: z.literal(true).optional(), // it can't cast spells, as Befuddlement's
+    cantripsOnly: z.literal(true).optional(), // it casts no spell but a cantrip, as after Arcane Deflection
     speedMax: z.number().int().min(0).optional(), // its Speed is at most this many feet, as Power Word Pain's
     // only one of moving, an action and a Bonus Action on its turns, as Abjure Foes' or Devious Strikes' Daze
     // (combat/durations.ts)
@@ -563,6 +572,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     amount: AmountSchema,
     ability: AbilitySchema.optional(),
     subtract: z.boolean().optional(), // a penalty, as a gold dragon's Weakening Breath
+    once: z.literal(true).optional(), // ends after the bearer's next attack roll, as Riposte's Superiority Die
   }),
   // A Speed of another kind, as a Fly Speed: these feet, or without them equal to the bearer's Speed
   // (core/movement-modes.ts).
@@ -606,11 +616,16 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("sanctuary"),
     dc: z.number().int().optional(),
   }),
-  // Damage of this type the bearer takes is cut by `amount`, once a turn, as with Resistance (the cantrip).
+  // Damage of this type the bearer takes is cut by `amount`, once a turn, as with Resistance (the cantrip). As a
+  // passive with no `damage`, any type; `magical` only a spell's, `oncePerTurn` once a turn and `able` only while the
+  // bearer isn't Incapacitated, as Spellfire Spark's Magic Absorption.
   z.strictObject({
     kind: z.literal("damageReduction"),
-    damage: DamageTypeSchema,
+    damage: DamageTypeSchema.optional(),
     amount: AmountSchema,
+    magical: z.literal(true).optional(),
+    oncePerTurn: z.literal(true).optional(),
+    able: z.literal(true).optional(),
   }),
   // The bearer can take its spell's `granted` action, dealing this type at the save DC it was cast with (filled in
   // as it's cast), as Dragon's Breath's breath.
@@ -1030,7 +1045,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("acAgainstHit"),
     // A formula is the reactor's, as a familiar's Intercept Attack adding its owner's Proficiency Bonus.
-    bonus: z.union([z.number().int().min(1), FormulaSchema]),
+    bonus: z.union([z.number().int().min(0), FormulaSchema]),
+    dice: DiceSchema.optional(), // rolled and added, as Warding Maneuver's 1d8
   }),
   // The caster's familiar takes its action of this name, which has the `commanded` trigger, spending its Reaction,
   // when it is within `range` feet, as a familiar's Energy Pulse (combat/familiar.ts).
@@ -1081,9 +1097,12 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // A Small or Medium ally within 5 feet trades places with the bearer and becomes the attack's target, as with
   // Redirect Attack; with `charmed`, any Charmed creature there instead.
+  // With `cover`, a creature within 5 feet that stands between the attacker and the bearer becomes the target
+  // instead, nobody moving, as Misdirection.
   z.strictObject({
     kind: z.literal("redirect"),
     charmed: z.boolean().default(false),
+    cover: z.literal(true).optional(),
   }),
   // The bearer becomes the attack's target instead of the ally it was made against, as with an Arrow-Catching
   // Shield (combat/attack.ts).
@@ -1102,6 +1121,14 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("stealSpell"),
     minutes: z.number().int().min(1).default(480),
+  }),
+  // Up to `creatures` of the bearer's foes it can see within `range`, the nearest, take this damage, as Deflecting
+  // Shroud's Force.
+  z.strictObject({
+    kind: z.literal("foesTake"),
+    creatures: z.number().int().min(1),
+    range: z.number().int().min(5),
+    damage: z.array(DamageSchema).min(1),
   }),
   // The triggering Critical Hit is a normal hit instead, as Sentinel at Death's Door makes it.
   z.strictObject({ kind: z.literal("noCritical") }),
@@ -1545,6 +1572,7 @@ export const ActivationSchema = z.strictObject({
       spellTargets: z.literal(true).optional(),
       // Taken when a foe it can see within the activation's range casts a spell, as with Counterspell.
       spellCast: z.literal(true).optional(),
+      teleports: z.literal(true).optional(), // with `spellCast`, a teleport too, as Magic-User's Nemesis
       // Taken right after hitting with a weapon, as with the smite spells. An area it targets is centred on the
       // creature hit, as Hail of Thorns' is.
       afterHit: HitKindSchema.optional(),
@@ -1650,6 +1678,9 @@ export const ActivationSchema = z.strictObject({
       // With `damaged`, only right after a trait such as Relentless Endurance leaves the bearer at 1 Hit Point instead
       // of 0, as Orcish Fury's attack.
       endured: z.literal(true).optional(),
+      // Taken when a creature under the bearer's Compelled Duel-like mark (a `duel` effect it put there) damages
+      // anyone but the bearer, as Unwavering Mark.
+      dueledDamages: z.literal(true).optional(),
       // Taken when an enemy ends its turn within `within`, as with Skirmisher.
       turnEnds: z.literal(true).optional(),
       // Taken right after a foe within `within` hits or misses anyone with an attack roll; with `marked`, only one
@@ -2379,6 +2410,30 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("wardPool"),
     resource: z.string().min(1),
     made: z.string().min(1),
+  }),
+  // Resistance to all damage other creatures deal the bearer, but none against a creature it has attacked or cast a
+  // spell on since its last Long Rest, as Emissary of Redemption (combat/reactions.ts beforeDamage).
+  z.strictObject({ kind: z.literal("creatureResistance") }),
+  // Psychic damage of this type a creature deals the bearer, it takes the same of, as Thought Shield.
+  z.strictObject({ kind: z.literal("mirrorDamage"), damage: DamageTypeSchema }),
+  // When a creature under the bearer's effect from one of these calls for its save, the bearer's Reaction makes a
+  // weapon attack at it first, and a hit makes the save succeed, as Slayer's Counter (combat/reactions.ts).
+  z.strictObject({
+    kind: z.literal("saveCounter"),
+    marked: z.array(ContentIdSchema).min(1),
+  }),
+  // These dice added to a save that such a creature calls for, as Supernatural Defense's 1d6.
+  z.strictObject({
+    kind: z.literal("preyBonus"),
+    marked: z.array(ContentIdSchema).min(1),
+    dice: DiceSchema,
+  }),
+  // Resistance to the damage of spells, as Spell Resistance.
+  z.strictObject({ kind: z.literal("spellDamageResistance") }),
+  // A Sneak Attack die that rolls below this counts as this, as Murderous Intent's 3.
+  z.strictObject({
+    kind: z.literal("sneakFloor"),
+    value: z.number().int().min(2).max(6),
   }),
   // A walk of 5 feet or more inside the bearer's reach provokes its Opportunity Attack too, as Hold the Line.
   z.strictObject({ kind: z.literal("holdTheLine") }),

@@ -3083,6 +3083,10 @@ export function scaleActivation(
       if (effect.kind === "transference") {
         return { ...effect, amount: more(effect.amount) };
       }
+      // What a reaction takes off grows too, as Spirit Shield's d6s.
+      if (effect.kind === "reduceDamage" && effect.amount) {
+        return { ...effect, amount: more(effect.amount) };
+      }
       if (effect.kind === "hitDieHeal") {
         return hitDice
           ? { ...effect, dice: (effect.dice ?? 1) + hitDice * steps }
