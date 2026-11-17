@@ -110,17 +110,6 @@ const RULES: Readonly<Record<string, Rules>> = {
       },
     ],
   },
-  // The same uses as Bardic Inspiration, now also back on a Short Rest.
-  "phb:feature/bard-font-of-inspiration": {
-    automation: "partial",
-    resources: [
-      {
-        id: "bardic-inspiration",
-        max: BARDIC_INSPIRATION_USES,
-        recharge: [{ on: "shortRest", amount: "all" }],
-      },
-    ],
-  },
   // shortcut: no beast form, only the Temporary Hit Points.
   "phb:feature/druid-wild-shape": {
     automation: "partial",

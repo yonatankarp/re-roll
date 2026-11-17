@@ -156,9 +156,15 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
     kind: z.literal("classLevel"),
     class: ContentIdSchema,
     half: z.boolean().optional(), // rounded down, as for Rally
+    roundUp: z.literal(true).optional(), // with `half`, rounded up instead, as for Arcane Recovery
     times: z.number().int().min(2).optional(), // multiplied, as Lay On Hands' five times the Paladin level
   }),
-  z.strictObject({ kind: z.literal("level") }), // character level
+  // character level, halved and rounded down with `half`, as for an item that can't name the class of a book it
+  // doesn't require
+  z.strictObject({
+    kind: z.literal("level"),
+    half: z.literal(true).optional(),
+  }),
   z.strictObject({ kind: z.literal("scaling"), key: z.string() }),
   // The best of these abilities' modifiers, as "the score increased by this feat" when the feat raised one of them.
   z.strictObject({
@@ -535,6 +541,15 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // restores, as Prayer of Healing (rest.ts).
   // Not again until the creature's Long Rest. shortcut: the player's Hit Dice are spent as a companion's are.
   z.strictObject({ kind: z.literal("shortRest") }),
+  // The target regains spent uses of a resource, a spell slot ("slot:<level>"), or its spell slots ("slots", highest
+  // first, `half` being half its slots rounded up), as Font of Inspiration's use for a slot or Magical Cunning.
+  z.strictObject({
+    kind: z.literal("regain"),
+    resource: z.string().min(1),
+    count: z
+      .union([z.number().int().min(1), z.enum(["half", "all"])])
+      .default(1),
+  }),
   // Ends every curse on the target, with all else the action that cursed it gave, as Remove Curse.
   z.strictObject({ kind: z.literal("uncurse") }),
   // With `reaction` the target spends its Reaction to gain them, and gains none without one, as a death's head tree's
@@ -1397,6 +1412,30 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     amount: FormulaSchema,
     allies: z.boolean().default(false),
   }),
+  // A Short Rest ends with spent spell slots back, of combined levels up to `levels` and none above 5, spending a use
+  // of the resource, as Arcane Recovery (rest.ts).
+  z.strictObject({
+    kind: z.literal("slotRecovery"),
+    levels: FormulaSchema,
+    resource: z.string().min(1),
+  }),
+  // Recovering slots that way also heals, as the Scarlet Spellbook's Arcane Stamina.
+  z.strictObject({ kind: z.literal("recoveryHeal"), amount: AmountSchema }),
+  // Each party member's first Hit Point Die spent in a Short Rest heals this much more, as Chef's Replenishing Meal.
+  z.strictObject({ kind: z.literal("restMeal"), amount: AmountSchema }),
+  // A Long Rest takes the bearer only this many hours, as Trance. The party rests as long as its slowest member.
+  z.strictObject({
+    kind: z.literal("restHours"),
+    hours: z.number().int().min(1).max(7),
+  }),
+  // Heroic Inspiration at the start of each of the bearer's turns in a fight, if it has none, as Heroic Warrior.
+  z.strictObject({ kind: z.literal("turnInspiration") }),
+  // While an effect of one of these features' activations is on the bearer, a spell can take two Metamagic options,
+  // as Sorcery Incarnate with Innate Sorcery.
+  z.strictObject({
+    kind: z.literal("doubleMetamagic"),
+    while: z.array(ContentIdSchema).min(1),
+  }),
   // The bearer's spells of this type ignore Resistance to it, and a 1 on their damage dice counts as a 2, as with
   // Elemental Adept.
   z.strictObject({
@@ -1682,11 +1721,19 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Casting a spell of this school, as an Arcana Unleashed adept's: with a slot, Temporary Hit Points of twice its
   // level ("ward"), up to two Hit Point Dice of healing plus its level ("life") or 5 feet of Speed a level this turn
   // ("augment"); once a turn up to two Hit Point Dice added to its damage ("fueled"); or a bonus to keep
-  // Concentration on it ("persistent"). combat/school.ts.
+  // Concentration on it ("persistent"); or, with a level 2+ slot, a spent slot of a lower level up to 5 back
+  // ("refund", as Expert Divination). combat/school.ts.
   z.strictObject({
     kind: z.literal("schoolCast"),
     school: SpellSchoolSchema,
-    rider: z.enum(["ward", "life", "augment", "fueled", "persistent"]),
+    rider: z.enum([
+      "ward",
+      "life",
+      "augment",
+      "fueled",
+      "persistent",
+      "refund",
+    ]),
   }),
   // A failed ability check gets this die added when it could be enough, spending a use, as Reborn's Knowledge from a
   // Past Life.
@@ -1772,6 +1819,19 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
 
+// How a spell is cast without a slot (stats.ts freeCastActions): `true` once per Long Rest each; "shortRest" once per
+// Short or Long Rest each, as Signature Spells; "atWill" at its lowest level whenever, as Spell Mastery; or by spending
+// a use of `resource`, as War God's Blessing's Channel Divinity, then lasting `minutes` without Concentration.
+export const FreeCastSchema = z.union([
+  z.literal(true),
+  z.enum(["shortRest", "atWill"]),
+  z.strictObject({
+    resource: z.string().min(1),
+    minutes: z.number().int().min(1).optional(),
+  }),
+]);
+export type FreeCast = z.infer<typeof FreeCastSchema>;
+
 export const ResourceDefSchema = z.strictObject({
   id: z.string().min(1),
   max: FormulaSchema,
@@ -1779,11 +1839,21 @@ export const ResourceDefSchema = z.strictObject({
     z.strictObject({
       // "initiative" comes back as a fight starts, as Boon of Fate's Improve Fate does.
       on: z.enum(["turnStart", "shortRest", "longRest", "dawn", "initiative"]),
-      amount: z.union([z.literal("all"), z.number().int()]),
+      // A formula is worked out from the bearer's numbers, as Sorcerous Restoration's half the Sorcerer level.
+      amount: z.union([z.literal("all"), z.number().int(), FormulaSchema]),
       rollAtLeast: z.number().int().optional(),
+      // No more come back than leave this many unspent, as Superior Inspiration's "until you have two".
+      upTo: z.number().int().min(1).optional(),
+      // Each time it applies it spends a use of this other resource, and it doesn't apply without one, as Persistent
+      // Rage's once per Long Rest. Only on its own trigger: a Long Rest doesn't count as a Short Rest for it.
+      uses: z.string().min(1).optional(),
+      // Hit Points regained as it applies, as Uncanny Metabolism's Martial Arts die plus the Monk level.
+      heal: z.lazy(() => AmountSchema).optional(),
     }),
   ),
 });
+
+export type ResourceDef = z.infer<typeof ResourceDefSchema>;
 
 const ScaleStepSchema = z.union([
   // With `every`, once for each that many levels, at most `max` times; `addBonus` also raises a flat bonus a modifier
@@ -1824,7 +1894,7 @@ export const FeatureSchema = ContentEntrySchema.extend({
   // These spells' damage takes this type instead, as Rimekin's Cold Fire Magic.
   retype: z.record(ContentIdSchema, DamageTypeSchema).optional(),
   // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched.
-  freeCast: z.literal(true).optional(),
+  freeCast: z.lazy(() => FreeCastSchema).optional(),
   // Its damage is added to a hit's, so it takes that hit's damage type, as a Battle Master maneuver's die does.
   hitType: z.literal(true).optional(),
   // Dice its slot-spending activations add for each slot level, as with Eldritch Smite.
@@ -1899,7 +1969,8 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     list: ContentIdSchema.optional(), // a class whose spell list it is; any spell when absent
     schools: z.array(SpellSchoolSchema).min(1).optional(),
     ritual: z.boolean().optional(), // only spells with the Ritual tag
-    freeCast: z.literal(true).optional(), // each leveled spell picked is also cast once per Long Rest without a slot
+    freeCast: z.lazy(() => FreeCastSchema).optional(), // each leveled spell picked is also cast without a slot
+    minLevel: z.number().int().min(1).max(9).optional(), // no spell below this level, as Signature Spells' level 3
     from: z.array(ContentIdSchema).min(1).optional(), // only these, as a feat's own table
     // The list of the version of this feat the character took, as "the list you chose for Magic Initiate".
     listOf: ContentIdSchema.optional(),
@@ -2414,7 +2485,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("spells"),
     values: z.array(ContentIdSchema),
-    freeCast: z.literal(true).optional(), // from a choice with `freeCast`
+    freeCast: z.lazy(() => FreeCastSchema).optional(), // from a choice with `freeCast`
     feat: ContentIdSchema.optional(), // the feat that asked, for its spells' ability
   }),
   z.strictObject({

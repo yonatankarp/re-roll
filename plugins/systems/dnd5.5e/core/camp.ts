@@ -16,7 +16,7 @@ import { type KnownAction, deriveStats } from "./stats.ts";
 import { canAfford, deadWithin, fitsType, goldFor } from "./combat/queries.ts";
 import { leafEvents, payCosts, sharedHealing } from "./combat/effects.ts";
 import { ITEM_PREFIX } from "./combat/ids.ts";
-import { SHORT_REST_GIVEN } from "./rest.ts";
+import { SHORT_REST_GIVEN, canRegain } from "./rest.ts";
 
 // Healing between fights: a party member's spell or feature that heals or raises the dead, used on the party from
 // the character sheet, as Cure Wounds after a fight or Raise Dead, which takes an hour. It costs what it costs in a
@@ -38,6 +38,7 @@ const BETWEEN: ReadonlySet<LeafEffect["kind"]> = new Set([
   "ordeal",
   "repose",
   "shortRest",
+  "regain",
 ]);
 
 // Whether the effect would do something for this creature between fights.
@@ -55,6 +56,8 @@ function helps(
       return !target.reposed;
     case "cure":
       return effect.exhaustion === true && target.exhaustion > 0;
+    case "regain":
+      return canRegain(target, effect.resource, deriveStats(target, access));
     default:
       return false;
   }
@@ -155,9 +158,12 @@ export function sceneCastActions(
   ) {
     return [];
   }
-  // Most scenes find the party whole, and then nothing here is worth working out.
+  // Most scenes find the party whole and fresh, and then nothing here is worth working out.
   const needy = members(state).some(
-    (item) => item.hp < deriveStats(item, access).maxHp || item.exhaustion > 0,
+    (item) =>
+      item.hp < deriveStats(item, access).maxHp ||
+      item.exhaustion > 0 ||
+      Object.keys(item.resourcesSpent).some((key) => key.startsWith("slot:")),
   );
   if (!needy) return [];
   return members(state).flatMap((caster) =>

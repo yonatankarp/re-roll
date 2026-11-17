@@ -13,7 +13,8 @@ import {
   isDead,
   NS,
 } from "../state.ts";
-import { deriveStats, lookup } from "../stats.ts";
+import { deriveStats, lookup, rollAmount } from "../stats.ts";
+import { canUse, rechargeAmount } from "../rest.ts";
 import { rollD20 } from "../rules.ts";
 import {
   openedCorners,
@@ -246,17 +247,60 @@ export function startCombat(
   };
 }
 
-// Uses that come back when Initiative is rolled, as Second Chance's.
-function initiativeRecharge(actor: Actor, context: Context): SystemEvent[] {
-  return deriveStats(actor, context).resourceDefs.flatMap((resource) =>
-    (actor.resourcesSpent[resource.id] ?? 0) > 0 &&
-    resource.recharge.some(({ on }) => on === "initiative")
-      ? [
-          dndEvent(`${NS}:resourceRestored`, {
+// Uses that come back when Initiative is rolled, as Second Chance's or Superior Inspiration's, in feature order. One
+// that spends a once-a-rest use, as Persistent Rage or Uncanny Metabolism, is taken once half the pool or more is
+// spent, so Perfect Focus after it tops up only when it wasn't.
+// shortcut: the player's is taken the same way, not asked.
+export function initiativeRecharge(
+  actor: Actor,
+  context: Context,
+): SystemEvent[] {
+  const stats = deriveStats(actor, context);
+  const spent = new Map(Object.entries(actor.resourcesSpent));
+  const used = (id: string): number => spent.get(id) ?? 0;
+  let { hp } = actor;
+  const events: SystemEvent[] = [];
+  for (const { id, recharge } of stats.resourceDefs) {
+    const max = stats.resources[id] ?? 0;
+    for (const entry of recharge) {
+      if (entry.on !== "initiative" || !canUse(entry, used, stats)) continue;
+      if (entry.uses !== undefined && used(id) * 2 < max) continue;
+      const amount = rechargeAmount(entry, used(id), max, stats);
+      if (amount <= 0) continue;
+      spent.set(id, used(id) - amount);
+      events.push(
+        dndEvent(`${NS}:resourceRestored`, {
+          actor: actor.id,
+          resource: id,
+          amount,
+        }),
+      );
+      if (entry.uses !== undefined) {
+        spent.set(entry.uses, used(entry.uses) + 1);
+        events.push(
+          dndEvent(`${NS}:resourceSpent`, {
             actor: actor.id,
-            resource: resource.id,
+            resource: entry.uses,
           }),
-        ]
-      : [],
-  );
+        );
+      }
+      const healed = entry.heal
+        ? Math.min(
+            rollAmount(entry.heal, stats, context.dice),
+            stats.maxHp - hp,
+          )
+        : 0;
+      if (healed > 0) {
+        hp += healed;
+        events.push(
+          dndEvent(`${NS}:healed`, {
+            actor: actor.id,
+            amount: healed,
+            max: stats.maxHp,
+          }),
+        );
+      }
+    }
+  }
+  return events;
 }
