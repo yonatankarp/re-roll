@@ -12,6 +12,7 @@ import { lightAt } from "./sight.ts";
 import { currentShape, formKept, formOf, usableIn } from "./forms.ts";
 import {
   ALL_SKILLS,
+  type Item,
   DAMAGE_TYPES,
   ABILITIES,
   type Ability,
@@ -182,7 +183,10 @@ function bestAc(
   }
   let bonus = fixed.reduce(
     (total, modifier) =>
-      modifier.kind === "bonus" && modifier.to === "ac" && !modifier.melee
+      modifier.kind === "bonus" &&
+      modifier.to === "ac" &&
+      !modifier.melee &&
+      !modifier.ranged
         ? total + (modifier.amount.bonus?.base ?? 0)
         : total,
     context.flatBonus,
@@ -190,7 +194,12 @@ function bestAc(
   const seen = new Set<string>();
   for (const effect of actor.activeEffects) {
     const { modifier } = effect;
-    if (modifier.kind === "bonus" && modifier.to === "ac" && !modifier.melee) {
+    if (
+      modifier.kind === "bonus" &&
+      modifier.to === "ac" &&
+      !modifier.melee &&
+      !modifier.ranged
+    ) {
       if (!seen.has(effect.sourceId)) bonus += modifier.amount.bonus?.base ?? 0;
       seen.add(effect.sourceId);
     }
@@ -198,12 +207,13 @@ function bestAc(
   return Math.max(...bases) + bonus;
 }
 
-// A magic armor's or Shield's own bonus to AC, which an Antimagic Field suppresses.
+// A magic armor's or Shield's own bonus to AC, which an Antimagic Field, or not being attuned where it needs it,
+// suppresses.
 function ownAc(
   bonuses: readonly { to: string; amount: number }[] | undefined,
-  antimagic: boolean,
+  suppressed: boolean,
 ): number {
-  if (antimagic) return 0;
+  if (suppressed) return 0;
   return (bonuses ?? [])
     .filter((bonus) => bonus.to === "ac")
     .reduce((total, bonus) => total + bonus.amount, 0);
@@ -574,6 +584,7 @@ export function weaponActivation(
           },
           type: weapon.damage.type,
         },
+        ...(weapon.hitDamage ?? []),
       ],
       onHit: [],
       onMiss: [],
@@ -674,14 +685,25 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const attuned = actor.attuned ?? [];
   // In an Antimagic Field, magic items don't work.
   const antimagic = actor.suppressed !== undefined;
-  const working = antimagic
-    ? []
-    : worn.flatMap(([itemId, item]) =>
-        item.type === "magicItem" &&
-        (!item.attunement || attuned.includes(itemId))
-          ? [item]
-          : [],
-      );
+  // Whether a worn item's magic works: not in an Antimagic Field, and attuned where it needs it.
+  const works = (itemId: string, item: Item): boolean =>
+    !antimagic &&
+    !("attunement" in item && item.attunement && !attuned.includes(itemId));
+  const working = worn.flatMap(([itemId, item]) =>
+    item.type === "magicItem" && works(itemId, item) ? [item] : [],
+  );
+  // Every worn item's passives, magic weapons and armor made from plain ones too (variants.ts). An entry with
+  // versions counts as its first, as its bonuses do.
+  const itemPassives = worn.flatMap(([itemId, item]) =>
+    works(itemId, item)
+      ? [
+          ...("passives" in item ? (item.passives ?? []) : []),
+          ...(item.type === "magicItem"
+            ? (item.variants?.[0]?.passives ?? [])
+            : []),
+        ]
+      : [],
+  );
   const abilities = withItemAbilities(ownAbilities(actor, build), working);
 
   const level = build.levels.length;
@@ -859,6 +881,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     slots.findLastIndex((count) => count > 0) + 1,
     featIds,
   );
+  // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
+  const traits = [...itemPassives, ...fromFeatures.passives];
   const castingAbility = featSpellAbilities(
     build,
     replaced ? [] : [background.feat],
@@ -877,16 +901,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       untrainedArmor ? undefined : caster?.spellcasting,
     );
     if (usable) {
-      actions.push(
-        item.type === "gear"
-          ? farLobbed(usable, fromFeatures.passives)
-          : usable,
-      );
+      actions.push(item.type === "gear" ? farLobbed(usable, traits) : usable);
     }
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
       const dex = abilityModifier(abilities.dex);
-      const maxDex = fromFeatures.passives.reduce(
+      const maxDex = traits.reduce(
         (most, passive) =>
           passive.kind === "armorDexMax" && passive.armor === parsed.armorType
             ? Math.max(most, passive.max)
@@ -894,11 +914,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         parsed.maxDex ?? dex,
       );
       const allowed = parsed.addDex ? Math.min(dex, maxDex) : 0;
-      armorBases.push(parsed.base + allowed + ownAc(item.bonuses, antimagic));
+      armorBases.push(
+        parsed.base + allowed + ownAc(item.bonuses, !works(itemId, item)),
+      );
     } else if (item.type === "shield") {
       // Only one shield is held, and it protects only with training.
       if (trained.has("shield")) {
-        shield = Math.max(shield, item.bonus + ownAc(item.bonuses, antimagic));
+        shield = Math.max(
+          shield,
+          item.bonus + ownAc(item.bonuses, !works(itemId, item)),
+        );
       }
     } else if (item.type === "weapon") {
       const weapon = WeaponSchema.parse(item);
@@ -906,10 +931,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       const own = (to: "attack" | "damage"): number =>
         Math.max(
           magic[to],
-          ...(antimagic || (weapon.attunement && !attuned.includes(itemId))
-            ? []
-            : (weapon.bonuses ?? [])
-          )
+          ...(!works(itemId, item) ? [] : (weapon.bonuses ?? []))
             .filter((bonus) => bonus.to === to)
             .map((bonus) => bonus.amount),
         );
@@ -925,8 +947,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
               kinds.some((kind) => bonus.weapons.includes(kind)),
           )
           .reduce((total, bonus) => total + bonus.amount, 0);
+      const { hitDamage, ...plain } = weapon;
       const activation = weaponActivation(
-        weapon,
+        works(itemId, item) && hitDamage ? { ...plain, hitDamage } : plain,
         abilities,
         martialTraining ||
           kinds.some((kind) => weaponTraining.has(kind)) ||
@@ -944,11 +967,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         actions.push({
           id: `${THROW_PREFIX}${itemId}`,
           name: `Throw ${item.name}`,
-          activation: thrownActivation(
-            activation,
-            weapon.range,
-            fromFeatures.passives,
-          ),
+          activation: thrownActivation(activation, weapon.range, traits),
           spellLevel: null,
         });
       }
@@ -1029,7 +1048,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ac: bestAc(actor, abilities, {
       armorBases,
       flatBonus: flatBonus + shield,
-      passives: fromFeatures.passives,
+      passives: traits,
     }),
     speed: encumberedSpeed(
       species.speed,
@@ -1037,21 +1056,19 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       carryingCapacity(
         abilities.str,
         species.size,
-        fromFeatures.passives.some(({ kind }) => kind === "powerfulBuild"),
+        traits.some(({ kind }) => kind === "powerfulBuild"),
       ),
     ),
     savingThrows: [
       ...new Set([
         ...firstClass.savingThrows,
         ...raisedSaves,
-        ...fromFeatures.passives.flatMap((passive) =>
+        ...traits.flatMap((passive) =>
           passive.kind === "saveProficiency" ? passive.abilities : [],
         ),
       ]),
     ],
-    skills: fromFeatures.passives.some(
-      (passive) => passive.kind === "allSkills",
-    )
+    skills: traits.some((passive) => passive.kind === "allSkills")
       ? ALL_SKILLS
       : [...skills],
     expertise: [...expertise],
@@ -1063,7 +1080,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     slots,
     resources: {},
     passives: [
-      ...working.flatMap((item) => item.passives ?? []),
+      ...itemPassives,
       ...fromFeatures.passives.map((passive) =>
         passive.kind === "extraDamage"
           ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }

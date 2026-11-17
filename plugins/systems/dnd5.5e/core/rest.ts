@@ -31,6 +31,7 @@ import {
   lookup,
   modifierFor,
   rollAmount,
+  rollDiceNotation,
 } from "./stats.ts";
 
 type Context = SystemContext<DndState>;
@@ -561,6 +562,40 @@ function restTempHp(
   );
 }
 
+// A Ring of Regeneration's Hit Points over a Short Rest's hour, before Hit Dice are spent: its dice for every so many
+// minutes of it, for a creature with at least 1 Hit Point.
+function regenerated(
+  members: readonly Actor[],
+  context: Context,
+): SystemEvent[] {
+  return members.flatMap((actor) => {
+    if (actor.hp < 1) return [];
+    const stats = deriveStats(actor, context);
+    const amount = stats.passives.reduce(
+      (total, passive) =>
+        passive.kind === "slowRegeneration"
+          ? total +
+            rollDiceNotation(
+              passive.dice,
+              context.dice,
+              Math.floor((REST_HOURS.short * 60) / passive.minutes),
+            )
+          : total,
+      0,
+    );
+    const healed = Math.min(amount, stats.maxHp - actor.hp);
+    return healed > 0
+      ? [
+          dndEvent(`${NS}:healed`, {
+            actor: actor.id,
+            amount: healed,
+            max: stats.maxHp,
+          }),
+        ]
+      : [];
+  });
+}
+
 const DAY_HOURS = 24;
 
 // Out of combat a Short Rest is always possible, and so is a Long Rest: a party within a day of its last one
@@ -591,7 +626,10 @@ export function availableRests(state: DndState): readonly RestOption[] {
 export const restEffects = {
   [`${NS}:shortRest`]: storyEffect({
     schema: z.strictObject({}),
-    apply: (_args, _context: Context) => ({ frames: [frame("shortRestStep")] }),
+    apply: (_args, context: Context) => ({
+      events: regenerated(party(context.state), context),
+      frames: [frame("shortRestStep")],
+    }),
   }),
   [`${NS}:longRest`]: storyEffect({
     schema: z.strictObject({}),

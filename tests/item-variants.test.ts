@@ -27,9 +27,12 @@ import {
   StateSchema,
   applyDndEvent,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
+import { restEffects } from "../plugins/systems/dnd5.5e/core/rest.ts";
+import { darkvisionOf } from "../plugins/systems/dnd5.5e/core/sight.ts";
 import {
   attackBonus,
   checkBonus,
+  damageResponses,
   deriveStats,
   evaluateFormula,
   saveBonus,
@@ -199,6 +202,41 @@ const ITEMS = `- id: "variant-test:item/potions"
   text: A test book that raises Strength for good.
   automation: full
   study: { ability: str, raise: 2, max: 30 }
+- id: "variant-test:item/ward-plate"
+  name: Ward Plate
+  type: magicItem
+  category: armor
+  rarity: rare
+  attunement: true
+  text: A test armor that resists one type of damage, and fire.
+  automation: full
+  bonuses: [{ to: ac, amount: 1 }]
+  passives: [{ kind: modifier, modifier: { kind: resistance, damage: fire } }]
+  variants:
+    - { name: Cold Ward Plate, rarity: rare, passives: [{ kind: modifier, modifier: { kind: resistance, damage: cold } }] }
+    - { name: Acid Ward Plate, rarity: rare, passives: [{ kind: modifier, modifier: { kind: resistance, damage: acid } }] }
+- id: "variant-test:item/frost-blade"
+  name: Frost Blade
+  type: magicItem
+  category: weapon
+  rarity: veryRare
+  attunement: true
+  text: A test weapon that resists fire while held, and adds cold.
+  automation: full
+  passives: [{ kind: modifier, modifier: { kind: resistance, damage: fire } }]
+  hitDamage: [{ amount: { dice: 1d6 }, type: cold }]
+- id: "variant-test:item/mage-robe"
+  name: Mage Robe
+  type: magicItem
+  category: wondrousItem
+  rarity: legendary
+  attunement: true
+  text: A test robe for AC without armor, Darkvision and slow healing.
+  automation: full
+  passives:
+    - { kind: modifier, modifier: { kind: acFormula, formula: { base: 15, add: [{ kind: abilityMod, ability: dex }] } } }
+    - { kind: modifier, modifier: { kind: darkvision, feet: 60 } }
+    - { kind: slowRegeneration, dice: 1d6, minutes: 10 }
 `;
 const STRONG = "variant-test:item/potions--2";
 const SWORD = "variant-test:item/weapon-1-2-or-3--2--longsword";
@@ -534,6 +572,92 @@ describe("magic armor, flat bonuses and ability scores", () => {
     expect(
       evaluateFormula(intDc, robed) - evaluateFormula(intDc, wizard([])),
     ).toBe(1);
+  });
+});
+
+describe("magic items' passives while worn or attuned", () => {
+  const PLATE = "variant-test:item/ward-plate--1--chain-mail";
+  const resists = (actor: Actor) =>
+    [...damageResponses(actor, run).resistances].sort();
+
+  it("makes attuned magic armor from a plain one, with its passives and a version's", () => {
+    expect(registry.content(PLATE)).toMatchObject({
+      name: "Cold Ward Plate (Chain Mail)",
+      type: "armor",
+      attunement: true,
+      passives: [
+        { kind: "modifier", modifier: { kind: "resistance", damage: "fire" } },
+        { kind: "modifier", modifier: { kind: "resistance", damage: "cold" } },
+      ],
+    });
+    // Its AC bonus and passives work only once attuned.
+    const unattuned = wearing([PLATE]);
+    expect(deriveStats(unattuned, run).ac).toBe(16);
+    expect(resists(unattuned)).toEqual([]);
+    const attuned = wearing([PLATE], [PLATE]);
+    expect(deriveStats(attuned, run).ac).toBe(17);
+    expect(resists(attuned)).toEqual(["cold", "fire"]);
+    expect(resists({ ...attuned, suppressed: [] })).toEqual([]);
+    expect(gearOptions(unattuned, run)).toContainEqual({
+      id: `attune:${PLATE}`,
+      label: "Attune to Cold Ward Plate (Chain Mail)",
+    });
+    // A bare entry with versions counts as its first.
+    const bare = "variant-test:item/ward-plate";
+    expect(resists(wearing([bare], [bare]))).toEqual(["cold", "fire"]);
+  });
+
+  it("gives a magic weapon's passives and damage while held and attuned", () => {
+    const blade = "variant-test:item/frost-blade--1--longsword";
+    const types = (actor: Actor) => {
+      const resolution = deriveStats(actor, run).actions.find(
+        (each) => each.id === `weapon:${blade}`,
+      )?.activation.resolution;
+      if (resolution?.kind !== "attack") throw new Error("Not an attack");
+      return resolution.damage.map((each) => each.type);
+    };
+    expect(resists(wearing([blade]))).toEqual([]);
+    expect(types(wearing([blade]))).toEqual(["slashing"]);
+    expect(resists(wearing([blade], [blade]))).toEqual(["fire"]);
+    expect(types(wearing([blade], [blade]))).toEqual(["slashing", "cold"]);
+  });
+
+  it("changes AC and Darkvision by an item's passives", () => {
+    const robe = "variant-test:item/mage-robe";
+    // The fighter's Dexterity 13 without armor: 15 + 1 with the robe, 10 + 1 without.
+    expect(deriveStats(wearing([]), run).ac).toBe(11);
+    expect(deriveStats(wearing([robe], [robe]), run).ac).toBe(16);
+    expect(darkvisionOf(wearing([robe], [robe]), run)).toBe(60);
+  });
+
+  it("heals a Ring of Regeneration's dice over a Short Rest's hour", () => {
+    const robe = "variant-test:item/mage-robe";
+    const { state } = fighter([]);
+    const rest = (actor: Actor) => {
+      const dnd = {
+        ...state,
+        actors: { ...state.actors, [PLAYER_ACTOR]: actor },
+      };
+      const result = restEffects[`${NS}:shortRest`].apply(
+        {},
+        {
+          state: dnd,
+          dice: createDice(rngFromSeed("regenerate")),
+          content: run.content,
+          contentIds: run.contentIds,
+        },
+      );
+      return (result.events ?? []).reduce(applyDndEvent, dnd).actors[
+        PLAYER_ACTOR
+      ]?.hp;
+    };
+    const hurt = { ...wearing([robe], [robe]), hp: 1 };
+    // Six rolls of 1d6 over the hour, from 6 to 36.
+    const healed = (rest(hurt) ?? 0) - 1;
+    expect(healed).toBeGreaterThanOrEqual(6);
+    expect(healed).toBeLessThanOrEqual(36);
+    expect(rest({ ...hurt, hp: 0 })).toBe(0);
+    expect(rest({ ...hurt, attuned: [] })).toBe(1);
   });
 });
 
