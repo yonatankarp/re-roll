@@ -239,6 +239,11 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
     kind: z.literal("spellSaveDc"),
     ability: AbilitySchema.optional(),
   }),
+  // The best of these ability scores themselves, as Overwhelming Strike's damage.
+  z.strictObject({
+    kind: z.literal("abilityScore"),
+    abilities: z.array(AbilitySchema).min(1),
+  }),
   // The Hit Point maximum, halved and rounded down with `half`, as Boon of Recovery's Last Stand.
   z.strictObject({
     kind: z.literal("maxHp"),
@@ -260,6 +265,7 @@ export const AmountSchema = z.strictObject({
   bonus: FormulaSchema.optional(),
   reroll: z.number().int().min(1).optional(), // dice rolled again once when below average, as with Empowered Spell
   rerollOnes: z.literal(true).optional(), // a die that rolls 1 is rolled again and the new roll stands
+  halfDice: z.literal(true).optional(), // half the dice, rounded up, as Wails from the Grave's half the Sneak Attack
 });
 export type Amount = z.infer<typeof AmountSchema>;
 
@@ -543,6 +549,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("duel"),
     feet: z.number().int().min(5).default(30),
+    unleashed: z.literal(true).optional(), // no leash, as Goading Attack's Disadvantage alone
   }),
   // The bearer can cast this spell once without its costs, as Wish's copy of it (combat/wish.ts).
   z.strictObject({ kind: z.literal("wished"), spell: ContentIdSchema }),
@@ -1042,6 +1049,8 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       itemBonus: z.number().int().min(1).optional(), // a magic weapon's own bonus to hit
       // Beyond this many feet, out to the targeting's range, the roll has Disadvantage, as a thrown weapon's long range.
       normalRange: z.number().int().min(5).optional(),
+      unarmed: z.literal(true).optional(), // an Unarmed Strike, as Martial Arts' or Vampiric Bite's
+      finesse: z.literal(true).optional(), // a Finesse weapon a feature makes, as a Psychic Blade, for Sneak Attack
     }),
     damage: z.array(DamageSchema).min(1),
     onHit: LeafEffectsSchema,
@@ -1159,6 +1168,25 @@ export const AreaEffectSchema = z.strictObject({
 });
 export type AreaEffect = z.infer<typeof AreaEffectSchema>;
 
+// Which hits a rider answers (combat/queries.ts hitFits): "unarmed" an Unarmed Strike, "monkWeapon" one or a Simple
+// Melee or Light Martial Melee weapon, "magicWeapon" a magic one, "strength" a Strength-based one, "heavy" a Heavy
+// weapon's ("heavyOrVersatile" or a Versatile one's), "finesseOrRanged" a Finesse or Ranged weapon's (a monster's any), as Sneak Attack's, and "attack" any
+// attack roll, a spell's too, as Hurl Through Hell's.
+export const HitKindSchema = z.enum([
+  "weapon",
+  "meleeWeapon",
+  "rangedWeapon",
+  "unarmed",
+  "monkWeapon",
+  "magicWeapon",
+  "strength",
+  "heavy",
+  "heavyOrVersatile",
+  "finesseOrRanged",
+  "attack",
+]);
+export type HitKind = z.infer<typeof HitKindSchema>;
+
 const CostSchema = z.union([
   z.enum(["action", "bonusAction", "reaction", "slot"]),
   // `count` spends that many at once, as Lay On Hands' 5 Hit Points to end Poisoned.
@@ -1195,6 +1223,8 @@ export const TargetingSchema = z.union([
     downed: z.literal(true).optional(), // only a living creature at 0 Hit Points, as for a will-o'-wisp's Consume Life
     // only a creature under an effect of the bearer's action of this name, as a nightmare's spear curse for Narcotize
     afflicted: z.string().min(1).optional(),
+    // a melee attack that reaches past 5 feet, as a Glaive's, so its range is its reach (combat/queries.ts isMelee)
+    reach: z.literal(true).optional(),
   }),
   z.strictObject({
     area: z.strictObject({
@@ -1222,7 +1252,24 @@ export const ActivationSchema = z.strictObject({
       spellCast: z.literal(true).optional(),
       // Taken right after hitting with a weapon, as with the smite spells. An area it targets is centred on the
       // creature hit, as Hail of Thorns' is.
-      afterHit: z.enum(["weapon", "meleeWeapon", "rangedWeapon"]).optional(),
+      afterHit: HitKindSchema.optional(),
+      // With `afterHit`, a strike option chosen before the damage is rolled, giving up this many of the hit's Sneak
+      // Attack dice, as Cunning Strike's Poison (combat/strikes.ts). It's offered only when Sneak Attack lands.
+      forgo: z.number().int().min(1).optional(),
+      // With `afterHit`, a strike option chosen before an attack roll that has Advantage, which then has none, as
+      // Brutal Strike's (combat/strikes.ts).
+      forgoAdvantage: z.literal(true).optional(),
+      // With `afterHit`, only once the hit has dealt Sneak Attack damage, as Wails from the Grave.
+      sneakAttack: z.literal(true).optional(),
+      // With `afterHit`, only a hit with this feature's own attacks, as Rend Mind's Psychic Blades.
+      withFeature: ContentIdSchema.optional(),
+      // With `afterHit`, aimed at another creature within this many feet of the one hit (of the targeting's side,
+      // within its range), as Sweeping Attack, and with `sameRoll` only one the hit's attack roll would also hit.
+      near: z.number().int().min(5).optional(),
+      sameRoll: z.literal(true).optional(),
+      // With `afterHit`, only a hit on a creature under an effect of the bearer's from one of these, as Superior
+      // Hunter's Prey's Hunter's Mark.
+      marked: z.array(ContentIdSchema).min(1).optional(),
       // With `afterHit`, taken as the attack hits or misses, in place of what it does: the target takes this, or
       // half on a miss, and an area is round the target without it, as Lightning Arrow.
       replacesHit: z.array(DamageSchema).min(1).optional(),
@@ -1300,10 +1347,16 @@ export const ActivationSchema = z.strictObject({
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
   whileIn: z.literal("shadows").optional(), // only in Dim Light or Darkness, as Merge with Shadows
   afterAction: z.literal(true).optional(), // only once the bearer has taken its action, as Blink Steps
+  beforeAction: z.literal(true).optional(), // only before it takes its action, as Reckless Attack's first attack roll
   afterBonusAction: z.literal(true).optional(), // only once it has taken its Bonus Action, as Fleet Step
   // only after casting a spell with a casting time of an action this turn, as Battle Magic
   afterCast: z.literal(true).optional(),
   unmoved: z.literal(true).optional(), // only if the bearer hasn't moved this turn, as Steady Aim
+  // Once a turn for all its feature's activations, as Stunning Strike, or with a name, for all activations of that
+  // name, as Brutal Strike's and Improved Brutal Strike's options (queries.ts gatesOpen).
+  oncePerTurn: z.union([z.literal(true), z.string().min(1)]).optional(),
+  // What the bearer gets as an `afterHit` activation is taken, as Cunning Strike's Withdraw move.
+  selfEffects: z.array(LeafEffectSchema).min(1).optional(),
   // only while an effect of one of these features' activations is on the bearer, as Travel along the Tree in a Rage,
   // or while it concentrates on one of these spells, as Telekinetic Master's attack
   while: z.array(ContentIdSchema).min(1).optional(),
@@ -1411,14 +1464,34 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     kind: z.literal("extraDamage"),
-    dice: DiceSchema,
+    dice: DiceSchema.optional(),
     diceCount: z.string().optional(), // a class scaling key that replaces the number of dice
     dieSize: z.string().optional(), // a class scaling key that replaces the die size
+    bonus: FormulaSchema.optional(), // added to the dice, as Divine Fury's half the Barbarian level
     // "advantageOrAlly" also counts an ally within 5 feet of the target, as Sneak Attack does. "targetHurt" is a
-    // target missing any Hit Points, as Circle of Mortality's Pull of Death.
-    when: z.enum(["advantage", "advantageOrAlly", "targetHurt"]),
+    // target missing any Hit Points, as Circle of Mortality's Pull of Death. "always" is every hit `with` allows.
+    // "natural20" is a hit whose d20 rolled a 20, as Overwhelming Strike's.
+    when: z.enum([
+      "advantage",
+      "advantageOrAlly",
+      "targetHurt",
+      "always",
+      "natural20",
+    ]),
+    // which hits carry it: unset, a Finesse or Ranged weapon's for Advantage, and any other hit
+    with: HitKindSchema.optional(),
     type: DamageTypeSchema.optional(), // the damage's own type, not the weapon's, as Pull of Death's Necrotic
+    // the type of these its target resists least, as Divine Fury's Necrotic or Radiant
+    types: z.array(DamageTypeSchema).min(2).optional(),
     oncePerTurn: z.boolean().default(false),
+    ownTurn: z.literal(true).optional(), // only on the bearer's own turn, as Divine Fury's first hit each turn
+    firstRound: z.literal(true).optional(), // only in a fight's first round, as Assassinate's Surprising Strikes
+    // only while an effect of each of these features' activations is on the bearer, as Divine Fury's Rage, or
+    // Frenzy's Rage and Reckless Attack
+    while: z.array(ContentIdSchema).min(1).optional(),
+    // only against a creature under an effect of the bearer's from one of these spells or features, as Guided
+    // Precision's Faerie Fire
+    against: z.array(ContentIdSchema).min(1).optional(),
   }),
   z.strictObject({ kind: z.literal("packTactics") }),
   // Moving through other creatures' spaces or through walls, as a swarm, a ghost's Incorporeal Movement or Halfling
@@ -1459,9 +1532,19 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     anySave: z.boolean().default(false),
   }),
   // Advantage on attack rolls while Bloodied, against a target missing Hit Points, or against a Frightened one.
+  // "marked" is against a creature under an effect of the bearer's from one of `against`, as Precise Hunter's Hunter's
+  // Mark (the spell's or Favored Enemy's),
+  // and "unacted" against one yet to take a turn in a fight's first round, as Assassinate's.
   z.strictObject({
     kind: z.literal("attackAdvantage"),
-    when: z.enum(["bloodied", "targetHurt", "targetFrightened"]),
+    when: z.enum([
+      "bloodied",
+      "targetHurt",
+      "targetFrightened",
+      "marked",
+      "unacted",
+    ]),
+    against: z.array(ContentIdSchema).min(1).optional(),
   }),
   // Its shape can't change, so Polymorph does nothing to it, as with a golem's Immutable Form.
   z.strictObject({ kind: z.literal("immutableForm") }),
@@ -1700,9 +1783,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Effects on a creature the bearer hits with an attack dealing this type, as Crusher or Slasher give: with
   // `critical` only on a Critical Hit, with `oncePerTurn` once a turn.
+  // Without `damage`, any hit `with` allows sets it off, as Eldritch Strike's weapon hit, and with `opportunity` only an
+  // Opportunity Attack's, as Relentless Avenger's.
   z.strictObject({
     kind: z.literal("damageRider"),
-    damage: DamageTypeSchema,
+    damage: DamageTypeSchema.optional(),
+    with: HitKindSchema.optional(),
+    opportunity: z.literal(true).optional(),
     critical: z.boolean().default(false),
     oncePerTurn: z.boolean().default(false),
     resource: z.string().optional(), // each use spends one, as Putrefy's once per rest
@@ -2098,6 +2185,39 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("bloodiedFeast"), resource: z.string() }),
   // Gear used with an action takes a Bonus Action instead, as with Fast Hands (stats.ts fastHands).
   z.strictObject({ kind: z.literal("fastHands") }),
+  // What weapon attacks of a kind gain (weapon-riders.ts), as Archery's +2 to hit with a Ranged weapon, Dueling's +2
+  // damage with a one-handed Melee weapon, Great Weapon Master's Proficiency Bonus with a Heavy one, Pact of the
+  // Blade's Necrotic, Psychic or Radiant in place of the weapon's type (the one its target resists least), or Battering
+  // Roots' 10 feet more reach. `while` holds it to an effect of these features' activations, as Sacred Weapon's.
+  z.strictObject({
+    kind: z.literal("weaponRider"),
+    with: HitKindSchema,
+    oneHanded: z.literal(true).optional(), // only a weapon without the Two-Handed property, as Dueling's
+    attack: z.number().int().optional(),
+    damage: FormulaSchema.optional(),
+    types: z.array(DamageTypeSchema).min(1).optional(),
+    reach: z.number().int().min(5).optional(),
+    ability: AbilitySchema.optional(), // used for the attack and damage when it's better, as Battle Ready's Intelligence
+    while: z.array(ContentIdSchema).min(1).optional(),
+  }),
+  // In a fight's first round, a hit carrying Sneak Attack makes its target save or take the hit's damage twice, as
+  // Death Strike.
+  z.strictObject({
+    kind: z.literal("deathStrike"),
+    ability: AbilitySchema,
+    dc: FormulaSchema,
+  }),
+  // Effects on a creature the bearer's attack roll misses, as Studied Attacks' Advantage on the next attack against it.
+  z.strictObject({
+    kind: z.literal("missRider"),
+    effects: z.array(LeafEffectSchema).min(1),
+  }),
+  // A hit takes this many strike options (Cunning Strike's or Brutal Strike's) instead of one, as Improved Cunning
+  // Strike.
+  z.strictObject({
+    kind: z.literal("strikeEffects"),
+    count: z.number().int().min(2),
+  }),
   // A vial or flask is thrown this far, as with Bomber's Far Lobber.
   z.strictObject({
     kind: z.literal("farLobber"),

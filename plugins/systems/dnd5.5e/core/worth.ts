@@ -53,7 +53,7 @@ import {
   attackRoutine,
   throwsLeft,
   canAfford,
-  carriesExtraDice,
+  extraFits,
   type Context,
   exemptFrom,
   findAction,
@@ -118,6 +118,8 @@ export interface Judge {
   readonly pressure: number;
   // Taking the Dodge action instead.
   readonly dodgeWorth: (actor: Actor) => number;
+  // What this much damage to a creature is worth to the judge's side.
+  readonly damageWorth: (target: Actor, dealt: number) => number;
   readonly worth: (
     actor: Actor,
     actionId: string,
@@ -326,25 +328,26 @@ export function makeJudge(context: Context, side: Actor): Judge {
     target: Actor,
     action: KnownAction,
   ): number => {
-    if (!carriesExtraDice(attacker, action, context)) return 0;
     const edge = attackEdge(attacker, target, action);
-    const flanked = allies(state, attacker).some(
-      (item) =>
-        item.id !== attacker.id &&
-        !isDown(item) &&
-        !hasCondition(item, ...INCAPACITATING) &&
-        within5(item, target),
-    );
-    return stats(attacker).passives.reduce(
+    const own = stats(attacker);
+    return own.passives.reduce(
       (total, passive, index) =>
         passive.kind === "extraDamage" &&
         !(
           passive.oncePerTurn &&
           attacker.usedThisTurn.includes(`extra:${String(index)}`)
         ) &&
-        (edge > 0 ||
-          (passive.when === "advantageOrAlly" && flanked && edge === 0))
-          ? total + rollDiceNotation(passive.dice, AVERAGE)
+        extraFits(
+          passive,
+          attacker,
+          target,
+          action,
+          { advantage: edge > 0, disadvantage: edge < 0 },
+          context,
+        )
+          ? total +
+            (passive.dice ? rollDiceNotation(passive.dice, AVERAGE) : 0) +
+            (passive.bonus ? evaluateFormula(passive.bonus, own) : 0)
           : total,
       0,
     );
@@ -912,8 +915,11 @@ export function makeJudge(context: Context, side: Actor): Judge {
                 )
               ? 0.05 * own * lasting(span)
               : 0;
+      // Attacks against it with Advantage are a cost, as Reckless Attack's, about what Disadvantage on them is worth.
       case "advantage":
-        return (modifier.on === "attacks" ? 0.25 : 0.05) * own * lasting(span);
+        return modifier.on === "attacksAgainst"
+          ? -0.2 * meanFoeThreat * lasting(span)
+          : (modifier.on === "attacks" ? 0.25 : 0.05) * own * lasting(span);
       case "disadvantage": {
         if (modifier.on !== "attacksAgainst") return 0;
         // Only against the foes it names, as Protection from Evil and Good's.
@@ -1459,6 +1465,8 @@ export function makeJudge(context: Context, side: Actor): Judge {
     pressure,
     worth,
     dodgeWorth,
+    damageWorth: (target, dealt) =>
+      hurtWorth(target, dealt, target.side !== side.side),
   };
 }
 

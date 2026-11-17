@@ -149,7 +149,7 @@ export function withInvocations(
     const melee =
       action.id.startsWith("weapon:") &&
       "range" in targeting &&
-      targeting.range === 5;
+      (targeting.range === 5 || ("reach" in targeting && targeting.reach));
     return pacts.length > 0 && melee
       ? {
           ...action,
