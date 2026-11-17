@@ -3,6 +3,7 @@ import {
   PLAYER_ACTOR,
   type SceneAction,
   type SystemContext,
+  type SystemEvent,
   type SystemResult,
   awaitDecision,
   frameHandler,
@@ -22,10 +23,17 @@ import {
   frame,
   isDead,
 } from "./state.ts";
+import { castFrom, spellOfSource } from "./combat/ids.ts";
 import {
   type Stats,
+  chargesOf,
+  imbuedRange,
   deriveStats,
+  rollDiceNotation,
+  evaluateFormula,
   itemHealing,
+  spellAttackBonus,
+  spellSaveDc,
   lookup,
   ownAbilities,
   rollAmount,
@@ -69,9 +77,51 @@ export function treasure(loot: Loot, context: Context): SystemResult {
         items: [...items],
         stowed: items.filter((id) => WORN_TYPES.has(itemOf(context, id).type)),
       }),
+      ...(context.state.actors[PLAYER_ACTOR]
+        ? gainRolls(context.state.actors[PLAYER_ACTOR], items, context)
+        : []),
     ],
     frames: [frame("gearStep", { step: 0, found: { gold, items } })],
   };
+}
+
+// What an item found rolls for as it's found: its pools' `rolled` dice, as a Helm of Brilliance's 1d10 diamonds,
+// and its `split` pieces' types, as a Necklace of Prayer Beads' beads. A pool already rolled stays as it is.
+export function gainRolls(
+  actor: Actor,
+  items: readonly string[],
+  context: Context,
+): SystemEvent[] {
+  const rolled = new Set(Object.keys(actor.rolledPools ?? {}));
+  const events: SystemEvent[] = [];
+  const set = (resource: string, amount: number) => {
+    rolled.add(resource);
+    events.push(
+      dndEvent(`${NS}:poolRolled`, { actor: actor.id, resource, amount }),
+    );
+  };
+  for (const id of items) {
+    const item = itemOf(context, id);
+    for (const pool of chargesOf(item).resources) {
+      if (pool.rolled && !rolled.has(pool.id)) {
+        set(pool.id, rollDiceNotation(pool.rolled, context.dice));
+      }
+    }
+    const split = "split" in item ? item.split : undefined;
+    if (!split || split.rows.every((row) => rolled.has(row.resource))) continue;
+    const counts = new Map(split.rows.map((row) => [row.resource, 0]));
+    const pieces =
+      split.count.base + rollDiceNotation(split.count.dice, context.dice);
+    for (let piece = 0; piece < pieces; piece += 1) {
+      const face = context.dice.roll(split.die);
+      const row = split.rows.find(
+        (entry) => face >= entry.min && face <= entry.max,
+      );
+      if (row) counts.set(row.resource, (counts.get(row.resource) ?? 0) + 1);
+    }
+    for (const [resource, amount] of counts) set(resource, amount);
+  }
+  return events;
 }
 
 // Whether any of the character's classes trains them with it, or for a scroll, whether they cast spells.
@@ -285,6 +335,23 @@ export function sceneGearActions(
           ]
         : [];
     }),
+    ...storeActions(state, access),
+    ...coatActions(actor, access),
+    ...[...new Set(actor.inventory)].flatMap((id) => {
+      const item = itemOf(access, id);
+      if (item.type !== "magicItem" || !item.chooseSkill) return [];
+      const picked = actor.itemSkills?.[id];
+      return item.chooseSkill
+        .filter((skill) => skill !== picked)
+        .map((skill) => ({
+          id: `skill:${id}:${skill}`,
+          label: `${item.name}: proficiency in ${skill.replace(/^./, (first) => first.toUpperCase())}`,
+          effect: `${NS}:pickItemSkill`,
+          args: { item: id, skill },
+          // The first pick comes with attuning; a change waits on a Long Rest's time.
+          ...(picked ? { rest: true as const } : {}),
+        }));
+    }),
     ...[...new Set(actor.inventory)].flatMap((id) => {
       const item = itemOf(access, id);
       return studyGain(actor, item) > 0
@@ -301,6 +368,186 @@ export function sceneGearActions(
     }),
   ];
 }
+
+// Applying an oil to a plain weapon or ammunition carried (MagicItemSchema `coats`), as Oil of Sharpness.
+function coatActions(actor: Actor, access: ContentAccess): SceneAction[] {
+  return [...new Set(actor.inventory)].flatMap((oilId) => {
+    const oil = itemOf(access, oilId);
+    if (oil.type !== "magicItem" || !oil.coats) return [];
+    const { coats } = oil;
+    return [...new Set(actor.inventory)].flatMap((targetId) => {
+      const target = itemOf(access, targetId);
+      const melee =
+        target.type === "weapon" &&
+        !target.baseWeapon &&
+        !target.properties.includes("ammunition") &&
+        coats.damage.includes(target.damage.type);
+      const ammunition =
+        target.type === "gear" && target.category === "ammunition";
+      if (!melee && !ammunition) return [];
+      const made = melee
+        ? `${coats.weapon}--${targetId.slice(targetId.lastIndexOf("/") + 1)}`
+        : coats.ammunition;
+      if (!access.content(made)) return [];
+      return [
+        {
+          id: `coat:${oilId}:${targetId}`,
+          label: `Apply ${oil.name} to ${target.name}`,
+          effect: `${NS}:coat`,
+          args: {
+            oil: oilId,
+            target: targetId,
+            items: Array<string>(melee ? 1 : coats.pieces).fill(made),
+          },
+        },
+      ];
+    });
+  });
+}
+
+// The oil and what it coats are used up, and what it makes is carried in their place.
+function coat(
+  args: z.infer<typeof CoatSchema>,
+  context: Context,
+): SystemResult {
+  const actor = player(context.state);
+  const offered = coatActions(actor, context).find(
+    (option) => option.id === `coat:${args.oil}:${args.target}`,
+  );
+  if (!offered) throw new Error(`${args.oil} can't coat ${args.target}`);
+  const { items } = CoatSchema.parse(offered.args);
+  return {
+    events: [
+      dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: args.oil }),
+      dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: args.target }),
+      dndEvent(`${NS}:treasureFound`, {
+        actor: actor.id,
+        gold: 0,
+        items,
+        stowed: [],
+      }),
+    ],
+  };
+}
+
+const CoatSchema = z.object({
+  oil: z.string(),
+  target: z.string(),
+  items: z.array(z.string()),
+});
+
+// Casting a spell into an item a party member carries, as into a Ring of Spell Storing (MagicItemSchema
+// `storesSpells`): each party caster's leveled spells that fit, with the lowest slot they have that the item takes.
+function storeActions(state: DndState, access: ContentAccess): SceneAction[] {
+  const party = Object.values(state.actors).filter(
+    (item) =>
+      item.side === "party" &&
+      item.source.kind === "character" &&
+      !isDead(item) &&
+      item.hp > 0,
+  );
+  return party.flatMap((holder) =>
+    [...new Set(holder.inventory)].flatMap((itemId) => {
+      const item = itemOf(access, itemId);
+      if (item.type !== "magicItem" || !item.storesSpells) return [];
+      const { levels, maxLevel } = item.storesSpells;
+      const room =
+        levels -
+        (holder.storedSpells?.[itemId] ?? []).reduce(
+          (total, stored) => total + stored.level,
+          0,
+        );
+      return party.flatMap((caster) => {
+        const stats = deriveStats(caster, access);
+        return stats.actions.flatMap((action) => {
+          const spell = action.id.startsWith("spell:")
+            ? spellOfSource(action.id)
+            : null;
+          const least = action.spellLevel;
+          if (
+            !spell ||
+            castFrom(action.id) ||
+            least === null ||
+            least < 1 ||
+            !action.activation.cost.includes("slot")
+          ) {
+            return [];
+          }
+          const slot = Array.from(
+            { length: Math.min(maxLevel, room) - least + 1 },
+            (_, index) => least + index,
+          ).find(
+            (level) =>
+              (stats.slots[level - 1] ?? 0) >
+              (caster.resourcesSpent[`slot:${String(level)}`] ?? 0),
+          );
+          if (slot === undefined) return [];
+          const who = caster.id === PLAYER_ACTOR ? "" : `${caster.name}: `;
+          return [
+            {
+              id: `store:${caster.id}:${spell}:${itemId}`,
+              label: `${who}Store ${action.name} in ${item.name}`,
+              effect: `${NS}:storeSpell`,
+              args: {
+                caster: caster.id,
+                holder: holder.id,
+                spell,
+                item: itemId,
+                slot,
+              },
+            },
+          ];
+        });
+      });
+    }),
+  );
+}
+
+// The caster spends the slot, and the item holds the spell with the caster's numbers.
+function storeSpell(
+  args: z.infer<typeof StoreSchema>,
+  context: Context,
+): SystemResult {
+  const offered = storeActions(context.state, context).some(
+    (option) =>
+      option.args.caster === args.caster &&
+      option.args.spell === args.spell &&
+      option.args.item === args.item &&
+      option.args.holder === args.holder,
+  );
+  const caster = context.state.actors[args.caster];
+  if (!offered || !caster) {
+    throw new Error(`${args.caster} can't store ${args.spell} in ${args.item}`);
+  }
+  const stats = deriveStats(caster, context);
+  return {
+    events: [
+      dndEvent(`${NS}:resourceSpent`, {
+        actor: caster.id,
+        resource: `slot:${String(args.slot)}`,
+      }),
+      dndEvent(`${NS}:spellStored`, {
+        actor: args.holder,
+        item: args.item,
+        stored: {
+          spell: args.spell,
+          level: args.slot,
+          dc: spellSaveDc(stats),
+          attack: spellAttackBonus(stats),
+          mod: evaluateFormula({ base: 0, add: [{ kind: "spellMod" }] }, stats),
+        },
+      }),
+    ],
+  };
+}
+
+const StoreSchema = z.object({
+  caster: z.string(),
+  holder: z.string(),
+  spell: z.string(),
+  item: z.string(),
+  slot: z.number().int().min(1).max(9),
+});
 
 // How much studying the item raises the character's own score, which may be nothing once at its maximum.
 function studyGain(actor: Actor, item: z.infer<typeof ItemSchema>): number {
@@ -377,6 +624,36 @@ export const gearEffects = {
     references: ({ item }) => [item],
     apply: ({ item }, context: Context) => drink(item, context),
   }),
+  [`${NS}:pickItemSkill`]: storyEffect({
+    schema: z.object({ item: z.string(), skill: z.string() }),
+    references: ({ item }) => [item],
+    apply: ({ item, skill }, context: Context) => {
+      const actor = player(context.state);
+      const entry = itemOf(context, item);
+      if (
+        !actor.inventory.includes(item) ||
+        entry.type !== "magicItem" ||
+        !entry.chooseSkill?.some((option) => option === skill)
+      ) {
+        throw new Error(`${item} gives no ${skill}`);
+      }
+      return {
+        events: [
+          dndEvent(`${NS}:itemSkillPicked`, { actor: actor.id, item, skill }),
+        ],
+      };
+    },
+  }),
+  [`${NS}:coat`]: storyEffect({
+    schema: CoatSchema,
+    references: ({ oil, target, items }) => [oil, target, ...items],
+    apply: coat,
+  }),
+  [`${NS}:storeSpell`]: storyEffect({
+    schema: StoreSchema,
+    references: ({ item, spell }) => [item, spell],
+    apply: storeSpell,
+  }),
   [`${NS}:study`]: storyEffect({
     schema: z.object({ item: z.string() }),
     references: ({ item }) => [item],
@@ -417,7 +694,12 @@ function throwWeapon(
   if (!thrower || !equipped(thrower).includes(payload.item)) return {};
   // A Returning Weapon comes back to the hand that threw it.
   const item = itemOf(context, payload.item);
-  if (item.type === "weapon" && item.returning) return {};
+  if (
+    item.type === "weapon" &&
+    (item.returning || imbuedRange(thrower, payload.item))
+  ) {
+    return {};
+  }
   const at = actors[payload.target]?.position ??
     thrower.position ?? { x: 0, y: 0 };
   return {

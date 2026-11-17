@@ -270,14 +270,15 @@ function caged(
 
 // Pays for an action and resolves it, at a target id (a creature, ALL, or an aim) or at chosen creatures.
 // Darts and rays go one each at the chosen ids, which may repeat.
-function castAction(
+export function castAction(
   actor: Actor,
   actionId: string,
   slot: string | undefined,
   target: string | readonly string[],
   context: Context,
-  uncountered = false, // a foe has already had its chance to counter it
+  uncountered = false, // a foe has already had its chance to counter it, and any check it needs was made
   shape?: string, // the shape picked for a spell that has several, as Forcecage's cage or box
+  checked = false, // the check it needs was made and passed (actions.ts castCheckFrames)
 ): SystemResult {
   const { state } = context;
   const slotLevel = slotLevelFor(actor, actionId, slot, context);
@@ -304,6 +305,17 @@ function castAction(
     };
   }
   const action = shape === undefined ? found : withShape(found, shape);
+  // A check it needs comes next, as a Spell Scroll read above its reader's level.
+  if (action.castCheck && !checked && !uncountered) {
+    return {
+      frames: [
+        frame("castCheck", {
+          ...cast,
+          ...(shape === undefined ? {} : { shape }),
+        }),
+      ],
+    };
+  }
   const counter = uncountered
     ? null
     : counterWindow(
@@ -482,6 +494,14 @@ function withShape(action: KnownAction, shape: string): KnownAction {
     },
   };
 }
+
+export const CastCheckSchema = z.object({
+  actor: z.string(),
+  actionId: z.string(),
+  slot: z.string().optional(),
+  target: z.union([z.string(), z.array(z.string())]),
+  shape: z.string().optional(),
+});
 
 export const ShapeSchema = z.object({
   actor: z.string(),

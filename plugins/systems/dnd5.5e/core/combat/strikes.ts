@@ -66,7 +66,7 @@ export function sneakDice(
 }
 
 function optionsFor(
-  kind: "forgo" | "forgoAdvantage" | "critical",
+  kind: "forgo" | "forgoAdvantage" | "gainsAdvantage" | "critical",
   hit: Struck,
   budget: number,
   context: Context,
@@ -85,9 +85,11 @@ function optionsFor(
           const fits =
             kind === "forgo"
               ? trigger?.forgo !== undefined && trigger.forgo <= budget
-              : kind === "critical"
-                ? trigger?.critical === true
-                : trigger?.forgoAdvantage === true;
+              : kind === "gainsAdvantage"
+                ? trigger?.gainsAdvantage === true
+                : kind === "critical"
+                  ? trigger?.critical === true
+                  : trigger?.forgoAdvantage === true;
           return (
             fits &&
             !chosen.includes(action.id) &&
@@ -224,6 +226,32 @@ export function criticalFrame(
     options,
     `${attacker.name} hits ${target.name}. Make it a Critical Hit?`,
     frame("criticalChosen", hit),
+    () => "",
+  );
+}
+
+// A Martialist's Trip's question before an attack roll without Advantage, or null when nothing gives it.
+export function gainAdvantageFrame(
+  attack: Struck,
+  context: Context,
+): Frame | null {
+  const { state } = context;
+  const attacker = actorOf(state, attack.attacker);
+  const stats = deriveStats(attacker, context);
+  if (
+    !stats.actions.some(({ activation }) => activation.trigger?.gainsAdvantage)
+  ) {
+    return null;
+  }
+  const { options } = optionsFor("gainsAdvantage", attack, 0, context);
+  if (options.length === 0) return null;
+  const target = actorOf(state, attack.target);
+  return askFor(
+    attack,
+    attacker,
+    options,
+    `${attacker.name} attacks ${target.name}. Use a strike for Advantage?`,
+    frame("advantageGained", attack),
     () => "",
   );
 }

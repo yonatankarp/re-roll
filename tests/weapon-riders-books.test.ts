@@ -490,4 +490,37 @@ describe.skipIf(!BOOKS)("the book's magic weapons", () => {
     );
     expect(aura).toMatchObject({ radius: 10, owner: PLAYER_ACTOR });
   });
+
+  it("knocks a creature Prone with a piece of Walloping Ammunition, which the hit spends", () => {
+    const bow = "srd52:item/shortbow";
+    const arrow = "dmg:item/walloping-ammunition";
+    let d20s = 0;
+    const state = onGrid(
+      [wielding([bow, arrow]), 0, 0],
+      [monster("bandit", "humanoid"), 6, 0],
+    );
+    const shot = settle(run, state, [swing(bow, "bandit")], {
+      below: () => 0,
+      roll: (sides) => (sides === 20 ? (d20s++ === 0 ? 15 : 1) : 1),
+    });
+    expect(hasCondition(need(shot.state, "bandit"), "prone")).toBe(true);
+    expect(need(shot.state, PLAYER_ACTOR).inventory).not.toContain(arrow);
+  });
+
+  it("slays a creature under 100 Hit Points on a Nine Lives Stealer's 20, spending a charge", () => {
+    const blade = "dmg:item/nine-lives-stealer--1--longsword";
+    let d20s = 0;
+    const state = onGrid(
+      [wielding([blade]), 0, 0],
+      [monster("bandit", "humanoid", 60), 1, 0],
+    );
+    const slain = settle(run, state, [swing(blade, "bandit")], {
+      below: () => 0,
+      roll: (sides) => (sides === 20 ? (d20s++ === 0 ? 20 : 1) : 1),
+    });
+    expect(slain.state.actors.bandit?.hp ?? 0).toBeLessThanOrEqual(0);
+    expect(
+      need(slain.state, PLAYER_ACTOR).resourcesSpent["nine-lives-stealer"],
+    ).toBe(1);
+  });
 });
