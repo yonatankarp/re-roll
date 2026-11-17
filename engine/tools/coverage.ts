@@ -84,7 +84,7 @@ const unique = (keys: readonly string[]): string[] => [
   ...new Set(keys.filter(Boolean)),
 ];
 
-// The heading as printed first, then without its labels: "Level 3: Rage", "Feature: Safe Haven", "Stone (Luckstone)",
+// The heading as printed first, then without its labels: "Level 3: Rage", "Feature: Moss Haven", "Stone (Luckstone)",
 // "Acid (25 GP)", "The Gilded Hand". Looser keys come after: the singular ("High Elves") and the name
 // inside a wrapper label ("Aasimar Traits", "Bard Spell List").
 export function variants(heading: string): {

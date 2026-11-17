@@ -758,7 +758,7 @@ function invocationFeatures(
     );
 }
 
-// A 2014 background prints its feature under a heading of its own, as "Feature: Shelter of the Faithful".
+// A 2014 background prints its feature under a heading of its own, as "Feature: Moss Haven".
 function backgroundFeatures(
   html: string,
   headings: readonly Heading[],
