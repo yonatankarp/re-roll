@@ -77,8 +77,11 @@ export function draftWorld(
       return;
     }
     // An area's id starts with its place's, since many places have a "1. Entrance".
-    const name =
+    const full =
       slug(heading.text.normalize("NFD").replace(/\p{M}/gu, "")) || "untitled";
+    // A ruling's heading is a whole question, so its name stops at a word near 60 letters.
+    const name =
+      full.length > 60 ? full.slice(0, 61).replace(/-[^-]*$/, "") : full;
     const base = kind === "area" && place ? `${tailOf(place)}-${name}` : name;
     let tail = base;
     for (let n = 2; used.has(`${folder}/${tail}.yaml`); n += 1)
