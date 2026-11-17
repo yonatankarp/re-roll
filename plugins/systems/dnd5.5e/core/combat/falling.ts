@@ -377,8 +377,11 @@ export function runFall(
     if (safe.has(actor.id) || count === 0) continue;
     let rolled = 0;
     for (let die = 0; die < count; die += 1) rolled += dice.roll(6);
+    // Low Gravity: falls hurt half as much.
     const amount = finalDamage(
-      rolled,
+      context.state.combat?.environment?.halfFalls
+        ? Math.floor(rolled / 2)
+        : rolled,
       "bludgeoning",
       damageResponses(actor, context),
     );

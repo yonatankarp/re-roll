@@ -330,7 +330,16 @@ export function masteredDice(
   type: DamageType,
   mastered: readonly DamageType[],
   rerolled: readonly DamageType[] = [],
+  forceFloor = 0, // an Empowered Force Zone's 3 for every Force die below it (environment.ts)
 ): Dice {
+  if (type === "force" && forceFloor > 0) {
+    const floored = masteredDice(dice, type, mastered, rerolled);
+    return {
+      below: (count) => floored.below(count),
+      roll: (sides) =>
+        Math.max(Math.min(forceFloor, sides), floored.roll(sides)),
+    };
+  }
   // Flames of Phlegethos: a 1 on a die of its type is rolled again, and the new roll stands.
   const once: Dice = rerolled.includes(type)
     ? {

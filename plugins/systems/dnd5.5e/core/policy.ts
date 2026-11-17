@@ -54,6 +54,7 @@ const crosses = (
   squares.length > 0 &&
   path.some((square) => squares.includes(squareKey(square)));
 import { TACTIC } from "./tactics.ts";
+import { COLLECT, SHAKE } from "./combat/fear.ts";
 import { SHAPE } from "./forms.ts";
 import { damageTypePolicy, zoneTypePolicy } from "./combat/damage-choice.ts";
 
@@ -634,6 +635,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (decision.id.startsWith(`${NS}:wish:`)) return first.id; // the highest level
   if (decision.id.startsWith(`${NS}:shape:`)) return first.id; // as written, as Forcecage's box
   if (decision.id.startsWith(`${NS}:focus:`)) return first.id; // as listed, the one a fight uses most first
+  if (decision.id.startsWith(`${NS}:option:`)) return first.id; // as listed, the strongest first
   if (decision.id.startsWith(`${NS}:damageType:`)) {
     return damageTypePolicy(decision, context);
   }
@@ -703,6 +705,11 @@ export function choosePolicy(decision: Decision, context: Context): string {
   // A weapon within reach on the ground is picked up first, since it's free.
   const pickUp = decision.options.find(({ id }) => id.startsWith(PICK_UP));
   if (pickUp && actor.side === "party") return pickUp.id;
+  // Shaking an ally out of a spell, or saving against one with its action, comes before fighting on.
+  const freeing = decision.options.find(
+    ({ id }) => id.startsWith(SHAKE) || id.startsWith(COLLECT),
+  );
+  if (freeing) return freeing.id;
   // A hidden option, such as a potion at full health, only answers older saves.
   const parsed = decision.options.flatMap((option) => {
     if (option.hidden) return [];

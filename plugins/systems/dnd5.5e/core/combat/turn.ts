@@ -3,6 +3,17 @@ import { deathSaveEvents } from "./actions.ts";
 import { duelStrayed } from "./duel.ts";
 import { confusedBy } from "./confusion.ts";
 import {
+  groundedEvents,
+  reverseGravityEvents,
+  turnSaveEvents,
+} from "../environment.ts";
+import {
+  dodgeSaveEvents,
+  fledEvents,
+  fleeingFrom,
+  repeatsNow,
+} from "./fear.ts";
+import {
   type Frame,
   PLAYER_ACTOR,
   type SystemEvent,
@@ -383,7 +394,8 @@ export function runFinishTurn(context: Context): SystemResult {
     actor &&
     effect.repeatSave &&
     !isDown(actor) &&
-    !actor.usedThisTurn.includes(`${FRESH}${effect.sourceId}`)
+    !actor.usedThisTurn.includes(`${FRESH}${effect.sourceId}`) &&
+    repeatsNow(actor, effect, context)
       ? [{ actor, effect, save: effect.repeatSave }]
       : [],
   );
@@ -440,6 +452,17 @@ export function runFinishTurn(context: Context): SystemResult {
             },
           );
     events.push(...rescued);
+    // Vision of Elapsing Eons: each failed repeat save is a level of Exhaustion.
+    if (
+      effect.failExhaustion &&
+      !rolled.saved &&
+      !resisted &&
+      rescued.length === 0
+    ) {
+      events.push(
+        dndEvent(`${NS}:exhaustionChanged`, { actor: target.id, levels: 1 }),
+      );
+    }
     const holder =
       target.activeEffects.find(
         (item) =>
@@ -482,7 +505,10 @@ export function runFinishTurn(context: Context): SystemResult {
     if (!worse && (rolled.saved || resisted || rescued.length > 0)) {
       events.push(...sharedRecovery(target, modifier, context));
     }
-    // A second failure leaves the worse condition instead, with no more saves.
+    // A second failure leaves the worse condition instead, with no more saves, and the source's other effects stay,
+    // as Contagion's Disadvantage on the chosen ability's saves.
+    // shortcut: a worse condition kept by Concentration ends with it, so Flesh to Stone held its whole minute doesn't
+    // petrify for good.
     if (
       worse &&
       !rolled.saved &&
@@ -490,6 +516,20 @@ export function runFinishTurn(context: Context): SystemResult {
       rescued.length === 0 &&
       !immuneToCondition(deriveStats(target, context), worse.condition)
     ) {
+      for (const companion of target.activeEffects) {
+        if (
+          companion.sourceId === sourceId &&
+          companion.casterId === casterId &&
+          companion.modifier.kind !== "condition"
+        ) {
+          events.push(
+            dndEvent(`${NS}:effectAdded`, {
+              actor: target.id,
+              effect: companion,
+            }),
+          );
+        }
+      }
       events.push(
         dndEvent(`${NS}:effectAdded`, {
           actor: target.id,
@@ -499,6 +539,11 @@ export function runFinishTurn(context: Context): SystemResult {
             modifier: { kind: "condition", condition: worse.condition },
             ends: worse.ends,
             ...(worse.endsOnDamage ? { endsOnDamage: true } : {}),
+            ...(holder.shake ? { shake: true } : {}),
+            ...(holder.clings ? { clings: holder.clings } : {}),
+            ...(holder.lingers === undefined
+              ? {}
+              : { lingers: holder.lingers }),
           },
         }),
       );
@@ -506,6 +551,8 @@ export function runFinishTurn(context: Context): SystemResult {
   }
   const ending = [
     ...events,
+    ...(actor ? fledEvents(actor, context) : []),
+    ...(actor ? groundedEvents(actor, state) : []),
     ...(actor ? duelStrayed(actor, state) : []),
     ...regurgitationEvents(context),
     ...(actor ? rechargeEvents(actor, context) : []),
@@ -568,6 +615,9 @@ export function runAdvanceTurn(
       ? deathSaveEvents(next, { ...context, state: after })
       : []),
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
+    ...(next ? dodgeSaveEvents(next, { ...context, state: after }) : []),
+    ...(next ? turnSaveEvents(next, { ...context, state: after }) : []),
+    ...(next ? reverseGravityEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
     ...(next ? sharedTempHp(next, { ...context, state: after }) : []),
@@ -598,10 +648,15 @@ export function runAdvanceTurn(
         { ...context, state: events.reduce(applyDndEvent, state) },
       )
     : [];
-  return ticks.length + watched.length > 0
+  // Fleeing comes after the reactions, which may set it off, as Flee, Fools! does.
+  const fleeing =
+    next && (fleeingFrom(next) || watched.length > 0)
+      ? [frame("fleeTurn", {})]
+      : [];
+  return ticks.length + watched.length + fleeing.length > 0
     ? {
         events,
-        frames: [...ticks, ...watched, frame("afterTurnStart", {})],
+        frames: [...ticks, ...watched, ...fleeing, frame("afterTurnStart", {})],
       }
     : { events };
 }

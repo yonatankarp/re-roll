@@ -138,6 +138,9 @@ import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
 import { damageTypeFrame, zoneTypeFrame } from "./damage-choice.ts";
 import { focusFrame } from "./check-choice.ts";
+import { clingSave, dropEvents, prisonEvents, sendAwayEvents } from "./fear.ts";
+import { optionFrame } from "./options.ts";
+import { curedDiseaseEvents } from "../environment.ts";
 import { weaponAttackResult } from "./weapon-spell.ts";
 import { duelBroken, duelDamaged } from "./duel.ts";
 import { wishFrame } from "./wish.ts";
@@ -1244,13 +1247,23 @@ export function dealEvents(
     if (!isDead(hurt))
       events.push(...downedEvents(hurt, { ...context, state }));
   }
+  const resaved = new Set<string>();
   for (const effect of dealt > 0 ? (hurt?.activeEffects ?? []) : []) {
     if (!hurt || !effect.saveOnDamage) continue;
+    // One save for each source, as Hideous Laughter's Prone and Incapacitated end together.
+    const key = `${effect.sourceId}|${effect.casterId}`;
+    if (resaved.has(key)) continue;
+    resaved.add(key);
     const save = rollSave(
       hurt,
       effect.saveOnDamage.ability,
       effect.saveOnDamage.dc,
       { ...context, state },
+      effect.sourceId.startsWith("spell:"),
+      0,
+      [],
+      false,
+      effect.saveOnDamage.advantage === true,
     );
     events.push(...save.events);
     if (save.saved) {
@@ -1259,6 +1272,47 @@ export function dealEvents(
           actor: hurt.id,
           sourceId: effect.sourceId,
           casterId: effect.casterId,
+        }),
+      );
+    }
+  }
+  // Cackle Fever: damage other than Psychic sets off a fit of laughter on a failed save (environment.ts).
+  const fits = hurt?.activeEffects.find(
+    ({ modifier }) => modifier.kind === "laughter",
+  );
+  if (
+    hurt &&
+    dealt > 0 &&
+    fits?.modifier.kind === "laughter" &&
+    !isDead(hurt) &&
+    !hasCondition(hurt, "incapacitated") &&
+    hits.some(({ type, amount }) => type !== "psychic" && amount > 0)
+  ) {
+    const { dc, damage } = fits.modifier;
+    const save = rollSave(hurt, "con", dc, { ...context, state });
+    events.push(...save.events);
+    if (!save.saved) {
+      const laughed = dealEvents(
+        hurt,
+        damage.map(({ amount, type }) => ({
+          amount: amount.dice ? rollDiceNotation(amount.dice, context.dice) : 0,
+          type,
+        })),
+        false,
+        { ...context, state },
+      );
+      events.push(
+        ...laughed.events,
+        dndEvent(`${NS}:effectAdded`, {
+          actor: hurt.id,
+          effect: {
+            sourceId: `${fits.sourceId}:laughter`,
+            casterId: hurt.id,
+            modifier: { kind: "condition", condition: "incapacitated" },
+            ends: "spellDuration",
+            repeatSave: { ability: "con", dc },
+            ...lastsFor({ minutes: 1 }, hurt, hurt, state),
+          },
         }),
       );
     }
@@ -1305,6 +1359,33 @@ function reducedHit(
     amount: Math.max(0, amount - cut),
     events: [dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key })],
   };
+}
+
+// A target whose Hit Points are in the effect's band, as Divine Word's or Power Word Stun's.
+function inHpBand(
+  target: Actor,
+  band: {
+    readonly hpAtMost?: number | undefined;
+    readonly hpAbove?: number | undefined;
+  },
+): boolean {
+  return (
+    (band.hpAtMost === undefined || target.hp <= band.hpAtMost) &&
+    (band.hpAbove === undefined || target.hp > band.hpAbove)
+  );
+}
+
+// An hour or more without Concentration outlasts the fight, counted down by rests after it (rest.ts).
+// shortcut: anything shorter ends with the fight, as the scenes between fights take longer than ten minutes.
+export function lingersFor(duration: Duration): {
+  lingers?: number;
+} {
+  return typeof duration === "object" &&
+    "minutes" in duration &&
+    !("concentration" in duration) &&
+    duration.minutes >= 60
+    ? { lingers: Math.floor(duration.minutes / 60) }
+    : {};
 }
 
 // A timed spell's minutes, and a turn of the target's, are counted in rounds by its `lasts` (lastsFor).
@@ -1772,8 +1853,16 @@ export function leafEvents(
         break;
       }
       case "modifier":
-        // given once its type, skill or ability is picked (combat/damage-choice.ts, combat/check-choice.ts)
-        if (effect.choose || effect.pick) break;
+        // given once its type, skill or ability is picked (combat/damage-choice.ts, combat/check-choice.ts), or once
+        // its option is (combat/options.ts)
+        if (effect.choose || effect.pick || effect.option) break;
+        if (!inHpBand(target, effect)) break;
+        if (
+          effect.immuneWith &&
+          immuneToCondition(deriveStats(target, context), effect.immuneWith)
+        ) {
+          break;
+        }
         events.push(
           dndEvent(`${NS}:effectAdded`, {
             actor: target.id,
@@ -1783,9 +1872,24 @@ export function leafEvents(
               ...level,
               modifier: rolledModifier(effect.modifier, stats, context),
               ends: effectEnds(effect.duration),
-              ...lastsFor(effect.duration, caster, target, context.state),
-              ...(effect.repeatSave && save ? { repeatSave: save } : {}),
+              ...(effect.gone?.includes(
+                deriveStats(target, context).creatureType ?? "",
+              )
+                ? {}
+                : lastsFor(effect.duration, caster, target, context.state)),
+              ...(effect.endSave
+                ? {
+                    repeatSave: {
+                      ability: effect.endSave.ability,
+                      dc: evaluateFormula(effect.endSave.dc, stats),
+                    },
+                  }
+                : effect.repeatSave && save
+                  ? { repeatSave: save }
+                  : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
+              ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
+              ...lingersFor(effect.duration),
               ...swallowed,
             },
           }),
@@ -1805,7 +1909,9 @@ export function leafEvents(
         }
         break;
       case "applyCondition": {
+        if (effect.option) break; // given once its option is picked (combat/options.ts)
         if (
+          !inHpBand(target, effect) ||
           immuneToCondition(deriveStats(target, context), effect.condition) ||
           zoneImmune(target, effect.condition, context.state, context) ||
           target.activeEffects.some(
@@ -1813,7 +1919,6 @@ export function leafEvents(
               modifier.kind === "conditionImmunity" &&
               modifier.condition === effect.condition,
           ) ||
-          (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost) ||
           (effect.web &&
             hasPassive(deriveStats(target, context), "webWalker")) ||
           (effect.maxSize !== undefined &&
@@ -1846,8 +1951,26 @@ export function leafEvents(
               ...(effect.endsOnSpell ? { endsOnSpell: true } : {}),
               ...(effect.endsOn ? { endsOn: effect.endsOn } : {}),
               ...(effect.saveOnDamage && conditionSave
-                ? { saveOnDamage: conditionSave }
+                ? {
+                    saveOnDamage: {
+                      ...conditionSave,
+                      ...(effect.saveOnDamage === "advantage"
+                        ? { advantage: true as const }
+                        : {}),
+                    },
+                  }
                 : {}),
+              ...(effect.flee ? { flee: effect.flee } : {}),
+              ...(effect.shake ? { shake: true as const } : {}),
+              ...(effect.cantStand ? { cantStand: true as const } : {}),
+              ...(effect.actionSave ? { actionSave: true as const } : {}),
+              ...(effect.failExhaustion
+                ? { failExhaustion: true as const }
+                : {}),
+              ...(effect.clings && conditionSave
+                ? { clings: conditionSave }
+                : {}),
+              ...lingersFor(effect.duration),
               ...(effect.banish && save
                 ? { banish: { ability: effect.banish.ability, dc: save.dc } }
                 : {}),
@@ -1907,7 +2030,10 @@ export function leafEvents(
         );
         break;
       }
-      case "removeCondition":
+      case "removeCondition": {
+        const clung = clingSave(target, effect.condition, context);
+        events.push(...clung.events);
+        if (clung.held) break;
         events.push(
           dndEvent(`${NS}:conditionRemoved`, {
             actor: target.id,
@@ -1915,8 +2041,30 @@ export function leafEvents(
           }),
         );
         break;
+      }
       case "cure": {
         const condition = cureFor(target, effect.conditions);
+        const clung = condition
+          ? clingSave(target, condition, context)
+          : { held: false, events: [] };
+        events.push(...clung.events);
+        if (effect.disease) events.push(...curedDiseaseEvents(target, context));
+        // Befuddlement's hold on its spellcasting, which Greater Restoration and Heal end.
+        const befuddled = effect.befuddled
+          ? target.activeEffects.find(
+              ({ modifier }) =>
+                modifier.kind === "actionLimit" && modifier.noSpells,
+            )
+          : undefined;
+        if (befuddled) {
+          events.push(
+            dndEvent(`${NS}:effectEnded`, {
+              actor: target.id,
+              sourceId: befuddled.sourceId,
+              casterId: befuddled.casterId,
+            }),
+          );
+        }
         const curse = target.activeEffects.find(
           ({ modifier }) => modifier.kind === "mark" && modifier.curse,
         );
@@ -1956,6 +2104,8 @@ export function leafEvents(
               }),
             );
           }
+        } else if (condition && clung.held) {
+          // the save failed, and the condition stays
         } else if (condition) {
           events.push(
             dndEvent(`${NS}:conditionRemoved`, { actor: target.id, condition }),
@@ -2145,6 +2295,7 @@ export function leafEvents(
         } else if (to) {
           events.push(
             dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 }),
+            ...prisonEvents(target, context),
           );
         }
         break;
@@ -2221,6 +2372,14 @@ export function leafEvents(
             { kind: "actorDefeated", actor: target.id },
           );
         }
+        break;
+      case "drop":
+        events.push(...dropEvents(target, context));
+        break;
+      case "sendAway":
+        events.push(
+          ...sendAwayEvents(effect, sourceId, caster, target, context),
+        );
         break;
       case "note":
       case "disperse":
@@ -3270,6 +3429,15 @@ export function resolveAction(
           slotLevel,
         );
         if (focus) frames.push(focus);
+        const picked = optionFrame(
+          resolution.effects,
+          spellSource(action),
+          actor,
+          target,
+          undefined,
+          slotLevel,
+        );
+        if (picked) frames.push(picked);
         // Where it lands is chosen, as a move is, and so is a form for a friend.
         for (const effect of resolution.effects) {
           if (
@@ -3425,10 +3593,15 @@ export function resolveAction(
           (!edge.creatureTypes ||
             exemptFrom(edge.creatureTypes, target, met)) &&
           (!edge.minSize ||
-            sizeOf(target, context) >= SIZES.indexOf(edge.minSize))
+            sizeOf(target, context) >= SIZES.indexOf(edge.minSize)) &&
+          (!edge.maxScore ||
+            met.abilities[edge.maxScore.ability] <= edge.maxScore.score) &&
+          (!edge.immuneTo || immuneToCondition(met, edge.immuneTo))
             ? [edge.roll]
             : [],
         );
+        // Cause Fear: a creature of a type it can't touch is left out altogether.
+        if (edges.includes("immune")) continue;
         // shortcut: cover counts from the caster, even for a sphere whose centre is elsewhere.
         const { saved: rolledSave, events: saveEvents } = spared.has(target.id)
           ? { saved: true, events: [] }
@@ -3548,6 +3721,27 @@ export function resolveAction(
             slotLevel,
           ),
         );
+        const focused = turned
+          ? null
+          : focusFrame(
+              saved ? resolution.onSuccess : resolution.onFail,
+              spellSource(action),
+              actor,
+              target,
+              slotLevel,
+            );
+        if (focused) frames.push(focused);
+        const picked = turned
+          ? null
+          : optionFrame(
+              saved ? resolution.onSuccess : resolution.onFail,
+              spellSource(action),
+              actor,
+              target,
+              { ability: resolution.ability, dc },
+              slotLevel,
+            );
+        if (picked) frames.push(picked);
         // Harm: the damage taken comes off the Hit Point maximum too.
         if (
           !saved &&
@@ -3836,7 +4030,10 @@ function rolledModifier(
 ): Modifier {
   // Sanctuary keeps the caster's save DC as it was cast, as does an action a spell gives.
   if (
-    (modifier.kind === "sanctuary" || modifier.kind === "grantedAction") &&
+    (modifier.kind === "sanctuary" ||
+      modifier.kind === "grantedAction" ||
+      modifier.kind === "castSave" ||
+      modifier.kind === "dodgeSave") &&
     modifier.dc === undefined
   ) {
     return { ...modifier, dc: spellSaveDc(stats) };

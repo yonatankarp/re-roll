@@ -1,5 +1,6 @@
 import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
+import { environmentPassives } from "./environment.ts";
 import {
   carriedWeight,
   carryingCapacity,
@@ -26,6 +27,7 @@ import {
   type Ability,
   type AbilityScores,
   type Activation,
+  type Duration,
   ActivationSchema,
   type FreeCast,
   type Amount,
@@ -713,16 +715,32 @@ function withRiders(
 ): KnownAction[] {
   return actions.map((action) => {
     const { resolution } = action.activation;
-    const extra = passives.flatMap((passive) =>
+    const riders = passives.flatMap((passive) =>
       passive.kind === "activationRider" &&
       action.id.startsWith(`feature:${passive.feature}:`) &&
+      (passive.label === undefined ||
+        action.activation.label === passive.label) &&
       (!passive.while ||
         actor.activeEffects.some(({ sourceId }) =>
           passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
         ))
-        ? passive.effects
+        ? [passive]
         : [],
     );
+    const extra = riders.flatMap(({ effects }) => effects);
+    const damage = riders.flatMap(({ damage: more }) => more ?? []);
+    if (damage.length > 0 && resolution.kind === "save") {
+      return {
+        ...action,
+        activation: {
+          ...action.activation,
+          resolution: {
+            ...resolution,
+            damage: [...resolution.damage, ...damage],
+          },
+        },
+      };
+    }
     return extra.length === 0 || resolution.kind !== "automatic"
       ? action
       : {
@@ -1206,7 +1224,23 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
-  actions.push(...fromFeatures.actions);
+  actions.push(
+    ...fromFeatures.actions.map((action) => {
+      const { targeting } = action.activation;
+      if (!("creatures" in targeting) || !targeting.creaturesBy) return action;
+      const mod = abilityModifier(abilities[targeting.creaturesBy]);
+      return {
+        ...action,
+        activation: {
+          ...action.activation,
+          targeting: {
+            ...targeting,
+            creatures: Math.max(targeting.creatures, mod),
+          },
+        },
+      };
+    }),
+  );
   for (const spellId of fromFeatures.spells) {
     if (access.content(spellId)) knownSpells.add(spellId);
   }
@@ -1397,6 +1431,13 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ),
       ),
       proficiency: proficiencyBonus(level) + magic.proficiency,
+      // Each ability modifier, at least 1, for dice that number it, as Sear Undead's d8s ("mod:wis").
+      ...Object.fromEntries(
+        Object.entries(abilities).map(([ability, score]) => [
+          `mod:${ability}`,
+          Math.max(1, abilityModifier(score)),
+        ]),
+      ),
     },
     features: [...featureIds],
     resourceDefs: [
@@ -2022,10 +2063,16 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
       ? { ...free, actions: [...free.actions, ...moving] }
       : free;
   const loss = actor.maxHpLoss ?? 0;
+  // The environmental effects around it give their passives too, as Arcadian Vitality (environment.ts).
+  const around = environmentPassives(moved.creatureType, access);
+  const placed =
+    around.length > 0
+      ? { ...moved, passives: [...moved.passives, ...around] }
+      : moved;
   return speed === 0 && maxHp === 0 && loss === 0
-    ? moved
+    ? placed
     : {
-        ...moved,
+        ...placed,
         speed: Math.max(0, stats.speed + speed),
         maxHp: Math.max(1, stats.maxHp + maxHp - loss),
       };
@@ -2530,12 +2577,51 @@ function addDice(amount: Amount, add: string, times: number): Amount {
     : amount;
 }
 
+// Every timed effect of an activation lasting `duration` instead, as a higher slot's Bestow Curse.
+function withDuration(activation: Activation, duration: Duration): Activation {
+  const timed = (effects: readonly LeafEffect[]): LeafEffect[] =>
+    effects.map((effect) =>
+      effect.kind === "modifier" || effect.kind === "applyCondition"
+        ? { ...effect, duration }
+        : effect,
+    );
+  const { resolution } = activation;
+  switch (resolution.kind) {
+    case "save":
+      return {
+        ...activation,
+        resolution: {
+          ...resolution,
+          onFail: timed(resolution.onFail),
+          onSuccess: timed(resolution.onSuccess),
+        },
+      };
+    case "automatic":
+      return {
+        ...activation,
+        resolution: { ...resolution, effects: timed(resolution.effects) },
+      };
+    case "attack":
+      return {
+        ...activation,
+        resolution: { ...resolution, onHit: timed(resolution.onHit) },
+      };
+    default:
+      return activation;
+  }
+}
+
 export function scaleActivation(
   activation: Activation,
   step: ScaleStep,
   times: number,
 ): Activation {
   if (times <= 0 || "slotOnly" in step) return activation;
+  if ("durations" in step) {
+    const reached = step.durations.filter(({ at }) => times >= at);
+    const longer = reached[reached.length - 1]?.duration;
+    return longer ? withDuration(activation, longer) : activation;
+  }
   if ("addRadius" in step) {
     const { targeting } = activation;
     return "area" in targeting

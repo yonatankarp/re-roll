@@ -48,6 +48,14 @@ import {
   runClassOption,
 } from "./class-options.ts";
 import { escapeDc, grapplesOn } from "./combat/grapple.ts";
+import {
+  COLLECT,
+  collectable,
+  collectEvents,
+  SHAKE,
+  shakeable,
+  shakeEvents,
+} from "./combat/fear.ts";
 import { unhindered } from "./movement-modes.ts";
 import {
   type Square,
@@ -728,8 +736,15 @@ export function tacticOptions(
   const stats = deriveStats(actor, access);
   const options: { id: string; label: string }[] = [];
   const half = halfSpeed(stats);
+  // Prone that Hideous Laughter keeps it in can't be ended by standing.
   if (
     hasCondition(actor, "prone") &&
+    !actor.activeEffects.some(
+      ({ cantStand, modifier }) =>
+        cantStand &&
+        modifier.kind === "condition" &&
+        modifier.condition === "prone",
+    ) &&
     (!actor.position || speedLeft(actor, stats) >= half)
   ) {
     options.push({
@@ -811,6 +826,19 @@ export function tacticOptions(
     id: DODGE,
     label: "Dodge (attacks against you have Disadvantage)",
   });
+  // Shaking an ally out of a spell, as out of Sleep, and saving against a spell with an action, as Irresistible Dance.
+  for (const ally of shakeable(actor, state)) {
+    options.push({
+      id: encodeOption(SHAKE, ally.id),
+      label: `Shake ${ally.name} out of it`,
+    });
+  }
+  for (const held of collectable(actor)) {
+    options.push({
+      id: encodeOption(COLLECT, held.casterId, held.sourceId),
+      label: `Collect yourself (${ABILITY_NAMES[held.repeatSave?.ability ?? "wis"]} save, DC ${String(held.repeatSave?.dc ?? 10)})`,
+    });
+  }
   // Help also stabilizes a dying creature within 5 feet, which every companion should be able to do.
   for (const dying of allies(state, actor).filter(
     (item) => item.id !== actor.id && dyingNow(item) && within5(actor, item),
@@ -1026,6 +1054,21 @@ export function runTactic(
   const mounted = mountEvents(actor, kind, targetId, state, context);
   if (mounted) return { events: mounted };
   switch (kind) {
+    case SHAKE:
+      return {
+        events: [spend("action"), ...shakeEvents(needTarget())],
+        frames: done,
+      };
+    case COLLECT: {
+      const held = collectable(actor).find(
+        (item) => item.sourceId === detail && item.casterId === targetId,
+      );
+      if (!held) throw new Error(`${actor.id} has nothing to collect from`);
+      return {
+        events: [spend("action"), ...collectEvents(actor, held, context)],
+        frames: done,
+      };
+    }
     case SLIP:
       return {
         events: [

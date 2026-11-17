@@ -161,8 +161,8 @@ export const MONSTER_TEXT_KINDS = {
   lairs: "lair",
 } as const;
 
-// Text kinds for what a book describes beside its rules (#134–#136), each entry the glossary's shape:
-// content folder -> id kind. Only read for now; what they do in play is later work (#149 for curses).
+// Kinds for what a book describes beside its rules (#134–#136), each entry the glossary's shape: content folder ->
+// id kind. Environmental effects, diseases and dungeon features play (#191, their schemas below); curses stay text.
 export const ENVIRONMENT_KINDS = {
   "environmental-effects": "environmental-effect",
   diseases: "disease",
@@ -363,6 +363,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     attackers: z.array(z.string()).min(1).optional(),
     skills: z.array(SkillSchema).min(1).optional(), // only checks with these skills
     spells: z.literal(true).optional(), // attacksAgainst only from spells, as a Spellguard Shield's
+    except: AbilitySchema.optional(), // saves with any ability but this one, as Power Word Pain's
+    casterOnly: z.literal(true).optional(), // attacks only against the effect's caster, as Bestow Curse's
+    // attacks only with a ranged weapon, as a strong wind's, or only spell attacks, as a dampened magic zone's
+    ranged: z.literal(true).optional(),
+    spellAttacks: z.literal(true).optional(),
+    concentration: z.literal(true).optional(), // saves only to keep Concentration, as an eerie chanting zone's
   }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
@@ -440,6 +446,40 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     oneAttack: z.literal(true).optional(),
     speed: z.enum(["half", "double", "none"]).optional(),
     spellFailure: z.number().int().min(1).max(100).optional(),
+    noSpells: z.literal(true).optional(), // it can't cast spells, as Befuddlement's
+    speedMax: z.number().int().min(0).optional(), // its Speed is at most this many feet, as Power Word Pain's
+    // only one of moving, an action and a Bonus Action on its turns, as Abjure Foes' (combat/durations.ts)
+    oneThing: z.literal(true).optional(),
+  }),
+  // Before casting a spell the bearer saves against `dc` (the caster's spell save DC, filled in as it's cast, when
+  // left out), or the spell fails and its action is wasted, its slot spent unless `keepSlot`, as Power Word Pain's or
+  // Gehennan Cruelty's (combat/actions.ts).
+  z.strictObject({
+    kind: z.literal("castSave"),
+    ability: AbilitySchema,
+    dc: z.number().int().optional(),
+    keepSlot: z.literal(true).optional(),
+  }),
+  // Taking damage other than Psychic gives the bearer this save, whose failure deals `damage` and Incapacitates it
+  // until it saves at the end of a turn, as Cackle Fever's laughter (environment.ts).
+  z.strictObject({
+    kind: z.literal("laughter"),
+    dc: z.number().int(),
+    damage: z.array(DamageSchema).min(1),
+  }),
+  // Being moved out of its space, or making a melee attack, deals `damage` to the bearer and ends the spell on it, as
+  // Mental Prison's illusory cell (combat/fear.ts).
+  // shortcut: only a push or pull moves it out, as Restrained it walks nowhere.
+  z.strictObject({
+    kind: z.literal("prison"),
+    damage: z.array(DamageSchema).min(1),
+  }),
+  // As each of its turns starts the bearer saves against `dc` (filled in as cast) or takes the Dodge action, which
+  // spends its action, as Bestow Curse's (combat/fear.ts).
+  z.strictObject({
+    kind: z.literal("dodgeSave"),
+    ability: AbilitySchema,
+    dc: z.number().int().optional(),
   }),
   // Haste's additional action each turn: the Attack (one attack only), Dash, Disengage or Hide action. When it
   // ends, the bearer is Incapacitated with a Speed of 0 until the end of its next turn.
@@ -679,6 +719,29 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .strictObject({ ability: AbilitySchema, dc: FormulaSchema })
       .optional(),
     hpAtMost: z.number().int().min(1).optional(), // only a target with this many Hit Points or fewer
+    hpAbove: z.number().int().min(1).optional(), // only a target with more Hit Points than this, as Divine Word's bands
+    // One of the caster's choices, by label: the effects sharing a label make one option, picked as the effect lands
+    // (combat/options.ts), as Blindness/Deafness's Blinded or Deafened.
+    option: z.string().min(1).optional(),
+    // On each of its turns it Dashes away from the caster by the longest way it can (combat/fear.ts). `unseen` makes its
+    // repeat save only at the end of a turn out of the caster's sight, as Fear's; `far` ends it once that many feet
+    // away and out of sight, as Eyebite's Panicked; `casterDown` ends it once the caster is Incapacitated or dead, as
+    // Turn Undead's.
+    flee: z
+      .strictObject({
+        unseen: z.literal(true).optional(),
+        far: z.number().int().min(5).optional(),
+        casterDown: z.literal(true).optional(),
+      })
+      .optional(),
+    // Another creature within 5 feet can take an action to end it, as shaking a creature out of Sleep (combat/fear.ts).
+    shake: z.literal(true).optional(),
+    cantStand: z.literal(true).optional(), // Prone it can't end on itself, as Hideous Laughter's
+    // It can spend its action to repeat the save, as Irresistible Dance's (combat/fear.ts).
+    actionSave: z.literal(true).optional(),
+    failExhaustion: z.literal(true).optional(), // each failed repeat save gives a level of Exhaustion
+    // Something that would end it does so only after the save it came with, as Contagion's Poisoned.
+    clings: z.literal(true).optional(),
     web: z.literal(true).optional(), // webs hold it, which a Web Walker ignores, as with Web
     // only a target this size or smaller, as an Energy Pulse knocks only a Medium or smaller creature Prone
     maxSize: z
@@ -688,8 +751,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature, as Modify Memory's
     // Ends when the creature attacks or deals damage ("attack"), or takes any action ("action"), as Fade Away's.
     endsOn: z.enum(["attack", "action"]).optional(),
-    // Taking damage gives it a save to end it, as Dragon Fear's, using the save it came with.
-    saveOnDamage: z.literal(true).optional(),
+    // Taking damage gives it a save to end it, as Dragon Fear's, using the save it came with, with Advantage on
+    // "advantage", as Hideous Laughter's.
+    saveOnDamage: z.union([z.literal(true), z.literal("advantage")]).optional(),
     // What a failed repeat save turns it into, as a cockatrice's Restrained becoming Petrified.
     secondFailure: z
       .strictObject({
@@ -713,6 +777,21 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("modifier"),
     modifier: ModifierSchema,
     duration: DurationSchema,
+    // as an applyCondition's
+    option: z.string().min(1).optional(),
+    hpAtMost: z.number().int().min(1).optional(),
+    hpAbove: z.number().int().min(1).optional(),
+    endsOnDamage: z.literal(true).optional(), // as Hypnotic Pattern's Speed 0
+    // A save at the end of each of its turns that ends it, as an applyCondition's, for an effect that came with none,
+    // as Power Word Pain's (2014).
+    endSave: z
+      .strictObject({ ability: AbilitySchema, dc: FormulaSchema })
+      .optional(),
+    // Not on a creature immune to this condition, as Power Word Pain's on one that can't be Charmed.
+    immuneWith: ConditionSchema.optional(),
+    // On a creature of these lowercase types it runs out only with Concentration, so held for its whole duration the
+    // creature doesn't come back and counts as beaten meanwhile, as Banishment's (combat/turn.ts shutAway).
+    gone: z.array(z.string()).min(1).optional(),
     repeatSave: z.boolean().optional(), // as an applyCondition's
     whileTempHp: z.literal(true).optional(), // ends once the bearer has no Temporary Hit Points, as Armor of Agathys
     // The caster picks the modifier's damage type from these as it casts (combat/damage-choice.ts), as with
@@ -789,6 +868,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     exhaustion: z.literal(true).optional(),
     curse: z.literal(true).optional(),
     maxHp: z.literal(true).optional(),
+    // and it ends a spell that keeps the target from casting, as Greater Restoration and Heal end Befuddlement
+    befuddled: z.literal(true).optional(),
+    // and the diseases magic cures, as Lesser Restoration ends Mudpox (environment.ts)
+    disease: z.literal(true).optional(),
     // each of them on the target ends instead, `per` of the caster's `resource` apiece while it lasts, as Restoring
     // Touch's 5 Hit Points of Lay On Hands' pool for each condition
     pool: z
@@ -981,6 +1064,23 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // A failed save's damage that drops the target to 0 Hit Points turns it to dust, dead outright, as Disintegrate.
   // Only a raising whose targeting has `dust` brings it back, as True Resurrection.
   z.strictObject({ kind: z.literal("disintegrate") }),
+  // The target drops what it holds, as from Fear (combat/fear.ts).
+  z.strictObject({ kind: z.literal("drop") }),
+  // The target is sent off to another plane, gone from the fight for good: only one of these lowercase types with
+  // `creatureTypes`, as Divine Word's Celestials and Fiends, and with `crByLevel` only one whose Challenge Rating is at
+  // most the one for the caster's level in `class`, as Arcane Abjuration's banishing (combat/fear.ts).
+  z.strictObject({
+    kind: z.literal("sendAway"),
+    creatureTypes: z.array(z.string()).min(1).optional(),
+    crByLevel: z
+      .strictObject({
+        class: ContentIdSchema,
+        at: z
+          .array(z.strictObject({ level: z.number().int(), cr: z.number() }))
+          .min(1),
+      })
+      .optional(),
+  }),
   // The target spends one of its Hit Point Dice and regains what it rolls plus `bonus`, as with Healer's Battle Medic.
   // Rolls up to `dice` of the target's Hit Point Dice (stopping once it is whole) and adds `bonus` once.
   z.strictObject({
@@ -1157,7 +1257,20 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
         z.strictObject({
           creatureTypes: z.array(z.string()).min(1).optional(),
           minSize: SizeSchema.optional(),
-          roll: z.enum(["advantage", "disadvantage", "fail", "succeed"]),
+          // a creature whose score in this ability is at most this much, as Psychic Scream's Intelligence 2
+          maxScore: z
+            .strictObject({ ability: AbilitySchema, score: z.number().int() })
+            .optional(),
+          // a creature immune to this condition, as Mental Prison's that can't be Charmed
+          immuneTo: ConditionSchema.optional(),
+          // "immune" leaves the creature out altogether, as Cause Fear's Constructs and Undead
+          roll: z.enum([
+            "advantage",
+            "disadvantage",
+            "fail",
+            "succeed",
+            "immune",
+          ]),
         }),
       )
       .min(1)
@@ -1267,6 +1380,8 @@ export const TargetingSchema = z.union([
   z.strictObject({ self: z.literal(true) }),
   z.strictObject({
     creatures: z.number().int().min(1),
+    // as many as this ability's modifier when more, as Abjure Foes' Charisma modifier (stats.ts)
+    creaturesBy: AbilitySchema.optional(),
     range: RangeSchema,
     // "any" is a creature of either side, as Dispel Magic aimed at a friend's curse or a foe's spell
     side: z.enum(["enemy", "ally", "any"]),
@@ -1390,6 +1505,8 @@ export const ActivationSchema = z.strictObject({
       entersReach: z.literal(true).optional(),
       endsMove: z.literal(true).optional(),
       turnStart: z.literal(true).optional(),
+      // With `turnStart`, only a Frightened creature sets it off, as Boon of Terror's Flee, Fools!
+      frightened: z.literal(true).optional(),
       // Taken after the bearer's own save against a creature's effect fails or succeeds, as with Mind Corrosion.
       ownSave: z.enum(["failed", "succeeded"]).optional(),
       // With `ownSave`, `missed` or `struck`, only a spell sets it off, as with Spell Reflection.
@@ -1590,6 +1707,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     feet: z.number().int().min(5).optional(),
     runUp: z.number().int().min(0).default(10),
     ability: z.literal("dex").optional(), // jumps by Dexterity instead of Strength, as a cat's Jumper
+    times: z.number().int().min(2).optional(), // its jumps go this many times as far, as in a Low Gravity Zone
   }),
   // Webs never hold it (applyCondition `web`), as a spider's Web Walker.
   z.strictObject({ kind: z.literal("webWalker") }),
@@ -2297,10 +2415,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Using an activation of this feature also does these to the bearer, as Tactical Shift's move with Second Wind or
   // Arcane Charge's teleport with Action Surge; with `while`, only while an effect of one of those features'
   // activations is on it, as Reckless Abandon's Temporary Hit Points with Reckless Attack in a Rage.
+  // With `label` only the activation of that label, and `damage` adds to a save's damage, dealt only on a failure,
+  // as Sear Undead's Radiant on Turn Undead.
   z.strictObject({
     kind: z.literal("activationRider"),
     feature: ContentIdSchema,
-    effects: z.array(LeafEffectSchema).min(1),
+    label: z.string().min(1).optional(),
+    effects: z.array(LeafEffectSchema).default([]),
+    damage: z.array(DamageSchema).min(1).optional(),
     while: z.array(ContentIdSchema).min(1).optional(),
   }),
   // A Long Rest leaves one of this item with the bearer, as Vampire's Plaything's Decanting.
@@ -2435,6 +2557,18 @@ const ScaleStepSchema = z.union([
   z.strictObject({ addRadius: z.number().int().min(5) }), // an area's radius, as Confusion's Sphere
   // Nothing grows but what reads the slot's level, as Mordenkainen's Lucubration's `regain` `maxLevel`.
   z.strictObject({ slotOnly: z.literal(true) }),
+  // Its effects last longer from a slot this many levels above the spell's, the highest reached counting, as Bestow
+  // Curse's 10 minutes, then 8 hours without Concentration (stats.ts scaleActivation).
+  z.strictObject({
+    durations: z
+      .array(
+        z.strictObject({
+          at: z.number().int().min(1),
+          duration: DurationSchema,
+        }),
+      )
+      .min(1),
+  }),
 ]);
 export type ScaleStep = z.infer<typeof ScaleStepSchema>;
 
@@ -3302,6 +3436,8 @@ export const EncounterSchema = z.strictObject({
   lair: z.boolean().optional(), // fought in a monster's lair: lair actions and its "in Lair" numbers
   surprise: z.enum(["party", "enemies"]).optional(), // the side caught unaware, which rolls initiative with disadvantage
   sunlight: z.literal(true).optional(), // fought outdoors in daylight, outside the map's shade (d) and darkness (x)
+  // The environmental effects it's fought in, by id, as a slippery ice floor or a strong wind (environment.ts).
+  environment: z.array(ContentIdSchema).min(1).optional(),
 });
 
 export const CheckSchema = z.union([
@@ -3312,7 +3448,161 @@ export const CheckSchema = z.union([
     dc: z.number().int(),
   }),
   z.strictObject({ ability: AbilitySchema, dc: z.number().int() }),
+  // A dungeon feature's check, its skill and ability from the feature, at the DC the adventure prints, as picking a
+  // Locked Door's lock (environment.ts).
+  z.strictObject({ feature: ContentIdSchema, dc: z.number().int() }),
 ]);
+
+// What an environment does in play (#191), each entry the glossary's shape with the numbers the engine reads
+// (environment.ts). A scene names one for the time the party spends in it, and an encounter for the fight in it.
+
+// A save after each hour (or minute) spent in it, a failure giving a level of Exhaustion, as Extreme Cold's.
+const ExposureSchema = z.strictObject({
+  every: z.enum(["hour", "minute"]).default("hour"),
+  ability: AbilitySchema,
+  dc: z.number().int(),
+  dcStep: z.number().int().min(1).optional(), // more for each one after the first, as Extreme Heat's 5, then 6
+  graceCon: z.literal(true).optional(), // as many as its Constitution score pass first, as Frigid Water's minutes
+  resist: DamageTypeSchema.optional(), // Resistance or Immunity to this type succeeds, as against Extreme Cold
+  swimSpeed: z.literal(true).optional(), // a Swim Speed succeeds, as in Deep Water
+  armor: z.enum(["advantage", "disadvantage"]).optional(), // Medium or Heavy armor's edge on the save
+  maxExhaustion: z.number().int().min(1).optional(), // no more Exhaustion than this from it, as Pandemonium's 3
+});
+
+// One roll on an environment's table for the party, as a psychic wind's: each row's effects, after a save when the
+// row or the table has one. `hours` pass for a delay.
+const EnvironmentRowSchema = z.strictObject({
+  min: z.number().int().min(1),
+  max: z.number().int().min(1),
+  hours: z.union([z.number().int().min(1), DiceSchema]).optional(),
+  hoursTimes: z.number().int().min(1).optional(), // the hours rolled, times this, as 1d6 days
+  damage: z.array(DamageSchema).optional(),
+  // conditions until damage or a shake ends them, lasting this many hours beyond a fight, as 1d10 hours Unconscious
+  conditions: z.array(ConditionSchema).optional(),
+  lingers: DiceSchema.optional(),
+});
+
+export const EnvironmentalEffectSchema = GlossaryEntrySchema.extend({
+  automation: AutomationSchema.default("text"),
+  exposure: ExposureSchema.optional(),
+  // In a fight fought in it, or a scene spent in it, every creature not of an `except` type has these passives, as
+  // Arcadian Vitality's Immunity to Frightened.
+  passives: z.array(PassiveSchema).default([]),
+  except: z.array(z.string()).optional(),
+  // And in a fight: these conditions on every creature, as Howling Wind's Deafened; every square Difficult Terrain;
+  // a save as each turn starts or the condition, as Slippery Ice's; an Antimagic Field everywhere, as a Dead Magic
+  // Zone; a flyer comes down at the end of its turn, as in a Strong Wind; falls hurt half, as in Low Gravity; force
+  // dice of 1 or 2 count as 3; Reverse Gravity's lift at this DC every few rounds, as Unstable Gravity's.
+  fight: z
+    .strictObject({
+      conditions: z.array(ConditionSchema).optional(),
+      difficult: z.literal(true).optional(),
+      turnSave: z
+        .strictObject({
+          ability: AbilitySchema,
+          dc: z.number().int(),
+          condition: ConditionSchema,
+        })
+        .optional(),
+      deadMagic: z.literal(true).optional(),
+      grounded: z.literal(true).optional(),
+      halfFalls: z.literal(true).optional(),
+      forceFloor: z.number().int().min(2).optional(),
+      reverseGravity: z.strictObject({ dc: z.number().int() }).optional(),
+      halfDurations: z.literal(true).optional(), // a spell lasting a minute or more lasts half as long
+    })
+    .optional(),
+  // After a Long Rest in it: Exhaustion isn't lessened, as in Pandemonium's winds; conditions a Lesser Restoration
+  // would end are, as with Blessed Beneficence; or this condition comes for the next fight, as a psionic field's fright.
+  rest: z
+    .strictObject({
+      keepExhaustion: z.literal(true).optional(),
+      restore: z.literal(true).optional(),
+      condition: ConditionSchema.optional(),
+    })
+    .optional(),
+  // Thin Ice: each party member's square holds this roll times `times` pounds, and one heavier breaks through into
+  // `into`, spending the scene's minutes in it, as Frigid Water.
+  breaks: z
+    .strictObject({
+      dice: DiceSchema,
+      times: z.number().int().min(1),
+      into: ContentIdSchema,
+    })
+    .optional(),
+  // Tables rolled once it comes, as a psychic wind's: once for the party, or with `save` once for each traveler
+  // that fails it.
+  tables: z
+    .array(
+      z.strictObject({
+        save: z
+          .strictObject({ ability: AbilitySchema, dc: z.number().int() })
+          .optional(),
+        die: z.number().int().min(2),
+        rows: z.array(EnvironmentRowSchema).min(1),
+      }),
+    )
+    .optional(),
+}).strict();
+export type EnvironmentalEffect = z.infer<typeof EnvironmentalEffectSchema>;
+
+// A disease (#191): caught on a failed save, its symptoms after `onsetRests` Long Rests (days count as Long Rests),
+// then fought with a save after each Long Rest.
+export const DiseaseSchema = GlossaryEntrySchema.extend({
+  automation: AutomationSchema.default("text"),
+  // who can catch it, by lowercase type, and species that can't, as Cackle Fever's gnomes
+  creatureTypes: z.array(z.string()).optional(),
+  immuneSpecies: z.array(z.string()).optional(),
+  catch: z
+    .strictObject({ ability: AbilitySchema, dc: z.number().int() })
+    .optional(),
+  onsetRests: z.number().int().min(0).default(0),
+  symptoms: z
+    .strictObject({
+      exhaustion: z.number().int().min(0).default(0), // levels at onset
+      holdsExhaustion: z.literal(true).optional(), // a Long Rest takes no Exhaustion away while it lasts
+      blinded: z.literal(true).optional(), // as 2024 Sight Rot
+      sightPenalty: z.literal(true).optional(), // -1 to sight-based attack rolls and checks, 1 worse each Long Rest
+      halfHitDice: z.literal(true).optional(), // half healing from Hit Point Dice while Exhausted, as Sewer Plague's
+      noRestHealing: z.literal(true).optional(), // a Long Rest restores no Hit Points while Exhausted
+      keepExhaustion: z.literal(true).optional(), // a Long Rest takes no Exhaustion away while Exhausted
+      // Taking damage (other than Psychic) gives this save, whose failure deals `damage` and Incapacitates it until
+      // it saves at the end of a turn, as Cackle Fever's laughter.
+      laughter: z
+        .strictObject({
+          dc: z.number().int(),
+          damage: z.array(DamageSchema).min(1),
+        })
+        .optional(),
+    })
+    .default({ exhaustion: 0 }),
+  // The save after each Long Rest: a failure adds a level of Exhaustion with `failExhaustion`, a success takes one
+  // away with `successLessens`; it ends after `cureAt` successes (in a row with `streak`), or once its Exhaustion is
+  // gone with `cureAtZero`.
+  fight: z
+    .strictObject({
+      ability: AbilitySchema,
+      dc: z.number().int(),
+      failExhaustion: z.literal(true).optional(),
+      successLessens: z.literal(true).optional(),
+      cureAt: z.number().int().min(1).optional(),
+      streak: z.literal(true).optional(),
+      cureAtZero: z.literal(true).optional(),
+      dcDrop: DiceSchema.optional(), // a success lowers the DC by this roll, ending it at 0, as 2014 Cackle Fever's
+    })
+    .optional(),
+  cureSpells: z.literal(true).optional(), // Lesser Restoration or Heal ends it
+}).strict();
+export type Disease = z.infer<typeof DiseaseSchema>;
+
+// A dungeon feature (#191): the check a scene's choice makes against it, at the DC the adventure prints.
+export const DungeonFeatureSchema = GlossaryEntrySchema.extend({
+  automation: AutomationSchema.default("text"),
+  check: z
+    .strictObject({ skill: SkillSchema.optional(), ability: AbilitySchema })
+    .optional(),
+}).strict();
+export type DungeonFeature = z.infer<typeof DungeonFeatureSchema>;
 export type Check = z.infer<typeof CheckSchema>;
 
 // A random table from a book. Each row covers the die results min to max, and its cells line up with `columns`.

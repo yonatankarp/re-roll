@@ -116,8 +116,15 @@ export function jumpOf(stats: Stats): Jump {
     running = Math.max(running, passive.feet ?? running);
     runUp = Math.min(runUp, passive.runUp);
   }
-  const standing = runUp === 0 ? running : Math.floor(running / 2);
-  return { standing, running, runUp };
+  const times = stats.passives.reduce(
+    (product, passive) =>
+      passive.kind === "jump" && passive.times
+        ? product * passive.times
+        : product,
+    1,
+  );
+  const standing = (runUp === 0 ? running : Math.floor(running / 2)) * times;
+  return { standing, running: running * times, runUp };
 }
 
 // How far its Tremorsense reaches, in feet, or 0 with none.

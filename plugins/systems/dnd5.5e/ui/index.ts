@@ -36,6 +36,7 @@ import {
   ItemSchema,
   LootSchema,
   SKILL_ABILITIES,
+  type Duration,
   type ScaleStep,
   type Skill,
   SpeciesSchema,
@@ -120,6 +121,17 @@ function actionNumbers(action: KnownAction, stats: Stats): string {
   }
 }
 
+function durationText(duration: Duration): string {
+  if (typeof duration !== "object") return "instantaneous";
+  if ("until" in duration) return "a turn";
+  if ("text" in duration) return duration.text;
+  const time =
+    duration.minutes >= 60
+      ? `${String(duration.minutes / 60)} hours`
+      : `${String(duration.minutes)} minutes`;
+  return "concentration" in duration ? `${time} with Concentration` : time;
+}
+
 // What a higher slot adds, for the action's details.
 function upcastText(
   step: Exclude<ScaleStep, { slotOnly: true }>,
@@ -130,6 +142,14 @@ function upcastText(
   }
   if ("addTargets" in step) {
     return `Each slot level above ${String(level)} adds ${String(step.addTargets)} target${step.addTargets > 1 ? "s" : ""}.`;
+  }
+  if ("durations" in step) {
+    return `A higher slot makes it last longer: ${step.durations
+      .map(
+        ({ at, duration }) =>
+          `${durationText(duration)} from level ${String(level + at)}`,
+      )
+      .join(", ")}.`;
   }
   const adds = [
     step.addDice
