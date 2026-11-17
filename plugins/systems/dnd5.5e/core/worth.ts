@@ -915,8 +915,11 @@ export function makeJudge(context: Context, side: Actor): Judge {
                 )
               ? 0.05 * own * lasting(span)
               : 0;
+      // Attacks against it with Advantage are a cost, as Reckless Attack's, about what Disadvantage on them is worth.
       case "advantage":
-        return (modifier.on === "attacks" ? 0.25 : 0.05) * own * lasting(span);
+        return modifier.on === "attacksAgainst"
+          ? -0.2 * meanFoeThreat * lasting(span)
+          : (modifier.on === "attacks" ? 0.25 : 0.05) * own * lasting(span);
       case "disadvantage": {
         if (modifier.on !== "attacksAgainst") return 0;
         // Only against the foes it names, as Protection from Evil and Good's.
