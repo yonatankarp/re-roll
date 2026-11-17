@@ -63,6 +63,12 @@ export function deriveItem(
       ...("healing" in variant && variant.healing
         ? { healing: variant.healing }
         : {}),
+      ...("activation" in variant && variant.activation
+        ? { activation: variant.activation }
+        : {}),
+      ...("granted" in variant && variant.granted
+        ? { granted: variant.granted }
+        : {}),
       ...magic,
     };
     delete item.variants;

@@ -442,8 +442,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     spellFailure: z.number().int().min(1).max(100).optional(),
   }),
   // Haste's additional action each turn: the Attack (one attack only), Dash, Disengage or Hide action. When it
-  // ends, the bearer is Incapacitated with a Speed of 0 until the end of its next turn.
-  z.strictObject({ kind: z.literal("hasted") }),
+  // ends, the bearer is Incapacitated with a Speed of 0 until the end of its next turn, unless `noLethargy`, as a
+  // Potion of Speed's.
+  z.strictObject({
+    kind: z.literal("hasted"),
+    noLethargy: z.literal(true).optional(),
+  }),
   // Shut away where nothing reaches it and it reaches nothing, as in Otiluke's Resilient Sphere, a Forcecage box
   // or Maze. With `escape` it can spend its action on that check to end the effect, as Maze's DC 20 Intelligence.
   z.strictObject({
@@ -535,11 +539,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     amount: AmountSchema,
   }),
   // The bearer can take its spell's `granted` action, dealing this type at the save DC it was cast with (filled in
-  // as it's cast), as Dragon's Breath's breath.
+  // as it's cast), as Dragon's Breath's breath, or an item's, as a Potion of Fire Breath's, `uses` times at most.
   z.strictObject({
     kind: z.literal("grantedAction"),
     damage: DamageTypeSchema,
     dc: z.number().int().optional(),
+    uses: z.number().int().min(1).optional(),
   }),
   // The bearer's weapon attacks are changed while it lasts, as by Shillelagh; with `once`, only its next one, as
   // True Strike's.
@@ -570,6 +575,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("confused"),
     spell: z.literal(true).optional(),
+  }),
+  // A character's ability score is this while it lasts, unless its own is higher, as a Potion of Giant Strength's
+  // Strength (stats.ts).
+  z.strictObject({
+    kind: z.literal("setScore"),
+    ability: AbilitySchema,
+    score: z.number().int().min(1),
   }),
   // No rule of its own: a curse, a mark or a hold that another of its giver's actions looks for (a targeting's
   // `afflicted`), as a nightmare's Haunter's Spear curse.
@@ -2922,11 +2934,20 @@ const MagicItemSchema = ItemBaseSchema.extend({
   // as Mithral Armor. Carried into the armor content names as `<id>--<n>--<armor>` (variants.ts).
   anyTraining: z.literal(true).optional(),
   noStrength: z.literal(true).optional(),
+  // Magic ammunition, one piece of it: its bonuses go to a shot from an Ammunition weapon, and a hit spends it, as
+  // +1 Ammunition (stats.ts). Several pieces are several of it carried.
+  ammunition: z.literal(true).optional(),
   // A magic weapon that comes back once thrown, as a Returning Weapon, carried the same way.
   returning: z.literal(true).optional(),
   // Damage a magic weapon made from it adds on a hit, as Frost Brand's 1d6 Cold, carried the same way.
   hitDamage: z.array(DamageSchema).min(1).optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
+  // What using it up does, as drinking a Potion of Speed or throwing a Bead of Force (stats.ts itemAction): an
+  // action that spends the item, named with `verb` ("Drink" for a potion, "Read" for a scroll, else "Use").
+  activation: ActivationSchema.optional(),
+  verb: z.string().min(1).optional(),
+  // An action its user can take while a `grantedAction` its activation gave lasts, as a Potion of Fire Breath's.
+  granted: ActivationSchema.optional(),
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
   ...ChargedSchema,
   // Set when one entry covers several rarities, such as +1, +2 or +3. Content names one as `<id>--<n>` (variants.ts).
@@ -2938,6 +2959,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
         bonuses: z.array(MagicBonusSchema).min(1).optional(),
         abilities: z.array(ItemAbilitySchema).min(1).optional(),
         healing: AmountSchema.optional(),
+        activation: ActivationSchema.optional(), // in place of the item's own, as a Potion of Resistance's type
+        granted: ActivationSchema.optional(),
         // added to the item's own, as a Ring of Resistance's one damage type
         passives: z.array(PassiveSchema).min(1).optional(),
         casts: z.array(ItemCastSchema).min(1).optional(), // added to the item's own, as a Staff of Skulls' Chill Touch

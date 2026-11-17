@@ -67,6 +67,7 @@ import { holdsConcentration, withMetamagic } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
 import { withWeaponRiders } from "./weapon-riders.ts";
 import {
+  ITEM_PREFIX,
   THROW_PREFIX,
   WEAPON_PREFIX,
   castFrom,
@@ -113,6 +114,7 @@ export interface KnownAction {
   readonly hitType?: true; // its damage takes the type of the hit it adds to, as a maneuver's die does
   readonly rolled?: true; // taken only when a randomAction picks it, as one eye ray
   readonly concentrates?: true; // casting it starts Concentration even with no lasting effect, as Flame Blade
+  readonly ammunition?: string; // the magic ammunition it fires, which a hit spends (combat/attack.ts landHit)
 }
 
 export interface Stats {
@@ -273,6 +275,17 @@ function withItemAbilities(
     }
   }
   return raised;
+}
+
+// Scores an effect on the character sets while it lasts, as a Potion of Giant Strength's, never lowering one.
+function withEffectScores(scores: AbilityScores, actor: Actor): AbilityScores {
+  const set = { ...scores };
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind === "setScore") {
+      set[modifier.ability] = Math.max(set[modifier.ability], modifier.score);
+    }
+  }
+  return set;
 }
 
 // The activation with each Concentration duration made a plain one of these minutes, as War God's Blessing's.
@@ -743,6 +756,120 @@ export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
   );
 }
 
+// The magic ammunition carried with the biggest bonus to attack rolls, as +3 Ammunition over +1.
+function bestAmmunition(
+  worn: readonly (readonly [string, Item])[],
+  works: (itemId: string, item: Item) => boolean,
+):
+  | {
+      readonly id: string;
+      readonly name: string;
+      readonly attack: number;
+      readonly damage: number;
+    }
+  | undefined {
+  const bonus = (item: Item, to: string): number =>
+    (item.type === "magicItem"
+      ? (item.bonuses ?? item.variants?.[0]?.bonuses ?? [])
+      : []
+    )
+      .filter((entry) => entry.to === to)
+      .reduce((total, entry) => total + entry.amount, 0);
+  return worn
+    .filter(
+      ([itemId, item]) =>
+        item.type === "magicItem" && item.ammunition && works(itemId, item),
+    )
+    .map(([id, item]) => ({
+      id,
+      name: item.name,
+      attack: bonus(item, "attack"),
+      damage: bonus(item, "damage"),
+    }))
+    .sort((a, b) => b.attack - a.attack)[0];
+}
+
+// The Unarmed Strike every character can make: a Strength attack it's proficient with, dealing 1 plus its
+// Strength modifier in Bludgeoning damage. Its Grapple and Shove are actions of their own (actions.ts).
+export const UNARMED_STRIKE = "unarmed-strike";
+function unarmedStrike(abilities: AbilityScores): KnownAction {
+  const activation = weaponActivation(
+    {
+      id: UNARMED_STRIKE,
+      name: "Unarmed Strike",
+      type: "weapon",
+      category: "simple",
+      damage: { flat: 1, type: "bludgeoning" },
+      properties: [],
+      mastery: "nick",
+    },
+    abilities,
+  );
+  const { resolution } = activation;
+  return {
+    id: UNARMED_STRIKE,
+    name: "Unarmed Strike",
+    activation:
+      resolution.kind === "attack"
+        ? {
+            ...activation,
+            resolution: {
+              ...resolution,
+              attack: { ...resolution.attack, unarmed: true },
+            },
+          }
+        : activation,
+    spellLevel: null,
+  };
+}
+
+// An Unarmed Strike with what items add to its attack and damage rolls, as Wraps of Unarmed Power's +1.
+function withUnarmedBonus(
+  action: KnownAction,
+  attack: number,
+  damage: number,
+): KnownAction {
+  const { resolution } = action.activation;
+  if (
+    (attack === 0 && damage === 0) ||
+    resolution.kind !== "attack" ||
+    !resolution.attack.unarmed
+  ) {
+    return action;
+  }
+  const [first, ...rest] = resolution.damage;
+  return {
+    ...action,
+    activation: {
+      ...action.activation,
+      resolution: {
+        ...resolution,
+        attack: {
+          ...resolution.attack,
+          ...(attack > 0
+            ? { itemBonus: (resolution.attack.itemBonus ?? 0) + attack }
+            : {}),
+        },
+        damage: first
+          ? [
+              {
+                ...first,
+                amount: {
+                  ...first.amount,
+                  bonus: {
+                    base: (first.amount.bonus?.base ?? 0) + damage,
+                    add: first.amount.bonus?.add ?? [],
+                  },
+                },
+              },
+              ...rest,
+            ]
+          : resolution.damage,
+      },
+    },
+  };
+}
+
 export function weaponActivation(
   weapon: Weapon,
   abilities: AbilityScores,
@@ -920,7 +1047,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ]
       : [],
   );
-  const abilities = withItemAbilities(ownAbilities(actor, build), working);
+  const abilities = withEffectScores(
+    withItemAbilities(ownAbilities(actor, build), working),
+    actor,
+  );
 
   const level = build.levels.length;
   const classLevels: Record<string, number> = {};
@@ -1073,6 +1203,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     working.flatMap((item) => item.weaponTraining ?? []),
   );
   for (const item of working) {
+    if (item.ammunition) continue; // its bonus goes only to the shot that fires it
     // An entry with versions counts as its first, as older saves hold; content names a version as `<id>--<n>` (variants.ts).
     for (const { to, amount, unarmored, weapons } of item.bonuses ??
       item.variants?.[0]?.bonuses ??
@@ -1175,20 +1306,25 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           )
           .reduce((total, bonus) => total + bonus.amount, 0);
       const { hitDamage, ...plain } = weapon;
+      // shortcut: an Ammunition weapon fires the best magic ammunition carried, without asking.
+      const shot = weapon.properties.includes("ammunition")
+        ? bestAmmunition(worn, works)
+        : undefined;
       const activation = weaponActivation(
         works(itemId, item) && hitDamage ? { ...plain, hitDamage } : plain,
         abilities,
         martialTraining ||
           kinds.some((kind) => weaponTraining.has(kind)) ||
           classes.some((def) => weaponProficient(def, weapon)),
-        own("damage") + scoped("damage"),
-        own("attack") - magic.attack + scoped("attack"),
+        own("damage") + scoped("damage") + (shot?.damage ?? 0),
+        own("attack") - magic.attack + scoped("attack") + (shot?.attack ?? 0),
       );
       actions.push({
         id: `${WEAPON_PREFIX}${itemId}`,
-        name: item.name,
+        name: shot ? `${item.name} (${shot.name})` : item.name,
         activation,
         spellLevel: null,
+        ...(shot ? { ammunition: shot.id } : {}),
       });
       if (weapon.properties.includes("thrown") && weapon.range) {
         actions.push({
@@ -1201,7 +1337,22 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
-  actions.push(...fromFeatures.actions);
+  // Every character's Unarmed Strike, and what items add to it, as Wraps of Unarmed Power, also to the Unarmed
+  // Strikes features make, as Martial Arts'. shortcut: they keep their own damage type rather than offering Force.
+  const unarmed = (to: "attack" | "damage"): number =>
+    weaponBonuses
+      .filter(
+        (bonus) => bonus.to === to && bonus.weapons.includes(UNARMED_STRIKE),
+      )
+      .reduce((total, bonus) => total + bonus.amount, 0);
+  actions.push(unarmedStrike(abilities), ...fromFeatures.actions);
+  actions.splice(
+    0,
+    actions.length,
+    ...actions.map((action) =>
+      withUnarmedBonus(action, unarmed("attack"), unarmed("damage")),
+    ),
+  );
   for (const spellId of fromFeatures.spells) {
     if (access.content(spellId)) knownSpells.add(spellId);
   }
@@ -1513,6 +1664,21 @@ function itemAction(
     return {
       id: `item:${itemId}`,
       name: `Throw ${item.name}`,
+      activation: item.activation,
+      spellLevel: null,
+    };
+  }
+  if (item.type === "magicItem" && item.activation) {
+    const verb =
+      item.verb ??
+      (item.category === "potion"
+        ? "Drink"
+        : item.category === "scroll"
+          ? "Read"
+          : "Use");
+    return {
+      id: `item:${itemId}`,
+      name: `${verb} ${item.name}`,
       activation: item.activation,
       spellLevel: null,
     };
@@ -2083,6 +2249,7 @@ function withEffectActions(
     return stats;
   }
   const granted: KnownAction[] = [];
+  const resources: Record<string, number> = {};
   let actions = stats.actions;
   for (const { modifier, sourceId, level } of actor.activeEffects) {
     if (modifier.kind === "wished") {
@@ -2116,28 +2283,38 @@ function withEffectActions(
       );
     }
     if (modifier.kind !== "grantedAction") continue;
-    const spell = lookup(access, SpellSchema, spellOfSource(sourceId) ?? "");
-    if (!spell.granted) continue;
-    const scaled = spell.upcast
-      ? scaleActivation(
-          spell.granted,
-          spell.upcast.perSlotLevel,
-          (level ?? spell.level) - spell.level,
-        )
-      : spell.granted;
+    const giver = grantedBy(sourceId, access);
+    if (!giver) continue;
+    const scaled =
+      giver.spell?.upcast && giver.spell.granted
+        ? scaleActivation(
+            giver.activation,
+            giver.spell.upcast.perSlotLevel,
+            (level ?? giver.spell.level) - giver.spell.level,
+          )
+        : giver.activation;
     const { resolution } = scaled;
+    const retypedAction = retyped(
+      resolution.kind === "save" && modifier.dc !== undefined
+        ? {
+            ...scaled,
+            resolution: { ...resolution, dc: { base: modifier.dc, add: [] } },
+          }
+        : scaled,
+      modifier.damage,
+    );
+    const uses = modifier.uses;
+    if (uses !== undefined) resources[grantedKey(sourceId)] = uses;
     granted.push({
       id: `granted:${sourceId}`,
-      name: spell.name,
-      activation: retyped(
-        resolution.kind === "save" && modifier.dc !== undefined
-          ? {
-              ...scaled,
-              resolution: { ...resolution, dc: { base: modifier.dc, add: [] } },
-            }
-          : scaled,
-        modifier.damage,
-      ),
+      name: giver.name,
+      activation:
+        uses === undefined
+          ? retypedAction
+          : {
+              ...retypedAction,
+              cost: [...retypedAction.cost, { resource: grantedKey(sourceId) }],
+            },
       spellLevel: null,
     });
   }
@@ -2168,7 +2345,39 @@ function withEffectActions(
     reaching.length === actions.length &&
     reaching.every((action, index) => action === actions[index])
     ? stats
-    : { ...stats, actions: [...reaching, ...granted] };
+    : {
+        ...stats,
+        actions: [...reaching, ...granted],
+        ...(Object.keys(resources).length > 0
+          ? { resources: { ...stats.resources, ...resources } }
+          : {}),
+      };
+}
+
+// The pool of a `grantedAction` that allows only so many uses, as a Potion of Fire Breath's three exhales.
+export const grantedKey = (sourceId: string): string => `granted:${sourceId}`;
+
+// What gave a `grantedAction`: a spell's `granted` action, or a magic item's, as a Potion of Fire Breath's.
+function grantedBy(
+  sourceId: string,
+  access: ContentAccess,
+):
+  | {
+      readonly name: string;
+      readonly activation: Activation;
+      readonly spell?: Spell;
+    }
+  | undefined {
+  if (sourceId.startsWith(ITEM_PREFIX)) {
+    const item = lookup(access, ItemSchema, sourceId.slice(ITEM_PREFIX.length));
+    return item.type === "magicItem" && item.granted
+      ? { name: item.name, activation: item.granted }
+      : undefined;
+  }
+  const spell = lookup(access, SpellSchema, spellOfSource(sourceId) ?? "");
+  return spell.granted
+    ? { name: spell.name, activation: spell.granted, spell }
+    : undefined;
 }
 
 // In usedThisTurn once Wish's copy of the spell has been cast.

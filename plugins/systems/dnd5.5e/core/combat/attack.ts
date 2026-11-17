@@ -1549,7 +1549,15 @@ function landHit(
   const rerolled = rerolledTypes(stats, action.spellLevel !== null);
   const responses = piercing(damageResponses(target, context), mastered, stats);
 
-  const events: SystemEvent[] = [];
+  // Magic ammunition is no longer magical once it hits.
+  const events: SystemEvent[] = action.ammunition
+    ? [
+        dndEvent(`${NS}:itemUsed`, {
+          actor: attacker.id,
+          item: action.ammunition,
+        }),
+      ]
+    : [];
   let totalDealt = 0;
   const absorbed: { amount: number; type: DamageType }[] = [];
   const firstType = resolution.damage[0]?.type;

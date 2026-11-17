@@ -13,6 +13,7 @@ import {
   rollAmount,
   rollDiceNotation,
   wishedKey,
+  grantedKey,
   saveBonus,
   scoreFloor,
   spellSaveDc,
@@ -1790,9 +1791,21 @@ export function leafEvents(
             },
           }),
         );
-        if (effect.modifier.kind === "hasted") {
+        if (effect.modifier.kind === "hasted" && !effect.modifier.noLethargy) {
           const waiting = lethargyEffect(sourceId, caster.id, target);
           if (waiting) events.push(waiting);
+        }
+        // A fresh grant's uses start over, as a second Potion of Fire Breath's three exhales.
+        if (
+          effect.modifier.kind === "grantedAction" &&
+          effect.modifier.uses !== undefined
+        ) {
+          events.push(
+            dndEvent(`${NS}:resourceRestored`, {
+              actor: target.id,
+              resource: grantedKey(sourceId),
+            }),
+          );
         }
         if (effect.modifier.kind === "actionLimit") {
           events.push(
