@@ -160,6 +160,27 @@ describe("roll tables", () => {
     });
   });
 
+  it("joins a table printed in halves under the same heading row", () => {
+    const half = (rows: string[][]) => table(["d4", "Moss"], rows);
+    const parsed = parseTablesFromHtml(
+      `<h3>Moss Shapes</h3>${half([
+        ["1", "Bog"],
+        ["2", "Fen"],
+      ])}${half([
+        ["3", "Mire"],
+        ["4", "Marsh"],
+      ])}`,
+      "my-book",
+    );
+    expect(parsed.map((item) => item.entry)).toMatchObject([
+      {
+        name: "Moss Shapes",
+        die: "d4",
+        rows: [{ min: 1 }, { min: 2 }, { min: 3 }, { min: 4 }],
+      },
+    ]);
+  });
+
   it("names tables from the caption or the nearest heading and keeps names unique", () => {
     const html = `<title>Test Tome</title><h3>Market</h3>${d100}${table(
       ["d2", "R"],

@@ -702,6 +702,27 @@ describe("keyed tables and Bastions", () => {
     });
   });
 
+  it("reads a facility printed alone, with its facts in its first lines", () => {
+    const parsed = parseBastionsFromHtml(
+      `<h3>Special Facility</h3><p>Members can add this one.</p>
+       <h4>Moss Den</h4><p><em>Level 5 Bastion Facility</em></p>
+       <p><strong>Prerequisite:</strong> Membership in the Moss Guild</p>
+       <p><strong>Order:</strong> Empower</p><p>A den of moss.</p>`,
+      "my-book",
+    );
+    expect(
+      parsed.map((item) => BastionEntrySchema.parse(item.entry)),
+    ).toMatchObject([
+      {
+        name: "Moss Den",
+        type: "facility",
+        level: 5,
+        prerequisite: "Membership in the Moss Guild",
+        order: "Empower",
+      },
+    ]);
+  });
+
   it("reads facilities with the facts from their table, and events", () => {
     const parsed = parseBastionsFromHtml(
       `<h1>Bastions of Moss</h1>

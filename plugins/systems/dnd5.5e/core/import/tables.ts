@@ -104,11 +104,31 @@ export function parseTablesFromHtml(
   const headings = headingsIn(html);
   const slug = uniqueSlugs();
   const result: ParsedImport[] = [];
-  for (const match of html.matchAll(/<table\b[\s\S]*?<\/table>/g)) {
-    const parsed = parseRollTable(match[0]);
+  const tables = [...html.matchAll(/<table\b[\s\S]*?<\/table>/g)];
+  const problemOf = (table: string): string | null => {
+    const parsed = parseRollTable(table);
+    return parsed && "problem" in parsed ? parsed.problem : null;
+  };
+  const headOf = (table: string): string => (rowsOf(table)[0] ?? []).join("|");
+  for (let at = 0; at < tables.length; at += 1) {
+    const match = tables[at];
+    if (!match) continue;
+    let table = match[0];
+    // A long table can be printed in halves side by side, each half under the same heading row.
+    for (
+      let next = tables[at + 1]?.[0];
+      next !== undefined &&
+      problemOf(table) === "doesn't reach the die's top" &&
+      headOf(next) === headOf(table);
+      next = tables[at + 1]?.[0]
+    ) {
+      table = `${table.replace(/<\/table>$/, "")}${next.replace(/^[\s\S]*?<\/tr>/, "")}`;
+      at += 1;
+    }
+    const parsed = parseRollTable(table);
     if (!parsed || "problem" in parsed) continue;
     const before = headings.filter((item) => item.start < match.index).at(-1);
-    const caption = captionOf(match[0]);
+    const caption = captionOf(table);
     const name = caption === "" ? (before?.title ?? "Table") : caption;
     const id = slug(name);
     result.push({
@@ -130,7 +150,7 @@ export function parseTablesFromHtml(
 }
 
 const LOOKUP_KEY =
-  /^(?:CR|Theme|Challenge|Character Level|Level\/CR|Trap Danger|Trap Level|Check Total|Rarity|Item Rarity|DC|Spell Level|Result|Type)$/;
+  /^(?:CR|Theme|Challenge|Character Level|Level\/CR|Trap Danger|Trap Level|Check Total|Rarity|Item Rarity|DC|Spell Level|Result|Type|Cost|Size|Deity)$/i;
 
 const isRollTable = (table: string): boolean => {
   const parsed = parseRollTable(table);
@@ -234,10 +254,44 @@ export function parseBastionsFromHtml(
       },
     };
   };
+  const listed = chapters.filter(
+    (item) => item.tag === 3 && facts.has(slugOf(item.title)),
+  );
+  // A book can also print a facility on its own, as a faction's, with its facts as the first lines under its name.
+  const alone = headings.flatMap((heading) => {
+    if (listed.includes(heading)) return [];
+    const lines = blockText(bodyOf(html, headings, heading)).split("\n");
+    const level = /^Level (\d+) Bastion Facility$/.exec(lines[0] ?? "")?.[1];
+    if (level === undefined) return [];
+    const labelled = (name: string): string | undefined =>
+      lines
+        .find((line) => line.startsWith(`${name}:`))
+        ?.slice(name.length + 1)
+        .trim();
+    const prerequisite = labelled("Prerequisite");
+    const order = labelled("Order");
+    const id = slugOf(heading.title);
+    return [
+      {
+        slug: id,
+        notes: [],
+        entry: {
+          id: `${pluginId}:bastion/${id}`,
+          name: heading.title,
+          type: "facility",
+          level: Number(level),
+          ...(prerequisite && !/^(?:None|—)$/.test(prerequisite)
+            ? { prerequisite }
+            : {}),
+          ...(order ? { order } : {}),
+          text: lines.join("\n"),
+        },
+      },
+    ];
+  });
   return [
-    ...chapters
-      .filter((item) => item.tag === 3 && facts.has(slugOf(item.title)))
-      .map((item) => entry(item, "facility")),
+    ...listed.map((item) => entry(item, "facility")),
+    ...alone,
     ...headings
       .filter((item) => item.title === "Event Descriptions")
       .flatMap((item) => headingsUnder(headings, item))
