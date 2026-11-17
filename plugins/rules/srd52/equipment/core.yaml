@@ -123,7 +123,7 @@
   rarity: rare
   attunement: true
   text: While attuned and wearing it, you have +1 to Armor Class and saving throws.
-  automation: partial
+  automation: full
   bonuses:
     - { to: ac, amount: 1 }
     - { to: savingThrows, amount: 1 }

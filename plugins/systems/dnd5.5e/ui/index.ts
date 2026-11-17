@@ -414,6 +414,7 @@ const GEAR_HINT = "Change gear between choices, outside a fight";
 const ATTUNE_HINT = "Attune where the party can rest";
 const DRINK_HINT = "Drink between choices, or on your turn in a fight";
 const FULL_HINT = "Already at full health";
+const STUDY_HINT = "Study it where the party can rest";
 
 // The player first, then the companions; none until the player has chosen a character.
 // What the character carries, with a way to change it whenever the pending choice allows, such as on a rest.
@@ -505,7 +506,11 @@ function equipmentRows(
                 hint: actor.hp >= stats.maxHp ? FULL_HINT : DRINK_HINT,
               },
             }
-          : {}),
+          : changes && item.type === "magicItem" && item.study
+            ? {
+                option: { id: `study:${id}`, label: "Study", hint: STUDY_HINT },
+              }
+            : {}),
         ...detail,
       },
     ];
@@ -520,8 +525,8 @@ function equipmentRows(
       const parsed = ItemSchema.safeParse(access.content(id));
       return (
         parsed.success &&
-        parsed.data.type === "magicItem" &&
-        parsed.data.attunement
+        "attunement" in parsed.data &&
+        parsed.data.attunement === true
       );
     })
       ? [
@@ -744,7 +749,11 @@ function sheetOf(
               { label: "Save DC", value: String(spellSaveDc(stats)) },
               {
                 label: "Attack",
-                value: signed(stats.proficiency + spellModifier(stats)),
+                value: signed(
+                  stats.proficiency +
+                    spellModifier(stats) +
+                    stats.itemBonuses.spellAttack,
+                ),
               },
               ...stats.slots.flatMap((max, index) => {
                 const level = String(index + 1);

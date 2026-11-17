@@ -16,6 +16,7 @@ import {
   MAX_ATTUNED,
   NS,
   dndEvent,
+  effectiveBuild,
   equipped,
   without,
   frame,
@@ -26,6 +27,7 @@ import {
   deriveStats,
   itemHealing,
   lookup,
+  ownAbilities,
   rollAmount,
   weaponProficient,
 } from "./stats.ts";
@@ -87,7 +89,10 @@ export function canUse(
     case "weapon":
       return classes.some((def) => weaponProficient(def, item));
     case "armor":
-      return classes.some((def) => def.armor.includes(item.armorType));
+      return (
+        item.anyTraining === true ||
+        classes.some((def) => def.armor.includes(item.armorType))
+      );
     case "shield":
       return classes.some((def) => def.armor.includes("shield"));
     case "magicItem":
@@ -112,6 +117,19 @@ export function gearOptions(
     .filter((id) => !found || found.includes(id))
     .flatMap((id) => {
       const item = itemOf(access, id);
+      const attunement =
+        !found && "attunement" in item && item.attunement
+          ? attuned.includes(id)
+            ? [
+                {
+                  id: `unattune:${id}`,
+                  label: `End attunement to ${item.name}`,
+                },
+              ]
+            : attuned.length < MAX_ATTUNED
+              ? [{ id: `attune:${id}`, label: `Attune to ${item.name}` }]
+              : []
+          : [];
       if (WORN_TYPES.has(item.type)) {
         const wearable = item.type === "weapon" || canUse(item, stats, access);
         return [
@@ -121,17 +139,10 @@ export function gearOptions(
           ...(worn.includes(id) && !found
             ? [{ id: `stow:${id}`, label: `Stow ${item.name}` }]
             : []),
+          ...attunement,
         ];
       }
-      if (item.type !== "magicItem" || !item.attunement || found) return [];
-      if (attuned.includes(id)) {
-        return [
-          { id: `unattune:${id}`, label: `End attunement to ${item.name}` },
-        ];
-      }
-      return attuned.length < MAX_ATTUNED
-        ? [{ id: `attune:${id}`, label: `Attune to ${item.name}` }]
-        : [];
+      return attunement;
     });
 }
 
@@ -274,7 +285,55 @@ export function sceneGearActions(
           ]
         : [];
     }),
+    ...[...new Set(actor.inventory)].flatMap((id) => {
+      const item = itemOf(access, id);
+      return studyGain(actor, item) > 0
+        ? [
+            {
+              id: `study:${id}`,
+              label: `Study ${item.name}`,
+              effect: `${NS}:study`,
+              args: { item: id },
+              rest: true,
+            },
+          ]
+        : [];
+    }),
   ];
+}
+
+// How much studying the item raises the character's own score, which may be nothing once at its maximum.
+function studyGain(actor: Actor, item: z.infer<typeof ItemSchema>): number {
+  const build = effectiveBuild(actor);
+  if (item.type !== "magicItem" || !item.study || !build) return 0;
+  const { ability, raise, max } = item.study;
+  const score = ownAbilities(actor, build)[ability];
+  return Math.max(0, Math.min(raise, max - score));
+}
+
+// Studying a Manual or Tome: the score it raises, by as much as it rose, and the item, whose magic is spent.
+// shortcut: the 48 hours over six days pass with a rest, as attuning's hour does.
+function study(id: string, context: Context): SystemResult {
+  const actor = player(context.state);
+  const item = itemOf(context, id);
+  const amount = studyGain(actor, item);
+  if (item.type !== "magicItem" || !item.study || amount === 0) {
+    throw new Error(`${actor.id} can't study ${id}`);
+  }
+  if (!actor.inventory.includes(id)) {
+    throw new Error(`${actor.id} has no ${id} to study`);
+  }
+  return {
+    events: [
+      dndEvent(`${NS}:abilityRaised`, {
+        actor: actor.id,
+        ability: item.study.ability,
+        amount,
+        item: id,
+      }),
+      dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: id }),
+    ],
+  };
 }
 
 // The healing is rolled here and carried by the event, so a later rules change can't rewrite it.
@@ -318,6 +377,11 @@ export const gearEffects = {
     references: ({ item }) => [item],
     apply: ({ item }, context: Context) => drink(item, context),
   }),
+  [`${NS}:study`]: storyEffect({
+    schema: z.object({ item: z.string() }),
+    references: ({ item }) => [item],
+    apply: ({ item }, context: Context) => study(item, context),
+  }),
   // `goldEach` is paid to every living party member, as "150 GP each", so the total follows the party's size then.
   [`${NS}:treasure`]: storyEffect({
     schema: LootSchema.extend({
@@ -351,6 +415,9 @@ function throwWeapon(
   const { actors } = context.state;
   const thrower = actors[payload.actor];
   if (!thrower || !equipped(thrower).includes(payload.item)) return {};
+  // A Returning Weapon comes back to the hand that threw it.
+  const item = itemOf(context, payload.item);
+  if (item.type === "weapon" && item.returning) return {};
   const at = actors[payload.target]?.position ??
     thrower.position ?? { x: 0, y: 0 };
   return {
