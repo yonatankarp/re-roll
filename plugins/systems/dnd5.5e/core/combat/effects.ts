@@ -174,6 +174,7 @@ import {
   hasPassive,
   inReach,
   isMelee,
+  luckyEdge,
   meleeReach,
   hitFits,
   onceKey,
@@ -1631,17 +1632,30 @@ function inHpBand(
   );
 }
 
-// An hour or more without Concentration outlasts the fight, counted down by rests after it (rest.ts).
+// An hour or more without Concentration outlasts the fight, counted down by rests after it (rest.ts), and one that
+// lasts until a Long Rest outlasts fights and scenes until then.
 // shortcut: anything shorter ends with the fight, as the scenes between fights take longer than ten minutes.
-export function lingersFor(duration: Duration): {
-  lingers?: number;
+// Outside a fight (`between`), as cast in a scene (camp.ts), the effect lasts the scene, or its hours, Concentration
+// or not; a scene takes about an hour.
+export function lingersFor(
+  duration: Duration,
+  between = false,
+): {
+  lingers?: number | "longRest";
 } {
-  return typeof duration === "object" &&
-    "minutes" in duration &&
-    !("concentration" in duration) &&
-    duration.minutes >= 60
-    ? { lingers: Math.floor(duration.minutes / 60) }
-    : {};
+  if (typeof duration === "object" && "until" in duration)
+    return duration.until === "longRest"
+      ? { lingers: "longRest" }
+      : between
+        ? { lingers: 0 }
+        : {};
+  if (typeof duration === "object" && "minutes" in duration)
+    return between || !("concentration" in duration)
+      ? duration.minutes >= 60 || between
+        ? { lingers: Math.floor(duration.minutes / 60) }
+        : {}
+      : {};
+  return between ? { lingers: 0 } : {};
 }
 
 // A timed spell's minutes, and a turn of the target's, are counted in rounds by its `lasts` (lastsFor).
@@ -2206,7 +2220,7 @@ export function leafEvents(
                   : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
-              ...lingersFor(effect.duration),
+              ...lingersFor(effect.duration, !context.state.combat),
               ...swallowed,
             },
           }),
@@ -2299,7 +2313,7 @@ export function leafEvents(
               ...(effect.clings && conditionSave
                 ? { clings: conditionSave }
                 : {}),
-              ...lingersFor(effect.duration),
+              ...lingersFor(effect.duration, !context.state.combat),
               ...(effect.banish && save
                 ? { banish: { ability: effect.banish.ability, dc: save.dc } }
                 : {}),
@@ -3406,6 +3420,8 @@ export function rollSave(
           ),
       ),
   };
+  const lucky = luckyEdge(target, stats, edge.advantage, edge.disadvantage);
+  if (lucky) edge.disadvantage = false;
   const rolled0 = rollD20(context.dice, {
     ...edge,
     rerollOnes: hasPassive(stats, "rerollOnes"),
@@ -3502,11 +3518,60 @@ export function rollSave(
   }
   return {
     saved,
-    events: [...counterEvents, ...settled.events, rolled, ...spent],
+    events: [
+      ...counterEvents,
+      ...(lucky ?? []),
+      ...settled.events,
+      rolled,
+      ...spent,
+      ...naturalOneEvents(target, settled.natural, context),
+    ],
   };
 }
 
 const SAVE_REROLL = "save-reroll";
+
+// Set while a natural 1's own save is rolled, so that save doesn't set it off again.
+let echoing = false;
+
+// Echoing Soul's Intrusive Echoes: right after a D20 Test of the bearer's rolls a 1, its save, and on a failure what
+// the passive does to it (schemas.ts naturalOne).
+export function naturalOneEvents(
+  actor: Actor,
+  natural: number,
+  context: Context,
+): SystemEvent[] {
+  if (natural !== 1 || echoing) return [];
+  const stats = deriveStats(actor, context);
+  const events: SystemEvent[] = [];
+  for (const passive of stats.passives) {
+    if (passive.kind !== "naturalOne") continue;
+    echoing = true;
+    try {
+      const against = {
+        ability: passive.save.ability,
+        dc: evaluateFormula(passive.save.dc, stats),
+      };
+      const save = rollSave(actor, against.ability, against.dc, context);
+      events.push(...save.events);
+      // The same save ends a condition that a later one can, as Symbiotic Agenda's Charmed when its bearer is hurt.
+      if (!save.saved)
+        events.push(
+          ...leafEvents(
+            passive.effects,
+            `trigger:${passive.name}`,
+            actor,
+            actor,
+            context,
+            against,
+          ),
+        );
+    } finally {
+      echoing = false;
+    }
+  }
+  return events;
+}
 
 // The square an answer aims at ("@x,y" or "@id"), or null for one that aims at no square.
 export function aimSquare(

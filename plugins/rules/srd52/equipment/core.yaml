@@ -172,3 +172,11 @@
   text: Reading it casts Magic Circle without a spell slot, and the scroll crumbles to dust.
   automation: partial
   spell: "srd52:spell/magic-circle"
+- id: "srd52:item/thieves-tools"
+  name: Thieves' Tools
+  costCp: 2500
+  weightLb: 1
+  type: tool
+  ability: dex
+  handles: [lock, trap]
+  text: Used to pick a lock or disarm a trap.

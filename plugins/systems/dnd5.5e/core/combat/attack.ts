@@ -149,6 +149,7 @@ import {
   slotToSpend,
   within5,
   withUpcasts,
+  luckyEdge,
 } from "./queries.ts";
 import {
   actingEnds,
@@ -162,6 +163,7 @@ import {
   resolveAction,
   rollSave,
   typeAgainst,
+  naturalOneEvents,
 } from "./effects.ts";
 
 // A resource spent on the bearer: this attacker is freed of its Among the Dead until a Long Rest.
@@ -1254,12 +1256,16 @@ export function runAttackRoll(
       ? null
       : gainAdvantageFrame({ ...payload, target: target.id }, context);
   if (trip) return { frames: [trip] };
-  const edge = held ?? { advantage, disadvantage };
+  // Drunkard's Luck cancels Disadvantage on a fresh roll, for its resource.
+  const lucky = held
+    ? null
+    : luckyEdge(attacker, stats, advantage, disadvantage);
+  const edge = held ?? { advantage, disadvantage: disadvantage && !lucky };
   const rolledFirst = held
     ? { natural: held.natural }
     : rollD20(dice, {
         advantage,
-        disadvantage,
+        disadvantage: edge.disadvantage,
         rerollOnes: hasPassive(stats, "rerollOnes"),
         thirdDie: ability !== "str" && hasPassive(stats, "elvenAccuracy"),
       });
@@ -1336,7 +1342,10 @@ export function runAttackRoll(
     context,
   );
   if ("frames" in window) {
-    return { events: [...guarded, ...window.events], frames: window.frames };
+    return {
+      events: [...(lucky ?? []), ...guarded, ...window.events],
+      frames: window.frames,
+    };
   }
   const roll = { natural: window.natural };
   const total = judge(roll.natural, window.bonus).total;
@@ -1368,9 +1377,11 @@ export function runAttackRoll(
   // An effect like Guiding Bolt's lasts only until the next attack roll it applies to.
   const spent = [
     ...turnedOn(attacker, [target], stats),
+    ...(lucky ?? []),
     ...duelBroken(attacker, [target], state),
     ...guarded,
     ...window.events,
+    ...naturalOneEvents(attacker, roll.natural, context),
     ...(aimed
       ? [
           dndEvent(`${NS}:oncePerTurnUsed`, {

@@ -248,9 +248,12 @@ const ActiveEffectSchema = z.strictObject({
   clings: z
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
-  // Hours it outlasts a fight by, counted down by rests, or "cured" for one that lasts until magic ends it (rest.ts).
-  // Missing for an effect that ends with the fight.
-  lingers: z.union([z.number().int(), z.literal("cured")]).optional(),
+  // Hours it outlasts a fight by, counted down by rests, "cured" for one that lasts until magic ends it (rest.ts), or
+  // "longRest" for one that lasts through fights and scenes until a Long Rest, as Blessing of the Trickster. Missing
+  // for an effect that ends with the fight. Cast between fights (camp.ts), 0 lasts until the next scene.
+  lingers: z
+    .union([z.number().int(), z.literal("cured"), z.literal("longRest")])
+    .optional(),
   level: z.number().int().optional(), // the slot a spell was cast with, when it was given one
   // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
   swallowed: z.boolean().optional(),
@@ -853,6 +856,16 @@ export const EVENT_SCHEMAS = {
   [`${NS}:deathSaveRolled`]: DeathSaveSchema,
   [`${NS}:maxHpReduced`]: MaxHpReducedSchema,
   [`${NS}:rollReported`]: RollReportSchema,
+  // A scene check done without a roll by what deals with its obstacle, as Knock with a lock (core/explore.ts).
+  [`${NS}:obstacleCleared`]: z.strictObject({
+    actor: z.string(),
+    source: z.string(),
+  }),
+  // A scene check that needs a tool the creature doesn't have, failed without a roll (core/explore.ts).
+  [`${NS}:toolMissing`]: z.strictObject({
+    actor: z.string(),
+    tool: ContentIdSchema,
+  }),
   [`${NS}:saveReported`]: SaveReportSchema,
   [`${NS}:saveRolled`]: SaveRolledSchema,
   // A die rolled for what befalls a creature, as Confusion's d10 or Prismatic Spray's d8, kept for the log: what
@@ -1171,25 +1184,50 @@ function grownClones(actors: DndState["actors"]): DndState["actors"] {
 }
 
 // Effects that outlast a fight run down with the hours that pass, as a curse's 8 hours (core/combat/effects.ts
-// lingersFor). Those that last until cured stay.
+// lingersFor). Those that last until cured stay, and those that last until a Long Rest stay until one (`long`).
+// Concentration on a spell whose effects have all run out ends with them.
 function lingerLess(
   actors: DndState["actors"],
   hours: number,
+  long = false,
 ): DndState["actors"] {
-  return Object.fromEntries(
+  const ends = (lingers: ActiveEffect["lingers"]) =>
+    typeof lingers === "number" || (long && lingers === "longRest");
+  if (
+    !Object.values(actors).some((actor) =>
+      actor.activeEffects.some(({ lingers }) => ends(lingers)),
+    )
+  )
+    return actors;
+  const after = Object.fromEntries(
     Object.entries(actors).map(([id, actor]) => [
       id,
-      actor.activeEffects.some(({ lingers }) => typeof lingers === "number")
+      actor.activeEffects.some(({ lingers }) => ends(lingers))
         ? {
             ...actor,
             activeEffects: actor.activeEffects.flatMap((effect) =>
-              typeof effect.lingers !== "number"
+              !ends(effect.lingers)
                 ? [effect]
-                : effect.lingers > hours
+                : typeof effect.lingers === "number" && effect.lingers > hours
                   ? [{ ...effect, lingers: effect.lingers - hours }]
                   : [],
             ),
           }
+        : actor,
+    ]),
+  );
+  const held = new Set(
+    Object.values(after).flatMap((actor) =>
+      actor.activeEffects.flatMap(({ casterId, ends: until }) =>
+        until === "concentration" ? [casterId] : [],
+      ),
+    ),
+  );
+  return Object.fromEntries(
+    Object.entries(after).map(([id, actor]) => [
+      id,
+      actor.concentratingOn !== null && !held.has(id)
+        ? { ...actor, concentratingOn: null }
         : actor,
     ]),
   );
@@ -1358,7 +1396,11 @@ function outlasting(
   const { modifier, lingers, casterId } = rest;
   if (lingers === undefined) return [];
   const caster = state.actors[casterId];
-  if (lingers !== "cured" && (!caster || caster.side === bearer.side))
+  if (
+    lingers !== "cured" &&
+    lingers !== "longRest" &&
+    (!caster || caster.side === bearer.side)
+  )
     return [];
   if (
     ((modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
@@ -1555,6 +1597,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
             ? grownClones(deadLonger(state, hours))
             : deadLonger(state, hours),
           hours,
+          rest === "long",
         ),
       };
       if (rest === "long") return { ...rested, sinceLongRest: hours };

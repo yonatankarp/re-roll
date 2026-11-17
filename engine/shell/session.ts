@@ -28,6 +28,7 @@ import {
   REST_OPTION_PREFIX,
   SCENE_DECISION_PREFIX,
   sceneActionsHere,
+  sceneHere,
   sceneText,
 } from "../story/runtime.ts";
 import type { Adventure } from "../story/adventure.ts";
@@ -1448,20 +1449,22 @@ export function createGame({
         }));
       // A row keeps its own choice on the decider's sheet while it's offered, and anywhere with a hint,
       // drawn disabled, which says when it will be offered.
-      const sheets = ui.sheets(state.system, run).map((sheet) => ({
-        ...sheet,
-        sections: sheet.sections.map((section) => ({
-          ...section,
-          rows: section.rows.map(({ option, ...row }) =>
-            option &&
-            (option.hint !== undefined ||
-              (sheet.id === decision?.actor &&
-                decision.options.some((item) => item.id === option.id)))
-              ? { ...row, option }
-              : row,
-          ),
-        })),
-      }));
+      const sheets = ui
+        .sheets(state.system, run, sceneHere(run, state))
+        .map((sheet) => ({
+          ...sheet,
+          sections: sheet.sections.map((section) => ({
+            ...section,
+            rows: section.rows.map(({ option, ...row }) =>
+              option &&
+              (option.hint !== undefined ||
+                (sheet.id === decision?.actor &&
+                  decision.options.some((item) => item.id === option.id)))
+                ? { ...row, option }
+                : row,
+            ),
+          })),
+        }));
       const combat = ui.combat(state.system, run, (id) =>
         run.adventure.encounters.find((item) => item.id === id),
       );

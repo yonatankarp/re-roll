@@ -317,6 +317,25 @@ export const WeaponChangeSchema = z.strictObject({
 });
 export type WeaponChange = z.infer<typeof WeaponChangeSchema>;
 
+// What a scene check acts on, so a spell, item or tool that deals with it can help (core/explore.ts): a lock to pick,
+// something stuck or barred to force, a wall or barricade to get through, a climb, water to swim or cross, a gap to
+// leap or balance over, a trap to disarm, something heavy to lift or shove, and a chase to get away from.
+export const ObstacleSchema = z.enum([
+  "lock",
+  "stuck",
+  "wall",
+  "climb",
+  "water",
+  "gap",
+  "trap",
+  "heavy",
+  "chase",
+]);
+export type Obstacle = z.infer<typeof ObstacleSchema>;
+
+// The weather an environmental effect is, which magic that changes the weather calms (environment.ts).
+export const WeatherSchema = z.enum(["cold", "heat", "rain", "wind"]);
+
 // "attacksAgainst" sits on the creature being attacked, as with Faerie Fire or Blur.
 const RollFlagSchema = z.enum(["attacks", "saves", "checks", "attacksAgainst"]);
 
@@ -338,6 +357,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     once: z.boolean().optional(),
     subtract: z.boolean().optional(), // taken off attack rolls, saves or checks instead, as with Bane
     skill: SkillSchema.optional(), // only checks with this skill, as Pass without Trace's Stealth
+    // only checks with this tool, as a Mark's die on its Herbalism Kit, or "artisan" with any Artisan's Tools
+    tool: z.union([ContentIdSchema, z.literal("artisan")]).optional(),
     ability: AbilitySchema.optional(), // only saves with this ability, as Slow's Dexterity saves
     melee: z.literal(true).optional(), // AC against melee attack rolls only, as a pirate admiral's Defensive Stance
     ranged: z.literal(true).optional(), // AC against ranged attack rolls only, as an Arrow-Catching Shield's
@@ -359,6 +380,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     // attacksAgainst only for the effect's caster, as Lords' Alliance Agent's Reassert Honor.
     casterOnly: z.literal(true).optional(),
     skills: z.array(SkillSchema).min(1).optional(), // only checks with these skills, as Remarkable Athlete's Athletics
+    halfMove: z.literal(true).optional(), // only once it has moved no more than half its Speed this turn, as Steady Eye
   }),
   // "attackers" limits attacksAgainst to creatures of these lowercase types, as with Protection from Evil and Good.
   z.strictObject({
@@ -459,6 +481,28 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   }),
   // Seeing creatures that have the Invisible condition as if they were visible, as See Invisibility does.
   z.strictObject({ kind: z.literal("seeInvisible") }),
+  // A scene check about one of these goes better (core/explore.ts): it succeeds without a roll, as a door Knock opened,
+  // or rolls with Advantage, as a climb with a Rope of Climbing. `once` is spent on the check it helps.
+  // `chance` is the percent it works, rolled on the check, and an item with `spends` is gone once it has, as a
+  // Mystery Key's.
+  z.strictObject({
+    kind: z.literal("sceneAid"),
+    about: z.array(ObstacleSchema).min(1),
+    aid: z.enum(["success", "advantage"]),
+    once: z.literal(true).optional(),
+    chance: z.number().int().min(1).max(99).optional(),
+    spends: z.literal(true).optional(),
+  }),
+  // Environmental effects of these kinds of weather don't touch the party while it lasts, as Control Weather calms a
+  // storm or a heat wave (environment.ts).
+  z.strictObject({
+    kind: z.literal("weather"),
+    ends: z.array(WeatherSchema).min(1),
+  }),
+  // Carries this many pounds of the bearer's gear for it, weightless, as a Bag of Holding or a Floating Disk (carry.ts).
+  z.strictObject({ kind: z.literal("holds"), pounds: z.number().int().min(1) }),
+  // Drinkable water for the party while it lasts, against an exposure that spares those with water (environment.ts).
+  z.strictObject({ kind: z.literal("water") }),
   // Damage at the start or end of the bearer's turn, such as Moonbeam or Searing Smite.
   z.strictObject({
     kind: z.literal("lingeringDamage"),
@@ -756,6 +800,7 @@ export const DurationSchema = z.union([
       "itsNextTurnEnd",
       "turnEnd",
       "rest",
+      "longRest", // until the next Long Rest, outlasting fights and scenes, as Blessing of the Trickster
     ]),
   }),
   z.strictObject({ minutes: z.number() }),
@@ -1034,7 +1079,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("zone"),
     zone: ZoneKindSchema,
-    radius: z.number().int().min(5),
+    radius: z.number().int().min(0), // 0 for the one square it's on, as Mold Earth's 5-foot square
     duration: DurationSchema,
     damage: z.array(DamageSchema).optional(),
     follows: z.literal(true).optional(),
@@ -1854,8 +1899,9 @@ export const ActivationSchema = z.strictObject({
   // only while an effect of one of these features' activations is on the bearer, as Travel along the Tree in a Rage,
   // or while it concentrates on one of these spells, as Telekinetic Master's attack
   while: z.array(ContentIdSchema).min(1).optional(),
-  // Only between fights, from the character sheet (camp.ts), as a spell that takes an hour to cast, as Raise Dead.
-  outOfCombat: z.literal(true).optional(),
+  // Only between fights, from the character sheet (camp.ts), as a spell that takes an hour to cast, as Raise Dead,
+  // which needs a scene with time to rest, or "scene" for one in any scene, as Knock on a scene's lock (explore.ts).
+  outOfCombat: z.union([z.literal(true), z.literal("scene")]).optional(),
   label: z.string().min(1).optional(), // added to its feature's name, to tell two of a feature's activations apart
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
   targeting: TargetingSchema,
@@ -2266,6 +2312,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("saveProficiency"),
     abilities: z.array(AbilitySchema).default([]),
     increased: z.boolean().default(false),
+    // already proficient in all of `abilities`, the first of these it isn't instead, as Elegant Courtier's
+    orElse: z.array(AbilitySchema).min(1).optional(),
   }),
   // Advantage on Death Saving Throws, as with Durable, or Disadvantage with `worse`, as Touch of Death's Pull of the
   // Grave.
@@ -2456,6 +2504,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // enough, and spent, as a Ring of Dedicated Focus's two on a save to keep Concentration. `resource` is then
     // "hitDice".
     hitDice: z.number().int().min(1).optional(),
+    // With `hitDice`, a use of this resource spent too, as Sustained Symbiosis's uses a Long Rest.
+    uses: z.string().min(1).optional(),
     concentration: z.literal(true).optional(), // a save to keep Concentration, as the Ring of Dedicated Focus's
     magical: z.literal(true).optional(), // only a save against a spell, as Magic Resistant
     from: SaveFromSchema.optional(), // only a save against this, as a Scarab of Protection's
@@ -2771,6 +2821,35 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("scoreFloor"), ability: AbilitySchema }),
   // Half the Proficiency Bonus, rounded down, on a skill check it isn't proficient in, as Jack of All Trades.
   z.strictObject({ kind: z.literal("halfProficiency") }),
+  // Proficiency with these tools, by id (core/explore.ts).
+  z.strictObject({
+    kind: z.literal("toolProficiency"),
+    tools: z.array(ContentIdSchema).default([]),
+  }),
+  // Counts as carrying any Artisan's Tools, proficient with them, as a Manifold Tool turns into the one needed
+  // (core/explore.ts).
+  z.strictObject({ kind: z.literal("anyTool") }),
+  // Disadvantage on a D20 Test is cancelled by spending `cost` of `resource`, as Drunkard's Luck's Focus Points.
+  z.strictObject({
+    kind: z.literal("cancelDisadvantage"),
+    resource: z.string().min(1),
+    cost: z.number().int().min(1).default(1),
+  }),
+  // Right after a D20 Test of the bearer's rolls a 1, it makes this save, and on a failure `effects` land on it, as
+  // Echoing Soul's Intrusive Echoes (combat/natural-one.ts). The save itself doesn't set it off again.
+  z.strictObject({
+    kind: z.literal("naturalOne"),
+    name: z.string().min(1),
+    save: z.strictObject({ ability: AbilitySchema, dc: FormulaSchema }),
+    effects: z.array(LeafEffectSchema).min(1),
+  }),
+  // One of `resource`'s dice rolled and added to the bearer's Initiative, as Ambush's Superiority Die.
+  z.strictObject({
+    kind: z.literal("initiativeDie"),
+    bonusDice: DiceSchema,
+    dieSize: z.string().optional(),
+    resource: z.string().min(1),
+  }),
   // Advantage on checks to escape a grapple, as Vampire Hunter's Adroit Escape.
   z.strictObject({ kind: z.literal("escapeAdvantage") }),
   // Raises a scaling key to at least this, as a Greater Mark's 1d6 for its Mark's 1d4 (`dieSize` "intuitionDie").
@@ -3352,6 +3431,7 @@ export const ClassSchema = ContentEntrySchema.extend({
   martialWeaponProperties: z.array(WeaponPropertySchema).min(1).optional(),
   armor: z.array(z.enum(["light", "medium", "heavy", "shield"])),
   spellcasting: z.strictObject({ ability: AbilitySchema }).optional(),
+  tools: z.array(ContentIdSchema).optional(), // tool proficiencies it gives at level 1, by id, as a Rogue's Thieves' Tools
   // Spells the class's own chapter names, for a class newer than the books that print them.
   spellList: z.array(ContentIdSchema).optional(),
   // shortcut: fewer than 20 levels are allowed while content is being added, require 20 once step 5 is done.
@@ -3447,6 +3527,9 @@ export const SpellSchema = ContentEntrySchema.extend({
   activation: ActivationSchema.optional(),
   // An action its caster can take while concentrating on it, as Flame Blade's attack or Heat Metal's Bonus Action.
   lasting: ActivationSchema.optional(),
+  // What it does outside a fight that its fight's activation doesn't, as Freezing Sphere's frozen water, cast only
+  // between fights from the sheet (camp.ts, explore.ts).
+  scene: ActivationSchema.optional(),
   // An action its target can take while a `grantedAction` it gave lasts, as Dragon's Breath's breath.
   granted: ActivationSchema.optional(),
   // Uses its caster spends on these activations while its `spheres` effect lasts: `count`, and `perSlot` more for
@@ -3717,6 +3800,9 @@ const GearSchema = ItemBaseSchema.extend({
 const ToolSchema = ItemBaseSchema.extend({
   type: z.literal("tool"),
   ability: AbilitySchema.optional(), // 2014 books print no ability for a tool
+  // What it deals with, so a check about that counts its proficiency when it's carried, as Thieves' Tools a lock.
+  handles: z.array(ObstacleSchema).min(1).optional(),
+  artisan: z.literal(true).optional(), // one of the Artisan's Tools, which a Manifold Tool can become
   text: z.string().min(1),
 }).strict();
 
@@ -4237,17 +4323,35 @@ export const EncounterSchema = z.strictObject({
   environment: z.array(ContentIdSchema).min(1).optional(),
 });
 
+// `about` says what a check acts on, so what deals with that helps (core/explore.ts), as Knock with a lock.
+const AboutSchema = z.array(ObstacleSchema).min(1).optional();
+
 export const CheckSchema = z.union([
   // `ability` pairs the skill with another ability, as a Constitution (Athletics) check (variant-rules.ts).
   z.strictObject({
     skill: SkillSchema,
     ability: AbilitySchema.optional(),
     dc: z.number().int(),
+    about: AboutSchema,
   }),
-  z.strictObject({ ability: AbilitySchema, dc: z.number().int() }),
+  z.strictObject({
+    ability: AbilitySchema,
+    dc: z.number().int(),
+    about: AboutSchema,
+  }),
   // A dungeon feature's check, its skill and ability from the feature, at the DC the adventure prints, as picking a
   // Locked Door's lock (environment.ts).
   z.strictObject({ feature: ContentIdSchema, dc: z.number().int() }),
+  // A check with a tool, by id: its ability, or the tool's, and a skill that also applies (core/explore.ts). With
+  // `needs`, it can't succeed without the tool, as picking a Locked Door's lock with Thieves' Tools.
+  z.strictObject({
+    tool: ContentIdSchema,
+    ability: AbilitySchema.optional(),
+    skill: SkillSchema.optional(),
+    dc: z.number().int(),
+    needs: z.literal(true).optional(),
+    about: AboutSchema,
+  }),
 ]);
 
 // What an environment does in play (#191), each entry the glossary's shape with the numbers the engine reads
@@ -4264,6 +4368,7 @@ const ExposureSchema = z.strictObject({
   swimSpeed: z.literal(true).optional(), // a Swim Speed succeeds, as in Deep Water
   armor: z.enum(["advantage", "disadvantage"]).optional(), // Medium or Heavy armor's edge on the save
   maxExhaustion: z.number().int().min(1).optional(), // no more Exhaustion than this from it, as Pandemonium's 3
+  water: z.literal(true).optional(), // drinkable water succeeds, as against Extreme Heat
 });
 
 // One roll on an environment's table for the party, as a psychic wind's: each row's effects, after a save when the
@@ -4281,6 +4386,7 @@ const EnvironmentRowSchema = z.strictObject({
 
 export const EnvironmentalEffectSchema = GlossaryEntrySchema.extend({
   automation: AutomationSchema.default("text"),
+  weather: WeatherSchema.optional(), // the weather it is, as Extreme Cold's cold
   exposure: ExposureSchema.optional(),
   // In a fight fought in it, or a scene spent in it, every creature not of an `except` type has these passives, as
   // Arcadian Vitality's Immunity to Frightened.
@@ -4395,8 +4501,14 @@ export type Disease = z.infer<typeof DiseaseSchema>;
 // A dungeon feature (#191): the check a scene's choice makes against it, at the DC the adventure prints.
 export const DungeonFeatureSchema = GlossaryEntrySchema.extend({
   automation: AutomationSchema.default("text"),
+  // `tool` is needed for the check, as Thieves' Tools to pick a Locked Door's lock; `about` is what it acts on.
   check: z
-    .strictObject({ skill: SkillSchema.optional(), ability: AbilitySchema })
+    .strictObject({
+      skill: SkillSchema.optional(),
+      ability: AbilitySchema,
+      tool: ContentIdSchema.optional(),
+      about: AboutSchema,
+    })
     .optional(),
 }).strict();
 export type DungeonFeature = z.infer<typeof DungeonFeatureSchema>;
