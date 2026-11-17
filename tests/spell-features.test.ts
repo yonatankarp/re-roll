@@ -17,6 +17,7 @@ import {
   runClassOption,
 } from "../plugins/systems/dnd5.5e/core/class-options.ts";
 import { recovered } from "../plugins/systems/dnd5.5e/core/rest.ts";
+import { classOptionFrames } from "../plugins/systems/dnd5.5e/core/class-options.ts";
 import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { castRiders } from "../plugins/systems/dnd5.5e/core/combat/school.ts";
 import {
@@ -32,6 +33,7 @@ import {
 import {
   type Actor,
   applyDndEvent,
+  type DndState,
   effectiveBuild,
   freshActor,
   NS,
@@ -282,6 +284,47 @@ const FIXTURES = [
         cost: "bonusAction",
       },
       { kind: "silentCasting", schools: ["enchantment"], slot: true },
+    ],
+  },
+  {
+    id: "test:feature/overchannel",
+    name: "Overchannel",
+    text,
+    automation: "full",
+    resources: [
+      {
+        id: "overchannel",
+        max: { base: 20 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+      {
+        id: "reaper",
+        max: { base: 1 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+    passives: [
+      {
+        kind: "castOption",
+        label: "Overchannel",
+        slot: true,
+        damaging: true,
+        maxDamage: true,
+        escalate: {
+          resource: "overchannel",
+          dice: 2,
+          die: 12,
+          type: "necrotic",
+        },
+      },
+      {
+        kind: "castOption",
+        label: "Reaper",
+        cost: [{ resource: "reaper" }],
+        oneTarget: true,
+        addTargets: 1,
+        saveDice: "1d6",
+      },
     ],
   },
   {
@@ -935,5 +978,104 @@ describe("spells changed as they're cast", () => {
       ],
     };
     expect(stats(actor).itemBonuses.spellDc).toBe(1);
+  });
+});
+
+describe("cast options", () => {
+  const caster = (spent: Record<string, number> = {}) => ({
+    ...priest([
+      [
+        { kind: "features", values: ["test:feature/overchannel"] },
+        {
+          kind: "spells",
+          values: ["srd52:spell/magic-missile", "srd52:spell/hold-person"],
+        },
+      ],
+      [],
+      [],
+    ]),
+    resourcesSpent: spent,
+    position: { x: 0, y: 0 },
+  });
+  const foe = freshActor({
+    id: "foe",
+    name: "Foe",
+    side: "enemy",
+    source: { kind: "monster", statBlockId: "srd52:monster/goblin-warrior" },
+    hp: 10,
+    inventory: [],
+  });
+  const fight = (actor: Actor) => ({
+    ...run,
+    state: {
+      actors: {
+        [PLAYER_ACTOR]: actor,
+        foe: { ...foe, position: { x: 2, y: 0 } },
+      },
+      combat: {
+        encounter: "arena",
+        order: [PLAYER_ACTOR, "foe"],
+        index: 0,
+        round: 1,
+      },
+    },
+    dice: { below: () => 0, roll: () => 1 },
+  });
+  const marked = (actor: Actor, source: string, action: string): Actor => {
+    const { events = [] } = classOptionFrames[`${NS}:castOption`].run(
+      { actor: PLAYER_ACTOR, source, answer: action },
+      fight(actor),
+    );
+    let state: DndState = fight(actor).state;
+    for (const event of events) state = applyDndEvent(state, event);
+    const after = state.actors[PLAYER_ACTOR];
+    if (!after) throw new Error("missing");
+    return after;
+  };
+
+  it("offers an option for the spells it fits, and changes the one picked", () => {
+    const actor = caster();
+    const offered = classOptions(actor, fight(actor).state, run).map(
+      (item) => item.id,
+    );
+    expect(offered).toContain(
+      "tactic:cast-option|castOption:test:feature/overchannel:0",
+    );
+    const missile = "spell:srd52:spell/magic-missile";
+    const maxed = stats(
+      marked(actor, "castOption:test:feature/overchannel:0", missile),
+    ).actions.find((item) => item.id === missile);
+    expect(maxed?.name).toBe("Magic Missile (Overchannel)");
+    expect(
+      maxed?.activation.resolution.damage.every((item) => item.amount.highest),
+    ).toBe(true);
+    const hold = "spell:srd52:spell/hold-person";
+    const reaped = stats(
+      marked(actor, "castOption:test:feature/overchannel:1", hold),
+    ).actions.find((item) => item.id === hold);
+    expect(reaped?.activation.targeting).toMatchObject({ creatures: 2 });
+    expect(reaped?.activation.cost).toContainEqual({ resource: "reaper" });
+    expect(reaped?.saveDice).toBe("1d6");
+  });
+
+  it("charges Overchannel's Necrotic from its second use on", () => {
+    const missile = "spell:srd52:spell/magic-missile";
+    const source = "castOption:test:feature/overchannel:0";
+    const spend = (actor: Actor) =>
+      classOptionFrames[`${NS}:castOptionSpent`].run(
+        { actor: PLAYER_ACTOR, action: missile, slotLevel: 2 },
+        fight(actor),
+      ).events ?? [];
+    const first = spend(marked(caster(), source, missile));
+    expect(first.some((item) => item.kind === `${NS}:damaged`)).toBe(false);
+    const again = spend(marked(caster({ overchannel: 1 }), source, missile));
+    // The dice all roll 1: 2d12 for each of two slot levels.
+    expect(
+      again.flatMap((item) =>
+        item.kind === `${NS}:damaged` && "payload" in item
+          ? [(item.payload as { amount: number }).amount]
+          : [],
+      ),
+    ).toEqual([4]);
   });
 });

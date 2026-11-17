@@ -57,6 +57,8 @@ export const FRAME_KINDS = [
   "masteryMiss",
   "metamagic",
   "metamagicSpent",
+  "castOption",
+  "castOptionSpent",
   "move",
   "pickTargets",
   "precision",

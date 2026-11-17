@@ -2989,6 +2989,7 @@ export function rollSave(
   disadvantage = false, // from the caster, as with Heightened Spell
   advantage = false, // from the spell itself, as Modify Memory gives a foe it fights
   source?: SaveSource, // what it's against, for Dragon Scale Mail's Advantage against a dragon's breath
+  penalty = 0, // taken off the total, as Tenacious Spell's 1d6
 ): { readonly saved: boolean; readonly events: SystemEvent[] } {
   if (
     (ability === "str" || ability === "dex") &&
@@ -3057,7 +3058,8 @@ export function rollSave(
   const base =
     saveBonus(stats, ability) +
     rollBonus(target, "saves", context, undefined, ability) +
-    (ability === "dex" ? cover : 0);
+    (ability === "dex" ? cover : 0) -
+    penalty;
   const least = scoreFloor(stats, ability); // Indomitable Might
   // Reactions to the roll before it lands, as Bountiful Luck or Portent (combat/reactions.ts).
   const judge = (natural: number, bonus: number) => ({
@@ -3877,6 +3879,9 @@ export function resolveAction(
                   ambushing,
                 resolution.advantage === true || edges.includes("advantage"),
                 source,
+                action.saveDice
+                  ? rollDiceNotation(action.saveDice, context.dice)
+                  : 0,
               );
         events.push(...saveEvents);
         const resisted = rolledSave

@@ -77,6 +77,7 @@ import {
   rollSave,
 } from "./effects.ts";
 import { metamagicCast, quickens } from "../metamagic.ts";
+import { castOptionCast } from "../cast-options.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
 import { spellFumble, timeStopEnds } from "./durations.ts";
 import { castRiders, schoolCastEvents } from "./school.ts";
@@ -425,6 +426,7 @@ function castAction(
       ...(result.frames ?? []),
       ...riders.frames,
       ...metamagicCast(actor, actionId),
+      ...castOptionCast(actor, actionId, slotLevel),
       // Used up once its darts or rolls are done, since they look the action up again.
       ...(actionId.startsWith(ITEM_PREFIX)
         ? [

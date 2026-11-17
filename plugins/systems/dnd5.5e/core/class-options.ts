@@ -10,8 +10,15 @@ import { z } from "zod";
 import { type Context, canAfford } from "./combat.ts";
 import { knownFoes } from "./fog.ts";
 import { inReach } from "./combat/queries.ts";
-import { encodeOption, parseOption } from "./combat/ids.ts";
-import { FeatureSchema } from "./schemas.ts";
+import { dealEvents } from "./combat/effects.ts";
+import { encodeOption, parseOption, spellOfSource } from "./combat/ids.ts";
+import { FeatureSchema, SpellSchema } from "./schemas.ts";
+import {
+  type CastOption,
+  castOptionsOf,
+  fitsOption,
+  waitingOptions,
+} from "./cast-options.ts";
 import {
   type Actor,
   CAST_LEVELED,
@@ -23,7 +30,14 @@ import {
   hasCondition,
   isDown,
 } from "./state.ts";
-import { type KnownAction, type Stats, deriveStats, lookup } from "./stats.ts";
+import {
+  type KnownAction,
+  type Stats,
+  deriveStats,
+  lookup,
+  onList,
+  rollDiceNotation,
+} from "./stats.ts";
 import { BACK } from "./targeting.ts";
 import { TACTIC } from "./tactics.ts";
 import {
@@ -47,6 +61,7 @@ const CANCEL = `${TACTIC}metamagic-cancel`;
 const TO_POINTS = `${TACTIC}font-points`;
 const TO_SLOT = `${TACTIC}font-slot`;
 const SLOT_POINTS = `${TACTIC}slot-points`; // a `slotToPoints` passive's trade, as Mystic Focus
+const CAST_OPTION = `${TACTIC}cast-option`; // a feature's change to a spell as it's cast (cast-options.ts)
 
 // Font of Magic's Creating Spell Slots table: the Sorcery Points a slot costs and the Sorcerer level it needs.
 const CREATED_SLOTS = [
@@ -58,9 +73,14 @@ const CREATED_SLOTS = [
 ] as const;
 
 export function isClassOption(answer: string): boolean {
-  return [METAMAGIC, CANCEL, TO_POINTS, TO_SLOT, SLOT_POINTS].includes(
-    parseOption(answer)[0] ?? "",
-  );
+  return [
+    METAMAGIC,
+    CANCEL,
+    TO_POINTS,
+    TO_SLOT,
+    SLOT_POINTS,
+    CAST_OPTION,
+  ].includes(parseOption(answer)[0] ?? "");
 }
 
 // Points not spent and not already promised to an option waiting on its spell.
@@ -207,6 +227,54 @@ function slotPointOptions(actor: Actor, stats: Stats): Decision["options"] {
   });
 }
 
+// The bearer's cast options, with the spells each fits now.
+function castOptionChoices(
+  actor: Actor,
+  stats: Stats,
+  state: DndState,
+  access: ContentAccess,
+): readonly {
+  readonly sourceId: string;
+  readonly option: CastOption;
+  readonly spells: readonly KnownAction[];
+}[] {
+  const options = castOptionsOf(
+    stats.features.flatMap((id) => {
+      const feature = FeatureSchema.safeParse(access.content(id)).data;
+      return feature ? [feature] : [];
+    }),
+  );
+  const busy = new Set(
+    waitingOptions(actor, options).map((item) => item.sourceId),
+  );
+  return options.flatMap(({ sourceId, option }) => {
+    if (busy.has(sourceId)) return [];
+    const spells = stats.actions.filter((action) => {
+      const spellId = spellOfSource(action.id);
+      if (spellId === null || action.activation.trigger) return false;
+      const spell = SpellSchema.safeParse(access.content(spellId)).data;
+      return (
+        fitsOption(option, action, spell, (list) =>
+          onList(spellId, spell, list, access),
+        ) &&
+        canAfford(
+          {
+            ...action,
+            activation: {
+              ...action.activation,
+              cost: [...action.activation.cost, ...option.cost],
+            },
+          },
+          actor,
+          stats,
+        ) &&
+        inReach(action, actor, state, access).length > 0
+      );
+    });
+    return spells.length > 0 ? [{ sourceId, option, spells }] : [];
+  });
+}
+
 export function classOptions(
   actor: Actor,
   state: DndState,
@@ -234,6 +302,17 @@ export function classOptions(
     options.push({
       id: CANCEL,
       label: "Metamagic: drop what waits on a spell",
+    });
+  }
+  for (const { sourceId, option } of castOptionChoices(
+    actor,
+    stats,
+    state,
+    access,
+  )) {
+    options.push({
+      id: encodeOption(CAST_OPTION, sourceId),
+      label: `${option.label}: change a spell as it's cast`,
     });
   }
   return [
@@ -291,6 +370,32 @@ export function runClassOption(
               { id: BACK, label: "Choose something else" },
             ],
             resume: frame("metamagic", { actor: actor.id, feature: detail }),
+          }),
+        ],
+      };
+    }
+    case CAST_OPTION: {
+      const found = castOptionChoices(actor, stats, state, context).find(
+        (item) => item.sourceId === detail,
+      );
+      if (!found) throw new Error(`${detail} fits no spell now`);
+      return {
+        frames: [
+          awaitDecision({
+            id: encodeOption(
+              `${NS}:castOption:${actor.id}:${String(state.combat?.round ?? 0)}`,
+              detail,
+            ),
+            actor: actor.id,
+            prompt: `${found.option.label}: on which spell?`,
+            options: [
+              ...found.spells.map((spell) => ({
+                id: spell.id,
+                label: spell.name,
+              })),
+              { id: BACK, label: "Choose something else" },
+            ],
+            resume: frame("castOption", { actor: actor.id, source: detail }),
           }),
         ],
       };
@@ -400,12 +505,107 @@ function runMetamagic(
   };
 }
 
+const CastOptionSchema = z.object({
+  actor: z.string(),
+  source: z.string(),
+  answer: z.string(),
+});
+
+// Leaves the option waiting on the spell until the end of the turn, as a Metamagic option does.
+function runCastOption(
+  payload: z.infer<typeof CastOptionSchema>,
+  _context: Context,
+): SystemResult {
+  if (payload.answer === BACK) return {};
+  return {
+    events: [
+      dndEvent(`${NS}:effectAdded`, {
+        actor: payload.actor,
+        effect: {
+          sourceId: payload.source,
+          casterId: payload.actor,
+          modifier: {
+            kind: "tactic",
+            tactic: "metamagic",
+            action: payload.answer,
+          },
+          ends: "casterTurnEnd",
+        },
+      }),
+    ],
+  };
+}
+
+const CastOptionSpentSchema = z.object({
+  actor: z.string(),
+  action: z.string(),
+  slotLevel: z.number().int().optional(),
+});
+
+// Once the spell is cast its options are done, and an `escalate` price is paid: Overchannel's Necrotic, rolled
+// for each slot level, more dice with each use since the Long Rest that ignores Resistance and Immunity.
+function runCastOptionSpent(
+  payload: z.infer<typeof CastOptionSpentSchema>,
+  context: Context,
+): SystemResult {
+  const actor = context.state.actors[payload.actor];
+  if (!actor) return {};
+  const stats = deriveStats(actor, context);
+  const options = castOptionsOf(
+    stats.features.flatMap((id) => {
+      const feature = FeatureSchema.safeParse(context.content(id)).data;
+      return feature ? [feature] : [];
+    }),
+  );
+  const mine = waitingOptions(actor, options).filter(
+    (item) => item.action === payload.action,
+  );
+  const events: SystemEvent[] = mine.map((item) =>
+    dndEvent(`${NS}:effectEnded`, {
+      actor: actor.id,
+      sourceId: item.sourceId,
+      casterId: actor.id,
+    }),
+  );
+  for (const { option } of mine) {
+    const price = option.escalate;
+    if (!price) continue;
+    const used = actor.resourcesSpent[price.resource] ?? 0;
+    events.push(
+      dndEvent(`${NS}:resourceSpent`, {
+        actor: actor.id,
+        resource: price.resource,
+      }),
+    );
+    if (used === 0) continue;
+    const count = (price.dice + used - 1) * (payload.slotLevel ?? 1);
+    const amount = rollDiceNotation(
+      `${String(count)}d${String(price.die)}`,
+      context.dice,
+    );
+    // Rolled as dealt, past Resistance and Immunity.
+    events.push(
+      ...dealEvents(actor, [{ amount, type: price.type }], false, context)
+        .events,
+    );
+  }
+  return { events };
+}
+
 const SpentSchema = z.object({ actor: z.string(), action: z.string() });
 
 export const classOptionFrames = {
   [`${NS}:metamagic`]: frameHandler({
     schema: MetamagicSchema,
     run: runMetamagic,
+  }),
+  [`${NS}:castOption`]: frameHandler({
+    schema: CastOptionSchema,
+    run: runCastOption,
+  }),
+  [`${NS}:castOptionSpent`]: frameHandler({
+    schema: CastOptionSpentSchema,
+    run: runCastOptionSpent,
   }),
   [`${NS}:metamagicSpent`]: frameHandler({
     schema: SpentSchema,

@@ -272,6 +272,7 @@ export const AmountSchema = z.strictObject({
   reroll: z.number().int().min(1).optional(), // dice rolled again once when below average, as with Empowered Spell
   rerollOnes: z.literal(true).optional(), // a die that rolls 1 is rolled again and the new roll stands
   halfDice: z.literal(true).optional(), // half the dice, rounded up, as Wails from the Grave's half the Sneak Attack
+  highest: z.literal(true).optional(), // the dice count their highest numbers, as Overchannel's maximum damage
 });
 export type Amount = z.infer<typeof AmountSchema>;
 
@@ -1997,6 +1998,55 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
   z.strictObject({ kind: z.literal("concentrationAdvantage") }),
+  // A change the bearer can make to a spell as it casts it, paying `cost` (cast-options.ts), as Overchannel's maximum
+  // damage, Enhanced Necromancy's second target for a Channel Divinity, or Split Enchantment's level more for a use.
+  // Which spells: `spells`, `schools`, `list`'s, cast with a slot (`slot`), of levels `minLevel` to `maxLevel`, that
+  // deal damage (`damaging`), call for a save (`saving`), make neither an attack roll nor a save (`plain`), target one
+  // creature (`oneTarget`) or allies (`allies`), or reach more creatures from a higher slot (`upcastTargets`). What
+  // changes: `levels` more of its upcast, `addTargets` more creatures, `maxDamage`, Temporary Hit Points for its
+  // targets (`tempHp`), or `saveDice` taken off each target's first save. With `escalate`, every use after the first
+  // until `escalate.resource` comes back deals the caster `dice` for each slot level, one die more for each use, of
+  // `type`, ignoring Resistance and Immunity, as Overchannel's Necrotic.
+  z.strictObject({
+    kind: z.literal("castOption"),
+    label: z.string().min(1),
+    cost: z.array(CostSchema).default([]),
+    spells: z.array(ContentIdSchema).min(1).optional(),
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
+    list: ContentIdSchema.optional(),
+    slot: z.literal(true).optional(),
+    minLevel: z.number().int().min(0).max(9).optional(),
+    maxLevel: z.number().int().min(0).max(9).optional(),
+    damaging: z.literal(true).optional(),
+    saving: z.literal(true).optional(),
+    plain: z.literal(true).optional(),
+    oneTarget: z.literal(true).optional(),
+    allies: z.literal(true).optional(),
+    upcastTargets: z.literal(true).optional(),
+    levels: z.number().int().min(1).optional(),
+    addTargets: z.number().int().min(1).optional(),
+    maxDamage: z.literal(true).optional(),
+    tempHp: AmountSchema.optional(),
+    saveDice: DiceSchema.optional(),
+    escalate: z
+      .strictObject({
+        resource: z.string().min(1),
+        dice: z.number().int().min(1),
+        die: z.number().int().min(2),
+        type: DamageTypeSchema,
+      })
+      .optional(),
+  }),
+  // The bearer's spells that deal damage may deal these types instead, the one a target resists least (DamageSchema
+  // `types`), as Psychic Spells' Psychic for Warlock spells (`list`); `oncePerTurn` once a turn, as Grave Touched's
+  // Necrotic, or `resource` spending a use, as a Prismatic Rune's charge.
+  z.strictObject({
+    kind: z.literal("spellTypes"),
+    add: z.array(DamageTypeSchema).min(1),
+    list: ContentIdSchema.optional(),
+    oncePerTurn: z.literal(true).optional(),
+    resource: z.string().min(1).optional(),
+  }),
   // These spells, when they target creatures, reach this many more, as Words of Creation's second creature for
   // Power Word Heal and Power Word Kill. shortcut: how near the first target the others are isn't checked.
   z.strictObject({

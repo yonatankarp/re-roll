@@ -73,6 +73,11 @@ import {
   withMetamagic,
 } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
+import {
+  castOptionsOf,
+  waitingOptions,
+  withCastOptions,
+} from "./cast-options.ts";
 import { withWeaponRiders } from "./weapon-riders.ts";
 import {
   THROW_PREFIX,
@@ -122,6 +127,7 @@ export interface KnownAction {
   readonly rolled?: true; // taken only when a randomAction picks it, as one eye ray
   readonly concentrates?: true; // casting it starts Concentration even with no lasting effect, as Flame Blade
   readonly onceKeys?: readonly string[]; // once-a-turn uses its cast spends, as a `spellDamage` bonus (combat/actions.ts)
+  readonly saveDice?: string; // dice taken off each target's first save, as Modify Magic's Tenacious Spell (cast-options.ts)
 }
 
 export interface Stats {
@@ -1065,6 +1071,59 @@ export function castsSilently(
   );
 }
 
+// Spells whose damage may take other types (`spellTypes`), the least resisted dealt.
+function withSpellTypes(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+  actor: Actor,
+  access: ContentAccess,
+): KnownAction[] {
+  const changes = passives.flatMap((passive, index) =>
+    passive.kind === "spellTypes" &&
+    !(
+      passive.oncePerTurn &&
+      actor.usedThisTurn.includes(`spellTypes:${String(index)}`)
+    ) &&
+    !(passive.resource && (actor.resourcesSpent[passive.resource] ?? 0) > 0)
+      ? [{ passive, key: `spellTypes:${String(index)}` }]
+      : [],
+  );
+  if (changes.length === 0) return [...actions];
+  return actions.map((action) => {
+    const spellId = spellOfSource(action.id);
+    const { resolution } = action.activation;
+    if (spellId === null || resolution.damage.length === 0) return action;
+    const spell = SpellSchema.safeParse(access.content(spellId)).data;
+    const fitting = changes.filter(
+      ({ passive }) =>
+        !passive.list || onList(spellId, spell, passive.list, access),
+    );
+    if (fitting.length === 0) return action;
+    const add = fitting.flatMap(({ passive }) => passive.add);
+    const damage = resolution.damage.map((item) => ({
+      ...item,
+      types: [...new Set([...(item.types ?? [item.type]), ...add])],
+    }));
+    const keys = fitting.flatMap(({ passive, key }) =>
+      passive.oncePerTurn ? [key] : [],
+    );
+    const spends = fitting.flatMap(({ passive }) =>
+      passive.resource ? [{ resource: passive.resource }] : [],
+    );
+    return {
+      ...action,
+      activation: {
+        ...action.activation,
+        cost: [...action.activation.cost, ...spends],
+        resolution: { ...resolution, damage },
+      },
+      ...(keys.length > 0
+        ? { onceKeys: [...(action.onceKeys ?? []), ...keys] }
+        : {}),
+    };
+  });
+}
+
 // Spells cast with a Bonus Action in place of an action (`castsAs`).
 function withCastsAs(
   actions: readonly KnownAction[],
@@ -1943,42 +2002,61 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         : []),
       ...(load === 2 ? HEAVILY_ENCUMBERED : []),
     ],
-    actions: withMetamagic(
-      withInvocations(
-        withWeaponRiders(
-          withSpellDamage(
-            emptyHanded(
-              withPotentCantrips(
-                withCastsAs(
-                  withExtraTargets(
-                    withRiders(actions, fromFeatures.passives, actor),
+    actions: withCastOptions(
+      withMetamagic(
+        withInvocations(
+          withWeaponRiders(
+            withSpellDamage(
+              emptyHanded(
+                withPotentCantrips(
+                  withSpellTypes(
+                    withCastsAs(
+                      withExtraTargets(
+                        withRiders(actions, fromFeatures.passives, actor),
+                        fromFeatures.passives,
+                      ),
+                      fromFeatures.passives,
+                    ),
                     fromFeatures.passives,
+                    actor,
+                    access,
                   ),
                   fromFeatures.passives,
                 ),
-                fromFeatures.passives,
+                actor,
+                access,
               ),
+              fromFeatures.passives,
               actor,
               access,
             ),
             fromFeatures.passives,
             actor,
             access,
+            abilities,
           ),
           fromFeatures.passives,
-          actor,
-          access,
           abilities,
+          classLevels,
+          access,
+          pactWeaponId(actor, access),
         ),
-        fromFeatures.passives,
-        abilities,
-        classLevels,
-        access,
-        pactWeaponId(actor, access),
+        actor,
+        abilityModifier(abilities.cha),
+        freeOption(actor, fromFeatures.passives),
       ),
-      actor,
-      abilityModifier(abilities.cha),
-      freeOption(actor, fromFeatures.passives),
+      waitingOptions(
+        actor,
+        castOptionsOf(
+          [...featureIds].flatMap((id) => {
+            const feature = FeatureSchema.safeParse(access.content(id)).data;
+            return feature
+              ? [withVariant(featureRules(feature), variants)]
+              : [];
+          }),
+        ),
+      ),
+      scaleActivation,
     ),
     multiattack:
       Math.max(
@@ -3468,7 +3546,11 @@ export function rollAmount(
   diceMultiplier = 1,
 ): number {
   const notation = scaledDice(amount, stats.scaling);
-  const rolling = amount.rerollOnes ? rerollingOnes(dice) : dice;
+  const rolling = amount.highest
+    ? { ...dice, roll: (sides: number) => sides }
+    : amount.rerollOnes
+      ? rerollingOnes(dice)
+      : dice;
   const rolled = notation
     ? amount.reroll
       ? rollRerolling(notation, rolling, diceMultiplier, amount.reroll)
