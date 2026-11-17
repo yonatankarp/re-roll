@@ -221,9 +221,10 @@ const ITEMS = `- id: "variant-test:item/potions"
   category: weapon
   rarity: veryRare
   attunement: true
-  text: A test weapon that resists fire while held.
+  text: A test weapon that resists fire while held, and adds cold.
   automation: full
   passives: [{ kind: modifier, modifier: { kind: resistance, damage: fire } }]
+  hitDamage: [{ amount: { dice: 1d6 }, type: cold }]
 - id: "variant-test:item/mage-robe"
   name: Mage Robe
   type: magicItem
@@ -606,10 +607,19 @@ describe("magic items' passives while worn or attuned", () => {
     expect(resists(wearing([bare], [bare]))).toEqual(["cold", "fire"]);
   });
 
-  it("gives a magic weapon's passives while held and attuned", () => {
+  it("gives a magic weapon's passives and damage while held and attuned", () => {
     const blade = "variant-test:item/frost-blade--1--longsword";
+    const types = (actor: Actor) => {
+      const resolution = deriveStats(actor, run).actions.find(
+        (each) => each.id === `weapon:${blade}`,
+      )?.activation.resolution;
+      if (resolution?.kind !== "attack") throw new Error("Not an attack");
+      return resolution.damage.map((each) => each.type);
+    };
     expect(resists(wearing([blade]))).toEqual([]);
+    expect(types(wearing([blade]))).toEqual(["slashing"]);
     expect(resists(wearing([blade], [blade]))).toEqual(["fire"]);
+    expect(types(wearing([blade], [blade]))).toEqual(["slashing", "cold"]);
   });
 
   it("changes AC and Darkvision by an item's passives", () => {

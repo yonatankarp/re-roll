@@ -557,6 +557,7 @@ export function weaponActivation(
           },
           type: weapon.damage.type,
         },
+        ...(weapon.hitDamage ?? []),
       ],
       onHit: [],
       onMiss: [],
@@ -919,8 +920,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
               kinds.some((kind) => bonus.weapons.includes(kind)),
           )
           .reduce((total, bonus) => total + bonus.amount, 0);
+      const { hitDamage, ...plain } = weapon;
       const activation = weaponActivation(
-        weapon,
+        works(itemId, item) && hitDamage ? { ...plain, hitDamage } : plain,
         abilities,
         martialTraining ||
           kinds.some((kind) => weaponTraining.has(kind)) ||

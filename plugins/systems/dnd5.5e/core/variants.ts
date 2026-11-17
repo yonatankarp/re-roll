@@ -87,6 +87,7 @@ export function deriveItem(
       ...bonuses,
       ...magic,
       ...(parent.returning ? { returning: true as const } : {}),
+      ...(parent.hitDamage ? { hitDamage: parent.hitDamage } : {}),
     };
   } else if (base.type === "armor") {
     item = {

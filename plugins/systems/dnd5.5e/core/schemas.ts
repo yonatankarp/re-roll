@@ -2123,6 +2123,7 @@ export const WeaponSchema = ItemBaseSchema.extend({
   attunement: z.literal(true).optional(), // its bonuses work only while attuned, as a Keyholes Dagger's
   returning: z.literal(true).optional(), // back in hand once thrown, as a Returning Weapon
   passives: z.array(PassiveSchema).min(1).optional(), // its magic item's, as Frost Brand's Resistance to Fire
+  hitDamage: z.array(DamageSchema).min(1).optional(), // its magic item's, as Frost Brand's 1d6 Cold
   // A Thrown or Ammunition weapon's range in feet: normal, and long with Disadvantage.
   range: z
     .strictObject({
@@ -2237,6 +2238,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
   noStrength: z.literal(true).optional(),
   // A magic weapon that comes back once thrown, as a Returning Weapon, carried the same way.
   returning: z.literal(true).optional(),
+  // Damage a magic weapon made from it adds on a hit, as Frost Brand's 1d6 Cold, carried the same way.
+  hitDamage: z.array(DamageSchema).min(1).optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
   // Set when one entry covers several rarities, such as +1, +2 or +3. Content names one as `<id>--<n>` (variants.ts).
