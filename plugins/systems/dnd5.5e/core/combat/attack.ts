@@ -91,6 +91,7 @@ import {
   markedBy,
   maximized,
   masteredTypes,
+  flooredTypes,
   rerolledTypes,
   piercing,
   rescuedSave,
@@ -1051,7 +1052,17 @@ export function runAttackRoll(
         resolution.attack.type === "weapon",
       ) +
       rollBonus(target, "attacksAgainst", context); // Blade Ward's -1d4
-  const cover = coverAgainst(state, attacker, target, context);
+  // A Wand of the War Mage ignores Half Cover with spell attacks.
+  const behind = coverAgainst(state, attacker, target, context);
+  const cover =
+    behind === 2 &&
+    stats.passives.some(
+      (passive) =>
+        passive.kind === "ignoreHalfCover" &&
+        passive.attack === resolution.attack.type,
+    )
+      ? 0
+      : behind;
   const ac =
     targetStats.ac +
     meleeAc(target, meleeReach(action) !== null, targetStats) +
@@ -1546,6 +1557,7 @@ function landHit(
   const stats = deriveStats(attacker, context);
   const multiplier = payload.critical ? 2 : 1;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
+  const floors = flooredTypes(stats, action.spellLevel !== null);
   const rerolled = rerolledTypes(stats, action.spellLevel !== null);
   const responses = piercing(damageResponses(target, context), mastered, stats);
 
@@ -1677,7 +1689,7 @@ function landHit(
       const inner =
         index === maxIndex
           ? HIGHEST
-          : masteredDice(weaponDice, type, mastered, rerolled);
+          : masteredDice(weaponDice, type, floors, rerolled);
       if (!(pierces && rerolls)) {
         return rollAmount(amount, stats, inner, multiplier);
       }
@@ -2320,6 +2332,7 @@ function hitRiders(
       modifier.dealtBy !== by ||
       (by === "caster" && casterId !== attacker.id) ||
       (modifier.weaponOnly && resolution.attack.type !== "weapon") ||
+      (modifier.unarmed && !resolution.attack.unarmed) ||
       (modifier.within !== undefined &&
         distanceFeet(attacker.position, target.position) > modifier.within) ||
       seen.has(sourceId)

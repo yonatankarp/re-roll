@@ -218,7 +218,8 @@ const ActiveEffectSchema = z.strictObject({
   endsOnDamage: z.boolean().optional(),
   endsWithTempHp: z.boolean().optional(), // ends once damage leaves the creature no Temporary Hit Points
   endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
-  endsOn: z.enum(["attack", "action"]).optional(), // ends when the creature attacks or deals damage, or acts
+  // ends when the creature attacks or deals damage, also when it casts a spell, or when it acts
+  endsOn: z.enum(["attack", "action", "spell"]).optional(),
   // Taking damage gives this save, ending it on a success, as Dragon Fear's.
   saveOnDamage: z
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })

@@ -286,6 +286,32 @@ function withItemAbilities(
   return raised;
 }
 
+// The activation with `bonus` added to each save DC worked out from its caster's spellcasting, as a Rod of the Pact
+// Keeper's for a Warlock spell.
+function withDcBonus(activation: Activation, bonus: number): Activation {
+  return JSON.parse(JSON.stringify(activation), (_key, value: unknown) =>
+    typeof value === "object" &&
+    value !== null &&
+    "add" in value &&
+    Array.isArray(value.add) &&
+    value.add.some(
+      (term: unknown) =>
+        typeof term === "object" &&
+        term !== null &&
+        "kind" in term &&
+        term.kind === "spellSaveDc",
+    )
+      ? {
+          ...value,
+          base:
+            ("base" in value && typeof value.base === "number"
+              ? value.base
+              : 0) + bonus,
+        }
+      : value,
+  ) as Activation;
+}
+
 // Scores an effect on the character sets while it lasts, as a Potion of Giant Strength's, never lowering one.
 function withEffectScores(scores: AbilityScores, actor: Actor): AbilityScores {
   const set = { ...scores };
@@ -1199,6 +1225,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const skills = new Set<Skill>(background.skills);
   const expertise = new Set<Skill>();
   const knownSpells = new Set<string>();
+  const spellClass = new Map<string, string>(); // the class whose levels gave each known spell
   const freeSpells = new Map<string, FreeCast>(); // also cast without a slot
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
   const featureIds = new Set<string>(species.traits);
@@ -1246,6 +1273,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       } else if (answer.kind === "spells") {
         for (const spell of answer.values) {
           knownSpells.add(spell);
+          spellClass.set(spell, entry.classId);
           if (answer.freeCast) freeSpells.set(spell, answer.freeCast);
         }
       } else if (answer.kind === "features") {
@@ -1344,13 +1372,22 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const weaponTraining = new Set(
     working.flatMap((item) => item.weaponTraining ?? []),
   );
+  const classDc: Record<string, number> = {}; // DC bonuses for one class's spells, by its name after the plugin
   for (const item of working) {
     if (item.ammunition) continue; // its bonus goes only to the shot that fires it
     // An entry with versions counts as its first, as older saves hold; content names a version as `<id>--<n>` (variants.ts).
-    for (const { to, amount, unarmored, weapons } of item.bonuses ??
-      item.variants?.[0]?.bonuses ??
-      []) {
+    for (const {
+      to,
+      amount,
+      unarmored,
+      weapons,
+      class: only,
+    } of item.bonuses ?? item.variants?.[0]?.bonuses ?? []) {
       if (unarmored && armored) continue;
+      if (only && to === "spellDc") {
+        classDc[only] = (classDc[only] ?? 0) + amount;
+        continue;
+      }
       if (weapons) {
         weaponBonuses.push({ to, amount, weapons });
         continue;
@@ -1549,7 +1586,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           : spell.activation;
       const ability = castingAbility.get(spellId);
       const type = fromFeatures.retype[spellId];
-      const cast = ability ? castWith(activation, ability) : activation;
+      const given = spellClass.get(spellId);
+      const bonusDc = given
+        ? classDc[given.slice(given.lastIndexOf("/") + 1)]
+        : undefined;
+      const bumped = bonusDc ? withDcBonus(activation, bonusDc) : activation;
+      const cast = ability ? castWith(bumped, ability) : bumped;
       actions.push({
         id: `spell:${spellId}`,
         name: spell.name,

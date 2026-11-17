@@ -71,6 +71,7 @@ import {
   masteredDice,
   maximized,
   masteredTypes,
+  flooredTypes,
   rerolledTypes,
   hitDieHealing,
   hitDieRoll,
@@ -1359,8 +1360,11 @@ export function actingEnds(
   const harms =
     resolution !== undefined &&
     (resolution.kind !== "automatic" || resolution.damage.length > 0);
+  const casts = action?.spellLevel !== null && action?.spellLevel !== undefined;
   return actor.activeEffects.flatMap(({ endsOn, sourceId, casterId }) =>
-    endsOn === "action" || (endsOn === "attack" && harms)
+    endsOn === "action" ||
+    (endsOn === "attack" && harms) ||
+    (endsOn === "spell" && (harms || casts))
       ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId, casterId })]
       : [],
   );
@@ -2978,6 +2982,7 @@ export function resolveAction(
       )
     : aimedAt;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
+  const floors = flooredTypes(stats, action.spellLevel !== null);
   const rerolled = rerolledTypes(stats, action.spellLevel !== null);
   // Another spell aimed at a creature ends what lasts only until one is, as Modify Memory's charm.
   const spellEnds = targets.flatMap((target) =>
@@ -3196,7 +3201,7 @@ export function resolveAction(
         stats,
         index === maxIndex
           ? HIGHEST
-          : floored(masteredDice(context.dice, type, mastered, rerolled)),
+          : floored(masteredDice(context.dice, type, floors, rerolled)),
         critical ? 2 : 1,
       ) + (index === 0 ? fuel.bonus : 0);
     const shared = list.map(({ amount, type }, index) => ({

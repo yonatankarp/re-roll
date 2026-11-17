@@ -426,6 +426,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     // the type picked for each hit, the one the target resists least, as Conjure Minor Elementals' acid to lightning
     types: z.array(DamageTypeSchema).min(2).optional(),
     once: z.boolean().optional(), // ends after the bearer's next attack roll, as a bandit crime lord's Deadly Aim
+    unarmed: z.literal(true).optional(), // only with an Unarmed Strike, as a Potion of Pugilism's
   }),
   // Limits on what the bearer can do on its turns, as Slow gives: `oneAction` is an action or a Bonus Action, not
   // both; `noActions` neither; `oneAttack` one attack with the Attack action; `speed` halves, doubles or stops its
@@ -709,8 +710,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .optional(),
     endsOnDamage: z.boolean().default(false),
     endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature, as Modify Memory's
-    // Ends when the creature attacks or deals damage ("attack"), or takes any action ("action"), as Fade Away's.
-    endsOn: z.enum(["attack", "action"]).optional(),
+    // Ends when the creature attacks or deals damage ("attack"), also when it casts a spell ("spell"), as a Potion of
+    // Invisibility's, or takes any action ("action"), as Fade Away's.
+    endsOn: z.enum(["attack", "action", "spell"]).optional(),
     // Taking damage gives it a save to end it, as Dragon Fear's, using the save it came with.
     saveOnDamage: z.literal(true).optional(),
     // What a failed repeat save turns it into, as a cockatrice's Restrained becoming Petrified.
@@ -1911,6 +1913,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("energyMastery"),
     damage: DamageTypeSchema,
   }),
+  // A 1 on a damage die of the bearer's spells counts as a 2, as a Robe of Thayan Arcana's Empowered Magic.
+  z.strictObject({ kind: z.literal("empoweredSpells") }),
   // Damage of these types the bearer deals ignores Resistance, as with the Boon of Irresistible Offense.
   z.strictObject({
     kind: z.literal("overcomeResistance"),
@@ -1951,6 +1955,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     attack: z.enum(["weapon", "spell"]),
     crossbows: z.boolean().default(false),
     bypassCover: z.boolean().default(false),
+  }),
+  // Attacks of this kind ignore Half Cover, as with a Wand of the War Mage's spell attacks.
+  z.strictObject({
+    kind: z.literal("ignoreHalfCover"),
+    attack: z.enum(["weapon", "spell"]),
   }),
   // A healing die that rolls 1 is rolled again and the new roll stands, as with Healer's Healing Rerolls.
   z.strictObject({ kind: z.literal("healingRerolls") }),
@@ -2756,6 +2765,9 @@ const MagicBonusSchema = z.strictObject({
   ]),
   amount: z.number().int().min(1),
   unarmored: z.literal(true).optional(), // only while wearing no armor and using no Shield, as Bracers of Defense
+  // Only for the spells of this class, by its name after the plugin, as a Rod of the Pact Keeper's DC for Warlock
+  // spells: those its levels of that class gave (stats.ts).
+  class: z.string().min(1).optional(),
   // Only with these weapons, or a magic one made from them, by their names after the plugin, as Bracers of
   // Archery's "longbow" and "shortbow", so any book's Longbow counts. It adds to a magic weapon's own bonus,
   // which other bonuses to attack and damage don't.
