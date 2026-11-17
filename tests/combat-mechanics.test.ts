@@ -50,7 +50,9 @@ import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 import {
   leafEvents,
   resolveAction,
+  rollSave,
 } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { provokers } from "../plugins/systems/dnd5.5e/core/combat/movement.ts";
 import {
   hasFlag,
   moveSquares,
@@ -89,6 +91,7 @@ import {
   NS,
   StateSchema,
   applyDndEvent,
+  cannotHeal,
   dndEvent,
   freshActor,
   hasCondition,
@@ -5131,5 +5134,543 @@ describe("a Charge", () => {
     const dashed = settle(run, state, [act("t", BONUS_DASH)], LOW, () => STAY);
     const charged = actor(dashed.state, "t");
     expect(speedOf(charged, deriveStats(charged, run))).toBe(45);
+  });
+});
+
+describe("smites and attack-spell riders", () => {
+  const sword = "weapon:srd52:item/longsword";
+  // The d20 lands on 15, a hit that isn't critical, and every other die rolls its highest.
+  const MID: Dice = {
+    below: () => 0,
+    roll: (sides) => (sides === 20 ? 15 : sides),
+  };
+  // Saves fail on a 1 while damage dice roll their highest.
+  const FAIL_HIGH: Dice = {
+    below: () => 0,
+    roll: (sides) => (sides === 20 ? 1 : sides),
+  };
+  const cast = (slug: string, target: string): Frame =>
+    act(PLAYER_ACTOR, `spell:${spell(slug)}|${target}`);
+  const smite = (slug: string, target: string, critical = false): Frame => ({
+    kind: `${NS}:smite`,
+    payload: {
+      attacker: PLAYER_ACTOR,
+      actionId: sword,
+      target,
+      critical,
+      answer: `spell:${spell(slug)}|${target}`,
+    },
+  });
+  const onGrid = (...placed: readonly [Actor, number, number][]): DndState => {
+    const state = fight(
+      ...placed.map(([item, x, y]) => ({ ...item, position: { x, y } })),
+    );
+    return state.combat
+      ? {
+          ...state,
+          combat: { ...state.combat, grid: { width: 14, height: 14 } },
+        }
+      : state;
+  };
+  const typesOf = (events: readonly SystemEvent[], id: string): string[] =>
+    events.flatMap((event) =>
+      event.kind === `${NS}:damaged` &&
+      "payload" in event &&
+      event.payload.actor === id
+        ? [String(event.payload.type)]
+        : [],
+    );
+  // A test spell made from a printed one, with its own activation.
+  const variant = (
+    from: RunContext,
+    slug: string,
+    copy: string,
+    activation: unknown,
+  ): Record<string, unknown> => ({
+    [spell(slug)]: {
+      ...SpellSchema.parse(from.content(spell(copy))),
+      id: spell(slug),
+      name: slug,
+      activation,
+    },
+  });
+  const DC = { base: 0, add: [{ kind: "spellSaveDc" }] };
+  // The state as the caster's turn ends, before the next creature's turn starts and resets what it spent.
+  const asTurnEnds = (start: DndState, events: readonly SystemEvent[]) => {
+    const ended = events.findIndex(
+      (event) => event.kind === `${NS}:turnAdvanced`,
+    );
+    return events
+      .slice(0, ended < 0 ? undefined : ended)
+      .reduce(applyDndEvent, start);
+  };
+
+  it("bursts Ice Knife round its target hit or miss, the caster's side too", async () => {
+    const run = arenaRun(await base(), {});
+    const state = onGrid(
+      [hero(run, { spells: ["ice-knife"] }), 0, 0],
+      [monster("a"), 4, 0],
+      [monster("b"), 5, 0],
+      [hero(run, { id: "ally" }), 4, 1],
+      [monster("far"), 8, 0],
+    );
+    // A natural 1 misses, and every save fails: 2d6 at their lowest.
+    const missed = settle(run, state, [cast("ice-knife", "a")], LOW);
+    expect(damageOf(missed.events, "a")).toEqual([2]);
+    expect(damageOf(missed.events, "b")).toEqual([2]);
+    expect(damageOf(missed.events, "ally")).toEqual([2]);
+    expect(damageOf(missed.events, "far")).toEqual([]);
+    expect(damageOf(missed.events, PLAYER_ACTOR)).toEqual([]);
+    // A hit deals its 1d10 Piercing before the burst, whose saves of 15 succeed here.
+    const struck = settle(run, state, [cast("ice-knife", "a")], MID);
+    expect(typesOf(struck.events, "a")).toEqual(["piercing"]);
+    expect(
+      kinds(struck.events).filter((kind) => kind === `${NS}:saveRolled`),
+    ).toHaveLength(3);
+  });
+
+  it("splashes half of Acid Arrow's damage on a miss, with no acid later", async () => {
+    const run = arenaRun(await base(), {});
+    const state = fight(hero(run, { spells: ["acid-arrow"] }), monster("a"));
+    const missed = settle(run, state, [cast("acid-arrow", "a")], LOW);
+    expect(damageOf(missed.events, "a")).toEqual([2]); // half of 4d4 at 1 each
+    expect(actor(missed.state, "a").activeEffects).toEqual([]);
+    const struck = settle(run, state, [cast("acid-arrow", "a")], MID);
+    expect(damageOf(struck.events, "a")).toEqual([16]);
+    expect(actor(struck.state, "a").activeEffects).toHaveLength(1);
+  });
+
+  it("deals the orb's type its target resists least", async () => {
+    const run = arenaRun(await base(), {
+      "srd52:monster/acid-proof": dummy("srd52:monster/acid-proof", {
+        passives: [
+          {
+            kind: "modifier",
+            modifier: { kind: "resistance", damage: "acid" },
+          },
+        ],
+      }),
+    });
+    const state = fight(
+      hero(run, { spells: ["chromatic-orb", "sorcerous-burst"] }),
+      monster("a", "srd52:monster/acid-proof"),
+    );
+    const orb = settle(run, state, [cast("chromatic-orb", "a")], MID);
+    expect(typesOf(orb.events, "a")).toEqual(["cold"]);
+    expect(damageOf(orb.events, "a")).toEqual([24]);
+    const burst = settle(run, state, [cast("sorcerous-burst", "a")], MID);
+    expect(typesOf(burst.events, "a")).toEqual(["cold"]);
+  });
+
+  it("adds Divine Smite's die against an Undead, and doubles it on a critical", async () => {
+    const run = arenaRun(await base(), {
+      "srd52:monster/dead": dummy("srd52:monster/dead", {
+        creatureType: "undead",
+      }),
+    });
+    const smiter = hero(run, { spells: ["divine-smite"] });
+    const living = settle(
+      run,
+      fight(smiter, monster("a")),
+      [smite("divine-smite", "a")],
+      HIGH,
+    );
+    expect(damageOf(living.events, "a")).toEqual([16]);
+    const dead = fight(smiter, monster("a", "srd52:monster/dead"));
+    expect(
+      damageOf(settle(run, dead, [smite("divine-smite", "a")], HIGH).events),
+    ).toEqual([16, 8]);
+    expect(
+      damageOf(
+        settle(run, dead, [smite("divine-smite", "a", true)], HIGH).events,
+      ),
+    ).toEqual([32, 16]);
+  });
+
+  it("doubles a smite's dice on a critical when it also asks for a save, as Thunderous Smite's push and fall", async () => {
+    const base_ = await base();
+    const run = arenaRun(
+      base_,
+      variant(base_, "thunder-smite", "divine-smite", {
+        cost: ["bonusAction", "slot"],
+        trigger: { afterHit: "meleeWeapon" },
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "str",
+          dc: DC,
+          damage: [{ amount: { dice: "2d6" }, type: "thunder" }],
+          onSuccessDamage: "full",
+          onFail: [
+            { kind: "forcedMove", feet: 10, direction: "away" },
+            {
+              kind: "applyCondition",
+              condition: "prone",
+              duration: "instantaneous",
+            },
+          ],
+        },
+      }),
+    );
+    const state = onGrid(
+      [hero(run, { spells: ["thunder-smite"] }), 0, 0],
+      [monster("a"), 1, 0],
+    );
+    const result = settle(
+      run,
+      state,
+      [smite("thunder-smite", "a", true)],
+      FAIL_HIGH,
+    );
+    expect(damageOf(result.events, "a")).toEqual([24]);
+    expect(actor(result.state, "a").position).toEqual({ x: 3, y: 0 });
+    expect(hasCondition(actor(result.state, "a"), "prone")).toBe(true);
+  });
+
+  it("banishes only a target the smite leaves at 50 Hit Points or fewer", async () => {
+    const base_ = await base();
+    const run = arenaRun(
+      base_,
+      variant(base_, "banish-smite", "divine-smite", {
+        cost: ["bonusAction", "slot"],
+        trigger: { afterHit: "meleeWeapon" },
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "cha",
+          dc: DC,
+          hpAtMost: 50,
+          damage: [{ amount: { dice: "5d10" }, type: "force" }],
+          onSuccessDamage: "full",
+          onFail: [
+            {
+              kind: "applyCondition",
+              condition: "incapacitated",
+              duration: { concentration: true, minutes: 1 },
+            },
+            {
+              kind: "modifier",
+              modifier: { kind: "sealed" },
+              duration: { concentration: true, minutes: 1 },
+            },
+          ],
+        },
+      }),
+    );
+    const smiter = hero(run, { spells: ["banish-smite"] });
+    const low = settle(
+      run,
+      fight(smiter, monster("a", "srd52:monster/dummy", 90)),
+      [smite("banish-smite", "a")],
+      FAIL_HIGH,
+    );
+    expect(damageOf(low.events, "a")).toEqual([50]);
+    expect(hasCondition(actor(low.state, "a"), "incapacitated")).toBe(true);
+    const sturdy = settle(
+      run,
+      fight(smiter, monster("a", "srd52:monster/dummy", 200)),
+      [smite("banish-smite", "a")],
+      FAIL_HIGH,
+    );
+    expect(damageOf(sturdy.events, "a")).toEqual([50]);
+    expect(kinds(sturdy.events)).not.toContain(`${NS}:saveRolled`);
+    expect(actor(sturdy.state, "a").activeEffects).toEqual([]);
+  });
+
+  it("fails Blight's save for a Plant, and gives a Construct Disadvantage against Shatter", async () => {
+    const run = arenaRun(await base(), {
+      "srd52:monster/shrub": dummy("srd52:monster/shrub", {
+        creatureType: "plant",
+      }),
+      "srd52:monster/golem": dummy("srd52:monster/golem", {
+        creatureType: "construct",
+      }),
+    });
+    const caster = hero(run, { spells: ["blight", "shatter"] });
+    // The save rolls a 20, so only the Plant takes all 8d8.
+    const blight = (statBlock: string): number[] =>
+      damageOf(
+        settle(
+          run,
+          fight(caster, monster("a", statBlock)),
+          [cast("blight", "a")],
+          HIGH,
+        ).events,
+      );
+    expect(blight("srd52:monster/shrub")).toEqual([64]);
+    expect(blight("srd52:monster/dummy")).toEqual([32]);
+    const d20s = (statBlock: string): number => {
+      const counted = countingD20s(HIGH);
+      settle(
+        run,
+        onGrid([caster, 0, 0], [monster("a", statBlock), 3, 0]),
+        [act(PLAYER_ACTOR, `spell:${spell("shatter")}|@3,0`)],
+        counted.dice,
+      );
+      return counted.d20s();
+    };
+    expect(d20s("srd52:monster/golem")).toBe(2);
+    expect(d20s("srd52:monster/dummy")).toBe(1);
+  });
+
+  it("gives a Large creature Advantage against Ensnaring Strike", async () => {
+    const run = arenaRun(await base(), {
+      "srd52:monster/big": dummy("srd52:monster/big", { size: "large" }),
+    });
+    const d20s = (statBlock: string): number => {
+      const counted = countingD20s(LOW);
+      settle(
+        run,
+        fight(
+          hero(run, { spells: ["ensnaring-strike"] }),
+          monster("a", statBlock),
+        ),
+        [smite("ensnaring-strike", "a")],
+        counted.dice,
+      );
+      return counted.d20s();
+    };
+    expect(d20s("srd52:monster/big")).toBe(2);
+    expect(d20s("srd52:monster/dummy")).toBe(1);
+  });
+
+  it("slows with Ray of Frost, stops healing with Chill Touch, and stops Opportunity Attacks with Shocking Grasp", async () => {
+    const run = arenaRun(await base(), {});
+    const caster = hero(run, {
+      spells: ["ray-of-frost", "chill-touch", "shocking-grasp"],
+    });
+    const state = onGrid([caster, 0, 0], [monster("a"), 1, 0]);
+    const frozen = settle(run, state, [cast("ray-of-frost", "a")], MID);
+    const slowed = actor(frozen.state, "a");
+    expect(walkSpeed(slowed, deriveStats(slowed, run))).toBe(20);
+    const chilled = settle(run, state, [cast("chill-touch", "a")], MID);
+    expect(cannotHeal(actor(chilled.state, "a"))).toBe(true);
+    const context = (from: DndState) => contextOf(run, from, MID);
+    expect(
+      provokers(caster, { x: 4, y: 0 }, state, context(state)).map(
+        ({ foe }) => foe.id,
+      ),
+    ).toEqual(["a"]);
+    const shocked = asTurnEnds(
+      state,
+      settle(run, state, [cast("shocking-grasp", "a")], MID).events,
+    );
+    expect(
+      provokers(
+        actor(shocked, PLAYER_ACTOR),
+        { x: 4, y: 0 },
+        shocked,
+        context(shocked),
+      ),
+    ).toEqual([]);
+  });
+
+  it("drives a target that fails against Dissonant Whispers away with its Reaction", async () => {
+    const run = arenaRun(await base(), {});
+    const state = onGrid(
+      [hero(run, { spells: ["dissonant-whispers"] }), 0, 0],
+      [monster("a"), 2, 0],
+    );
+    const fled = settle(run, state, [cast("dissonant-whispers", "a")], LOW);
+    const after = actor(asTurnEnds(state, fled.events), "a");
+    expect(after.position).toEqual({ x: 8, y: 0 });
+    expect(after.budget.reaction).toBe(false);
+    const stood = settle(run, state, [cast("dissonant-whispers", "a")], HIGH);
+    expect(actor(stood.state, "a").position).toEqual({ x: 2, y: 0 });
+  });
+
+  it("pulls a target no larger than Large toward the caster, as Thorn Whip", async () => {
+    const base_ = await base();
+    const run = arenaRun(base_, {
+      ...variant(base_, "whip", "starry-wisp", {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 30, side: "enemy" },
+        resolution: {
+          kind: "attack",
+          attack: { type: "spell" },
+          damage: [{ amount: { dice: "1d6" }, type: "piercing" }],
+          onHit: [
+            {
+              kind: "forcedMove",
+              feet: 10,
+              direction: "toward",
+              maxSize: "large",
+            },
+          ],
+        },
+      }),
+      "srd52:monster/huge": dummy("srd52:monster/huge", { size: "huge" }),
+    });
+    const caster = hero(run, { spells: ["whip"] });
+    const pulled = settle(
+      run,
+      onGrid([caster, 0, 0], [monster("a"), 4, 2]),
+      [cast("whip", "a")],
+      MID,
+    );
+    expect(actor(pulled.state, "a").position).toEqual({ x: 2, y: 0 });
+    const held = settle(
+      run,
+      onGrid([caster, 0, 0], [monster("a", "srd52:monster/huge"), 4, 0]),
+      [cast("whip", "a")],
+      MID,
+    );
+    expect(actor(held.state, "a").position).toEqual({ x: 4, y: 0 });
+  });
+
+  it("rolls Toll the Dead's larger die against a hurt target", async () => {
+    const base_ = await base();
+    const run = arenaRun(
+      base_,
+      variant(base_, "toll", "starry-wisp", {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 60, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "wis",
+          dc: DC,
+          damage: [{ amount: { dice: "1d8" }, type: "necrotic", hurtDie: 12 }],
+        },
+      }),
+    );
+    const caster = hero(run, { spells: ["toll"] });
+    const full = settle(
+      run,
+      fight(caster, monster("a")),
+      [cast("toll", "a")],
+      FAIL_HIGH,
+    );
+    expect(damageOf(full.events, "a")).toEqual([8]);
+    const hurt = settle(
+      run,
+      fight(caster, { ...monster("a"), hp: 400 }),
+      [cast("toll", "a")],
+      FAIL_HIGH,
+    );
+    expect(damageOf(hurt.events, "a")).toEqual([12]);
+  });
+
+  it("spends Mind Sliver's 1d4 off the next save only", async () => {
+    const base_ = await base();
+    const run = arenaRun(
+      base_,
+      variant(base_, "sliver", "starry-wisp", {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 60, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "int",
+          dc: DC,
+          damage: [{ amount: { dice: "1d6" }, type: "psychic" }],
+          onFail: [
+            {
+              kind: "modifier",
+              modifier: {
+                kind: "bonus",
+                to: "saves",
+                amount: { dice: "1d4" },
+                subtract: true,
+                once: true,
+              },
+              duration: { until: "yourNextTurnEnd" },
+            },
+          ],
+        },
+      }),
+    );
+    const state = fight(hero(run, { spells: ["sliver"] }), monster("a"));
+    const slivered = settle(run, state, [cast("sliver", "a")], LOW);
+    const target = actor(slivered.state, "a");
+    expect(target.activeEffects).toHaveLength(1);
+    const context = contextOf(run, slivered.state, LOW);
+    expect(rollBonus(target, "saves", context, undefined, "dex")).toBe(-1);
+    const saved = rollSave(target, "dex", 10, context);
+    expect(kinds(saved.events)).toContain(`${NS}:effectEnded`);
+  });
+
+  it("leaves the caster's side out of an area of creatures of its choice", async () => {
+    const base_ = await base();
+    const fireball = SpellSchema.parse(base_.content(spell("fireball")));
+    const run = arenaRun(
+      base_,
+      variant(base_, "volley", "fireball", {
+        ...fireball.activation,
+        targeting: {
+          area: { shape: "sphere", radius: 20 },
+          range: 150,
+          side: "enemy",
+          choice: true,
+        },
+      }),
+    );
+    const caster = hero(run, { spells: ["volley", "fireball"] });
+    const state = onGrid(
+      [caster, 0, 0],
+      [monster("a"), 6, 0],
+      [hero(run, { id: "ally" }), 6, 1],
+    );
+    const chosen = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `spell:${spell("volley")}|@6,0`)],
+      LOW,
+    );
+    expect(damageOf(chosen.events, "a")).toHaveLength(1);
+    expect(damageOf(chosen.events, "ally")).toEqual([]);
+    const all = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `spell:${spell("fireball")}|@6,0`)],
+      LOW,
+    );
+    expect(damageOf(all.events, "ally")).toHaveLength(1);
+  });
+
+  it("ends Darkness in Sunburst's area", async () => {
+    const base_ = await base();
+    const fog = SpellSchema.parse(base_.content(spell("fog-cloud")));
+    const run = arenaRun(
+      base_,
+      variant(base_, "darkness", "fog-cloud", {
+        ...fog.activation,
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "zone",
+              zone: "darkness",
+              radius: 15,
+              duration: { concentration: true, minutes: 10 },
+            },
+          ],
+        },
+      }),
+    );
+    const caster = hero(run, { spells: ["darkness", "sunburst"], level: 15 });
+    const state = onGrid([caster, 0, 0], [monster("a"), 8, 0]);
+    const dark = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `spell:${spell("darkness")}|@6,0`)],
+      LOW,
+    );
+    expect(zonesOf(dark.state).map((zone) => zone.zone)).toEqual(["darkness"]);
+    const lit = settle(
+      run,
+      {
+        ...dark.state,
+        actors: {
+          ...dark.state.actors,
+          [PLAYER_ACTOR]: {
+            ...actor(dark.state, PLAYER_ACTOR),
+            budget: { ...actor(dark.state, PLAYER_ACTOR).budget, action: true },
+          },
+        },
+      },
+      [act(PLAYER_ACTOR, `spell:${spell("sunburst")}|@8,0`)],
+      LOW,
+    );
+    expect(zonesOf(lit.state)).toEqual([]);
+    expect(hasCondition(actor(lit.state, "a"), "blinded")).toBe(true);
   });
 });

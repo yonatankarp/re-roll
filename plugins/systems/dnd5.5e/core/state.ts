@@ -92,6 +92,8 @@ export const FRAME_KINDS = [
   "chooseShape",
   "chooseFocus",
   "castOn", // whom a spell or feature used between fights goes to (camp.ts)
+  "applyMiss", // what an attack does on a miss, as Acid Arrow's splash (combat/spell-riders.ts)
+  "burst", // a save round an attack's target, hit or miss, as Ice Knife's (combat/spell-riders.ts)
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 

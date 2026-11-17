@@ -17,6 +17,7 @@ import {
 } from "../state.ts";
 import { ALL, DECLINE, parseOption } from "./ids.ts";
 import { aroundHit, replaceHitFrame, runReplaceHit } from "./ranged-smite.ts";
+import { againstTarget, missFrames, runApplyMiss } from "./spell-riders.ts";
 import { duelBroken, duelDamaged, duelHampers } from "./duel.ts";
 import { distanceFeet } from "../grid.ts";
 import { grapplesOn } from "./grapple.ts";
@@ -129,6 +130,7 @@ import {
   payCosts,
   resolveAction,
   rollSave,
+  typeAgainst,
 } from "./effects.ts";
 
 // Attack rolls and what follows a hit: reactions, damage, riders, smites and concentration saves.
@@ -641,13 +643,15 @@ function attackKind(
   return { melee, ranged: !melee, spell: action.spellLevel !== null };
 }
 
-// What follows a miss: its weapon's mastery, as Graze, and what answers it.
+// What follows a miss: what the attack itself does on one, as Acid Arrow's splash, its weapon's mastery, as Graze,
+// and what answers it.
 export function missOutcome(
   hit: z.infer<typeof HitSchema>,
   context: Context,
 ): Frame[] {
   const attacker = actorOf(context.state, hit.attacker);
   return [
+    ...missFrames(hit, context),
     ...(masteryOf(attacker, hit.actionId, context)
       ? [frame("masteryMiss", hit)]
       : []),
@@ -1335,7 +1339,11 @@ export function runApplyHit(
   if (printed.kind !== "attack") {
     throw new Error(`${action.id} isn't an attack`);
   }
-  const resolution = payload.poleStrike ? poleEnd(printed) : printed;
+  const resolution = againstTarget(
+    payload.poleStrike ? poleEnd(printed) : printed,
+    target,
+    context,
+  );
   const stats = deriveStats(attacker, context);
   const multiplier = payload.critical ? 2 : 1;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
@@ -2070,15 +2078,6 @@ function hitRiders(
     ...attacker.activeEffects.map((effect) => ({ effect, by: "bearer" })),
     ...target.activeEffects.map((effect) => ({ effect, by: "caster" })),
   ];
-  // The type the target takes most from: vulnerable, then plain, then resisted, never immune if another will do.
-  const worth = (type: Damage["type"]): number =>
-    responses.immunities.includes(type) || responses.absorbs.includes(type)
-      ? 0
-      : responses.resistances.includes(type)
-        ? 1
-        : responses.vulnerabilities.includes(type)
-          ? 3
-          : 2;
   return carried.flatMap(({ effect, by }) => {
     const { modifier, sourceId, casterId } = effect;
     if (
@@ -2093,9 +2092,9 @@ function hitRiders(
       return [];
     }
     seen.add(sourceId);
-    const [type = modifier.damage.type] = [...(modifier.types ?? [])].sort(
-      (a, b) => worth(b) - worth(a),
-    );
+    const type = modifier.types
+      ? typeAgainst(modifier.types, responses)
+      : modifier.damage.type;
     return [{ ...modifier.damage, type }];
   });
 }
@@ -2305,14 +2304,14 @@ export function runSmite(
     findAction(attacker, actionId, context, slotLevel),
     findAction(attacker, payload.actionId, context),
   );
-  // A smite's damage is part of the attack, so a Critical Hit doubles its dice too, but not a save's round the target.
+  // A smite's damage is part of the attack, so a Critical Hit doubles its dice too, but not an area's round the target.
   const result = resolveAction(
     action,
     attacker,
     aroundHit(action, attacker, target, context),
     context,
     slotLevel,
-    payload.critical && action.activation.resolution.kind !== "save",
+    payload.critical && !("area" in action.activation.targeting),
     target.position ?? undefined,
   );
   return {
@@ -2404,6 +2403,7 @@ export const attackFrames = {
     run: runRecheckHit,
   }),
   [`${NS}:applyHit`]: frameHandler({ schema: HitSchema, run: runApplyHit }),
+  [`${NS}:applyMiss`]: frameHandler({ schema: HitSchema, run: runApplyMiss }),
   [`${NS}:concentrationSave`]: frameHandler({
     schema: ConcentrationSchema,
     run: runConcentrationSave,

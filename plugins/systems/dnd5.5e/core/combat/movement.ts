@@ -58,6 +58,7 @@ import { hasTactic } from "../tactics.ts";
 import { STAY } from "./ids.ts";
 import { grapplesOn } from "./grapple.ts";
 import { heightOf } from "./falling.ts";
+import { limitsOf } from "./durations.ts";
 import {
   actorOf,
   CHECK_END,
@@ -155,6 +156,7 @@ export function provokers(
       !foe.budget.reaction ||
       isDown(foe) ||
       sealed(foe) ||
+      limitsOf(foe).noOpportunityAttacks === true || // Shocking Grasp
       hasCondition(foe, ...INCAPACITATING) ||
       (disengaged && !hasPassive(deriveStats(foe, access), "sentinel"))
     ) {

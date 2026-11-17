@@ -15,7 +15,7 @@
     turn. On a miss, the arrow splashes the target with acid for half as much of
     the initial damage only. Using a Higher-Level Spell Slot. The damage (both
     initial and later) increases by 1d4 for each spell slot level above 2.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -45,6 +45,7 @@
                 type: acid
             once: true
       onMiss: []
+      missDamage: half
   upcast:
     perSlotLevel:
       addDice: 1d4
@@ -763,6 +764,9 @@
                   dice: 1d6
                 type: piercing
       onSuccess: []
+      edges:
+        - minSize: large
+          roll: advantage
   upcast:
     perSlotLevel:
       addDice: 1d6
@@ -2083,7 +2087,35 @@
     of these d8s you can add to the spell’s damage equals your spellcasting
     ability modifier. Cantrip Upgrade. The damage increases by 1d8 when you
     reach levels 5 (2d8), 11 (3d8), and 17 (4d8)."
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+    targeting:
+      creatures: 1
+      range: 120
+      side: enemy
+    resolution:
+      kind: attack
+      attack:
+        type: spell
+      damage:
+        - amount:
+            dice: 1d8
+          type: acid
+          types:
+            - acid
+            - cold
+            - fire
+            - lightning
+            - poison
+            - psychic
+            - thunder
+      onHit: []
+      onMiss: []
+  cantrip:
+    perTier:
+      addDice: 1d8
 - id: srd52:spell/spider-climb
   name: Spider Climb
   level: 2
@@ -2669,7 +2701,7 @@
     tree or shrub. It doesn’t make a save; it simply withers and dies. Using a
     Higher-Level Spell Slot. The damage increases by 1d8 for each spell slot
     level above 4.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -2691,6 +2723,10 @@
       onSuccessDamage: half
       onFail: []
       onSuccess: []
+      edges:
+        - creatureTypes:
+            - plant
+          roll: fail
   upcast:
     perSlotLevel:
       addDice: 1d8
@@ -2735,7 +2771,7 @@
     can’t regain Hit Points until the end of your next turn. Cantrip Upgrade.
     The damage increases by 1d10 when you reach levels 5 (2d10), 11 (3d10), and
     17 (4d10).
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -2752,8 +2788,11 @@
             dice: 1d10
           type: necrotic
       onHit:
-        - kind: note
-          text: Can't regain Hit Points until the end of your next turn
+        - kind: modifier
+          modifier:
+            kind: noHealing
+          duration:
+            until: yourNextTurnEnd
       onMiss: []
   cantrip:
     perTier:
@@ -4227,7 +4266,7 @@
     damage, and its Speed is reduced by 10 feet until the start of your next
     turn. Cantrip Upgrade. The damage increases by 1d8 when you reach levels 5
     (2d8), 11 (3d8), and 17 (4d8).
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -4244,8 +4283,17 @@
             dice: 1d8
           type: cold
       onHit:
-        - kind: note
-          text: Speed reduced by 10 feet until the start of your next turn
+        - kind: modifier
+          modifier:
+            kind: bonus
+            to: speed
+            amount:
+              bonus:
+                base: 10
+                add: []
+            subtract: true
+          duration:
+            until: yourNextTurnStart
       onMiss: []
   cantrip:
     perTier:
@@ -4427,7 +4475,7 @@
     ends early if you cast it again or if you let go of the weapon. Cantrip
     Upgrade. The damage die changes when you reach levels 5 (d10), 11 (d12), and
     17 (2d6).
-  automation: partial
+  automation: full
   activation:
     cost:
       - bonusAction
@@ -5135,7 +5183,35 @@
     for each spell slot level above 1. The orb can leap a maximum number of
     times equal to the level of the slot expended, and a creature can be
     targeted only once by each casting of this spell.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 90
+      side: enemy
+    resolution:
+      kind: attack
+      attack:
+        type: spell
+      damage:
+        - amount:
+            dice: 3d8
+          type: acid
+          types:
+            - acid
+            - cold
+            - fire
+            - lightning
+            - poison
+            - thunder
+      onHit: []
+      onMiss: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
 - id: srd52:spell/color-spray
   name: Color Spray
   level: 1
@@ -5474,7 +5550,7 @@
   text: The target takes an extra 2d8 Radiant damage from the attack. The damage
     increases by 1d8 if the target is a Fiend or an Undead. Using a Higher-Level
     Spell Slot. The damage increases by 1d8 for each spell slot level above 1.
-  automation: partial
+  automation: full
   activation:
     cost:
       - bonusAction
@@ -5491,6 +5567,11 @@
         - amount:
             dice: 2d8
           type: radiant
+          vs:
+            creatureTypes:
+              - fiend
+              - undead
+            dice: 1d8
       effects: []
   upcast:
     perSlotLevel:
@@ -5758,7 +5839,7 @@
     damage on a failed save or half as much damage on a successful one. Using a
     Higher-Level Spell Slot. The Fire damage and the Radiant damage increase by
     1d6 for each spell slot level above 5.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -6137,7 +6218,39 @@
     creature within 5 feet of it must succeed on a Dexterity saving throw or
     take 2d6 Cold damage. Using a Higher-Level Spell Slot. The Cold damage
     increases by 1d6 for each spell slot level above 1.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 60
+      side: enemy
+    resolution:
+      kind: attack
+      attack:
+        type: spell
+      damage:
+        - amount:
+            dice: 1d10
+          type: piercing
+      onHit: []
+      onMiss: []
+      burst:
+        radius: 5
+        ability: dex
+        dc:
+          base: 0
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 2d6
+            type: cold
+  upcast:
+    perSlotLevel:
+      addDice: 1d6
 - id: srd52:spell/incendiary-cloud
   name: Incendiary Cloud
   level: 8
@@ -6625,7 +6738,25 @@
     of you. Make a ranged spell attack. On a hit, the target takes 1d8 Fire
     damage. Cantrip Upgrade. The damage increases by 1d8 when you reach levels 5
     (2d8), 11 (3d8), and 17 (4d8).
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+    targeting:
+      creatures: 1
+      range: 60
+      side: enemy
+    resolution:
+      kind: attack
+      attack:
+        type: spell
+      damage:
+        - amount:
+            dice: 1d8
+          type: fire
+  cantrip:
+    perTier:
+      addDice: 1d8
 - id: srd52:spell/protection-from-poison
   name: Protection from Poison
   level: 2
@@ -6881,6 +7012,12 @@
           modifier:
             kind: advantage
             on: attacksAgainst
+        - kind: modifier
+          modifier:
+            kind: outlined
+          duration:
+            concentration: true
+            minutes: 1
   upcast:
     perSlotLevel:
       addDice: 1d6
@@ -7065,7 +7202,7 @@
     Constitution saving throw at the end of each of its turns, ending the effect
     on itself on a success. This spell dispels Darkness in its area that was
     created by any spell.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -7092,6 +7229,10 @@
           condition: blinded
           duration:
             minutes: 1
+          repeatSave: true
+        - kind: disperse
+          zones:
+            - darkness
       onSuccess: []
 - id: srd52:spell/teleportation-circle
   name: Teleportation Circle
@@ -9035,7 +9176,7 @@
     has the Poisoned condition until the end of your next turn. Using a
     Higher-Level Spell Slot. The damage increases by 1d8 for each spell slot
     level above 1.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -9056,7 +9197,7 @@
         - kind: applyCondition
           condition: poisoned
           duration:
-            until: yourNextTurnStart
+            until: yourNextTurnEnd
   upcast:
     perSlotLevel:
       addDice: 1d8
@@ -9160,7 +9301,7 @@
     nonmagical object that isn’t being worn or carried also takes the damage if
     it’s in the spell’s area. Using a Higher-Level Spell Slot. The damage
     increases by 1d8 for each spell slot level above 2.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -9182,6 +9323,10 @@
             dice: 3d8
           type: thunder
       onSuccessDamage: half
+      edges:
+        - creatureTypes:
+            - construct
+          roll: disadvantage
   upcast:
     perSlotLevel:
       addDice: 1d8
@@ -9201,7 +9346,7 @@
     Lightning damage, and it can’t make Opportunity Attacks until the start of
     its next turn. Cantrip Upgrade. The damage increases by 1d8 when you reach
     levels 5 (2d8), 11 (3d8), and 17 (4d8).
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -9218,8 +9363,12 @@
             dice: 1d8
           type: lightning
       onHit:
-        - kind: note
-          text: Target can't make Opportunity Attacks until the start of its next turn
+        - kind: modifier
+          modifier:
+            kind: actionLimit
+            noOpportunityAttacks: true
+          duration:
+            until: itsNextTurnStart
   cantrip:
     perTier:
       addDice: 1d8
@@ -9435,7 +9584,7 @@
     type (your choice). Cantrip Upgrade. Whether you deal Radiant damage or the
     weapon’s normal damage type, the attack deals extra Radiant damage when you
     reach levels 5 (1d6), 11 (2d6), and 17 (3d6).
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -10258,7 +10407,7 @@
     safest route. On a successful save, the target takes half as much damage
     only. Using a Higher-Level Spell Slot. The damage increases by 1d6 for each
     spell slot level above 1.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -10278,6 +10427,10 @@
             dice: 3d6
           type: psychic
       onSuccessDamage: half
+      onFail:
+        - kind: reactionMove
+          away: true
+      onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d6
@@ -11820,6 +11973,13 @@
         - amount:
             dice: 1d8
           type: radiant
+      onHit:
+        - kind: modifier
+          modifier:
+            kind: outlined
+          duration:
+            until: yourNextTurnEnd
+      onMiss: []
   cantrip:
     perTier:
       addDice: 1d8
