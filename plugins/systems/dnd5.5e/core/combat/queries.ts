@@ -110,6 +110,7 @@ export function hasFlag(
   ability?: Ability,
   attackerType?: string, // the attacker's creature type, for attacksAgainst
   attackerId?: string, // for attacksAgainst, which a caster's own Advantage needs
+  skill?: Skill, // the check's skill, for Advantage on only some, as Remarkable Athlete's Athletics
 ): boolean {
   return [
     ...actor.activeEffects
@@ -121,6 +122,9 @@ export function hasFlag(
       modifier.kind === kind &&
       modifier.on === on &&
       (!modifier.ability || modifier.ability === ability) &&
+      (!("skills" in modifier) ||
+        !modifier.skills ||
+        (skill !== undefined && modifier.skills.includes(skill))) &&
       // Advantage only against some conditions is the save's to weigh (placedFlag).
       (!("conditions" in modifier) || !modifier.conditions) &&
       (!("magical" in modifier) || !modifier.magical) &&

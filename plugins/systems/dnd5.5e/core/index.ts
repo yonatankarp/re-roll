@@ -30,9 +30,10 @@ import { movementFrames } from "./combat/movement.ts";
 import { fallingFrames } from "./combat/falling.ts";
 import { formFrames } from "./combat/form-choice.ts";
 import { damageChoiceFrames } from "./combat/damage-choice.ts";
+import { checkChoiceFrames } from "./combat/check-choice.ts";
 import { confusionFrames } from "./combat/confusion.ts";
 import { wishFrames } from "./combat/wish.ts";
-import { reactionFrames, settleRoll } from "./combat/reactions.ts";
+import { reactionFrames } from "./combat/reactions.ts";
 import { turnFrames } from "./combat/turn.ts";
 import { areaFrames } from "./combat/areas.ts";
 import {
@@ -46,6 +47,7 @@ import {
   runTactic,
   tacticalPolicy,
   withTactics,
+  abilityCheck,
 } from "./actions.ts";
 import {
   parseClassesFromHtml,
@@ -98,7 +100,6 @@ import {
   runPrecision,
 } from "./class-rules.ts";
 import { classOptionFrames } from "./class-options.ts";
-import { rollD20 } from "./rules.ts";
 import {
   BackgroundSchema,
   CheckSchema,
@@ -137,11 +138,9 @@ import {
   freshActor,
 } from "./state.ts";
 import { afterActionEvents } from "./combat/durations.ts";
-import { checkBonus, deriveStats, lookup } from "./stats.ts";
+import { deriveStats, lookup } from "./stats.ts";
 import { withReveal } from "./fog.ts";
 import { actingEnds } from "./combat/effects.ts";
-import { rescuedCheck } from "./trait-rules.ts";
-import { familiarHelpUse } from "./combat/familiar.ts";
 
 // Every step ends by revealing what the party sees once its events land, so the fog clears as it happens.
 function revealing(
@@ -449,6 +448,7 @@ export const dnd55e = defineSystem<DndState>({
     ...fallingFrames,
     ...formFrames,
     ...damageChoiceFrames,
+    ...checkChoiceFrames,
     ...confusionFrames,
     ...wishFrames,
     ...reactionFrames,
@@ -560,72 +560,27 @@ export const dnd55e = defineSystem<DndState>({
       combat: null,
     };
   },
-  // Scene checks are made by the player's character.
+  // Scene checks are made by the player's character, with the same roll as a check in a fight.
   resolveCheck: (check, context) => {
     const parsed = CheckSchema.parse(check);
     const player = context.state.actors[PLAYER_ACTOR];
     if (!player) throw new Error("The player has no character");
-    const stats = deriveStats(player, context);
+    const skill = "skill" in parsed ? parsed.skill : undefined;
     const ability =
       "skill" in parsed ? SKILL_ABILITIES[parsed.skill] : parsed.ability;
-    // Helpful Friend: the familiar beside the player gives a proficient skill Advantage.
-    const befriended = familiarHelpUse(
+    const rolled = abilityCheck(
       player,
-      stats,
-      "skill" in parsed ? parsed.skill : undefined,
-      context.state,
-    );
-    const edge = {
-      advantage: befriended !== null,
-      disadvantage:
-        stats.untrainedArmor && (ability === "str" || ability === "dex"),
-    };
-    const first = rollD20(context.dice, {
-      ...edge,
-      rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
-    });
-    const base = checkBonus(stats, player, {
+      skill,
       ability,
-      ...("skill" in parsed ? { skill: parsed.skill } : {}),
-    });
-    const judge = (natural: number, bonus: number) => ({
-      total: natural + base + bonus,
-      success: natural + base + bonus >= parsed.dc,
-    });
-    // A companion's Bountiful Luck or the player's Lucky may answer it (combat/reactions.ts).
-    const settled = settleRoll(
-      {
-        roller: player,
-        kind: "check",
-        natural: first.natural,
-        goal: parsed.dc,
-        ...judge(first.natural, 0),
-      },
-      edge,
-      judge,
+      parsed.dc,
+      () => skill ?? ability,
       context,
     );
-    const roll = { natural: settled.natural };
-    const rolled = judge(settled.natural, settled.bonus).total;
-    const rescue = rescuedCheck(player, stats, rolled, parsed.dc, context.dice);
-    const total = rolled + rescue.bonus;
-    const success = total >= parsed.dc;
     return {
-      outcome: success ? "success" : "failure",
+      outcome: rolled.success ? "success" : "failure",
       events: [
-        ...(befriended ? [befriended] : []),
-        ...settled.events,
-        ...rescue.events,
-        dndEvent(`${NS}:rollReported`, {
-          actor: PLAYER_ACTOR,
-          against: "check",
-          natural: roll.natural,
-          total,
-          target: parsed.dc,
-          success,
-          label: "skill" in parsed ? parsed.skill : parsed.ability,
-        }),
-        ...(success ? [] : ([{ kind: "gmOpportunity" }] as const)),
+        ...rolled.events,
+        ...(rolled.success ? [] : ([{ kind: "gmOpportunity" }] as const)),
       ],
     };
   },
@@ -654,7 +609,7 @@ export const dnd55e = defineSystem<DndState>({
   // Building steps (class, scores, subclass, spells, feats) are made as a companion's are, and a rest's
   // Hit Dice and gear as a careful player would.
   tactical: (decision) =>
-    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave|build|metamagic|precision|damageType|wish):/.test(
+    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave|build|metamagic|precision|damageType|focus|wish):/.test(
       decision.id,
     ) || isGearDecision(decision),
 });

@@ -90,6 +90,7 @@ export const FRAME_KINDS = [
   "copySpell",
   "wallLayer",
   "chooseShape",
+  "chooseFocus",
   "castOn", // whom a spell or feature used between fights goes to (camp.ts)
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];

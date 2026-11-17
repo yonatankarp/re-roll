@@ -10,6 +10,7 @@ import {
   rollAmount,
   wishedKey,
   saveBonus,
+  scoreFloor,
   spellSaveDc,
   type Stats,
 } from "../stats.ts";
@@ -112,6 +113,7 @@ import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
 import { damageTypeFrame, zoneTypeFrame } from "./damage-choice.ts";
+import { focusFrame } from "./check-choice.ts";
 import { weaponAttackResult } from "./weapon-spell.ts";
 import { duelBroken, duelDamaged } from "./duel.ts";
 import { wishFrame } from "./wish.ts";
@@ -1028,7 +1030,8 @@ export function leafEvents(
         );
         break;
       case "modifier":
-        if (effect.choose) break; // given once its type is picked (combat/damage-choice.ts)
+        // given once its type, skill or ability is picked (combat/damage-choice.ts, combat/check-choice.ts)
+        if (effect.choose || effect.pick) break;
         events.push(
           dndEvent(`${NS}:effectAdded`, {
             actor: target.id,
@@ -1824,10 +1827,11 @@ export function rollSave(
     saveBonus(stats, ability) +
     rollBonus(target, "saves", context, undefined, ability) +
     (ability === "dex" ? cover : 0);
+  const least = scoreFloor(stats, ability); // Indomitable Might
   // Reactions to the roll before it lands, as Bountiful Luck or Portent (combat/reactions.ts).
   const judge = (natural: number, bonus: number) => ({
-    total: natural + base + bonus,
-    success: natural + base + bonus >= dc,
+    total: Math.max(natural + base + bonus, least),
+    success: Math.max(natural + base + bonus, least) >= dc,
   });
   const settled = settleRoll(
     {
@@ -2262,6 +2266,14 @@ export function resolveAction(
           slotLevel,
         );
         if (typed) frames.push(typed);
+        const focus = focusFrame(
+          resolution.effects,
+          spellSource(action),
+          actor,
+          target,
+          slotLevel,
+        );
+        if (focus) frames.push(focus);
         // Where it lands is chosen, as a move is, and so is a form for a friend.
         for (const effect of resolution.effects) {
           if (effect.kind === "teleport" && target.id === actor.id) {

@@ -196,6 +196,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     magical: z.literal(true).optional(), // only on saves against spells and magic, as Circle of Power
     // attacksAgainst only for the effect's caster, as Lords' Alliance Agent's Reassert Honor.
     casterOnly: z.literal(true).optional(),
+    skills: z.array(SkillSchema).min(1).optional(), // only checks with these skills, as Remarkable Athlete's Athletics
   }),
   // "attackers" limits attacksAgainst to creatures of these lowercase types, as with Protection from Evil and Good.
   z.strictObject({
@@ -204,6 +205,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     once: z.boolean().optional(),
     ability: AbilitySchema.optional(),
     attackers: z.array(z.string()).min(1).optional(),
+    skills: z.array(SkillSchema).min(1).optional(), // only checks with these skills
   }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
@@ -225,6 +227,20 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     condition: ConditionSchema,
   }),
   z.strictObject({ kind: z.literal("acFormula"), formula: FormulaSchema }),
+  // Expertise in these skills while it lasts, where the bearer is proficient, as Skill Empowerment's.
+  z.strictObject({
+    kind: z.literal("expertise"),
+    skills: z.array(SkillSchema).min(1).optional(), // set by the cast's `pick`
+  }),
+  // A check's d20 roll below `value` counts as `value`, as Reliable Talent's 10 on a check it's proficient in or
+  // Glibness's 15 on Charisma checks. `ability` and `skills` limit which checks.
+  z.strictObject({
+    kind: z.literal("checkFloor"),
+    value: z.number().int().min(2).max(20),
+    ability: AbilitySchema.optional(),
+    skills: z.array(SkillSchema).min(1).optional(),
+    proficient: z.literal(true).optional(),
+  }),
   // Seeing creatures that have the Invisible condition as if they were visible, as See Invisibility does.
   z.strictObject({ kind: z.literal("seeInvisible") }),
   // Damage at the start or end of the bearer's turn, such as Moonbeam or Searing Smite.
@@ -522,6 +538,12 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     // Protection from Energy. A cast's lists of the same length are picked together, by place, as Fire Shield's
     // warm or chill shield sets both its Resistance and its flames.
     choose: z.array(DamageTypeSchema).min(2).optional(),
+    // The caster picks the skill or ability the modifier is limited to as it casts (combat/check-choice.ts), as
+    // Guidance's skill or Enhance Ability's ability.
+    pick: z
+      .array(z.union([AbilitySchema, SkillSchema]))
+      .min(2)
+      .optional(),
   }),
   z.strictObject({
     kind: z.literal("forcedMove"),
@@ -1279,7 +1301,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Dash, Disengage or Hide as a Bonus Action, as with Cunning Action or a goblin's Nimble Escape.
   z.strictObject({
     kind: z.literal("bonusTactics"),
-    tactics: z.array(z.enum(["dash", "disengage", "hide", "dodge"])).min(1),
+    // "search" and "study" as Observant's Quick Search and Keen Mind's Quick Study
+    tactics: z
+      .array(z.enum(["dash", "disengage", "hide", "dodge", "search", "study"]))
+      .min(1),
     half: z.literal(true).optional(), // its Dash adds half its Speed, as a troll's Charge
     safe: z.literal(true).optional(), // its Dash provokes no Opportunity Attacks, as a warrior commander's Tactical Charge
     resource: z.string().optional(), // each use spends one, as Timely Retreat's
@@ -1610,10 +1635,28 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // A failed ability check gets this die added when it could be enough, spending a use, as Reborn's Knowledge from a
   // Past Life.
+  // `dieSize` is a scaling key for the die, as Peerless Skill's Bardic Inspiration die; `skills` limits it to checks
+  // with those, as Tactical Assessment's; and with `keep` a use isn't spent when the check still fails, as Tactical
+  // Mind's Second Wind.
   z.strictObject({
     kind: z.literal("checkRescue"),
     bonusDice: DiceSchema,
     resource: z.string(),
+    dieSize: z.string().optional(),
+    skills: z.array(SkillSchema).min(1).optional(),
+    keep: z.literal(true).optional(),
+  }),
+  // A check or save with this ability totals at least the bearer's score in it, as Indomitable Might's Strength.
+  z.strictObject({ kind: z.literal("scoreFloor"), ability: AbilitySchema }),
+  // Half the Proficiency Bonus, rounded down, on a skill check it isn't proficient in, as Jack of All Trades.
+  z.strictObject({ kind: z.literal("halfProficiency") }),
+  // Advantage on checks to escape a grapple, as Vampire Hunter's Adroit Escape.
+  z.strictObject({ kind: z.literal("escapeAdvantage") }),
+  // Raises a scaling key to at least this, as a Greater Mark's 1d6 for its Mark's 1d4 (`dieSize` "intuitionDie").
+  z.strictObject({
+    kind: z.literal("scalingFloor"),
+    key: z.string().min(1),
+    value: z.number().int().min(1),
   }),
   // Advantage on saves with these abilities while within 5 feet of an ally that can act, for the bearer and that
   // ally, as Order's Resilience's Stronger Together.
@@ -1781,6 +1824,8 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     // Expertise in the skills picked instead of proficiency: in one the character is proficient in ("proficient"), as
     // Skill Expert gives, or in any ("any"), when the same feat makes it proficient in all, as Boon of Skill.
     expertise: z.enum(["proficient", "any"]).optional(),
+    // Expertise in a skill picked that the character is already proficient in, else proficiency, as Keen Mind.
+    orExpertise: z.literal(true).optional(),
     // Picked again after a Long Rest, as Weapon Master's weapons (swap.ts).
     swap: z.literal("longRest").optional(),
   }),
@@ -2116,6 +2161,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
   automation: AutomationSchema,
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   abilities: z.array(ItemAbilitySchema).min(1).optional(),
+  // Always-on rules while it works (worn, and attuned where it needs it), as Eyes of the Eagle's Advantage on Perception.
+  passives: z.array(PassiveSchema).min(1).optional(),
   // A score studying it raises for good, as a Manual of Bodily Health's Constitution by 2 to a maximum of 30.
   // Studying spends its magic, so the item is gone after.
   study: z
@@ -2315,6 +2362,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
     kind: z.literal("skills"),
     values: z.array(SkillSchema),
     expertise: z.literal(true).optional(), // from a choice with `expertise`
+    orExpertise: z.literal(true).optional(), // from a choice with `orExpertise`
     feat: ContentIdSchema.optional(), // the feat or species that asked, when it can be swapped
   }),
   z.strictObject({
