@@ -474,8 +474,9 @@ const ItemPickedUpSchema = z.strictObject({
 });
 const AnswerSwappedSchema = z.strictObject({
   actor: z.string(),
-  key: z.string(), // "<level>:<answer>" in its build
+  key: z.string(), // "<level>:<answer>" in its build, or "trait:<feature>" for a trait's own cantrip
   values: z.array(z.string()),
+  mark: z.string().optional(), // kept in `swapped` in place of the key, "<feat>@<level>" for a level's swap
 });
 const ItemUsedSchema = z.strictObject({
   actor: z.string(),
@@ -1203,8 +1204,10 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
               tempHp: 0,
               deathSaves: { successes: 0, failures: 0 },
               exhaustion: Math.max(0, actor.exhaustion - 1),
-              // Each Long Rest allows its swaps again.
-              ...(actor.swapped ? { swapped: [] } : {}),
+              // Each Long Rest allows its swaps again, though not a level's.
+              ...(actor.swapped
+                ? { swapped: actor.swapped.filter((key) => key.includes("@")) }
+                : {}),
             },
       );
     }
@@ -1691,7 +1694,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         swaps: { ...actor.swaps, [data.key]: data.values },
-        swapped: [...(actor.swapped ?? []), data.key],
+        swapped: [...(actor.swapped ?? []), data.mark ?? data.key],
       }));
     }
     case `${NS}:weaponThrown`: {

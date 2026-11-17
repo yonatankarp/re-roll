@@ -125,7 +125,7 @@ function actionDetail(
 ): string {
   const source = contentText(
     access,
-    action.id.replace(/^[a-z]+:/, "").replace(/:free$/, ""),
+    action.id.replace(/^[a-z]+:/, "").replace(/:free(?::[a-z0-9-]+)?$/, ""),
   );
   const upcast = action.upcast?.perSlotLevel;
   return [

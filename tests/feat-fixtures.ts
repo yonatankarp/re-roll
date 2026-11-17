@@ -614,6 +614,131 @@ const FIXTURES = [
     freeCast: true,
   }),
   trait("sturdy", [{ kind: "saveProficiency", increased: true }]),
+  // #167: a cantrip swapped after a Long Rest, a feat's spells changed each level or picked between scenes, free casts
+  // at a slot level, by another resource, or each spell its own way.
+  trait("high", [], {
+    spells: { 1: ["srd52:spell/prestidigitation"] },
+    swapCantrip: ["srd52:class/wizard"],
+  }),
+  trait("gift-again", [], {
+    spells: { 1: ["srd52:spell/burning-hands"] },
+    freeCast: true,
+  }),
+  trait("wishing", [], {
+    resources: [
+      {
+        id: "wish",
+        max: { base: 1 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+  }),
+  trait("drowish", [], {
+    spells: { 1: ["srd52:spell/bless", "srd52:spell/burning-hands"] },
+    freeCast: {
+      "srd52:spell/bless": "atWill",
+      "srd52:spell/burning-hands": true,
+    },
+  }),
+  trait("dragonmarked", [], {
+    spells: { 1: ["srd52:spell/burning-hands"] },
+    freeCast: true,
+    preparedWith: {
+      feat: "test:feat/potent",
+      spells: { 1: ["srd52:spell/bless"] },
+      freeCast: { resource: "potent", slotLevel: { 1: 1, 3: 2 } },
+    },
+  }),
+  trait("potent", [], {
+    resources: [
+      {
+        id: "potent",
+        max: { base: 1 },
+        recharge: [{ on: "shortRest", amount: "all" }],
+      },
+    ],
+  }),
+  trait("rituals", [], {
+    resources: [
+      {
+        id: "quick-ritual",
+        max: { base: 1 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+  }),
+  trait("bringer", [], { spells: { 1: ["srd52:spell/light"] } }),
+  trait("lit", [], { spells: { 1: ["srd52:spell/light"] } }),
+  {
+    id: "test:feat/potent",
+    name: "Potent",
+    category: "general",
+    text: "Test.",
+    grants: ["test:feature/potent"],
+  },
+  {
+    id: "test:feat/rituals",
+    name: "Rituals",
+    category: "general",
+    text: "Test.",
+    grants: ["test:feature/rituals"],
+    abilityIncrease: ["int", "wis", "cha"],
+    spellAbility: "increased",
+    choices: [
+      {
+        kind: "spells",
+        id: "rituals",
+        count: 1,
+        maxLevel: 1,
+        ritual: true,
+        grows: "proficiency",
+        freeCast: { resource: "quick-ritual" },
+      },
+    ],
+  },
+  {
+    id: "test:feat/bringer",
+    name: "Bringer",
+    category: "general",
+    text: "Test.",
+    grants: ["test:feature/bringer"],
+    spellAbility: "increased",
+    choices: [
+      {
+        kind: "spells",
+        id: "other",
+        count: 1,
+        maxLevel: 0,
+        list: "srd52:class/cleric",
+        ifKnown: "srd52:spell/light",
+      },
+    ],
+  },
+  {
+    id: "test:feat/changing",
+    name: "Changing",
+    category: "general",
+    text: "Test.",
+    spellAbility: "int",
+    choices: [
+      {
+        kind: "spells",
+        id: "cantrips",
+        count: 2,
+        maxLevel: 0,
+        list: "srd52:class/wizard",
+        swap: "levelUp",
+      },
+      {
+        kind: "spells",
+        id: "table",
+        count: 1,
+        maxLevel: 1,
+        list: "srd52:class/cleric",
+        also: ["srd52:spell/magic-missile"],
+      },
+    ],
+  },
   trait("blessed", [], {
     spells: { 1: ["srd52:spell/bless"] },
     freeCast: true,

@@ -509,7 +509,15 @@ function owned<T extends ChoiceDef>(
       (choice) => choice.kind === "spellAbility" || "swap" in choice,
     );
   for (const choice of own ? choices : []) choiceOwners.set(choice, feat.id);
-  return choices;
+  return choices.filter((choice) => !latePick(choice));
+}
+
+// A choice picked between scenes rather than as its feat is taken (swap.ts).
+export function latePick(choice: ChoiceDef): boolean {
+  return (
+    choice.kind === "spells" &&
+    (Boolean(choice.grows) || Boolean(choice.ifKnown))
+  );
 }
 
 // Each spell choice looks at every spell, and companions make many of them when a run starts.
@@ -732,17 +740,21 @@ export function choiceOptions(
             access,
           )
         : choice.list;
-      const spells = classSpells(access, list).filter(
-        (spell) =>
-          !had.has(spell.id) &&
-          (listed?.has(spell.id) ?? true) &&
-          (choice.schools?.includes(spell.school) ?? true) &&
-          (!choice.ritual || spell.ritual) &&
-          (choice.maxLevel === 0
-            ? spell.level === 0
-            : spell.level >= (choice.minLevel ?? 1) &&
-              spell.level <= choice.maxLevel),
-      );
+      const also = new Set(choice.also);
+      const spells = [
+        ...classSpells(access, list).filter(
+          (spell) =>
+            !also.has(spell.id) &&
+            (listed?.has(spell.id) ?? true) &&
+            (choice.schools?.includes(spell.school) ?? true) &&
+            (!choice.ritual || spell.ritual) &&
+            (choice.maxLevel === 0
+              ? spell.level === 0
+              : spell.level >= (choice.minLevel ?? 1) &&
+                spell.level <= choice.maxLevel),
+        ),
+        ...classSpells(access, undefined).filter((spell) => also.has(spell.id)),
+      ].filter((spell) => !had.has(spell.id));
       const works = (spell: Spell): boolean =>
         spell.activation !== undefined &&
         doesSomething(spell.activation.resolution);
