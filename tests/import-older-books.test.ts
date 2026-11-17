@@ -6,6 +6,7 @@ import {
   parseFeaturesFromHtml,
   parseSubclassesFromHtml,
 } from "../plugins/systems/dnd5.5e/core/import/classes.ts";
+import { parseEquipmentFromHtml } from "../plugins/systems/dnd5.5e/core/import/equipment.ts";
 import { parseCompanionsFromHtml } from "../plugins/systems/dnd5.5e/core/import/companions.ts";
 import { parseMonstersFromHtml } from "../plugins/systems/dnd5.5e/core/import/monsters.ts";
 import { parseFeatsFromHtml } from "../plugins/systems/dnd5.5e/core/import/origins.ts";
@@ -23,6 +24,7 @@ import {
   BastionEntrySchema,
   ClassSchema,
   LookupTableSchema,
+  ItemSchema,
   MonsterSchema,
   SubclassSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
@@ -599,6 +601,31 @@ const handbookPage = `
   <h2>Eldritch Invocations</h2><h4>Moss Sight</h4><p>Prerequisite: 5th level</p><p>You see moss.</p>
   <h1>Chapter 4: Backgrounds</h1>
   <h2>Moss Keeper</h2><h3>Feature: Moss Haven</h3><p>Keepers shelter you.</p>`;
+
+describe("2014 tools", () => {
+  it("reads a tool description with no ability, and its activities as a lookup", () => {
+    const page = `<h3>Tool Descriptions</h3><p>Tools at length.</p>
+      <h4>Moss Kit</h4><p>Moss kits grow moss.</p>
+      <h5 class="Table-Title">Moss Kit</h5>
+      <table><tr><th>Activity</th><th>DC</th></tr><tr><td>Grow moss</td><td>10</td></tr></table>`;
+    const [kit] = parseEquipmentFromHtml(page, "older-book");
+    expect(ItemSchema.parse(kit?.entry)).toMatchObject({
+      name: "Moss Kit",
+      type: "tool",
+      text: expect.stringContaining("grow moss") as unknown,
+    });
+    expect(kit?.entry).not.toHaveProperty("ability");
+    expect(
+      parseLookupsFromHtml(page, "older-book").map((item) => item.entry),
+    ).toMatchObject([
+      {
+        keyedBy: "Activity",
+        columns: ["DC"],
+        rows: [{ key: "Grow moss", cells: ["10"] }],
+      },
+    ]);
+  });
+});
 
 describe("2014 Player's Handbook layout", () => {
   const features = parseFeaturesFromHtml(handbookPage, "older-book");

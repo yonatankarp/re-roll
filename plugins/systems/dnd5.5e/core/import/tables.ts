@@ -150,7 +150,7 @@ export function parseTablesFromHtml(
 }
 
 const LOOKUP_KEY =
-  /^(?:CR|Theme|Challenge|Character Level|Level\/CR|Trap Danger|Trap Level|Check Total|Rarity|Item Rarity|DC|Spell Level|Result|Type|Cost|Size|Deity)$/i;
+  /^(?:CR|Theme|Challenge|Character Level|Level\/CR|Trap Danger|Trap Level|Check Total|Rarity|Item Rarity|DC|Spell Level|Result|Type|Cost|Size|Deity|Activity)$/i;
 
 const isRollTable = (table: string): boolean => {
   const parsed = parseRollTable(table);

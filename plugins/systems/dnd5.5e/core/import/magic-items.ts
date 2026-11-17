@@ -11,7 +11,7 @@ import { plainText, slugOf } from "./spells.ts";
 
 // The line under an item's name. Subtypes can hold commas, so it anchors on the subtype's closing bracket.
 const TYPE_LINE =
-  /^(Wondrous Item|Potion|Ring|Rod|Scroll|Staff|Wand|Armor|Weapon)(?: \([^)]*\))?, ((?:Very Rare|Uncommon|Common|Rare|Legendary|Artifact|Rarity Varies)\b.*)$/i;
+  /^(Wondrous Item|Potion|Ring|Rod|Scroll|Staff|Wand|Armor|Weapon)(?: \([^)]*\))?, ((?:Very Rare|Uncommon|Common|Rare|Legendary|Artifact|Rarity Varies|Varies|Rarity by \w+)\b.*)$/i;
 // Some books print a rarity in lowercase.
 const RARITY = /(Very Rare|Uncommon|Common|Rare|Legendary|Artifact)/i;
 
@@ -131,7 +131,8 @@ export function parseMagicItemsFromHtml(
     );
     const rest = (line[2] ?? "").replace(/\((?!\+\d\))[^)]*\)/g, "");
     const healing = healingVariants(body);
-    const listed = /Rarity Varies/i.test(rest)
+    // 2014 books also print "varies" alone, or "rarity by figurine".
+    const listed = /^(?:Rarity Varies|Varies|Rarity by)\b/i.test(rest.trim())
       ? []
       : rarityVariants(rest, text);
     const variants = healing.length > 0 ? healing : listed;
