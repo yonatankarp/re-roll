@@ -2032,7 +2032,7 @@ const RaritySchema = z.enum([
   "artifact",
 ]);
 
-// Numbers read from the book's text. The engine doesn't apply them yet, so `automation` says what actually happens.
+// Numbers read from the book's text, which the engine applies where it can; `automation` says how much plays.
 const MagicItemSchema = ItemBaseSchema.extend({
   type: z.literal("magicItem"),
   category: z.enum([
