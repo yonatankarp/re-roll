@@ -619,6 +619,169 @@ function olderSubclasses(
   });
 }
 
+const MECHANICS_ONLY = /^(?:Spellcasting|Pact Magic|Font of Magic)$/;
+
+// The 2014 Player's Handbook prints a class as a heading with its own "Class Features" heading after it, a feature to each
+// heading below that, then its subclasses' heading ("Primal Paths") with a feature to each heading under each subclass.
+// A later heading of the class, as "Eldritch Invocations", lists options, each a feature of its own.
+function handbook2014(
+  html: string,
+  headings: readonly Heading[],
+): {
+  readonly features: readonly BookFeature[];
+  readonly subclasses: readonly BookSubclass[];
+} {
+  const features: BookFeature[] = [];
+  const subclasses: BookSubclass[] = [];
+  if (classChapters(html).length > 0) return { features, subclasses };
+  const isTableTitle = (item: Heading): boolean =>
+    item.attributes.includes("Table-Title");
+  // A page rebuilt from the library marks any heading right above a table as its title, though a feature can start so.
+  const tableOnly = (item: Heading): boolean =>
+    isTableTitle(item) &&
+    !/<p\b/.test(
+      bodyOf(
+        html,
+        headings,
+        item,
+        (next) => next.tag <= item.tag && !isTableTitle(next),
+      ),
+    );
+  const levelOf = (text: string): number | null => {
+    const level = LEVEL_IN_TEXT.exec(text)?.[1];
+    return level === undefined ? null : Number(level);
+  };
+  const used = new Set<string>();
+  const unique = (base: string): string => {
+    let slug = base;
+    for (let n = 2; used.has(slug); n += 1) slug = `${base}-${String(n)}`;
+    used.add(slug);
+    return slug;
+  };
+  let className = "";
+  let part: "features" | "subclasses" | "options" | null = null;
+  for (const heading of headings) {
+    if (heading.tag === 1) className = "";
+    if (heading.tag <= 2) {
+      const named = CLASS_TITLE.exec(heading.title)?.[1];
+      if (named) className = named;
+      part =
+        named || !className
+          ? null
+          : heading.title === "Class Features"
+            ? "features"
+            : part === "features"
+              ? "subclasses"
+              : part === null
+                ? null
+                : "options";
+      continue;
+    }
+    if (part === null || heading.tag !== 3) continue;
+    if (part !== "subclasses") {
+      // The options of a feature, as each Fighting Style, are features too, unlike the rules of casting spells.
+      const options = MECHANICS_ONLY.test(heading.title)
+        ? []
+        : headingsUnder(headings, heading).filter(
+            (item) => item.tag === 4 && !tableOnly(item),
+          );
+      for (const item of [heading, ...options]) {
+        const text = blockText(bodyOf(html, headings, item));
+        features.push({
+          slug: unique([className, item.title].map(slugOf).join("-")),
+          headingId: item.id,
+          name: item.title,
+          text,
+          level: levelOf(text),
+          subclass: "",
+        });
+      }
+      continue;
+    }
+    const parts = headingsUnder(headings, heading)
+      .filter((item) => item.tag === 4 && !tableOnly(item))
+      .map((item) => {
+        const text = blockText(
+          bodyOf(
+            html,
+            headings,
+            item,
+            (next) => next.tag <= item.tag && !isTableTitle(next),
+          ),
+        );
+        return { item, text, level: levelOf(text) };
+      });
+    const levels = parts.flatMap(({ level }) =>
+      level === null ? [] : [level],
+    );
+    if (levels.length === 0) continue;
+    subclasses.push({
+      className,
+      name: heading.title,
+      older: true,
+      castingTable: [],
+      features: parts.map(({ item, text, level }) => ({
+        slug: unique(
+          [className, heading.title, item.title].map(slugOf).join("-"),
+        ),
+        headingId: item.id,
+        name: item.title,
+        text,
+        // A feature with no level of its own, such as a domain's spell list, comes with the subclass.
+        level: level ?? Math.min(...levels),
+        subclass: heading.title,
+      })),
+    });
+  }
+  return { features, subclasses };
+}
+
+// Each Eldritch Invocation, which 2014 books print under a heading of their own rather than with the class.
+function invocationFeatures(
+  html: string,
+  headings: readonly Heading[],
+): readonly BookFeature[] {
+  return headings
+    .filter((heading) => heading.title === "Eldritch Invocations")
+    .flatMap((heading) =>
+      headingsUnder(headings, heading)
+        .filter((item) => item.tag === heading.tag + 2)
+        .map((item) => ({
+          slug: ["Warlock", item.title].map(slugOf).join("-"),
+          headingId: item.id,
+          name: item.title,
+          text: blockText(bodyOf(html, headings, item)),
+          level: null,
+          subclass: "",
+          optionOf: heading.title,
+        })),
+    );
+}
+
+// A 2014 background prints its feature under a heading of its own, as "Feature: Moss Haven".
+function backgroundFeatures(
+  html: string,
+  headings: readonly Heading[],
+): readonly BookFeature[] {
+  return headings.flatMap((heading, index) => {
+    const [, name] = /^Feature: (.+)$/.exec(heading.title) ?? [];
+    const parent = headings
+      .slice(0, index)
+      .findLast((item) => item.tag < heading.tag);
+    if (!name || !parent) return [];
+    return [
+      {
+        slug: [parent.title, name].map(slugOf).join("-"),
+        headingId: heading.id,
+        name,
+        text: blockText(bodyOf(html, headings, heading)),
+        level: null,
+        subclass: "",
+      },
+    ];
+  });
+}
+
 // Books after the Player's Handbook print a subclass alone, as "Name (Class)" above "Level N: Feature" headings.
 function bookSubclasses(html: string): readonly BookSubclass[] {
   // A stat block's title can outrank the features around it, and it belongs to the feature that grants it.
@@ -666,7 +829,11 @@ function bookSubclasses(html: string): readonly BookSubclass[] {
       },
     ];
   });
-  return [...modern, ...olderSubclasses(html, headings)];
+  return [
+    ...modern,
+    ...olderSubclasses(html, headings),
+    ...handbook2014(html, headings).subclasses,
+  ];
 }
 
 function bookSubclassEntries(
@@ -778,6 +945,11 @@ export function parseFeaturesFromHtml(
     ...bookSubclasses(html).flatMap((subclass) =>
       subclass.features.map((feature) => featureEntry(pluginId, feature)),
     ),
+    ...[
+      ...handbook2014(html, headingsIn(html)).features,
+      ...backgroundFeatures(html, headingsIn(html)),
+      ...invocationFeatures(html, headingsIn(html)),
+    ].map((feature) => featureEntry(pluginId, feature)),
     ...parseSpeciesTraits(html, pluginId),
     ...parseFeatFeatures(html, pluginId),
   ];

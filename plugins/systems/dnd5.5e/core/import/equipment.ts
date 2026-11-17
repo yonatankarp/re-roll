@@ -273,16 +273,22 @@ function parseTools(
   headings: readonly Heading[],
   pluginId: string,
 ): readonly ParsedImport[] {
+  // Xanathar's Guide describes 2014 tools, one to a heading, under "Tool Descriptions".
   const parent = headings.find(
-    (item) => item.tag === 2 && item.title === "Tools",
+    (item) =>
+      (item.tag === 2 && item.title === "Tools") ||
+      item.title === "Tool Descriptions",
   );
   if (!parent) return [];
-  return headingsUnder(headings, parent)
-    .filter((item) => item.tag === 4)
+  const under = headingsUnder(headings, parent);
+  const level = parent.title === "Tools" ? 4 : parent.tag + 1;
+  return under
+    .filter((item) => item.tag === level)
     .map((heading) => {
       const [, name = heading.title, cost = ""] =
         /^(.*?) \((.*)\)$/.exec(heading.title) ?? [];
       const text = blockText(bodyOf(html, headings, heading));
+      const ability = abilitiesIn(/Ability: (\w+)/.exec(text)?.[1] ?? "")[0];
       const slug = slugOf(name);
       return {
         slug,
@@ -291,7 +297,7 @@ function parseTools(
           id: `${pluginId}:item/${slug}`,
           name,
           type: "tool",
-          ability: abilitiesIn(/Ability: (\w+)/.exec(text)?.[1] ?? "")[0],
+          ...(ability ? { ability } : {}),
           text,
           ...priced(cost),
           ...weighed(/Weight: (\S+ lb\.)/.exec(text)?.[1] ?? ""),

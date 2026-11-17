@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { systems } from "../app/systems.ts";
-import { buildLibrary } from "../engine/tools/library.ts";
+import { buildLibrary, libraryHtml } from "../engine/tools/library.ts";
 import { approveImport, importParsed } from "../engine/tools/import.ts";
 import { checkPlugins } from "../engine/tools/check-pack.ts";
 import {
@@ -82,6 +82,33 @@ describe("reference library", () => {
     expect(keep).toContain("#### Deep Cellar\n\n- one\n\n- two");
     expect([...library.files.values()].join("")).not.toContain("art credit");
   });
+
+  it("turns its files back into a page that makes the same library", () => {
+    const page = libraryHtml(
+      library.title,
+      library.entries.map((entry) => ({
+        text: library.files.get(entry.file) ?? "",
+        anchor: entry.anchor,
+      })),
+    );
+    const again = buildLibrary(page);
+    expect(again.title).toBe(library.title);
+    expect(again.entries.map((e) => [e.path, e.anchor, e.file])).toEqual(
+      library.entries.map((e) => [e.path, e.anchor, e.file]),
+    );
+    expect(
+      [...again.files.values()].map((t) => t.replace(/^> /gm, "")),
+    ).toEqual([...library.files.values()].map((t) => t.replace(/^> /gm, "")));
+    // A heading right above a table is that table's title, as the importers expect.
+    expect(
+      libraryHtml("T", [
+        {
+          text: "#### Odds\n\n| d4 | Odd |\n| --- | --- |\n| 1 | Yes |",
+          anchor: "",
+        },
+      ]),
+    ).toContain('<h4 class="Table-Title">Odds</h4>');
+  });
 });
 
 describe("roll tables", () => {
@@ -131,6 +158,27 @@ describe("roll tables", () => {
     expect(parseRollTable(table(["d6", "x"], [["1–6", "A", "B"]]))).toEqual({
       problem: "ragged row",
     });
+  });
+
+  it("joins a table printed in halves under the same heading row", () => {
+    const half = (rows: string[][]) => table(["d4", "Moss"], rows);
+    const parsed = parseTablesFromHtml(
+      `<h3>Moss Shapes</h3>${half([
+        ["1", "Bog"],
+        ["2", "Fen"],
+      ])}${half([
+        ["3", "Mire"],
+        ["4", "Marsh"],
+      ])}`,
+      "my-book",
+    );
+    expect(parsed.map((item) => item.entry)).toMatchObject([
+      {
+        name: "Moss Shapes",
+        die: "d4",
+        rows: [{ min: 1 }, { min: 2 }, { min: 3 }, { min: 4 }],
+      },
+    ]);
   });
 
   it("names tables from the caption or the nearest heading and keeps names unique", () => {

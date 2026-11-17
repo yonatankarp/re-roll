@@ -2019,7 +2019,7 @@ const GearSchema = ItemBaseSchema.extend({
 
 const ToolSchema = ItemBaseSchema.extend({
   type: z.literal("tool"),
-  ability: AbilitySchema,
+  ability: AbilitySchema.optional(), // 2014 books print no ability for a tool
   text: z.string().min(1),
 }).strict();
 

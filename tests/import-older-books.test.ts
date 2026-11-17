@@ -1,3 +1,4 @@
+import { libraryHtml } from "../engine/tools/library.ts";
 import { describe, expect, it } from "vitest";
 import { choiceOptions } from "../plugins/systems/dnd5.5e/core/character.ts";
 import {
@@ -5,6 +6,7 @@ import {
   parseFeaturesFromHtml,
   parseSubclassesFromHtml,
 } from "../plugins/systems/dnd5.5e/core/import/classes.ts";
+import { parseEquipmentFromHtml } from "../plugins/systems/dnd5.5e/core/import/equipment.ts";
 import { parseCompanionsFromHtml } from "../plugins/systems/dnd5.5e/core/import/companions.ts";
 import { parseMonstersFromHtml } from "../plugins/systems/dnd5.5e/core/import/monsters.ts";
 import { parseFeatsFromHtml } from "../plugins/systems/dnd5.5e/core/import/origins.ts";
@@ -22,6 +24,7 @@ import {
   BastionEntrySchema,
   ClassSchema,
   LookupTableSchema,
+  ItemSchema,
   MonsterSchema,
   SubclassSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
@@ -522,6 +525,25 @@ describe("2014-format books", () => {
     });
   });
 
+  it("reads the class lists of a page rebuilt from the library, which has no links", () => {
+    const page = libraryHtml("Moss Basics", [
+      {
+        text: "## Wizard Spells\n\n**Cantrips (0 Level)**\n\nMoss Spark (evocation)\n\n## Beast Spells\n\nMoss Spark",
+        anchor: "",
+      },
+      {
+        text: "### Moss Spark\n\nEvocation cantrip\n\nCasting Time: 1 action\n\nRange: 30 feet\n\nComponents: V\n\nDuration: Instantaneous\n\nA green spark.",
+        anchor: "",
+      },
+    ]);
+    const [spark] = splitSpells(spellTextFromHtml(page));
+    expect(spark?.data).toMatchObject({
+      name: "Moss Spark",
+      level: 0,
+      classNames: ["Wizard"],
+    });
+  });
+
   it("reads a 1 action casting time, so the spell can be cast and picked", () => {
     const [burst] = splitSpells(spellTextFromHtml(olderPage));
     if (!burst) throw new Error("no spell");
@@ -553,9 +575,137 @@ describe("2014-format books", () => {
       text: "Instantaneous or 1 hour (see below)",
     });
   });
+
+  it("reads a number the book spells out", () => {
+    expect(parseDuration("Concentration, up to one minute")).toEqual({
+      concentration: true,
+      minutes: 1,
+    });
+  });
+});
+
+// The 2014 Player's Handbook layout: a class, its own Class Features, then its subclasses. Invented, as the rest.
+const handbookPage = `
+  <h1>Chapter 3: Classes</h1>
+  <h2>Barbarian</h2><p>Mossy folk.</p>
+  <h2>Class Features</h2><h4>Hit Points</h4><p>Hit Dice: 1d12</p>
+  <h3>Moss Rage</h3><p>You rage with moss.</p>
+  <h3>Fighting Moss</h3><p>At 2nd level, choose one.</p>
+  <h4>Lichen</h4><p>You hit harder.</p>
+  <h3>Spellcasting</h3><p>You cast.</p><h4>Cantrips</h4><p>You know two.</p>
+  <h2>Moss Paths</h2>
+  <h3>Path of the Bog</h3><p>Some love bogs.</p>
+  <h4 class="Table-Title">Bog Spells</h4><table><tr><th>Level</th><th>Spells</th></tr><tr><td>3rd</td><td>moss bolt</td></tr></table>
+  <h4>Bog Step</h4><p>Starting at 3rd level, you step.</p>
+  <h4 class="Table-Title">Bog Kin</h4><table><tr><th>Kin</th></tr><tr><td>Toad</td></tr></table><p>At 6th level, choose a kin.</p>
+  <h2>Eldritch Invocations</h2><h4>Moss Sight</h4><p>Prerequisite: 5th level</p><p>You see moss.</p>
+  <h1>Chapter 4: Backgrounds</h1>
+  <h2>Moss Keeper</h2><h3>Feature: Moss Haven</h3><p>Keepers shelter you.</p>`;
+
+describe("2014 tools", () => {
+  it("reads a tool description with no ability, and its activities as a lookup", () => {
+    const page = `<h3>Tool Descriptions</h3><p>Tools at length.</p>
+      <h4>Moss Kit</h4><p>Moss kits grow moss.</p>
+      <h5 class="Table-Title">Moss Kit</h5>
+      <table><tr><th>Activity</th><th>DC</th></tr><tr><td>Grow moss</td><td>10</td></tr></table>`;
+    const [kit] = parseEquipmentFromHtml(page, "older-book");
+    expect(ItemSchema.parse(kit?.entry)).toMatchObject({
+      name: "Moss Kit",
+      type: "tool",
+      text: expect.stringContaining("grow moss") as unknown,
+    });
+    expect(kit?.entry).not.toHaveProperty("ability");
+    expect(
+      parseLookupsFromHtml(page, "older-book").map((item) => item.entry),
+    ).toMatchObject([
+      {
+        keyedBy: "Activity",
+        columns: ["DC"],
+        rows: [{ key: "Grow moss", cells: ["10"] }],
+      },
+    ]);
+  });
+});
+
+describe("2014 Player's Handbook layout", () => {
+  const features = parseFeaturesFromHtml(handbookPage, "older-book");
+
+  it("reads each class feature, an option under one, invocations and background features", () => {
+    expect(features.map((item) => item.slug)).toEqual([
+      "barbarian-path-of-the-bog-bog-step",
+      "barbarian-path-of-the-bog-bog-kin",
+      "barbarian-moss-rage",
+      "barbarian-fighting-moss",
+      "barbarian-lichen",
+      "barbarian-spellcasting",
+      "moss-keeper-moss-haven",
+      "warlock-moss-sight",
+    ]);
+    expect(entryOf(features, "barbarian-spellcasting").text).toContain(
+      "You know two.",
+    );
+    expect(entryOf(features, "moss-keeper-moss-haven")).toMatchObject({
+      name: "Moss Haven",
+      automation: "text",
+    });
+  });
+
+  it("reads a subclass with its features' levels, hidden from character creation", () => {
+    const subclasses = parseSubclassesFromHtml(handbookPage, "older-book", [
+      "srd52:class/barbarian",
+    ]);
+    expect(subclasses.map((item) => item.entry)).toMatchObject([
+      {
+        name: "Path of the Bog",
+        class: "srd52:class/barbarian",
+        edition: "2014",
+        levels: [
+          {
+            level: 3,
+            grants: ["older-book:feature/barbarian-path-of-the-bog-bog-step"],
+          },
+          {
+            level: 6,
+            grants: ["older-book:feature/barbarian-path-of-the-bog-bog-kin"],
+          },
+        ],
+      },
+    ]);
+  });
 });
 
 describe("keyed tables and Bastions", () => {
+  it("reads a table keyed by character level under a spanning label, and not a class's level table", () => {
+    const parsed = parseLookupsFromHtml(
+      `<h4 class="Table-Title">Moss Thresholds</h4>
+       <table><tr><th>Character Level</th><th>— Moss Danger —</th><th></th></tr>
+         <tr><td>Low</td><td>High</td><td></td></tr>
+         <tr><td>1st</td><td>25</td><td>50</td></tr></table>
+       <table><tr><th>Level</th><th>Features</th></tr><tr><td>1st</td><td>Moss Sense</td></tr></table>
+       <table><tr><th>Level</th><th>Moss XP</th></tr><tr><td>1st</td><td>300</td></tr></table>
+       <table><tr><th>Check Total</th><th>Moss</th></tr><tr><td>1–5</td><td>None</td></tr></table>
+       <table><tr><th>d10</th><th>Moss</th></tr><tr><td>2 or lower</td><td>One</td></tr><tr><td>3–10</td><td>Two</td></tr></table>`,
+      "my-book",
+    );
+    expect(parsed.map((item) => item.entry)).toMatchObject([
+      {
+        name: "Moss Thresholds",
+        keyedBy: "Character Level",
+        columns: ["Low", "High"],
+        rows: [{ key: "1st", cells: ["25", "50"] }],
+      },
+      { keyedBy: "Level", columns: ["Moss XP"] },
+      { keyedBy: "Check Total", columns: ["Moss"] },
+      {
+        keyedBy: "d10",
+        rows: [
+          { key: "2 or lower", cells: ["One"] },
+          { key: "3–10", cells: ["Two"] },
+        ],
+      },
+    ]);
+  });
+
   it("reads a table keyed by Challenge Rating or theme, and no other", () => {
     const parsed = parseLookupsFromHtml(
       `<h2>Moss Hoards</h2>
@@ -577,6 +727,27 @@ describe("keyed tables and Bastions", () => {
         { key: "5+", cells: ["3d4"] },
       ],
     });
+  });
+
+  it("reads a facility printed alone, with its facts in its first lines", () => {
+    const parsed = parseBastionsFromHtml(
+      `<h3>Special Facility</h3><p>Members can add this one.</p>
+       <h4>Moss Den</h4><p><em>Level 5 Bastion Facility</em></p>
+       <p><strong>Prerequisite:</strong> Membership in the Moss Guild</p>
+       <p><strong>Order:</strong> Empower</p><p>A den of moss.</p>`,
+      "my-book",
+    );
+    expect(
+      parsed.map((item) => BastionEntrySchema.parse(item.entry)),
+    ).toMatchObject([
+      {
+        name: "Moss Den",
+        type: "facility",
+        level: 5,
+        prerequisite: "Membership in the Moss Guild",
+        order: "Empower",
+      },
+    ]);
   });
 
   it("reads facilities with the facts from their table, and events", () => {

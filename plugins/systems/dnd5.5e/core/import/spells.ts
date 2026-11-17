@@ -38,7 +38,11 @@ const MINUTES: Readonly<Record<string, number>> = {
 };
 
 export function parseDuration(text: string): Duration | null {
-  const clean = text.trim().toLowerCase();
+  // Some books spell the number out, as "up to one minute".
+  const clean = text
+    .trim()
+    .toLowerCase()
+    .replace(/\bone (?=(?:round|minute|hour|day)\b)/, "1 ");
   if (clean === "instantaneous") return "instantaneous";
   if (clean === "1 round") return { until: "yourNextTurnStart" };
   if (
@@ -196,6 +200,9 @@ export function isStatBlockTitle(html: string, start: number): boolean {
 const OLDER_HEADER =
   /^(?:(\d)(?:st|nd|rd|th)-level (\w+)|(\w+) cantrip)( \(ritual\))?$/i;
 
+const SPELL_LIST_CLASS =
+  /^(?:Artificer|Bard|Cleric|Druid|Paladin|Ranger|Sorcerer|Warlock|Wizard)$/;
+
 const capitalized = (word: string): string =>
   `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`;
 
@@ -214,9 +221,19 @@ function olderSpellText(
   headings.forEach((heading, index) => {
     const [, className] = /^(\w+) Spells$/.exec(heading.name) ?? [];
     const body = html.slice(heading.end, headings[index + 1]?.start);
-    if (!className || !body.includes("compendium-spell-lists")) return;
-    for (const link of body.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/g)) {
-      const slug = slugOf(plainText(link[1] ?? ""));
+    if (!className) return;
+    const names = body.includes("compendium-spell-lists")
+      ? [...body.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/g)].map((link) =>
+          plainText(link[1] ?? ""),
+        )
+      : // A page rebuilt from the library has no links: a class's list is one spell to a line, under bold level labels.
+        SPELL_LIST_CLASS.test(className)
+        ? [...body.matchAll(/<p>(?!<strong>)([\s\S]*?)<\/p>/g)].map((line) =>
+            plainText(line[1] ?? "").replace(/\s*\([^)]*\)$/, ""),
+          )
+        : [];
+    for (const name of names) {
+      const slug = slugOf(name);
       onLists.set(slug, [...(onLists.get(slug) ?? []), className]);
     }
   });
