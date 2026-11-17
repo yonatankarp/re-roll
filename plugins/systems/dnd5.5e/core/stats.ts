@@ -121,6 +121,7 @@ export interface KnownAction {
     readonly ability: Ability;
     readonly skill?: Skill;
     readonly dc: number;
+    readonly keep?: string; // a resource a failure doesn't spend
   };
 }
 
@@ -493,6 +494,75 @@ function itemCasts(
         },
       ];
     });
+  });
+}
+
+// Every spell by its name after the plugin, from the book that leads, as spellNamed finds them.
+const leadingSpells = new WeakMap<readonly string[], readonly string[]>();
+function allSpells(access: ContentAccess): readonly string[] {
+  const ids = access.contentIds();
+  let found = leadingSpells.get(ids);
+  if (!found) {
+    found = ids.filter((id) => {
+      const at = id.indexOf(":spell/");
+      return at >= 0 && spellNamed(id.slice(at + 7), access) === id;
+    });
+    leadingSpells.set(ids, found);
+  }
+  return found;
+}
+
+// The spells an item lets its bearer try to cast without knowing them (MagicItemSchema `unknownSpell`): each behind
+// its Arcana check, spending the item's use, and for a leveled spell a slot of its level.
+function unknownSpells(
+  itemId: string,
+  item: Item,
+  known: ReadonlySet<string>,
+  highest: number,
+  ability: Ability,
+  level: number,
+  access: ContentAccess,
+): KnownAction[] {
+  if (item.type !== "magicItem" || !item.unknownSpell) return [];
+  const rule = item.unknownSpell;
+  return allSpells(access).flatMap((spellId): KnownAction[] => {
+    const spell = lookup(access, SpellSchema, spellId);
+    const activation = spell.activation;
+    if (
+      !activation ||
+      known.has(spellId) ||
+      !onClassList(spell, [rule.class]) ||
+      (rule.cantrips
+        ? spell.level !== 0
+        : spell.level < 1 || spell.level > highest) ||
+      (rule.action && !activation.cost.includes("action")) ||
+      !doesSomething(activation.resolution)
+    ) {
+      return [];
+    }
+    const scaled =
+      spell.level === 0 && spell.cantrip
+        ? scaleActivation(activation, spell.cantrip.perTier, cantripTier(level))
+        : activation;
+    const cast = castWith(scaled, ability);
+    return [
+      {
+        id: itemCastId(spellId, itemId, 0),
+        name: `${spell.name} (${item.name})`,
+        activation: {
+          ...cast,
+          cost: [...cast.cost, { resource: rule.resource }],
+        },
+        spellLevel: spell.level,
+        upcast: spell.upcast,
+        castCheck: {
+          ability: "int",
+          skill: "arcana",
+          dc: rule.dc + (rule.perLevel ? spell.level : 0),
+          ...(rule.keepOnFailure ? { keep: rule.resource } : {}),
+        },
+      },
+    ];
   });
 }
 
@@ -1438,6 +1508,23 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         activation: lasting,
         spellLevel: null,
       });
+    }
+  }
+
+  // Spells a worn item lets its bearer try to cast without knowing them, as a Hat of Wizardry's cantrips.
+  for (const [itemId, item] of worn) {
+    if (works(itemId, item) && !untrainedArmor && caster?.spellcasting) {
+      actions.push(
+        ...unknownSpells(
+          itemId,
+          item,
+          knownSpells,
+          slots.findLastIndex((count) => count > 0) + 1,
+          caster.spellcasting.ability,
+          level,
+          access,
+        ),
+      );
     }
   }
 

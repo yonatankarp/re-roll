@@ -2948,6 +2948,21 @@ const MagicItemSchema = ItemBaseSchema.extend({
   verb: z.string().min(1).optional(),
   // An action its user can take while a `grantedAction` its activation gave lasts, as a Potion of Fire Breath's.
   granted: ActivationSchema.optional(),
+  // Casting a spell its bearer doesn't know, from a class's list (by its name after the plugin), behind an
+  // Intelligence (Arcana) check of `dc` (plus the spell's level with `perLevel`), as a Hat of Wizardry's (stats.ts
+  // unknownSpells): cantrips, or spells of a level its slots reach, spending one; with `action` only those cast with
+  // an action. Each use spends `resource`, kept on a failure with `keepOnFailure`, as a Hat of Many Spells' is.
+  unknownSpell: z
+    .strictObject({
+      class: z.string().min(1),
+      cantrips: z.literal(true).optional(),
+      action: z.literal(true).optional(),
+      dc: z.number().int().min(1),
+      perLevel: z.literal(true).optional(),
+      resource: z.string().min(1),
+      keepOnFailure: z.literal(true).optional(),
+    })
+    .optional(),
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
   // A spell bound into it as it's made, named after its plugin by the content id's last part, as
   // "dmg:item/enspelled-staff--fireball" or "dmg:item/enspelled-armor--1--chain-mail--shield" (variants.ts), with

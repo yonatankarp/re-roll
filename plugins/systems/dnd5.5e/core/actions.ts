@@ -280,10 +280,28 @@ export const castCheckFrames = {
           events: [...rolled.events, ...(taken.events ?? [])],
         };
       }
+      // A Hat of Many Spells' use is kept on a failure, though the slot is spent.
+      const keep = check.keep;
+      const paid = keep
+        ? {
+            ...action,
+            activation: {
+              ...action.activation,
+              cost: action.activation.cost.filter(
+                (cost) =>
+                  !(
+                    typeof cost === "object" &&
+                    "resource" in cost &&
+                    cost.resource === keep
+                  ),
+              ),
+            },
+          }
+        : action;
       return {
         events: [
           ...rolled.events,
-          ...payCosts(action, actor, context, slotLevel),
+          ...payCosts(paid, actor, context, slotLevel),
         ],
         frames: [
           ...(cast.actionId.startsWith(ITEM_PREFIX)

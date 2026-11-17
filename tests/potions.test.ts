@@ -120,6 +120,40 @@ const ITEMS = [
     category: "wondrousItem",
     boundSpell: { as: "tattoo", minLevel: 1, maxLevel: 3 },
   }),
+  item("hat", {
+    category: "wondrousItem",
+    resources: [
+      {
+        id: "hat",
+        max: { base: 1 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+    unknownSpell: {
+      class: "wizard",
+      cantrips: true,
+      action: true,
+      dc: 10,
+      resource: "hat",
+    },
+  }),
+  item("many", {
+    category: "wondrousItem",
+    resources: [
+      {
+        id: "many",
+        max: { base: 1 },
+        recharge: [{ on: "shortRest", amount: "all" }],
+      },
+    ],
+    unknownSpell: {
+      class: "wizard",
+      dc: 10,
+      perLevel: true,
+      resource: "many",
+      keepOnFailure: true,
+    },
+  }),
 ];
 
 async function itemRun() {
@@ -416,5 +450,80 @@ describe("spells bound into items (#142, #199)", () => {
       expect.objectContaining({ name: "tattoo (Fireball)" }),
     );
     expect(run.content("test:item/tattoo--wish")).toBeUndefined();
+  });
+});
+
+describe("spells an item casts unknown (#199)", () => {
+  it("tries a cantrip off a class's list behind an Arcana check, as a Hat of Wizardry", async () => {
+    const run = await itemRun();
+    const hat = "test:item/hat";
+    const actions = deriveStats(wizard([hat]), run).actions;
+    const bolt = actions.find(
+      (action) => action.id === `spell:srd52:spell/fire-bolt:item:${hat}:0`,
+    );
+    expect(bolt?.castCheck).toEqual({
+      ability: "int",
+      skill: "arcana",
+      dc: 10,
+    });
+    expect(bolt?.activation.cost).toContainEqual({ resource: "hat" });
+    // Only cantrips, and none for a fighter, who has no spellcasting.
+    expect(
+      actions.some((action) =>
+        action.id.startsWith("spell:srd52:spell/magic-missile:item"),
+      ),
+    ).toBe(false);
+    expect(
+      deriveStats(carrying([hat]), run).actions.some((action) =>
+        action.id.endsWith(`:item:${hat}:0`),
+      ),
+    ).toBe(false);
+  });
+
+  it("tries a leveled spell its slots reach for DC 10 + its level, keeping the use on a failure, as a Hat of Many Spells", async () => {
+    const run = await itemRun();
+    const many = "test:item/many";
+    const ids = deriveStats(wizard([many], 3), run).actions;
+    const missile = ids.find(
+      (action) =>
+        action.id === `spell:srd52:spell/magic-missile:item:${many}:0`,
+    );
+    expect(missile?.castCheck).toEqual({
+      ability: "int",
+      skill: "arcana",
+      dc: 11,
+      keep: "many",
+    });
+    expect(missile?.activation.cost).toContain("slot");
+    expect(
+      ids.some(
+        (action) => action.id === `spell:srd52:spell/fireball:item:${many}:0`,
+      ),
+    ).toBe(false);
+    const foe = {
+      ...hero([], { id: "foe" }),
+      side: "enemy" as const,
+      hp: 40,
+      position: { x: 4, y: 0 },
+    };
+    const caster = { ...wizard([many], 3), position: { x: 0, y: 0 } };
+    const { events } = settle(
+      run,
+      [caster, foe],
+      [
+        frame("castCheck", {
+          actor: PLAYER_ACTOR,
+          actionId: `spell:srd52:spell/magic-missile:item:${many}:0`,
+          target: ["foe", "foe", "foe"],
+        }),
+      ],
+      scripted([2]).dice,
+      () => "",
+    );
+    const spent = payloads(events, "resourceSpent").map(
+      (item) => item.resource,
+    );
+    expect(spent).toContain("slot:1");
+    expect(spent).not.toContain("many");
   });
 });
