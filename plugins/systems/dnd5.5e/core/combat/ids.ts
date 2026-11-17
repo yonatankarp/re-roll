@@ -15,6 +15,32 @@ export const WEAPON_PREFIX = "weapon:"; // an attack with a weapon carried
 export const THROW_PREFIX = "throw:"; // a ranged attack throwing a Thrown weapon, which leaves the hand
 export const PICK_UP = "pickUp"; // picking a thrown weapon up from the ground: "pickUp|<index in combat.dropped>"
 
+// A spell cast from a magic item, spending `charges` of it (stats.ts itemCasts).
+export function itemCastId(
+  spellId: string,
+  itemId: string,
+  charges: number,
+): string {
+  return `spell:${spellId}:item:${itemId}:${String(charges)}`;
+}
+
+// The spell behind an action or a lasting effect's source: "spell:<spell>", alone, with ":free" after it, or with
+// an item's ":item:<item>:<charges>". A content id holds one colon, before its kind.
+export function spellOfSource(sourceId: string): string | null {
+  return /^spell:([^:]+:[^:/]+\/[^:]+)/.exec(sourceId)?.[1] ?? null;
+}
+
+// The item a spell is cast from, and the charges it spends, or null for any other action.
+export function castFrom(
+  actionId: string,
+): { readonly item: string; readonly charges: number } | null {
+  const [, item, charges] =
+    /^spell:[^:]+:[^:/]+\/[^:]+:item:([^:]+:[^:/]+\/[^:]+):(\d+)$/.exec(
+      actionId,
+    ) ?? [];
+  return item && charges ? { item, charges: Number(charges) } : null;
+}
+
 // The weapon behind a weapon attack or a throw, or "" for any other action.
 export function weaponItemId(actionId: string): string {
   for (const prefix of [WEAPON_PREFIX, THROW_PREFIX]) {

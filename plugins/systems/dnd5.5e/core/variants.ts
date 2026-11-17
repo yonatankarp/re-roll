@@ -27,9 +27,20 @@ export function deriveItem(
     ...(parent.passives ?? []),
     ...("passives" in variant ? (variant.passives ?? []) : []),
   ];
+  const casts = [
+    ...(parent.casts ?? []),
+    ...("casts" in variant ? (variant.casts ?? []) : []),
+  ];
+  const resources = [
+    ...(parent.resources ?? []),
+    ...("resources" in variant ? (variant.resources ?? []) : []),
+  ];
   const magic = {
     ...(passives.length > 0 ? { passives } : {}),
     ...(parent.attunement ? { attunement: true as const } : {}),
+    ...(casts.length > 0 ? { casts } : {}),
+    ...(resources.length > 0 ? { resources } : {}),
+    ...(parent.lastCharge ? { lastCharge: parent.lastCharge } : {}),
   };
   const bonus = variant.bonuses?.[0]?.amount;
   const plus = bonus !== undefined && /, \+1\b/.test(parent.name);

@@ -13,6 +13,8 @@ import { currentShape, formKept, formOf, usableIn } from "./forms.ts";
 import {
   ALL_SKILLS,
   type Item,
+  type ItemCast,
+  type ResourceDef,
   DAMAGE_TYPES,
   ABILITIES,
   type Ability,
@@ -57,7 +59,14 @@ import { featureRules, grantedSpells } from "./feature-rules.ts";
 import { type Caster, multiclassSlots } from "./multiclass.ts";
 import { holdsConcentration, withMetamagic } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
-import { THROW_PREFIX, WEAPON_PREFIX, weaponItemId } from "./combat/ids.ts";
+import {
+  THROW_PREFIX,
+  WEAPON_PREFIX,
+  castFrom,
+  itemCastId,
+  spellOfSource,
+  weaponItemId,
+} from "./combat/ids.ts";
 import { zoneModifiers } from "./zones.ts";
 
 // Content is frozen once loaded, so each entry is checked against a schema only once.
@@ -314,6 +323,135 @@ function freeCastActions(
           : null,
       },
     ];
+  });
+}
+
+// A charged item's pools and spells (ChargedSchema). An entry with versions counts as its first, as its passives do.
+export function chargesOf(item: Item): {
+  readonly resources: readonly ResourceDef[];
+  readonly casts: readonly ItemCast[];
+} {
+  const first = item.type === "magicItem" ? item.variants?.[0] : undefined;
+  return {
+    resources: [
+      ...("resources" in item ? (item.resources ?? []) : []),
+      ...(first?.resources ?? []),
+    ],
+    casts: [
+      ...("casts" in item ? (item.casts ?? []) : []),
+      ...(first?.casts ?? []),
+    ],
+  };
+}
+
+// Spells by their names after the plugin, the first loaded of each, so the book that leads plays it. Kept for each
+// run's list of ids, which doesn't change.
+const namedSpells = new WeakMap<readonly string[], Map<string, string>>();
+function spellNamed(slug: string, access: ContentAccess): string | undefined {
+  const ids = access.contentIds();
+  let bySlug = namedSpells.get(ids);
+  if (!bySlug) {
+    bySlug = new Map();
+    for (const id of ids) {
+      const at = id.indexOf(":spell/");
+      const name = id.slice(at + 7);
+      if (at >= 0 && !bySlug.has(name)) bySlug.set(name, id);
+    }
+    namedSpells.set(ids, bySlug);
+  }
+  return bySlug.get(slug);
+}
+
+// A spell cast with an item's own numbers, as a Wand of Web's DC 13, rather than with the bearer's.
+function withItemNumbers(
+  activation: Activation,
+  dc: number | undefined,
+  attack: number | undefined,
+): Activation {
+  const toHit = attack ?? (dc === undefined ? undefined : dc - 8);
+  const mapped = (value: unknown, key = ""): unknown => {
+    if (Array.isArray(value)) return value.map((item) => mapped(item));
+    if (value === null || typeof value !== "object") return value;
+    const copy: Record<string, unknown> = Object.fromEntries(
+      Object.entries(value).map(([name, item]) => [name, mapped(item, name)]),
+    );
+    const terms = Array.isArray(copy.add)
+      ? (copy.add as { readonly kind: string }[])
+      : [];
+    if (dc !== undefined && terms.some((term) => term.kind === "spellSaveDc")) {
+      return {
+        ...copy,
+        base: (typeof copy.base === "number" ? copy.base : 0) + dc,
+        add: terms.filter((term) => term.kind !== "spellSaveDc"),
+      };
+    }
+    return key === "attack" && copy.type === "spell" && toHit !== undefined
+      ? { ...copy, flatBonus: toHit }
+      : copy;
+  };
+  return mapped(activation) as Activation;
+}
+
+// The spells a worn item casts (ItemCastSchema): one action for each number of charges it can spend, each at its
+// own level, which never spends a slot.
+function itemCasts(
+  itemId: string,
+  item: Item,
+  level: number,
+  access: ContentAccess,
+): KnownAction[] {
+  const { resources, casts } = chargesOf(item);
+  return casts.flatMap((cast) => {
+    const spellId = spellNamed(cast.spell, access);
+    const spell = spellId ? lookup(access, SpellSchema, spellId) : undefined;
+    const activation = spell?.activation;
+    if (!spellId || !spell || !activation) return [];
+    const lasting =
+      spell.lasting &&
+      typeof spell.duration === "object" &&
+      "concentration" in spell.duration;
+    if (!lasting && !doesSomething(activation.resolution)) return [];
+    const resource = cast.resource ?? resources[0]?.id;
+    const lowest = cast.level ?? spell.level;
+    const step = spell.upcast?.perSlotLevel;
+    return Array.from(
+      { length: (cast.upTo ?? cast.charges) - cast.charges + 1 },
+      (_, extra) => cast.charges + extra,
+    ).flatMap((charges): KnownAction[] => {
+      const at = lowest + charges - cast.charges;
+      if ((charges > 0 && !resource) || (at > lowest && !step)) return [];
+      const scaled =
+        spell.level === 0 && spell.cantrip
+          ? scaleActivation(
+              activation,
+              spell.cantrip.perTier,
+              cantripTier(level),
+            )
+          : step
+            ? scaleActivation(activation, step, at - spell.level)
+            : activation;
+      const numbered = withItemNumbers(scaled, cast.dc, cast.attack);
+      return [
+        {
+          id: itemCastId(spellId, itemId, charges),
+          name:
+            cast.upTo === undefined
+              ? `${spell.name} (${item.name})`
+              : `${spell.name}, level ${String(at)} (${item.name})`,
+          activation: {
+            ...numbered,
+            cost: [
+              ...activation.cost.filter((cost) => cost !== "slot"),
+              ...(charges > 0 && resource
+                ? [{ resource, ...(charges > 1 ? { count: charges } : {}) }]
+                : []),
+            ],
+          },
+          spellLevel: at,
+          ...(lasting ? { concentrates: true as const } : {}),
+        },
+      ];
+    });
   });
 }
 
@@ -903,6 +1041,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     if (usable) {
       actions.push(item.type === "gear" ? farLobbed(usable, traits) : usable);
     }
+    if (works(itemId, item) && !untrainedArmor) {
+      actions.push(...itemCasts(itemId, item, level, access));
+    }
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
       const dex = abilityModifier(abilities.dex);
@@ -1026,9 +1167,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     // shortcut: it's at the spell's own level, not the slot's it was cast with.
     if (
       lasting &&
-      [`spell:${spellId}`, `spell:${spellId}:free`].includes(
-        actor.concentratingOn ?? "",
-      )
+      spellOfSource(actor.concentratingOn ?? "") === spellId &&
+      !castFrom(actor.concentratingOn ?? "")
     ) {
       actions.push({
         id: `lasting:${spellId}`,
@@ -1037,6 +1177,22 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         spellLevel: null,
       });
     }
+  }
+
+  // What a spell cast from an item lets its caster do while it holds, as Flaming Sphere's from a Staff of the Magi.
+  const held = castFrom(actor.concentratingOn ?? "")
+    ? spellOfSource(actor.concentratingOn ?? "")
+    : null;
+  const heldLasting = held
+    ? SpellSchema.safeParse(access.content(held)).data?.lasting
+    : undefined;
+  if (held && heldLasting && !untrainedArmor) {
+    actions.push({
+      id: `lasting:${held}`,
+      name: lookup(access, SpellSchema, held).name,
+      activation: heldLasting,
+      spellLevel: null,
+    });
   }
 
   const partial: Stats = {
@@ -1140,6 +1296,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     resourceDefs: [
       ...fromFeatures.resources,
       ...freeCasts.flatMap(({ resource }) => (resource ? [resource] : [])),
+      ...itemPools(actor, access),
     ],
     pactMagic: [...featureIds].some(isPactMagic),
     untrainedArmor,
@@ -1161,12 +1318,26 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         5 * actor.exhaustion,
     ),
     resources: Object.fromEntries(
-      fromFeatures.resources.map((resource) => [
+      partial.resourceDefs.map((resource) => [
         resource.id,
         evaluateFormula(resource.max, partial),
       ]),
     ),
   };
+}
+
+// The pools of every item carried, stowed or not, so a wand in the pack still regains its charges. Two of one item
+// share theirs.
+// shortcut: pools are kept by their ids, so a second Wand of Web adds no charges of its own.
+function itemPools(actor: Actor, access: ContentAccess): ResourceDef[] {
+  const pools = new Map<string, ResourceDef>();
+  for (const itemId of new Set(actor.inventory)) {
+    const item = ItemSchema.safeParse(access.content(itemId)).data;
+    for (const pool of item ? chargesOf(item).resources : []) {
+      if (!pools.has(pool.id)) pools.set(pool.id, pool);
+    }
+  }
+  return [...pools.values()];
 }
 
 function familiarFrom(
@@ -1819,11 +1990,7 @@ function withEffectActions(
       );
     }
     if (modifier.kind !== "grantedAction") continue;
-    const spell = lookup(
-      access,
-      SpellSchema,
-      sourceId.replace(/^spell:/, "").replace(/:free$/, ""),
-    );
+    const spell = lookup(access, SpellSchema, spellOfSource(sourceId) ?? "");
     if (!spell.granted) continue;
     const scaled = spell.upcast
       ? scaleActivation(

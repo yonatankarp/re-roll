@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PLAYER_ACTOR } from "#sdk";
@@ -25,6 +25,7 @@ import {
   spellSaveDc,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { BOOK_ROOTS } from "./depth.ts";
+import { castFrom } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
 
 // A sample of the book's magic items (issues #137 and #138), played by a pregen. Skipped where the books aren't present.
 const BOOKS =
@@ -187,5 +188,66 @@ describe.skipIf(!BOOKS)("the book's magic items' passives", () => {
     expect(
       kinds(wearing(["dmg:item/adamantine-armor--1--chain-mail"])),
     ).toContain("noCriticals");
+  });
+
+  // Issue #140: charges that cast spells.
+  const casts = (actor: Actor) =>
+    deriveStats(actor, run)
+      .actions.filter((action) => castFrom(action.id))
+      .map((action) => action.name);
+
+  it("casts the shipped adventures' Thayan Sword smites and Staff of Power spells from their charges", () => {
+    const sword = "arcana-unleashed-deadfall:item/thayan-sword";
+    expect(casts(wearing([sword]))).toEqual([
+      "Searing Smite (Thayan Sword)",
+      "Thunderous Smite (Thayan Sword)",
+      "Wrathful Smite (Thayan Sword)",
+    ]);
+    const stats = deriveStats(wearing([sword]), run);
+    expect(stats.resources).toMatchObject({
+      "thayan-sword": 4,
+      "thayan-sword-resurgent": 1,
+    });
+    expect(kinds(wearing([sword]))).toContain("dropToOne");
+    const staff = wearing(["dmg:item/staff-of-power"], "wizard");
+    const named = casts(staff);
+    expect(named).toContain("Fireball (Staff of Power)");
+    expect(named).toContain("Cone of Cold (Staff of Power)");
+    const fireball = deriveStats(staff, run).actions.find(
+      (action) => action.name === "Fireball (Staff of Power)",
+    );
+    expect(fireball?.spellLevel).toBe(5);
+    expect(fireball?.activation.cost).toContainEqual({
+      resource: "staff-of-power",
+      count: 5,
+    });
+  });
+
+  it("heals from a Staff of Healing with the bearer's Wisdom, a level for each charge", () => {
+    const named = casts(wearing(["dmg:item/staff-of-healing"], "cleric"));
+    expect(named.filter((name) => name.startsWith("Cure Wounds"))).toEqual([
+      "Cure Wounds, level 1 (Staff of Healing)",
+      "Cure Wounds, level 2 (Staff of Healing)",
+      "Cure Wounds, level 3 (Staff of Healing)",
+      "Cure Wounds, level 4 (Staff of Healing)",
+    ]);
+  });
+
+  it("names only spells some book has, for every item that casts", async () => {
+    const missing: string[] = [];
+    for (const book of await readdir("books/rules")) {
+      const folder = `books/rules/${book}/equipment`;
+      if (!existsSync(folder)) continue;
+      for (const file of await readdir(folder)) {
+        const text = await readFile(`${folder}/${file}`, "utf8");
+        for (const [, slug = ""] of text.matchAll(/\{ spell: ([a-z0-9-]+)/g)) {
+          const known =
+            run.contentIds().some((id) => id.endsWith(`:spell/${slug}`)) ||
+            existsSync(`books/rules/arcana-unleashed/spells/${slug}.yaml`);
+          if (!known) missing.push(`${file}: ${slug}`);
+        }
+      }
+    }
+    expect(missing).toEqual([]);
   });
 });

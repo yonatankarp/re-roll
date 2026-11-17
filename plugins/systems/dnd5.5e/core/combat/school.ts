@@ -8,7 +8,7 @@ import {
   spellModifier,
   type Stats,
 } from "../stats.ts";
-import { HIT_DICE } from "./ids.ts";
+import { HIT_DICE, spellOfSource } from "./ids.ts";
 import { hitDieRoll } from "../trait-rules.ts";
 import { leafEvents } from "./effects.ts";
 import type { Context } from "./queries.ts";
@@ -18,13 +18,13 @@ import type { Context } from "./queries.ts";
 type Rider = Extract<Passive, { kind: "schoolCast" }>["rider"];
 const FUELED = "fueled"; // usedThisTurn: Fueled Evocation's once a turn
 
-// The school of the spell behind an action or a Concentration source, as "spell:<id>" or "spell:<id>:free".
+// The school of the spell behind an action or a Concentration source (ids.ts spellOfSource).
 export function schoolOf(
   sourceId: string | null,
   context: Pick<Context, "content">,
 ): string | null {
-  if (!sourceId?.startsWith("spell:")) return null;
-  const id = sourceId.slice(6).replace(/:free$/, "");
+  const id = sourceId === null ? null : spellOfSource(sourceId);
+  if (!id) return null;
   return SpellSchema.safeParse(context.content(id)).data?.school ?? null;
 }
 
