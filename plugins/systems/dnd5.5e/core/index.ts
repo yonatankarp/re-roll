@@ -97,8 +97,10 @@ import { shopEffects, shopFrames } from "./shop.ts";
 import { availableRests, restEffects, restFrames } from "./rest.ts";
 import {
   InspirationSchema,
+  MissRerollSchema,
   PrecisionSchema,
   runInspiration,
+  runMissReroll,
   runPrecision,
 } from "./class-rules.ts";
 import { classOptionFrames } from "./class-options.ts";
@@ -552,6 +554,10 @@ export const dnd55e = defineSystem<DndState>({
       schema: InspirationSchema,
       run: runInspiration,
     }),
+    [`${NS}:missReroll`]: frameHandler({
+      schema: MissRerollSchema,
+      run: runMissReroll,
+    }),
     [`${NS}:precision`]: frameHandler({
       schema: PrecisionSchema,
       run: runPrecision,
@@ -725,7 +731,7 @@ export const dnd55e = defineSystem<DndState>({
   // Building steps (class, scores, subclass, spells, feats) are made as a companion's are, and a rest's
   // Hit Dice and gear as a careful player would.
   tactical: (decision) =>
-    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|strike|inspiration|deathSave|build|metamagic|precision|damageType|focus|wish|mastery):/.test(
+    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|strike|inspiration|deathSave|build|metamagic|precision|damageType|focus|wish|mastery|missReroll):/.test(
       decision.id,
     ) || isGearDecision(decision),
 });

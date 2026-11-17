@@ -93,6 +93,7 @@ import {
   damageResponses,
   deriveStats,
   modifierFor,
+  rollAmount,
   saveBonus,
   scoreFloor,
 } from "./stats.ts";
@@ -162,6 +163,7 @@ const BREAK_OUT = `${TACTIC}break-out`;
 export const OFFHAND = `${TACTIC}offhand`;
 export const POLE_STRIKE = `${TACTIC}pole-strike`;
 export const HEW = `${TACTIC}hew`;
+const MOVE_HURT = "move-hurt:";
 const OFFHAND_USED = "offhand";
 const NICK_USED = `${MASTERY}nick`;
 const CLEAVE_USED = `${MASTERY}cleave`;
@@ -1682,6 +1684,38 @@ export function runAfterMove(
   )
     ? oneActionEvents(mover)
     : [];
+  // Grasping Arrow's brambles: the first walk on each turn hurts.
+  const brambles = mover.activeEffects.find(
+    ({ modifier }) => modifier.kind === "moveDamage",
+  );
+  if (
+    brambles?.modifier.kind === "moveDamage" &&
+    (from.x !== mover.position.x || from.y !== mover.position.y) &&
+    !mover.usedThisTurn.includes(`${MOVE_HURT}${brambles.sourceId}`)
+  ) {
+    const responses = damageResponses(mover, context);
+    const caster = state.actors[brambles.casterId] ?? mover;
+    const casterStats = deriveStats(caster, context);
+    events.push(
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: mover.id,
+        key: `${MOVE_HURT}${brambles.sourceId}`,
+      }),
+      ...dealEvents(
+        mover,
+        brambles.modifier.damage.map(({ amount, type }) => ({
+          amount: finalDamage(
+            rollAmount(amount, casterStats, context.dice),
+            type,
+            responses,
+          ),
+          type,
+        })),
+        false,
+        context,
+      ).events,
+    );
+  }
   if (charges) {
     events.push(
       dndEvent(`${NS}:oncePerTurnUsed`, {

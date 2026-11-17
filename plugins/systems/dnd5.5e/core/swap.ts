@@ -70,6 +70,7 @@ export function swappable(
                   kind: "variant",
                   id: `variant:${feature.id}`,
                   feature: feature.id,
+                  count: 1,
                 },
                 values: answer.values,
                 anyRest: true,

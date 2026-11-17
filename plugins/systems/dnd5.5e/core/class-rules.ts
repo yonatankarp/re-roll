@@ -17,6 +17,8 @@ import {
   frame,
 } from "./state.ts";
 import { type KnownAction, type Stats, deriveStats } from "./stats.ts";
+import { findAction, hitFits } from "./combat/queries.ts";
+import { distanceFeet } from "./grid.ts";
 import { seekingReroll } from "./metamagic.ts";
 import { rechargeAmount } from "./rest.ts";
 
@@ -90,7 +92,9 @@ export function criticalFrom(stats: Stats): number {
   return Math.min(
     20,
     ...stats.passives.flatMap((passive) =>
-      passive.kind === "criticalRange" ? [passive.from] : [],
+      passive.kind === "criticalRange" && !passive.against && !passive.while
+        ? [passive.from]
+        : [],
     ),
   );
 }
@@ -121,6 +125,10 @@ export function offerInspiration(
   const precision =
     hit && context ? offerPrecision(attacker, hit, report, context) : null;
   if (precision) return precision;
+  const again = context
+    ? offerMissReroll(attacker, payload, report, context)
+    : null;
+  if (again) return again;
   if (attacker.id !== PLAYER_ACTOR || !attacker.heroicInspiration) return null;
   return {
     events: [report],
@@ -162,6 +170,142 @@ export function runInspiration(
       ...inspirationEchoes(attacker, context),
     ],
     frames: [frame("attackRoll", attack)],
+  };
+}
+
+type MissReroll = Extract<Stats["passives"][number], { kind: "missReroll" }>;
+const missKey = (index: number) => `miss-reroll:${String(index)}`;
+
+// The `missReroll` passives that can answer this miss, by their place among the bearer's passives.
+function missRerolls(
+  attacker: Actor,
+  actionId: string,
+  context: Context,
+): readonly { passive: MissReroll; index: number }[] {
+  const stats = deriveStats(attacker, context);
+  const combat = context.state.combat;
+  const ownTurn = combat?.order[combat.index] === attacker.id;
+  const hitWith = findAction(attacker, actionId, context);
+  return stats.passives.flatMap((passive, index) =>
+    passive.kind === "missReroll" &&
+    hitFits(passive.with, hitWith, attacker, context) &&
+    (!passive.ownTurn || ownTurn) &&
+    (!passive.bonusAction || (ownTurn && attacker.budget.bonusAction)) &&
+    !(passive.oncePerTurn && attacker.usedThisTurn.includes(missKey(index))) &&
+    (!passive.resource ||
+      (attacker.resourcesSpent[passive.resource] ?? 0) <
+        (stats.resources[passive.resource] ?? 0))
+      ? [{ passive, index }]
+      : [],
+  );
+}
+
+function offerMissReroll(
+  attacker: Actor,
+  payload: z.infer<typeof AttackPayload>,
+  report: SystemEvent,
+  context: Context,
+): SystemResult | null {
+  const { state } = context;
+  const target = state.actors[payload.target];
+  if (!target || isDown(attacker)) return null;
+  const options = missRerolls(attacker, payload.actionId, context).flatMap(
+    ({ passive, index }) => {
+      if (passive.newTarget === undefined) {
+        return [
+          { id: `${String(index)}|${target.id}`, label: "Roll it again" },
+        ];
+      }
+      const feet = passive.newTarget;
+      return Object.values(state.actors)
+        .filter(
+          (other) =>
+            other.id !== target.id &&
+            other.side !== attacker.side &&
+            !isDown(other) &&
+            distanceFeet(other.position, target.position) <= feet,
+        )
+        .map((other) => ({
+          id: `${String(index)}|${other.id}`,
+          label: `Curve the shot at ${other.name}`,
+        }));
+    },
+  );
+  if (options.length === 0) return null;
+  return {
+    events: [report],
+    frames: [
+      awaitDecision({
+        id: `${NS}:missReroll:${attacker.id}`,
+        actor: attacker.id,
+        prompt: `${attacker.name} misses. Try again?`,
+        options: [...options, { id: DECLINE, label: "Keep the miss" }],
+        resume: frame("missReroll", payload),
+      }),
+    ],
+  };
+}
+
+export const MissRerollSchema = AttackPayload.extend({ answer: z.string() });
+
+export function runMissReroll(
+  { answer, ...attack }: z.infer<typeof MissRerollSchema>,
+  context: Context,
+): SystemResult {
+  const attacker = context.state.actors[attack.attacker];
+  const target = context.state.actors[attack.target];
+  if (!attacker) return {};
+  const ended = [
+    ...onceEnded(attacker, "attacks"),
+    ...(target ? onceEnded(target, "attacksAgainst") : []),
+  ];
+  const [index = "", aim = attack.target] = answer.split("|");
+  const passive = deriveStats(attacker, context).passives[Number(index)];
+  if (answer === DECLINE || passive?.kind !== "missReroll") {
+    return { events: ended };
+  }
+  return {
+    events: [
+      ...ended,
+      ...(passive.resource
+        ? [
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: attacker.id,
+              resource: passive.resource,
+            }),
+          ]
+        : []),
+      ...(passive.oncePerTurn
+        ? [
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: attacker.id,
+              key: missKey(Number(index)),
+            }),
+          ]
+        : []),
+      ...(passive.bonusAction
+        ? [
+            dndEvent(`${NS}:budgetSpent`, {
+              actor: attacker.id,
+              kind: "bonusAction",
+            }),
+          ]
+        : []),
+      ...(passive.advantage
+        ? [
+            dndEvent(`${NS}:effectAdded`, {
+              actor: attacker.id,
+              effect: {
+                sourceId: missKey(Number(index)),
+                casterId: attacker.id,
+                modifier: { kind: "advantage", on: "attacks", once: true },
+                ends: "casterTurnEnd",
+              },
+            }),
+          ]
+        : []),
+    ],
+    frames: [frame("attackRoll", { ...attack, target: aim })],
   };
 }
 
@@ -310,8 +454,24 @@ export function runPrecision(
 // A maneuver's die is added to the hit's own damage roll, so it takes that damage's type.
 export function asHit(action: KnownAction, hitWith: KnownAction): KnownAction {
   const [first] = hitWith.activation.resolution.damage;
-  if (!action.hitType || !first) return action;
+  if ((!action.hitType && !action.activation.weaponDie) || !first) {
+    return action;
+  }
   const { resolution } = action.activation;
+  // Orcish Fury: one of the weapon's damage dice rolled again.
+  if (action.activation.weaponDie) {
+    const sides = (first.amount.dice ?? "1d4").split("d")[1] ?? "4";
+    return {
+      ...action,
+      activation: {
+        ...action.activation,
+        resolution: {
+          ...resolution,
+          damage: [{ amount: { dice: `1d${sides}` }, type: first.type }],
+        },
+      },
+    };
+  }
   return {
     ...action,
     activation: {

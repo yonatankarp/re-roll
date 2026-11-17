@@ -614,20 +614,27 @@ export function maximized(
   types: readonly DamageType[],
 ): { readonly type: DamageType; readonly events: SystemEvent[] } | null {
   for (const passive of stats.passives) {
-    if (
-      passive.kind === "maxDamageDice" &&
-      types.includes(passive.damage) &&
-      (actor.resourcesSpent[passive.resource] ?? 0) <
-        (stats.resources[passive.resource] ?? 0)
-    ) {
+    if (passive.kind !== "maxDamageDice" || !types.includes(passive.damage)) {
+      continue;
+    }
+    const { resource } = passive;
+    const key = `max-dice:${passive.damage}`;
+    if (resource) {
+      if (
+        (actor.resourcesSpent[resource] ?? 0) < (stats.resources[resource] ?? 0)
+      ) {
+        return {
+          type: passive.damage,
+          events: [
+            dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource }),
+          ],
+        };
+      }
+    } else if (!actor.usedThisTurn.includes(key)) {
+      // Perfect Poisoner: once a turn.
       return {
         type: passive.damage,
-        events: [
-          dndEvent(`${NS}:resourceSpent`, {
-            actor: actor.id,
-            resource: passive.resource,
-          }),
-        ],
+        events: [dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key })],
       };
     }
   }

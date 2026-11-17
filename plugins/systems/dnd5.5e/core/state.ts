@@ -102,6 +102,7 @@ export const FRAME_KINDS = [
   "givenDiceAnswer",
   "reincarnate", // the player picks what a reincarnated body's species asks for (reincarnate.ts)
   "reincarnateAnswer",
+  "missReroll", // a missed attack rolled again, or at another creature, as Master Duelist or Curving Shot (class-rules.ts)
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 

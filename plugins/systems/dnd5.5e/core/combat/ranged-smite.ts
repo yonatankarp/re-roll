@@ -124,7 +124,24 @@ export function runReplaceHit(
           stats,
         ) ?? undefined)
       : Number(slot);
-  const action = findAction(attacker, actionId, context, slotLevel);
+  const found = findAction(attacker, actionId, context, slotLevel);
+  // Piercing or Seeking Arrow deals the weapon's own damage too, as if the arrow hit.
+  const weapon = found.activation.weaponDamage
+    ? findAction(attacker, hit.actionId, context).activation.resolution.damage
+    : [];
+  const action =
+    weapon.length > 0
+      ? {
+          ...found,
+          activation: {
+            ...found.activation,
+            resolution: {
+              ...found.activation.resolution,
+              damage: [...weapon, ...found.activation.resolution.damage],
+            },
+          },
+        }
+      : found;
   const responses = damageResponses(target, context);
   const rolled = (action.activation.trigger?.replacesHit ?? []).map(
     ({ amount, type }) => {

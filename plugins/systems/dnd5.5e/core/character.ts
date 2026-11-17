@@ -447,7 +447,23 @@ export function levelChoices(
         kind: "variant",
         id: `variant:${grant}`,
         feature: grant,
+        count: feature.variantPicks?.count ?? 1,
       });
+    }
+  }
+  // One more of an earlier subclass feature's variants at the levels it names, as Arcane Shot's options.
+  for (const earlier of subclass?.levels ?? []) {
+    if (earlier.level >= level) continue;
+    for (const grant of earlier.grants) {
+      const feature = FeatureSchema.safeParse(access.content(grant)).data;
+      if (feature?.variantPicks?.more.includes(level)) {
+        inferred.push({
+          kind: "variant",
+          id: `variant:${grant}`,
+          feature: grant,
+          count: 1,
+        });
+      }
     }
   }
   const stated = [...data.choices, ...(subclassLevel?.choices ?? [])];
@@ -824,7 +840,19 @@ export function choiceOptions(
     }
     case "variant": {
       const feature = lookup(access, FeatureSchema, choice.feature);
-      const options = feature.variants ?? [];
+      const had = new Set([
+        ...(base?.levels ?? []).flatMap((entry) =>
+          entry.answers.flatMap((answer) =>
+            answer.kind === "variant" && answer.feature === choice.feature
+              ? answer.values
+              : [],
+          ),
+        ),
+        ...(draft.picks[choice.id] ?? []),
+      ]);
+      const options = (feature.variants ?? []).filter(
+        (item) => !had.has(item.id),
+      );
       return {
         what: `an option for ${feature.name}`,
         options: options.map((item) => ({ id: item.id, label: item.name })),

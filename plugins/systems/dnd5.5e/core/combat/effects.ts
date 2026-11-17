@@ -78,6 +78,7 @@ import {
   piercing,
   interposedShield,
   evades,
+  markedBy,
   rescuedSave,
   type SaveSource,
   saveSourceOf,
@@ -166,6 +167,7 @@ import {
   slotToSpend,
   deadWithin,
   spellSource,
+  underEffect,
   walledApart,
 } from "./queries.ts";
 
@@ -728,7 +730,8 @@ function killEvents(fallen: Actor, context: Context): SystemEvent[] {
             hasCondition(bearer, ...INCAPACITATING))) ||
         (passive.oncePerTurn &&
           (bearer.usedThisTurn.includes(ON_KILL) ||
-            hasCondition(bearer, ...INCAPACITATING)))
+            hasCondition(bearer, ...INCAPACITATING))) ||
+        (passive.marked && !markedBy(fallen, bearer, passive.marked))
       ) {
         return [];
       }
@@ -1412,6 +1415,11 @@ export function damageRiders(
     }
     if (spell && !passive.spells) return [];
     if (passive.critical && !critical) return [];
+    if (passive.while && !underEffect(attacker, passive.while)) return [];
+    if (passive.firstRound && (combat?.round ?? 1) > 1) return [];
+    if (passive.ownTurn && combat?.order[combat.index] !== attacker.id) {
+      return [];
+    }
     const key =
       passive.damage === undefined
         ? `rider:${String(index)}`
@@ -4155,7 +4163,7 @@ function reactionAttack(
 // A creature spends its Reaction to step beside its nearest foe within its Speed, or to get as far from the caster as
 // it can, provoking nothing.
 // shortcut: fleeing goes straight away from the caster, as a push does, not by the safest winding route.
-function reactionMove(
+export function reactionMove(
   target: Actor,
   context: Context,
   effect: Extract<LeafEffect, { kind: "reactionMove" }>,

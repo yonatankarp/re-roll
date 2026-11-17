@@ -160,14 +160,13 @@ function pactWeapon(
   };
 }
 
-// shortcut: every melee weapon carried counts as the pact weapon, and Lifedrinker's damage comes on every hit, not
-// once a turn.
 export function withInvocations(
   actions: readonly KnownAction[],
   passives: readonly Passive[],
   scores: Readonly<Record<"str" | "dex" | "cha", number>>,
   classLevels: Readonly<Record<string, number>>,
   access: ContentAccess,
+  bonded?: string, // the weapon Pact of the Blade bonds with (combat/queries.ts pactWeaponId)
 ): KnownAction[] {
   const pacts = passives.filter(
     (item): item is PactWeapon => item.kind === "pactWeapon",
@@ -178,7 +177,7 @@ export function withInvocations(
   let shaped = actions.map((action) => {
     const { targeting } = action.activation;
     const melee =
-      action.id.startsWith("weapon:") &&
+      action.id === `weapon:${bonded ?? ""}` &&
       "range" in targeting &&
       (targeting.range === 5 || ("reach" in targeting && targeting.reach));
     return pacts.length > 0 && melee

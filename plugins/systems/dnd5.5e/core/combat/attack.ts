@@ -128,6 +128,7 @@ import {
   hasFlag,
   hasPassive,
   ridden,
+  underEffect,
   isMelee,
   meleeReach,
   rollBonus,
@@ -144,6 +145,7 @@ import {
   leafEvents,
   payCosts,
   protectedMount,
+  reactionMove,
   resolveAction,
   rollSave,
   typeAgainst,
@@ -1074,7 +1076,18 @@ export function runAttackRoll(
     meleeReach(action) === null
       ? 0
       : cover);
-  const critFrom = criticalFrom(stats);
+  const critFrom = Math.min(
+    criticalFrom(stats),
+    ...stats.passives.flatMap((passive) =>
+      passive.kind === "criticalRange" &&
+      (passive.against !== undefined || passive.while !== undefined) &&
+      (!passive.against || markedBy(target, attacker, passive.against)) &&
+      (!passive.while ||
+        (isMelee(action) && underEffect(attacker, passive.while)))
+        ? [passive.from]
+        : [],
+    ),
+  );
   const judge = (natural: number, bonus: number) => {
     const sum = natural + base + bonus;
     return {
@@ -1594,8 +1607,24 @@ function landHit(
   if (printed.kind !== "attack") {
     throw new Error(`${action.id} isn't an attack`);
   }
+  // Planar Warrior: all the hit's own damage takes the type the bearer's mark on the target names.
+  const retype = target.activeEffects.find(
+    ({ modifier, casterId }) =>
+      modifier.kind === "hitDamage" &&
+      modifier.retype !== undefined &&
+      casterId === attacker.id,
+  )?.modifier;
+  const shaped = payload.poleStrike ? poleEnd(printed) : printed;
   const resolution = againstTarget(
-    payload.poleStrike ? poleEnd(printed) : printed,
+    retype?.kind === "hitDamage" && retype.retype
+      ? {
+          ...shaped,
+          damage: shaped.damage.map((item) => ({
+            ...item,
+            type: retype.retype ?? item.type,
+          })),
+        }
+      : shaped,
     target,
     context,
   );
@@ -1797,12 +1826,32 @@ function landHit(
     ? deathStruck(attacker, target, stats, context)
     : null;
   if (struck) events.push(...struck.events);
-  const doubled = struck?.doubled
-    ? hits.map((item) => ({
-        ...item,
-        amount: item.amount > 0 ? item.amount * 2 : item.amount,
-      }))
-    : hits;
+  // Enfeebling Arrow: the bearer's weapon attacks deal half damage; Ancestral Protectors' only off its caster.
+  const weakened =
+    resolution.attack.type === "weapon" &&
+    attacker.activeEffects.some(
+      ({ modifier, casterId }) =>
+        modifier.kind === "weakened" &&
+        !(modifier.exceptCaster && casterId === target.id),
+    );
+  // Path to the Grave's curse: the next hit from its caster's side deals double.
+  const exposed = target.activeEffects.some(
+    ({ modifier, casterId }) =>
+      modifier.kind === "exposed" &&
+      state.actors[casterId]?.side === attacker.side,
+  );
+  const doubled =
+    struck?.doubled || exposed
+      ? hits.map((item) => ({
+          ...item,
+          amount: item.amount > 0 ? item.amount * 2 : item.amount,
+        }))
+      : weakened
+        ? hits.map((item) => ({
+            ...item,
+            amount: item.amount > 0 ? halved(item.amount) : item.amount,
+          }))
+        : hits;
   const targetStats = deriveStats(target, context);
   const armored = doubled.map((item) => ({
     ...item,
@@ -2027,13 +2076,15 @@ function imageHit(
 // A curse any of its caster's side spends by hitting, as Path to the Grave's, ends once a hit uses it.
 function sideRidersSpent(attacker: Actor, target: Actor, state: DndState) {
   return target.activeEffects.flatMap(({ modifier, sourceId, casterId }) =>
-    modifier.kind === "hitDamage" &&
-    ((modifier.dealtBy === "side" &&
+    (modifier.kind === "exposed" &&
       state.actors[casterId]?.side === attacker.side) ||
-      // Feinting Attack's die, on the creature feinted, goes with the caster's hit.
-      (modifier.dealtBy === "caster" &&
-        modifier.once === true &&
-        casterId === attacker.id))
+    (modifier.kind === "hitDamage" &&
+      ((modifier.dealtBy === "side" &&
+        state.actors[casterId]?.side === attacker.side) ||
+        // Feinting Attack's die, on the creature feinted, goes with the caster's hit.
+        (modifier.dealtBy === "caster" &&
+          modifier.once === true &&
+          casterId === attacker.id)))
       ? [
           dndEvent(`${NS}:effectEnded`, {
             actor: target.id,
@@ -2305,7 +2356,10 @@ function inspiringStrike(
         item.id !== attacker.id &&
         !isDead(item) &&
         !item.heroicInspiration &&
-        distanceFeet(attacker.position, item.position) <= 30,
+        distanceFeet(attacker.position, item.position) <= 30 &&
+        // who can see or hear the bearer
+        (seeing(item, attacker.position, context.state, context) !== "none" ||
+          !hasCondition(item, "deafened")),
     )
     .sort(
       (a, b) =>
@@ -2824,11 +2878,14 @@ export function runSmite(
   const attacker = actorOf(state, payload.attacker);
   const [actionId = "", aimed = "", slot] = parseOption(payload.answer);
   const known = findAction(attacker, actionId, context);
-  // One aimed at another creature near the one hit goes for that one.
-  const target = actorOf(
-    state,
-    known.activation.trigger?.near === undefined ? payload.target : aimed,
-  );
+  // One aimed at another creature near the one hit goes for that one, and one on the bearer itself for the bearer.
+  const target =
+    "self" in known.activation.targeting
+      ? attacker
+      : actorOf(
+          state,
+          known.activation.trigger?.near === undefined ? payload.target : aimed,
+        );
   const slotLevel =
     slot === undefined
       ? (slotToSpend(known, attacker, deriveStats(attacker, context)) ??
@@ -2861,8 +2918,13 @@ export function runSmite(
     target.position ?? undefined,
   );
   const own = action.activation.selfEffects ?? [];
-  // Options that follow this one on the same hit, as Stalker's Flurry's after Dreadful Strike.
-  const [, featureId] = /^feature:(.+):\d+$/.exec(known.id) ?? [];
+  // Options that follow this one on the same hit, as Stalker's Flurry's after Dreadful Strike, or Elemental Smite's
+  // after the Divine Smite spell.
+  const featureId =
+    /^feature:(.+):\d+$/.exec(known.id)?.[1] ??
+    (known.id.startsWith("spell:")
+      ? known.id.slice("spell:".length).replace(/:free$/, "")
+      : undefined);
   const follows =
     featureId !== undefined &&
     known.activation.trigger?.following === undefined &&
@@ -2874,6 +2936,12 @@ export function runSmite(
       ...payCosts(action, attacker, context, slotLevel),
       ...(result.events ?? []),
       ...leafEvents(own, action.id, attacker, attacker, context),
+      // A move as part of the option, as Mobile Flourish's after the push.
+      ...own.flatMap((effect) =>
+        effect.kind === "reactionMove"
+          ? reactionMove(attacker, context, effect, target)
+          : [],
+      ),
     ],
     frames: [
       ...(result.frames ?? []),

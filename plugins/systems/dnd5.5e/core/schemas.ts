@@ -437,6 +437,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     // ends after the bearer's next attack roll, as a bandit crime lord's Deadly Aim; dealt by the caster, with its
     // next hit on the bearer, as Feinting Attack's die
     once: z.boolean().optional(),
+    // all the hit's own damage takes this type, as Planar Warrior's Force
+    retype: DamageTypeSchema.optional(),
   }),
   // Limits on what the bearer can do on its turns, as Slow gives: `oneAction` is an action or a Bonus Action, not
   // both; `noActions` neither; `oneAttack` one attack with the Attack action; `speed` halves, doubles or stops its
@@ -487,6 +489,25 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   }),
   // The bearer can't attack with this action's weapon while it lasts, as one caught by a kuo-toa's Sticky Shield.
   z.strictObject({ kind: z.literal("stuck"), action: z.string() }),
+  // The first time on each turn the bearer walks 1 foot or more, it takes this damage, as Grasping Arrow's brambles.
+  z.strictObject({
+    kind: z.literal("moveDamage"),
+    damage: z.array(DamageSchema).min(1),
+  }),
+  // The damage the bearer's weapon attacks deal is halved, as Enfeebling Arrow's, or with `exceptCaster` only against
+  // creatures other than the effect's caster, as Ancestral Protectors' spectral warriors.
+  z.strictObject({
+    kind: z.literal("weakened"),
+    exceptCaster: z.literal(true).optional(),
+  }),
+  // The next attack that hits the bearer from its caster's side deals it double damage, which spends it, as Path to
+  // the Grave's (2014) curse.
+  z.strictObject({ kind: z.literal("exposed") }),
+  // The bearer sees nothing farther than this many feet away, as Shadow Arrow's.
+  z.strictObject({
+    kind: z.literal("sightLimit"),
+    feet: z.number().int().min(5),
+  }),
   // The bearer can't benefit from the Invisible condition, as with a sahuagin baron's Fiendish Blood.
   // Its Fiends sensing the bearer's location adds nothing, since hiding is the Invisible condition too.
   z.strictObject({ kind: z.literal("outlined") }),
@@ -1271,6 +1292,7 @@ export type AreaEffect = z.infer<typeof AreaEffectSchema>;
 // attack roll, a spell's too, as Hurl Through Hell's.
 export const HitKindSchema = z.enum([
   "weapon",
+  "pactWeapon", // the melee weapon a Warlock's Pact of the Blade bonds with: the first one it holds
   "meleeWeapon",
   "rangedWeapon",
   "unarmed",
@@ -1362,8 +1384,8 @@ export const ActivationSchema = z.strictObject({
       forgoAdvantage: z.literal(true).optional(),
       // With `afterHit`, only once the hit has dealt Sneak Attack damage, as Wails from the Grave.
       sneakAttack: z.literal(true).optional(),
-      // With `afterHit`, offered only right after an `afterHit` activation of this feature lands on the same hit, as
-      // Stalker's Flurry's effects after Dreadful Strike.
+      // With `afterHit`, offered only right after an `afterHit` activation of this feature or spell lands on the same
+      // hit, as Stalker's Flurry's effects after Dreadful Strike or Elemental Smite's after Divine Smite.
       following: ContentIdSchema.optional(),
       // With `afterHit`, only on the bearer's own turn, as Shield Bash or Charge Attack.
       ownTurn: z.literal(true).optional(),
@@ -1383,7 +1405,8 @@ export const ActivationSchema = z.strictObject({
       marked: z.array(ContentIdSchema).min(1).optional(),
       // With `afterHit`, taken as the attack hits or misses, in place of what it does: the target takes this, or
       // half on a miss, and an area is round the target without it, as Lightning Arrow.
-      replacesHit: z.array(DamageSchema).min(1).optional(),
+      // An empty list deals nothing to the target itself, as Piercing Arrow's line or Seeking Arrow's save.
+      replacesHit: z.array(DamageSchema).optional(),
       // Taken for another creature within 5 feet that a creature the bearer can see attacks, before the roll, or hits,
       // as with Protection and Interception. It's taken as soon as it can be.
       allyAttacked: z.literal(true).optional(),
@@ -1468,6 +1491,13 @@ export const ActivationSchema = z.strictObject({
   // name, as Brutal Strike's and Improved Brutal Strike's options (queries.ts gatesOpen).
   oncePerTurn: z.union([z.literal(true), z.string().min(1)]).optional(),
   withShield: z.literal(true).optional(), // only while the bearer holds a Shield, as Shield Bash
+  // Its damage is one of the hit weapon's damage dice, of the weapon's type, as Orcish Fury's.
+  weaponDie: z.literal(true).optional(),
+  // A spell attack that's one of the Attack action's attacks all the same, so Extra Attack repeats it, as Radiant Sun
+  // Bolt.
+  withExtraAttack: z.literal(true).optional(),
+  // Its resolution deals the damage of the weapon whose shot it takes the place of too, as Piercing Arrow's.
+  weaponDamage: z.literal(true).optional(),
   // Its first damage entry's dice while the bearer holds no weapon or Shield, as Unarmed Fighting's d8.
   emptyHanded: DiceSchema.optional(),
   // Only as the bearer takes the Attack action: while its action is unspent or Attack-action attacks are left, as
@@ -1721,6 +1751,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("criticalRange"),
     from: z.number().int().min(2).max(19),
+    // only against a creature under an effect of the bearer's from one of these, as Hexblade's Curse
+    against: z.array(ContentIdSchema).min(1).optional(),
+    // only while an effect of one of these features is on the bearer, as Invincible Conqueror
+    while: z.array(ContentIdSchema).min(1).optional(),
   }),
   // Advantage on saving throws with these abilities, or against these conditions, as with Gnomish Cunning or Brave.
   z.strictObject({
@@ -1845,6 +1879,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("multiattack"),
     attacks: z.number().int().min(2),
+  }),
+  // More attacks with each Attack action: while an effect of one of `while`'s features is on the bearer, as Invincible
+  // Conqueror, or on its first turn of a fight, as Dread Ambusher's (2014).
+  z.strictObject({
+    kind: z.literal("extraAttacks"),
+    count: z.number().int().min(1),
+    while: z.array(ContentIdSchema).min(1).optional(),
+    firstTurn: z.literal(true).optional(),
   }),
   // The Attack action can trade `attacks` of its attacks for one of these taken with its action (combat/trade.ts):
   // a cantrip (`cantrips`), a spell of these `levels`, or an activation that spends this `resource`, as Valor's
@@ -1978,6 +2020,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     resource: z.string().optional(), // each use spends one, as Putrefy's once per rest
     spells: z.literal(true).optional(), // a spell's damage triggers it too, as Putrefy's
     effects: z.array(LeafEffectSchema).min(1),
+    // only while an effect of one of these features' activations is on the bearer, as Ancestral Protectors' Rage
+    while: z.array(ContentIdSchema).min(1).optional(),
+    ownTurn: z.literal(true).optional(), // only on the bearer's own turn
+    firstRound: z.literal(true).optional(), // only in a fight's first round, as Ambush Master's
   }),
   // An attack's damage of these types lessened while the bearer wears this armor, as with Heavy Armor Master.
   z.strictObject({
@@ -2329,7 +2375,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("maxDamageDice"),
     damage: DamageTypeSchema,
-    resource: z.string(),
+    resource: z.string().optional(),
+    oncePerTurn: z.literal(true).optional(), // with no `resource`, once a turn instead, as Perfect Poisoner
   }),
   // Once a turn, an attack made while Bloodied deals the Proficiency Bonus more, as Boon of Bloodshed's Power from Pain.
   z.strictObject({ kind: z.literal("bloodiedDamage") }),
@@ -2352,6 +2399,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     ally: z.literal(true).optional(),
     fallenHitDice: z.literal(true).optional(),
     oncePerTurn: z.literal(true).optional(),
+    // only a foe under an effect of the bearer's from one of these, as Hexblade's Curse's healing
+    marked: z.array(ContentIdSchema).min(1).optional(),
   }),
   // Helping an attack on an enemy also gives it Disadvantage on its next save, as Harper Teamwork.
   z.strictObject({ kind: z.literal("helpRider") }),
@@ -2429,6 +2478,19 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     label: z.string().min(1).optional(),
     other: z.number().int().min(5).optional(),
   }),
+  // A missed attack of this kind can be rolled again: with `advantage` (Master Duelist), spending a `resource`, once a
+  // turn (`oncePerTurn`), only on the bearer's turn (`ownTurn`), for its Bonus Action (`bonusAction`), or at another
+  // creature within `newTarget` feet of the first (Curving Shot) (class-rules.ts).
+  z.strictObject({
+    kind: z.literal("missReroll"),
+    with: HitKindSchema,
+    resource: z.string().min(1).optional(),
+    oncePerTurn: z.literal(true).optional(),
+    ownTurn: z.literal(true).optional(),
+    bonusAction: z.literal(true).optional(),
+    advantage: z.literal(true).optional(),
+    newTarget: z.number().int().min(5).optional(),
+  }),
   // On a miss that a die could still turn into a hit, one of `resource` can be rolled (a d`dieSize` from that class
   // scaling key) and added to the roll, spent only if the attack then hits, as Soul Blades' Homing Strikes with a
   // Psychic Blade (`withFeature`). Precision Attack works the same way (class-rules.ts).
@@ -2451,6 +2513,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Right after a Critical Hit with a melee weapon, or one that drops a creature to 0 Hit Points, one attack with that
   // weapon as a Bonus Action, as Great Weapon Master's Hew (actions.ts).
   z.strictObject({ kind: z.literal("hew") }),
+  // Feet added to its Speed on its turn once it has taken its action, as Blade Flourish's after the Attack action.
+  z.strictObject({
+    kind: z.literal("attackSpeed"),
+    feet: z.number().int().min(5),
+  }),
   // Feet added to its Speed on its first turn of a fight, as Ambusher's Leap.
   z.strictObject({
     kind: z.literal("firstTurnSpeed"),
@@ -2464,6 +2531,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("grappleDamage"),
     dice: DiceSchema,
     type: DamageTypeSchema,
+  }),
+  // Sneak Attack without Advantage, but never with Disadvantage: while the bearer stands within 5 feet of the target and
+  // no other creature within 5 feet of it (`alone`), as Rakish Audacity, or against a creature under an effect of one
+  // of `against`'s features, as Insightful Fighting.
+  z.strictObject({
+    kind: z.literal("sneakOpening"),
+    alone: z.literal(true).optional(),
+    against: z.array(ContentIdSchema).min(1).optional(),
   }),
   // Training with Martial weapons, as Battle Ready's Weapon Knowledge.
   z.strictObject({ kind: z.literal("martialTraining") }),
@@ -2655,6 +2730,14 @@ export const FeatureSchema = ContentEntrySchema.extend({
       labels: z.array(z.string().min(1)).min(1),
     })
     .optional(),
+  // How many variants it gives when gained, and the levels in the class whose subclass grants it where it gives one
+  // more, as Arcane Shot's two options and one more at Fighter levels 7, 10, 15 and 18.
+  variantPicks: z
+    .strictObject({
+      count: z.number().int().min(1),
+      more: z.array(z.number().int().min(1).max(20)).default([]),
+    })
+    .optional(),
   // Its variants follow the pick made for this feature instead of asking, as Improved Blessed Strikes'.
   follows: ContentIdSchema.optional(),
   // The variant picked can be changed outside a fight after a rest, as Hunter's Prey's (swap.ts).
@@ -2744,6 +2827,7 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     kind: z.literal("variant"),
     id: z.string(),
     feature: ContentIdSchema,
+    count: z.number().int().min(1).default(1),
   }),
 ]);
 
@@ -3334,7 +3418,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("variant"),
     feature: ContentIdSchema,
-    values: z.array(z.string().min(1)).length(1),
+    values: z.array(z.string().min(1)).min(1),
   }),
 ]);
 
