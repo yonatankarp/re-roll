@@ -98,8 +98,8 @@ export function deriveItem(
       ...(damageType ? { type: damageType } : {}),
     };
     // Damage with no type of its own is the weapon's, and a weapon die is one of its dice.
-    const hitDamage = parent.hitDamage?.map(
-      ({ type, weaponDie, amount, ...rest }) => ({
+    const own = (list: NonNullable<typeof parent.hitDamage>) =>
+      list.map(({ type, weaponDie, amount, ...rest }) => ({
         ...rest,
         amount:
           weaponDie && base.damage.dice
@@ -109,8 +109,12 @@ export function deriveItem(
               }
             : amount,
         type: type ?? damage.type,
-      }),
-    );
+      }));
+    const hitDamage = parent.hitDamage && own(parent.hitDamage);
+    const natural20 = parent.natural20 && {
+      ...parent.natural20,
+      damage: own(parent.natural20.damage),
+    };
     item = {
       ...base,
       id,
@@ -133,6 +137,7 @@ export function deriveItem(
       ...(hitDamage ? { hitDamage } : {}),
       ...(parent.abilities ? { abilities: parent.abilities } : {}),
       ...riders(parent),
+      ...(natural20 ? { natural20 } : {}),
     };
   } else if (base.type === "armor") {
     item = {
@@ -168,7 +173,6 @@ function riders(parent: Extract<Item, { type: "magicItem" }>) {
   const {
     hitSave,
     hitEffects,
-    natural20,
     breaksConcentration,
     vs,
     thrown,
@@ -179,7 +183,6 @@ function riders(parent: Extract<Item, { type: "magicItem" }>) {
     ...(sworn ? { sworn: { ...sworn, item: parent.id } } : {}),
     ...(hitSave ? { hitSave } : {}),
     ...(hitEffects ? { hitEffects } : {}),
-    ...(natural20 ? { natural20 } : {}),
     ...(breaksConcentration ? { breaksConcentration } : {}),
     ...(vs ? { vs } : {}),
     ...(thrown ? { thrown } : {}),

@@ -25,6 +25,7 @@ import {
   resolveTargets,
   typeAgainst,
 } from "./effects.ts";
+import { formOf, shapeOf } from "../forms.ts";
 import { distanceFeet } from "../grid.ts";
 import { AIM } from "./ids.ts";
 import {
@@ -58,7 +59,8 @@ export function againstTarget(
         item.hurtDie !== undefined ||
         item.vs !== undefined ||
         item.except !== undefined ||
-        item.only !== undefined,
+        item.only !== undefined ||
+        item.shapeShifted !== undefined,
     )
   ) {
     return resolution;
@@ -71,6 +73,13 @@ export function againstTarget(
     damage: resolution.damage.flatMap((item) => {
       if (item.except && exemptFrom(item.except, target, met)) return [];
       if (item.only && !exemptFrom(item.only, target, met)) return [];
+      if (
+        item.shapeShifted &&
+        shapeOf(target) === null &&
+        formOf(target) === null
+      ) {
+        return [];
+      }
       const type = item.types ? typeAgainst(item.types, responses) : item.type;
       const count = (item.amount.dice ?? "").split("d")[0] ?? "0";
       const amount =

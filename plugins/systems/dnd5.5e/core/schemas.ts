@@ -308,6 +308,8 @@ export const DamageSchema = z.strictObject({
   rolledTypes: z.array(DamageTypeSchema).min(2).optional(),
   // the attacker gains as many Temporary Hit Points as it deals, as an Executioner's Axe's extra damage
   tempHp: z.literal(true).optional(),
+  // only a creature in a shape not its own, changed by its own trait or by magic, takes it, as a Silvered Weapon's die
+  shapeShifted: z.literal(true).optional(),
 });
 export type Damage = z.infer<typeof DamageSchema>;
 
@@ -1235,6 +1237,12 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("slay"),
     hpAtMost: z.number().int().min(1),
     creatureTypes: z.array(z.string()).min(1).optional(), // only these types, as a Mace of Smiting's Construct
+  }),
+  // A concentrating target saves with Constitution against this DC or its Concentration ends, as a Thunderous
+  // Greatclub's Earthquake shakes it.
+  z.strictObject({
+    kind: z.literal("concentrationSave"),
+    dc: z.number().int().min(1),
   }),
   // A Vorpal Sword's beheading: the target dies, unless it has Immunity to the damage's type, is of a type in
   // `spares` that has or needs no head, or spends a Legendary Resistance, and then takes `damage` instead.
@@ -3548,6 +3556,10 @@ const MagicItemSchema = ItemBaseSchema.extend({
   // Damage a magic weapon made from it adds on a hit, as Frost Brand's 1d6 Cold, carried the same way.
   hitDamage: z.array(ItemDamageSchema).min(1).optional(),
   ...WeaponRiders,
+  // its damage may name the weapon's type or die, as `hitDamage`'s
+  natural20: NaturalTwentySchema.extend({
+    damage: z.array(ItemDamageSchema).default([]),
+  }).optional(),
   // A magic weapon made from it deals this instead of the weapon's own type, and has these properties too, as a Sun
   // Blade's Radiant and Finesse.
   damageType: DamageTypeSchema.optional(),

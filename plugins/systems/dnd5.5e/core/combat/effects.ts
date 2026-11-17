@@ -2485,6 +2485,19 @@ export function leafEvents(
         break;
       // On a failed save, or a creature already at 0 Hit Points, as Steal Body or Consume Life. An automatic one
       // is worked out with its damage (resolveAction).
+      case "concentrationSave":
+        if (target.concentratingOn) {
+          const kept = rollSave(target, "con", effect.dc, context, false, 0, [
+            "concentration",
+          ]);
+          events.push(
+            ...kept.events,
+            ...(kept.saved
+              ? []
+              : [dndEvent(`${NS}:concentrationEnded`, { actor: target.id })]),
+          );
+        }
+        break;
       case "behead":
         events.push(...beheadEvents(effect, caster, target, context));
         break;
