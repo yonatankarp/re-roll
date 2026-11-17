@@ -178,8 +178,8 @@ const ITEMS = `- id: "variant-test:item/potions"
   attunement: false
   text: A test item for some weapons.
   automation: full
-  weaponTraining: ["srd52:item/shortbow", "srd52:item/longsword"]
-  bonuses: [{ to: damage, amount: 2, weapons: ["srd52:item/shortbow"] }]
+  weaponTraining: [shortbow, longsword]
+  bonuses: [{ to: damage, amount: 2, weapons: [shortbow] }]
 - id: "variant-test:item/mastery-stone"
   name: Mastery Stone
   type: magicItem

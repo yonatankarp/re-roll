@@ -1914,9 +1914,10 @@ const MagicBonusSchema = z.strictObject({
   ]),
   amount: z.number().int().min(1),
   unarmored: z.literal(true).optional(), // only while wearing no armor and using no Shield, as Bracers of Defense
-  // Only with these weapons, or a magic one made from them, as Bracers of Archery's with a Longbow or Shortbow.
-  // It adds to a magic weapon's own bonus, which other bonuses to attack and damage don't.
-  weapons: z.array(ContentIdSchema).min(1).optional(),
+  // Only with these weapons, or a magic one made from them, by their names after the plugin, as Bracers of
+  // Archery's "longbow" and "shortbow", so any book's Longbow counts. It adds to a magic weapon's own bonus,
+  // which other bonuses to attack and damage don't.
+  weapons: z.array(z.string().min(1)).min(1).optional(),
 });
 
 // An ability score an item sets while worn, as Gauntlets of Ogre Power's Strength 19, which does nothing to a higher
@@ -2061,8 +2062,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
       max: z.number().int().min(1),
     })
     .optional(),
-  // Weapons it trains its wearer with, and magic ones made from them, as Bracers of Archery's Longbow.
-  weaponTraining: z.array(ContentIdSchema).min(1).optional(),
+  // Weapons it trains its wearer with, and magic ones made from them, named as a bonus's `weapons` are.
+  weaponTraining: z.array(z.string().min(1)).min(1).optional(),
   // Magic armor made from a plain one: worn as if trained with it, as Elven Chain, or with no Strength it needs,
   // as Mithral Armor. Carried into the armor content names as `<id>--<n>--<armor>` (variants.ts).
   anyTraining: z.literal(true).optional(),

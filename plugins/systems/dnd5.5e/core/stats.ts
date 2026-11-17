@@ -883,7 +883,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
             .map((bonus) => bonus.amount),
         );
       // Bonuses and training an item gives with this kind of weapon, as Bracers of Archery with a Longbow.
-      const kinds = [itemId, weapon.baseWeapon ?? itemId];
+      const kinds = [itemId, weapon.baseWeapon ?? itemId].map((id) =>
+        id.slice(id.lastIndexOf("/") + 1),
+      );
       const scoped = (to: "attack" | "damage"): number =>
         weaponBonuses
           .filter(
