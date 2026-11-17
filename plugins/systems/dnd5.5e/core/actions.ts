@@ -101,6 +101,7 @@ import {
   GRAPPLE_SOURCE,
   HIDE_SOURCE,
   LIGHT_USED,
+  CHARGE_FROM,
   HEW_READY,
   HEW_USED,
   POLE_STRUCK,
@@ -366,6 +367,12 @@ export function abilityCheck(
       ...(helped
         ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId: HELP })]
         : []),
+      // A bonus for the next check only, as Vampiric Bite's Strengthen, is spent on it.
+      ...actor.activeEffects.flatMap(({ modifier, sourceId }) =>
+        modifier.kind === "bonus" && modifier.to === "checks" && modifier.once
+          ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId })]
+          : [],
+      ),
     ],
   };
 }
@@ -492,6 +499,21 @@ function offhandOptions(
         label: `Off-hand ${action.name}: ${foe.name} (${String(foe.hp)} HP)${nick ? ", with Nick" : ""}`,
       }));
   });
+}
+
+// Crossbow Expert's Dual Wielding: the extra attack with a Light crossbow keeps its ability modifier.
+function lightCrossbow(
+  actor: Actor,
+  actionId: string,
+  access: ContentAccess,
+): boolean {
+  const weapon = weaponOf(actionId, access);
+  return (
+    weapon !== null &&
+    /crossbow/i.test(weapon.name) &&
+    weapon.properties.includes("light") &&
+    hasPassive(deriveStats(actor, access), "crossbowDualWielding")
+  );
 }
 
 // Polearm Master's Pole Strike: after attacking with a polearm, a Bonus Action attack with its other end.
@@ -1542,7 +1564,9 @@ export function runTactic(
             attacker: actor.id,
             actionId: detail,
             target: needTarget().id,
-            ...(twoWeaponStyle(actor) ? {} : { noModifier: true }),
+            ...(twoWeaponStyle(actor) || lightCrossbow(actor, detail, context)
+              ? {}
+              : { noModifier: true }),
           }),
           ...done,
         ],
@@ -1648,12 +1672,24 @@ export function runAfterMove(
   const mover = state.actors[payload.actor];
   if (!state.combat || !mover?.position || isDown(mover)) return {};
   const from = { x: payload.x, y: payload.y };
+  // A charge needs to know where the last walk started.
+  const charges = deriveStats(mover, context).actions.some(
+    ({ activation }) => activation.trigger?.charge !== undefined,
+  );
   // Daze: having moved, it can take no action or Bonus Action.
   const events: SystemEvent[] = mover.activeEffects.some(
     ({ modifier }) => modifier.kind === "actionLimit" && modifier.oneThing,
   )
     ? oneActionEvents(mover)
     : [];
+  if (charges) {
+    events.push(
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: mover.id,
+        key: `${CHARGE_FROM}${String(from.x)},${String(from.y)}`,
+      }),
+    );
+  }
   const frames: Frame[] = [];
   for (const foe of enemies(state, mover)) {
     const [ready] = tacticsOf(foe, "ready");

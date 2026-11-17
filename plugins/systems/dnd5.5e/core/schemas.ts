@@ -434,7 +434,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     within: z.number().int().min(5).optional(), // only against a creature this near the bearer
     // the type picked for each hit, the one the target resists least, as Conjure Minor Elementals' acid to lightning
     types: z.array(DamageTypeSchema).min(2).optional(),
-    once: z.boolean().optional(), // ends after the bearer's next attack roll, as a bandit crime lord's Deadly Aim
+    // ends after the bearer's next attack roll, as a bandit crime lord's Deadly Aim; dealt by the caster, with its
+    // next hit on the bearer, as Feinting Attack's die
+    once: z.boolean().optional(),
   }),
   // Limits on what the bearer can do on its turns, as Slow gives: `oneAction` is an action or a Bonus Action, not
   // both; `noActions` neither; `oneAttack` one attack with the Attack action; `speed` halves, doubles or stops its
@@ -552,6 +554,15 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("grantedAction"),
     damage: DamageTypeSchema,
     dc: z.number().int().optional(),
+  }),
+  // The bearer's next weapon hit that deals damage also makes its target make this save, which spends it, as a
+  // Poisoner's dose (combat/attack.ts). Its DC is worked out from the bearer's numbers as it hits.
+  z.strictObject({
+    kind: z.literal("coating"),
+    ability: AbilitySchema,
+    dc: FormulaSchema,
+    damage: z.array(DamageSchema).min(1),
+    condition: ConditionSchema.optional(), // on a failed save, until the end of the bearer's next turn
   }),
   // The bearer's weapon attacks are changed while it lasts, as by Shillelagh; with `once`, only its next one, as
   // True Strike's.
@@ -745,6 +756,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     feet: z.number(),
     direction: z.enum(["away", "toward"]),
     maxSize: SizeSchema.optional(),
+    largerBy: z.number().int().min(0).optional(), // only a target at most this many sizes larger than the caster
   }),
   z.strictObject({ kind: z.literal("note"), text: z.string() }),
   // The bearer teleports up to `feet` to an open square it can see, or with `movement` jumps there for that much
@@ -1037,6 +1049,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
   // A dying creature becomes Stable, as with Spare the Dying.
   z.strictObject({ kind: z.literal("stabilize") }),
+  // The target drops the weapon it holds: a character's lands in its space to pick up again, and a monster can't use
+  // its weapon attack until its next turn starts, when it takes it up again, as Disarming Attack.
+  z.strictObject({ kind: z.literal("disarm") }),
   // The caster takes `amount` of `type` damage, which nothing lessens, and the target regains `times` as much, as
   // Life Transference.
   z.strictObject({
@@ -1091,6 +1106,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("reactionMove"),
     away: z.literal(true).optional(),
+    half: z.literal(true).optional(), // up to half its Speed, as Maneuvering Attack's comrade
   }),
   z.strictObject({
     kind: z.literal("raiseCorpse"),
@@ -1113,6 +1129,20 @@ const BurstSchema = z.strictObject({
   dc: FormulaSchema,
   damage: z.array(DamageSchema).min(1),
   half: z.literal(true).optional(),
+});
+
+export const OnHitSaveSchema = z.strictObject({
+  ability: AbilitySchema,
+  dc: FormulaSchema,
+  damage: z.array(DamageSchema).default([]),
+  onSuccessDamage: z.enum(["half", "none", "full"]).default("none"),
+  onFail: LeafEffectsSchema,
+  onSuccess: LeafEffectsSchema,
+  exempt: z.array(z.string()).optional(),
+  // Only once a turn, on the attacker's own turn, as Feral Pounce's Shove or Punch and Grab's Grapple.
+  oncePerTurn: z.literal(true).optional(),
+  onceKey: z.string().min(1).optional(), // the once-a-turn use it shares with other attacks, as Feral Pounce's two
+  orDex: z.literal(true).optional(), // the target saves with Strength or Dexterity, whichever is better
 });
 
 export const ResolutionSchema = z.discriminatedUnion("kind", [
@@ -1141,20 +1171,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     onMiss: LeafEffectsSchema,
     // A save the target makes after a hit, as a ghoul's paralysing claw. Creatures of an `exempt` type or species
     // (lowercase) never make it.
-    onHitSave: z
-      .strictObject({
-        ability: AbilitySchema,
-        dc: FormulaSchema,
-        damage: z.array(DamageSchema).default([]),
-        onSuccessDamage: z.enum(["half", "none", "full"]).default("none"),
-        onFail: LeafEffectsSchema,
-        onSuccess: LeafEffectsSchema,
-        exempt: z.array(z.string()).optional(),
-        // Only once a turn, on the attacker's own turn, as Feral Pounce's Shove or Punch and Grab's Grapple.
-        oncePerTurn: z.literal(true).optional(),
-        orDex: z.literal(true).optional(), // the target saves with Strength or Dexterity, whichever is better
-      })
-      .optional(),
+    onHitSave: OnHitSaveSchema.optional(),
     // Effects on a hit once a turn, on the attacker's own turn, as Tavern Brawler's push.
     onHitOncePerTurn: z.array(LeafEffectSchema).min(1).optional(),
     // A hit heals the attacker by the damage dealt, spending a use, as a Dhampir's Vampiric Bite.
@@ -1348,6 +1365,11 @@ export const ActivationSchema = z.strictObject({
       // With `afterHit`, offered only right after an `afterHit` activation of this feature lands on the same hit, as
       // Stalker's Flurry's effects after Dreadful Strike.
       following: ContentIdSchema.optional(),
+      // With `afterHit`, only on the bearer's own turn, as Shield Bash or Charge Attack.
+      ownTurn: z.literal(true).optional(),
+      // With `afterHit`, only right after a walk of at least this many feet in a straight line toward the target, as
+      // Charge Attack.
+      charge: z.number().int().min(5).optional(),
       // With `afterHit`, only a hit that can deal this damage type, as Burst of Sunlight's Radiant.
       dealing: DamageTypeSchema.optional(),
       // With `afterHit`, only a hit with this feature's own attacks, as Rend Mind's Psychic Blades.
@@ -1445,6 +1467,9 @@ export const ActivationSchema = z.strictObject({
   // Once a turn for all its feature's activations, as Stunning Strike, or with a name, for all activations of that
   // name, as Brutal Strike's and Improved Brutal Strike's options (queries.ts gatesOpen).
   oncePerTurn: z.union([z.literal(true), z.string().min(1)]).optional(),
+  withShield: z.literal(true).optional(), // only while the bearer holds a Shield, as Shield Bash
+  // Its first damage entry's dice while the bearer holds no weapon or Shield, as Unarmed Fighting's d8.
+  emptyHanded: DiceSchema.optional(),
   // Only as the bearer takes the Attack action: while its action is unspent or Attack-action attacks are left, as
   // Vow of Enmity or Sacred Weapon.
   withAttack: z.literal(true).optional(),
@@ -2430,6 +2455,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("firstTurnSpeed"),
     feet: z.number().int().min(5),
+  }),
+  // The Light property's extra attack with a Light crossbow adds the ability modifier to its damage, as Crossbow
+  // Expert's Dual Wielding.
+  z.strictObject({ kind: z.literal("crossbowDualWielding") }),
+  // As its turn starts, this damage to one creature it grapples, as Unarmed Fighting's 1d4.
+  z.strictObject({
+    kind: z.literal("grappleDamage"),
+    dice: DiceSchema,
+    type: DamageTypeSchema,
   }),
   // Training with Martial weapons, as Battle Ready's Weapon Knowledge.
   z.strictObject({ kind: z.literal("martialTraining") }),

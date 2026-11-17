@@ -18,6 +18,7 @@ import {
 } from "../state.ts";
 import { ALL, DECLINE, encodeOption, parseOption } from "./ids.ts";
 import { forgoAdvantageFrame, forgoFrame, SNEAK_DICE } from "./strikes.ts";
+import { lastsFor } from "./durations.ts";
 import { aroundHit, replaceHitFrame, runReplaceHit } from "./ranged-smite.ts";
 import { againstTarget, missFrames, runApplyMiss } from "./spell-riders.ts";
 import { duelBroken, duelDamaged, duelHampers } from "./duel.ts";
@@ -63,6 +64,7 @@ import {
 } from "../stats.ts";
 import { finalDamage, halved, rollD20 } from "../rules.ts";
 import {
+  CHARGE_FROM,
   dodging,
   grappledAwayFrom,
   HEW_READY,
@@ -1835,7 +1837,7 @@ function landHit(
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
     ...oncePerTurnHit(resolution, action, attacker, target, context),
-    ...drained(resolution, attacker, dealt.dealt, stats),
+    ...drained(resolution, attacker, target, dealt.dealt, stats, context),
     ...feast(attacker, target, stats, context),
     ...retaliated(attacker, target, action, context),
     ...halted(attacker, target, stats, context),
@@ -1852,10 +1854,59 @@ function landHit(
     state: afterHit,
   });
   events.push(...nested.events);
+  // A Poisoner's dose on the weapon: the save it brings, once, on a hit that deals damage.
+  const coating =
+    dealt.dealt > 0 && action.id.startsWith("weapon:")
+      ? attacker.activeEffects.find(
+          ({ modifier }) => modifier.kind === "coating",
+        )
+      : undefined;
+  const coated =
+    coating?.modifier.kind === "coating"
+      ? nestedSave(
+          {
+            ...resolution,
+            onHitSave: {
+              ability: coating.modifier.ability,
+              dc: coating.modifier.dc,
+              damage: coating.modifier.damage,
+              onSuccessDamage: "none",
+              onFail: coating.modifier.condition
+                ? [
+                    {
+                      kind: "applyCondition",
+                      condition: coating.modifier.condition,
+                      duration: { until: "yourNextTurnEnd" },
+                      repeatSave: false,
+                      endsOnDamage: false,
+                    },
+                  ]
+                : [],
+              onSuccess: [],
+            },
+          },
+          { ...action, id: coating.sourceId },
+          attacker,
+          target,
+          { ...context, state: nested.events.reduce(applyDndEvent, afterHit) },
+        )
+      : null;
+  if (coating && coated) {
+    events.push(
+      ...coated.events,
+      dndEvent(`${NS}:effectEnded`, {
+        actor: attacker.id,
+        sourceId: coating.sourceId,
+      }),
+    );
+  }
   // What answers the hit: the damage, the hit itself, and a foe striking someone else, as with Sentinel's Guardian.
   const landed = {
     ...context,
-    state: nested.events.reduce(applyDndEvent, afterHit),
+    state: [...nested.events, ...(coated?.events ?? [])].reduce(
+      applyDndEvent,
+      afterHit,
+    ),
   };
   const how = attackKind(payload, context);
   const cause = {
@@ -1977,8 +2028,12 @@ function imageHit(
 function sideRidersSpent(attacker: Actor, target: Actor, state: DndState) {
   return target.activeEffects.flatMap(({ modifier, sourceId, casterId }) =>
     modifier.kind === "hitDamage" &&
-    modifier.dealtBy === "side" &&
-    state.actors[casterId]?.side === attacker.side
+    ((modifier.dealtBy === "side" &&
+      state.actors[casterId]?.side === attacker.side) ||
+      // Feinting Attack's die, on the creature feinted, goes with the caster's hit.
+      (modifier.dealtBy === "caster" &&
+        modifier.once === true &&
+        casterId === attacker.id))
       ? [
           dndEvent(`${NS}:effectEnded`, {
             actor: target.id,
@@ -1994,7 +2049,8 @@ function sideRidersSpent(attacker: Actor, target: Actor, state: DndState) {
 // True Strike's change to it.
 function onceHitEnded(attacker: Actor): SystemEvent[] {
   return attacker.activeEffects.flatMap(({ modifier, sourceId }) =>
-    (modifier.kind === "hitDamage" || modifier.kind === "weaponSpell") &&
+    ((modifier.kind === "hitDamage" && modifier.dealtBy === "bearer") ||
+      modifier.kind === "weaponSpell") &&
     modifier.once
       ? [dndEvent(`${NS}:effectEnded`, { actor: attacker.id, sourceId })]
       : [],
@@ -2058,27 +2114,56 @@ function hasUse(actor: Actor, stats: Stats, resource: string): boolean {
   );
 }
 
-// A Dhampir's Vampiric Bite: the hit heals the biter by the damage it dealt.
-// shortcut: always Drain, never Strengthen.
+// A Dhampir's Vampiric Bite on a creature that isn't a Construct or an Undead: Drain heals the biter by the damage
+// dealt, and Strengthen adds it to the biter's next attack roll or ability check within a minute.
+// shortcut: Drain is taken while the biter is missing that many Hit Points, else Strengthen, without asking.
 function drained(
   resolution: Extract<Resolution, { kind: "attack" }>,
   attacker: Actor,
+  target: Actor,
   dealt: number,
   stats: Stats,
+  context: Context,
 ): SystemEvent[] {
   const { drain } = resolution;
-  if (!drain || dealt <= 0 || !hasUse(attacker, stats, drain.resource))
+  if (
+    !drain ||
+    dealt <= 0 ||
+    !hasUse(attacker, stats, drain.resource) ||
+    exemptFrom(["construct", "undead"], target, deriveStats(target, context))
+  )
     return [];
+  const missing = stats.maxHp - Math.max(attacker.hp, 0);
+  const strengthen = (to: "attacks" | "checks") =>
+    dndEvent(`${NS}:effectAdded`, {
+      actor: attacker.id,
+      effect: {
+        sourceId: `${drain.resource}:strengthen`,
+        casterId: attacker.id,
+        modifier: {
+          kind: "bonus",
+          to,
+          amount: { bonus: { base: dealt, add: [] } },
+          once: true,
+        },
+        ends: "spellDuration",
+        ...lastsFor({ minutes: 1 }, attacker, attacker, context.state),
+      },
+    });
   return [
     dndEvent(`${NS}:resourceSpent`, {
       actor: attacker.id,
       resource: drain.resource,
     }),
-    dndEvent(`${NS}:healed`, {
-      actor: attacker.id,
-      amount: Math.min(dealt, stats.maxHp - Math.max(attacker.hp, 0)),
-      max: stats.maxHp,
-    }),
+    ...(missing >= dealt
+      ? [
+          dndEvent(`${NS}:healed`, {
+            actor: attacker.id,
+            amount: Math.min(dealt, missing),
+            max: stats.maxHp,
+          }),
+        ]
+      : [strengthen("attacks"), strengthen("checks")]),
   ];
 }
 
@@ -2440,7 +2525,7 @@ function nestedSave(
   if (exemptFrom(printed.exempt, target, deriveStats(target, context))) {
     return { events: [], dealt: 0 };
   }
-  const onceKey = `onhit:${action.id}`;
+  const onceKey = `onhit:${printed.onceKey ?? action.id}`;
   const once = printed.oncePerTurn
     ? attacker.usedThisTurn.includes(onceKey) || !inOwnTurn(attacker, context)
       ? null
@@ -2577,6 +2662,10 @@ function smitesFor(
         hitWith.id.startsWith(`feature:${trigger.withFeature}:`)) &&
       (!trigger.sneakAttack || sneakLanded(attacker, stats)) &&
       (!trigger.marked || markedBy(target, attacker, trigger.marked)) &&
+      (!trigger.ownTurn || inOwnTurn(attacker, context)) &&
+      (trigger.charge === undefined ||
+        charged(attacker, target, trigger.charge)) &&
+      (!action.activation.withShield || holdsShield(attacker, context)) &&
       (!trigger.dealing ||
         hitWith.activation.resolution.damage.some(
           (item) =>
@@ -2585,6 +2674,25 @@ function smitesFor(
         ))
     );
   });
+}
+
+// Charge Attack: the last walk this turn was at least `feet` in a straight line toward the target.
+function charged(attacker: Actor, target: Actor, feet: number): boolean {
+  const last = attacker.usedThisTurn.findLast((key) =>
+    key.startsWith(CHARGE_FROM),
+  );
+  if (!last || !attacker.position || !target.position) return false;
+  const [x = NaN, y = NaN] = last
+    .slice(CHARGE_FROM.length)
+    .split(",")
+    .map(Number);
+  const from = { x, y };
+  const walked = distanceFeet(from, attacker.position);
+  return (
+    walked >= feet &&
+    distanceFeet(from, target.position) >=
+      walked + distanceFeet(attacker.position, target.position) - 5
+  );
 }
 
 // Whether the attacker's Sneak Attack has been dealt this turn, as it is once a hit carries it.
@@ -2757,6 +2865,7 @@ export function runSmite(
   const [, featureId] = /^feature:(.+):\d+$/.exec(known.id) ?? [];
   const follows =
     featureId !== undefined &&
+    known.activation.trigger?.following === undefined &&
     deriveStats(attacker, context).actions.some(
       ({ activation }) => activation.trigger?.following === featureId,
     );

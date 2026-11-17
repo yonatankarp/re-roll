@@ -26,6 +26,7 @@ import {
   cannotHeal,
   dndEvent,
   type DndState,
+  equipped,
   hasCondition,
   INCAPACITATING,
   fightingOn,
@@ -2178,8 +2179,11 @@ export function leafEvents(
       // A push or pull is made on the grid as Shove's is, in a straight line.
       case "forcedMove": {
         const to =
-          effect.maxSize === undefined ||
-          sizeOf(target, context) <= SIZES.indexOf(effect.maxSize)
+          (effect.maxSize === undefined ||
+            sizeOf(target, context) <= SIZES.indexOf(effect.maxSize)) &&
+          (effect.largerBy === undefined ||
+            sizeOf(target, context) <=
+              sizeOf(caster, context) + effect.largerBy)
             ? pushTo(
                 caster.position,
                 target,
@@ -2194,6 +2198,49 @@ export function leafEvents(
         } else if (to) {
           events.push(
             dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 }),
+          );
+        }
+        break;
+      }
+      case "disarm": {
+        if (isDown(target) || !target.position) break;
+        const held = equipped(target).find(
+          (id) =>
+            ItemSchema.safeParse(context.content(id)).data?.type === "weapon",
+        );
+        if (target.source.kind === "character") {
+          if (held) {
+            events.push(
+              dndEvent(`${NS}:weaponThrown`, {
+                item: held,
+                at: target.position,
+                by: target.id,
+              }),
+            );
+          }
+          break;
+        }
+        const weapon = deriveStats(target, context).actions.find(
+          ({ activation }) =>
+            activation.resolution.kind === "attack" &&
+            activation.resolution.attack.type === "weapon" &&
+            !activation.resolution.attack.unarmed,
+        );
+        if (weapon) {
+          events.push(
+            ...leafEvents(
+              [
+                {
+                  kind: "modifier",
+                  modifier: { kind: "stuck", action: weapon.id },
+                  duration: { until: "itsNextTurnStart" },
+                },
+              ],
+              sourceId,
+              caster,
+              target,
+              context,
+            ),
           );
         }
         break;
@@ -4115,7 +4162,8 @@ function reactionMove(
   caster: Actor,
 ): SystemEvent[] {
   if (!target.budget.reaction || isDown(target) || !target.position) return [];
-  const speed = speedOf(target, deriveStats(target, context));
+  const full = speedOf(target, deriveStats(target, context));
+  const speed = effect.half ? Math.floor(full / 10) * 5 : full;
   if (effect.away) {
     const to =
       speed > 0 ? pushTo(caster.position, target, speed, context.state) : null;

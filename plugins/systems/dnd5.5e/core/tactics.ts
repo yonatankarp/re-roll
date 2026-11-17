@@ -160,6 +160,8 @@ export const LIGHT_USED = "light:";
 
 // An attack with a polearm lets Polearm Master's Pole Strike follow it (actions.ts).
 export const POLE_USED = "pole";
+// Where the last walk this turn started ("charge-from:x,y"), for a Charge Attack in a straight line.
+export const CHARGE_FROM = "charge-from:";
 // Hew: a crit or a drop with a melee weapon readies its Bonus Action attack ("hew:<action>"), once a turn.
 export const HEW_READY = "hew:";
 export const HEW_USED = "hew-used";

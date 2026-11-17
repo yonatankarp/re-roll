@@ -34,6 +34,7 @@ import {
   immuneToCondition,
   lookup,
   rollAmount,
+  rollDiceNotation,
 } from "../stats.ts";
 import { z } from "zod";
 import { finalDamage, halved } from "../rules.ts";
@@ -65,7 +66,7 @@ import {
   dealEvents,
   rollSave,
 } from "./effects.ts";
-import { releasedGrapples } from "./grapple.ts";
+import { grapplesOn, releasedGrapples } from "./grapple.ts";
 import { distanceFeet } from "../grid.ts";
 import { coverFor } from "../sight.ts";
 import { hasTactic, revealEvents, STEALTH_ATTACK } from "../tactics.ts";
@@ -584,6 +585,9 @@ export function runAdvanceTurn(
   const drifted = next
     ? driftResult(next, { ...context, state: after })
     : { events: [], frames: [] };
+  const grappled = next
+    ? grappleDamage(next, { ...context, state: after })
+    : { events: [], frames: [] };
   const events = [
     ...finished,
     ...expired,
@@ -595,6 +599,7 @@ export function runAdvanceTurn(
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
+    ...grappled.events,
     ...(next ? sharedTempHp(next, { ...context, state: after }) : []),
     ...(next ? turnInspiration(next, { ...context, state: after }) : []),
     ...(next ? fogBoundEvents(next, { ...context, state: after }) : []),
@@ -609,6 +614,7 @@ export function runAdvanceTurn(
   const ticks = next
     ? [
         ...drifted.frames,
+        ...grappled.frames,
         ...mad.frames,
         ...lingeringFrames(next, "turnStart"),
         ...sunlightFrames(next, starts),
@@ -629,6 +635,42 @@ export function runAdvanceTurn(
         frames: [...ticks, ...watched, frame("afterTurnStart", {})],
       }
     : { events };
+}
+
+// Unarmed Fighting: damage to one creature the bearer grapples as its turn starts.
+function grappleDamage(
+  actor: Actor,
+  context: Context,
+): { events: SystemEvent[]; frames: Frame[] } {
+  if (isDown(actor) || hasCondition(actor, ...INCAPACITATING)) {
+    return { events: [], frames: [] };
+  }
+  const stats = deriveStats(actor, context);
+  const passive = stats.passives.find((item) => item.kind === "grappleDamage");
+  const held = Object.values(context.state.actors).find(
+    (other) =>
+      !isDead(other) &&
+      grapplesOn(other).some(({ casterId }) => casterId === actor.id),
+  );
+  if (passive?.kind !== "grappleDamage" || !held) {
+    return { events: [], frames: [] };
+  }
+  const { events, dealt } = dealEvents(
+    held,
+    [
+      {
+        amount: finalDamage(
+          rollDiceNotation(passive.dice, context.dice),
+          passive.type,
+          damageResponses(held, context),
+        ),
+        type: passive.type,
+      },
+    ],
+    false,
+    context,
+  );
+  return { events, frames: [...concentrationFrame(held, dealt)] };
 }
 
 // Life-Giving Force: Temporary Hit Points for the ally nearby that has the fewest Hit Points left.

@@ -762,6 +762,34 @@ function collectFeatureData(
   return { passives, actions, resources, spells, free, retype };
 }
 
+// An attack with `emptyHanded` dice rolls them while the bearer holds no weapon or Shield, as Unarmed Fighting's d8.
+function emptyHanded(
+  actions: readonly KnownAction[],
+  actor: Actor,
+  access: ContentAccess,
+): KnownAction[] {
+  const holding = equipped(actor).some((id) => {
+    const item = ItemSchema.safeParse(access.content(id)).data;
+    return item?.type === "weapon" || item?.type === "shield";
+  });
+  return actions.map((action) => {
+    const dice = action.activation.emptyHanded;
+    const { resolution } = action.activation;
+    const [first, ...rest] = resolution.damage;
+    if (!dice || holding || !first) return action;
+    return {
+      ...action,
+      activation: {
+        ...action.activation,
+        resolution: {
+          ...resolution,
+          damage: [{ ...first, amount: { ...first.amount, dice } }, ...rest],
+        },
+      },
+    };
+  });
+}
+
 // Spells with a `spellDamage` bonus added to their damage, while its once-a-turn use is left.
 function withSpellDamage(
   actions: readonly KnownAction[],
@@ -1479,7 +1507,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       withInvocations(
         withWeaponRiders(
           withSpellDamage(
-            withRiders(actions, fromFeatures.passives),
+            emptyHanded(
+              withRiders(actions, fromFeatures.passives),
+              actor,
+              access,
+            ),
             fromFeatures.passives,
             actor,
           ),
