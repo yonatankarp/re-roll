@@ -138,12 +138,7 @@ import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
 import { damageTypeFrame, zoneTypeFrame } from "./damage-choice.ts";
 import { focusFrame } from "./check-choice.ts";
-import {
-  clingSave,
-  dropEvents,
-  prisonEvents,
-  sendAwayEvents,
-} from "./fear.ts";
+import { clingSave, dropEvents, prisonEvents, sendAwayEvents } from "./fear.ts";
 import { optionFrame } from "./options.ts";
 import { weaponAttackResult } from "./weapon-spell.ts";
 import { duelBroken, duelDamaged } from "./duel.ts";
@@ -1835,7 +1830,9 @@ export function leafEvents(
               ...level,
               modifier: rolledModifier(effect.modifier, stats, context),
               ends: effectEnds(effect.duration),
-              ...(effect.gone?.includes(deriveStats(target, context).creatureType ?? "")
+              ...(effect.gone?.includes(
+                deriveStats(target, context).creatureType ?? "",
+              )
                 ? {}
                 : lastsFor(effect.duration, caster, target, context.state)),
               ...(effect.endSave

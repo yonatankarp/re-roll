@@ -1211,8 +1211,8 @@ function settleSummons(state: DndState): DndState {
 // What outlasts a fight, without its count in rounds (lingers): a curse that hampers attacks against its caster,
 // or hits from it, goes with the caster.
 // shortcut: repeat saves still being counted when the fight ends stop where they are, as Contagion's.
-function outlasting(effect: ActiveEffect): ActiveEffect[] {
-  const { modifier, lingers, lasts: _lasts, ...rest } = effect;
+function outlasting({ lasts: _lasts, ...rest }: ActiveEffect): ActiveEffect[] {
+  const { modifier, lingers } = rest;
   if (lingers === undefined) return [];
   if (
     ((modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
@@ -1221,7 +1221,7 @@ function outlasting(effect: ActiveEffect): ActiveEffect[] {
   ) {
     return [];
   }
-  return [{ ...rest, modifier, lingers }];
+  return [rest];
 }
 
 function endCombat(state: DndState): DndState {

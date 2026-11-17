@@ -326,10 +326,7 @@ export function dropEvents(target: Actor, context: Context): SystemEvent[] {
 }
 
 // Mental Prison: moving out of the illusory cell, or attacking through it in melee, hurts and ends it.
-export function prisonEvents(
-  actor: Actor,
-  context: Context,
-): SystemEvent[] {
+export function prisonEvents(actor: Actor, context: Context): SystemEvent[] {
   const cell = actor.activeEffects.find(
     ({ modifier }) => modifier.kind === "prison",
   );

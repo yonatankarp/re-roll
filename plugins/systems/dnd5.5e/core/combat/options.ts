@@ -1,6 +1,10 @@
 import { awaitDecision, type Frame, frameHandler } from "#sdk";
 import { z } from "zod";
-import { AbilitySchema, type LeafEffect, LeafEffectSchema } from "../schemas.ts";
+import {
+  AbilitySchema,
+  type LeafEffect,
+  LeafEffectSchema,
+} from "../schemas.ts";
 import { type Actor, frame, NS } from "../state.ts";
 import { focusFrame } from "./check-choice.ts";
 import { leafEvents } from "./effects.ts";
@@ -29,7 +33,10 @@ export function optionFrame(
   sourceId: string,
   caster: Actor,
   target: Actor,
-  save?: { readonly ability: z.infer<typeof AbilitySchema>; readonly dc: number },
+  save?: {
+    readonly ability: z.infer<typeof AbilitySchema>;
+    readonly dc: number;
+  },
   slotLevel?: number,
 ): Frame | null {
   const chosen = optioned(effects);

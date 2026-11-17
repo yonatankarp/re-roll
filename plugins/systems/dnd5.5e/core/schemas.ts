@@ -1250,7 +1250,13 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
           // a creature immune to this condition, as Mental Prison's that can't be Charmed
           immuneTo: ConditionSchema.optional(),
           // "immune" leaves the creature out altogether, as Cause Fear's Constructs and Undead
-          roll: z.enum(["advantage", "disadvantage", "fail", "succeed", "immune"]),
+          roll: z.enum([
+            "advantage",
+            "disadvantage",
+            "fail",
+            "succeed",
+            "immune",
+          ]),
         }),
       )
       .min(1)
@@ -2538,7 +2544,12 @@ const ScaleStepSchema = z.union([
   // Curse's 10 minutes, then 8 hours without Concentration (stats.ts scaleActivation).
   z.strictObject({
     durations: z
-      .array(z.strictObject({ at: z.number().int().min(1), duration: DurationSchema }))
+      .array(
+        z.strictObject({
+          at: z.number().int().min(1),
+          duration: DurationSchema,
+        }),
+      )
       .min(1),
   }),
 ]);

@@ -716,8 +716,7 @@ function withRiders(
     const riders = passives.flatMap((passive) =>
       passive.kind === "activationRider" &&
       action.id.startsWith(`feature:${passive.feature}:`) &&
-      (passive.label === undefined ||
-        action.activation.label === passive.label)
+      (passive.label === undefined || action.activation.label === passive.label)
         ? [passive]
         : [],
     );

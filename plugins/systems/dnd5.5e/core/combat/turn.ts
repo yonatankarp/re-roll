@@ -534,7 +534,9 @@ export function runFinishTurn(context: Context): SystemResult {
             ...(worse.endsOnDamage ? { endsOnDamage: true } : {}),
             ...(holder.shake ? { shake: true } : {}),
             ...(holder.clings ? { clings: holder.clings } : {}),
-            ...(holder.lingers === undefined ? {} : { lingers: holder.lingers }),
+            ...(holder.lingers === undefined
+              ? {}
+              : { lingers: holder.lingers }),
           },
         }),
       );
