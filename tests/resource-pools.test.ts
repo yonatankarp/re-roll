@@ -1,5 +1,7 @@
 import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
 import { describe, expect, it } from "vitest";
+import { completeDraft } from "../plugins/systems/dnd5.5e/core/character-sheet.ts";
+import { levelEntry } from "../plugins/systems/dnd5.5e/core/character.ts";
 import {
   turnInspiration,
   turnRecharge,
@@ -97,6 +99,31 @@ const FIXTURES = [
     spells: { "1": ["srd52:spell/bless"] },
     freeCast: "atWill",
   }),
+  {
+    id: "test:feat/mastered",
+    name: "Mastered",
+    category: "origin",
+    text: "Test.",
+    choices: [
+      {
+        kind: "spells",
+        id: "spell",
+        count: 1,
+        minLevel: 1,
+        maxLevel: 1,
+        list: "srd52:class/wizard",
+        freeCast: "atWill",
+      },
+    ],
+  },
+  {
+    id: "test:background/mastered",
+    name: "Mastered",
+    abilities: ["str", "dex", "con"],
+    feat: "test:feat/mastered",
+    skills: ["athletics", "survival"],
+    tool: "Test Tools",
+  },
   trait("signature", [], {
     spells: { "1": ["srd52:spell/bless"] },
     freeCast: "shortRest",
@@ -308,6 +335,25 @@ describe("resource pools, conversions and rest recovery (#170)", () => {
         recharge: [{ on: "shortRest", amount: "all" }],
       },
     ]);
+  });
+
+  it("keeps a spells choice's way of casting free in its answer, as Spell Mastery's at will", async () => {
+    const run = await poolsRun();
+    const draft = completeDraft(
+      {
+        classId: "srd52:class/fighter",
+        speciesId: "test:species/plain",
+        backgroundId: "test:background/mastered",
+        scores: [],
+        picks: {},
+      },
+      "standard",
+      run,
+    );
+    const { answers } = levelEntry(draft, null, run);
+    expect(answers).toContainEqual(
+      expect.objectContaining({ kind: "spells", freeCast: "atWill" }),
+    );
   });
 
   it("adds a Replenishing Meal to each member's first Hit Point Die in a Short Rest", async () => {

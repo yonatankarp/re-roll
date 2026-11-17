@@ -1046,7 +1046,7 @@ function answersOf(
           {
             kind: "spells",
             values,
-            ...(choice.freeCast ? { freeCast: true } : {}),
+            ...(choice.freeCast ? { freeCast: choice.freeCast } : {}),
             ...(choiceOwners.has(choice)
               ? { feat: choiceOwners.get(choice) }
               : {}),
