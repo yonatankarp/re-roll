@@ -124,6 +124,23 @@ export const GlossaryEntrySchema = ContentEntrySchema.extend({
   text: z.string(),
 }).strict();
 
+// Monster families and lairs (#133), text kinds like the glossary's, keyed by content folder.
+export const MONSTER_TEXT_KINDS = {
+  "monster-families": "monster-family",
+  lairs: "lair",
+} as const;
+
+// A family heading (Bandits, Black Dragons): the stat blocks and families it holds or, for a group, lists.
+export const MonsterFamilySchema = GlossaryEntrySchema.extend({
+  members: z.array(ContentIdSchema).default([]),
+}).strict();
+
+// A monster's lair: its regional effects as printed, and whose lair it is. A 2024 stat block prints its
+// in-Lair numbers itself, so play reads nothing here.
+export const LairSchema = GlossaryEntrySchema.extend({
+  owners: z.array(ContentIdSchema).default([]),
+}).strict();
+
 // An engine value as the name in its entity's id: "twoHanded" is weapon-property/two-handed.
 export const glossaryName = (key: string): string =>
   key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);

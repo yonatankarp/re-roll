@@ -751,6 +751,20 @@ summary {
   margin: 8px 0 0 12px;
 }
 
+.book-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.book-links button {
+  padding: 4px 8px;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 760px) {
   .book-layout {
     grid-template-columns: minmax(0, 1fr);
