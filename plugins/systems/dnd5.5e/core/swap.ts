@@ -8,8 +8,9 @@ import {
   type SystemResult,
 } from "#sdk";
 import { z } from "zod";
-import { choiceOptions } from "./character.ts";
+import { choiceOptions, latePick } from "./character.ts";
 import {
+  BackgroundSchema,
   type ChoiceDef,
   ClassSchema,
   FeatSchema,
@@ -24,12 +25,19 @@ import {
   frame,
   NS,
 } from "./state.ts";
-import { lookup } from "./stats.ts";
+import {
+  deriveStats,
+  latePickKey,
+  lookup,
+  type Stats,
+  traitCantrips,
+} from "./stats.ts";
 
-// Picks a feat or species lets the character change after a Long Rest, as Weapon Master's weapons, offered beside a
-// scene's choices so a save from before them never meets a new decision.
-// shortcut: only the player swaps, any time until the next Long Rest, and only picks made since builds record whose
-// they are.
+// Picks a feat or species lets the character change after a Long Rest, as Weapon Master's weapons, or once a level,
+// as Magic Initiate's spells, or picks it makes between scenes, as Ritual Caster's, offered beside a scene's choices so
+// a save from before them never meets a new decision.
+// shortcut: only the player swaps, any time until the next Long Rest (or level), and only picks made since builds
+// record whose they are.
 
 type Context = ContentAccess & { readonly state: DndState };
 
@@ -37,16 +45,19 @@ const KINDS = {
   skills: "skills",
   weaponMastery: "weaponMastery",
   features: "option",
+  spells: "spells",
 } as const;
 const KEEP = "keep";
+const ADD = "+"; // the "pick" dropped when a late pick adds one
 
 interface Swappable {
-  readonly key: string; // "<level>:<answer>" in the build
+  readonly key: string; // "<level>:<answer>" in the build, "trait:<feature>", or latePickKey
   readonly owner: string;
-  readonly choice: ChoiceDef;
+  readonly choices: readonly ChoiceDef[]; // what the new pick comes from, one list each
   readonly values: readonly string[];
-  // shortcut: changed after a Short Rest too, so it's offered between fights whenever the party has rested.
-  readonly anyRest?: boolean;
+  readonly open: boolean; // offered now
+  readonly mark?: string; // kept as swapped in place of the key
+  readonly adds?: true; // a late pick: one more, nothing dropped
 }
 
 export function swappable(
@@ -55,25 +66,30 @@ export function swappable(
 ): readonly Swappable[] {
   const build = effectiveBuild(actor);
   if (!build) return [];
-  return build.levels.flatMap((entry, level) =>
+  const level = build.levels.length;
+  const swapped = actor.swapped ?? [];
+  const fromAnswers = build.levels.flatMap((entry, at) =>
     entry.answers.flatMap((answer, index): Swappable[] => {
       if (answer.kind === "variant") {
         const feature = FeatureSchema.safeParse(
           access.content(answer.feature),
         ).data;
+        // shortcut: changed after a Short Rest too, so it's offered between fights whenever the party has rested.
         return feature?.variantSwap
           ? [
               {
-                key: `${String(level)}:${String(index)}`,
+                key: `${String(at)}:${String(index)}`,
                 owner: feature.name,
-                choice: {
-                  kind: "variant",
-                  id: `variant:${feature.id}`,
-                  feature: feature.id,
-                  count: 1,
-                },
+                choices: [
+                  {
+                    kind: "variant",
+                    id: `variant:${feature.id}`,
+                    feature: feature.id,
+                    count: 1,
+                  },
+                ],
                 values: answer.values,
-                anyRest: true,
+                open: true,
               },
             ]
           : [];
@@ -86,26 +102,138 @@ export function swappable(
       const owner =
         FeatSchema.safeParse(content).data ??
         SpeciesSchema.safeParse(content).data;
-      const choice = owner?.choices.find(
-        (item) =>
-          item.kind === kind &&
-          "swap" in item &&
-          item.swap === "longRest" &&
-          (item.kind !== "skills" ||
-            Boolean(item.expertise) ===
-              (answer.kind === "skills" && answer.expertise === true)),
-      );
-      return owner && choice && "values" in answer
-        ? [
-            {
-              key: `${String(level)}:${String(index)}`,
-              owner: owner.name,
-              choice,
-              values: answer.values,
-            },
-          ]
-        : [];
+      if (!owner || !("values" in answer)) return [];
+      // A feat's second spells answer is its second spells choice, as Magic Initiate's level 1 spell.
+      const nth = entry.answers
+        .slice(0, index)
+        .filter(
+          (other) =>
+            other.kind === answer.kind &&
+            "feat" in other &&
+            other.feat === answer.feat,
+        ).length;
+      const choice =
+        kind === "spells"
+          ? owner.choices.filter(
+              (item) => item.kind === "spells" && !latePick(item),
+            )[nth]
+          : owner.choices.find(
+              (item) =>
+                item.kind === kind &&
+                "swap" in item &&
+                item.swap === "longRest" &&
+                (item.kind !== "skills" ||
+                  Boolean(item.expertise) ===
+                    (answer.kind === "skills" && answer.expertise === true)),
+            );
+      if (!choice || !("swap" in choice) || !choice.swap) return [];
+      const key = `${String(at)}:${String(index)}`;
+      const mark =
+        choice.swap === "levelUp"
+          ? `${answer.feat}@${String(level)}`
+          : undefined;
+      return [
+        {
+          key,
+          owner: owner.name,
+          choices: [choice],
+          values: answer.values,
+          open: mark
+            ? level > at + 1 && !swapped.includes(mark)
+            : !swapped.includes(key),
+          ...(mark ? { mark } : {}),
+        },
+      ];
     }),
+  );
+  const stats = deriveStats(actor, access);
+  const traits = stats.features.flatMap((id): Swappable[] => {
+    const feature = FeatureSchema.safeParse(access.content(id)).data;
+    if (!feature?.swapCantrip) return [];
+    const key = `trait:${id}`;
+    return [
+      {
+        key,
+        owner: feature.name,
+        choices: feature.swapCantrip.map((list) => ({
+          kind: "spells" as const,
+          id: key,
+          count: 1,
+          maxLevel: 0,
+          list,
+        })),
+        values: actor.swaps?.[key] ?? traitCantrips(feature, access),
+        open: !swapped.includes(key),
+      },
+    ];
+  });
+  const background = lookup(access, BackgroundSchema, build.backgroundId);
+  const feats = new Set([
+    background.feat,
+    ...build.levels.flatMap((entry) =>
+      entry.answers.flatMap((answer) =>
+        answer.kind === "feats" ? answer.values : [],
+      ),
+    ),
+  ]);
+  const late = [...feats].flatMap((featId) => {
+    const feat = FeatSchema.safeParse(access.content(featId)).data;
+    return (feat?.choices ?? []).flatMap((choice): Swappable[] => {
+      if (choice.kind !== "spells" || !latePick(choice)) return [];
+      const key = latePickKey(featId, choice.id);
+      const values = actor.swaps?.[key] ?? [];
+      const wanted = choice.grows
+        ? stats.proficiency
+        : choice.late
+          ? choice.count
+          : knowsElsewhere(
+                actor,
+                stats,
+                feat?.grants ?? [],
+                choice.ifKnown,
+                access,
+              )
+            ? choice.count
+            : 0;
+      return [
+        {
+          key,
+          owner: feat?.name ?? featId,
+          choices: [choice],
+          values,
+          open: values.length < wanted,
+          adds: true,
+        },
+      ];
+    });
+  });
+  return [...fromAnswers, ...traits, ...late];
+}
+
+// Whether the character knows the spell other than through these features, as a Light from a class.
+function knowsElsewhere(
+  actor: Actor,
+  stats: Stats,
+  except: readonly string[],
+  spell: string | undefined,
+  access: ContentAccess,
+): boolean {
+  if (spell === undefined) return false;
+  const build = effectiveBuild(actor);
+  const picked = (build?.levels ?? []).some((entry) =>
+    entry.answers.some(
+      (answer) => answer.kind === "spells" && answer.values.includes(spell),
+    ),
+  );
+  return (
+    picked ||
+    stats.features.some(
+      (id) =>
+        !except.includes(id) &&
+        Object.values(
+          FeatureSchema.safeParse(access.content(id)).data?.spells ?? {},
+        ).some((ids) => ids.includes(spell)),
+    )
   );
 }
 
@@ -116,13 +244,10 @@ export function sceneSwapActions(
   const actor = state.actors[PLAYER_ACTOR];
   if (!actor || state.combat || state.sinceLongRest === undefined) return [];
   return swappable(actor, access)
-    .filter(
-      ({ key, anyRest }) =>
-        anyRest === true || !(actor.swapped ?? []).includes(key),
-    )
-    .map(({ key, owner }) => ({
+    .filter(({ open }) => open)
+    .map(({ key, owner, adds }) => ({
       id: `swap:${key}`,
-      label: `Change a pick of ${owner}`,
+      label: adds ? `Make a pick of ${owner}` : `Change a pick of ${owner}`,
       effect: `${NS}:swap`,
       args: { key },
     }));
@@ -166,7 +291,9 @@ function runSwapStep(
     });
   // With several picks, which one changes is asked first.
   const [only] = found.values;
-  const drop = payload.drop ?? (found.values.length === 1 ? only : undefined);
+  const drop =
+    payload.drop ??
+    (found.adds ? ADD : found.values.length === 1 ? only : undefined);
   if (drop === undefined) {
     return {
       frames: [
@@ -188,20 +315,29 @@ function runSwapStep(
   }
   const [first] = build.levels;
   const classDef = lookup(context, ClassSchema, first?.classId ?? "");
-  const { options } = choiceOptions(
-    found.choice,
-    { picks: {}, scores: [] },
-    build,
-    classDef,
-    context,
+  const seen = new Set(found.values);
+  const options = found.choices.flatMap(
+    (choice) =>
+      choiceOptions(choice, { picks: {}, scores: [] }, build, classDef, context)
+        .options,
   );
   return {
     frames: [
       awaitDecision({
         id,
         actor: actor.id,
-        prompt: `${found.owner}: what takes the place of ${nameOf(drop, context, found.choice)}?`,
-        options: [...options.filter(({ id }) => id !== drop), keep],
+        prompt:
+          drop === ADD
+            ? `${found.owner}: which do you pick?`
+            : `${found.owner}: what takes the place of ${nameOf(drop, context, found.choices[0])}?`,
+        options: [
+          ...options.filter((option) => {
+            const fresh = !seen.has(option.id);
+            seen.add(option.id);
+            return fresh;
+          }),
+          keep,
+        ],
         resume: resume(drop),
       }),
     ],
@@ -227,7 +363,11 @@ function runSwapAnswer(
       dndEvent(`${NS}:answerSwapped`, {
         actor,
         key,
-        values: found.values.map((value) => (value === drop ? answer : value)),
+        values:
+          drop === ADD
+            ? [...found.values, answer]
+            : found.values.map((value) => (value === drop ? answer : value)),
+        ...(found.mark ? { mark: found.mark } : {}),
       }),
     ],
   };

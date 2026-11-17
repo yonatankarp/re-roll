@@ -1820,7 +1820,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("evasion"),
     anySave: z.boolean().default(false),
   }),
-  // Advantage on attack rolls while Bloodied, against a target missing Hit Points, or against a Frightened one.
+  // Advantage on attack rolls while Bloodied, against a target missing Hit Points, or against a Frightened or Charmed
+  // one, as Treacherous Allure's.
   // "marked" is against a creature under an effect of the bearer's from one of `against`, as Precise Hunter's Hunter's
   // Mark (the spell's or Favored Enemy's),
   // and "unacted" against one yet to take a turn in a fight's first round, as Assassinate's.
@@ -1830,6 +1831,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       "bloodied",
       "targetHurt",
       "targetFrightened",
+      "targetCharmed",
       "marked",
       "unacted",
     ]),
@@ -2194,8 +2196,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     abilities: z.array(AbilitySchema).default([]),
     conditions: z.array(ConditionSchema).default([]),
     bonus: FormulaSchema.optional(),
-    // A die rolled and added instead, when its highest roll could be enough, as Spell Resistant's 1d6.
+    // A die rolled and added instead, when its highest roll could be enough, as Spell Resistant's 1d6. `dieSize` is a
+    // scaling key for its size, as Greater Aberrant Mark's 1d6 for Aberrant Fortitude's 1d4.
     bonusDice: DiceSchema.optional(),
+    dieSize: z.string().optional(),
     // Up to this many of the bearer's Hit Point Dice rolled and added, one at a time while the highest rolls could be
     // enough, and spent, as a Ring of Dedicated Focus's two on a save to keep Concentration. `resource` is then
     // "hitDice".
@@ -2720,13 +2724,17 @@ export type Passive = z.infer<typeof PassiveSchema>;
 
 // How a spell is cast without a slot (stats.ts freeCastActions): `true` once per Long Rest each; "shortRest" once per
 // Short or Long Rest each, as Signature Spells; "atWill" at its lowest level whenever, as Spell Mastery; or by spending
-// a use of `resource`, as War God's Blessing's Channel Divinity, then lasting `minutes` without Concentration.
+// a use of `resource`, as War God's Blessing's Channel Divinity, then lasting `minutes` without Concentration. With
+// `slotLevel`, it's cast as with a slot of the level keyed by the highest character level reached, as Genie Magic's
+// level 2 slot from level 11, and only a spell of that level or lower is cast so.
 export const FreeCastSchema = z.union([
   z.literal(true),
   z.enum(["shortRest", "atWill"]),
   z.strictObject({
-    resource: z.string().min(1),
+    resource: z.string().regex(/^[a-z0-9-]+$/),
     minutes: z.number().int().min(1).optional(),
+    slotLevel: z.record(z.string(), z.number().int().min(1).max(9)).optional(),
+    self: z.literal(true).optional(), // cast so only on the caster, as Vampire Touched's Spider Climb
   }),
 ]);
 export type FreeCast = z.infer<typeof FreeCastSchema>;
@@ -2822,12 +2830,28 @@ export const FeatureSchema = ContentEntrySchema.extend({
     .strictObject({
       feat: ContentIdSchema,
       spells: z.record(z.string(), z.array(ContentIdSchema)),
+      // Its own and these spells are also cast so with that feat, as Potent Dragonmark's extra slot.
+      freeCast: z.lazy(() => FreeCastSchema).optional(),
     })
     .optional(),
   // These spells' damage takes this type instead, as Rimekin's Cold Fire Magic.
   retype: z.record(ContentIdSchema, DamageTypeSchema).optional(),
-  // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched.
-  freeCast: z.lazy(() => FreeCastSchema).optional(),
+  // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched, or each
+  // as its own entry says, as Drow High Magic's at-will Detect Magic beside its once-a-day spells.
+  freeCast: z
+    .union([
+      z.lazy(() => FreeCastSchema),
+      z.record(
+        ContentIdSchema,
+        z.lazy(() => FreeCastSchema),
+      ),
+    ])
+    .optional(),
+  // Spells it casts only by its free cast, never known, as Genie Magic's level 1 Sorcerer spells, picked as cast.
+  castsOnly: z.array(ContentIdSchema).min(1).optional(),
+  // Its cantrip can be replaced after a Long Rest by one from these class lists, as a High Elf's Prestidigitation
+  // (swap.ts).
+  swapCantrip: z.array(ContentIdSchema).min(1).optional(),
   // Its damage is added to a hit's, so it takes that hit's damage type, as a Battle Master maneuver's die does.
   hitType: z.literal(true).optional(),
   // Dice its slot-spending activations add for each slot level, as with Eldritch Smite.
@@ -2943,6 +2967,16 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     from: z.array(ContentIdSchema).min(1).optional(), // only these, as a feat's own table
     // The list of the version of this feat the character took, as "the list you chose for Magic Initiate".
     listOf: ContentIdSchema.optional(),
+    also: z.array(ContentIdSchema).min(1).optional(), // these too, beside the list, as Boon of Siberys' own table
+    // One of the picks can be replaced each time the character gains a level, as Magic Initiate's (swap.ts).
+    swap: z.literal("levelUp").optional(),
+    // As many picks as the Proficiency Bonus, made between scenes and one more as it rises, as Ritual Caster's
+    // (swap.ts). Such a choice and an `ifKnown` one are never asked as the feat is taken, so old saves replay.
+    grows: z.literal("proficiency").optional(),
+    late: z.literal(true).optional(), // picked between scenes, as a background's feat added after saves were made
+    // Picked between scenes, only by a character who knows this spell from elsewhere, as Light Bringer's Cleric
+    // cantrip in place of a Light already known.
+    ifKnown: ContentIdSchema.optional(),
   }),
   // The spellcasting ability of the feat's spells, as Magic Initiate's "Intelligence, Wisdom, or Charisma".
   z.strictObject({

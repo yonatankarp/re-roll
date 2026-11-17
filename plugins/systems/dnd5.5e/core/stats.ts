@@ -293,49 +293,156 @@ function unconcentrated(activation: Activation, minutes: number): Activation {
   );
 }
 
-// A leveled spell a feat or feature lets the character cast without a slot, as its own action (FreeCastSchema).
+// A leveled spell a feat or feature lets the character cast without a slot, as its own action (FreeCastSchema). The
+// ways a spell has share one action and pool when they're its own once-a-rest uses, as Hex from two traits, and each
+// spending another resource is an action of its own, "spell:<spell>:free:<resource>" after the first.
 function freeCastActions(
-  spells: ReadonlyMap<string, FreeCast>,
+  spells: ReadonlyMap<string, readonly FreeCast[]>,
   access: ContentAccess,
+  level: number,
 ): { action: KnownAction; resource: Feature["resources"][number] | null }[] {
-  return [...spells].flatMap(([spellId, how]) => {
+  return [...spells].flatMap(([spellId, ways]) => {
     if (!access.content(spellId)) return [];
     const spell = lookup(access, SpellSchema, spellId);
     const { activation } = spell;
     if (spell.level === 0 || !activation) return [];
     if (!doesSomething(activation.resolution)) return [];
-    const own = how === true || how === "shortRest";
-    const id = typeof how === "object" ? how.resource : `free:${spellId}`;
-    const cast =
-      typeof how === "object" && how.minutes !== undefined
-        ? unconcentrated(activation, how.minutes)
-        : activation;
+    const isOwn = (how: FreeCast) => how === true || how === "shortRest";
+    const own = ways.filter(isOwn);
+    const [first] = own;
+    const kinds = [
+      ...(first === undefined ? [] : [first]),
+      ...new Set(ways.filter((how) => !isOwn(how))),
+    ];
+    return kinds.flatMap((how, index) => {
+      const id = typeof how === "object" ? how.resource : `free:${spellId}`;
+      const slot =
+        typeof how === "object" && how.slotLevel
+          ? Object.entries(how.slotLevel)
+              .filter(([from]) => Number(from) <= level)
+              .reduce((best, [, at]) => Math.max(best, at), 0)
+          : spell.level;
+      if (slot < spell.level) return [];
+      const step = spell.upcast?.perSlotLevel;
+      const leveled =
+        slot > spell.level && step
+          ? scaleActivation(activation, step, slot - spell.level)
+          : activation;
+      const lasting =
+        typeof how === "object" && how.minutes !== undefined
+          ? unconcentrated(leveled, how.minutes)
+          : leveled;
+      const cast =
+        typeof how === "object" && how.self
+          ? { ...lasting, targeting: { self: true as const } }
+          : lasting;
+      const suffix =
+        index === 0 ? "" : `:${typeof how === "object" ? how.resource : how}`;
+      return [
+        {
+          action: {
+            id: `spell:${spellId}:free${suffix}`,
+            name: `${spell.name} (free)`,
+            activation: {
+              ...cast,
+              cost: [
+                ...activation.cost.filter((cost) => cost !== "slot"),
+                ...(how === "atWill" ? [] : [{ resource: id }]),
+              ],
+            },
+            spellLevel: slot,
+          },
+          resource: isOwn(how)
+            ? {
+                id,
+                max: { base: own.length, add: [] },
+                recharge: [
+                  {
+                    on: how === true ? "longRest" : "shortRest",
+                    amount: "all",
+                  },
+                ],
+              }
+            : null,
+        },
+      ];
+    });
+  });
+}
+
+// A trait's own cantrips, before any swap (swap.ts).
+export function traitCantrips(
+  feature: Pick<Feature, "spells">,
+  access: ContentAccess,
+): readonly string[] {
+  return Object.values(feature.spells ?? {})
+    .flat()
+    .filter(
+      (id) =>
+        Boolean(access.content(id)) &&
+        lookup(access, SpellSchema, id).level === 0,
+    );
+}
+
+// Where the late picks of a feat's choice are kept in `swaps` (swap.ts), and back.
+export function latePickKey(feat: string, choice: string): string {
+  return `pick:${feat}#${choice}`;
+}
+function latePicks(
+  swaps: Readonly<Record<string, readonly string[]>>,
+  feats: ReadonlySet<string>,
+  access: ContentAccess,
+): { feat: string; spells: readonly string[]; freeCast?: FreeCast }[] {
+  return Object.entries(swaps).flatMap(([key, spells]) => {
+    const hash = key.lastIndexOf("#");
+    if (!key.startsWith("pick:") || hash < 0) return [];
+    const feat = key.slice(5, hash);
+    if (!feats.has(feat)) return [];
+    const choice = lookup(access, FeatSchema, feat).choices.find(
+      (item) => item.id === key.slice(hash + 1),
+    );
+    if (choice?.kind !== "spells") return [];
     return [
       {
-        action: {
-          id: `spell:${spellId}:free`,
-          name: `${spell.name} (free)`,
-          activation: {
-            ...cast,
-            cost: [
-              ...activation.cost.filter((cost) => cost !== "slot"),
-              ...(how === "atWill" ? [] : [{ resource: id }]),
-            ],
-          },
-          spellLevel: spell.level,
-        },
-        resource: own
-          ? {
-              id,
-              max: { base: 1, add: [] },
-              recharge: [
-                { on: how === true ? "longRest" : "shortRest", amount: "all" },
-              ],
-            }
-          : null,
+        feat,
+        spells,
+        ...(choice.freeCast ? { freeCast: choice.freeCast } : {}),
       },
     ];
   });
+}
+
+// How a feature casts one of its spells without a slot: all alike, or each as its own entry says.
+function freeCastOf(
+  how: Feature["freeCast"],
+  spell: string,
+): FreeCast | undefined {
+  if (how === undefined || how === true || typeof how === "string") return how;
+  return "resource" in how && typeof how.resource === "string"
+    ? (how as FreeCast)
+    : (how as Record<string, FreeCast>)[spell];
+}
+
+// A feature's spells with a trait's cantrip swapped after a Long Rest (swap.ts).
+function swappedSpells(
+  id: string,
+  feature: Pick<Feature, "spells" | "swapCantrip">,
+  swaps: Readonly<Record<string, readonly string[]>>,
+  access: ContentAccess,
+): Feature["spells"] {
+  const swapped = swaps[`trait:${id}`];
+  if (!feature.swapCantrip || !swapped) return feature.spells;
+  const cantrips = traitCantrips(feature, access);
+  const entries = Object.entries(feature.spells ?? {});
+  return Object.fromEntries(
+    entries.map(([from, ids], index) => [
+      from,
+      [
+        ...ids.filter((spell) => !cantrips.includes(spell)),
+        ...(index === 0 ? swapped : []),
+      ],
+    ]),
+  );
 }
 
 // A charged item's pools and spells (ChargedSchema). An entry with versions counts as its first, as its passives do.
@@ -522,6 +629,7 @@ function featSpellAbilities(
   originFeats: readonly string[],
   species: Species,
   access: ContentAccess,
+  swaps: Readonly<Record<string, readonly string[]>> = {},
 ): ReadonlyMap<string, Ability> {
   const byFeat = new Map<string, Ability>();
   const taken: [string, CharacterBuild["levels"][number]["answers"]][] = [];
@@ -569,7 +677,12 @@ function featSpellAbilities(
   const featureSpells = (ids: readonly string[], ability: Ability) => {
     for (const grant of ids) {
       const feature = FeatureSchema.safeParse(access.content(grant)).data;
-      for (const spells of [feature?.spells, feature?.spellsBySlot]) {
+      const own = feature && swappedSpells(grant, feature, swaps, access);
+      for (const spells of [
+        own,
+        feature?.spellsBySlot,
+        { castsOnly: feature?.castsOnly ?? [] },
+      ]) {
         for (const spell of Object.values(spells ?? {}).flat()) {
           bySpell.set(spell, ability);
         }
@@ -596,6 +709,10 @@ function featSpellAbilities(
   }
   const own = byFeat.get(species.id);
   if (own) featureSpells(species.traits, own);
+  for (const pick of latePicks(swaps, new Set(byFeat.keys()), access)) {
+    const ability = byFeat.get(pick.feat);
+    if (ability) for (const spell of pick.spells) bySpell.set(spell, ability);
+  }
   return bySpell;
 }
 
@@ -707,6 +824,7 @@ function collectFeatureData(
   feats: ReadonlySet<string> = new Set(),
   classLevels: Readonly<Record<string, number>> = {},
   variants: Readonly<Record<string, readonly string[]>> = {},
+  swaps: Readonly<Record<string, readonly string[]>> = {},
 ): {
   passives: Passive[];
   actions: KnownAction[];
@@ -755,22 +873,36 @@ function collectFeatureData(
     Object.assign(retype, feature.retype);
     passives.push(...feature.passives);
     resources.push(...feature.resources);
-    for (const [from, ids] of Object.entries(feature.spells ?? {})) {
+    const own: string[] = [];
+    for (const [from, ids] of Object.entries(
+      swappedSpells(id, feature, swaps, access) ?? {},
+    )) {
       if (Number(from) > level) continue;
-      spells.push(...ids);
-      const how = feature.freeCast;
-      if (how)
-        free.push(...ids.map((spell): [string, FreeCast] => [spell, how]));
+      own.push(...ids);
+      for (const spell of ids) {
+        const how = freeCastOf(feature.freeCast, spell);
+        if (how) free.push([spell, how]);
+      }
     }
+    spells.push(...own);
     const { preparedWith } = feature;
+    const prepared =
+      preparedWith && feats.has(preparedWith.feat) ? preparedWith : undefined;
     for (const [slot, ids] of Object.entries({
       ...feature.spellsBySlot,
-      ...(preparedWith && feats.has(preparedWith.feat)
-        ? preparedWith.spells
-        : {}),
+      ...prepared?.spells,
     })) {
-      if (Number(slot) <= highestSlot) spells.push(...ids);
+      if (Number(slot) > highestSlot) continue;
+      spells.push(...ids);
+      if (prepared?.spells[slot] === ids) own.push(...ids);
     }
+    for (const spell of feature.castsOnly ?? []) {
+      const how = freeCastOf(feature.freeCast, spell);
+      if (how) free.push([spell, how]);
+    }
+    const extra = prepared?.freeCast;
+    if (extra)
+      free.push(...own.map((spell): [string, FreeCast] => [spell, extra]));
     feature.activations.forEach((activation, index) => {
       if (activation.label && replaced.get(id)?.has(activation.label)) return;
       actions.push({
@@ -1130,7 +1262,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const skills = new Set<Skill>(background.skills);
   const expertise = new Set<Skill>();
   const knownSpells = new Set<string>();
-  const freeSpells = new Map<string, FreeCast>(); // also cast without a slot
+  const freeSpells = new Map<string, FreeCast[]>(); // also cast without a slot
+  const freeAlso = (spell: string, how: FreeCast) =>
+    freeSpells.set(spell, [...(freeSpells.get(spell) ?? []), how]);
+  const swaps = actor.swaps ?? {};
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
   const featureIds = new Set<string>(species.traits);
   const variants: Record<string, string[]> = {}; // the variants picked, by feature
@@ -1178,7 +1313,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       } else if (answer.kind === "spells") {
         for (const spell of answer.values) {
           knownSpells.add(spell);
-          if (answer.freeCast) freeSpells.set(spell, answer.freeCast);
+          if (answer.freeCast) freeAlso(spell, answer.freeCast);
         }
       } else if (answer.kind === "features") {
         for (const id of answer.values) featureIds.add(id);
@@ -1307,7 +1442,18 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     featIds,
     classLevels,
     variants,
+    swaps,
   );
+  for (const pick of latePicks(
+    swaps,
+    new Set([...featIds, ...(replaced ? [] : [background.feat])]),
+    access,
+  )) {
+    for (const spell of pick.spells) {
+      knownSpells.add(spell);
+      if (pick.freeCast) freeAlso(spell, pick.freeCast);
+    }
+  }
   // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
   const traits = [...itemPassives, ...fromFeatures.passives];
   const castingAbility = featSpellAbilities(
@@ -1315,6 +1461,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     replaced ? [] : [background.feat],
     species,
     access,
+    swaps,
   );
   const armorBases: number[] = [];
   const flatBonus = magic.ac;
@@ -1434,12 +1581,13 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   for (const spellId of fromFeatures.spells) {
     if (access.content(spellId)) knownSpells.add(spellId);
   }
-  for (const [spellId, how] of fromFeatures.free) freeSpells.set(spellId, how);
-  const freeCasts = untrainedArmor ? [] : freeCastActions(freeSpells, access);
+  for (const [spellId, how] of fromFeatures.free) freeAlso(spellId, how);
+  const freeCasts = untrainedArmor
+    ? []
+    : freeCastActions(freeSpells, access, level);
   actions.push(
     ...freeCasts.map(({ action }) => {
-      // Its id is "spell:<spell>:free".
-      const ability = castingAbility.get(action.id.slice(6, -5));
+      const ability = castingAbility.get(spellOfSource(action.id) ?? "");
       return ability
         ? { ...action, activation: castWith(action.activation, ability) }
         : action;

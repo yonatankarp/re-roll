@@ -212,6 +212,8 @@ function attackAdvantaged(
       return target.hp < targetStats.maxHp;
     case "targetFrightened":
       return hasCondition(target, "frightened");
+    case "targetCharmed":
+      return hasCondition(target, "charmed");
     case "marked":
       return (
         passive.against !== undefined &&
@@ -442,6 +444,13 @@ export function rescuedSave(
         (resource === undefined || event.payload.resource === resource),
     ).length;
   for (const passive of stats.passives) {
+    const die =
+      passive.kind === "saveRescue" && passive.bonusDice
+        ? (scaledDice(
+            { dice: passive.bonusDice, dieSize: passive.dieSize },
+            stats.scaling,
+          ) ?? passive.bonusDice)
+        : undefined;
     if (
       passive.kind !== "saveRescue" ||
       // A save to keep Concentration is rescued only by what names it, as a Ring of Dedicated Focus.
@@ -456,10 +465,10 @@ export function rescuedSave(
       ) ||
       (passive.bonus && total + evaluateFormula(passive.bonus, stats) < dc) ||
       (passive.magical && !magical) ||
-      (passive.bonusDice &&
+      (die &&
         (!dice ||
-          total + rollDiceNotation(passive.bonusDice, HIGHEST) < dc ||
-          total + rollDiceNotation(passive.bonusDice, dice) < dc)) ||
+          total + rollDiceNotation(die, HIGHEST) < dc ||
+          total + rollDiceNotation(die, dice) < dc)) ||
       (passive.reaction &&
         (!target.budget.reaction ||
           hasCondition(target, ...INCAPACITATING) ||

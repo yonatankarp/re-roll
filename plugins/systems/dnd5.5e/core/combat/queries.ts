@@ -50,7 +50,12 @@ import {
   throughOf,
 } from "../movement-modes.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
-import { encodeOption, THROW_PREFIX, weaponItemId } from "./ids.ts";
+import {
+  encodeOption,
+  spellOfSource,
+  THROW_PREFIX,
+  weaponItemId,
+} from "./ids.ts";
 import { markedBy } from "../trait-rules.ts";
 import { swallowerOf } from "./swallow.ts";
 import { hasteActing, limitsOf } from "./durations.ts";
@@ -792,7 +797,7 @@ export function underEffect(actor: Actor, ids: readonly string[]): boolean {
     (id) =>
       actor.activeEffects.some(({ sourceId }) =>
         sourceId.startsWith(`feature:${id}:`),
-      ) || actor.concentratingOn?.replace(/:free$/, "") === `spell:${id}`,
+      ) || spellOfSource(actor.concentratingOn ?? "") === id,
   );
 }
 

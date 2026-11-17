@@ -19,3 +19,59 @@
     text: "Learn two cantrips and one level 1 spell.",
     grants: ["srd52:feature/magic-initiate"],
   }
+- {
+    id: "srd52:feat/magic-initiate-cleric",
+    name: Magic Initiate (Cleric),
+    category: origin,
+    text: "Learn two Cleric cantrips and one level 1 Cleric spell, cast once per Long Rest without a slot.",
+    grants: ["srd52:feature/magic-initiate"],
+    # Picked between scenes: saves of the backgrounds that give it were made before it asked.
+    choices:
+      [
+        {
+          kind: spells,
+          id: cantrips,
+          count: 2,
+          maxLevel: 0,
+          list: "srd52:class/cleric",
+          late: true,
+        },
+        {
+          kind: spells,
+          id: spell,
+          count: 1,
+          maxLevel: 1,
+          list: "srd52:class/cleric",
+          freeCast: true,
+          late: true,
+        },
+      ],
+  }
+- {
+    id: "srd52:feat/magic-initiate-wizard",
+    name: Magic Initiate (Wizard),
+    category: origin,
+    text: "Learn two Wizard cantrips and one level 1 Wizard spell, cast once per Long Rest without a slot.",
+    grants: ["srd52:feature/magic-initiate"],
+    # Picked between scenes: saves of the backgrounds that give it were made before it asked.
+    choices:
+      [
+        {
+          kind: spells,
+          id: cantrips,
+          count: 2,
+          maxLevel: 0,
+          list: "srd52:class/wizard",
+          late: true,
+        },
+        {
+          kind: spells,
+          id: spell,
+          count: 1,
+          maxLevel: 1,
+          list: "srd52:class/wizard",
+          freeCast: true,
+          late: true,
+        },
+      ],
+  }
