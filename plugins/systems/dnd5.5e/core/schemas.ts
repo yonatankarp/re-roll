@@ -252,6 +252,9 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
   }),
   // The damage that set a reaction off, as Rebuke the Violent's (combat/reactions.ts takeReaction); 0 anywhere else.
   z.strictObject({ kind: z.literal("dealt") }),
+  // The level of the slot the spell is cast with, as Blessed Healer's 2 plus the slot's level (combat/school.ts
+  // castRiders); 0 anywhere else.
+  z.strictObject({ kind: z.literal("slotLevel") }),
 ]);
 
 export const FormulaSchema = z.strictObject({
@@ -2125,6 +2128,18 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       )
       .min(1),
   }),
+  // A spell the bearer casts heals this much more on each creature it heals, as Disciple of Life's 2 plus the slot's
+  // level (`perSlot`), only cast with a slot (`slot`) or of this class's list (`list`).
+  // shortcut: the bonus goes to every creature a spell heals, not to one roll, as Alchemical Savant says.
+  z.strictObject({
+    kind: z.literal("spellHealing"),
+    bonus: FormulaSchema,
+    perSlot: z.literal(true).optional(),
+    slot: z.literal(true).optional(),
+    list: ContentIdSchema.optional(),
+  }),
+  // Healing dice of the bearer's spells and Channel Divinity count as their highest faces, as Supreme Healing.
+  z.strictObject({ kind: z.literal("maxHealingDice") }),
   // Recovering slots that way also heals, as the Scarlet Spellbook's Arcane Stamina.
   z.strictObject({ kind: z.literal("recoveryHeal"), amount: AmountSchema }),
   // Each party member's first Hit Point Die spent in a Short Rest heals this much more, as Chef's Replenishing Meal.
@@ -2566,11 +2581,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // With `school` instead, casting a spell of that school with an action and a spell slot does, as Bewitching
   // Magic's Misty Step after an Enchantment spell. With `uses`, casting one of these spells does, as Hunter's Rime's
   // Temporary Hit Points with Hunter's Mark, and `onTargets` go on the spell's targets, as its hold on the marked.
+  // With `heals`, a spell that restores Hit Points to a creature other than the caster, as Blessed Healer's own
+  // healing; `slot` only with a spell slot, and a `slotLevel` term in its effects is that slot's level.
   z.strictObject({
     kind: z.literal("castRider"),
     damage: DamageTypeSchema.optional(),
     school: z.array(SpellSchoolSchema).min(1).optional(),
     uses: z.array(ContentIdSchema).min(1).optional(),
+    heals: z.literal(true).optional(),
+    slot: z.literal(true).optional(),
     effects: z.array(LeafEffectSchema).min(1),
     onTargets: z.array(LeafEffectSchema).min(1).optional(),
     resource: z.string().optional(), // spending a use, only while one is left, as Defy Death's after Spare the Dying
@@ -2662,11 +2681,21 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // A spell the bearer casts adds this to its damage: only one of `spells`, or one dealing one of `types` (the bonus
   // taking that type), and with `oncePerTurn` once a turn, as Guided Precision's Cartographer spells or Radiant Soul.
   // shortcut: the bonus goes to every target of a spell that has several, not only one.
+  // With `dice` the spell deals them too, in the damage's type or `type`, as Alchemical Eruption's 2d8 Force or Arcane
+  // Firearm's 1d8. `list` keeps it to spells on that class's list and `schools` to those schools, as Empowered
+  // Evocation's Wizard evocations; `slot` to casts with a spell slot; and `resource` spends a use each cast, while one
+  // is left, as Arcane Overload's Power Surge.
   z.strictObject({
     kind: z.literal("spellDamage"),
-    bonus: FormulaSchema,
+    bonus: FormulaSchema.optional(),
+    dice: DiceSchema.optional(),
+    type: DamageTypeSchema.optional(),
     spells: z.array(ContentIdSchema).min(1).optional(),
     types: z.array(DamageTypeSchema).min(1).optional(),
+    list: ContentIdSchema.optional(),
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
+    slot: z.literal(true).optional(),
+    resource: z.string().min(1).optional(),
     oncePerTurn: z.literal(true).optional(),
   }),
   // Right after a Critical Hit with a melee weapon, or one that drops a creature to 0 Hit Points, one attack with that

@@ -2,6 +2,7 @@ import type { Frame, SystemEvent } from "#sdk";
 import { ClassSchema, type Passive, SpellSchema } from "../schemas.ts";
 import { type Actor, dndEvent, NS } from "../state.ts";
 import {
+  atSlotLevel,
   deriveStats,
   evaluateFormula,
   type KnownAction,
@@ -162,6 +163,18 @@ export function fueledDamage(
   };
 }
 
+// Whether a spell restores Hit Points.
+function heals(action: KnownAction): boolean {
+  const { resolution } = action.activation;
+  const effects =
+    resolution.kind === "automatic"
+      ? resolution.effects
+      : resolution.kind === "save"
+        ? [...resolution.onFail, ...resolution.onSuccess]
+        : resolution.onHit;
+  return effects.some((effect) => effect.kind === "heal");
+}
+
 // Flames of Phlegethos: casting a spell that deals the type puts the rider's effects on the caster. Bewitching
 // Magic: casting one of the school with an action and a slot does, its teleport landing where the caster picks.
 export function castRiders(
@@ -190,6 +203,7 @@ export function castRiders(
     ) {
       return [];
     }
+    if (passive.slot && slotLevel === undefined) return [];
     const fits = passive.uses
       ? passive.uses.some(
           (id) =>
@@ -199,7 +213,9 @@ export function castRiders(
         ? slotLevel !== undefined &&
           cost.includes("action") &&
           passive.school.some((item) => item === school)
-        : passive.damage !== undefined && types.has(passive.damage);
+        : passive.heals
+          ? heals(action) && targets.some((item) => item.id !== actor.id)
+          : passive.damage !== undefined && types.has(passive.damage);
     return fits ? [passive] : [];
   });
   // Simbul's Synostodweomer: a slot spell rolls as many Hit Point Dice as the slot's level.
@@ -236,7 +252,13 @@ export function castRiders(
         ...(resource
           ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
           : []),
-        ...leafEvents(effects, `castRider:${action.id}`, actor, actor, context),
+        ...leafEvents(
+          atSlotLevel(effects, slotLevel ?? 0),
+          `castRider:${action.id}`,
+          actor,
+          actor,
+          context,
+        ),
         // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
         ...(onTargets
           ? targets.flatMap((target) =>

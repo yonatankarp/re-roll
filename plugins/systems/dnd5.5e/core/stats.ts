@@ -1017,66 +1017,93 @@ function withExtraTargets(
   });
 }
 
-// Spells with a `spellDamage` bonus added to their damage, while its once-a-turn use is left.
+// Spells with a `spellDamage` bonus added to their damage, while its once-a-turn use (and its resource) is left.
 function withSpellDamage(
   actions: readonly KnownAction[],
   passives: readonly Passive[],
   actor: Actor,
+  access: ContentAccess,
 ): KnownAction[] {
   const bonuses = passives.flatMap((passive, index) =>
     passive.kind === "spellDamage" &&
     !(
       passive.oncePerTurn &&
       actor.usedThisTurn.includes(`spellDamage:${String(index)}`)
-    )
+    ) &&
+    // shortcut: a resource counts as left only while none of it is spent, as maximums are worked out after this.
+    !(passive.resource && (actor.resourcesSpent[passive.resource] ?? 0) > 0)
       ? [{ passive, key: `spellDamage:${String(index)}` }]
       : [],
   );
   if (bonuses.length === 0) return [...actions];
   return actions.map((action) => {
-    if (action.spellLevel === null || !action.id.startsWith("spell:")) {
-      return action;
-    }
-    const spellId = action.id.slice("spell:".length).replace(/:free$/, "");
-    let { resolution } = action.activation;
+    const spellId = spellOfSource(action.id);
+    if (action.spellLevel === null || spellId === null) return action;
+    const spell = SpellSchema.safeParse(access.content(spellId)).data;
+    let { resolution, cost } = action.activation;
     const keys: string[] = [];
     for (const { passive, key } of bonuses) {
       if (passive.spells && !passive.spells.includes(spellId)) continue;
+      if (passive.schools && !(spell && passive.schools.includes(spell.school)))
+        continue;
+      if (passive.list && !onList(spellId, spell, passive.list, access))
+        continue;
+      if (passive.slot && !cost.includes("slot")) continue;
       const at = resolution.damage.findIndex(
         (item) => !passive.types || passive.types.includes(item.type),
       );
       const entry = resolution.damage[at];
       if (!entry) continue;
-      const damage = resolution.damage.map((item, index) =>
-        index === at
+      const { bonus, dice } = passive;
+      const raised = resolution.damage.map((item, index) =>
+        index === at && bonus
           ? {
               ...item,
               amount: {
                 ...item.amount,
                 bonus: {
-                  base: (item.amount.bonus?.base ?? 0) + passive.bonus.base,
-                  add: [
-                    ...(item.amount.bonus?.add ?? []),
-                    ...passive.bonus.add,
-                  ],
+                  base: (item.amount.bonus?.base ?? 0) + bonus.base,
+                  add: [...(item.amount.bonus?.add ?? []), ...bonus.add],
+                  ...(bonus.min === undefined ? {} : { min: bonus.min }),
                 },
               },
             }
           : item,
       );
+      // Dice of their own, in the damage's type or `type`, as Alchemical Eruption's Force.
+      const damage = dice
+        ? [...raised, { amount: { dice }, type: passive.type ?? entry.type }]
+        : raised;
       resolution = { ...resolution, damage };
+      if (passive.resource) cost = [...cost, { resource: passive.resource }];
       if (passive.oncePerTurn) keys.push(key);
     }
     return keys.length === 0 && resolution === action.activation.resolution
       ? action
       : {
           ...action,
-          activation: { ...action.activation, resolution },
+          activation: { ...action.activation, resolution, cost },
           ...(keys.length > 0
             ? { onceKeys: [...(action.onceKeys ?? []), ...keys] }
             : {}),
         };
   });
+}
+
+// Whether a spell is on a class's list: the spell names the class, or the class's chapter names the spell.
+export function onList(
+  spellId: string,
+  spell: Spell | undefined,
+  list: string,
+  access: ContentAccess,
+): boolean {
+  return (
+    (spell?.classes.includes(list) ?? false) ||
+    (ClassSchema.safeParse(access.content(list)).data?.spellList?.includes(
+      spellId,
+    ) ??
+      false)
+  );
 }
 
 // A feature's activations with the effects other features ride on them, as Tactical Shift's move on Second Wind.
@@ -1822,6 +1849,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
             ),
             fromFeatures.passives,
             actor,
+            access,
           ),
           fromFeatures.passives,
           actor,
@@ -2900,6 +2928,33 @@ export function spellSaveDc(stats: Stats): number {
   );
 }
 
+// Effects with their `slotLevel` terms worked out for a cast with this slot.
+export function atSlotLevel<T>(value: T, slot: number): T {
+  return slotted(value, slot) as T;
+}
+
+function slotted(value: unknown, slot: number): unknown {
+  if (Array.isArray(value)) return value.map((item) => slotted(item, slot));
+  if (value === null || typeof value !== "object") return value;
+  const copy: Record<string, unknown> = Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, slotted(item, slot)]),
+  );
+  const terms: unknown[] = Array.isArray(copy.add) ? copy.add : [];
+  const isSlot = (term: unknown) =>
+    typeof term === "object" &&
+    term !== null &&
+    "kind" in term &&
+    term.kind === "slotLevel";
+  const count = terms.filter(isSlot).length;
+  return count === 0
+    ? copy
+    : {
+        ...copy,
+        base: (typeof copy.base === "number" ? copy.base : 0) + count * slot,
+        add: terms.filter((term) => !isSlot(term)),
+      };
+}
+
 export function evaluateFormula(formula: Formula, stats: Stats): number {
   let total = formula.base;
   for (const term of formula.add) {
@@ -2949,6 +3004,7 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
         );
         break;
       case "dealt": // filled in by the reaction it's part of
+      case "slotLevel": // filled in by the cast it's part of (atSlotLevel)
         break;
       default:
         term satisfies never;

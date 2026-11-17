@@ -17,6 +17,8 @@ import {
   runClassOption,
 } from "../plugins/systems/dnd5.5e/core/class-options.ts";
 import { recovered } from "../plugins/systems/dnd5.5e/core/rest.ts";
+import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { castRiders } from "../plugins/systems/dnd5.5e/core/combat/school.ts";
 import {
   type CharacterBuild,
   ClassSchema,
@@ -211,6 +213,53 @@ const FIXTURES = [
           { level: 1, points: 2, from: 1 },
           { level: 2, points: 3, from: 3 },
         ],
+      },
+    ],
+  },
+  {
+    id: "test:feature/life",
+    name: "Life",
+    text,
+    automation: "full",
+    passives: [
+      {
+        kind: "spellHealing",
+        bonus: { base: 2 },
+        perSlot: true,
+        slot: true,
+      },
+      { kind: "maxHealingDice" },
+      {
+        kind: "castRider",
+        heals: true,
+        slot: true,
+        effects: [
+          {
+            kind: "heal",
+            amount: { bonus: { base: 2, add: [{ kind: "slotLevel" }] } },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "test:feature/evoker",
+    name: "Evoker",
+    text,
+    automation: "full",
+    passives: [
+      {
+        kind: "spellDamage",
+        bonus: { add: [{ kind: "abilityMod", ability: "wis" }] },
+        schools: ["evocation"],
+        list: WIZARD,
+      },
+      {
+        kind: "spellDamage",
+        dice: "2d8",
+        type: "force",
+        types: ["fire"],
+        oncePerTurn: true,
       },
     ],
   },
@@ -643,5 +692,117 @@ describe("a class's picks as one scene action", () => {
       key: "1:0",
       drop: "srd52:spell/shield-of-faith",
     });
+  });
+});
+
+describe("spells that heal more and hit harder", () => {
+  const healer = () =>
+    priest([[{ kind: "features", values: ["test:feature/life"] }], [], []]);
+  const hurt = () => ({
+    ...freshActor({
+      id: "friend",
+      name: "Friend",
+      side: "party",
+      source: { kind: "character", build: priestBuild([[]]) },
+      hp: 1,
+      inventory: [],
+    }),
+  });
+  const context = (actors: readonly Actor[]) => ({
+    ...run,
+    state: {
+      actors: Object.fromEntries(actors.map((item) => [item.id, item])),
+      combat: null,
+    },
+    dice: { below: () => 0, roll: () => 1 },
+  });
+  const healed = (events: readonly { kind: string }[]) =>
+    events.flatMap((item) =>
+      item.kind === `${NS}:healed` && "payload" in item
+        ? [item.payload as { actor: string; amount: number }]
+        : [],
+    );
+
+  it("heals with the dice's highest faces and 2 plus the slot's level more", () => {
+    const caster = healer();
+    const friend = hurt();
+    const events = leafEvents(
+      [{ kind: "heal", amount: { dice: "2d8" } }],
+      "spell:srd52:spell/cure-wounds",
+      caster,
+      friend,
+      context([caster, friend]),
+      undefined,
+      2,
+    );
+    // 16 from the dice at their highest, 4 from the slot; the friend has room for 9.
+    expect(healed(events)).toEqual([{ actor: "friend", amount: 9, max: 10 }]);
+    const free = leafEvents(
+      [{ kind: "heal", amount: { bonus: { base: 1, add: [] } } }],
+      "spell:srd52:spell/cure-wounds:free",
+      caster,
+      friend,
+      context([caster, friend]),
+    );
+    expect(healed(free)[0]?.amount).toBe(1);
+  });
+
+  it("heals the caster 2 plus the slot's level after healing another with a slot", () => {
+    const caster = { ...healer(), hp: 5 };
+    const friend = hurt();
+    const cure = stats(caster).actions.find(
+      (item) => item.id === "spell:srd52:spell/cure-wounds",
+    );
+    const known = deriveStats(
+      priest([[{ kind: "spells", values: ["srd52:spell/cure-wounds"] }]]),
+      run,
+    ).actions.find((item) => item.id === "spell:srd52:spell/cure-wounds");
+    const action = cure ?? known;
+    if (!action) throw new Error("no Cure Wounds");
+    const { events } = castRiders(
+      caster,
+      action,
+      3,
+      context([caster, friend]),
+      [friend],
+    );
+    expect(healed(events)).toEqual([
+      { actor: PLAYER_ACTOR, amount: 5, max: 30 },
+    ]);
+    expect(
+      castRiders(caster, action, 3, context([caster, friend]), [caster]).events,
+    ).toEqual([]);
+  });
+
+  it("adds damage to a list's school, and dice of their own type to another's", () => {
+    const evoker = priest([
+      [
+        { kind: "features", values: ["test:feature/evoker"] },
+        {
+          kind: "spells",
+          values: ["srd52:spell/fire-bolt", "srd52:spell/sacred-flame"],
+        },
+      ],
+    ]);
+    const actions = stats(evoker).actions;
+    const bolt = actions.find(
+      (item) => item.id === "spell:srd52:spell/fire-bolt",
+    );
+    const [fire, force] = bolt?.activation.resolution.damage ?? [];
+    expect(fire?.type).toBe("fire");
+    expect(fire?.amount.bonus?.add).toEqual([
+      { kind: "abilityMod", ability: "wis" },
+    ]);
+    expect(force).toEqual({ amount: { dice: "2d8" }, type: "force" });
+    expect(bolt?.activation.resolution.damage).toHaveLength(2);
+    expect(bolt?.onceKeys).toContain("spellDamage:1");
+    // Sacred Flame is no Wizard evocation and deals no fire.
+    const flame = actions.find(
+      (item) => item.id === "spell:srd52:spell/sacred-flame",
+    );
+    expect(flame?.activation.resolution.damage).toHaveLength(1);
+    expect(
+      flame?.activation.resolution.damage[0]?.amount.bonus,
+    ).toBeUndefined();
   });
 });

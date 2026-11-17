@@ -324,6 +324,12 @@ function resolve(
     context,
     slot,
   );
+  // The slot it's cast with, its own level's unless a higher one was picked, so Disciple of Life sees it.
+  const spent =
+    slot ??
+    (between(action, context).activation.cost.includes("slot")
+      ? (action.spellLevel ?? undefined)
+      : undefined);
   for (const target of targets) {
     events.push(
       ...leafEvents(
@@ -333,7 +339,7 @@ function resolve(
         target,
         context,
         undefined,
-        slot,
+        spent,
       ),
     );
   }

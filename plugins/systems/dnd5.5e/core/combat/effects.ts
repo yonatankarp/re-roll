@@ -8,6 +8,7 @@ import {
   type KnownAction,
   lookup,
   modifierFor,
+  onList,
   passiveModifiers,
   rerollingOnes,
   rollAmount,
@@ -1624,6 +1625,33 @@ export function poolHealing(
   return { resource: pool.resource, spent, healed };
 }
 
+// What a caster's `spellHealing` passives add to the healing of a spell, cast with a slot of this level unless it's a
+// free cast or one from an item.
+function spellHealing(
+  spell: string,
+  sourceId: string,
+  stats: Stats,
+  context: Context,
+  slotLevel: number | undefined,
+): number {
+  const slotted =
+    slotLevel !== undefined &&
+    !/:free(:|$)/.test(sourceId) &&
+    castFrom(sourceId) === null;
+  const known = SpellSchema.safeParse(context.content(spell)).data;
+  return stats.passives.reduce(
+    (sum, passive) =>
+      passive.kind === "spellHealing" &&
+      (!passive.slot || slotted) &&
+      (!passive.list || onList(spell, known, passive.list, context))
+        ? sum +
+          evaluateFormula(passive.bonus, stats) +
+          (passive.perSlot && slotted ? slotLevel : 0)
+        : sum,
+    0,
+  );
+}
+
 export function leafEvents(
   effects: readonly LeafEffect[],
   sourceId: string,
@@ -1696,9 +1724,13 @@ export function leafEvents(
           0,
           (effect.half ? Math.floor(max / 2) : max) - Math.max(target.hp, 0),
         );
-        // Circle of Mortality: dice healing a creature at 0 Hit Points give their highest faces.
+        // Circle of Mortality: dice healing a creature at 0 Hit Points give their highest faces, and Supreme
+        // Healing's for any spell or Channel Divinity.
+        const spell = spellOfSource(sourceId);
+        const divine = sourceId.includes("channel-divinity");
         const dice =
-          target.hp <= 0 && hasPassive(stats, "maxHealingAtZero")
+          (target.hp <= 0 && hasPassive(stats, "maxHealingAtZero")) ||
+          ((spell !== null || divine) && hasPassive(stats, "maxHealingDice"))
             ? HIGHEST
             : healDice;
         const pool = effect.pool
@@ -1721,9 +1753,13 @@ export function leafEvents(
               : []),
           );
         }
-        const rolled = effect.full
-          ? max
-          : (pool?.healed ?? rollAmount(effect.amount, stats, dice));
+        const rolled =
+          (effect.full
+            ? max
+            : (pool?.healed ?? rollAmount(effect.amount, stats, dice))) +
+          (spell === null
+            ? 0
+            : spellHealing(spell, sourceId, stats, context, slotLevel));
         // Fortified Health: once a turn, healing gives the Constitution modifier more.
         const fortified = deriveStats(target, context).passives.find(
           (passive) => passive.kind === "healBonus",
