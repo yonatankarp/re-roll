@@ -973,6 +973,17 @@ export function makeJudge(context: Context, side: Actor): Judge {
       // Haste's extra attack each turn, and its AC.
       case "hasted":
         return 0.45 * own * lasting(span);
+      // A Potion of Giant Strength's score: about a tenth of its threat for each point its attack modifier rises.
+      case "setScore": {
+        const scores = stats(target).abilities;
+        const gain =
+          Math.floor((modifier.score - 10) / 2) -
+          Math.floor((scores[modifier.ability] - 10) / 2);
+        return gain > 0 &&
+          (modifier.ability === "str" || modifier.ability === "dex")
+          ? 0.1 * gain * own * lasting(span)
+          : 0;
+      }
       // Sealing or slowing a friend costs it what it would cost a foe.
       case "sealed":
         return -0.9 * own * lasting(span);
