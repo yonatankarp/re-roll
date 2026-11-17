@@ -81,17 +81,17 @@ const RELATION: Readonly<Record<LinkRef["rel"], string>> = {
   owner: "Lair of",
 };
 
-// The sections a monster, its family and its lair are in, each opened in place (#133).
+// The sections a monster, its family and its lair are in, each opened in place (#133), another book's too (#188).
 function linkRow(
   refs: readonly LinkRef[],
-  open: (file: string) => void,
+  open: (ref: LinkRef) => void,
 ): HTMLElement {
   return el(
     "nav",
     { class: "book-links" },
     ...refs.map((ref) =>
       button(`${RELATION[ref.rel]}: ${ref.heading}`, () => {
-        open(ref.file);
+        open(ref);
       }),
     ),
   );
@@ -189,20 +189,22 @@ export async function showBook(
   text.tabIndex = -1;
   const kindsBox = el("div");
   const rulings = el("div");
-  const openSection = async (file: string): Promise<void> => {
-    const [words, refs, links, kinds] = await Promise.all([
-      ctx.game.readSection(id, file),
-      ctx.game.rulings(id, file),
-      ctx.game.links(id, file),
-      ctx.game.kinds(id, file),
+  // A section of this book, or of another the library holds, as a family's in the Monster Manual (#188).
+  const openSection = async (file: string, from = id): Promise<void> => {
+    const [words, refs, all, kinds] = await Promise.all([
+      ctx.game.readSection(from, file),
+      ctx.game.rulings(from, file),
+      ctx.game.links(from, file),
+      ctx.game.kinds(from, file),
     ]);
+    const links = all.filter((ref) => !ref.book || books.includes(ref.book));
     text.textContent = words;
     kindsBox.replaceChildren(...(kinds.length > 0 ? [kindRow(kinds)] : []));
     rulings.replaceChildren(
       ...(links.length > 0
         ? [
             linkRow(links, (to) => {
-              ctx.act(() => openSection(to));
+              ctx.act(() => openSection(to.file, to.book ?? from));
             }),
           ]
         : []),

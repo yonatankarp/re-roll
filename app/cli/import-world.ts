@@ -11,6 +11,7 @@ import { createNodeStorage } from "../../engine/platform/node/storage.ts";
 import { scanPlugins } from "../../engine/run/loader.ts";
 import {
   type Entity,
+  type Verdict,
   checkCoverage,
   indexEntities,
   matchHeading,
@@ -119,7 +120,7 @@ for (const entity of report.entities.filter((e) => e.kind === "monster")) {
 }
 
 // Each book's drafts, and its families' and lairs' links, from where the book nests them.
-const plans = report.books.map(({ book, edition, verdicts }) => {
+const plans = report.books.map(({ book, edition, verdicts, members }) => {
   const record = catalog.plugins.get(book);
   const { drafts, homeless } = draftWorld(
     book,
@@ -157,6 +158,8 @@ const plans = report.books.map(({ book, edition, verdicts }) => {
       (e) => e.plugin === book && (e.kind === "monster" || e.kind === "npc"),
     ),
   });
+  // Where a family's section names its stat blocks only in prose or in another book, the coverage file does.
+  for (const [id, ids] of Object.entries(members)) links.set(id, [...ids]);
   return {
     book,
     edition,
@@ -180,6 +183,28 @@ for (const { book, edition, drafts, links } of plans)
     if (links.get(entry.id)?.some((id) => id.startsWith(`${book}:`)))
       owned.set(nameKey(edition, entry.name), entry.id);
 
+// Each stat block's families in its own book, for a book that prints it too, as the Basic Rules (#188).
+const familiesOf = new Map<string, string[]>();
+const pluginOf = (id: string) => id.slice(0, id.indexOf(":"));
+for (const { links } of plans)
+  for (const [family, ids] of links)
+    for (const id of ids)
+      if (
+        family.includes(":monster-family/") &&
+        pluginOf(id) === pluginOf(family)
+      )
+        familiesOf.set(id, [...(familiesOf.get(id) ?? []), family]);
+// The heading each entity's own book describes it under, as coverage links it.
+const sectionOf = new Map<string, Verdict["heading"]>();
+for (const { verdicts } of report.books)
+  for (const { heading, status, entity } of verdicts)
+    if (
+      status === "linked" &&
+      entity !== undefined &&
+      pluginOf(entity) === heading.book &&
+      !sectionOf.has(entity)
+    )
+      sectionOf.set(entity, heading);
 const counts = new Map<string, number>();
 const rulings: Pick<Entity, "plugin" | "library" | "about">[] =
   report.entities.filter((e) => e.kind === "ruling");
@@ -214,11 +239,24 @@ for (const plan of plans) {
     links.set(id, [
       ...new Set(ids.map((m) => skipped.get(m) ?? m).filter(plan.visible)),
     ]);
+  const indexed = new Map(links);
+  for (const { entity } of placed)
+    if (entity && pluginOf(entity) !== book)
+      for (const family of familiesOf.get(entity) ?? [])
+        indexed.set(family, [
+          ...new Set([...(indexed.get(family) ?? []), entity]),
+        ]);
   const related = linksIndex(
     placed.map((p) =>
       p.entity && skipped.has(p.entity) ? { ...p, entity: undefined } : p,
     ),
-    links,
+    indexed,
+    (id) => {
+      const heading = sectionOf.get(id);
+      return heading && heading.book !== book
+        ? { book: heading.book, file: heading.file, heading: heading.text }
+        : undefined;
+    },
   );
   if (Object.keys(related).length > 0)
     await storage.replaceAtomically(

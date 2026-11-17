@@ -55,6 +55,8 @@ export const CoverageFileSchema = z.strictObject({
   adventure: z.array(z.string()).optional(),
   rules: z.array(RuleSchema).default([]),
   links: z.record(z.string(), z.array(z.string())).optional(), // heading id -> entity ids
+  // family id -> its stat blocks, where its section names them only in prose or in another book (#188)
+  members: z.record(z.string(), z.array(z.string())).optional(),
 });
 export type CoverageFile = z.infer<typeof CoverageFileSchema>;
 
@@ -354,6 +356,7 @@ export interface CoverageReport {
     readonly book: string;
     readonly edition: string;
     readonly verdicts: readonly Verdict[];
+    readonly members: Readonly<Record<string, readonly string[]>>; // the coverage file's
   }[];
   readonly entities: readonly Entity[];
   readonly issues: readonly Issue[]; // unreadable coverage files and links to nothing
@@ -474,7 +477,17 @@ export async function checkCoverage(
           index,
           linkedBy,
         ),
+        members: coverage?.members ?? {},
       });
+      for (const [family, ids] of Object.entries(coverage?.members ?? {}))
+        for (const id of [family, ...ids].filter(
+          (item) => !index.byId.has(item),
+        ))
+          issues.push({
+            plugin: book,
+            file: path,
+            message: `members of ${family} name ${id}, which no entity has`,
+          });
       for (const [heading, ids] of Object.entries(coverage?.links ?? {})) {
         if (!known.has(heading))
           issues.push({
