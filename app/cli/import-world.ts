@@ -27,7 +27,7 @@ const ROOTS = ["plugins", "books"];
 const ALIASES: Readonly<Record<string, string>> = {
   "5e player's handbook": "basic-rules-2014",
 };
-// A ruling that names a rules term ("Resistance") rules on the term, not a spell of that name.
+// A ruling that names a rules term rules on the term, not on a spell that shares its name.
 const terms = new Set(
   GLOSSARY_TERMS.map(({ heading }) =>
     singular(slug(heading.replace(/\s*\[[^\]]*\]$/, ""))),

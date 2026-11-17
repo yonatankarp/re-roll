@@ -10,7 +10,7 @@ import {
   slug,
 } from "./coverage.ts";
 
-// Lore, tables, Bastion orders ("Attack") and other rulings aren't what a ruling is about.
+// Lore, tables, Bastion orders and other rulings aren't what a ruling is about.
 const NOT_SUBJECTS = new Set([
   ...Object.values(WORLD_KINDS).map((kind) => kind.idPrefix),
   "table",
@@ -19,8 +19,8 @@ const NOT_SUBJECTS = new Set([
   "bastion",
 ]);
 const subject = (entity: Entity) => !NOT_SUBJECTS.has(entity.kind);
-// The kinds a section of questions is about ("Barbarian", "Charger"), unlike a feature that shares
-// a section's name ("Spellcasting").
+// The kinds a section of questions is about (a class, a feat), unlike a feature that shares a
+// section's name ("Spellwork").
 const SECTIONS = new Set([
   "class",
   "subclass",
@@ -30,7 +30,7 @@ const SECTIONS = new Set([
 ]);
 const bare = (entity: Entity) => slug(entity.name.replace(/\([^)]*\)/g, ""));
 
-// The word after a name that says what kind it is: "the Wish spell", "a Shield item".
+// The word after a name that says what kind it is: "the Hush spell", "a Hush item".
 const HINTS: Readonly<Record<string, readonly string[]>> = {
   spell: ["spell"],
   cantrip: ["spell"],
@@ -47,23 +47,36 @@ const HINTS: Readonly<Record<string, readonly string[]>> = {
   race: ["species"],
 };
 const JOINERS = new Set(["of", "the", "and", "to", "a", "an", "in", "from"]);
+// Words that come before a spell a book names in lower case: "by gloomshape", "casting hush".
+const SPELL_CUES = new Set([
+  "of",
+  "by",
+  "from",
+  "for",
+  "like",
+  "as",
+  "cast",
+  "casts",
+  "casting",
+  "does",
+]);
 const MAX_WORDS = 6;
 const capital = (word: string) => /^[\p{Lu}\d+]/u.test(word);
 
 // The entities a ruling's question names, as a reader would spot them: a run of capitalized words
-// ("Ring of Protection", "Reckless Attack"), any words before "spell" ("the guidance spell"), or
-// lower-case words that are a whole name ("bracers of defense").
+// ("Ring of Quiet"), any words before "spell" ("the gloom lance spell"), lower-case words that are a
+// whole name ("ring of quiet"), or one lower-case spell after a word that introduces one ("by hush").
 export function mentions(
   index: EntityIndex,
   text: string,
   edition: string,
-  terms: ReadonlySet<string> = new Set(), // rules terms' names, by slug ("resistance")
+  terms: ReadonlySet<string> = new Set(), // rules terms' names, by slug ("quiet")
 ): string[] {
   const found = new Set<string>();
   let first = true; // a sentence's first word is capitalized anyway
   for (const clause of text.split(/[.,;:?!“”"()—–/]/)) {
     const raw = clause.split(/\s+/).filter(Boolean);
-    // A possessive ends a name: "the Abjurer's Arcane Ward" names two things.
+    // A possessive ends a name: "the Warden's Spellwork" names two things.
     const owns = raw.map((word) => /[’']s$/.test(word));
     const words = raw.map((word) => word.replace(/[’']s$/, ""));
     for (let at = 0; at < words.length;) {
@@ -76,17 +89,22 @@ export function mentions(
         if (owns.slice(at, at + size - 1).some(Boolean)) continue;
         const run = words.slice(at, at + size);
         const after = words[at + size] ?? "";
-        const next = after.toLowerCase();
-        const kinds = HINTS[next];
+        const hinted = HINTS[after.toLowerCase()];
         const named =
           capital(run[0] ?? "") &&
           capital(run.at(-1) ?? "") &&
           run.every((word) => capital(word) || JOINERS.has(word)) &&
-          // One word that starts a longer capitalized name is that name's ("Sage Advice").
+          // One word that starts a longer capitalized name is that name's ("Warden Lore").
           !(
             size === 1 &&
             ((capital(after) && !owns[at]) || (first && at === 0))
           );
+        const cue =
+          !named &&
+          size === 1 &&
+          (run[0] ?? "").length >= 5 &&
+          SPELL_CUES.has((words[at - 1] ?? "").toLowerCase());
+        const kinds = hinted ?? (cue ? ["spell"] : undefined);
         // Lower-case words name an entity only when they are its whole name, as the 2014 books print them.
         const plain =
           !named &&
@@ -107,10 +125,10 @@ export function mentions(
             (!kinds || kinds.includes(entity.kind)) &&
             keys.includes(bare(entity)),
         );
-        // A rules term's name is the term, not the spell that shares it ("Resistance"), unless hinted.
-        if (hits.length === 0 || (!kinds && keys.some((k) => terms.has(k))))
+        // A rules term's name is the term, not the spell that shares it, unless the next word says so.
+        if (hits.length === 0 || (!hinted && keys.some((k) => terms.has(k))))
           continue;
-        // "Spell Scroll" names the scroll, not each "Spell Scroll (Wish)", where the scroll itself exists.
+        // "Scroll" names the scroll, not each "Scroll (Hush)", where the scroll itself exists.
         const whole = hits.filter((hit) => keys.includes(slug(hit.name)));
         for (const hit of whole.length > 0 ? whole : hits) found.add(hit.id);
         taken = size;
@@ -152,16 +170,16 @@ export function subjectsOf(
   const book = top?.heading.level === 1 ? bookOf(top.heading.text) : undefined;
   if (book !== undefined) {
     const name = slug(verdict.heading.text.replace(/\s*\([^)]*\)$/, ""));
-    // Missing books, and rules terms ("Darkvision (p. 183)"), have no entity to link yet.
+    // Missing books, and rules terms ("Quiet (p. 9)"), have no entity to link yet.
     if (book === null || terms.has(singular(name))) return [];
     const hit = matchHeading(index, verdict.heading.text, {
       book: book.plugin,
       edition: book.edition,
       kinds: null,
-      asked: false, // by its name, not a feature's that ends with it ("Athlete")
+      asked: false, // by its name, not a feature's that ends with it ("Gloom" for "Deep Gloom")
       adventure: null,
     });
-    return hit && subject(hit) ? [hit.id] : [];
+    return hit?.plugin === book.plugin && hit.kind !== "ruling" ? [hit.id] : [];
   }
   const section = above.find((item) => item.status === "linked")?.entity;
   const owner = section === undefined ? undefined : index.byId.get(section);

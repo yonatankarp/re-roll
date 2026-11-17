@@ -22,6 +22,7 @@ const entity = (id: string, name: string, edition = "new"): Entity => ({
 const INDEX = indexEntities([
   entity("hb:spell/gloom-lance", "Gloom Lance"),
   entity("hb:spell/hush", "Hush"),
+  entity("hb:spell/stillness", "Stillness"),
   entity("hb:item/hush", "Hush"),
   entity("hb:item/ring-of-quiet", "Ring of Quiet"),
   entity("hb:item/scroll", "Scroll"),
@@ -97,6 +98,13 @@ describe("what a ruling names", () => {
         "new",
       ),
     ).toEqual(["hb:class/warden", "hb:feature/warden-spellwork"]);
+  });
+
+  it("takes one lower-case spell only after a word that introduces one", () => {
+    expect(
+      mentions(INDEX, "Is a warden transformed by stillness still?", "new"),
+    ).toEqual(["hb:spell/stillness"]);
+    expect(mentions(INDEX, "Can stillness last?", "new")).toEqual([]);
   });
 
   it("names the thing itself over each of its variants", () => {
