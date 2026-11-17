@@ -87,7 +87,10 @@ export function canUse(
     case "weapon":
       return classes.some((def) => weaponProficient(def, item));
     case "armor":
-      return classes.some((def) => def.armor.includes(item.armorType));
+      return (
+        item.anyTraining === true ||
+        classes.some((def) => def.armor.includes(item.armorType))
+      );
     case "shield":
       return classes.some((def) => def.armor.includes("shield"));
     case "magicItem":

@@ -744,7 +744,11 @@ function sheetOf(
               { label: "Save DC", value: String(spellSaveDc(stats)) },
               {
                 label: "Attack",
-                value: signed(stats.proficiency + spellModifier(stats)),
+                value: signed(
+                  stats.proficiency +
+                    spellModifier(stats) +
+                    stats.itemBonuses.spellAttack,
+                ),
               },
               ...stats.slots.flatMap((max, index) => {
                 const level = String(index + 1);

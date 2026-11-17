@@ -129,7 +129,10 @@ export interface Stats {
   >;
   // From magic items worn, and attuned where they need it.
   readonly itemBonuses: Readonly<
-    Record<"attack" | "spellAttack" | "savingThrows", number>
+    Record<
+      "attack" | "spellAttack" | "spellDc" | "savingThrows" | "checks",
+      number
+    >
   >;
   // A character's familiar, from a spell it knows that gives one (combat/familiar.ts), with the ability it casts
   // that spell with.
@@ -190,6 +193,44 @@ function bestAc(
     }
   }
   return Math.max(...bases) + bonus;
+}
+
+// A magic armor's or Shield's own bonus to AC, which an Antimagic Field suppresses.
+function ownAc(
+  bonuses: readonly { to: string; amount: number }[] | undefined,
+  antimagic: boolean,
+): number {
+  if (antimagic) return 0;
+  return (bonuses ?? [])
+    .filter((bonus) => bonus.to === "ac")
+    .reduce((total, bonus) => total + bonus.amount, 0);
+}
+
+// Scores the items worn set or raise, as Gauntlets of Ogre Power's Strength 19, never lowering one.
+// An entry with versions counts as its first, as with its bonuses.
+function withItemAbilities(
+  scores: AbilityScores,
+  items: readonly Extract<z.infer<typeof ItemSchema>, { type: "magicItem" }>[],
+): AbilityScores {
+  const raised = { ...scores };
+  const changes = items.flatMap(
+    (item) => item.abilities ?? item.variants?.[0]?.abilities ?? [],
+  );
+  // Setting comes after raising, so a set score is what the item says, unless the raised one is higher.
+  for (const change of changes) {
+    if ("raise" in change) {
+      raised[change.ability] = Math.max(
+        raised[change.ability],
+        Math.min(change.max, raised[change.ability] + change.raise),
+      );
+    }
+  }
+  for (const change of changes) {
+    if ("set" in change) {
+      raised[change.ability] = Math.max(raised[change.ability], change.set);
+    }
+  }
+  return raised;
 }
 
 // A leveled spell a feat or trait lets the character cast once per Long Rest without a slot, as its own action.
@@ -586,7 +627,22 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const background = lookup(access, BackgroundSchema, build.backgroundId);
   const species = lookup(access, SpeciesSchema, build.speciesId);
 
-  const abilities = buildAbilities(build);
+  // One action per kind of item, so a second dagger or potion doesn't list twice.
+  const worn = [...new Set(equipped(actor))].map(
+    (itemId) => [itemId, lookup(access, ItemSchema, itemId)] as const,
+  );
+  const attuned = actor.attuned ?? [];
+  // In an Antimagic Field, magic items don't work.
+  const antimagic = actor.suppressed !== undefined;
+  const working = antimagic
+    ? []
+    : worn.flatMap(([itemId, item]) =>
+        item.type === "magicItem" &&
+        (!item.attunement || attuned.includes(itemId))
+          ? [item]
+          : [],
+      );
+  const abilities = withItemAbilities(buildAbilities(build), working);
 
   const level = build.levels.length;
   const classLevels: Record<string, number> = {};
@@ -708,34 +764,34 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const martialTraining = [...featIds].some((id) =>
     id.endsWith("/martial-weapon-training"),
   );
-  // One action per kind of item, so a second dagger or potion doesn't list twice.
-  const worn = [...new Set(equipped(actor))].map(
-    (itemId) => [itemId, lookup(access, ItemSchema, itemId)] as const,
-  );
   const untrainedArmor = worn.some(
-    ([, item]) => item.type === "armor" && !trained.has(item.armorType),
+    ([, item]) =>
+      item.type === "armor" &&
+      !item.anyTraining &&
+      !trained.has(item.armorType),
   );
   const tooHeavy = worn.some(
     ([, item]) => item.type === "armor" && abilities.str < (item.strength ?? 0),
   );
 
-  const attuned = actor.attuned ?? [];
   const magic = {
     ac: 0,
     attack: 0,
     damage: 0,
     savingThrows: 0,
     spellAttack: 0,
+    spellDc: 0,
+    checks: 0,
   };
-  // In an Antimagic Field, magic items don't work.
-  const antimagic = actor.suppressed !== undefined;
-  for (const [itemId, item] of worn) {
-    if (item.type !== "magicItem" || antimagic) continue;
-    if (item.attunement && !attuned.includes(itemId)) continue;
+  const armored = worn.some(
+    ([, item]) => item.type === "armor" || item.type === "shield",
+  );
+  for (const item of working) {
     // An entry with versions counts as its first, as older saves hold; content names a version as `<id>--<n>` (variants.ts).
-    for (const { to, amount } of item.bonuses ??
+    for (const { to, amount, unarmored } of item.bonuses ??
       item.variants?.[0]?.bonuses ??
       []) {
+      if (unarmored && armored) continue;
       // shortcut: a magic weapon isn't a weapon to swing here, so its bonus goes to the weapons carried, the best one once.
       magic[to] =
         to === "attack" || to === "damage"
@@ -786,10 +842,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         parsed.maxDex ?? dex,
       );
       const allowed = parsed.addDex ? Math.min(dex, maxDex) : 0;
-      armorBases.push(parsed.base + allowed);
+      armorBases.push(parsed.base + allowed + ownAc(item.bonuses, antimagic));
     } else if (item.type === "shield") {
       // Only one shield is held, and it protects only with training.
-      if (trained.has("shield")) shield = Math.max(shield, item.bonus);
+      if (trained.has("shield")) {
+        shield = Math.max(shield, item.bonus + ownAc(item.bonuses, antimagic));
+      }
     } else if (item.type === "weapon") {
       const weapon = WeaponSchema.parse(item);
       // A magic weapon's own bonus, or the best from a magic weapon carried beside it, never both.
@@ -1414,7 +1472,13 @@ function statBlockStats(
     pactMagic: false,
     untrainedArmor: false,
     exhaustion: actor.exhaustion,
-    itemBonuses: { attack: 0, spellAttack: 0, savingThrows: 0 },
+    itemBonuses: {
+      attack: 0,
+      spellAttack: 0,
+      spellDc: 0,
+      savingThrows: 0,
+      checks: 0,
+    },
     speeds: Object.fromEntries(
       (["fly", "climb", "burrow"] as const).flatMap((mode) => {
         const feet = monster.speeds?.[mode];
@@ -1868,13 +1932,16 @@ export function checkBonus(
   const expert = skill !== undefined && stats.expertise.includes(skill);
   return (
     modifierFor(stats, check.ability) +
-    (proficient ? stats.proficiency * (expert ? 2 : 1) : 0) -
+    (proficient ? stats.proficiency * (expert ? 2 : 1) : 0) +
+    stats.itemBonuses.checks -
     2 * actor.exhaustion
   );
 }
 
 export function spellSaveDc(stats: Stats): number {
-  return 8 + stats.proficiency + spellModifier(stats);
+  return (
+    8 + stats.proficiency + spellModifier(stats) + stats.itemBonuses.spellDc
+  );
 }
 
 export function evaluateFormula(formula: Formula, stats: Stats): number {
