@@ -359,14 +359,16 @@ describe("the session's rules terms", () => {
     expect(await game.links("..", "0001-imp.md")).toEqual([]);
   });
 
-  it("keeps the environment, downtime and option kinds out of the save hash, as lore", () => {
+  it("keeps the downtime and option kinds and curses out of the save hash, as lore, and hashes the played environment kinds", () => {
     const kinds = dnd55e.contentKinds;
+    // Environmental effects, diseases and dungeon features play (#191), so they count toward the save hash.
+    const played = ["environmental-effects", "diseases", "dungeon-features"];
     for (const map of [ENVIRONMENT_KINDS, DOWNTIME_KINDS, OPTION_KINDS])
       for (const [folder, idPrefix] of Object.entries(map))
         expect([folder, kinds[folder]?.idPrefix, kinds[folder]?.lore]).toEqual([
           folder,
           idPrefix,
-          true,
+          played.includes(folder) ? undefined : true,
         ]);
   });
 

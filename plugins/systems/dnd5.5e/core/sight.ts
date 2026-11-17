@@ -1,5 +1,6 @@
 // What a battle map's ground, cover and light do in a fight: cover between two squares, and who can see whom.
 import type { ContentAccess } from "#sdk";
+import { everySquare } from "./environment.ts";
 import {
   type Cover,
   type Square,
@@ -62,7 +63,10 @@ function setOf(keys: readonly string[] | undefined): ReadonlySet<string> {
 export function difficultSquares(state: DndState): ReadonlySet<string> {
   const thorns = thornKeys(state);
   const ground = setOf(state.combat?.terrain?.difficult);
-  return thorns.length > 0 ? new Set([...ground, ...thorns]) : ground;
+  const icy = everySquare(state); // Slippery Ice: the whole map (environment.ts)
+  return thorns.length > 0 || icy.length > 0
+    ? new Set([...ground, ...thorns, ...icy])
+    : ground;
 }
 
 // Whether `actor` stands in the space of an ally whose trait gives it Half Cover there, as Overhanging Branches does.

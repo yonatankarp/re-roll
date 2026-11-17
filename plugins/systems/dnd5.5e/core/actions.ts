@@ -51,6 +51,14 @@ import {
   runClassOption,
 } from "./class-options.ts";
 import { escapeDc, grapplesOn } from "./combat/grapple.ts";
+import {
+  COLLECT,
+  collectable,
+  collectEvents,
+  SHAKE,
+  shakeable,
+  shakeEvents,
+} from "./combat/fear.ts";
 import { unhindered } from "./movement-modes.ts";
 import {
   type Square,
@@ -119,7 +127,7 @@ import {
   weaponOf,
 } from "./tactics.ts";
 import { fogged, knownFoes, partySight } from "./fog.ts";
-import { hasteActing, oneActionEvents } from "./combat/durations.ts";
+import { hasteActing } from "./combat/durations.ts";
 import { placedFlag } from "./zones.ts";
 import {
   STRIKE,
@@ -794,8 +802,15 @@ export function tacticOptions(
   const stats = deriveStats(actor, access);
   const options: { id: string; label: string }[] = [];
   const half = halfSpeed(stats);
+  // Prone that Hideous Laughter keeps it in can't be ended by standing.
   if (
     hasCondition(actor, "prone") &&
+    !actor.activeEffects.some(
+      ({ cantStand, modifier }) =>
+        cantStand &&
+        modifier.kind === "condition" &&
+        modifier.condition === "prone",
+    ) &&
     (!actor.position || speedLeft(actor, stats) >= half)
   ) {
     options.push({
@@ -877,6 +892,19 @@ export function tacticOptions(
     id: DODGE,
     label: "Dodge (attacks against you have Disadvantage)",
   });
+  // Shaking an ally out of a spell, as out of Sleep, and saving against a spell with an action, as Irresistible Dance.
+  for (const ally of shakeable(actor, state)) {
+    options.push({
+      id: encodeOption(SHAKE, ally.id),
+      label: `Shake ${ally.name} out of it`,
+    });
+  }
+  for (const held of collectable(actor)) {
+    options.push({
+      id: encodeOption(COLLECT, held.casterId, held.sourceId),
+      label: `Collect yourself (${ABILITY_NAMES[held.repeatSave?.ability ?? "wis"]} save, DC ${String(held.repeatSave?.dc ?? 10)})`,
+    });
+  }
   // Help also stabilizes a dying creature within 5 feet, which every companion should be able to do.
   for (const dying of allies(state, actor).filter(
     (item) => item.id !== actor.id && dyingNow(item) && within5(actor, item),
@@ -1092,6 +1120,21 @@ export function runTactic(
   const mounted = mountEvents(actor, kind, targetId, state, context);
   if (mounted) return { events: mounted };
   switch (kind) {
+    case SHAKE:
+      return {
+        events: [spend("action"), ...shakeEvents(needTarget())],
+        frames: done,
+      };
+    case COLLECT: {
+      const held = collectable(actor).find(
+        (item) => item.sourceId === detail && item.casterId === targetId,
+      );
+      if (!held) throw new Error(`${actor.id} has nothing to collect from`);
+      return {
+        events: [spend("action"), ...collectEvents(actor, held, context)],
+        frames: done,
+      };
+    }
     case SLIP:
       return {
         events: [
@@ -1678,12 +1721,7 @@ export function runAfterMove(
   const charges = deriveStats(mover, context).actions.some(
     ({ activation }) => activation.trigger?.charge !== undefined,
   );
-  // Daze: having moved, it can take no action or Bonus Action.
-  const events: SystemEvent[] = mover.activeEffects.some(
-    ({ modifier }) => modifier.kind === "actionLimit" && modifier.oneThing,
-  )
-    ? oneActionEvents(mover)
-    : [];
+  const events: SystemEvent[] = [];
   // Grasping Arrow's brambles: the first walk on each turn hurts.
   const brambles = mover.activeEffects.find(
     ({ modifier }) => modifier.kind === "moveDamage",

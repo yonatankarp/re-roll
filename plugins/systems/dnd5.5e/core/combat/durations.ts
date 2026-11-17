@@ -57,10 +57,14 @@ export function lastsFor(
     }
   }
   if (!("minutes" in duration)) return {};
+  // A Dampened Magic Zone halves a spell lasting a minute or more.
+  const rounds = state.combat?.environment?.halfDurations
+    ? 5 * duration.minutes
+    : 10 * duration.minutes;
   return {
     lasts: {
       actor: caster.id,
-      round: nextTurnRound(state, caster.id) + 10 * duration.minutes - 1,
+      round: nextTurnRound(state, caster.id) + rounds - 1,
       at: "start",
     },
   };
@@ -127,18 +131,8 @@ export function limitEvents(
 // Once an action or a Bonus Action is spent, the other goes too for a creature that can take only one.
 export function oneActionEvents(actor: Actor): SystemEvent[] {
   const { action, bonusAction } = actor.budget;
-  const limits = limitsOf(actor);
-  // Daze: having moved, it takes neither.
-  if (limits.oneThing && actor.moved > 0) {
-    return (["action", "bonusAction"] as const).flatMap((kind) =>
-      actor.budget[kind]
-        ? [dndEvent(`${NS}:budgetSpent`, { actor: actor.id, kind })]
-        : [],
-    );
-  }
-  if (!(limits.oneAction || limits.oneThing) || action === bonusAction) {
-    return [];
-  }
+  const { oneAction, oneThing } = limitsOf(actor);
+  if (!(oneAction || oneThing) || action === bonusAction) return [];
   return [
     dndEvent(`${NS}:budgetSpent`, {
       actor: actor.id,

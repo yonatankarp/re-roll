@@ -1,4 +1,8 @@
 import {
+  environmentConditionEvents,
+  fightEnvironment,
+} from "../environment.ts";
+import {
   initiativeMoveFrames,
   initiativeSwapFrames,
   inspirationEchoes,
@@ -47,6 +51,7 @@ export function startCombat(
     readonly lair?: boolean | undefined;
     readonly surprise?: "party" | "enemies" | undefined;
     readonly sunlight?: true | undefined;
+    readonly environment?: readonly string[] | undefined;
   },
   context: Context,
   { canFlee, defeatContinues }: EncounterOptions,
@@ -185,6 +190,7 @@ export function startCombat(
     ? openedCorners(walls, grid, startsOf(party), startsOf(monsters))
     : [];
 
+  const environment = fightEnvironment(encounter.environment, context);
   const started = {
     encounter: encounter.id,
     monsters,
@@ -209,6 +215,7 @@ export function startCombat(
     ...(defeatContinues ? { defeatContinues } : {}),
     ...(encounter.loot ? { loot: encounter.loot } : {}),
     ...(encounter.sunlight ? { sunlight: true as const } : {}),
+    ...(environment ? { environment } : {}),
     ...(surprised ? { surprised } : {}),
     ...(lair ? { lair } : {}),
     ...(familiars.length > 0 ? { familiars } : {}),
@@ -236,6 +243,11 @@ export function startCombat(
         ...(lowered ? { damageToParty: share } : {}),
       }),
       ...party.flatMap((actor) => initiativeRecharge(actor, context)),
+      ...environmentConditionEvents(
+        encounter.environment,
+        [...party, ...monsters],
+        context,
+      ),
     ],
     // Alert's Initiative Swap comes first. With nobody on 20 or more, the lair acts before anyone.
     frames: [
