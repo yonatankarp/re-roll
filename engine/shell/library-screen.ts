@@ -1,6 +1,6 @@
 import { OPENING, type ShellContext } from "./context.ts";
 import { button, el } from "./dom.ts";
-import type { RulingRef } from "./session.ts";
+import type { LinkRef, RulingRef } from "./session.ts";
 
 // The book library: a book's headings, and the text of the one chosen.
 
@@ -71,6 +71,29 @@ function rulingDrawer(
       });
       return item;
     }),
+  );
+}
+
+const RELATION: Readonly<Record<LinkRef["rel"], string>> = {
+  family: "Family",
+  member: "Stat block",
+  lair: "Lair",
+  owner: "Lair of",
+};
+
+// The sections a monster, its family and its lair are in, each opened in place (#133).
+function linkRow(
+  refs: readonly LinkRef[],
+  open: (file: string) => void,
+): HTMLElement {
+  return el(
+    "nav",
+    { class: "book-links" },
+    ...refs.map((ref) =>
+      button(`${RELATION[ref.rel]}: ${ref.heading}`, () => {
+        open(ref.file);
+      }),
+    ),
   );
 }
 
@@ -153,12 +176,20 @@ export async function showBook(
   text.tabIndex = -1;
   const rulings = el("div");
   const openSection = async (file: string): Promise<void> => {
-    const [words, refs] = await Promise.all([
+    const [words, refs, links] = await Promise.all([
       ctx.game.readSection(id, file),
       ctx.game.rulings(id, file),
+      ctx.game.links(id, file),
     ]);
     text.textContent = words;
     rulings.replaceChildren(
+      ...(links.length > 0
+        ? [
+            linkRow(links, (to) => {
+              ctx.act(() => openSection(to));
+            }),
+          ]
+        : []),
       ...(refs.length > 0 ? [rulingDrawer(ctx, refs)] : []),
     );
     ctx.focusNext = text;
