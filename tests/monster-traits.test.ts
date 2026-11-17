@@ -117,6 +117,29 @@ const BLOCKS = [
   statBlock("test:monster/turner", {
     passives: [{ kind: "spellTurning", upTo: 7 }],
   }),
+  // A magic item's passives, on a stat block: Adamantine Armor, an Arrow-Catching Shield and a Spellguard Shield.
+  statBlock("test:monster/adamant", { passives: [{ kind: "noCriticals" }] }),
+  statBlock("test:monster/catcher", {
+    passives: [
+      {
+        kind: "modifier",
+        modifier: {
+          kind: "bonus",
+          to: "ac",
+          amount: { bonus: { base: 2, add: [] } },
+          ranged: true,
+        },
+      },
+    ],
+  }),
+  statBlock("test:monster/spellguard", {
+    passives: [
+      {
+        kind: "modifier",
+        modifier: { kind: "disadvantage", on: "attacksAgainst", spells: true },
+      },
+    ],
+  }),
   statBlock("test:monster/frenzied", {
     passives: [{ kind: "attackAdvantage", when: "targetHurt" }],
   }),
@@ -547,6 +570,78 @@ describe("Evasion", () => {
     expect(await dealt("turner", spell(1, 8))).toEqual([5]);
     expect(await dealt("turner", spell(30, 3))).toEqual([10]);
     expect(await dealt("turner", burst("con", 1))).toEqual([5]); // not a spell
+  });
+});
+
+describe("magic items' defenses, on a stat block", () => {
+  const strike = async (
+    target: string,
+    actionId: string,
+    natural: number,
+    attacker = fighter,
+  ) => {
+    const run = await base();
+    const { dice, count } = d20s(natural);
+    const { events } = settle(
+      run,
+      // 30 feet apart, so a ranged attack has no foe beside it.
+      fight(
+        { ...attacker(run), position: { x: 0, y: 0 } },
+        monster(target, { at: [6, 0] }),
+      ),
+      [attack(PLAYER_ACTOR, actionId, target)],
+      dice,
+    );
+    return { dealt: damageOf(events, target), d20s: count() };
+  };
+  const SWORD = "weapon:srd52:item/longsword";
+  const BOW = "weapon:srd52:item/shortbow";
+
+  it("turns a Critical Hit into a normal hit, as Adamantine Armor does", async () => {
+    // A longsword's d8 rolls 1, plus Strength's 3: twice the die on a Critical Hit.
+    expect((await strike("dummy", SWORD, 20)).dealt).toEqual([5]);
+    expect((await strike("adamant", SWORD, 20)).dealt).toEqual([4]);
+  });
+
+  it("adds AC against ranged attack rolls only, as an Arrow-Catching Shield does", async () => {
+    // The shortbow hits at +3 and the longsword at +5: 11 each, against AC 10, or 12 at range.
+    expect((await strike("dummy", BOW, 8)).dealt).toEqual([2]);
+    expect((await strike("catcher", BOW, 8)).dealt).toEqual([]);
+    expect((await strike("catcher", SWORD, 6)).dealt).toEqual([4]);
+  });
+
+  it("gives spell attack rolls against it Disadvantage, as a Spellguard Shield does", async () => {
+    const caster = (run: RunContext): Actor => {
+      const plain = fighter(run);
+      if (plain.source.kind !== "character" || !plain.source.build) {
+        throw new Error("No build");
+      }
+      const { build } = plain.source;
+      return {
+        ...plain,
+        source: {
+          ...plain.source,
+          build: {
+            ...build,
+            levels: build.levels.map((level, index) =>
+              index === 0
+                ? {
+                    ...level,
+                    answers: [
+                      ...level.answers,
+                      { kind: "spells", values: ["srd52:spell/fire-bolt"] },
+                    ],
+                  }
+                : level,
+            ),
+          },
+        },
+      };
+    };
+    const BOLT = "spell:srd52:spell/fire-bolt";
+    expect((await strike("dummy", BOLT, 15, caster)).d20s).toBe(1);
+    expect((await strike("spellguard", BOLT, 15, caster)).d20s).toBe(2);
+    expect((await strike("spellguard", SWORD, 15)).d20s).toBe(1);
   });
 });
 

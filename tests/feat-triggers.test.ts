@@ -495,6 +495,27 @@ describe("feats and traits that act on their own", () => {
     expect(start(false)).toEqual({ d20s: 2, spent: [] });
   });
 
+  it("gives the bearer's allies Advantage on Initiative too, as a Weapon of Warning does", async () => {
+    const run = await testRun();
+    const start = (traits: readonly string[]) => {
+      const party = [hero(traits), hero([], { id: "friend" })];
+      const context = contextOf(run, party, scripted([]).dice);
+      const { dice, counts } = scripted([]);
+      startCombat(
+        {
+          id: "ambush",
+          monsters: [{ monster: "srd52:monster/goblin-warrior", count: 1 }],
+        },
+        { ...context, dice, state: { ...context.state, combat: null } },
+        { canFlee: false, defeatContinues: false },
+      );
+      return counts[20];
+    };
+    // Two d20s for each of the party, one for the goblin.
+    expect(start(["warned"])).toBe(5);
+    expect(start([])).toBe(3);
+  });
+
   it("gives the next attack against a bearer that Readies an action Disadvantage, as Tyro of the Gauntlet does", async () => {
     const run = await testRun();
     const readied = (traits: readonly string[]) => {

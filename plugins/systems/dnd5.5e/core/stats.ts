@@ -181,7 +181,10 @@ function bestAc(
   }
   let bonus = fixed.reduce(
     (total, modifier) =>
-      modifier.kind === "bonus" && modifier.to === "ac" && !modifier.melee
+      modifier.kind === "bonus" &&
+      modifier.to === "ac" &&
+      !modifier.melee &&
+      !modifier.ranged
         ? total + (modifier.amount.bonus?.base ?? 0)
         : total,
     context.flatBonus,
@@ -189,7 +192,12 @@ function bestAc(
   const seen = new Set<string>();
   for (const effect of actor.activeEffects) {
     const { modifier } = effect;
-    if (modifier.kind === "bonus" && modifier.to === "ac" && !modifier.melee) {
+    if (
+      modifier.kind === "bonus" &&
+      modifier.to === "ac" &&
+      !modifier.melee &&
+      !modifier.ranged
+    ) {
       if (!seen.has(effect.sourceId)) bonus += modifier.amount.bonus?.base ?? 0;
       seen.add(effect.sourceId);
     }

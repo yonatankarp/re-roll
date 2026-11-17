@@ -221,6 +221,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     skill: SkillSchema.optional(), // only checks with this skill, as Pass without Trace's Stealth
     ability: AbilitySchema.optional(), // only saves with this ability, as Slow's Dexterity saves
     melee: z.literal(true).optional(), // AC against melee attack rolls only, as a pirate admiral's Defensive Stance
+    ranged: z.literal(true).optional(), // AC against ranged attack rolls only, as an Arrow-Catching Shield's
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
@@ -244,6 +245,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     ability: AbilitySchema.optional(),
     attackers: z.array(z.string()).min(1).optional(),
     skills: z.array(SkillSchema).min(1).optional(), // only checks with these skills
+    spells: z.literal(true).optional(), // attacksAgainst only from spells, as a Spellguard Shield's
   }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
@@ -1596,8 +1598,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     monster: ContentIdSchema.optional(),
     hp: z.enum(["full", "half"]),
   }),
-  // Advantage on its Initiative roll, as an asteroid spider's False Appearance gives one that lies still.
-  z.strictObject({ kind: z.literal("initiativeAdvantage") }),
+  // Advantage on its Initiative roll, as an asteroid spider's False Appearance gives one that lies still. With `allies`
+  // its allies' too, as a Weapon of Warning's. shortcut: every ally, not only those within 30 feet, since a party
+  // starts a fight together.
+  z.strictObject({
+    kind: z.literal("initiativeAdvantage"),
+    allies: z.literal(true).optional(),
+  }),
+  // A Critical Hit against the bearer is a normal hit, as with Adamantine Armor.
+  z.strictObject({ kind: z.literal("noCriticals") }),
   // Knocked Prone, an odd roll of a die leaves it Incapacitated until it passes this save at the end of a turn, as a
   // flumph's Prone Deficiency.
   z.strictObject({

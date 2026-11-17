@@ -106,12 +106,18 @@ export function startCombat(
       actor.heroicInspiration &&
       hasPassive(deriveStats(actor, context), "initiativeInspiration"),
   );
+  // A Weapon of Warning's Advantage on Initiative for its bearer's allies.
+  const warned = party.some((actor) =>
+    deriveStats(actor, context).passives.some(
+      (passive) => passive.kind === "initiativeAdvantage" && passive.allies,
+    ),
+  );
   const rolled = [...party, ...familiars, ...monsters].map(
     (actor, position) => {
       const stats = deriveStats(actor, context);
       const edge = {
         advantage:
-          (rallier !== undefined && actor.side === "party") ||
+          ((rallier !== undefined || warned) && actor.side === "party") ||
           hasPassive(stats, "initiativeAdvantage"),
         disadvantage: Boolean(surprised) && actor.side === caught,
         rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
