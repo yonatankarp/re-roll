@@ -87,6 +87,7 @@ import {
   holdsShield,
   HIGHEST,
   masteredDice,
+  markedBy,
   maximized,
   masteredTypes,
   rerolledTypes,
@@ -1328,6 +1329,25 @@ export function runRecheckHit(
   return intercepted(payload, context);
 }
 
+function deathStruck(
+  attacker: Actor,
+  target: Actor,
+  stats: Stats,
+  context: Context,
+): { readonly doubled: boolean; readonly events: SystemEvent[] } | null {
+  const passive = stats.passives.find(({ kind }) => kind === "deathStrike");
+  if (passive?.kind !== "deathStrike" || (context.state.combat?.round ?? 1) > 1) {
+    return null;
+  }
+  const save = rollSave(
+    target,
+    passive.ability,
+    evaluateFormula(passive.dc, stats),
+    context,
+  );
+  return { doubled: !save.saved, events: save.events };
+}
+
 // Dice less this many, as Sneak Attack's 5d6 less 1d6 for Cunning Strike's Poison.
 function fewerDice(
   notation: string | undefined,
@@ -1462,11 +1482,13 @@ function landHit(
     disadvantage: payload.hadDisadvantage === true,
     natural: payload.natural,
   };
+  let sneaked = false;
   stats.passives.forEach((passive, index) => {
     if (passive.kind !== "extraDamage") return;
     const key = `extra:${String(index)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return;
     if (!extraFits(passive, attacker, target, action, edge, context)) return;
+    if (passive.diceCount) sneaked = true;
     // Cunning Strike's options give up some of Sneak Attack's dice before they're rolled.
     const dice_ = passive.diceCount
       ? fewerDice(passive.dice, payload.forgone ?? 0)
@@ -1627,8 +1649,17 @@ function landHit(
       type,
     })),
   ];
+  // Death Strike: a first-round Sneak Attack doubles the hit's damage unless the target saves.
+  const struck = sneaked ? deathStruck(attacker, target, stats, context) : null;
+  if (struck) events.push(...struck.events);
+  const doubled = struck?.doubled
+    ? hits.map((item) => ({
+        ...item,
+        amount: item.amount > 0 ? item.amount * 2 : item.amount,
+      }))
+    : hits;
   const targetStats = deriveStats(target, context);
-  const armored = hits.map((item) => ({
+  const armored = doubled.map((item) => ({
     ...item,
     amount:
       item.amount < 0
@@ -1708,7 +1739,7 @@ function landHit(
           answer: encodeOption(id, target.id),
         }),
       ),
-      ...(smitesFor(action, attacker, stats, context).length > 0
+      ...(smitesFor(action, attacker, target, stats, context).length > 0
         ? [
             frame("afterHit", {
               attacker: attacker.id,
@@ -2332,6 +2363,7 @@ function damageBonus(
 function smitesFor(
   hitWith: KnownAction,
   attacker: Actor,
+  target: Actor,
   stats: Stats,
   context: Context,
 ): readonly KnownAction[] {
@@ -2347,7 +2379,8 @@ function smitesFor(
       hitFits(trigger.afterHit, hitWith, attacker, context) &&
       (!trigger.withFeature ||
         hitWith.id.startsWith(`feature:${trigger.withFeature}:`)) &&
-      (!trigger.sneakAttack || sneakLanded(attacker, stats))
+      (!trigger.sneakAttack || sneakLanded(attacker, stats)) &&
+      (!trigger.marked || markedBy(target, attacker, trigger.marked))
     );
   });
 }
@@ -2429,7 +2462,7 @@ export function runAfterHit(
   const stats = deriveStats(attacker, context);
   const hitWith = findAction(attacker, payload.actionId, context);
   // One limited to a size or type, as Hill's Tumble to Large or smaller, is offered only for a target that fits.
-  const options = smitesFor(hitWith, attacker, stats, context).flatMap(
+  const options = smitesFor(hitWith, attacker, target, stats, context).flatMap(
     (action) =>
       action.activation.trigger?.near === undefined
         ? fitsType(target, action.activation.targeting, context, attacker)

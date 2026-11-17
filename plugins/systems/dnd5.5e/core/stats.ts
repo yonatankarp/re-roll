@@ -1306,6 +1306,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           fromFeatures.passives,
           actor,
           access,
+          abilities,
         ),
         fromFeatures.passives,
         abilities,

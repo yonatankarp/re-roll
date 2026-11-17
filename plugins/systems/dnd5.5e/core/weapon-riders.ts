@@ -1,5 +1,5 @@
 import type { ContentAccess } from "#sdk";
-import type { Passive } from "./schemas.ts";
+import type { Ability, AbilityScores, Passive } from "./schemas.ts";
 import type { Actor } from "./state.ts";
 import type { KnownAction } from "./stats.ts";
 import { hitFits, underEffect } from "./combat/queries.ts";
@@ -17,7 +17,56 @@ function twoHanded(action: KnownAction, access: ContentAccess): boolean {
   return item?.type === "weapon" && item.properties.includes("twoHanded");
 }
 
-function ridden(action: KnownAction, rider: WeaponRider): KnownAction {
+const modifier = (score: number): number => Math.floor((score - 10) / 2);
+
+// The attack made with the rider's ability in place of its own, where that's better, as Battle Ready's Intelligence.
+function withAbility(
+  action: KnownAction,
+  ability: Ability,
+  scores: AbilityScores,
+): KnownAction {
+  const { resolution } = action.activation;
+  if (resolution.kind !== "attack") return action;
+  const own = resolution.attack.ability ?? "str";
+  if (modifier(scores[ability]) <= modifier(scores[own])) return action;
+  return {
+    ...action,
+    activation: {
+      ...action.activation,
+      resolution: {
+        ...resolution,
+        attack: { ...resolution.attack, ability },
+        damage: resolution.damage.map((item) =>
+          item.amount.bonus
+            ? {
+                ...item,
+                amount: {
+                  ...item.amount,
+                  bonus: {
+                    ...item.amount.bonus,
+                    add: item.amount.bonus.add.map((term) =>
+                      term.kind === "abilityMod" && term.ability === own
+                        ? { ...term, ability }
+                        : term,
+                    ),
+                  },
+                },
+              }
+            : item,
+        ),
+      },
+    },
+  };
+}
+
+function ridden(
+  plain: KnownAction,
+  rider: WeaponRider,
+  scores: AbilityScores,
+): KnownAction {
+  const action = rider.ability
+    ? withAbility(plain, rider.ability, scores)
+    : plain;
   const { resolution, targeting } = action.activation;
   if (resolution.kind !== "attack") return action;
   const [first, ...rest] = resolution.damage;
@@ -85,6 +134,7 @@ export function withWeaponRiders(
   passives: readonly Passive[],
   actor: Actor,
   access: ContentAccess,
+  scores: AbilityScores,
 ): readonly KnownAction[] {
   const riders = passives.filter(
     (item): item is WeaponRider =>
@@ -98,7 +148,7 @@ export function withWeaponRiders(
         action.activation.trigger === undefined &&
         hitFits(rider.with, action, actor, access) &&
         !(rider.oneHanded && twoHanded(action, access))
-          ? ridden(shaped, rider)
+          ? ridden(shaped, rider, scores)
           : shaped,
       action,
     ),

@@ -1267,6 +1267,9 @@ export const ActivationSchema = z.strictObject({
       // within its range), as Sweeping Attack, and with `sameRoll` only one the hit's attack roll would also hit.
       near: z.number().int().min(5).optional(),
       sameRoll: z.literal(true).optional(),
+      // With `afterHit`, only a hit on a creature under an effect of the bearer's from one of these, as Superior
+      // Hunter's Prey's Hunter's Mark.
+      marked: z.array(ContentIdSchema).min(1).optional(),
       // With `afterHit`, taken as the attack hits or misses, in place of what it does: the target takes this, or
       // half on a miss, and an area is round the target without it, as Lightning Arrow.
       replacesHit: z.array(DamageSchema).min(1).optional(),
@@ -2194,7 +2197,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     damage: FormulaSchema.optional(),
     types: z.array(DamageTypeSchema).min(1).optional(),
     reach: z.number().int().min(5).optional(),
+    ability: AbilitySchema.optional(), // used for the attack and damage when it's better, as Battle Ready's Intelligence
     while: z.array(ContentIdSchema).min(1).optional(),
+  }),
+  // In a fight's first round, a hit carrying Sneak Attack makes its target save or take the hit's damage twice, as
+  // Death Strike.
+  z.strictObject({
+    kind: z.literal("deathStrike"),
+    ability: AbilitySchema,
+    dc: FormulaSchema,
   }),
   // Effects on a creature the bearer's attack roll misses, as Studied Attacks' Advantage on the next attack against it.
   z.strictObject({
