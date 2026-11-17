@@ -10,7 +10,7 @@ import { damageToParty, rollSave } from "./combat/effects.ts";
 import { finalDamage, halved } from "./rules.ts";
 import { AbilitySchema, DamageTypeSchema, DiceSchema } from "./schemas.ts";
 import { type Actor, type DndState, NS, dndEvent, isDead } from "./state.ts";
-import { damageResponses, rollDiceNotation } from "./stats.ts";
+import { damageResponses, deriveStats, rollDiceNotation } from "./stats.ts";
 
 // What a scene does to the party outside a fight: a trap or hazard's damage, and paying for something.
 
@@ -24,6 +24,8 @@ const SceneDamageSchema = z.strictObject({
   type: DamageTypeSchema,
   // The player's character, or every living member, as a trap that catches the whole party.
   who: z.enum(["player", "party"]).default("player"),
+  trap: z.literal(true).optional(), // it's a trap's, which a Thief's Thimble takes
+
   save: z
     .strictObject({
       ability: AbilitySchema,
@@ -84,7 +86,12 @@ export function sceneDamage(
       defended > 0
         ? Math.max(1, Math.round(defended * damageToParty(context.state)))
         : 0;
-    const amount = Math.min(scaled, target.tempHp + target.hp - 1);
+    const shield = args.trap ? trapShielded(target, scaled, context) : null;
+    if (shield) events.push(...shield.events);
+    const amount = Math.min(
+      scaled - (shield?.taken ?? 0),
+      target.tempHp + target.hp - 1,
+    );
     if (amount > 0)
       events.push(
         dndEvent(`${NS}:damaged`, {
@@ -97,6 +104,47 @@ export function sceneDamage(
       );
   }
   return events;
+}
+
+// A Thief's Thimble takes a trap's damage for its wearer, as long as its Hit Points last, and breaks at 0.
+function trapShielded(
+  target: Actor,
+  amount: number,
+  context: Context,
+): { readonly taken: number; readonly events: SystemEvent[] } | null {
+  const stats = deriveStats(target, context);
+  for (const passive of stats.passives) {
+    if (passive.kind !== "trapShield") continue;
+    const left =
+      (stats.resources[passive.resource] ?? 0) -
+      (target.resourcesSpent[passive.resource] ?? 0);
+    const taken = Math.min(left, amount);
+    if (taken <= 0) continue;
+    return {
+      taken,
+      events: [
+        ...(taken < left
+          ? [
+              dndEvent(`${NS}:resourceSpent`, {
+                actor: target.id,
+                resource: passive.resource,
+                amount: taken,
+              }),
+            ]
+          : [
+              dndEvent(`${NS}:itemUsed`, {
+                actor: target.id,
+                item: passive.item,
+              }),
+              dndEvent(`${NS}:resourceRestored`, {
+                actor: target.id,
+                resource: passive.resource,
+              }),
+            ]),
+      ],
+    };
+  }
+  return null;
 }
 
 export const sceneEffects = {

@@ -7,7 +7,7 @@ import {
 } from "#sdk";
 import { z } from "zod";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
-import { HIT_DICE, parseOption } from "../core/combat/ids.ts";
+import { HIT_DICE, itemUseOf, parseOption } from "../core/combat/ids.ts";
 import { squareKey } from "../core/grid.ts";
 import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
@@ -25,6 +25,7 @@ import type { AreaView, BoardExtra, FightMap } from "./board-data.ts";
 import { zonesOf } from "../core/zones.ts";
 import { dndCue } from "./cues.ts";
 import { GLOSSARY_TERMS } from "../core/glossary.ts";
+import { playing } from "../core/variant-rules.ts";
 import {
   ABILITIES,
   ABILITY_NAMES,
@@ -120,7 +121,10 @@ function actionNumbers(action: KnownAction, stats: Stats): string {
 }
 
 // What a higher slot adds, for the action's details.
-function upcastText(step: ScaleStep, level: number): string {
+function upcastText(
+  step: Exclude<ScaleStep, { slotOnly: true }>,
+  level: number,
+): string {
   if ("addRadius" in step) {
     return `Each slot level above ${String(level)} adds ${String(step.addRadius)} feet to its radius.`;
   }
@@ -149,12 +153,15 @@ function actionDetail(
 ): string {
   const source = contentText(
     access,
-    action.id.replace(/^[a-z]+:/, "").replace(/:free$/, ""),
+    itemUseOf(action.id) ??
+      action.id.replace(/^[a-z]+:/, "").replace(/:free$/, ""),
   );
   const upcast = action.upcast?.perSlotLevel;
   return [
     actionNumbers(action, stats),
-    upcast ? upcastText(upcast, action.spellLevel ?? 0) : "",
+    upcast && !("slotOnly" in upcast)
+      ? upcastText(upcast, action.spellLevel ?? 0)
+      : "",
     source?.text ?? "",
   ]
     .filter(Boolean)
@@ -1366,20 +1373,37 @@ function playerDied(rawState: unknown): boolean {
 }
 
 export const dndUi = {
-  cue: dndCue,
+  cue: (
+    event: SystemEvent,
+    before: unknown,
+    after: unknown,
+    access: ContentAccess,
+  ) => dndCue(event, before, after, playing(after, access)),
   roll,
   systemId: "dnd5.5e",
   about: "Compatible with fifth edition.",
-  sheets,
-  combat,
-  describe,
+  sheets: (rawState: unknown, access: ContentAccess) =>
+    sheets(rawState, playing(rawState, access)),
+  combat: (
+    rawState: unknown,
+    access: ContentAccess,
+    encounter?: (id: string) => unknown,
+  ) => combat(rawState, playing(rawState, access), encounter),
+  describe: (event: SystemEvent, rawState: unknown, access: ContentAccess) =>
+    describe(event, rawState, playing(rawState, access)),
   actorOf,
-  optionGroups,
-  card,
-  shop,
+  optionGroups: (
+    decision: Decision,
+    rawState: unknown,
+    access: ContentAccess,
+  ) => optionGroups(decision, rawState, playing(rawState, access)),
+  card: (decision: Decision, rawState: unknown, access: ContentAccess) =>
+    card(decision, rawState, playing(rawState, access)),
+  shop: (decision: Decision, rawState: unknown, access: ContentAccess) =>
+    shop(decision, rawState, playing(rawState, access)),
   creation: (decision: Decision, rawState: unknown, access: ContentAccess) =>
-    sheetCreation(decision, rawState, access) ??
-    creation(decision, rawState, access),
+    sheetCreation(decision, rawState, playing(rawState, access)) ??
+    creation(decision, rawState, playing(rawState, access)),
   playerDied,
   terms: GLOSSARY_TERMS,
 };

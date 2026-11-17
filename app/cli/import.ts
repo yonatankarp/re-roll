@@ -96,7 +96,12 @@ if (command === "library") {
 if (command === "glossary") {
   // Each book's glossary entities, written by npm run import:world.
   const entities: GlossaryEntity[] = [];
-  for (const book of GLOSSARY_BOOKS) {
+  // And the books a term names for itself.
+  const sources = new Set([
+    ...GLOSSARY_BOOKS,
+    ...GLOSSARY_TERMS.flatMap((term) => term.books ?? []),
+  ]);
+  for (const book of sources) {
     for (const folder of Object.keys(GLOSSARY_KINDS)) {
       const dir = `books/rules/${book}/${folder}`;
       const names = await readdir(dir).catch(() => []);

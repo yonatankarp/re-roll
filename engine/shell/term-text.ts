@@ -13,8 +13,13 @@ const plain = (text: string): string =>
     .replace(/\*+|_{2,}/g, "")
     .trim();
 
+// One or many of a word, as "Dragon" for "Dragons" or "Monstrosity" for "Monstrosities".
+const one = (word: string): string =>
+  word.toLowerCase().replace(/ies$/, "y").replace(/s$/, "");
+
 // The start of a section, enough for a quick answer: whole paragraphs up to about a short card's worth.
-// A table row named by the word, such as one damage type of many, is added after the first paragraph.
+// A table row or a paragraph led by the word in bold, such as one damage type or creature type of many, is added
+// after the first paragraph.
 export function excerpt(markdown: string, word: string): Excerpt {
   const blocks = markdown
     .split(/\n\s*\n/)
@@ -35,6 +40,10 @@ export function excerpt(markdown: string, word: string): Excerpt {
         .filter(Boolean),
     )
     .find((cells) => cells[0]?.toLowerCase() === word.toLowerCase());
+  const led = blocks.find((block) => {
+    const lead = /^\*\*([^*]+)\*\*\s/.exec(block)?.[1];
+    return lead !== undefined && one(lead) === one(word);
+  });
   const prose = blocks.filter(
     (block) =>
       !block.startsWith("#") &&
@@ -45,7 +54,8 @@ export function excerpt(markdown: string, word: string): Excerpt {
   let length = 0;
   for (const block of prose) {
     const text = plain(block.replace(/^[-*]\s+/gm, "• "));
-    if (paragraphs.length > 0 && (row || length + text.length > 420)) break;
+    if (paragraphs.length > 0 && (row || led || length + text.length > 420))
+      break;
     paragraphs.push(
       text.length > 600
         ? `${text.slice(0, 420).replace(/[^.!?]*$/, "")} …`
@@ -55,24 +65,34 @@ export function excerpt(markdown: string, word: string): Excerpt {
     if (paragraphs.length >= 3) break;
   }
   if (row) paragraphs.push(row.join(": "));
+  else if (led && led !== prose[0]) paragraphs.push(plain(led));
   return { title, paragraphs };
 }
 
-// Finds terms' words in text: whole words, longest first, matched as written.
+// Finds terms' words in text: whole words, longest first, matched as written. A name from the run's content that holds
+// a term's word, as Giant Rat or Nature's Veil, is matched whole and links nothing.
 export function termFinder(
   terms: readonly TermEntry[],
+  names: readonly string[] = [],
 ): (text: string) => { index: number; word: string; term: TermEntry }[] {
   const byWord = new Map<string, TermEntry>();
   for (const term of terms) {
     for (const word of term.words)
       if (!byWord.has(word)) byWord.set(word, term);
   }
-  const words = [...byWord.keys()].sort((a, b) => b.length - a.length);
-  if (words.length === 0) return () => [];
-  const pattern = new RegExp(
-    `(?<![\\w-])(?:${words.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?![\\w-])`,
-    "g",
-  );
+  if (byWord.size === 0) return () => [];
+  const alternation = (words: readonly string[]) =>
+    `(?<![\\w-])(?:${[...words]
+      .sort((a, b) => b.length - a.length)
+      .map((word) =>
+        word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/['’]/g, "['’]"),
+      )
+      .join("|")})(?![\\w-])`;
+  const holds = new RegExp(alternation([...byWord.keys()]));
+  const holding = [
+    ...new Set(names.filter((name) => !byWord.has(name) && holds.test(name))),
+  ];
+  const pattern = new RegExp(alternation([...byWord.keys(), ...holding]), "g");
   return (text) =>
     [...text.matchAll(pattern)].flatMap((match) => {
       const term = byWord.get(match[0]);

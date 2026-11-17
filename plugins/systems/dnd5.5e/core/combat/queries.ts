@@ -27,7 +27,7 @@ import {
   scaleActivation,
   type Stats,
 } from "../stats.ts";
-import type { Passive, Skill } from "../schemas.ts";
+import type { HitKind, Passive, Skill } from "../schemas.ts";
 import {
   distanceFeet,
   rangeFeet,
@@ -51,6 +51,7 @@ import {
 } from "../movement-modes.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
 import { encodeOption, THROW_PREFIX, weaponItemId } from "./ids.ts";
+import { markedBy } from "../trait-rules.ts";
 import { swallowerOf } from "./swallow.ts";
 import { hasteActing, limitsOf } from "./durations.ts";
 import { ownZoneAction } from "./areas.ts";
@@ -64,7 +65,7 @@ import {
   zonesOn,
 } from "../zones.ts";
 import { spellLevelOf } from "./dispel.ts";
-import { canRegain } from "../rest.ts";
+import { canRegain, regainCap } from "../rest.ts";
 import {
   type Ability,
   CompanionSchema,
@@ -209,6 +210,7 @@ export function meleeReach(action: KnownAction): number | null {
   const { targeting } = action.activation;
   if (!("creatures" in targeting)) return null;
   const feet = rangeFeet(targeting.range);
+  if (targeting.reach) return feet;
   return feet > 0 && feet <= 10 ? feet : null;
 }
 
@@ -690,6 +692,7 @@ export function canAfford(
   if (afterAction && actor.budget.action) return false;
   // only while Bloodied, as Unearthly Recovery
   if (action.activation.bloodied && actor.hp * 2 >= stats.maxHp) return false;
+  if (action.activation.beforeAction && !actor.budget.action) return false;
   if (!gatesOpen(action, actor)) return false;
   // Haste's additional action takes only a weapon attack, or Dash, Disengage or Hide (actions.ts).
   if (
@@ -720,20 +723,10 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
   const { activation } = action;
   const used = actor.usedThisTurn;
   if (activation.unmoved && actor.moved > 0) return false;
+  if (activation.oncePerTurn && used.includes(onceKey(action))) return false;
   if (activation.afterCast && !used.includes(CAST_ACTION)) return false;
   if (activation.afterBonusAction && actor.budget.bonusAction) return false;
-  const lasting = activation.while;
-  if (
-    lasting &&
-    !lasting.some(
-      (id) =>
-        actor.activeEffects.some(({ sourceId }) =>
-          sourceId.startsWith(`feature:${id}:`),
-        ) || actor.concentratingOn?.replace(/:free$/, "") === `spell:${id}`,
-    )
-  ) {
-    return false;
-  }
+  if (activation.while && !underEffect(actor, activation.while)) return false;
   const { resolution, cost } = activation;
   if (
     resolution.kind === "automatic" &&
@@ -750,6 +743,122 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
   );
 }
 
+// Whether an effect of one of these features' activations is on the actor, or it concentrates on one of these
+// spells, as a Rage for Travel along the Tree or Divine Fury.
+export function underEffect(actor: Actor, ids: readonly string[]): boolean {
+  return ids.some(
+    (id) =>
+      actor.activeEffects.some(({ sourceId }) =>
+        sourceId.startsWith(`feature:${id}:`),
+      ) || actor.concentratingOn?.replace(/:free$/, "") === `spell:${id}`,
+  );
+}
+
+// Whether a hit with this action is one a rider of this kind answers (schemas.ts HitKindSchema).
+export function hitFits(
+  kind: HitKind,
+  hitWith: KnownAction,
+  attacker: Actor,
+  access: Pick<ContentAccess, "content">,
+): boolean {
+  const { resolution } = hitWith.activation;
+  if (resolution.kind !== "attack") return false;
+  if (kind === "attack") return true;
+  if (resolution.attack.type !== "weapon") return false;
+  if (kind === "finesseOrRanged") {
+    return carriesExtraDice(attacker, hitWith, access);
+  }
+  const unarmed = resolution.attack.unarmed === true;
+  const id = weaponItemId(hitWith.id);
+  const item = id ? ItemSchema.safeParse(access.content(id)).data : undefined;
+  const weapon = item?.type === "weapon" ? item : undefined;
+  switch (kind) {
+    case "weapon":
+      return true;
+    case "meleeWeapon":
+      return isMelee(hitWith);
+    case "rangedWeapon":
+      return !isMelee(hitWith);
+    case "unarmed":
+      return unarmed;
+    case "monkWeapon":
+      return (
+        unarmed ||
+        (weapon !== undefined &&
+          isMelee(hitWith) &&
+          (weapon.category === "simple" || weapon.properties.includes("light")))
+      );
+    case "magicWeapon":
+      return weapon?.baseWeapon !== undefined;
+    case "strength":
+      return (
+        (resolution.attack.ability ?? (isMelee(hitWith) ? "str" : "dex")) ===
+        "str"
+      );
+    case "heavy":
+      return weapon?.properties.includes("heavy") === true;
+    case "heavyOrVersatile":
+      return (
+        weapon?.properties.some(
+          (property) => property === "heavy" || property === "versatile",
+        ) === true
+      );
+  }
+}
+
+// Whether an extraDamage passive adds to this hit: `edge` is the roll's Advantage and Disadvantage.
+export function extraFits(
+  passive: Extract<Passive, { kind: "extraDamage" }>,
+  attacker: Actor,
+  target: Actor,
+  hitWith: KnownAction,
+  edge: {
+    readonly advantage: boolean;
+    readonly disadvantage: boolean;
+    readonly natural?: number;
+  },
+  context: Context,
+): boolean {
+  const { state } = context;
+  const turn = state.combat?.order[state.combat.index];
+  if (passive.ownTurn && turn !== attacker.id) return false;
+  if (passive.firstRound && (state.combat?.round ?? 1) > 1) return false;
+  if (passive.while?.some((id) => !underEffect(attacker, [id]))) return false;
+  if (passive.against && !markedBy(target, attacker, passive.against)) {
+    return false;
+  }
+  const advantaged =
+    passive.when === "advantage" || passive.when === "advantageOrAlly";
+  const kind = passive.with ?? (advantaged ? "finesseOrRanged" : "attack");
+  if (!hitFits(kind, hitWith, attacker, context)) return false;
+  if (passive.when === "always") return true;
+  if (passive.when === "natural20") return edge.natural === 20;
+  if (passive.when === "targetHurt") {
+    return target.hp < deriveStats(target, context).maxHp;
+  }
+  if (edge.advantage && !edge.disadvantage) return true;
+  // Sneak Attack's ally must be able to act, and the ally never makes up for Disadvantage on the roll.
+  return (
+    passive.when === "advantageOrAlly" &&
+    !edge.disadvantage &&
+    allies(state, attacker).some(
+      (item) =>
+        item.id !== attacker.id &&
+        !isDown(item) &&
+        !hasCondition(item, ...INCAPACITATING) &&
+        within5(item, target),
+    )
+  );
+}
+
+// The usedThisTurn key of an activation limited to once a turn: its name, or its feature's (or its own) id.
+export function onceKey(action: KnownAction): string {
+  const once = action.activation.oncePerTurn;
+  return typeof once === "string"
+    ? `once:${once}`
+    : `once:${action.id.replace(/^(feature:[^:]+:[^:]+):\d+$/, "$1")}`;
+}
+
 // A healing pool with nothing left in it can't heal, as Lay On Hands spent, and nothing is regained with nothing
 // spent, as Font of Inspiration's use for a slot.
 function poolsLeft(action: KnownAction, actor: Actor, stats: Stats): boolean {
@@ -758,7 +867,12 @@ function poolsLeft(action: KnownAction, actor: Actor, stats: Stats): boolean {
     resolution.kind !== "automatic" ||
     resolution.effects.every((effect) =>
       effect.kind === "regain"
-        ? canRegain(actor, effect.resource, stats)
+        ? canRegain(
+            actor,
+            effect.resource,
+            stats,
+            regainCap(effect, action.spellLevel),
+          )
         : effect.kind === "cure" && effect.pool
           ? (actor.resourcesSpent[effect.pool.resource] ?? 0) +
               effect.pool.per <=
@@ -1036,7 +1150,8 @@ export function isMelee(action: KnownAction): boolean {
   const { targeting } = action.activation;
   return (
     "creatures" in targeting &&
-    (targeting.range === "touch" ||
+    (targeting.reach === true ||
+      targeting.range === "touch" ||
       (typeof targeting.range === "number" && targeting.range <= 5))
   );
 }
@@ -1068,6 +1183,8 @@ export function carriesExtraDice(
   access: Pick<ContentAccess, "content">,
 ): boolean {
   if (attacker.source.kind !== "character") return true;
+  const { resolution } = action.activation;
+  if (resolution.kind === "attack" && resolution.attack.finesse) return true;
   const itemId = weaponItemId(action.id);
   const item =
     itemId && access.content(itemId)

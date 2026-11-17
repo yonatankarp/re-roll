@@ -1,6 +1,12 @@
 import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
-import { carriedWeight, carryingCapacity, encumberedSpeed } from "./carry.ts";
+import {
+  carriedWeight,
+  carryingCapacity,
+  encumberedSpeed,
+  encumbrance,
+} from "./carry.ts";
+import { ENCUMBRANCE, variantOn } from "./variant-rules.ts";
 import {
   type Actor,
   type DndState,
@@ -59,11 +65,13 @@ import { featureRules, grantedSpells } from "./feature-rules.ts";
 import { type Caster, multiclassSlots } from "./multiclass.ts";
 import { holdsConcentration, withMetamagic } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
+import { withWeaponRiders } from "./weapon-riders.ts";
 import {
   THROW_PREFIX,
   WEAPON_PREFIX,
   castFrom,
   itemCastId,
+  itemUseId,
   spellOfSource,
   weaponItemId,
 } from "./combat/ids.ts";
@@ -465,6 +473,17 @@ function itemCasts(
   });
 }
 
+// A worn item's own activations (ChargedSchema `activations`), named after it, as a Pearl of Power's.
+function itemUses(itemId: string, item: Item): KnownAction[] {
+  const uses = "activations" in item ? (item.activations ?? []) : [];
+  return uses.map(({ name, activation }, index) => ({
+    id: itemUseId(itemId, index),
+    name: uses.length > 1 ? `${name} (${item.name})` : name,
+    activation,
+    spellLevel: null,
+  }));
+}
+
 // The abilities a level's feat raised, when that feat makes its raised save proficient, as Resilient does.
 function raisedByFeat(
   answers: CharacterBuild["levels"][number]["answers"],
@@ -740,9 +759,15 @@ export function weaponActivation(
       : "str";
   // shortcut: an Ammunition weapon without its range in the data reaches 80 feet with no long range.
   const range = ranged ? (weapon.range ?? { normal: 80, long: 80 }) : null;
+  const reach = !ranged && weapon.properties.includes("reach");
   return {
     cost: ["action"],
-    targeting: { creatures: 1, range: range?.long ?? 5, side: "enemy" },
+    targeting: {
+      creatures: 1,
+      range: range?.long ?? (reach ? 10 : 5),
+      side: "enemy",
+      ...(reach ? { reach: true as const } : {}),
+    },
     resolution: {
       kind: "attack",
       attack: {
@@ -852,6 +877,16 @@ function attacksFrom(featureId: string): number {
 }
 
 const isPactMagic = (id: string): boolean => id.endsWith("pact-magic");
+
+// Heavily encumbered: Disadvantage on ability checks, attack rolls and saving throws that use Strength, Dexterity or
+// Constitution.
+const HEAVILY_ENCUMBERED = (["checks", "attacks", "saves"] as const).flatMap(
+  (on) =>
+    (["str", "dex", "con"] as const).map((ability) => ({
+      kind: "modifier" as const,
+      modifier: { kind: "disadvantage" as const, on, ability },
+    })),
+);
 
 function characterStats(actor: Actor, access: ContentAccess): Stats {
   const build = effectiveBuild(actor);
@@ -1090,7 +1125,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       );
     }
     if (works(itemId, item) && !untrainedArmor) {
-      actions.push(...itemCasts(itemId, item, level, access));
+      actions.push(
+        ...itemCasts(itemId, item, level, access),
+        ...itemUses(itemId, item),
+      );
     }
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
@@ -1244,6 +1282,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   }
 
   const pools = itemPools(actor, access);
+  const carried = carriedWeight(actor, access);
+  const capacity = carryingCapacity(
+    abilities.str,
+    species.size,
+    traits.some(({ kind }) => kind === "powerfulBuild"),
+  );
+  // With the Encumbrance variant the load slows, in place of armor's Strength score.
+  const load = variantOn(access, ENCUMBRANCE)
+    ? encumbrance(carried, capacity)
+    : null;
   const partial: Stats = {
     abilities,
     proficiency: proficiencyBonus(level) + magic.proficiency,
@@ -1255,15 +1303,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       flatBonus: flatBonus + shield,
       passives: traits,
     }),
-    speed: encumberedSpeed(
-      species.speed,
-      carriedWeight(actor, access),
-      carryingCapacity(
-        abilities.str,
-        species.size,
-        traits.some(({ kind }) => kind === "powerfulBuild"),
-      ),
-    ),
+    speed: encumberedSpeed(species.speed - 10 * (load ?? 0), carried, capacity),
     savingThrows: [
       ...new Set([
         ...firstClass.savingThrows,
@@ -1307,10 +1347,17 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
             },
           ]
         : []),
+      ...(load === 2 ? HEAVILY_ENCUMBERED : []),
     ],
     actions: withMetamagic(
       withInvocations(
-        withRiders(actions, fromFeatures.passives),
+        withWeaponRiders(
+          withRiders(actions, fromFeatures.passives),
+          fromFeatures.passives,
+          actor,
+          access,
+          abilities,
+        ),
         fromFeatures.passives,
         abilities,
         classLevels,
@@ -1368,7 +1415,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       0,
       partial.speed +
         passiveBonus(partial, "speed") -
-        (tooHeavy ? 10 : 0) -
+        (tooHeavy && load === null ? 10 : 0) -
         5 * actor.exhaustion,
     ),
     resources: Object.fromEntries(
@@ -1948,7 +1995,8 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
           : {}),
       }
     : own;
-  const speed = effectBonus(actor, "speed");
+  // A Ring of Free Action: nothing takes Speed off.
+  const speed = effectBonus(actor, "speed", hasSteadySpeed(stats));
   const maxHp = effectBonus(actor, "maxHp");
   const stuck = new Set(
     actor.activeEffects.flatMap(({ modifier }) =>
@@ -2225,16 +2273,29 @@ function changedWeapon(
 
 // A spell's flat Speed or Hit Point maximum increase, as with Longstrider or Aid, counted once per source.
 // shortcut: Hit Points above the maximum aren't taken away when the increase ends.
-function effectBonus(actor: Actor, to: "speed" | "maxHp"): number {
+function effectBonus(
+  actor: Actor,
+  to: "speed" | "maxHp",
+  increasesOnly = false,
+): number {
   const seen = new Set<string>();
   let total = 0;
   for (const { sourceId, modifier } of actor.activeEffects) {
-    if (modifier.kind !== "bonus" || modifier.to !== to || seen.has(sourceId))
+    if (
+      modifier.kind !== "bonus" ||
+      modifier.to !== to ||
+      seen.has(sourceId) ||
+      (increasesOnly && modifier.subtract)
+    )
       continue;
     seen.add(sourceId);
     total += (modifier.subtract ? -1 : 1) * (modifier.amount.bonus?.base ?? 0);
   }
   return total;
+}
+
+export function hasSteadySpeed(stats: Stats): boolean {
+  return stats.passives.some((passive) => passive.kind === "steadySpeed");
 }
 
 export function modifierFor(stats: Stats, ability: Ability): number {
@@ -2368,6 +2429,13 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
       case "maxHp":
         total += term.half ? Math.floor(stats.maxHp / 2) : stats.maxHp;
         break;
+      case "abilityScore":
+        total += Math.max(
+          ...term.abilities.map((ability) => stats.abilities[ability]),
+        );
+        break;
+      case "dealt": // filled in by the reaction it's part of
+        break;
       default:
         term satisfies never;
     }
@@ -2414,12 +2482,15 @@ export function scaledDice(
     readonly dice?: string | undefined;
     readonly diceCount?: string | undefined;
     readonly dieSize?: string | undefined;
+    readonly halfDice?: true | undefined;
   },
   scaling: Readonly<Record<string, number>>,
 ): string | undefined {
   if (!source.dice) return undefined;
   const [count = "0", sides = "0"] = source.dice.split("d");
-  return `${String(scaling[source.diceCount ?? ""] ?? count)}d${String(scaling[source.dieSize ?? ""] ?? sides)}`;
+  const dice = Number(scaling[source.diceCount ?? ""] ?? count);
+  const rolled = source.halfDice ? Math.ceil(dice / 2) : dice;
+  return `${String(rolled)}d${String(scaling[source.dieSize ?? ""] ?? sides)}`;
 }
 
 // A feature's dice that grow at levels in one class, as Jolt to Life's lightning at Artificer levels 11 and 17.
@@ -2459,7 +2530,7 @@ export function scaleActivation(
   step: ScaleStep,
   times: number,
 ): Activation {
-  if (times <= 0) return activation;
+  if (times <= 0 || "slotOnly" in step) return activation;
   if ("addRadius" in step) {
     const { targeting } = activation;
     return "area" in targeting

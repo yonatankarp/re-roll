@@ -24,7 +24,7 @@ import { HIT_DICE } from "./combat/ids.ts";
 import { hitDieHealing, hitDieRoll } from "./trait-rules.ts";
 import { gearOptions } from "./gear.ts";
 import { familiarFoundEvents } from "./combat/familiar.ts";
-import { ClassSchema, type ResourceDef } from "./schemas.ts";
+import { ClassSchema, type LeafEffect, type ResourceDef } from "./schemas.ts";
 import {
   type Stats,
   deriveStats,
@@ -320,8 +320,22 @@ function maxUses(resource: string, stats: Stats): number {
   return stats.resources[resource] ?? 0;
 }
 
-function slotKeys(stats: Stats): string[] {
-  return stats.slots.map((_, index) => `slot:${String(index + 1)}`).reverse();
+// Spell slot keys, the highest first, up to `maxLevel`.
+function slotKeys(stats: Stats, maxLevel = 9): string[] {
+  return stats.slots
+    .slice(0, maxLevel)
+    .map((_, index) => `slot:${String(index + 1)}`)
+    .reverse();
+}
+
+// The highest slot level a `regain` effect gives back, cast with a slot of this level.
+export function regainCap(
+  effect: Extract<LeafEffect, { kind: "regain" }>,
+  slotLevel: number | null | undefined,
+): number | undefined {
+  return effect.maxLevel === "halfSlot"
+    ? Math.floor((slotLevel ?? 0) / 2)
+    : effect.maxLevel;
 }
 
 // Whether there's anything spent for a `regain` effect to give back.
@@ -329,18 +343,20 @@ export function canRegain(
   actor: Actor,
   resource: string,
   stats: Stats,
+  maxLevel?: number,
 ): boolean {
-  const keys = resource === "slots" ? slotKeys(stats) : [resource];
+  const keys = resource === "slots" ? slotKeys(stats, maxLevel) : [resource];
   return keys.some((key) => (actor.resourcesSpent[key] ?? 0) > 0);
 }
 
 // A `regain` effect: spent uses back, at most `count`, half the most rounded up, or all; for "slots", slots of
-// any level, the highest first.
+// any level up to `maxLevel`, the highest first.
 export function regainEvents(
   actor: Actor,
   resource: string,
   count: number | "half" | "all",
   stats: Stats,
+  maxLevel?: number,
 ): SystemEvent[] {
   let left =
     count === "all"
@@ -348,21 +364,21 @@ export function regainEvents(
       : count === "half"
         ? Math.ceil(maxUses(resource, stats) / 2)
         : count;
-  return (resource === "slots" ? slotKeys(stats) : [resource]).flatMap(
-    (key) => {
-      const amount = Math.min(left, actor.resourcesSpent[key] ?? 0);
-      left -= amount;
-      return amount > 0
-        ? [
-            dndEvent(`${NS}:resourceRestored`, {
-              actor: actor.id,
-              resource: key,
-              amount,
-            }),
-          ]
-        : [];
-    },
-  );
+  return (
+    resource === "slots" ? slotKeys(stats, maxLevel) : [resource]
+  ).flatMap((key) => {
+    const amount = Math.min(left, actor.resourcesSpent[key] ?? 0);
+    left -= amount;
+    return amount > 0
+      ? [
+          dndEvent(`${NS}:resourceRestored`, {
+            actor: actor.id,
+            resource: key,
+            amount,
+          }),
+        ]
+      : [];
+  });
 }
 
 type Recharge = ResourceDef["recharge"][number];

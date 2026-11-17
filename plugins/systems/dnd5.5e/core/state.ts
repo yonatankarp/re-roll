@@ -74,6 +74,9 @@ export const FRAME_KINDS = [
   "sheetAnswer",
   "sheetStep",
   "smite",
+  "strikeChosen",
+  "missRider",
+  "advantageForgone",
   "swapInitiative",
   "takeAction",
   "teleport",
@@ -383,6 +386,8 @@ export const MAX_ATTUNED = 3;
 export const StateSchema = z.strictObject({
   // Chosen when the game starts. Missing in saves from before there was a choice, which played as normal.
   difficulty: z.enum(DIFFICULTIES).optional(),
+  // The variant rules the run plays (variant-rules.ts), chosen when it starts. Missing when it plays none.
+  variantRules: z.array(ContentIdSchema).optional(),
   gold: z.number().min(0).optional(), // the party's coins, in gold pieces, with copper as hundredths
   // What each merchant has sold, by name, so limited stock stays sold on a later visit.
   shopBought: z.record(z.string(), z.array(ContentIdSchema)).optional(),

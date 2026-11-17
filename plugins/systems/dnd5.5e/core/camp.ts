@@ -22,7 +22,7 @@ import {
 } from "./combat/queries.ts";
 import { leafEvents, payCosts, sharedHealing } from "./combat/effects.ts";
 import { ITEM_PREFIX, spellOfSource } from "./combat/ids.ts";
-import { SHORT_REST_GIVEN, canRegain } from "./rest.ts";
+import { SHORT_REST_GIVEN, canRegain, regainCap } from "./rest.ts";
 
 // Healing between fights: a party member's spell or feature that heals or raises the dead, used on the party from
 // the character sheet, as Cure Wounds after a fight or Raise Dead, which takes an hour. It costs what it costs in a
@@ -55,6 +55,7 @@ function helps(
   effect: LeafEffect,
   target: Actor,
   access: ContentAccess,
+  slotLevel: number | null,
 ): boolean {
   switch (effect.kind) {
     case "heal":
@@ -74,7 +75,12 @@ function helps(
         (effect.maxHp === true && (target.maxHpLoss ?? 0) > 0)
       );
     case "regain":
-      return canRegain(target, effect.resource, deriveStats(target, access));
+      return canRegain(
+        target,
+        effect.resource,
+        deriveStats(target, access),
+        regainCap(effect, slotLevel),
+      );
     default:
       return false;
   }
@@ -164,7 +170,9 @@ function targetsOf(
         item.resourcesSpent[SHORT_REST_GIVEN] &&
         effectsOf(action).some((effect) => effect.kind === "shortRest")
       ) &&
-      effectsOf(action).some((effect) => helps(effect, item, access)),
+      effectsOf(action).some((effect) =>
+        helps(effect, item, access, action.spellLevel),
+      ),
   );
 }
 

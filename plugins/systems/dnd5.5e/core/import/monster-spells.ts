@@ -159,6 +159,7 @@ function upcast(
         }
       : null;
   }
+  if ("slotOnly" in step) return activation;
   // A flat step (Heal's 10 more, Magic Weapon's +2) needs no dice to match.
   if (!step.addDice) return scaleActivation(activation, step, times);
   const { resolution } = activation;

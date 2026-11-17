@@ -157,6 +157,13 @@ import { afterActionEvents } from "./combat/durations.ts";
 import { deriveStats, lookup } from "./stats.ts";
 import { withReveal } from "./fog.ts";
 import { actingEnds } from "./combat/effects.ts";
+import {
+  SKILLS_WITH_DIFFERENT_ABILITIES,
+  VARIANT_SETTINGS,
+  chosenVariants,
+  playing,
+  variantOn,
+} from "./variant-rules.ts";
 
 // Every step ends by revealing what the party sees once its events land, so the fog clears as it happens.
 function revealing(
@@ -591,6 +598,7 @@ export const dnd55e = defineSystem<DndState>({
         },
       ],
     },
+    ...VARIANT_SETTINGS,
   ],
   createRun: ({ settings, actors, dice, content, contentIds, setting }) => {
     const access = { content, contentIds, setting };
@@ -618,8 +626,10 @@ export const dnd55e = defineSystem<DndState>({
     const difficulty = DIFFICULTIES.find(
       (item) => item === settings.difficulty,
     );
+    const variantRules = chosenVariants(settings);
     return {
       ...(difficulty ? { difficulty } : {}),
+      ...(variantRules.length > 0 ? { variantRules } : {}),
       actors: state,
       combat: null,
     };
@@ -629,9 +639,21 @@ export const dnd55e = defineSystem<DndState>({
     const parsed = CheckSchema.parse(check);
     const player = context.state.actors[PLAYER_ACTOR];
     if (!player) throw new Error("The player has no character");
-    const skill = "skill" in parsed ? parsed.skill : undefined;
+    // A skill paired with another ability adds the skill's proficiency only with Skills with Different Abilities, and
+    // is that ability's plain check without it.
+    const paired =
+      "skill" in parsed &&
+      parsed.ability !== undefined &&
+      parsed.ability !== SKILL_ABILITIES[parsed.skill];
+    const skill =
+      "skill" in parsed &&
+      (!paired || variantOn(context, SKILLS_WITH_DIFFERENT_ABILITIES))
+        ? parsed.skill
+        : undefined;
     const ability =
-      "skill" in parsed ? SKILL_ABILITIES[parsed.skill] : parsed.ability;
+      "skill" in parsed
+        ? (parsed.ability ?? SKILL_ABILITIES[parsed.skill])
+        : parsed.ability;
     const rolled = abilityCheck(
       player,
       skill,
@@ -654,8 +676,13 @@ export const dnd55e = defineSystem<DndState>({
       context,
     ),
   applyEvent: applyDndEvent,
+  // The engine hands these the state and the access apart, so the access gets the state for the variant rules.
   nextDecision: (state, access) =>
-    withTactics(nextDndDecision(state, access), state, access),
+    withTactics(
+      nextDndDecision(state, playing(state, access)),
+      state,
+      playing(state, access),
+    ),
   rests: availableRests,
   // Going to another scene takes about an hour, so the party's dead lie dead longer, past Revivify's minute, and
   // one with a finished clone wakes in it, whole (Clone).
@@ -679,11 +706,14 @@ export const dnd55e = defineSystem<DndState>({
         : []),
     ];
   },
-  sceneActions: (state, access) => [
-    ...sceneGearActions(state, access),
-    ...sceneSwapActions(state, access),
-    ...sceneCastActions(state, access),
-  ],
+  sceneActions: (state, bare) => {
+    const access = playing(state, bare);
+    return [
+      ...sceneGearActions(state, access),
+      ...sceneSwapActions(state, access),
+      ...sceneCastActions(state, access),
+    ];
+  },
   decidePolicy: (decision, context) =>
     decision.id.endsWith(`:build:${decision.actor}:${SHEET_KEY}`)
       ? ACCEPT // the sheet is always a sound, recommended build
@@ -695,7 +725,7 @@ export const dnd55e = defineSystem<DndState>({
   // Building steps (class, scores, subclass, spells, feats) are made as a companion's are, and a rest's
   // Hit Dice and gear as a careful player would.
   tactical: (decision) =>
-    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|inspiration|deathSave|build|metamagic|precision|damageType|focus|wish):/.test(
+    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|strike|inspiration|deathSave|build|metamagic|precision|damageType|focus|wish):/.test(
       decision.id,
     ) || isGearDecision(decision),
 });
