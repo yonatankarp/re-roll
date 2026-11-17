@@ -1195,6 +1195,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     });
   }
 
+  const pools = itemPools(actor, access);
   const partial: Stats = {
     abilities,
     proficiency: proficiencyBonus(level) + magic.proficiency,
@@ -1296,7 +1297,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     resourceDefs: [
       ...fromFeatures.resources,
       ...freeCasts.flatMap(({ resource }) => (resource ? [resource] : [])),
-      ...itemPools(actor, access),
+      ...pools,
     ],
     pactMagic: [...featureIds].some(isPactMagic),
     untrainedArmor,
@@ -1318,7 +1319,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         5 * actor.exhaustion,
     ),
     resources: Object.fromEntries(
-      partial.resourceDefs.map((resource) => [
+      [...fromFeatures.resources, ...pools].map((resource) => [
         resource.id,
         evaluateFormula(resource.max, partial),
       ]),
@@ -1332,8 +1333,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
 function itemPools(actor: Actor, access: ContentAccess): ResourceDef[] {
   const pools = new Map<string, ResourceDef>();
   for (const itemId of new Set(actor.inventory)) {
-    const item = ItemSchema.safeParse(access.content(itemId)).data;
-    for (const pool of item ? chargesOf(item).resources : []) {
+    for (const pool of chargesOf(lookup(access, ItemSchema, itemId))
+      .resources) {
       if (!pools.has(pool.id)) pools.set(pool.id, pool);
     }
   }

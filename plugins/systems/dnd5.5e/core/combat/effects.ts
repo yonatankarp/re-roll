@@ -228,9 +228,7 @@ function lastCharge(
   context: Context,
 ): SystemEvent[] {
   const from = castFrom(action.id);
-  const item = from
-    ? ItemSchema.safeParse(context.content(from.item)).data
-    : undefined;
+  const item = from ? lookup(context, ItemSchema, from.item) : undefined;
   const fate = item && "lastCharge" in item ? item.lastCharge : undefined;
   const pool = item ? chargesOf(item).resources[0]?.id : undefined;
   if (!from || !fate || !pool) return [];
