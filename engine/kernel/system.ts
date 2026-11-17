@@ -28,6 +28,8 @@ export const ContentIdSchema = z
 export const ContentEntrySchema = z.object({
   id: ContentIdSchema,
   replaces: ContentIdSchema.optional(),
+  // Another entry of the same kind whose fields fill every one this entry leaves out, so twins share one encoding.
+  playsAs: ContentIdSchema.optional(),
   // The library headings this entry describes, by heading id ("phb/0123-section#heading"), for coverage.
   library: z.array(z.string()).optional(),
 });
@@ -35,6 +37,7 @@ export const ContentEntrySchema = z.object({
 export interface ContentEntry {
   readonly id: string;
   readonly replaces?: string | undefined;
+  readonly playsAs?: string | undefined;
   readonly library?: readonly string[] | undefined;
 }
 

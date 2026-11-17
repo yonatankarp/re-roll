@@ -33,7 +33,7 @@
 - id: "srd52:feature/fighting-style"
   name: Fighting Style
   text: "You gain a Fighting Style feat of your choice."
-  automation: text
+  automation: full
 
 - id: "srd52:feature/weapon-mastery"
   name: Weapon Mastery
@@ -78,12 +78,25 @@
 - id: "srd52:feature/savage-attacker"
   name: Savage Attacker
   text: "Once per turn, roll a weapon's damage dice twice and use either roll."
-  automation: text
+  automation: full
+  passives:
+    - { kind: savageAttacker }
 
 - id: "srd52:feature/alert"
   name: Alert
   text: "Add your Proficiency Bonus to Initiative, and you may swap Initiative with an ally."
-  automation: text
+  automation: full
+  passives:
+    - kind: modifier
+      modifier:
+        kind: bonus
+        to: initiative
+        amount: { bonus: { add: [{ kind: proficiency }] } }
+  activations:
+    - cost: []
+      trigger: { initiative: true }
+      targeting: { self: true }
+      resolution: { kind: automatic, effects: [{ kind: swapInitiative }] }
 
 - id: "srd52:feature/magic-initiate"
   name: Magic Initiate
@@ -103,7 +116,7 @@
 - id: "srd52:feature/ability-score-improvement"
   name: Ability Score Improvement
   text: "You gain the Ability Score Improvement feat or another feat you qualify for."
-  automation: text
+  automation: full
 
 - id: "srd52:feature/extra-attack"
   name: Extra Attack
@@ -125,7 +138,7 @@
 - id: "srd52:feature/fighter-subclass"
   name: Fighter Subclass
   text: "You gain a Fighter subclass of your choice."
-  automation: text
+  automation: full
 
 - id: "srd52:feature/tactical-shift"
   name: Tactical Shift
@@ -155,7 +168,7 @@
 - id: "srd52:feature/rogue-subclass"
   name: Rogue Subclass
   text: "You gain a Rogue subclass of your choice."
-  automation: text
+  automation: full
 
 - id: "srd52:feature/steady-aim"
   name: Steady Aim
@@ -170,7 +183,15 @@
 - id: "srd52:feature/uncanny-dodge"
   name: Uncanny Dodge
   text: "When an attacker you can see hits you, you can use your Reaction to halve the damage."
-  automation: text
+  automation: full
+  activations:
+    - cost: [reaction]
+      trigger: { hitByAttack: true }
+      targeting: { self: true }
+      resolution:
+        kind: automatic
+        effects:
+          - { kind: reduceDamage, halve: true }
 
 - id: "srd52:feature/fast-hands"
   name: Fast Hands
@@ -180,7 +201,10 @@
 - id: "srd52:feature/second-story-work"
   name: Second-Story Work
   text: "You gain a Climb Speed, and you can jump farther using Dexterity."
-  automation: text
+  automation: full
+  passives:
+    - { kind: modifier, modifier: { kind: movementMode, mode: climb } }
+    - { kind: jump, ability: dex }
 
 - id: "srd52:feature/channel-divinity"
   name: Channel Divinity
@@ -194,7 +218,7 @@
 - id: "srd52:feature/cleric-subclass"
   name: Cleric Subclass
   text: "You gain a Cleric subclass of your choice."
-  automation: text
+  automation: full
 
 - id: "srd52:feature/sear-undead"
   name: Sear Undead
@@ -242,7 +266,7 @@
 - id: "srd52:feature/wizard-subclass"
   name: Wizard Subclass
   text: "You gain a Wizard subclass of your choice."
-  automation: text
+  automation: full
 
 - id: "srd52:feature/memorize-spell"
   name: Memorize Spell

@@ -445,6 +445,61 @@ describe("content", () => {
       expect(await errorsOf(files, ["a"])).toContain("replacement cycle");
     });
   });
+
+  describe("twins", () => {
+    const base = {
+      ...rules("a"),
+      "plugins/rules/a/tricks/x.yaml": trick("a:trick/old"),
+      "plugins/rules/a/foes/x.yaml":
+        '- { id: "a:foe/x", name: X, menace: 3, trick: "a:trick/old" }',
+    };
+    const needsA = { requires: [["a", "^1"]] } as const;
+
+    it("fills what an entry leaves out from the one it plays as", async () => {
+      const files = {
+        ...base,
+        ...rules("b", needsA),
+        "plugins/rules/b/foes/y.yaml":
+          '- { id: "b:foe/y", playsAs: "a:foe/x", name: Y }',
+      };
+      const result = await load(files, ["b"]);
+      if (!result.ok) throw new Error(JSON.stringify(result.issues));
+      expect(result.registry.content("b:foe/y")).toMatchObject({
+        id: "b:foe/y",
+        name: "Y",
+        menace: 3,
+        trick: "a:trick/old",
+      });
+      expect(result.registry.content("a:foe/x")).toMatchObject({ name: "X" });
+      expect(result.registry.contentIds()).toContain("b:foe/y");
+    });
+
+    it("rejects playing as an unknown entry, another kind, or an undeclared plugin", async () => {
+      const unknown = {
+        ...base,
+        ...rules("b", needsA),
+        "plugins/rules/b/foes/y.yaml":
+          '- { id: "b:foe/y", playsAs: "a:foe/no", name: Y }',
+      };
+      expect(await errorsOf(unknown, ["b"])).toContain(
+        'plays as unknown entry "a:foe/no"',
+      );
+      const otherKind = {
+        ...unknown,
+        "plugins/rules/b/foes/y.yaml":
+          '- { id: "b:foe/y", playsAs: "a:trick/old", name: Y }',
+      };
+      expect(await errorsOf(otherKind, ["b"])).toContain(
+        "plays as a different kind",
+      );
+      const undeclared = { ...otherKind, ...rules("b") };
+      undeclared["plugins/rules/b/foes/y.yaml"] =
+        '- { id: "b:foe/y", playsAs: "a:foe/x", name: Y }';
+      expect(await errorsOf(undeclared, ["a", "b"])).toContain(
+        "without requiring its plugin",
+      );
+    });
+  });
 });
 
 describe("adventures", () => {
