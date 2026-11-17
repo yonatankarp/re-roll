@@ -43,7 +43,7 @@ import {
   sizeOf,
 } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
-import { blindedTo, coverFor, seeing } from "./sight.ts";
+import { blindedTo, coverFor, lightAt, seeing } from "./sight.ts";
 import {
   classOptionPolicy,
   classOptions,
@@ -152,6 +152,7 @@ export const BONUS_HIDE = `${TACTIC}bonus-hide`;
 export const BONUS_DODGE = `${TACTIC}bonus-dodge`;
 const BONUS_SEARCH = `${TACTIC}bonus-search`;
 const BONUS_STUDY = `${TACTIC}bonus-study`;
+const BONUS_HELP = `${TACTIC}bonus-help`;
 const DODGE = `${TACTIC}dodge`;
 const HIDE = HIDE_SOURCE;
 const SEARCH = `${TACTIC}search`;
@@ -274,6 +275,7 @@ export function abilityCheck(
   label: (success: boolean) => string,
   context: Context,
   advantage = false, // from a trait, as Powerful Build gives to escape a grapple
+  disadvantage = false, // from the creature it's made against, as a Cloak of Elvenkind's wearer
 ): {
   readonly success: boolean;
   readonly total: number;
@@ -297,6 +299,7 @@ export function abilityCheck(
       ) ||
       placedFlag(actor, "advantage", "checks", context.state, context, ability),
     disadvantage:
+      disadvantage ||
       (stats.untrainedArmor && (ability === "str" || ability === "dex")) ||
       hasFlag(
         actor,
@@ -671,7 +674,7 @@ function readyable(stats: Stats): readonly KnownAction[] {
 function bonusTacticCost(
   actor: Actor,
   stats: Stats,
-  tactic: "dash" | "disengage" | "hide" | "dodge" | "search" | "study",
+  tactic: "dash" | "disengage" | "hide" | "dodge" | "search" | "study" | "help",
 ): SystemEvent[] | null {
   // Expeditious Retreat's Dash as a Bonus Action costs nothing more.
   if (
@@ -716,10 +719,11 @@ function bonusTacticOptions(
 ): { id: string; label: string }[] {
   if (!actor.budget.bonusAction) return [];
   const allowed = new Set(
-    (["dash", "disengage", "hide", "dodge", "search", "study"] as const).filter(
-      (tactic) => bonusTacticCost(actor, stats, tactic) !== null,
-    ),
+    (
+      ["dash", "disengage", "hide", "dodge", "search", "study", "help"] as const
+    ).filter((tactic) => bonusTacticCost(actor, stats, tactic) !== null),
   );
+  const shaded = dimHide(actor, state, access, stats);
   const options: { id: string; label: string }[] = [];
   const extra = bonusDashFeet(actor, stats) + dashBonus(stats);
   if (
@@ -749,9 +753,9 @@ function bonusTacticOptions(
     });
   }
   if (
-    allowed.has("hide") &&
+    (allowed.has("hide") || shaded) &&
     !hasTactic(actor, "hidden") &&
-    hiddenFromAll(actor, state, access)
+    (shaded || hiddenFromAll(actor, state, access))
   ) {
     options.push({
       id: BONUS_HIDE,
@@ -764,6 +768,14 @@ function bonusTacticOptions(
       label: "Search as a Bonus Action (Perception)",
     });
   }
+  if (allowed.has("help")) {
+    options.push(
+      ...helpOptions(actor, state, access, stats).map((option) => ({
+        id: option.id.replace(HELP, BONUS_HELP),
+        label: `${option.label} as a Bonus Action`,
+      })),
+    );
+  }
   // Study is the player's, as its action is (tacticOptions).
   if (allowed.has("study") && actor.id === PLAYER_ACTOR) {
     for (const foe of standing(knownFoes(state, actor, access))) {
@@ -772,6 +784,70 @@ function bonusTacticOptions(
         label: `Study ${foe.name} as a Bonus Action (${capitalized(studySkill(foe, access))})`,
       });
     }
+  }
+  return options;
+}
+
+// A Nature's Mantle: in Dim Light or Darkness, Hide as a Bonus Action even with a foe watching.
+function dimHide(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+  stats: Stats,
+): boolean {
+  return (
+    hasPassive(stats, "hideInDim") &&
+    lightAt(actor.position, state, access) !== "bright"
+  );
+}
+
+// Help: distracting a foe for an ally's next attack, or helping an ally beside it with a check. With Tag Team the
+// player may also trade places with a willing ally beside it.
+function helpOptions(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+  stats: Stats,
+): { id: string; label: string }[] {
+  const foes = standing(knownFoes(state, actor, access));
+  const friends = standing(allies(state, actor)).filter(
+    (item) => item.id !== actor.id,
+  );
+  // Harper Agent's Distracting Melody helps against an enemy farther off.
+  const helpFeet = Math.max(
+    5,
+    ...stats.passives.flatMap((passive) =>
+      passive.kind === "helpRange" ? [passive.feet] : [],
+    ),
+  );
+  const options: { id: string; label: string }[] = [];
+  const swaps =
+    actor.id === PLAYER_ACTOR && hasPassive(stats, "helpSwap")
+      ? friends.filter(
+          (item) =>
+            within5(actor, item) && !hasCondition(item, ...INCAPACITATING),
+        )
+      : [];
+  const add = (target: Actor, label: string): void => {
+    options.push({ id: encodeOption(HELP, target.id), label });
+    for (const ally of swaps) {
+      options.push({
+        id: encodeOption(HELP, target.id, ally.id),
+        label: `${label}, trading places with ${ally.name}`,
+      });
+    }
+  };
+  if (friends.length > 0) {
+    for (const foe of foes.filter(
+      (item) =>
+        within5(actor, item) ||
+        distanceFeet(actor.position, item.position) <= helpFeet,
+    )) {
+      add(foe, `Help an ally attack ${foe.name}`);
+    }
+  }
+  for (const friend of friends.filter((item) => within5(actor, item))) {
+    add(friend, `Help ${friend.name} with a check`);
   }
   return options;
 }
@@ -862,9 +938,6 @@ export function tacticOptions(
 
   const foes = standing(knownFoes(state, actor, access));
   const near = foes.filter((foe) => within5(actor, foe));
-  const friends = standing(allies(state, actor)).filter(
-    (item) => item.id !== actor.id,
-  );
   const extra = walkSpeed(actor, stats) + dashBonus(stats);
   if (extra > 0 && !hasCondition(actor, "grappled", "restrained")) {
     options.push({
@@ -944,31 +1017,7 @@ export function tacticOptions(
       label: `Study ${foe.name} (${capitalized(studySkill(foe, access))})`,
     });
   }
-  // Harper Agent's Distracting Melody helps against an enemy farther off.
-  const helpFeet = Math.max(
-    5,
-    ...stats.passives.flatMap((passive) =>
-      passive.kind === "helpRange" ? [passive.feet] : [],
-    ),
-  );
-  if (friends.length > 0) {
-    for (const foe of foes.filter(
-      (item) =>
-        within5(actor, item) ||
-        distanceFeet(actor.position, item.position) <= helpFeet,
-    )) {
-      options.push({
-        id: encodeOption(HELP, foe.id),
-        label: `Help an ally attack ${foe.name}`,
-      });
-    }
-  }
-  for (const friend of friends.filter((item) => within5(actor, item))) {
-    options.push({
-      id: encodeOption(HELP, friend.id),
-      label: `Help ${friend.name} with a check`,
-    });
-  }
+  options.push(...helpOptions(actor, state, access, stats));
   if (!full) return options;
   const dc = String(saveDc(stats, "str"));
   const size = sizeOf(actor, access);
@@ -1316,6 +1365,7 @@ export function runTactic(
         HIDE_DC,
         () => "stealth",
         context,
+        hasPassive(stats, "hideAdvantage"), // Skulker's Fog of War
       );
       const hidden: SystemEvent[] = rolled.success
         ? [
@@ -1349,24 +1399,48 @@ export function runTactic(
     }
     case SEARCH:
     case BONUS_SEARCH: {
-      // A Perception check finds every hidden foe whose Stealth total it matches.
+      // A Perception check finds every hidden foe whose Stealth total it matches. One that's harder to perceive, as a
+      // Cloak of Elvenkind's wearer, is looked for with a roll of its own, at Disadvantage.
       const hidden = enemies(state, actor).flatMap((foe) => {
         const [mark] = tacticsOf(foe, "hidden");
-        return mark ? [{ foe, dc: mark.value ?? HIDE_DC }] : [];
+        return mark
+          ? [
+              {
+                foe,
+                dc: mark.value ?? HIDE_DC,
+                cloaked: hasPassive(
+                  deriveStats(foe, context),
+                  "perceivedDisadvantage",
+                ),
+              },
+            ]
+          : [];
       });
       const lowest = Math.min(HIDE_DC, ...hidden.map(({ dc }) => dc));
       const keen = sharpEye(actor, stats);
-      const rolled = abilityCheck(
-        actor,
-        "perception",
-        "wis",
-        lowest,
-        () => "perception",
-        context,
-        keen !== null,
+      const look = (dc: number, cloaked: boolean) =>
+        abilityCheck(
+          actor,
+          "perception",
+          "wis",
+          dc,
+          () => "perception",
+          context,
+          keen !== null,
+          cloaked,
+        );
+      const plain = hidden.filter(({ cloaked }) => !cloaked);
+      const rolled = look(
+        plain.length > 0 ? Math.min(...plain.map(({ dc }) => dc)) : lowest,
+        plain.length === 0 && hidden.length > 0,
       );
-      const found = hidden.flatMap(({ foe, dc }) =>
-        rolled.total >= dc
+      const cloaked = hidden.filter((item) => item.cloaked);
+      const second =
+        plain.length > 0 && cloaked.length > 0
+          ? look(Math.min(...cloaked.map(({ dc }) => dc)), true)
+          : null;
+      const found = hidden.flatMap(({ foe, dc, cloaked: hard }) =>
+        (hard && second ? second.total : rolled.total) >= dc
           ? [
               dndEvent(`${NS}:effectEnded`, {
                 actor: foe.id,
@@ -1379,6 +1453,7 @@ export function runTactic(
         events: [
           ...actionOrBonus(kind === SEARCH, "search"),
           ...rolled.events,
+          ...(second?.events ?? []),
           ...keenSpent(actor, keen, rolled.success),
           ...found,
         ],
@@ -1415,8 +1490,33 @@ export function runTactic(
         ],
       };
     }
-    case HELP: {
+    case HELP:
+    case BONUS_HELP: {
       const helped = needTarget();
+      const paid =
+        kind === HELP
+          ? [spend("action")]
+          : [
+              spend("bonusAction"),
+              ...(bonusTacticCost(actor, stats, "help") ?? []),
+            ];
+      // Tag Team: trading places with a willing ally beside it, which provokes nothing.
+      const partner = detail ? state.actors[detail] : undefined;
+      const swapped =
+        partner?.position && actor.position
+          ? [
+              dndEvent(`${NS}:moved`, {
+                actor: actor.id,
+                to: partner.position,
+                feet: 0,
+              }),
+              dndEvent(`${NS}:moved`, {
+                actor: partner.id,
+                to: actor.position,
+                feet: 0,
+              }),
+            ]
+          : [];
       // On a dying creature, a Wisdom (Medicine) check to make it Stable.
       if (helped.side === actor.side && dyingNow(helped)) {
         const rolled = abilityCheck(
@@ -1429,7 +1529,8 @@ export function runTactic(
         );
         return {
           events: [
-            spend("action"),
+            ...paid,
+            ...swapped,
             ...rolled.events,
             ...(rolled.success
               ? [dndEvent(`${NS}:stabilized`, { actor: helped.id })]
@@ -1459,7 +1560,8 @@ export function runTactic(
           : [];
       return {
         events: [
-          spend("action"),
+          ...paid,
+          ...swapped,
           effect(helped.id, HELP, actor.id, modifier, "casterNextTurn"),
           ...withering,
         ],

@@ -599,6 +599,16 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     feet: z.number().int().min(5),
     extend: z.number().int().min(5).optional(),
   }),
+  // The bearer sheds light this far round itself wherever it goes, Bright ("light") or Dim, with `dim` feet of Dim
+  // Light beyond Bright, as Faerie Fire's 10 feet of Dim Light (core/zones.ts).
+  z.strictObject({
+    kind: z.literal("sheds"),
+    light: z.enum(["light", "dim"]),
+    feet: z.number().int().min(5),
+    dim: z.number().int().min(5).optional(),
+  }),
+  // Heavily Obscured to everyone else, which only Blindsight sees past, as Shadow of Moil's shadows (core/sight.ts).
+  z.strictObject({ kind: z.literal("shrouded") }),
   // Illusory duplicates, each of which a hit may land on instead, as Mirror Image's (combat/attack.ts).
   z.strictObject({
     kind: z.literal("images"),
@@ -701,6 +711,8 @@ export const ZoneKindSchema = z.enum([
   "sunlight",
   "area",
   "wall",
+  // Light one step dimmer in it, Bright Light Dim and Dim Light Darkness, as round Shadow of Moil's caster.
+  "shade",
 ]);
 export type ZoneKind = z.infer<typeof ZoneKindSchema>;
 
@@ -800,8 +812,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .optional(),
     endsOnDamage: z.boolean().default(false),
     endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature, as Modify Memory's
-    // Ends when the creature attacks or deals damage ("attack"), or takes any action ("action"), as Fade Away's.
-    endsOn: z.enum(["attack", "action"]).optional(),
+    // Ends when the creature attacks or deals damage ("attack"), or takes any action ("action"), as Fade Away's, or
+    // attacks, deals damage or casts a spell ("attackOrCast"), as Invisibility's.
+    endsOn: z.enum(["attack", "action", "attackOrCast"]).optional(),
+    // Ends as the creature's turn ends in Bright Light, as Cloak of Shadows' (combat/turn.ts).
+    endsInLight: z.literal(true).optional(),
+    // Ends once the creature has the Incapacitated condition, as Draconic Flight's wings (combat/turn.ts).
+    untilIncapacitated: z.literal(true).optional(),
     // Taking damage gives it a save to end it, as Dragon Fear's, using the save it came with, with Advantage on
     // "advantage", as Hideous Laughter's.
     saveOnDamage: z.union([z.literal(true), z.literal("advantage")]).optional(),
@@ -845,6 +862,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     gone: z.array(z.string()).min(1).optional(),
     repeatSave: z.boolean().optional(), // as an applyCondition's
     whileTempHp: z.literal(true).optional(), // ends once the bearer has no Temporary Hit Points, as Armor of Agathys
+    endsInLight: z.literal(true).optional(), // as an applyCondition's
+    untilIncapacitated: z.literal(true).optional(), // as an applyCondition's
     // The caster picks the modifier's damage type from these as it casts (combat/damage-choice.ts), as with
     // Protection from Energy. A cast's lists of the same length are picked together, by place, as Fire Shield's
     // warm or chill shield sets both its Resistance and its flames.
@@ -960,6 +979,12 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     escape: AbilitySchema.optional(),
     // a wall that stops only walking, as Forcecage's cage, or only sight, as Wall of Fire; both when left out
     walls: z.enum(["walking", "sight"]).optional(),
+    // light: Dim Light this many feet beyond its Bright, as Light's 20 more feet (core/zones.ts)
+    dim: z.number().int().min(5).optional(),
+    // darkness its caster sees through, as Shadow Arts' (core/sight.ts)
+    ownerSees: z.literal(true).optional(),
+    // light: creatures in its Bright Light can't benefit from the Invisible condition, as a Lantern of Revealing's
+    reveals: z.literal(true).optional(),
   }),
   // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
   // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe. A caster
@@ -1111,9 +1136,12 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // A strong wind: it ends the gas and vapour zones in its area, as Gust of Wind does Fog Cloud.
   // With `zones`, it ends the spells' zones of those kinds in its area instead, as Sunburst does Darkness.
+  // With `maxLevel`, it ends those of a spell of that level or lower whose area overlaps its own, as Daylight ends
+  // Darkness of level 3 or lower.
   z.strictObject({
     kind: z.literal("disperse"),
     zones: z.array(ZoneKindSchema).min(1).optional(),
+    maxLevel: z.number().int().min(0).max(9).optional(),
   }),
   // The caster takes this many turns in a row, ending once something it does reaches another creature, as Time Stop.
   z.strictObject({ kind: z.literal("extraTurns"), turns: AmountSchema }),
@@ -1382,6 +1410,8 @@ export const AreaEffectSchema = z.strictObject({
   drifts: z.number().int().min(5).optional(),
   // its owner can take an action on later turns to move it up to this far, as Moonbeam's Magic action
   moves: z.number().int().min(5).optional(),
+  // moving it takes a Bonus Action instead, as Dancing Lights', or nothing, once a turn, as Shadow Arts' Darkness
+  moveWith: z.enum(["bonusAction", "free"]).optional(),
   // while a creature has a condition from it, it acts only on that one, with this as that creature's turns start,
   // as Conjure Elemental's spirit holding the one it Restrained
   holding: ResolutionSchema.optional(),
@@ -1604,7 +1634,8 @@ export const ActivationSchema = z.strictObject({
     })
     .optional(),
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
-  whileIn: z.literal("shadows").optional(), // only in Dim Light or Darkness, as Merge with Shadows
+  // only in Dim Light or Darkness ("shadows"), as Merge with Shadows, or in sunlight, as Light Bringer's Sun's Healing
+  whileIn: z.enum(["shadows", "sunlight"]).optional(),
   afterAction: z.literal(true).optional(), // only once the bearer has taken its action, as Blink Steps
   beforeAction: z.literal(true).optional(), // only before it takes its action, as Reckless Attack's first attack roll
   afterBonusAction: z.literal(true).optional(), // only once it has taken its Bonus Action, as Fleet Step
@@ -1977,6 +2008,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // What the caster gets once the cantrip deals damage, as Improved Blessed Strikes' Temporary Hit Points.
     selfEffects: z.array(LeafEffectSchema).min(1).optional(),
   }),
+  // Seeing normally through the Darkness of its own spells, as Power of Shadow's Eyes of the Dark.
+  z.strictObject({ kind: z.literal("seesOwnDarkness") }),
+  // While in Darkness, Invisible to a creature that sees it there only by Darkvision, as Umbral Sight.
+  z.strictObject({ kind: z.literal("umbral") }),
   // Seeing through Darkness and Dim Light this far, as with Devil's Sight.
   z.strictObject({
     kind: z.literal("seesInDarkness"),
@@ -1992,7 +2027,17 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("bonusTactics"),
     // "search" and "study" as Observant's Quick Search and Keen Mind's Quick Study
     tactics: z
-      .array(z.enum(["dash", "disengage", "hide", "dodge", "search", "study"]))
+      .array(
+        z.enum([
+          "dash",
+          "disengage",
+          "hide",
+          "dodge",
+          "search",
+          "study",
+          "help",
+        ]),
+      )
       .min(1),
     half: z.literal(true).optional(), // its Dash adds half its Speed, as a troll's Charge
     safe: z.literal(true).optional(), // its Dash provokes no Opportunity Attacks, as a warrior commander's Tactical Charge
@@ -2032,6 +2077,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("rerollOnes") }),
   // A creature at least one size larger is cover enough to Hide behind, as with Naturally Stealthy.
   z.strictObject({ kind: z.literal("hideBehindLarger") }),
+  // Advantage on the Stealth check of the Hide action, as Skulker's Fog of War.
+  z.strictObject({ kind: z.literal("hideAdvantage") }),
+  // An attack roll made while hidden that misses doesn't give the bearer away, as Skulker's Sniper.
+  z.strictObject({ kind: z.literal("quietMiss") }),
+  // In Dim Light it can Hide as a Bonus Action, even with a foe watching, as a Nature's Mantle allows.
+  z.strictObject({ kind: z.literal("hideInDim") }),
+  // A Perception check made to find the bearer has Disadvantage, as with a Cloak of Elvenkind.
+  z.strictObject({ kind: z.literal("perceivedDisadvantage") }),
   // Once a turn, a weapon hit's damage dice are rolled twice and the higher kept, as with Savage Attacker.
   z.strictObject({ kind: z.literal("savageAttacker") }),
   // Proficiency in these saving throws, or with `increased` in the one its feat raised, as with Resilient.
@@ -2237,6 +2290,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Once a turn, one damage die of a hit of this type is rolled again, and a Critical Hit rolls one more die, as
   // with Piercer.
   z.strictObject({ kind: z.literal("damageReroll"), damage: DamageTypeSchema }),
+  // Helping, it can trade places with a willing ally within 5 feet that isn't Incapacitated, which provokes nothing, as
+  // Emerald Enclave Fledgling's Tag Team.
+  z.strictObject({ kind: z.literal("helpSwap") }),
   // Help distracts an enemy this far away, as with Harper Agent's Distracting Melody.
   z.strictObject({
     kind: z.literal("helpRange"),

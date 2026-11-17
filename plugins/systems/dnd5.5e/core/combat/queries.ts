@@ -67,6 +67,7 @@ import {
   inZone,
   sealed,
   slowingKeys,
+  zoneModifiers,
   zonesOn,
 } from "../zones.ts";
 import { spellLevelOf } from "./dispel.ts";
@@ -187,7 +188,11 @@ export function rollBonus(
     total += modifier.subtract ? -rolled : rolled;
   }
   const stats = deriveStats(actor, context);
-  for (const modifier of passiveModifiers(stats.passives)) {
+  // What a zone it stands in grants, as Pass without Trace's +10 to Stealth.
+  const placed = context.state.combat
+    ? zoneModifiers(actor, context.state, context)
+    : [];
+  for (const modifier of [...passiveModifiers(stats.passives), ...placed]) {
     if (
       modifier.kind === "bonus" &&
       modifier.to === to &&

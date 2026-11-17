@@ -31,6 +31,8 @@ import {
   blockingSet,
   glows,
   lit,
+  revealed,
+  shaded,
   obscuring,
   statsOf,
   thornKeys,
@@ -159,6 +161,16 @@ export function lightAt(
   state: DndState,
   access?: ContentAccess, // for the light monsters shed, as a flameskull's
 ): "bright" | "dim" | "dark" {
+  const light = unshadedLight(square, state, access);
+  if (!shaded(square, state)) return light;
+  return light === "bright" ? "dim" : "dark";
+}
+
+function unshadedLight(
+  square: Square | null,
+  state: DndState,
+  access?: ContentAccess,
+): "bright" | "dim" | "dark" {
   const terrain = state.combat?.terrain;
   if (!terrain || !square || lit(square, state, access)) return "bright";
   const key = squareKey(square);
@@ -167,7 +179,7 @@ export function lightAt(
     : setOf(terrain.dim).has(key)
       ? "dim"
       : terrain.light;
-  return ground === "dark" && glows(square, state, access) ? "dim" : ground;
+  return ground !== "bright" && glows(square, state, access) ? "dim" : ground;
 }
 
 // A sense reaches a square this many feet away, when the creature has it at all.
@@ -181,6 +193,7 @@ export interface Senses {
   readonly blindsight: number; // sees without light: through fog and darkness, the Invisible, while Blinded
   readonly truesight: number; // sees in magical and normal darkness, and the Invisible
   readonly devilsSight: number; // sees normally in Dim Light and Darkness, magical too, as Devil's Sight
+  readonly ownDarkness: boolean; // sees through the Darkness of its own spells, as Power of Shadow
 }
 
 type SenseModifier = Extract<Modifier, { kind: "sense" }>;
@@ -217,6 +230,7 @@ const NO_SENSES: Senses = {
   blindsight: 0,
   truesight: 0,
   devilsSight: 0,
+  ownDarkness: false,
 };
 
 // What a stat block's or companion's printed senses give.
@@ -271,6 +285,9 @@ export function sensesOf(actor: Actor, access: ContentAccess): Senses {
         : { ...NO_SENSES, darkvision: speciesDarkvision(actor, access) };
   const base = {
     ...printed,
+    ownDarkness: stats.passives.some(
+      (passive) => passive.kind === "seesOwnDarkness",
+    ),
     devilsSight: Math.max(
       0,
       ...stats.passives.flatMap((passive) =>
@@ -359,7 +376,9 @@ export function seeing(
   if (feet > limit) return "none";
   if (reaches(feet, senses.blindsight)) return "clear";
   // shortcut: a zone hides whatever is in it and blinds whoever stands in it, whichever way the line runs.
-  const hidden = obscuring(at, state) ?? obscuring(viewer.position, state);
+  const hidden =
+    obscuring(at, state, viewer.id, senses.ownDarkness) ??
+    obscuring(viewer.position, state, viewer.id, senses.ownDarkness);
   if (hidden) {
     const through =
       hidden === "darkness"
@@ -403,11 +422,45 @@ export function behindTotalCover(
   );
 }
 
-// Invisible to `viewer`, which nothing it has sees past, Blindsight and Truesight in range included.
+// Invisible to `viewer`, which nothing it has sees past, Blindsight and Truesight in range included, and not in the
+// Bright Light of a light that shows the Invisible. Shadow of Moil's shroud hides the bearer as well from all but
+// Blindsight, and Umbral Sight from a viewer that sees it in Darkness only by Darkvision.
 export function unseenInvisible(
   target: Actor,
   viewer: Actor,
+  context: ContentAccess & { readonly state: DndState },
+): boolean {
+  if (target.id === viewer.id) return false;
+  const feet = distanceFeet(viewer.position, target.position);
+  if (
+    target.activeEffects.some(({ modifier }) => modifier.kind === "shrouded") &&
+    !reaches(feet, sensesOf(viewer, context).blindsight)
+  ) {
+    return true;
+  }
+  if (umbralTo(target, viewer, context.state, context)) return true;
+  return (
+    invisibleTo(target, viewer) &&
+    !seesInvisible(viewer, target, context) &&
+    !revealed(target.position, context.state, context)
+  );
+}
+
+// Umbral Sight: the bearer, in Darkness, is unseen by a viewer whose only way to see it there is Darkvision.
+export function umbralTo(
+  target: Actor,
+  viewer: Actor,
+  state: DndState,
   access: ContentAccess,
 ): boolean {
-  return invisibleTo(target, viewer) && !seesInvisible(viewer, target, access);
+  if (!statsOf(target, access).passives.some((p) => p.kind === "umbral")) {
+    return false;
+  }
+  if (lightAt(target.position, state, access) !== "dark") return false;
+  const feet = distanceFeet(viewer.position, target.position);
+  const senses = sensesOf(viewer, access);
+  return !reaches(
+    feet,
+    Math.max(senses.blindsight, senses.truesight, senses.devilsSight),
+  );
 }

@@ -2471,7 +2471,13 @@ function zoneMoves(actor: Actor): KnownAction[] {
           id: `${MOVE_ZONE}${sourceId}`,
           name: `Move ${modifier.name ?? "the area"}`,
           activation: {
-            cost: ["action"],
+            cost:
+              modifier.area.moveWith === "free"
+                ? []
+                : [modifier.area.moveWith ?? "action"],
+            ...(modifier.area.moveWith === "free"
+              ? { oncePerTurn: `${MOVE_ZONE}${sourceId}` }
+              : {}),
             targeting: {
               area: { shape: "sphere", radius: modifier.radius },
               range: modifier.area.moves,

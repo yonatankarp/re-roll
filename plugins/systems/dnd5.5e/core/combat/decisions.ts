@@ -25,9 +25,9 @@ import { deriveStats, lookup } from "../stats.ts";
 import { commandedFamiliar } from "./effects.ts";
 import { AIM_AREA, PICK } from "../targeting.ts";
 import { fleeOptions } from "../legendary.ts";
-import { ItemSchema, PregenSchema } from "../schemas.ts";
+import { type Activation, ItemSchema, PregenSchema } from "../schemas.ts";
 import { heroOptions } from "../character-sheet.ts";
-import { silencedSpells } from "../zones.ts";
+import { silencedSpells, sunlit } from "../zones.ts";
 import {
   actorOf,
   canAfford,
@@ -43,6 +43,19 @@ import {
 } from "./queries.ts";
 
 // The decision a fight asks next: the player's character first, then whoever's turn it is.
+
+// Only in Dim Light or Darkness, or only in sunlight, as its activation says.
+export function whereItWorks(
+  activation: Activation,
+  actor: Actor,
+  state: DndState,
+): boolean {
+  if (activation.whileIn === "shadows") {
+    return lightAt(actor.position, state) !== "bright";
+  }
+  if (activation.whileIn === "sunlight") return sunlit(actor.position, state);
+  return true;
+}
 
 function turnOptions(
   actor: Actor,
@@ -67,9 +80,7 @@ function turnOptions(
     )
       continue;
     if (hushed?.(action)) continue;
-    if (activation.whileIn && lightAt(actor.position, state) === "bright") {
-      continue;
-    }
+    if (!whereItWorks(activation, actor, state)) continue;
     const { targeting } = activation;
     const add = (target: string, label: string): void => {
       options.push(...withUpcasts(action, actor, stats, target, label));

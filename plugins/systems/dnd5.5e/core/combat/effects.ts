@@ -135,7 +135,13 @@ import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
 import { movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
 import { reincarnateEvents } from "../reincarnate.ts";
-import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
+import {
+  cureFor,
+  dispelEvents,
+  isSpell,
+  snuffedLights,
+  spellLevelOf,
+} from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
 import { damageTypeFrame, zoneTypeFrame } from "./damage-choice.ts";
@@ -1462,8 +1468,11 @@ export function actingEnds(
   const harms =
     resolution !== undefined &&
     (resolution.kind !== "automatic" || resolution.damage.length > 0);
+  const casts = action !== null && action.spellLevel !== null;
   return actor.activeEffects.flatMap(({ endsOn, sourceId, casterId }) =>
-    endsOn === "action" || (endsOn === "attack" && harms)
+    endsOn === "action" ||
+    (endsOn === "attack" && harms) ||
+    (endsOn === "attackOrCast" && (harms || casts))
       ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId, casterId })]
       : [],
   );
@@ -1944,6 +1953,10 @@ export function leafEvents(
                   : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
+              ...(effect.endsInLight ? { endsInLight: true as const } : {}),
+              ...(effect.untilIncapacitated
+                ? { untilIncapacitated: true as const }
+                : {}),
               ...lingersFor(effect.duration),
               ...swallowed,
             },
@@ -2005,6 +2018,10 @@ export function leafEvents(
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
               ...(effect.endsOnSpell ? { endsOnSpell: true } : {}),
               ...(effect.endsOn ? { endsOn: effect.endsOn } : {}),
+              ...(effect.endsInLight ? { endsInLight: true as const } : {}),
+              ...(effect.untilIncapacitated
+                ? { untilIncapacitated: true as const }
+                : {}),
               ...(effect.saveOnDamage && conditionSave
                 ? {
                     saveOnDamage: {
@@ -2585,7 +2602,9 @@ function zoneEvents(
   const events: SystemEvent[] = [];
   const { targeting } = action.activation;
   const wind = effects.find((effect) => effect.kind === "disperse");
-  if (wind?.kind === "disperse" && "area" in targeting) {
+  if (wind?.kind === "disperse" && wind.maxLevel !== undefined) {
+    events.push(...overlapEnds(wind, effects, actor, at, context));
+  } else if (wind?.kind === "disperse" && "area" in targeting) {
     const { shape, radius } = targeting.area;
     // shortcut: Sunburst ends any Darkness zone, as a monster's own Darkness is a spell too.
     const ends = (zone: ReturnType<typeof zonesOf>[number]): boolean =>
@@ -2681,6 +2700,9 @@ function zoneEvents(
             ...(wall ? { blocks: wall.squares } : {}),
             ...(wall && effect.walls ? { walls: effect.walls } : {}),
             ...(wall && fixedLayers ? { layers: fixedLayers } : {}),
+            ...(effect.dim ? { dim: effect.dim } : {}),
+            ...(effect.ownerSees ? { ownerSees: true as const } : {}),
+            ...(effect.reveals ? { reveals: true as const } : {}),
             name: action.name,
           },
           ends: effectEnds(effect.duration),
@@ -2690,6 +2712,41 @@ function zoneEvents(
     );
   }
   return events;
+}
+
+// Daylight's sunlight ends Darkness of level 3 or lower that its area overlaps, and the Boon of the Bright Sun's
+// light any spell's Darkness.
+function overlapEnds(
+  wind: Extract<LeafEffect, { kind: "disperse" }>,
+  effects: readonly LeafEffect[],
+  actor: Actor,
+  at: Square,
+  context: Context,
+): SystemEvent[] {
+  const own = effects.flatMap((effect) =>
+    effect.kind === "zone" ? [effect] : [],
+  );
+  const reach = Math.max(0, ...own.map((effect) => effect.radius));
+  const centre = own.some((effect) => effect.follows)
+    ? (actor.position ?? at)
+    : at;
+  const kinds = wind.zones ?? ["fog"];
+  return zonesOf(context.state).flatMap((zone) => {
+    const owner = context.state.actors[zone.owner];
+    const level =
+      zone.level ?? spellLevelOf(zone.sourceId, owner, context) ?? 9;
+    return kinds.includes(zone.zone) &&
+      level <= (wind.maxLevel ?? 9) &&
+      distanceFeet(zone.at, centre) <= zone.radius + reach
+      ? [
+          dndEvent(`${NS}:effectEnded`, {
+            actor: zone.owner,
+            sourceId: zone.sourceId,
+            casterId: zone.owner,
+          }),
+        ]
+      : [];
+  });
 }
 
 // The damage type of `types` its foes in the fight resist least, as a caster picking Conjure Elemental's element.

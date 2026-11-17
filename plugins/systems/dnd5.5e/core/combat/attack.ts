@@ -1171,7 +1171,8 @@ export function runAttackRoll(
     ...actingEnds(attacker, action),
     ...(isMelee(action) ? prisonEvents(attacker, context) : []),
     ...onceEnded(target, "attacksAgainst", attacker.id),
-    ...revealEvents(attacker),
+    // Skulker's Sniper: a miss from hiding doesn't give the attacker away.
+    ...(!hits && hasPassive(stats, "quietMiss") ? [] : revealEvents(attacker)),
     ...unwarded,
     // Attacking lowers the attacker's own Diabolic Ward until its next turn.
     ...(stats.passives.some(

@@ -183,6 +183,9 @@ const ActiveEffectSchema = z.strictObject({
       walls: z.enum(["walking", "sight"]).optional(), // what alone its wall stops, when not both
       layers: z.array(ResolutionSchema).optional(), // what walking into its wall does, in order, its DCs as cast
       name: z.string().optional(), // the action that left it
+      dim: z.number().int().optional(), // light: feet of Dim Light beyond its Bright
+      ownerSees: z.literal(true).optional(), // darkness its caster sees through
+      reveals: z.literal(true).optional(), // light: no benefit from the Invisible condition in its Bright Light
     }),
     // What an action anyone can take, such as Dodge, or a weapon mastery, leaves behind (core/tactics.ts).
     z.strictObject({
@@ -209,7 +212,10 @@ const ActiveEffectSchema = z.strictObject({
   endsOnDamage: z.boolean().optional(),
   endsWithTempHp: z.boolean().optional(), // ends once damage leaves the creature no Temporary Hit Points
   endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
-  endsOn: z.enum(["attack", "action"]).optional(), // ends when the creature attacks or deals damage, or acts
+  // ends when the creature attacks or deals damage, or acts, or attacks, deals damage or casts a spell
+  endsOn: z.enum(["attack", "action", "attackOrCast"]).optional(),
+  endsInLight: z.literal(true).optional(), // ends as the creature's turn ends in Bright Light
+  untilIncapacitated: z.literal(true).optional(), // ends once the creature is Incapacitated
   // Taking damage gives this save, ending it on a success, as Dragon Fear's.
   saveOnDamage: z
     .strictObject({
