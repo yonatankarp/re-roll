@@ -523,15 +523,19 @@ function itemCasts(
           activation: {
             ...numbered,
             cost: [
-              ...activation.cost.filter(
-                (cost) =>
-                  cost !== "slot" &&
-                  !(
-                    cast.gold !== undefined &&
-                    typeof cost === "object" &&
-                    "gold" in cost
-                  ),
-              ),
+              ...activation.cost
+                .map((cost) =>
+                  cast.bonusAction && cost === "action" ? "bonusAction" : cost,
+                )
+                .filter(
+                  (cost) =>
+                    cost !== "slot" &&
+                    !(
+                      cast.gold !== undefined &&
+                      typeof cost === "object" &&
+                      "gold" in cost
+                    ),
+                ),
               // the item's own costly component in place of the spell's, as Cauldron of Rebirth's salt
               ...(cast.gold ? [{ gold: cast.gold }] : []),
               ...(charges > 0 && resource

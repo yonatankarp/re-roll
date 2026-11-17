@@ -288,8 +288,10 @@ function lastCharge(
   const itemId = castFrom(action.id)?.item ?? itemUseOf(action.id);
   const item = itemId ? lookup(context, ItemSchema, itemId) : undefined;
   const fate = item && "lastCharge" in item ? item.lastCharge : undefined;
+  const twenty =
+    item && "lastChargeTwenty" in item ? item.lastChargeTwenty : undefined;
   const pool = item ? chargesOf(item).resources[0]?.id : undefined;
-  if (!itemId || !fate || !pool) return [];
+  if (!itemId || (!fate && !twenty) || !pool) return [];
   const charges = action.activation.cost.reduce(
     (total, cost) =>
       typeof cost === "object" && "resource" in cost && cost.resource === pool
@@ -305,8 +307,6 @@ function lastCharge(
   // An Arcane Chatelaine is gone with its last key, with no d20.
   const face = fate === "vanishes" ? 1 : context.dice.roll(20);
   // A Staff of Power's 20 gives charges back.
-  const twenty =
-    item && "lastChargeTwenty" in item ? item.lastChargeTwenty : undefined;
   if (face === 20 && twenty) {
     return [
       dndEvent(`${NS}:resourceRestored`, {
@@ -319,7 +319,7 @@ function lastCharge(
       }),
     ];
   }
-  if (face !== 1) return [];
+  if (face !== 1 || !fate) return [];
   return [
     dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: itemId }),
     dndEvent(`${NS}:resourceRestored`, { actor: actor.id, resource: pool }),

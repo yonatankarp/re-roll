@@ -89,13 +89,17 @@ function version(
     (plus
       ? `${parent.name.replace(/, \+1\b.*$/, "")}, +${String(bonus)}`
       : `${parent.name} (${rarityName("rarity" in variant ? variant.rarity : parent.rarity)})`);
+  // An evolving item's version without bonuses of its own keeps the last earlier one's, as an Idol of Good Fortunes'
+  // +1 to AC.
+  const own =
+    variant.bonuses ?? kept.findLast((entry) => entry.bonuses)?.bonuses;
   if (baseSlug === undefined) {
     const item: Item = {
       ...parent,
       id,
       name,
       rarity: "rarity" in variant ? variant.rarity : parent.rarity,
-      ...(variant.bonuses ? { bonuses: variant.bonuses } : {}),
+      ...(own ? { bonuses: own } : {}),
       ...("abilities" in variant && variant.abilities
         ? { abilities: variant.abilities }
         : {}),
@@ -135,8 +139,8 @@ function version(
       ? `${name.slice(0, -1)}, ${base.name})`
       : `${name} (${base.name})`;
   // A version with no bonuses of its own has the item's, as a Dragon Scale Mail's +1 for every kind of dragon.
-  const own = variant.bonuses ?? parent.bonuses;
-  const bonuses = own ? { bonuses: own } : {};
+  const bonuses =
+    (own ?? parent.bonuses) ? { bonuses: own ?? parent.bonuses } : {};
   let item: Item;
   if (base.type === "weapon") {
     item = {

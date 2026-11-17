@@ -375,6 +375,42 @@ describe.skipIf(!BOOKS)("the book's single-use items and riders", () => {
     });
   });
 
+  it("tries an unknown cantrip with a Hat of Wizardry, casts an Enspelled Staff's Fireball at DC 15, and throws more Necklace of Fireballs beads", () => {
+    const hat = "dmg:item/hat-of-wizardry";
+    const wizard = deriveStats(wearing([hat], "wizard"), run);
+    const unknown = wizard.actions.filter((item) =>
+      item.id.endsWith(`:item:${hat}:0`),
+    );
+    expect(unknown.length).toBeGreaterThan(0);
+    expect(unknown[0]?.castCheck).toMatchObject({ skill: "arcana", dc: 10 });
+    const staff = "dmg:item/enspelled-staff--fireball";
+    expect(run.content(staff)).toMatchObject({
+      name: "Enspelled Staff (Fireball)",
+    });
+    const fire = action(
+      wearing([staff], "wizard"),
+      `spell:phb:spell/fireball:item:${staff}:1`,
+    );
+    expect(fire.activation.resolution).toMatchObject({ dc: { base: 15 } });
+    const necklace = "dmg:item/necklace-of-fireballs";
+    const beads = action(
+      wearing([necklace]),
+      `spell:phb:spell/fireball:item:${necklace}:5`,
+    );
+    expect(beads.activation.resolution).toMatchObject({
+      damage: [{ amount: { dice: "12d6" } }],
+    });
+  });
+
+  it("gives a fire Ring of Elemental Command Immunity to Fire, and a Staff of Power its Retributive Strike", () => {
+    const ring = "dmg:item/ring-of-elemental-command--3";
+    expect(damageResponses(wearing([ring]), run).immunities).toContain("fire");
+    const staff = "dmg:item/staff-of-power";
+    expect(action(wearing([staff], "wizard"), `use:${staff}:0`).name).toBe(
+      "Retributive Strike",
+    );
+  });
+
   it("fires +3 Ammunition, and offers Oil of Sharpness for a Longsword", () => {
     const shot = action(
       wearing(["srd52:item/shortbow", "dmg:item/ammunition-1-2-or-3--3"]),

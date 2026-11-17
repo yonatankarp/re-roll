@@ -2852,6 +2852,7 @@ const ItemCastSchema = z.strictObject({
   // Each use after the first since its pool came back has this many percent more chance to fail, tearing the item
   // apart, as a Wind Fan's 20.
   tears: z.number().int().min(1).max(100).optional(),
+  bonusAction: z.literal(true).optional(), // cast as a Bonus Action, as a Necklace of Prayer Beads' beads
   charges: z.number().int().min(0).default(1), // 0 casts it whenever
   resource: z.string().min(1).optional(),
   level: z.number().int().min(0).max(9).optional(),
