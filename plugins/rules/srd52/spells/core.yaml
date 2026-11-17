@@ -11355,16 +11355,25 @@
     target’s Hit Point maximum"
   automation: full
   activation:
-    cost: [action, slot, { gold: 100 }]
-    targeting: { creatures: 1, range: touch, side: ally }
+    cost:
+      - action
+      - slot
+      - gold: 100
+    targeting:
+      creatures: 1
+      range: touch
+      side: ally
     resolution:
       kind: automatic
       effects:
         - kind: cure
-          conditions: [charmed, petrified]
+          conditions:
+            - charmed
+            - petrified
           curse: true
           maxHp: true
           exhaustion: true
+          befuddled: true
 
 - id: srd52:spell/gust-of-wind
   name: Gust of Wind
@@ -11429,6 +11438,10 @@
           condition: deafened
         - kind: removeCondition
           condition: poisoned
+        - kind: cure
+          conditions:
+            - blinded
+          befuddled: true
 - id: srd52:spell/heroism
   name: Heroism
   level: 1
