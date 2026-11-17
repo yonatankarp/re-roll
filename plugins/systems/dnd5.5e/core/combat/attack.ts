@@ -1330,10 +1330,10 @@ export function runApplyHit(
   const typedExtra: Damage[] = [];
   const extraDice = carriesExtraDice(attacker, action, context);
   // Pull of Death's comes with any attack, against a target missing Hit Points.
-  const hurt = target.hp < deriveStats(target, context).maxHp;
+  const hurt = (): boolean => target.hp < deriveStats(target, context).maxHp;
   stats.passives.forEach((passive, index) => {
     if (passive.kind !== "extraDamage") return;
-    if (passive.when === "targetHurt" ? !hurt : !extraDice) return;
+    if (passive.when === "targetHurt" ? !hurt() : !extraDice) return;
     const key = `extra:${String(index)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return;
     // Sneak Attack's ally must be able to act, and the ally never makes up for Disadvantage on the roll.
