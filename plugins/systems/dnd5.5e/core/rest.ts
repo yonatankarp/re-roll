@@ -113,11 +113,15 @@ export function shortRestEvents(
 export const SHORT_REST_GIVEN = "shortRest:given";
 
 // A Short Rest's benefits for one creature, as Prayer of Healing gives: Hit Dice spent until healed, then what the
-// rest restores. The player spends theirs die by die afterwards (`givenDice`), so theirs aren't spent here.
+// rest restores. Between fights the player spends theirs die by die afterwards (`givenDice`, from camp.ts), so
+// theirs aren't spent here; in a fight, as by Catnap, they're spent as a companion's are.
 export function shortRestFor(actor: Actor, context: Context): SystemEvent[] {
   if (actor.side !== "party" || isDead(actor)) return [];
   if (actor.resourcesSpent[SHORT_REST_GIVEN]) return [];
-  const spent = actor.id === PLAYER_ACTOR ? [] : diceSpent(actor, context);
+  const spent =
+    actor.id === PLAYER_ACTOR && !context.state.combat
+      ? []
+      : diceSpent(actor, context);
   const after = spent.reduce(applyDndEvent, context.state).actors[actor.id];
   const stats = deriveStats(actor, context);
   return [
@@ -416,7 +420,10 @@ export function recovered(
   const used = (id: string): number => left.get(id) ?? 0;
   for (const key of left.keys()) {
     const slot = key.startsWith("slot:");
-    const daily = key === HIT_DICE || key === SHORT_REST_GIVEN;
+    const daily =
+      key === HIT_DICE ||
+      key === SHORT_REST_GIVEN ||
+      key.startsWith("deterred:"); // Among the Dead's freed attackers
     if (
       key === MEAL ||
       (rest === "long" ? slot || daily : slot && stats.pactMagic)

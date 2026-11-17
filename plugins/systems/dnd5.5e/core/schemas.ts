@@ -1226,7 +1226,8 @@ export const TargetingSchema = z.union([
   z.strictObject({
     creatures: z.number().int().min(1),
     range: RangeSchema,
-    side: SideSchema,
+    // "any" is a creature of either side, as Dispel Magic aimed at a friend's curse or a foe's spell
+    side: z.enum(["enemy", "ally", "any"]),
     creatureTypes: z.array(CreatureTypeSchema).optional(), // only these types can be targeted
     targetConditions: z.array(ConditionSchema).min(1).optional(), // only a creature with one of these, as for Trample
     dead: z.literal(true).optional(), // only a dead creature, as for Revivify

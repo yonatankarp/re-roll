@@ -8100,7 +8100,7 @@
   automation: full
   activation:
     cost: [action, slot]
-    targeting: { creatures: 1, range: 120, side: ally }
+    targeting: { creatures: 1, range: 120, side: any }
     resolution:
       kind: automatic
       effects: [{ kind: dispel, maxLevel: 3, check: true }]

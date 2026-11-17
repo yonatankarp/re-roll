@@ -31,10 +31,12 @@ type Context = ContentAccess & {
 };
 
 // The new species' choices with what each could be, worked out against the build as it is.
+// With `all`, every option, as if nothing were picked yet, to find the old species' picks among them.
 function speciesChoices(
   actor: Actor,
   speciesId: string,
   access: ContentAccess,
+  all = false,
 ): readonly {
   readonly choice: ChoiceDef;
   readonly options: readonly { id: string; label: string }[];
@@ -47,8 +49,15 @@ function speciesChoices(
     choice,
     options: choiceOptions(
       choice,
-      { picks: {}, scores: [] },
-      build,
+      all
+        ? {
+            picks: {},
+            scores: [],
+            backgroundId: build.backgroundId,
+            speciesId,
+          }
+        : { picks: {}, scores: [] },
+      all ? null : build,
       classDef,
       access,
     ).options,
@@ -62,9 +71,13 @@ export function reincarnatedEvent(
   picks: Record<string, string[]>,
   access: ContentAccess,
 ): SystemEvent {
-  const old = effectiveBuild(actor)?.speciesId;
+  // The printed build's species, whose picks the build still holds, however many bodies came between.
+  const old =
+    actor.source.kind === "character"
+      ? actor.source.build?.speciesId
+      : undefined;
   const drop = old
-    ? speciesChoices(actor, old, access).flatMap(({ options }) =>
+    ? speciesChoices(actor, old, access, true).flatMap(({ options }) =>
         options.map(({ id }) => id),
       )
     : [];

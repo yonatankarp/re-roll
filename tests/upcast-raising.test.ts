@@ -21,6 +21,7 @@ import {
 import {
   type Activation,
   type LeafEffect,
+  PregenSchema,
   SpellSchema,
   type Targeting,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
@@ -51,6 +52,23 @@ const use = (id: string) => ({
   ],
 });
 const FIXTURES = [
+  {
+    id: "test:species/keen",
+    name: "Keen",
+    text: "A test species.",
+    creatureType: "Humanoid",
+    size: "medium",
+    speed: 30,
+    traits: [],
+    choices: [
+      {
+        kind: "skills",
+        id: "senses",
+        count: 1,
+        from: ["insight", "perception"],
+      },
+    ],
+  },
   trait("rage", []),
   trait("beyond", [{ kind: "fightOn", while: [RAGE] }]),
   trait("before", [{ kind: "fightOn", resource: "before" }], use("before")),
@@ -697,6 +715,154 @@ describe("healing and raising (#186)", () => {
       ),
     ).toBe(false);
     expect(nextDndDecision(context.state, content)).not.toBeNull();
+  });
+});
+
+// A cleric from the SRD pregen who knows these spells.
+function cleric(
+  content: RunContext,
+  spells: readonly string[],
+  level = 3,
+): Actor {
+  const pregen = PregenSchema.parse(content.content("srd52:pregen/cleric"));
+  const [first] = pregen.build.levels;
+  if (!first) throw new Error("no levels");
+  return freshActor({
+    id: PLAYER_ACTOR,
+    name: "Cleric",
+    side: "party",
+    source: {
+      kind: "character",
+      build: {
+        ...pregen.build,
+        levels: Array.from({ length: level }, () => ({
+          ...first,
+          answers: [{ kind: "spells" as const, values: [...spells] }],
+        })),
+      },
+    },
+    hp: 100,
+    inventory: [],
+  });
+}
+
+describe("a reincarnated body (#186)", () => {
+  it("drops the printed species' picks even after a second event, and the player picks the new ones", async () => {
+    const content = await run();
+    const keen = hero([]);
+    if (keen.source.kind !== "character" || !keen.source.build) {
+      throw new Error("no build");
+    }
+    const [first, ...rest] = keen.source.build.levels;
+    if (!first) throw new Error("no level");
+    const fallen: Actor = {
+      ...keen,
+      hp: 0,
+      deathSaves: { successes: 0, failures: 3 },
+      source: {
+        kind: "character",
+        build: {
+          ...keen.source.build,
+          speciesId: "test:species/keen",
+          levels: [
+            {
+              ...first,
+              answers: [
+                ...first.answers,
+                { kind: "skills", values: ["perception"] },
+              ],
+            },
+            ...rest,
+          ],
+        },
+      },
+    };
+    const context = {
+      ...contextOf(content, [fallen], scripted([2]).dice),
+      state: { actors: { [PLAYER_ACTOR]: fallen }, combat: null },
+    };
+    const raised = leafEvents(
+      [
+        {
+          kind: "reincarnate",
+          species: ["test:species/plain", "test:species/plain"],
+        },
+      ],
+      "x",
+      fallen,
+      fallen,
+      context,
+    );
+    expect(deriveStats(fallen, content).skills).toContain("perception");
+    let state = fold(context.state, raised);
+    const skills = () =>
+      deriveStats(present(state.actors[PLAYER_ACTOR]), content).skills;
+    expect(skills()).not.toContain("perception");
+    // The player's own picks come as a second event, which still drops the printed species' pick.
+    const asked = content.system.frames[`${NS}:reincarnate`]?.run(
+      { picks: {} },
+      { ...context, state },
+    );
+    state = fold(state, asked?.events ?? []);
+    expect(effectiveBuild(present(state.actors[PLAYER_ACTOR]))?.speciesId).toBe(
+      "test:species/plain",
+    );
+    expect(skills()).not.toContain("perception");
+    expect(isDead(present(state.actors[PLAYER_ACTOR]))).toBe(false);
+  });
+});
+
+describe("casting between fights (#186)", () => {
+  it("offers a higher slot, which heals more, and a ritual with no slot", async () => {
+    const content = await run();
+    const priest = cleric(content, [
+      "srd52:spell/cure-wounds",
+      "srd52:spell/gentle-repose",
+    ]);
+    const hurt = { ...hero([], { id: "hurt" }), hp: 1 };
+    const fallen = {
+      ...hero([], { id: "fallen" }),
+      hp: 0,
+      deathSaves: { successes: 0, failures: 3 },
+    };
+    const state: DndState = {
+      actors: { [PLAYER_ACTOR]: priest, hurt, fallen },
+      combat: null,
+      gold: 10,
+    };
+    const offered = sceneCastActions(state, content);
+    const labels = offered.map((action) => action.label);
+    expect(labels).toContain("Cure Wounds (level 2 slot)");
+    expect(labels).toContain("Gentle Repose (ritual)");
+    const cast = content.system.storyEffects[`${NS}:castBetween`];
+    const upcast = offered.find(
+      (action) => action.label === "Cure Wounds (level 2 slot)",
+    );
+    const healed = cast?.apply(upcast?.args, {
+      state,
+      dice: scripted([1, 1, 1, 1]).dice,
+      ...content,
+    });
+    expect(payloads(healed?.events ?? [], "resourceSpent")).toContainEqual({
+      actor: PLAYER_ACTOR,
+      resource: "slot:2",
+    });
+    const ritual = offered.find(
+      (action) => action.label === "Gentle Repose (ritual)",
+    );
+    const reposed = cast?.apply(ritual?.args, {
+      state,
+      dice: scripted([]).dice,
+      ...content,
+    });
+    expect(payloads(reposed?.events ?? [], "reposed")).toEqual([
+      { actor: "fallen" },
+    ]);
+    expect(
+      payloads(reposed?.events ?? [], "resourceSpent").filter(({ resource }) =>
+        String(resource).startsWith("slot:"),
+      ),
+    ).toEqual([]);
   });
 });
 

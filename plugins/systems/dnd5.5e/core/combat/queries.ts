@@ -808,13 +808,16 @@ export function inReach(
   if ("self" in targeting) return [actor];
   const charmers = charmersOf(actor);
   const downed = "downed" in targeting && targeting.downed === true;
-  return (
-    targeting.side === "enemy"
+  return [
+    ...(targeting.side !== "ally"
       ? knownFoes(state, actor, access).filter(
           (item) => isDown(item) === downed && !charmers.has(item.id),
         )
-      : allies(state, actor).filter((item) => !downed || isDown(item))
-  )
+      : []),
+    ...(targeting.side !== "enemy"
+      ? allies(state, actor).filter((item) => !downed || isDown(item))
+      : []),
+  ]
     .filter(
       (item) =>
         isDead(item) === ("dead" in targeting && targeting.dead === true) &&

@@ -2639,7 +2639,11 @@ export function resolveTargets(
   // Revivify is the one aimed at the dead.
   const dead = "dead" in targeting && targeting.dead === true;
   const side = (
-    targeting.side === "enemy" ? enemies(state, actor) : allies(state, actor)
+    targeting.side === "enemy"
+      ? enemies(state, actor)
+      : targeting.side === "ally"
+        ? allies(state, actor)
+        : [...enemies(state, actor), ...allies(state, actor)]
   ).filter(
     (item) =>
       isDead(item) === dead &&

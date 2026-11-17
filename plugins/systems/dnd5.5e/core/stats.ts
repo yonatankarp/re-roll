@@ -1884,6 +1884,11 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "weaponAttack" ||
       effect.kind === "randomAction" ||
       effect.kind === "copySpell" ||
+      // what raises or mends the dead and dying, mostly between fights (camp.ts)
+      effect.kind === "repose" ||
+      effect.kind === "transference" ||
+      effect.kind === "reincarnate" ||
+      effect.kind === "clone" ||
       (effect.kind === "applyCondition" &&
         effect.condition !== "deafened" &&
         effect.condition !== "grappled"),
