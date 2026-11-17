@@ -1942,7 +1942,10 @@ export function leafEvents(
           INCAPACITATING.includes(effect.condition) &&
           target.concentratingOn !== null &&
           (["petrified", "unconscious"].includes(effect.condition) ||
-            !hasPassive(deriveStats(target, context), "unshakableFocus"))
+            !deriveStats(target, context).passives.some(
+              (passive) =>
+                passive.kind === "unshakableFocus" && !passive.spells,
+            ))
         ) {
           events.push(
             dndEvent(`${NS}:concentrationEnded`, { actor: target.id }),
@@ -2714,6 +2717,13 @@ export function rollSave(
     return { saved: false, events: [] };
   }
   const stats = deriveStats(target, context);
+  // Eldritch Strike: Disadvantage only on a save against its caster's spell.
+  const against = (effect: Actor["activeEffects"][number]): boolean =>
+    effect.modifier.kind === "disadvantage" &&
+    effect.modifier.on === "saves" &&
+    effect.modifier.casterSpells === true &&
+    magical &&
+    source?.caster === effect.casterId;
   const edge = {
     advantage:
       advantage ||
@@ -2741,6 +2751,7 @@ export function rollSave(
       strongerTogether(target, ability, context),
     disadvantage:
       disadvantage ||
+      target.activeEffects.some(against) ||
       hasFlag(target, "disadvantage", "saves", stats, ability) ||
       placedFlag(
         target,
@@ -2791,7 +2802,10 @@ export function rollSave(
   const spent = target.activeEffects.flatMap(
     ({ modifier, sourceId, casterId }) =>
       (((modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
-        modifier.on === "saves") ||
+        modifier.on === "saves" &&
+        (modifier.kind !== "disadvantage" ||
+          !modifier.casterSpells ||
+          (magical && source?.caster === casterId))) ||
         (modifier.kind === "bonus" &&
           modifier.to === "saves" &&
           (!modifier.ability || modifier.ability === ability))) &&

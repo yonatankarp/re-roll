@@ -160,6 +160,9 @@ export const LIGHT_USED = "light:";
 
 // An attack with a polearm lets Polearm Master's Pole Strike follow it (actions.ts).
 export const POLE_USED = "pole";
+// Hew: a crit or a drop with a melee weapon readies its Bonus Action attack ("hew:<action>"), once a turn.
+export const HEW_READY = "hew:";
+export const HEW_USED = "hew-used";
 export const POLE_STRUCK = "pole-struck";
 
 // Pole Strike's weapons: a Quarterstaff, a Spear, or one that is Heavy with Reach. Matched by name, as masteries are.

@@ -37,6 +37,7 @@ export interface SaveSource {
   readonly creatureType: string | undefined;
   readonly school: string | null;
   readonly breath: boolean;
+  readonly caster?: string; // who calls for it, for Disadvantage only against its spells (Eldritch Strike)
 }
 
 // The source of a save that this creature's action calls for.
@@ -50,6 +51,7 @@ export function saveSourceOf(
     creatureType: deriveStats(caster, access).creatureType,
     school: schoolOf(actionId, access),
     breath: /breath/i.test(name),
+    caster: caster.id,
   };
 }
 

@@ -36,7 +36,9 @@ import { heightChoices, heightOf } from "./combat/falling.ts";
 import {
   SIZES,
   canAfford,
+  currentActor,
   hasPassive,
+  hitFits,
   inReach,
   sizeOf,
 } from "./combat/queries.ts";
@@ -65,6 +67,7 @@ import {
   ABILITY_NAMES,
   type Ability,
   type Skill,
+  type WeaponMastery,
   WeaponMasterySchema,
 } from "./schemas.ts";
 import {
@@ -98,6 +101,8 @@ import {
   GRAPPLE_SOURCE,
   HIDE_SOURCE,
   LIGHT_USED,
+  HEW_READY,
+  HEW_USED,
   POLE_STRUCK,
   POLE_USED,
   isPolearm,
@@ -155,6 +160,7 @@ const SLIP = `${TACTIC}slip`;
 const BREAK_OUT = `${TACTIC}break-out`;
 export const OFFHAND = `${TACTIC}offhand`;
 export const POLE_STRIKE = `${TACTIC}pole-strike`;
+export const HEW = `${TACTIC}hew`;
 const OFFHAND_USED = "offhand";
 const NICK_USED = `${MASTERY}nick`;
 const CLEAVE_USED = `${MASTERY}cleave`;
@@ -516,7 +522,36 @@ function poleStrikeOptions(
   });
 }
 
-// The Bonus Action attacks that follow an attack: off-hand and Pole Strike.
+// Great Weapon Master's Hew: after a Critical Hit or a drop with a melee weapon, a Bonus Action attack with it.
+function hewOptions(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+  stats: Stats,
+): { id: string; label: string }[] {
+  if (
+    !hasPassive(stats, "hew") ||
+    !actor.budget.bonusAction ||
+    actor.usedThisTurn.includes(HEW_USED)
+  ) {
+    return [];
+  }
+  return actor.usedThisTurn.flatMap((key) => {
+    if (!key.startsWith(HEW_READY)) return [];
+    const action = stats.actions.find(
+      ({ id }) => id === key.slice(HEW_READY.length),
+    );
+    if (!action) return [];
+    return standing(inReach(action, actor, state, access))
+      .filter((foe) => foe.side !== actor.side)
+      .map((foe) => ({
+        id: encodeOption(HEW, foe.id, action.id),
+        label: `Hew with the ${action.name}: ${foe.name} (${String(foe.hp)} HP)`,
+      }));
+  });
+}
+
+// The Bonus Action attacks that follow an attack: off-hand, Pole Strike and Hew.
 function bonusAttackOptions(
   actor: Actor,
   state: DndState,
@@ -527,6 +562,7 @@ function bonusAttackOptions(
     ...strikeOptions(actor, state, access, stats),
     ...offhandOptions(actor, state, access, stats),
     ...poleStrikeOptions(actor, state, access, stats),
+    ...hewOptions(actor, state, access, stats),
   ];
 }
 
@@ -1542,6 +1578,21 @@ export function runTactic(
         ],
       };
     }
+    case HEW:
+      return {
+        events: [
+          spend("bonusAction"),
+          dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key: HEW_USED }),
+        ],
+        frames: [
+          frame("attackRoll", {
+            attacker: actor.id,
+            actionId: detail,
+            target: needTarget().id,
+          }),
+          ...done,
+        ],
+      };
     case POLE_STRIKE:
       return {
         events: [
@@ -1702,124 +1753,151 @@ export function runMasteryHit(
       ],
     };
   }
-  const mastery =
+  const chosen =
     WeaponMasterySchema.safeParse(payload.answer).data ?? found.mastery;
-  const source = `${MASTERY}${mastery}`;
-  const up = !isDown(target);
-  // Advantage and Disadvantage don't stack, so a second Sap or Vex before the first is used adds nothing.
-  const has = (actor: Actor): boolean =>
-    actor.activeEffects.some((item) => item.sourceId === source);
-  switch (mastery) {
-    case "sap":
-      return up && !has(target)
-        ? {
-            events: [
-              effect(
-                target.id,
-                source,
-                attacker.id,
-                { kind: "disadvantage", on: "attacks", once: true },
-                "casterNextTurn",
-              ),
-            ],
-          }
-        : {};
-    case "slow":
-      return up && payload.dealt > 0 && !hasTactic(target, "slowed")
-        ? {
-            events: [
-              effect(
-                target.id,
-                source,
-                attacker.id,
-                { kind: "tactic", tactic: "slowed" },
-                "casterNextTurn",
-              ),
-            ],
-          }
-        : {};
-    // shortcut: Vex's Advantage goes on the attacker's next attack against anyone, not only this target.
-    case "vex":
-      return payload.dealt > 0 && !has(attacker)
-        ? {
-            events: [
-              effect(
-                attacker.id,
-                source,
-                attacker.id,
-                { kind: "advantage", on: "attacks", once: true },
-                "casterNextTurnEnd",
-              ),
-            ],
-          }
-        : {};
-    case "topple": {
-      if (!up || hasCondition(target, "prone")) return {};
-      const save = reportedSave(
-        target,
-        "con",
-        saveDc(stats, ability),
-        "Topple",
-        context,
-      );
-      return {
-        events: [
-          ...save.events,
-          ...(save.saved
-            ? []
-            : [
+  const outcome = (mastery: WeaponMastery): SystemResult => {
+    const source = `${MASTERY}${mastery}`;
+    const up = !isDown(target);
+    // Advantage and Disadvantage don't stack, so a second Sap or Vex before the first is used adds nothing.
+    const has = (actor: Actor): boolean =>
+      actor.activeEffects.some((item) => item.sourceId === source);
+    switch (mastery) {
+      case "sap":
+        return up && !has(target)
+          ? {
+              events: [
                 effect(
                   target.id,
                   source,
                   attacker.id,
-                  { kind: "condition", condition: "prone" },
-                  "spellDuration",
+                  { kind: "disadvantage", on: "attacks", once: true },
+                  "casterNextTurn",
                 ),
-              ]),
-        ],
-      };
-    }
-    case "push":
-      return up && sizeOf(target, context) <= SIZES.indexOf("large")
-        ? { events: pushEvents(attacker, target, 10, context) }
-        : {};
-    case "cleave": {
-      const reach = meleeReach(action);
-      if (reach === null || attacker.usedThisTurn.includes(CLEAVE_USED)) {
-        return {};
+              ],
+            }
+          : {};
+      case "slow":
+        return up && payload.dealt > 0 && !hasTactic(target, "slowed")
+          ? {
+              events: [
+                effect(
+                  target.id,
+                  source,
+                  attacker.id,
+                  { kind: "tactic", tactic: "slowed" },
+                  "casterNextTurn",
+                ),
+              ],
+            }
+          : {};
+      // shortcut: Vex's Advantage goes on the attacker's next attack against anyone, not only this target.
+      case "vex":
+        return payload.dealt > 0 && !has(attacker)
+          ? {
+              events: [
+                effect(
+                  attacker.id,
+                  source,
+                  attacker.id,
+                  { kind: "advantage", on: "attacks", once: true },
+                  "casterNextTurnEnd",
+                ),
+              ],
+            }
+          : {};
+      case "topple": {
+        if (!up || hasCondition(target, "prone")) return {};
+        const save = reportedSave(
+          target,
+          "con",
+          saveDc(stats, ability),
+          "Topple",
+          context,
+        );
+        return {
+          events: [
+            ...save.events,
+            ...(save.saved
+              ? []
+              : [
+                  effect(
+                    target.id,
+                    source,
+                    attacker.id,
+                    { kind: "condition", condition: "prone" },
+                    "spellDuration",
+                  ),
+                ]),
+          ],
+        };
       }
-      const [next] = standing(knownFoes(state, attacker, context))
-        .filter(
-          (item) =>
-            item.id !== target.id &&
-            within5(item, target) &&
-            distanceFeet(attacker.position, item.position) <= reach,
-        )
-        .sort((a, b) => a.hp - b.hp);
-      if (!next) return {};
-      return {
-        events: [
-          dndEvent(`${NS}:oncePerTurnUsed`, {
-            actor: attacker.id,
-            key: CLEAVE_USED,
-          }),
-        ],
-        frames: [
-          frame("attackRoll", {
-            attacker: attacker.id,
-            actionId: action.id,
-            target: next.id,
-            noModifier: true,
-          }),
-        ],
-      };
+      case "push":
+        return up && sizeOf(target, context) <= SIZES.indexOf("large")
+          ? { events: pushEvents(attacker, target, 10, context) }
+          : {};
+      case "cleave": {
+        const reach = meleeReach(action);
+        if (reach === null || attacker.usedThisTurn.includes(CLEAVE_USED)) {
+          return {};
+        }
+        const [next] = standing(knownFoes(state, attacker, context))
+          .filter(
+            (item) =>
+              item.id !== target.id &&
+              within5(item, target) &&
+              distanceFeet(attacker.position, item.position) <= reach,
+          )
+          .sort((a, b) => a.hp - b.hp);
+        if (!next) return {};
+        return {
+          events: [
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: attacker.id,
+              key: CLEAVE_USED,
+            }),
+          ],
+          frames: [
+            frame("attackRoll", {
+              attacker: attacker.id,
+              actionId: action.id,
+              target: next.id,
+              noModifier: true,
+            }),
+          ],
+        };
+      }
+      case "graze":
+      case "nick":
+        return {};
+      default:
+        return mastery satisfies never;
     }
-    case "graze":
-    case "nick":
-      return {};
-    default:
-      return mastery satisfies never;
-  }
+  };
+  // Battering Roots: Push or Topple too, besides the weapon's own on such a hit on the bearer's turn.
+  const [more] = stats.passives.flatMap((passive) =>
+    passive.kind === "extraMastery" &&
+    hitFits(passive.with, action, attacker, context) &&
+    currentActor(state)?.id === attacker.id
+      ? passive.masteries.filter((item) => item !== chosen)
+      : [],
+  );
+  const main = outcome(chosen);
+  if (!more) return main;
+  const extra = outcome(
+    more === "topple" && hasCondition(target, "prone")
+      ? (stats.passives.flatMap((passive) =>
+          passive.kind === "extraMastery"
+            ? passive.masteries.filter(
+                (item) => item !== chosen && item !== "topple",
+              )
+            : [],
+        )[0] ?? more)
+      : more,
+  );
+  return {
+    events: [...(main.events ?? []), ...(extra.events ?? [])],
+    frames: [...(main.frames ?? []), ...(extra.frames ?? [])],
+  };
 }
 
 export { MasteryHitSchema };
@@ -2009,7 +2087,8 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
       (option) =>
         option.id.startsWith(encodeOption(STRIKE, "")) ||
         option.id.startsWith(encodeOption(OFFHAND, "")) ||
-        option.id.startsWith(encodeOption(POLE_STRIKE, "")),
+        option.id.startsWith(encodeOption(POLE_STRIKE, "")) ||
+        option.id.startsWith(encodeOption(HEW, "")),
     )
     .sort(
       (a, b) =>

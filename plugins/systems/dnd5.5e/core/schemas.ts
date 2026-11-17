@@ -131,6 +131,7 @@ export const WeaponMasterySchema = z.enum([
   "topple",
   "vex",
 ]);
+export type WeaponMastery = z.infer<typeof WeaponMasterySchema>;
 
 // The rules glossary (#132): terms, conditions, actions and the rest, each text a book prints. Keyed by
 // content folder, with the id kinds coverage files name.
@@ -367,6 +368,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     spells: z.literal(true).optional(), // attacksAgainst only from spells, as a Spellguard Shield's
     // attacks only against the effect's caster, as Perfected Armor's glimmer (combat/attack.ts)
     againstCaster: z.literal(true).optional(),
+    // saves only against a spell of the effect's caster, as Eldritch Strike's (combat/effects.ts rollSave)
+    casterSpells: z.literal(true).optional(),
   }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
@@ -423,7 +426,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // "caster" means the effect's caster deals it when hitting whoever has the effect (Hex).
   z.strictObject({
     kind: z.literal("hitDamage"),
-    dealtBy: z.enum(["bearer", "caster"]),
+    // "side" means the caster or any creature on its side deals it once, hitting whoever has the effect, which ends
+    // it, as Path to the Grave's curse
+    dealtBy: z.enum(["bearer", "caster", "side"]),
     weaponOnly: z.boolean().default(false),
     damage: DamageSchema,
     within: z.number().int().min(5).optional(), // only against a creature this near the bearer
@@ -1340,6 +1345,11 @@ export const ActivationSchema = z.strictObject({
       forgoAdvantage: z.literal(true).optional(),
       // With `afterHit`, only once the hit has dealt Sneak Attack damage, as Wails from the Grave.
       sneakAttack: z.literal(true).optional(),
+      // With `afterHit`, offered only right after an `afterHit` activation of this feature lands on the same hit, as
+      // Stalker's Flurry's effects after Dreadful Strike.
+      following: ContentIdSchema.optional(),
+      // With `afterHit`, only a hit that can deal this damage type, as Burst of Sunlight's Radiant.
+      dealing: DamageTypeSchema.optional(),
       // With `afterHit`, only a hit with this feature's own attacks, as Rend Mind's Psychic Blades.
       withFeature: ContentIdSchema.optional(),
       // With `afterHit`, aimed at another creature within this many feet of the one hit (of the targeting's side,
@@ -1835,8 +1845,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     abilities: z.array(AbilitySchema).default([]),
     increased: z.boolean().default(false),
   }),
-  // Advantage on Death Saving Throws, as with Durable.
-  z.strictObject({ kind: z.literal("deathSaveAdvantage") }),
+  // Advantage on Death Saving Throws, as with Durable, or Disadvantage with `worse`, as Touch of Death's Pull of the
+  // Grave.
+  z.strictObject({
+    kind: z.literal("deathSaveAdvantage"),
+    worse: z.literal(true).optional(),
+  }),
   // A Death Saving Throw's roll counts as a 20 from `twentyFrom` up, as Survivor's 18-20, and as at least `floor`, as
   // a Periapt of Wound Closure's 10.
   z.strictObject({
@@ -2090,7 +2104,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Elven Accuracy.
   z.strictObject({ kind: z.literal("elvenAccuracy") }),
   // Damage never calls for a save to keep Concentration, as with Boon of the Iron Mind.
-  z.strictObject({ kind: z.literal("unshakableFocus") }),
+  z.strictObject({
+    kind: z.literal("unshakableFocus"),
+    // only Concentration on one of these spells, as Guided Precision's Faerie Fire
+    spells: z.array(ContentIdSchema).min(1).optional(),
+  }),
   // A 1 on a damage die of this type for the bearer's spell is rolled again, as with Flames of Phlegethos.
   // Casting with a level 1-4 slot rolls a d4, and a roll equal to the slot's level keeps it, as with Boon of Spell
   // Recall.
@@ -2362,6 +2380,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     reach: z.number().int().min(5).optional(),
     ability: AbilitySchema.optional(), // used for the attack and damage when it's better, as Battle Ready's Intelligence
     while: z.array(ContentIdSchema).min(1).optional(),
+    ownTurn: z.literal(true).optional(), // only on the bearer's own turn, as Battering Roots' reach
+    attackMod: AbilitySchema.optional(), // this ability's modifier (at least +1) added to hit, as Sacred Weapon's
   }),
   // In a fight's first round, a hit carrying Sneak Attack makes its target save or take the hit's damage twice, as
   // Death Strike.
@@ -2393,10 +2413,37 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     dieSize: z.string().min(1),
     withFeature: ContentIdSchema.optional(),
   }),
+  // A spell the bearer casts adds this to its damage: only one of `spells`, or one dealing one of `types` (the bonus
+  // taking that type), and with `oncePerTurn` once a turn, as Guided Precision's Cartographer spells or Radiant Soul.
+  // shortcut: the bonus goes to every target of a spell that has several, not only one.
+  z.strictObject({
+    kind: z.literal("spellDamage"),
+    bonus: FormulaSchema,
+    spells: z.array(ContentIdSchema).min(1).optional(),
+    types: z.array(DamageTypeSchema).min(1).optional(),
+    oncePerTurn: z.literal(true).optional(),
+  }),
+  // Right after a Critical Hit with a melee weapon, or one that drops a creature to 0 Hit Points, one attack with that
+  // weapon as a Bonus Action, as Great Weapon Master's Hew (actions.ts).
+  z.strictObject({ kind: z.literal("hew") }),
+  // Feet added to its Speed on its first turn of a fight, as Ambusher's Leap.
+  z.strictObject({
+    kind: z.literal("firstTurnSpeed"),
+    feet: z.number().int().min(5),
+  }),
+  // Training with Martial weapons, as Battle Ready's Weapon Knowledge.
+  z.strictObject({ kind: z.literal("martialTraining") }),
   // Mounted Combatant: while it rides, Advantage against an unmounted creature within 5 feet of its mount and smaller
   // than the mount; its mount takes no damage on a successful Dexterity save for half; and a hit on its mount can be
   // made to hit it instead (combat/attack.ts, trait-rules.ts).
   z.strictObject({ kind: z.literal("mountedCombatant") }),
+  // A hit of this kind on the bearer's own turn also uses one of these mastery properties, besides its weapon's own,
+  // as Battering Roots' Push or Topple.
+  z.strictObject({
+    kind: z.literal("extraMastery"),
+    with: HitKindSchema,
+    masteries: z.array(WeaponMasterySchema).min(1),
+  }),
   // A hit with a mastered weapon can use one of these mastery properties in place of the weapon's own, as Tactical
   // Master's Push, Sap or Slow (actions.ts runMasteryHit).
   z.strictObject({

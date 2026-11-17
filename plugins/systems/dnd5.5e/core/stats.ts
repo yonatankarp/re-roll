@@ -113,6 +113,7 @@ export interface KnownAction {
   readonly hitType?: true; // its damage takes the type of the hit it adds to, as a maneuver's die does
   readonly rolled?: true; // taken only when a randomAction picks it, as one eye ray
   readonly concentrates?: true; // casting it starts Concentration even with no lasting effect, as Flame Blade
+  readonly onceKeys?: readonly string[]; // once-a-turn uses its cast spends, as a `spellDamage` bonus (combat/actions.ts)
 }
 
 export interface Stats {
@@ -640,6 +641,13 @@ function bestMentalAbility(abilities: AbilityScores): Ability {
   );
 }
 
+// Whether it's the actor's own turn in a fight's first round, as Ambusher's Leap's.
+export function ownFirstTurn(actor: Actor, access: ContentAccess): boolean {
+  const combat = (access as ContentAccess & { readonly state?: DndState }).state
+    ?.combat;
+  return combat?.round === 1 && combat.order[combat.index] === actor.id;
+}
+
 // A feature with the variant picked for it (or for the feature it follows) joined in; the first when none was.
 export function withVariant(
   feature: Feature,
@@ -752,6 +760,68 @@ function collectFeatureData(
     });
   }
   return { passives, actions, resources, spells, free, retype };
+}
+
+// Spells with a `spellDamage` bonus added to their damage, while its once-a-turn use is left.
+function withSpellDamage(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+  actor: Actor,
+): KnownAction[] {
+  const bonuses = passives.flatMap((passive, index) =>
+    passive.kind === "spellDamage" &&
+    !(
+      passive.oncePerTurn &&
+      actor.usedThisTurn.includes(`spellDamage:${String(index)}`)
+    )
+      ? [{ passive, key: `spellDamage:${String(index)}` }]
+      : [],
+  );
+  if (bonuses.length === 0) return [...actions];
+  return actions.map((action) => {
+    if (action.spellLevel === null || !action.id.startsWith("spell:")) {
+      return action;
+    }
+    const spellId = action.id.slice("spell:".length).replace(/:free$/, "");
+    let { resolution } = action.activation;
+    const keys: string[] = [];
+    for (const { passive, key } of bonuses) {
+      if (passive.spells && !passive.spells.includes(spellId)) continue;
+      const at = resolution.damage.findIndex(
+        (item) => !passive.types || passive.types.includes(item.type),
+      );
+      const entry = resolution.damage[at];
+      if (!entry) continue;
+      const damage = resolution.damage.map((item, index) =>
+        index === at
+          ? {
+              ...item,
+              amount: {
+                ...item.amount,
+                bonus: {
+                  base: (item.amount.bonus?.base ?? 0) + passive.bonus.base,
+                  add: [
+                    ...(item.amount.bonus?.add ?? []),
+                    ...passive.bonus.add,
+                  ],
+                },
+              },
+            }
+          : item,
+      );
+      resolution = { ...resolution, damage };
+      if (passive.oncePerTurn) keys.push(key);
+    }
+    return keys.length === 0 && resolution === action.activation.resolution
+      ? action
+      : {
+          ...action,
+          activation: { ...action.activation, resolution },
+          ...(keys.length > 0
+            ? { onceKeys: [...(action.onceKeys ?? []), ...keys] }
+            : {}),
+        };
+  });
 }
 
 // A feature's activations with the effects other features ride on them, as Tactical Shift's move on Second Wind.
@@ -1232,6 +1302,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         works(itemId, item) && hitDamage ? { ...plain, hitDamage } : plain,
         abilities,
         martialTraining ||
+          fromFeatures.passives.some(
+            ({ kind }) => kind === "martialTraining",
+          ) ||
           kinds.some((kind) => weaponTraining.has(kind)) ||
           classes.some((def) => weaponProficient(def, weapon)),
         own("damage") + scoped("damage"),
@@ -1405,7 +1478,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     actions: withMetamagic(
       withInvocations(
         withWeaponRiders(
-          withRiders(actions, fromFeatures.passives),
+          withSpellDamage(
+            withRiders(actions, fromFeatures.passives),
+            fromFeatures.passives,
+            actor,
+          ),
           fromFeatures.passives,
           actor,
           access,
@@ -1468,7 +1545,14 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     speed: Math.max(
       0,
       partial.speed +
-        passiveBonus(partial, "speed") -
+        passiveBonus(partial, "speed") +
+        (ownFirstTurn(actor, access)
+          ? partial.passives.reduce(
+              (sum, passive) =>
+                passive.kind === "firstTurnSpeed" ? sum + passive.feet : sum,
+              0,
+            )
+          : 0) -
         (tooHeavy && load === null ? 10 : 0) -
         5 * actor.exhaustion,
     ),

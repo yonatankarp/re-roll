@@ -136,6 +136,7 @@ export function hasFlag(
       (!("spells" in modifier) || !modifier.spells) &&
       // Disadvantage only against its caster is the attack's to weigh (combat/attack.ts).
       (!("againstCaster" in modifier) || !modifier.againstCaster) &&
+      (!("casterSpells" in modifier) || !modifier.casterSpells) &&
       (!("attackers" in modifier) ||
         !modifier.attackers ||
         modifier.attackers.includes(attackerType ?? "")),
