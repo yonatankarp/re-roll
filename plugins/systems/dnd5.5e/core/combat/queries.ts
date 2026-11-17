@@ -687,6 +687,7 @@ export function canAfford(
   const { carrying, afterAction, resolution } = action.activation;
   if (carrying && !actor.inventory.includes(carrying)) return false;
   if (afterAction && actor.budget.action) return false;
+  if (action.activation.beforeAction && !actor.budget.action) return false;
   if (!gatesOpen(action, actor)) return false;
   // Haste's additional action takes only a weapon attack, or Dash, Disengage or Hide (actions.ts).
   if (

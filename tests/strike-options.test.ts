@@ -305,7 +305,8 @@ describe("strike options", () => {
     // The bearer's own move after the blow.
     expect(
       done.state.actors[PLAYER_ACTOR]?.activeEffects.some(
-        ({ modifier }) => modifier.kind === "tactic" && modifier.tactic === "dash",
+        ({ modifier }) =>
+          modifier.kind === "tactic" && modifier.tactic === "dash",
       ),
     ).toBe(true);
     expect(
@@ -377,9 +378,9 @@ describe("attack riders", () => {
       [hit("weapon:srd52:item/longsword", { hadAdvantage: false })],
       scripted([]).dice,
     );
-    expect(
-      payloads(done.events, "damaged").map((item) => item.type),
-    ).toContain("necrotic");
+    expect(payloads(done.events, "damaged").map((item) => item.type)).toContain(
+      "necrotic",
+    );
     const calm = settle(
       run,
       [placed(hero(["fury"])), resistant],
@@ -413,9 +414,10 @@ describe("attack riders", () => {
     expect(glaive && meleeReach(glaive)).toBe(20);
     expect(glaive && isMelee(glaive)).toBe(true);
     const glaiveHit = glaive?.activation.resolution;
-    expect(
-      glaiveHit?.kind === "attack" && glaiveHit.damage[0]?.types,
-    ).toEqual(["slashing", "radiant"]);
+    expect(glaiveHit?.kind === "attack" && glaiveHit.damage[0]?.types).toEqual([
+      "slashing",
+      "radiant",
+    ]);
   });
 
   it("reaches 10 feet with a Reach weapon and still counts as melee", () => {
@@ -529,5 +531,3 @@ describe("attack riders", () => {
     ).toBe(false);
   });
 });
-
-

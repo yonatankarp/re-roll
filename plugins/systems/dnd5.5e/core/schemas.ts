@@ -1344,6 +1344,7 @@ export const ActivationSchema = z.strictObject({
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
   whileIn: z.literal("shadows").optional(), // only in Dim Light or Darkness, as Merge with Shadows
   afterAction: z.literal(true).optional(), // only once the bearer has taken its action, as Blink Steps
+  beforeAction: z.literal(true).optional(), // only before it takes its action, as Reckless Attack's first attack roll
   afterBonusAction: z.literal(true).optional(), // only once it has taken its Bonus Action, as Fleet Step
   // only after casting a spell with a casting time of an action this turn, as Battle Magic
   afterCast: z.literal(true).optional(),
