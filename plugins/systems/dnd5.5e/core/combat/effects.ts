@@ -26,6 +26,7 @@ import {
   cannotHeal,
   dndEvent,
   type DndState,
+  equipped,
   hasCondition,
   INCAPACITATING,
   fightingOn,
@@ -77,6 +78,7 @@ import {
   piercing,
   interposedShield,
   evades,
+  markedBy,
   rescuedSave,
   type SaveSource,
   saveSourceOf,
@@ -168,6 +170,7 @@ import {
   slotToSpend,
   deadWithin,
   spellSource,
+  underEffect,
   walledApart,
 } from "./queries.ts";
 
@@ -730,7 +733,8 @@ function killEvents(fallen: Actor, context: Context): SystemEvent[] {
             hasCondition(bearer, ...INCAPACITATING))) ||
         (passive.oncePerTurn &&
           (bearer.usedThisTurn.includes(ON_KILL) ||
-            hasCondition(bearer, ...INCAPACITATING)))
+            hasCondition(bearer, ...INCAPACITATING))) ||
+        (passive.marked && !markedBy(fallen, bearer, passive.marked))
       ) {
         return [];
       }
@@ -791,6 +795,51 @@ function killEvents(fallen: Actor, context: Context): SystemEvent[] {
 }
 
 const ON_KILL = "onKill";
+
+// Effects from an activation with `transfers` move off a creature that drops to the foe nearest their caster.
+function transferEvents(fallen: Actor, context: Context): SystemEvent[] {
+  const { state } = context;
+  const moved = new Set<string>();
+  return fallen.activeEffects.flatMap((effect) => {
+    const caster = state.actors[effect.casterId];
+    const key = `${effect.casterId}|${effect.sourceId}`;
+    if (!caster || isDown(caster) || moved.has(key)) return [];
+    if (!effect.sourceId.startsWith("feature:")) return [];
+    const feet = deriveStats(caster, context).actions.find(
+      ({ id }) => id === effect.sourceId,
+    )?.activation.transfers;
+    if (feet === undefined) return [];
+    moved.add(key);
+    const [next] = Object.values(state.actors)
+      .filter(
+        (other) =>
+          other.id !== fallen.id &&
+          other.side !== caster.side &&
+          !isDown(other) &&
+          distanceFeet(caster.position, other.position) <= feet,
+      )
+      .sort(
+        (a, b) =>
+          distanceFeet(caster.position, a.position) -
+          distanceFeet(caster.position, b.position),
+      );
+    if (!next) return [];
+    const carried = fallen.activeEffects.filter(
+      (item) =>
+        item.sourceId === effect.sourceId && item.casterId === effect.casterId,
+    );
+    return [
+      dndEvent(`${NS}:effectEnded`, {
+        actor: fallen.id,
+        sourceId: effect.sourceId,
+        casterId: effect.casterId,
+      }),
+      ...carried.map((item) =>
+        dndEvent(`${NS}:effectAdded`, { actor: next.id, effect: item }),
+      ),
+    ];
+  });
+}
 
 // A check with the caster's spellcasting ability, as Dispel Magic's against a higher spell.
 // shortcut: no reactions or rescues change the roll, as they may an ability check's (actions.ts abilityCheck).
@@ -1244,6 +1293,7 @@ export function dealEvents(
       );
     }
     events.push(...killEvents(target, { ...context, state }));
+    events.push(...transferEvents(target, { ...context, state }));
     if (!isDead(hurt))
       events.push(...downedEvents(hurt, { ...context, state }));
   }
@@ -1446,6 +1496,11 @@ export function damageRiders(
     }
     if (spell && !passive.spells) return [];
     if (passive.critical && !critical) return [];
+    if (passive.while && !underEffect(attacker, passive.while)) return [];
+    if (passive.firstRound && (combat?.round ?? 1) > 1) return [];
+    if (passive.ownTurn && combat?.order[combat.index] !== attacker.id) {
+      return [];
+    }
     const key =
       passive.damage === undefined
         ? `rider:${String(index)}`
@@ -2019,7 +2074,10 @@ export function leafEvents(
           INCAPACITATING.includes(effect.condition) &&
           target.concentratingOn !== null &&
           (["petrified", "unconscious"].includes(effect.condition) ||
-            !hasPassive(deriveStats(target, context), "unshakableFocus"))
+            !deriveStats(target, context).passives.some(
+              (passive) =>
+                passive.kind === "unshakableFocus" && !passive.spells,
+            ))
         ) {
           events.push(
             dndEvent(`${NS}:concentrationEnded`, { actor: target.id }),
@@ -2279,8 +2337,11 @@ export function leafEvents(
       // A push or pull is made on the grid as Shove's is, in a straight line.
       case "forcedMove": {
         const to =
-          effect.maxSize === undefined ||
-          sizeOf(target, context) <= SIZES.indexOf(effect.maxSize)
+          (effect.maxSize === undefined ||
+            sizeOf(target, context) <= SIZES.indexOf(effect.maxSize)) &&
+          (effect.largerBy === undefined ||
+            sizeOf(target, context) <=
+              sizeOf(caster, context) + effect.largerBy)
             ? pushTo(
                 caster.position,
                 target,
@@ -2296,6 +2357,49 @@ export function leafEvents(
           events.push(
             dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 }),
             ...prisonEvents(target, context),
+          );
+        }
+        break;
+      }
+      case "disarm": {
+        if (isDown(target) || !target.position) break;
+        const held = equipped(target).find(
+          (id) =>
+            ItemSchema.safeParse(context.content(id)).data?.type === "weapon",
+        );
+        if (target.source.kind === "character") {
+          if (held) {
+            events.push(
+              dndEvent(`${NS}:weaponThrown`, {
+                item: held,
+                at: target.position,
+                by: target.id,
+              }),
+            );
+          }
+          break;
+        }
+        const weapon = deriveStats(target, context).actions.find(
+          ({ activation }) =>
+            activation.resolution.kind === "attack" &&
+            activation.resolution.attack.type === "weapon" &&
+            !activation.resolution.attack.unarmed,
+        );
+        if (weapon) {
+          events.push(
+            ...leafEvents(
+              [
+                {
+                  kind: "modifier",
+                  modifier: { kind: "stuck", action: weapon.id },
+                  duration: { until: "itsNextTurnStart" },
+                },
+              ],
+              sourceId,
+              caster,
+              target,
+              context,
+            ),
           );
         }
         break;
@@ -2827,6 +2931,13 @@ export function rollSave(
     return { saved: false, events: [] };
   }
   const stats = deriveStats(target, context);
+  // Eldritch Strike: Disadvantage only on a save against its caster's spell.
+  const against = (effect: Actor["activeEffects"][number]): boolean =>
+    effect.modifier.kind === "disadvantage" &&
+    effect.modifier.on === "saves" &&
+    effect.modifier.casterSpells === true &&
+    magical &&
+    source?.caster === effect.casterId;
   const edge = {
     advantage:
       advantage ||
@@ -2854,6 +2965,7 @@ export function rollSave(
       strongerTogether(target, ability, context),
     disadvantage:
       disadvantage ||
+      target.activeEffects.some(against) ||
       hasFlag(target, "disadvantage", "saves", stats, ability) ||
       placedFlag(
         target,
@@ -2904,7 +3016,10 @@ export function rollSave(
   const spent = target.activeEffects.flatMap(
     ({ modifier, sourceId, casterId }) =>
       (((modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
-        modifier.on === "saves") ||
+        modifier.on === "saves" &&
+        (modifier.kind !== "disadvantage" ||
+          !modifier.casterSpells ||
+          (magical && source?.caster === casterId))) ||
         (modifier.kind === "bonus" &&
           modifier.to === "saves" &&
           (!modifier.ability || modifier.ability === ability))) &&
@@ -3085,6 +3200,42 @@ export function resolveAction(
   if (spellEnds.length > 0 && isSpell(action, actor, context)) {
     events.push(...spellEnds);
   }
+  // Ending what the action it needs left on the target, as Quivering Palm's end.
+  const { targeting } = action.activation;
+  const afflicting =
+    action.activation.endsAffliction && "afflicted" in targeting
+      ? stats.actions.find(({ name }) => name === targeting.afflicted)?.id
+      : undefined;
+  if (afflicting) {
+    events.push(
+      ...targets.map((target) =>
+        dndEvent(`${NS}:effectEnded`, {
+          actor: target.id,
+          sourceId: afflicting,
+          casterId: actor.id,
+        }),
+      ),
+    );
+  }
+  // One creature at a time: used again, it leaves the last one.
+  if (action.activation.oneTarget) {
+    for (const other of Object.values(context.state.actors)) {
+      if (
+        !targets.some(({ id }) => id === other.id) &&
+        other.activeEffects.some(
+          (item) => item.sourceId === action.id && item.casterId === actor.id,
+        )
+      ) {
+        events.push(
+          dndEvent(`${NS}:effectEnded`, {
+            actor: other.id,
+            sourceId: action.id,
+            casterId: actor.id,
+          }),
+        );
+      }
+    }
+  }
   if (spell) events.push(...duelBroken(actor, targets, context.state));
 
   const usesConcentration = (effects: readonly LeafEffect[]): boolean =>
@@ -3138,7 +3289,12 @@ export function resolveAction(
         amount: finalDamage(
           scale(total),
           type,
-          piercing(damageResponses(target, context), mastered, stats),
+          piercing(
+            damageResponses(target, context),
+            mastered,
+            stats,
+            action.id,
+          ),
         ),
         type,
       })),
@@ -3302,6 +3458,7 @@ export function resolveAction(
       const met = deriveStats(target, context);
       const hurt = target.hp < met.maxHp;
       return list.flatMap((item, index) => {
+        if (item.except && exemptFrom(item.except, target, met)) return [];
         const { total = 0 } = shared[index] ?? {};
         const type = item.types
           ? typeAgainst(item.types, damageResponses(target, context))
@@ -3444,10 +3601,17 @@ export function resolveAction(
             effect.kind === "teleport" &&
             (target.id === actor.id || effect.others)
           ) {
+            const { rolled } = effect;
             frames.push(
               teleportFrame(
                 target,
-                effect.feet,
+                rolled
+                  ? rolled.times *
+                      context.dice.roll(
+                        deriveStats(actor, context).scaling[rolled.dieSize] ??
+                          6,
+                      )
+                  : effect.feet,
                 effect.movement,
                 context,
                 effect.provokes,
@@ -4196,14 +4360,15 @@ function reactionAttack(
 // A creature spends its Reaction to step beside its nearest foe within its Speed, or to get as far from the caster as
 // it can, provoking nothing.
 // shortcut: fleeing goes straight away from the caster, as a push does, not by the safest winding route.
-function reactionMove(
+export function reactionMove(
   target: Actor,
   context: Context,
   effect: Extract<LeafEffect, { kind: "reactionMove" }>,
   caster: Actor,
 ): SystemEvent[] {
   if (!target.budget.reaction || isDown(target) || !target.position) return [];
-  const speed = speedOf(target, deriveStats(target, context));
+  const full = speedOf(target, deriveStats(target, context));
+  const speed = effect.half ? Math.floor(full / 10) * 5 : full;
   if (effect.away) {
     const to =
       speed > 0 ? pushTo(caster.position, target, speed, context.state) : null;

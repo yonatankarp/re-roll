@@ -209,7 +209,8 @@ export function afterActionEvents(actor: Actor): SystemEvent[] {
     hasted(actor) &&
     !actor.budget.action &&
     !actor.usedThisTurn.includes(HASTE_ACTION) &&
-    !limitsOf(actor).oneAction
+    !limitsOf(actor).oneAction &&
+    !limitsOf(actor).oneThing
   ) {
     events.push(
       dndEvent(`${NS}:actionRegained`, { actor: actor.id }),

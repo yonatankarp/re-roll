@@ -1,4 +1,11 @@
-import type { Activation, Amount, Formula, Passive } from "./schemas.ts";
+import type { ContentAccess } from "#sdk";
+import {
+  type Activation,
+  type Amount,
+  type Formula,
+  type Passive,
+  SpellSchema,
+} from "./schemas.ts";
 import type { KnownAction } from "./stats.ts";
 
 // Eldritch Invocations that change a character's own attacks: the pact weapon's (Pact of the Blade, Lifedrinker)
@@ -16,24 +23,36 @@ function averageOf(amount: Amount): number {
 
 // shortcut: a rider goes to the known cantrip dealing the most damage rather than one the player names, and the
 // cantrip may be from any class's list.
-function cantripFor(
+function cantripsFor(
   actions: readonly KnownAction[],
   rider: CantripRider,
-): KnownAction | undefined {
+  access: ContentAccess,
+): readonly KnownAction[] {
   const worth = (action: KnownAction): number =>
     action.activation.resolution.damage.reduce(
       (sum, item) => sum + averageOf(item.amount),
       0,
     ) * (action.activation.projectiles ?? 1);
-  return actions
-    .filter(
-      (action) =>
-        action.spellLevel === 0 &&
-        action.id.startsWith("spell:") &&
-        action.activation.resolution.damage.length > 0 &&
-        (!rider.attackOnly || action.activation.resolution.kind === "attack"),
-    )
-    .sort((a, b) => worth(b) - worth(a))[0];
+  const { list } = rider;
+  const listed = (action: KnownAction): boolean =>
+    list === undefined ||
+    (SpellSchema.safeParse(
+      access.content(action.id.slice("spell:".length)),
+    ).data?.classes.some(
+      (id) => id.split(":class/")[1] === list.split(":class/")[1],
+    ) ??
+      false);
+  const fit = actions.filter(
+    (action) =>
+      action.spellLevel === 0 &&
+      action.id.startsWith("spell:") &&
+      action.activation.resolution.damage.length > 0 &&
+      (!rider.attackOnly || action.activation.resolution.kind === "attack") &&
+      listed(action),
+  );
+  if (list !== undefined) return fit;
+  const best = fit.sort((a, b) => worth(b) - worth(a))[0];
+  return best ? [best] : [];
 }
 
 function addedTo(bonus: Formula | undefined, more: Formula): Formula {
@@ -65,15 +84,26 @@ function ridden(
         ]
       : resolution.damage;
   const range = rider.rangePerLevel;
+  const reach =
+    "range" in targeting && typeof targeting.range === "number"
+      ? targeting.range
+      : 0;
+  const added =
+    (range ? range.feet * (classLevels[range.class] ?? 0) : 0) +
+    (rider.range !== undefined && reach >= 10 ? rider.range : 0);
   return {
     ...activation,
+    ...(rider.selfEffects
+      ? {
+          selfEffects: [
+            ...(activation.selfEffects ?? []),
+            ...rider.selfEffects,
+          ],
+        }
+      : {}),
     targeting:
-      range && "range" in targeting && typeof targeting.range === "number"
-        ? {
-            ...targeting,
-            range:
-              targeting.range + range.feet * (classLevels[range.class] ?? 0),
-          }
+      added > 0 && "range" in targeting && typeof targeting.range === "number"
+        ? { ...targeting, range: targeting.range + added }
         : targeting,
     resolution:
       resolution.kind === "attack"
@@ -130,13 +160,13 @@ function pactWeapon(
   };
 }
 
-// shortcut: every melee weapon carried counts as the pact weapon, and Lifedrinker's damage comes on every hit, not
-// once a turn.
 export function withInvocations(
   actions: readonly KnownAction[],
   passives: readonly Passive[],
   scores: Readonly<Record<"str" | "dex" | "cha", number>>,
   classLevels: Readonly<Record<string, number>>,
+  access: ContentAccess,
+  bonded?: string, // the weapon Pact of the Blade bonds with (combat/queries.ts pactWeaponId)
 ): KnownAction[] {
   const pacts = passives.filter(
     (item): item is PactWeapon => item.kind === "pactWeapon",
@@ -147,7 +177,7 @@ export function withInvocations(
   let shaped = actions.map((action) => {
     const { targeting } = action.activation;
     const melee =
-      action.id.startsWith("weapon:") &&
+      action.id === `weapon:${bonded ?? ""}` &&
       "range" in targeting &&
       (targeting.range === 5 || ("reach" in targeting && targeting.reach));
     return pacts.length > 0 && melee
@@ -158,10 +188,10 @@ export function withInvocations(
       : action;
   });
   for (const rider of riders) {
-    const cantrip = cantripFor(shaped, rider);
-    if (!cantrip) continue;
+    const cantrips = cantripsFor(shaped, rider, access);
+    if (cantrips.length === 0) continue;
     shaped = shaped.map((action) =>
-      action === cantrip
+      cantrips.includes(action)
         ? {
             ...action,
             activation: ridden(action.activation, rider, classLevels),

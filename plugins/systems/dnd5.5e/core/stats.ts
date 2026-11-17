@@ -8,6 +8,7 @@ import {
   encumbrance,
 } from "./carry.ts";
 import { ENCUMBRANCE, variantOn } from "./variant-rules.ts";
+import { pactWeaponId } from "./combat/queries.ts";
 import {
   type Actor,
   type DndState,
@@ -115,6 +116,7 @@ export interface KnownAction {
   readonly hitType?: true; // its damage takes the type of the hit it adds to, as a maneuver's die does
   readonly rolled?: true; // taken only when a randomAction picks it, as one eye ray
   readonly concentrates?: true; // casting it starts Concentration even with no lasting effect, as Flame Blade
+  readonly onceKeys?: readonly string[]; // once-a-turn uses its cast spends, as a `spellDamage` bonus (combat/actions.ts)
 }
 
 export interface Stats {
@@ -642,6 +644,61 @@ function bestMentalAbility(abilities: AbilityScores): Ability {
   );
 }
 
+// Whether it's the actor's own turn in a fight's first round, as Ambusher's Leap's.
+export function ownFirstTurn(actor: Actor, access: ContentAccess): boolean {
+  const combat = (access as ContentAccess & { readonly state?: DndState }).state
+    ?.combat;
+  return combat?.round === 1 && combat.order[combat.index] === actor.id;
+}
+
+// Whether it's the actor's own turn and it has taken its action, as for Blade Flourish's Speed.
+// shortcut: any action counts, not only the Attack action.
+function ownTurnActed(actor: Actor, access: ContentAccess): boolean {
+  const combat = (access as ContentAccess & { readonly state?: DndState }).state
+    ?.combat;
+  return combat?.order[combat.index] === actor.id && !actor.budget.action;
+}
+
+// The variants picked for a feature, or for the feature it follows; with none picked, as many as it gives at first.
+export function pickedVariants(
+  feature: Feature,
+  variants: Readonly<Record<string, readonly string[]>>,
+): NonNullable<Feature["variants"]> {
+  const options = feature.variants ?? [];
+  const ids = variants[feature.follows ?? feature.id] ?? [];
+  const picked = options.filter(({ id }) => ids.includes(id));
+  return picked.length > 0
+    ? picked
+    : options.slice(0, feature.variantPicks?.count ?? 1);
+}
+
+// A feature with the variants picked for it joined in.
+export function withVariant(
+  feature: Feature,
+  variants: Readonly<Record<string, readonly string[]>>,
+): Feature {
+  if (!feature.variants) return feature;
+  const picked = pickedVariants(feature, variants);
+  return picked.length > 0
+    ? {
+        ...feature,
+        name: `${feature.name} (${picked.map(({ name }) => name).join(", ")})`,
+        passives: [
+          ...feature.passives,
+          ...picked.flatMap((item) => item.passives),
+        ],
+        activations: [
+          ...feature.activations,
+          ...picked.flatMap((item) => item.activations),
+        ],
+        resources: [
+          ...feature.resources,
+          ...picked.flatMap((item) => item.resources),
+        ],
+      }
+    : feature;
+}
+
 function collectFeatureData(
   access: ContentAccess,
   featureIds: readonly string[],
@@ -649,6 +706,7 @@ function collectFeatureData(
   highestSlot = 0,
   feats: ReadonlySet<string> = new Set(),
   classLevels: Readonly<Record<string, number>> = {},
+  variants: Readonly<Record<string, readonly string[]>> = {},
 ): {
   passives: Passive[];
   actions: KnownAction[];
@@ -663,8 +721,36 @@ function collectFeatureData(
   const spells = featureIds.flatMap((id) => grantedSpells(id, level));
   const free: [string, FreeCast][] = [];
   const retype: Record<string, DamageType> = {};
+  // Activations a later feature's variant takes the place of, by the feature they're on (`replaces`).
+  const replaced = new Map<string, Set<string>>();
   for (const id of featureIds) {
-    const feature = featureRules(lookup(access, FeatureSchema, id));
+    const feature = lookup(access, FeatureSchema, id);
+    const labels = pickedVariants(feature, variants).flatMap(
+      (item) => item.replaces ?? [],
+    );
+    if (
+      feature.follows &&
+      labels.length > 0 &&
+      (feature.fromLevel ?? 1) <= level
+    ) {
+      replaced.set(feature.follows, new Set(labels));
+    }
+    const { overrides } = featureRules(feature);
+    if (overrides && (feature.fromLevel ?? 1) <= level) {
+      replaced.set(
+        overrides.feature,
+        new Set([
+          ...(replaced.get(overrides.feature) ?? []),
+          ...overrides.labels,
+        ]),
+      );
+    }
+  }
+  for (const id of featureIds) {
+    const feature = withVariant(
+      featureRules(lookup(access, FeatureSchema, id)),
+      variants,
+    );
     if ((feature.fromLevel ?? 1) > level) continue;
     Object.assign(retype, feature.retype);
     passives.push(...feature.passives);
@@ -686,6 +772,7 @@ function collectFeatureData(
       if (Number(slot) <= highestSlot) spells.push(...ids);
     }
     feature.activations.forEach((activation, index) => {
+      if (activation.label && replaced.get(id)?.has(activation.label)) return;
       actions.push({
         id: `feature:${id}:${String(index)}`,
         name: activation.label
@@ -705,6 +792,96 @@ function collectFeatureData(
     });
   }
   return { passives, actions, resources, spells, free, retype };
+}
+
+// An attack with `emptyHanded` dice rolls them while the bearer holds no weapon or Shield, as Unarmed Fighting's d8.
+function emptyHanded(
+  actions: readonly KnownAction[],
+  actor: Actor,
+  access: ContentAccess,
+): KnownAction[] {
+  const holding = equipped(actor).some((id) => {
+    const item = ItemSchema.safeParse(access.content(id)).data;
+    return item?.type === "weapon" || item?.type === "shield";
+  });
+  return actions.map((action) => {
+    const dice = action.activation.emptyHanded;
+    const { resolution } = action.activation;
+    const [first, ...rest] = resolution.damage;
+    if (!dice || holding || !first) return action;
+    return {
+      ...action,
+      activation: {
+        ...action.activation,
+        resolution: {
+          ...resolution,
+          damage: [{ ...first, amount: { ...first.amount, dice } }, ...rest],
+        },
+      },
+    };
+  });
+}
+
+// Spells with a `spellDamage` bonus added to their damage, while its once-a-turn use is left.
+function withSpellDamage(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+  actor: Actor,
+): KnownAction[] {
+  const bonuses = passives.flatMap((passive, index) =>
+    passive.kind === "spellDamage" &&
+    !(
+      passive.oncePerTurn &&
+      actor.usedThisTurn.includes(`spellDamage:${String(index)}`)
+    )
+      ? [{ passive, key: `spellDamage:${String(index)}` }]
+      : [],
+  );
+  if (bonuses.length === 0) return [...actions];
+  return actions.map((action) => {
+    if (action.spellLevel === null || !action.id.startsWith("spell:")) {
+      return action;
+    }
+    const spellId = action.id.slice("spell:".length).replace(/:free$/, "");
+    let { resolution } = action.activation;
+    const keys: string[] = [];
+    for (const { passive, key } of bonuses) {
+      if (passive.spells && !passive.spells.includes(spellId)) continue;
+      const at = resolution.damage.findIndex(
+        (item) => !passive.types || passive.types.includes(item.type),
+      );
+      const entry = resolution.damage[at];
+      if (!entry) continue;
+      const damage = resolution.damage.map((item, index) =>
+        index === at
+          ? {
+              ...item,
+              amount: {
+                ...item.amount,
+                bonus: {
+                  base: (item.amount.bonus?.base ?? 0) + passive.bonus.base,
+                  add: [
+                    ...(item.amount.bonus?.add ?? []),
+                    ...passive.bonus.add,
+                  ],
+                },
+              },
+            }
+          : item,
+      );
+      resolution = { ...resolution, damage };
+      if (passive.oncePerTurn) keys.push(key);
+    }
+    return keys.length === 0 && resolution === action.activation.resolution
+      ? action
+      : {
+          ...action,
+          activation: { ...action.activation, resolution },
+          ...(keys.length > 0
+            ? { onceKeys: [...(action.onceKeys ?? []), ...keys] }
+            : {}),
+        };
+  });
 }
 
 // A feature's activations with the effects other features ride on them, as Tactical Shift's move on Second Wind.
@@ -729,7 +906,8 @@ function withRiders(
     );
     const extra = riders.flatMap(({ effects }) => effects);
     const damage = riders.flatMap(({ damage: more }) => more ?? []);
-    if (damage.length > 0 && resolution.kind === "save") {
+    // On a save, whether it succeeds or fails, as Focused Strike's with Stunning Strike.
+    if (resolution.kind === "save" && (damage.length > 0 || extra.length > 0)) {
       return {
         ...action,
         activation: {
@@ -737,6 +915,8 @@ function withRiders(
           resolution: {
             ...resolution,
             damage: [...resolution.damage, ...damage],
+            onFail: [...resolution.onFail, ...extra],
+            onSuccess: [...resolution.onSuccess, ...extra],
           },
         },
       };
@@ -953,6 +1133,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const freeSpells = new Map<string, FreeCast>(); // also cast without a slot
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
   const featureIds = new Set<string>(species.traits);
+  const variants: Record<string, string[]> = {}; // the variants picked, by feature
   // A feat picked in place of the background's, as a Dark Gift for Haunted One, is in the first level's answers.
   const replaced =
     background.featOr !== undefined &&
@@ -1001,6 +1182,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         }
       } else if (answer.kind === "features") {
         for (const id of answer.values) featureIds.add(id);
+      } else if (answer.kind === "variant") {
+        variants[answer.feature] = [
+          ...(variants[answer.feature] ?? []),
+          ...answer.values,
+        ];
       } else if (answer.kind === "feats") {
         for (const id of answer.values) {
           featIds.add(id);
@@ -1120,6 +1306,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     slots.findLastIndex((count) => count > 0) + 1,
     featIds,
     classLevels,
+    variants,
   );
   // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
   const traits = [...itemPassives, ...fromFeatures.passives];
@@ -1202,6 +1389,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         works(itemId, item) && hitDamage ? { ...plain, hitDamage } : plain,
         abilities,
         martialTraining ||
+          fromFeatures.passives.some(
+            ({ kind }) => kind === "martialTraining",
+          ) ||
           kinds.some((kind) => weaponTraining.has(kind)) ||
           classes.some((def) => weaponProficient(def, weapon)),
         own("damage") + scoped("damage"),
@@ -1391,7 +1581,15 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     actions: withMetamagic(
       withInvocations(
         withWeaponRiders(
-          withRiders(actions, fromFeatures.passives, actor),
+          withSpellDamage(
+            emptyHanded(
+              withRiders(actions, fromFeatures.passives, actor),
+              actor,
+              access,
+            ),
+            fromFeatures.passives,
+            actor,
+          ),
           fromFeatures.passives,
           actor,
           access,
@@ -1400,15 +1598,32 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         fromFeatures.passives,
         abilities,
         classLevels,
+        access,
+        pactWeaponId(actor, access),
       ),
       actor,
       abilityModifier(abilities.cha),
     ),
-    multiattack: Math.max(
-      ...[...featureIds].map(attacksFrom),
-      ...passiveAttacks(fromFeatures.passives),
-      1,
-    ),
+    multiattack:
+      Math.max(
+        ...[...featureIds].map(attacksFrom),
+        ...passiveAttacks(fromFeatures.passives),
+        1,
+      ) +
+      fromFeatures.passives.reduce(
+        (sum, passive) =>
+          passive.kind === "extraAttacks" &&
+          (!passive.while ||
+            passive.while.some((id) =>
+              actor.activeEffects.some(({ sourceId }) =>
+                sourceId.startsWith(`feature:${id}:`),
+              ),
+            )) &&
+          (!passive.firstTurn || ownFirstTurn(actor, access))
+            ? sum + passive.count
+            : sum,
+        0,
+      ),
     routines: null,
     creatureType: species.creatureType.toLowerCase(),
     initiative:
@@ -1460,7 +1675,21 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     speed: Math.max(
       0,
       partial.speed +
-        passiveBonus(partial, "speed") -
+        passiveBonus(partial, "speed") +
+        (ownFirstTurn(actor, access)
+          ? partial.passives.reduce(
+              (sum, passive) =>
+                passive.kind === "firstTurnSpeed" ? sum + passive.feet : sum,
+              0,
+            )
+          : 0) +
+        (ownTurnActed(actor, access)
+          ? partial.passives.reduce(
+              (sum, passive) =>
+                passive.kind === "attackSpeed" ? sum + passive.feet : sum,
+              0,
+            )
+          : 0) -
         (tooHeavy && load === null ? 10 : 0) -
         5 * actor.exhaustion,
     ),

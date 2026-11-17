@@ -13,6 +13,7 @@ import {
   type ChoiceDef,
   ClassSchema,
   FeatSchema,
+  FeatureSchema,
   SpeciesSchema,
 } from "./schemas.ts";
 import {
@@ -44,6 +45,8 @@ interface Swappable {
   readonly owner: string;
   readonly choice: ChoiceDef;
   readonly values: readonly string[];
+  // shortcut: changed after a Short Rest too, so it's offered between fights whenever the party has rested.
+  readonly anyRest?: boolean;
 }
 
 export function swappable(
@@ -54,6 +57,27 @@ export function swappable(
   if (!build) return [];
   return build.levels.flatMap((entry, level) =>
     entry.answers.flatMap((answer, index): Swappable[] => {
+      if (answer.kind === "variant") {
+        const feature = FeatureSchema.safeParse(
+          access.content(answer.feature),
+        ).data;
+        return feature?.variantSwap
+          ? [
+              {
+                key: `${String(level)}:${String(index)}`,
+                owner: feature.name,
+                choice: {
+                  kind: "variant",
+                  id: `variant:${feature.id}`,
+                  feature: feature.id,
+                  count: 1,
+                },
+                values: answer.values,
+                anyRest: true,
+              },
+            ]
+          : [];
+      }
       if (!(answer.kind in KINDS) || !("feat" in answer) || !answer.feat) {
         return [];
       }
@@ -92,7 +116,10 @@ export function sceneSwapActions(
   const actor = state.actors[PLAYER_ACTOR];
   if (!actor || state.combat || state.sinceLongRest === undefined) return [];
   return swappable(actor, access)
-    .filter(({ key }) => !(actor.swapped ?? []).includes(key))
+    .filter(
+      ({ key, anyRest }) =>
+        anyRest === true || !(actor.swapped ?? []).includes(key),
+    )
     .map(({ key, owner }) => ({
       id: `swap:${key}`,
       label: `Change a pick of ${owner}`,
@@ -101,7 +128,13 @@ export function sceneSwapActions(
     }));
 }
 
-function nameOf(id: string, access: ContentAccess): string {
+function nameOf(id: string, access: ContentAccess, choice?: ChoiceDef): string {
+  if (choice?.kind === "variant") {
+    const feature = FeatureSchema.safeParse(
+      access.content(choice.feature),
+    ).data;
+    return feature?.variants?.find((item) => item.id === id)?.name ?? id;
+  }
   const entry = access.content(id) as { name?: unknown } | undefined;
   return typeof entry?.name === "string" ? entry.name : id;
 }
@@ -167,8 +200,8 @@ function runSwapStep(
       awaitDecision({
         id,
         actor: actor.id,
-        prompt: `${found.owner}: what takes the place of ${nameOf(drop, context)}?`,
-        options: [...options, keep],
+        prompt: `${found.owner}: what takes the place of ${nameOf(drop, context, found.choice)}?`,
+        options: [...options.filter(({ id }) => id !== drop), keep],
         resume: resume(drop),
       }),
     ],

@@ -1,6 +1,6 @@
 import type { ContentAccess } from "#sdk";
 import type { Ability, AbilityScores, Passive } from "./schemas.ts";
-import type { Actor } from "./state.ts";
+import type { Actor, DndState } from "./state.ts";
 import type { KnownAction } from "./stats.ts";
 import { hitFits, underEffect } from "./combat/queries.ts";
 import { ItemSchema } from "./schemas.ts";
@@ -87,12 +87,18 @@ function ridden(
       targeting: reach,
       resolution: {
         ...resolution,
-        attack: rider.attack
-          ? {
-              ...resolution.attack,
-              flatBonus: (resolution.attack.flatBonus ?? 0) + rider.attack,
-            }
-          : resolution.attack,
+        attack:
+          rider.attack || rider.attackMod
+            ? {
+                ...resolution.attack,
+                flatBonus:
+                  (resolution.attack.flatBonus ?? 0) +
+                  (rider.attack ?? 0) +
+                  (rider.attackMod
+                    ? Math.max(1, modifier(scores[rider.attackMod]))
+                    : 0),
+              }
+            : resolution.attack,
         damage: first
           ? [
               {
@@ -129,6 +135,13 @@ function ridden(
   };
 }
 
+// Whether it's the actor's own turn in a fight, for a rider only then.
+function ownTurn(actor: Actor, access: ContentAccess): boolean {
+  const { state } = access as ContentAccess & { readonly state?: DndState };
+  const combat = state?.combat;
+  return combat?.order[combat.index] === actor.id;
+}
+
 export function withWeaponRiders(
   actions: readonly KnownAction[],
   passives: readonly Passive[],
@@ -139,7 +152,8 @@ export function withWeaponRiders(
   const riders = passives.filter(
     (item): item is WeaponRider =>
       item.kind === "weaponRider" &&
-      (!item.while || underEffect(actor, item.while)),
+      (!item.while || underEffect(actor, item.while)) &&
+      (!item.ownTurn || ownTurn(actor, access)),
   );
   if (riders.length === 0) return actions;
   return actions.map((action) =>

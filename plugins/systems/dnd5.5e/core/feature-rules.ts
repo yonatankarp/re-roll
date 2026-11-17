@@ -193,6 +193,18 @@ const RULES: Readonly<Record<string, Rules>> = {
     ],
   },
   // Subclass spell tables. Circle of the Land is left out, as its list depends on a land the player doesn't pick yet.
+  "eberron-forge-of-the-artificer:feature/artificer-cartographer-cartographer-spells":
+    prepared({
+      3: [
+        "phb:spell/faerie-fire",
+        "phb:spell/guiding-bolt",
+        "phb:spell/healing-word",
+      ],
+      5: ["phb:spell/locate-object", "phb:spell/mind-spike"],
+      9: ["phb:spell/call-lightning", "phb:spell/clairvoyance"],
+      13: ["phb:spell/banishment", "phb:spell/locate-creature"],
+      17: ["phb:spell/scrying", "phb:spell/teleportation-circle"],
+    }),
   "phb:feature/cleric-life-domain-life-domain-spells": prepared({
     3: [
       "phb:spell/aid",

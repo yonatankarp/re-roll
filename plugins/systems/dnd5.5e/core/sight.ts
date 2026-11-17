@@ -267,6 +267,13 @@ export function seeing(
   access: ContentAccess,
   darkvision?: number, // the viewer's, when already worked out
 ): "clear" | "dim" | "none" {
+  // Shadow Arrow: nothing farther than a few feet away.
+  const limit = viewer.activeEffects.reduce(
+    (least, { modifier }) =>
+      modifier.kind === "sightLimit" ? Math.min(least, modifier.feet) : least,
+    Infinity,
+  );
+  if (distanceFeet(viewer.position, at) > limit) return "none";
   // shortcut: a zone hides whatever is in it and blinds whoever stands in it, whichever way the line runs.
   const hidden = obscuring(at, state) ?? obscuring(viewer.position, state);
   if (hidden) {

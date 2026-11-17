@@ -25,7 +25,7 @@ export function speedsOf(
   }
   for (const modifier of modifiersOf(actor, stats)) {
     if (modifier.kind !== "movementMode") continue;
-    const feet = modifier.feet ?? stats.speed;
+    const feet = modifier.feet ?? stats.speed * (modifier.times ?? 1);
     speeds.set(modifier.mode, Math.max(speeds.get(modifier.mode) ?? 0, feet));
   }
   return speeds;
