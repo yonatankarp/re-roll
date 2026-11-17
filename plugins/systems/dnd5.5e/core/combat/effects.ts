@@ -2488,8 +2488,8 @@ export function resolveAction(
         // shortcut: cover counts from the caster, even for a sphere whose centre is elsewhere.
         const { saved: rolledSave, events: saveEvents } = spared.has(target.id)
           ? { saved: true, events: [] }
-          : edges.includes("fail")
-            ? { saved: false, events: [] }
+          : edges.includes("succeed") || edges.includes("fail")
+            ? { saved: edges.includes("succeed"), events: [] }
             : rollSave(
                 target,
                 resolution.ability,

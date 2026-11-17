@@ -5413,6 +5413,39 @@ describe("smites and attack-spell riders", () => {
     expect(d20s("srd52:monster/dummy")).toBe(1);
   });
 
+  it("lets a Construct succeed on its own, as against Wardaway", async () => {
+    const base_ = await base();
+    const run = arenaRun(base_, {
+      ...variant(base_, "ward", "starry-wisp", {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 60, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "con",
+          dc: DC,
+          edges: [{ creatureTypes: ["construct"], roll: "succeed" }],
+          damage: [{ amount: { dice: "2d4" }, type: "force" }],
+          onSuccessDamage: "half",
+        },
+      }),
+      "srd52:monster/golem": dummy("srd52:monster/golem", {
+        creatureType: "construct",
+      }),
+    });
+    const caster = hero(run, { spells: ["ward"] });
+    const warded = (statBlock: string) =>
+      settle(
+        run,
+        fight(caster, monster("a", statBlock)),
+        [cast("ward", "a")],
+        FAIL_HIGH,
+      );
+    const golem = warded("srd52:monster/golem");
+    expect(damageOf(golem.events, "a")).toEqual([4]);
+    expect(kinds(golem.events)).not.toContain(`${NS}:saveRolled`);
+    expect(damageOf(warded("srd52:monster/dummy").events, "a")).toEqual([8]);
+  });
+
   it("gives a Large creature Advantage against Ensnaring Strike", async () => {
     const run = arenaRun(await base(), {
       "srd52:monster/big": dummy("srd52:monster/big", { size: "large" }),

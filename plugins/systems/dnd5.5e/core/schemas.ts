@@ -1025,13 +1025,14 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     dc: FormulaSchema,
     advantage: z.boolean().optional(), // the target saves with Advantage, as when its caster is fighting it
     // How the save goes for creatures of these lowercase types or this size or larger, as a Plant failing against
-    // Blight, a Construct's Disadvantage against Shatter or a Large creature's Advantage against Ensnaring Strike.
+    // Blight, a Construct's Disadvantage against Shatter, a Large creature's Advantage against Ensnaring Strike or
+    // an Undead succeeding against Wardaway.
     edges: z
       .array(
         z.strictObject({
           creatureTypes: z.array(z.string()).min(1).optional(),
           minSize: SizeSchema.optional(),
-          roll: z.enum(["advantage", "disadvantage", "fail"]),
+          roll: z.enum(["advantage", "disadvantage", "fail", "succeed"]),
         }),
       )
       .min(1)
