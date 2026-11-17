@@ -2018,7 +2018,10 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
         break;
       case "spellSaveDc":
         total += term.ability
-          ? 8 + stats.proficiency + modifierFor(stats, term.ability)
+          ? 8 +
+            stats.proficiency +
+            modifierFor(stats, term.ability) +
+            stats.itemBonuses.spellDc
           : spellSaveDc(stats);
         break;
       default:

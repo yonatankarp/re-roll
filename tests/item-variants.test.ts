@@ -31,6 +31,7 @@ import {
   attackBonus,
   checkBonus,
   deriveStats,
+  evaluateFormula,
   saveBonus,
   spellSaveDc,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
@@ -526,6 +527,13 @@ describe("magic armor, flat bonuses and ability scores", () => {
     const robed = wizard(["variant-test:item/caster-robe"]);
     expect(spellSaveDc(robed) - spellSaveDc(wizard([]))).toBe(1);
     expect(robed.itemBonuses.spellAttack).toBe(1);
+    const intDc = {
+      base: 0,
+      add: [{ kind: "spellSaveDc" as const, ability: "int" as const }],
+    };
+    expect(
+      evaluateFormula(intDc, robed) - evaluateFormula(intDc, wizard([])),
+    ).toBe(1);
   });
 });
 
