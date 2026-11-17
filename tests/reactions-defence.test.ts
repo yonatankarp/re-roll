@@ -381,6 +381,145 @@ const MINE = [
       },
     ],
   }),
+
+  trait("fury", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { damaged: true, endured: true },
+        targeting: { creatures: 1, range: 15, side: "enemy" },
+        resolution: { kind: "automatic", effects: [{ kind: "strike" }] },
+      },
+    ],
+  }),
+  trait("endurance", [{ kind: "dropToOne", resource: "endurance" }], {
+    resources: [
+      {
+        id: "endurance",
+        max: { base: 1 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+  }),
+  trait("counter", [
+    { kind: "saveCounter", marked: ["test:feature/vow"] },
+    { kind: "preyBonus", marked: ["test:feature/vow"], dice: "1d6" },
+  ]),
+  trait("majesty-after", [
+    { kind: "modifier", modifier: { kind: "majesty", ability: "cha" } },
+  ]),
+  trait("storm", [{ kind: "stormStrength", damage: ["lightning"] }]),
+  trait("horde", [
+    {
+      kind: "modifier",
+      modifier: {
+        kind: "disadvantage",
+        on: "attacksAgainst",
+        opportunity: true,
+      },
+    },
+  ]),
+  trait("rebuker", [
+    {
+      kind: "modifier",
+      modifier: {
+        kind: "retaliate",
+        anyAttack: true,
+        oncePerTurn: true,
+        damage: [{ amount: { bonus: { base: 4 } }, type: "psychic" }],
+      },
+    },
+  ]),
+  trait("shroud", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { rolled: { rolls: ["save"], by: "self", when: "failed" } },
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            { kind: "rollBonus", amount: { bonus: { base: 4 } } },
+            {
+              kind: "modifier",
+              modifier: { kind: "actionLimit", cantripsOnly: true },
+              duration: { until: "yourNextTurnEnd" },
+            },
+            {
+              kind: "foesTake",
+              creatures: 1,
+              range: 60,
+              damage: [{ amount: { bonus: { base: 5 } }, type: "force" }],
+            },
+          ],
+        },
+      },
+    ],
+  }),
+  trait("stride", [], {
+    activations: [
+      {
+        cost: [],
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "modifier",
+              modifier: {
+                kind: "strideDamage",
+                damage: { bonus: { base: 3 } },
+                types: ["fire"],
+              },
+              duration: { until: "turnEnd" },
+            },
+          ],
+        },
+      },
+    ],
+  }),
+  trait("song", [], {
+    activations: [
+      {
+        cost: ["reaction", "slot"],
+        minSlot: 2,
+        trigger: { damaged: true, before: true },
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [{ kind: "reduceDamage", perSlot: 5 }],
+        },
+      },
+    ],
+  }),
+  trait("absorb", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { damaged: true, before: true, damagedBy: ["fire"] },
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "resistTrigger",
+              lasting: { until: "yourNextTurnStart" },
+              hitDamage: { dice: "1d6" },
+            },
+          ],
+        },
+      },
+    ],
+  }),
+  trait("raging-only", [
+    {
+      kind: "modifier",
+      modifier: { kind: "immunity", damage: "thunder" },
+      bloodied: true,
+    },
+    { kind: "sneakFloor", value: 3 },
+    { kind: "armorStrength" },
+  ]),
 ];
 
 async function mineRun(): Promise<RunContext> {
@@ -1120,5 +1259,214 @@ describe("resistances and protections", () => {
     expect(second).toMatchObject({ lethargy: 1, "lethargy:waited": 2 });
     const third = recovered(second, stats, "long", scripted([]).dice);
     expect(third.lethargy).toBeUndefined();
+  });
+});
+
+describe("more reactions and protections", () => {
+  it("strikes back right after Relentless Endurance holds, as Orcish Fury", async () => {
+    const run = await mineRun();
+    const me = { ...hero(["fury", "endurance"]), hp: 5 };
+    const state = row([foeOf(), me]);
+    const { events } = settle(
+      run,
+      state,
+      [
+        frame("applyHit", {
+          actionId: SWORD,
+          critical: false,
+          hadAdvantage: false,
+          total: 30,
+          natural: 15,
+          attacker: "foe",
+          target: PLAYER_ACTOR,
+        }),
+      ],
+      { below: () => 0, roll: (sides) => (sides === 20 ? 15 : 8) },
+    );
+    expect(rolls(events, PLAYER_ACTOR)).toEqual([
+      expect.objectContaining({ against: "foe" }),
+    ]);
+  });
+
+  it("attacks the prey that calls for a save first, and a hit makes it succeed, as Slayer's Counter", async () => {
+    const run = await mineRun();
+    const prey = foeOf([], {
+      activeEffects: [
+        {
+          sourceId: "feature:test:feature/vow:0",
+          casterId: PLAYER_ACTOR,
+          modifier: { kind: "advantage", on: "attacksAgainst" },
+          ends: "spellDuration",
+        },
+      ],
+    });
+    const me = hero(["counter"]);
+    const save = rollSave(
+      me,
+      "wis",
+      30,
+      at(row([me, prey]), scripted([18, 4]).dice, run),
+      false,
+      0,
+      [],
+      false,
+      false,
+      { creatureType: undefined, school: null, breath: false, caster: "foe" },
+    );
+    expect(save.saved).toBe(true);
+    expect(rolls(save.events, PLAYER_ACTOR)).toEqual([
+      expect.objectContaining({ against: "foe", success: true }),
+    ]);
+  });
+
+  it("makes the first creature to hit the bearer on a turn save or miss, as Unbreakable Majesty", async () => {
+    const run = await mineRun();
+    const me = {
+      ...hero([]),
+      hp: 30,
+      activeEffects: [
+        {
+          sourceId: "test",
+          casterId: PLAYER_ACTOR,
+          modifier: { kind: "majesty" as const, ability: "cha" as const },
+          ends: "spellDuration" as const,
+        },
+      ],
+    };
+    const { events } = settle(
+      run,
+      row([foeOf(), me]),
+      [
+        frame("attackRoll", {
+          attacker: "foe",
+          actionId: SWORD,
+          target: PLAYER_ACTOR,
+        }),
+      ],
+      scripted([15, 2]).dice,
+    );
+    expect(
+      payloads(events, "damaged").filter((item) => item.actor === PLAYER_ACTOR),
+    ).toEqual([]);
+  });
+
+  it("strikes back at any attacker that hits, once a turn, as Scornful Rebuke", async () => {
+    const run = await mineRun();
+    const me = { ...hero(["rebuker"]), hp: 40 };
+    const state = board([foeOf(), me], { foe: [0, 0], player: [5, 0] }, "foe");
+    const hit = {
+      actionId: SWORD,
+      critical: false,
+      hadAdvantage: false,
+      total: 30,
+      natural: 15,
+      attacker: "foe",
+      target: PLAYER_ACTOR,
+    };
+    const { events } = settle(
+      run,
+      state,
+      [frame("applyHit", hit), frame("applyHit", hit)],
+      scripted([]).dice,
+    );
+    expect(
+      payloads(events, "damaged").filter((item) => item.actor === "foe"),
+    ).toEqual([expect.objectContaining({ amount: 4, type: "psychic" })]);
+  });
+
+  it("adds to a failed save, keeps the bearer to cantrips and hurts a foe, as Arcane Deflection with Deflecting Shroud", async () => {
+    const run = await mineRun();
+    const me = hero(["shroud"]);
+    const save = rollSave(
+      me,
+      "con",
+      16,
+      at(row([me, foeOf()]), scripted([10]).dice, run),
+    );
+    expect(save.saved).toBe(true);
+    expect(payloads(save.events, "damaged")).toEqual([
+      expect.objectContaining({ actor: "foe", amount: 5 }),
+    ]);
+    expect(
+      payloads(save.events, "effectAdded").map(
+        (item) => (item.effect as { modifier: { kind: string } }).modifier.kind,
+      ),
+    ).toContain("actionLimit");
+  });
+
+  it("lessens damage by five a slot level, and resists a type until its next turn with a hit's extra die, as Song of Defense and Absorb Elements", async () => {
+    const run = await mineRun();
+    const caster = {
+      ...hero(["song"]),
+      hp: 40,
+      source: hero(["song"]).source,
+    };
+    const stats = deriveStats(caster, run);
+    expect(stats.actions.some((item) => item.activation.minSlot === 2)).toBe(
+      true,
+    );
+    const absorber = { ...hero(["absorb"]), hp: 40 };
+    const dealt = dealEvents(
+      absorber,
+      [{ amount: 10, type: "fire" }],
+      false,
+      at(row([absorber]), scripted([]).dice, run),
+    );
+    expect(payloads(dealt.events, "damaged")).toEqual([
+      expect.objectContaining({ amount: 5 }),
+    ]);
+    expect(
+      payloads(dealt.events, "effectAdded").map(
+        (item) => (item.effect as { modifier: { kind: string } }).modifier.kind,
+      ),
+    ).toEqual(["resistance", "hitDamage"]);
+  });
+
+  it("holds a passive only while Bloodied, floors Sneak Attack dice, and lifts armor's Strength", async () => {
+    const run = await mineRun();
+    const whole = deriveStats({ ...hero(["raging-only"]), hp: 30 }, run);
+    expect(whole.passives.some((passive) => passive.kind === "modifier")).toBe(
+      false,
+    );
+    const hurt = deriveStats({ ...hero(["raging-only"]), hp: 1 }, run);
+    expect(hurt.passives.some((passive) => passive.kind === "modifier")).toBe(
+      true,
+    );
+    expect(hurt.passives.some((passive) => passive.kind === "sneakFloor")).toBe(
+      true,
+    );
+  });
+
+  it("burns foes a walk comes beside once a turn, as Destructive Stride", async () => {
+    const run = await mineRun();
+    const walker = {
+      ...hero(["stride"]),
+      activeEffects: [
+        {
+          sourceId: "feature:test:feature/stride:0",
+          casterId: PLAYER_ACTOR,
+          modifier: {
+            kind: "strideDamage" as const,
+            damage: { bonus: { base: 3, add: [] } },
+            types: ["fire" as const],
+          },
+          ends: "spellDuration" as const,
+        },
+      ],
+    };
+    const state = board(
+      [walker, foeOf()],
+      { player: [0, 0], foe: [3, 1] },
+      PLAYER_ACTOR,
+    );
+    const { events } = settle(
+      run,
+      state,
+      [frame("move", { actor: PLAYER_ACTOR, answer: "5,0" })],
+      scripted([]).dice,
+    );
+    expect(
+      payloads(events, "damaged").filter((item) => item.actor === "foe"),
+    ).toEqual([expect.objectContaining({ amount: 3, type: "fire" })]);
   });
 });
