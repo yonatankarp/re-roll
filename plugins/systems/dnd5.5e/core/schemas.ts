@@ -77,7 +77,7 @@ export type Condition = z.infer<typeof ConditionSchema>;
 
 export const AutomationSchema = z.enum(["full", "partial", "text"]);
 
-const WeaponPropertySchema = z.enum([
+export const WeaponPropertySchema = z.enum([
   "ammunition",
   "finesse",
   "heavy",
@@ -89,6 +89,44 @@ const WeaponPropertySchema = z.enum([
   "twoHanded",
   "versatile",
 ]);
+
+export const WeaponMasterySchema = z.enum([
+  "cleave",
+  "graze",
+  "nick",
+  "push",
+  "sap",
+  "slow",
+  "topple",
+  "vex",
+]);
+
+// The rules glossary (#132): terms, conditions, actions and the rest, each text a book prints. Keyed by
+// content folder, with the id kinds coverage files name.
+export const GLOSSARY_KINDS = {
+  "rule-terms": "rule-term",
+  conditions: "condition",
+  actions: "action",
+  senses: "sense",
+  skills: "skill",
+  "creature-types": "creature-type",
+  "areas-of-effect": "area-of-effect",
+  "weapon-properties": "weapon-property",
+  "weapon-masteries": "weapon-mastery",
+  attitudes: "attitude",
+} as const;
+
+export const GlossaryEntrySchema = ContentEntrySchema.extend({
+  name: z.string().min(1),
+  source: z.string().min(1), // the book's title
+  // shortcut: optional, since the imported library has no printed page numbers. Require it once it does (#181).
+  page: z.number().int().positive().optional(),
+  text: z.string(),
+}).strict();
+
+// An engine value as the name in its entity's id: "twoHanded" is weapon-property/two-handed.
+export const glossaryName = (key: string): string =>
+  key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 
 export const DiceSchema = z
   .string()
@@ -2056,16 +2094,7 @@ export const WeaponSchema = ItemBaseSchema.extend({
       },
     ),
   properties: z.array(WeaponPropertySchema).default([]),
-  mastery: z.enum([
-    "cleave",
-    "graze",
-    "nick",
-    "push",
-    "sap",
-    "slow",
-    "topple",
-    "vex",
-  ]),
+  mastery: WeaponMasterySchema,
   // A magic weapon made from a plain one, as a +2 Longsword: the plain weapon, and its own bonuses.
   baseWeapon: ContentIdSchema.optional(),
   bonuses: z.array(MagicBonusSchema).min(1).optional(),

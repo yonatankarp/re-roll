@@ -1,5 +1,5 @@
 // Writes an entity for every library heading that coverage says should be one of the engine's text
-// kinds (world lore #127–#129, rulings #130), into the book's own rules plugin, and each ruling book's
+// kinds (world lore #127–#129, rulings #130) or the D&D rules glossary (#132), into the book's own rules plugin, and each ruling book's
 // index of the sections its rulings rule on. Run it from the main checkout, since storage refuses a symlink.
 //   npm run import:world
 // The systems load first: the glossary reaches the D&D modules, which import each other.
@@ -21,17 +21,17 @@ import {
 } from "../../engine/tools/rulings.ts";
 import { draftWorld } from "../../engine/tools/world.ts";
 import { GLOSSARY_TERMS } from "../../plugins/systems/dnd5.5e/core/glossary.ts";
+import { GLOSSARY_KINDS } from "../../plugins/systems/dnd5.5e/core/schemas.ts";
 
 const ROOTS = ["plugins", "books"];
 // An erratum's top heading names the book it corrects. These name a book the library holds by another title.
 const ALIASES: Readonly<Record<string, string>> = {
   "5e player's handbook": "basic-rules-2014",
 };
-// A ruling that names a rules term rules on the term, not on a spell that shares its name.
-const terms = new Set(
-  GLOSSARY_TERMS.map(({ heading }) =>
-    singular(slug(heading.replace(/\s*\[[^\]]*\]$/, ""))),
-  ),
+
+// The D&D rules glossary's kinds (#132), drafted like lore: id kind -> folder.
+const TEXT_KINDS = Object.fromEntries(
+  Object.entries(GLOSSARY_KINDS).map(([folder, kind]) => [kind, folder]),
 );
 const plain = (title: string) => title.replace(/[’‘]/g, "'").toLowerCase();
 
@@ -39,6 +39,16 @@ const storage = await createNodeStorage(process.cwd());
 const catalog = await scanPlugins(storage, ROOTS);
 const report = await checkCoverage(storage, ROOTS, catalog, systems);
 const index = indexEntities(report.entities);
+// The terms the game explains stay terms in every edition, so a 2014 ruling's "Resistance" isn't the cantrip.
+// Not a weapon's mastery or property, which 2014 books don't have and whose names are spells' too (Slow).
+const terms = new Set(
+  GLOSSARY_TERMS.filter((term) => !term.entity.startsWith("weapon-")).flatMap(
+    (term) =>
+      report.entities
+        .filter((entity) => entity.id.endsWith(`:${term.entity}`))
+        .map((entity) => singular(slug(entity.name))),
+  ),
+);
 const editions = new Map(report.entities.map((e) => [e.plugin, e.edition]));
 
 const titles = new Map<string, string>(); // book -> its title
@@ -79,6 +89,7 @@ for (const { book, edition, verdicts } of report.books) {
     titles.get(book) ?? book,
     verdicts,
     new Set(record?.files),
+    TEXT_KINDS,
   );
   for (const id of homeless) console.warn(`${id}: a keyed area with no place`);
   if (record?.manifest.kind !== "rules") {

@@ -1,17 +1,24 @@
-import { ConditionSchema, DAMAGE_TYPES } from "./schemas.ts";
+import {
+  ConditionSchema,
+  DAMAGE_TYPES,
+  WeaponMasterySchema,
+  WeaponPropertySchema,
+  glossaryName,
+} from "./schemas.ts";
 import { TACTICS } from "./state.ts";
 import { TACTIC_WORDS } from "./tactics.ts";
 
-// The rules terms the game can explain from a book's Rules Glossary: each term's id, the glossary
-// heading that explains it (a name, matched by code), and the words the game's own text uses for it.
+// The rules terms the game can explain from a book's rules glossary entities (#132): each term's id,
+// the entity that explains it (its id without the book, as "condition/prone"), and the words the
+// game's own text uses for it.
 
 export interface GlossaryTerm {
   readonly id: string;
-  readonly heading: string;
+  readonly entity: string;
   readonly words: readonly string[];
 }
 
-// Books whose Rules Glossary may explain a term, best first. 2014 books are left out, as their rules differ.
+// Books whose glossary entities may explain a term, best first. 2014 books are left out, as their rules differ.
 export const GLOSSARY_BOOKS = ["phb", "dmg", "basic-rules", "srd52"] as const;
 
 const capital = (word: string): string =>
@@ -23,33 +30,33 @@ const both = (...words: string[]): string[] =>
 // Actions anyone can take, by the option kind that offers each (TACTIC_DETAILS in the ui).
 // Common words such as "help" or "ready" match capitalized only, so a sentence's own word isn't linked.
 const ACTIONS: readonly GlossaryTerm[] = [
-  { id: "action:dash", heading: "Dash [Action]", words: ["Dash"] },
+  { id: "action:dash", entity: "action/dash", words: ["Dash"] },
   {
     id: "action:disengage",
-    heading: "Disengage [Action]",
+    entity: "action/disengage",
     words: ["Disengage"],
   },
-  { id: "action:dodge", heading: "Dodge [Action]", words: ["Dodge"] },
-  { id: "action:help", heading: "Help [Action]", words: ["Help"] },
-  { id: "action:hide", heading: "Hide [Action]", words: ["Hide"] },
-  { id: "action:ready", heading: "Ready [Action]", words: ["Ready"] },
-  { id: "action:search", heading: "Search [Action]", words: ["Search"] },
-  { id: "action:study", heading: "Study [Action]", words: ["Study"] },
+  { id: "action:dodge", entity: "action/dodge", words: ["Dodge"] },
+  { id: "action:help", entity: "action/help", words: ["Help"] },
+  { id: "action:hide", entity: "action/hide", words: ["Hide"] },
+  { id: "action:ready", entity: "action/ready", words: ["Ready"] },
+  { id: "action:search", entity: "action/search", words: ["Search"] },
+  { id: "action:study", entity: "action/study", words: ["Study"] },
   {
     id: "action:influence",
-    heading: "Influence [Action]",
+    entity: "action/influence",
     words: ["Influence"],
   },
-  { id: "action:utilize", heading: "Utilize [Action]", words: ["Utilize"] },
-  { id: "action:grapple", heading: "Grappling", words: ["Grapple"] },
+  { id: "action:utilize", entity: "action/utilize", words: ["Utilize"] },
+  { id: "action:grapple", entity: "rule-term/grappling", words: ["Grapple"] },
   {
     id: "action:shove",
-    heading: "Unarmed Strike",
+    entity: "rule-term/unarmed-strike",
     words: ["Shove", "Unarmed Strike"],
   },
 ];
 
-// How a tactic reads on a creature ("dodging"), and the action it comes from.
+// How a tactic reads on a creature ("dodging"), and the action or mastery it comes from.
 const TACTIC_ACTIONS: Readonly<
   Record<(typeof TACTICS)[number], string | null>
 > = {
@@ -58,21 +65,71 @@ const TACTIC_ACTIONS: Readonly<
   dash: "action:dash",
   hidden: "action:hide",
   ready: "action:ready",
-  slowed: null, // a weapon's Slow mastery, which the Rules Glossary doesn't cover
+  slowed: "mastery:slow",
   metamagic: null, // a Sorcerer feature, not in the Rules Glossary
   exiting: null, // a swallower's stat block, not the Rules Glossary
 };
 
+// A weapon's masteries and properties, as the log and the shop name them. Push, Slow, Heavy, Light and
+// Range are common words, so only Slow's "slowed" stands for one.
+const MASTERY_WORDS: Readonly<Record<string, readonly string[]>> = {
+  cleave: ["Cleave"],
+  graze: ["Graze"],
+  nick: ["Nick"],
+  sap: ["Sap"],
+  slow: [],
+  topple: ["Topple"],
+  vex: ["Vex"],
+};
+const PROPERTY_WORDS: Readonly<Record<string, readonly string[]>> = {
+  ammunition: ["Ammunition"],
+  finesse: ["Finesse"],
+  loading: ["Loading"],
+  thrown: ["Thrown"],
+  twoHanded: ["Two Handed", "Two-Handed"],
+  versatile: ["Versatile"],
+};
+const WEAPON: readonly GlossaryTerm[] = [
+  ...WeaponMasterySchema.options.flatMap((mastery) => {
+    const words = MASTERY_WORDS[mastery];
+    return words
+      ? [
+          {
+            id: `mastery:${mastery}`,
+            entity: `weapon-mastery/${mastery}`,
+            words,
+          },
+        ]
+      : [];
+  }),
+  ...WeaponPropertySchema.options.flatMap((property) => {
+    const words = PROPERTY_WORDS[property];
+    return words
+      ? [
+          {
+            id: `property:${glossaryName(property)}`,
+            entity: `weapon-property/${glossaryName(property)}`,
+            words,
+          },
+        ]
+      : [];
+  }),
+];
+
 const RULES: readonly GlossaryTerm[] = [
-  { id: "rule:advantage", heading: "Advantage", words: both("advantage") },
+  {
+    id: "rule:advantage",
+    entity: "rule-term/advantage",
+    words: both("advantage"),
+  },
   {
     id: "rule:disadvantage",
-    heading: "Disadvantage",
+    entity: "rule-term/disadvantage",
     words: both("disadvantage"),
   },
   {
     id: "rule:opportunity-attack",
-    heading: "Opportunity Attacks",
+    entity: "rule-term/opportunity-attacks",
     words: both("opportunity attacks", "opportunity attack").concat(
       "Opportunity Attacks",
       "Opportunity Attack",
@@ -80,7 +137,7 @@ const RULES: readonly GlossaryTerm[] = [
   },
   {
     id: "rule:saving-throw",
-    heading: "Saving Throw",
+    entity: "rule-term/saving-throw",
     words: both("saving throws", "saving throw", "save", "saves").concat(
       "Saving Throws",
       "Saving Throw",
@@ -88,40 +145,44 @@ const RULES: readonly GlossaryTerm[] = [
   },
   {
     id: "rule:death-saving-throw",
-    heading: "Death Saving Throw",
+    entity: "rule-term/death-saving-throw",
     words: both("death saving throw", "death save", "dying").concat(
       "Death Saving Throw",
     ),
   },
   {
     id: "rule:bonus-action",
-    heading: "Bonus Action",
+    entity: "rule-term/bonus-action",
     words: both("bonus action").concat("Bonus Action"),
   },
-  { id: "rule:reaction", heading: "Reaction", words: both("reaction") },
+  {
+    id: "rule:reaction",
+    entity: "rule-term/reaction",
+    words: both("reaction"),
+  },
   {
     id: "rule:concentration",
-    heading: "Concentration",
+    entity: "rule-term/concentration",
     words: both("concentration", "concentrating"),
   },
   {
     id: "rule:cover",
-    heading: "Cover",
+    entity: "rule-term/cover",
     words: both("half cover", "three-quarters cover", "total cover"),
   },
   {
     id: "rule:difficult-terrain",
-    heading: "Difficult Terrain",
+    entity: "rule-term/difficult-terrain",
     words: both("difficult terrain").concat("Difficult Terrain"),
   },
   {
     id: "rule:critical-hit",
-    heading: "Critical Hit",
+    entity: "rule-term/critical-hit",
     words: both("critical hit").concat("Critical Hit"),
   },
   {
     id: "rule:temporary-hit-points",
-    heading: "Temporary Hit Points",
+    entity: "rule-term/temporary-hit-points",
     words: both("temporary hit points", "temp HP").concat(
       "Temporary Hit Points",
       "Temp HP",
@@ -129,78 +190,107 @@ const RULES: readonly GlossaryTerm[] = [
   },
   {
     id: "rule:resistance",
-    heading: "Resistance",
+    entity: "rule-term/resistance",
     words: both("resistance", "resists", "resistant"),
   },
   {
     id: "rule:vulnerability",
-    heading: "Vulnerability",
+    entity: "rule-term/vulnerability",
     words: both("vulnerability", "vulnerable"),
   },
   {
     id: "rule:immunity",
-    heading: "Immunity",
+    entity: "rule-term/immunity",
     words: both("immunity", "immune"),
   },
-  { id: "rule:bloodied", heading: "Bloodied", words: both("bloodied") },
-  { id: "rule:stable", heading: "Stable", words: both("stable", "stabilized") },
-  { id: "rule:dead", heading: "Dead", words: both("dead") },
-  { id: "rule:initiative", heading: "Initiative", words: both("initiative") },
+  {
+    id: "rule:bloodied",
+    entity: "rule-term/bloodied",
+    words: both("bloodied"),
+  },
+  {
+    id: "rule:stable",
+    entity: "rule-term/stable",
+    words: both("stable", "stabilized"),
+  },
+  { id: "rule:dead", entity: "rule-term/dead", words: both("dead") },
+  {
+    id: "rule:initiative",
+    entity: "rule-term/initiative",
+    words: both("initiative"),
+  },
   {
     id: "rule:exhaustion",
-    heading: "Exhaustion [Condition]",
+    entity: "condition/exhaustion",
     words: both("exhaustion", "exhausted"),
   },
-  { id: "rule:armor-class", heading: "Armor Class", words: ["Armor Class"] },
+  {
+    id: "rule:armor-class",
+    entity: "rule-term/armor-class",
+    words: ["Armor Class"],
+  },
   {
     id: "rule:hit-points",
-    heading: "Hit Points",
+    entity: "rule-term/hit-points",
     words: ["Hit Points", "hit points"],
   },
-  { id: "rule:surprise", heading: "Surprise", words: both("surprised") },
-  { id: "rule:darkvision", heading: "Darkvision", words: both("darkvision") },
-  { id: "rule:speed", heading: "Speed", words: ["Speed"] },
-  { id: "rule:reach", heading: "Reach", words: both("reach") },
+  {
+    id: "rule:surprise",
+    entity: "rule-term/surprise",
+    words: both("surprised"),
+  },
+  {
+    id: "rule:darkvision",
+    entity: "sense/darkvision",
+    words: both("darkvision"),
+  },
+  { id: "rule:speed", entity: "rule-term/speed", words: ["Speed"] },
+  { id: "rule:reach", entity: "rule-term/reach", words: both("reach") },
   {
     id: "rule:heroic-inspiration",
-    heading: "Heroic Inspiration",
+    entity: "rule-term/heroic-inspiration",
     words: both("heroic inspiration").concat("Heroic Inspiration"),
   },
   {
     id: "rule:short-rest",
-    heading: "Short Rest",
+    entity: "rule-term/short-rest",
     words: both("short rest").concat("Short Rest"),
   },
   {
     id: "rule:long-rest",
-    heading: "Long Rest",
+    entity: "rule-term/long-rest",
     words: both("long rest").concat("Long Rest"),
   },
   {
     id: "rule:hit-point-dice",
-    heading: "Hit Point Dice",
+    entity: "rule-term/hit-point-dice",
     words: ["Hit Dice", "Hit Point Dice", "hit dice"],
   },
-  { id: "rule:proficiency", heading: "Proficiency", words: ["Proficiency"] },
+  {
+    id: "rule:proficiency",
+    entity: "rule-term/proficiency",
+    words: ["Proficiency"],
+  },
 ];
 
 export const GLOSSARY_TERMS: readonly GlossaryTerm[] = [
   ...ConditionSchema.options.map((condition) => ({
     id: `condition:${condition}`,
-    heading: `${capital(condition)} [Condition]`,
+    entity: `condition/${condition}`,
     words: both(condition),
   })),
   // Lower-case only, as in "7 fire damage", so names such as Fire Bolt aren't linked.
   ...DAMAGE_TYPES.map((type) => ({
     id: `damage:${type}`,
-    heading: "Damage Types",
+    entity: "rule-term/damage-types",
     words: [type],
   })),
-  ...ACTIONS.map((action) => {
-    const tactic = TACTICS.find((item) => TACTIC_ACTIONS[item] === action.id);
+  // A tactic's word on a creature ("dodging") stands for the action or mastery it comes from.
+  ...[...ACTIONS, ...WEAPON].map((term) => {
+    const tactic = TACTICS.find((item) => TACTIC_ACTIONS[item] === term.id);
     return tactic
-      ? { ...action, words: [...action.words, ...both(TACTIC_WORDS[tactic])] }
-      : action;
+      ? { ...term, words: [...term.words, ...both(TACTIC_WORDS[tactic])] }
+      : term;
   }),
   ...RULES,
 ];

@@ -44,6 +44,7 @@ const ENTITIES = [
   entity("mm:monster/glimmerwing", "Glimmerwing"),
   entity("old:spell/rage", "Rage", "old"),
   entity("hb:deity/glimmer", "Glimmer"),
+  { ...entity("hb:condition/dizzy", "Dizzy"), lore: true },
 ];
 const index = indexEntities(ENTITIES);
 const scope = (book: string, kinds: string[] | null = null) => ({
@@ -101,6 +102,13 @@ describe("the coverage matcher", () => {
     expect(match("hb", "Glimmer")).toBe("hb:deity/glimmer");
     expect(match("other", "Glimmer")).toBeUndefined();
     expect(match("other", "Glimmer", ["deity"])).toBe("hb:deity/glimmer");
+  });
+
+  it("links a system's lore, such as a glossary term, only where a rule asks for its kind", () => {
+    expect(match("hb", "Dizzy")).toBeUndefined();
+    expect(match("hb", "Dizzy [Condition]", ["condition"])).toBe(
+      "hb:condition/dizzy",
+    );
   });
 
   it("links an adventure's heading only to its own book or its adventure kinds", () => {
@@ -259,6 +267,8 @@ describe("the coverage report", () => {
       "- id: hb:spell/gloom\n  name: Gloom\n  library: [hb/0002-gloom, hb/0009-gone]\n",
     "books/rules/hb/rulings/gloom-at-noon.yaml":
       "- id: hb:ruling/gloom-at-noon\n  name: Gloom at noon?\n  about: [hb:spell/gloom, hb:spell/none]\n",
+    "books/rules/hb/conditions/dizzy.yaml":
+      "- id: hb:condition/dizzy\n  name: Dizzy\n",
     "books/library/hb/0001-intro.md": "# Chapter 1: Intro\n",
     "books/library/hb/0002-gloom.md": "## Shadows\n### Bane\n",
     "books/coverage/hb.yaml":
@@ -273,7 +283,18 @@ describe("the coverage report", () => {
           .map((path) => ({ path, symlink: false })),
       ),
   };
-  const system = { id: "sys", edition: () => "new" } as unknown as GameSystem;
+  // A glossary kind whose entities the system's own values name.
+  const system = {
+    id: "sys",
+    edition: () => "new",
+    contentKinds: {
+      conditions: {
+        idPrefix: "condition",
+        lore: true,
+        keys: ["dizzy", "gone"],
+      },
+    },
+  } as unknown as GameSystem;
 
   it("counts each book's headings, and the missing ones by kind", async () => {
     const roots = ["books"];
@@ -289,11 +310,15 @@ describe("the coverage report", () => {
       "Missing by kind: deity 1",
     ]);
     expect(report.issues.map((issue) => issue.message)).toEqual([
+      'condition "gone", which the system plays, has no entity in any book',
       "links hb/0002-gloom#nothing, which no heading has",
       "links hb/0002-gloom#nothing to hb:spell/none, which no entity has",
       "hb:spell/gloom names library heading hb/0009-gone, which no book has",
       "hb:ruling/gloom-at-noon rules on hb:spell/none, which no entity has",
     ]);
+    expect(
+      report.entities.find((item) => item.id === "hb:condition/dizzy")?.lore,
+    ).toBe(true);
   });
 
   it("reports no books when there is no library", async () => {

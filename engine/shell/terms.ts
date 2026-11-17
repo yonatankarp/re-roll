@@ -138,9 +138,14 @@ export function wireTerms(ctx: ShellContext): void {
     const box = target.getBoundingClientRect();
     clearTimeout(hideTimer);
     const mine = ++shown;
-    const key = `${entry.book}/${entry.file}`;
+    // The book's entity for the term, or its section where an older index names none.
+    const { book, file, entity } = entry;
+    const key = `${book}/${entity ?? file}`;
     const read =
-      sections.get(key) ?? ctx.game.readSection(entry.book, entry.file);
+      sections.get(key) ??
+      (entity
+        ? ctx.game.readTerm(book, entity)
+        : ctx.game.readSection(book, file));
     sections.set(key, read);
     const text = await read.catch(() => "");
     const now = redrawn(target, box);

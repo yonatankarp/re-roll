@@ -1,50 +1,49 @@
-// The glossary index: which book section explains each of a system's rules terms. Built by code from the
-// library's headings, and holding only ids and file names, never a book's words.
+// The glossary index: which book's entity explains each of a system's rules terms (#132), and the book
+// section it describes. Built by code from the entities, and holding only ids and file names, never a book's words.
 
-export interface BookIndex {
-  readonly plugin: string;
-  readonly entries: readonly {
-    readonly path: readonly string[];
-    readonly file: string;
-  }[];
+export interface GlossaryEntity {
+  readonly id: string; // plugin:kind/name
+  readonly file: string; // inside its plugin, as "conditions/prone.yaml"
+  readonly library: readonly string[]; // the headings it describes, as "phb/0123-prone#prone"
 }
 
 export interface Glossary {
   readonly system: string;
   readonly terms: Readonly<
-    Record<string, { readonly book: string; readonly file: string }>
+    Record<
+      string,
+      {
+        readonly book: string;
+        readonly file: string; // the library section
+        readonly entity: string; // the entity's file in the book's rules plugin
+      }
+    >
   >;
   readonly missing: readonly string[]; // term ids no book explains
 }
 
-const SECTION = "rules glossary";
-
-const plain = (heading: string): string =>
-  heading.replace(/[’‘]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
-
-// Books come best first, so the first that has a heading wins.
+// Books come best first, so the first that has the term's entity wins.
 export function buildGlossary(
   system: string,
-  terms: readonly { readonly id: string; readonly heading: string }[],
-  books: readonly BookIndex[],
+  terms: readonly { readonly id: string; readonly entity: string }[],
+  books: readonly string[],
+  entities: readonly GlossaryEntity[],
 ): Glossary {
-  const found: Record<string, { book: string; file: string }> = {};
+  const byId = new Map(entities.map((entity) => [entity.id, entity]));
+  const out: Record<string, Glossary["terms"][string]> = {};
   const missing: string[] = [];
   for (const term of terms) {
-    const wanted = plain(term.heading);
     const hit = books
-      .flatMap((book) =>
-        book.entries
-          .filter(
-            ({ path }) =>
-              plain(path[0] ?? "") === SECTION &&
-              plain(path[path.length - 1] ?? "") === wanted,
-          )
-          .map(({ file }) => ({ book: book.plugin, file })),
-      )
-      .at(0);
-    if (hit) found[term.id] = hit;
-    else missing.push(term.id);
+      .map((book) => ({ book, entity: byId.get(`${book}:${term.entity}`) }))
+      .find(({ entity }) => entity?.library[0] !== undefined);
+    const section = /^[^/]+\/([^#]+)/.exec(hit?.entity?.library[0] ?? "")?.[1];
+    if (hit?.entity && section) {
+      out[term.id] = {
+        book: hit.book,
+        file: `${section}.md`,
+        entity: hit.entity.file,
+      };
+    } else missing.push(term.id);
   }
-  return { system, terms: found, missing };
+  return { system, terms: out, missing };
 }

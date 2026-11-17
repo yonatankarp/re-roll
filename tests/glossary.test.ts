@@ -16,42 +16,51 @@ import {
 import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 
 // Every heading, file and sentence here is invented.
-const GLOSSARY = ["Rules Glossary", "Rules Definitions"];
-const book = (plugin: string, entries: [string[], string][]) => ({
-  plugin,
-  entries: entries.map(([path, file]) => ({ path, file })),
-});
-
 describe("the glossary index", () => {
   const terms = [
-    { id: "condition:wobbly", heading: "Wobbly [Condition]" },
-    { id: "rule:luck", heading: "Luck’s Edge" },
-    { id: "rule:nowhere", heading: "Nowhere" },
+    { id: "condition:wobbly", entity: "condition/wobbly" },
+    { id: "rule:luck", entity: "rule-term/lucks-edge" },
+    { id: "rule:nowhere", entity: "rule-term/nowhere" },
   ];
+  const entity = (id: string, library: string[]) => ({
+    id,
+    file: `${id.slice(id.indexOf(":") + 1, id.indexOf("/"))}s/${id.slice(id.indexOf("/") + 1)}.yaml`,
+    library,
+  });
 
-  it("takes each term from the best book that has it, only from a Rules Glossary", () => {
-    const glossary = buildGlossary("test", terms, [
-      book("first", [
-        [["Chapter 1", "Wobbly [Condition]"], "0001-wobbly.md"], // not the glossary
-        [[...GLOSSARY, "Luck's  edge"], "0100-luck.md"],
-      ]),
-      book("second", [
-        [[...GLOSSARY, "Wobbly [Condition]"], "0200-wobbly.md"],
-        [[...GLOSSARY, "Luck’s Edge"], "0201-luck.md"],
-      ]),
-    ]);
+  it("takes each term's entity from the best book that has it, with the section it describes", () => {
+    const glossary = buildGlossary(
+      "test",
+      terms,
+      ["first", "second"],
+      [
+        entity("first:rule-term/lucks-edge", ["first/0100-luck"]),
+        entity("second:condition/wobbly", ["second/0200-terms#wobbly"]),
+        entity("second:rule-term/lucks-edge", ["second/0201-luck"]),
+        entity("third:rule-term/nowhere", ["third/0300-nowhere"]), // not a glossary book
+        entity("first:condition/sideways", ["first/0001-sideways"]),
+      ],
+    );
     expect(glossary).toEqual({
       system: "test",
       terms: {
-        "condition:wobbly": { book: "second", file: "0200-wobbly.md" },
-        "rule:luck": { book: "first", file: "0100-luck.md" },
+        "condition:wobbly": {
+          book: "second",
+          file: "0200-terms.md",
+          entity: "conditions/wobbly.yaml",
+        },
+        "rule:luck": {
+          book: "first",
+          file: "0100-luck.md",
+          entity: "rule-terms/lucks-edge.yaml",
+        },
       },
       missing: ["rule:nowhere"],
     });
   });
 
   it("lists every term as missing with no books", () => {
-    expect(buildGlossary("test", terms, []).missing).toHaveLength(3);
+    expect(buildGlossary("test", terms, [], []).missing).toHaveLength(3);
   });
 
   it("covers every condition and damage type the D&D plugin knows, once each", () => {
@@ -61,6 +70,10 @@ describe("the glossary index", () => {
       expect(ids).toContain(`condition:${condition}`);
     }
     for (const type of DAMAGE_TYPES) expect(ids).toContain(`damage:${type}`);
+    expect(ids).toContain("mastery:slow"); // the slowed tactic's
+    expect(
+      GLOSSARY_TERMS.every((term) => /^[a-z-]+\/[a-z0-9-]+$/.test(term.entity)),
+    ).toBe(true);
     expect(GLOSSARY_TERMS.every((term) => term.words.length > 0)).toBe(true);
   });
 });
@@ -156,7 +169,10 @@ function memorySaves(): SaveStore {
 }
 
 describe("the session's rules terms", () => {
-  const gameWith = async (glossary: string | null) => {
+  const gameWith = async (
+    glossary: string | null,
+    files: Readonly<Record<string, string>> = {},
+  ) => {
     const content = await createNodeStorage(process.cwd());
     return createGame({
       storage: withSaves(
@@ -164,7 +180,9 @@ describe("the session's rules terms", () => {
           read: (path) =>
             path === "books/library/glossary.json"
               ? Promise.resolve(glossary)
-              : content.read(path),
+              : Object.hasOwn(files, path)
+                ? Promise.resolve(files[path] ?? null)
+                : content.read(path),
           list: async (prefix) => [
             ...(await content.list(prefix)),
             ...(glossary !== null && prefix === "books/library"
@@ -185,7 +203,16 @@ describe("the session's rules terms", () => {
       JSON.stringify({
         system: "dnd5.5e",
         terms: {
-          "condition:prone": { book: "made-up", file: "0001-prone.md" },
+          "condition:prone": {
+            book: "made-up",
+            file: "0001-prone.md",
+            entity: "conditions/prone.yaml",
+          },
+          "condition:blinded": {
+            book: "made-up",
+            file: "0004-blinded.md",
+            entity: "../escape.yaml",
+          },
           "rule:advantage": { book: "../escape", file: "0002.md" },
           "rule:unknown": { book: "made-up", file: "0003.md" },
         },
@@ -196,12 +223,33 @@ describe("the session's rules terms", () => {
     await game.start("goblin-ambush", "glossary-test", {});
     expect(await game.terms()).toEqual([
       {
+        id: "condition:blinded",
+        words: ["blinded", "Blinded"],
+        book: "made-up",
+        file: "0004-blinded.md",
+      },
+      {
         id: "condition:prone",
         words: ["prone", "Prone"],
         book: "made-up",
         file: "0001-prone.md",
+        entity: "conditions/prone.yaml",
       },
     ]);
+  });
+
+  it("reads a term's entity as a section: its name, then its text", async () => {
+    const game = await gameWith(null, {
+      "books/rules/made-up/conditions/prone.yaml":
+        "- id: made-up:condition/prone\n  name: Flat\n  source: Made Up\n  text: You lie about.\n",
+    });
+    expect(await game.readTerm("made-up", "conditions/prone.yaml")).toBe(
+      "### Flat\n\nYou lie about.",
+    );
+    await expect(
+      game.readTerm("..", "conditions/prone.yaml"),
+    ).rejects.toThrow();
+    await expect(game.readTerm("made-up", "../x.yaml")).rejects.toThrow();
   });
 
   it("gives none without the owner's index, or with another system's", async () => {

@@ -111,6 +111,8 @@ import {
   type ChoiceDef,
   FeatSchema,
   FeatureSchema,
+  GLOSSARY_KINDS,
+  GlossaryEntrySchema,
   HazardSchema,
   ItemSchema,
   MonsterSchema,
@@ -120,6 +122,10 @@ import {
   PregenSchema,
   RollTableSchema,
   SKILL_ABILITIES,
+  ConditionSchema,
+  WeaponMasterySchema,
+  WeaponPropertySchema,
+  glossaryName,
   SpeciesSchema,
   SpellSchema,
   SubclassSchema,
@@ -174,6 +180,30 @@ function tacticEnds(
         events: [...actingEnds(actor, null), ...(result.events ?? [])],
       }
     : result;
+}
+
+// The conditions, weapon properties and masteries the engine plays name their glossary entities.
+const PLAYED: Partial<Record<string, readonly string[]>> = {
+  condition: [...ConditionSchema.options, "exhaustion"],
+  "weapon-property": WeaponPropertySchema.options.map(glossaryName),
+  "weapon-mastery": WeaponMasterySchema.options,
+};
+
+function glossaryKinds() {
+  return Object.fromEntries(
+    Object.entries(GLOSSARY_KINDS).map(([folder, idPrefix]) => {
+      const keys = PLAYED[idPrefix];
+      return [
+        folder,
+        contentKind({
+          idPrefix,
+          schema: GlossaryEntrySchema,
+          lore: true,
+          ...(keys ? { keys } : {}),
+        }),
+      ];
+    }),
+  );
 }
 
 function buildReferences(pregen: z.infer<typeof PregenSchema>): string[] {
@@ -346,6 +376,7 @@ export const dnd55e = defineSystem<DndState>({
       schema: PregenSchema,
       references: buildReferences,
     }),
+    ...glossaryKinds(),
   },
   checkSchema: CheckSchema,
   encounters: encounterKind({

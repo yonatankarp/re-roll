@@ -88,3 +88,29 @@ describe("drafting world entities", () => {
     ]);
   });
 });
+
+describe("drafting a system's text kinds", () => {
+  it("leaves a glossary heading's label out of the id and name", () => {
+    const { drafts } = draftWorld(
+      "bk",
+      "A Book",
+      [
+        verdict(3, "Dizzy [Condition]", "missing", "condition"),
+        verdict(3, "Two-Step", "missing", "weapon-property"),
+        verdict(3, "Unlisted [Thing]", "missing", "unlisted"),
+      ],
+      new Set(),
+      { condition: "conditions", "weapon-property": "weapon-properties" },
+    );
+    expect(
+      drafts.map(({ file, entry }) => [file, entry.id, entry.name]),
+    ).toEqual([
+      ["conditions/dizzy.yaml", "bk:condition/dizzy", "Dizzy"],
+      [
+        "weapon-properties/two-step.yaml",
+        "bk:weapon-property/two-step",
+        "Two-Step",
+      ],
+    ]);
+  });
+});

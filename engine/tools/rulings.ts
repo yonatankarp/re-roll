@@ -61,6 +61,23 @@ const SPELL_CUES = new Set([
   "does",
 ]);
 const MAX_WORDS = 6;
+
+// The rules terms an edition's books have glossary entities for (#132), by slug, as "hit-point".
+const glossaries = new WeakMap<EntityIndex, Map<string, Set<string>>>();
+function glossaryNames(index: EntityIndex, edition: string): Set<string> {
+  const byEdition = glossaries.get(index) ?? new Map<string, Set<string>>();
+  glossaries.set(index, byEdition);
+  let names = byEdition.get(edition);
+  if (!names) {
+    names = new Set(
+      [...index.byId.values()]
+        .filter((entity) => entity.lore && entity.edition === edition)
+        .map((entity) => singular(slug(entity.name))),
+    );
+    byEdition.set(edition, names);
+  }
+  return names;
+}
 const capital = (word: string) => /^[\p{Lu}\d+]/u.test(word);
 
 // The entities a ruling's question names, as a reader would spot them: a run of capitalized words
@@ -70,8 +87,9 @@ export function mentions(
   index: EntityIndex,
   text: string,
   edition: string,
-  terms: ReadonlySet<string> = new Set(), // rules terms' names, by slug ("quiet")
+  terms: ReadonlySet<string> = new Set(), // more rules terms' names, by slug ("quiet")
 ): string[] {
+  const glossary = glossaryNames(index, edition);
   const found = new Set<string>();
   let first = true; // a sentence's first word is capitalized anyway
   for (const clause of text.split(/[.,;:?!“”"()—–/]/)) {
@@ -125,12 +143,16 @@ export function mentions(
             (!kinds || kinds.includes(entity.kind)) &&
             keys.includes(bare(entity)),
         );
-        // A rules term's name is the term, not the spell that shares it, unless the next word says so.
-        if (hits.length === 0 || (!hinted && keys.some((k) => terms.has(k))))
-          continue;
+        // A rules term's name is the term's entity (#132), not the spell that shares it, unless the next
+        // word says so. With no entity for the term in this edition, it names nothing.
+        const term =
+          !hinted && keys.some((k) => terms.has(k) || glossary.has(k));
+        const subjects = term ? hits.filter((hit) => hit.lore) : hits;
+        if (subjects.length === 0) continue;
         // "Scroll" names the scroll, not each "Scroll (Hush)", where the scroll itself exists.
-        const whole = hits.filter((hit) => keys.includes(slug(hit.name)));
-        for (const hit of whole.length > 0 ? whole : hits) found.add(hit.id);
+        const whole = subjects.filter((hit) => keys.includes(slug(hit.name)));
+        for (const hit of whole.length > 0 ? whole : subjects)
+          found.add(hit.id);
         taken = size;
         break;
       }
@@ -169,13 +191,29 @@ export function subjectsOf(
   const top = above.at(-1);
   const book = top?.heading.level === 1 ? bookOf(top.heading.text) : undefined;
   if (book !== undefined) {
-    const name = slug(verdict.heading.text.replace(/\s*\([^)]*\)$/, ""));
-    // Missing books, and rules terms ("Quiet (p. 9)"), have no entity to link yet.
-    if (book === null || terms.has(singular(name))) return [];
+    // Without its page and a glossary label: "Hide [Action] (p. 9)" is the term Hide.
+    const name = slug(
+      verdict.heading.text
+        .replace(/\s*\([^)]*\)$/, "")
+        .replace(/\s*\[[^\]]*\]$/, ""),
+    );
+    if (book === null) return []; // a book the library doesn't have
+    // A rules term ("Quiet (p. 9)") names its glossary entity, not a spell that shares its name.
+    const term = singular(name);
+    const kinds =
+      terms.has(term) || glossaryNames(index, book.edition).has(term)
+        ? [
+            ...new Set(
+              [...index.byId.values()]
+                .filter((entity) => entity.lore)
+                .map((entity) => entity.kind),
+            ),
+          ]
+        : null;
     const hit = matchHeading(index, verdict.heading.text, {
       book: book.plugin,
       edition: book.edition,
-      kinds: null,
+      kinds,
       asked: false, // by its name, not a feature's that ends with it ("Gloom" for "Deep Gloom")
       adventure: null,
     });
