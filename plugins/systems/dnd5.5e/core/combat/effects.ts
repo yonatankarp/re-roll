@@ -1,4 +1,5 @@
 import {
+  chargesOf,
   damageResponses,
   deriveStats,
   evaluateFormula,
@@ -49,6 +50,7 @@ import {
   type DamageType,
   type Duration,
   type Formula,
+  ItemSchema,
   type LeafEffect,
   type Modifier,
   MonsterSchema,
@@ -73,7 +75,15 @@ import {
   traitSaveAdvantage,
 } from "../trait-rules.ts";
 import { dodging, speedOf, walkSpeed } from "../tactics.ts";
-import { AIM, ALL, HIT_DICE, THROW_PREFIX, weaponItemId } from "./ids.ts";
+import {
+  AIM,
+  ALL,
+  HIT_DICE,
+  THROW_PREFIX,
+  castFrom,
+  spellOfSource,
+  weaponItemId,
+} from "./ids.ts";
 import {
   distanceFeet,
   inArea,
@@ -207,7 +217,45 @@ export function payCosts(
       );
     }
   }
-  return events;
+  return [...events, ...lastCharge(actor, action, context)];
+}
+
+// Spending a charged item's last charge rolls a d20, and on a 1 the item is gone, or left as the plain item it
+// becomes, as an Enspelled Staff's Quarterstaff (ChargedSchema).
+// shortcut: a Staff of Power's or the Magi's other rolls, keeping its bonus or regaining charges on a 20, don't play.
+function lastCharge(
+  actor: Actor,
+  action: KnownAction,
+  context: Context,
+): SystemEvent[] {
+  const from = castFrom(action.id);
+  const item = from ? lookup(context, ItemSchema, from.item) : undefined;
+  const fate = item && "lastCharge" in item ? item.lastCharge : undefined;
+  const pool = item ? chargesOf(item).resources[0]?.id : undefined;
+  if (!from || !fate || !pool) return [];
+  const spends = action.activation.cost.some(
+    (cost) =>
+      typeof cost === "object" && "resource" in cost && cost.resource === pool,
+  );
+  const left =
+    (deriveStats(actor, context).resources[pool] ?? 0) -
+    (actor.resourcesSpent[pool] ?? 0) -
+    from.charges;
+  if (!spends || left > 0 || context.dice.roll(20) !== 1) return [];
+  return [
+    dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: from.item }),
+    dndEvent(`${NS}:resourceRestored`, { actor: actor.id, resource: pool }),
+    ...(typeof fate === "object"
+      ? [
+          dndEvent(`${NS}:treasureFound`, {
+            actor: actor.id,
+            gold: 0,
+            items: [fate.becomes],
+            stowed: [],
+          }),
+        ]
+      : []),
+  ];
 }
 
 // `breaker` gives the save Disadvantage, as damage from a Mage Slayer does.
@@ -3247,10 +3295,9 @@ function spellRolls(
   action: KnownAction,
   context: Context,
 ): readonly (KnownAction & { readonly label: string })[] | null {
-  if (!action.id.startsWith("spell:")) return null;
-  const spell = SpellSchema.safeParse(
-    context.content(action.id.replace(/^spell:/, "").replace(/:free$/, "")),
-  ).data;
+  const id = spellOfSource(action.id);
+  if (!id) return null;
+  const spell = SpellSchema.safeParse(context.content(id)).data;
   return (
     spell?.rolled?.map((activation) => ({
       id: action.id,
