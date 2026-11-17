@@ -1626,6 +1626,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ...(lasting ? { concentrates: true as const } : {}),
       });
     }
+    // What it does only outside a fight, as Freezing Sphere's frozen water, cast from the sheet (camp.ts).
+    if (spell.scene) {
+      actions.push({
+        id: `spell:${spellId}:scene`,
+        name: spell.name,
+        activation: { ...spell.scene, outOfCombat: "scene" },
+        spellLevel: spell.level,
+        upcast: spell.upcast,
+      });
+    }
     // What the spell lets its caster do while it holds, as Flame Blade's attack, is no cast of its own.
     // shortcut: it's at the spell's own level, not the slot's it was cast with.
     if (
@@ -1681,15 +1691,20 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       passives: traits,
     }),
     speed: encumberedSpeed(species.speed - 10 * (load ?? 0), carried, capacity),
-    savingThrows: [
-      ...new Set([
-        ...firstClass.savingThrows,
-        ...raisedSaves,
-        ...traits.flatMap((passive) =>
-          passive.kind === "saveProficiency" ? passive.abilities : [],
-        ),
-      ]),
-    ],
+    savingThrows: withFallbackSaves(
+      [
+        ...new Set([
+          ...firstClass.savingThrows,
+          ...raisedSaves,
+          ...traits.flatMap((passive) =>
+            passive.kind === "saveProficiency" ? passive.abilities : [],
+          ),
+        ]),
+      ],
+      [...firstClass.savingThrows, ...raisedSaves],
+      traits,
+      abilities,
+    ),
     skills: traits.some((passive) => passive.kind === "allSkills")
       ? ALL_SKILLS
       : [...skills],
@@ -2768,6 +2783,31 @@ export function saveBonus(stats: Stats, ability: Ability): number {
     2 * stats.exhaustion -
     stats.ordeal
   );
+}
+
+// Elegant Courtier: a save proficiency the character already had from elsewhere gives one of `orElse` instead, the
+// highest score's it isn't proficient in.
+// shortcut: the book has the player choose; the higher score is the one worth having.
+function withFallbackSaves(
+  saves: Ability[],
+  otherwise: readonly Ability[],
+  passives: readonly Passive[],
+  abilities: AbilityScores,
+): Ability[] {
+  const out = [...saves];
+  for (const passive of passives) {
+    if (
+      passive.kind !== "saveProficiency" ||
+      !passive.orElse ||
+      !passive.abilities.every((ability) => otherwise.includes(ability))
+    )
+      continue;
+    const pick = [...passive.orElse]
+      .filter((ability) => !out.includes(ability))
+      .sort((a, b) => abilities[b] - abilities[a])[0];
+    if (pick) out.push(pick);
+  }
+  return out;
 }
 
 export function checkBonus(

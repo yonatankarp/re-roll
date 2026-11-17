@@ -42,12 +42,14 @@ export function aidFor(
     ...stats.passives.flatMap((passive) =>
       passive.kind === "modifier" &&
       passive.modifier.kind === "sceneAid" &&
+      passive.modifier.chance === undefined &&
       passive.modifier.about.some((item) => about.includes(item))
         ? [{ aid: passive.modifier.aid, sourceId: "", spent: false }]
         : [],
     ),
     ...actor.activeEffects.flatMap(({ modifier, sourceId }) =>
       modifier.kind === "sceneAid" &&
+      modifier.chance === undefined &&
       modifier.about.some((item) => about.includes(item))
         ? [{ aid: modifier.aid, sourceId, spent: modifier.once === true }]
         : [],
@@ -56,6 +58,36 @@ export function aidFor(
   const rank = (aid: SceneAid) =>
     (aid.aid === "success" ? 0 : 2) + (aid.spent ? 1 : 0);
   return [...aids].sort((a, b) => rank(a) - rank(b))[0] ?? null;
+}
+
+// An item carried that may deal with it, by chance, as a Mystery Key with a lock.
+function chanceAid(
+  actor: Actor,
+  about: readonly Obstacle[],
+  access: ContentAccess,
+): {
+  readonly item: string;
+  readonly chance: number;
+  readonly spends: boolean;
+} | null {
+  for (const id of new Set(actor.inventory)) {
+    const item = ItemSchema.safeParse(access.content(id)).data;
+    if (item?.type !== "magicItem") continue;
+    for (const passive of item.passives ?? []) {
+      if (
+        passive.kind === "modifier" &&
+        passive.modifier.kind === "sceneAid" &&
+        passive.modifier.chance !== undefined &&
+        passive.modifier.about.some((obstacle) => about.includes(obstacle))
+      )
+        return {
+          item: id,
+          chance: passive.modifier.chance,
+          spends: passive.modifier.spends === true,
+        };
+    }
+  }
+  return null;
 }
 
 // Whether any of these is about one of the obstacles, for offering an aid only where it would help.
@@ -100,6 +132,18 @@ export function toolProficiencies(
   ]);
 }
 
+export function isArtisan(tool: string, access: ContentAccess): boolean {
+  const item = ItemSchema.safeParse(access.content(tool)).data;
+  return item?.type === "tool" && item.artisan === true;
+}
+
+// Whether it turns into any Artisan's Tools, as a Manifold Tool, which it's proficient with too.
+function anyArtisan(actor: Actor, access: ContentAccess): boolean {
+  return deriveStats(actor, access).passives.some(
+    ({ kind }) => kind === "anyTool",
+  );
+}
+
 // Whether it has the tool at hand: carried, or a Manifold Tool that turns into it.
 export function hasTool(
   actor: Actor,
@@ -108,7 +152,7 @@ export function hasTool(
 ): boolean {
   return (
     actor.inventory.includes(tool) ||
-    deriveStats(actor, access).passives.some(({ kind }) => kind === "anyTool")
+    (isArtisan(tool, access) && anyArtisan(actor, access))
   );
 }
 
@@ -124,7 +168,11 @@ function toolFor(
   about: readonly Obstacle[],
   access: ContentAccess,
 ): ToolUse | null {
-  const proficient = toolProficiencies(actor, access);
+  const known = toolProficiencies(actor, access);
+  const proficient = {
+    has: (id: string) =>
+      known.has(id) || (isArtisan(id, access) && anyArtisan(actor, access)),
+  };
   if ("tool" in check)
     return { id: check.tool, proficient: proficient.has(check.tool) };
   if (about.length === 0) return null;
@@ -170,6 +218,21 @@ export function sceneCheck(
       ],
     };
   }
+  // An item that works by chance is tried first, and gone once it has worked if it spends itself.
+  const lucky = aid ? null : chanceAid(actor, about, context);
+  if (lucky && context.dice.roll(100) <= lucky.chance)
+    return {
+      success: true,
+      events: [
+        dndEvent(`${NS}:obstacleCleared`, {
+          actor: actor.id,
+          source: lucky.item,
+        }),
+        ...(lucky.spends
+          ? [dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: lucky.item })]
+          : []),
+      ],
+    };
   if ("tool" in parsed && parsed.needs && !hasTool(actor, parsed.tool, context))
     return {
       success: false,

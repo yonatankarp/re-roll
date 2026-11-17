@@ -151,12 +151,54 @@ export function hasFlag(
       (!("casterSpells" in modifier) || !modifier.casterSpells) &&
       (!("attackers" in modifier) ||
         !modifier.attackers ||
-        modifier.attackers.includes(attackerType ?? "")),
+        modifier.attackers.includes(attackerType ?? "")) &&
+      // Steady Eye: only while it has moved no more than half its Speed this turn.
+      (!("halfMove" in modifier) ||
+        !modifier.halfMove ||
+        actor.moved * 2 <= stats.speed),
   );
 }
 
 export function hasPassive(stats: Stats, kind: Passive["kind"]): boolean {
   return stats.passives.some((passive) => passive.kind === kind);
+}
+
+// Drunkard's Luck: Disadvantage on a D20 Test is cancelled by spending its resource, while the bearer has enough. The
+// spend, or null where there's nothing to cancel or nothing to spend.
+export function luckyEdge(
+  actor: Actor,
+  stats: Stats,
+  advantage: boolean,
+  disadvantage: boolean,
+): SystemEvent[] | null {
+  if (!disadvantage || advantage) return null;
+  for (const passive of stats.passives) {
+    if (passive.kind !== "cancelDisadvantage") continue;
+    const left =
+      (stats.resources[passive.resource] ?? 0) -
+      (actor.resourcesSpent[passive.resource] ?? 0);
+    if (left >= passive.cost)
+      return [
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: actor.id,
+          resource: passive.resource,
+          ...(passive.cost > 1 ? { amount: passive.cost } : {}),
+        }),
+      ];
+  }
+  return null;
+}
+
+// Whether a check with `tool` is one a bonus for `wanted` adds to: that tool, or any Artisan's Tools.
+function usesTool(
+  wanted: string,
+  tool: string | undefined,
+  access: ContentAccess,
+): boolean {
+  if (tool === undefined) return false;
+  if (wanted !== "artisan") return wanted === tool;
+  const item = ItemSchema.safeParse(access.content(tool)).data;
+  return item?.type === "tool" && item.artisan === true;
 }
 
 // Effects from one source count once, so casting Bless twice can't add two d4s.
@@ -176,7 +218,7 @@ export function rollBonus(
     if (modifier.kind !== "bonus" || modifier.to !== to) continue;
     if (modifier.weapon && !weapon) continue;
     if (modifier.skill && modifier.skill !== skill) continue;
-    if (modifier.tool && modifier.tool !== tool) continue;
+    if (modifier.tool && !usesTool(modifier.tool, tool, context)) continue;
     if (modifier.ability && modifier.ability !== ability) continue;
     if (seen.has(effect.sourceId)) continue;
     seen.add(effect.sourceId);
@@ -195,7 +237,7 @@ export function rollBonus(
       modifier.to === to &&
       (!modifier.weapon || weapon) &&
       (!modifier.skill || modifier.skill === skill) &&
-      (!modifier.tool || modifier.tool === tool) &&
+      (!modifier.tool || usesTool(modifier.tool, tool, context)) &&
       (!modifier.ability || modifier.ability === ability)
     ) {
       total += rollAmount(modifier.amount, stats, context.dice);

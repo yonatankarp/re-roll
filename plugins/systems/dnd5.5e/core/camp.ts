@@ -395,7 +395,7 @@ export function sceneCastActions(
           ...(slot === undefined ? {} : { slot }),
         },
         // An hour's casting only where the scene leaves time to rest.
-        ...(action.activation.outOfCombat ? { rest: true } : {}),
+        ...(action.activation.outOfCombat === true ? { rest: true } : {}),
       }));
     });
   });

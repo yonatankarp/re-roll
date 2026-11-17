@@ -160,6 +160,7 @@ import {
   hasPassive,
   inReach,
   isMelee,
+  luckyEdge,
   meleeReach,
   hitFits,
   onceKey,
@@ -2997,6 +2998,8 @@ export function rollSave(
           ),
       ),
   };
+  const lucky = luckyEdge(target, stats, edge.advantage, edge.disadvantage);
+  if (lucky) edge.disadvantage = false;
   const roll = rollD20(context.dice, {
     ...edge,
     rerollOnes: hasPassive(stats, "rerollOnes"),
@@ -3084,10 +3087,60 @@ export function rollSave(
       ],
     };
   }
-  return { saved, events: [...settled.events, rolled, ...spent] };
+  return {
+    saved,
+    events: [
+      ...(lucky ?? []),
+      ...settled.events,
+      rolled,
+      ...spent,
+      ...naturalOneEvents(target, settled.natural, context),
+    ],
+  };
 }
 
 const SAVE_REROLL = "save-reroll";
+
+// Set while a natural 1's own save is rolled, so that save doesn't set it off again.
+let echoing = false;
+
+// Echoing Soul's Intrusive Echoes: right after a D20 Test of the bearer's rolls a 1, its save, and on a failure what
+// the passive does to it (schemas.ts naturalOne).
+export function naturalOneEvents(
+  actor: Actor,
+  natural: number,
+  context: Context,
+): SystemEvent[] {
+  if (natural !== 1 || echoing) return [];
+  const stats = deriveStats(actor, context);
+  const events: SystemEvent[] = [];
+  for (const passive of stats.passives) {
+    if (passive.kind !== "naturalOne") continue;
+    echoing = true;
+    try {
+      const save = rollSave(
+        actor,
+        passive.save.ability,
+        evaluateFormula(passive.save.dc, stats),
+        context,
+      );
+      events.push(...save.events);
+      if (!save.saved)
+        events.push(
+          ...leafEvents(
+            passive.effects,
+            `trigger:${passive.name}`,
+            actor,
+            actor,
+            context,
+          ),
+        );
+    } finally {
+      echoing = false;
+    }
+  }
+  return events;
+}
 
 // The square an answer aims at ("@x,y" or "@id"), or null for one that aims at no square.
 export function aimSquare(

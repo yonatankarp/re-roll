@@ -31,7 +31,7 @@ import { encodeOption, parseOption } from "./combat/ids.ts";
 import { opportunity, provokers, teleportSquares } from "./combat/movement.ts";
 import { familiarHelpUse } from "./combat/familiar.ts";
 import { mountEvents, mountOptions } from "./combat/mounts.ts";
-import { heldInPlace, leafEvents } from "./combat/effects.ts";
+import { heldInPlace, leafEvents, naturalOneEvents } from "./combat/effects.ts";
 import { heightChoices, heightOf } from "./combat/falling.ts";
 import {
   SIZES,
@@ -41,6 +41,7 @@ import {
   hitFits,
   inReach,
   sizeOf,
+  luckyEdge,
 } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
@@ -319,6 +320,8 @@ export function abilityCheck(
       ) ||
       hasCondition(actor, "poisoned", "frightened"),
   };
+  const lucky = luckyEdge(actor, stats, edge.advantage, edge.disadvantage);
+  if (lucky) edge.disadvantage = false;
   const first = rollD20(context.dice, {
     ...edge,
     rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
@@ -366,6 +369,7 @@ export function abilityCheck(
     success,
     total,
     events: [
+      ...(lucky ?? []),
       ...(befriended ? [befriended] : []),
       ...settled.events,
       ...rescue.events,
@@ -387,6 +391,7 @@ export function abilityCheck(
           ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId })]
           : [],
       ),
+      ...naturalOneEvents(actor, roll.natural, context),
     ],
   };
 }

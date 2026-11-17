@@ -59,11 +59,33 @@ function partyOf(state: DndState): Actor[] {
   );
 }
 
-// The effects around a creature now: a fight's, or between fights the scene's.
+// The effects a party member's magic keeps off the party, as Control Weather's calm.
+export function calmed(state: DndState | undefined): ReadonlySet<string> {
+  return new Set(
+    partyOf(state ?? { actors: {}, combat: null }).flatMap((actor) =>
+      actor.activeEffects.flatMap(({ modifier }) =>
+        modifier.kind === "weather" ? modifier.ends : [],
+      ),
+    ),
+  );
+}
+
+// Those of `ids` the party's magic doesn't keep off.
+export function uncalmed(
+  ids: readonly string[] | undefined,
+  state: DndState,
+): readonly string[] | undefined {
+  if (!ids || ids.length === 0) return ids;
+  const calm = calmed(state);
+  return calm.size > 0 ? ids.filter((id) => !calm.has(id)) : ids;
+}
+
+// The effects around a creature now: a fight's, or between fights the scene's, less what the party's magic calms.
 export function environmentIds(state: DndState | undefined): readonly string[] {
-  return state?.combat
+  const ids = state?.combat
     ? (state.combat.environment?.ids ?? [])
     : (state?.ambient ?? []);
+  return state ? (uncalmed(ids, state) ?? []) : ids;
 }
 
 // The passives the effects around it give a creature not of an excepted type, as Arcadian Vitality's Immunity to
@@ -323,7 +345,7 @@ export function environmentEvents(
   const events: SystemEvent[] = [
     dndEvent(`${NS}:environmentEntered`, { effects: args.effects }),
   ];
-  for (const id of args.effects) {
+  for (const id of uncalmed(args.effects, context.state) ?? []) {
     const effect = effectOf(context, id);
     const periods =
       effect.exposure?.every === "minute" ? args.minutes : args.hours;

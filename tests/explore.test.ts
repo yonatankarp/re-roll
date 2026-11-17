@@ -15,7 +15,9 @@ import {
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import { startingTools } from "../plugins/systems/dnd5.5e/core/tools.ts";
 import { ClassSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
-import { lookup } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { deriveStats, lookup } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { hasFlag } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import { startCombat } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import { hero, scripted, settle, testRun, trait } from "./feat-fixtures.ts";
 
 // Made-up tools, items and features for exploring outside a fight (#153, #185): ids and mechanics only.
@@ -163,6 +165,73 @@ const FIXTURES = [
       about: ["lock"],
     },
   },
+  {
+    id: "test:item/key",
+    name: "Key",
+    type: "magicItem",
+    category: "wondrousItem",
+    rarity: "common",
+    attunement: false,
+    text: "Test.",
+    automation: "full",
+    passives: [
+      {
+        kind: "modifier",
+        modifier: {
+          kind: "sceneAid",
+          about: ["lock"],
+          aid: "success",
+          chance: 5,
+          spends: true,
+        },
+      },
+    ],
+  },
+  {
+    id: "test:item/saw",
+    name: "Saw",
+    type: "tool",
+    ability: "dex",
+    artisan: true,
+    text: "Test.",
+  },
+  trait("manifold", [{ kind: "anyTool" }]),
+  trait("lucky", [{ kind: "cancelDisadvantage", resource: "focus", cost: 2 }], {
+    resources: [{ id: "focus", max: { base: 2 }, recharge: [] }],
+  }),
+  trait("echoing", [
+    {
+      kind: "naturalOne",
+      name: "Echoes",
+      save: { ability: "con", dc: { base: 30 } },
+      effects: [
+        {
+          kind: "applyCondition",
+          condition: "incapacitated",
+          duration: { until: "yourNextTurnEnd" },
+        },
+      ],
+    },
+  ]),
+  trait(
+    "ambusher",
+    [{ kind: "initiativeDie", bonusDice: "1d8", resource: "dice" }],
+    { resources: [{ id: "dice", max: { base: 1 }, recharge: [] }] },
+  ),
+  trait("steady", [
+    {
+      kind: "modifier",
+      modifier: {
+        kind: "advantage",
+        on: "checks",
+        skills: ["perception"],
+        halfMove: true,
+      },
+    },
+  ]),
+  trait("courtier", [
+    { kind: "saveProficiency", abilities: ["con"], orElse: ["int", "cha"] },
+  ]),
   {
     id: "test:environmental-effect/heat",
     name: "Heat",
@@ -501,5 +570,169 @@ describe("what's carried and drunk (#153)", () => {
     expect(kinds(environmentEvents(heat, context([watered])))).not.toContain(
       `${NS}:exhaustionChanged`,
     );
+  });
+});
+
+describe("the rest of the pieces (#153, #185)", () => {
+  it("tries an item that works by chance, which is gone once it has", async () => {
+    const run = await exploreRun();
+    const player = { ...hero([]), inventory: ["test:item/key"] };
+    const lock = { skill: "sleightOfHand", dc: 30, about: ["lock"] };
+    const opened = check(run, between([player]), lock, scripted([4]).dice);
+    expect(opened.outcome).toBe("success");
+    expect(kinds(opened.events)).toEqual([
+      `${NS}:obstacleCleared`,
+      `${NS}:itemUsed`,
+    ]);
+    const tried = check(run, between([player]), lock, scripted([50, 10]).dice);
+    expect(tried.outcome).toBe("failure");
+  });
+
+  it("counts a Manifold Tool as any Artisan's Tools, proficient", async () => {
+    const run = await exploreRun();
+    const saw = { tool: "test:item/saw", dc: 30 };
+    // 10, Dexterity 2, and the tool's proficiency 2.
+    expect(
+      check(run, between([hero(["manifold"])]), saw, scripted([10]).dice).total,
+    ).toBe(14);
+    const needed = { tool: "test:item/saw", dc: 5, needs: true };
+    expect(check(run, between([hero([])]), needed).outcome).toBe("failure");
+  });
+
+  it("cancels Disadvantage on a check by spending its resource, while there's enough", async () => {
+    const run = await exploreRun();
+    const poisoned = (actor: Actor): Actor => ({
+      ...actor,
+      activeEffects: [
+        {
+          sourceId: "x:poison",
+          casterId: "foe",
+          modifier: { kind: "condition", condition: "poisoned" },
+          ends: "spellDuration",
+        },
+      ],
+    });
+    const athletics = { skill: "athletics", dc: 30 };
+    // One die, the 5, with the Disadvantage cancelled; 5 + 3 + 2.
+    const lucky = check(
+      run,
+      between([poisoned(hero(["lucky"]))]),
+      athletics,
+      scripted([5, 15]).dice,
+    );
+    expect(lucky.total).toBe(10);
+    expect(kinds(lucky.events)[0]).toBe(`${NS}:resourceSpent`);
+    const spent = {
+      ...poisoned(hero(["lucky"])),
+      resourcesSpent: { focus: 1 },
+    };
+    expect(
+      check(run, between([spent]), athletics, scripted([15, 5]).dice).total,
+    ).toBe(10);
+  });
+
+  it("makes its save right after a d20 test rolls a 1, and the failure lands on the bearer", async () => {
+    const run = await exploreRun();
+    const rolled = check(
+      run,
+      between([hero(["echoing"])]),
+      { skill: "athletics", dc: 30 },
+      scripted([1, 1]).dice,
+    );
+    expect(kinds(rolled.events)).toEqual(
+      expect.arrayContaining([`${NS}:saveRolled`, `${NS}:effectAdded`]),
+    );
+    const fine = check(
+      run,
+      between([hero(["echoing"])]),
+      { skill: "athletics", dc: 30 },
+      scripted([2]).dice,
+    );
+    expect(kinds(fine.events)).not.toContain(`${NS}:saveRolled`);
+  });
+
+  it("adds a resource's die to Initiative and spends it", async () => {
+    const run = await exploreRun();
+    const state = between([hero(["ambusher"])]);
+    const result = startCombat(
+      {
+        id: "ambush",
+        monsters: [{ monster: "srd52:monster/goblin-warrior", count: 1 }],
+      },
+      {
+        state,
+        dice: scripted([10, 10, 8]).dice,
+        content: run.content,
+        contentIds: run.contentIds,
+      },
+      { canFlee: false, defeatContinues: false },
+    );
+    expect(kinds(result.events ?? [])).toContain(`${NS}:resourceSpent`);
+  });
+
+  it("gives Advantage only while the bearer has moved no more than half its Speed", async () => {
+    const run = await exploreRun();
+    const steady = hero(["steady"]);
+    const stats = deriveStats(steady, run);
+    expect(
+      hasFlag(
+        steady,
+        "advantage",
+        "checks",
+        stats,
+        "wis",
+        undefined,
+        undefined,
+        "perception",
+      ),
+    ).toBe(true);
+    const moved = { ...steady, moved: stats.speed };
+    expect(
+      hasFlag(
+        moved,
+        "advantage",
+        "checks",
+        stats,
+        "wis",
+        undefined,
+        undefined,
+        "perception",
+      ),
+    ).toBe(false);
+  });
+
+  it("gives another save's proficiency when the one it gives is already there", async () => {
+    const run = await exploreRun();
+    // The Fighter already has Constitution; Charisma 10 beats Intelligence 8.
+    expect(deriveStats(hero(["courtier"]), run).savingThrows).toContain("cha");
+  });
+
+  it("keeps a calmed environment's exposure off the party", async () => {
+    const run = await exploreRun();
+    const calm = {
+      ...hero([]),
+      activeEffects: [
+        {
+          sourceId: "x:calm",
+          casterId: PLAYER_ACTOR,
+          modifier: {
+            kind: "weather" as const,
+            ends: ["test:environmental-effect/heat"],
+          },
+          ends: "spellDuration" as const,
+          lingers: 8,
+        },
+      ],
+    };
+    const events = environmentEvents(
+      { effects: ["test:environmental-effect/heat"], hours: 1, minutes: 0 },
+      {
+        state: between([calm]),
+        dice: scripted([1]).dice,
+        content: run.content,
+        contentIds: run.contentIds,
+      },
+    );
+    expect(kinds(events)).not.toContain(`${NS}:saveRolled`);
   });
 });
