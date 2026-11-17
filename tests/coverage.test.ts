@@ -42,6 +42,7 @@ const ENTITIES = [
   entity("mm:monster/yuan-ti-malison", "Yuan-ti Malison"),
   entity("mm:monster/glimmerwing", "Glimmerwing"),
   entity("old:spell/rage", "Rage", "old"),
+  entity("hb:deity/glimmer", "Glimmer"),
 ];
 const index = indexEntities(ENTITIES);
 const scope = (book: string, kinds: string[] | null = null) => ({
@@ -95,6 +96,12 @@ describe("the coverage matcher", () => {
     ).toBe("hb:spell/gloom");
   });
 
+  it("links lore by name in its own book, or where a rule asks for its kind", () => {
+    expect(match("hb", "Glimmer")).toBe("hb:deity/glimmer");
+    expect(match("other", "Glimmer")).toBeUndefined();
+    expect(match("other", "Glimmer", ["deity"])).toBe("hb:deity/glimmer");
+  });
+
   it("links an adventure's heading only to its own book or its adventure kinds", () => {
     const adventure = { ...scope("adv"), adventure: ["monster"] };
     expect(matchHeading(index, "Treasure", adventure)).toBeUndefined();
@@ -109,7 +116,7 @@ const heading = (
   level: number,
   text: string,
   id = `bk/${file}#${text}`,
-): Heading => ({ id, book: "bk", file, level, text });
+): Heading => ({ id, book: "bk", file, level, text, body: "" });
 
 const classify = (
   headings: Heading[],

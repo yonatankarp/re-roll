@@ -36,6 +36,8 @@ export type {
   SystemResult,
   SystemOutcomes,
 } from "../kernel/system.ts";
+export { WORLD_KINDS, WorldEntrySchema } from "../kernel/world.ts";
+export type { WorldEntry } from "../kernel/world.ts";
 export { PLAYER_ACTOR } from "../kernel/events.ts";
 export type {
   Decision,

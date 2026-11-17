@@ -20,6 +20,7 @@ import {
   type GameSystem,
   SDK_VERSION,
 } from "../kernel/system.ts";
+import { WORLD_KINDS, worldClashes } from "../kernel/world.ts";
 
 // An allowlist, because a denylist would miss formats such as .mjs, .wasm or a script-bearing .svg.
 export const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -260,6 +261,14 @@ function resolveSystem(
 
   const [systemId] = used;
   const system = systems.find((candidate) => candidate.id === systemId);
+  for (const clash of system ? worldClashes(system.contentKinds) : []) {
+    const message = `system ${system?.id ?? ""}: ${clash} belongs to a world kind`;
+    issues.push({
+      plugin: order[0]?.manifest.id ?? "run",
+      file: null,
+      message,
+    });
+  }
   for (const { manifest } of order) {
     if (!system) {
       issues.push({
@@ -423,8 +432,10 @@ export async function loadRun(
     read: (path: string) => texts.get(path) ?? storage.read(path),
   };
   const hashed = (file: string): boolean =>
-    // Narration's index changes as clips are made, which doesn't change the story.
-    extensionOf(file) === YAML && !file.startsWith(`${NARRATION_FOLDER}/`);
+    // Narration's index changes as clips are made, and lore is only read, so neither changes the story.
+    extensionOf(file) === YAML &&
+    !file.startsWith(`${NARRATION_FOLDER}/`) &&
+    !Object.hasOwn(WORLD_KINDS, file.split("/")[0] ?? "");
 
   for (const record of order) {
     const plugin = record.manifest.id;
@@ -470,7 +481,9 @@ export async function loadRun(
         continue;
       }
 
-      const kind = system.contentKinds[folder];
+      const kind =
+        system.contentKinds[folder] ??
+        (Object.hasOwn(WORLD_KINDS, folder) ? WORLD_KINDS[folder] : undefined);
       if (!kind) {
         const message = `unknown content folder "${folder}" for system ${system.id}`;
         issues.push({ plugin, file: `${record.root}/${file}`, message });

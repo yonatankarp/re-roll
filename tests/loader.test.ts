@@ -289,6 +289,65 @@ describe("content", () => {
     );
   });
 
+  describe("world kinds", () => {
+    const place = (id: string, extra = ""): string =>
+      `- { id: "${id}", name: Ashvale, source: A Book, text: "", ${extra} }\n`;
+
+    it("loads lore into any system's plugins, without changing their hash", async () => {
+      const bare = await load(rules("a"), ["a"]);
+      const result = await load(
+        {
+          ...rules("a"),
+          "plugins/rules/a/places/x.yaml": place("a:place/ashvale"),
+          "plugins/rules/a/areas/x.yaml": place(
+            "a:area/ashvale-1-gate",
+            'place: "a:place/ashvale"',
+          ),
+        },
+        ["a"],
+      );
+      expect(
+        result.ok && result.registry.content("a:area/ashvale-1-gate"),
+      ).toBeTruthy();
+      expect(result.ok && result.registry.pluginHash("a")).toBe(
+        bare.ok && bare.registry.pluginHash("a"),
+      );
+    });
+
+    it("checks lore's links, and that an area has its place", async () => {
+      const files = {
+        ...rules("a"),
+        "plugins/rules/a/areas/x.yaml": place("a:area/gate"),
+        "plugins/rules/a/deities/x.yaml": place(
+          "a:deity/x",
+          'pantheon: "a:pantheon/nope"',
+        ),
+      };
+      const errors = await errorsOf(files, ["a"]);
+      expect(errors).toContain("0.place");
+      expect(errors).toContain('unknown reference "a:pantheon/nope"');
+    });
+
+    it("refuses a system kind that takes a world kind's folder or prefix", async () => {
+      const storage = memoryStorage(rules("a"));
+      const kind = Object.values(d6System.contentKinds)[0];
+      if (!kind) throw new Error("the d6 fixture has no kinds");
+      const system = {
+        ...d6System,
+        contentKinds: { places: kind, x: { ...kind, idPrefix: "deity" } },
+      };
+      const result = await loadRun(
+        storage,
+        await scanPlugins(storage, ["plugins"]),
+        [system],
+        ["a"],
+      );
+      const errors = result.ok ? [] : result.issues.map((i) => i.message);
+      expect(errors.join("\n")).toContain('content folder "places"');
+      expect(errors.join("\n")).toContain('id prefix "deity"');
+    });
+  });
+
   describe("replacements", () => {
     const base = {
       ...rules("a"),

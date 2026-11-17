@@ -6,6 +6,7 @@ import { z } from "zod";
 import { type Issue, zodIssues } from "../kernel/issues.ts";
 import type { Storage } from "../kernel/storage.ts";
 import type { GameSystem } from "../kernel/system.ts";
+import { WORLD_KINDS } from "../kernel/world.ts";
 import type { Catalog } from "../run/loader.ts";
 
 export interface Heading {
@@ -14,6 +15,7 @@ export interface Heading {
   readonly file: string;
   readonly level: number;
   readonly text: string;
+  readonly body: string; // what the book prints under it, up to the next heading
 }
 
 export interface Entity {
@@ -60,6 +62,7 @@ const ALWAYS_STRUCTURAL = /^(?:chapter|appendix|part)\s+\w+\b|^credits$/i;
 export const KEYED =
   /^(?:Area\s+)?[A-Z]{0,2}\d{1,3}(?:[a-z](?:\s*[–-]\s*[a-z])?)?\s*[.:]\s*\S/;
 const SITE_PART = /(?:Features|Locations)$/;
+const WORLD = new Set(Object.values(WORLD_KINDS).map((kind) => kind.idPrefix));
 
 export const slug = (text: string): string =>
   text
@@ -155,6 +158,8 @@ export function matchHeading(
   const fits = (entity: Entity) =>
     entity.edition === scope.edition &&
     (!scope.kinds || scope.kinds.includes(entity.kind)) &&
+    // Lore's names are common words (a ship's station named for a god, Encounters), so another book's needs a rule asking.
+    (!WORLD.has(entity.kind) || sameBook(entity) || scope.kinds !== null) &&
     (asked ||
       !scope.adventure ||
       sameBook(entity) ||
@@ -202,11 +207,15 @@ export function headingsOf(
   const stem = file.replace(/\.md$/, "");
   const seen = new Set<string>();
   const out: Heading[] = [];
+  const bodies: string[][] = [];
   for (const line of markdown.split("\n")) {
     const found = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
-    if (!found) continue;
-    const text = (found[2] ?? "").replace(/[*_`]/g, "").trim();
-    if (!text) continue;
+    const text = (found?.[2] ?? "").replace(/[*_`]/g, "").trim();
+    if (!found || !text) {
+      bodies.at(-1)?.push(line);
+      continue;
+    }
+    bodies.push([]);
     let id = `${book}/${stem}`;
     if (out.length > 0) {
       const base = `${id}#${slug(text) || "heading"}`;
@@ -214,9 +223,19 @@ export function headingsOf(
       for (let n = 2; seen.has(id); n += 1) id = `${base}-${String(n)}`;
     }
     seen.add(id);
-    out.push({ id, book, file, level: (found[1] ?? "").length, text });
+    out.push({
+      id,
+      book,
+      file,
+      level: (found[1] ?? "").length,
+      text,
+      body: "",
+    });
   }
-  return out;
+  return out.map((heading, at) => ({
+    ...heading,
+    body: (bodies[at] ?? []).join("\n").trim(),
+  }));
 }
 
 export interface BookInput {
