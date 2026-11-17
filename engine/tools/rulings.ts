@@ -62,19 +62,35 @@ const SPELL_CUES = new Set([
 ]);
 const MAX_WORDS = 6;
 
+// What a system's rules glossary tells the finder (#132, #184).
+export interface Glossary {
+  readonly terms?: ReadonlySet<string>; // more rules terms' names, by slug ("quiet")
+  readonly kinds?: ReadonlySet<string>; // the lore kinds that are rules terms, unlike a family; every lore kind when absent
+  readonly lower?: ReadonlySet<string>; // kinds a book names in one lower-case word, as "blinded"
+}
+const isTerm = (entity: Entity, glossary: Glossary) =>
+  entity.lore === true && (glossary.kinds?.has(entity.kind) ?? true);
+
 // The rules terms an edition's books have glossary entities for (#132), by slug, as "hit-point".
 const glossaries = new WeakMap<EntityIndex, Map<string, Set<string>>>();
-function glossaryNames(index: EntityIndex, edition: string): Set<string> {
+function glossaryNames(
+  index: EntityIndex,
+  edition: string,
+  glossary: Glossary,
+): Set<string> {
   const byEdition = glossaries.get(index) ?? new Map<string, Set<string>>();
   glossaries.set(index, byEdition);
-  let names = byEdition.get(edition);
+  const key = `${edition}|${[...(glossary.kinds ?? [])].join()}`;
+  let names = byEdition.get(key);
   if (!names) {
     names = new Set(
       [...index.byId.values()]
-        .filter((entity) => entity.lore && entity.edition === edition)
+        .filter(
+          (entity) => isTerm(entity, glossary) && entity.edition === edition,
+        )
         .map((entity) => singular(slug(entity.name))),
     );
-    byEdition.set(edition, names);
+    byEdition.set(key, names);
   }
   return names;
 }
@@ -82,14 +98,16 @@ const capital = (word: string) => /^[\p{Lu}\d+]/u.test(word);
 
 // The entities a ruling's question names, as a reader would spot them: a run of capitalized words
 // ("Ring of Quiet"), any words before "spell" ("the gloom lance spell"), lower-case words that are a
-// whole name ("ring of quiet"), or one lower-case spell after a word that introduces one ("by hush").
+// whole name ("ring of quiet", "opportunity attacks"), one lower-case spell after a word that introduces
+// one ("by hush"), or one lower-case word of a kind the books print that way ("blinded").
 export function mentions(
   index: EntityIndex,
   text: string,
   edition: string,
-  terms: ReadonlySet<string> = new Set(), // more rules terms' names, by slug ("quiet")
+  glossary: Glossary = {},
 ): string[] {
-  const glossary = glossaryNames(index, edition);
+  const terms = glossary.terms ?? new Set();
+  const termNames = glossaryNames(index, edition, glossary);
   const found = new Set<string>();
   let first = true; // a sentence's first word is capitalized anyway
   for (const clause of text.split(/[.,;:?!“”"()—–/]/)) {
@@ -130,7 +148,13 @@ export function mentions(
           size > 1 &&
           !JOINERS.has(run[0] ?? "") &&
           !JOINERS.has(run.at(-1) ?? "");
-        if (!named && !plain && !kinds?.includes("spell")) continue;
+        const word =
+          !named &&
+          !kinds &&
+          size === 1 &&
+          glossary.lower !== undefined &&
+          /^\p{Ll}/u.test(run[0] ?? "");
+        if (!named && !plain && !word && !kinds?.includes("spell")) continue;
         const key = slug(run.join(" "));
         const keys = plain ? [key] : [key, singular(key)];
         const hits = [
@@ -141,13 +165,21 @@ export function mentions(
             entity.edition === edition &&
             subject(entity) &&
             (!kinds || kinds.includes(entity.kind)) &&
-            keys.includes(bare(entity)),
+            (!word || glossary.lower.has(entity.kind)) &&
+            // Lower-case words are a rules term ("opportunity attacks") but never other lore ("magic items").
+            (!plain || !entity.lore || isTerm(entity, glossary)) &&
+            (plain
+              ? [bare(entity), singular(bare(entity))]
+              : [bare(entity)]
+            ).some((name) => keys.includes(name)),
         );
         // A rules term's name is the term's entity (#132), not the spell that shares it, unless the next
         // word says so. With no entity for the term in this edition, it names nothing.
         const term =
-          !hinted && keys.some((k) => terms.has(k) || glossary.has(k));
-        const subjects = term ? hits.filter((hit) => hit.lore) : hits;
+          !hinted && keys.some((k) => terms.has(k) || termNames.has(k));
+        const subjects = term
+          ? hits.filter((hit) => isTerm(hit, glossary))
+          : hits;
         if (subjects.length === 0) continue;
         // "Scroll" names the scroll, not each "Scroll (Hush)", where the scroll itself exists.
         const whole = subjects.filter((hit) => keys.includes(slug(hit.name)));
@@ -177,7 +209,7 @@ export function subjectsOf(
   edition: string, // the ruling book's
   index: EntityIndex,
   bookOf: (title: string) => BookRef | null | undefined,
-  terms: ReadonlySet<string> = new Set(),
+  glossary: Glossary = {},
 ): string[] {
   const verdict = verdicts[at];
   if (!verdict) return [];
@@ -198,33 +230,46 @@ export function subjectsOf(
         .replace(/\s*\[[^\]]*\]$/, ""),
     );
     if (book === null) return []; // a book the library doesn't have
-    // A rules term ("Quiet (p. 9)") names its glossary entity, not a spell that shares its name.
+    // A rules term ("Quiet (p. 9)") names its glossary entity, not a spell that shares its name. Other lore
+    // ("Research") is the entry only where nothing else has its name.
     const term = singular(name);
-    const kinds =
-      terms.has(term) || glossaryNames(index, book.edition).has(term)
-        ? [
-            ...new Set(
-              [...index.byId.values()]
-                .filter((entity) => entity.lore)
-                .map((entity) => entity.kind),
-            ),
-          ]
-        : null;
-    const hit = matchHeading(index, verdict.heading.text, {
-      book: book.plugin,
-      edition: book.edition,
-      kinds,
-      asked: false, // by its name, not a feature's that ends with it ("Gloom" for "Deep Gloom")
-      adventure: null,
-    });
-    return hit?.plugin === book.plugin && hit.kind !== "ruling" ? [hit.id] : [];
+    const lore = (terms: boolean) => [
+      ...new Set(
+        [...index.byId.values()]
+          .filter((entity) =>
+            terms ? isTerm(entity, glossary) : entity.lore === true,
+          )
+          .map((entity) => entity.kind),
+      ),
+    ];
+    const match = (kinds: readonly string[] | null) => {
+      const hit = matchHeading(index, verdict.heading.text, {
+        book: book.plugin,
+        edition: book.edition,
+        kinds,
+        asked: false, // by its name, not a feature's that ends with it ("Gloom" for "Deep Gloom")
+        adventure: null,
+      });
+      return hit?.plugin === book.plugin && hit.kind !== "ruling"
+        ? hit
+        : undefined;
+    };
+    const hit =
+      glossary.terms?.has(term) ||
+      glossaryNames(index, book.edition, glossary).has(term)
+        ? match(lore(true))
+        : (match(null) ??
+          [match(lore(false))].find(
+            (other) => other && singular(slug(other.name)) === term,
+          ));
+    return hit ? [hit.id] : [];
   }
   const section = above.find((item) => item.status === "linked")?.entity;
   const owner = section === undefined ? undefined : index.byId.get(section);
   return [
     ...new Set([
       ...(owner && SECTIONS.has(owner.kind) ? [owner.id] : []),
-      ...mentions(index, verdict.heading.text, edition, terms),
+      ...mentions(index, verdict.heading.text, edition, glossary),
     ]),
   ];
 }

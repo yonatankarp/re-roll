@@ -58,6 +58,8 @@ const SHOWN_KINDS = new Set<string>([
   ...Object.values(DOWNTIME_KINDS),
   ...Object.values(OPTION_KINDS),
 ]);
+// The 2014 books print a condition or a sense in lower case, unlike an action or a skill ("help", "history").
+const LOWER_CASE = new Set(["condition", "sense"]);
 const plain = (title: string) => title.replace(/[’‘]/g, "'").toLowerCase();
 
 const storage = await createNodeStorage(process.cwd());
@@ -248,7 +250,11 @@ for (const plan of plans) {
       written = { ...entry, owners: links.get(entry.id) ?? [] };
     if (kind === "rulings") {
       const found = at.get(entry.library?.[0] ?? "") ?? -1;
-      const about = subjectsOf(verdicts, found, edition, index, bookOf, terms);
+      const about = subjectsOf(verdicts, found, edition, index, bookOf, {
+        terms,
+        kinds: new Set(Object.values(GLOSSARY_KINDS)),
+        lower: LOWER_CASE,
+      });
       written = { ...entry, ...(about.length > 0 ? { about } : {}) };
       rulings.push({ plugin: book, library: entry.library ?? [], about });
     }
