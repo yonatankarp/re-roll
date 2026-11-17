@@ -3118,13 +3118,13 @@ export function naturalOneEvents(
     if (passive.kind !== "naturalOne") continue;
     echoing = true;
     try {
-      const save = rollSave(
-        actor,
-        passive.save.ability,
-        evaluateFormula(passive.save.dc, stats),
-        context,
-      );
+      const against = {
+        ability: passive.save.ability,
+        dc: evaluateFormula(passive.save.dc, stats),
+      };
+      const save = rollSave(actor, against.ability, against.dc, context);
       events.push(...save.events);
+      // The same save ends a condition that a later one can, as Symbiotic Agenda's Charmed when its bearer is hurt.
       if (!save.saved)
         events.push(
           ...leafEvents(
@@ -3133,6 +3133,7 @@ export function naturalOneEvents(
             actor,
             actor,
             context,
+            against,
           ),
         );
     } finally {

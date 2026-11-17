@@ -6476,7 +6476,6 @@
     minute, if the globe hasn’t already shattered, it explodes. Using a
     Higher-Level Spell Slot. The damage increases by 1d6 for each spell slot
     level above 6.
-  automation: full
   activation:
     cost:
       - action
@@ -6503,6 +6502,25 @@
   upcast:
     perSlotLevel:
       addDice: 1d6
+  automation: partial
+  scene:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - water
+            aid: success
+          duration: instantaneous
 - id: srd52:spell/giant-insect
   name: Giant Insect
   level: 4

@@ -131,6 +131,7 @@ export function startCombat(
     ),
   );
   // Ambush: a die of its resource added to Initiative, spent.
+  // shortcut: it's spent on every Initiative while one is left, where the player would choose when.
   const dieSpent: SystemEvent[] = [];
   const initiativeDie = (actor: Actor, stats: Stats): number => {
     for (const passive of stats.passives) {

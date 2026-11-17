@@ -28,7 +28,7 @@ import {
   type Stats,
 } from "../stats.ts";
 import type { HitKind, Passive, Skill } from "../schemas.ts";
-import { toolKeyOf } from "../tools.ts";
+import { toolKeyOf, toolOf } from "../tools.ts";
 import {
   distanceFeet,
   rangeFeet,
@@ -166,6 +166,7 @@ export function hasPassive(stats: Stats, kind: Passive["kind"]): boolean {
 
 // Drunkard's Luck: Disadvantage on a D20 Test is cancelled by spending its resource, while the bearer has enough. The
 // spend, or null where there's nothing to cancel or nothing to spend.
+// shortcut: it's spent on every such roll, where the player would choose which.
 export function luckyEdge(
   actor: Actor,
   stats: Stats,
@@ -199,8 +200,7 @@ function usesTool(
   if (tool === undefined) return false;
   if (wanted !== "artisan")
     return toolKeyOf(wanted, access) === toolKeyOf(tool, access);
-  const item = ItemSchema.safeParse(access.content(tool)).data;
-  return item?.type === "tool" && item.artisan === true;
+  return toolOf(tool, access)?.artisan === true;
 }
 
 // Effects from one source count once, so casting Bless twice can't add two d4s.

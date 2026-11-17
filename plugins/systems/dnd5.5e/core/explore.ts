@@ -13,7 +13,7 @@ import {
 } from "./schemas.ts";
 import { type Actor, type DndState, NS, dndEvent } from "./state.ts";
 import { deriveStats, lookup } from "./stats.ts";
-import { toolByName, toolKeyOf } from "./tools.ts";
+import { toolByName, toolKeyOf, toolOf } from "./tools.ts";
 import { SKILLS_WITH_DIFFERENT_ABILITIES, variantOn } from "./variant-rules.ts";
 
 // Exploring outside a fight (#153, #185): a scene check says what it acts on (`about`), as a lock or a climb, and
@@ -135,8 +135,7 @@ export function toolProficiencies(
 }
 
 export function isArtisan(tool: string, access: ContentAccess): boolean {
-  const item = ItemSchema.safeParse(access.content(tool)).data;
-  return item?.type === "tool" && item.artisan === true;
+  return toolOf(tool, access)?.artisan === true;
 }
 
 // Whether it turns into any Artisan's Tools, as a Manifold Tool, which it's proficient with too.
@@ -181,9 +180,8 @@ function toolFor(
     return { id: check.tool, proficient: proficient.has(check.tool) };
   if (about.length === 0) return null;
   const carried = actor.inventory.flatMap((id) => {
-    const item = ItemSchema.safeParse(access.content(id)).data;
-    return item?.type === "tool" &&
-      item.handles?.some((obstacle) => about.includes(obstacle))
+    const handles = toolOf(id, access)?.handles;
+    return handles && about.some((obstacle) => handles.has(obstacle))
       ? [{ id, proficient: proficient.has(id) }]
       : [];
   });

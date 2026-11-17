@@ -982,7 +982,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("zone"),
     zone: ZoneKindSchema,
-    radius: z.number().int().min(5),
+    radius: z.number().int().min(0), // 0 for the one square it's on, as Mold Earth's 5-foot square
     duration: DurationSchema,
     damage: z.array(DamageSchema).optional(),
     follows: z.literal(true).optional(),

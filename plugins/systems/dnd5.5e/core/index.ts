@@ -659,11 +659,17 @@ export const dnd55e = defineSystem<DndState>({
     const player = context.state.actors[PLAYER_ACTOR];
     if (!player) throw new Error("The player has no character");
     const rolled = sceneCheck(player, CheckSchema.parse(check), context);
+    // A check the character couldn't even try, without the tool it needs, gives the GM nothing to work with.
+    const tried = !rolled.events.some(
+      (event) => event.kind === `${NS}:toolMissing`,
+    );
     return {
       outcome: rolled.success ? "success" : "failure",
       events: [
         ...rolled.events,
-        ...(rolled.success ? [] : ([{ kind: "gmOpportunity" }] as const)),
+        ...(rolled.success || !tried
+          ? []
+          : ([{ kind: "gmOpportunity" }] as const)),
       ],
     };
   },

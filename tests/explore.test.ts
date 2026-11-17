@@ -18,6 +18,7 @@ import { ClassSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import { deriveStats, lookup } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { hasFlag } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { startCombat } from "../plugins/systems/dnd5.5e/core/combat.ts";
+import { slowingKeys } from "../plugins/systems/dnd5.5e/core/zones.ts";
 import { hero, scripted, settle, testRun, trait } from "./feat-fixtures.ts";
 
 // Made-up tools, items and features for exploring outside a fight (#153, #185): ids and mechanics only.
@@ -376,10 +377,7 @@ describe("tool checks (#185)", () => {
     const feature = { feature: "test:dungeon-feature/lock", dc: 5 };
     const without = check(run, between([hero(["picker"])]), feature);
     expect(without.outcome).toBe("failure");
-    expect(kinds(without.events)).toEqual([
-      `${NS}:toolMissing`,
-      "gmOpportunity",
-    ]);
+    expect(kinds(without.events)).toEqual([`${NS}:toolMissing`]);
     const carried = check(
       run,
       between([{ ...hero(["picker"]), inventory: [PICKS] }]),
@@ -736,5 +734,37 @@ describe("the rest of the pieces (#153, #185)", () => {
       },
     );
     expect(kinds(events)).not.toContain(`${NS}:saveRolled`);
+  });
+
+  it("makes a zone of radius 0 cover only its own square, as Mold Earth's", async () => {
+    const run = await exploreRun();
+    const caster = {
+      ...hero([]),
+      activeEffects: [
+        {
+          sourceId: "x:mold",
+          casterId: PLAYER_ACTOR,
+          modifier: {
+            kind: "zone" as const,
+            zone: "area" as const,
+            at: { x: 2, y: 2 },
+            radius: 0,
+            area: { difficult: true as const },
+          },
+          ends: "spellDuration" as const,
+        },
+      ],
+    };
+    const state: DndState = {
+      actors: { [PLAYER_ACTOR]: caster },
+      combat: {
+        encounter: "arena",
+        order: [PLAYER_ACTOR],
+        index: 0,
+        round: 1,
+        grid: { width: 5, height: 5 },
+      },
+    };
+    expect(slowingKeys(caster, state, run)).toHaveLength(1);
   });
 });
