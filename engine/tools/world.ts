@@ -8,8 +8,15 @@ import { STRUCTURAL, type Verdict, slug } from "./coverage.ts";
 const WORLD_FOLDERS: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(WORLD_KINDS).map(([folder, kind]) => [kind.idPrefix, folder]),
 );
-// A glossary heading's label says its kind ("Blinded [Condition]"), which the id and name leave out.
-const LABEL = /\s*\[[^\]]*\]$/;
+// A text kind's heading can wrap its name in a label saying its kind or its price ("Blinded [Condition]",
+// "Variant: Encumbrance", "Modest (1 GP per Day)"), which the id and name leave out.
+const LABELS = [
+  /\s*\[[^\]]*\]$/,
+  /^(?:variant|option):\s*/i,
+  /\s*\((?:free|[\d,]+\s*[cesgp]p\b[^)]*)\)$/i,
+];
+const unlabelled = (text: string): string =>
+  LABELS.reduce((name, label) => name.replace(label, ""), text) || text;
 const kindOf = (id: string): string => /:([^/]+)\//.exec(id)?.[1] ?? "";
 const tailOf = (id: string): string => id.slice(id.indexOf("/") + 1);
 
@@ -83,9 +90,7 @@ export function draftWorld(
       return;
     }
     // An area's id starts with its place's, since many places have a "1. Entrance".
-    const shown = labelled(kind)
-      ? heading.text.replace(LABEL, "")
-      : heading.text;
+    const shown = labelled(kind) ? unlabelled(heading.text) : heading.text;
     const full =
       slug(shown.normalize("NFD").replace(/\p{M}/gu, "")) || "untitled";
     // A ruling's heading is a whole question, so its name stops at a word near 60 letters.
