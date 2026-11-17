@@ -330,6 +330,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     ability: AbilitySchema.optional(), // only saves with this ability, as Slow's Dexterity saves
     melee: z.literal(true).optional(), // AC against melee attack rolls only, as a pirate admiral's Defensive Stance
     ranged: z.literal(true).optional(), // AC against ranged attack rolls only, as an Arrow-Catching Shield's
+    weapon: z.literal(true).optional(), // weapon attack rolls only, as Magic Weapon's
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
@@ -693,6 +694,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     modifier: ModifierSchema,
     duration: DurationSchema,
     repeatSave: z.boolean().optional(), // as an applyCondition's
+    whileTempHp: z.literal(true).optional(), // ends once the bearer has no Temporary Hit Points, as Armor of Agathys
     // The caster picks the modifier's damage type from these as it casts (combat/damage-choice.ts), as with
     // Protection from Energy. A cast's lists of the same length are picked together, by place, as Fire Shield's
     // warm or chill shield sets both its Resistance and its flames.
@@ -817,6 +819,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     maxLevel: z.number().int().min(0).max(9),
     // only spells cast by the target's foes, so a friend keeps its own, as Clockwork Cavalcade's chosen creatures
     hostile: z.literal(true).optional(),
+    // each higher spell ends on a spellcasting ability check against 10 plus its level, as Dispel Magic's
+    check: z.literal(true).optional(),
   }),
   // Lessens the hit that triggered a reaction, such as Uncanny Dodge or Deflect Attacks. With `deflect`, damage
   // brought to 0 is sent at a creature within `range`, which saves or takes `damage`, as Deflect Missile's force.
@@ -944,7 +948,12 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // shortcut: nothing stops a later raising, which only True Resurrection or Wish should manage.
   z.strictObject({ kind: z.literal("disintegrate") }),
   // The target spends one of its Hit Point Dice and regains what it rolls plus `bonus`, as with Healer's Battle Medic.
-  z.strictObject({ kind: z.literal("hitDieHeal"), bonus: FormulaSchema }),
+  // Rolls up to `dice` of the target's Hit Point Dice (stopping once it is whole) and adds `bonus` once.
+  z.strictObject({
+    kind: z.literal("hitDieHeal"),
+    bonus: FormulaSchema,
+    dice: z.number().int().min(2).optional(),
+  }),
   // The bearer takes another of its stat block's own shapes, by name, or goes back to its true one (core/forms.ts).
   z.strictObject({ kind: z.literal("shapeShift"), shape: z.string().min(1) }),
   // One of the bearer's own actions picked at random, `times` over, never one already used this turn, at the same
@@ -1026,11 +1035,22 @@ export type LeafEffect = z.infer<typeof LeafEffectSchema>;
 const LeafEffectsSchema = z.array(LeafEffectSchema).default([]);
 
 // Nesting stops at one level on purpose: a small model can only produce non-recursive output reliably.
+// Each of the caster's foes within `radius` of a target saves or takes `damage`, half on a success with `half`: Ice
+// Knife's shard round an attack's target, or Jolt to Life's lightning round the creature it revives.
+const BurstSchema = z.strictObject({
+  radius: z.number().int().min(5),
+  ability: AbilitySchema,
+  dc: FormulaSchema,
+  damage: z.array(DamageSchema).min(1),
+  half: z.literal(true).optional(),
+});
+
 export const ResolutionSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("automatic"),
     damage: z.array(DamageSchema).default([]),
     effects: LeafEffectsSchema,
+    burst: BurstSchema.optional(),
   }),
   z.strictObject({
     kind: z.literal("attack"),
@@ -1042,6 +1062,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       itemBonus: z.number().int().min(1).optional(), // a magic weapon's own bonus to hit
       // Beyond this many feet, out to the targeting's range, the roll has Disadvantage, as a thrown weapon's long range.
       normalRange: z.number().int().min(5).optional(),
+      bypassCover: z.literal(true).optional(), // ignores Half and Three-Quarters Cover, as Spellfire Flare's blasts
     }),
     damage: z.array(DamageSchema).min(1),
     onHit: LeafEffectsSchema,
@@ -1068,14 +1089,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     drain: z.strictObject({ resource: z.string() }).optional(),
     missDamage: z.literal("half").optional(), // a miss still deals half the damage, as Acid Arrow's splash
     // Hit or miss, the target and each creature within `radius` of it then save or take `damage`, as Ice Knife's shard.
-    burst: z
-      .strictObject({
-        radius: z.number().int().min(5),
-        ability: AbilitySchema,
-        dc: FormulaSchema,
-        damage: z.array(DamageSchema).min(1),
-      })
-      .optional(),
+    burst: BurstSchema.optional(),
   }),
   z.strictObject({
     kind: z.literal("save"),
@@ -1106,6 +1120,9 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     onSuccessDamage: z.enum(["half", "none", "full"]).default("none"),
     onFail: LeafEffectsSchema,
     onSuccess: LeafEffectsSchema,
+    // with an area, one creature of the caster's choice in it, the most hurt of its side, also gets these, as Wither
+    // and Bloom's Hit Point Dice
+    chosen: z.array(LeafEffectSchema).min(1).optional(),
   }),
 ]);
 export type Resolution = z.infer<typeof ResolutionSchema>;
@@ -2147,11 +2164,18 @@ export type ResourceDef = z.infer<typeof ResourceDefSchema>;
 const ScaleStepSchema = z.union([
   // With `every`, once for each that many levels, at most `max` times; `addBonus` also raises a flat bonus a modifier
   // gives, as Elemental Weapon's +1 to hit becomes +2 with its 1d4 becoming 2d4.
+  // Without `addDice`, `addBonus` alone raises a flat number: healing, Temporary Hit Points, a damage bonus, a
+  // retaliation's damage or Dispel Magic's level, as Heal's 10 more. `at` adds once at each of these slot levels
+  // above the spell's instead, as Magic Weapon's +2 and +3. `initial` leaves damage that lingers alone, as Vitriolic
+  // Sphere's 5d4, and `hitDice` lets its Hit Point Dice healing roll that many more, as Wither and Bloom's.
   z.strictObject({
-    addDice: DiceSchema,
+    addDice: DiceSchema.optional(),
     every: z.number().int().min(2).optional(),
     max: z.number().int().min(1).optional(),
     addBonus: z.number().int().min(1).optional(),
+    at: z.array(z.number().int().min(1)).min(1).optional(),
+    initial: z.literal(true).optional(),
+    hitDice: z.number().int().min(1).optional(),
   }),
   z.strictObject({ addTargets: z.number().int().min(1) }),
   z.strictObject({ addRadius: z.number().int().min(5) }), // an area's radius, as Confusion's Sphere
@@ -2168,6 +2192,14 @@ export const FeatureSchema = ContentEntrySchema.extend({
   fromLevel: z.number().int().min(1).max(20).optional(), // the character level it starts working at
   // Dice added to its activations at character levels 5, 11 and 17, as a cantrip's are.
   perTier: ScaleStepSchema.optional(),
+  // `step` added once at each of these levels in `class`, as Jolt to Life's lightning at Artificer levels 11 and 17.
+  classTiers: z
+    .strictObject({
+      class: ContentIdSchema,
+      at: z.array(z.number().int().min(1).max(20)).min(1),
+      step: ScaleStepSchema,
+    })
+    .optional(),
   // Spells it always gives, from the character level in the key.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.

@@ -955,13 +955,23 @@ export function runAttackRoll(
   const base =
     held?.base ??
     attackBonus(resolution, stats) +
-      rollBonus(attacker, "attacks", context) +
+      rollBonus(
+        attacker,
+        "attacks",
+        context,
+        undefined,
+        undefined,
+        resolution.attack.type === "weapon",
+      ) +
       rollBonus(target, "attacksAgainst", context); // Blade Ward's -1d4
   const cover = coverAgainst(state, attacker, target, context);
   const ac =
     targetStats.ac +
     meleeAc(target, meleeReach(action) !== null, targetStats) +
-    (steady.bypassCover && meleeReach(action) === null ? 0 : cover);
+    ((steady.bypassCover || resolution.attack.bypassCover) &&
+    meleeReach(action) === null
+      ? 0
+      : cover);
   const critFrom = criticalFrom(stats);
   const judge = (natural: number, bonus: number) => {
     const sum = natural + base + bonus;

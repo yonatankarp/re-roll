@@ -35,6 +35,7 @@ import {
   ItemSchema,
   LootSchema,
   SKILL_ABILITIES,
+  type ScaleStep,
   type Skill,
   SpeciesSchema,
 } from "../core/schemas.ts";
@@ -118,6 +119,29 @@ function actionNumbers(action: KnownAction, stats: Stats): string {
   }
 }
 
+// What a higher slot adds, for the action's details.
+function upcastText(step: ScaleStep, level: number): string {
+  if ("addRadius" in step) {
+    return `Each slot level above ${String(level)} adds ${String(step.addRadius)} feet to its radius.`;
+  }
+  if ("addTargets" in step) {
+    return `Each slot level above ${String(level)} adds ${String(step.addTargets)} target${step.addTargets > 1 ? "s" : ""}.`;
+  }
+  const adds = [
+    step.addDice
+      ? `${step.addDice} ${step.initial ? "initial " : ""}damage`
+      : "",
+    step.addBonus ? `${String(step.addBonus)} to its number` : "",
+    step.hitDice ? `${String(step.hitDice)} Hit Point Die` : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
+  if (step.at) {
+    return `It adds ${adds} with a slot of level ${step.at.map((above) => String(level + above)).join(" and again ")}.`;
+  }
+  return `${step.every ? `Every ${String(step.every)} slot levels` : "Each slot level"} above ${String(level)} adds ${adds}.`;
+}
+
 function actionDetail(
   action: KnownAction,
   stats: Stats,
@@ -130,9 +154,7 @@ function actionDetail(
   const upcast = action.upcast?.perSlotLevel;
   return [
     actionNumbers(action, stats),
-    upcast
-      ? `${"every" in upcast && upcast.every ? `Every ${String(upcast.every)} slot levels` : "Each slot level"} above ${String(action.spellLevel)} adds ${"addDice" in upcast ? `${upcast.addDice} damage` : "addRadius" in upcast ? `${String(upcast.addRadius)} feet to its radius` : `${String(upcast.addTargets)} target${upcast.addTargets > 1 ? "s" : ""}`}.`
-      : "",
+    upcast ? upcastText(upcast, action.spellLevel ?? 0) : "",
     source?.text ?? "",
   ]
     .filter(Boolean)

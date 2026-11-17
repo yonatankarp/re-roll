@@ -41,6 +41,13 @@ const TWINS: readonly (readonly [srd: string, phb: string])[] = [
     "power-word-kill",
     "see-invisibility",
     "spare-the-dying",
+    "aid",
+    "conjure-minor-elementals",
+    "dispel-magic",
+    "false-life",
+    "heal",
+    "magic-weapon",
+    "vitriolic-sphere",
   ].map((name) => [`srd52:spell/${name}`, `phb:spell/${name}`] as const),
 ];
 

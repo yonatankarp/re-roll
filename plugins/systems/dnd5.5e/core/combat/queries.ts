@@ -150,12 +150,14 @@ export function rollBonus(
   context: Context,
   skill?: Skill, // the check's skill, for a bonus that only adds to one
   ability?: Ability, // the save's ability, for a bonus that only adds to one
+  weapon = false, // a weapon attack roll, for a bonus to those only
 ): number {
   const seen = new Set<string>();
   let total = 0;
   for (const effect of actor.activeEffects) {
     const { modifier } = effect;
     if (modifier.kind !== "bonus" || modifier.to !== to) continue;
+    if (modifier.weapon && !weapon) continue;
     if (modifier.skill && modifier.skill !== skill) continue;
     if (modifier.ability && modifier.ability !== ability) continue;
     if (seen.has(effect.sourceId)) continue;
@@ -173,6 +175,7 @@ export function rollBonus(
     if (
       modifier.kind === "bonus" &&
       modifier.to === to &&
+      (!modifier.weapon || weapon) &&
       (!modifier.skill || modifier.skill === skill) &&
       (!modifier.ability || modifier.ability === ability)
     ) {

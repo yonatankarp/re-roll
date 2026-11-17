@@ -95,6 +95,8 @@ export const FRAME_KINDS = [
   "applyMiss", // what an attack does on a miss, as Acid Arrow's splash (combat/spell-riders.ts)
   "burst", // a save round an attack's target, hit or miss, as Ice Knife's (combat/spell-riders.ts)
   "initiativeMove", // a move right after Initiative, as Unpredictable Movement's (combat/reactions.ts)
+  "givenDice", // the player spends Hit Dice a spell's Short Rest gave them (rest.ts)
+  "givenDiceAnswer",
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -191,6 +193,7 @@ const ActiveEffectSchema = z.strictObject({
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
   endsOnDamage: z.boolean().optional(),
+  endsWithTempHp: z.boolean().optional(), // ends once damage leaves the creature no Temporary Hit Points
   endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
   endsOn: z.enum(["attack", "action"]).optional(), // ends when the creature attacks or deals damage, or acts
   // Taking damage gives this save, ending it on a success, as Dragon Fear's.
@@ -1115,7 +1118,11 @@ function applyDamage(
     ...actor,
     activeEffects:
       amount > 0
-        ? actor.activeEffects.filter((effect) => !effect.endsOnDamage)
+        ? actor.activeEffects.filter(
+            (effect) =>
+              !effect.endsOnDamage &&
+              !(effect.endsWithTempHp && actor.tempHp <= absorbed),
+          )
         : actor.activeEffects,
     tempHp: actor.tempHp - absorbed,
     hp,

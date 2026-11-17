@@ -78,8 +78,9 @@ function spendEvents(
   die: string,
   stats: Stats,
   context: Context,
+  withMeal = true,
 ): readonly SystemEvent[] {
-  const meal = mealBonus(actor, context);
+  const meal = withMeal ? mealBonus(actor, context) : 0;
   const rolled =
     hitDieRoll(die, stats, context.dice) + modifierFor(stats, "con");
   return [
@@ -112,11 +113,11 @@ export function shortRestEvents(
 export const SHORT_REST_GIVEN = "shortRest:given";
 
 // A Short Rest's benefits for one creature, as Prayer of Healing gives: Hit Dice spent until healed, then what the
-// rest restores.
+// rest restores. The player spends theirs die by die afterwards (`givenDice`), so theirs aren't spent here.
 export function shortRestFor(actor: Actor, context: Context): SystemEvent[] {
   if (actor.side !== "party" || isDead(actor)) return [];
   if (actor.resourcesSpent[SHORT_REST_GIVEN]) return [];
-  const spent = diceSpent(actor, context);
+  const spent = actor.id === PLAYER_ACTOR ? [] : diceSpent(actor, context);
   const after = spent.reduce(applyDndEvent, context.state).actors[actor.id];
   const stats = deriveStats(actor, context);
   return [
@@ -253,6 +254,49 @@ function runShortRestAnswer(
       context,
     ),
     frames: [frame("shortRestStep")],
+  };
+}
+
+const GIVEN = "given";
+
+// The player spends Hit Dice a spell's Short Rest gave them, die by die, as in a Short Rest of their own.
+function runGivenDice(context: Context): SystemResult {
+  const player = context.state.actors[PLAYER_ACTOR];
+  if (!player) return {};
+  const stats = deriveStats(player, context);
+  if (!canSpend(player, stats)) return {};
+  const left = stats.level - (player.resourcesSpent[HIT_DICE] ?? 0);
+  return {
+    frames: [
+      awaitDecision({
+        id: `${NS}:givenDice:${String(left)}`,
+        actor: player.id,
+        prompt: `You have ${String(player.hp)} of ${String(stats.maxHp)} HP and ${String(left)} Hit Dice left.`,
+        options: [
+          { id: SPEND, label: `Spend a Hit Die (${nextDie(player, context)})` },
+          { id: GIVEN, label: "Keep the rest" },
+        ],
+        resume: frame("givenDiceAnswer"),
+      }),
+    ],
+  };
+}
+
+function runGivenDiceAnswer(
+  { answer }: z.infer<typeof AnswerSchema>,
+  context: Context,
+): SystemResult {
+  const player = context.state.actors[PLAYER_ACTOR];
+  if (answer !== SPEND || !player) return {};
+  return {
+    events: spendEvents(
+      player,
+      nextDie(player, context),
+      deriveStats(player, context),
+      context,
+      false,
+    ),
+    frames: [frame("givenDice")],
   };
 }
 
@@ -697,6 +741,14 @@ export const restFrames = {
   [`${NS}:shortRestAnswer`]: frameHandler({
     schema: AnswerSchema,
     run: runShortRestAnswer,
+  }),
+  [`${NS}:givenDice`]: frameHandler({
+    schema: z.object({}),
+    run: (_payload, context: Context) => runGivenDice(context),
+  }),
+  [`${NS}:givenDiceAnswer`]: frameHandler({
+    schema: AnswerSchema,
+    run: runGivenDiceAnswer,
   }),
   [`${NS}:companionsSpend`]: frameHandler({
     schema: z.object({}),

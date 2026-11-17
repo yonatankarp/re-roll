@@ -121,6 +121,7 @@ import { headDamageEvents } from "./heads.ts";
 import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
 import { movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
+import { abilityCheck } from "../actions.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
@@ -1311,22 +1312,51 @@ export function leafEvents(
         break;
       case "hitDieHeal": {
         // shortcut: a Healer's Kit's ten uses aren't counted; the target's Hit Point Dice are the limit.
-        const die = nextHitDie(target, context);
-        if (!die || unhealed || cannotHeal(target)) break;
-        const max = deriveStats(target, context).maxHp;
-        const rolled = hitDieHealing(
-          hitDieRoll(die, deriveStats(target, context), healDice) +
-            evaluateFormula(effect.bonus, stats),
-          deriveStats(target, context),
+        // shortcut: it rolls as many of the dice it may as the target has, until the target is whole, rather than
+        // asking how many.
+        if (unhealed || cannotHeal(target)) break;
+        const targetStats = deriveStats(target, context);
+        const { maxHp: max } = targetStats;
+        const missing = max - Math.max(target.hp, 0);
+        let rolled = 0;
+        let spent = 0;
+        for (
+          let left = effect.dice ?? 1;
+          left > 0 && rolled < missing;
+          left--
+        ) {
+          const die = nextHitDie(
+            {
+              ...target,
+              resourcesSpent: {
+                ...target.resourcesSpent,
+                [HIT_DICE]: (target.resourcesSpent[HIT_DICE] ?? 0) + spent,
+              },
+            },
+            context,
+          );
+          if (!die) break;
+          rolled += hitDieHealing(
+            hitDieRoll(die, targetStats, healDice),
+            targetStats,
+          );
+          spent++;
+        }
+        if (spent === 0) break;
+        rolled += hitDieHealing(
+          evaluateFormula(effect.bonus, stats),
+          targetStats,
         );
         events.push(
-          dndEvent(`${NS}:resourceSpent`, {
-            actor: target.id,
-            resource: HIT_DICE,
-          }),
+          ...Array.from({ length: spent }, () =>
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: target.id,
+              resource: HIT_DICE,
+            }),
+          ),
           dndEvent(`${NS}:healed`, {
             actor: target.id,
-            amount: Math.max(0, Math.min(rolled, max - Math.max(target.hp, 0))),
+            amount: Math.max(0, Math.min(rolled, missing)),
             max,
           }),
         );
@@ -1396,6 +1426,7 @@ export function leafEvents(
               ends: effectEnds(effect.duration),
               ...lastsFor(effect.duration, caster, target, context.state),
               ...(effect.repeatSave && save ? { repeatSave: save } : {}),
+              ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...swallowed,
             },
           }),
@@ -1566,6 +1597,18 @@ export function leafEvents(
             context.state,
             context,
             effect.hostile,
+            effect.check && stats.spellAbility
+              ? (dc) =>
+                  abilityCheck(
+                    caster,
+                    undefined,
+                    stats.spellAbility ?? "int",
+                    dc,
+                    (success) =>
+                      success ? "ends the spell" : "fails to end the spell",
+                    context,
+                  )
+              : undefined,
           ),
         );
         // Shutdown: the dispelled construct may fall Unconscious.
@@ -2791,6 +2834,17 @@ export function resolveAction(
             frames.push(...struck.frames);
           }
         }
+        // A save round the target, as Jolt to Life's lightning (combat/spell-riders.ts).
+        if (resolution.burst) {
+          frames.push(
+            frame("burst", {
+              attacker: actor.id,
+              actionId: action.id,
+              target: target.id,
+              ...(slotLevel === undefined ? {} : { slotLevel }),
+            }),
+          );
+        }
       }
       break;
     }
@@ -3056,6 +3110,40 @@ export function resolveAction(
             context,
           ),
         );
+      }
+      // One creature of the caster's choice in the area, the most hurt of its side there, also gets these, as
+      // Wither and Bloom's Hit Point Dice.
+      const { targeting } = action.activation;
+      if (resolution.chosen && "area" in targeting) {
+        const caught = [actor, ...allies(context.state, actor)].filter(
+          (item) =>
+            !isDead(item) &&
+            inArea(
+              targeting.area.shape,
+              targeting.area.radius,
+              actor.position,
+              aim ?? actor.position,
+              item.position,
+            ),
+        );
+        const now = events.reduce(applyDndEvent, context.state);
+        const missing = (item: Actor) =>
+          deriveStats(item, context).maxHp -
+          (now.actors[item.id]?.hp ?? item.hp);
+        const chosen = [...caught].sort((a, b) => missing(b) - missing(a))[0];
+        if (chosen && missing(chosen) > 0) {
+          events.push(
+            ...leafEvents(
+              resolution.chosen,
+              spellSource(action),
+              actor,
+              now.actors[chosen.id] ?? chosen,
+              { ...context, state: now },
+              undefined,
+              slotLevel,
+            ),
+          );
+        }
       }
       break;
     }

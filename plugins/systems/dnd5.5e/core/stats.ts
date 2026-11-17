@@ -617,6 +617,7 @@ function collectFeatureData(
   level = 1,
   highestSlot = 0,
   feats: ReadonlySet<string> = new Set(),
+  classLevels: Readonly<Record<string, number>> = {},
 ): {
   passives: Passive[];
   actions: KnownAction[];
@@ -659,9 +660,13 @@ function collectFeatureData(
         name: activation.label
           ? `${feature.name} (${activation.label})`
           : feature.name,
-        activation: feature.perTier
-          ? scaleActivation(activation, feature.perTier, cantripTier(level))
-          : activation,
+        activation: classTiered(
+          feature.perTier
+            ? scaleActivation(activation, feature.perTier, cantripTier(level))
+            : activation,
+          feature.classTiers,
+          classLevels,
+        ),
         spellLevel: null,
         ...(feature.upcast ? { upcast: feature.upcast } : {}),
         ...(feature.hitType ? { hitType: true as const } : {}),
@@ -1046,6 +1051,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     level,
     slots.findLastIndex((count) => count > 0) + 1,
     featIds,
+    classLevels,
   );
   // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
   const traits = [...itemPassives, ...fromFeatures.passives];
@@ -2401,6 +2407,21 @@ export function scaledDice(
   return `${String(scaling[source.diceCount ?? ""] ?? count)}d${String(scaling[source.dieSize ?? ""] ?? sides)}`;
 }
 
+// A feature's dice that grow at levels in one class, as Jolt to Life's lightning at Artificer levels 11 and 17.
+function classTiered(
+  activation: Activation,
+  tiers: Feature["classTiers"],
+  classLevels: Readonly<Record<string, number>>,
+): Activation {
+  if (!tiers) return activation;
+  const level = classLevels[tiers.class] ?? 0;
+  return scaleActivation(
+    activation,
+    tiers.step,
+    tiers.at.filter((at) => level >= at).length,
+  );
+}
+
 function cantripTier(level: number): number {
   return level >= 17 ? 3 : level >= 11 ? 2 : level >= 5 ? 1 : 0;
 }
@@ -2452,68 +2473,105 @@ export function scaleActivation(
         }
       : activation;
   }
-  const steps = step.every
-    ? Math.min(step.max ?? times, Math.floor(times / step.every))
-    : times;
+  const steps = step.at
+    ? step.at.filter((above) => times >= above).length
+    : step.every
+      ? Math.min(step.max ?? times, Math.floor(times / step.every))
+      : times;
   if (steps <= 0) return activation;
+  const { addBonus, hitDice } = step;
+  const more = (amount: Amount): Amount => {
+    const dice = step.addDice ? addDice(amount, step.addDice, steps) : amount;
+    if (!addBonus) return dice;
+    const { bonus } = dice;
+    return {
+      ...dice,
+      bonus: {
+        ...bonus,
+        base: (bonus?.base ?? 0) + addBonus * steps,
+        add: bonus?.add ?? [],
+      },
+    };
+  };
+  const dice = (amount: Amount): Amount =>
+    step.addDice ? addDice(amount, step.addDice, steps) : amount;
   const damage = (list: readonly Damage[]): Damage[] =>
-    list.map((item) => ({
-      ...item,
-      amount: addDice(item.amount, step.addDice, steps),
-    }));
+    list.map((item) => ({ ...item, amount: dice(item.amount) }));
   const effects = (list: readonly LeafEffect[]): LeafEffect[] =>
-    list.map((effect) => {
+    list.map((effect): LeafEffect => {
       if (effect.kind === "heal" || effect.kind === "tempHp") {
-        return {
-          ...effect,
-          amount: addDice(effect.amount, step.addDice, steps),
-        };
+        return { ...effect, amount: more(effect.amount) };
       }
-      if (effect.kind === "modifier" && effect.modifier.kind === "hitDamage") {
-        const [hit] = damage([effect.modifier.damage]);
-        return hit
-          ? { ...effect, modifier: { ...effect.modifier, damage: hit } }
+      if (effect.kind === "hitDieHeal") {
+        return hitDice
+          ? { ...effect, dice: (effect.dice ?? 1) + hitDice * steps }
           : effect;
       }
-      const { addBonus } = step;
-      if (
-        addBonus &&
-        effect.kind === "modifier" &&
-        effect.modifier.kind === "bonus" &&
-        effect.modifier.amount.dice === undefined
-      ) {
-        const { bonus } = effect.modifier.amount;
-        return {
-          ...effect,
-          modifier: {
-            ...effect.modifier,
-            amount: {
-              ...effect.modifier.amount,
-              bonus: {
-                base: (bonus?.base ?? 0) + addBonus * steps,
-                add: bonus?.add ?? [],
-              },
-            },
-          },
-        };
-      }
-      // An extra hit's damage grows too, as Conjure Minor Elementals'.
-      if (effect.kind === "modifier" && effect.modifier.kind === "hitDamage") {
-        const [scaled] = damage([effect.modifier.damage]);
-        return scaled
-          ? { ...effect, modifier: { ...effect.modifier, damage: scaled } }
+      if (effect.kind === "dispel") {
+        return addBonus
+          ? {
+              ...effect,
+              maxLevel: Math.min(9, effect.maxLevel + addBonus * steps),
+            }
           : effect;
       }
-      return effect.kind === "modifier" &&
-        effect.modifier.kind === "lingeringDamage"
-        ? {
+      if (effect.kind !== "modifier") return effect;
+      const { modifier } = effect;
+      switch (modifier.kind) {
+        // An extra hit's damage grows too, as Conjure Minor Elementals'.
+        case "hitDamage": {
+          const [hit] = damage([modifier.damage]);
+          return hit
+            ? { ...effect, modifier: { ...modifier, damage: hit } }
+            : effect;
+        }
+        // A flat bonus grows only by `addBonus`, as Elemental Weapon's +1 to hit or Aid's Hit Point maximum.
+        case "bonus":
+          return addBonus && modifier.amount.dice === undefined
+            ? {
+                ...effect,
+                modifier: {
+                  ...modifier,
+                  amount: {
+                    ...modifier.amount,
+                    bonus: {
+                      base:
+                        (modifier.amount.bonus?.base ?? 0) + addBonus * steps,
+                      add: modifier.amount.bonus?.add ?? [],
+                    },
+                  },
+                },
+              }
+            : effect;
+        case "damageBonus":
+          return addBonus
+            ? {
+                ...effect,
+                modifier: { ...modifier, amount: more(modifier.amount) },
+              }
+            : effect;
+        // The cold that strikes back grows with Armor of Agathys' Temporary Hit Points.
+        case "retaliate":
+          return {
             ...effect,
             modifier: {
-              ...effect.modifier,
-              damage: damage(effect.modifier.damage),
+              ...modifier,
+              damage: modifier.damage.map((item) => ({
+                ...item,
+                amount: more(item.amount),
+              })),
             },
-          }
-        : effect;
+          };
+        case "lingeringDamage":
+          return step.initial
+            ? effect
+            : {
+                ...effect,
+                modifier: { ...modifier, damage: damage(modifier.damage) },
+              };
+        default:
+          return effect;
+      }
     });
   const scaled = (resolution: Resolution): Resolution => {
     switch (resolution.kind) {
@@ -2522,6 +2580,14 @@ export function scaleActivation(
           ...resolution,
           damage: damage(resolution.damage),
           effects: effects(resolution.effects),
+          ...(resolution.burst
+            ? {
+                burst: {
+                  ...resolution.burst,
+                  damage: damage(resolution.burst.damage),
+                },
+              }
+            : {}),
         };
       case "attack":
         return {
@@ -2544,6 +2610,7 @@ export function scaleActivation(
           damage: damage(resolution.damage),
           onFail: effects(resolution.onFail),
           onSuccess: effects(resolution.onSuccess),
+          ...(resolution.chosen ? { chosen: effects(resolution.chosen) } : {}),
         };
       default:
         return resolution satisfies never;
