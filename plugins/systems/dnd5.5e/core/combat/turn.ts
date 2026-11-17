@@ -507,6 +507,8 @@ export function runFinishTurn(context: Context): SystemResult {
     }
     // A second failure leaves the worse condition instead, with no more saves, and the source's other effects stay,
     // as Contagion's Disadvantage on the chosen ability's saves.
+    // shortcut: a worse condition kept by Concentration ends with it, so Flesh to Stone held its whole minute doesn't
+    // petrify for good.
     if (
       worse &&
       !rolled.saved &&

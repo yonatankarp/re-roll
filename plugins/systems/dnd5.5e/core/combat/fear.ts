@@ -59,7 +59,8 @@ const ended = (actor: Actor, effect: ActiveEffect): SystemEvent =>
 // As its turn starts a fleeing creature takes the Dash action, when it can act, and spends its movement getting as far
 // from the caster as it can. Turn Undead's ends first if its caster is Incapacitated or dead.
 // shortcut: the flight provokes no Opportunity Attacks, as a push doesn't, and goes to the farthest square it can walk
-// to rather than by the safest route.
+// to rather than by the safest route. One with nowhere to go takes no Dodge, as Arcane Abjuration's would, and Turn
+// Undead's end with its caster down is checked only as the turned creature's turn starts.
 export function runFleeTurn(context: Context): SystemResult {
   const { state } = context;
   const actor = currentActor(state);

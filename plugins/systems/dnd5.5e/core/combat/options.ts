@@ -14,7 +14,7 @@ import type { Context } from "./queries.ts";
 // a label make one option, as Blindness/Deafness's Blinded or Deafened, or Bestow Curse's four curses.
 // tacticalPolicy takes the first offered, so an entry lists its strongest option first.
 // shortcut: on a save it's picked once the target has failed, not as the spell is cast, which changes nothing as the
-// save is the same whichever is picked.
+// save is the same whichever is picked. Eyebite's later turns may aim at a creature that already saved against it.
 
 const optioned = (effects: readonly LeafEffect[]): LeafEffect[] =>
   effects.filter(

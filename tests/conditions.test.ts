@@ -8,7 +8,10 @@ import {
 import {
   castSaveFoiled,
   clingSave,
+  COLLECT,
   collectable,
+  dodgeSaveEvents,
+  prisonEvents,
   dropEvents,
   outOfSight,
   repeatsNow,
@@ -17,9 +20,15 @@ import {
   shakeable,
   shakeEvents,
 } from "../plugins/systems/dnd5.5e/core/combat/fear.ts";
-import { canAfford } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import {
+  canAfford,
+  hasFlag,
+} from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { runFinishTurn } from "../plugins/systems/dnd5.5e/core/combat/turn.ts";
-import { tacticOptions } from "../plugins/systems/dnd5.5e/core/actions.ts";
+import {
+  runTactic,
+  tacticOptions,
+} from "../plugins/systems/dnd5.5e/core/actions.ts";
 import { walkSpeed } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import {
   type Activation,
@@ -452,7 +461,7 @@ describe("curses and what outlasts a fight (#149)", () => {
     expect(durations(7)).toEqual({ minutes: 1440 });
   });
 
-  it("keeps an hour-long effect after the fight and runs it down with rests", () => {
+  it("keeps a foe's hour-long effect after the fight, but not a friend's, and runs it down with rests", () => {
     const cursed = {
       ...hero([]),
       activeEffects: [
@@ -461,11 +470,18 @@ describe("curses and what outlasts a fight (#149)", () => {
           lasts: { actor: "caster", round: 50, at: "start" },
         }),
         effect({ sourceId: "spell:short" }),
+        effect({ sourceId: "spell:armor", casterId: "friend", lingers: 8 }),
       ],
     };
+    const friend = hero([], { id: "friend" });
     const state: DndState = {
-      actors: { [cursed.id]: cursed },
-      combat: { encounter: "x", order: [cursed.id], index: 0, round: 1 },
+      actors: { [cursed.id]: cursed, caster: foe("caster"), friend },
+      combat: {
+        encounter: "x",
+        order: [cursed.id, "caster", "friend"],
+        index: 0,
+        round: 1,
+      },
     };
     const after = applyDndEvent(state, dndEvent(`${NS}:combatEnded`, {}));
     const kept = after.actors[cursed.id]?.activeEffects ?? [];
@@ -578,5 +594,237 @@ describe("curses and what outlasts a fight (#149)", () => {
     expect(payloads(dropEvents(fighter, context), "weaponThrown")).toEqual([
       expect.objectContaining({ item: "srd52:item/longsword" }),
     ]);
+  });
+});
+
+describe("the rest of #149's pieces", () => {
+  it("hurts and frees a creature that attacks in melee out of Mental Prison's cell", async () => {
+    const content = await run();
+    const jailed = at(foe("jailed", 30), 1, 0, {
+      activeEffects: [
+        effect({
+          casterId: "caster",
+          modifier: {
+            kind: "prison",
+            damage: [{ amount: { dice: "1d10" }, type: "psychic" }],
+          },
+        }),
+      ],
+    });
+    const caster = at(hero([], { id: "caster" }), 0, 0);
+    const context = onGrid(content, [jailed, caster], scripted([7]).dice);
+    const events = prisonEvents(jailed, context);
+    expect(payloads(events, "damaged")[0]).toMatchObject({ amount: 7 });
+    expect(payloads(events, "effectEnded")).toHaveLength(1);
+  });
+
+  it("makes a cursed creature Dodge on a failed save as its turn starts", async () => {
+    const content = await run();
+    const cursed = at(hero([]), 0, 0, {
+      activeEffects: [
+        effect({ modifier: { kind: "dodgeSave", ability: "wis", dc: 30 } }),
+      ],
+    });
+    const context = onGrid(content, [cursed], scripted([1]).dice);
+    const events = dodgeSaveEvents(cursed, context);
+    expect(payloads(events, "budgetSpent")).toEqual([
+      { actor: cursed.id, kind: "action" },
+    ]);
+  });
+
+  it("gives a level of Exhaustion for each failed repeat save of Vision of Elapsing Eons", async () => {
+    const content = await run();
+    const caught = at(foe("caught"), 0, 0, {
+      activeEffects: [
+        effect({
+          modifier: { kind: "condition", condition: "paralyzed" },
+          repeatSave: { ability: "int", dc: 30 },
+          failExhaustion: true,
+        }),
+      ],
+    });
+    const context = onGrid(content, [caught], scripted([1]).dice);
+    const ending = runFinishTurn(context);
+    expect(payloads(ending.events ?? [], "exhaustionChanged")).toEqual([
+      { actor: "caught", levels: 1 },
+    ]);
+  });
+
+  it("banishes only a creature whose Challenge Rating the cleric's level reaches, as Arcane Abjuration", async () => {
+    const content = await run();
+    const cleric = hero([], { id: "cleric", level: 5 });
+    const goblin = foe("goblin");
+    const context = contextOf(content, [cleric, goblin], scripted([]).dice);
+    const send = (level: number): LeafEffect => ({
+      kind: "sendAway",
+      crByLevel: { class: "srd52:class/fighter", at: [{ level, cr: 5 }] },
+    });
+    expect(
+      payloads(
+        leafEvents([send(5)], "x", cleric, goblin, context),
+        "effectAdded",
+      ),
+    ).toHaveLength(1);
+    // A level the fighter hasn't reached banishes nothing.
+    expect(leafEvents([send(6)], "x", cleric, goblin, context)).toEqual([]);
+  });
+
+  it("lets Flee, Fools! go only at a Frightened creature, and flees after the reactions", async () => {
+    const content = await run();
+    const stats = deriveStats(hero(["turning"]), content);
+    expect(stats.scaling["mod:cha"]).toBe(1);
+    const scared = at(foe("scared"), 3, 0, {
+      activeEffects: [effect({ casterId: "boon", flee: {} })],
+    });
+    const boon = at(hero([], { id: "boon" }), 0, 0);
+    const context = onGrid(content, [scared, boon]);
+    expect(payloads(runFleeTurn(context).events ?? [], "moved")).toHaveLength(
+      1,
+    );
+  });
+
+  it("targets as many creatures as Charisma allows, saves with Disadvantage on all but Constitution, and can't cast", async () => {
+    const content = await run();
+    const pained = {
+      ...hero([]),
+      activeEffects: [
+        effect({
+          modifier: { kind: "disadvantage", on: "saves", except: "con" },
+        }),
+        effect({
+          modifier: { kind: "actionLimit", noSpells: true, speedMax: 10 },
+        }),
+      ],
+    };
+    const stats = deriveStats(pained, content);
+    expect(hasFlag(pained, "disadvantage", "saves", stats, "dex")).toBe(true);
+    expect(hasFlag(pained, "disadvantage", "saves", stats, "con")).toBe(false);
+    expect(walkSpeed(pained, stats)).toBe(10);
+    const cast: KnownAction = {
+      ...spellAction(content, "fear"),
+      activation: {
+        ...spellAction(content, "fear").activation,
+        cost: ["action"],
+      },
+    };
+    expect(canAfford(cast, pained, stats)).toBe(false);
+  });
+
+  it("puts a Bestow Curse's Disadvantage only on attacks against its caster", async () => {
+    const content = await run();
+    const cursed = {
+      ...hero([]),
+      activeEffects: [
+        effect({
+          modifier: { kind: "disadvantage", on: "attacks", casterOnly: true },
+        }),
+      ],
+    };
+    const stats = deriveStats(cursed, content);
+    expect(
+      hasFlag(
+        cursed,
+        "disadvantage",
+        "attacks",
+        stats,
+        "str",
+        undefined,
+        "caster",
+      ),
+    ).toBe(true);
+    expect(
+      hasFlag(
+        cursed,
+        "disadvantage",
+        "attacks",
+        stats,
+        "str",
+        undefined,
+        "other",
+      ),
+    ).toBe(false);
+  });
+
+  it("leaves out a creature Psychic Scream can't touch, and spares one immune to Charmed from Mental Prison", async () => {
+    const content = await run();
+    const caster = at(hero([], { id: "caster" }), 0, 0);
+    const dim = at(foe("dim"), 2, 0);
+    const context = onGrid(content, [caster, dim], scripted([1]).dice);
+    const scream: KnownAction = {
+      id: "spell:test:scream",
+      name: "Scream",
+      spellLevel: 9,
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: 90, side: "enemy" },
+        resolution: {
+          kind: "save",
+          ability: "int",
+          dc: { base: 15, add: [] },
+          damage: [{ amount: { dice: "1d6" }, type: "psychic" }],
+          onSuccessDamage: "half",
+          onFail: [],
+          onSuccess: [],
+          edges: [{ maxScore: { ability: "int", score: 20 }, roll: "immune" }],
+        },
+      },
+    };
+    expect(resolveAction(scream, caster, [dim], context).events ?? []).toEqual(
+      [],
+    );
+  });
+
+  it("collects itself from Irresistible Dance through its tactic", async () => {
+    const content = await run();
+    const dancer = at(hero([]), 0, 0, {
+      activeEffects: [
+        effect({
+          sourceId: "spell:srd52:spell/irresistible-dance",
+          modifier: { kind: "condition", condition: "charmed" },
+          repeatSave: { ability: "wis", dc: 5 },
+          actionSave: true,
+        }),
+      ],
+    });
+    const context = onGrid(content, [dancer], scripted([20]).dice);
+    const option = tacticOptions(dancer, context.state, content).find(
+      ({ id }) => id.startsWith(COLLECT),
+    );
+    expect(option).toBeDefined();
+    const result = runTactic(
+      { actor: dancer.id, answer: need(option).id },
+      context,
+    );
+    expect(payloads(result.events ?? [], "effectEnded")).toHaveLength(1);
+  });
+
+  it("ends a lingering curse with the hours a scene takes", async () => {
+    const content = await run();
+    const cursed = {
+      ...hero([]),
+      activeEffects: [effect({ lingers: 2 })],
+    };
+    const state: DndState = { actors: { [cursed.id]: cursed }, combat: null };
+    const passed = content.system.sceneEntered?.(state, content) ?? [];
+    expect(payloads(passed, "timePassed")).toEqual([{ hours: 1 }]);
+  });
+
+  it("ends Befuddlement with Greater Restoration", async () => {
+    const content = await run();
+    const befuddled = {
+      ...hero([]),
+      activeEffects: [
+        effect({ modifier: { kind: "actionLimit", noSpells: true } }),
+      ],
+    };
+    const context = contextOf(content, [befuddled], scripted([]).dice);
+    const events = leafEvents(
+      [{ kind: "cure", conditions: ["charmed"], befuddled: true }],
+      "spell:gr",
+      befuddled,
+      befuddled,
+      context,
+    );
+    expect(payloads(events, "effectEnded")).toHaveLength(1);
   });
 });

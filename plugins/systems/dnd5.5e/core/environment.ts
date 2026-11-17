@@ -229,6 +229,8 @@ function heavyArmored(actor: Actor, access: ContentAccess): boolean {
 
 // An effect's tables, as a psychic wind's: a party roll whose row passes time, then each traveler's save, whose
 // failure rolls the table for that traveler's damage and conditions.
+// shortcut: a row that only stuns for a minute does nothing between fights, and a row that sends the party elsewhere,
+// as an ether cyclone's, leaves the story where it is.
 function tableEvents(
   effect: EnvironmentalEffect,
   context: Context,
@@ -720,6 +722,7 @@ export function reverseGravityEvents(
 }
 
 // A Strong Wind: a flyer comes down to land at the end of its turn.
+// shortcut: it disperses no fog, as nothing in a fight is lit or put out by it either.
 export function groundedEvents(actor: Actor, state: DndState): SystemEvent[] {
   if (!state.combat?.environment?.grounded) return [];
   return actor.activeEffects.flatMap(({ modifier, sourceId, casterId }) =>

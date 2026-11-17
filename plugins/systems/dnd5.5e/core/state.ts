@@ -1265,12 +1265,21 @@ function settleSummons(state: DndState): DndState {
   return actors === state.actors ? state : { ...state, actors };
 }
 
-// What outlasts a fight, without its count in rounds (lingers): a curse that hampers attacks against its caster,
-// or hits from it, goes with the caster.
-// shortcut: repeat saves still being counted when the fight ends stop where they are, as Contagion's.
-function outlasting({ lasts: _lasts, ...rest }: ActiveEffect): ActiveEffect[] {
-  const { modifier, lingers } = rest;
+// What outlasts a fight, without its count in rounds (lingers): what a foe left on the creature, as a curse, and what
+// lasts until cured, as a disease's symptoms. A curse that hampers attacks against its caster, or hits from it, goes
+// with the caster.
+// shortcut: a friend's long spell, as Mage Armor's 8 hours, still ends with the fight, and repeat saves still being
+// counted when it ends stop where they are, as Contagion's.
+function outlasting(
+  { lasts: _lasts, ...rest }: ActiveEffect,
+  bearer: Actor,
+  state: DndState,
+): ActiveEffect[] {
+  const { modifier, lingers, casterId } = rest;
   if (lingers === undefined) return [];
+  const caster = state.actors[casterId];
+  if (lingers !== "cured" && (!caster || caster.side === bearer.side))
+    return [];
   if (
     ((modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
       modifier.casterOnly) ||
@@ -1317,7 +1326,9 @@ function endCombat(state: DndState): DndState {
         id,
         {
           ...actor,
-          activeEffects: actor.activeEffects.flatMap(outlasting),
+          activeEffects: actor.activeEffects.flatMap((effect) =>
+            outlasting(effect, actor, kept),
+          ),
           concentratingOn: null,
           budget: { action: true, bonusAction: true, reaction: true },
           usedThisTurn: [],

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SystemEvent } from "#sdk";
 import type { RunContext } from "../engine/run/turn.ts";
 import {
+  ambientRestEvents,
   contagionEvents,
   diseaseRestEvents,
   environmentConditionEvents,
@@ -9,10 +10,19 @@ import {
   everySquare,
   featureCheck,
   fightEnvironment,
+  groundedEvents,
+  halvesHitDice,
   restHampered,
+  reverseGravityEvents,
   turnSaveEvents,
 } from "../plugins/systems/dnd5.5e/core/environment.ts";
-import { dealEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import {
+  dealEvents,
+  leafEvents,
+} from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { lastsFor } from "../plugins/systems/dnd5.5e/core/combat/durations.ts";
+import { hasFlag } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import { jumpOf } from "../plugins/systems/dnd5.5e/core/movement-modes.ts";
 import { inAntimagic } from "../plugins/systems/dnd5.5e/core/zones.ts";
 import { masteredDice } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
 import {
@@ -120,6 +130,47 @@ const FIXTURES = [
     },
   },
   {
+    id: "test:environmental-effect/gravity",
+    name: "Gravity",
+    source: "Test",
+    text: "A test effect.",
+    automation: "full",
+    passives: [{ kind: "jump", times: 4 }],
+    fight: {
+      reverseGravity: { dc: 16 },
+      grounded: true,
+      halfFalls: true,
+      halfDurations: true,
+    },
+  },
+  {
+    id: "test:environmental-effect/thin",
+    name: "Thin",
+    source: "Test",
+    text: "A test effect.",
+    automation: "full",
+    breaks: { dice: "1d4", times: 10, into: "test:environmental-effect/water" },
+  },
+  {
+    id: "test:environmental-effect/blessed",
+    name: "Blessed",
+    source: "Test",
+    text: "A test effect.",
+    automation: "full",
+    rest: { restore: true },
+  },
+  {
+    id: "test:disease/rot",
+    name: "Rot",
+    source: "Test",
+    text: "A test disease.",
+    automation: "full",
+    catch: { ability: "con", dc: 15 },
+    onsetRests: 0,
+    symptoms: { exhaustion: 1, sightPenalty: true, halfHitDice: true },
+    cureSpells: true,
+  },
+  {
     id: "test:dungeon-feature/lock",
     name: "Lock",
     source: "Test",
@@ -158,6 +209,10 @@ const between = (
   const context = contextOf(content, actors, scripted(rolls).dice);
   return { ...context, state: { ...context.state, combat: null } };
 };
+const at = (actor: Actor, x: number, y: number): Actor => ({
+  ...actor,
+  position: { x, y },
+});
 function need<T>(value: T | undefined | null): T {
   if (value === undefined || value === null) throw new Error("missing");
   return value;
@@ -404,5 +459,171 @@ describe("dungeon features (#191)", () => {
       skill: "perception",
       dc: 12,
     });
+  });
+});
+
+describe("the rest of #191's pieces", () => {
+  it("lifts creatures on even rounds, lands flyers, halves falls and spell durations, and jumps four times as far", async () => {
+    const content = await run();
+    const fighter = at(hero([]), 1, 1);
+    const environment = need(
+      fightEnvironment(["test:environmental-effect/gravity"], content),
+    );
+    const context = contextOf(content, [fighter], scripted([20]).dice);
+    const fight = (round: number): DndState => ({
+      ...context.state,
+      combat: {
+        ...need(context.state.combat),
+        round,
+        grid: { width: 5, height: 5 },
+        environment,
+      },
+    });
+    expect(
+      reverseGravityEvents(fighter, { ...context, state: fight(1) }),
+    ).toEqual([]);
+    expect(
+      payloads(
+        reverseGravityEvents(fighter, { ...context, state: fight(2) }),
+        "effectAdded",
+      ).length,
+    ).toBeGreaterThan(0);
+    const flying = {
+      ...fighter,
+      activeEffects: [
+        {
+          sourceId: "flight",
+          casterId: fighter.id,
+          modifier: { kind: "aloft" as const, feet: 10, mode: "fly" as const },
+          ends: "spellDuration" as const,
+        },
+      ],
+    };
+    expect(
+      payloads(groundedEvents(flying, fight(1)), "effectEnded"),
+    ).toHaveLength(1);
+    const lasts = (state: DndState) =>
+      need(lastsFor({ minutes: 1 }, fighter, fighter, state).lasts).round;
+    expect(lasts(fight(1))).toBe(lasts(context.state) - 5);
+    const leaping = deriveStats(fighter, {
+      ...content,
+      state: fight(1),
+    } as never);
+    expect(jumpOf(leaping).running).toBe(
+      4 * jumpOf(deriveStats(fighter, content)).running,
+    );
+  });
+
+  it("breaks thin ice under a heavy creature, which then spends its minutes in the frigid water", async () => {
+    const content = await run();
+    const con = deriveStats(hero([]), content).abilities.con;
+    const events = environmentEvents(
+      {
+        effects: ["test:environmental-effect/thin"],
+        hours: 0,
+        minutes: con + 1,
+      },
+      between(content, [hero([])], [1, 10]),
+    );
+    expect(payloads(events, "saveRolled")).toHaveLength(1);
+  });
+
+  it("restores a creature after a Long Rest in blessed ground", async () => {
+    const content = await run();
+    const blind = {
+      ...hero([]),
+      activeEffects: [
+        {
+          sourceId: "x",
+          casterId: "x",
+          modifier: {
+            kind: "condition" as const,
+            condition: "blinded" as const,
+          },
+          ends: "spellDuration" as const,
+        },
+      ],
+    };
+    const context = between(content, [blind], []);
+    const state = {
+      ...context.state,
+      ambient: ["test:environmental-effect/blessed"],
+    };
+    expect(
+      payloads(
+        ambientRestEvents(blind, { ...context, state }),
+        "conditionRemoved",
+      ),
+    ).toEqual([{ actor: blind.id, condition: "blinded" }]);
+  });
+
+  it("grows Sight Rot's penalty each Long Rest, halves Hit Point Dice while Exhausted, and ends with Lesser Restoration", async () => {
+    const content = await run();
+    const sick = { ...hero([]), exhaustion: 1 };
+    const caught = contagionEvents(
+      { disease: "test:disease/rot", who: "player" },
+      between(content, [sick], [1]),
+    );
+    let state = fold(between(content, [sick], []).state, caught);
+    const penalty = (actor: Actor | undefined) =>
+      (actor?.activeEffects ?? []).flatMap(({ modifier }) =>
+        modifier.kind === "bonus" ? [modifier.amount.bonus?.base] : [],
+      );
+    expect(penalty(state.actors[sick.id])).toEqual([1, 1]);
+    state = fold(
+      state,
+      diseaseRestEvents(need(state.actors[sick.id]), {
+        ...between(content, [], []),
+        state,
+      }),
+    );
+    expect(penalty(state.actors[sick.id])).toEqual([2, 2]);
+    expect(halvesHitDice(need(state.actors[sick.id]), content)).toBe(true);
+    const cured = leafEvents(
+      [{ kind: "cure", conditions: ["blinded"], disease: true }],
+      "spell:lesser-restoration",
+      need(state.actors[sick.id]),
+      need(state.actors[sick.id]),
+      { ...between(content, [], []), state },
+    );
+    expect(fold(state, cured).actors[sick.id]?.diseases).toBeUndefined();
+  });
+
+  it("hampers ranged weapon attacks, spell attacks and Concentration only where the effect says", async () => {
+    const content = await run();
+    const windy = {
+      ...hero([]),
+      activeEffects: [],
+    };
+    const stats = deriveStats(windy, content);
+    const hampered = {
+      ...stats,
+      passives: [
+        ...stats.passives,
+        {
+          kind: "modifier" as const,
+          modifier: {
+            kind: "disadvantage" as const,
+            on: "attacks" as const,
+            ranged: true as const,
+          },
+        },
+        {
+          kind: "modifier" as const,
+          modifier: {
+            kind: "disadvantage" as const,
+            on: "saves" as const,
+            concentration: true as const,
+          },
+        },
+      ],
+    };
+    // Neither counts as Disadvantage on every attack or every Constitution save.
+    expect(hasFlag(windy, "disadvantage", "attacks", hampered, "dex")).toBe(
+      false,
+    );
+    expect(hasFlag(windy, "disadvantage", "saves", hampered, "con")).toBe(
+      false,
+    );
   });
 });
