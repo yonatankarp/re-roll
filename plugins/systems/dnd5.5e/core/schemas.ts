@@ -269,6 +269,9 @@ export const AmountSchema = z.strictObject({
   reroll: z.number().int().min(1).optional(), // dice rolled again once when below average, as with Empowered Spell
   rerollOnes: z.literal(true).optional(), // a die that rolls 1 is rolled again and the new roll stands
   halfDice: z.literal(true).optional(), // half the dice, rounded up, as Wails from the Grave's half the Sneak Attack
+  // a die showing its highest face adds another die, at most this many more, as Sorcerous Burst's 8s up to the
+  // spellcasting modifier
+  explode: FormulaSchema.optional(),
 });
 export type Amount = z.infer<typeof AmountSchema>;
 
@@ -298,6 +301,13 @@ export const DamageSchema = z.strictObject({
     .optional(),
   // creatures of these types take none of it, as Hurl Through Hell's Psychic damage spares a Fiend
   except: z.array(z.string()).min(1).optional(),
+  // only creatures of these types take it, as a Holy Avenger's Radiant against a Fiend or an Undead
+  only: z.array(z.string()).min(1).optional(),
+  // The type is the one of these a die of it rolled, by the die's face (the first for a 1), picked from its dice as
+  // the one the target resists least, and the hit's other damage takes it too, as Chaos Bolt's d8s (combat/attack.ts).
+  rolledTypes: z.array(DamageTypeSchema).min(2).optional(),
+  // the attacker gains as many Temporary Hit Points as it deals, as an Executioner's Axe's extra damage
+  tempHp: z.literal(true).optional(),
 });
 export type Damage = z.infer<typeof DamageSchema>;
 
@@ -371,6 +381,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     // attacks only with a ranged weapon, as a strong wind's, or only spell attacks, as a dampened magic zone's
     ranged: z.literal(true).optional(),
     spellAttacks: z.literal(true).optional(),
+    weapon: z.literal(true).optional(), // weapon attack rolls only, as Frostbite's
     concentration: z.literal(true).optional(), // saves only to keep Concentration, as an eerie chanting zone's
     // saves only against a spell of the effect's caster, as Eldritch Strike's (combat/effects.ts rollSave)
     casterSpells: z.literal(true).optional(),
@@ -443,6 +454,11 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     once: z.boolean().optional(),
     // all the hit's own damage takes this type, as Planar Warrior's Force
     retype: DamageTypeSchema.optional(),
+    oncePerTurn: z.literal(true).optional(), // on one hit a turn, as a Mythallar Cloak's 1d4 Radiant
+    melee: z.literal(true).optional(), // melee attacks only, as Fount of Moonlight's
+    // Ammunition weapons only, the bearer's next `uses` attacks with them, hit or miss, as Flame Arrows' quiver
+    ammunition: z.literal(true).optional(),
+    uses: z.number().int().min(1).optional(),
   }),
   // Limits on what the bearer can do on its turns, as Slow gives: `oneAction` is an action or a Bonus Action, not
   // both; `noActions` neither; `oneAttack` one attack with the Attack action; `speed` halves, doubles or stops its
@@ -530,6 +546,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("moveDamage"),
     damage: z.array(DamageSchema).min(1),
+    once: z.literal(true).optional(), // it ends once dealt, as Booming Blade's thunder
   }),
   // The damage the bearer's weapon attacks deal is halved, as Enfeebling Arrow's, or with `exceptCaster` only against
   // creatures other than the effect's caster, as Ancestral Protectors' spectral warriors.
@@ -571,6 +588,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // Difficult Terrain costs it no extra movement, and it escapes a grapple with 5 feet of movement, as with Freedom of
   // Movement.
   z.strictObject({ kind: z.literal("unhindered") }),
+  // Its moving provokes no Opportunity Attacks while it lasts, as Zephyr Strike's.
+  z.strictObject({ kind: z.literal("unprovoking") }),
   // Knowing where creatures on the ground are, this far, through walls and darkness, as Stonecunning's Tremorsense.
   z.strictObject({
     kind: z.literal("tremorsense"),
@@ -610,7 +629,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // as it's cast), as Dragon's Breath's breath.
   z.strictObject({
     kind: z.literal("grantedAction"),
-    damage: DamageTypeSchema,
+    damage: DamageTypeSchema.optional(), // none for an action that deals none of a chosen type, as Fount of Moonlight's
     dc: z.number().int().optional(),
   }),
   // The bearer's next weapon hit that deals damage also makes its target make this save, which spends it, as a
@@ -780,6 +799,15 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     cantStand: z.literal(true).optional(), // Prone it can't end on itself, as Hideous Laughter's
     // It can spend its action to repeat the save, as Irresistible Dance's (combat/fear.ts).
     actionSave: z.literal(true).optional(),
+    // It, or another creature within 5 feet, can take an action to make this check against the save's DC (or `dc`),
+    // ending every effect of its source on a success, as Ensnaring Strike's Strength (Athletics) (combat/fear.ts).
+    escape: z
+      .strictObject({
+        ability: AbilitySchema,
+        skill: SkillSchema.optional(),
+        dc: z.number().int().min(1).optional(),
+      })
+      .optional(),
     failExhaustion: z.literal(true).optional(), // each failed repeat save gives a level of Exhaustion
     // Something that would end it does so only after the save it came with, as Contagion's Poisoned.
     clings: z.literal(true).optional(),
@@ -847,11 +875,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .optional(),
   }),
   // Pushed straight away from the caster or pulled toward it, as Thunderous Smite or Thorn Whip, only when this size
-  // or smaller with `maxSize`.
+  // or smaller with `maxSize`; or moved north, south, east or west by a d4, as by Infestation.
   z.strictObject({
     kind: z.literal("forcedMove"),
     feet: z.number(),
-    direction: z.enum(["away", "toward"]),
+    direction: z.enum(["away", "toward", "random"]),
     maxSize: SizeSchema.optional(),
     largerBy: z.number().int().min(0).optional(), // only a target at most this many sizes larger than the caster
   }),
@@ -1200,6 +1228,15 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("slay"),
     hpAtMost: z.number().int().min(1),
   }),
+  // Damage to another creature within `feet` of the target, the nearest of the caster's foes there, and `perTier` dice
+  // more for each cantrip tier past the first, as Green-Flame Blade's leaping fire. shortcut: the nearest foe, not
+  // the one the player picks.
+  z.strictObject({
+    kind: z.literal("splash"),
+    feet: z.number().int().min(5),
+    damage: z.array(DamageSchema).min(1),
+    perTier: DiceSchema.optional(),
+  }),
   // The target gains this many levels of Exhaustion, as a sphinx's Weight of Years.
   z.strictObject({
     kind: z.literal("exhaustion"),
@@ -1247,6 +1284,10 @@ const BurstSchema = z.strictObject({
   dc: FormulaSchema,
   damage: z.array(DamageSchema).min(1),
   half: z.literal(true).optional(),
+  others: z.literal(true).optional(), // only those round the target, not the target itself, as Detonate's explosion
+  // the saves have Disadvantage when the spell dropped the target to 0 Hit Points, as Detonate's
+  dropped: z.literal("disadvantage").optional(),
+  everyone: z.literal(true).optional(), // each creature there, of either side, as Detonate's
 });
 
 export const OnHitSaveSchema = z.strictObject({
@@ -1283,6 +1324,8 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       bypassCover: z.literal(true).optional(), // ignores Half and Three-Quarters Cover, as Spellfire Flare's blasts
       unarmed: z.literal(true).optional(), // an Unarmed Strike, as Martial Arts' or Vampiric Bite's
       finesse: z.literal(true).optional(), // a Finesse weapon a feature makes, as a Psychic Blade, for Sneak Attack
+      // Advantage against a target in Dim Light or Darkness, as Shadow Blade's sword
+      shadowAdvantage: z.literal(true).optional(),
     }),
     damage: z.array(DamageSchema).min(1),
     onHit: LeafEffectsSchema,
@@ -1297,6 +1340,15 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     missDamage: z.literal("half").optional(), // a miss still deals half the damage, as Acid Arrow's splash
     // Hit or miss, the target and each creature within `radius` of it then save or take `damage`, as Ice Knife's shard.
     burst: BurstSchema.optional(),
+    // When two of its first damage's dice show the same number, the attack leaps to another creature within `feet` of
+    // the one hit, never one it struck before, with a new roll: as often as the slot's level with `slotLevel`, as
+    // Chromatic Orb's, or with no limit, as Chaos Bolt's (combat/leap.ts).
+    leap: z
+      .strictObject({
+        feet: z.number().int().min(5),
+        max: z.literal("slotLevel").optional(),
+      })
+      .optional(),
   }),
   z.strictObject({
     kind: z.literal("save"),
@@ -1343,6 +1395,9 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     // with an area, one creature of the caster's choice in it, the most hurt of its side, also gets these, as Wither
     // and Bloom's Hit Point Dice
     chosen: z.array(LeafEffectSchema).min(1).optional(),
+    // the damage lands only on a target that ends this near the caster once its effects are done, as Lightning Lure's
+    damageWithin: z.number().int().min(5).optional(),
+    burst: BurstSchema.optional(), // a save round each target once its own is done, as Detonate's explosion
   }),
 ]);
 export type Resolution = z.infer<typeof ResolutionSchema>;
@@ -1465,6 +1520,7 @@ export const TargetingSchema = z.union([
     area: z.strictObject({
       shape: z.enum(["sphere", "cone", "cube", "line", "emanation"]),
       radius: z.number(),
+      width: z.number().int().min(10).optional(), // a line this many feet wide, as Festering Blast's 10, not 5
     }),
     range: RangeSchema,
     side: SideSchema,
@@ -1632,6 +1688,11 @@ export const ActivationSchema = z.strictObject({
   keepsHidden: z.literal(true).optional(),
   // What the bearer gets as an `afterHit` activation is taken, as Cunning Strike's Withdraw move.
   selfEffects: z.array(LeafEffectSchema).min(1).optional(),
+  // Taking it ends the spell that granted it, as Holy Weapon's burst of radiance.
+  dismisses: z.literal(true).optional(),
+  // Once its attacks are made, the bearer teleports to a square within this many feet of the first creature it aimed
+  // at, as Steel Wind Strike. shortcut: the first such creature, not the one the player picks.
+  teleportAfter: z.number().int().min(5).optional(),
   // only while an effect of one of these features' activations is on the bearer, as Travel along the Tree in a Rage,
   // or while it concentrates on one of these spells, as Telekinetic Master's attack
   while: z.array(ContentIdSchema).min(1).optional(),

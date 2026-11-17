@@ -17,7 +17,15 @@ import {
   NS,
   frame,
 } from "../state.ts";
-import { ALL, DECLINE, encodeOption, parseOption } from "./ids.ts";
+import {
+  ALL,
+  DECLINE,
+  encodeOption,
+  parseOption,
+  spellOfSource,
+  WEAPON_PREFIX,
+  weaponItemId,
+} from "./ids.ts";
 import { forgoAdvantageFrame, forgoFrame, SNEAK_DICE } from "./strikes.ts";
 import { lastsFor } from "./durations.ts";
 import { aroundHit, replaceHitFrame, runReplaceHit } from "./ranged-smite.ts";
@@ -25,10 +33,11 @@ import { againstTarget, missFrames, runApplyMiss } from "./spell-riders.ts";
 import { duelBroken, duelDamaged, duelHampers } from "./duel.ts";
 import { distanceFeet } from "../grid.ts";
 import { grapplesOn } from "./grapple.ts";
-import { behindTotalCover, coverAgainst, seeing } from "../sight.ts";
+import { behindTotalCover, coverAgainst, lightAt, seeing } from "../sight.ts";
 import { insideDamageEvents, swallowerOf } from "./swallow.ts";
 import {
   awaitDecision,
+  type Dice,
   type Frame,
   PLAYER_ACTOR,
   type SystemEvent,
@@ -57,9 +66,11 @@ import {
   modifierFor,
   passiveModifiers,
   evaluateFormula,
+  cantripTier,
   rollAmount,
   rollDiceNotation,
   saveBonus,
+  scaleActivation,
   spellSaveDc,
   type Stats,
 } from "../stats.ts";
@@ -90,6 +101,7 @@ import {
   type LeafEffect,
   MonsterSchema,
   type Resolution,
+  SpellSchema,
 } from "../schemas.ts";
 import {
   armoredReduction,
@@ -176,6 +188,8 @@ export const AttackSchema = z.object({
     .optional(),
   passed: z.array(z.string()).optional(), // creatures that already answered the roll or turned it down
   strikes: z.array(z.string()).optional(), // strike options picked in place of the roll's Advantage, as Brutal Strike's
+  leapt: z.array(z.string()).optional(), // the creatures a leaping attack struck before this one, as Chromatic Orb's
+  spell: z.string().optional(), // the spell source whose weapon attack this is, as Booming Blade's
 });
 
 // Who a projectile or later attack actually goes for, given who is still standing.
@@ -934,6 +948,8 @@ export function runAttackRoll(
         );
       }) ||
       traitAttackAdvantage(stats, attacker, target, targetStats, state) ||
+      (resolution.attack.shadowAdvantage === true &&
+        lightAt(target.position, state, context) !== "bright") ||
       mountedStrike(attacker, target, stats, context));
   const held = payload.rolled;
   // Redirect Attack: the target trades places with an ally next to it, who takes the attack instead.
@@ -1012,7 +1028,18 @@ export function runAttackRoll(
           modifier.on === "attacksAgainst" &&
           modifier.spells,
       )) ||
-    // A strong wind hampers ranged weapon attacks, and a dampened magic zone spell attacks (environment.ts).
+    // A strong wind hampers ranged weapon attacks, and a dampened magic zone spell attacks (environment.ts); Frostbite
+    // the next weapon attack.
+    [
+      ...attacker.activeEffects.map(({ modifier }) => modifier),
+      ...passiveModifiers(stats.passives),
+    ].some(
+      (modifier) =>
+        modifier.kind === "disadvantage" &&
+        modifier.on === "attacks" &&
+        modifier.weapon === true &&
+        resolution.attack.type === "weapon",
+    ) ||
     passiveModifiers(stats.passives).some(
       (modifier) =>
         modifier.kind === "disadvantage" &&
@@ -1168,10 +1195,16 @@ export function runAttackRoll(
           }),
         ]
       : []),
-    ...onceEnded(attacker, "attacks"),
+    ...onceEnded(
+      attacker,
+      "attacks",
+      undefined,
+      resolution.attack.type === "weapon",
+    ),
     ...actingEnds(attacker, action),
     ...(isMelee(action) ? prisonEvents(attacker, context) : []),
     ...onceEnded(target, "attacksAgainst", attacker.id),
+    ...quiverDrawn(attacker, action, context),
     ...revealEvents(attacker),
     ...unwarded,
     // Attacking lowers the attacker's own Diabolic Ward until its next turn.
@@ -1203,6 +1236,8 @@ export function runAttackRoll(
     ...(payload.noModifier ? { noModifier: true } : {}),
     ...(payload.poleStrike ? { poleStrike: true } : {}),
     ...(payload.strikes ? { strikes: payload.strikes } : {}),
+    ...(payload.leapt ? { leapt: payload.leapt } : {}),
+    ...(payload.spell ? { spell: payload.spell } : {}),
     // The Stealth total it attacked from hiding with, for Supreme Sneak's Stealth Attack.
     ...(hiddenWith === undefined ? {} : { hidden: hiddenWith }),
   };
@@ -1293,6 +1328,8 @@ export const HitSchema = z.object({
   strikes: z.array(z.string()).optional(), // the strike options chosen for this hit, resolved after its damage
   deflect: z.string().optional(), // the reaction that sends the force back out if the damage drops to 0, as Deflect Missile
   transfer: z.string().optional(), // the creature that takes what a reaction took off, as Transfer Harm's podling
+  leapt: z.array(z.string()).optional(), // as the attack's
+  spell: z.string().optional(), // as the attack's
 });
 
 export const ReactionSchema = HitSchema.extend({ answer: z.string() });
@@ -1656,7 +1693,10 @@ function landHit(
   const events: SystemEvent[] = [];
   let totalDealt = 0;
   const absorbed: { amount: number; type: DamageType }[] = [];
-  const firstType = resolution.damage[0]?.type;
+  // The first damage's dice, for Chaos Bolt's type and a leap's matching numbers.
+  const faces: number[] = [];
+  const printedFirst = resolution.damage[0]?.type;
+  let gained = 0; // Temporary Hit Points the hit gives the attacker, as an Executioner's Axe's
 
   // Add dice-based extra damage such as Sneak Attack to the first damage roll.
   let extra = 0;
@@ -1766,22 +1806,29 @@ function landHit(
     ({ type }) => type === maxed?.type,
   );
   const weaponDice = weaponDamageDice(dice, action.id, stats, context);
-  resolution.damage.forEach(({ amount, type }, index) => {
+  resolution.damage.forEach(({ amount, type: printedType, tempHp }, index) => {
+    const recording = index === 0 && needsFaces(resolution);
     const pierces = index === pierceIndex;
     const die = /d(\d+)/.exec(amount.dice ?? "")?.[1];
     const roll = () => {
+      if (recording) faces.length = 0;
       const inner =
         index === maxIndex
           ? HIGHEST
           : masteredDice(
               weaponDice,
-              type,
+              printedType,
               mastered,
               rerolled,
               state.combat?.environment?.forceFloor,
             );
       if (!(pierces && rerolls)) {
-        return rollAmount(amount, stats, inner, multiplier);
+        return rollAmount(
+          amount,
+          stats,
+          recording ? recorded(inner, faces) : inner,
+          multiplier,
+        );
       }
       let count = 0;
       const total = rollAmount(
@@ -1805,7 +1852,7 @@ function landHit(
       (pierces && payload.critical && die
         ? rollDiceNotation(`1d${die}`, dice)
         : 0) +
-      (index === 0 && type === firstType
+      (index === 0 && printedType === printedFirst
         ? extra +
           damageBonus(attacker, resolution, stats, context) +
           (pain ? stats.proficiency : 0) +
@@ -1814,11 +1861,23 @@ function landHit(
       (index === 0 && payload.noModifier && resolution.attack.ability
         ? Math.max(0, modifierFor(stats, resolution.attack.ability))
         : 0);
+    const type =
+      rolledType(resolution.damage[0]?.rolledTypes, faces, responses) ??
+      printedType;
     const final = finalDamage(Math.max(0, rolled), type, responses);
     // Damage it absorbs heals it on its own, rather than taking from the rest of the hit.
     if (final < 0) absorbed.push({ amount: final, type });
     else totalDealt += final;
+    if (tempHp && final > 0) gained += final;
   });
+  const firstType =
+    rolledType(resolution.damage[0]?.rolledTypes, faces, responses) ??
+    printedFirst;
+  if (gained > 0) {
+    events.push(
+      dndEvent(`${NS}:tempHpGained`, { actor: attacker.id, amount: gained }),
+    );
+  }
   if (pierce.used) {
     events.push(
       dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key: pierceKey }),
@@ -1826,13 +1885,19 @@ function landHit(
   }
 
   events.push(...sideRidersSpent(attacker, target, state));
+  const riders = hitRiders(
+    attacker,
+    target,
+    action,
+    resolution,
+    responses,
+    context,
+  );
+  events.push(...riders.events);
   const hits = [
     ...(firstType ? [{ amount: totalDealt, type: firstType }] : []),
     ...absorbed,
-    ...[
-      ...typedExtra,
-      ...hitRiders(attacker, target, resolution, responses, state),
-    ].map(({ amount, type }) => ({
+    ...[...typedExtra, ...riders.damage].map(({ amount, type }) => ({
       amount: finalDamage(
         rollAmount(amount, stats, dice, multiplier),
         type,
@@ -1905,6 +1970,7 @@ function landHit(
     ),
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
+    ...spellHitEvents(payload.spell, attacker, target, stats, context),
     ...oncePerTurnHit(resolution, action, attacker, target, context),
     ...drained(resolution, attacker, target, dealt.dealt, stats, context),
     ...feast(attacker, target, stats, context),
@@ -2032,6 +2098,9 @@ function landHit(
         : []),
       ...(masteryOf(attacker, action.id, context)
         ? [frame("masteryHit", { ...payload, dealt: dealt.dealt })]
+        : []),
+      ...(resolution.leap && new Set(faces).size < faces.length
+        ? [frame("leap", payload)]
         : []),
       ...passed.frames,
       ...afterDamage(target, dealt.dealt + nested.dealt, cause, [], landed),
@@ -2546,22 +2615,86 @@ function lessenHits<T extends { readonly amount: number }>(
   });
 }
 
+// Booming Blade: the spell whose weapon attack hit lands its other effects on the creature hit, grown with the
+// caster's level as a cantrip's damage is.
+function spellHitEvents(
+  sourceId: string | undefined,
+  attacker: Actor,
+  target: Actor,
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  const spellId = sourceId ? spellOfSource(sourceId) : null;
+  const spell = spellId
+    ? SpellSchema.safeParse(context.content(spellId)).data
+    : undefined;
+  if (!sourceId || !spell?.activation) return [];
+  const activation =
+    spell.level === 0 && spell.cantrip
+      ? scaleActivation(
+          spell.activation,
+          spell.cantrip.perTier,
+          cantripTier(stats.level),
+        )
+      : spell.activation;
+  const { resolution } = activation;
+  if (resolution.kind !== "automatic") return [];
+  return leafEvents(
+    resolution.effects.filter((effect) => effect.kind !== "weaponAttack"),
+    sourceId,
+    attacker,
+    target,
+    context,
+  );
+}
+
+// Whether the hit's first damage needs its dice's faces: for a type they pick, or numbers that match for a leap.
+const needsFaces = (resolution: Extract<Resolution, { kind: "attack" }>) =>
+  resolution.leap !== undefined ||
+  resolution.damage[0]?.rolledTypes !== undefined;
+
+// Dice that note each face they roll.
+const recorded = (dice: Dice, faces: number[]): Dice => ({
+  below: (count) => dice.below(count),
+  roll: (sides) => {
+    const face = dice.roll(sides);
+    faces.push(face);
+    return face;
+  },
+});
+
+// Chaos Bolt: the type one of the dice picks, by its face, the one the target resists least.
+function rolledType(
+  types: readonly DamageType[] | undefined,
+  faces: readonly number[],
+  responses: ReturnType<typeof damageResponses>,
+): DamageType | undefined {
+  if (!types || faces.length === 0) return undefined;
+  const picks = [
+    ...new Set(faces.map((face) => types[(face - 1) % types.length])),
+  ].flatMap((type) => (type ? [type] : []));
+  return picks.length > 1 ? typeAgainst(picks, responses) : picks[0];
+}
+
 // Extra damage riders: Divine Favor sits on the attacker, while Hex and Hunter's Mark sit on the target.
 function hitRiders(
   attacker: Actor,
   target: Actor,
+  action: KnownAction,
   resolution: Extract<Resolution, { kind: "attack" }>,
   responses: ReturnType<typeof damageResponses>,
-  state: DndState,
-): readonly Damage[] {
+  context: Context,
+): { readonly damage: readonly Damage[]; readonly events: SystemEvent[] } {
+  const { state } = context;
   const seen = new Set<string>();
+  const events: SystemEvent[] = [];
   const sided = (casterId: string) =>
     state.actors[casterId]?.side === attacker.side;
   const carried = [
     ...attacker.activeEffects.map((effect) => ({ effect, by: "bearer" })),
     ...target.activeEffects.map((effect) => ({ effect, by: "caster" })),
   ];
-  return carried.flatMap(({ effect, by }) => {
+  const damage = carried.flatMap(({ effect, by }) => {
     const { modifier, sourceId, casterId } = effect;
     if (
       modifier.kind !== "hitDamage" ||
@@ -2570,17 +2703,77 @@ function hitRiders(
         : modifier.dealtBy !== by ||
           (by === "caster" && casterId !== attacker.id)) ||
       (modifier.weaponOnly && resolution.attack.type !== "weapon") ||
+      (modifier.melee && !isMelee(action)) ||
+      (modifier.ammunition && !firesAmmunition(action, context)) ||
       (modifier.within !== undefined &&
         distanceFeet(attacker.position, target.position) > modifier.within) ||
+      (modifier.oncePerTurn &&
+        attacker.usedThisTurn.includes(`${HIT_DAMAGE_ONCE}${sourceId}`)) ||
       seen.has(sourceId)
     ) {
       return [];
     }
     seen.add(sourceId);
+    if (modifier.oncePerTurn) {
+      events.push(
+        dndEvent(`${NS}:oncePerTurnUsed`, {
+          actor: attacker.id,
+          key: `${HIT_DAMAGE_ONCE}${sourceId}`,
+        }),
+      );
+    }
     const type = modifier.types
       ? typeAgainst(modifier.types, responses)
       : modifier.damage.type;
     return [{ ...modifier.damage, type }];
+  });
+  return { damage, events };
+}
+
+// A once-a-turn hitDamage's use, by its source: "hitDamage:<source>".
+const HIT_DAMAGE_ONCE = "hitDamage:";
+
+// An attack with a weapon that fires ammunition, as Flame Arrows' quiver feeds.
+function firesAmmunition(action: KnownAction, context: Context): boolean {
+  if (!action.id.startsWith(WEAPON_PREFIX)) return false;
+  const item = ItemSchema.safeParse(
+    context.content(weaponItemId(action.id)),
+  ).data;
+  return item?.type === "weapon" && item.properties.includes("ammunition");
+}
+
+// Flame Arrows: each attack with an Ammunition weapon draws a piece from the quiver, hit or miss, and the last ends it.
+function quiverDrawn(
+  attacker: Actor,
+  action: KnownAction,
+  context: Context,
+): SystemEvent[] {
+  if (!firesAmmunition(action, context)) return [];
+  return attacker.activeEffects.flatMap((effect) => {
+    const { modifier } = effect;
+    if (
+      modifier.kind !== "hitDamage" ||
+      !modifier.ammunition ||
+      modifier.uses === undefined
+    ) {
+      return [];
+    }
+    const ended = dndEvent(`${NS}:effectEnded`, {
+      actor: attacker.id,
+      sourceId: effect.sourceId,
+    });
+    return modifier.uses <= 1
+      ? [ended]
+      : [
+          ended,
+          dndEvent(`${NS}:effectAdded`, {
+            actor: attacker.id,
+            effect: {
+              ...effect,
+              modifier: { ...modifier, uses: modifier.uses - 1 },
+            },
+          }),
+        ];
   });
 }
 

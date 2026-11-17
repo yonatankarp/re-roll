@@ -55,6 +55,8 @@ import {
   COLLECT,
   collectable,
   collectEvents,
+  escapedEvents,
+  escapeFrom,
   SHAKE,
   shakeable,
   shakeEvents,
@@ -264,6 +266,18 @@ function reportedSave(
     ],
   };
 }
+
+// "Strength (Athletics)", for an escape check's label.
+const checkName = ({
+  ability,
+  skill,
+}: {
+  readonly ability: Ability;
+  readonly skill?: Skill | undefined;
+}): string =>
+  skill
+    ? `${ABILITY_NAMES[ability]} (${capitalized(skill)})`
+    : ABILITY_NAMES[ability];
 
 // An ability check, in a fight or a scene. Help's Advantage on a check is used up by it.
 export function abilityCheck(
@@ -894,15 +908,20 @@ export function tacticOptions(
   });
   // Shaking an ally out of a spell, as out of Sleep, and saving against a spell with an action, as Irresistible Dance.
   for (const ally of shakeable(actor, state)) {
+    const escape = escapeFrom(ally)?.escape;
     options.push({
       id: encodeOption(SHAKE, ally.id),
-      label: `Shake ${ally.name} out of it`,
+      label: escape
+        ? `Free ${ally.name} (${checkName(escape)}, DC ${String(escape.dc)})`
+        : `Shake ${ally.name} out of it`,
     });
   }
   for (const held of collectable(actor)) {
     options.push({
       id: encodeOption(COLLECT, held.casterId, held.sourceId),
-      label: `Collect yourself (${ABILITY_NAMES[held.repeatSave?.ability ?? "wis"]} save, DC ${String(held.repeatSave?.dc ?? 10)})`,
+      label: held.escape
+        ? `Break free (${checkName(held.escape)}, DC ${String(held.escape.dc)})`
+        : `Collect yourself (${ABILITY_NAMES[held.repeatSave?.ability ?? "wis"]} save, DC ${String(held.repeatSave?.dc ?? 10)})`,
     });
   }
   // Help also stabilizes a dying creature within 5 feet, which every companion should be able to do.
@@ -1116,22 +1135,55 @@ export function runTactic(
     if (!target) throw new Error(`${payload.answer} has no target`);
     return target;
   };
+  // Ensnaring Strike's vines: `by`'s check frees `held` on a success.
+  const escapeCheck = (
+    by: Actor,
+    freed: Actor,
+    held: ActiveEffect,
+  ): SystemEvent[] => {
+    const { escape } = held;
+    if (!escape) return [];
+    const rolled = abilityCheck(
+      by,
+      escape.skill,
+      escape.ability,
+      escape.dc,
+      (success) =>
+        success ? `${by.name} frees ${freed.name}` : `${freed.name} stays held`,
+      context,
+    );
+    return [
+      ...rolled.events,
+      ...(rolled.success ? escapedEvents(freed, held) : []),
+    ];
+  };
 
   const mounted = mountEvents(actor, kind, targetId, state, context);
   if (mounted) return { events: mounted };
   switch (kind) {
-    case SHAKE:
+    case SHAKE: {
+      const target = needTarget();
+      const held = escapeFrom(target);
       return {
-        events: [spend("action"), ...shakeEvents(needTarget())],
+        events: [
+          spend("action"),
+          ...(held ? escapeCheck(actor, target, held) : shakeEvents(target)),
+        ],
         frames: done,
       };
+    }
     case COLLECT: {
       const held = collectable(actor).find(
         (item) => item.sourceId === detail && item.casterId === targetId,
       );
       if (!held) throw new Error(`${actor.id} has nothing to collect from`);
       return {
-        events: [spend("action"), ...collectEvents(actor, held, context)],
+        events: [
+          spend("action"),
+          ...(held.escape
+            ? escapeCheck(actor, actor, held)
+            : collectEvents(actor, held, context)),
+        ],
         frames: done,
       };
     }
@@ -1752,6 +1804,14 @@ export function runAfterMove(
         false,
         context,
       ).events,
+      ...(brambles.modifier.once
+        ? [
+            dndEvent(`${NS}:effectEnded`, {
+              actor: mover.id,
+              sourceId: brambles.sourceId,
+            }),
+          ]
+        : []),
     );
   }
   if (charges) {

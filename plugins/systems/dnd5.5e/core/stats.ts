@@ -70,6 +70,7 @@ import { holdsConcentration, withMetamagic } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
 import { withWeaponRiders } from "./weapon-riders.ts";
 import {
+  GRANTED_PREFIX,
   THROW_PREFIX,
   WEAPON_PREFIX,
   castFrom,
@@ -2547,25 +2548,32 @@ function withEffectActions(
     if (modifier.kind !== "grantedAction") continue;
     const spell = lookup(access, SpellSchema, spellOfSource(sourceId) ?? "");
     if (!spell.granted) continue;
+    // A cantrip's action grows with the bearer's level, as Produce Flame's hurl.
     const scaled = spell.upcast
       ? scaleActivation(
           spell.granted,
           spell.upcast.perSlotLevel,
           (level ?? spell.level) - spell.level,
         )
-      : spell.granted;
+      : spell.level === 0 && spell.cantrip
+        ? scaleActivation(
+            spell.granted,
+            spell.cantrip.perTier,
+            cantripTier(stats.level),
+          )
+        : spell.granted;
     const { resolution } = scaled;
     granted.push({
-      id: `granted:${sourceId}`,
+      id: `${GRANTED_PREFIX}${sourceId}`,
       name: spell.name,
-      activation: retyped(
+      activation: ((dcSet: Activation) =>
+        modifier.damage ? retyped(dcSet, modifier.damage) : dcSet)(
         resolution.kind === "save" && modifier.dc !== undefined
           ? {
               ...scaled,
               resolution: { ...resolution, dc: { base: modifier.dc, add: [] } },
             }
           : scaled,
-        modifier.damage,
       ),
       spellLevel: null,
     });
@@ -2743,10 +2751,16 @@ export function attackBonus(
   const { attack } = resolution;
   const exhaustion = 2 * stats.exhaustion + stats.ordeal;
   if (attack.flatBonus !== undefined) return attack.flatBonus - exhaustion;
+  // A Finesse weapon a feature or spell makes, as Shadow Blade's, uses the better of Strength and Dexterity.
   const ability =
     attack.type === "spell"
       ? (attack.ability ?? stats.spellAbility)
-      : attack.ability;
+      : (attack.ability ??
+        (attack.finesse
+          ? modifierFor(stats, "dex") > modifierFor(stats, "str")
+            ? "dex"
+            : "str"
+          : undefined));
   const proficiency = attack.proficient === false ? 0 : stats.proficiency;
   const item =
     attack.type === "spell"
@@ -2937,7 +2951,7 @@ function classTiered(
   );
 }
 
-function cantripTier(level: number): number {
+export function cantripTier(level: number): number {
   return level >= 17 ? 3 : level >= 11 ? 2 : level >= 5 ? 1 : 0;
 }
 
@@ -3076,12 +3090,28 @@ export function scaleActivation(
       const { modifier } = effect;
       switch (modifier.kind) {
         // An extra hit's damage grows too, as Conjure Minor Elementals'.
+        // Flame Arrows' quiver holds more pieces with `addBonus`.
         case "hitDamage": {
           const [hit] = damage([modifier.damage]);
           return hit
-            ? { ...effect, modifier: { ...modifier, damage: hit } }
+            ? {
+                ...effect,
+                modifier: {
+                  ...modifier,
+                  damage: hit,
+                  ...(addBonus && modifier.uses !== undefined
+                    ? { uses: modifier.uses + addBonus * steps }
+                    : {}),
+                },
+              }
             : effect;
         }
+        // Booming Blade's thunder for moving grows with its cantrip tier.
+        case "moveDamage":
+          return {
+            ...effect,
+            modifier: { ...modifier, damage: damage(modifier.damage) },
+          };
         // A flat bonus grows only by `addBonus`, as Elemental Weapon's +1 to hit or Aid's Hit Point maximum.
         case "bonus":
           return addBonus && modifier.amount.dice === undefined
@@ -3216,9 +3246,39 @@ export function rollAmount(
   const rolled = notation
     ? amount.reroll
       ? rollRerolling(notation, rolling, diceMultiplier, amount.reroll)
-      : rollDiceNotation(notation, rolling, diceMultiplier)
+      : amount.explode
+        ? rollExploding(
+            notation,
+            rolling,
+            diceMultiplier,
+            evaluateFormula(amount.explode, stats),
+          )
+        : rollDiceNotation(notation, rolling, diceMultiplier)
     : 0;
   return rolled + (amount.bonus ? evaluateFormula(amount.bonus, stats) : 0);
+}
+
+// Each die showing its highest face, the added ones too, adds another die, at most `most` more, as Sorcerous Burst's.
+export function rollExploding(
+  notation: string,
+  dice: Dice,
+  multiplier: number,
+  most: number,
+): number {
+  const [count = "0", sides = "0"] = notation.split("d");
+  let left = Number(count) * multiplier;
+  let added = 0;
+  let total = 0;
+  while (left > 0) {
+    left -= 1;
+    const face = dice.roll(Number(sides));
+    total += face;
+    if (face === Number(sides) && added < most) {
+      added += 1;
+      left += 1;
+    }
+  }
+  return total;
 }
 
 export function damageResponses(

@@ -137,7 +137,12 @@ export function provokers(
   path?: readonly Square[],
   height?: number,
 ): readonly { readonly foe: Actor; readonly melee: KnownAction }[] {
-  if (hasPassive(deriveStats(actor, access), "noOpportunityAttacks")) return [];
+  if (
+    hasPassive(deriveStats(actor, access), "noOpportunityAttacks") ||
+    actor.activeEffects.some(({ modifier }) => modifier.kind === "unprovoking")
+  ) {
+    return [];
+  }
   // Sentinel's Guardian: Disengage doesn't stop a Sentinel's Opportunity Attack. A mount's Disengage covers its
   // rider. shortcut: either one's covers both.
   const mount = ridden(actor, state);

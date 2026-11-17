@@ -146,6 +146,7 @@ export function hasFlag(
       // spell attacks or Concentration saves too.
       (!("spells" in modifier) || !modifier.spells) &&
       (!("ranged" in modifier) || !modifier.ranged) &&
+      (modifier.kind !== "disadvantage" || !modifier.weapon) &&
       (!("spellAttacks" in modifier) || !modifier.spellAttacks) &&
       (!("concentration" in modifier) || !modifier.concentration) &&
       (!("casterSpells" in modifier) || !modifier.casterSpells) &&

@@ -2,7 +2,14 @@ import { type Frame, frameHandler, type SystemResult } from "#sdk";
 import { z } from "zod";
 import { finalDamage, halved } from "../rules.ts";
 import type { Resolution } from "../schemas.ts";
-import { type Actor, applyDndEvent, frame, isDead, NS } from "../state.ts";
+import {
+  type Actor,
+  applyDndEvent,
+  frame,
+  isDead,
+  isDown,
+  NS,
+} from "../state.ts";
 import {
   damageResponses,
   deriveStats,
@@ -18,11 +25,13 @@ import {
   resolveTargets,
   typeAgainst,
 } from "./effects.ts";
+import { distanceFeet } from "../grid.ts";
 import { AIM } from "./ids.ts";
 import {
   actorOf,
   CHECK_END,
   type Context,
+  enemies,
   exemptFrom,
   findAction,
   hasPassive,
@@ -36,7 +45,7 @@ import { afterDamage } from "./reactions.ts";
 type AttackResolution = Extract<Resolution, { kind: "attack" }>;
 type Hit = z.infer<typeof HitSchema>;
 
-// The hit's damage against this target (DamageSchema's `types`, `hurtDie` and `vs`).
+// The hit's damage against this target (DamageSchema's `types`, `hurtDie`, `vs`, `except` and `only`).
 export function againstTarget(
   resolution: AttackResolution,
   target: Actor,
@@ -48,7 +57,8 @@ export function againstTarget(
         item.types !== undefined ||
         item.hurtDie !== undefined ||
         item.vs !== undefined ||
-        item.except !== undefined,
+        item.except !== undefined ||
+        item.only !== undefined,
     )
   ) {
     return resolution;
@@ -60,6 +70,7 @@ export function againstTarget(
     ...resolution,
     damage: resolution.damage.flatMap((item) => {
       if (item.except && exemptFrom(item.except, target, met)) return [];
+      if (item.only && !exemptFrom(item.only, target, met)) return [];
       const type = item.types ? typeAgainst(item.types, responses) : item.type;
       const count = (item.amount.dice ?? "").split("d")[0] ?? "0";
       const amount =
@@ -67,7 +78,12 @@ export function againstTarget(
           ? { ...item.amount, dice: `${count}d${String(item.hurtDie)}` }
           : item.amount;
       return [
-        { amount, type },
+        {
+          amount,
+          type,
+          ...(item.rolledTypes ? { rolledTypes: item.rolledTypes } : {}),
+          ...(item.tempHp ? { tempHp: true as const } : {}),
+        },
         ...(item.vs && exemptFrom(item.vs.creatureTypes, target, met)
           ? [{ amount: { dice: item.vs.dice }, type }]
           : []),
@@ -162,10 +178,7 @@ export function runBurst(
     payload.slotLevel,
   );
   const { resolution } = action.activation;
-  const burst =
-    resolution.kind === "attack" || resolution.kind === "automatic"
-      ? resolution.burst
-      : undefined;
+  const { burst } = resolution;
   if (!burst || !target.position) return {};
   const { targeting } = action.activation;
   const exploding: KnownAction = {
@@ -185,15 +198,24 @@ export function runBurst(
         onSuccessDamage: burst.half ? "half" : "none",
         onFail: [],
         onSuccess: [],
+        // Detonate's explosion is harder to escape when the seed dropped the creature it was in.
+        ...(burst.dropped && target.hp <= 0
+          ? { edges: [{ roll: "disadvantage" as const }] }
+          : {}),
       },
     },
   };
-  const caught = resolveTargets(
-    `${AIM}${target.id}`,
-    exploding,
-    attacker,
-    context,
-  );
+  const around = (
+    burst.everyone
+      ? Object.values(context.state.actors).filter(
+          (item) =>
+            !isDead(item) &&
+            item.position !== null &&
+            distanceFeet(target.position, item.position) <= burst.radius,
+        )
+      : resolveTargets(`${AIM}${target.id}`, exploding, attacker, context)
+  ).filter((item) => !burst.others || item.id !== target.id);
+  const caught = around;
   const result = resolveAction(
     exploding,
     attacker,
@@ -209,7 +231,61 @@ export function runBurst(
   };
 }
 
+// Chromatic Orb's or Chaos Bolt's leap from the creature just hit to another within reach of it, with a new roll.
+// shortcut: it leaps to the nearest foe of the attacker's it hasn't struck yet (the most hurt of those as near),
+// rather than one the player picks.
+const LeapSchema = z.object({
+  attacker: z.string(),
+  actionId: z.string(),
+  target: z.string(),
+  slotLevel: z.number().optional(),
+  leapt: z.array(z.string()).optional(),
+});
+
+export function runLeap(
+  hit: z.infer<typeof LeapSchema>,
+  context: Context,
+): SystemResult {
+  const { state } = context;
+  const attacker = actorOf(state, hit.attacker);
+  const from = actorOf(state, hit.target);
+  const action = findAction(attacker, hit.actionId, context, hit.slotLevel);
+  const leap = attackOf(action)?.leap;
+  if (!leap || !from.position) return {};
+  const leapt = [...(hit.leapt ?? []), from.id];
+  const most =
+    leap.max === "slotLevel"
+      ? (hit.slotLevel ?? action.spellLevel ?? 1)
+      : Infinity;
+  if (leapt.length - 1 >= most) return {};
+  const [next] = enemies(state, attacker)
+    .filter(
+      (item) =>
+        !leapt.includes(item.id) &&
+        !isDown(item) &&
+        distanceFeet(from.position, item.position) <= leap.feet,
+    )
+    .sort(
+      (a, b) =>
+        distanceFeet(from.position, a.position) -
+          distanceFeet(from.position, b.position) || a.hp - b.hp,
+    );
+  if (!next) return {};
+  return {
+    frames: [
+      frame("attackRoll", {
+        attacker: attacker.id,
+        actionId: action.id,
+        target: next.id,
+        ...(hit.slotLevel === undefined ? {} : { slotLevel: hit.slotLevel }),
+        leapt,
+      }),
+    ],
+  };
+}
+
 // applyMiss takes a hit's payload, so it sits with attackFrames (combat/attack.ts).
 export const spellRiderFrames = {
   [`${NS}:burst`]: frameHandler({ schema: BurstSchema, run: runBurst }),
+  [`${NS}:leap`]: frameHandler({ schema: LeapSchema, run: runLeap }),
 };

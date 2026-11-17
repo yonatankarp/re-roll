@@ -10,8 +10,10 @@ import {
   modifierFor,
   passiveModifiers,
   rerollingOnes,
+  cantripTier,
   rollAmount,
   rollDiceNotation,
+  weaponAttackOf,
   wishedKey,
   saveBonus,
   scoreFloor,
@@ -2019,6 +2021,17 @@ export function leafEvents(
               ...(effect.shake ? { shake: true as const } : {}),
               ...(effect.cantStand ? { cantStand: true as const } : {}),
               ...(effect.actionSave ? { actionSave: true as const } : {}),
+              ...(effect.escape && (effect.escape.dc ?? save?.dc) !== undefined
+                ? {
+                    escape: {
+                      ability: effect.escape.ability,
+                      ...(effect.escape.skill
+                        ? { skill: effect.escape.skill }
+                        : {}),
+                      dc: effect.escape.dc ?? save?.dc ?? 10,
+                    },
+                  }
+                : {}),
               ...(effect.failExhaustion
                 ? { failExhaustion: true as const }
                 : {}),
@@ -2343,7 +2356,9 @@ export function leafEvents(
             sizeOf(target, context) <=
               sizeOf(caster, context) + effect.largerBy)
             ? pushTo(
-                caster.position,
+                effect.direction === "random"
+                  ? randomFrom(target, context.dice.roll(4))
+                  : caster.position,
                 target,
                 effect.feet,
                 context.state,
@@ -2452,6 +2467,9 @@ export function leafEvents(
         break;
       case "lift":
         events.push(...liftEvents(effect, sourceId, caster, target, context));
+        break;
+      case "splash":
+        events.push(...splashEvents(effect, caster, target, context));
         break;
       case "exhaustion":
         events.push(
@@ -2722,6 +2740,58 @@ export function leastResisted(
 
 // Of these types, the one a creature takes most from: vulnerable, then plain, then resisted, never immune if another
 // will do, as Chromatic Orb's caster picks.
+// Green-Flame Blade's fire leaping from the creature hit to the nearest other foe of the caster's beside it.
+function splashEvents(
+  effect: Extract<LeafEffect, { kind: "splash" }>,
+  caster: Actor,
+  target: Actor,
+  context: Context,
+): SystemEvent[] {
+  const [other] = Object.values(context.state.actors)
+    .filter(
+      (item) =>
+        item.id !== target.id &&
+        item.side !== caster.side &&
+        !isDown(item) &&
+        distanceFeet(target.position, item.position) <= effect.feet,
+    )
+    .sort(
+      (a, b) =>
+        distanceFeet(target.position, a.position) -
+        distanceFeet(target.position, b.position),
+    );
+  if (!other) return [];
+  const stats = deriveStats(caster, context);
+  const responses = damageResponses(other, context);
+  const tiers = cantripTier(stats.level);
+  const hits = effect.damage.map(({ amount, type }, index) => ({
+    amount: finalDamage(
+      rollAmount(amount, stats, context.dice) +
+        (index === 0 && effect.perTier && tiers > 0
+          ? rollDiceNotation(effect.perTier, context.dice, tiers)
+          : 0),
+      type,
+      responses,
+    ),
+    type,
+  }));
+  return dealEvents(other, hits, false, context).events;
+}
+
+// The square a creature is pushed away from to go north, south, east or west, by a d4's 1 to 4, as Infestation moves
+// it. shortcut: a creature that can't move or has no Speed is moved all the same.
+function randomFrom(target: Actor, face: number): Square | null {
+  const at = target.position;
+  if (!at) return null;
+  const [dx, dy] = [
+    [0, 1],
+    [0, -1],
+    [-1, 0],
+    [1, 0],
+  ][face - 1] ?? [0, 1];
+  return { x: at.x + (dx ?? 0), y: at.y + (dy ?? 0) };
+}
+
 export function typeAgainst(
   types: readonly DamageType[],
   responses: ReturnType<typeof damageResponses>,
@@ -3459,6 +3529,7 @@ export function resolveAction(
       const hurt = target.hp < met.maxHp;
       return list.flatMap((item, index) => {
         if (item.except && exemptFrom(item.except, target, met)) return [];
+        if (item.only && !exemptFrom(item.only, target, met)) return [];
         const { total = 0 } = shared[index] ?? {};
         const type = item.types
           ? typeAgainst(item.types, damageResponses(target, context))
@@ -3561,7 +3632,8 @@ export function resolveAction(
         applyRolled(target, damage(target), (amount) => amount);
         events.push(
           ...leafEvents(
-            shared(target),
+            // A spell's weapon attack lands its other effects only on a hit, as Booming Blade's (combat/attack.ts).
+            weaponAttackOf(resolution) ? [] : shared(target),
             spellSource(action),
             actor,
             target,
@@ -3862,17 +3934,20 @@ export function resolveAction(
             : null;
         if (interposed) events.push(interposed);
         lastDealt = 0;
-        if (!landed) {
-          applyRolled(target, damage(target), (amount) => {
-            if (turned) return 0;
-            if (evaded) return saved ? 0 : halved(amount);
-            if (!saved || resolution.onSuccessDamage === "full") return amount;
-            return resolution.onSuccessDamage === "half" &&
-              !spared.has(target.id) &&
-              !interposed
-              ? halved(amount)
-              : 0;
-          });
+        const scaled = (amount: number): number => {
+          if (turned) return 0;
+          if (evaded) return saved ? 0 : halved(amount);
+          if (!saved || resolution.onSuccessDamage === "full") return amount;
+          return resolution.onSuccessDamage === "half" &&
+            !spared.has(target.id) &&
+            !interposed
+            ? halved(amount)
+            : 0;
+        };
+        // Lightning Lure's damage waits on where its pull leaves the target.
+        const within = resolution.damageWithin;
+        if (!landed && within === undefined) {
+          applyRolled(target, damage(target), scaled);
         }
         events.push(
           ...leafEvents(
@@ -3885,6 +3960,25 @@ export function resolveAction(
             slotLevel,
           ),
         );
+        if (!landed && within !== undefined) {
+          const now = events.reduce(applyDndEvent, context.state).actors[
+            target.id
+          ];
+          if (now && distanceFeet(actor.position, now.position) <= within) {
+            applyRolled(target, damage(target), scaled);
+          }
+        }
+        // Detonate: an explosion round the target once its own save is done (combat/spell-riders.ts).
+        if (resolution.burst) {
+          frames.push(
+            frame("burst", {
+              attacker: actor.id,
+              actionId: action.id,
+              target: target.id,
+              ...(slotLevel === undefined ? {} : { slotLevel }),
+            }),
+          );
+        }
         const focused = turned
           ? null
           : focusFrame(

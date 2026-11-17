@@ -11,6 +11,7 @@ import {
   LootSchema,
   ModifierSchema,
   ResolutionSchema,
+  SkillSchema,
   ZoneKindSchema,
 } from "./schemas.ts";
 import { settleForms } from "./forms.ts";
@@ -99,6 +100,7 @@ export const FRAME_KINDS = [
   "castOn", // whom a spell or feature used between fights goes to (camp.ts)
   "applyMiss", // what an attack does on a miss, as Acid Arrow's splash (combat/spell-riders.ts)
   "burst", // a save round an attack's target, hit or miss, as Ice Knife's (combat/spell-riders.ts)
+  "leap", // an attack spell leaping to another creature, as Chromatic Orb's (combat/spell-riders.ts)
   "initiativeMove", // a move right after Initiative, as Unpredictable Movement's (combat/reactions.ts)
   "givenDice", // the player spends Hit Dice a spell's Short Rest gave them (rest.ts)
   "givenDiceAnswer",
@@ -230,6 +232,13 @@ const ActiveEffectSchema = z.strictObject({
   shake: z.literal(true).optional(),
   cantStand: z.literal(true).optional(),
   actionSave: z.literal(true).optional(),
+  escape: z
+    .strictObject({
+      ability: AbilitySchema,
+      skill: SkillSchema.optional(),
+      dc: z.number().int(),
+    })
+    .optional(),
   failExhaustion: z.literal(true).optional(),
   clings: z
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })

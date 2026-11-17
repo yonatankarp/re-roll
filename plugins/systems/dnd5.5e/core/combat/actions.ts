@@ -12,6 +12,7 @@ import {
   ALL,
   DEATH_SAVE,
   encodeOption,
+  GRANTED_PREFIX,
   ITEM_PREFIX,
   MOVE,
   parseOption,
@@ -19,6 +20,7 @@ import {
   PICK_UP,
   STAY,
 } from "./ids.ts";
+import { teleportFrame } from "./movement.ts";
 import {
   type Actor,
   CAST_ACTION,
@@ -396,6 +398,7 @@ function castAction(
         : revealEvents(actor)),
       ...(result.events ?? []),
       ...dealtSelfEffects(action, actor, result.events ?? [], context),
+      ...dismissed(action, actor),
       ...(action.onceKeys ?? []).map((key) =>
         dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key }),
       ),
@@ -403,6 +406,20 @@ function castAction(
     frames: [
       ...(result.frames ?? []),
       ...riders.frames,
+      // Steel Wind Strike: the teleport once its attacks are made.
+      ...(action.activation.teleportAfter !== undefined && caught[0]
+        ? [
+            teleportFrame(
+              actor,
+              TELEPORT_ANYWHERE,
+              0,
+              context,
+              false,
+              { actor: caught[0].id, feet: action.activation.teleportAfter },
+              actionId,
+            ),
+          ]
+        : []),
       ...metamagicCast(actor, actionId),
       // Used up once its darts or rolls are done, since they look the action up again.
       ...(actionId.startsWith(ITEM_PREFIX)
@@ -421,6 +438,20 @@ function castAction(
 
 // What a cast's `selfEffects` give the caster once it has hurt another creature, as Improved Blessed Strikes' gift.
 // shortcut: an attack roll left waiting on a reaction lands later and gives nothing.
+// How far a teleport that lands beside a creature may go: anywhere it sees.
+const TELEPORT_ANYWHERE = 1000;
+
+// Holy Weapon's burst ends the spell that gave it: the caster's Concentration on it, or the effect itself.
+function dismissed(action: KnownAction, actor: Actor): SystemEvent[] {
+  if (!action.activation.dismisses || !action.id.startsWith(GRANTED_PREFIX)) {
+    return [];
+  }
+  const sourceId = action.id.slice(GRANTED_PREFIX.length);
+  return actor.concentratingOn === sourceId
+    ? [dndEvent(`${NS}:concentrationEnded`, { actor: actor.id })]
+    : [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId })];
+}
+
 function dealtSelfEffects(
   action: KnownAction,
   caster: Actor,
