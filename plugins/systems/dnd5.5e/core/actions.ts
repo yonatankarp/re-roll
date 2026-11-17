@@ -43,7 +43,7 @@ import {
   sizeOf,
 } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
-import { coverFor, seeing } from "./sight.ts";
+import { blindedTo, coverFor, seeing } from "./sight.ts";
 import {
   classOptionPolicy,
   classOptions,
@@ -426,7 +426,7 @@ function hiddenFromAll(
       )
     : [];
   return standing(enemies(state, actor)).every((foe) => {
-    if (hasCondition(foe, "blinded")) return true;
+    if (blindedTo(foe, actor, access)) return true;
     const cover = coverFor(state, foe.position, actor, [foe.id]);
     if (cover === 5 || cover === "total") return true;
     if (seeing(foe, actor.position, state, access) === "none") return true;

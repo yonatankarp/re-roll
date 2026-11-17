@@ -9,21 +9,30 @@ import {
   distanceFeet,
   squareKey,
 } from "./grid.ts";
-import type { Battlemap } from "./schemas.ts";
+import type { Battlemap, Modifier } from "./schemas.ts";
 import {
   CompanionSchema,
   FeatureSchema,
   MonsterSchema,
   SpeciesSchema,
 } from "./schemas.ts";
-import { type Actor, type DndState, type Terrain, isDead } from "./state.ts";
-import { deriveStats, lookup } from "./stats.ts";
+import {
+  type ActiveEffect,
+  type Actor,
+  type DndState,
+  type Terrain,
+  hasCondition,
+  invisibleTo,
+  isDead,
+} from "./state.ts";
+import { lookup, passiveModifiers } from "./stats.ts";
 import { swallowerOf } from "./combat/swallow.ts";
 import {
   blockingSet,
   glows,
   lit,
   obscuring,
+  statsOf,
   thornKeys,
   type ZoneKind,
 } from "./zones.ts";
@@ -161,62 +170,74 @@ export function lightAt(
   return ground === "dark" && glows(square, state, access) ? "dim" : ground;
 }
 
-const SEES_IN_DARK = /\b(?:darkvision|blindsight|truesight) (\d+) ft/gi;
+// A sense reaches a square this many feet away, when the creature has it at all.
+const reaches = (feet: number, range: number): boolean =>
+  range > 0 && feet <= range;
 
-// How far a creature sees without light, in feet: Darkvision from its species, or Darkvision, Blindsight or
-// Truesight from its stat block's senses. 0 for none.
-// shortcut: Blindsight and Truesight count as Darkvision, so magical darkness and invisibility aren't told apart.
-export function darkvisionOf(actor: Actor, access: ContentAccess): number {
-  return Math.max(ownDarkvision(actor, access), effectSight(actor, false));
+const PRINTED_SENSE = /\b(darkvision|blindsight|truesight) (\d+) ft/gi;
+
+export interface Senses {
+  readonly darkvision: number; // sees Darkness as Dim Light, and Dim Light as Bright
+  readonly blindsight: number; // sees without light: through fog and darkness, the Invisible, while Blinded
+  readonly truesight: number; // sees in magical and normal darkness, and the Invisible
+  readonly devilsSight: number; // sees normally in Dim Light and Darkness, magical too, as Devil's Sight
 }
 
-// Darkvision or True Seeing cast on the creature: how far it sees, and with `truesight` only Truesight's.
-function effectSight(actor: Actor, truesight: boolean): number {
-  return Math.max(
-    0,
-    ...actor.activeEffects.flatMap(({ modifier }) =>
-      modifier.kind === "darkvision" && (!truesight || modifier.truesight)
-        ? [modifier.feet]
-        : [],
-    ),
-  );
+type SenseModifier = Extract<Modifier, { kind: "sense" }>;
+
+// The senses as feet, from the modifiers a creature has: Darkvision and True Seeing's `darkvision`, and `sense`.
+// Darkvision that only extends what the creature already has is added last.
+function fromModifiers(
+  base: Senses,
+  modifiers: readonly ActiveEffect["modifier"][],
+): Senses {
+  let { darkvision, blindsight, truesight } = base;
+  const extending: SenseModifier[] = [];
+  for (const modifier of modifiers) {
+    if (modifier.kind === "darkvision") {
+      darkvision = Math.max(darkvision, modifier.feet);
+      if (modifier.truesight) truesight = Math.max(truesight, modifier.feet);
+    } else if (modifier.kind === "sense") {
+      if (modifier.extend) extending.push(modifier);
+      else if (modifier.sense === "darkvision")
+        darkvision = Math.max(darkvision, modifier.feet);
+      else if (modifier.sense === "blindsight")
+        blindsight = Math.max(blindsight, modifier.feet);
+      else truesight = Math.max(truesight, modifier.feet);
+    }
+  }
+  for (const { feet, extend = 0 } of extending) {
+    darkvision = darkvision > 0 ? darkvision + extend : feet;
+  }
+  return { ...base, darkvision, blindsight, truesight };
 }
 
-function ownDarkvision(actor: Actor, access: ContentAccess): number {
-  if (actor.source.kind === "monster") {
-    const { text = "" } = lookup(
-      access,
-      MonsterSchema,
-      actor.source.statBlockId,
-    );
-    return Math.max(
-      0,
-      ...[...text.matchAll(SEES_IN_DARK)].map((match) => Number(match[1])),
-    );
+const NO_SENSES: Senses = {
+  darkvision: 0,
+  blindsight: 0,
+  truesight: 0,
+  devilsSight: 0,
+};
+
+// What a stat block's or companion's printed senses give.
+function printedSenses(text: string): Senses {
+  const found = { ...NO_SENSES };
+  for (const match of text.matchAll(PRINTED_SENSE)) {
+    const sense = match[1]?.toLowerCase() as
+      "darkvision" | "blindsight" | "truesight";
+    found[sense] = Math.max(found[sense], Number(match[2]));
   }
-  if (actor.source.kind === "summon") {
-    const { text } = lookup(access, CompanionSchema, actor.source.companion);
-    return Math.max(
-      0,
-      ...[...text.matchAll(SEES_IN_DARK)].map((match) => Number(match[1])),
-    );
-  }
-  const { build } = actor.source;
-  if (!build) return 0;
-  const species = lookup(access, SpeciesSchema, build.speciesId);
+  return found;
+}
+
+// A species trait named Darkvision, or one that lists all the species' traits starting with it, as the SRD's do.
+function speciesDarkvision(actor: Actor, access: ContentAccess): number {
+  if (actor.source.kind !== "character" || !actor.source.build) return 0;
+  const species = lookup(access, SpeciesSchema, actor.source.build.speciesId);
   return Math.max(
     0,
-    // Devil's Sight, or Darkvision a worn item gives, as a Belt of Dwarvenkind's.
-    ...deriveStats(actor, access).passives.flatMap((passive) =>
-      passive.kind === "seesInDarkness"
-        ? [passive.feet]
-        : passive.kind === "modifier" && passive.modifier.kind === "darkvision"
-          ? [passive.modifier.feet]
-          : [],
-    ),
     ...species.traits.flatMap((id) => {
       const feature = lookup(access, FeatureSchema, id);
-      // A trait named Darkvision, or one that lists all the species' traits starting with it, as the SRD's do.
       if (
         !/\bdarkvision\b/i.test(feature.name) &&
         !/^darkvision\b/i.test(feature.text)
@@ -229,7 +250,47 @@ function ownDarkvision(actor: Actor, access: ContentAccess): number {
   );
 }
 
-const SEES_THROUGH = /\b(blindsight|truesight) (\d+) ft/gi;
+// Kept per actor object, which never changes in place, since sight is asked about on every square a turn weighs.
+const sensesKept = new WeakMap<Actor, Senses>();
+
+// How far a creature sees each way: its stat block's printed senses or its species' Darkvision, then what its traits,
+// worn items and the effects on it give (Blind Fighting, Goggles of Night, True Seeing, Devil's Sight).
+export function sensesOf(actor: Actor, access: ContentAccess): Senses {
+  const known = sensesKept.get(actor);
+  if (known) return known;
+  const stats = statsOf(actor, access);
+  const printed =
+    actor.source.kind === "monster"
+      ? printedSenses(
+          lookup(access, MonsterSchema, actor.source.statBlockId).text ?? "",
+        )
+      : actor.source.kind === "summon"
+        ? printedSenses(
+            lookup(access, CompanionSchema, actor.source.companion).text,
+          )
+        : { ...NO_SENSES, darkvision: speciesDarkvision(actor, access) };
+  const base = {
+    ...printed,
+    devilsSight: Math.max(
+      0,
+      ...stats.passives.flatMap((passive) =>
+        passive.kind === "seesInDarkness" ? [passive.feet] : [],
+      ),
+    ),
+  };
+  const senses = fromModifiers(base, [
+    ...passiveModifiers(stats.passives),
+    ...actor.activeEffects.map(({ modifier }) => modifier),
+  ]);
+  sensesKept.set(actor, senses);
+  return senses;
+}
+
+// How far a creature sees without light, in feet: Darkvision, or Devil's Sight, which sees darkness better still.
+export function darkvisionOf(actor: Actor, access: ContentAccess): number {
+  const senses = sensesOf(actor, access);
+  return Math.max(senses.darkvision, senses.devilsSight);
+}
 
 // How far a creature sees into a zone: Blindsight sees through fog and darkness, Truesight or Devil's Sight only
 // through darkness. 0 for not at all.
@@ -238,54 +299,79 @@ export function seesThrough(
   zone: ZoneKind,
   access: ContentAccess,
 ): number {
-  const text =
-    viewer.source.kind === "monster"
-      ? (lookup(access, MonsterSchema, viewer.source.statBlockId).text ?? "")
-      : "";
-  return Math.max(
-    0,
-    ...[...text.matchAll(SEES_THROUGH)].flatMap((match) =>
-      zone === "darkness" || match[1]?.toLowerCase() === "blindsight"
-        ? [Number(match[2])]
-        : [],
-    ),
-    ...(zone === "darkness" && viewer.source.kind === "character"
-      ? deriveStats(viewer, access).passives.flatMap((passive) =>
-          passive.kind === "seesInDarkness" ? [passive.feet] : [],
-        )
-      : []),
-    zone === "darkness" ? effectSight(viewer, true) : 0,
+  const senses = sensesOf(viewer, access);
+  return zone === "darkness"
+    ? Math.max(senses.blindsight, senses.truesight, senses.devilsSight)
+    : senses.blindsight;
+}
+
+// Whether `viewer` sees past `target`'s Invisible condition: See Invisibility, or Blindsight or Truesight reaching it.
+export function seesInvisible(
+  viewer: Actor,
+  target: Actor,
+  access: ContentAccess,
+): boolean {
+  if (
+    viewer.activeEffects.some(
+      ({ modifier }) => modifier.kind === "seeInvisible",
+    )
+  ) {
+    return true;
+  }
+  const senses = sensesOf(viewer, access);
+  const feet = distanceFeet(viewer.position, target.position);
+  return reaches(feet, Math.max(senses.blindsight, senses.truesight));
+}
+
+// A Blinded viewer sees nothing beyond its Blindsight.
+export function blindedTo(
+  viewer: Actor,
+  target: Actor,
+  access: ContentAccess,
+): boolean {
+  return (
+    hasCondition(viewer, "blinded") &&
+    !reaches(
+      distanceFeet(viewer.position, target.position),
+      sensesOf(viewer, access).blindsight,
+    )
   );
 }
 
-// How well `viewer` sees the square `at`: Darkness hides it from a creature without Darkvision in range, and
-// Darkvision sees darkness as dim light. Dim light gives Disadvantage on Perception that relies on sight.
+// How well `viewer` sees the square `at`: Blindsight sees whatever its range holds; a zone hides what's in it from all
+// but the senses that pierce it; Darkness hides from a creature without Darkvision in range, Darkvision sees it as
+// Dim Light, and Truesight or Devil's Sight as plainly as Bright. Dim Light gives Disadvantage on Perception that relies
+// on sight.
 export function seeing(
   viewer: Actor,
   at: Square | null,
   state: DndState,
   access: ContentAccess,
-  darkvision?: number, // the viewer's, when already worked out
+  senses: Senses = sensesOf(viewer, access), // the viewer's, when it stands somewhere else for the question
 ): "clear" | "dim" | "none" {
+  const feet = distanceFeet(viewer.position, at);
   // Shadow Arrow: nothing farther than a few feet away.
   const limit = viewer.activeEffects.reduce(
     (least, { modifier }) =>
       modifier.kind === "sightLimit" ? Math.min(least, modifier.feet) : least,
     Infinity,
   );
-  if (distanceFeet(viewer.position, at) > limit) return "none";
+  if (feet > limit) return "none";
+  if (reaches(feet, senses.blindsight)) return "clear";
   // shortcut: a zone hides whatever is in it and blinds whoever stands in it, whichever way the line runs.
   const hidden = obscuring(at, state) ?? obscuring(viewer.position, state);
   if (hidden) {
-    const feet = seesThrough(viewer, hidden, access);
-    return feet > 0 && distanceFeet(viewer.position, at) <= feet
-      ? "clear"
-      : "none";
+    const through =
+      hidden === "darkness"
+        ? Math.max(senses.truesight, senses.devilsSight)
+        : 0;
+    return reaches(feet, through) ? "clear" : "none";
   }
   const light = lightAt(at, state, access);
   if (light === "bright") return "clear";
-  const feet = darkvision ?? darkvisionOf(viewer, access);
-  const inRange = feet > 0 && distanceFeet(viewer.position, at) <= feet;
+  if (reaches(feet, senses.devilsSight)) return "clear";
+  if (light === "dark" && reaches(feet, senses.truesight)) return "clear";
+  const inRange = reaches(feet, senses.darkvision);
   if (light === "dark") return inRange ? "dim" : "none";
   return inRange ? "clear" : "dim";
 }
@@ -315,4 +401,13 @@ export function behindTotalCover(
     swallowerOf(actor) !== target.id &&
     coverFor(state, actor.position, target, [actor.id]) === "total"
   );
+}
+
+// Invisible to `viewer`, which nothing it has sees past, Blindsight and Truesight in range included.
+export function unseenInvisible(
+  target: Actor,
+  viewer: Actor,
+  access: ContentAccess,
+): boolean {
+  return invisibleTo(target, viewer) && !seesInvisible(viewer, target, access);
 }

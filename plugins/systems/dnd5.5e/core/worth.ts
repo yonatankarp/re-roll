@@ -6,7 +6,6 @@ import {
   hasCondition,
   INCAPACITATING,
   familiarOwner,
-  invisibleTo,
   isDead,
   isDown,
   isStable,
@@ -40,7 +39,12 @@ import {
   resolveTargets,
 } from "./combat/effects.ts";
 import { cureFor, dispellable, spellLevelOf } from "./combat/dispel.ts";
-import { difficultSquares, seesThrough } from "./sight.ts";
+import {
+  blindedTo,
+  difficultSquares,
+  seesThrough,
+  unseenInvisible,
+} from "./sight.ts";
 import { crossesDifficult, speedsOf, tremorsenseOf } from "./movement-modes.ts";
 import { formOf, formsFor } from "./forms.ts";
 import { legendOf } from "./legendary.ts";
@@ -190,10 +194,10 @@ export function makeJudge(context: Context, side: Actor): Judge {
       hasFlag(attacker, "advantage", "attacks", own) ||
       hasFlag(target, "advantage", "attacksAgainst", stats(target)) ||
       placedFlag(attacker, "advantage", "attacks", state, context) ||
-      invisibleTo(attacker, target) ||
+      unseenInvisible(attacker, target, context) ||
+      blindedTo(target, attacker, context) ||
       hasCondition(
         target,
-        "blinded",
         "paralyzed",
         "petrified",
         "restrained",
@@ -218,15 +222,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
         own.creatureType,
       ) ||
       placedFlag(attacker, "disadvantage", "attacks", state, context) ||
-      hasCondition(
-        attacker,
-        "blinded",
-        "frightened",
-        "poisoned",
-        "prone",
-        "restrained",
-      ) ||
-      invisibleTo(target, attacker) ||
+      hasCondition(attacker, "frightened", "poisoned", "prone", "restrained") ||
+      blindedTo(attacker, target, context) ||
+      unseenInvisible(target, attacker, context) ||
       warded(target, stats(target));
     return Number(up) - Number(down);
   };
@@ -939,7 +937,10 @@ export function makeJudge(context: Context, side: Actor): Judge {
       case "acFormula":
         return 0.05 * meanFoeThreat * lasting(span);
       case "seeInvisible":
-        return foes.some((foe) => invisibleTo(foe, target))
+      case "sense":
+        return (modifier.kind === "seeInvisible" ||
+          modifier.sense !== "darkvision") &&
+          foes.some((foe) => unseenInvisible(foe, target, context))
           ? 0.25 * Math.max(own, meanFoeThreat * 0.5) * lasting(span)
           : 0;
       // A new Speed helps one that's faster with it, or that crosses the map's rough ground with it.

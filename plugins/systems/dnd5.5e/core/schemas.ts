@@ -589,6 +589,16 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     feet: z.number().int().min(5),
     truesight: z.literal(true).optional(),
   }),
+  // A sense this far (core/sight.ts sensesOf): Darkvision, Blindsight (seeing without light, through fog, past the
+  // Invisible condition and while Blinded) or Truesight (through magical darkness and the Invisible condition), as
+  // Blind Fighting's or Witch Sight's. `extend` is what it adds to Darkvision the bearer already has instead, as
+  // Umbral Sight's 60 feet.
+  z.strictObject({
+    kind: z.literal("sense"),
+    sense: z.enum(["darkvision", "blindsight", "truesight"]),
+    feet: z.number().int().min(5),
+    extend: z.number().int().min(5).optional(),
+  }),
   // Illusory duplicates, each of which a hit may land on instead, as Mirror Image's (combat/attack.ts).
   z.strictObject({
     kind: z.literal("images"),

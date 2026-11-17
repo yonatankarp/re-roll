@@ -9,7 +9,6 @@ import {
   type DndState,
   hasCondition,
   equipped,
-  invisibleTo,
   INCAPACITATING,
   isDead,
   isDown,
@@ -25,7 +24,13 @@ import { againstTarget, missFrames, runApplyMiss } from "./spell-riders.ts";
 import { duelBroken, duelDamaged, duelHampers } from "./duel.ts";
 import { distanceFeet } from "../grid.ts";
 import { grapplesOn } from "./grapple.ts";
-import { behindTotalCover, coverAgainst, seeing } from "../sight.ts";
+import {
+  behindTotalCover,
+  blindedTo,
+  coverAgainst,
+  seeing,
+  unseenInvisible,
+} from "../sight.ts";
 import { insideDamageEvents, swallowerOf } from "./swallow.ts";
 import {
   awaitDecision,
@@ -908,10 +913,10 @@ export function runAttackRoll(
       ) ||
       placedFlag(attacker, "advantage", "attacks", state, context, ability) ||
       placedFlag(target, "advantage", "attacksAgainst", state, context) ||
-      invisibleTo(attacker, target) ||
+      unseenInvisible(attacker, target, context) ||
+      blindedTo(target, attacker, context) ||
       hasCondition(
         target,
-        "blinded",
         "paralyzed",
         "petrified",
         "restrained",
@@ -994,15 +999,9 @@ export function runAttackRoll(
     ) ||
     placedFlag(attacker, "disadvantage", "attacks", state, context, ability) ||
     placedFlag(target, "disadvantage", "attacksAgainst", state, context) ||
-    hasCondition(
-      attacker,
-      "blinded",
-      "frightened",
-      "poisoned",
-      "prone",
-      "restrained",
-    ) ||
-    invisibleTo(target, attacker) ||
+    hasCondition(attacker, "frightened", "poisoned", "prone", "restrained") ||
+    blindedTo(attacker, target, context) ||
+    unseenInvisible(target, attacker, context) ||
     warded(target, targetStats) ||
     protectedMount(target, context) ||
     (action.spellLevel !== null &&
