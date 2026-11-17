@@ -794,23 +794,39 @@ export function runAttackRoll(
     throw new Error(`${action.id} isn't an attack`);
   }
   // Sanctuary: an attacker that fails its Wisdom save loses the attack. One warded itself loses the ward by attacking.
+  const attackerType = deriveStats(attacker, context).creatureType ?? "";
+  const freedKey = `${DETERRED}${attacker.id}`;
   const ward = target.activeEffects.find(
-    ({ modifier }) => modifier.kind === "sanctuary",
+    ({ modifier }) =>
+      modifier.kind === "sanctuary" &&
+      (!modifier.creatureTypes ||
+        modifier.creatureTypes.includes(attackerType)) &&
+      !(modifier.lasting && target.resourcesSpent[freedKey]),
   );
   const unwarded = attacker.activeEffects
-    .filter(({ modifier }) => modifier.kind === "sanctuary")
+    .filter(
+      ({ modifier }) => modifier.kind === "sanctuary" && !modifier.lasting,
+    )
     .map(({ sourceId }) =>
       dndEvent(`${NS}:effectEnded`, { actor: attacker.id, sourceId }),
     );
   if (ward?.modifier.kind === "sanctuary" && attacker.side !== target.side) {
     const save = rollSave(
       attacker,
-      "wis",
+      ward.modifier.ability ?? "wis",
       ward.modifier.dc ?? 10,
       context,
       true,
     );
     if (!save.saved) return { events: [...unwarded, ...save.events] };
+    if (ward.modifier.lasting) {
+      unwarded.push(
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: target.id,
+          resource: freedKey,
+        }),
+      );
+    }
   }
   const stats = deriveStats(attacker, context);
   const targetStats = deriveStats(target, context);

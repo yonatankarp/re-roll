@@ -924,6 +924,36 @@ export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
   );
 }
 
+// The weapon, or one of the forms it changes into, whose damage die is biggest, attacked with as a Finesse weapon.
+function bestForm(
+  weapon: Weapon,
+  forms: readonly string[],
+  access: ContentAccess,
+): Weapon {
+  const average = (item: Weapon): number => {
+    const [count = 1, sides = 0] = (item.damage.dice ?? "0d0")
+      .split("d")
+      .map(Number);
+    return (item.damage.flat ?? 0) + (count * (sides + 1)) / 2;
+  };
+  const shaped = forms
+    .map((slug) =>
+      access
+        .contentIds()
+        .filter((id) => id.endsWith(`:item/${slug}`))
+        .map((id) => WeaponSchema.safeParse(access.content(id)).data)
+        .find((item) => item !== undefined),
+    )
+    .filter((item): item is Weapon => item !== undefined);
+  const best = [weapon, ...shaped].reduce((most, item) =>
+    average(item) > average(most) ? item : most,
+  );
+  const properties = best.properties.includes("finesse")
+    ? best.properties
+    : [...best.properties, "finesse" as const];
+  return { ...weapon, damage: best.damage, properties };
+}
+
 // The magic ammunition carried with the biggest bonus to attack rolls, as +3 Ammunition over +1.
 function bestAmmunition(
   worn: readonly (readonly [string, Item])[],
@@ -1501,7 +1531,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
               kinds.some((kind) => bonus.weapons.includes(kind)),
           )
           .reduce((total, bonus) => total + bonus.amount, 0);
-      const { hitDamage, ...plain } = weapon;
+      const { hitDamage, ...unchanged } = weapon;
+      // A Keyholes Dagger attacks as the form of its own its version allows that hits hardest, with Strength or
+      // Dexterity. shortcut: it keeps its own mastery, and it changes back to throw.
+      const plain = weapon.forms
+        ? bestForm(unchanged, weapon.forms, access)
+        : unchanged;
       // shortcut: an Ammunition weapon fires the best magic ammunition carried, without asking.
       const shot = weapon.properties.includes("ammunition")
         ? bestAmmunition(worn, works)

@@ -33,7 +33,7 @@ import { actorOf, findAction, slotLevelFor } from "./combat/queries.ts";
 import { opportunity, provokers, teleportSquares } from "./combat/movement.ts";
 import { familiarHelpUse } from "./combat/familiar.ts";
 import { mountEvents, mountOptions } from "./combat/mounts.ts";
-import { heldInPlace, leafEvents, payCosts } from "./combat/effects.ts";
+import { braced, heldInPlace, leafEvents, payCosts } from "./combat/effects.ts";
 import { heightChoices, heightOf } from "./combat/falling.ts";
 import {
   SIZES,
@@ -446,10 +446,17 @@ function pushEvents(
   feet: number,
   context: Context,
 ): SystemEvent[] {
-  const to = pushTo(by.position, target, feet, context.state);
+  const brace = braced(target, feet, context);
+  const to =
+    brace.feet > 0
+      ? pushTo(by.position, target, brace.feet, context.state)
+      : null;
   const held = to ? heldInPlace(target, context) : [];
-  if (held.length > 0) return held;
-  return to ? [dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 })] : [];
+  if (held.length > 0) return [...brace.events, ...held];
+  return [
+    ...brace.events,
+    ...(to ? [dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 })] : []),
+  ];
 }
 
 function standing(list: readonly Actor[]): readonly Actor[] {

@@ -1123,6 +1123,32 @@ export function protectedMount(
 
 // Several hits on one target, reported in turn so each one sees the HP the last one left.
 // Tyro of the Gauntlet's Stand as One: an ally within 5 feet spends its Reaction to keep the target from being moved.
+// A push along the ground made shorter by the target's Reaction, as Dwarven Plate's 10 feet less: the feet it's
+// still moved, and the Reaction spent. shortcut: the Reaction is always taken when it can be.
+export function braced(
+  target: Actor,
+  feet: number,
+  context: Pick<Context, "state" | "content" | "contentIds">,
+): { readonly feet: number; readonly events: SystemEvent[] } {
+  const brace = deriveStats(target, context).passives.find(
+    (passive) => passive.kind === "bracing",
+  );
+  if (
+    brace?.kind !== "bracing" ||
+    !target.budget.reaction ||
+    isDown(target) ||
+    hasCondition(target, ...INCAPACITATING)
+  ) {
+    return { feet, events: [] };
+  }
+  return {
+    feet: Math.max(0, feet - brace.feet),
+    events: [
+      dndEvent(`${NS}:budgetSpent`, { actor: target.id, kind: "reaction" }),
+    ],
+  };
+}
+
 export function heldInPlace(
   target: Actor,
   context: Pick<Context, "state" | "content" | "contentIds">,
@@ -2201,13 +2227,19 @@ export function leafEvents(
         break;
       // A push or pull is made on the grid as Shove's is, in a straight line.
       case "forcedMove": {
-        const to =
+        const fits =
           effect.maxSize === undefined ||
-          sizeOf(target, context) <= SIZES.indexOf(effect.maxSize)
+          sizeOf(target, context) <= SIZES.indexOf(effect.maxSize);
+        const brace = fits
+          ? braced(target, effect.feet, context)
+          : { feet: 0, events: [] };
+        events.push(...brace.events);
+        const to =
+          fits && brace.feet > 0
             ? pushTo(
                 caster.position,
                 target,
-                effect.feet,
+                brace.feet,
                 context.state,
                 effect.direction === "toward",
               )

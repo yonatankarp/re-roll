@@ -66,6 +66,14 @@ function version(
     ...(parent.activations ?? []),
     ...kept.flatMap((entry) => entry.activations ?? []),
   ];
+  const forms = [
+    ...(parent.forms ?? []),
+    ...kept.flatMap((entry) => entry.forms ?? []),
+  ];
+  const hitDamage = [
+    ...(parent.hitDamage ?? []),
+    ...kept.flatMap((entry) => entry.hitDamage ?? []),
+  ];
   const magic = {
     ...(passives.length > 0 ? { passives } : {}),
     ...(parent.attunement ? { attunement: true as const } : {}),
@@ -136,7 +144,8 @@ function version(
       ...bonuses,
       ...magic,
       ...(parent.returning ? { returning: true as const } : {}),
-      ...(parent.hitDamage ? { hitDamage: parent.hitDamage } : {}),
+      ...(hitDamage.length > 0 ? { hitDamage } : {}),
+      ...(forms.length > 0 ? { forms } : {}),
     };
   } else if (base.type === "armor") {
     item = {

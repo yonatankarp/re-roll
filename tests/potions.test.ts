@@ -2,12 +2,21 @@ import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
 import type { RunContext } from "../engine/run/turn.ts";
 import { describe, expect, it } from "vitest";
 import {
+  braced,
   leafEvents,
   payCosts,
   resolveAction,
 } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { sceneCastActions } from "../plugins/systems/dnd5.5e/core/camp.ts";
 import { itemUseId } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
+import {
+  counterWindow,
+  runCounterspell,
+} from "../plugins/systems/dnd5.5e/core/combat/counter.ts";
+import {
+  reactionCosts,
+  rollResponder,
+} from "../plugins/systems/dnd5.5e/core/combat/reactions.ts";
 import { sceneGearActions } from "../plugins/systems/dnd5.5e/core/gear.ts";
 import {
   type Actor,
@@ -18,6 +27,7 @@ import {
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import {
   deriveStats,
+  evaluateFormula,
   grantedKey,
   type KnownAction,
   UNARMED_STRIKE,
@@ -220,6 +230,75 @@ const ITEMS = [
       { kind: "untilLongRest" },
       { kind: "removeCondition", condition: "poisoned" },
       { kind: "exhaustion", clear: true },
+    ]),
+  }),
+  item("absorption", {
+    category: "wondrousItem",
+    resources: [{ id: "absorption", max: { base: 20 }, recharge: [] }],
+    activations: [
+      {
+        name: "Absorb",
+        activation: {
+          cost: ["reaction"],
+          trigger: { spellCast: true },
+          targeting: { creatures: 1, range: 120, side: "enemy" },
+          resolution: {
+            kind: "automatic",
+            effects: [{ kind: "counter", maxLevel: 4, levels: "absorption" }],
+          },
+        },
+      },
+    ],
+  }),
+  item("plate", {
+    category: "armor",
+    passives: [{ kind: "bracing", feet: 10 }],
+  }),
+  item("keyholes", {
+    category: "weapon",
+    evolving: true,
+    variants: [
+      {
+        rarity: "uncommon",
+        bonuses: [{ to: "attack", amount: 1 }],
+        forms: ["mace"],
+      },
+      {
+        rarity: "rare",
+        bonuses: [{ to: "attack", amount: 2 }],
+        forms: ["longsword"],
+      },
+    ],
+  }),
+  item("lucky", {
+    category: "wondrousItem",
+    activation: {
+      cost: [],
+      trigger: {
+        rolled: { rolls: ["save", "check"], by: "self", when: "natural1" },
+      },
+      targeting: { self: true },
+      resolution: { kind: "automatic", effects: [{ kind: "reroll" }] },
+    },
+  }),
+  item("rod", {
+    category: "rod",
+    bonuses: [{ to: "spellDc", amount: 2, class: "wizard" }],
+  }),
+  item("protection", {
+    category: "scroll",
+    activation: self([
+      {
+        kind: "modifier",
+        modifier: {
+          kind: "sanctuary",
+          dc: 15,
+          ability: "cha",
+          creatureTypes: ["humanoid"],
+          lasting: true,
+        },
+        duration: { minutes: 5 },
+      },
     ]),
   }),
 ];
@@ -771,6 +850,185 @@ describe("evolving items, made items and coatings (#142, #199)", () => {
     expect(deriveStats(rested, run).passives).toContainEqual({
       kind: "hitDieRolls",
       highest: true,
+    });
+  });
+});
+
+describe("item riders (#180, #199)", () => {
+  it("cancels a spell of level 4 or lower outright, spending its levels and wasting the slot, as an Ioun Stone of Absorption", async () => {
+    const run = await itemRun();
+    const stone = "test:item/absorption";
+    const bearer = { ...carrying([stone]), position: { x: 0, y: 0 } };
+    const caster = {
+      ...wizard([], 3, ["srd52:spell/magic-missile"]),
+      id: "foe",
+      side: "enemy" as const,
+      position: { x: 4, y: 0 },
+    };
+    const cast = {
+      actor: "foe",
+      actionId: "spell:srd52:spell/magic-missile",
+      target: [PLAYER_ACTOR, PLAYER_ACTOR, PLAYER_ACTOR],
+    };
+    const context = contextOf(run, [bearer, caster], scripted([]).dice);
+    const action = actionOf(run, caster, cast.actionId);
+    const offered = counterWindow(caster, action, cast, 1, context);
+    expect(offered).not.toBeNull();
+    const { events = [] } = runCounterspell(
+      { ...cast, counterer: PLAYER_ACTOR, answer: itemUseId(stone, 0) },
+      context,
+      () => {
+        throw new Error("Cast anyway");
+      },
+    );
+    expect(payloads(events, "resourceSpent")).toEqual([
+      { actor: PLAYER_ACTOR, resource: "absorption", amount: 1 },
+      { actor: "foe", resource: "slot:1" },
+    ]);
+    // With fewer levels left than the spell's, it can't.
+    const spent = { ...bearer, resourcesSpent: { absorption: 20 } };
+    expect(
+      counterWindow(
+        caster,
+        action,
+        cast,
+        1,
+        contextOf(run, [spent, caster], scripted([]).dice),
+      ),
+    ).toBeNull();
+  });
+
+  it("is pushed 10 feet less, spending its Reaction, in Dwarven Plate", async () => {
+    const run = await itemRun();
+    const bearer = {
+      ...carrying(["test:item/plate"]),
+      position: { x: 1, y: 0 },
+    };
+    const context = contextOf(run, [bearer], scripted([]).dice);
+    expect(braced(bearer, 15, context)).toEqual({
+      feet: 5,
+      events: [
+        expect.objectContaining({
+          payload: { actor: PLAYER_ACTOR, kind: "reaction" },
+        }),
+      ],
+    });
+    expect(braced({ ...bearer, inventory: [] }, 15, context)).toEqual({
+      feet: 15,
+      events: [],
+    });
+    const spent = { ...bearer, budget: { ...bearer.budget, reaction: false } };
+    expect(braced(spent, 15, context).feet).toBe(15);
+  });
+
+  it("swings a Keyholes Dagger as the hardest-hitting form its version allows", async () => {
+    const run = await itemRun();
+    const damage = (id: string) => {
+      const resolution = actionOf(run, carrying([id]), `weapon:${id}`)
+        .activation.resolution;
+      return resolution.kind === "attack"
+        ? resolution.damage[0]?.amount.dice
+        : undefined;
+    };
+    expect(damage("test:item/keyholes--1--dagger")).toBe("1d6");
+    expect(damage("test:item/keyholes--2--dagger")).toBe("1d8");
+  });
+
+  it("rerolls a natural 1 on a save once, and the Lucky Foot is gone", async () => {
+    const run = await itemRun();
+    const actor = {
+      ...carrying(["test:item/lucky"]),
+      position: { x: 0, y: 0 },
+    };
+    const roll = {
+      roller: actor,
+      kind: "save" as const,
+      natural: 1,
+      goal: 15,
+      total: 1,
+      success: false,
+    };
+    const answer = rollResponder(
+      roll,
+      [],
+      contextOf(run, [actor], scripted([]).dice),
+    );
+    expect(answer?.action.id).toBe("item:test:item/lucky");
+    if (!answer) throw new Error("No answer");
+    expect(
+      payloads(
+        reactionCosts(
+          actor,
+          answer.action,
+          contextOf(run, [actor], scripted([]).dice),
+        ),
+        "itemUsed",
+      ),
+    ).toEqual([{ actor: PLAYER_ACTOR, item: "test:item/lucky" }]);
+  });
+
+  it("raises the DC of only one class's spells, as a Rod of the Pact Keeper", async () => {
+    const run = await itemRun();
+    const caster = wizard(["test:item/rod"], 3, ["srd52:spell/hold-person"]);
+    const plain = wizard([], 3, ["srd52:spell/hold-person"]);
+    const dc = (actor: Actor) => {
+      const resolution = actionOf(run, actor, "spell:srd52:spell/hold-person")
+        .activation.resolution;
+      return resolution.kind === "save"
+        ? evaluateFormula(resolution.dc, deriveStats(actor, run))
+        : 0;
+    };
+    expect(dc(caster)).toBe(dc(plain) + 2);
+  });
+
+  it("wards off one creature type until it saves, as a Scroll of Protection", async () => {
+    const run = await itemRun();
+    const warded = {
+      ...carrying([]),
+      position: { x: 0, y: 0 },
+      activeEffects: [
+        {
+          sourceId: "item:test:item/protection",
+          casterId: PLAYER_ACTOR,
+          ends: "spellDuration" as const,
+          modifier: {
+            kind: "sanctuary" as const,
+            dc: 15,
+            ability: "cha" as const,
+            creatureTypes: ["humanoid"],
+            lasting: true as const,
+          },
+        },
+      ],
+    };
+    const foe = {
+      ...hero([], { id: "foe" }),
+      side: "enemy" as const,
+      position: { x: 1, y: 0 },
+    };
+    const swing = (rolls: number[], target: Actor = warded) =>
+      settle(
+        run,
+        [target, foe],
+        [
+          frame("attackRoll", {
+            attacker: "foe",
+            actionId: "weapon:srd52:item/longsword",
+            target: PLAYER_ACTOR,
+          }),
+        ],
+        scripted(rolls).dice,
+        () => "",
+      );
+    const lost = swing([2]);
+    expect(payloads(lost.events, "saveRolled")[0]).toEqual(
+      expect.objectContaining({ ability: "cha" }),
+    );
+    expect(payloads(lost.events, "damaged")).toEqual([]);
+    const saved = swing([19, 18]);
+    expect(payloads(saved.events, "resourceSpent")).toContainEqual({
+      actor: PLAYER_ACTOR,
+      resource: "deterred:foe",
     });
   });
 });

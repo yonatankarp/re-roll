@@ -8,6 +8,7 @@ import {
 import { DECLINE } from "./ids.ts";
 import {
   type Actor,
+  dndEvent,
   frame,
   hasCondition,
   INCAPACITATING,
@@ -16,6 +17,7 @@ import {
 } from "../state.ts";
 import { distanceFeet, rangeFeet } from "../grid.ts";
 import { deriveStats, evaluateFormula, type KnownAction } from "../stats.ts";
+import type { LeafEffect } from "../schemas.ts";
 import { seeing } from "../sight.ts";
 import {
   actorOf,
@@ -24,6 +26,7 @@ import {
   type Context,
   enemies,
   findAction,
+  slotLevelFor,
 } from "./queries.ts";
 import { payCosts, resolveAction, rollSave } from "./effects.ts";
 import { isSpell, spellLevelOf } from "./dispel.ts";
@@ -43,10 +46,21 @@ export const CounterSchema = z.object({
 });
 export type Cast = Omit<z.infer<typeof CounterSchema>, "counterer" | "answer">;
 
-// The foe's reaction it could counter this spell with, if any.
+// An automatic counter's own limits (an Ioun Stone of Absorption's), or null for one that makes the caster save.
+function outright(
+  action: KnownAction,
+): Extract<LeafEffect, { kind: "counter" }> | null {
+  const { resolution } = action.activation;
+  if (resolution.kind !== "automatic") return null;
+  const found = resolution.effects.find((effect) => effect.kind === "counter");
+  return found?.kind === "counter" ? found : null;
+}
+
+// The foe's reaction it could counter this spell, of `level`, with, if any.
 function counterOf(
   foe: Actor,
   caster: Actor,
+  level: number,
   context: Context,
 ): KnownAction | null {
   if (!foe.budget.reaction || isDown(foe)) return null;
@@ -58,12 +72,19 @@ function counterOf(
   return (
     stats.actions.find((action) => {
       const { trigger, targeting } = action.activation;
+      const limits = outright(action);
       return (
         trigger?.spellCast === true &&
         "range" in targeting &&
         distanceFeet(foe.position, caster.position) <=
           rangeFeet(targeting.range) &&
-        canAfford(action, foe, stats)
+        canAfford(action, foe, stats) &&
+        (limits?.maxLevel === undefined || level <= limits.maxLevel) &&
+        (limits?.levels === undefined ||
+          (level > 0 &&
+            (stats.resources[limits.levels] ?? 0) -
+              (foe.resourcesSpent[limits.levels] ?? 0) >=
+              level))
       );
     }) ?? null
   );
@@ -79,14 +100,14 @@ export function counterWindow(
   context: Context,
 ): Frame | null {
   if (!isSpell(action, caster, context)) return null;
+  const level =
+    slotLevel ??
+    action.spellLevel ??
+    spellLevelOf(action.id, caster, context) ??
+    0;
   for (const foe of enemies(context.state, caster)) {
-    const counter = counterOf(foe, caster, context);
+    const counter = counterOf(foe, caster, level, context);
     if (!counter) continue;
-    const level =
-      slotLevel ??
-      action.spellLevel ??
-      spellLevelOf(action.id, caster, context) ??
-      0;
     const options = [
       { id: counter.id, label: `${counter.name} (${caster.name})` },
       { id: DECLINE, label: "Let it be cast" },
@@ -116,6 +137,32 @@ export function runCounterspell(
   const { resolution } = counter.activation;
   // A reaction to a spell nearby that isn't a counter, as a gremishka's Magic Allergy, acts on its bearer and lets the
   // spell through.
+  const limits = outright(counter);
+  if (limits) {
+    // It fails outright, and what cast it is spent, its slot too.
+    const action = findAction(caster, payload.actionId, context);
+    const level =
+      slotLevelFor(caster, payload.actionId, payload.slot, context) ??
+      action.spellLevel ??
+      spellLevelOf(action.id, caster, context) ??
+      0;
+    return {
+      events: [
+        ...payCosts(counter, counterer, context),
+        ...(limits.levels
+          ? [
+              dndEvent(`${NS}:resourceSpent`, {
+                actor: counterer.id,
+                resource: limits.levels,
+                amount: level,
+              }),
+            ]
+          : []),
+        ...payCosts(action, caster, context, level || undefined),
+      ],
+      frames: [CHECK_END, frame("afterAction", { actor: caster.id })],
+    };
+  }
   if (
     resolution.kind === "automatic" &&
     !resolution.effects.some(({ kind }) => kind === "counter")

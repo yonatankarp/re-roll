@@ -528,10 +528,16 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     count: z.number().int().min(1),
   }),
   // An attacker must pass a Wisdom save against `dc` (the caster's, filled in as it's cast) or lose the attack, as
-  // Sanctuary.
+  // Sanctuary. With `creatureTypes` only those attackers, with `ability` another save, and with `lasting` the bearer's
+  // own attacks don't end it and an attacker that saves is free of it, as a Scroll of Protection's ward.
+  // shortcut: a Scroll of Protection's save is made as the attack is, not with a Magic action, and it wards only
+  // its reader.
   z.strictObject({
     kind: z.literal("sanctuary"),
     dc: z.number().int().optional(),
+    ability: AbilitySchema.optional(),
+    creatureTypes: z.array(z.string()).min(1).optional(),
+    lasting: z.literal(true).optional(),
   }),
   // Damage of this type the bearer takes is cut by `amount`, once a turn, as with Resistance (the cantrip).
   z.strictObject({
@@ -911,8 +917,14 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     action: z.string().min(1),
     range: z.number().int().min(5),
   }),
-  // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts).
-  z.strictObject({ kind: z.literal("counter") }),
+  // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts). In an
+  // automatic resolution it fails outright, only of `maxLevel` or lower, spending as many of `levels` as its level,
+  // with what cast it wasted, slot and all, as an Ioun Stone of Absorption's 20 levels.
+  z.strictObject({
+    kind: z.literal("counter"),
+    maxLevel: z.number().int().min(0).max(9).optional(),
+    levels: z.string().min(1).optional(),
+  }),
   // Responses to a d20 roll made before its result applies (combat/reactions.ts): the roller rolls the die again
   // and must use the new roll, as with Bountiful Luck; the roll gains or loses `amount`, as with Boon of Fate
   // (`either`) or a sphinx's Burst of Ingenuity; or the bearer rolls a d20 that may stand in for it, as with
@@ -1956,6 +1968,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     crossbows: z.boolean().default(false),
     bypassCover: z.boolean().default(false),
   }),
+  // A Reaction moves the bearer this many feet less when something pushes or pulls it, as Dwarven Plate's 10.
+  z.strictObject({ kind: z.literal("bracing"), feet: z.number().int().min(5) }),
   // Attacks of this kind ignore Half Cover, as with a Wand of the War Mage's spell attacks.
   z.strictObject({
     kind: z.literal("ignoreHalfCover"),
@@ -2850,6 +2864,7 @@ export const WeaponSchema = ItemBaseSchema.extend({
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   attunement: z.literal(true).optional(), // its bonuses work only while attuned, as a Keyholes Dagger's
   returning: z.literal(true).optional(), // back in hand once thrown, as a Returning Weapon
+  forms: z.array(z.string().min(1)).min(1).optional(), // its magic item's, as a Keyholes Dagger's
   passives: z.array(PassiveSchema).min(1).optional(), // its magic item's, as Frost Brand's Resistance to Fire
   hitDamage: z.array(DamageSchema).min(1).optional(), // its magic item's, as Frost Brand's 1d6 Cold
   ...ChargedSchema,
@@ -2970,6 +2985,9 @@ const MagicItemSchema = ItemBaseSchema.extend({
   // Magic ammunition, one piece of it: its bonuses go to a shot from an Ammunition weapon, and a hit spends it, as
   // +1 Ammunition (stats.ts). Several pieces are several of it carried.
   ammunition: z.literal(true).optional(),
+  // Weapons a magic weapon made from it changes into as it attacks, by their names after the plugin, attacking with
+  // Strength or Dexterity in any of them, as a Keyholes Dagger's Handaxe or Mace, carried the same way (stats.ts).
+  forms: z.array(z.string().min(1)).min(1).optional(),
   // A magic weapon that comes back once thrown, as a Returning Weapon, carried the same way.
   returning: z.literal(true).optional(),
   // Damage a magic weapon made from it adds on a hit, as Frost Brand's 1d6 Cold, carried the same way.
@@ -3054,6 +3072,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
         resources: z.array(ResourceDefSchema).min(1).optional(), // added to the item's own too
         // added to the item's own too, as a Staff of Skulls' Pulverizing
         activations: ChargedSchema.activations,
+        forms: z.array(z.string().min(1)).min(1).optional(), // added too, as a Keyholes Dagger's
+        hitDamage: z.array(DamageSchema).min(1).optional(), // added too
       }),
     )
     .min(1)
