@@ -138,9 +138,24 @@ export function parseLookupsFromHtml(
   const headings = headingsIn(html);
   const slug = uniqueSlugs();
   return [...html.matchAll(/<table\b[\s\S]*?<\/table>/g)].flatMap((match) => {
-    const [header = [], ...rows] = cellsOf(match[0]);
-    const [keyedBy = "", ...columns] = header;
-    if (!/^(?:CR|Theme)$/.test(keyedBy) || columns.length === 0) return [];
+    const [header = [], ...after] = cellsOf(match[0]);
+    // A label spanning the columns, as "— Encounter Difficulty —", puts their own headings on the next row.
+    const grouped = header.some((cell) => /^[—–-].*[—–-]$/.test(cell));
+    // The key's own heading is on that row too when the label row leaves its cell empty.
+    const [keyedBy = "", ...printed] =
+      grouped && header[0] === "" ? (after[0] ?? []) : header;
+    const columns = grouped
+      ? (header[0] === "" ? printed : (after[0] ?? [])).filter(
+          (cell) => cell !== "",
+        )
+      : printed;
+    const rows = grouped ? after.slice(1) : after;
+    const keyed =
+      /^(?:CR|Theme|Challenge|Character Level|Level\/CR|Trap Danger|Trap Level)$/.test(
+        keyedBy,
+      ) ||
+      (keyedBy === "Level" && columns.some((cell) => /\bXP\b/.test(cell)));
+    if (!keyed || columns.length === 0) return [];
     const body = rows.filter((row) => row.length === header.length && row[0]);
     if (body.length === 0) return [];
     const before = headings.filter((item) => item.start < match.index).at(-1);

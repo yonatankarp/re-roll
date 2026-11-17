@@ -1,3 +1,4 @@
+import { libraryHtml } from "../engine/tools/library.ts";
 import { describe, expect, it } from "vitest";
 import { choiceOptions } from "../plugins/systems/dnd5.5e/core/character.ts";
 import {
@@ -522,6 +523,25 @@ describe("2014-format books", () => {
     });
   });
 
+  it("reads the class lists of a page rebuilt from the library, which has no links", () => {
+    const page = libraryHtml("Moss Basics", [
+      {
+        text: "## Wizard Spells\n\n**Cantrips (0 Level)**\n\nMoss Spark (evocation)\n\n## Beast Spells\n\nMoss Spark",
+        anchor: "",
+      },
+      {
+        text: "### Moss Spark\n\nEvocation cantrip\n\nCasting Time: 1 action\n\nRange: 30 feet\n\nComponents: V\n\nDuration: Instantaneous\n\nA green spark.",
+        anchor: "",
+      },
+    ]);
+    const [spark] = splitSpells(spellTextFromHtml(page));
+    expect(spark?.data).toMatchObject({
+      name: "Moss Spark",
+      level: 0,
+      classNames: ["Wizard"],
+    });
+  });
+
   it("reads a 1 action casting time, so the spell can be cast and picked", () => {
     const [burst] = splitSpells(spellTextFromHtml(olderPage));
     if (!burst) throw new Error("no spell");
@@ -553,9 +573,37 @@ describe("2014-format books", () => {
       text: "Instantaneous or 1 hour (see below)",
     });
   });
+
+  it("reads a number the book spells out", () => {
+    expect(parseDuration("Concentration, up to one minute")).toEqual({
+      concentration: true,
+      minutes: 1,
+    });
+  });
 });
 
 describe("keyed tables and Bastions", () => {
+  it("reads a table keyed by character level under a spanning label, and not a class's level table", () => {
+    const parsed = parseLookupsFromHtml(
+      `<h4 class="Table-Title">Moss Thresholds</h4>
+       <table><tr><th>Character Level</th><th>— Moss Danger —</th><th></th></tr>
+         <tr><td>Low</td><td>High</td><td></td></tr>
+         <tr><td>1st</td><td>25</td><td>50</td></tr></table>
+       <table><tr><th>Level</th><th>Features</th></tr><tr><td>1st</td><td>Moss Sense</td></tr></table>
+       <table><tr><th>Level</th><th>Moss XP</th></tr><tr><td>1st</td><td>300</td></tr></table>`,
+      "my-book",
+    );
+    expect(parsed.map((item) => item.entry)).toMatchObject([
+      {
+        name: "Moss Thresholds",
+        keyedBy: "Character Level",
+        columns: ["Low", "High"],
+        rows: [{ key: "1st", cells: ["25", "50"] }],
+      },
+      { keyedBy: "Level", columns: ["Moss XP"] },
+    ]);
+  });
+
   it("reads a table keyed by Challenge Rating or theme, and no other", () => {
     const parsed = parseLookupsFromHtml(
       `<h2>Moss Hoards</h2>
