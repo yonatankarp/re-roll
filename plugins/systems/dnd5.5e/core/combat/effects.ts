@@ -3612,7 +3612,9 @@ export function resolveAction(
                           6,
                       )
                   : effect.feet,
-                effect.movement,
+                effect.halfSpeed
+                  ? Math.floor(deriveStats(target, context).speed / 2)
+                  : effect.movement,
                 context,
                 effect.provokes,
                 undefined,

@@ -8,7 +8,12 @@ import {
   type SystemResult,
 } from "#sdk";
 import { z } from "zod";
-import { choiceOptions, latePick, levelChoices } from "./character.ts";
+import {
+  choiceOptions,
+  latePick,
+  levelChoices,
+  widening,
+} from "./character.ts";
 import {
   BackgroundSchema,
   type CharacterBuild,
@@ -130,11 +135,27 @@ function classPicks(
             : when === "longRest"
               ? `${entry.classId}:${choice.id}`
               : undefined;
-        // Prepared spells come from any level the class now has slots for.
-        const wider =
-          choice.kind === "spells" && choice.id === "spells"
-            ? { ...choice, maxLevel: Math.max(choice.maxLevel, highestSlot) }
+        // Prepared spells come from any level the class now has slots for, and the lists its features add by now.
+        const now = widening(
+          classDef,
+          build.levels.filter((item) => item.classId === entry.classId).length,
+          subclass,
+          access,
+        );
+        const widened =
+          choice.kind === "spells" &&
+          (choice.id === "spells" || (choice.id === "cantrips" && now.cantrips))
+            ? {
+                ...choice,
+                ...(now.lists.length > 0 ? { lists: now.lists } : {}),
+                ...(now.spells.length > 0 ? { also: now.spells } : {}),
+              }
             : choice;
+        const wider =
+          widened.kind === "spells" &&
+          (widened.id === "spells" || widened.upToSlots)
+            ? { ...widened, maxLevel: Math.max(widened.maxLevel, highestSlot) }
+            : widened;
         return [
           {
             key,
@@ -167,7 +188,7 @@ export function swappable(
         const feature = FeatureSchema.safeParse(
           access.content(answer.feature),
         ).data;
-        // shortcut: changed after a Short Rest too, so it's offered between fights whenever the party has rested.
+        // shortcut: "shortRest" is offered between fights whenever the party has rested, once or not.
         return feature?.variantSwap
           ? [
               {
@@ -182,7 +203,10 @@ export function swappable(
                   },
                 ],
                 values: answer.values,
-                open: true,
+                // "longRest" once after each Long Rest, as Circle of the Land's land.
+                open:
+                  feature.variantSwap === "shortRest" ||
+                  !swapped.includes(`${String(at)}:${String(index)}`),
               },
             ]
           : [];

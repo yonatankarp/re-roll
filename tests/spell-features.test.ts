@@ -2,7 +2,10 @@ import { PLAYER_ACTOR } from "#sdk";
 import { beforeAll, describe, expect, it } from "vitest";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import type { RunContext } from "../engine/run/turn.ts";
-import { levelChoices } from "../plugins/systems/dnd5.5e/core/character.ts";
+import {
+  choiceOptions,
+  levelChoices,
+} from "../plugins/systems/dnd5.5e/core/character.ts";
 import { swappable } from "../plugins/systems/dnd5.5e/core/swap.ts";
 import {
   type CharacterBuild,
@@ -70,12 +73,85 @@ const FIXTURES = [
     armor: ["light"],
     spellcasting: { ability: "wis" },
     swaps: { cantrips: "levelUp", spells: "longRest" },
-    spellList: ["srd52:spell/sacred-flame", "srd52:spell/light"],
+    spellList: [
+      "srd52:spell/sacred-flame",
+      "srd52:spell/light",
+      "srd52:spell/bless",
+      "srd52:spell/cure-wounds",
+    ],
     levels: [
       { level: 1, slots: [2], scaling: { cantrips: 2, preparedSpells: 2 } },
-      { level: 2, slots: [3], scaling: { cantrips: 2, preparedSpells: 3 } },
-      { level: 3, slots: [4, 2], scaling: { cantrips: 2, preparedSpells: 4 } },
+      {
+        level: 2,
+        slots: [3],
+        scaling: { cantrips: 2, preparedSpells: 3 },
+        choices: [
+          {
+            kind: "spells",
+            id: "discoveries",
+            count: 2,
+            maxLevel: 1,
+            upToSlots: true,
+            cantrips: true,
+            list: WIZARD,
+            lists: [PRIEST],
+          },
+        ],
+      },
+      {
+        level: 3,
+        grants: ["test:feature/secrets"],
+        slots: [4, 2],
+        scaling: { cantrips: 2, preparedSpells: 4 },
+      },
     ],
+  },
+  {
+    id: "test:feature/secrets",
+    name: "Secrets",
+    text,
+    automation: "full",
+    widens: { lists: [WIZARD] },
+  },
+  {
+    id: "test:feature/lands",
+    name: "Lands",
+    text,
+    automation: "full",
+    variants: [
+      {
+        id: "fire",
+        name: "Fire",
+        spells: { 1: ["srd52:spell/burning-hands"] },
+      },
+      { id: "ice", name: "Ice", spells: { 1: ["srd52:spell/ice-knife"] } },
+    ],
+    variantSwap: "longRest",
+  },
+  {
+    id: "test:feature/recovery",
+    name: "Recovery",
+    text,
+    automation: "full",
+    resources: [
+      {
+        id: "recovery-spell",
+        max: { base: 1 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+    freeCastsFrom: {
+      feature: "test:feature/lands",
+      resource: "recovery-spell",
+    },
+  },
+  {
+    id: "test:feature/charmer",
+    name: "Charmer",
+    text,
+    automation: "full",
+    spells: { 1: ["srd52:spell/hold-person"] },
+    spellAbility: "cha",
   },
   {
     id: "test:feature/blade-subclass",
@@ -219,7 +295,13 @@ describe("class pick swaps", () => {
     });
     const two = priest([
       first,
-      [{ kind: "spells", values: ["srd52:spell/shield-of-faith"] }],
+      [
+        {
+          kind: "spells",
+          values: ["srd52:spell/fire-bolt", "srd52:spell/magic-missile"],
+        },
+        { kind: "spells", values: ["srd52:spell/shield-of-faith"] },
+      ],
     ]);
     const cantrip = swappable(two, run).find((item) => item.key === "0:1");
     expect(cantrip).toMatchObject({ open: true, mark: `${PRIEST}:cantrips@2` });
@@ -244,7 +326,94 @@ describe("class pick swaps", () => {
       swappable(swapped, run).find((item) => item.key === "0:1")?.open,
     ).toBe(false);
     // A prepared spell swap offers spells of every level it has slots for now.
-    const spells = swappable(two, run).find((item) => item.key === "1:0");
+    const spells = swappable(two, run).find((item) => item.key === "1:1");
     expect(spells?.choices[0]).toMatchObject({ maxLevel: 1, list: PRIEST });
+  });
+});
+
+describe("wider spell lists", () => {
+  const def = () => ClassSchema.parse(run.content(PRIEST));
+  const options = (level: number, id: string) => {
+    const choice = levelChoices(def(), level, undefined, run).find(
+      (item) => item.id === id,
+    );
+    if (!choice) throw new Error(`no ${id}`);
+    return choiceOptions(
+      choice,
+      { scores: [], picks: {}, backgroundId: "srd52:background/acolyte" },
+      null,
+      def(),
+      run,
+    ).options.map((item) => item.id);
+  };
+
+  it("takes a feature's extra lists into the class's spell picks", () => {
+    expect(options(2, "spells")).not.toContain("srd52:spell/magic-missile");
+    expect(options(3, "spells")).toContain("srd52:spell/magic-missile");
+    expect(options(3, "spells")).toContain("srd52:spell/bless");
+  });
+
+  it("offers cantrips and spells from several lists up to the level's slots", () => {
+    const offered = options(2, "discoveries");
+    expect(offered).toContain("srd52:spell/fire-bolt");
+    expect(offered).toContain("srd52:spell/magic-missile");
+    expect(offered).toContain("srd52:spell/bless");
+    expect(offered).not.toContain("srd52:spell/scorching-ray");
+  });
+});
+
+describe("spells from a feature's pick and its free casts", () => {
+  const features = (ids: string[], extra: Answers = []): Answers => [
+    { kind: "features", values: ids },
+    ...extra,
+  ];
+
+  it("gives the picked variant's spells, changed after a Long Rest", () => {
+    const iced = priest([
+      features(
+        ["test:feature/lands", "test:feature/recovery"],
+        [{ kind: "variant", feature: "test:feature/lands", values: ["ice"] }],
+      ),
+    ]);
+    const derived = stats(iced);
+    const ids = derived.actions.map((item) => item.id);
+    expect(ids).toContain("spell:srd52:spell/ice-knife");
+    expect(ids).not.toContain("spell:srd52:spell/burning-hands");
+    // Recovery casts the lands' level 1+ spell without a slot.
+    expect(
+      ids.some((id) => id.startsWith("spell:srd52:spell/ice-knife:free")),
+    ).toBe(true);
+    expect(derived.resources["recovery-spell"]).toBe(1);
+    const land = swappable(iced, run).find(
+      (item) => item.choices[0]?.kind === "variant",
+    );
+    expect(land?.open).toBe(true);
+    const state = applyDndEvent(
+      { actors: { [PLAYER_ACTOR]: iced }, combat: null },
+      {
+        kind: `${NS}:answerSwapped`,
+        payload: {
+          actor: PLAYER_ACTOR,
+          key: land?.key ?? "",
+          values: ["fire"],
+        },
+      },
+    );
+    const after = state.actors[PLAYER_ACTOR];
+    if (!after) throw new Error("missing");
+    expect(stats(after).actions.map((item) => item.id)).toContain(
+      "spell:srd52:spell/burning-hands",
+    );
+    expect(
+      swappable(after, run).find((item) => item.key === land?.key)?.open,
+    ).toBe(false);
+  });
+
+  it("casts a feature's spells with its own ability", () => {
+    const charmer = priest([features(["test:feature/charmer"])]);
+    const hold = stats(charmer).actions.find(
+      (item) => item.id === "spell:srd52:spell/hold-person",
+    );
+    expect(JSON.stringify(hold?.activation)).toContain('"ability":"cha"');
   });
 });

@@ -37,6 +37,7 @@ import {
   SpeciesSchema,
   SpellSchema,
   type Spell,
+  type Subclass,
   SubclassSchema,
   type Weapon,
 } from "./schemas.ts";
@@ -504,11 +505,49 @@ export function levelChoices(
       }
     }
   }
-  const stated = [...data.choices, ...(subclassLevel?.choices ?? [])];
+  const stated = [...data.choices, ...(subclassLevel?.choices ?? [])].map(
+    (choice) =>
+      choice.kind === "spells" && choice.upToSlots
+        ? { ...choice, maxLevel: Math.max(1, highestSlot) }
+        : choice,
+  );
+  const widens = widening(classDef, level, subclass, access);
   return [
     ...stated,
-    ...inferred.filter((item) => !stated.some(({ id }) => id === item.id)),
+    ...inferred
+      .filter((item) => !stated.some(({ id }) => id === item.id))
+      .map((item) =>
+        item.kind === "spells" &&
+        (item.id === "spells" || (item.id === "cantrips" && widens.cantrips))
+          ? {
+              ...item,
+              ...(widens.lists.length > 0 ? { lists: widens.lists } : {}),
+              ...(widens.spells.length > 0 ? { also: widens.spells } : {}),
+            }
+          : item,
+      ),
   ];
+}
+
+// The lists and spells a class's features by this level add to its spell picks (Feature `widens`).
+export function widening(
+  classDef: ClassDef,
+  level: number,
+  subclass: Subclass | undefined,
+  access: ContentAccess,
+): { lists: string[]; spells: string[]; cantrips: boolean } {
+  const grants = [...classDef.levels, ...(subclass?.levels ?? [])]
+    .filter((item) => item.level <= level)
+    .flatMap((item) => item.grants);
+  const all = grants.flatMap((id) => {
+    const widens = FeatureSchema.safeParse(access.content(id)).data?.widens;
+    return widens ? [widens] : [];
+  });
+  return {
+    lists: all.flatMap((item) => item.lists ?? []),
+    spells: all.flatMap((item) => item.spells ?? []),
+    cantrips: all.some((item) => item.cantrips),
+  };
 }
 
 export const BACKGROUND_FEAT = "background-feat";
@@ -807,20 +846,30 @@ export function choiceOptions(
           )
         : choice.list;
       const also = new Set(choice.also);
+      const levelFits = (spell: Spell) =>
+        choice.maxLevel === 0 || (choice.cantrips && spell.level === 0)
+          ? spell.level === 0
+          : spell.level >= (choice.minLevel ?? 1) &&
+            spell.level <= choice.maxLevel;
+      const fits = (spell: Spell) =>
+        !also.has(spell.id) &&
+        (listed?.has(spell.id) ?? true) &&
+        (choice.schools?.includes(spell.school) ?? true) &&
+        (!choice.ritual || spell.ritual) &&
+        levelFits(spell);
+      const seen = new Set<string>();
       const spells = [
-        ...classSpells(access, list).filter(
-          (spell) =>
-            !also.has(spell.id) &&
-            (listed?.has(spell.id) ?? true) &&
-            (choice.schools?.includes(spell.school) ?? true) &&
-            (!choice.ritual || spell.ritual) &&
-            (choice.maxLevel === 0
-              ? spell.level === 0
-              : spell.level >= (choice.minLevel ?? 1) &&
-                spell.level <= choice.maxLevel),
+        ...[list, ...(choice.lists ?? [])].flatMap((item) =>
+          classSpells(access, item).filter(fits),
         ),
-        ...classSpells(access, undefined).filter((spell) => also.has(spell.id)),
-      ].filter((spell) => !had.has(spell.id));
+        ...classSpells(access, undefined).filter(
+          (spell) => also.has(spell.id) && levelFits(spell),
+        ),
+      ].filter((spell) => {
+        const fresh = !had.has(spell.id) && !seen.has(spell.name);
+        seen.add(spell.name);
+        return fresh;
+      });
       const works = (spell: Spell): boolean =>
         spell.activation !== undefined &&
         doesSomething(spell.activation.resolution);
@@ -1159,6 +1208,7 @@ function answersOf(
             kind: "spells",
             values,
             ...(choice.freeCast ? { freeCast: choice.freeCast } : {}),
+            ...(choice.ability ? { ability: choice.ability } : {}),
             ...(choiceOwners.has(choice)
               ? { feat: choiceOwners.get(choice) }
               : {}),

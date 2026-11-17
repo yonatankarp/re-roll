@@ -869,6 +869,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       })
       .optional(),
     movement: z.number().int().min(0).default(0),
+    // Paid for with half the bearer's Speed (rounded down) in place of `movement`, as Portal Jump.
+    halfSpeed: z.literal(true).optional(),
     // The target it's used on moves instead of the bearer, as a willing ally with Telekinetic Movement.
     others: z.literal(true).optional(),
     // A teleport paid for with movement that still provokes nothing, as Portal Step's.
@@ -2822,6 +2824,22 @@ export const FeatureSchema = ContentEntrySchema.extend({
     .optional(),
   // Spells it always gives, from the level in the key: the level of the class that granted it, else the character's.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  // The ability its `spells` are cast with, as Manipulate Elements' Wisdom for a Monk's Elementalism.
+  spellAbility: AbilitySchema.optional(),
+  // Its class's spell picks (and swaps) may also come from these classes' lists or these spells, as Magical Secrets'
+  // Cleric, Druid and Wizard lists or a 2014 patron's Expanded Spell List; with `cantrips` its cantrip picks too.
+  widens: z
+    .strictObject({
+      lists: z.array(ContentIdSchema).min(1).optional(),
+      spells: z.array(ContentIdSchema).min(1).optional(),
+      cantrips: z.literal(true).optional(),
+    })
+    .optional(),
+  // Each level 1+ spell of another feature's can be cast without a slot by spending `resource`, as Natural
+  // Recovery's free Circle spell once a Long Rest.
+  freeCastsFrom: z
+    .strictObject({ feature: ContentIdSchema, resource: z.string().min(1) })
+    .optional(),
   // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.
   spellsBySlot: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   // Spells by slot level, as `spellsBySlot`, given only once this feat is taken too, as a Dragonmark's Spells of the
@@ -2876,6 +2894,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
         passives: z.array(PassiveSchema).default([]),
         activations: z.array(ActivationSchema).default([]),
         resources: z.array(ResourceDefSchema).default([]),
+        // Spells the pick gives, as the feature's own `spells`, as a land's Circle spells or a Vestige's domain.
+        spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
         // Labels of the followed feature's activations these take the place of, as Perfected Armor's bigger weapons.
         replaces: z.array(z.string().min(1)).min(1).optional(),
       }),
@@ -2901,7 +2921,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
   // Its variants follow the pick made for this feature instead of asking, as Improved Blessed Strikes'.
   follows: ContentIdSchema.optional(),
   // The variant picked can be changed outside a fight after a rest, as Hunter's Prey's (swap.ts).
-  variantSwap: z.literal("shortRest").optional(),
+  // With "longRest", only after a Long Rest, as Circle of the Land's land.
+  variantSwap: z.enum(["shortRest", "longRest"]).optional(),
   // What it gives the bearer's familiar (combat/familiar.ts): Hit Points added to its maximum when it is found,
   // worked out from the bearer's numbers, and passives and actions of its own.
   familiar: z
@@ -2977,6 +2998,10 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     // Picked between scenes, only by a character who knows this spell from elsewhere, as Light Bringer's Cleric
     // cantrip in place of a Light already known.
     ifKnown: ContentIdSchema.optional(),
+    lists: z.array(ContentIdSchema).min(1).optional(), // these classes' lists too, as Magical Discoveries'
+    cantrips: z.literal(true).optional(), // cantrips too, beside spells up to `maxLevel`
+    upToSlots: z.literal(true).optional(), // `maxLevel` is the highest slot the class has at that level
+    ability: AbilitySchema.optional(), // the spells' casting ability, as Arcane Archer Lore's Intelligence
   }),
   // The spellcasting ability of the feat's spells, as Magic Initiate's "Intelligence, Wisdom, or Charisma".
   z.strictObject({
@@ -3577,6 +3602,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
     values: z.array(ContentIdSchema),
     freeCast: z.lazy(() => FreeCastSchema).optional(), // from a choice with `freeCast`
     feat: ContentIdSchema.optional(), // the feat that asked, for its spells' ability
+    ability: AbilitySchema.optional(), // from a choice with `ability`
   }),
   z.strictObject({
     kind: z.literal("features"),

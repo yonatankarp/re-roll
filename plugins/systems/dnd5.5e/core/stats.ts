@@ -812,6 +812,20 @@ export function withVariant(
           ...feature.resources,
           ...picked.flatMap((item) => item.resources),
         ],
+        spells: picked.reduce<Record<string, string[]>>(
+          (all, item) => {
+            for (const [from, ids] of Object.entries(item.spells ?? {})) {
+              all[from] = [...(all[from] ?? []), ...ids];
+            }
+            return all;
+          },
+          Object.fromEntries(
+            Object.entries(feature.spells ?? {}).map(([from, ids]) => [
+              from,
+              [...ids],
+            ]),
+          ),
+        ),
       }
     : feature;
 }
@@ -833,6 +847,7 @@ function collectFeatureData(
   spells: string[];
   free: [string, FreeCast][];
   retype: Record<string, DamageType>;
+  abilities: ReadonlyMap<string, Ability>;
 } {
   const passives: Passive[] = [];
   const actions: KnownAction[] = [];
@@ -843,6 +858,8 @@ function collectFeatureData(
   const spells = featureIds.flatMap((id) => grantedSpells(id, levelFor(id)));
   const free: [string, FreeCast][] = [];
   const retype: Record<string, DamageType> = {};
+  const ownSpells = new Map<string, readonly string[]>(); // each feature's own spells, by feature
+  const abilities = new Map<string, Ability>(); // a feature's spells cast with its own ability
   // Activations a later feature's variant takes the place of, by the feature they're on (`replaces`).
   const replaced = new Map<string, Set<string>>();
   for (const id of featureIds) {
@@ -889,6 +906,10 @@ function collectFeatureData(
       }
     }
     spells.push(...own);
+    ownSpells.set(id, own);
+    if (feature.spellAbility) {
+      for (const spell of own) abilities.set(spell, feature.spellAbility);
+    }
     const { preparedWith } = feature;
     const prepared =
       preparedWith && feats.has(preparedWith.feat) ? preparedWith : undefined;
@@ -927,7 +948,16 @@ function collectFeatureData(
       });
     });
   }
-  return { passives, actions, resources, spells, free, retype };
+  for (const id of featureIds) {
+    const from = FeatureSchema.safeParse(access.content(id)).data
+      ?.freeCastsFrom;
+    if (!from) continue;
+    for (const spell of ownSpells.get(from.feature) ?? []) {
+      const level = SpellSchema.safeParse(access.content(spell)).data?.level;
+      if (level) free.push([spell, { resource: from.resource }]);
+    }
+  }
+  return { passives, actions, resources, spells, free, retype, abilities };
 }
 
 // An attack with `emptyHanded` dice rolls them while the bearer holds no weapon or Shield, as Unarmed Fighting's d8.
@@ -1273,6 +1303,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
   const featureIds = new Set<string>(species.traits);
   const grantedBy = new Map<string, string>(); // the class whose level granted a feature
+  const answerAbilities = new Map<string, Ability>(); // spells a class choice gives with its own ability
   const variants: Record<string, string[]> = {}; // the variants picked, by feature
   // A feat picked in place of the background's, as a Dark Gift for Haunted One, is in the first level's answers.
   const replaced =
@@ -1322,6 +1353,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         for (const spell of answer.values) {
           knownSpells.add(spell);
           if (answer.freeCast) freeAlso(spell, answer.freeCast);
+          if (answer.ability) answerAbilities.set(spell, answer.ability);
         }
       } else if (answer.kind === "features") {
         for (const id of answer.values) featureIds.add(id);
@@ -1473,13 +1505,17 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   }
   // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
   const traits = [...itemPassives, ...fromFeatures.passives];
-  const castingAbility = featSpellAbilities(
-    build,
-    replaced ? [] : [background.feat],
-    species,
-    access,
-    swaps,
-  );
+  const castingAbility = new Map([
+    ...answerAbilities,
+    ...fromFeatures.abilities,
+    ...featSpellAbilities(
+      build,
+      replaced ? [] : [background.feat],
+      species,
+      access,
+      swaps,
+    ),
+  ]);
   const armorBases: number[] = [];
   const flatBonus = magic.ac;
   let shield = 0;
