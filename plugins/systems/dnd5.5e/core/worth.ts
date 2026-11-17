@@ -1038,10 +1038,12 @@ export function makeJudge(context: Context, side: Actor): Judge {
           isDown(target) ||
           (effect.reaction && !target.budget.reaction)
           ? 0
-          : 0.5 *
+          : // They don't stack, so only what they'd add over the ones held now counts.
+            0.5 *
               healWorth(
                 target,
-                rollAmount(effect.amount, stats(actor), AVERAGE),
+                rollAmount(effect.amount, stats(actor), AVERAGE) -
+                  target.tempHp,
               );
       case "applyCondition": {
         const { condition } = effect;
