@@ -7,7 +7,7 @@ import {
 } from "#sdk";
 import { z } from "zod";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
-import { HIT_DICE, parseOption } from "../core/combat/ids.ts";
+import { HIT_DICE, itemUseOf, parseOption } from "../core/combat/ids.ts";
 import { squareKey } from "../core/grid.ts";
 import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
@@ -125,7 +125,8 @@ function actionDetail(
 ): string {
   const source = contentText(
     access,
-    action.id.replace(/^[a-z]+:/, "").replace(/:free$/, ""),
+    itemUseOf(action.id) ??
+      action.id.replace(/^[a-z]+:/, "").replace(/:free$/, ""),
   );
   const upcast = action.upcast?.perSlotLevel;
   return [

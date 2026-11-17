@@ -1943,9 +1943,7 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
       }
     : own;
   // A Ring of Free Action: nothing takes Speed off.
-  const speed = hasSteadySpeed(stats)
-    ? Math.max(0, effectBonus(actor, "speed"))
-    : effectBonus(actor, "speed");
+  const speed = effectBonus(actor, "speed", hasSteadySpeed(stats));
   const maxHp = effectBonus(actor, "maxHp");
   const stuck = new Set(
     actor.activeEffects.flatMap(({ modifier }) =>
@@ -2222,11 +2220,20 @@ function changedWeapon(
 
 // A spell's flat Speed or Hit Point maximum increase, as with Longstrider or Aid, counted once per source.
 // shortcut: Hit Points above the maximum aren't taken away when the increase ends.
-function effectBonus(actor: Actor, to: "speed" | "maxHp"): number {
+function effectBonus(
+  actor: Actor,
+  to: "speed" | "maxHp",
+  increasesOnly = false,
+): number {
   const seen = new Set<string>();
   let total = 0;
   for (const { sourceId, modifier } of actor.activeEffects) {
-    if (modifier.kind !== "bonus" || modifier.to !== to || seen.has(sourceId))
+    if (
+      modifier.kind !== "bonus" ||
+      modifier.to !== to ||
+      seen.has(sourceId) ||
+      (increasesOnly && modifier.subtract)
+    )
       continue;
     seen.add(sourceId);
     total += (modifier.subtract ? -1 : 1) * (modifier.amount.bonus?.base ?? 0);

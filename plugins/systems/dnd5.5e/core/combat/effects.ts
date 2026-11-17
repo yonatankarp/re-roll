@@ -41,6 +41,7 @@ import {
   type ContentAccess,
   type Dice,
   type Frame,
+  PLAYER_ACTOR,
   type SystemEvent,
   type SystemResult,
 } from "#sdk";
@@ -117,6 +118,7 @@ import {
   reactFrames,
   settleRoll,
   beforeFailedSave,
+  playerTakes,
   slotRefund,
 } from "./reactions.ts";
 import { summonEvents } from "./summon.ts";
@@ -796,7 +798,8 @@ export function burstEvents(
 }
 
 // A Ring of Spell Turning's Reaction: a spell that targeted only the bearer, with no area, is cast back at its caster,
-// who saves against its own spell save DC. shortcut: it comes back at the spell's own level, whatever slot it took.
+// who saves against its own spell save DC. The player is asked first. shortcut: it comes back at the spell's own
+// level, whatever slot it took, and not at all when the caster can't cast it again as an action of its own.
 function deflectedSpell(
   action: KnownAction,
   caster: Actor,
@@ -813,7 +816,17 @@ function deflectedSpell(
     hasCondition(target, ...INCAPACITATING) ||
     !deriveStats(target, context).passives.some(
       (passive) => passive.kind === "spellTurning" && passive.deflect,
-    )
+    ) ||
+    !deriveStats(caster, context).actions.some(
+      (item) => item.id === action.id,
+    ) ||
+    (target.id === PLAYER_ACTOR &&
+      !playerTakes(
+        "spellTurning",
+        `You save against ${caster.name}'s ${action.name}. Turn it back with Spell Turning?`,
+        { ...action, id: "spellTurning", name: "Spell Turning" },
+        context,
+      ))
   ) {
     return none;
   }

@@ -195,6 +195,16 @@ const ITEMS = [
   },
 ];
 
+ITEMS.push({
+  id: "test:feature/hold-caster",
+  name: "Hold Caster",
+  text: "Test.",
+  automation: "full",
+  passives: [],
+  spells: { 1: ["srd52:spell/hold-person"] },
+  freeCast: "atWill",
+} as never);
+
 async function itemRun() {
   const run = await testRun();
   const byId = new Map(ITEMS.map((entry) => [entry.id, entry]));
@@ -610,16 +620,34 @@ describe("magic item passives (#193)", () => {
     };
     const cold = { ...wearing(["free"]), activeEffects: [chilled] };
     expect(deriveStats(cold, run).speed).toBe(30);
+    // An increase still counts, whatever else would take Speed off.
+    const striding: ActiveEffect = {
+      ...chilled,
+      sourceId: "spell:stride",
+      modifier: { ...chilled.modifier, subtract: false } as never,
+    };
+    const both = { ...cold, activeEffects: [chilled, striding] };
+    expect(deriveStats(both, run).speed).toBe(40);
   });
 
   it("turns a spell aimed at a Ring of Spell Turning's wearer alone back at its caster", async () => {
     const run = await itemRun();
     const bearer = at(wearing(["turning"]), 0);
-    const foe = at(foeOf(), 1);
+    const foe = at(
+      {
+        ...wearing([], { id: "foe", traits: ["hold-caster"] }),
+        side: "enemy" as const,
+      },
+      1,
+    );
+    const known =
+      deriveStats(foe, run).actions.find((action) =>
+        action.id.includes("hold-person"),
+      )?.id ?? "";
     const hold = (
       targeting: KnownAction["activation"]["targeting"],
     ): KnownAction => ({
-      id: "test-hold",
+      id: known,
       name: "Hold",
       spellLevel: 2,
       activation: {
@@ -654,7 +682,7 @@ describe("magic item passives (#193)", () => {
     expect(single.frames).toContainEqual(
       frame("useAction", {
         actor: "foe",
-        actionId: "test-hold",
+        actionId: known,
         target: "foe",
         anyone: true,
         free: true,
@@ -667,6 +695,99 @@ describe("magic item passives (#193)", () => {
       ctx(run, [bearer, foe], [15]),
     );
     expect(payloads(area.events ?? [], "budgetSpent")).toEqual([]);
+  });
+
+  it("plays a turned spell on its caster, who saves against its own DC, and asks nothing of a caster without it", async () => {
+    const run = await itemRun();
+    const bearer = at(wearing(["turning"]), 0);
+    const foe = at(
+      {
+        ...foeOf(),
+        ...wearing([], { id: "foe", traits: ["hold-caster"] }),
+        side: "enemy" as const,
+      },
+      1,
+    );
+    const hold = deriveStats(foe, run).actions.find((action) =>
+      action.id.includes("hold-person"),
+    );
+    if (!hold) throw new Error("No Hold Person");
+    // The bearer saves on a 20; the caster fails on a 1.
+    const dice = scripted([20, 1]).dice;
+    const cast = resolveAction(
+      hold,
+      foe,
+      [bearer],
+      contextOf(run, [bearer, foe], dice),
+    );
+    const { events } = settle(
+      run,
+      [bearer, foe],
+      [...(cast.frames ?? [])],
+      dice,
+    );
+    expect(payloads(events, "saveRolled")).toContainEqual(
+      expect.objectContaining({ actor: "foe", success: false }),
+    );
+    const added = payloads(events, "effectAdded") as {
+      actor: string;
+      effect: ActiveEffect;
+    }[];
+    expect(
+      added.some(
+        (item) =>
+          item.actor === "foe" &&
+          item.effect.modifier.kind === "condition" &&
+          item.effect.modifier.condition === "paralyzed",
+      ),
+    ).toBe(true);
+    // A caster that has no such action of its own gets nothing back.
+    const unknown = resolveAction(
+      { ...hold, id: "spell:srd52:spell/hold-person:item:test:item/wand:1" },
+      foe,
+      [bearer],
+      contextOf(run, [bearer, foe], scripted([20]).dice),
+    );
+    expect(payloads(unknown.events ?? [], "budgetSpent")).toEqual([]);
+  });
+
+  it("gives back Lucubration's slots by the slot it's cast with", async () => {
+    const run = await itemRun();
+    const actor = {
+      ...wearing([], { level: 5, wizard: true }),
+      resourcesSpent: { "slot:3": 1, "slot:2": 1, "slot:1": 1 },
+    };
+    const spell: KnownAction = {
+      id: "spell:test:spell/lucubration",
+      name: "Lucubration",
+      spellLevel: 2,
+      upcast: { perSlotLevel: { slotOnly: true } },
+      activation: ActivationSchema.parse({
+        cost: ["action", "slot"],
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "regain",
+              resource: "slots",
+              count: 2,
+              maxLevel: "halfSlot",
+            },
+          ],
+        },
+      }),
+    };
+    const { events = [] } = resolveAction(
+      spell,
+      actor,
+      [actor],
+      ctx(run, [actor]),
+      3,
+    );
+    expect(
+      payloads(events, "resourceRestored").map((item) => item.resource),
+    ).toEqual(["slot:1"]);
   });
 
   it("draws a ranged attack on a creature beside it to an Arrow-Catching Shield's wearer", async () => {

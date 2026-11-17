@@ -358,6 +358,8 @@ export function rescuedSave(
   for (const passive of stats.passives) {
     if (
       passive.kind !== "saveRescue" ||
+      // A save to keep Concentration is rescued only by what names it, as a Ring of Dedicated Focus.
+      (conditions.includes("concentration") && !passive.concentration) ||
       !coversSave(
         passive.concentration
           ? { ...passive, conditions: [...passive.conditions, "concentration"] }
