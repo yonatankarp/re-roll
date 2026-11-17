@@ -1,4 +1,5 @@
 import {
+  ALL_SKILLS,
   ConditionSchema,
   DAMAGE_TYPES,
   WeaponMasterySchema,
@@ -293,4 +294,16 @@ export const GLOSSARY_TERMS: readonly GlossaryTerm[] = [
       : term;
   }),
   ...RULES,
+  // Capitalized only, since "history" is a word of a sentence too. Not the creature types, whose words start
+  // monsters' and spells' names (Giant Rat, Fey Step), and whose entities list monsters rather than explain.
+  ...ALL_SKILLS.map((skill) => ({
+    id: `skill:${skill}`,
+    entity: `skill/${glossaryName(skill)}`,
+    words: [
+      glossaryName(skill)
+        .split("-")
+        .map((word) => (word === "of" ? word : capital(word)))
+        .join(" "),
+    ],
+  })),
 ];

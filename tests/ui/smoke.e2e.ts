@@ -20,7 +20,7 @@ test("starts the shipped adventure and plays a turn on the map", async ({
   await page.getByRole("button", { name: /^Pick a ready hero/ }).click();
   await page.getByRole("button", { name: /^Human Fighter/ }).click();
   await page
-    .getByRole("button", { name: "[Perception] Check the treeline" })
+    .getByRole("button", { name: /Perception ?\] Check the treeline$/ })
     .click();
 
   // The check's die waits for a click, then a found item, the ambush or the fight's scene may come first.

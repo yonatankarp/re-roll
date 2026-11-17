@@ -60,7 +60,7 @@ test("explains a term in a fight and opens its book section", async ({
   await page.getByRole("button", { name: /^Pick a ready hero/ }).click();
   await page.getByRole("button", { name: /^Human Fighter/ }).click();
   await page
-    .getByRole("button", { name: "[Perception] Check the treeline" })
+    .getByRole("button", { name: /Perception ?\] Check the treeline$/ })
     .click();
   const actions = page.getByRole("button", { name: "Actions", exact: true });
   const onward = page.getByRole("button", {

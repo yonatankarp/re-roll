@@ -276,6 +276,35 @@ describe("the session's rules terms", () => {
     expect(await game.kinds("..", "0001-ague.md")).toEqual([]);
   });
 
+  it("reads a section's family links, another book's too (#188)", async () => {
+    const links = JSON.stringify({
+      links: {
+        "0001-imp.md": [
+          { file: "0002-imps.md", heading: "Imps", rel: "family" },
+          {
+            book: "bestiary",
+            file: "0009-fiends.md",
+            heading: "Fiends",
+            rel: "family",
+          },
+        ],
+      },
+    });
+    const game = await gameWith(null, {
+      "books/library/made-up/links.json": links,
+    });
+    expect(await game.links("made-up", "0001-imp.md")).toEqual([
+      { file: "0002-imps.md", heading: "Imps", rel: "family" },
+      {
+        book: "bestiary",
+        file: "0009-fiends.md",
+        heading: "Fiends",
+        rel: "family",
+      },
+    ]);
+    expect(await game.links("..", "0001-imp.md")).toEqual([]);
+  });
+
   it("keeps the environment, downtime and option kinds out of the save hash, as lore", () => {
     const kinds = dnd55e.contentKinds;
     for (const map of [ENVIRONMENT_KINDS, DOWNTIME_KINDS, OPTION_KINDS])
