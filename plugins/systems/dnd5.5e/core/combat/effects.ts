@@ -910,6 +910,14 @@ export function leafEvents(
               resource: pool.resource,
               amount: pool.spent,
             }),
+            ...(effect.pool?.temp
+              ? [
+                  dndEvent(`${NS}:tempHpGained`, {
+                    actor: target.id,
+                    amount: pool.spent,
+                  }),
+                ]
+              : []),
           );
         }
         const rolled = effect.full

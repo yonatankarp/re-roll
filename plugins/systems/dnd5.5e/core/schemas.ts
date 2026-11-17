@@ -447,6 +447,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .strictObject({
         resource: z.string().min(1),
         most: FormulaSchema.optional(),
+        temp: z.literal(true).optional(), // and a Temporary Hit Point for each spent, as Balm of the Summer Court
       })
       .optional(),
   }),

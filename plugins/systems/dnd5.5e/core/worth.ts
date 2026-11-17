@@ -32,6 +32,7 @@ import { grapplesOn } from "./combat/grapple.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX, THROW_PREFIX } from "./combat/ids.ts";
 import {
+  poolHealing,
   commandedFamiliar,
   DAMAGE_TO_PARTY,
   damageToParty,
@@ -652,8 +653,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
 
   // Bringing a downed ally back gives its turns back, and stops its death saves. Topping up a standing one
   // counts only while the hardest hitter could drop it before it acts again.
+  // Only a raising reaches the dead, and bringing one back is worth what getting a downed one up is.
   const healWorth = (target: Actor, amount: number): number => {
-    if (isDead(target) || amount <= 0) return 0;
+    if (amount <= 0) return 0;
     const maxHp = stats(target).maxHp;
     const value = Math.max(threat(target), 0.5 * meanFoeThreat);
     if (isDown(target)) return value * playerWeight(target);
@@ -908,10 +910,23 @@ export function makeJudge(context: Context, side: Actor): Judge {
   ): number => {
     const foe = target.side !== actor.side;
     switch (effect.kind) {
-      case "heal":
-        return foe
-          ? 0
-          : healWorth(target, rollAmount(effect.amount, stats(actor), AVERAGE));
+      case "heal": {
+        if (foe) return 0;
+        const room = stats(target).maxHp - Math.max(target.hp, 0);
+        const each = rollAmount(effect.amount, stats(actor), AVERAGE);
+        // A pool heals what it can of the room, a full heal all of it.
+        const pool = effect.pool
+          ? poolHealing(
+              effect.pool,
+              effect.amount,
+              room,
+              actor,
+              stats(actor),
+              AVERAGE,
+            ).healed
+          : null;
+        return healWorth(target, effect.full ? room : (pool ?? each));
+      }
       case "hitDieHeal": {
         const die = nextHitDie(target, context);
         return foe || !die
