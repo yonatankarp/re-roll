@@ -34,6 +34,8 @@ import { formFrames } from "./combat/form-choice.ts";
 import { damageChoiceFrames } from "./combat/damage-choice.ts";
 import { checkChoiceFrames } from "./combat/check-choice.ts";
 import { confusionFrames } from "./combat/confusion.ts";
+import { fearFrames } from "./combat/fear.ts";
+import { optionFrames } from "./combat/options.ts";
 import { wishFrames } from "./combat/wish.ts";
 import { reactionFrames } from "./combat/reactions.ts";
 import { turnFrames } from "./combat/turn.ts";
@@ -519,6 +521,8 @@ export const dnd55e = defineSystem<DndState>({
     ...damageChoiceFrames,
     ...checkChoiceFrames,
     ...confusionFrames,
+    ...fearFrames,
+    ...optionFrames,
     ...wishFrames,
     ...reactionFrames,
     ...attackFrames,

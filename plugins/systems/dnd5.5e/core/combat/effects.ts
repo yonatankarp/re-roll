@@ -138,6 +138,8 @@ import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
 import { damageTypeFrame, zoneTypeFrame } from "./damage-choice.ts";
 import { focusFrame } from "./check-choice.ts";
+import { sendAwayEvents, slayEvents } from "./fear.ts";
+import { optionFrame } from "./options.ts";
 import { weaponAttackResult } from "./weapon-spell.ts";
 import { duelBroken, duelDamaged } from "./duel.ts";
 import { wishFrame } from "./wish.ts";
@@ -1307,6 +1309,33 @@ function reducedHit(
   };
 }
 
+// A target whose Hit Points are in the effect's band, as Divine Word's or Power Word Stun's.
+function inHpBand(
+  target: Actor,
+  band: {
+    readonly hpAtMost?: number | undefined;
+    readonly hpAbove?: number | undefined;
+  },
+): boolean {
+  return (
+    (band.hpAtMost === undefined || target.hp <= band.hpAtMost) &&
+    (band.hpAbove === undefined || target.hp > band.hpAbove)
+  );
+}
+
+// An hour or more without Concentration outlasts the fight, counted down by rests after it (rest.ts).
+// shortcut: anything shorter ends with the fight, as the scenes between fights take longer than ten minutes.
+export function lingersFor(duration: Duration): {
+  lingers?: number;
+} {
+  return typeof duration === "object" &&
+    "minutes" in duration &&
+    !("concentration" in duration) &&
+    duration.minutes >= 60
+    ? { lingers: Math.floor(duration.minutes / 60) }
+    : {};
+}
+
 // A timed spell's minutes, and a turn of the target's, are counted in rounds by its `lasts` (lastsFor).
 export function effectEnds(
   duration: Duration,
@@ -1772,8 +1801,10 @@ export function leafEvents(
         break;
       }
       case "modifier":
-        // given once its type, skill or ability is picked (combat/damage-choice.ts, combat/check-choice.ts)
-        if (effect.choose || effect.pick) break;
+        // given once its type, skill or ability is picked (combat/damage-choice.ts, combat/check-choice.ts), or once
+        // its option is (combat/options.ts)
+        if (effect.choose || effect.pick || effect.option) break;
+        if (!inHpBand(target, effect)) break;
         events.push(
           dndEvent(`${NS}:effectAdded`, {
             actor: target.id,
@@ -1783,9 +1814,12 @@ export function leafEvents(
               ...level,
               modifier: rolledModifier(effect.modifier, stats, context),
               ends: effectEnds(effect.duration),
-              ...lastsFor(effect.duration, caster, target, context.state),
+              ...(effect.gone?.includes(deriveStats(target, context).creatureType ?? "")
+                ? {}
+                : lastsFor(effect.duration, caster, target, context.state)),
               ...(effect.repeatSave && save ? { repeatSave: save } : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
+              ...lingersFor(effect.duration),
               ...swallowed,
             },
           }),
@@ -1805,7 +1839,9 @@ export function leafEvents(
         }
         break;
       case "applyCondition": {
+        if (effect.option) break; // given once its option is picked (combat/options.ts)
         if (
+          !inHpBand(target, effect) ||
           immuneToCondition(deriveStats(target, context), effect.condition) ||
           zoneImmune(target, effect.condition, context.state, context) ||
           target.activeEffects.some(
@@ -1813,7 +1849,6 @@ export function leafEvents(
               modifier.kind === "conditionImmunity" &&
               modifier.condition === effect.condition,
           ) ||
-          (effect.hpAtMost !== undefined && target.hp > effect.hpAtMost) ||
           (effect.web &&
             hasPassive(deriveStats(target, context), "webWalker")) ||
           (effect.maxSize !== undefined &&
@@ -1846,8 +1881,24 @@ export function leafEvents(
               ...(effect.endsOnSpell ? { endsOnSpell: true } : {}),
               ...(effect.endsOn ? { endsOn: effect.endsOn } : {}),
               ...(effect.saveOnDamage && conditionSave
-                ? { saveOnDamage: conditionSave }
+                ? {
+                    saveOnDamage: {
+                      ...conditionSave,
+                      ...(effect.saveOnDamage === "advantage"
+                        ? { advantage: true as const }
+                        : {}),
+                    },
+                  }
                 : {}),
+              ...(effect.flee ? { flee: effect.flee } : {}),
+              ...(effect.shake ? { shake: true as const } : {}),
+              ...(effect.cantStand ? { cantStand: true as const } : {}),
+              ...(effect.actionSave ? { actionSave: true as const } : {}),
+              ...(effect.failExhaustion
+                ? { failExhaustion: true as const }
+                : {}),
+              ...(effect.clings ? { clings: true as const } : {}),
+              ...lingersFor(effect.duration),
               ...(effect.banish && save
                 ? { banish: { ability: effect.banish.ability, dc: save.dc } }
                 : {}),
@@ -2221,6 +2272,14 @@ export function leafEvents(
             { kind: "actorDefeated", actor: target.id },
           );
         }
+        break;
+      case "slay":
+        events.push(...slayEvents(effect, target));
+        break;
+      case "sendAway":
+        events.push(
+          ...sendAwayEvents(effect, sourceId, caster, target, context),
+        );
         break;
       case "note":
       case "disperse":
@@ -3270,6 +3329,15 @@ export function resolveAction(
           slotLevel,
         );
         if (focus) frames.push(focus);
+        const picked = optionFrame(
+          resolution.effects,
+          spellSource(action),
+          actor,
+          target,
+          undefined,
+          slotLevel,
+        );
+        if (picked) frames.push(picked);
         // Where it lands is chosen, as a move is, and so is a form for a friend.
         for (const effect of resolution.effects) {
           if (
@@ -3548,6 +3616,17 @@ export function resolveAction(
             slotLevel,
           ),
         );
+        const picked = turned
+          ? null
+          : optionFrame(
+              saved ? resolution.onSuccess : resolution.onFail,
+              spellSource(action),
+              actor,
+              target,
+              { ability: resolution.ability, dc },
+              slotLevel,
+            );
+        if (picked) frames.push(picked);
         // Harm: the damage taken comes off the Hit Point maximum too.
         if (
           !saved &&
@@ -3836,7 +3915,10 @@ function rolledModifier(
 ): Modifier {
   // Sanctuary keeps the caster's save DC as it was cast, as does an action a spell gives.
   if (
-    (modifier.kind === "sanctuary" || modifier.kind === "grantedAction") &&
+    (modifier.kind === "sanctuary" ||
+      modifier.kind === "grantedAction" ||
+      modifier.kind === "castSave" ||
+      modifier.kind === "dodgeSave") &&
     modifier.dc === undefined
   ) {
     return { ...modifier, dc: spellSaveDc(stats) };

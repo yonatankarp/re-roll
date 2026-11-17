@@ -363,6 +363,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     attackers: z.array(z.string()).min(1).optional(),
     skills: z.array(SkillSchema).min(1).optional(), // only checks with these skills
     spells: z.literal(true).optional(), // attacksAgainst only from spells, as a Spellguard Shield's
+    except: AbilitySchema.optional(), // saves with any ability but this one, as Power Word Pain's
+    casterOnly: z.literal(true).optional(), // attacks only against the effect's caster, as Bestow Curse's
   }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
@@ -440,6 +442,26 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     oneAttack: z.literal(true).optional(),
     speed: z.enum(["half", "double", "none"]).optional(),
     spellFailure: z.number().int().min(1).max(100).optional(),
+    noSpells: z.literal(true).optional(), // it can't cast spells, as Befuddlement's
+    speedMax: z.number().int().min(0).optional(), // its Speed is at most this many feet, as Power Word Pain's
+    // only one of moving, an action and a Bonus Action on its turns, as Abjure Foes' (combat/durations.ts)
+    oneThing: z.literal(true).optional(),
+  }),
+  // Before casting a spell the bearer saves against `dc` (the caster's spell save DC, filled in as it's cast, when
+  // left out), or the spell fails and its action is wasted, its slot spent unless `keepSlot`, as Power Word Pain's or
+  // Gehennan Cruelty's (combat/actions.ts).
+  z.strictObject({
+    kind: z.literal("castSave"),
+    ability: AbilitySchema,
+    dc: z.number().int().optional(),
+    keepSlot: z.literal(true).optional(),
+  }),
+  // As each of its turns starts the bearer saves against `dc` (filled in as cast) or takes the Dodge action, which
+  // spends its action, as Bestow Curse's (combat/fear.ts).
+  z.strictObject({
+    kind: z.literal("dodgeSave"),
+    ability: AbilitySchema,
+    dc: z.number().int().optional(),
   }),
   // Haste's additional action each turn: the Attack (one attack only), Dash, Disengage or Hide action. When it
   // ends, the bearer is Incapacitated with a Speed of 0 until the end of its next turn.
@@ -679,6 +701,29 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .strictObject({ ability: AbilitySchema, dc: FormulaSchema })
       .optional(),
     hpAtMost: z.number().int().min(1).optional(), // only a target with this many Hit Points or fewer
+    hpAbove: z.number().int().min(1).optional(), // only a target with more Hit Points than this, as Divine Word's bands
+    // One of the caster's choices, by label: the effects sharing a label make one option, picked as the effect lands
+    // (combat/options.ts), as Blindness/Deafness's Blinded or Deafened.
+    option: z.string().min(1).optional(),
+    // On each of its turns it Dashes away from the caster by the longest way it can (combat/fear.ts). `unseen` makes its
+    // repeat save only at the end of a turn out of the caster's sight, as Fear's; `far` ends it once that many feet
+    // away and out of sight, as Eyebite's Panicked; `casterDown` ends it once the caster is Incapacitated or dead, as
+    // Turn Undead's.
+    flee: z
+      .strictObject({
+        unseen: z.literal(true).optional(),
+        far: z.number().int().min(5).optional(),
+        casterDown: z.literal(true).optional(),
+      })
+      .optional(),
+    // Another creature within 5 feet can take an action to end it, as shaking a creature out of Sleep (combat/fear.ts).
+    shake: z.literal(true).optional(),
+    cantStand: z.literal(true).optional(), // Prone it can't end on itself, as Hideous Laughter's
+    // It can spend its action to repeat the save, as Irresistible Dance's (combat/fear.ts).
+    actionSave: z.literal(true).optional(),
+    failExhaustion: z.literal(true).optional(), // each failed repeat save gives a level of Exhaustion
+    // Something that would end it does so only after the save it came with, as Contagion's Poisoned.
+    clings: z.literal(true).optional(),
     web: z.literal(true).optional(), // webs hold it, which a Web Walker ignores, as with Web
     // only a target this size or smaller, as an Energy Pulse knocks only a Medium or smaller creature Prone
     maxSize: z
@@ -688,8 +733,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature, as Modify Memory's
     // Ends when the creature attacks or deals damage ("attack"), or takes any action ("action"), as Fade Away's.
     endsOn: z.enum(["attack", "action"]).optional(),
-    // Taking damage gives it a save to end it, as Dragon Fear's, using the save it came with.
-    saveOnDamage: z.literal(true).optional(),
+    // Taking damage gives it a save to end it, as Dragon Fear's, using the save it came with, with Advantage on
+    // "advantage", as Hideous Laughter's.
+    saveOnDamage: z.union([z.literal(true), z.literal("advantage")]).optional(),
     // What a failed repeat save turns it into, as a cockatrice's Restrained becoming Petrified.
     secondFailure: z
       .strictObject({
@@ -713,6 +759,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("modifier"),
     modifier: ModifierSchema,
     duration: DurationSchema,
+    // as an applyCondition's
+    option: z.string().min(1).optional(),
+    hpAtMost: z.number().int().min(1).optional(),
+    hpAbove: z.number().int().min(1).optional(),
+    // On a creature of these lowercase types it runs out only with Concentration, so held for its whole duration the
+    // creature doesn't come back and counts as beaten meanwhile, as Banishment's (combat/turn.ts shutAway).
+    gone: z.array(z.string()).min(1).optional(),
     repeatSave: z.boolean().optional(), // as an applyCondition's
     whileTempHp: z.literal(true).optional(), // ends once the bearer has no Temporary Hit Points, as Armor of Agathys
     // The caster picks the modifier's damage type from these as it casts (combat/damage-choice.ts), as with
@@ -981,6 +1034,23 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // A failed save's damage that drops the target to 0 Hit Points turns it to dust, dead outright, as Disintegrate.
   // Only a raising whose targeting has `dust` brings it back, as True Resurrection.
   z.strictObject({ kind: z.literal("disintegrate") }),
+  // A target with this many Hit Points or fewer dies, as Divine Word's lowest band on a failed save.
+  z.strictObject({ kind: z.literal("slay"), hpAtMost: z.number().int().min(1) }),
+  // The target is sent off to another plane, gone from the fight for good: only one of these lowercase types with
+  // `creatureTypes`, as Divine Word's Celestials and Fiends, and with `crByLevel` only one whose Challenge Rating is at
+  // most the one for the caster's level in `class`, as Arcane Abjuration's banishing (combat/fear.ts).
+  z.strictObject({
+    kind: z.literal("sendAway"),
+    creatureTypes: z.array(z.string()).min(1).optional(),
+    crByLevel: z
+      .strictObject({
+        class: ContentIdSchema,
+        at: z
+          .array(z.strictObject({ level: z.number().int(), cr: z.number() }))
+          .min(1),
+      })
+      .optional(),
+  }),
   // The target spends one of its Hit Point Dice and regains what it rolls plus `bonus`, as with Healer's Battle Medic.
   // Rolls up to `dice` of the target's Hit Point Dice (stopping once it is whole) and adds `bonus` once.
   z.strictObject({
@@ -2296,10 +2366,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Using an activation of this feature also does these to the bearer, as Tactical Shift's move with Second Wind or
   // Arcane Charge's teleport with Action Surge.
+  // With `label` only the activation of that label, and `damage` adds to a save's damage, dealt only on a failure,
+  // as Sear Undead's Radiant on Turn Undead.
   z.strictObject({
     kind: z.literal("activationRider"),
     feature: ContentIdSchema,
-    effects: z.array(LeafEffectSchema).min(1),
+    label: z.string().min(1).optional(),
+    effects: z.array(LeafEffectSchema).default([]),
+    damage: z.array(DamageSchema).min(1).optional(),
   }),
   // A Long Rest leaves one of this item with the bearer, as Vampire's Plaything's Decanting.
   z.strictObject({ kind: z.literal("restItem"), item: ContentIdSchema }),

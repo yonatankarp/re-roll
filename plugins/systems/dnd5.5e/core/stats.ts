@@ -712,12 +712,28 @@ function withRiders(
 ): KnownAction[] {
   return actions.map((action) => {
     const { resolution } = action.activation;
-    const extra = passives.flatMap((passive) =>
+    const riders = passives.flatMap((passive) =>
       passive.kind === "activationRider" &&
-      action.id.startsWith(`feature:${passive.feature}:`)
-        ? passive.effects
+      action.id.startsWith(`feature:${passive.feature}:`) &&
+      (passive.label === undefined ||
+        action.activation.label === passive.label)
+        ? [passive]
         : [],
     );
+    const extra = riders.flatMap(({ effects }) => effects);
+    const damage = riders.flatMap(({ damage: more }) => more ?? []);
+    if (damage.length > 0 && resolution.kind === "save") {
+      return {
+        ...action,
+        activation: {
+          ...action.activation,
+          resolution: {
+            ...resolution,
+            damage: [...resolution.damage, ...damage],
+          },
+        },
+      };
+    }
     return extra.length === 0 || resolution.kind !== "automatic"
       ? action
       : {
@@ -1392,6 +1408,13 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ),
       ),
       proficiency: proficiencyBonus(level) + magic.proficiency,
+      // Each ability modifier, at least 1, for dice that number it, as Sear Undead's d8s ("mod:wis").
+      ...Object.fromEntries(
+        Object.entries(abilities).map(([ability, score]) => [
+          `mod:${ability}`,
+          Math.max(1, abilityModifier(score)),
+        ]),
+      ),
     },
     features: [...featureIds],
     resourceDefs: [

@@ -3,6 +3,12 @@ import { deathSaveEvents } from "./actions.ts";
 import { duelStrayed } from "./duel.ts";
 import { confusedBy } from "./confusion.ts";
 import {
+  dodgeSaveEvents,
+  fledEvents,
+  fleeingFrom,
+  repeatsNow,
+} from "./fear.ts";
+import {
   type Frame,
   PLAYER_ACTOR,
   type SystemEvent,
@@ -383,7 +389,8 @@ export function runFinishTurn(context: Context): SystemResult {
     actor &&
     effect.repeatSave &&
     !isDown(actor) &&
-    !actor.usedThisTurn.includes(`${FRESH}${effect.sourceId}`)
+    !actor.usedThisTurn.includes(`${FRESH}${effect.sourceId}`) &&
+    repeatsNow(actor, effect, context)
       ? [{ actor, effect, save: effect.repeatSave }]
       : [],
   );
@@ -440,6 +447,17 @@ export function runFinishTurn(context: Context): SystemResult {
             },
           );
     events.push(...rescued);
+    // Vision of Elapsing Eons: each failed repeat save is a level of Exhaustion.
+    if (
+      effect.failExhaustion &&
+      !rolled.saved &&
+      !resisted &&
+      rescued.length === 0
+    ) {
+      events.push(
+        dndEvent(`${NS}:exhaustionChanged`, { actor: target.id, levels: 1 }),
+      );
+    }
     const holder =
       target.activeEffects.find(
         (item) =>
@@ -499,6 +517,8 @@ export function runFinishTurn(context: Context): SystemResult {
             modifier: { kind: "condition", condition: worse.condition },
             ends: worse.ends,
             ...(worse.endsOnDamage ? { endsOnDamage: true } : {}),
+            ...(holder.shake ? { shake: true } : {}),
+            ...(holder.lingers === undefined ? {} : { lingers: holder.lingers }),
           },
         }),
       );
@@ -506,6 +526,7 @@ export function runFinishTurn(context: Context): SystemResult {
   }
   const ending = [
     ...events,
+    ...(actor ? fledEvents(actor, context) : []),
     ...(actor ? duelStrayed(actor, state) : []),
     ...regurgitationEvents(context),
     ...(actor ? rechargeEvents(actor, context) : []),
@@ -568,6 +589,7 @@ export function runAdvanceTurn(
       ? deathSaveEvents(next, { ...context, state: after })
       : []),
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
+    ...(next ? dodgeSaveEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
     ...(next ? sharedTempHp(next, { ...context, state: after }) : []),
@@ -589,6 +611,7 @@ export function runAdvanceTurn(
         ...sunlightFrames(next, starts),
         ...zoneFrames(next, "start", starts),
         ...(confusedBy(next) ? [frame("confusedTurn", {})] : []),
+        ...(fleeingFrom(next) ? [frame("fleeTurn", {})] : []),
       ]
     : [];
   // A reaction to a creature starting its turn nearby, as with Unnerving Gaze.

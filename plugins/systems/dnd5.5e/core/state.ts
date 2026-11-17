@@ -90,6 +90,8 @@ export const FRAME_KINDS = [
   "chooseZoneType",
   "replaceHit",
   "confusedTurn",
+  "fleeTurn",
+  "chooseOption",
   "copySpell",
   "wallLayer",
   "chooseShape",
@@ -209,8 +211,29 @@ const ActiveEffectSchema = z.strictObject({
   endsOn: z.enum(["attack", "action"]).optional(), // ends when the creature attacks or deals damage, or acts
   // Taking damage gives this save, ending it on a success, as Dragon Fear's.
   saveOnDamage: z
-    .strictObject({ ability: AbilitySchema, dc: z.number().int() })
+    .strictObject({
+      ability: AbilitySchema,
+      dc: z.number().int(),
+      advantage: z.literal(true).optional(), // rolled with Advantage, as Hideous Laughter's
+    })
     .optional(),
+  // As an applyCondition's (core/schemas.ts): fleeing the caster on its turns, ended by another's action, Prone it
+  // can't end, saved against with its action, Exhaustion on a failed repeat save, and ended only after a save.
+  flee: z
+    .strictObject({
+      unseen: z.literal(true).optional(),
+      far: z.number().int().optional(),
+      casterDown: z.literal(true).optional(),
+    })
+    .optional(),
+  shake: z.literal(true).optional(),
+  cantStand: z.literal(true).optional(),
+  actionSave: z.literal(true).optional(),
+  failExhaustion: z.literal(true).optional(),
+  clings: z.literal(true).optional(),
+  // Hours it outlasts a fight by, counted down by rests, or "cured" for one that lasts until magic ends it (rest.ts).
+  // Missing for an effect that ends with the fight.
+  lingers: z.union([z.number().int(), z.literal("cured")]).optional(),
   level: z.number().int().optional(), // the slot a spell was cast with, when it was given one
   // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
   swallowed: z.boolean().optional(),
