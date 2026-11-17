@@ -2418,6 +2418,32 @@ describe("how companions spend spell slots", () => {
     expect(choose(run, fight(twoLeft, monster("a")))).toContain("guiding-bolt");
   });
 
+  it("sees no worth in healing one that can't regain Hit Points", async () => {
+    const run = arenaRun(await base(), {});
+    const caster = hero(run, { spells: ["cure-wounds"] });
+    // Down, so getting it up is worth its turns back.
+    const hurt = { ...hero(run, { id: "ally" }), hp: 0 };
+    const worth = (ally: Actor): number =>
+      makeJudge(
+        contextOf(run, fight(caster, ally, monster("a")), LOW),
+        caster,
+      ).worth(caster, `spell:${spell("cure-wounds")}`, ally.id, undefined);
+    expect(worth(hurt)).toBeGreaterThan(0);
+    // A death tyrant's Negative Energy Cone.
+    const coned = {
+      ...hurt,
+      activeEffects: [
+        {
+          sourceId: "monster:12",
+          casterId: "a",
+          ends: "spellDuration" as const,
+          modifier: { kind: "noHealing" as const },
+        },
+      ],
+    };
+    expect(worth(coned)).toBe(0);
+  });
+
   it("won't drop one Concentration spell for another, or repeat a buff", async () => {
     const run = arenaRun(await base(), {});
     const concentrating = {
@@ -4179,6 +4205,71 @@ describe("the difficulty setting", () => {
       fight({ ...party, hp: 5 }, { ...ally, hp: 195 }, monster("a", brute, 60)),
     );
     expect(frail).toBeLessThan(healthy);
+  });
+
+  it("counts the turns Eye Rays take from the party, which their damage misses", async () => {
+    const gazer = (onFail: readonly unknown[]) =>
+      dummy("srd52:monster/gazer", {
+        actions: [
+          {
+            name: "Eye Rays",
+            activation: {
+              cost: ["action"],
+              targeting: { creatures: 1, range: 120, side: "enemy" },
+              resolution: {
+                kind: "automatic",
+                effects: [
+                  {
+                    kind: "randomAction",
+                    of: ["Hold Ray", "Zap Ray"],
+                    times: 2,
+                  },
+                ],
+              },
+            },
+          },
+          ...["Hold Ray", "Zap Ray"].map((name) => ({
+            name,
+            rolled: true,
+            activation: {
+              cost: [],
+              targeting: { creatures: 1, range: 120, side: "enemy" },
+              resolution: {
+                kind: "save",
+                ability: "con",
+                dc: { base: 15, add: [] },
+                damage: [{ amount: { dice: "2d6" }, type: "force" }],
+                onSuccessDamage: "half",
+                onFail: name === "Hold Ray" ? onFail : [],
+              },
+            },
+          })),
+        ],
+      });
+    const pressure = (onFail: readonly unknown[]): number => {
+      const run = arenaRun(base0, {
+        "srd52:monster/gazer": gazer(onFail),
+      });
+      const party = hero(run);
+      return makeJudge(
+        contextOf(
+          run,
+          fight(party, monster("a", "srd52:monster/gazer", 60)),
+          HIGH,
+        ),
+        party,
+      ).pressure;
+    };
+    const base0 = await base();
+    const paralyzing = [
+      {
+        kind: "applyCondition",
+        condition: "paralyzed",
+        duration: { minutes: 1 },
+        repeatSave: true,
+      },
+    ];
+    expect(pressure(paralyzing)).toBeGreaterThan(pressure([]) * 1.3);
   });
 
   it("counts the Advantage a fight's opening positions don't show yet", async () => {
