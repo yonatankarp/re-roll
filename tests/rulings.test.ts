@@ -34,6 +34,7 @@ const INDEX = indexEntities([
   entity("old:spell/gloom-lance", "Gloom Lance", "old"),
   entity("old:item/ring-of-quiet", "Ring of Quiet", "old"),
   entity("hb:spell/muffle", "Muffle"),
+  entity("old:spell/muffle", "Muffle", "old"),
   { ...entity("hb:condition/muffled", "Muffled"), lore: true },
   { ...entity("hb:rule-term/muffle", "Muffle"), lore: true },
 ]);
@@ -86,14 +87,16 @@ describe("what a ruling names", () => {
     expect(mentions(INDEX, "Is the Hush spell loud?", "new", terms)).toEqual([
       "hb:spell/hush",
     ]);
-    // With an entity for the term (#132), the name links to it.
-    const muffle = new Set(["muffle", "muffled"]);
-    expect(mentions(INDEX, "Is a Muffle loud?", "new", muffle)).toEqual([
+    // Where the edition has a glossary entity for the term (#132), the name links to it, and only there.
+    expect(mentions(INDEX, "Is a Muffle loud?", "new")).toEqual([
       "hb:rule-term/muffle",
     ]);
-    expect(mentions(INDEX, "Is the Muffle spell loud?", "new", muffle)).toEqual(
-      ["hb:spell/muffle"],
-    );
+    expect(mentions(INDEX, "Is the Muffle spell loud?", "new")).toEqual([
+      "hb:spell/muffle",
+    ]);
+    expect(mentions(INDEX, "Is a Muffle loud?", "old")).toEqual([
+      "old:spell/muffle",
+    ]);
   });
 
   it("skips a sentence's first word, lore, Bastion orders, and one-word lower-case names", () => {
@@ -163,13 +166,8 @@ describe("what a ruling rules on", () => {
       subjectsOf(verdicts, 5, "new", INDEX, bookOf, new Set(["ring-of-quiet"])),
     ).toEqual([]);
     // A rules term's erratum rules on its glossary entity, not the spell that shares its name.
-    expect(subjects(9)).toEqual(["hb:spell/muffle"]);
-    expect(
-      subjectsOf(verdicts, 9, "new", INDEX, bookOf, new Set(["muffle"])),
-    ).toEqual(["hb:rule-term/muffle"]);
-    expect(
-      subjectsOf(verdicts, 10, "new", INDEX, bookOf, new Set(["muffled"])),
-    ).toEqual(["hb:condition/muffled"]);
+    expect(subjects(9)).toEqual(["hb:rule-term/muffle"]);
+    expect(subjects(10)).toEqual(["hb:condition/muffled"]);
   });
 
   it("lists each ruling beside the sections that describe what it rules on", () => {

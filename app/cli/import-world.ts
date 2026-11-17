@@ -20,6 +20,7 @@ import {
   subjectsOf,
 } from "../../engine/tools/rulings.ts";
 import { draftWorld } from "../../engine/tools/world.ts";
+import { GLOSSARY_TERMS } from "../../plugins/systems/dnd5.5e/core/glossary.ts";
 import { GLOSSARY_KINDS } from "../../plugins/systems/dnd5.5e/core/schemas.ts";
 
 const ROOTS = ["plugins", "books"];
@@ -38,11 +39,15 @@ const storage = await createNodeStorage(process.cwd());
 const catalog = await scanPlugins(storage, ROOTS);
 const report = await checkCoverage(storage, ROOTS, catalog, systems);
 const index = indexEntities(report.entities);
-// A ruling that names a rules term rules on the term's entity (#132), not on a spell that shares its name.
+// The terms the game explains stay terms in every edition, so a 2014 ruling's "Resistance" isn't the cantrip.
+// Not a weapon's mastery or property, which 2014 books don't have and whose names are spells' too (Slow).
 const terms = new Set(
-  report.entities
-    .filter((entity) => entity.lore)
-    .map((entity) => singular(slug(entity.name))),
+  GLOSSARY_TERMS.filter((term) => !term.entity.startsWith("weapon-")).flatMap(
+    (term) =>
+      report.entities
+        .filter((entity) => entity.id.endsWith(`:${term.entity}`))
+        .map((entity) => singular(slug(entity.name))),
+  ),
 );
 const editions = new Map(report.entities.map((e) => [e.plugin, e.edition]));
 
