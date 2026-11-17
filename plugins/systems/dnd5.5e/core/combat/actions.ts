@@ -21,6 +21,7 @@ import {
 } from "./ids.ts";
 import {
   type Actor,
+  CAST_ACTION,
   dndEvent,
   hasCondition,
   INCAPACITATING,
@@ -74,6 +75,7 @@ import { keepsHidden, metamagicCast } from "../metamagic.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
 import { spellFumble, timeStopEnds } from "./durations.ts";
 import { castRiders, schoolCastEvents } from "./school.ts";
+import { tradeEvents } from "./trade.ts";
 import { spellFoiled } from "./areas.ts";
 
 // Taking an action on a turn: casting it, choosing its targets one by one, or aiming its area.
@@ -314,6 +316,7 @@ function castAction(
   const caught = picked
     ? picked.map((id) => actorOf(state, id))
     : resolveTargets(targetId, action, actor, context);
+  const riders = castRiders(actor, action, slotLevel, context);
   const result: SystemResult =
     projectiles !== undefined && resolution.kind !== "save"
       ? {
@@ -340,7 +343,18 @@ function castAction(
       ...payCosts(action, actor, context, slotLevel),
       ...timeStopEnds(actor, caught),
       ...schoolCastEvents(actor, action, slotLevel, context),
-      ...castRiders(actor, action, context),
+      ...riders.events,
+      ...tradeEvents(actor, action, context),
+      // Battle Magic's attack waits on a spell cast with an action.
+      ...(action.spellLevel !== null &&
+      action.activation.cost.includes("action")
+        ? [
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: actor.id,
+              key: CAST_ACTION,
+            }),
+          ]
+        : []),
       ...(foiled?.events ?? []),
       ...lightAttackEvents(actor, actionId, context),
       // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.
@@ -351,6 +365,7 @@ function castAction(
     ],
     frames: [
       ...(result.frames ?? []),
+      ...riders.frames,
       ...metamagicCast(actor, actionId),
       // Used up once its darts or rolls are done, since they look the action up again.
       ...(actionId.startsWith(ITEM_PREFIX)

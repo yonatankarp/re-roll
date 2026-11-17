@@ -156,7 +156,7 @@ const FIXTURES = [
   trait("vitality", [
     {
       kind: "castRider",
-      uses: [RAGE],
+      uses: ["test:spell/mark"],
       effects: [{ kind: "tempHp", amount: { bonus: { base: 4 } } }],
     },
     {
@@ -444,12 +444,12 @@ describe("hit points, temporary hit points and death (#174)", () => {
     expect(state.actors.warlock?.exhaustion).toBe(1);
   });
 
-  it("gives Temporary Hit Points for using a feature, and to an ally nearby as a raging turn starts", async () => {
+  it("gives Temporary Hit Points for casting a spell, and to an ally nearby as a raging turn starts", async () => {
     const content = await run();
     const barbarian = at(hero(["vitality"]), 0, 0);
     const action = {
-      id: `feature:${RAGE}:0`,
-      spellLevel: null,
+      id: "spell:test:spell/mark",
+      spellLevel: 1,
       activation: {
         resolution: { kind: "automatic", damage: [], effects: [] },
       },
@@ -458,7 +458,7 @@ describe("hit points, temporary hit points and death (#174)", () => {
       ...contextOf(content, [barbarian], scripted([]).dice),
       ...content,
     };
-    expect(kinds(castRiders(barbarian, action, context))).toContain(
+    expect(kinds(castRiders(barbarian, action, 1, context).events)).toContain(
       `${NS}:tempHpGained`,
     );
     const ally = at(hero([], { id: "ally" }), 1, 0);

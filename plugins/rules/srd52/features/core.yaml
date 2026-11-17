@@ -145,7 +145,15 @@
 - id: "srd52:feature/action-surge"
   name: Action Surge
   text: "Once between rests, you can take one additional action on your turn."
-  automation: text
+  automation: full
+  resources:
+    - id: action-surge
+      max: { base: 1 }
+      recharge: [{ on: shortRest, amount: all }, { on: longRest, amount: all }]
+  activations:
+    - cost: [{ resource: action-surge }]
+      targeting: { self: true }
+      resolution: { kind: automatic, effects: [{ kind: extraAction }] }
 
 - id: "srd52:feature/tactical-mind"
   name: Tactical Mind
@@ -162,7 +170,11 @@
 - id: "srd52:feature/tactical-shift"
   name: Tactical Shift
   text: "When you use Second Wind, you can move up to half your Speed without provoking Opportunity Attacks."
-  automation: text
+  automation: full
+  passives:
+    - kind: activationRider
+      feature: "srd52:feature/second-wind"
+      effects: [{ kind: dash, half: true, safe: true }]
 
 - id: "srd52:feature/improved-critical"
   name: Improved Critical
@@ -182,7 +194,9 @@
 - id: "srd52:feature/cunning-action"
   name: Cunning Action
   text: "You can Dash, Disengage or Hide as a Bonus Action."
-  automation: text
+  automation: full
+  passives:
+    - { kind: bonusTactics, tactics: [dash, disengage, hide] }
 
 - id: "srd52:feature/rogue-subclass"
   name: Rogue Subclass
@@ -192,7 +206,20 @@
 - id: "srd52:feature/steady-aim"
   name: Steady Aim
   text: "As a Bonus Action, give yourself Advantage on your next attack if you haven't moved this turn."
-  automation: text
+  automation: full
+  activations:
+    - cost: [bonusAction]
+      unmoved: true
+      targeting: { self: true }
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            modifier: { kind: advantage, on: attacks, once: true }
+            duration: { until: turnEnd }
+          - kind: modifier
+            modifier: { kind: actionLimit, speed: none }
+            duration: { until: turnEnd }
 
 - id: "srd52:feature/cunning-strike"
   name: Cunning Strike
@@ -215,7 +242,9 @@
 - id: "srd52:feature/fast-hands"
   name: Fast Hands
   text: "You can use Cunning Action for Sleight of Hand, thieves' tools or a Magic item."
-  automation: text
+  automation: full
+  passives:
+    - { kind: fastHands }
 
 - id: "srd52:feature/second-story-work"
   name: Second-Story Work

@@ -94,6 +94,7 @@ export const FRAME_KINDS = [
   "castOn", // whom a spell or feature used between fights goes to (camp.ts)
   "applyMiss", // what an attack does on a miss, as Acid Arrow's splash (combat/spell-riders.ts)
   "burst", // a save round an attack's target, hit or miss, as Ice Knife's (combat/spell-riders.ts)
+  "initiativeMove", // a move right after Initiative, as Unpredictable Movement's (combat/reactions.ts)
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -102,6 +103,8 @@ export function frame(kind: FrameKind, payload: Frame["payload"] = {}): Frame {
 }
 export const LEGENDARY_USE = "legendary";
 export const PICKED_UP = "pickedUp"; // in usedThisTurn: the one free pick-up of a turn
+export const CAST_ACTION = "castAction"; // in usedThisTurn: a spell with a casting time of an action was cast
+export const SURGED = "surged"; // in usedThisTurn: Action Surge's extra action, which can't be a Magic action
 export const LEGENDARY_RESISTANCE = "legendaryResistance";
 
 export const TACTICS = [
@@ -113,6 +116,8 @@ export const TACTICS = [
   "slowed",
   "metamagic", // a Metamagic option waiting for its spell, or Extended Spell's hold on Concentration (metamagic.ts)
   "exiting", // the feet of movement climbing out of a dead swallower still costs (combat/swallow.ts)
+  "trading", // attacks of the Attack action readied to trade for a spell; `value` the passive's place (combat/trade.ts)
+  "attacksLeft", // the Attack action's attacks left after that trade, its `value` (combat/trade.ts)
 ] as const;
 
 const EndsSchema = z.enum([

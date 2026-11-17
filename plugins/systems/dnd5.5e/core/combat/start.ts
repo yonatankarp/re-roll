@@ -1,4 +1,8 @@
-import { initiativeSwapFrames, inspirationEchoes } from "./reactions.ts";
+import {
+  initiativeMoveFrames,
+  initiativeSwapFrames,
+  inspirationEchoes,
+} from "./reactions.ts";
 import { type Battlemap, type Loot, MonsterSchema } from "../schemas.ts";
 import {
   type EncounterOptions,
@@ -236,6 +240,7 @@ export function startCombat(
     // Alert's Initiative Swap comes first. With nobody on 20 or more, the lair acts before anyone.
     frames: [
       ...initiativeSwapFrames(party, context),
+      ...initiativeMoveFrames(party, context),
       ...(lair?.at === 0
         ? lairTurns(
             {

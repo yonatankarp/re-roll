@@ -32,7 +32,13 @@ import { familiarHelpUse } from "./combat/familiar.ts";
 import { mountEvents, mountOptions } from "./combat/mounts.ts";
 import { heldInPlace, leafEvents } from "./combat/effects.ts";
 import { heightChoices, heightOf } from "./combat/falling.ts";
-import { SIZES, hasPassive, sizeOf } from "./combat/queries.ts";
+import {
+  SIZES,
+  canAfford,
+  hasPassive,
+  inReach,
+  sizeOf,
+} from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
 import {
@@ -89,6 +95,7 @@ import {
   POLE_STRUCK,
   POLE_USED,
   isPolearm,
+  lightAttackEvents,
   MASTERY,
   TACTIC,
   hasTactic,
@@ -101,6 +108,15 @@ import {
 import { fogged, knownFoes, partySight } from "./fog.ts";
 import { hasteActing } from "./combat/durations.ts";
 import { placedFlag } from "./zones.ts";
+import {
+  STRIKE,
+  TRADE,
+  attacksAfter,
+  attacksLeft,
+  strikesLeft,
+  tradeFits,
+  tradesOf,
+} from "./combat/trade.ts";
 
 // The 2024 actions anyone can take in a fight besides attacking and casting (Dash, Disengage, Dodge, Help,
 // Hide, Ready, Search, Study, Grapple, Shove, standing up, escaping a grapple), the off-hand attack of a second Light weapon,
@@ -502,9 +518,66 @@ function bonusAttackOptions(
   stats: Stats,
 ): { id: string; label: string }[] {
   return [
+    ...strikeOptions(actor, state, access, stats),
     ...offhandOptions(actor, state, access, stats),
     ...poleStrikeOptions(actor, state, access, stats),
   ];
+}
+
+// The Attack action's attacks a trade left (combat/trade.ts), one weapon attack at a time.
+function strikeOptions(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+  stats: Stats,
+): { id: string; label: string }[] {
+  const left = attacksLeft(actor);
+  if (left === 0) return [];
+  return stats.actions.flatMap((action) => {
+    const { cost, resolution } = action.activation;
+    if (
+      action.spellLevel !== null ||
+      !cost.includes("action") ||
+      resolution.kind !== "attack" ||
+      resolution.attack.type !== "weapon"
+    ) {
+      return [];
+    }
+    return standing(inReach(action, actor, state, access))
+      .filter((foe) => foe.side !== actor.side)
+      .map((foe) => ({
+        id: encodeOption(STRIKE, foe.id, action.id),
+        label: `${action.name}: ${foe.name} (${String(foe.hp)} HP), ${String(left)} ${left === 1 ? "attack" : "attacks"} left`,
+      }));
+  });
+}
+
+// Readying a trade of attacks for a spell or Breath Weapon, while the Attack action keeps one to make.
+function tradeOptions(
+  actor: Actor,
+  stats: Stats,
+): { id: string; label: string }[] {
+  if (hasTactic(actor, "trading")) return [];
+  return tradesOf(stats).flatMap((trade, index) => {
+    const fits = stats.actions.filter(
+      (action) =>
+        tradeFits(trade, action) &&
+        !action.activation.trigger &&
+        canAfford(action, actor, stats),
+    );
+    if (attacksAfter(trade, stats) < 1 || fits.length === 0) return [];
+    const what = trade.cantrips
+      ? "a cantrip"
+      : trade.levels
+        ? `a level ${trade.levels.join(" or ")} spell`
+        : [...new Set(fits.map(({ name }) => name))].join(" or ");
+    return [
+      {
+        id: encodeOption(TRADE, actor.id, String(index)),
+        label: `Trade ${trade.attacks === 1 ? "an attack" : `${String(trade.attacks)} attacks`} for ${what}`,
+      },
+    ];
+  });
 }
 
 function readyable(stats: Stats): readonly KnownAction[] {
@@ -676,6 +749,7 @@ export function tacticOptions(
   options.push(...classOptions(actor, state, access));
   options.push(...bonusTacticOptions(actor, state, access, stats));
   if (!actor.budget.action) return options;
+  options.push(...tradeOptions(actor, stats));
   // Shut away, it can only try to get out, as from a Maze.
   const seal = actor.activeEffects.find(
     ({ modifier }) => modifier.kind === "sealed",
@@ -1417,6 +1491,36 @@ export function runTactic(
         ],
       };
     }
+    case TRADE:
+      return {
+        events: [
+          effect(
+            actor.id,
+            TRADE,
+            actor.id,
+            { kind: "tactic", tactic: "trading", value: Number(detail) },
+            "casterTurnEnd",
+          ),
+        ],
+      };
+    case STRIKE: {
+      const left = attacksLeft(actor);
+      return {
+        events: [
+          dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId: STRIKE }),
+          ...(left > 1 ? [strikesLeft(actor, left - 1)] : []),
+          ...lightAttackEvents(actor, detail, context),
+        ],
+        frames: [
+          frame("attackRoll", {
+            attacker: actor.id,
+            actionId: detail,
+            target: needTarget().id,
+          }),
+          ...done,
+        ],
+      };
+    }
     case POLE_STRIKE:
       return {
         events: [
@@ -1800,6 +1904,16 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   ) {
     return dying.option.id;
   }
+  // A cantrip or Breath Weapon that can stand in for one of the Attack action's attacks is traded for it first,
+  // which keeps the attacks it leaves.
+  const trade = chosenAction
+    ? decision.options.find((option) => {
+        const [kind, , index = ""] = parseOption(option.id);
+        const passive = tradesOf(deriveStats(actor, context))[Number(index)];
+        return kind === TRADE && passive && tradeFits(passive, chosenAction);
+      })
+    : undefined;
+  if (trade) return trade.id;
   // A teleport or Leap that lands in reach when walking won't get there.
   if (chosen === MOVE && actor.budget.action) {
     const step = stepToward(actor, context);
@@ -1835,6 +1949,7 @@ export function tacticalPolicy(decision: Decision, context: Context): string {
   const offhand = decision.options
     .filter(
       (option) =>
+        option.id.startsWith(encodeOption(STRIKE, "")) ||
         option.id.startsWith(encodeOption(OFFHAND, "")) ||
         option.id.startsWith(encodeOption(POLE_STRIKE, "")),
     )

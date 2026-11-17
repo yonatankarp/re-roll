@@ -749,6 +749,14 @@ The player decides every reaction through a `dnd5.5e:reaction:` decision. The at
 - **Attacks:** `missDamage: half` deals half the damage on a miss and `onMiss` effects play, as Acid Arrow's splash. A `burst` makes the target and everyone within its radius save, hit or miss, as Ice Knife's shard (frame `burst`).
 - **Effects:** `forcedMove` pulls as well as pushes, up to `maxSize`, as Thorn Whip. `reactionMove` with `away` spends the target's Reaction to flee straight from the caster, as Dissonant Whispers. `actionLimit.noOpportunityAttacks` is Shocking Grasp's, and a `once` bonus to saves is spent on the next save, as Mind Sliver's 1d4. `disperse` with `zones` ends those zones in the area, as Sunburst ends Darkness.
 
+**Extra actions, Bonus Actions and movement** (`combat/trade.ts`, `combat/queries.ts` `gatesOpen`, `stats.ts` `withRiders`):
+
+- **Riders on another feature:** an `activationRider` passive adds its effects to every automatic activation of the feature it names, as Tactical Shift's move on Second Wind or Arcane Charge's teleport on Action Surge. A `castRider` with `school` rides spells of that school cast with an action and a slot, as Bewitching Magic's Misty Step.
+- **Moving as part of another action:** `dash` takes `half` (half the Speed more) and `safe` (no Opportunity Attacks this turn), and `dodge` and `swapPlaces` join `disengage`. A teleport's `around` can deal `damage`, half on a save against a formula DC, as Warping Implosion. An activation triggered on `initiative` with a teleport moves right after Initiative (frame `initiativeMove`), as Unpredictable Movement.
+- **Gates:** an activation can need the bearer unmoved (`unmoved`, Steady Aim), a spell cast with an action this turn (`afterCast`, Battle Magic), its Bonus Action spent (`afterBonusAction`, Fleet Step), or an effect of a feature, or Concentration on a spell, it names (`while`, Travel along the Tree in a Rage). Action Surge's `extraAction` is offered once the action is spent, once a turn, and the action it gives can't cast a spell.
+- **Trading attacks:** an `attackReplacement` passive lets the Attack action trade `attacks` of its attacks for a cantrip, a spell of some `levels`, or an activation spending a `resource`, as War Magic or Breath Weapon. The trade is readied as an option (`tactic:trade`), the cast spends the action, and each attack left is a `tactic:strike` option until made.
+- **Small passives:** `fastHands` makes gear used with an action take a Bonus Action. Cunning Action, Patient Defense and Step of the Wind are `bonusTactics`.
+
 A hit on a creature during that creature's own turn counts as an Opportunity Attack, for Sentinel's Halt and Zhentarim Ruffian's damage. A walk whose Speed drops to 0 before it finishes, from Halt or a grapple, ends where it started.
 
 ### 8.8 Formulas
