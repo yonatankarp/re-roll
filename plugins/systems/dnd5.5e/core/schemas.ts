@@ -265,6 +265,8 @@ export const AmountSchema = z.strictObject({
   dice: DiceSchema.optional(),
   diceCount: z.string().optional(), // a scaling key holding the number of dice, such as sneakAttackD6
   dieSize: z.string().optional(), // a scaling key holding the die size, such as martialArtsDie
+  // a scaling key holding a die size used where it's bigger, as a Monk weapon's Martial Arts die
+  dieAtLeast: z.string().optional(),
   bonus: FormulaSchema.optional(),
   reroll: z.number().int().min(1).optional(), // dice rolled again once when below average, as with Empowered Spell
   rerollOnes: z.literal(true).optional(), // a die that rolls 1 is rolled again and the new roll stands
@@ -596,6 +598,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     feet: z.number().int().min(5),
     movement: z.number().int().min(0),
   }),
+  // Its Speed is at least this, as Boots of Striding and Springing's 30 feet (stats.ts).
+  // shortcut: a higher Speed that carrying weight or Heavy armor lowers isn't kept at its own.
+  z.strictObject({
+    kind: z.literal("speedFloor"),
+    feet: z.number().int().min(5),
+  }),
   // Walking across water as if it were ground, as with Water Walk (core/combat/queries.ts).
   z.strictObject({ kind: z.literal("waterWalk") }),
   // Breathing underwater, as with Water Breathing, so an underwater fight never runs its breath out (combat/water.ts).
@@ -918,6 +926,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     direction: z.enum(["away", "toward"]),
     maxSize: SizeSchema.optional(),
     largerBy: z.number().int().min(0).optional(), // only a target at most this many sizes larger than the caster
+    option: z.string().min(1).optional(), // as an applyCondition's, as Telekinetic Thrust's push or Prone
   }),
   z.strictObject({ kind: z.literal("note"), text: z.string() }),
   // The bearer teleports up to `feet` to an open square it can see, or with `movement` jumps there for that much
@@ -939,6 +948,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     provokes: z.literal(false).optional(),
     // It flies there instead, round walls, as Tempestuous Magic's 10 feet (combat/movement.ts teleportSquares).
     fly: z.literal(true).optional(),
+    // Only to a square it stood on this turn, as Boots of the Winding Path's.
+    retrace: z.literal(true).optional(),
     // Up to `count` willing allies within `within` feet of where it left come too, each landing within `near` feet of
     // where it lands, as Travel along the Tree's six (combat/movement.ts bringFrame).
     bring: z
@@ -1537,6 +1548,8 @@ export const TargetingSchema = z.union([
     creatures: z.number().int().min(1),
     // as many as this ability's modifier when more, as Abjure Foes' Charisma modifier (stats.ts)
     creaturesBy: AbilitySchema.optional(),
+    // this ability's modifier more, as Wind Soul's 3 plus the Charisma modifier
+    creaturesPlus: AbilitySchema.optional(),
     range: RangeSchema,
     // "any" is a creature of either side, as Dispel Magic aimed at a friend's curse or a foe's spell
     side: z.enum(["enemy", "ally", "any"]),
@@ -1748,6 +1761,14 @@ export const ActivationSchema = z.strictObject({
   label: z.string().min(1).optional(), // added to its feature's name, to tell two of a feature's activations apart
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
   distinct: z.literal(true).optional(), // with `projectiles`, each at a different creature, as Intoxicated Frenzy's
+  // Only from this level in the class, as Searing Arc Strike's spell raised by more Focus Points, up to half the Monk
+  // level.
+  minLevel: z
+    .strictObject({ class: ContentIdSchema, level: z.number().int().min(1) })
+    .optional(),
+  // Only once the bearer has attacked this many different creatures this turn, and only at one it hasn't, as Distant
+  // Strike's third attack (combat/actions.ts actionKindMarks).
+  afterTargets: z.number().int().min(1).optional(),
   // Only once this turn its bearer has used the activation of this feature with this label, as Hand of Healing's heal
   // in place of a Flurry of Blows strike (combat/actions.ts actionKindMarks).
   afterUse: z
@@ -2226,6 +2247,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Its weapons can't be knocked from its hand unless it's Incapacitated, and one it has thrown or let fall comes back
   // to its hand for a Bonus Action, as War Bond's. shortcut: every weapon it carries is taken to be bonded.
   z.strictObject({ kind: z.literal("warBond") }),
+  // Sneak Attack a second time in a turn, on a creature it hasn't dealt it to, once it has used an activation of this
+  // feature this turn, as Sudden Strike's Bonus Action attack (combat/attack.ts).
+  z.strictObject({
+    kind: z.literal("secondSneak"),
+    feature: ContentIdSchema,
+  }),
   // A second turn in a fight's first round, at its Initiative less `minus`, as Thief's Reflexes (state.ts advanceTurn).
   z.strictObject({
     kind: z.literal("secondTurn"),
@@ -2823,6 +2850,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     while: z.array(ContentIdSchema).min(1).optional(),
     ownTurn: z.literal(true).optional(), // only on the bearer's own turn, as Battering Roots' reach
     attackMod: AbilitySchema.optional(), // this ability's modifier (at least +1) added to hit, as Sacred Weapon's
+    // its first damage die is this scaling key's where that's bigger, as Martial Arts' die with Monk weapons
+    dieAtLeast: z.string().optional(),
+    armor: z.enum(["noHeavy", "none"]).optional(), // as a modifier passive's
   }),
   // In a fight's first round, a hit carrying Sneak Attack makes its target save or take the hit's damage twice, as
   // Death Strike.

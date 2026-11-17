@@ -106,6 +106,9 @@ function ridden(
                 amount: rider.damage
                   ? {
                       ...first.amount,
+                      ...(rider.dieAtLeast
+                        ? { dieAtLeast: rider.dieAtLeast }
+                        : {}),
                       bonus: {
                         base:
                           (first.amount.bonus?.base ?? 0) + rider.damage.base,
@@ -115,7 +118,9 @@ function ridden(
                         ],
                       },
                     }
-                  : first.amount,
+                  : rider.dieAtLeast
+                    ? { ...first.amount, dieAtLeast: rider.dieAtLeast }
+                    : first.amount,
                 ...(rider.types
                   ? {
                       types: [

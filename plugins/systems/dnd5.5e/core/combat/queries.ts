@@ -768,7 +768,7 @@ export function canAfford(
   // only while Bloodied, as Unearthly Recovery
   if (action.activation.bloodied && actor.hp * 2 >= stats.maxHp) return false;
   if (action.activation.beforeAction && !actor.budget.action) return false;
-  if (!gatesOpen(action, actor)) return false;
+  if (!gatesOpen(action, actor, stats)) return false;
   const limits = limitsOf(actor);
   // Befuddlement: no spells at all.
   if (limits.noSpells && action.spellLevel !== null) return false;
@@ -807,7 +807,7 @@ export function canAfford(
 
 // What an activation needs this turn beyond its costs: Steady Aim's standing still, Battle Magic's spell, Fleet Step's
 // Bonus Action, Travel along the Tree's Rage, and Action Surge's spent action, once a turn and never for magic.
-function gatesOpen(action: KnownAction, actor: Actor): boolean {
+function gatesOpen(action: KnownAction, actor: Actor, stats: Stats): boolean {
   const { activation } = action;
   const used = actor.usedThisTurn;
   if (activation.unmoved && actor.moved > 0) return false;
@@ -822,6 +822,20 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
   }
   if (activation.afterBonusAction && actor.budget.bonusAction) return false;
   if (activation.while && !underEffect(actor, activation.while)) return false;
+  if (
+    activation.minLevel &&
+    (stats.classLevels[activation.minLevel.class] ?? 0) <
+      activation.minLevel.level
+  ) {
+    return false;
+  }
+  if (
+    activation.afterTargets !== undefined &&
+    used.filter((key) => key.startsWith(ATTACKED)).length <
+      activation.afterTargets
+  ) {
+    return false;
+  }
   if (
     activation.afterUse &&
     !used.includes(
@@ -857,6 +871,10 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
     cost.includes("action")
   );
 }
+
+// The usedThisTurn mark of a creature attacked this turn, kept for Distant Strike's bearer (combat/actions.ts).
+const ATTACKED = "attacked:";
+export const attackedKey = (id: string): string => `${ATTACKED}${id}`;
 
 // The usedThisTurn mark of an activation of a feature, with its label, used this turn (combat/actions.ts).
 export const usedKey = (feature: string, label?: string): string =>
@@ -1081,25 +1099,33 @@ export function inReach(
   if ("self" in targeting) return [actor];
   const charmers = charmersOf(actor);
   const downed = "downed" in targeting && targeting.downed === true;
-  return [
-    ...(targeting.side !== "ally"
-      ? knownFoes(state, actor, access).filter(
-          (item) => isDown(item) === downed && !charmers.has(item.id),
-        )
-      : []),
-    ...(targeting.side !== "enemy"
-      ? allies(state, actor).filter((item) => !downed || isDown(item))
-      : []),
-  ]
-    .filter(
-      (item) =>
-        isDead(item) === ("dead" in targeting && targeting.dead === true) &&
-        deadWithin(item, targeting),
-    )
-    .filter((item) => fitsType(item, targeting, access, actor))
-    .filter((item) => reaches(action, actor, item))
-    .filter((item) => !behindTotalCover(state, actor, item))
-    .filter((item) => !walledApart(actor, item, action, state, access));
+  return (
+    [
+      ...(targeting.side !== "ally"
+        ? knownFoes(state, actor, access).filter(
+            (item) => isDown(item) === downed && !charmers.has(item.id),
+          )
+        : []),
+      ...(targeting.side !== "enemy"
+        ? allies(state, actor).filter((item) => !downed || isDown(item))
+        : []),
+    ]
+      .filter(
+        (item) =>
+          isDead(item) === ("dead" in targeting && targeting.dead === true) &&
+          deadWithin(item, targeting),
+      )
+      .filter((item) => fitsType(item, targeting, access, actor))
+      // Distant Strike's third attack: only at one it hasn't attacked this turn.
+      .filter(
+        (item) =>
+          action.activation.afterTargets === undefined ||
+          !actor.usedThisTurn.includes(attackedKey(item.id)),
+      )
+      .filter((item) => reaches(action, actor, item))
+      .filter((item) => !behindTotalCover(state, actor, item))
+      .filter((item) => !walledApart(actor, item, action, state, access))
+  );
 }
 
 // Whether something keeps `target` out of `actor`'s reach: either is shut away (Resilient Sphere, Maze), the actor

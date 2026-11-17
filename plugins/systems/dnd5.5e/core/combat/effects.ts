@@ -2387,6 +2387,7 @@ export function leafEvents(
         break;
       // A push or pull is made on the grid as Shove's is, in a straight line.
       case "forcedMove": {
+        if (effect.option) break; // given once its option is picked (combat/options.ts)
         const to =
           (effect.maxSize === undefined ||
             sizeOf(target, context) <= SIZES.indexOf(effect.maxSize)) &&
@@ -3849,6 +3850,7 @@ export function resolveAction(
                 undefined,
                 action.id,
                 effect.fly,
+                effect.retrace,
               ),
             );
           }

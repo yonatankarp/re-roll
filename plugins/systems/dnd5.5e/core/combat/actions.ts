@@ -64,6 +64,7 @@ import {
   type Context,
   findAction,
   hasPassive,
+  attackedKey,
   inReach,
   usedKey,
   moveSquares,
@@ -418,7 +419,7 @@ function castAction(
             }),
           ]
         : []),
-      ...actionKindMarks(actor, action, slotLevel, context),
+      ...actionKindMarks(actor, action, slotLevel, context, caught),
       // What it does to its bearer whatever its targets, as Step of the Wind's Dash while carrying an ally.
       ...(action.activation.alsoSelf
         ? leafEvents(
@@ -474,12 +475,22 @@ function actionKindMarks(
   action: KnownAction,
   slotLevel: number | undefined,
   context: Context,
+  caught: readonly Actor[],
 ): SystemEvent[] {
-  const waits = deriveStats(actor, context).actions.filter(
+  const known = deriveStats(actor, context).actions;
+  const waits = known.filter(
     (item) =>
       typeof item.activation.afterAction === "string" ||
       typeof item.activation.afterCast === "string",
   );
+  // Distant Strike: the creatures it has attacked this turn.
+  const attacked =
+    action.activation.resolution.kind === "attack" &&
+    known.some((item) => item.activation.afterTargets !== undefined)
+      ? caught.flatMap((target) =>
+          target.side === actor.side ? [] : [attackedKey(target.id)],
+        )
+      : [];
   // Hand of Healing's heal after its Flurry of Blows strike.
   const labelled = /^feature:([^:]+:[^:]+):\d+$/.exec(action.id)?.[1];
   const usedMarks = deriveStats(actor, context).actions.flatMap((item) => {
@@ -490,7 +501,9 @@ function actionKindMarks(
       ? [usedKey(after.feature, after.label)]
       : [];
   });
-  if (waits.length === 0 && usedMarks.length === 0) return [];
+  if (waits.length === 0 && usedMarks.length === 0 && attacked.length === 0) {
+    return [];
+  }
   const { cost, resolution } = action.activation;
   const withAction = cost.includes("action");
   const keys = [
@@ -511,7 +524,10 @@ function actionKindMarks(
       : []),
     ...((action.spellLevel ?? 0) >= 1 ? [LEVELED_CAST] : []),
   ];
-  return [...(waits.length > 0 ? keys : []), ...new Set(usedMarks)]
+  return [
+    ...(waits.length > 0 ? keys : []),
+    ...new Set([...usedMarks, ...attacked]),
+  ]
     .filter((key) => !actor.usedThisTurn.includes(key))
     .map((key) => dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key }));
 }

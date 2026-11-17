@@ -1522,7 +1522,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ([, item]) => item.type === "armor" && item.armorType === "heavy",
   );
   const fits = (passive: Passive): boolean =>
-    passive.kind !== "modifier" ||
+    (passive.kind !== "modifier" && passive.kind !== "weaponRider") ||
     passive.armor === undefined ||
     (passive.armor === "noHeavy" ? !heavy : !armored);
   const traits = [...itemPassives, ...fromFeatures.passives].filter(fits);
@@ -1634,15 +1634,20 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   actions.push(
     ...fromFeatures.actions.map((action) => {
       const { targeting } = action.activation;
-      if (!("creatures" in targeting) || !targeting.creaturesBy) return action;
-      const mod = abilityModifier(abilities[targeting.creaturesBy]);
+      if (!("creatures" in targeting)) return action;
+      const { creaturesBy, creaturesPlus } = targeting;
+      if (!creaturesBy && !creaturesPlus) return action;
+      const by = creaturesBy ? abilityModifier(abilities[creaturesBy]) : 0;
+      const plus = creaturesPlus
+        ? Math.max(0, abilityModifier(abilities[creaturesPlus]))
+        : 0;
       return {
         ...action,
         activation: {
           ...action.activation,
           targeting: {
             ...targeting,
-            creatures: Math.max(targeting.creatures, mod),
+            creatures: Math.max(targeting.creatures, by) + plus,
           },
         },
       };
@@ -2521,11 +2526,20 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
     around.length > 0
       ? { ...moved, passives: [...moved.passives, ...around] }
       : moved;
+  // Boots of Striding and Springing: a Speed of at least 30 feet.
+  const floor = Math.max(
+    0,
+    ...passiveModifiers(placed.passives).flatMap((modifier) =>
+      modifier.kind === "speedFloor" ? [modifier.feet] : [],
+    ),
+  );
+  const floored =
+    floor > placed.speed + speed ? { ...placed, speed: floor - speed } : placed;
   return speed === 0 && maxHp === 0 && loss === 0
-    ? placed
+    ? floored
     : {
-        ...placed,
-        speed: Math.max(0, stats.speed + speed),
+        ...floored,
+        speed: Math.max(0, floored.speed + speed),
         maxHp: Math.max(1, stats.maxHp + maxHp - loss),
       };
 }
@@ -3027,6 +3041,7 @@ export function scaledDice(
     readonly dice?: string | undefined;
     readonly diceCount?: string | undefined;
     readonly dieSize?: string | undefined;
+    readonly dieAtLeast?: string | undefined;
     readonly halfDice?: true | undefined;
   },
   scaling: Readonly<Record<string, number>>,
@@ -3035,7 +3050,11 @@ export function scaledDice(
   const [count = "0", sides = "0"] = source.dice.split("d");
   const dice = Number(scaling[source.diceCount ?? ""] ?? count);
   const rolled = source.halfDice ? Math.ceil(dice / 2) : dice;
-  return `${String(rolled)}d${String(scaling[source.dieSize ?? ""] ?? sides)}`;
+  const size = Math.max(
+    Number(scaling[source.dieSize ?? ""] ?? sides),
+    scaling[source.dieAtLeast ?? ""] ?? 0,
+  );
+  return `${String(rolled)}d${String(size)}`;
 }
 
 // A feature's dice that grow at levels in one class, as Jolt to Life's lightning at Artificer levels 11 and 17.

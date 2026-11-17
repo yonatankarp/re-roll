@@ -498,6 +498,7 @@ export function runFinishMove(
       ...fogBoundEvents(arrived, context),
       ...(fields ? placedEvents(applyDndEvent(context.state, moved)) : []),
       ...carriedEvents(walker, { x: payload.x, y: payload.y }, context),
+      ...beenEvents(walker, { x: payload.x, y: payload.y }, context),
     ],
   };
 }
@@ -538,6 +539,45 @@ function occupiedKeys(state: DndState, except: readonly string[]): Set<string> {
         ? [squareKey(item.position)]
         : [],
     ),
+  );
+}
+
+const BEEN = "been:";
+
+// The squares it stood on this turn, for a teleport that only goes back to one.
+function retraced(actor: Actor): Square[] {
+  return actor.usedThisTurn
+    .flatMap((key) =>
+      key.startsWith(BEEN) ? [parseSquare(key.slice(BEEN.length))] : [],
+    )
+    .flatMap((square) => (square ? [square] : []));
+}
+
+// Boots of the Winding Path's wearer: each square it stands on this turn is kept, for the teleport back.
+function beenEvents(
+  walker: Actor,
+  to: Square,
+  context: Context,
+): SystemEvent[] {
+  const winding = deriveStats(walker, context).actions.some((action) => {
+    const { resolution } = action.activation;
+    return (
+      resolution.kind === "automatic" &&
+      resolution.effects.some(
+        (effect) => effect.kind === "teleport" && effect.retrace,
+      )
+    );
+  });
+  if (!winding) return [];
+  return [walker.position, to].flatMap((square) =>
+    square && !walker.usedThisTurn.includes(`${BEEN}${squareKey(square)}`)
+      ? [
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: walker.id,
+            key: `${BEEN}${squareKey(square)}`,
+          }),
+        ]
+      : [],
   );
 }
 
@@ -687,11 +727,22 @@ export function teleportSquares(
   access: ContentAccess,
   near?: Near, // only squares this close to another creature, as Pursuit's
   fly = false, // flown to round walls instead, as Tempestuous Magic's 10 feet
+  retrace = false, // only back to a square it stood on this turn, as Boots of the Winding Path's
 ): readonly Square[] {
   const close = near ? state.actors[near.actor]?.position : undefined;
   const grid = state.combat?.grid;
   const from = actor.position;
   if (!grid || !from) return [];
+  // Boots of the Winding Path: only back to a square it stood on this turn.
+  if (retrace) {
+    const taken = occupiedKeys(state, [actor.id]);
+    return retraced(actor).filter(
+      (square) =>
+        !taken.has(squareKey(square)) &&
+        distanceFeet(square, from) <= feet &&
+        (square.x !== from.x || square.y !== from.y),
+    );
+  }
   if (fly) {
     const occupied = occupiedKeys(state, [actor.id]);
     return reachableSquares(
@@ -753,6 +804,7 @@ export function teleportFrame(
   near?: Near,
   actionId?: string, // the action it's part of, for what happens round it (aroundTeleport)
   fly = false,
+  retrace = false,
 ): Frame {
   const squares = teleportSquares(
     actor,
@@ -762,6 +814,7 @@ export function teleportFrame(
     context,
     near,
     fly,
+    retrace,
   );
   return awaitDecision({
     id: `${NS}:teleportTo:${actor.id}:${String(actor.moved)}`,
@@ -782,6 +835,7 @@ export function teleportFrame(
       ...(near ? { near } : {}),
       ...(actionId ? { actionId } : {}),
       ...(fly ? { fly } : {}),
+      ...(retrace ? { retrace } : {}),
     }),
   });
 }
@@ -876,6 +930,7 @@ export const TeleportSchema = z.object({
   near: NearSchema.optional(),
   actionId: z.string().optional(),
   fly: z.boolean().optional(),
+  retrace: z.boolean().optional(),
   answer: z.string(),
 });
 
@@ -896,6 +951,7 @@ export function runTeleport(
     context,
     payload.near,
     payload.fly === true,
+    payload.retrace === true,
   );
   if (!open.some((square) => squareKey(square) === payload.answer)) {
     throw new Error(`${actor.name} can't land on ${payload.answer}`);

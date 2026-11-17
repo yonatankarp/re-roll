@@ -168,6 +168,8 @@ import {
 
 // A resource spent on the bearer: this attacker is freed of its Among the Dead until a Long Rest.
 const DETERRED = "deterred:";
+const SNEAK_TWICE = "sneak-twice"; // Sudden Strike's second Sneak Attack, spent
+const SNEAK_AT = "sneak-at:"; // the creature dealt the first, for a bearer of Sudden Strike
 // Attack rolls and what follows a hit: reactions, damage, riders, smites and concentration saves.
 
 export const AttackSchema = z.object({
@@ -1716,12 +1718,35 @@ function landHit(
     natural: payload.natural,
   };
   const sneak = { landed: false };
+  // Sudden Strike: once its Bonus Action attack is taken, Sneak Attack a second time, at a creature not dealt it yet.
+  const twice = stats.passives.flatMap((passive) =>
+    passive.kind === "secondSneak" ? [passive.feature] : [],
+  );
+  const again =
+    twice.length > 0 &&
+    !attacker.usedThisTurn.includes(SNEAK_TWICE) &&
+    !attacker.usedThisTurn.includes(`${SNEAK_AT}${target.id}`) &&
+    twice.some((feature) =>
+      attacker.usedThisTurn.includes(`once:feature:${feature}`),
+    );
   stats.passives.forEach((passive, index) => {
     if (passive.kind !== "extraDamage") return;
     const key = `extra:${String(index)}`;
-    if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return;
+    const sneaks = passive.diceCount === SNEAK_DICE;
+    const spent = passive.oncePerTurn && attacker.usedThisTurn.includes(key);
+    if (spent && !(sneaks && again)) return;
     if (!extraFits(passive, attacker, target, action, edge, context)) return;
-    if (passive.diceCount === SNEAK_DICE) sneak.landed = true;
+    if (sneaks) {
+      sneak.landed = true;
+      if (twice.length > 0) {
+        events.push(
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: attacker.id,
+            key: spent ? SNEAK_TWICE : `${SNEAK_AT}${target.id}`,
+          }),
+        );
+      }
+    }
     // Cunning Strike's options give up some of Sneak Attack's dice before they're rolled.
     const dice_ =
       passive.diceCount === SNEAK_DICE
