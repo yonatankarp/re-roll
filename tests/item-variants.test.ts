@@ -11,7 +11,14 @@ import {
   startRun,
 } from "../engine/run/turn.ts";
 import { checkPlugins } from "../engine/tools/check-pack.ts";
-import { gearOptions, treasure } from "../plugins/systems/dnd5.5e/core/gear.ts";
+import {
+  changed,
+  gearEffects,
+  gearFrames,
+  gearOptions,
+  sceneGearActions,
+  treasure,
+} from "../plugins/systems/dnd5.5e/core/gear.ts";
 import { shopOptions } from "../plugins/systems/dnd5.5e/core/shop.ts";
 import {
   type Actor,
@@ -22,7 +29,11 @@ import {
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import {
   attackBonus,
+  checkBonus,
   deriveStats,
+  evaluateFormula,
+  saveBonus,
+  spellSaveDc,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { masteryOf } from "../plugins/systems/dnd5.5e/core/tactics.ts";
 import { createDice, rngFromSeed } from "../engine/kernel/dice.ts";
@@ -52,6 +63,142 @@ const ITEMS = `- id: "variant-test:item/potions"
   variants:
     - { rarity: uncommon, bonuses: [{ to: attack, amount: 1 }, { to: damage, amount: 1 }] }
     - { rarity: rare, bonuses: [{ to: attack, amount: 2 }, { to: damage, amount: 2 }] }
+- id: "variant-test:item/armor-1-2-or-3"
+  name: Armor, +1, +2, or +3
+  type: magicItem
+  category: armor
+  rarity: varies
+  attunement: false
+  text: A test armor with a bonus.
+  automation: full
+  variants:
+    - { rarity: rare, bonuses: [{ to: ac, amount: 1 }] }
+    - { rarity: veryRare, bonuses: [{ to: ac, amount: 2 }] }
+- id: "variant-test:item/shield-1-2-or-3"
+  name: Shield, +1, +2, or +3
+  type: magicItem
+  category: armor
+  rarity: varies
+  attunement: false
+  text: A test shield with a bonus.
+  automation: full
+  variants:
+    - { rarity: uncommon, bonuses: [{ to: ac, amount: 1 }] }
+- id: "variant-test:item/light-chain"
+  name: Light Chain
+  type: magicItem
+  category: armor
+  rarity: rare
+  attunement: false
+  text: A test armor anyone can wear.
+  automation: full
+  anyTraining: true
+  noStrength: true
+  bonuses: [{ to: ac, amount: 1 }]
+- id: "variant-test:item/strong-gloves"
+  name: Strong Gloves
+  type: magicItem
+  category: wondrousItem
+  rarity: uncommon
+  attunement: true
+  text: A test item that sets Strength.
+  automation: full
+  abilities: [{ ability: str, set: 19 }]
+- id: "variant-test:item/weak-gloves"
+  name: Weak Gloves
+  type: magicItem
+  category: wondrousItem
+  rarity: common
+  attunement: false
+  text: A test item that sets Strength lower than a fighter's.
+  automation: full
+  abilities: [{ ability: str, set: 12 }]
+- id: "variant-test:item/stones"
+  name: Test Stone
+  type: magicItem
+  category: wondrousItem
+  rarity: varies
+  attunement: true
+  text: Test stones that raise a score.
+  automation: partial
+  variants:
+    - { name: Quick Stone, rarity: veryRare, abilities: [{ ability: dex, raise: 2, max: 20 }] }
+    - { name: Capped Stone, rarity: rare, abilities: [{ ability: dex, raise: 2, max: 14 }] }
+- id: "variant-test:item/lucky-pebble"
+  name: Lucky Pebble
+  type: magicItem
+  category: wondrousItem
+  rarity: uncommon
+  attunement: false
+  text: A test item for checks and saves.
+  automation: full
+  bonuses: [{ to: checks, amount: 1 }, { to: savingThrows, amount: 1 }]
+- id: "variant-test:item/guard-bracers"
+  name: Guard Bracers
+  type: magicItem
+  category: wondrousItem
+  rarity: rare
+  attunement: false
+  text: A test item for AC without armor.
+  automation: full
+  bonuses: [{ to: ac, amount: 2, unarmored: true }]
+- id: "variant-test:item/caster-robe"
+  name: Caster Robe
+  type: magicItem
+  category: wondrousItem
+  rarity: veryRare
+  attunement: false
+  text: A test item for spells.
+  automation: partial
+  bonuses: [{ to: spellAttack, amount: 1 }, { to: spellDc, amount: 1 }]
+- id: "variant-test:item/key-blade"
+  name: Key Blade
+  type: magicItem
+  category: weapon
+  rarity: varies
+  attunement: true
+  text: A test weapon that needs attunement.
+  automation: partial
+  variants:
+    - { name: Key Blade (Three), rarity: uncommon, bonuses: [{ to: attack, amount: 1 }, { to: damage, amount: 1 }] }
+- id: "variant-test:item/homing-weapon"
+  name: Homing Weapon
+  type: magicItem
+  category: weapon
+  rarity: uncommon
+  attunement: false
+  text: A test weapon that comes back.
+  automation: full
+  returning: true
+  bonuses: [{ to: attack, amount: 1 }, { to: damage, amount: 1 }]
+- id: "variant-test:item/archer-bracers"
+  name: Archer Bracers
+  type: magicItem
+  category: wondrousItem
+  rarity: uncommon
+  attunement: false
+  text: A test item for some weapons.
+  automation: full
+  weaponTraining: [shortbow, longsword]
+  bonuses: [{ to: damage, amount: 2, weapons: [shortbow] }]
+- id: "variant-test:item/mastery-stone"
+  name: Mastery Stone
+  type: magicItem
+  category: wondrousItem
+  rarity: legendary
+  attunement: false
+  text: A test item for the Proficiency Bonus.
+  automation: full
+  bonuses: [{ to: proficiency, amount: 1 }]
+- id: "variant-test:item/strength-manual"
+  name: Strength Manual
+  type: magicItem
+  category: wondrousItem
+  rarity: veryRare
+  attunement: false
+  text: A test book that raises Strength for good.
+  automation: full
+  study: { ability: str, raise: 2, max: 30 }
 `;
 const STRONG = "variant-test:item/potions--2";
 const SWORD = "variant-test:item/weapon-1-2-or-3--2--longsword";
@@ -101,7 +248,10 @@ beforeAll(async () => {
 const dnd = (state: GameState): DndState => StateSchema.parse(state.system);
 
 // The fighter pregen with its Longsword in hand, also carrying `items`, equipped.
-function fighter(items: readonly string[]): {
+function fighter(
+  items: readonly string[],
+  pregen = "srd52:pregen/fighter",
+): {
   state: DndState;
   actor: Actor;
 } {
@@ -109,7 +259,7 @@ function fighter(items: readonly string[]): {
   const chosen = step(run, started.state, {
     kind: "answer",
     decisionId: `${NS}:chooseCharacter`,
-    optionId: "srd52:pregen/fighter",
+    optionId: pregen,
   });
   if (!chosen.ok) throw new Error(chosen.error);
   const state = dnd(chosen.state);
@@ -238,6 +388,259 @@ describe("item variants", () => {
       (section) => section.title === "Equipment",
     );
     expect(gear?.rows.map((row) => row.label)).toContain("Strong Test Potion");
+  });
+});
+
+const CHAIN = "variant-test:item/armor-1-2-or-3--2--chain-mail";
+const SHIELD = "variant-test:item/shield-1-2-or-3--1--shield";
+const LIGHT = "variant-test:item/light-chain--1--chain-mail";
+
+// The pregen wearing `items` in place of its armor and shield, attuned to `attuned`.
+function wearing(
+  items: readonly string[],
+  attuned: readonly string[] = [],
+  pregen = "srd52:pregen/fighter",
+): Actor {
+  const { actor } = fighter([], pregen);
+  return {
+    ...actor,
+    inventory: [
+      ...actor.inventory.filter(
+        (id) => id !== "srd52:item/chain-mail" && id !== "srd52:item/shield",
+      ),
+      ...items,
+    ],
+    attuned: [...attuned],
+  };
+}
+
+describe("magic armor, flat bonuses and ability scores", () => {
+  it("makes magic armor and a magic Shield from plain ones", () => {
+    expect(registry.content(CHAIN)).toMatchObject({
+      name: "+2 Chain Mail",
+      type: "armor",
+      base: 16,
+      baseArmor: "srd52:item/chain-mail",
+      bonuses: [{ to: "ac", amount: 2 }],
+    });
+    expect(registry.content(CHAIN)).not.toHaveProperty("costCp");
+    expect(registry.content(SHIELD)).toMatchObject({
+      name: "+1 Shield",
+      type: "shield",
+      bonus: 2,
+    });
+    // An entry with no versions is its own first.
+    expect(registry.content(LIGHT)).toMatchObject({
+      name: "Light Chain (Chain Mail)",
+      type: "armor",
+      anyTraining: true,
+    });
+    expect(registry.content(LIGHT)).not.toHaveProperty("strength");
+    for (const id of [
+      "variant-test:item/armor-1-2-or-3--1--longsword", // not armor
+      "variant-test:item/light-chain--2--chain-mail", // no second version
+      "variant-test:item/light-chain--1", // no versions to pick from
+      "variant-test:item/strong-gloves--1--chain-mail", // not armor or a weapon
+    ]) {
+      expect(registry.content(id), id).toBeUndefined();
+    }
+  });
+
+  it("wears magic armor and a Shield for their AC, unless magic is suppressed", () => {
+    // Chain Mail 16 and a Shield's 2.
+    expect(
+      deriveStats(wearing(["srd52:item/chain-mail", "srd52:item/shield"]), run)
+        .ac,
+    ).toBe(18);
+    const magic = wearing([CHAIN, SHIELD]);
+    expect(deriveStats(magic, run).ac).toBe(16 + 2 + 2 + 1);
+    expect(deriveStats({ ...magic, suppressed: [] }, run).ac).toBe(18);
+  });
+
+  it("swaps the worn armor for magic armor put on", () => {
+    const { actor } = fighter([]);
+    const packed = {
+      ...actor,
+      inventory: [...actor.inventory, CHAIN],
+      stowed: [CHAIN],
+    };
+    expect(gearOptions(packed, run)).toContainEqual({
+      id: `equip:${CHAIN}`,
+      label: "Equip +2 Chain Mail",
+    });
+    expect(changed(packed, `equip:${CHAIN}`, run).stowed).toEqual([
+      "srd52:item/chain-mail",
+    ]);
+  });
+
+  it("wears armor that needs no training or Strength", () => {
+    const wizard = (armor: string) =>
+      deriveStats(wearing([armor], [], "srd52:pregen/wizard"), run);
+    const plain = wizard("srd52:item/chain-mail");
+    expect(plain.untrainedArmor).toBe(true);
+    const light = wizard(LIGHT);
+    expect(light.untrainedArmor).toBe(false);
+    expect(light.ac).toBe(17);
+    // Strength 8 is below Chain Mail's 13, which costs the plain one 10 feet.
+    expect(light.speed - plain.speed).toBe(10);
+  });
+
+  it("sets and raises ability scores while worn and attuned", () => {
+    const gloves = "variant-test:item/strong-gloves";
+    expect(deriveStats(wearing([gloves]), run).abilities.str).toBe(17);
+    expect(deriveStats(wearing([gloves], [gloves]), run).abilities.str).toBe(
+      19,
+    );
+    // A score set lower than the character's own does nothing.
+    expect(
+      deriveStats(wearing(["variant-test:item/weak-gloves"]), run).abilities
+        .str,
+    ).toBe(17);
+    const quick = "variant-test:item/stones--1";
+    const capped = "variant-test:item/stones--2";
+    expect(registry.content(quick)).toMatchObject({ name: "Quick Stone" });
+    expect(deriveStats(wearing([quick], [quick]), run).abilities.dex).toBe(15);
+    expect(deriveStats(wearing([capped], [capped]), run).abilities.dex).toBe(
+      14,
+    );
+  });
+
+  it("adds item bonuses to checks, saves, spells and unarmored AC", () => {
+    const { actor } = fighter([]);
+    const pebble = deriveStats(
+      wearing(["variant-test:item/lucky-pebble"]),
+      run,
+    );
+    const plain = deriveStats(wearing([]), run);
+    expect(saveBonus(pebble, "dex") - saveBonus(plain, "dex")).toBe(1);
+    expect(
+      checkBonus(pebble, actor, { ability: "wis", skill: "perception" }) -
+        checkBonus(plain, actor, { ability: "wis", skill: "perception" }),
+    ).toBe(1);
+    const bracers = "variant-test:item/guard-bracers";
+    expect(deriveStats(wearing([bracers]), run).ac).toBe(plain.ac + 2);
+    expect(deriveStats(wearing([bracers, "srd52:item/shield"]), run).ac).toBe(
+      plain.ac + 2,
+    );
+    const wizard = (items: readonly string[]) =>
+      deriveStats(wearing(items, [], "srd52:pregen/wizard"), run);
+    const robed = wizard(["variant-test:item/caster-robe"]);
+    expect(spellSaveDc(robed) - spellSaveDc(wizard([]))).toBe(1);
+    expect(robed.itemBonuses.spellAttack).toBe(1);
+    const intDc = {
+      base: 0,
+      add: [{ kind: "spellSaveDc" as const, ability: "int" as const }],
+    };
+    expect(
+      evaluateFormula(intDc, robed) - evaluateFormula(intDc, wizard([])),
+    ).toBe(1);
+  });
+});
+
+describe("magic weapons that need attunement or come back, and other item pieces", () => {
+  const attack = (actor: Actor, itemId: string) => {
+    const stats = deriveStats(actor, run);
+    const resolution = stats.actions.find(
+      (each) => each.id === `weapon:${itemId}`,
+    )?.activation.resolution;
+    if (resolution?.kind !== "attack") throw new Error("Not an attack");
+    return {
+      hit: attackBonus(resolution, stats),
+      damage: resolution.damage[0]?.amount.bonus?.base,
+      proficient: resolution.attack.proficient !== false,
+    };
+  };
+
+  it("swings an attuned magic weapon with its bonus only once attuned", () => {
+    const blade = "variant-test:item/key-blade--1--dagger";
+    expect(registry.content(blade)).toMatchObject({
+      name: "Key Blade (Three, Dagger)",
+      type: "weapon",
+      attunement: true,
+    });
+    const { actor } = fighter([blade]);
+    expect(attack(actor, blade).hit).toBe(2 + 3);
+    expect(attack({ ...actor, attuned: [blade] }, blade).hit).toBe(2 + 3 + 1);
+    expect(gearOptions(actor, run)).toContainEqual({
+      id: `attune:${blade}`,
+      label: "Attune to Key Blade (Three, Dagger)",
+    });
+  });
+
+  it("keeps a Returning Weapon in hand once thrown", () => {
+    const homing = "variant-test:item/homing-weapon--1--dagger";
+    expect(registry.content(homing)).toMatchObject({
+      name: "Homing Weapon (Dagger)",
+      returning: true,
+    });
+    const { state } = fighter([homing]);
+    const context = {
+      state,
+      dice: createDice(rngFromSeed("returning")),
+      content: run.content,
+      contentIds: run.contentIds,
+    };
+    const thrown = (item: string) =>
+      gearFrames[`${NS}:throwWeapon`].run(
+        { actor: PLAYER_ACTOR, item, target: PLAYER_ACTOR },
+        context,
+      ).events ?? [];
+    expect(thrown(homing)).toEqual([]);
+    const { state: plain } = fighter(["srd52:item/dagger"]);
+    expect(
+      gearFrames[`${NS}:throwWeapon`].run(
+        {
+          actor: PLAYER_ACTOR,
+          item: "srd52:item/dagger",
+          target: PLAYER_ACTOR,
+        },
+        { ...context, state: plain },
+      ).events,
+    ).toHaveLength(1);
+  });
+
+  it("trains with some weapons and adds to their damage alone", () => {
+    const bracers = "variant-test:item/archer-bracers";
+    const wizard = (items: readonly string[]) =>
+      wearing(items, [], "srd52:pregen/wizard");
+    const sword = "srd52:item/longsword";
+    const bow = "srd52:item/shortbow";
+    expect(attack(wizard([sword]), sword).proficient).toBe(false);
+    expect(attack(wizard([sword, bracers]), sword).proficient).toBe(true);
+    expect(attack(wizard([sword, bracers]), sword).damage).toBe(0);
+    expect(attack(wizard([bow, bracers]), bow).damage).toBe(2);
+  });
+
+  it("raises the Proficiency Bonus", () => {
+    const stone = "variant-test:item/mastery-stone";
+    expect(deriveStats(wearing([stone]), run).proficiency).toBe(3);
+  });
+
+  it("studies a book to raise a score for good, spending the book", () => {
+    const manual = "variant-test:item/strength-manual";
+    const { state } = fighter([manual]);
+    const action = sceneGearActions(state, run).find(
+      (each) => each.id === `study:${manual}`,
+    );
+    expect(action).toMatchObject({
+      label: "Study Strength Manual",
+      rest: true,
+    });
+    const result = gearEffects[`${NS}:study`].apply(
+      { item: manual },
+      {
+        state,
+        dice: createDice(rngFromSeed("study")),
+        content: run.content,
+        contentIds: run.contentIds,
+      },
+    );
+    const after = (result.events ?? []).reduce(applyDndEvent, state);
+    const player = after.actors[PLAYER_ACTOR];
+    if (!player) throw new Error("No player");
+    expect(player.raised).toEqual({ str: 2 });
+    expect(player.inventory).not.toContain(manual);
+    expect(deriveStats(player, run).abilities.str).toBe(19);
   });
 });
 

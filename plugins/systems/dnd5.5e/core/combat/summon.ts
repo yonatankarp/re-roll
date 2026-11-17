@@ -49,7 +49,12 @@ export function summonedActors(
           typeof effect.duration === "object" &&
           "concentration" in effect.duration,
         proficiency: stats.proficiency,
-        spellAttack: spellDc - 8 + stats.itemBonuses.spellAttack,
+        // An item's bonus to DCs isn't one to attacks, so it comes off, and its bonus to spell attacks goes on.
+        spellAttack:
+          spellDc -
+          8 -
+          stats.itemBonuses.spellDc +
+          stats.itemBonuses.spellAttack,
         spellDc,
       },
       hp: 1,

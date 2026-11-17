@@ -1902,9 +1902,34 @@ const ItemBaseSchema = ContentEntrySchema.extend({
 });
 
 const MagicBonusSchema = z.strictObject({
-  to: z.enum(["attack", "damage", "ac", "savingThrows", "spellAttack"]),
+  to: z.enum([
+    "attack",
+    "damage",
+    "ac",
+    "savingThrows",
+    "spellAttack",
+    "spellDc", // spell save DCs, as a Robe of Thayan Arcana's
+    "checks", // ability checks, as a Stone of Good Luck's
+    "proficiency", // the Proficiency Bonus, as an Ioun Stone of Mastery's
+  ]),
   amount: z.number().int().min(1),
+  unarmored: z.literal(true).optional(), // only while wearing no armor and using no Shield, as Bracers of Defense
+  // Only with these weapons, or a magic one made from them, by their names after the plugin, as Bracers of
+  // Archery's "longbow" and "shortbow", so any book's Longbow counts. It adds to a magic weapon's own bonus,
+  // which other bonuses to attack and damage don't.
+  weapons: z.array(z.string().min(1)).min(1).optional(),
 });
+
+// An ability score an item sets while worn, as Gauntlets of Ogre Power's Strength 19, which does nothing to a higher
+// score, or raises, as an Ioun Stone's +2 to a maximum of 20.
+const ItemAbilitySchema = z.union([
+  z.strictObject({ ability: AbilitySchema, set: z.number().int().min(1) }),
+  z.strictObject({
+    ability: AbilitySchema,
+    raise: z.number().int().min(1),
+    max: z.number().int().min(1),
+  }),
+]);
 
 export const WeaponSchema = ItemBaseSchema.extend({
   type: z.literal("weapon"),
@@ -1936,6 +1961,8 @@ export const WeaponSchema = ItemBaseSchema.extend({
   // A magic weapon made from a plain one, as a +2 Longsword: the plain weapon, and its own bonuses.
   baseWeapon: ContentIdSchema.optional(),
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
+  attunement: z.literal(true).optional(), // its bonuses work only while attuned, as a Keyholes Dagger's
+  returning: z.literal(true).optional(), // back in hand once thrown, as a Returning Weapon
   // A Thrown or Ammunition weapon's range in feet: normal, and long with Disadvantage.
   range: z
     .strictObject({
@@ -1953,12 +1980,18 @@ export const ArmorSchema = ItemBaseSchema.extend({
   addDex: z.boolean(),
   maxDex: z.number().int().optional(),
   strength: z.number().int().optional(), // a lower Strength score costs 10 feet of speed
+  // Magic armor made from a plain one, as +1 Chain Mail (variants.ts): the plain armor, and its own bonuses.
+  baseArmor: ContentIdSchema.optional(),
+  bonuses: z.array(MagicBonusSchema).min(1).optional(),
+  anyTraining: z.literal(true).optional(), // worn as if trained with it, as Elven Chain
 }).strict();
 export type Armor = z.infer<typeof ArmorSchema>;
 
 const ShieldItemSchema = ItemBaseSchema.extend({
   type: z.literal("shield"),
   bonus: z.number().int(),
+  baseArmor: ContentIdSchema.optional(), // a magic Shield's plain one, as a +1 Shield's (variants.ts)
+  bonuses: z.array(MagicBonusSchema).min(1).optional(),
 }).strict();
 
 const GearSchema = ItemBaseSchema.extend({
@@ -1999,7 +2032,7 @@ const RaritySchema = z.enum([
   "artifact",
 ]);
 
-// Numbers read from the book's text. The engine doesn't apply them yet, so `automation` says what actually happens.
+// Numbers read from the book's text, which the engine applies where it can; `automation` says how much plays.
 const MagicItemSchema = ItemBaseSchema.extend({
   type: z.literal("magicItem"),
   category: z.enum([
@@ -2019,6 +2052,24 @@ const MagicItemSchema = ItemBaseSchema.extend({
   text: z.string().min(1),
   automation: AutomationSchema,
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
+  abilities: z.array(ItemAbilitySchema).min(1).optional(),
+  // A score studying it raises for good, as a Manual of Bodily Health's Constitution by 2 to a maximum of 30.
+  // Studying spends its magic, so the item is gone after.
+  study: z
+    .strictObject({
+      ability: AbilitySchema,
+      raise: z.number().int().min(1),
+      max: z.number().int().min(1),
+    })
+    .optional(),
+  // Weapons it trains its wearer with, and magic ones made from them, named as a bonus's `weapons` are.
+  weaponTraining: z.array(z.string().min(1)).min(1).optional(),
+  // Magic armor made from a plain one: worn as if trained with it, as Elven Chain, or with no Strength it needs,
+  // as Mithral Armor. Carried into the armor content names as `<id>--<n>--<armor>` (variants.ts).
+  anyTraining: z.literal(true).optional(),
+  noStrength: z.literal(true).optional(),
+  // A magic weapon that comes back once thrown, as a Returning Weapon, carried the same way.
+  returning: z.literal(true).optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
   // Set when one entry covers several rarities, such as +1, +2 or +3. Content names one as `<id>--<n>` (variants.ts).
@@ -2028,6 +2079,7 @@ const MagicItemSchema = ItemBaseSchema.extend({
         rarity: RaritySchema,
         name: z.string().min(1).optional(),
         bonuses: z.array(MagicBonusSchema).min(1).optional(),
+        abilities: z.array(ItemAbilitySchema).min(1).optional(),
         healing: AmountSchema.optional(),
       }),
     )

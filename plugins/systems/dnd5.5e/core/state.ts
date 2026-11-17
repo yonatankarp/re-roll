@@ -307,6 +307,8 @@ const ActorSchema = z.strictObject({
   // Copies in `inventory` carried in the pack rather than worn or wielded. Missing in older saves, where all is worn.
   stowed: z.array(ContentIdSchema).optional(),
   attuned: z.array(ContentIdSchema).optional(), // magic items attuned to, at most MAX_ATTUNED
+  // Ability scores raised for good, as by studying a Manual of Bodily Health. Missing when none has been.
+  raised: z.partialRecord(AbilitySchema, z.number().int()).optional(),
   xp: z.number().int().optional(), // only the player's is tracked, and the party levels together
   // Where the creature stands in a fight, null outside one. Saves from before the grid have none.
   position: SquareSchema.nullable().default(null),
@@ -457,6 +459,13 @@ const AnswerSwappedSchema = z.strictObject({
 });
 const ItemUsedSchema = z.strictObject({
   actor: z.string(),
+  item: ContentIdSchema,
+});
+// A score raised for good, by as much as it rose, as by a Manual of Bodily Health.
+const AbilityRaisedSchema = z.strictObject({
+  actor: z.string(),
+  ability: AbilitySchema,
+  amount: z.number().int(),
   item: ContentIdSchema,
 });
 const MovedSchema = z.strictObject({
@@ -638,6 +647,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:goldSpent`]: GoldSpentSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
+  [`${NS}:abilityRaised`]: AbilityRaisedSchema,
   [`${NS}:weaponThrown`]: WeaponThrownSchema,
   [`${NS}:answerSwapped`]: AnswerSwappedSchema,
   [`${NS}:itemPickedUp`]: ItemPickedUpSchema,
@@ -1634,6 +1644,16 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         inventory: without(actor.inventory, [data.item]),
+      }));
+    }
+    case `${NS}:abilityRaised`: {
+      const data = payload(AbilityRaisedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        raised: {
+          ...actor.raised,
+          [data.ability]: (actor.raised?.[data.ability] ?? 0) + data.amount,
+        },
       }));
     }
     // Uses are marks in usedThisTurn, which clears when the monster's own turn starts, as its uses come back.
