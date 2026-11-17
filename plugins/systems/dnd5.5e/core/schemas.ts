@@ -760,6 +760,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     full: z.literal(true).optional(),
     divided: z.literal(true).optional(),
     half: z.literal(true).optional(),
+    perSlot: z.number().int().min(1).optional(), // this much more for each level of the slot, as Undead Vitality's
+    halfMax: z.literal(true).optional(), // half the target's own Hit Point maximum, as Master Transmuter's Panacea
     pool: z
       .strictObject({
         resource: z.string().min(1),
@@ -2768,6 +2770,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     resource: z.string().optional(), // spending a use, only while one is left, as Defy Death's after Spare the Dying
     // with `school`, a spell of any casting time cast with a slot, as Arcane Ward's Abjuration spells
     slotted: z.literal(true).optional(),
+    // its `effects` go to the most hurt of the bearer's allies of these types within `within` instead, as Undead
+    // Vitality's healing of an Undead
+    toAlly: z
+      .strictObject({
+        creatureTypes: z.array(CreatureTypeSchema).min(1),
+        within: z.number().int().min(5),
+      })
+      .optional(),
   }),
   // Using an activation of this feature also does these to the bearer, as Tactical Shift's move with Second Wind or
   // Arcane Charge's teleport with Action Surge; with `while`, only while an effect of one of those features'

@@ -1794,7 +1794,10 @@ export function leafEvents(
         }
         const rolled = effect.full
           ? max
-          : (pool?.healed ?? rollAmount(effect.amount, stats, dice));
+          : effect.halfMax
+            ? Math.floor(max / 2)
+            : (pool?.healed ?? rollAmount(effect.amount, stats, dice)) +
+              (effect.perSlot && slotLevel ? effect.perSlot * slotLevel : 0);
         // Fortified Health: once a turn, healing gives the Constitution modifier more.
         const fortified = deriveStats(target, context).passives.find(
           (passive) => passive.kind === "healBonus",
