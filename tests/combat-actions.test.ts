@@ -5,6 +5,7 @@ import {
   type SystemEvent,
 } from "#sdk";
 import { describe, expect, it } from "vitest";
+import { ENCUMBRANCE } from "../plugins/systems/dnd5.5e/core/variant-rules.ts";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import type { Dice } from "../engine/kernel/dice.ts";
 import { AWAIT_FRAME } from "../engine/kernel/system.ts";
@@ -637,6 +638,27 @@ describe("actions anyone can take", () => {
     // It lasts only until the creature's next turn.
     const later = nextTurn(nextTurn(dashed.state));
     expect(speedLeft(who(later, PLAYER_ACTOR), stats)).toBe(30);
+  });
+
+  it("offers a heavily loaded character only 10 feet of movement with the Encumbrance variant (#190)", async () => {
+    const run = await base();
+    // 4 chain mail and a longsword are 223 pounds, over two thirds of Strength 17's 255.
+    const mail = Array.from({ length: 4 }, () => "srd52:item/chain-mail");
+    const state = fight([
+      fighter(run, {
+        at: [0, 0],
+        inventory: ["srd52:item/longsword", ...mail],
+      }),
+      monster("foe", [19, 19]),
+    ]);
+    const move = (played: DndState) =>
+      run.system
+        .nextDecision(played, run)
+        ?.options.find((option) => option.id === "move")?.label;
+    expect(move(state)).toBe("Move (30 ft left)");
+    expect(move({ ...state, variantRules: [ENCUMBRANCE] })).toBe(
+      "Move (10 ft left)",
+    );
   });
 
   it("Disengage stops Opportunity Attacks for the turn", async () => {

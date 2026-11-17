@@ -25,6 +25,7 @@ import type { AreaView, BoardExtra, FightMap } from "./board-data.ts";
 import { zonesOf } from "../core/zones.ts";
 import { dndCue } from "./cues.ts";
 import { GLOSSARY_TERMS } from "../core/glossary.ts";
+import { playing } from "../core/variant-rules.ts";
 import {
   ABILITIES,
   ABILITY_NAMES,
@@ -1344,20 +1345,37 @@ function playerDied(rawState: unknown): boolean {
 }
 
 export const dndUi = {
-  cue: dndCue,
+  cue: (
+    event: SystemEvent,
+    before: unknown,
+    after: unknown,
+    access: ContentAccess,
+  ) => dndCue(event, before, after, playing(after, access)),
   roll,
   systemId: "dnd5.5e",
   about: "Compatible with fifth edition.",
-  sheets,
-  combat,
-  describe,
+  sheets: (rawState: unknown, access: ContentAccess) =>
+    sheets(rawState, playing(rawState, access)),
+  combat: (
+    rawState: unknown,
+    access: ContentAccess,
+    encounter?: (id: string) => unknown,
+  ) => combat(rawState, playing(rawState, access), encounter),
+  describe: (event: SystemEvent, rawState: unknown, access: ContentAccess) =>
+    describe(event, rawState, playing(rawState, access)),
   actorOf,
-  optionGroups,
-  card,
-  shop,
+  optionGroups: (
+    decision: Decision,
+    rawState: unknown,
+    access: ContentAccess,
+  ) => optionGroups(decision, rawState, playing(rawState, access)),
+  card: (decision: Decision, rawState: unknown, access: ContentAccess) =>
+    card(decision, rawState, playing(rawState, access)),
+  shop: (decision: Decision, rawState: unknown, access: ContentAccess) =>
+    shop(decision, rawState, playing(rawState, access)),
   creation: (decision: Decision, rawState: unknown, access: ContentAccess) =>
-    sheetCreation(decision, rawState, access) ??
-    creation(decision, rawState, access),
+    sheetCreation(decision, rawState, playing(rawState, access)) ??
+    creation(decision, rawState, playing(rawState, access)),
   playerDied,
   terms: GLOSSARY_TERMS,
 };

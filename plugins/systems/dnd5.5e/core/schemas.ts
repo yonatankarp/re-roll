@@ -3127,7 +3127,12 @@ export const EncounterSchema = z.strictObject({
 });
 
 export const CheckSchema = z.union([
-  z.strictObject({ skill: SkillSchema, dc: z.number().int() }),
+  // `ability` pairs the skill with another ability, as a Constitution (Athletics) check (variant-rules.ts).
+  z.strictObject({
+    skill: SkillSchema,
+    ability: AbilitySchema.optional(),
+    dc: z.number().int(),
+  }),
   z.strictObject({ ability: AbilitySchema, dc: z.number().int() }),
 ]);
 export type Check = z.infer<typeof CheckSchema>;

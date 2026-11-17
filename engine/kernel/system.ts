@@ -252,6 +252,9 @@ export interface SystemSetting {
     readonly undo?: boolean; // lets the player take back their last choice, as a forgiving option
   }[];
   readonly default: string;
+  // A variant rule: its id names the rule's entity, its options are off (the default) then on, and the setup
+  // screen offers it folded away as a switch.
+  readonly variant?: true;
 }
 
 export interface RunSetup {
