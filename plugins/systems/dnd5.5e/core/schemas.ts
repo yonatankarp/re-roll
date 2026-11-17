@@ -2347,11 +2347,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     resource: z.string().optional(), // spending a use, only while one is left, as Defy Death's after Spare the Dying
   }),
   // Using an activation of this feature also does these to the bearer, as Tactical Shift's move with Second Wind or
-  // Arcane Charge's teleport with Action Surge.
+  // Arcane Charge's teleport with Action Surge; with `while`, only while an effect of one of those features'
+  // activations is on it, as Reckless Abandon's Temporary Hit Points with Reckless Attack in a Rage.
   z.strictObject({
     kind: z.literal("activationRider"),
     feature: ContentIdSchema,
     effects: z.array(LeafEffectSchema).min(1),
+    while: z.array(ContentIdSchema).min(1).optional(),
   }),
   // A Long Rest leaves one of this item with the bearer, as Vampire's Plaything's Decanting.
   z.strictObject({ kind: z.literal("restItem"), item: ContentIdSchema }),
