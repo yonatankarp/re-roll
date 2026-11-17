@@ -89,6 +89,16 @@ describe("what a ruling names", () => {
     expect(mentions(INDEX, "Can I Attack while I hush?", "new")).toEqual([]);
   });
 
+  it("ends a name at a possessive, and leaves one word to the longer name it starts", () => {
+    expect(
+      mentions(
+        INDEX,
+        "Does the Warden’s Spellwork outlast Warden Lore?",
+        "new",
+      ),
+    ).toEqual(["hb:class/warden", "hb:feature/warden-spellwork"]);
+  });
+
   it("names the thing itself over each of its variants", () => {
     expect(mentions(INDEX, "Who can read a Scroll?", "new")).toEqual([
       "hb:item/scroll",

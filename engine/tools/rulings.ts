@@ -61,11 +61,11 @@ export function mentions(
 ): string[] {
   const found = new Set<string>();
   let first = true; // a sentence's first word is capitalized anyway
-  for (const clause of text.split(/[.,;:?!“”"()—–]/)) {
-    const words = clause
-      .replace(/[’']s\b/g, "")
-      .split(/[\s/]+/)
-      .filter(Boolean);
+  for (const clause of text.split(/[.,;:?!“”"()—–/]/)) {
+    const raw = clause.split(/\s+/).filter(Boolean);
+    // A possessive ends a name: "the Abjurer's Arcane Ward" names two things.
+    const owns = raw.map((word) => /[’']s$/.test(word));
+    const words = raw.map((word) => word.replace(/[’']s$/, ""));
     for (let at = 0; at < words.length;) {
       let taken = 1;
       for (
@@ -73,14 +73,20 @@ export function mentions(
         size > 0;
         size--
       ) {
+        if (owns.slice(at, at + size - 1).some(Boolean)) continue;
         const run = words.slice(at, at + size);
-        const next = (words[at + size] ?? "").toLowerCase();
+        const after = words[at + size] ?? "";
+        const next = after.toLowerCase();
         const kinds = HINTS[next];
         const named =
           capital(run[0] ?? "") &&
           capital(run.at(-1) ?? "") &&
           run.every((word) => capital(word) || JOINERS.has(word)) &&
-          !(first && at === 0 && size === 1);
+          // One word that starts a longer capitalized name is that name's ("Sage Advice").
+          !(
+            size === 1 &&
+            ((capital(after) && !owns[at]) || (first && at === 0))
+          );
         // Lower-case words name an entity only when they are its whole name, as the 2014 books print them.
         const plain =
           !named &&
@@ -190,8 +196,12 @@ export function rulingIndex(
     const key = `${heading.book}/${heading.file}`;
     sections.set(entity, (sections.get(entity) ?? new Set()).add(key));
   }
+  // In reading order, so the index reads the same however the rulings were found.
+  const order = new Map(verdicts.map((item, at) => [item.heading.id, at]));
+  const place = (ruling: (typeof rulings)[number]) =>
+    order.get(ruling.library[0] ?? "") ?? Infinity;
   const out = new Map<string, Record<string, RulingRef[]>>();
-  for (const ruling of rulings) {
+  for (const ruling of [...rulings].sort((a, b) => place(a) - place(b))) {
     const self = headings.get(ruling.library[0] ?? "");
     if (!self) continue;
     const ref = { book: self.book, file: self.file, heading: self.text };
@@ -199,8 +209,15 @@ export function rulingIndex(
       ruling.about.flatMap((id) => [...(sections.get(id) ?? [])]),
     );
     const book = out.get(ruling.plugin) ?? {};
-    for (const key of [...keys].sort()) (book[key] ??= []).push(ref);
+    for (const key of keys) (book[key] ??= []).push(ref);
     out.set(ruling.plugin, book);
   }
+  for (const [plugin, book] of out)
+    out.set(
+      plugin,
+      Object.fromEntries(
+        Object.entries(book).sort(([a], [b]) => a.localeCompare(b)),
+      ),
+    );
   return out;
 }
