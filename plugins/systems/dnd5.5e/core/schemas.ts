@@ -55,6 +55,30 @@ export const DAMAGE_TYPES = [
   "thunder",
 ] as const;
 export const DamageTypeSchema = z.enum(DAMAGE_TYPES);
+
+// The creature types, lowercase, each a monster-manual creature-type entity (#187).
+export const CREATURE_TYPES = [
+  "aberration",
+  "beast",
+  "celestial",
+  "construct",
+  "dragon",
+  "elemental",
+  "fey",
+  "fiend",
+  "giant",
+  "humanoid",
+  "monstrosity",
+  "ooze",
+  "plant",
+  "undead",
+] as const;
+const isCreatureType = (type: string) =>
+  (CREATURE_TYPES as readonly string[]).includes(type);
+// Checked against the list, though read as a string, so code may compare it with any stats' type.
+const CreatureTypeSchema = z
+  .string()
+  .refine(isCreatureType, "must be a lowercase creature type");
 export type DamageType = z.infer<typeof DamageTypeSchema>;
 
 export const ConditionSchema = z.enum([
@@ -924,7 +948,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("raiseCorpse"),
     monster: ContentIdSchema,
     range: z.number().int().min(5),
-    creatureTypes: z.array(z.string()).min(1),
+    creatureTypes: z.array(CreatureTypeSchema).min(1),
     all: z.boolean().default(false), // every such corpse, not one
   }),
 ]);
@@ -994,8 +1018,8 @@ export type Resolution = z.infer<typeof ResolutionSchema>;
 // as its owner's turn starts or ends. `grants` are modifiers those in it have, as Marshal Undead's Advantage.
 export const AreaEffectSchema = z.strictObject({
   side: z.enum(["enemy", "ally"]).optional(),
-  creatureTypes: z.array(z.string()).min(1).optional(), // only these lowercase types, as Marshal Undead's undead
-  exceptTypes: z.array(z.string()).min(1).optional(), // never these, as Antilife Shell's undead and constructs
+  creatureTypes: z.array(CreatureTypeSchema).min(1).optional(), // only these types, as Marshal Undead's undead
+  exceptTypes: z.array(CreatureTypeSchema).min(1).optional(), // never these, as Antilife Shell's undead and constructs
   when: z
     .enum(["turnStart", "turnEnd", "ownerTurnStart", "ownerTurnEnd"])
     .optional(),
@@ -1058,7 +1082,7 @@ export const TargetingSchema = z.union([
     creatures: z.number().int().min(1),
     range: RangeSchema,
     side: SideSchema,
-    creatureTypes: z.array(z.string()).optional(), // only these lowercase types can be targeted
+    creatureTypes: z.array(CreatureTypeSchema).optional(), // only these types can be targeted
     targetConditions: z.array(ConditionSchema).min(1).optional(), // only a creature with one of these, as for Trample
     dead: z.literal(true).optional(), // only a dead creature, as for Revivify
     // with `dead`, only one dead no longer than this many hours, as Raise Dead's 10 days (240). Only rests pass
@@ -1081,7 +1105,7 @@ export const TargetingSchema = z.union([
     }),
     range: RangeSchema,
     side: SideSchema,
-    creatureTypes: z.array(z.string()).optional(),
+    creatureTypes: z.array(CreatureTypeSchema).optional(),
     targetConditions: z.array(ConditionSchema).min(1).optional(), // only those with one of these, as Intensify Poison
     afflicted: z.string().min(1).optional(), // as a creature target's, as an arch-hag's Witch Strike
   }),
@@ -2059,7 +2083,13 @@ export type Subclass = z.infer<typeof SubclassSchema>;
 export const SpeciesSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
   text: z.string().min(1),
-  creatureType: z.string().min(1),
+  // A species' book prints it capitalized ("Humanoid"), and stats read it lowercase.
+  creatureType: z
+    .string()
+    .refine(
+      (type) => isCreatureType(type.toLowerCase()),
+      "must be a creature type",
+    ),
   size: z.enum(["tiny", "small", "medium", "large"]),
   speed: z.number().int(),
   traits: z.array(ContentIdSchema).default([]),
@@ -2397,7 +2427,7 @@ export const MonsterSchema = ContentEntrySchema.extend({
   proficiency: z.number().int(),
   saves: z.array(AbilitySchema).default([]),
   initiative: z.number().int(),
-  creatureType: z.string().optional(), // lowercase, such as undead
+  creatureType: CreatureTypeSchema.optional(),
   features: z.array(ContentIdSchema).default([]),
   passives: z.array(PassiveSchema).default([]),
   multiattack: z.number().int().min(1).default(1),

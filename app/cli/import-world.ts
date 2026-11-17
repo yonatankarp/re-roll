@@ -28,6 +28,7 @@ import {
   familyLinks,
   linksIndex,
 } from "../../plugins/systems/dnd5.5e/core/import/families.ts";
+import { skillRows } from "../../plugins/systems/dnd5.5e/core/import/skills.ts";
 import {
   DOWNTIME_KINDS,
   ENVIRONMENT_KINDS,
@@ -263,6 +264,32 @@ for (const plan of plans) {
       stringify([written], { lineWidth: 0 }),
     );
     counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+
+  // The skills a 2024 book lists in its Skills table, each linked to the heading nearest it: the last in
+  // reading order whose text holds the whole table, not an ability's few (#187).
+  let table: { id: string; rows: ReturnType<typeof skillRows> } | undefined;
+  for (const { heading } of verdicts) {
+    const rows = skillRows(heading.body);
+    if (rows.length > 0 && rows.length >= (table?.rows.length ?? 0))
+      table = { id: heading.id, rows };
+  }
+  const found = table;
+  for (const row of found?.rows ?? []) {
+    const file = `skills/${row.id}.yaml`;
+    if (record.files.includes(file)) continue;
+    const entry = {
+      id: `${book}:skill/${row.id}`,
+      name: row.name,
+      source: titles.get(book) ?? book,
+      text: row.text,
+      library: found ? [found.id] : [],
+    };
+    await storage.replaceAtomically(
+      `${record.root}/${file}`,
+      stringify([entry], { lineWidth: 0 }),
+    );
+    counts.set("skills", (counts.get("skills") ?? 0) + 1);
   }
 }
 for (const [book, sections] of rulingIndex(

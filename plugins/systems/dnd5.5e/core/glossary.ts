@@ -1,4 +1,6 @@
 import {
+  ALL_SKILLS,
+  CREATURE_TYPES,
   ConditionSchema,
   DAMAGE_TYPES,
   WeaponMasterySchema,
@@ -19,7 +21,13 @@ export interface GlossaryTerm {
 }
 
 // Books whose glossary entities may explain a term, best first. 2014 books are left out, as their rules differ.
-export const GLOSSARY_BOOKS = ["phb", "dmg", "basic-rules", "srd52"] as const;
+export const GLOSSARY_BOOKS = [
+  "phb",
+  "dmg",
+  "basic-rules",
+  "srd52",
+  "monster-manual",
+] as const;
 
 const capital = (word: string): string =>
   word.charAt(0).toUpperCase() + word.slice(1);
@@ -293,4 +301,20 @@ export const GLOSSARY_TERMS: readonly GlossaryTerm[] = [
       : term;
   }),
   ...RULES,
+  // Capitalized only, since "history" or "beast" is a word of a sentence too.
+  ...ALL_SKILLS.map((skill) => ({
+    id: `skill:${skill}`,
+    entity: `skill/${glossaryName(skill)}`,
+    words: [
+      glossaryName(skill)
+        .split("-")
+        .map((word) => (word === "of" ? word : capital(word)))
+        .join(" "),
+    ],
+  })),
+  ...CREATURE_TYPES.map((type) => ({
+    id: `creature-type:${type}`,
+    entity: `creature-type/${type}`,
+    words: [capital(type)],
+  })),
 ];
