@@ -144,6 +144,7 @@ import {
   inReach,
   isMelee,
   meleeReach,
+  onceKey,
   reaches,
   rollBonus,
   SIZES,
@@ -179,6 +180,14 @@ export function payCosts(
           ]
         : [],
     ),
+    ...(action.activation.oncePerTurn
+      ? [
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: actor.id,
+            key: onceKey(action.id),
+          }),
+        ]
+      : []),
   ];
   for (const cost of action.activation.cost) {
     if (cost === "action" || cost === "bonusAction" || cost === "reaction") {

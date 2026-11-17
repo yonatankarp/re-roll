@@ -763,8 +763,42 @@ export function choosePolicy(decision: Decision, context: Context): string {
   const spendsSlot =
     foesHp > stats.maxHp && slotsLeft(actor, stats) > (healer ? 1 : 0);
 
+  // A strike option is worth what it adds less the Sneak Attack dice it gives up (combat/strikes.ts).
+  if (decision.id.startsWith(`${NS}:strike:`)) {
+    const judge = makeJudge(context, actor);
+    const best = parsed
+      .map((item) => {
+        const forgo = item.action.activation.trigger?.forgo ?? 0;
+        const lost =
+          item.target && forgo > 0
+            ? judge.damageWorth(item.target, forgo * 3.5)
+            : 0;
+        return {
+          id: item.option.id,
+          worth:
+            judge.worth(actor, item.action.id, item.targetId, item.slot) -
+            lost,
+        };
+      })
+      .sort((a, b) => b.worth - a.worth)[0];
+    return best && best.worth > 0 ? best.id : DECLINE;
+  }
+
   if (decision.id.startsWith(`${NS}:afterHit:`)) {
-    return spendsSlot ? first.id : DECLINE;
+    if (actor.side !== "party") return spendsSlot ? first.id : DECLINE;
+    // The party adds what's worth its cost, as a Superiority Die or a Focus Point (worth.ts prices each), and a
+    // slot only in a fight that needs one.
+    const judge = makeJudge(context, actor);
+    const best = parsed
+      .filter(
+        (item) => spendsSlot || !item.action.activation.cost.includes("slot"),
+      )
+      .map((item) => ({
+        id: item.option.id,
+        worth: judge.worth(actor, item.action.id, item.targetId, item.slot),
+      }))
+      .sort((a, b) => b.worth - a.worth)[0];
+    return best && best.worth > 0 ? best.id : DECLINE;
   }
 
   // The party plays by worth. Monsters keep the simple rules below, so the books' fights stay as hard as written.

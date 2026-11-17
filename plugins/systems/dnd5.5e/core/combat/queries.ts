@@ -27,7 +27,7 @@ import {
   scaleActivation,
   type Stats,
 } from "../stats.ts";
-import type { Passive, Skill } from "../schemas.ts";
+import type { HitKind, Passive, Skill } from "../schemas.ts";
 import {
   distanceFeet,
   rangeFeet,
@@ -715,20 +715,10 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
   const { activation } = action;
   const used = actor.usedThisTurn;
   if (activation.unmoved && actor.moved > 0) return false;
+  if (activation.oncePerTurn && used.includes(onceKey(action.id))) return false;
   if (activation.afterCast && !used.includes(CAST_ACTION)) return false;
   if (activation.afterBonusAction && actor.budget.bonusAction) return false;
-  const lasting = activation.while;
-  if (
-    lasting &&
-    !lasting.some(
-      (id) =>
-        actor.activeEffects.some(({ sourceId }) =>
-          sourceId.startsWith(`feature:${id}:`),
-        ) || actor.concentratingOn?.replace(/:free$/, "") === `spell:${id}`,
-    )
-  ) {
-    return false;
-  }
+  if (activation.while && !underEffect(actor, activation.while)) return false;
   const { resolution, cost } = activation;
   if (
     resolution.kind === "automatic" &&
@@ -743,6 +733,105 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
     action.spellLevel !== null &&
     cost.includes("action")
   );
+}
+
+// Whether an effect of one of these features' activations is on the actor, or it concentrates on one of these
+// spells, as a Rage for Travel along the Tree or Divine Fury.
+export function underEffect(actor: Actor, ids: readonly string[]): boolean {
+  return ids.some(
+    (id) =>
+      actor.activeEffects.some(({ sourceId }) =>
+        sourceId.startsWith(`feature:${id}:`),
+      ) || actor.concentratingOn?.replace(/:free$/, "") === `spell:${id}`,
+  );
+}
+
+// Whether a hit with this action is one a rider of this kind answers (schemas.ts HitKindSchema).
+export function hitFits(
+  kind: HitKind,
+  hitWith: KnownAction,
+  attacker: Actor,
+  access: Pick<ContentAccess, "content">,
+): boolean {
+  const { resolution } = hitWith.activation;
+  if (resolution.kind !== "attack") return false;
+  if (kind === "attack") return true;
+  if (resolution.attack.type !== "weapon") return false;
+  if (kind === "finesseOrRanged") {
+    return carriesExtraDice(attacker, hitWith, access);
+  }
+  const unarmed = resolution.attack.unarmed === true;
+  const id = weaponItemId(hitWith.id);
+  const item = id ? ItemSchema.safeParse(access.content(id)).data : undefined;
+  const weapon = item?.type === "weapon" ? item : undefined;
+  switch (kind) {
+    case "weapon":
+      return true;
+    case "meleeWeapon":
+      return isMelee(hitWith);
+    case "rangedWeapon":
+      return !isMelee(hitWith);
+    case "unarmed":
+      return unarmed;
+    case "monkWeapon":
+      return (
+        unarmed ||
+        (weapon !== undefined &&
+          isMelee(hitWith) &&
+          (weapon.category === "simple" || weapon.properties.includes("light")))
+      );
+    case "magicWeapon":
+      return weapon?.baseWeapon !== undefined;
+    case "strength":
+      return (
+        (resolution.attack.ability ?? (isMelee(hitWith) ? "str" : "dex")) ===
+        "str"
+      );
+    case "heavy":
+      return weapon?.properties.includes("heavy") === true;
+  }
+}
+
+// Whether an extraDamage passive adds to this hit: `edge` is the roll's Advantage and Disadvantage.
+export function extraFits(
+  passive: Extract<Passive, { kind: "extraDamage" }>,
+  attacker: Actor,
+  target: Actor,
+  hitWith: KnownAction,
+  edge: { readonly advantage: boolean; readonly disadvantage: boolean },
+  context: Context,
+): boolean {
+  const { state } = context;
+  const turn = state.combat?.order[state.combat.index];
+  if (passive.ownTurn && turn !== attacker.id) return false;
+  if (passive.firstRound && (state.combat?.round ?? 1) > 1) return false;
+  if (passive.while && !underEffect(attacker, passive.while)) return false;
+  const advantaged =
+    passive.when === "advantage" || passive.when === "advantageOrAlly";
+  const kind = passive.with ?? (advantaged ? "finesseOrRanged" : "attack");
+  if (!hitFits(kind, hitWith, attacker, context)) return false;
+  if (passive.when === "always") return true;
+  if (passive.when === "targetHurt") {
+    return target.hp < deriveStats(target, context).maxHp;
+  }
+  if (edge.advantage && !edge.disadvantage) return true;
+  // Sneak Attack's ally must be able to act, and the ally never makes up for Disadvantage on the roll.
+  return (
+    passive.when === "advantageOrAlly" &&
+    !edge.disadvantage &&
+    allies(state, attacker).some(
+      (item) =>
+        item.id !== attacker.id &&
+        !isDown(item) &&
+        !hasCondition(item, ...INCAPACITATING) &&
+        within5(item, target),
+    )
+  );
+}
+
+// The usedThisTurn key of an activation limited to once a turn.
+export function onceKey(actionId: string): string {
+  return `once:${actionId}`;
 }
 
 // A healing pool with nothing left in it can't heal, as Lay On Hands spent, and nothing is regained with nothing

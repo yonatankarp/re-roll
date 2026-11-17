@@ -74,6 +74,8 @@ export const FRAME_KINDS = [
   "sheetAnswer",
   "sheetStep",
   "smite",
+  "strikeChosen",
+  "advantageForgone",
   "swapInitiative",
   "takeAction",
   "teleport",
