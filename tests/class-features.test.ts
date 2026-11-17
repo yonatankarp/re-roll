@@ -546,7 +546,7 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
   it("reports a feature's status from what the engine does with it", () => {
     const stats = deriveStats(hero("rogue", 2), run);
     expect(classify("phb:feature/rogue-sneak-attack", stats, run).status).toBe(
-      "partial",
+      "working",
     );
     expect(
       classify(
