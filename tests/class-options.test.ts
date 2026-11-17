@@ -1490,7 +1490,7 @@ describe("saves", () => {
           : undefined;
       },
       () => used,
-      "precision-1", // a seed whose fight has a miss the die can save
+      "precision-4", // a seed whose fight has a miss the die can save
     );
   });
 });

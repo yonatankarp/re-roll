@@ -1,4 +1,4 @@
-import type { SystemEvent } from "#sdk";
+import type { Frame, SystemEvent } from "#sdk";
 import { ClassSchema, type Passive, SpellSchema } from "../schemas.ts";
 import { type Actor, dndEvent, NS } from "../state.ts";
 import {
@@ -11,6 +11,7 @@ import {
 import { HIT_DICE, spellOfSource } from "./ids.ts";
 import { hitDieRoll } from "../trait-rules.ts";
 import { leafEvents } from "./effects.ts";
+import { teleportFrame } from "./movement.ts";
 import type { Context } from "./queries.ts";
 
 // The Arcana Unleashed adepts' riders on casting a spell of their school (passive `schoolCast`).
@@ -160,31 +161,52 @@ export function fueledDamage(
   };
 }
 
-// Flames of Phlegethos: casting a spell that deals the type puts the rider's effects on the caster.
+// Flames of Phlegethos: casting a spell that deals the type puts the rider's effects on the caster. Bewitching
+// Magic: casting one of the school with an action and a slot does, its teleport landing where the caster picks.
 export function castRiders(
   actor: Actor,
   action: KnownAction,
+  slotLevel: number | undefined,
   context: Context,
-): SystemEvent[] {
-  if (action.spellLevel === null) return [];
-  const { resolution } = action.activation;
+): { readonly events: SystemEvent[]; readonly frames: Frame[] } {
+  if (action.spellLevel === null) return { events: [], frames: [] };
+  const { resolution, cost } = action.activation;
   const types = new Set([
     ...resolution.damage.map(({ type }) => type),
     ...(resolution.kind === "attack" && resolution.onHitSave
       ? resolution.onHitSave.damage.map(({ type }) => type)
       : []),
   ]);
-  return deriveStats(actor, context).passives.flatMap((passive) =>
-    passive.kind === "castRider" && types.has(passive.damage)
-      ? leafEvents(
-          passive.effects,
-          `castRider:${action.id}`,
-          actor,
-          actor,
-          context,
-        )
-      : [],
-  );
+  const school = schoolOf(action.id, context);
+  const rides = deriveStats(actor, context).passives.flatMap((passive) => {
+    if (passive.kind !== "castRider") return [];
+    const fits = passive.school
+      ? slotLevel !== undefined &&
+        cost.includes("action") &&
+        passive.school.some((item) => item === school)
+      : passive.damage !== undefined && types.has(passive.damage);
+    return fits ? [passive.effects] : [];
+  });
+  return {
+    events: rides.flatMap((effects) =>
+      leafEvents(effects, `castRider:${action.id}`, actor, actor, context),
+    ),
+    frames: rides.flatMap((effects) =>
+      effects.flatMap((effect) =>
+        effect.kind === "teleport"
+          ? [
+              teleportFrame(
+                actor,
+                effect.feet,
+                effect.movement,
+                context,
+                effect.provokes,
+              ),
+            ]
+          : [],
+      ),
+    ),
+  };
 }
 
 // Persistent Conjuration: the bonus to the save to keep Concentration on a Conjuration spell.

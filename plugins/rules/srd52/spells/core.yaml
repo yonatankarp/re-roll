@@ -10528,7 +10528,17 @@
     minutes: 10
   text: You take the Dash action, and until the spell ends, you can take that
     action again as a Bonus Action.
-  automation: text
+  automation: full
+  activation:
+    cost: [bonusAction, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - { kind: dash }
+        - kind: modifier
+          modifier: { kind: bonusDash }
+          duration: { concentration: true, minutes: 10 }
 - id: srd52:spell/false-life
   name: False Life
   level: 1

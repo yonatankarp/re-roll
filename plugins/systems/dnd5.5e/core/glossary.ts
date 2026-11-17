@@ -68,6 +68,8 @@ const TACTIC_ACTIONS: Readonly<
   ready: "action:ready",
   slowed: "mastery:slow",
   metamagic: null, // a Sorcerer feature, not in the Rules Glossary
+  trading: null, // a feature trading attacks, not a Rules Glossary action
+  attacksLeft: null,
   exiting: null, // a swallower's stat block, not the Rules Glossary
 };
 
