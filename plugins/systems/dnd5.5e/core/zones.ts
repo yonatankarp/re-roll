@@ -110,20 +110,30 @@ function castZones(state: DndState): readonly Zone[] {
   return all;
 }
 
-// A sealed-away creature's areas reach nothing outside, and one Incapacitated loses those it must be awake for.
+// A sealed-away creature's areas reach nothing outside, and one Incapacitated loses those it must be awake for. A
+// character's come only from what it carries, as a Holy Avenger's.
 function auraZones(state: DndState, access: ContentAccess): readonly Zone[] {
   return Object.values(state.actors).flatMap((actor): Zone[] => {
-    if (actor.source.kind === "character" || !actor.position) return [];
+    if (!actor.position) return [];
     if (isDead(actor) || sealed(actor)) return [];
     const at = actor.position;
-    return statsOf(actor, access).passives.flatMap((passive): Zone[] =>
+    const stats = statsOf(actor, access);
+    const levelIn = (slug: string): number =>
+      Object.entries(stats.classLevels).find(([id]) =>
+        id.endsWith(`/${slug}`),
+      )?.[1] ?? 0;
+    return stats.passives.flatMap((passive): Zone[] =>
       passive.kind === "aura" &&
       !(passive.area.awake && hasCondition(actor, ...INCAPACITATING))
         ? [
             {
               zone: passive.zone,
               at,
-              radius: passive.radius,
+              radius:
+                passive.wider &&
+                levelIn(passive.wider.class) >= passive.wider.level
+                  ? passive.wider.radius
+                  : passive.radius,
               owner: actor.id,
               sourceId: `${AURA}${passive.name}`,
               follows: true,

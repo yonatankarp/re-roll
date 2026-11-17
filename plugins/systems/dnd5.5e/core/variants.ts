@@ -68,8 +68,9 @@ export function deriveItem(
     delete item.variants;
     return item;
   }
+  // A staff is wielded as a Quarterstaff, as a Staff of Striking is.
   const types =
-    parent.category === "weapon"
+    parent.category === "weapon" || parent.category === "staff"
       ? ["weapon"]
       : parent.category === "armor"
         ? ["armor", "shield"]
@@ -91,15 +92,47 @@ export function deriveItem(
   const bonuses = own ? { bonuses: own } : {};
   let item: Item;
   if (base.type === "weapon") {
+    const { damageType, addProperties, thrown } = parent;
+    const damage = {
+      ...base.damage,
+      ...(damageType ? { type: damageType } : {}),
+    };
+    // Damage with no type of its own is the weapon's, and a weapon die is one of its dice.
+    const hitDamage = parent.hitDamage?.map(
+      ({ type, weaponDie, amount, ...rest }) => ({
+        ...rest,
+        amount:
+          weaponDie && base.damage.dice
+            ? {
+                ...amount,
+                dice: `1${base.damage.dice.slice(base.damage.dice.indexOf("d"))}`,
+              }
+            : amount,
+        type: type ?? damage.type,
+      }),
+    );
     item = {
       ...base,
       id,
       name: named,
       baseWeapon: base.id,
+      damage,
+      properties: [
+        ...new Set([
+          ...base.properties,
+          ...(addProperties ?? []),
+          ...(thrown ? (["thrown"] as const) : []),
+        ]),
+      ],
+      ...(thrown
+        ? { range: { normal: thrown.normal, long: thrown.long } }
+        : {}),
       ...bonuses,
       ...magic,
       ...(parent.returning ? { returning: true as const } : {}),
-      ...(parent.hitDamage ? { hitDamage: parent.hitDamage } : {}),
+      ...(hitDamage ? { hitDamage } : {}),
+      ...(parent.abilities ? { abilities: parent.abilities } : {}),
+      ...riders(parent),
     };
   } else if (base.type === "armor") {
     item = {
@@ -128,6 +161,30 @@ export function deriveItem(
   delete item.costCp;
   delete item.replaces;
   return item;
+}
+
+// A magic item's riders on its weapons' hits, as they are (schemas.ts WeaponRiders).
+function riders(parent: Extract<Item, { type: "magicItem" }>) {
+  const {
+    hitSave,
+    hitEffects,
+    natural20,
+    breaksConcentration,
+    vs,
+    thrown,
+    classAbility,
+    sworn,
+  } = parent;
+  return {
+    ...(sworn ? { sworn: { ...sworn, item: parent.id } } : {}),
+    ...(hitSave ? { hitSave } : {}),
+    ...(hitEffects ? { hitEffects } : {}),
+    ...(natural20 ? { natural20 } : {}),
+    ...(breaksConcentration ? { breaksConcentration } : {}),
+    ...(vs ? { vs } : {}),
+    ...(thrown ? { thrown } : {}),
+    ...(classAbility ? { classAbility } : {}),
+  };
 }
 
 // "veryRare" as "Very Rare".

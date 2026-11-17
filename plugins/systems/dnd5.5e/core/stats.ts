@@ -257,11 +257,17 @@ export function ownAbilities(
 // An entry with versions counts as its first, as with its bonuses.
 function withItemAbilities(
   scores: AbilityScores,
-  items: readonly Extract<z.infer<typeof ItemSchema>, { type: "magicItem" }>[],
+  items: readonly Extract<
+    z.infer<typeof ItemSchema>,
+    { type: "magicItem" | "weapon" }
+  >[],
+  attuned: readonly string[] = [],
 ): AbilityScores {
   const raised = { ...scores };
-  const changes = items.flatMap(
-    (item) => item.abilities ?? item.variants?.[0]?.abilities ?? [],
+  const changes = items.flatMap((item) =>
+    item.type === "weapon"
+      ? (item.abilities ?? [])
+      : (item.abilities ?? item.variants?.[0]?.abilities ?? []),
   );
   // Setting comes after raising, so a set score is what the item says, unless the raised one is higher.
   for (const change of changes) {
@@ -275,6 +281,20 @@ function withItemAbilities(
   for (const change of changes) {
     if ("set" in change) {
       raised[change.ability] = Math.max(raised[change.ability], change.set);
+    }
+  }
+  // Might of Giants: more on top, with the other item attuned.
+  for (const change of changes) {
+    if (
+      "boost" in change &&
+      attuned.some((id) =>
+        change.attunedTo.some((to) => id === to || id.startsWith(`${to}--`)),
+      )
+    ) {
+      raised[change.ability] = Math.min(
+        change.max,
+        raised[change.ability] + change.boost,
+      );
     }
   }
   return raised;
@@ -1085,6 +1105,7 @@ export function weaponActivation(
   proficient = true,
   damageBonus = 0,
   itemBonus = 0,
+  classIds: readonly string[] = [], // the wielder's classes, for a weapon's `classAbility`
 ): Activation {
   const ranged = weapon.properties.includes("ammunition");
   const finesse = weapon.properties.includes("finesse");
@@ -1093,6 +1114,16 @@ export function weaponActivation(
     (finesse && abilityModifier(abilities.dex) > abilityModifier(abilities.str))
       ? "dex"
       : "str";
+  // A Lute of Thunderous Thumping's Bard swings it with Charisma, its damage still with Strength.
+  const { classAbility } = weapon;
+  const rolledWith =
+    classAbility &&
+    !ranged &&
+    classIds.some((id) => id.endsWith(`/${classAbility.class}`)) &&
+    abilityModifier(abilities[classAbility.ability]) >
+      abilityModifier(abilities[ability])
+      ? classAbility.ability
+      : ability;
   // shortcut: an Ammunition weapon without its range in the data reaches 80 feet with no long range.
   const range = ranged ? (weapon.range ?? { normal: 80, long: 80 }) : null;
   const reach = !ranged && weapon.properties.includes("reach");
@@ -1108,7 +1139,7 @@ export function weaponActivation(
       kind: "attack",
       attack: {
         type: "weapon",
-        ability,
+        ability: rolledWith,
         ...(proficient ? {} : { proficient }),
         ...(itemBonus > 0 ? { itemBonus } : {}),
         ...(range && range.normal < range.long
@@ -1128,10 +1159,32 @@ export function weaponActivation(
         },
         ...(weapon.hitDamage ?? []),
       ],
-      onHit: [],
+      onHit: weapon.hitEffects ?? [],
       onMiss: [],
+      ...(weapon.hitSave ? { onHitSave: weapon.hitSave } : {}),
+      ...(weapon.natural20 ? { natural20: weapon.natural20 } : {}),
+      ...(weapon.breaksConcentration ? { breaksConcentration: true } : {}),
+      ...(weapon.vs ? { vs: weapon.vs } : {}),
+      ...(weapon.sworn?.item
+        ? { sworn: { item: weapon.sworn.item, damage: weapon.sworn.damage } }
+        : {}),
     },
   };
+}
+
+// A magic weapon whose magic doesn't work, unattuned or in an Antimagic Field: no damage or riders of its magic's.
+function plainWeapon(weapon: Weapon): Weapon {
+  const plain = { ...weapon };
+  delete plain.hitDamage;
+  delete plain.hitSave;
+  delete plain.hitEffects;
+  delete plain.natural20;
+  delete plain.breaksConcentration;
+  delete plain.vs;
+  delete plain.thrown;
+  delete plain.classAbility;
+  delete plain.sworn;
+  return plain;
 }
 
 // Throwing a Thrown weapon: its melee attack made at range, with Disadvantage past its normal range.
@@ -1139,6 +1192,7 @@ function thrownActivation(
   melee: Activation,
   range: NonNullable<Weapon["range"]>,
   passives: readonly Passive[],
+  thrown?: Weapon["thrown"], // a magic weapon's own throw, as a Hammer of Thunderbolts' hurl
 ): Activation {
   const { resolution } = melee;
   if (resolution.kind !== "attack") return melee;
@@ -1150,29 +1204,36 @@ function thrownActivation(
   const longShots = passives.some(({ kind }) => kind === "longShots");
   return {
     ...melee,
+    ...(thrown?.resource
+      ? { cost: [...melee.cost, { resource: thrown.resource }] }
+      : {}),
     targeting: { creatures: 1, range: range.long, side: "enemy" },
     resolution: {
       ...resolution,
+      ...(thrown?.hitSave ? { onHitSave: thrown.hitSave } : {}),
       attack: {
         ...resolution.attack,
         ...(longShots || range.normal >= range.long
           ? {}
           : { normalRange: range.normal }),
       },
-      damage: resolution.damage.map((damage, index) =>
-        index === 0 && bonus > 0
-          ? {
-              ...damage,
-              amount: {
-                ...damage.amount,
-                bonus: {
-                  base: (damage.amount.bonus?.base ?? 0) + bonus,
-                  add: damage.amount.bonus?.add ?? [],
+      damage: [
+        ...resolution.damage.map((damage, index) =>
+          index === 0 && bonus > 0
+            ? {
+                ...damage,
+                amount: {
+                  ...damage.amount,
+                  bonus: {
+                    base: (damage.amount.bonus?.base ?? 0) + bonus,
+                    add: damage.amount.bonus?.add ?? [],
+                  },
                 },
-              },
-            }
-          : damage,
-      ),
+              }
+            : damage,
+        ),
+        ...(thrown?.damage ?? []),
+      ],
     },
   };
 }
@@ -1244,6 +1305,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const working = worn.flatMap(([itemId, item]) =>
     item.type === "magicItem" && works(itemId, item) ? [item] : [],
   );
+  // A magic weapon's own scores too, as a Thunderous Greatclub's Strength 20.
+  const scoring = worn.flatMap(([itemId, item]) =>
+    (item.type === "magicItem" || item.type === "weapon") && works(itemId, item)
+      ? [item]
+      : [],
+  );
   // Every worn item's passives, magic weapons and armor made from plain ones too (variants.ts). An entry with
   // versions counts as its first, as its bonuses do.
   const itemPassives = worn.flatMap(([itemId, item]) =>
@@ -1256,7 +1323,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ]
       : [],
   );
-  const abilities = withItemAbilities(ownAbilities(actor, build), working);
+  const abilities = withItemAbilities(
+    ownAbilities(actor, build),
+    scoring,
+    attuned,
+  );
 
   const level = build.levels.length;
   const classLevels: Record<string, number> = {};
@@ -1532,9 +1603,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
               kinds.some((kind) => bonus.weapons.includes(kind)),
           )
           .reduce((total, bonus) => total + bonus.amount, 0);
-      const { hitDamage, ...plain } = weapon;
+      // Its magic's damage and riders only while it works.
       const activation = weaponActivation(
-        works(itemId, item) && hitDamage ? { ...plain, hitDamage } : plain,
+        works(itemId, item) ? weapon : plainWeapon(weapon),
         abilities,
         martialTraining ||
           fromFeatures.passives.some(
@@ -1544,6 +1615,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           classes.some((def) => weaponProficient(def, weapon)),
         own("damage") + scoped("damage"),
         own("attack") - magic.attack + scoped("attack"),
+        Object.keys(classLevels),
       );
       actions.push({
         id: `${WEAPON_PREFIX}${itemId}`,
@@ -1555,7 +1627,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         actions.push({
           id: `${THROW_PREFIX}${itemId}`,
           name: `Throw ${item.name}`,
-          activation: thrownActivation(activation, weapon.range, traits),
+          activation: thrownActivation(
+            activation,
+            weapon.range,
+            traits,
+            works(itemId, item) ? weapon.thrown : undefined,
+          ),
           spellLevel: null,
         });
       }

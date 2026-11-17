@@ -78,6 +78,7 @@ export const FRAME_KINDS = [
   "strikeChosen",
   "missRider",
   "advantageForgone",
+  "criticalChosen", // a strike option making a hit a Critical Hit, as a Namer's Needle's (combat/strikes.ts)
   "swapInitiative",
   "takeAction",
   "teleport",

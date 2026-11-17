@@ -10,6 +10,7 @@ import {
   findAction,
   fitsType,
   hitFits,
+  itemFits,
 } from "./queries.ts";
 
 // Strike options picked before a hit's dice are rolled: Cunning Strike's give up Sneak Attack dice (`trigger.forgo`),
@@ -65,7 +66,7 @@ export function sneakDice(
 }
 
 function optionsFor(
-  kind: "forgo" | "forgoAdvantage",
+  kind: "forgo" | "forgoAdvantage" | "critical",
   hit: Struck,
   budget: number,
   context: Context,
@@ -84,7 +85,9 @@ function optionsFor(
           const fits =
             kind === "forgo"
               ? trigger?.forgo !== undefined && trigger.forgo <= budget
-              : trigger?.forgoAdvantage === true;
+              : kind === "critical"
+                ? trigger?.critical === true
+                : trigger?.forgoAdvantage === true;
           return (
             fits &&
             !chosen.includes(action.id) &&
@@ -97,6 +100,7 @@ function optionsFor(
               attacker,
               context,
             ) &&
+            itemFits(action, hitWith) &&
             fitsType(target, targeting, context, attacker)
           );
         });
@@ -196,6 +200,30 @@ export function forgoAdvantageFrame(
     options,
     `${attacker.name} attacks ${target.name} with Advantage. Give it up for a strike?`,
     frame("advantageForgone", attack),
+    () => "",
+  );
+}
+
+// A Namer's Needle's Named Target asked as a hit lands that isn't a Critical Hit, or null with nothing to ask.
+export function criticalFrame(
+  hit: Struck & { readonly critical: boolean },
+  context: Context,
+): Frame | null {
+  if (hit.critical) return null;
+  const attacker = actorOf(context.state, hit.attacker);
+  const stats = deriveStats(attacker, context);
+  if (!stats.actions.some(({ activation }) => activation.trigger?.critical)) {
+    return null;
+  }
+  const { options } = optionsFor("critical", hit, 0, context);
+  if (options.length === 0) return null;
+  const target = actorOf(context.state, hit.target);
+  return askFor(
+    hit,
+    attacker,
+    options,
+    `${attacker.name} hits ${target.name}. Make it a Critical Hit?`,
+    frame("criticalChosen", hit),
     () => "",
   );
 }

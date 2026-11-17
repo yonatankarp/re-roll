@@ -37,7 +37,7 @@ import {
   type Stats,
 } from "../stats.ts";
 import { rollD20 } from "../rules.ts";
-import { DECLINE } from "./ids.ts";
+import { DECLINE, itemUseOf, WEAPON_PREFIX } from "./ids.ts";
 import { teleportFrame } from "./movement.ts";
 import {
   actorOf,
@@ -740,7 +740,12 @@ export function takeReaction(
   events.push(...stuckEvents(action, moment, target, result.events ?? []));
   for (const effect of effectsOf(action)) {
     if (effect.kind === "strike" && target && !isDown(target)) {
-      const attack = strikeAction(reactor, effect.action, context);
+      const item = effect.ownWeapon ? itemUseOf(action.id) : null;
+      const attack = item
+        ? deriveStats(reactor, context).actions.find(
+            ({ id }) => id === `${WEAPON_PREFIX}${item}`,
+          )
+        : strikeAction(reactor, effect.action, context);
       if (!attack) continue;
       const to = effect.approach
         ? besideSquare(reactor, target, context)
@@ -777,6 +782,7 @@ export function takeReaction(
             attacker: reactor.id,
             actionId: attack.id,
             target: target.id,
+            ...(effect.overcomes ? { overcomes: true } : {}),
           }),
         );
       } else if (effect.near !== undefined && teleportOf(attack)) {

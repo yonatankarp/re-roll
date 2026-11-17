@@ -26,7 +26,12 @@ import {
   WEAPON_PREFIX,
   weaponItemId,
 } from "./ids.ts";
-import { forgoAdvantageFrame, forgoFrame, SNEAK_DICE } from "./strikes.ts";
+import {
+  criticalFrame,
+  forgoAdvantageFrame,
+  forgoFrame,
+  SNEAK_DICE,
+} from "./strikes.ts";
 import { lastsFor } from "./durations.ts";
 import { aroundHit, replaceHitFrame, runReplaceHit } from "./ranged-smite.ts";
 import { againstTarget, missFrames, runApplyMiss } from "./spell-riders.ts";
@@ -128,6 +133,7 @@ import {
   canAfford,
   extraFits,
   hitFits,
+  itemFits,
   charmersOf,
   CHECK_END,
   type Context,
@@ -190,6 +196,7 @@ export const AttackSchema = z.object({
   strikes: z.array(z.string()).optional(), // strike options picked in place of the roll's Advantage, as Brutal Strike's
   leapt: z.array(z.string()).optional(), // the creatures a leaping attack struck before this one, as Chromatic Orb's
   spell: z.string().optional(), // the spell source whose weapon attack this is, as Booming Blade's
+  overcomes: z.boolean().optional(), // its damage ignores Resistance and Immunity, as a Sword of Answering's answer
 });
 
 // Who a projectile or later attack actually goes for, given who is still standing.
@@ -904,6 +911,10 @@ export function runAttackRoll(
   // A monster's flat bonus names no ability: a weapon attack is Strength-based in melee and Dexterity-based at range.
   const ability =
     resolution.attack.ability ?? (meleeReach(action) === null ? "dex" : "str");
+  // An Oathbow at its sworn enemy: Advantage, and no cover or long range in the way.
+  const sworn =
+    resolution.sworn !== undefined &&
+    markedBy(target, attacker, [resolution.sworn.item]);
   // Brutal Strike's options take the roll's Advantage away.
   const forgoes = (payload.strikes ?? []).length > 0;
   const advantage =
@@ -950,6 +961,7 @@ export function runAttackRoll(
       traitAttackAdvantage(stats, attacker, target, targetStats, state) ||
       (resolution.attack.shadowAdvantage === true &&
         lightAt(target.position, state, context) !== "bright") ||
+      sworn ||
       mountedStrike(attacker, target, stats, context));
   const held = payload.rolled;
   // Redirect Attack: the target trades places with an ally next to it, who takes the attack instead.
@@ -980,12 +992,14 @@ export function runAttackRoll(
     : guardFor(target, attacker, "allyAttacked", context, { ranged });
   const { normalRange } = resolution.attack;
   const longRange =
+    !sworn &&
     normalRange !== undefined &&
     distanceFeet(attacker.position, target.position) > normalRange;
   const hampered =
     shielded !== null ||
     crowded ||
     longRange ||
+    swornElsewhere(attacker, action, resolution, context) ||
     unseenTarget ||
     proneFar ||
     dodging(target) ||
@@ -1107,12 +1121,17 @@ export function runAttackRoll(
         undefined,
         resolution.attack.type === "weapon",
       ) +
-      rollBonus(target, "attacksAgainst", context); // Blade Ward's -1d4
+      rollBonus(target, "attacksAgainst", context) + // Blade Ward's -1d4
+      // A Mace of Smiting's more against a Construct.
+      (resolution.vs &&
+      exemptFrom(resolution.vs.creatureTypes, target, targetStats)
+        ? resolution.vs.bonus
+        : 0);
   const cover = coverAgainst(state, attacker, target, context);
   const ac =
     targetStats.ac +
     meleeAc(target, meleeReach(action) !== null, targetStats) +
-    ((steady.bypassCover || resolution.attack.bypassCover) &&
+    ((steady.bypassCover || resolution.attack.bypassCover || sworn) &&
     meleeReach(action) === null
       ? 0
       : cover);
@@ -1238,6 +1257,7 @@ export function runAttackRoll(
     ...(payload.strikes ? { strikes: payload.strikes } : {}),
     ...(payload.leapt ? { leapt: payload.leapt } : {}),
     ...(payload.spell ? { spell: payload.spell } : {}),
+    ...(payload.overcomes ? { overcomes: true } : {}),
     // The Stealth total it attacked from hiding with, for Supreme Sneak's Stealth Attack.
     ...(hiddenWith === undefined ? {} : { hidden: hiddenWith }),
   };
@@ -1330,6 +1350,7 @@ export const HitSchema = z.object({
   transfer: z.string().optional(), // the creature that takes what a reaction took off, as Transfer Harm's podling
   leapt: z.array(z.string()).optional(), // as the attack's
   spell: z.string().optional(), // as the attack's
+  overcomes: z.boolean().optional(), // as the attack's
 });
 
 export const ReactionSchema = HitSchema.extend({ answer: z.string() });
@@ -1582,7 +1603,29 @@ export function runApplyHit(
   const strike =
     payload.strikes === undefined ? forgoFrame(payload, context) : null;
   if (strike) return { frames: [strike] };
+  const named = criticalFrame(payload, context);
+  if (named) return { frames: [named] };
   return landHit(payload, context);
+}
+
+// A strike option picked to make the hit a Critical Hit, paid for as it's picked, as a Namer's Needle's Named Target.
+export function runCriticalChosen(
+  { answer, ...hit }: z.infer<typeof StrikeChosenSchema>,
+  context: Context,
+): SystemResult {
+  if (answer === DECLINE) return landHit(hit, context);
+  const [actionId = ""] = parseOption(answer);
+  const attacker = actorOf(context.state, hit.attacker);
+  const paid = payCosts(
+    findAction(attacker, actionId, context),
+    attacker,
+    context,
+  );
+  const landed = landHit(
+    { ...hit, critical: true },
+    { ...context, state: paid.reduce(applyDndEvent, context.state) },
+  );
+  return { ...landed, events: [...paid, ...(landed.events ?? [])] };
 }
 
 export const StrikeChosenSchema = HitSchema.extend({ answer: z.string() });
@@ -1665,7 +1708,26 @@ function landHit(
       modifier.retype !== undefined &&
       casterId === attacker.id,
   )?.modifier;
-  const shaped = payload.poleStrike ? poleEnd(printed) : printed;
+  const poled = payload.poleStrike ? poleEnd(printed) : printed;
+  // A Sword of Sharpness's 20: what a natural 20, or with `critical` any Critical Hit, adds.
+  const twenty = poled.natural20;
+  const lucky =
+    twenty &&
+    (payload.natural === 20 || (twenty.critical && payload.critical)) &&
+    (!twenty.attunedTo ||
+      (attacker.attuned ?? []).some((id) =>
+        twenty.attunedTo?.some((to) => id === to || id.startsWith(`${to}--`)),
+      ))
+      ? twenty
+      : undefined;
+  const swornDamage =
+    poled.sworn && markedBy(target, attacker, [poled.sworn.item])
+      ? poled.sworn.damage
+      : [];
+  const shaped = {
+    ...poled,
+    damage: [...poled.damage, ...(lucky?.damage ?? []), ...swornDamage],
+  };
   const resolution = againstTarget(
     retype?.kind === "hitDamage" && retype.retype
       ? {
@@ -1683,12 +1745,15 @@ function landHit(
   const multiplier = payload.critical ? 2 : 1;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
   const rerolled = rerolledTypes(stats, action.spellLevel !== null);
-  const responses = piercing(
+  const piercedResponses = piercing(
     damageResponses(target, context),
     mastered,
     stats,
     action.id,
   );
+  const responses = payload.overcomes
+    ? { ...piercedResponses, resistances: [], immunities: [] }
+    : piercedResponses;
 
   const events: SystemEvent[] = [];
   let totalDealt = 0;
@@ -1984,11 +2049,36 @@ function landHit(
   );
   // The save sees the target as the hit left it.
   const afterHit = events.reduce(applyDndEvent, state);
-  const nested = nestedSave(resolution, action, attacker, target, {
+  const nested = nestedSaves(resolution, action, attacker, target, {
     ...context,
     state: afterHit,
   });
   events.push(...nested.events);
+  // A natural 20's own effects and save, on the target as the hit left it, as a Mace of Smiting's or a Nine Lives
+  // Stealer's.
+  if (lucky) {
+    const now = {
+      ...context,
+      state: nested.events.reduce(applyDndEvent, afterHit),
+    };
+    const struckNow = now.state.actors[target.id];
+    if (struckNow && !isDead(struckNow)) {
+      events.push(
+        ...leafEvents(lucky.onHit, action.id, attacker, struckNow, now),
+      );
+    }
+    if (lucky.onHitSave) {
+      events.push(
+        ...nestedSaves(
+          { ...resolution, onHitSave: lucky.onHitSave },
+          action,
+          attacker,
+          target,
+          { ...context, state: events.reduce(applyDndEvent, state) },
+        ).events,
+      );
+    }
+  }
   // A Poisoner's dose on the weapon: the save it brings, once, on a hit that deals damage.
   const coating =
     dealt.dealt > 0 && action.id.startsWith("weapon:")
@@ -2011,7 +2101,9 @@ function landHit(
                     {
                       kind: "applyCondition",
                       condition: coating.modifier.condition,
-                      duration: { until: "yourNextTurnEnd" },
+                      duration: coating.modifier.minutes
+                        ? { minutes: coating.modifier.minutes }
+                        : { until: "yourNextTurnEnd" },
                       repeatSave: false,
                       endsOnDamage: false,
                     },
@@ -2069,7 +2161,8 @@ function landHit(
       ...concentrationFrame(
         target,
         dealt.dealt + nested.dealt,
-        hasPassive(stats, "concentrationBreaker"),
+        hasPassive(stats, "concentrationBreaker") ||
+          resolution.breaksConcentration === true,
       ),
       // The attacker's own choices for its hit come before the target's answers: the strike options picked, then
       // what it can add now.
@@ -2789,7 +2882,15 @@ function nestedSave(
   const printed = resolution.onHitSave;
   const target = context.state.actors[hit.id];
   if (!printed || !target || isDead(target)) return { events: [], dealt: 0 };
-  if (exemptFrom(printed.exempt, target, deriveStats(target, context))) {
+  const met = deriveStats(target, context);
+  if (
+    exemptFrom(printed.exempt, target, met) ||
+    (printed.only && !exemptFrom(printed.only, target, met)) ||
+    (printed.hpAtMost !== undefined &&
+      (target.hp <= 0 || target.hp > printed.hpAtMost)) ||
+    (printed.resource !== undefined &&
+      !hasUse(attacker, deriveStats(attacker, context), printed.resource))
+  ) {
     return { events: [], dealt: 0 };
   }
   const onceKey = `onhit:${printed.onceKey ?? action.id}`;
@@ -2865,6 +2966,15 @@ function nestedSave(
       ...rolled.events,
       ...rescued,
       ...damage.events,
+      // A Nine Lives Stealer's charge goes with each life it takes.
+      ...(printed.resource && !succeeded
+        ? [
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: attacker.id,
+              resource: printed.resource,
+            }),
+          ]
+        : []),
       ...leafEvents(
         succeeded ? save.onSuccess : save.onFail,
         source,
@@ -2877,6 +2987,83 @@ function nestedSave(
     dealt: damage.dealt,
   };
 }
+
+// The save a hit brings, on the target and, with `radius`, every other creature that near it but the attacker, as a
+// Hammer of Thunderbolts' thunderclap; with `allHit`, only once each of the action's projectiles has hit the target
+// this turn, as a Tentacle Rod's.
+function nestedSaves(
+  resolution: Extract<Resolution, { kind: "attack" }>,
+  action: KnownAction,
+  attacker: Actor,
+  hit: Actor,
+  context: Context,
+): { readonly events: SystemEvent[]; readonly dealt: number } {
+  const printed = resolution.onHitSave;
+  if (!printed) return { events: [], dealt: 0 };
+  const counted: SystemEvent[] = [];
+  if (printed.allHit) {
+    const key = `${ALL_HIT}${action.id}:${hit.id}:`;
+    const landed = attacker.usedThisTurn.filter((used) =>
+      used.startsWith(key),
+    ).length;
+    counted.push(
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: attacker.id,
+        key: `${key}${String(landed + 1)}`,
+      }),
+    );
+    if (landed + 1 < (action.activation.projectiles ?? 1)) {
+      return { events: counted, dealt: 0 };
+    }
+  }
+  const around =
+    printed.radius === undefined
+      ? []
+      : Object.values(context.state.actors).filter(
+          (item) =>
+            item.id !== hit.id &&
+            item.id !== attacker.id &&
+            !isDead(item) &&
+            distanceFeet(hit.position, item.position) <= (printed.radius ?? 0),
+        );
+  const first = nestedSave(resolution, action, attacker, hit, context);
+  const rest = around.map((item) =>
+    nestedSave(resolution, action, attacker, item, context),
+  );
+  return {
+    events: [
+      ...counted,
+      ...first.events,
+      ...rest.flatMap(({ events }) => events),
+    ],
+    dealt: first.dealt,
+  };
+}
+
+// An Oathbow's curse on its bearer: while its sworn enemy lives, the bearer's other weapons attack with
+// Disadvantage.
+function swornElsewhere(
+  attacker: Actor,
+  action: KnownAction,
+  resolution: Extract<Resolution, { kind: "attack" }>,
+  context: Context,
+): boolean {
+  if (resolution.attack.type !== "weapon") return false;
+  const swearing = deriveStats(attacker, context).actions.flatMap((item) => {
+    const { resolution: other } = item.activation;
+    return other.kind === "attack" && other.sworn ? [other.sworn.item] : [];
+  });
+  return swearing.some(
+    (item) =>
+      resolution.sworn?.item !== item &&
+      Object.values(context.state.actors).some(
+        (other) => !isDead(other) && markedBy(other, attacker, [item]),
+      ),
+  );
+}
+
+// A hit of an action's that a Tentacle Rod's save counts: "allHit:<action>:<target>:<n>".
+const ALL_HIT = "allHit:";
 
 // Flat damage added to a weapon's own roll, such as Rage.
 function damageBonus(
@@ -2927,6 +3114,7 @@ function smitesFor(
       !trigger.forgoAdvantage && // picked before the roll
       canAfford(action, attacker, stats) &&
       hitFits(trigger.afterHit, hitWith, attacker, context) &&
+      itemFits(action, hitWith) &&
       (!trigger.withFeature ||
         hitWith.id.startsWith(`feature:${trigger.withFeature}:`)) &&
       (!trigger.sneakAttack || sneakLanded(attacker, stats)) &&
@@ -3364,6 +3552,10 @@ export const attackFrames = {
   [`${NS}:strikeChosen`]: frameHandler({
     schema: StrikeChosenSchema,
     run: runStrikeChosen,
+  }),
+  [`${NS}:criticalChosen`]: frameHandler({
+    schema: StrikeChosenSchema,
+    run: runCriticalChosen,
   }),
   [`${NS}:advantageForgone`]: frameHandler({
     schema: AdvantageForgoneSchema,

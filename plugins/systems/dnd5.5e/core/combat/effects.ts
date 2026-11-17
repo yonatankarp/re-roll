@@ -130,7 +130,11 @@ import {
 } from "./reactions.ts";
 import { summonEvents } from "./summon.ts";
 import { fueledDamage } from "./school.ts";
-import { conditionsApplied, legendaryResistance } from "../legendary.ts";
+import {
+  conditionsApplied,
+  legendaryResistance,
+  resistancesLeft,
+} from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { headDamageEvents } from "./heads.ts";
 import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
@@ -2481,8 +2485,20 @@ export function leafEvents(
         break;
       // On a failed save, or a creature already at 0 Hit Points, as Steal Body or Consume Life. An automatic one
       // is worked out with its damage (resolveAction).
+      case "behead":
+        events.push(...beheadEvents(effect, caster, target, context));
+        break;
       case "slay":
-        if (!isDead(target) && target.hp <= effect.hpAtMost) {
+        if (
+          !isDead(target) &&
+          target.hp <= effect.hpAtMost &&
+          (!effect.creatureTypes ||
+            exemptFrom(
+              effect.creatureTypes,
+              target,
+              deriveStats(target, context),
+            ))
+        ) {
           events.push(
             dndEvent(`${NS}:damaged`, {
               actor: target.id,
@@ -2740,6 +2756,56 @@ export function leastResisted(
 
 // Of these types, the one a creature takes most from: vulnerable, then plain, then resisted, never immune if another
 // will do, as Chromatic Orb's caster picks.
+// A Vorpal Sword's 20 on a creature with a head: it dies, or takes the damage when it can't lose one.
+function beheadEvents(
+  effect: Extract<LeafEffect, { kind: "behead" }>,
+  caster: Actor,
+  target: Actor,
+  context: Context,
+): SystemEvent[] {
+  if (isDead(target)) return [];
+  const responses = damageResponses(target, context);
+  const headless =
+    effect.spares !== undefined &&
+    exemptFrom(effect.spares, target, deriveStats(target, context));
+  const immune = effect.damage.some(({ type }) =>
+    responses.immunities.includes(type),
+  );
+  const resisted =
+    headless || immune || resistancesLeft(target, context, context.state) <= 0
+      ? null
+      : dndEvent(`${NS}:legendaryResistanceUsed`, { actor: target.id });
+  if (!headless && !immune && !resisted) {
+    return [
+      dndEvent(`${NS}:damaged`, {
+        actor: target.id,
+        amount: Math.max(0, target.hp) + target.tempHp,
+        type: effect.damage[0]?.type ?? "slashing",
+        critical: true,
+        massive: true,
+      }),
+      { kind: "actorDefeated", actor: target.id },
+    ];
+  }
+  const stats = deriveStats(caster, context);
+  return [
+    ...(resisted ? [resisted] : []),
+    ...dealEvents(
+      target,
+      effect.damage.map(({ amount, type }) => ({
+        amount: finalDamage(
+          rollAmount(amount, stats, context.dice),
+          type,
+          responses,
+        ),
+        type,
+      })),
+      false,
+      context,
+    ).events,
+  ];
+}
+
 // Green-Flame Blade's fire leaping from the creature hit to the nearest other foe of the caster's beside it.
 function splashEvents(
   effect: Extract<LeafEffect, { kind: "splash" }>,
@@ -3687,7 +3753,9 @@ export function resolveAction(
                 effect.movement,
                 context,
                 effect.provokes,
-                undefined,
+                effect.beside === undefined
+                  ? undefined
+                  : { actor: actor.id, feet: effect.beside },
                 action.id,
               ),
             );

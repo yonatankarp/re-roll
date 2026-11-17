@@ -640,6 +640,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     dc: FormulaSchema,
     damage: z.array(DamageSchema).min(1),
     condition: ConditionSchema.optional(), // on a failed save, until the end of the bearer's next turn
+    minutes: z.number().int().min(1).optional(), // the condition lasts this long instead, as a Dagger of Venom's minute
   }),
   // The bearer's weapon attacks are changed while it lasts, as by Shillelagh; with `once`, only its next one, as
   // True Strike's.
@@ -901,6 +902,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     others: z.literal(true).optional(),
     // A teleport paid for with movement that still provokes nothing, as Portal Step's.
     provokes: z.literal(false).optional(),
+    // it lands within this many feet of the one using it, as an Energy Bow's Arrow of Transport brings a friend near
+    beside: z.number().int().min(5).optional(),
     // Creatures within `within` feet of where it lands, or with `origin` of where it left, get `conditions` and
     // `modifiers` for `duration`, after a save when `save` is set: Whirlwind of Sand's Blinded, Toxic Escape's
     // Poisoned, Temporal Disruption's halved Speed. `foes` keeps it to the bearer's foes, the creatures of its choice.
@@ -1069,6 +1072,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     approach: z.boolean().default(false),
     // A teleport it uses lands within this many feet of the creature that set it off, as with Pursuit.
     near: z.number().int().min(5).optional(),
+    // the attack is with the weapon whose item's activation this is, and its damage ignores Resistance and
+    // Immunity, as a Sword of Answering's
+    ownWeapon: z.literal(true).optional(),
+    overcomes: z.literal(true).optional(),
   }),
   // A Small or Medium ally within 5 feet trades places with the bearer and becomes the attack's target, as with
   // Redirect Attack; with `charmed`, any Charmed creature there instead.
@@ -1227,6 +1234,15 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("slay"),
     hpAtMost: z.number().int().min(1),
+    creatureTypes: z.array(z.string()).min(1).optional(), // only these types, as a Mace of Smiting's Construct
+  }),
+  // A Vorpal Sword's beheading: the target dies, unless it has Immunity to the damage's type, is of a type in
+  // `spares` that has or needs no head, or spends a Legendary Resistance, and then takes `damage` instead.
+  // shortcut: no creature is too big for the sword.
+  z.strictObject({
+    kind: z.literal("behead"),
+    damage: z.array(DamageSchema).min(1),
+    spares: z.array(z.string()).min(1).optional(),
   }),
   // Damage to another creature within `feet` of the target, the nearest of the caster's foes there, and `perTier` dice
   // more for each cantrip tier past the first, as Green-Flame Blade's leaping fire. shortcut: the nearest foe, not
@@ -1302,6 +1318,28 @@ export const OnHitSaveSchema = z.strictObject({
   oncePerTurn: z.literal(true).optional(),
   onceKey: z.string().min(1).optional(), // the once-a-turn use it shares with other attacks, as Feral Pounce's two
   orDex: z.literal(true).optional(), // the target saves with Strength or Dexterity, whichever is better
+  only: z.array(z.string()).min(1).optional(), // only creatures of these types make it, as a Giant Slayer's Giants
+  // only a target the hit leaves with this many Hit Points or fewer makes it, as a Mace of Disruption's 25
+  hpAtMost: z.number().int().min(1).optional(),
+  // a failed save spends one of this resource, and with none left there's no save, as a Nine Lives Stealer's charges
+  resource: z.string().min(1).optional(),
+  // every other creature within this many feet of the target makes it too, but not the attacker, as a Hammer of
+  // Thunderbolts' thunderclap
+  radius: z.number().int().min(5).optional(),
+  // only once each of the action's projectiles has hit the target this turn, as a Tentacle Rod's three tentacles
+  allHit: z.literal(true).optional(),
+});
+
+// What a hit whose d20 rolled a 20 adds, or with `critical` any Critical Hit, as a Vorpal Sword's beheading or a
+// Silvered Weapon's die against a shape-shifted creature (combat/attack.ts).
+export const NaturalTwentySchema = z.strictObject({
+  critical: z.literal(true).optional(),
+  // only while the bearer is attuned to one of these too (or a version of it), as a Hammer of Thunderbolts' Giant's
+  // Bane with a Belt of Giant Strength
+  attunedTo: z.array(ContentIdSchema).min(1).optional(),
+  damage: z.array(DamageSchema).default([]),
+  onHit: LeafEffectsSchema,
+  onHitSave: OnHitSaveSchema.optional(),
 });
 
 export const ResolutionSchema = z.discriminatedUnion("kind", [
@@ -1340,6 +1378,25 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     missDamage: z.literal("half").optional(), // a miss still deals half the damage, as Acid Arrow's splash
     // Hit or miss, the target and each creature within `radius` of it then save or take `damage`, as Ice Knife's shard.
     burst: BurstSchema.optional(),
+    natural20: NaturalTwentySchema.optional(),
+    // A creature it damages has Disadvantage on the save to keep Concentration, as a Mage Breaker's.
+    breaksConcentration: z.literal(true).optional(),
+    // more to hit against creatures of these types, as a Mace of Smiting's +3 against a Construct
+    vs: z
+      .strictObject({
+        creatureTypes: z.array(z.string()).min(1),
+        bonus: z.number().int(),
+      })
+      .optional(),
+    // Against a creature under an effect of this item's (its sworn enemy), the roll has Advantage, ignores Half and
+    // Three-Quarters Cover and long range, and a hit deals `damage` too; while that creature lives, the bearer's other
+    // weapon attacks have Disadvantage, as an Oathbow's (combat/attack.ts).
+    sworn: z
+      .strictObject({
+        item: ContentIdSchema,
+        damage: z.array(DamageSchema).default([]),
+      })
+      .optional(),
     // When two of its first damage's dice show the same number, the attack leaps to another creature within `feet` of
     // the one hit, never one it struck before, with a new roll: as often as the slot's level with `slotLevel`, as
     // Chromatic Orb's, or with no limit, as Chaos Bolt's (combat/leap.ts).
@@ -1576,6 +1633,10 @@ export const ActivationSchema = z.strictObject({
       // half on a miss, and an area is round the target without it, as Lightning Arrow.
       // An empty list deals nothing to the target itself, as Piercing Arrow's line or Seeking Arrow's save.
       replacesHit: z.array(DamageSchema).optional(),
+      hitOnly: z.literal(true).optional(), // with `replacesHit`, offered only on a hit, as an Energy Bow's Arrow of Restraint
+      // With `afterHit`, a strike option picked before the damage that makes the hit a Critical Hit, as a Namer's
+      // Needle's Named Target (combat/strikes.ts).
+      critical: z.literal(true).optional(),
       // Taken for another creature within 5 feet that a creature the bearer can see attacks, before the roll, or hits,
       // as with Protection and Interception. It's taken as soon as it can be.
       allyAttacked: z.literal(true).optional(),
@@ -1777,6 +1838,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     zone: ZoneKindSchema.default("area"),
     radius: z.number().int().min(5),
     area: AreaEffectSchema.default({}),
+    // this wide instead from a level in one class (its name after the plugin), as a Holy Avenger's 30 feet for a
+    // Paladin of level 17
+    wider: z
+      .strictObject({
+        class: z.string().min(1),
+        level: z.number().int().min(1),
+        radius: z.number().int().min(5),
+      })
+      .optional(),
   }),
   // What happens round the bearer when it takes damage of these types, once a turn, as a spore of Moander's
   // Explosive Core.
@@ -3267,6 +3337,51 @@ export const ChargedSchema = {
     .optional(),
 };
 
+// What a magic weapon's hits do past its damage, carried from its magic item into the weapons made from it
+// (variants.ts) and into their attacks (stats.ts weaponActivation), as an attack's own fields are.
+const WeaponRiders = {
+  hitSave: OnHitSaveSchema.optional(), // as a Giant Slayer's Prone
+  hitEffects: z.array(LeafEffectSchema).min(1).optional(), // as a Life-Sapping Blade's lack of healing
+  natural20: NaturalTwentySchema.optional(), // as a Sword of Sharpness's 14 Slashing and Exhaustion
+  breaksConcentration: z.literal(true).optional(), // as a Mage Breaker's
+  // an Oathbow's sworn enemy, the creature its item's activation marks, and what a hit on it adds
+  sworn: z
+    .strictObject({
+      item: ContentIdSchema.optional(), // filled in from the magic item (variants.ts)
+      damage: z.array(DamageSchema).default([]),
+    })
+    .optional(),
+  vs: z
+    .strictObject({
+      creatureTypes: z.array(z.string()).min(1),
+      bonus: z.number().int(),
+    })
+    .optional(), // more to hit against these creature types, as a Mace of Smiting's
+  // Thrown with this range, its throw spending one of `resource` and making its target save as `hitSave`, as a
+  // Hammer of Thunderbolts' hurl; `damage` is added to a throw's hit only, as a Dwarven Thrower's Force.
+  thrown: z
+    .strictObject({
+      normal: z.number().int().min(5),
+      long: z.number().int().min(5),
+      resource: z.string().min(1).optional(),
+      hitSave: OnHitSaveSchema.optional(),
+      damage: z.array(DamageSchema).min(1).optional(),
+    })
+    .optional(),
+  // with that class (its name after the plugin), its attack rolls may use this ability, as a Bard's Charisma with a
+  // Lute of Thunderous Thumping
+  classAbility: z
+    .strictObject({ class: z.string().min(1), ability: AbilitySchema })
+    .optional(),
+};
+
+// A magic item's damage on a hit: without a `type`, the weapon's own, and with `weaponDie` one of the weapon's dice,
+// as a Vicious Weapon's 2d6 or a Silvered Weapon's die.
+const ItemDamageSchema = DamageSchema.extend({
+  type: DamageTypeSchema.optional(),
+  weaponDie: z.literal(true).optional(),
+});
+
 // An ability score an item sets while worn, as Gauntlets of Ogre Power's Strength 19, which does nothing to a higher
 // score, or raises, as an Ioun Stone's +2 to a maximum of 20.
 const ItemAbilitySchema = z.union([
@@ -3275,6 +3390,14 @@ const ItemAbilitySchema = z.union([
     ability: AbilitySchema,
     raise: z.number().int().min(1),
     max: z.number().int().min(1),
+  }),
+  // Raises the score another item sets, while the bearer is attuned to one of `attunedTo` (or a version of it), as a
+  // Hammer of Thunderbolts' Might of Giants on a Belt of Giant Strength's Strength.
+  z.strictObject({
+    ability: AbilitySchema,
+    boost: z.number().int().min(1),
+    max: z.number().int().min(1),
+    attunedTo: z.array(ContentIdSchema).min(1),
   }),
 ]);
 
@@ -3303,7 +3426,9 @@ export const WeaponSchema = ItemBaseSchema.extend({
   returning: z.literal(true).optional(), // back in hand once thrown, as a Returning Weapon
   passives: z.array(PassiveSchema).min(1).optional(), // its magic item's, as Frost Brand's Resistance to Fire
   hitDamage: z.array(DamageSchema).min(1).optional(), // its magic item's, as Frost Brand's 1d6 Cold
+  abilities: z.array(ItemAbilitySchema).min(1).optional(), // its magic item's, as a Thunderous Greatclub's Strength
   ...ChargedSchema,
+  ...WeaponRiders,
   // A Thrown or Ammunition weapon's range in feet: normal, and long with Disadvantage.
   range: z
     .strictObject({
@@ -3421,7 +3546,12 @@ const MagicItemSchema = ItemBaseSchema.extend({
   // A magic weapon that comes back once thrown, as a Returning Weapon, carried the same way.
   returning: z.literal(true).optional(),
   // Damage a magic weapon made from it adds on a hit, as Frost Brand's 1d6 Cold, carried the same way.
-  hitDamage: z.array(DamageSchema).min(1).optional(),
+  hitDamage: z.array(ItemDamageSchema).min(1).optional(),
+  ...WeaponRiders,
+  // A magic weapon made from it deals this instead of the weapon's own type, and has these properties too, as a Sun
+  // Blade's Radiant and Finesse.
+  damageType: DamageTypeSchema.optional(),
+  addProperties: z.array(WeaponPropertySchema).min(1).optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
   ...ChargedSchema,

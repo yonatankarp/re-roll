@@ -54,6 +54,7 @@ import {
   encodeOption,
   spellOfSource,
   THROW_PREFIX,
+  itemUseOf,
   weaponItemId,
 } from "./ids.ts";
 import { markedBy } from "../trait-rules.ts";
@@ -819,6 +820,12 @@ export function pactWeaponId(
 }
 
 // Whether a hit with this action is one a rider of this kind answers (schemas.ts HitKindSchema).
+// An item's own strike option answers only a hit with that item, as a Staff of Striking's charges.
+export function itemFits(action: KnownAction, hitWith: KnownAction): boolean {
+  const item = itemUseOf(action.id);
+  return item === null || weaponItemId(hitWith.id) === item;
+}
+
 export function hitFits(
   kind: HitKind,
   hitWith: KnownAction,

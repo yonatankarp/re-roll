@@ -20,6 +20,7 @@ import { AIM, DECLINE, parseOption } from "./ids.ts";
 import {
   actorOf,
   canAfford,
+  itemFits,
   CHECK_END,
   type Context,
   findAction,
@@ -84,6 +85,8 @@ export function replaceHitFrame(
     .filter(
       (action) =>
         action.activation.trigger?.replacesHit &&
+        (landed || !action.activation.trigger.hitOnly) &&
+        itemFits(action, hitWith) &&
         canAfford(action, attacker, stats),
     )
     .flatMap((action) =>

@@ -204,6 +204,40 @@ const SPELLS = [
       },
     },
   }),
+  testSpell("moonlight", {
+    activation: {
+      cost: ["action"],
+      targeting: { self: true },
+      resolution: {
+        kind: "automatic",
+        effects: [
+          {
+            kind: "modifier",
+            modifier: { kind: "grantedAction" },
+            duration: { concentration: true, minutes: 10 },
+          },
+        ],
+      },
+    },
+    granted: {
+      cost: ["reaction"],
+      trigger: { damaged: true, within: 60 },
+      targeting: FOE,
+      resolution: {
+        kind: "save",
+        ability: "con",
+        dc: DC,
+        onFail: [
+          {
+            kind: "applyCondition",
+            condition: "blinded",
+            duration: { until: "yourNextTurnEnd" },
+          },
+        ],
+        onSuccess: [],
+      },
+    },
+  }),
   testSpell("whirl", {
     activation: {
       cost: ["action"],
@@ -528,6 +562,50 @@ describe("attack-spell riders", () => {
     );
     expect(damageOf(dismissed.events, "a")).toEqual([6]);
     expect(need(dismissed.state, PLAYER_ACTOR).activeEffects).toEqual([]);
+  });
+
+  it("answers damage with a Reaction a spell gives, as Fount of Moonlight's", async () => {
+    const run = await testRun();
+    const state = onGrid(
+      [caster(run, ["moonlight"]), 0, 0],
+      [monster("a"), 1, 0],
+    );
+    const lit = settle(
+      run,
+      state,
+      [act(PLAYER_ACTOR, `spell:${spell("moonlight")}|${PLAYER_ACTOR}`)],
+      MID,
+    );
+    let d20s = 0;
+    const struck = settle(
+      run,
+      lit.state,
+      [
+        {
+          kind: `${NS}:attackRoll`,
+          payload: {
+            attacker: "a",
+            actionId: "monster:0",
+            target: PLAYER_ACTOR,
+          },
+        },
+      ],
+      // The attack's d20 hits, Concentration holds, and the Reaction's save fails.
+      {
+        below: () => 0,
+        roll: (sides) => (sides === 20 ? ([15, 20][d20s++] ?? 1) : 1),
+      },
+    );
+    expect(damageOf(struck.events, PLAYER_ACTOR)).toEqual([1]);
+    expect(struck.decisions.map(({ id }) => id)).toContain(
+      `${NS}:reaction:${PLAYER_ACTOR}`,
+    );
+    expect(
+      need(struck.state, "a").activeEffects.some(
+        ({ modifier }) =>
+          modifier.kind === "condition" && modifier.condition === "blinded",
+      ),
+    ).toBe(true);
   });
 
   it("teleports beside the first target once Steel Wind Strike's attacks are made", async () => {
