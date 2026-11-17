@@ -9,9 +9,13 @@ import { createGame } from "../engine/shell/session.ts";
 import { excerpt, termFinder } from "../engine/shell/term-text.ts";
 import { buildGlossary } from "../engine/tools/glossary.ts";
 import { GLOSSARY_TERMS } from "../plugins/systems/dnd5.5e/core/glossary.ts";
+import { dnd55e } from "../plugins/systems/dnd5.5e/core/index.ts";
 import {
   ConditionSchema,
   DAMAGE_TYPES,
+  DOWNTIME_KINDS,
+  ENVIRONMENT_KINDS,
+  OPTION_KINDS,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 
@@ -188,6 +192,9 @@ describe("the session's rules terms", () => {
             ...(glossary !== null && prefix === "books/library"
               ? [{ path: "books/library/glossary.json", symlink: false }]
               : []),
+            ...Object.keys(files)
+              .filter((path) => path.startsWith(`${prefix}/`))
+              .map((path) => ({ path, symlink: false })),
           ],
         },
         memorySaves(),
@@ -250,6 +257,34 @@ describe("the session's rules terms", () => {
       game.readTerm("..", "conditions/prone.yaml"),
     ).rejects.toThrow();
     await expect(game.readTerm("made-up", "../x.yaml")).rejects.toThrow();
+  });
+
+  it("says which text kind a book's section is, or nothing without a sound index (#134–#136)", async () => {
+    const kinds = JSON.stringify({
+      kinds: { "0001-ague.md": [{ heading: "Ague", kind: "disease" }] },
+    });
+    const game = await gameWith(null, {
+      "books/library/made-up/kinds.json": kinds,
+      "books/library/damaged/kinds.json": "not json",
+    });
+    expect(await game.kinds("made-up", "0001-ague.md")).toEqual([
+      { heading: "Ague", kind: "disease" },
+    ]);
+    expect(await game.kinds("made-up", "0002-other.md")).toEqual([]);
+    expect(await game.kinds("damaged", "0001-ague.md")).toEqual([]);
+    expect(await game.kinds("absent", "0001-ague.md")).toEqual([]);
+    expect(await game.kinds("..", "0001-ague.md")).toEqual([]);
+  });
+
+  it("keeps the environment, downtime and option kinds out of the save hash, as lore", () => {
+    const kinds = dnd55e.contentKinds;
+    for (const map of [ENVIRONMENT_KINDS, DOWNTIME_KINDS, OPTION_KINDS])
+      for (const [folder, idPrefix] of Object.entries(map))
+        expect([folder, kinds[folder]?.idPrefix, kinds[folder]?.lore]).toEqual([
+          folder,
+          idPrefix,
+          true,
+        ]);
   });
 
   it("gives none without the owner's index, or with another system's", async () => {

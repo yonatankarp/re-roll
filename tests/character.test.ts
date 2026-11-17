@@ -1091,7 +1091,7 @@ describe("rests", () => {
     );
     expect(actorIn(rested.state).resourcesSpent).toEqual({});
 
-    // A wizard keeps theirs spent until a long rest.
+    // A wizard keeps theirs spent until a long rest, but for the one Arcane Recovery gives back at level 1.
     const wizard = answer(
       run,
       hurt(state, PLAYER_ACTOR, {
@@ -1105,7 +1105,10 @@ describe("rests", () => {
       "scene:s0",
       "0",
     );
-    expect(actorIn(wizard.state).resourcesSpent).toEqual({ "slot:1": 2 });
+    expect(actorIn(wizard.state).resourcesSpent).toEqual({
+      "slot:1": 1,
+      "arcane-recovery": 1,
+    });
   });
 
   it("replays a rest with dice exactly", async () => {

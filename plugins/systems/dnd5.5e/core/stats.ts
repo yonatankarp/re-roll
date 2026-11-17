@@ -18,6 +18,8 @@ import {
   type Ability,
   type AbilityScores,
   type Activation,
+  ActivationSchema,
+  type FreeCast,
   type Amount,
   type Condition,
   ArmorSchema,
@@ -256,37 +258,60 @@ function withItemAbilities(
   return raised;
 }
 
-// A leveled spell a feat or trait lets the character cast once per Long Rest without a slot, as its own action.
+// The activation with each Concentration duration made a plain one of these minutes, as War God's Blessing's.
+function unconcentrated(activation: Activation, minutes: number): Activation {
+  return ActivationSchema.parse(
+    JSON.parse(JSON.stringify(activation), (_key, value: unknown) =>
+      typeof value === "object" &&
+      value !== null &&
+      "concentration" in value &&
+      "minutes" in value
+        ? { minutes }
+        : value,
+    ),
+  );
+}
+
+// A leveled spell a feat or feature lets the character cast without a slot, as its own action (FreeCastSchema).
 function freeCastActions(
-  spellIds: ReadonlySet<string>,
+  spells: ReadonlyMap<string, FreeCast>,
   access: ContentAccess,
-): { action: KnownAction; resource: Feature["resources"][number] }[] {
-  return [...spellIds].flatMap((spellId) => {
+): { action: KnownAction; resource: Feature["resources"][number] | null }[] {
+  return [...spells].flatMap(([spellId, how]) => {
     if (!access.content(spellId)) return [];
     const spell = lookup(access, SpellSchema, spellId);
     const { activation } = spell;
     if (spell.level === 0 || !activation) return [];
     if (!doesSomething(activation.resolution)) return [];
-    const id = `free:${spellId}`;
+    const own = how === true || how === "shortRest";
+    const id = typeof how === "object" ? how.resource : `free:${spellId}`;
+    const cast =
+      typeof how === "object" && how.minutes !== undefined
+        ? unconcentrated(activation, how.minutes)
+        : activation;
     return [
       {
         action: {
           id: `spell:${spellId}:free`,
           name: `${spell.name} (free)`,
           activation: {
-            ...activation,
+            ...cast,
             cost: [
               ...activation.cost.filter((cost) => cost !== "slot"),
-              { resource: id },
+              ...(how === "atWill" ? [] : [{ resource: id }]),
             ],
           },
           spellLevel: spell.level,
         },
-        resource: {
-          id,
-          max: { base: 1, add: [] },
-          recharge: [{ on: "longRest", amount: "all" }],
-        },
+        resource: own
+          ? {
+              id,
+              max: { base: 1, add: [] },
+              recharge: [
+                { on: how === true ? "longRest" : "shortRest", amount: "all" },
+              ],
+            }
+          : null,
       },
     ];
   });
@@ -459,14 +484,14 @@ function collectFeatureData(
   actions: KnownAction[];
   resources: Feature["resources"];
   spells: string[];
-  free: string[];
+  free: [string, FreeCast][];
   retype: Record<string, DamageType>;
 } {
   const passives: Passive[] = [];
   const actions: KnownAction[] = [];
   const resources: Feature["resources"] = [];
   const spells = featureIds.flatMap((id) => grantedSpells(id, level));
-  const free: string[] = [];
+  const free: [string, FreeCast][] = [];
   const retype: Record<string, DamageType> = {};
   for (const id of featureIds) {
     const feature = featureRules(lookup(access, FeatureSchema, id));
@@ -477,7 +502,9 @@ function collectFeatureData(
     for (const [from, ids] of Object.entries(feature.spells ?? {})) {
       if (Number(from) > level) continue;
       spells.push(...ids);
-      if (feature.freeCast) free.push(...ids);
+      const how = feature.freeCast;
+      if (how)
+        free.push(...ids.map((spell): [string, FreeCast] => [spell, how]));
     }
     const { preparedWith } = feature;
     for (const [slot, ids] of Object.entries({
@@ -684,7 +711,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const skills = new Set<Skill>(background.skills);
   const expertise = new Set<Skill>();
   const knownSpells = new Set<string>();
-  const freeSpells = new Set<string>(); // also cast once per Long Rest without a slot
+  const freeSpells = new Map<string, FreeCast>(); // also cast without a slot
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
   const featureIds = new Set<string>(species.traits);
   // A feat picked in place of the background's, as a Dark Gift for Haunted One, is in the first level's answers.
@@ -731,7 +758,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       } else if (answer.kind === "spells") {
         for (const spell of answer.values) {
           knownSpells.add(spell);
-          if (answer.freeCast) freeSpells.add(spell);
+          if (answer.freeCast) freeSpells.set(spell, answer.freeCast);
         }
       } else if (answer.kind === "features") {
         for (const id of answer.values) featureIds.add(id);
@@ -951,7 +978,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   for (const spellId of fromFeatures.spells) {
     if (access.content(spellId)) knownSpells.add(spellId);
   }
-  for (const spellId of fromFeatures.free) freeSpells.add(spellId);
+  for (const [spellId, how] of fromFeatures.free) freeSpells.set(spellId, how);
   const freeCasts = untrainedArmor ? [] : freeCastActions(freeSpells, access);
   actions.push(
     ...freeCasts.map(({ action }) => {
@@ -1112,7 +1139,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     features: [...featureIds],
     resourceDefs: [
       ...fromFeatures.resources,
-      ...freeCasts.map(({ resource }) => resource),
+      ...freeCasts.flatMap(({ resource }) => (resource ? [resource] : [])),
     ],
     pactMagic: [...featureIds].some(isPactMagic),
     untrainedArmor,
@@ -2062,12 +2089,12 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
         break;
       case "classLevel":
         total +=
-          Math.floor(
+          (term.roundUp ? Math.ceil : Math.floor)(
             (stats.classLevels[term.class] ?? 0) / (term.half ? 2 : 1),
           ) * (term.times ?? 1);
         break;
       case "level":
-        total += stats.level;
+        total += term.half ? Math.floor(stats.level / 2) : stats.level;
         break;
       case "scaling":
         total += stats.scaling[term.key] ?? 0;

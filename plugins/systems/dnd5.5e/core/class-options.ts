@@ -94,10 +94,17 @@ function castable(
   const waiting = markersOf(actor)
     .filter((item) => item.action === action.id)
     .map((item) => item.option);
+  const two = stats.passives.some(
+    (passive) =>
+      passive.kind === "doubleMetamagic" &&
+      actor.activeEffects.some(({ sourceId }) =>
+        passive.while.some((id) => sourceId.startsWith(`feature:${id}:`)),
+      ),
+  );
   return (
     !action.activation.trigger &&
     fits(option, action) &&
-    joins(option, waiting) &&
+    joins(option, waiting, two) &&
     canAfford(
       { ...action, activation: { ...action.activation, cost } },
       actor,

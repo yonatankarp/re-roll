@@ -15,7 +15,7 @@ import {
   type Stats,
 } from "../stats.ts";
 import { metamagicSaves } from "../metamagic.ts";
-import { shortRestFor } from "../rest.ts";
+import { regainEvents, shortRestFor } from "../rest.ts";
 import {
   type Actor,
   applyDndEvent,
@@ -969,6 +969,16 @@ export function leafEvents(
       }
       case "shortRest":
         events.push(...shortRestFor(target, context));
+        break;
+      case "regain":
+        events.push(
+          ...regainEvents(
+            target,
+            effect.resource,
+            effect.count,
+            deriveStats(target, context),
+          ),
+        );
         break;
       case "repose":
         if (isDead(target)) {

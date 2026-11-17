@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// Shows a made-up ruling beside the section it rules on (#130), and a monster's family (#133), in a made-up library.
+// Shows a made-up ruling beside the section it rules on (#130), a monster's family (#133) and what a section is (#134–#136), in a made-up library.
 const BOOK = "fixture-book";
 const SAGE = "fixture-sage";
 const FILES: Readonly<Record<string, string>> = {
@@ -26,6 +26,11 @@ const FILES: Readonly<Record<string, string>> = {
       "0003-elder-gloomwing.md": [
         { file: "0002-gloomwings.md", heading: "Gloomwings", rel: "family" },
       ],
+    },
+  }),
+  [`books/library/${BOOK}/kinds.json`]: JSON.stringify({
+    kinds: {
+      "0001-hush.md": [{ heading: "Hush", kind: "environmental-effect" }],
     },
   }),
   [`books/library/${SAGE}/index.json`]: JSON.stringify({
@@ -69,6 +74,9 @@ test("shows the rulings on a book section beside it", async ({ page }) => {
   await expect(page.locator(".book-text").first()).toContainText(
     "A fixture spell.",
   );
+  await expect(page.locator(".book-kinds")).toHaveText(
+    "Environmental effect: Hush",
+  );
   await page.getByText("Rulings (1)").click();
   await page.getByText("Is Hush loud?").click();
   const ruling = page.locator(".book-ruling .book-text");
@@ -82,6 +90,7 @@ test("shows the rulings on a book section beside it", async ({ page }) => {
     "Another answer.",
   );
   await expect(page.locator(".book-rulings")).toHaveCount(0);
+  await expect(page.locator(".book-kinds")).toHaveCount(0);
 
   // A stat block links to its family's section.
   await page.getByRole("button", { name: "Library" }).click();

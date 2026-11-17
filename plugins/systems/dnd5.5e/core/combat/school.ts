@@ -116,6 +116,21 @@ export function schoolCastEvents(
       }),
     );
   }
+  // Expert Divination: the highest spent slot below the one cast with, up to level 5.
+  if (riding(stats, school, "refund") && slotLevel >= 2) {
+    for (let level = Math.min(slotLevel - 1, 5); level >= 1; level -= 1) {
+      const resource = `slot:${String(level)}`;
+      if ((actor.resourcesSpent[resource] ?? 0) === 0) continue;
+      events.push(
+        dndEvent(`${NS}:resourceRestored`, {
+          actor: actor.id,
+          resource,
+          amount: 1,
+        }),
+      );
+      break;
+    }
+  }
   return events;
 }
 

@@ -740,7 +740,8 @@ export function choiceOptions(
           (!choice.ritual || spell.ritual) &&
           (choice.maxLevel === 0
             ? spell.level === 0
-            : spell.level >= 1 && spell.level <= choice.maxLevel),
+            : spell.level >= (choice.minLevel ?? 1) &&
+              spell.level <= choice.maxLevel),
       );
       const works = (spell: Spell): boolean =>
         spell.activation !== undefined &&
@@ -1045,7 +1046,7 @@ function answersOf(
           {
             kind: "spells",
             values,
-            ...(choice.freeCast ? { freeCast: true } : {}),
+            ...(choice.freeCast ? { freeCast: choice.freeCast } : {}),
             ...(choiceOwners.has(choice)
               ? { feat: choiceOwners.get(choice) }
               : {}),

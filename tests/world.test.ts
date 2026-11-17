@@ -90,7 +90,7 @@ describe("drafting world entities", () => {
 });
 
 describe("drafting a system's text kinds", () => {
-  it("leaves a glossary heading's label out of the id and name", () => {
+  it("leaves a heading's label, such as its kind or price, out of the id and name", () => {
     const { drafts } = draftWorld(
       "bk",
       "A Book",
@@ -98,9 +98,20 @@ describe("drafting a system's text kinds", () => {
         verdict(3, "Dizzy [Condition]", "missing", "condition"),
         verdict(3, "Two-Step", "missing", "weapon-property"),
         verdict(3, "Unlisted [Thing]", "missing", "unlisted"),
+        verdict(3, "Variant: Lucky Dice", "missing", "variant-rule"),
+        verdict(3, "Snug (1,500 GP per Day)", "missing", "lifestyle"),
+        verdict(3, "Huddled (Free)", "missing", "lifestyle"),
+        verdict(3, "Ferry (1 SP/Trip)", "missing", "service"),
+        verdict(3, "Toll (Bridge)", "missing", "service"),
       ],
       new Set(),
-      { condition: "conditions", "weapon-property": "weapon-properties" },
+      {
+        condition: "conditions",
+        "weapon-property": "weapon-properties",
+        "variant-rule": "variant-rules",
+        lifestyle: "lifestyles",
+        service: "services",
+      },
     );
     expect(
       drafts.map(({ file, entry }) => [file, entry.id, entry.name]),
@@ -111,6 +122,15 @@ describe("drafting a system's text kinds", () => {
         "bk:weapon-property/two-step",
         "Two-Step",
       ],
+      [
+        "variant-rules/lucky-dice.yaml",
+        "bk:variant-rule/lucky-dice",
+        "Lucky Dice",
+      ],
+      ["lifestyles/snug.yaml", "bk:lifestyle/snug", "Snug"],
+      ["lifestyles/huddled.yaml", "bk:lifestyle/huddled", "Huddled"],
+      ["services/ferry.yaml", "bk:service/ferry", "Ferry"],
+      ["services/toll-bridge.yaml", "bk:service/toll-bridge", "Toll (Bridge)"],
     ]);
   });
 });
