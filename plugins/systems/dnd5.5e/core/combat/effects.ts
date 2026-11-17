@@ -131,7 +131,13 @@ import { fueledDamage } from "./school.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { headDamageEvents } from "./heads.ts";
-import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
+import { canHide, hideEvents } from "../actions.ts";
+import {
+  lastsFor,
+  lethargyEffect,
+  limitEvents,
+  timeStopEnds,
+} from "./durations.ts";
 import { movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
 import { reincarnateEvents } from "../reincarnate.ts";
@@ -2321,6 +2327,11 @@ export function leafEvents(
         }
         break;
       }
+      case "hide":
+        if (canHide(target, context.state, context)) {
+          events.push(...hideEvents(target, context));
+        }
+        break;
       case "carry":
         if (target.id !== caster.id) {
           events.push(
@@ -2683,6 +2694,18 @@ function zoneEvents(
       events.push(...snuffedLights(at, radius, context));
     }
     const centre = effect.follows ? (actor.position ?? at) : at;
+    // Time Stop ends once an area its caster leaves during it covers another creature.
+    events.push(
+      ...timeStopEnds(
+        actor,
+        Object.values(context.state.actors).filter(
+          (other) =>
+            other.position !== null &&
+            !isDead(other) &&
+            distanceFeet(other.position, centre) <= radius,
+        ),
+      ),
+    );
     if (effect.zone === "sunlight") {
       events.push(...dazzled(centre, spellSource(action), actor, context));
     }
@@ -3830,6 +3853,7 @@ export function resolveAction(
                 effect.provokes,
                 undefined,
                 action.id,
+                effect.fly,
               ),
             );
           }

@@ -83,7 +83,7 @@ import {
   HEW_READY,
   HIDE_SOURCE,
   masteryOf,
-  revealEvents,
+  castRevealEvents,
   STEALTH_ATTACK,
   tacticsOf,
 } from "../tactics.ts";
@@ -1216,7 +1216,9 @@ export function runAttackRoll(
     ...(isMelee(action) ? prisonEvents(attacker, context) : []),
     ...onceEnded(target, "attacksAgainst", attacker.id),
     // Skulker's Sniper: a miss from hiding doesn't give the attacker away.
-    ...(!hits && hasPassive(stats, "quietMiss") ? [] : revealEvents(attacker)),
+    ...(!hits && hasPassive(stats, "quietMiss")
+      ? []
+      : castRevealEvents(attacker, action.spellLevel !== null, stats.passives)),
     ...unwarded,
     // Attacking lowers the attacker's own Diabolic Ward until its next turn.
     ...(stats.passives.some(

@@ -455,6 +455,48 @@ function hiddenFromAll(
   });
 }
 
+// The Hide action's Stealth check, DC 15, and on a success the Invisible condition and the total a Search must beat.
+export function hideEvents(actor: Actor, context: Context): SystemEvent[] {
+  const stats = deriveStats(actor, context);
+  const rolled = abilityCheck(
+    actor,
+    "stealth",
+    "dex",
+    HIDE_DC,
+    () => "stealth",
+    context,
+    hasPassive(stats, "hideAdvantage"), // Skulker's Fog of War
+  );
+  const hide = (modifier: Actor["activeEffects"][number]["modifier"]) =>
+    dndEvent(`${NS}:effectAdded`, {
+      actor: actor.id,
+      effect: {
+        sourceId: HIDE,
+        casterId: actor.id,
+        modifier,
+        ends: "spellDuration",
+      },
+    });
+  return [
+    ...rolled.events,
+    ...(rolled.success
+      ? [
+          hide({ kind: "condition", condition: "invisible" }),
+          hide({ kind: "tactic", tactic: "hidden", value: rolled.total }),
+        ]
+      : []),
+  ];
+}
+
+// Whether the Hide action as part of another can be taken here, as Shrouding Spells' after a spell.
+export function canHide(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+): boolean {
+  return !hasTactic(actor, "hidden") && hiddenFromAll(actor, state, access);
+}
+
 function dashBonus(stats: Stats): number {
   return stats.passives.reduce(
     (total, passive) =>
@@ -1373,41 +1415,13 @@ export function runTactic(
       };
     case HIDE:
     case BONUS_HIDE: {
-      const rolled = abilityCheck(
-        actor,
-        "stealth",
-        "dex",
-        HIDE_DC,
-        () => "stealth",
-        context,
-        hasPassive(stats, "hideAdvantage"), // Skulker's Fog of War
-      );
-      const hidden: SystemEvent[] = rolled.success
-        ? [
-            effect(
-              actor.id,
-              HIDE,
-              actor.id,
-              { kind: "condition", condition: "invisible" },
-              "spellDuration",
-            ),
-            effect(
-              actor.id,
-              HIDE,
-              actor.id,
-              { kind: "tactic", tactic: "hidden", value: rolled.total },
-              "spellDuration",
-            ),
-          ]
-        : [];
       return {
         events: [
           spend(kind === HIDE ? "action" : "bonusAction"),
           ...(kind === HIDE
             ? []
             : (bonusTacticCost(actor, stats, "hide") ?? [])),
-          ...rolled.events,
-          ...hidden,
+          ...hideEvents(actor, context),
         ],
         frames: done,
       };

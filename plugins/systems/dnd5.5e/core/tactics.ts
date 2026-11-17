@@ -123,6 +123,28 @@ export function revealEvents(actor: Actor): SystemEvent[] {
     : [];
 }
 
+// Sneaky Casting: a spell cast or spell attack made from hiding keeps it hidden while it ends the turn behind
+// Three-Quarters or Total Cover (combat/turn.ts outOfCover); anything else gives it away.
+export function castRevealEvents(
+  actor: Actor,
+  spell: boolean,
+  passives: readonly { readonly kind: string }[],
+): SystemEvent[] {
+  if (
+    spell &&
+    hasTactic(actor, "hidden") &&
+    passives.some((passive) => passive.kind === "sneakyCasting")
+  ) {
+    return [
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: actor.id,
+        key: STEALTH_ATTACK,
+      }),
+    ];
+  }
+  return revealEvents(actor);
+}
+
 export function weaponOf(
   actionId: string,
   access: Pick<ContentAccess, "content">,

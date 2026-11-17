@@ -116,6 +116,13 @@ export const LEGENDARY_USE = "legendary";
 export const PICKED_UP = "pickedUp"; // in usedThisTurn: the one free pick-up of a turn
 export const CAST_ACTION = "castAction"; // in usedThisTurn: a spell with a casting time of an action was cast
 export const SURGED = "surged"; // in usedThisTurn: Action Surge's extra action, which can't be a Magic action
+// In usedThisTurn, kept only for a creature with an activation that waits on them (combat/actions.ts): the Attack
+// action taken, the Magic action (a spell cast with an action, or a magic item used) taken, a spell cast with an action
+// and a slot, and a spell of level 1 or higher cast.
+export const ATTACK_ACTION = "attackAction";
+export const MAGIC_ACTION = "magicAction";
+export const SLOT_CAST_ACTION = "slotCastAction";
+export const LEVELED_CAST = "leveledCast";
 export const LEGENDARY_RESISTANCE = "legendaryResistance";
 
 export const TACTICS = [

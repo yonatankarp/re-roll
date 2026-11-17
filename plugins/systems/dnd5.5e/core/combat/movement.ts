@@ -51,6 +51,7 @@ import {
   distanceFeet,
   parseSquare,
   rangeFeet,
+  reachableSquares,
   type Square,
   squareKey,
 } from "../grid.ts";
@@ -685,11 +686,24 @@ export function teleportSquares(
   state: DndState,
   access: ContentAccess,
   near?: Near, // only squares this close to another creature, as Pursuit's
+  fly = false, // flown to round walls instead, as Tempestuous Magic's 10 feet
 ): readonly Square[] {
   const close = near ? state.actors[near.actor]?.position : undefined;
   const grid = state.combat?.grid;
   const from = actor.position;
   if (!grid || !from) return [];
+  if (fly) {
+    const occupied = occupiedKeys(state, [actor.id]);
+    return reachableSquares(
+      from,
+      feet,
+      grid,
+      blockingSet(state, "walking"),
+      occupied,
+    )
+      .map(({ square }) => square)
+      .filter((square) => square.x !== from.x || square.y !== from.y);
+  }
   if (movement > 0 && speedLeft(actor, deriveStats(actor, access)) < movement) {
     return [];
   }
@@ -738,6 +752,7 @@ export function teleportFrame(
   provokes = true,
   near?: Near,
   actionId?: string, // the action it's part of, for what happens round it (aroundTeleport)
+  fly = false,
 ): Frame {
   const squares = teleportSquares(
     actor,
@@ -746,6 +761,7 @@ export function teleportFrame(
     context.state,
     context,
     near,
+    fly,
   );
   return awaitDecision({
     id: `${NS}:teleportTo:${actor.id}:${String(actor.moved)}`,
@@ -765,6 +781,7 @@ export function teleportFrame(
       ...(provokes ? {} : { provokes }),
       ...(near ? { near } : {}),
       ...(actionId ? { actionId } : {}),
+      ...(fly ? { fly } : {}),
     }),
   });
 }
@@ -858,6 +875,7 @@ export const TeleportSchema = z.object({
   provokes: z.boolean().optional(), // false for movement spent that provokes nothing, as Portal Step's
   near: NearSchema.optional(),
   actionId: z.string().optional(),
+  fly: z.boolean().optional(),
   answer: z.string(),
 });
 
@@ -877,6 +895,7 @@ export function runTeleport(
     state,
     context,
     payload.near,
+    payload.fly === true,
   );
   if (!open.some((square) => squareKey(square) === payload.answer)) {
     throw new Error(`${actor.name} can't land on ${payload.answer}`);

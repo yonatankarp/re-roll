@@ -3,7 +3,11 @@ import { leashed } from "./duel.ts";
 import { knownFoes, knows } from "../fog.ts";
 import {
   type Actor,
+  ATTACK_ACTION,
   CAST_ACTION,
+  LEVELED_CAST,
+  MAGIC_ACTION,
+  SLOT_CAST_ACTION,
   controllingRider,
   dndEvent,
   type DndState,
@@ -751,6 +755,15 @@ export function canAfford(
   const { carrying, afterAction, resolution } = action.activation;
   if (carrying && !actor.inventory.includes(carrying)) return false;
   if (afterAction && actor.budget.action) return false;
+  const used = actor.usedThisTurn;
+  if (afterAction === "attack" && !used.includes(ATTACK_ACTION)) return false;
+  if (
+    afterAction === "attackOrMagic" &&
+    !used.includes(ATTACK_ACTION) &&
+    !used.includes(MAGIC_ACTION)
+  ) {
+    return false;
+  }
   // only while Bloodied, as Unearthly Recovery
   if (action.activation.bloodied && actor.hp * 2 >= stats.maxHp) return false;
   if (action.activation.beforeAction && !actor.budget.action) return false;
@@ -798,7 +811,14 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
   const used = actor.usedThisTurn;
   if (activation.unmoved && actor.moved > 0) return false;
   if (activation.oncePerTurn && used.includes(onceKey(action))) return false;
-  if (activation.afterCast && !used.includes(CAST_ACTION)) return false;
+  if (activation.afterCast === true && !used.includes(CAST_ACTION))
+    return false;
+  if (activation.afterCast === "slot" && !used.includes(SLOT_CAST_ACTION)) {
+    return false;
+  }
+  if (activation.afterCast === "leveled" && !used.includes(LEVELED_CAST)) {
+    return false;
+  }
   if (activation.afterBonusAction && actor.budget.bonusAction) return false;
   if (activation.while && !underEffect(actor, activation.while)) return false;
   if (

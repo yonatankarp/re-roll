@@ -13,6 +13,7 @@ import {
   DEATH_SAVE,
   encodeOption,
   ITEM_PREFIX,
+  USE_PREFIX,
   MOVE,
   parseOption,
   PASS,
@@ -21,7 +22,11 @@ import {
 } from "./ids.ts";
 import {
   type Actor,
+  ATTACK_ACTION,
   CAST_ACTION,
+  LEVELED_CAST,
+  MAGIC_ACTION,
+  SLOT_CAST_ACTION,
   dndEvent,
   fightingOn,
   hasCondition,
@@ -49,7 +54,7 @@ import {
   PICK,
   pickOptions,
 } from "../targeting.ts";
-import { lightAttackEvents, revealEvents } from "../tactics.ts";
+import { castRevealEvents, lightAttackEvents } from "../tactics.ts";
 import {
   actorOf,
   aimsFor,
@@ -387,13 +392,18 @@ function castAction(
             }),
           ]
         : []),
+      ...actionKindMarks(actor, action, slotLevel, context),
       ...passedSaves,
       ...(foiled?.events ?? []),
       ...lightAttackEvents(actor, actionId, context),
       // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.
       ...(resolution.kind === "attack" || keepsHidden(actor, actionId)
         ? []
-        : revealEvents(actor)),
+        : castRevealEvents(
+            actor,
+            action.spellLevel !== null,
+            deriveStats(actor, context).passives,
+          )),
       ...(result.events ?? []),
       ...dealtSelfEffects(action, actor, result.events ?? [], context),
       ...(action.onceKeys ?? []).map((key) =>
@@ -421,6 +431,45 @@ function castAction(
 
 // What a cast's `selfEffects` give the caster once it has hurt another creature, as Improved Blessed Strikes' gift.
 // shortcut: an attack roll left waiting on a reaction lands later and gives nothing.
+// What Sudden Strike, Blink Steps, Spell Subterfuge or Tempestuous Magic wait on, marked only for a creature with
+// such an activation, so the turns of everyone else are kept as before.
+function actionKindMarks(
+  actor: Actor,
+  action: KnownAction,
+  slotLevel: number | undefined,
+  context: Context,
+): SystemEvent[] {
+  const waits = deriveStats(actor, context).actions.filter(
+    (item) =>
+      typeof item.activation.afterAction === "string" ||
+      typeof item.activation.afterCast === "string",
+  );
+  if (waits.length === 0) return [];
+  const { cost, resolution } = action.activation;
+  const withAction = cost.includes("action");
+  const keys = [
+    ...(withAction &&
+    action.spellLevel === null &&
+    resolution.kind === "attack" &&
+    resolution.attack.type === "weapon"
+      ? [ATTACK_ACTION]
+      : []),
+    ...(withAction &&
+    (action.spellLevel !== null ||
+      action.id.startsWith(ITEM_PREFIX) ||
+      action.id.startsWith(USE_PREFIX))
+      ? [MAGIC_ACTION]
+      : []),
+    ...(withAction && action.spellLevel !== null && slotLevel !== undefined
+      ? [SLOT_CAST_ACTION]
+      : []),
+    ...((action.spellLevel ?? 0) >= 1 ? [LEVELED_CAST] : []),
+  ];
+  return keys
+    .filter((key) => !actor.usedThisTurn.includes(key))
+    .map((key) => dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key }));
+}
+
 function dealtSelfEffects(
   action: KnownAction,
   caster: Actor,

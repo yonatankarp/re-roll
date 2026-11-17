@@ -937,6 +937,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     others: z.literal(true).optional(),
     // A teleport paid for with movement that still provokes nothing, as Portal Step's.
     provokes: z.literal(false).optional(),
+    // It flies there instead, round walls, as Tempestuous Magic's 10 feet (combat/movement.ts teleportSquares).
+    fly: z.literal(true).optional(),
     // Up to `count` willing allies within `within` feet of where it left come too, each landing within `near` feet of
     // where it lands, as Travel along the Tree's six (combat/movement.ts bringFrame).
     bring: z
@@ -983,6 +985,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({ kind: z.literal("disengage") }),
   z.strictObject({ kind: z.literal("dodge") }), // the Dodge action as part of another, as Patient Defense's
+  // The Hide action as part of another, where it could Hide, as Spell Subterfuge's Shrouding Spells.
+  z.strictObject({ kind: z.literal("hide") }),
   // Action Surge: once a turn, after the action is spent, and the action it gives can't be a Magic action.
   z.strictObject({ kind: z.literal("extraAction") }),
   // Ends one of these conditions on the target, the one that hampers it most, as Lesser Restoration does.
@@ -1688,11 +1692,16 @@ export const ActivationSchema = z.strictObject({
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
   // only in Dim Light or Darkness ("shadows"), as Merge with Shadows, or in sunlight, as Light Bringer's Sun's Healing
   whileIn: z.enum(["shadows", "sunlight"]).optional(),
-  afterAction: z.literal(true).optional(), // only once the bearer has taken its action, as Blink Steps
+  // only once the bearer has taken its action, as Sudden Strike after the Attack action ("attack") or Blink Steps after
+  // the Attack or the Magic action ("attackOrMagic")
+  afterAction: z
+    .union([z.literal(true), z.enum(["attack", "attackOrMagic"])])
+    .optional(),
   beforeAction: z.literal(true).optional(), // only before it takes its action, as Reckless Attack's first attack roll
   afterBonusAction: z.literal(true).optional(), // only once it has taken its Bonus Action, as Fleet Step
-  // only after casting a spell with a casting time of an action this turn, as Battle Magic
-  afterCast: z.literal(true).optional(),
+  // only after casting a spell with a casting time of an action this turn, as Battle Magic; "slot" one cast with a
+  // spell slot too, as Spell Subterfuge; "leveled" any spell of level 1 or higher, as Tempestuous Magic
+  afterCast: z.union([z.literal(true), z.enum(["slot", "leveled"])]).optional(),
   unmoved: z.literal(true).optional(), // only if the bearer hasn't moved this turn, as Steady Aim
   bloodied: z.literal(true).optional(), // only while the bearer has under half its Hit Points, as Unearthly Recovery
   // Once a turn for all its feature's activations, as Stunning Strike, or with a name, for all activations of that
@@ -2183,6 +2192,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // A creature it makes a melee attack against can't make Opportunity Attacks against it for the rest of its turn,
   // as Fancy Footwork (combat/movement.ts).
   z.strictObject({ kind: z.literal("fancyFootwork") }),
+  // A spell it casts doesn't give away a hiding place unless it ends the turn out of Three-Quarters or Total Cover, as
+  // Spell Subterfuge's Sneaky Casting (combat/turn.ts outOfCover).
+  z.strictObject({ kind: z.literal("sneakyCasting") }),
   // Advantage on the Stealth check of the Hide action, as Skulker's Fog of War.
   z.strictObject({ kind: z.literal("hideAdvantage") }),
   // An attack roll made while hidden that misses doesn't give the bearer away, as Skulker's Sniper.
