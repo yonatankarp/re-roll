@@ -1,3 +1,4 @@
+import { prisonEvents } from "./fear.ts";
 import { z } from "zod";
 import { placedFlag } from "../zones.ts";
 import { concentrationBonus } from "./school.ts";
@@ -1137,6 +1138,7 @@ export function runAttackRoll(
       : []),
     ...onceEnded(attacker, "attacks"),
     ...actingEnds(attacker, action),
+    ...(isMelee(action) ? prisonEvents(attacker, context) : []),
     ...onceEnded(target, "attacksAgainst", attacker.id),
     ...revealEvents(attacker),
     ...unwarded,

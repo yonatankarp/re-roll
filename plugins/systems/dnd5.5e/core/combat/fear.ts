@@ -1,6 +1,6 @@
 import { frameHandler, type SystemEvent, type SystemResult } from "#sdk";
 import { z } from "zod";
-import type { LeafEffect } from "../schemas.ts";
+import { ItemSchema, type LeafEffect } from "../schemas.ts";
 import {
   type ActiveEffect,
   type Actor,
@@ -13,12 +13,13 @@ import {
   isDown,
   NS,
 } from "../state.ts";
-import { deriveStats } from "../stats.ts";
+import { damageResponses, deriveStats, rollAmount } from "../stats.ts";
+import { finalDamage } from "../rules.ts";
 import { distanceFeet } from "../grid.ts";
 import { behindTotalCover, seeing } from "../sight.ts";
 import { levelOrChallenge } from "../forms.ts";
 import { TACTIC, walkSpeed } from "../tactics.ts";
-import { rollSave } from "./effects.ts";
+import { dealEvents, rollSave } from "./effects.ts";
 import { type Context, currentActor, moveSquares } from "./queries.ts";
 
 // Fear and its kin (core/schemas.ts applyCondition): fleeing on its turns, as from Fear or Turn Undead; shaking a
@@ -296,4 +297,57 @@ export function clingSave(
     true,
   );
   return { held: !save.saved, events: save.events };
+}
+
+// Fear: the creature drops the weapons it has ready, which lie where it stands until picked up (actions.ts) and go
+// back to it after the fight.
+// shortcut: every weapon it carries outside its pack counts as held, and a monster's stat block attacks aren't items,
+// so it keeps them.
+export function dropEvents(target: Actor, context: Context): SystemEvent[] {
+  const at = target.position;
+  if (!at || !context.state.combat) return [];
+  const stowed = [...(target.stowed ?? [])];
+  return target.inventory.flatMap((item) => {
+    const packed = stowed.indexOf(item);
+    if (packed >= 0) {
+      stowed.splice(packed, 1);
+      return [];
+    }
+    return ItemSchema.safeParse(context.content(item)).data?.type === "weapon"
+      ? [
+          dndEvent(`${NS}:weaponThrown`, {
+            item,
+            at,
+            by: target.id,
+          }),
+        ]
+      : [];
+  });
+}
+
+// Mental Prison: moving out of the illusory cell, or attacking through it in melee, hurts and ends it.
+export function prisonEvents(
+  actor: Actor,
+  context: Context,
+): SystemEvent[] {
+  const cell = actor.activeEffects.find(
+    ({ modifier }) => modifier.kind === "prison",
+  );
+  if (cell?.modifier.kind !== "prison") return [];
+  const caster = context.state.actors[cell.casterId] ?? actor;
+  const stats = deriveStats(caster, context);
+  const { events } = dealEvents(
+    actor,
+    cell.modifier.damage.map(({ amount, type }) => ({
+      amount: finalDamage(
+        rollAmount(amount, stats, context.dice),
+        type,
+        damageResponses(actor, context),
+      ),
+      type,
+    })),
+    false,
+    context,
+  );
+  return [...events, ended(actor, cell)];
 }

@@ -138,7 +138,12 @@ import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
 import { damageTypeFrame, zoneTypeFrame } from "./damage-choice.ts";
 import { focusFrame } from "./check-choice.ts";
-import { clingSave, sendAwayEvents } from "./fear.ts";
+import {
+  clingSave,
+  dropEvents,
+  prisonEvents,
+  sendAwayEvents,
+} from "./fear.ts";
 import { optionFrame } from "./options.ts";
 import { weaponAttackResult } from "./weapon-spell.ts";
 import { duelBroken, duelDamaged } from "./duel.ts";
@@ -2234,6 +2239,7 @@ export function leafEvents(
         } else if (to) {
           events.push(
             dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 }),
+            ...prisonEvents(target, context),
           );
         }
         break;
@@ -2310,6 +2316,9 @@ export function leafEvents(
             { kind: "actorDefeated", actor: target.id },
           );
         }
+        break;
+      case "drop":
+        events.push(...dropEvents(target, context));
         break;
       case "sendAway":
         events.push(
@@ -3528,10 +3537,14 @@ export function resolveAction(
           (!edge.creatureTypes ||
             exemptFrom(edge.creatureTypes, target, met)) &&
           (!edge.minSize ||
-            sizeOf(target, context) >= SIZES.indexOf(edge.minSize))
+            sizeOf(target, context) >= SIZES.indexOf(edge.minSize)) &&
+          (!edge.maxScore ||
+            met.abilities[edge.maxScore.ability] <= edge.maxScore.score)
             ? [edge.roll]
             : [],
         );
+        // Cause Fear: a creature of a type it can't touch is left out altogether.
+        if (edges.includes("immune")) continue;
         // shortcut: cover counts from the caster, even for a sphere whose centre is elsewhere.
         const { saved: rolledSave, events: saveEvents } = spared.has(target.id)
           ? { saved: true, events: [] }

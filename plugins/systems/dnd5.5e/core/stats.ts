@@ -26,6 +26,7 @@ import {
   type Ability,
   type AbilityScores,
   type Activation,
+  type Duration,
   ActivationSchema,
   type FreeCast,
   type Amount,
@@ -1217,7 +1218,23 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
-  actions.push(...fromFeatures.actions);
+  actions.push(
+    ...fromFeatures.actions.map((action) => {
+      const { targeting } = action.activation;
+      if (!("creatures" in targeting) || !targeting.creaturesBy) return action;
+      const mod = abilityModifier(abilities[targeting.creaturesBy]);
+      return {
+        ...action,
+        activation: {
+          ...action.activation,
+          targeting: {
+            ...targeting,
+            creatures: Math.max(targeting.creatures, mod),
+          },
+        },
+      };
+    }),
+  );
   for (const spellId of fromFeatures.spells) {
     if (access.content(spellId)) knownSpells.add(spellId);
   }
@@ -2548,12 +2565,51 @@ function addDice(amount: Amount, add: string, times: number): Amount {
     : amount;
 }
 
+// Every timed effect of an activation lasting `duration` instead, as a higher slot's Bestow Curse.
+function withDuration(activation: Activation, duration: Duration): Activation {
+  const timed = (effects: readonly LeafEffect[]): LeafEffect[] =>
+    effects.map((effect) =>
+      effect.kind === "modifier" || effect.kind === "applyCondition"
+        ? { ...effect, duration }
+        : effect,
+    );
+  const { resolution } = activation;
+  switch (resolution.kind) {
+    case "save":
+      return {
+        ...activation,
+        resolution: {
+          ...resolution,
+          onFail: timed(resolution.onFail),
+          onSuccess: timed(resolution.onSuccess),
+        },
+      };
+    case "automatic":
+      return {
+        ...activation,
+        resolution: { ...resolution, effects: timed(resolution.effects) },
+      };
+    case "attack":
+      return {
+        ...activation,
+        resolution: { ...resolution, onHit: timed(resolution.onHit) },
+      };
+    default:
+      return activation;
+  }
+}
+
 export function scaleActivation(
   activation: Activation,
   step: ScaleStep,
   times: number,
 ): Activation {
   if (times <= 0 || "slotOnly" in step) return activation;
+  if ("durations" in step) {
+    const reached = step.durations.filter(({ at }) => times >= at);
+    const longer = reached[reached.length - 1]?.duration;
+    return longer ? withDuration(activation, longer) : activation;
+  }
   if ("addRadius" in step) {
     const { targeting } = activation;
     return "area" in targeting

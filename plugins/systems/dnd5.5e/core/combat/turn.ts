@@ -627,7 +627,6 @@ export function runAdvanceTurn(
         ...sunlightFrames(next, starts),
         ...zoneFrames(next, "start", starts),
         ...(confusedBy(next) ? [frame("confusedTurn", {})] : []),
-        ...(fleeingFrom(next) ? [frame("fleeTurn", {})] : []),
       ]
     : [];
   // A reaction to a creature starting its turn nearby, as with Unnerving Gaze.
@@ -637,10 +636,15 @@ export function runAdvanceTurn(
         { ...context, state: events.reduce(applyDndEvent, state) },
       )
     : [];
-  return ticks.length + watched.length > 0
+  // Fleeing comes after the reactions, which may set it off, as Flee, Fools! does.
+  const fleeing =
+    next && (fleeingFrom(next) || watched.length > 0)
+      ? [frame("fleeTurn", {})]
+      : [];
+  return ticks.length + watched.length + fleeing.length > 0
     ? {
         events,
-        frames: [...ticks, ...watched, frame("afterTurnStart", {})],
+        frames: [...ticks, ...watched, ...fleeing, frame("afterTurnStart", {})],
       }
     : { events };
 }

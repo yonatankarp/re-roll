@@ -456,6 +456,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     dc: z.number().int().optional(),
     keepSlot: z.literal(true).optional(),
   }),
+  // Being moved out of its space, or making a melee attack, deals `damage` to the bearer and ends the spell on it, as
+  // Mental Prison's illusory cell (combat/fear.ts).
+  // shortcut: only a push or pull moves it out, as Restrained it walks nowhere.
+  z.strictObject({
+    kind: z.literal("prison"),
+    damage: z.array(DamageSchema).min(1),
+  }),
   // As each of its turns starts the bearer saves against `dc` (filled in as cast) or takes the Dodge action, which
   // spends its action, as Bestow Curse's (combat/fear.ts).
   z.strictObject({
@@ -1036,6 +1043,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // A failed save's damage that drops the target to 0 Hit Points turns it to dust, dead outright, as Disintegrate.
   // Only a raising whose targeting has `dust` brings it back, as True Resurrection.
   z.strictObject({ kind: z.literal("disintegrate") }),
+  // The target drops what it holds, as from Fear (combat/fear.ts).
+  z.strictObject({ kind: z.literal("drop") }),
   // The target is sent off to another plane, gone from the fight for good: only one of these lowercase types with
   // `creatureTypes`, as Divine Word's Celestials and Fiends, and with `crByLevel` only one whose Challenge Rating is at
   // most the one for the caster's level in `class`, as Arcane Abjuration's banishing (combat/fear.ts).
@@ -1227,7 +1236,12 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
         z.strictObject({
           creatureTypes: z.array(z.string()).min(1).optional(),
           minSize: SizeSchema.optional(),
-          roll: z.enum(["advantage", "disadvantage", "fail", "succeed"]),
+          // a creature whose score in this ability is at most this much, as Psychic Scream's Intelligence 2
+          maxScore: z
+            .strictObject({ ability: AbilitySchema, score: z.number().int() })
+            .optional(),
+          // "immune" leaves the creature out altogether, as Cause Fear's Constructs and Undead
+          roll: z.enum(["advantage", "disadvantage", "fail", "succeed", "immune"]),
         }),
       )
       .min(1)
@@ -1337,6 +1351,8 @@ export const TargetingSchema = z.union([
   z.strictObject({ self: z.literal(true) }),
   z.strictObject({
     creatures: z.number().int().min(1),
+    // as many as this ability's modifier when more, as Abjure Foes' Charisma modifier (stats.ts)
+    creaturesBy: AbilitySchema.optional(),
     range: RangeSchema,
     // "any" is a creature of either side, as Dispel Magic aimed at a friend's curse or a foe's spell
     side: z.enum(["enemy", "ally", "any"]),
@@ -1460,6 +1476,8 @@ export const ActivationSchema = z.strictObject({
       entersReach: z.literal(true).optional(),
       endsMove: z.literal(true).optional(),
       turnStart: z.literal(true).optional(),
+      // With `turnStart`, only a Frightened creature sets it off, as Boon of Terror's Flee, Fools!
+      frightened: z.literal(true).optional(),
       // Taken after the bearer's own save against a creature's effect fails or succeeds, as with Mind Corrosion.
       ownSave: z.enum(["failed", "succeeded"]).optional(),
       // With `ownSave`, `missed` or `struck`, only a spell sets it off, as with Spell Reflection.
@@ -2507,6 +2525,13 @@ const ScaleStepSchema = z.union([
   z.strictObject({ addRadius: z.number().int().min(5) }), // an area's radius, as Confusion's Sphere
   // Nothing grows but what reads the slot's level, as Mordenkainen's Lucubration's `regain` `maxLevel`.
   z.strictObject({ slotOnly: z.literal(true) }),
+  // Its effects last longer from a slot this many levels above the spell's, the highest reached counting, as Bestow
+  // Curse's 10 minutes, then 8 hours without Concentration (stats.ts scaleActivation).
+  z.strictObject({
+    durations: z
+      .array(z.strictObject({ at: z.number().int().min(1), duration: DurationSchema }))
+      .min(1),
+  }),
 ]);
 export type ScaleStep = z.infer<typeof ScaleStepSchema>;
 
