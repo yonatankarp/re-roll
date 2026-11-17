@@ -89,6 +89,7 @@ import {
   AIM,
   ALL,
   HIT_DICE,
+  ITEM_PREFIX,
   THROW_PREFIX,
   castFrom,
   itemUseOf,
@@ -1654,6 +1655,23 @@ export function leafEvents(
           }),
         );
         break;
+      case "untilLongRest": {
+        const item = sourceId.startsWith(ITEM_PREFIX)
+          ? lookup(context, ItemSchema, sourceId.slice(ITEM_PREFIX.length))
+          : undefined;
+        const passives =
+          item?.type === "magicItem" ? (item.untilLongRest ?? []) : [];
+        if (passives.length > 0) {
+          events.push(
+            dndEvent(`${NS}:restPassivesGained`, {
+              actor: target.id,
+              source: sourceId,
+              passives,
+            }),
+          );
+        }
+        break;
+      }
       case "createItems": {
         const count = Math.max(1, evaluateFormula(effect.count, stats));
         events.push(

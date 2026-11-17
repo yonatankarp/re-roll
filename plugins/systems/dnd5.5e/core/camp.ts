@@ -62,6 +62,7 @@ const BETWEEN: ReadonlySet<LeafEffect["kind"]> = new Set([
   "reincarnate",
   "clone",
   "exhaustion",
+  "untilLongRest",
 ]);
 
 // Whether the effect would do something for this creature between fights.
@@ -85,6 +86,8 @@ function helps(
       return target.clone === undefined;
     case "exhaustion":
       return effect.clear === true && target.exhaustion > 0;
+    case "untilLongRest":
+      return true;
     case "cure":
       return (
         (effect.exhaustion === true && target.exhaustion > 0) ||

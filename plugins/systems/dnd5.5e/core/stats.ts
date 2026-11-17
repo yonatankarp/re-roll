@@ -1372,7 +1372,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     classLevels,
   );
   // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
-  const traits = [...itemPassives, ...fromFeatures.passives];
+  const kept = (actor.restPassives ?? []).flatMap((entry) => entry.passives);
+  const traits = [...itemPassives, ...kept, ...fromFeatures.passives];
   const castingAbility = featSpellAbilities(
     build,
     replaced ? [] : [background.feat],
@@ -1652,6 +1653,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     resources: {},
     passives: [
       ...itemPassives,
+      ...kept,
       ...fromFeatures.passives.map((passive) =>
         passive.kind === "extraDamage"
           ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
@@ -2351,6 +2353,7 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "randomAction" ||
       effect.kind === "copySpell" ||
       effect.kind === "createItems" ||
+      effect.kind === "untilLongRest" ||
       (effect.kind === "exhaustion" && effect.clear === true) ||
       // what raises or mends the dead and dying, mostly between fights (camp.ts)
       effect.kind === "repose" ||

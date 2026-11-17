@@ -215,7 +215,9 @@ const ITEMS = [
     },
   }),
   item("vitality", {
+    untilLongRest: [{ kind: "hitDieRolls", highest: true }],
     activation: self([
+      { kind: "untilLongRest" },
       { kind: "removeCondition", condition: "poisoned" },
       { kind: "exhaustion", clear: true },
     ]),
@@ -765,5 +767,10 @@ describe("evolving items, made items and coatings (#142, #199)", () => {
     const rested = after(tired, events);
     expect(rested.exhaustion).toBe(0);
     expect(rested.inventory).not.toContain("test:item/vitality");
+    // Until the next Long Rest, its Hit Point Dice heal their most.
+    expect(deriveStats(rested, run).passives).toContainEqual({
+      kind: "hitDieRolls",
+      highest: true,
+    });
   });
 });

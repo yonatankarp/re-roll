@@ -671,6 +671,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .union([z.number().int().min(1).max(9), z.literal("halfSlot")])
       .optional(),
   }),
+  // The item used's `untilLongRest` passives, which the target keeps until it finishes a Long Rest, in a fight or out
+  // of one, as a Potion of Vitality's highest Hit Point Dice.
+  // shortcut: "24 hours" lasts until the next Long Rest, the only clock between scenes.
+  z.strictObject({ kind: z.literal("untilLongRest") }),
   // Items handed to the target, `count` of them worked out from the caster's numbers, as the potions Tasha's
   // Bubbling Cauldron makes. shortcut: they come at once rather than a Bonus Action each, and stay after a recast.
   z.strictObject({
@@ -2963,6 +2967,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
   // action that spends the item, named with `verb` ("Drink" for a potion, "Read" for a scroll, else "Use").
   activation: ActivationSchema.optional(),
   verb: z.string().min(1).optional(),
+  // What an `untilLongRest` effect of its activation gives, as a Potion of Vitality's highest Hit Point Dice.
+  untilLongRest: z.array(PassiveSchema).min(1).optional(),
   // An action its user can take while a `grantedAction` its activation gave lasts, as a Potion of Fire Breath's.
   granted: ActivationSchema.optional(),
   // Casting a spell its bearer doesn't know, from a class's list (by its name after the plugin), behind an

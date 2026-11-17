@@ -10,6 +10,7 @@ import {
   AreaEffectSchema,
   LootSchema,
   ModifierSchema,
+  PassiveSchema,
   ResolutionSchema,
   ZoneKindSchema,
 } from "./schemas.ts";
@@ -368,6 +369,12 @@ const ActorSchema = z.strictObject({
     .optional(),
   // Taken off its D20 Tests after coming back from the dead, one less each Long Rest, as Raise Dead's. Missing at 0.
   ordeal: z.number().int().optional(),
+  // Passives kept until the next Long Rest, as a Potion of Vitality's, by what gave them.
+  restPassives: z
+    .array(
+      z.strictObject({ source: z.string(), passives: z.array(PassiveSchema) }),
+    )
+    .optional(),
   // What a pool's `rolled` dice came to, by its id, as a Necklace of Fireballs' beads (ResourceDefSchema).
   rolledPools: z.record(z.string(), z.number().int()).optional(),
   // Spells stored in an item carried, by the item's id, with the numbers they were cast with (MagicItemSchema
@@ -537,6 +544,11 @@ const StoredSpellUsedSchema = z.strictObject({
   actor: z.string(),
   item: z.string(),
   spell: z.string(),
+});
+const RestPassivesSchema = z.strictObject({
+  actor: z.string(),
+  source: z.string(),
+  passives: z.array(PassiveSchema),
 });
 const PoolRolledSchema = z.strictObject({
   actor: z.string(),
@@ -764,6 +776,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:itemUsed`]: ItemUsedSchema,
   [`${NS}:abilityRaised`]: AbilityRaisedSchema,
   [`${NS}:poolRolled`]: PoolRolledSchema,
+  [`${NS}:restPassivesGained`]: RestPassivesSchema,
   [`${NS}:spellStored`]: SpellStoredSchema,
   [`${NS}:storedSpellUsed`]: StoredSpellUsedSchema,
   [`${NS}:weaponThrown`]: WeaponThrownSchema,
@@ -1019,13 +1032,14 @@ export function isDead(actor: Actor): boolean {
   );
 }
 
-// A Long Rest takes one off the ordeal of coming back from the dead, and it's gone at 0.
+// A Long Rest takes one off the ordeal of coming back from the dead, and it's gone at 0. Passives kept until a Long
+// Rest go too.
 // A Long Rest gives back the Hit Point maximum Harm took.
 function withoutLoss({ maxHpLoss: _loss, ...actor }: Actor): Actor {
   return actor;
 }
 
-function lessOrdeal({ ordeal, ...actor }: Actor): Actor {
+function lessOrdeal({ ordeal, restPassives: _kept, ...actor }: Actor): Actor {
   return ordeal && ordeal > 1 ? { ...actor, ordeal: ordeal - 1 } : actor;
 }
 
@@ -1973,6 +1987,18 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
               },
             };
       });
+    }
+    case `${NS}:restPassivesGained`: {
+      const data = payload(RestPassivesSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        restPassives: [
+          ...(actor.restPassives ?? []).filter(
+            (entry) => entry.source !== data.source,
+          ),
+          { source: data.source, passives: data.passives },
+        ],
+      }));
     }
     case `${NS}:poolRolled`: {
       const data = payload(PoolRolledSchema, event);
