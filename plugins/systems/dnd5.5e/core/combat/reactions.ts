@@ -738,6 +738,38 @@ export function takeReaction(
   events.push(...(result.events ?? []));
   frames.push(...(result.frames ?? []));
   events.push(...stuckEvents(action, moment, target, result.events ?? []));
+  // Redirect Attack: the attack that missed hits another creature beside the bearer, which it picks.
+  if (
+    effectsOf(action).some((effect) => effect.kind === "redirectMiss") &&
+    moment.weapon &&
+    moment.source
+  ) {
+    const others = Object.values(context.state.actors).filter(
+      (item) =>
+        item.id !== reactor.id &&
+        item.id !== moment.source &&
+        !isDown(item) &&
+        distanceFeet(item.position, reactor.position) <= 5 &&
+        seeing(reactor, item.position, context.state, context) !== "none",
+    );
+    if (others.length > 0) {
+      frames.push(
+        awaitDecision({
+          id: `${NS}:redirect:${reactor.id}`,
+          actor: reactor.id,
+          prompt: "Which creature does the attack hit instead?",
+          options: others.map((item) => ({
+            id: item.id,
+            label: `${item.name} (${String(item.hp)} HP)`,
+          })),
+          resume: frame("redirectHit", {
+            attacker: moment.source,
+            actionId: moment.weapon,
+          }),
+        }),
+      );
+    }
+  }
   for (const effect of effectsOf(action)) {
     if (effect.kind === "strike" && target && !isDown(target)) {
       const attack = strikeAction(reactor, effect.action, context);
@@ -1323,5 +1355,27 @@ export const reactionFrames = {
   [`${NS}:swapInitiative`]: frameHandler({
     schema: SwapSchema,
     run: runSwapInitiative,
+  }),
+};
+
+const RedirectHitSchema = z.object({
+  attacker: z.string(),
+  actionId: z.string(),
+  answer: z.string(),
+});
+
+export const redirectFrames = {
+  [`${NS}:redirectHit`]: frameHandler({
+    schema: RedirectHitSchema,
+    run: (payload) => ({
+      frames: [
+        frame("attackRoll", {
+          attacker: payload.attacker,
+          actionId: payload.actionId,
+          target: payload.answer,
+          hits: true,
+        }),
+      ],
+    }),
   }),
 };

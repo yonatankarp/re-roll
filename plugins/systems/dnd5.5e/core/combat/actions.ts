@@ -18,6 +18,7 @@ import {
   parseOption,
   PASS,
   PICK_UP,
+  SUMMON_WEAPON,
   STAY,
 } from "./ids.ts";
 import {
@@ -140,6 +141,18 @@ export function runTakeAction(
   if (payload.answer === FLEE) return runFlee(actor, context);
 
   const [actionId = "", targetId = "", slot] = parseOption(payload.answer);
+  // War Bond: the weapon comes back to its hand for the Bonus Action.
+  if (actionId === SUMMON_WEAPON) {
+    return {
+      events: [
+        dndEvent(`${NS}:budgetSpent`, { actor: actor.id, kind: "bonusAction" }),
+        dndEvent(`${NS}:itemPickedUp`, {
+          actor: actor.id,
+          index: Number(targetId),
+        }),
+      ],
+    };
+  }
   if (actionId === PICK_UP) {
     return {
       events: [

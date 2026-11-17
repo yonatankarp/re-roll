@@ -1144,6 +1144,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("stickWeapon") }),
   // The triggering attack misses instead, as with Jinx on a failed save.
   z.strictObject({ kind: z.literal("negateHit") }),
+  // The melee attack that missed the bearer hits another creature of its choice within 5 feet of it instead, as
+  // Tipsy Sway's Redirect Attack (combat/reactions.ts).
+  z.strictObject({ kind: z.literal("redirectMiss") }),
   // Lifts the target `feet` up, where it can't move and nothing below reaches it, until `duration` is over and it
   // falls, as with Reverse Gravity (combat/falling.ts). With `grab`, a creature beside a wall may save to hold on.
   z.strictObject({
@@ -2220,6 +2223,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       .min(1),
     label: z.string().min(1),
   }),
+  // Its weapons can't be knocked from its hand unless it's Incapacitated, and one it has thrown or let fall comes back
+  // to its hand for a Bonus Action, as War Bond's. shortcut: every weapon it carries is taken to be bonded.
+  z.strictObject({ kind: z.literal("warBond") }),
   // A second turn in a fight's first round, at its Initiative less `minus`, as Thief's Reflexes (state.ts advanceTurn).
   z.strictObject({
     kind: z.literal("secondTurn"),

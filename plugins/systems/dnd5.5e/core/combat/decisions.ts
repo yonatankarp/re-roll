@@ -19,6 +19,7 @@ import {
   MOVE,
   PASS,
   PICK_UP,
+  SUMMON_WEAPON,
 } from "./ids.ts";
 import { distanceFeet } from "../grid.ts";
 import { lightAt } from "../sight.ts";
@@ -158,11 +159,19 @@ function turnOptions(
   }
   // One weapon lying within 5 feet can be picked up a turn, for free.
   if (!actor.usedThisTurn.includes(PICKED_UP)) {
+    const bonded =
+      actor.budget.bonusAction &&
+      stats.passives.some((passive) => passive.kind === "warBond");
     (state.combat?.dropped ?? []).forEach((drop, index) => {
       if (actor.position && distanceFeet(actor.position, drop.at) <= 5) {
         options.push({
           id: encodeOption(PICK_UP, index),
           label: `Pick up ${lookup(access, ItemSchema, drop.item).name}`,
+        });
+      } else if (bonded && drop.by === actor.id) {
+        options.push({
+          id: encodeOption(SUMMON_WEAPON, index),
+          label: `Summon ${lookup(access, ItemSchema, drop.item).name} to your hand (Bonus Action)`,
         });
       }
     });

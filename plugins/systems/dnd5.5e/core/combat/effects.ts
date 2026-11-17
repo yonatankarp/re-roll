@@ -2414,6 +2414,13 @@ export function leafEvents(
       }
       case "disarm": {
         if (isDown(target) || !target.position) break;
+        // War Bond: no disarming while it can act.
+        if (
+          hasPassive(deriveStats(target, context), "warBond") &&
+          !hasCondition(target, ...INCAPACITATING)
+        ) {
+          break;
+        }
         const held = equipped(target).find(
           (id) =>
             ItemSchema.safeParse(context.content(id)).data?.type === "weapon",
@@ -2557,6 +2564,7 @@ export function leafEvents(
       case "redirect":
       case "drawAttack":
       case "negateHit":
+      case "redirectMiss":
       case "stickWeapon":
       case "slowFall":
       case "split":

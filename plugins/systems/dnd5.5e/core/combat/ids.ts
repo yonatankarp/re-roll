@@ -14,7 +14,8 @@ export const ITEM_PREFIX = "item:"; // an action that uses up the item, such as 
 export const WEAPON_PREFIX = "weapon:"; // an attack with a weapon carried
 export const THROW_PREFIX = "throw:"; // a ranged attack throwing a Thrown weapon, which leaves the hand
 export const FANCY_FOOTWORK = "fancy-footwork"; // marks a creature that can't make Opportunity Attacks on its attacker
-export const PICK_UP = "pickUp"; // picking a thrown weapon up from the ground: "pickUp|<index in combat.dropped>"
+export const PICK_UP = "pickUp";
+export const SUMMON_WEAPON = "summonWeapon"; // War Bond: "summonWeapon|<index in combat.dropped>", for a Bonus Action // picking a thrown weapon up from the ground: "pickUp|<index in combat.dropped>"
 
 // A spell cast from a magic item, spending `charges` of it (stats.ts itemCasts).
 export function itemCastId(

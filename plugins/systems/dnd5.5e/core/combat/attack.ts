@@ -190,6 +190,7 @@ export const AttackSchema = z.object({
     .optional(),
   passed: z.array(z.string()).optional(), // creatures that already answered the roll or turned it down
   strikes: z.array(z.string()).optional(), // strike options picked in place of the roll's Advantage, as Brutal Strike's
+  hits: z.boolean().optional(), // it hits outright, as a missed attack Redirect Attack turns on another creature
 });
 
 // Who a projectile or later attack actually goes for, given who is still standing.
@@ -1134,8 +1135,9 @@ export function runAttackRoll(
     return {
       total: sum,
       success:
-        !drowned && (natural >= critFrom || (natural !== 1 && sum >= ac)),
-      critical: !drowned && natural >= critFrom,
+        payload.hits === true ||
+        (!drowned && (natural >= critFrom || (natural !== 1 && sum >= ac))),
+      critical: payload.hits !== true && !drowned && natural >= critFrom,
     };
   };
   // Reactions to the roll before it lands, as Bountiful Luck or Second Chance (combat/reactions.ts).

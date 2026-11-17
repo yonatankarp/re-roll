@@ -38,6 +38,7 @@ import { fearFrames } from "./combat/fear.ts";
 import { environmentEffects, featureCheck } from "./environment.ts";
 import { optionFrames } from "./combat/options.ts";
 import { riderChoiceFrames } from "./combat/school.ts";
+import { redirectFrames } from "./combat/reactions.ts";
 import { wishFrames } from "./combat/wish.ts";
 import { reactionFrames } from "./combat/reactions.ts";
 import { turnFrames } from "./combat/turn.ts";
@@ -544,6 +545,7 @@ export const dnd55e = defineSystem<DndState>({
     ...fearFrames,
     ...optionFrames,
     ...riderChoiceFrames,
+    ...redirectFrames,
     ...wishFrames,
     ...reactionFrames,
     ...attackFrames,

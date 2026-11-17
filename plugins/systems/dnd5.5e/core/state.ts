@@ -107,6 +107,7 @@ export const FRAME_KINDS = [
   "missReroll", // a missed attack rolled again, or at another creature, as Master Duelist or Curving Shot (class-rules.ts)
   "bringAlong", // the allies a teleport brings land beside it, as Travel along the Tree's (combat/movement.ts)
   "riderChoice", // what a spell's cast rider does, picked once it's done, as Steps of the Fey's (combat/school.ts)
+  "redirectHit", // where a missed attack lands instead, as Tipsy Sway's Redirect Attack (combat/reactions.ts)
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
