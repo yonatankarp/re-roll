@@ -80,10 +80,14 @@ export function shortRestEvents(
   );
 }
 
+// Marks a creature given a Short Rest's benefits by a spell, which can't give them again until its Long Rest.
+export const SHORT_REST_GIVEN = "shortRest:given";
+
 // A Short Rest's benefits for one creature, as Prayer of Healing gives: Hit Dice spent until healed, then what the
 // rest restores.
 export function shortRestFor(actor: Actor, context: Context): SystemEvent[] {
   if (actor.side !== "party" || isDead(actor)) return [];
+  if (actor.resourcesSpent[SHORT_REST_GIVEN]) return [];
   const spent = diceSpent(actor, context);
   const after = spent.reduce(applyDndEvent, context.state).actors[actor.id];
   const stats = deriveStats(actor, context);
@@ -98,6 +102,10 @@ export function shortRestFor(actor: Actor, context: Context): SystemEvent[] {
         stats,
         "short",
       ),
+    }),
+    dndEvent(`${NS}:resourceSpent`, {
+      actor: actor.id,
+      resource: SHORT_REST_GIVEN,
     }),
   ];
 }
@@ -219,7 +227,8 @@ function recovered(
   const left = new Map(Object.entries(spent));
   for (const key of left.keys()) {
     const slot = key.startsWith("slot:");
-    if (rest === "long" ? slot || key === HIT_DICE : slot && stats.pactMagic) {
+    const daily = key === HIT_DICE || key === SHORT_REST_GIVEN;
+    if (rest === "long" ? slot || daily : slot && stats.pactMagic) {
       left.set(key, 0);
     }
   }

@@ -653,9 +653,13 @@ export function makeJudge(context: Context, side: Actor): Judge {
 
   // Bringing a downed ally back gives its turns back, and stops its death saves. Topping up a standing one
   // counts only while the hardest hitter could drop it before it acts again.
-  // Only a raising reaches the dead, and bringing one back is worth what getting a downed one up is.
-  const healWorth = (target: Actor, amount: number): number => {
-    if (amount <= 0) return 0;
+  // A raising, aimed at the dead, is worth what getting a downed one up is. Nothing else heals the dead.
+  const healWorth = (
+    target: Actor,
+    amount: number,
+    raising = false,
+  ): number => {
+    if (amount <= 0 || (isDead(target) && !raising)) return 0;
     const maxHp = stats(target).maxHp;
     const value = Math.max(threat(target), 0.5 * meanFoeThreat);
     if (isDown(target)) return value * playerWeight(target);
@@ -925,7 +929,12 @@ export function makeJudge(context: Context, side: Actor): Judge {
               AVERAGE,
             ).healed
           : null;
-        return healWorth(target, effect.full ? room : (pool ?? each));
+        const { targeting } = action.activation;
+        return healWorth(
+          target,
+          effect.full ? room : (pool ?? each),
+          "dead" in targeting && targeting.dead === true,
+        );
       }
       case "hitDieHeal": {
         const die = nextHitDie(target, context);
@@ -1040,6 +1049,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
           effect.maxLevel,
           context.state,
           context,
+          effect.hostile,
         ).reduce((sum, { casterId }) => {
           const helps = context.state.actors[casterId]?.side === target.side;
           return helps === foe

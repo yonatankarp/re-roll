@@ -780,16 +780,20 @@ export function sharedHealing(
     shares.set(target.id, share);
     left -= share;
   }
+  // No share, no heal, so a dying creature's death saves stand.
   return (target) =>
-    effects.map((effect) =>
-      effect === divided
-        ? {
-            kind: "heal" as const,
-            amount: { bonus: { base: shares.get(target.id) ?? 0, add: [] } },
-            ...(divided.half ? { half: true as const } : {}),
-          }
-        : effect,
-    );
+    effects.flatMap((effect) => {
+      if (effect !== divided) return [effect];
+      const share = shares.get(target.id) ?? 0;
+      return share > 0
+        ? [
+            {
+              kind: "heal" as const,
+              amount: { bonus: { base: share, add: [] } },
+            },
+          ]
+        : [];
+    });
 }
 
 const MEAN: Dice = { below: () => 0, roll: (sides) => (sides + 1) / 2 };
@@ -1200,7 +1204,13 @@ export function leafEvents(
       }
       case "dispel": {
         events.push(
-          ...dispelEvents(target, effect.maxLevel, context.state, context),
+          ...dispelEvents(
+            target,
+            effect.maxLevel,
+            context.state,
+            context,
+            effect.hostile,
+          ),
         );
         // Shutdown: the dispelled construct may fall Unconscious.
         const shutdown = deriveStats(target, context).passives.find(

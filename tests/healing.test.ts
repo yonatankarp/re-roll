@@ -218,10 +218,10 @@ describe("healing, curing and raising the dead (#162)", () => {
     const healed = (target: Actor) =>
       payloads(leafEvents(shared(target), "x", a, target, context), "healed")[0]
         ?.amount;
-    // The one at 0 fills to half its maximum, the next gets what's left, and the unhurt one none.
+    // The one at 0 fills to half its maximum, the next gets what's left, and the unhurt one no heal at all.
     expect(healed(a)).toBe(half);
     expect(healed(b)).toBe(1);
-    expect(healed(c)).toBe(0);
+    expect(healed(c)).toBeUndefined();
   });
 
   it("rolls healing dice at their highest for a creature at 0 Hit Points, as Circle of Mortality", async () => {
@@ -324,6 +324,45 @@ describe("healing, curing and raising the dead (#162)", () => {
     expect(after.actors.b?.hp).toBe(max);
     expect(after.actors.a?.hp).toBe(1);
     expect(after.actors[PLAYER_ACTOR]?.resourcesSpent.hands).toBe(max - 2);
+  });
+
+  it("leaves potions to their own row, and gives a Short Rest's benefits once a Long Rest, as Prayer of Healing", async () => {
+    const run = await healingRun();
+    const max = deriveStats(hero([]), run).maxHp;
+    const drinker = {
+      ...hero([]),
+      hp: 1,
+      inventory: ["srd52:item/longsword", "srd52:item/potion-of-healing"],
+    };
+    const ids = sceneCastActions(between([drinker]), run).map(({ id }) => id);
+    expect(ids.some((id) => id.includes("potion"))).toBe(false);
+    const prayer = { ...hero([], { id: "friend" }), hp: 1 };
+    const context = {
+      ...contextOf(run, [prayer], scripted([]).dice),
+      state: between([prayer]),
+    };
+    const given = leafEvents(
+      [{ kind: "shortRest" }],
+      "x",
+      prayer,
+      prayer,
+      context,
+    );
+    expect(payloads(given, "resourceSpent")).toContainEqual({
+      actor: "friend",
+      resource: "shortRest:given",
+    });
+    const after = given.reduce(applyDndEvent, between([prayer]));
+    const again = after.actors.friend;
+    if (!again) throw new Error("no friend");
+    expect(
+      leafEvents([{ kind: "shortRest" }], "x", again, again, {
+        ...context,
+        state: after,
+      }),
+    ).toEqual([]);
+    expect(again.hp).toBeGreaterThan(1);
+    expect(again.hp).toBeLessThanOrEqual(max);
   });
 
   it("counts the hours the party's dead lie dead by the rests passed, unless reposed", () => {

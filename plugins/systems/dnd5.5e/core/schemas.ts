@@ -462,7 +462,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("repose") }),
   // The target gains a Short Rest's benefits: it spends Hit Dice until healed and gets back what a Short Rest
   // restores, as Prayer of Healing (rest.ts).
-  // shortcut: the player's Hit Dice are spent as a companion's are, and it can benefit again before a Long Rest.
+  // Not again until the creature's Long Rest. shortcut: the player's Hit Dice are spent as a companion's are.
   z.strictObject({ kind: z.literal("shortRest") }),
   // Ends every curse on the target, with all else the action that cursed it gave, as Remove Curse.
   z.strictObject({ kind: z.literal("uncurse") }),
@@ -618,6 +618,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("dispel"),
     maxLevel: z.number().int().min(0).max(9),
+    // only spells cast by the target's foes, so a friend keeps its own, as Clockwork Cavalcade's chosen creatures
+    hostile: z.literal(true).optional(),
   }),
   // Lessens the hit that triggered a reaction, such as Uncanny Dodge or Deflect Attacks. With `deflect`, damage
   // brought to 0 is sent at a creature within `range`, which saves or takes `damage`, as Deflect Missile's force.

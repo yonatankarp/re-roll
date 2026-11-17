@@ -15,6 +15,8 @@ import { type Actor, type DndState, NS, frame, isDead } from "./state.ts";
 import { type KnownAction, deriveStats } from "./stats.ts";
 import { canAfford, deadWithin, fitsType, goldFor } from "./combat/queries.ts";
 import { leafEvents, payCosts, sharedHealing } from "./combat/effects.ts";
+import { ITEM_PREFIX } from "./combat/ids.ts";
+import { SHORT_REST_GIVEN } from "./rest.ts";
 
 // Healing between fights: a party member's spell or feature that heals or raises the dead, used on the party from
 // the character sheet, as Cure Wounds after a fight or Raise Dead, which takes an hour. It costs what it costs in a
@@ -76,9 +78,11 @@ function effectsOf(action: KnownAction): readonly LeafEffect[] {
   return resolution.kind === "automatic" ? resolution.effects : [];
 }
 
+// A potion is drunk from its own row (gear.ts), so only spells and features are used here.
 function usable(action: KnownAction): boolean {
   const effects = effectsOf(action);
   return (
+    !action.id.startsWith(ITEM_PREFIX) &&
     !action.activation.trigger &&
     !(
       "side" in action.activation.targeting &&
@@ -110,6 +114,11 @@ function targetsOf(
       isDead(item) === dead &&
       deadWithin(item, targeting) &&
       fitsType(item, targeting, access, caster) &&
+      // Prayer of Healing reaches no one it already gave a Short Rest's benefits since a Long Rest.
+      !(
+        item.resourcesSpent[SHORT_REST_GIVEN] &&
+        effectsOf(action).some((effect) => effect.kind === "shortRest")
+      ) &&
       effectsOf(action).some((effect) => helps(effect, item, access)),
   );
 }
@@ -155,6 +164,8 @@ export function sceneCastActions(
           : `${caster.name}: ${action.name}`,
       effect: `${NS}:castBetween`,
       args: { caster: caster.id, action: action.id },
+      // An hour's casting only where the scene leaves time to rest.
+      ...(action.activation.outOfCombat ? { rest: true } : {}),
     })),
   );
 }
