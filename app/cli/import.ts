@@ -1,6 +1,7 @@
 // The systems load first: the glossary reaches the D&D policy and tactics modules, which import each other.
 import { systems } from "../systems.ts";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { parse } from "yaml";
 import { parseArgs } from "node:util";
 import { formatIssue } from "../../engine/kernel/issues.ts";
 import { loadRun, scanPlugins } from "../../engine/run/loader.ts";
@@ -8,7 +9,10 @@ import { createLlamaClient } from "../../engine/platform/node/llama-client.ts";
 import { createNodeStorage } from "../../engine/platform/node/storage.ts";
 import { checkPlugins } from "../../engine/tools/check-pack.ts";
 import { buildLibrary, libraryHtml } from "../../engine/tools/library.ts";
-import { type BookIndex, buildGlossary } from "../../engine/tools/glossary.ts";
+import {
+  type GlossaryEntity,
+  buildGlossary,
+} from "../../engine/tools/glossary.ts";
 import {
   approveImport,
   importParsed,
@@ -19,6 +23,7 @@ import {
   GLOSSARY_BOOKS,
   GLOSSARY_TERMS,
 } from "../../plugins/systems/dnd5.5e/core/glossary.ts";
+import { GLOSSARY_KINDS } from "../../plugins/systems/dnd5.5e/core/schemas.ts";
 import { spellTextFromHtml } from "../../plugins/systems/dnd5.5e/core/import/spells.ts";
 import { PLUGIN_ROOTS } from "./load-adventure.ts";
 
@@ -89,23 +94,38 @@ if (command === "library") {
 }
 
 if (command === "glossary") {
-  const books = (
-    await Promise.all(
-      GLOSSARY_BOOKS.map((id) =>
-        readFile(`books/library/${id}/index.json`, "utf8").then(
-          (text) => ({ ...(JSON.parse(text) as BookIndex), plugin: id }),
-          () => null,
-        ),
-      ),
-    )
-  ).filter((book) => book !== null);
-  const glossary = buildGlossary("dnd5.5e", GLOSSARY_TERMS, books);
+  // Each book's glossary entities, written by npm run import:world.
+  const entities: GlossaryEntity[] = [];
+  for (const book of GLOSSARY_BOOKS) {
+    for (const folder of Object.keys(GLOSSARY_KINDS)) {
+      const dir = `books/rules/${book}/${folder}`;
+      const names = await readdir(dir).catch(() => []);
+      for (const name of names.filter((item) => item.endsWith(".yaml"))) {
+        const raw: unknown = parse(await readFile(`${dir}/${name}`, "utf8"));
+        for (const item of Array.isArray(raw) ? raw : [raw]) {
+          const entry = item as { id?: unknown; library?: unknown } | null;
+          if (typeof entry?.id !== "string") continue;
+          const library = Array.isArray(entry.library)
+            ? entry.library.filter((id) => typeof id === "string")
+            : [];
+          entities.push({ id: entry.id, file: `${folder}/${name}`, library });
+        }
+      }
+    }
+  }
+  const glossary = buildGlossary(
+    "dnd5.5e",
+    GLOSSARY_TERMS,
+    GLOSSARY_BOOKS,
+    entities,
+  );
   await writeFile(
     "books/library/glossary.json",
     `${JSON.stringify(glossary, null, 2)}\n`,
   );
+  const books = new Set(Object.values(glossary.terms).map((at) => at.book));
   console.log(
-    `glossary: ${String(Object.keys(glossary.terms).length)} terms from ${books.map((book) => book.plugin).join(", ")}; none for ${glossary.missing.join(", ") || "-"}`,
+    `glossary: ${String(Object.keys(glossary.terms).length)} terms from ${[...books].join(", ")}; none for ${glossary.missing.join(", ") || "-"}`,
   );
   process.exit(0);
 }

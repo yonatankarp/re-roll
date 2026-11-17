@@ -1,15 +1,33 @@
 import { expect, test } from "@playwright/test";
 
-// Shows a made-up ruling beside the section it rules on, in a made-up library (#130).
+// Shows a made-up ruling beside the section it rules on (#130), and a monster's family (#133), in a made-up library.
 const BOOK = "fixture-book";
 const SAGE = "fixture-sage";
 const FILES: Readonly<Record<string, string>> = {
   [`books/library/${BOOK}/index.json`]: JSON.stringify({
     plugin: BOOK,
     title: "Fixture Book",
-    entries: [{ path: ["Spells", "Hush"], file: "0001-hush.md" }],
+    entries: [
+      { path: ["Spells", "Hush"], file: "0001-hush.md" },
+      { path: ["Bestiary", "Gloomwings"], file: "0002-gloomwings.md" },
+      {
+        path: ["Bestiary", "Gloomwings", "Elder Gloomwing"],
+        file: "0003-elder-gloomwing.md",
+      },
+    ],
   }),
   [`books/library/${BOOK}/0001-hush.md`]: "### Hush\n\nA fixture spell.",
+  [`books/library/${BOOK}/0002-gloomwings.md`]:
+    "## Gloomwings\n\nA fixture family.",
+  [`books/library/${BOOK}/0003-elder-gloomwing.md`]:
+    "### Elder Gloomwing\n\nA fixture stat block.",
+  [`books/library/${BOOK}/links.json`]: JSON.stringify({
+    links: {
+      "0003-elder-gloomwing.md": [
+        { file: "0002-gloomwings.md", heading: "Gloomwings", rel: "family" },
+      ],
+    },
+  }),
   [`books/library/${SAGE}/index.json`]: JSON.stringify({
     plugin: SAGE,
     title: "Fixture Sage",
@@ -64,5 +82,15 @@ test("shows the rulings on a book section beside it", async ({ page }) => {
     "Another answer.",
   );
   await expect(page.locator(".book-rulings")).toHaveCount(0);
+
+  // A stat block links to its family's section.
+  await page.getByRole("button", { name: "Library" }).click();
+  await page.getByRole("button", { name: "Fixture Book" }).click();
+  await expect(page.locator(".book-links")).toHaveCount(0);
+  await page.getByRole("button", { name: "Elder Gloomwing" }).click();
+  await page.getByRole("button", { name: "Family: Gloomwings" }).click();
+  await expect(page.locator(".book-text").first()).toContainText(
+    "A fixture family.",
+  );
   expect(errors).toEqual([]);
 });

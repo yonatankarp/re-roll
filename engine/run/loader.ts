@@ -361,6 +361,7 @@ async function parseContentFile(
   file: string,
   kind: ContentKind,
   entries: Map<string, LoadedEntry>,
+  deferred: Deferred[],
   issues: Issue[],
 ): Promise<void> {
   const plugin = record.manifest.id;
@@ -372,31 +373,62 @@ async function parseContentFile(
     return;
   }
   (raw.value as unknown[]).forEach((item, index) => {
-    const parsed = kind.parse(item);
-    if (!parsed.ok) {
-      issues.push(...zodIssues(plugin, path, parsed.error, String(index)));
+    if (isRecord(item) && typeof item.playsAs === "string") {
+      deferred.push({ item, kind, plugin, file: path, index });
       return;
     }
-    const { entry, references } = parsed;
-    const expected = `${plugin}:${kind.idPrefix}/`;
-    if (!entry.id.startsWith(expected)) {
-      issues.push({
-        plugin,
-        file: path,
-        message: `id "${entry.id}" must start with "${expected}"`,
-      });
-      return;
-    }
-    if (entries.has(entry.id)) {
-      issues.push({
-        plugin,
-        file: path,
-        message: `duplicate id "${entry.id}"`,
-      });
-      return;
-    }
-    entries.set(entry.id, { entry, owner: plugin, file: path, references });
+    addEntry(item, kind, plugin, path, index, entries, issues);
   });
+}
+
+// An entry that plays as another, parsed once every plugin is loaded: whatever it doesn't set comes from that entry.
+interface Deferred {
+  readonly item: Record<string, unknown>;
+  readonly kind: ContentKind;
+  readonly plugin: string;
+  readonly file: string;
+  readonly index: number;
+}
+
+// What an entry that plays as another never takes from it.
+const OWN_FIELDS = new Set(["id", "replaces", "library"]);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+function addEntry(
+  item: unknown,
+  kind: ContentKind,
+  plugin: string,
+  path: string,
+  index: number,
+  entries: Map<string, LoadedEntry>,
+  issues: Issue[],
+): void {
+  const parsed = kind.parse(item);
+  if (!parsed.ok) {
+    issues.push(...zodIssues(plugin, path, parsed.error, String(index)));
+    return;
+  }
+  const { entry, references } = parsed;
+  const expected = `${plugin}:${kind.idPrefix}/`;
+  if (!entry.id.startsWith(expected)) {
+    issues.push({
+      plugin,
+      file: path,
+      message: `id "${entry.id}" must start with "${expected}"`,
+    });
+    return;
+  }
+  if (entries.has(entry.id)) {
+    issues.push({
+      plugin,
+      file: path,
+      message: `duplicate id "${entry.id}"`,
+    });
+    return;
+  }
+  entries.set(entry.id, { entry, owner: plugin, file: path, references });
 }
 
 function deepFreeze<T>(value: T): T {
@@ -423,6 +455,7 @@ export async function loadRun(
   const precedence = precedenceOrder(order, requested, system, issues);
 
   const entries = new Map<string, LoadedEntry>();
+  const deferred: Deferred[] = [];
   const adventures = new Map<string, Adventure>();
   const adventureReferences: { readonly owner: string; readonly id: string }[] =
     [];
@@ -435,7 +468,8 @@ export async function loadRun(
     // Narration's index changes as clips are made, and lore is only read, so neither changes the story.
     extensionOf(file) === YAML &&
     !file.startsWith(`${NARRATION_FOLDER}/`) &&
-    !Object.hasOwn(WORLD_KINDS, file.split("/")[0] ?? "");
+    !Object.hasOwn(WORLD_KINDS, file.split("/")[0] ?? "") &&
+    !system.contentKinds[file.split("/")[0] ?? ""]?.lore;
 
   for (const record of order) {
     const plugin = record.manifest.id;
@@ -494,7 +528,15 @@ export async function loadRun(
         issues.push({ plugin, file: `${record.root}/${file}`, message });
         continue;
       }
-      await parseContentFile(reader, record, file, kind, entries, issues);
+      await parseContentFile(
+        reader,
+        record,
+        file,
+        kind,
+        entries,
+        deferred,
+        issues,
+      );
     }
 
     if (isAdventure) {
@@ -517,6 +559,35 @@ export async function loadRun(
   );
   const canSee = (owner: string, id: string): boolean =>
     closures.get(owner)?.has(ownerOf(id)) ?? false;
+
+  // A twin shares one encoding: a book's copy of an SRD entry keeps its own name, text and lists and plays as the SRD's.
+  for (const { item, kind, plugin, file, index } of deferred) {
+    const target = String(item.playsAs);
+    const twin = entries.get(target);
+    const report = (message: string): void => {
+      issues.push({ plugin, file, message: `${String(item.id)}: ${message}` });
+    };
+    // A twin that plays as another is still deferred here, so chains are reported as unknown.
+    if (!twin) report(`plays as unknown entry "${target}"`);
+    else if (!canSee(plugin, target))
+      report(`plays as "${target}" without requiring its plugin`);
+    else if (kindPrefixOf(target) !== kindPrefixOf(String(item.id)))
+      report(`plays as a different kind`);
+    else {
+      const encoding = Object.fromEntries(
+        Object.entries(twin.entry).filter(([key]) => !OWN_FIELDS.has(key)),
+      );
+      addEntry(
+        { ...encoding, ...item },
+        kind,
+        plugin,
+        file,
+        index,
+        entries,
+        issues,
+      );
+    }
+  }
 
   const aliases = new Map<string, string>();
   for (const { entry, owner, file } of entries.values()) {

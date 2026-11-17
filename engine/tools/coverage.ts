@@ -26,6 +26,7 @@ export interface Entity {
   readonly edition: string;
   readonly library: readonly string[]; // heading ids the entity says it describes
   readonly about: readonly string[]; // a ruling's: the entity ids it rules on
+  readonly lore?: boolean; // a system's lore kind, such as a rules glossary term: linked only where a rule asks
 }
 
 const RuleSchema = z.strictObject({
@@ -161,6 +162,8 @@ export function matchHeading(
     (!scope.kinds || scope.kinds.includes(entity.kind)) &&
     // Lore's names are common words (a ship's station named for a god, Encounters), so another book's needs a rule asking.
     (!WORLD.has(entity.kind) || sameBook(entity) || scope.kinds !== null) &&
+    // A rules glossary's names are common words (Light, Slow, Adventure), so it needs a rule asking even in its own book.
+    (!entity.lore || scope.kinds !== null) &&
     (asked ||
       !scope.adventure ||
       sameBook(entity) ||
@@ -371,6 +374,13 @@ export async function checkCoverage(
     return system?.edition?.(manifest) ?? manifest.edition ?? "";
   };
 
+  const lore = new Set(
+    systems.flatMap((system) =>
+      Object.values(system.contentKinds)
+        .filter((kind) => kind.lore)
+        .map((kind) => kind.idPrefix),
+    ),
+  );
   const entities: Entity[] = [];
   for (const [plugin, record] of catalog.plugins) {
     if (record.manifest.kind !== "rules") continue;
@@ -401,8 +411,26 @@ export async function checkCoverage(
           edition,
           library: ids(entry.library),
           about: ids(entry.about),
+          lore: lore.has(kind),
         });
       }
+    }
+  }
+  // Each value the engine plays names an entity, once the books hold any of its kind.
+  for (const system of systems) {
+    for (const kind of Object.values(system.contentKinds)) {
+      const names = new Set(
+        entities
+          .filter((entity) => entity.kind === kind.idPrefix)
+          .map((entity) => entity.id.slice(entity.id.indexOf("/") + 1)),
+      );
+      if (names.size === 0) continue;
+      for (const key of (kind.keys ?? []).filter((item) => !names.has(item)))
+        issues.push({
+          plugin: system.id,
+          file: null,
+          message: `${kind.idPrefix} "${key}", which the system plays, has no entity in any book`,
+        });
     }
   }
   const index = indexEntities(entities);

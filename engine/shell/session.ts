@@ -71,6 +71,8 @@ const LIBRARY = "books/library";
 const GLOSSARY = `${LIBRARY}/glossary.json`;
 const IMAGE_FILE = /\.(png|jpe?g|webp|gif)$/i;
 const BARE_NAME = /^[^/\\]+$/;
+const ENTITY_FILE = /^[a-z0-9-]+\/[a-z0-9-]+\.yaml$/;
+const PLUGIN_ID = /^[a-z0-9][a-z0-9.-]*$/;
 
 // Something worth more than the ticker: the player's level-up, or a foe defeated, which the ending counts.
 export type Moment = "levelUp" | "foeDefeated";
@@ -259,10 +261,18 @@ const BookIndexSchema = z.object({
   entries: z.array(z.object({ path: z.array(z.string()), file: z.string() })),
 });
 
-// The owner's glossary index: for each of a system's rules terms, the book section that explains it.
+// The owner's glossary index: for each of a system's rules terms, the book section that explains it, and
+// the book's entity for it (#132), which older indexes lack.
 const GlossarySchema = z.object({
   system: z.string(),
-  terms: z.record(z.string(), z.object({ book: z.string(), file: z.string() })),
+  terms: z.record(
+    z.string(),
+    z.object({
+      book: z.string(),
+      file: z.string(),
+      entity: z.string().optional(),
+    }),
+  ),
 });
 
 // A ruling book's index: for each section ("<book>/<file>") its rulings rule on, where those rulings are.
@@ -278,11 +288,27 @@ export type RulingRef = z.infer<
   typeof RulingIndexSchema
 >["rulings"][string][number];
 
+// A book's index of where its families' stat blocks and its lairs' owners are, both ways (#133).
+const LinkIndexSchema = z.object({
+  links: z.record(
+    z.string(),
+    z.array(
+      z.object({
+        file: z.string(),
+        heading: z.string(),
+        rel: z.enum(["family", "member", "lair", "owner"]),
+      }),
+    ),
+  ),
+});
+export type LinkRef = z.infer<typeof LinkIndexSchema>["links"][string][number];
+
 export interface TermEntry {
   readonly id: string;
   readonly words: readonly string[];
   readonly book: string;
   readonly file: string;
+  readonly entity?: string; // its file in the book's rules plugin, as "conditions/prone.yaml"
 }
 
 // "Goblin Warrior", "goblin-warrior" and "srd52:monster/goblin-warrior" all find the same picture.
@@ -563,6 +589,10 @@ export function createGame({
   let glossaryText: Promise<string | null> | undefined; // read once, as the books don't change in play
   let rulingIndex:
     Promise<ReadonlyMap<string, readonly RulingRef[]>> | undefined; // likewise
+  const linkIndexes = new Map<
+    string,
+    Promise<Readonly<Record<string, readonly LinkRef[]>>>
+  >(); // likewise, by book
   // The cover of the book an id such as "phb:background/acolyte" comes from. Spells and features keep
   // none, so a list of them isn't a wall of the same cover.
   const coverOf = (id: string): string | undefined =>
@@ -1023,6 +1053,23 @@ export function createGame({
       return (await storage.read(`${LIBRARY}/${id}/${file}`)) ?? "";
     },
 
+    // A rules term's entity (#132), as a section of its own: its name as the heading, then its text.
+    async readTerm(book: string, entity: string): Promise<string> {
+      if (!PLUGIN_ID.test(book) || !ENTITY_FILE.test(entity)) {
+        throw new Error("That isn't part of a book");
+      }
+      const raw: unknown = parse(
+        (await storage.read(`books/rules/${book}/${entity}`)) ?? "",
+      );
+      const entry = (Array.isArray(raw) ? raw[0] : raw) as {
+        name?: unknown;
+        text?: unknown;
+      } | null;
+      return typeof entry?.name === "string" && typeof entry.text === "string"
+        ? `### ${entry.name}\n\n${entry.text}`
+        : "";
+    },
+
     // The rulings (#130) on what a book's section describes, from every ruling book's index.
     async rulings(id: string, file: string): Promise<readonly RulingRef[]> {
       rulingIndex ??= storage
@@ -1046,6 +1093,28 @@ export function createGame({
           return found;
         });
       return (await rulingIndex).get(`${id}/${file}`) ?? [];
+    },
+
+    // The family, members, lair or owners of what a book's section describes, in the same book (#133).
+    async links(id: string, file: string): Promise<readonly LinkRef[]> {
+      if (!BARE_NAME.test(id)) return [];
+      let index = linkIndexes.get(id);
+      if (!index) {
+        const path = `${LIBRARY}/${id}/links.json`;
+        index = storage
+          .list(LIBRARY)
+          // Listed first, as reading a missing file is an error in a browser's console.
+          .then(async (entries) =>
+            entries.some((entry) => entry.path === path)
+              ? LinkIndexSchema.parse(
+                  JSON.parse((await storage.read(path)) ?? ""),
+                ).links
+              : {},
+          )
+          .catch(() => ({})); // a damaged index hides its links, not the book
+        linkIndexes.set(id, index);
+      }
+      return (await index)[file] ?? [];
     },
 
     // The current system's terms that a book in the library explains, or none without the owner's books.
@@ -1072,9 +1141,20 @@ export function createGame({
       if (glossary.system !== ui.systemId) return [];
       return ui.terms.flatMap((term) => {
         const at = glossary.terms[term.id];
-        return at && BARE_NAME.test(at.book) && BARE_NAME.test(at.file)
-          ? [{ id: term.id, words: term.words, ...at }]
-          : [];
+        if (!at || !BARE_NAME.test(at.book) || !BARE_NAME.test(at.file))
+          return [];
+        const { book, file, entity } = at;
+        return [
+          {
+            id: term.id,
+            words: term.words,
+            book,
+            file,
+            ...(entity !== undefined && ENTITY_FILE.test(entity)
+              ? { entity }
+              : {}),
+          },
+        ];
       });
     },
 
