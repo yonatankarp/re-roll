@@ -25,7 +25,11 @@ export interface Glossary {
 // Books come best first, so the first that has the term's entity wins.
 export function buildGlossary(
   system: string,
-  terms: readonly { readonly id: string; readonly entity: string }[],
+  terms: readonly {
+    readonly id: string;
+    readonly entity: string;
+    readonly books?: readonly string[]; // in place of `books`, for this term
+  }[],
   books: readonly string[],
   entities: readonly GlossaryEntity[],
 ): Glossary {
@@ -33,7 +37,7 @@ export function buildGlossary(
   const out: Record<string, Glossary["terms"][string]> = {};
   const missing: string[] = [];
   for (const term of terms) {
-    const hit = books
+    const hit = (term.books ?? books)
       .map((book) => ({ book, entity: byId.get(`${book}:${term.entity}`) }))
       .find(({ entity }) => entity?.library[0] !== undefined);
     const section = /^[^/]+\/([^#]+)/.exec(hit?.entity?.library[0] ?? "")?.[1];

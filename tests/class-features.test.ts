@@ -160,6 +160,7 @@ const attack = (attacker: string, actionId: string, target: string): Frame => ({
   payload: { attacker, actionId, target },
 });
 const endTurn: Frame = { kind: `${NS}:endTurn`, payload: {} };
+const DECLINE_ID = "decline";
 
 function payloads(
   events: readonly SystemEvent[],
@@ -545,7 +546,7 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
   it("reports a feature's status from what the engine does with it", () => {
     const stats = deriveStats(hero("rogue", 2), run);
     expect(classify("phb:feature/rogue-sneak-attack", stats, run).status).toBe(
-      "partial",
+      "working",
     );
     expect(
       classify(
@@ -555,11 +556,8 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
       ).status,
     ).toBe("working");
     expect(
-      classify("phb:feature/rogue-cunning-action", stats, run),
-    ).toMatchObject({
-      status: "text-only",
-      why: "needs bonus-action Dash, Disengage and Hide",
-    });
+      classify("phb:feature/rogue-thieves-cant", stats, run),
+    ).toMatchObject({ status: "text-only" });
   });
 
   it("Hunter's Mark is prepared and adds 1d6 to the Ranger's hits on the mark", () => {
@@ -587,6 +585,126 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
       dice(),
     );
     expect(damageTo(hit.events, "a")).toBe(plain + 6);
+  });
+  it("Reckless Attack lets Brutal Strike trade its Advantage for a d10 and a blow (#157)", () => {
+    const barbarian = hero("barbarian", 9);
+    const reckless = settle(
+      run,
+      fight(barbarian, monster("a")),
+      [
+        act(
+          PLAYER_ACTOR,
+          `${feature("barbarian-reckless-attack")}|${PLAYER_ACTOR}`,
+        ),
+      ],
+      dice(),
+    );
+    const done = settle(
+      run,
+      reckless.state,
+      [attack(PLAYER_ACTOR, weaponOf(barbarian), "a")],
+      dice(),
+    );
+    const asked = done.decisions.find(({ id }) =>
+      id.startsWith(`${NS}:strike:`),
+    );
+    expect(asked?.options.map((item) => item.label)).toContain(
+      "Brutal Strike (Forceful Blow)",
+    );
+    expect(actorIn(done.state, PLAYER_ACTOR).usedThisTurn).toContain(
+      "once:brutal-strike",
+    );
+  });
+
+  it("Stunning Strike spends a Focus Point once a turn (#157)", () => {
+    const monk = hero("monk", 5);
+    const strike = feature("monk-martial-arts");
+    const stun = (decision: Decision) =>
+      decision.options.find((item) =>
+        item.id.startsWith(feature("monk-stunning-strike")),
+      )?.id ?? DECLINE_ID;
+    const first = settle(
+      run,
+      fight(monk, monster("a")),
+      [attack(PLAYER_ACTOR, strike, "a")],
+      dice(),
+      stun,
+    );
+    expect(
+      actorIn(first.state, PLAYER_ACTOR).resourcesSpent["focus-points"],
+    ).toBe(1);
+    const second = settle(
+      run,
+      first.state,
+      [attack(PLAYER_ACTOR, strike, "a")],
+      dice(),
+      stun,
+    );
+    expect(
+      actorIn(second.state, PLAYER_ACTOR).resourcesSpent["focus-points"],
+    ).toBe(1);
+  });
+
+  it("Cunning Strike trades a Sneak Attack die for a Trip (#157)", () => {
+    const rogue = {
+      ...hero("rogue", 5),
+      inventory: ["phb:item/rapier"],
+      activeEffects: [
+        {
+          sourceId: "test",
+          casterId: PLAYER_ACTOR,
+          ends: "spellDuration" as const,
+          modifier: { kind: "advantage" as const, on: "attacks" as const },
+        },
+      ],
+    };
+    const done = settle(
+      run,
+      fight(rogue, monster("a")),
+      [attack(PLAYER_ACTOR, "weapon:phb:item/rapier", "a")],
+      dice(),
+      (decision) =>
+        decision.options.find((item) => item.label.includes("Trip"))?.id ??
+        DECLINE_ID,
+    );
+    expect(
+      done.decisions.some(({ id }) => id.startsWith(`${NS}:strike:`)),
+    ).toBe(true);
+    // One Sneak Attack die fewer than a hit that keeps them all.
+    const kept = settle(
+      run,
+      fight(rogue, monster("a")),
+      [attack(PLAYER_ACTOR, "weapon:phb:item/rapier", "a")],
+      dice(),
+      () => DECLINE_ID,
+    );
+    expect(damageTo(kept.events, "a") - damageTo(done.events, "a")).toBe(6);
+  });
+
+  it("Divine Fury adds Necrotic or Radiant damage on the first hit of a raging turn (#158)", () => {
+    const zealot = hero(
+      "barbarian",
+      3,
+      "phb:subclass/barbarian-path-of-the-zealot",
+    );
+    const raging = settle(
+      run,
+      fight(zealot, monster("a")),
+      [act(PLAYER_ACTOR, `${feature("barbarian-rage")}|${PLAYER_ACTOR}`)],
+      dice(),
+    ).state;
+    const types = (start: DndState) =>
+      payloads(
+        settle(
+          run,
+          start,
+          [attack(PLAYER_ACTOR, weaponOf(zealot), "a")],
+          dice(),
+        ).events,
+        "damaged",
+      ).map((item) => item.type);
+    expect(types(raging)).toContain("necrotic");
+    expect(types(fight(zealot, monster("a")))).not.toContain("necrotic");
   });
 });
 

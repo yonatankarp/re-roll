@@ -23,6 +23,7 @@ import {
   type Actor,
   CAST_ACTION,
   dndEvent,
+  fightingOn,
   hasCondition,
   INCAPACITATING,
   isDown,
@@ -89,63 +90,12 @@ export function runTakeAction(
   payload: z.infer<typeof TakeActionSchema>,
   context: Context,
 ): SystemResult {
-  const { state, dice } = context;
+  const { state } = context;
   const actor = actorOf(state, payload.actor);
 
   if (payload.answer === DEATH_SAVE) {
-    const stats = deriveStats(actor, context);
-    const { natural } = rollD20(dice, {
-      advantage: hasPassive(stats, "deathSaveAdvantage"),
-      disadvantage: false,
-      rerollOnes: hasPassive(stats, "rerollOnes"),
-    });
-    // Survivor's 18-20 count as a 20, and a Periapt of Wound Closure turns a failure into a 10.
-    const counts = stats.passives.reduce(
-      (roll, passive) =>
-        passive.kind !== "deathSaveRoll"
-          ? roll
-          : Math.max(
-              passive.twentyFrom !== undefined && natural >= passive.twentyFrom
-                ? 20
-                : roll,
-              passive.floor ?? 0,
-            ),
-      natural,
-    );
-    const events: SystemEvent[] = [
-      dndEvent(`${NS}:deathSaveRolled`, {
-        actor: actor.id,
-        natural,
-        ...(counts === natural ? {} : { counts }),
-      }),
-    ];
-    const failuresAfter =
-      actor.deathSaves.failures + (counts < 10 ? (counts === 1 ? 2 : 1) : 0);
-    if (counts !== 20 && failuresAfter >= 3) {
-      events.push({ kind: "actorDefeated", actor: actor.id });
-    }
-    // Defy Death: a success heals, once.
-    const heal = stats.passives.find(
-      (passive) =>
-        passive.kind === "deathSaveHeal" &&
-        (actor.resourcesSpent[passive.resource] ?? 0) <
-          (stats.resources[passive.resource] ?? 0),
-    );
-    if (counts >= 10 && heal?.kind === "deathSaveHeal") {
-      events.push(
-        dndEvent(`${NS}:resourceSpent`, {
-          actor: actor.id,
-          resource: heal.resource,
-        }),
-        dndEvent(`${NS}:healed`, {
-          actor: actor.id,
-          amount: Math.max(1, rollAmount(heal.amount, stats, dice)),
-          max: stats.maxHp,
-        }),
-      );
-    }
     return {
-      events,
+      events: deathSaveEvents(actor, context),
       frames: [CHECK_END, frame("endTurn", {})],
     };
   }
@@ -199,6 +149,66 @@ export function runTakeAction(
     return { frames: [aimFrame(actor, actionId, slot, context)] };
   }
   return castAction(actor, actionId, slot, targetId, context);
+}
+
+// A Death Saving Throw and what it leads to. One fighting on at 0 Hit Points as Rage beyond Death makes it too, as
+// its turn starts, and isn't defeated by a third failure until that ends.
+export function deathSaveEvents(actor: Actor, context: Context): SystemEvent[] {
+  const { dice } = context;
+  {
+    const stats = deriveStats(actor, context);
+    const { natural } = rollD20(dice, {
+      advantage: hasPassive(stats, "deathSaveAdvantage"),
+      disadvantage: false,
+      rerollOnes: hasPassive(stats, "rerollOnes"),
+    });
+    // Survivor's 18-20 count as a 20, and a Periapt of Wound Closure turns a failure into a 10.
+    const counts = stats.passives.reduce(
+      (roll, passive) =>
+        passive.kind !== "deathSaveRoll"
+          ? roll
+          : Math.max(
+              passive.twentyFrom !== undefined && natural >= passive.twentyFrom
+                ? 20
+                : roll,
+              passive.floor ?? 0,
+            ),
+      natural,
+    );
+    const events: SystemEvent[] = [
+      dndEvent(`${NS}:deathSaveRolled`, {
+        actor: actor.id,
+        natural,
+        ...(counts === natural ? {} : { counts }),
+      }),
+    ];
+    const failuresAfter =
+      actor.deathSaves.failures + (counts < 10 ? (counts === 1 ? 2 : 1) : 0);
+    if (counts !== 20 && failuresAfter >= 3 && !fightingOn(actor)?.delayDeath) {
+      events.push({ kind: "actorDefeated", actor: actor.id });
+    }
+    // Defy Death: a success heals, once.
+    const heal = stats.passives.find(
+      (passive) =>
+        passive.kind === "deathSaveHeal" &&
+        (actor.resourcesSpent[passive.resource] ?? 0) <
+          (stats.resources[passive.resource] ?? 0),
+    );
+    if (counts >= 10 && heal?.kind === "deathSaveHeal") {
+      events.push(
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: actor.id,
+          resource: heal.resource,
+        }),
+        dndEvent(`${NS}:healed`, {
+          actor: actor.id,
+          amount: Math.max(1, rollAmount(heal.amount, stats, dice)),
+          max: stats.maxHp,
+        }),
+      );
+    }
+    return events;
+  }
 }
 
 // Teleporting out of a prison that allows it, as a Forcecage: a save against its caster's spell save DC first. On a
@@ -316,7 +326,7 @@ function castAction(
   const caught = picked
     ? picked.map((id) => actorOf(state, id))
     : resolveTargets(targetId, action, actor, context);
-  const riders = castRiders(actor, action, slotLevel, context);
+  const riders = castRiders(actor, action, slotLevel, context, caught);
   const result: SystemResult =
     projectiles !== undefined && resolution.kind !== "save"
       ? {
@@ -535,6 +545,8 @@ export const UseActionSchema = z.object({
   target: z.string(),
   // At that creature whatever its side, as a confused or berserk creature's attack (combat/madness.ts).
   anyone: z.boolean().optional(),
+  // With nothing at all to pay, as a spell a Ring of Spell Turning sends back at its caster.
+  free: z.boolean().optional(),
 });
 
 // An action a Multiattack uses after its attacks: at their target if it still reaches it, or else the weakest
@@ -558,7 +570,9 @@ export function runUseAction(
     ...found,
     activation: {
       ...found.activation,
-      cost: found.activation.cost.filter((cost) => typeof cost === "object"),
+      cost: payload.free
+        ? []
+        : found.activation.cost.filter((cost) => typeof cost === "object"),
     },
   };
   if (!canAfford(action, actor, deriveStats(actor, context))) return {};

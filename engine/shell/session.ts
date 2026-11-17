@@ -795,6 +795,12 @@ export function createGame({
         sheet?.kind && sheet.kind !== sheet.title ? sheet.kind : null,
       health: health ? `${health.value} ${health.label}` : null,
       settings: (run.system.settings ?? []).flatMap((setting) => {
+        // A variant rule is named only when it's on.
+        if (setting.variant) {
+          return chosen[setting.id] === setting.options[1]?.id
+            ? [setting.label]
+            : [];
+        }
         const option = setting.options.find(
           (item) => item.id === chosen[setting.id],
         );
@@ -1188,6 +1194,33 @@ export function createGame({
               : {}),
           },
         ];
+      });
+    },
+
+    // The names in the run's own content, as its monsters, spells and features and the actions and traits in them,
+    // so a term's word inside one, as Giant in Giant Rat or Fey in Fey Step, isn't linked. Not lore, whose names are
+    // the rules terms themselves.
+    termNames(): readonly string[] {
+      const run = current?.run;
+      if (!run) return [];
+      const played = new Set(
+        Object.values(run.system.contentKinds)
+          .filter((kind) => !kind.lore)
+          .map((kind) => kind.idPrefix),
+      );
+      const namesIn = (value: unknown): string[] =>
+        Array.isArray(value)
+          ? value.flatMap(namesIn)
+          : value !== null && typeof value === "object"
+            ? Object.entries(value).flatMap(([key, item]) =>
+                key === "name" && typeof item === "string"
+                  ? [item]
+                  : namesIn(item),
+              )
+            : [];
+      return run.contentIds().flatMap((id) => {
+        const kind = /:([^/]+)\//.exec(id)?.[1];
+        return kind && played.has(kind) ? namesIn(run.content(id)) : [];
       });
     },
 

@@ -23,7 +23,12 @@ import {
 } from "../state.ts";
 import { distanceFeet, squareKey, type Square } from "../grid.ts";
 import { seeing } from "../sight.ts";
-import { DamageTypeSchema, type LeafEffect, WeaponSchema } from "../schemas.ts";
+import {
+  type Activation,
+  DamageTypeSchema,
+  type LeafEffect,
+  WeaponSchema,
+} from "../schemas.ts";
 import {
   damageResponses,
   deriveStats,
@@ -360,6 +365,7 @@ export const MomentSchema = z.object({
   from: z.object({ x: z.number(), y: z.number() }).optional(), // the square a walker entered from
   weapon: z.string().optional(), // the action of the weapon attack that missed, for Sticky Shield
   passed: z.array(z.string()).optional(), // creatures that already answered it or turned it down
+  dealt: z.number().optional(), // the damage the hit dealt, for "hitOther", as Rebuke the Violent echoes
 });
 export type Moment = z.infer<typeof MomentSchema>;
 
@@ -682,6 +688,28 @@ export function besideSquare(
 }
 
 // Takes the reaction: its costs, then what it does to the creature that set it off, or round the bearer.
+// The reaction with the damage that set it off in place of its `dealt` terms, as Rebuke the Violent's Radiant.
+function withDealt(action: KnownAction, dealt: number): KnownAction {
+  const mapped = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(mapped);
+    if (value === null || typeof value !== "object") return value;
+    const copy: Record<string, unknown> = Object.fromEntries(
+      Object.entries(value).map(([name, item]) => [name, mapped(item)]),
+    );
+    const terms = Array.isArray(copy.add)
+      ? (copy.add as { readonly kind: string }[])
+      : [];
+    return terms.some((term) => term.kind === "dealt")
+      ? {
+          ...copy,
+          base: (typeof copy.base === "number" ? copy.base : 0) + dealt,
+          add: terms.filter((term) => term.kind !== "dealt"),
+        }
+      : copy;
+  };
+  return { ...action, activation: mapped(action.activation) as Activation };
+}
+
 export function takeReaction(
   reactor: Actor,
   action: KnownAction,
@@ -700,7 +728,12 @@ export function takeReaction(
           : [];
   const events: SystemEvent[] = [...reactionCosts(reactor, action, context)];
   const frames: Frame[] = [];
-  const result = resolveAction(action, reactor, targets, context);
+  const result = resolveAction(
+    withDealt(action, moment.dealt ?? 0),
+    reactor,
+    targets,
+    context,
+  );
   events.push(...(result.events ?? []));
   frames.push(...(result.frames ?? []));
   events.push(...stuckEvents(action, moment, target, result.events ?? []));

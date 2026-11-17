@@ -252,6 +252,9 @@ export interface SystemSetting {
     readonly undo?: boolean; // lets the player take back their last choice, as a forgiving option
   }[];
   readonly default: string;
+  // A variant rule: its id names the rule's entity, its options are off (the default) then on, and the setup
+  // screen offers it folded away as a switch.
+  readonly variant?: true;
 }
 
 export interface RunSetup {
@@ -386,6 +389,11 @@ export interface SystemDefinition<S> {
   readonly nextDecision: (state: S, access: ContentAccess) => Decision | null;
   // The rests the rules allow right now, offered with each scene's choices.
   readonly rests?: (state: S) => readonly RestOption[];
+  // What happens to the system's state as the party enters a scene, as time passing for the dead.
+  readonly sceneEntered?: (
+    state: S,
+    access: ContentAccess,
+  ) => readonly SystemEvent[];
   // What the player may do between the scene's choices right now, offered with them.
   readonly sceneActions?: (
     state: S,

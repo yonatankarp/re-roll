@@ -543,16 +543,20 @@ export function runStoryFrame(
         state,
         AfterEncounterSchema.parse(frame.payload),
       );
-    case "story:enterScene":
+    case "story:enterScene": {
+      const passed = run.system.sceneEntered?.(state.system, run) ?? [];
+      assertOwnEvents(run, passed);
       return {
         events: [
           {
             kind: "sceneEntered",
             scene: EnterSceneSchema.parse(frame.payload).scene,
           },
+          ...passed,
         ],
         frames: [DIRECTOR_FRAME],
       };
+    }
     case "story:director":
       return runDirector(run, state, dice);
     default:

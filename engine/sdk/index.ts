@@ -34,6 +34,7 @@ export type {
   SystemContext,
   SystemDefinition,
   SystemResult,
+  SystemSetting,
   SystemOutcomes,
 } from "../kernel/system.ts";
 export { WORLD_KINDS, WorldEntrySchema } from "../kernel/world.ts";

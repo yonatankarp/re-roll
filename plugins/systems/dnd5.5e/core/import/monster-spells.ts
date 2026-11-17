@@ -1,6 +1,6 @@
 import type { Activation, Spell } from "../schemas.ts";
 import { SpellSchema } from "../schemas.ts";
-import { doesSomething } from "../stats.ts";
+import { doesSomething, scaleActivation } from "../stats.ts";
 import { slugOf } from "./spells.ts";
 
 // A monster's spells become ordinary actions with its own numbers, so play needs nothing a stat block doesn't have.
@@ -159,6 +159,9 @@ function upcast(
         }
       : null;
   }
+  if ("slotOnly" in step) return activation;
+  // A flat step (Heal's 10 more, Magic Weapon's +2) needs no dice to match.
+  if (!step.addDice) return scaleActivation(activation, step, times);
   const { resolution } = activation;
   const [first, ...rest] = "damage" in resolution ? resolution.damage : [];
   if (first?.amount.dice) {

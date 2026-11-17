@@ -34,11 +34,18 @@ describe("a book's Skills table (#187)", () => {
     expect(skillRows("Just words.")).toEqual([]);
   });
 
-  it("gives the hover each skill, capitalized only, but no creature type", () => {
+  it("gives the hover each skill, capitalized only, and each creature type, one or many, from the Monster Manual", () => {
     const words = (id: string) =>
       GLOSSARY_TERMS.find((term) => term.id === id)?.words;
     expect(words("skill:sleightOfHand")).toEqual(["Sleight of Hand"]);
     expect(words("skill:animalHandling")).toEqual(["Animal Handling"]);
-    expect(words("creature-type:undead")).toBeUndefined();
+    expect(words("creature-type:undead")).toEqual(["Undead"]);
+    expect(words("creature-type:monstrosity")).toEqual([
+      "Monstrosity",
+      "Monstrosities",
+    ]);
+    expect(
+      GLOSSARY_TERMS.find((term) => term.id === "creature-type:dragon")?.books,
+    ).toEqual(["monster-manual"]);
   });
 });
