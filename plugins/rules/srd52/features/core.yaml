@@ -140,7 +140,8 @@
 - id: "srd52:feature/remarkable-athlete"
   name: Remarkable Athlete
   text: "You have Advantage on Initiative rolls and Strength (Athletics) checks."
-  automation: full
+  automation: partial
+  # shortcut: the move after a Critical Hit isn't given.
   passives:
     - { kind: initiativeAdvantage }
     - kind: modifier

@@ -606,7 +606,8 @@ function bonusTacticOptions(
       label: "Search as a Bonus Action (Perception)",
     });
   }
-  if (allowed.has("study")) {
+  // Study is the player's, as its action is (tacticOptions).
+  if (allowed.has("study") && actor.id === PLAYER_ACTOR) {
     for (const foe of standing(knownFoes(state, actor, access))) {
       options.push({
         id: encodeOption(BONUS_STUDY, foe.id),

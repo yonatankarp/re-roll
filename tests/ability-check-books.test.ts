@@ -14,7 +14,11 @@ import {
   step,
 } from "../engine/run/turn.ts";
 import { hasFlag } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
-import { SpellSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import {
+  type CharacterBuild,
+  SpellSchema,
+} from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import { swappable } from "../plugins/systems/dnd5.5e/core/swap.ts";
 import {
   type Actor,
   NS,
@@ -33,7 +37,8 @@ const BOOKS =
   existsSync("books/rules/phb") &&
   existsSync("books/rules/dmg") &&
   existsSync("books/rules/arcana-unleashed-deadfall") &&
-  existsSync("books/rules/eberron-forge-of-the-artificer");
+  existsSync("books/rules/eberron-forge-of-the-artificer") &&
+  existsSync("books/rules/ravenloft-horrors-within");
 
 let run: RunContext;
 
@@ -50,15 +55,17 @@ beforeAll(async () => {
     "dmg",
     "arcana-unleashed-deadfall",
     "eberron-forge-of-the-artificer",
+    "ravenloft-horrors-within",
   ]);
   if (!loaded.ok) throw new Error(JSON.stringify(loaded.issues));
   run = createRunContext(loaded.registry, "goblin-ambush");
 });
 
-// The fighter pregen with these features and these items worn.
+// The fighter pregen with these features and these items worn, and these answers too.
 function fighter(
   features: readonly string[],
   items: readonly string[] = [],
+  answers: CharacterBuild["levels"][number]["answers"] = [],
 ): Actor {
   const chosen = step(run, startRun(run, "books").state, {
     kind: "answer",
@@ -85,6 +92,7 @@ function fighter(
             answers: [
               ...first.answers,
               { kind: "features", values: [...features] },
+              ...answers,
             ],
           },
           ...rest,
@@ -157,6 +165,22 @@ describe.skipIf(!BOOKS)("the book's check entries", () => {
     expect(
       deriveStats(fighter([mark, greater]), run).scaling.intuitionDie,
     ).toBe(6);
+  });
+
+  it("still plays an Echoing Soul taken before its Expertise pick existed", () => {
+    const feat = "ravenloft-horrors-within:feat/echoing-soul";
+    const older = fighter(
+      [],
+      [],
+      [
+        { kind: "feats", values: [feat] },
+        { kind: "skills", values: ["arcana", "history"], feat },
+      ],
+    );
+    const stats = deriveStats(older, run);
+    expect(stats.skills).toEqual(expect.arrayContaining(["arcana", "history"]));
+    expect(stats.expertise).toEqual([]);
+    expect(swappable(older, run)).toEqual([]);
   });
 
   it("lets Guidance's caster pick the skill", () => {
