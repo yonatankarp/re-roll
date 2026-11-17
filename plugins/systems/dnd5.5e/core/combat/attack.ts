@@ -16,7 +16,7 @@ import {
   frame,
 } from "../state.ts";
 import { ALL, DECLINE, encodeOption, parseOption } from "./ids.ts";
-import { forgoAdvantageFrame, forgoFrame } from "./strikes.ts";
+import { forgoAdvantageFrame, forgoFrame, SNEAK_DICE } from "./strikes.ts";
 import { aroundHit, replaceHitFrame, runReplaceHit } from "./ranged-smite.ts";
 import { againstTarget, missFrames, runApplyMiss } from "./spell-riders.ts";
 import { duelBroken, duelDamaged, duelHampers } from "./duel.ts";
@@ -1336,7 +1336,10 @@ function deathStruck(
   context: Context,
 ): { readonly doubled: boolean; readonly events: SystemEvent[] } | null {
   const passive = stats.passives.find(({ kind }) => kind === "deathStrike");
-  if (passive?.kind !== "deathStrike" || (context.state.combat?.round ?? 1) > 1) {
+  if (
+    passive?.kind !== "deathStrike" ||
+    (context.state.combat?.round ?? 1) > 1
+  ) {
     return null;
   }
   const save = rollSave(
@@ -1488,11 +1491,12 @@ function landHit(
     const key = `extra:${String(index)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return;
     if (!extraFits(passive, attacker, target, action, edge, context)) return;
-    if (passive.diceCount) sneaked = true;
+    if (passive.diceCount === SNEAK_DICE) sneaked = true;
     // Cunning Strike's options give up some of Sneak Attack's dice before they're rolled.
-    const dice_ = passive.diceCount
-      ? fewerDice(passive.dice, payload.forgone ?? 0)
-      : passive.dice;
+    const dice_ =
+      passive.diceCount === SNEAK_DICE
+        ? fewerDice(passive.dice, payload.forgone ?? 0)
+        : passive.dice;
     const rolled =
       (dice_ ? rollDiceNotation(dice_, dice, multiplier) : 0) +
       (passive.bonus ? evaluateFormula(passive.bonus, stats) : 0);
@@ -2390,7 +2394,7 @@ function sneakLanded(attacker: Actor, stats: Stats): boolean {
   return stats.passives.some(
     (passive, index) =>
       passive.kind === "extraDamage" &&
-      passive.diceCount !== undefined &&
+      passive.diceCount === SNEAK_DICE &&
       attacker.usedThisTurn.includes(`extra:${String(index)}`),
   );
 }

@@ -25,6 +25,9 @@ interface Struck {
   readonly strikes?: readonly string[] | undefined;
 }
 
+// Sneak Attack's extra damage is the extraDamage passive whose dice count is this class scaling key.
+export const SNEAK_DICE = "sneakAttackD6";
+
 // How many strike options one hit takes.
 export function strikeLimit(stats: Stats): number {
   return stats.passives.reduce(
@@ -46,7 +49,7 @@ export function sneakDice(
   const index = stats.passives.findIndex(
     (passive) =>
       passive.kind === "extraDamage" &&
-      passive.diceCount !== undefined &&
+      passive.diceCount === SNEAK_DICE &&
       !(
         passive.oncePerTurn &&
         attacker.usedThisTurn.includes(
@@ -162,7 +165,10 @@ export function forgoFrame(
     options,
     `${attacker.name}'s Sneak Attack lands on ${target.name} (${String(left)} dice). Trade dice for a strike?`,
     frame("strikeChosen", hit),
-    (action) => ` (${String(action.activation.trigger?.forgo ?? 0)} dice)`,
+    (action) => {
+      const forgo = action.activation.trigger?.forgo ?? 0;
+      return ` (${String(forgo)} ${forgo === 1 ? "die" : "dice"})`;
+    },
   );
 }
 

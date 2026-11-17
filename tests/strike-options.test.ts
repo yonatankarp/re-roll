@@ -35,7 +35,7 @@ const RECKLESS = "test:feature/reckless";
 
 const FIXTURES = [
   trait("sneak", [
-    { kind: "extraDamage", dice: "3d6", diceCount: "none", when: "advantage" },
+    { kind: "extraDamage", dice: "3d6", diceCount: "sneakAttackD6", when: "advantage" },
   ]),
   trait("cunning", [], {
     activations: [
@@ -255,7 +255,7 @@ describe("strike options", () => {
     expect(asked?.id).toBe(`${NS}:strike:${PLAYER_ACTOR}`);
     // Knock Out costs 6 dice, more than the 3 the hit carries.
     expect(asked?.options.map((item) => item.label)).toEqual([
-      "cunning (Trip) (1 dice)",
+      "cunning (Trip) (1 die)",
       "None",
     ]);
     // The shortsword's d6 and two Sneak Attack dice, then nothing else.
