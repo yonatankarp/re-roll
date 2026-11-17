@@ -5,7 +5,7 @@ import {
   moveSquares,
   speedLeft,
 } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
-import { dropToOneEvents } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
+import { damageEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { partySight } from "../plugins/systems/dnd5.5e/core/fog.ts";
 import { codeKeys, squareKey } from "../plugins/systems/dnd5.5e/core/grid.ts";
 import { makeJudge } from "../plugins/systems/dnd5.5e/core/worth.ts";
@@ -59,13 +59,25 @@ const FIXTURES = [
   ]),
   trait("nimble", [through({ creatures: "larger" })]),
   trait("leaper", [{ kind: "jump", runUp: 5 }]),
-  trait("misty", [
+  trait(
+    "misty",
+    [
+      {
+        kind: "dropToOne",
+        resource: "misty",
+        effects: [{ kind: "movementMode", mode: "fly", feet: 20 }],
+      },
+    ],
     {
-      kind: "dropToOne",
-      resource: "misty",
-      effects: [{ kind: "movementMode", mode: "fly", feet: 20 }],
+      resources: [
+        {
+          id: "misty",
+          max: { base: 1 },
+          recharge: [{ on: "longRest", amount: "all" }],
+        },
+      ],
     },
-  ]),
+  ),
   trait("winged", [], {
     resources: [
       {
@@ -321,15 +333,16 @@ describe("movement modes", () => {
   it("drops to 1 Hit Point with a Fly Speed, as Boon of Misty Escape's Gaseous Form", async () => {
     const content = await run();
     const misty = { ...at(hero(["misty"]), 0, 0), hp: 5 };
-    const stats = deriveStats(misty, content);
-    const events = dropToOneEvents(
-      misty,
-      9,
-      4,
-      { type: "slashing", critical: false },
-      { ...stats, resources: { ...stats.resources, misty: 1 } },
-    );
-    expect(events?.map((event) => event.kind)).toContain("dnd5.5e:effectAdded");
+    const state: DndState = {
+      actors: { [misty.id]: misty },
+      combat: null,
+    };
+    const events = damageEvents(misty, 9, "slashing", false, {
+      ...content,
+      state,
+      dice: createDice(rngFromSeed("misty")),
+    });
+    expect(events.map((event) => event.kind)).toContain("dnd5.5e:effectAdded");
   });
 
   it("finds foes on the ground with Tremorsense, hidden or not, but not flyers", async () => {

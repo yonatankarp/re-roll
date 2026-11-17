@@ -166,7 +166,6 @@ export function castRiders(
   action: KnownAction,
   context: Context,
 ): SystemEvent[] {
-  if (action.spellLevel === null) return [];
   const { resolution } = action.activation;
   const types = new Set([
     ...resolution.damage.map(({ type }) => type),
@@ -174,8 +173,17 @@ export function castRiders(
       ? resolution.onHitSave.damage.map(({ type }) => type)
       : []),
   ]);
+  const used = (id: string): boolean =>
+    [`spell:${id}`, `feature:${id}`].some(
+      (prefix) => action.id === prefix || action.id.startsWith(`${prefix}:`),
+    );
   return deriveStats(actor, context).passives.flatMap((passive) =>
-    passive.kind === "castRider" && types.has(passive.damage)
+    passive.kind === "castRider" &&
+    (passive.uses
+      ? passive.uses.some(used)
+      : action.spellLevel !== null &&
+        passive.damage !== undefined &&
+        types.has(passive.damage))
       ? leafEvents(
           passive.effects,
           `castRider:${action.id}`,

@@ -262,68 +262,6 @@ export function repeatSaveConditions(actor: Actor, sourceId: string): string[] {
   );
 }
 
-// Relentless Endurance: a hit that would drop the target to 0 Hit Points, without killing it outright, leaves it
-// at 1 instead and spends the trait's use. Null when it doesn't apply.
-export function dropToOneEvents(
-  target: Actor,
-  amount: number,
-  remaining: number,
-  hit: { readonly type: DamageType; readonly critical: boolean },
-  stats: Stats,
-): SystemEvent[] | null {
-  if (target.hp <= 0 || remaining < 0) return null;
-  // Death Ward holds even against damage that would kill outright, and ends.
-  const ward = target.activeEffects.find(
-    ({ modifier }) => modifier.kind === "deathWard",
-  );
-  if (ward) {
-    return [
-      dndEvent(`${NS}:effectEnded`, {
-        actor: target.id,
-        sourceId: ward.sourceId,
-      }),
-      dndEvent(`${NS}:damaged`, {
-        actor: target.id,
-        amount: amount - remaining - 1,
-        ...hit,
-        massive: false,
-      }),
-    ];
-  }
-  const outright = target.side === "party" && remaining >= stats.maxHp;
-  if (outright) return null;
-  const trait = stats.passives.find(
-    (passive) =>
-      passive.kind === "dropToOne" &&
-      (target.resourcesSpent[passive.resource] ?? 0) <
-        (stats.resources[passive.resource] ?? 0),
-  );
-  if (trait?.kind !== "dropToOne") return null;
-  return [
-    dndEvent(`${NS}:resourceSpent`, {
-      actor: target.id,
-      resource: trait.resource,
-    }),
-    dndEvent(`${NS}:damaged`, {
-      actor: target.id,
-      amount: amount - remaining - 1,
-      ...hit,
-      massive: false,
-    }),
-    ...trait.effects.map((modifier) =>
-      dndEvent(`${NS}:effectAdded`, {
-        actor: target.id,
-        effect: {
-          sourceId: trait.resource,
-          casterId: target.id,
-          modifier,
-          ends: "spellDuration",
-        },
-      }),
-    ),
-  ];
-}
-
 // A failed save turned into a success by a trait, as Mage Slayer's Guarded Mind or Survivor's Steel Yourself do:
 // the events that pay for it, or none when nothing rescues it. `rolled` holds the save's own events, for its total.
 // `pending` holds the events not yet applied, so two saves in one step can't spend the same use.
@@ -494,6 +432,15 @@ export function hitDieRoll(die: string, stats: Stats, dice: Dice): number {
   );
   if (rules.some(({ highest }) => highest)) return sides;
   return Math.max(dice.roll(sides), ...rules.map(({ floor = 1 }) => floor));
+}
+
+// What a Hit Point Die spent to heal restores, twice over with a Periapt of Wound Closure.
+export function hitDieHealing(amount: number, stats: Stats): number {
+  return stats.passives.some(
+    (passive) => passive.kind === "hitDieRolls" && passive.double,
+  )
+    ? amount * 2
+    : amount;
 }
 
 // The die a character's next unspent Hit Point Die is, in level order as resting spends them, or null for none.

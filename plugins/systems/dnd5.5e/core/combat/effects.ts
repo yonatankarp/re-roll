@@ -57,12 +57,12 @@ import {
 } from "../schemas.ts";
 import { multiattackUses } from "../multiattack-uses.ts";
 import {
-  dropToOneEvents,
   HIGHEST,
   masteredDice,
   maximized,
   masteredTypes,
   rerolledTypes,
+  hitDieHealing,
   hitDieRoll,
   nextHitDie,
   piercing,
@@ -465,20 +465,15 @@ function takenEvents(
       }),
     ];
   }
-  const endured = fortitude
+  const tried = fortitude
     ? null
-    : dropToOneEvents(
-        target,
-        amount,
-        remaining,
-        { type, critical },
-        deriveStats(target, context),
-      );
-  if (endured) return endured;
+    : enduredEvents(target, amount, remaining, { type, critical }, context);
+  if (tried?.endured) return [...tried.rolled, ...tried.endured];
   const massive =
     target.side === "party" && remaining >= deriveStats(target, context).maxHp;
   const events: SystemEvent[] = [
     ...(fortitude?.events ?? []),
+    ...(tried?.rolled ?? []),
     dndEvent(`${NS}:damaged`, {
       actor: target.id,
       amount,
@@ -497,6 +492,238 @@ function takenEvents(
     events.push({ kind: "actorDowned", actor: target.id });
   }
   return events;
+}
+
+// A hit that would drop the target to 0 Hit Points without killing it outright leaves it at 1 instead, or at a trait's
+// `hp`, as Relentless Endurance or Relentless Rage do: the events, or null when nothing holds it. Death Ward comes
+// first, then the target's own traits, then an ally's that hold for allies too, as Gift of the Protectors. `rolled`
+// holds the saves tried on the way, which stand either way.
+function enduredEvents(
+  target: Actor,
+  amount: number,
+  remaining: number,
+  hit: { readonly type: DamageType; readonly critical: boolean },
+  context: Context,
+): { rolled: SystemEvent[]; endured: SystemEvent[] | null } | null {
+  if (target.hp <= 0 || remaining < 0) return null;
+  const toOne = amount - remaining - 1;
+  const ward = target.activeEffects.find(
+    ({ modifier }) => modifier.kind === "deathWard",
+  );
+  if (ward) {
+    return {
+      rolled: [],
+      endured: [
+        dndEvent(`${NS}:effectEnded`, {
+          actor: target.id,
+          sourceId: ward.sourceId,
+        }),
+        dndEvent(`${NS}:damaged`, {
+          actor: target.id,
+          amount: toOne,
+          ...hit,
+          massive: false,
+        }),
+      ],
+    };
+  }
+  const stats = deriveStats(target, context);
+  if (target.side === "party" && remaining >= stats.maxHp) return null;
+  const bearers = [
+    target,
+    ...Object.values(context.state.actors).filter(
+      (other) =>
+        other.id !== target.id && other.side === target.side && !isDead(other),
+    ),
+  ];
+  const rolled: SystemEvent[] = [];
+  for (const bearer of bearers) {
+    const own = deriveStats(bearer, context);
+    for (const trait of own.passives) {
+      if (
+        trait.kind !== "dropToOne" ||
+        (bearer !== target && !trait.allies) ||
+        (bearer.resourcesSpent[trait.resource] ?? 0) >=
+          (own.resources[trait.resource] ?? 0) ||
+        trait.except?.includes(hit.type) ||
+        (trait.notCritical && hit.critical) ||
+        (trait.while &&
+          !bearer.activeEffects.some(({ sourceId }) =>
+            trait.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+          ))
+      ) {
+        continue;
+      }
+      if (trait.save) {
+        const save = rollSave(
+          target,
+          trait.save.ability,
+          trait.save.dc +
+            (trait.save.step ?? 0) *
+              (bearer.resourcesSpent[trait.resource] ?? 0) +
+            (trait.save.plusDamage ? amount : 0),
+          context,
+        );
+        rolled.push(...save.events);
+        if (!save.saved) continue;
+      }
+      const hp = trait.hp
+        ? Math.min(stats.maxHp, Math.max(1, evaluateFormula(trait.hp, own)))
+        : 1;
+      const endured = [
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: bearer.id,
+          resource: trait.resource,
+        }),
+        ...(trait.burst
+          ? burstEvents(target, target, trait.burst, context)
+          : []),
+        dndEvent(`${NS}:damaged`, {
+          actor: target.id,
+          amount: toOne,
+          ...hit,
+          massive: false,
+        }),
+        ...(hp > 1
+          ? [
+              dndEvent(`${NS}:healed`, {
+                actor: target.id,
+                amount: hp - 1,
+                max: stats.maxHp,
+              }),
+            ]
+          : []),
+        ...(trait.exhaustion
+          ? [
+              dndEvent(`${NS}:exhaustionChanged`, {
+                actor: target.id,
+                levels: trait.exhaustion,
+              }),
+            ]
+          : []),
+        ...trait.effects.map((modifier) =>
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: {
+              sourceId: trait.resource,
+              casterId: target.id,
+              modifier,
+              ends: "spellDuration",
+            },
+          }),
+        ),
+      ];
+      return { rolled, endured };
+    }
+  }
+  return { rolled, endured: null };
+}
+
+// A foe that just dropped to 0 Hit Points feeds its enemies' traits, as Dark One's Blessing.
+// shortcut: the creature whose turn it is counts as the one that dropped it, as most damage comes on its own turn.
+function killEvents(fallen: Actor, context: Context): SystemEvent[] {
+  const turn = context.state.combat
+    ? context.state.combat.order[context.state.combat.index]
+    : undefined;
+  return Object.values(context.state.actors).flatMap((bearer) => {
+    if (bearer.side === fallen.side || isDown(bearer)) return [];
+    const stats = deriveStats(bearer, context);
+    return stats.passives.flatMap((passive) => {
+      if (
+        passive.kind !== "onKill" ||
+        (passive.within !== undefined &&
+          !(passive.mine && turn === bearer.id) &&
+          distanceFeet(bearer.position, fallen.position) > passive.within) ||
+        (passive.resource !== undefined &&
+          (bearer.resourcesSpent[passive.resource] ?? 0) >=
+            (stats.resources[passive.resource] ?? 0)) ||
+        (passive.reaction &&
+          (!bearer.budget.reaction || hasCondition(bearer, ...INCAPACITATING)))
+      ) {
+        return [];
+      }
+      return [
+        ...(passive.resource
+          ? [
+              dndEvent(`${NS}:resourceSpent`, {
+                actor: bearer.id,
+                resource: passive.resource,
+              }),
+            ]
+          : []),
+        ...(passive.reaction
+          ? [
+              dndEvent(`${NS}:budgetSpent`, {
+                actor: bearer.id,
+                kind: "reaction",
+              }),
+            ]
+          : []),
+        ...leafEvents(
+          passive.effects,
+          `onKill:${fallen.id}`,
+          bearer,
+          bearer,
+          context,
+        ),
+      ];
+    });
+  });
+}
+
+// Damage to each foe of `source` within `radius` feet of `origin`, halved by a save against the source's spell save
+// DC when there is one, as Necrotic Husk's Unholy Resuscitation, and with `blind` Blinded until the origin's turn ends,
+// as Searing Vengeance. shortcut: no Concentration saves or reactions follow, as for a trap's damage.
+export function burstEvents(
+  origin: Actor,
+  source: Actor,
+  burst: {
+    readonly radius: number;
+    readonly save?: Ability | undefined;
+    readonly damage: Amount;
+    readonly type: DamageType;
+    readonly blind?: boolean;
+  },
+  context: Context,
+): SystemEvent[] {
+  const stats = deriveStats(source, context);
+  const dc = spellSaveDc(stats);
+  return Object.values(context.state.actors).flatMap((foe) => {
+    if (
+      foe.side === source.side ||
+      isDead(foe) ||
+      !foe.position ||
+      distanceFeet(origin.position, foe.position) > burst.radius
+    ) {
+      return [];
+    }
+    const save = burst.save
+      ? rollSave(foe, burst.save, dc, context, true)
+      : { saved: false, events: [] };
+    const rolled = rollAmount(burst.damage, stats, context.dice);
+    return [
+      ...save.events,
+      ...dealEvents(
+        foe,
+        [{ amount: save.saved ? halved(rolled) : rolled, type: burst.type }],
+        false,
+        context,
+      ).events,
+      ...(burst.blind
+        ? [
+            dndEvent(`${NS}:effectAdded`, {
+              actor: foe.id,
+              effect: {
+                sourceId: `${source.id}:burst`,
+                casterId: origin.id,
+                modifier: { kind: "condition", condition: "blinded" },
+                ends: "casterTurnEnd",
+              },
+            }),
+          ]
+        : []),
+    ];
+  });
 }
 
 // Several hits on one target, reported in turn so each one sees the HP the last one left.
@@ -635,6 +862,7 @@ export function dealEvents(
         }),
       );
     }
+    events.push(...killEvents(target, { ...context, state }));
   }
   for (const effect of dealt > 0 ? (hurt?.activeEffects ?? []) : []) {
     if (!hurt || !effect.saveOnDamage) continue;
@@ -762,6 +990,25 @@ export function sharedHealing(
   caster: Actor,
   context: Context,
 ): (target: Actor) => readonly LeafEffect[] {
+  // shortcut: Temporary Hit Points to divide go evenly, as the caster may share them out any way.
+  const split = effects.find(
+    (effect) => effect.kind === "tempHp" && effect.divided,
+  );
+  if (split?.kind === "tempHp") {
+    const each = Math.floor(
+      rollAmount(split.amount, deriveStats(caster, context), context.dice) /
+        Math.max(1, targets.length),
+    );
+    return () =>
+      effects.map((effect) =>
+        effect === split
+          ? {
+              kind: "tempHp" as const,
+              amount: { bonus: { base: each, add: [] } },
+            }
+          : effect,
+      );
+  }
   const divided = effects.find(
     (effect) => effect.kind === "heal" && effect.divided,
   );
@@ -799,6 +1046,8 @@ export function sharedHealing(
         : [];
     });
 }
+
+const FORTIFIED = "fortified-health";
 
 const MEAN: Dice = { below: () => 0, roll: (sides) => (sides + 1) / 2 };
 
@@ -931,11 +1180,32 @@ export function leafEvents(
         const rolled = effect.full
           ? max
           : (pool?.healed ?? rollAmount(effect.amount, stats, dice));
+        // Fortified Health: once a turn, healing gives the Constitution modifier more.
+        const fortified = deriveStats(target, context).passives.find(
+          (passive) => passive.kind === "healBonus",
+        );
+        const bonus =
+          fortified?.kind === "healBonus" &&
+          !target.usedThisTurn.includes(FORTIFIED) &&
+          rolled < room
+            ? Math.max(
+                0,
+                evaluateFormula(fortified.amount, deriveStats(target, context)),
+              )
+            : 0;
+        if (bonus > 0) {
+          events.push(
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: target.id,
+              key: FORTIFIED,
+            }),
+          );
+        }
         // Healing beyond the maximum is lost, so only what's really gained is reported.
         events.push(
           dndEvent(`${NS}:healed`, {
             actor: target.id,
-            amount: Math.min(rolled, room),
+            amount: Math.min(rolled + bonus, room),
             max,
           }),
         );
@@ -982,6 +1252,9 @@ export function leafEvents(
           ),
         );
         break;
+      case "drainMaxHp": // dealt with by the save it follows, which knows the damage
+      case "disintegrate":
+        break;
       case "repose":
         if (isDead(target)) {
           events.push(dndEvent(`${NS}:reposed`, { actor: target.id }));
@@ -992,9 +1265,11 @@ export function leafEvents(
         const die = nextHitDie(target, context);
         if (!die || unhealed || cannotHeal(target)) break;
         const max = deriveStats(target, context).maxHp;
-        const rolled =
+        const rolled = hitDieHealing(
           hitDieRoll(die, deriveStats(target, context), healDice) +
-          evaluateFormula(effect.bonus, stats);
+            evaluateFormula(effect.bonus, stats),
+          deriveStats(target, context),
+        );
         events.push(
           dndEvent(`${NS}:resourceSpent`, {
             actor: target.id,
@@ -2104,6 +2379,7 @@ export function resolveAction(
 
   let ridden = false;
   const overload = { prone: false };
+  let lastDealt = 0;
   const applyRolled = (
     target: Actor,
     damage: readonly {
@@ -2125,6 +2401,7 @@ export function resolveAction(
       false,
       context,
     );
+    lastDealt = result.dealt;
     events.push(
       ...result.events,
       ...insideDamageEvents(actor, target, result.dealt),
@@ -2463,6 +2740,25 @@ export function resolveAction(
         modifierFor(stats, "cha"),
       );
       for (const struck of targets) {
+        if (resolution.heard && hasCondition(struck, "deafened")) continue;
+        // Wail of the Banshee: a target with few enough Hit Points dies, and only the others save.
+        if (
+          resolution.slayAtMost !== undefined &&
+          struck.hp > 0 &&
+          struck.hp <= resolution.slayAtMost
+        ) {
+          events.push(
+            dndEvent(`${NS}:damaged`, {
+              actor: struck.id,
+              amount: struck.hp + struck.tempHp,
+              type: resolution.damage[0]?.type ?? "psychic",
+              critical: false,
+              massive: true,
+            }),
+            { kind: "actorDefeated", actor: struck.id },
+          );
+          continue;
+        }
         // Banishing Smite: the damage lands first, and only a target it leaves low enough saves.
         const landed = resolution.hpAtMost !== undefined;
         if (landed) applyRolled(struck, damage(struck), (amount) => amount);
@@ -2572,6 +2868,7 @@ export function resolveAction(
             ? interposedShield(target, deriveStats(target, context), context)
             : null;
         if (interposed) events.push(interposed);
+        lastDealt = 0;
         if (!landed) {
           applyRolled(target, damage(target), (amount) => {
             if (turned) return 0;
@@ -2595,6 +2892,53 @@ export function resolveAction(
             slotLevel,
           ),
         );
+        // Harm: the damage taken comes off the Hit Point maximum too.
+        if (
+          !saved &&
+          !turned &&
+          lastDealt > 0 &&
+          resolution.onFail.some((effect) => effect.kind === "drainMaxHp")
+        ) {
+          const now = events.reduce(applyDndEvent, context.state).actors[
+            target.id
+          ];
+          const max = Math.max(
+            1,
+            deriveStats(target, context).maxHp - lastDealt,
+          );
+          if (now) {
+            events.push(
+              dndEvent(`${NS}:maxHpReduced`, {
+                actor: target.id,
+                amount: lastDealt,
+                ...(now.hp > max ? { hp: max } : {}),
+              }),
+            );
+          }
+        }
+        // Disintegrate: a character it drops is dust, past death saves.
+        if (
+          !saved &&
+          !turned &&
+          target.side === "party" &&
+          resolution.onFail.some((effect) => effect.kind === "disintegrate")
+        ) {
+          const now = events.reduce(applyDndEvent, context.state).actors[
+            target.id
+          ];
+          if (now && now.hp <= 0 && !isDead(now)) {
+            events.push(
+              dndEvent(`${NS}:damaged`, {
+                actor: target.id,
+                amount: 0,
+                type: "force",
+                critical: false,
+                massive: true,
+              }),
+              { kind: "actorDefeated", actor: target.id },
+            );
+          }
+        }
         if (!saved) {
           const forced = forcedAttack(
             resolution.onFail,

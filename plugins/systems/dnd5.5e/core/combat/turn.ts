@@ -20,6 +20,7 @@ import {
   INCAPACITATING,
   isDead,
   isDown,
+  isStable,
   NS,
   frame,
 } from "../state.ts";
@@ -55,7 +56,12 @@ import {
   currentActor,
   hasPassive,
 } from "./queries.ts";
-import { concentrationFrame, dealEvents, rollSave } from "./effects.ts";
+import {
+  burstEvents,
+  concentrationFrame,
+  dealEvents,
+  rollSave,
+} from "./effects.ts";
 import { releasedGrapples } from "./grapple.ts";
 import { distanceFeet } from "../grid.ts";
 import { regurgitationEvents, releasedSwallows } from "./swallow.ts";
@@ -487,6 +493,7 @@ export function runFinishTurn(context: Context): SystemResult {
     ...regurgitationEvents(context),
     ...(actor ? rechargeEvents(actor, context) : []),
     ...(actor ? shakeOffEvents(actor, context) : []),
+    ...(actor ? regenerationEvents(actor, context, true) : []),
     ...(actor ? regrowEvents(actor, context) : []),
     ...(actor ? expiredEvents(state, actor.id, "end") : []),
   ];
@@ -538,9 +545,11 @@ export function runAdvanceTurn(
   const events = [
     ...finished,
     ...expired,
+    ...(next ? rescueEvents(next, { ...context, state: after }) : []),
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
+    ...(next ? sharedTempHp(next, { ...context, state: after }) : []),
     ...(next ? turnInspiration(next, { ...context, state: after }) : []),
     ...(next ? fogBoundEvents(next, { ...context, state: after }) : []),
     ...antimagicEvents(after),
@@ -574,6 +583,83 @@ export function runAdvanceTurn(
         frames: [...ticks, ...watched, frame("afterTurnStart", {})],
       }
     : { events };
+}
+
+// Life-Giving Force: Temporary Hit Points for the ally nearby that has the fewest Hit Points left.
+function sharedTempHp(actor: Actor, context: Context): SystemEvent[] {
+  if (isDown(actor)) return [];
+  const stats = deriveStats(actor, context);
+  return stats.passives.flatMap((passive) => {
+    if (
+      passive.kind !== "turnTempHp" ||
+      !actor.activeEffects.some(({ sourceId }) =>
+        passive.while.some((id) => sourceId.startsWith(`feature:${id}:`)),
+      )
+    ) {
+      return [];
+    }
+    const [ally] = Object.values(context.state.actors)
+      .filter(
+        (other) =>
+          other.id !== actor.id &&
+          other.side === actor.side &&
+          !isDead(other) &&
+          distanceFeet(actor.position, other.position) <= passive.within,
+      )
+      .sort((a, b) => a.hp + a.tempHp - (b.hp + b.tempHp));
+    return ally
+      ? [
+          dndEvent(`${NS}:tempHpGained`, {
+            actor: ally.id,
+            amount: rollAmount(passive.amount, stats, context.dice),
+          }),
+        ]
+      : [];
+  });
+}
+
+// Searing Vengeance: a creature about to make a Death Saving Throw as its turn starts springs back up instead, with
+// half its Hit Points, and a burst of light round it.
+function rescueEvents(actor: Actor, context: Context): SystemEvent[] {
+  if (actor.side !== "party" || actor.hp > 0 || isDead(actor)) return [];
+  if (isStable(actor)) return [];
+  for (const bearer of Object.values(context.state.actors)) {
+    if (bearer.side !== actor.side || isDead(bearer)) continue;
+    const stats = deriveStats(bearer, context);
+    const rescue = stats.passives.find(
+      (passive) =>
+        passive.kind === "deathSaveRescue" &&
+        (bearer.resourcesSpent[passive.resource] ?? 0) <
+          (stats.resources[passive.resource] ?? 0) &&
+        (bearer.id === actor.id ||
+          (passive.within !== undefined &&
+            !isDown(bearer) &&
+            distanceFeet(bearer.position, actor.position) <= passive.within)),
+    );
+    if (rescue?.kind !== "deathSaveRescue") continue;
+    const { maxHp } = deriveStats(actor, context);
+    return [
+      dndEvent(`${NS}:resourceSpent`, {
+        actor: bearer.id,
+        resource: rescue.resource,
+      }),
+      dndEvent(`${NS}:healed`, {
+        actor: actor.id,
+        amount: halved(maxHp),
+        max: maxHp,
+      }),
+      ...(hasCondition(actor, "prone")
+        ? [
+            dndEvent(`${NS}:conditionRemoved`, {
+              actor: actor.id,
+              condition: "prone",
+            }),
+          ]
+        : []),
+      ...burstEvents(actor, bearer, { ...rescue, blind: true }, context),
+    ];
+  }
+  return [];
 }
 
 // Prismatic Spray's violet ray: as the caster's next turn starts, each creature it blinded saves again, and a
@@ -625,20 +711,40 @@ function shakeOffEvents(actor: Actor, context: Context): SystemEvent[] {
   });
 }
 
-function regenerationEvents(actor: Actor, context: Context): SystemEvent[] {
+function regenerationEvents(
+  actor: Actor,
+  context: Context,
+  turnEnd = false,
+): SystemEvent[] {
   if (isDown(actor) || healingStopped(actor, context.state, context)) return [];
+  if (turnEnd && hasCondition(actor, ...INCAPACITATING)) return [];
   const stats = deriveStats(actor, context);
+  const bloodied = actor.hp * 2 <= stats.maxHp;
   const hp = stats.passives.reduce(
-    (sum, passive) => sum + (passive.kind === "regeneration" ? passive.hp : 0),
+    (sum, passive) =>
+      passive.kind !== "regeneration" ||
+      (passive.turnEnd ?? false) !== turnEnd ||
+      (passive.bloodied && !bloodied) ||
+      (passive.whileEffect !== undefined &&
+        !actor.activeEffects.some(
+          ({ sourceId }) => sourceId === passive.whileEffect,
+        ))
+        ? sum
+        : sum +
+          (typeof passive.hp === "number"
+            ? passive.hp
+            : rollAmount(passive.hp, stats, context.dice)),
     0,
   );
   const amount = cannotHeal(actor) ? 0 : Math.min(hp, stats.maxHp - actor.hp);
   // Metabolic Control also ends the condition that hampers it most.
-  const cured = stats.passives.some(
-    (passive) => passive.kind === "regeneration" && passive.cures,
-  )
-    ? cureFor(actor, ALL_CONDITIONS)
-    : null;
+  const cured =
+    !turnEnd &&
+    stats.passives.some(
+      (passive) => passive.kind === "regeneration" && passive.cures,
+    )
+      ? cureFor(actor, ALL_CONDITIONS)
+      : null;
   const curing = cured
     ? [
         dndEvent(`${NS}:conditionRemoved`, {
