@@ -57,10 +57,14 @@ export function lastsFor(
     }
   }
   if (!("minutes" in duration)) return {};
+  // A Dampened Magic Zone halves a spell lasting a minute or more.
+  const rounds = state.combat?.environment?.halfDurations
+    ? 5 * duration.minutes
+    : 10 * duration.minutes;
   return {
     lasts: {
       actor: caster.id,
-      round: nextTurnRound(state, caster.id) + 10 * duration.minutes - 1,
+      round: nextTurnRound(state, caster.id) + rounds - 1,
       at: "start",
     },
   };

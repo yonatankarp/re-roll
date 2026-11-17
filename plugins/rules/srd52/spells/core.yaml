@@ -3857,6 +3857,7 @@
           duration:
             concentration: true
             minutes: 1
+          endsOnDamage: true
       onSuccess: []
 - id: srd52:spell/imprisonment
   name: Imprisonment
@@ -4015,6 +4016,7 @@
             - deafened
             - paralyzed
             - poisoned
+          disease: true
 - id: srd52:spell/locate-creature
   name: Locate Creature
   level: 4
@@ -11442,6 +11444,7 @@
           conditions:
             - blinded
           befuddled: true
+          disease: true
 - id: srd52:spell/heroism
   name: Heroism
   level: 1

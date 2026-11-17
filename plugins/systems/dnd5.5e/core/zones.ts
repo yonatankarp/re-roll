@@ -91,8 +91,23 @@ function castZones(state: DndState): readonly Zone[] {
           ];
         }),
       );
-  spellZones.set(state, zones);
-  return zones;
+  // A Dead Magic Zone: an Antimagic Field over the whole fight (environment.ts).
+  const dead: Zone[] = state.combat?.environment?.deadMagic
+    ? [
+        {
+          zone: "area",
+          at: { x: 0, y: 0 },
+          radius: 100000,
+          owner: "",
+          sourceId: "environment:dead-magic",
+          follows: false,
+          area: { noSpells: "all" },
+        },
+      ]
+    : [];
+  const all = dead.length > 0 ? [...zones, ...dead] : zones;
+  spellZones.set(state, all);
+  return all;
 }
 
 // A sealed-away creature's areas reach nothing outside, and one Incapacitated loses those it must be awake for.

@@ -258,6 +258,39 @@ const ActiveEffectSchema = z.strictObject({
 });
 export type ActiveEffect = z.infer<typeof ActiveEffectSchema>;
 
+// A disease caught (environment.ts): Long Rests left before its symptoms, and its saves so far.
+const DiseaseRecordSchema = z.strictObject({
+  disease: ContentIdSchema,
+  onset: z.number().int().min(0),
+  saved: z.number().int().default(0),
+  failed: z.number().int().default(0),
+  streak: z.number().int().default(0), // successes in a row
+  dc: z.number().int().optional(), // a DC lowered by its saves, as 2014 Cackle Fever's
+  penalty: z.number().int().optional(), // 2014 Sight Rot's growing penalty
+});
+export type DiseaseRecord = z.infer<typeof DiseaseRecordSchema>;
+
+// What the environmental effects a fight is fought in do there (environment.ts): their ids, and what they make of
+// the fight, as worked out when it starts.
+export const FightEnvironmentSchema = z.strictObject({
+  ids: z.array(ContentIdSchema),
+  difficult: z.literal(true).optional(),
+  deadMagic: z.literal(true).optional(),
+  grounded: z.literal(true).optional(),
+  halfFalls: z.literal(true).optional(),
+  forceFloor: z.number().int().optional(),
+  halfDurations: z.literal(true).optional(),
+  turnSave: z
+    .strictObject({
+      ability: AbilitySchema,
+      dc: z.number().int(),
+      condition: ConditionSchema,
+    })
+    .optional(),
+  reverseGravity: z.strictObject({ dc: z.number().int() }).optional(),
+});
+export type FightEnvironment = z.infer<typeof FightEnvironmentSchema>;
+
 const SquareSchema = z.strictObject({
   x: z.number().int(),
   y: z.number().int(),
@@ -398,6 +431,8 @@ const ActorSchema = z.strictObject({
     .optional(),
   // Days until a clone of it is ready, 0 once it is (Clone). Missing without one.
   clone: z.number().int().min(0).optional(),
+  // The diseases it has caught (environment.ts). Missing while it has none.
+  diseases: z.array(DiseaseRecordSchema).optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -417,6 +452,8 @@ export const StateSchema = z.strictObject({
   // What each merchant has sold, by name, so limited stock stays sold on a later visit.
   shopBought: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   actors: z.record(z.string(), ActorSchema),
+  // The environmental effects the party is in between fights, as a scene set them (environment.ts). Missing in none.
+  ambient: z.array(ContentIdSchema).optional(),
   // Hours since the last Long Rest began. Missing until the first, so the first is always allowed.
   sinceLongRest: z.number().int().optional(),
   surprise: SurpriseSchema.optional(), // set by the story for the next fight, such as after a Stealth check
@@ -445,6 +482,7 @@ export const StateSchema = z.strictObject({
       // The map is covered until the party sees it (fog.ts). Missing in older saves, whose fights show all of it.
       fog: z.literal(true).optional(),
       sunlight: z.literal(true).optional(), // fought under the sky in daylight (zones.ts)
+      environment: FightEnvironmentSchema.optional(), // the environmental effects it's fought in (environment.ts)
       // Weapons thrown and lying where they landed, until picked up. They go back to their throwers as it ends.
       dropped: z.array(DroppedSchema).optional(),
     })
@@ -473,6 +511,9 @@ const RestedSchema = z.strictObject({
   rest: z.enum(["short", "long"]),
   maxHp: z.number().int(),
   resourcesSpent: z.record(z.string(), z.number().int()),
+  // A disease or the winds of Pandemonium keep a Long Rest from healing, or from lessening Exhaustion below this.
+  keepHp: z.literal(true).optional(),
+  exhaustionFloor: z.number().int().optional(),
 });
 // Rests are the only thing that passes time, so they're the clock for the one-Long-Rest-a-day rule.
 export const REST_HOURS = { short: 1, long: 8 } as const;
@@ -498,6 +539,7 @@ const CombatStartedSchema = z.strictObject({
   damageToParty: z.number().optional(),
   fog: z.literal(true).optional(),
   sunlight: z.literal(true).optional(),
+  environment: FightEnvironmentSchema.optional(),
   // The party's familiars, who join with Initiative of their own (combat/familiar.ts).
   familiars: z.array(ActorSchema).optional(),
 });
@@ -732,6 +774,21 @@ export const EVENT_SCHEMAS = {
   }),
   // Time passed outside a fight, as the party goes to another scene: the dead lie dead that much longer.
   [`${NS}:timePassed`]: z.strictObject({ hours: z.number().int().min(1) }),
+  [`${NS}:environmentEntered`]: z.strictObject({
+    effects: z.array(ContentIdSchema),
+  }),
+  [`${NS}:diseaseCaught`]: z.strictObject({
+    actor: z.string(),
+    record: DiseaseRecordSchema,
+  }),
+  [`${NS}:diseaseChanged`]: z.strictObject({
+    actor: z.string(),
+    record: DiseaseRecordSchema,
+  }),
+  [`${NS}:diseaseCured`]: z.strictObject({
+    actor: z.string(),
+    disease: ContentIdSchema,
+  }),
   [`${NS}:effectAdded`]: EffectAddedSchema,
   [`${NS}:effectEnded`]: EffectEndedSchema,
   [`${NS}:conditionRemoved`]: ConditionRemovedSchema,
@@ -1290,19 +1347,13 @@ function applyDamage(
   const hitWhileDown =
     wasDown && remaining > 0 && actor.side === "party" ? (critical ? 2 : 1) : 0;
   const unsettled = hitWhileDown > 0 && isStable(actor);
-  // An effect that ends on damage takes the rest of its spell on the creature with it, as Hypnotic Pattern's Speed 0.
-  const broken = new Set(
-    actor.activeEffects.flatMap((effect) =>
-      effect.endsOnDamage ? [`${effect.sourceId}|${effect.casterId}`] : [],
-    ),
-  );
   return {
     ...actor,
     activeEffects:
       amount > 0
         ? actor.activeEffects.filter(
             (effect) =>
-              !broken.has(`${effect.sourceId}|${effect.casterId}`) &&
+              !effect.endsOnDamage &&
               !(effect.endsWithTempHp && actor.tempHp <= absorbed),
           )
         : actor.activeEffects,
@@ -1388,10 +1439,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           : {
               ...lessOrdeal(withoutLoss(actor)),
               resourcesSpent: data.resourcesSpent,
-              hp: data.maxHp,
+              hp: data.keepHp ? actor.hp : data.maxHp,
               tempHp: 0,
               deathSaves: { successes: 0, failures: 0 },
-              exhaustion: Math.max(0, actor.exhaustion - 1),
+              exhaustion: Math.max(
+                Math.min(actor.exhaustion, data.exhaustionFloor ?? 0),
+                actor.exhaustion - 1,
+              ),
               // Each Long Rest allows its swaps again.
               ...(actor.swapped ? { swapped: [] } : {}),
             },
@@ -1457,6 +1511,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
             : { damageToParty: data.damageToParty }),
           ...(data.fog ? { fog: true as const } : {}),
           ...(data.sunlight ? { sunlight: true as const } : {}),
+          ...(data.environment ? { environment: data.environment } : {}),
         },
       };
     }
@@ -1737,6 +1792,46 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         ...actor,
         ordeal: data.penalty,
       }));
+    }
+    case `${NS}:environmentEntered`: {
+      const { effects } = payload(
+        EVENT_SCHEMAS[`${NS}:environmentEntered`],
+        event,
+      );
+      const { ambient: _left, ...rest } = state;
+      return effects.length > 0 ? { ...rest, ambient: effects } : rest;
+    }
+    case `${NS}:diseaseCaught`:
+    case `${NS}:diseaseChanged`: {
+      const { actor: id, record } = payload(
+        EVENT_SCHEMAS[`${NS}:diseaseChanged`],
+        event,
+      );
+      return updateActor(state, id, (actor) => ({
+        ...actor,
+        diseases: [
+          ...(actor.diseases ?? []).filter(
+            (item) => item.disease !== record.disease,
+          ),
+          record,
+        ],
+      }));
+    }
+    case `${NS}:diseaseCured`: {
+      const { actor: id, disease } = payload(
+        EVENT_SCHEMAS[`${NS}:diseaseCured`],
+        event,
+      );
+      return updateActor(state, id, ({ diseases, ...actor }) => {
+        const left = (diseases ?? []).filter((item) => item.disease !== disease);
+        return {
+          ...actor,
+          activeEffects: actor.activeEffects.filter(
+            ({ sourceId }) => sourceId !== `disease:${disease}`,
+          ),
+          ...(left.length > 0 ? { diseases: left } : {}),
+        };
+      });
     }
     case `${NS}:timePassed`: {
       const { hours } = payload(

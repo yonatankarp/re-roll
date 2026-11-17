@@ -3,6 +3,11 @@ import { deathSaveEvents } from "./actions.ts";
 import { duelStrayed } from "./duel.ts";
 import { confusedBy } from "./confusion.ts";
 import {
+  groundedEvents,
+  reverseGravityEvents,
+  turnSaveEvents,
+} from "../environment.ts";
+import {
   dodgeSaveEvents,
   fledEvents,
   fleeingFrom,
@@ -545,6 +550,7 @@ export function runFinishTurn(context: Context): SystemResult {
   const ending = [
     ...events,
     ...(actor ? fledEvents(actor, context) : []),
+    ...(actor ? groundedEvents(actor, state) : []),
     ...(actor ? duelStrayed(actor, state) : []),
     ...regurgitationEvents(context),
     ...(actor ? rechargeEvents(actor, context) : []),
@@ -608,6 +614,8 @@ export function runAdvanceTurn(
       : []),
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
     ...(next ? dodgeSaveEvents(next, { ...context, state: after }) : []),
+    ...(next ? turnSaveEvents(next, { ...context, state: after }) : []),
+    ...(next ? reverseGravityEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
     ...(next ? sharedTempHp(next, { ...context, state: after }) : []),

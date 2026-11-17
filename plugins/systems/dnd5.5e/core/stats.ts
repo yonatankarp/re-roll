@@ -1,5 +1,6 @@
 import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
+import { environmentPassives } from "./environment.ts";
 import {
   carriedWeight,
   carryingCapacity,
@@ -2062,10 +2063,16 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
       ? { ...free, actions: [...free.actions, ...moving] }
       : free;
   const loss = actor.maxHpLoss ?? 0;
+  // The environmental effects around it give their passives too, as Arcadian Vitality (environment.ts).
+  const around = environmentPassives(moved.creatureType, access);
+  const placed =
+    around.length > 0
+      ? { ...moved, passives: [...moved.passives, ...around] }
+      : moved;
   return speed === 0 && maxHp === 0 && loss === 0
-    ? moved
+    ? placed
     : {
-        ...moved,
+        ...placed,
         speed: Math.max(0, stats.speed + speed),
         maxHp: Math.max(1, stats.maxHp + maxHp - loss),
       };

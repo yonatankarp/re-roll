@@ -1000,7 +1000,17 @@ export function runAttackRoll(
           modifier.kind === "disadvantage" &&
           modifier.on === "attacksAgainst" &&
           modifier.spells,
-      ));
+      )) ||
+    // A strong wind hampers ranged weapon attacks, and a dampened magic zone spell attacks (environment.ts).
+    passiveModifiers(stats.passives).some(
+      (modifier) =>
+        modifier.kind === "disadvantage" &&
+        modifier.on === "attacks" &&
+        ((modifier.ranged === true &&
+          action.spellLevel === null &&
+          !isMelee(action)) ||
+          (modifier.spellAttacks === true && action.spellLevel !== null)),
+    );
   // Lucky: the target spends a Luck Point on its own once it's badly hurt or the attacker has Advantage.
   const luck =
     held ||
@@ -1679,7 +1689,13 @@ function landHit(
       const inner =
         index === maxIndex
           ? HIGHEST
-          : masteredDice(weaponDice, type, mastered, rerolled);
+          : masteredDice(
+              weaponDice,
+              type,
+              mastered,
+              rerolled,
+              state.combat?.environment?.forceFloor,
+            );
       if (!(pierces && rerolls)) {
         return rollAmount(amount, stats, inner, multiplier);
       }
@@ -2674,7 +2690,14 @@ export function runConcentrationSave(
         false,
         0,
         ["concentration"],
-        payload.disadvantage,
+        payload.disadvantage === true ||
+          // An eerie chanting zone hampers Concentration (environment.ts).
+          passiveModifiers(deriveStats(actor, context).passives).some(
+            (modifier) =>
+              modifier.kind === "disadvantage" &&
+              modifier.on === "saves" &&
+              modifier.concentration === true,
+          ),
       );
   // A Ring of Dedicated Focus: Hit Point Dice added to a failed save.
   const rescued =

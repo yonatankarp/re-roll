@@ -137,8 +137,12 @@ export function hasFlag(
       // Advantage only against some conditions is the save's to weigh (placedFlag).
       (!("conditions" in modifier) || !modifier.conditions) &&
       (!("magical" in modifier) || !modifier.magical) &&
-      // Disadvantage only on spell attacks is the attack's to weigh (combat/attack.ts).
+      // Disadvantage only on spell attacks is the attack's to weigh (combat/attack.ts), and on ranged weapon attacks,
+      // spell attacks or Concentration saves too.
       (!("spells" in modifier) || !modifier.spells) &&
+      (!("ranged" in modifier) || !modifier.ranged) &&
+      (!("spellAttacks" in modifier) || !modifier.spellAttacks) &&
+      (!("concentration" in modifier) || !modifier.concentration) &&
       (!("attackers" in modifier) ||
         !modifier.attackers ||
         modifier.attackers.includes(attackerType ?? "")),

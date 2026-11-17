@@ -35,6 +35,7 @@ import { damageChoiceFrames } from "./combat/damage-choice.ts";
 import { checkChoiceFrames } from "./combat/check-choice.ts";
 import { confusionFrames } from "./combat/confusion.ts";
 import { fearFrames } from "./combat/fear.ts";
+import { environmentEffects, featureCheck } from "./environment.ts";
 import { optionFrames } from "./combat/options.ts";
 import { wishFrames } from "./combat/wish.ts";
 import { reactionFrames } from "./combat/reactions.ts";
@@ -116,7 +117,10 @@ import {
   FeatSchema,
   FeatureSchema,
   DOWNTIME_KINDS,
+  DiseaseSchema,
+  DungeonFeatureSchema,
   ENVIRONMENT_KINDS,
+  EnvironmentalEffectSchema,
   GLOSSARY_KINDS,
   OPTION_KINDS,
   GlossaryEntrySchema,
@@ -394,7 +398,19 @@ export const dnd55e = defineSystem<DndState>({
     bastions: contentKind({ idPrefix: "bastion", schema: BastionEntrySchema }),
     traps: contentKind({ idPrefix: "trap", schema: TrapSchema }),
     hazards: contentKind({ idPrefix: "hazard", schema: HazardSchema }),
-    ...glossaryKinds(ENVIRONMENT_KINDS),
+    ...glossaryKinds({ curses: ENVIRONMENT_KINDS.curses }),
+    "environmental-effects": contentKind({
+      idPrefix: ENVIRONMENT_KINDS["environmental-effects"],
+      schema: EnvironmentalEffectSchema,
+    }),
+    diseases: contentKind({
+      idPrefix: ENVIRONMENT_KINDS.diseases,
+      schema: DiseaseSchema,
+    }),
+    "dungeon-features": contentKind({
+      idPrefix: ENVIRONMENT_KINDS["dungeon-features"],
+      schema: DungeonFeatureSchema,
+    }),
     poisons: contentKind({ idPrefix: "poison", schema: PoisonSchema }),
     budgets: contentKind({ idPrefix: "budget", schema: EncounterBudgetSchema }),
     pregens: contentKind({
@@ -471,6 +487,7 @@ export const dnd55e = defineSystem<DndState>({
     ...surpriseEffects,
     ...shopEffects,
     ...sceneEffects,
+    ...environmentEffects,
     ...campEffects,
   },
   storyPredicates: {
@@ -640,7 +657,8 @@ export const dnd55e = defineSystem<DndState>({
   },
   // Scene checks are made by the player's character, with the same roll as a check in a fight.
   resolveCheck: (check, context) => {
-    const parsed = CheckSchema.parse(check);
+    const parsed = featureCheck(CheckSchema.parse(check), context);
+    if ("feature" in parsed) throw new Error("A feature check resolves to a skill");
     const player = context.state.actors[PLAYER_ACTOR];
     if (!player) throw new Error("The player has no character");
     // A skill paired with another ability adds the skill's proficiency only with Skills with Different Abilities, and

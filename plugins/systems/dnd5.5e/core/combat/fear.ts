@@ -13,7 +13,12 @@ import {
   isDown,
   NS,
 } from "../state.ts";
-import { damageResponses, deriveStats, rollAmount } from "../stats.ts";
+import {
+  damageResponses,
+  deriveStats,
+  passiveModifiers,
+  rollAmount,
+} from "../stats.ts";
 import { finalDamage } from "../rules.ts";
 import { distanceFeet } from "../grid.ts";
 import { behindTotalCover, seeing } from "../sight.ts";
@@ -265,7 +270,11 @@ export function castSaveFoiled(
 } | null {
   if (!spell) return null;
   const events: SystemEvent[] = [];
-  for (const { modifier } of actor.activeEffects) {
+  // Gehennan Cruelty's comes as a passive from the plane around it (environment.ts).
+  for (const modifier of [
+    ...actor.activeEffects.map((effect) => effect.modifier),
+    ...passiveModifiers(deriveStats(actor, context).passives),
+  ]) {
     if (modifier.kind !== "castSave") continue;
     const save = rollSave(actor, modifier.ability, modifier.dc ?? 10, context);
     events.push(...save.events);

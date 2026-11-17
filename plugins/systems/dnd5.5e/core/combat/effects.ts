@@ -140,6 +140,7 @@ import { damageTypeFrame, zoneTypeFrame } from "./damage-choice.ts";
 import { focusFrame } from "./check-choice.ts";
 import { clingSave, dropEvents, prisonEvents, sendAwayEvents } from "./fear.ts";
 import { optionFrame } from "./options.ts";
+import { curedDiseaseEvents } from "../environment.ts";
 import { weaponAttackResult } from "./weapon-spell.ts";
 import { duelBroken, duelDamaged } from "./duel.ts";
 import { wishFrame } from "./wish.ts";
@@ -1275,6 +1276,47 @@ export function dealEvents(
       );
     }
   }
+  // Cackle Fever: damage other than Psychic sets off a fit of laughter on a failed save (environment.ts).
+  const fits = hurt?.activeEffects.find(
+    ({ modifier }) => modifier.kind === "laughter",
+  );
+  if (
+    hurt &&
+    dealt > 0 &&
+    fits?.modifier.kind === "laughter" &&
+    !isDead(hurt) &&
+    !hasCondition(hurt, "incapacitated") &&
+    hits.some(({ type, amount }) => type !== "psychic" && amount > 0)
+  ) {
+    const { dc, damage } = fits.modifier;
+    const save = rollSave(hurt, "con", dc, { ...context, state });
+    events.push(...save.events);
+    if (!save.saved) {
+      const laughed = dealEvents(
+        hurt,
+        damage.map(({ amount, type }) => ({
+          amount: amount.dice ? rollDiceNotation(amount.dice, context.dice) : 0,
+          type,
+        })),
+        false,
+        { ...context, state },
+      );
+      events.push(
+        ...laughed.events,
+        dndEvent(`${NS}:effectAdded`, {
+          actor: hurt.id,
+          effect: {
+            sourceId: `${fits.sourceId}:laughter`,
+            casterId: hurt.id,
+            modifier: { kind: "condition", condition: "incapacitated" },
+            ends: "spellDuration",
+            repeatSave: { ability: "con", dc },
+            ...lastsFor({ minutes: 1 }, hurt, hurt, state),
+          },
+        }),
+      );
+    }
+  }
   return { events, dealt };
 }
 
@@ -1846,6 +1888,7 @@ export function leafEvents(
                   ? { repeatSave: save }
                   : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
+              ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
               ...lingersFor(effect.duration),
               ...swallowed,
             },
@@ -2005,6 +2048,7 @@ export function leafEvents(
           ? clingSave(target, condition, context)
           : { held: false, events: [] };
         events.push(...clung.events);
+        if (effect.disease) events.push(...curedDiseaseEvents(target, context));
         // Befuddlement's hold on its spellcasting, which Greater Restoration and Heal end.
         const befuddled = effect.befuddled
           ? target.activeEffects.find(
