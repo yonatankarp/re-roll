@@ -8,6 +8,7 @@ import {
   modifierFor,
   rerollingOnes,
   rollAmount,
+  rollDiceNotation,
   wishedKey,
   saveBonus,
   scoreFloor,
@@ -125,6 +126,7 @@ import {
   type Context,
   currentActor,
   enemies,
+  exemptFrom,
   fitsType,
   hasFlag,
   hasPassive,
@@ -1314,11 +1316,18 @@ export function leafEvents(
           }),
         );
         break;
-      // shortcut: a push is made on the grid as Shove's is, while a pull is only described, and neither checks size.
+      // A push or pull is made on the grid as Shove's is, in a straight line.
       case "forcedMove": {
         const to =
-          effect.direction === "away"
-            ? pushTo(caster.position, target, effect.feet, context.state)
+          effect.maxSize === undefined ||
+          sizeOf(target, context) <= SIZES.indexOf(effect.maxSize)
+            ? pushTo(
+                caster.position,
+                target,
+                effect.feet,
+                context.state,
+                effect.direction === "toward",
+              )
             : null;
         const held = to ? heldInPlace(target, context) : [];
         if (held.length > 0) {
@@ -1460,16 +1469,16 @@ function zoneEvents(
   const placed = new Set<string>();
   const events: SystemEvent[] = [];
   const { targeting } = action.activation;
-  if (
-    effects.some((effect) => effect.kind === "disperse") &&
-    "area" in targeting
-  ) {
+  const wind = effects.find((effect) => effect.kind === "disperse");
+  if (wind?.kind === "disperse" && "area" in targeting) {
     const { shape, radius } = targeting.area;
+    // shortcut: Sunburst ends any Darkness zone, as a monster's own Darkness is a spell too.
+    const ends = (zone: ReturnType<typeof zonesOf>[number]): boolean =>
+      wind.zones
+        ? wind.zones.includes(zone.zone)
+        : zone.zone === "fog" || zone.area?.disperses === true;
     for (const zone of zonesOf(context.state)) {
-      if (
-        (zone.zone === "fog" || zone.area?.disperses) &&
-        inArea(shape, radius, actor.position, at, zone.at)
-      ) {
+      if (ends(zone) && inArea(shape, radius, actor.position, at, zone.at)) {
         events.push(
           dndEvent(`${NS}:effectEnded`, {
             actor: zone.owner,
@@ -1590,6 +1599,26 @@ export function leastResisted(
               : 2)
       );
     }, 0);
+  const [best = types[0] ?? "force"] = [...types].sort(
+    (a, b) => worth(b) - worth(a),
+  );
+  return best;
+}
+
+// Of these types, the one a creature takes most from: vulnerable, then plain, then resisted, never immune if another
+// will do, as Chromatic Orb's caster picks.
+export function typeAgainst(
+  types: readonly DamageType[],
+  responses: ReturnType<typeof damageResponses>,
+): DamageType {
+  const worth = (type: DamageType): number =>
+    responses.immunities.includes(type) || responses.absorbs.includes(type)
+      ? 0
+      : responses.resistances.includes(type)
+        ? 1
+        : responses.vulnerabilities.includes(type)
+          ? 3
+          : 2;
   const [best = types[0] ?? "force"] = [...types].sort(
     (a, b) => worth(b) - worth(a),
   );
@@ -1857,11 +1886,14 @@ export function rollSave(
     context,
   );
   const { total, success: saved } = judge(settled.natural, settled.bonus);
-  // A save's once-only edge, as Harper Teamwork's Disadvantage, is spent on it.
+  // A save's once-only edge or bonus, as Harper Teamwork's Disadvantage or Mind Sliver's 1d4, is spent on it.
   const spent = target.activeEffects.flatMap(
     ({ modifier, sourceId, casterId }) =>
-      (modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
-      modifier.on === "saves" &&
+      (((modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
+        modifier.on === "saves") ||
+        (modifier.kind === "bonus" &&
+          modifier.to === "saves" &&
+          (!modifier.ability || modifier.ability === ability))) &&
       modifier.once
         ? [
             dndEvent(`${NS}:effectEnded`, {
@@ -1952,6 +1984,10 @@ export function resolveTargets(
       // Total cover from where it spreads keeps a creature out of it.
       const centre =
         shape === "sphere" || shape === "cube" ? aim : actor.position;
+      // Creatures of the caster's choice in it are only its side, as Conjure Barrage's.
+      const chosen = targeting.choice
+        ? new Set(side.map((item) => item.id))
+        : null;
       return caughtBy(
         targeting,
         actor,
@@ -1959,9 +1995,10 @@ export function resolveTargets(
         areaPool(targeting, context, actor),
       ).filter(
         (item) =>
-          item.id === actor.id ||
-          (coverFor(state, centre, item, [actor.id]) !== "total" &&
-            !walledApart(actor, item, action, state, context)),
+          (chosen === null || chosen.has(item.id)) &&
+          (item.id === actor.id ||
+            (coverFor(state, centre, item, [actor.id]) !== "total" &&
+              !walledApart(actor, item, action, state, context))),
       );
     }
     // Round the caster, or with no grid: only the side it's meant for, as if placed with care.
@@ -2176,18 +2213,61 @@ export function resolveAction(
             roll: (sides) => Math.max(3, dice.roll(sides)),
           }
         : dice;
-    return list.map(({ amount, type }, index) => ({
-      total:
-        rollAmount(
-          amount,
-          stats,
-          index === maxIndex
-            ? HIGHEST
-            : floored(masteredDice(context.dice, type, mastered, rerolled)),
-          critical ? 2 : 1,
-        ) + (index === 0 ? fuel.bonus : 0),
+    const roll = (amount: Damage["amount"], type: DamageType, index: number) =>
+      rollAmount(
+        amount,
+        stats,
+        index === maxIndex
+          ? HIGHEST
+          : floored(masteredDice(context.dice, type, mastered, rerolled)),
+        critical ? 2 : 1,
+      ) + (index === 0 ? fuel.bonus : 0);
+    const shared = list.map(({ amount, type }, index) => ({
+      total: roll(amount, type, index),
       type,
     }));
+    // A larger die against a hurt target, or more dice against its kind, rolled once for all they reach.
+    const later = new Map<string, number>();
+    const once = (key: string, rolled: () => number): number => {
+      const known = later.get(key) ?? rolled();
+      later.set(key, known);
+      return known;
+    };
+    return (target: Actor) => {
+      const met = deriveStats(target, context);
+      const hurt = target.hp < met.maxHp;
+      return list.flatMap((item, index) => {
+        const { total = 0 } = shared[index] ?? {};
+        const type = item.types
+          ? typeAgainst(item.types, damageResponses(target, context))
+          : item.type;
+        const count = (item.amount.dice ?? "").split("d")[0] ?? "0";
+        const dealt =
+          item.hurtDie && hurt
+            ? once(`hurt:${String(index)}`, () =>
+                roll(
+                  { ...item.amount, dice: `${count}d${String(item.hurtDie)}` },
+                  type,
+                  index,
+                ),
+              )
+            : total;
+        const { vs } = item;
+        return [
+          { total: dealt, type },
+          ...(vs && exemptFrom(vs.creatureTypes, target, met)
+            ? [
+                {
+                  total: once(`vs:${String(index)}`, () =>
+                    rollDiceNotation(vs.dice, context.dice, critical ? 2 : 1),
+                  ),
+                  type,
+                },
+              ]
+            : []),
+        ];
+      });
+    };
   };
 
   switch (resolution.kind) {
@@ -2256,7 +2336,7 @@ export function resolveAction(
           );
           continue;
         }
-        applyRolled(target, damage, (amount) => amount);
+        applyRolled(target, damage(target), (amount) => amount);
         events.push(
           ...leafEvents(
             shared(target),
@@ -2341,7 +2421,7 @@ export function resolveAction(
             frames.push(...rolled.frames);
           }
           if (effect.kind === "reactionMove") {
-            events.push(...reactionMove(target, context));
+            events.push(...reactionMove(target, context, effect, actor));
           }
           if (effect.kind === "reactionAttack") {
             const struck = reactionAttack(target, context);
@@ -2382,21 +2462,45 @@ export function resolveAction(
         targets,
         modifierFor(stats, "cha"),
       );
-      for (const target of targets) {
+      for (const struck of targets) {
+        // Banishing Smite: the damage lands first, and only a target it leaves low enough saves.
+        const landed = resolution.hpAtMost !== undefined;
+        if (landed) applyRolled(struck, damage(struck), (amount) => amount);
+        const target = landed
+          ? (events.reduce(applyDndEvent, context.state).actors[struck.id] ??
+            struck)
+          : struck;
+        if (
+          resolution.hpAtMost !== undefined &&
+          (target.hp <= 0 || target.hp > resolution.hpAtMost)
+        ) {
+          continue;
+        }
+        const met = deriveStats(target, context);
+        const edges = (resolution.edges ?? []).flatMap((edge) =>
+          (!edge.creatureTypes ||
+            exemptFrom(edge.creatureTypes, target, met)) &&
+          (!edge.minSize ||
+            sizeOf(target, context) >= SIZES.indexOf(edge.minSize))
+            ? [edge.roll]
+            : [],
+        );
         // shortcut: cover counts from the caster, even for a sphere whose centre is elsewhere.
         const { saved: rolledSave, events: saveEvents } = spared.has(target.id)
           ? { saved: true, events: [] }
-          : rollSave(
-              target,
-              resolution.ability,
-              dc,
-              context,
-              action.spellLevel !== null,
-              coverAgainst(context.state, actor, target, context),
-              conditionsApplied(resolution.onFail),
-              heightened === target.id,
-              resolution.advantage,
-            );
+          : edges.includes("succeed") || edges.includes("fail")
+            ? { saved: edges.includes("succeed"), events: [] }
+            : rollSave(
+                target,
+                resolution.ability,
+                dc,
+                context,
+                action.spellLevel !== null,
+                coverAgainst(context.state, actor, target, context),
+                conditionsApplied(resolution.onFail),
+                heightened === target.id || edges.includes("disadvantage"),
+                resolution.advantage === true || edges.includes("advantage"),
+              );
         events.push(...saveEvents);
         const resisted = rolledSave
           ? null
@@ -2461,23 +2565,25 @@ export function resolveAction(
         const interposed =
           saved &&
           !evaded &&
-          damage.length > 0 &&
+          resolution.damage.length > 0 &&
           resolution.ability === "dex" &&
           resolution.onSuccessDamage === "half" &&
           !spared.has(target.id)
             ? interposedShield(target, deriveStats(target, context), context)
             : null;
         if (interposed) events.push(interposed);
-        applyRolled(target, damage, (amount) => {
-          if (turned) return 0;
-          if (evaded) return saved ? 0 : halved(amount);
-          if (!saved || resolution.onSuccessDamage === "full") return amount;
-          return resolution.onSuccessDamage === "half" &&
-            !spared.has(target.id) &&
-            !interposed
-            ? halved(amount)
-            : 0;
-        });
+        if (!landed) {
+          applyRolled(target, damage(target), (amount) => {
+            if (turned) return 0;
+            if (evaded) return saved ? 0 : halved(amount);
+            if (!saved || resolution.onSuccessDamage === "full") return amount;
+            return resolution.onSuccessDamage === "half" &&
+              !spared.has(target.id) &&
+              !interposed
+              ? halved(amount)
+              : 0;
+          });
+        }
         events.push(
           ...leafEvents(
             turned ? [] : saved ? resolution.onSuccess : resolution.onFail,
@@ -2498,6 +2604,15 @@ export function resolveAction(
           );
           events.push(...forced.events);
           frames.push(...forced.frames);
+          for (const effect of turned ? [] : resolution.onFail) {
+            if (effect.kind === "reactionMove") {
+              const now = events.reduce(applyDndEvent, context.state).actors[
+                target.id
+              ];
+              if (now)
+                events.push(...reactionMove(now, context, effect, actor));
+            }
+          }
         }
         // A reaction to how the save went, as Mind Corrosion or Spell Reflection.
         frames.push(
@@ -2537,6 +2652,17 @@ export function resolveAction(
               }),
             );
           }
+        }
+        // Hit or miss, the shard bursts round the target, as Ice Knife's.
+        if (resolution.burst) {
+          frames.push(
+            frame("burst", {
+              attacker: actor.id,
+              actionId: action.id,
+              target: target.id,
+              ...(slotLevel === undefined ? {} : { slotLevel }),
+            }),
+          );
         }
       }
       frames.push(...thrown);
@@ -2836,10 +2962,27 @@ function reactionAttack(
   };
 }
 
-// A creature spends its Reaction to step beside its nearest foe within its Speed, provoking nothing.
-function reactionMove(target: Actor, context: Context): SystemEvent[] {
+// A creature spends its Reaction to step beside its nearest foe within its Speed, or to get as far from the caster as
+// it can, provoking nothing.
+// shortcut: fleeing goes straight away from the caster, as a push does, not by the safest winding route.
+function reactionMove(
+  target: Actor,
+  context: Context,
+  effect: Extract<LeafEffect, { kind: "reactionMove" }>,
+  caster: Actor,
+): SystemEvent[] {
   if (!target.budget.reaction || isDown(target) || !target.position) return [];
   const speed = speedOf(target, deriveStats(target, context));
+  if (effect.away) {
+    const to =
+      speed > 0 ? pushTo(caster.position, target, speed, context.state) : null;
+    return to
+      ? [
+          dndEvent(`${NS}:budgetSpent`, { actor: target.id, kind: "reaction" }),
+          dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 }),
+        ]
+      : [];
+  }
   const [foe] = enemies(context.state, target)
     .filter((item) => !isDown(item) && item.position)
     .sort(

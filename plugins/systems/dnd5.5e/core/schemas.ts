@@ -258,9 +258,30 @@ export const AmountSchema = z.strictObject({
 });
 export type Amount = z.infer<typeof AmountSchema>;
 
+const SizeSchema = z.enum([
+  "tiny",
+  "small",
+  "medium",
+  "large",
+  "huge",
+  "gargantuan",
+]);
+
+// Read where a resolution's damage is rolled (combat/effects.ts, combat/attack.ts): `types` deals the one of them the
+// target resists least, as Chromatic Orb's chosen orb; `hurtDie` is the die size against a target missing Hit
+// Points, as Toll the Dead's d12; `vs` adds dice against creatures of these lowercase types, as Divine Smite's
+// against a Fiend or an Undead, which a higher slot leaves alone.
 export const DamageSchema = z.strictObject({
   amount: AmountSchema,
   type: DamageTypeSchema,
+  types: z.array(DamageTypeSchema).min(2).optional(),
+  hurtDie: z.number().int().min(2).optional(),
+  vs: z
+    .strictObject({
+      creatureTypes: z.array(z.string()).min(1),
+      dice: DiceSchema,
+    })
+    .optional(),
 });
 export type Damage = z.infer<typeof DamageSchema>;
 
@@ -400,6 +421,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     oneAction: z.literal(true).optional(),
     noActions: z.literal(true).optional(),
     noReactions: z.literal(true).optional(),
+    noOpportunityAttacks: z.literal(true).optional(), // as Shocking Grasp's
     oneAttack: z.literal(true).optional(),
     speed: z.enum(["half", "double", "none"]).optional(),
     spellFailure: z.number().int().min(1).max(100).optional(),
@@ -676,10 +698,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .min(2)
       .optional(),
   }),
+  // Pushed straight away from the caster or pulled toward it, as Thunderous Smite or Thorn Whip, only when this size
+  // or smaller with `maxSize`.
   z.strictObject({
     kind: z.literal("forcedMove"),
     feet: z.number(),
     direction: z.enum(["away", "toward"]),
+    maxSize: SizeSchema.optional(),
   }),
   z.strictObject({ kind: z.literal("note"), text: z.string() }),
   // The bearer teleports up to `feet` to an open square it can see, or with `movement` jumps there for that much
@@ -884,7 +909,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     dc: FormulaSchema.default({ base: 0, add: [{ kind: "spellSaveDc" }] }),
   }),
   // A strong wind: it ends the gas and vapour zones in its area, as Gust of Wind does Fog Cloud.
-  z.strictObject({ kind: z.literal("disperse") }),
+  // With `zones`, it ends the spells' zones of those kinds in its area instead, as Sunburst does Darkness.
+  z.strictObject({
+    kind: z.literal("disperse"),
+    zones: z.array(ZoneKindSchema).min(1).optional(),
+  }),
   // The caster takes this many turns in a row, ending once something it does reaches another creature, as Time Stop.
   z.strictObject({ kind: z.literal("extraTurns"), turns: AmountSchema }),
   // The target spends one of its Hit Point Dice and regains what it rolls plus `bonus`, as with Healer's Battle Medic.
@@ -951,8 +980,12 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // Rampage.
   z.strictObject({ kind: z.literal("reactionAttack") }),
   // The target spends its Reaction to move up to its Speed beside its nearest foe, without provoking Opportunity
-  // Attacks, as Ez d'Avenir's Inspiring Rally.
-  z.strictObject({ kind: z.literal("reactionMove") }),
+  // Attacks, as Ez d'Avenir's Inspiring Rally. With `away` it moves as far from the caster as it can instead, as
+  // Dissonant Whispers drives it.
+  z.strictObject({
+    kind: z.literal("reactionMove"),
+    away: z.literal(true).optional(),
+  }),
   z.strictObject({
     kind: z.literal("raiseCorpse"),
     monster: ContentIdSchema,
@@ -1006,12 +1039,37 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     onHitOncePerTurn: z.array(LeafEffectSchema).min(1).optional(),
     // A hit heals the attacker by the damage dealt, spending a use, as a Dhampir's Vampiric Bite.
     drain: z.strictObject({ resource: z.string() }).optional(),
+    missDamage: z.literal("half").optional(), // a miss still deals half the damage, as Acid Arrow's splash
+    // Hit or miss, the target and each creature within `radius` of it then save or take `damage`, as Ice Knife's shard.
+    burst: z
+      .strictObject({
+        radius: z.number().int().min(5),
+        ability: AbilitySchema,
+        dc: FormulaSchema,
+        damage: z.array(DamageSchema).min(1),
+      })
+      .optional(),
   }),
   z.strictObject({
     kind: z.literal("save"),
     ability: AbilitySchema,
     dc: FormulaSchema,
     advantage: z.boolean().optional(), // the target saves with Advantage, as when its caster is fighting it
+    // How the save goes for creatures of these lowercase types or this size or larger, as a Plant failing against
+    // Blight, a Construct's Disadvantage against Shatter, a Large creature's Advantage against Ensnaring Strike or
+    // an Undead succeeding against Wardaway.
+    edges: z
+      .array(
+        z.strictObject({
+          creatureTypes: z.array(z.string()).min(1).optional(),
+          minSize: SizeSchema.optional(),
+          roll: z.enum(["advantage", "disadvantage", "fail", "succeed"]),
+        }),
+      )
+      .min(1)
+      .optional(),
+    // Only a target its damage leaves with this many Hit Points or fewer saves, as Banishing Smite's.
+    hpAtMost: z.number().int().min(1).optional(),
     damage: z.array(DamageSchema).default([]),
     // "full" deals the damage either way, and the save is only for its effects, as with Trip Attack.
     onSuccessDamage: z.enum(["half", "none", "full"]).default("none"),
@@ -1117,6 +1175,7 @@ export const TargetingSchema = z.union([
     creatureTypes: z.array(CreatureTypeSchema).optional(),
     targetConditions: z.array(ConditionSchema).min(1).optional(), // only those with one of these, as Intensify Poison
     afflicted: z.string().min(1).optional(), // as a creature target's, as an arch-hag's Witch Strike
+    choice: z.literal(true).optional(), // only the creatures of the caster's choice in it, its `side`, as Conjure Barrage
   }),
 ]);
 export type Targeting = z.infer<typeof TargetingSchema>;

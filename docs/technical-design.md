@@ -742,6 +742,13 @@ The player decides every reaction through a `dnd5.5e:reaction:` decision. The at
 - **A fall** (`falls`), as Feather Fall: Reverse Gravity's `lift` holds creatures up, and out of reach of those below, until it ends. Then everyone it held falls together (`combat/falling.ts`) and takes 1d6 per 10 feet, unless a `slowFall` reaction catches them. Levitate's `gentle` lift floats them down instead. A creature with a Fly Speed, or a Climb Speed beside a wall (anywhere with Spider Climb's `ceiling`), goes up or down 10 feet for 10 feet of movement, an `aloft` effect with its `mode`. Height counts in reach and Opportunity Attacks. A flyer falls once it's Prone, Incapacitated or can't move, unless it hovers, and once it loses that Speed.
 - **A table** on the activation (`table`), as Mythal Ward's, rolled as the reaction is taken. It's taken before a spell attack's hit or a failed save against a spell lands, so a row can turn the spell aside. A walk that enters a reaction's reach stops on that square, takes the reaction, then goes on as a `move` with `rest`.
 
+**Smites and attack-spell riders** (`combat/spell-riders.ts`, `combat/effects.ts`):
+
+- **Damage against one target:** a damage entry's `types` deals the one its target resists least, as Chromatic Orb's chosen type or Shillelagh's Force or the weapon's own. `hurtDie` is the die size against a target missing Hit Points, as Toll the Dead's d12, and `vs` adds dice against creatures of some types, as Divine Smite's against a Fiend or an Undead, which a higher slot doesn't grow.
+- **Saves:** a save's `edges` give Advantage or Disadvantage, or a failure or success without a roll, by creature type or size, as Blight's Plant, Shatter's Construct or Ensnaring Strike's Large creature. With `hpAtMost`, the damage lands first and only a target left that low saves, as against Banishing Smite. A smite that asks for a save still doubles its dice on a Critical Hit, unless it is an area round the target.
+- **Attacks:** `missDamage: half` deals half the damage on a miss and `onMiss` effects play, as Acid Arrow's splash. A `burst` makes the target and everyone within its radius save, hit or miss, as Ice Knife's shard (frame `burst`).
+- **Effects:** `forcedMove` pulls as well as pushes, up to `maxSize`, as Thorn Whip. `reactionMove` with `away` spends the target's Reaction to flee straight from the caster, as Dissonant Whispers. `actionLimit.noOpportunityAttacks` is Shocking Grasp's, and a `once` bonus to saves is spent on the next save, as Mind Sliver's 1d4. `disperse` with `zones` ends those zones in the area, as Sunburst ends Darkness.
+
 A hit on a creature during that creature's own turn counts as an Opportunity Attack, for Sentinel's Halt and Zhentarim Ruffian's damage. A walk whose Speed drops to 0 before it finishes, from Halt or a grapple, ends where it started.
 
 ### 8.8 Formulas
@@ -874,7 +881,7 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 - **The grid:** no difficult terrain, cover, line of sight or creature sizes, and no flanking. An Opportunity Attack checks only where a move starts and ends.
 - **Character building:** no multiclassing, swapping prepared spells, feat prerequisites, or starting gear from the class tables. Expertise, Eldritch Invocations and other options with no choice data stay as text. Companions' classes don't follow their personalities.
 - **Spell rules:** no swapping prepared spells or one-spell-slot-per-turn rule. Upcasting works for spells whose data has `upcast`, and cantrips scale by tier from their `cantrip` data.
-- **Other rules:** no Arcane Recovery, weapon mastery effects or armor training limits, and forced movement is stored in data but does nothing yet. Section 8.17 lists which class features work.
+- **Other rules:** no Arcane Recovery, weapon mastery effects or armor training limits, and forced movement pushes or pulls only in a straight line. Section 8.17 lists which class features work.
 - **Recovery after a fight:** anyone down but not dead gets back up with 1 HP, since an adventure doesn't have to offer a rest. HP otherwise carries over between fights.
 - **Branded IDs:** content IDs are checked strings, not per-kind branded types as section 4.4 planned.
 
@@ -911,7 +918,7 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 `core/targeting.ts` is pure geometry with no rolls and no content, so the combat board uses the same rules as the engine.
 
 - **Choosing targets:** a spell with one target is offered once per creature. One with more targets, or with darts and rays, opens a follow-up decision (frame `pickTargets`, options `+id`, `-id`, Cast and Back), like choosing where to move. Darts and rays may go at the same creature more than once, and all must be aimed before casting. `targetCount` scales with the slot.
-- **Aiming areas:** on a grid, an area opens frame `aimArea`. A cone, line or cube from the caster is aimed by one of the eight squares around them, named by direction, and any other area at a square in range. The area catches everyone in it, both sides and the caster (`caughtBy`), and the option says who. Emanations, and areas with no grid, keep catching one side.
+- **Aiming areas:** on a grid, an area opens frame `aimArea`. A cone, line or cube from the caster is aimed by one of the eight squares around them, named by direction, and any other area at a square in range. The area catches everyone in it, both sides and the caster (`caughtBy`), and the option says who. Emanations, areas with no grid, and areas of creatures of the caster's `choice`, as Conjure Barrage, keep catching one side.
 - **The AI** scores each aim with `aimScore` (foes caught against allies caught, the caster counting most) and drops aims worth nothing, so it avoids hitting its own side where it can.
 - **The board** lights covered squares on hover, and rings picked and caught tokens.
 
