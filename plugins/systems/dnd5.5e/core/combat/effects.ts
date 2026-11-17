@@ -1888,6 +1888,15 @@ export function leafEvents(
       case "dash":
       case "disengage":
       case "dodge": {
+        if (effect.kind !== "dodge") {
+          events.push(
+            ...tacticRiderEvents(
+              target,
+              deriveStats(target, context),
+              effect.kind,
+            ),
+          );
+        }
         const tactic = (
           name: "dash" | "disengage" | "dodge",
           value?: number,
@@ -3177,6 +3186,29 @@ export function rollSave(
 }
 
 const SAVE_REROLL = "save-reroll";
+
+// What taking the Dash or Disengage action gives its taker until its turn ends, as Speedy's Dash over Difficult Terrain.
+export function tacticRiderEvents(
+  actor: Actor,
+  stats: Stats,
+  tactic: "dash" | "disengage",
+): SystemEvent[] {
+  return stats.passives.flatMap((passive, index) =>
+    passive.kind === "tacticRider" && passive.tactic === tactic
+      ? passive.modifiers.map((modifier) =>
+          dndEvent(`${NS}:effectAdded`, {
+            actor: actor.id,
+            effect: {
+              sourceId: `tactic-rider:${tactic}:${String(index)}`,
+              casterId: actor.id,
+              modifier,
+              ends: "casterTurnEnd",
+            },
+          }),
+        )
+      : [],
+  );
+}
 
 // Set while Warping Flesh's own save is rolled, whose 1 sets off nothing more.
 let warping = false;

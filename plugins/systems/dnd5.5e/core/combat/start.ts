@@ -51,6 +51,7 @@ export function startCombat(
     readonly lair?: boolean | undefined;
     readonly surprise?: "party" | "enemies" | undefined;
     readonly sunlight?: true | undefined;
+    readonly underwater?: true | undefined;
     readonly environment?: readonly string[] | undefined;
   },
   context: Context,
@@ -215,6 +216,7 @@ export function startCombat(
     ...(defeatContinues ? { defeatContinues } : {}),
     ...(encounter.loot ? { loot: encounter.loot } : {}),
     ...(encounter.sunlight ? { sunlight: true as const } : {}),
+    ...(encounter.underwater ? { underwater: true as const } : {}),
     ...(environment ? { environment } : {}),
     ...(surprised ? { surprised } : {}),
     ...(lair ? { lair } : {}),

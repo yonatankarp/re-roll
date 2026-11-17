@@ -319,6 +319,8 @@ export const TerrainSchema = z.strictObject({
   dim: z.array(z.string()),
   dark: z.array(z.string()),
   light: z.enum(["bright", "dim", "dark"]), // everywhere else
+  // water to swim in, each foot costing double without a Swim Speed (core/combat/queries.ts). Missing in older saves.
+  water: z.array(z.string()).optional(),
 });
 export type Terrain = z.infer<typeof TerrainSchema>;
 // The picture a fight is drawn on, when its encounter has a battle map.
@@ -489,6 +491,7 @@ export const StateSchema = z.strictObject({
       // The map is covered until the party sees it (fog.ts). Missing in older saves, whose fights show all of it.
       fog: z.literal(true).optional(),
       sunlight: z.literal(true).optional(), // fought under the sky in daylight (zones.ts)
+      underwater: z.literal(true).optional(), // fought underwater (combat/water.ts)
       environment: FightEnvironmentSchema.optional(), // the environmental effects it's fought in (environment.ts)
       // Weapons thrown and lying where they landed, until picked up. They go back to their throwers as it ends.
       dropped: z.array(DroppedSchema).optional(),
@@ -546,6 +549,7 @@ const CombatStartedSchema = z.strictObject({
   damageToParty: z.number().optional(),
   fog: z.literal(true).optional(),
   sunlight: z.literal(true).optional(),
+  underwater: z.literal(true).optional(),
   environment: FightEnvironmentSchema.optional(),
   // The party's familiars, who join with Initiative of their own (combat/familiar.ts).
   familiars: z.array(ActorSchema).optional(),
@@ -1532,6 +1536,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
             : { damageToParty: data.damageToParty }),
           ...(data.fog ? { fog: true as const } : {}),
           ...(data.sunlight ? { sunlight: true as const } : {}),
+          ...(data.underwater ? { underwater: true as const } : {}),
           ...(data.environment ? { environment: data.environment } : {}),
         },
       };

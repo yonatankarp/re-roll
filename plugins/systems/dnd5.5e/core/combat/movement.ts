@@ -56,7 +56,7 @@ import {
 } from "../grid.ts";
 import { seeing } from "../sight.ts";
 import { hasTactic } from "../tactics.ts";
-import { STAY } from "./ids.ts";
+import { FANCY_FOOTWORK, STAY } from "./ids.ts";
 import { grapplesOn } from "./grapple.ts";
 import { heightOf } from "./falling.ts";
 import { limitsOf } from "./durations.ts";
@@ -158,6 +158,11 @@ export function provokers(
       isDown(foe) ||
       sealed(foe) ||
       limitsOf(foe).noOpportunityAttacks === true || // Shocking Grasp
+      // Fancy Footwork: a creature the mover attacked in melee this turn
+      foe.activeEffects.some(
+        ({ sourceId, casterId }) =>
+          sourceId === FANCY_FOOTWORK && casterId === actor.id,
+      ) ||
       hasCondition(foe, ...INCAPACITATING) ||
       (disengaged && !hasPassive(deriveStats(foe, access), "sentinel"))
     ) {

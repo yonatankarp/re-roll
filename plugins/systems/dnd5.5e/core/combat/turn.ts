@@ -80,6 +80,7 @@ import {
 import { grapplesOn, releasedGrapples } from "./grapple.ts";
 import { distanceFeet } from "../grid.ts";
 import { coverFor, lightAt } from "../sight.ts";
+import { reviveUnderwater, suffocationEvents } from "./water.ts";
 import { hasTactic, revealEvents, STEALTH_ATTACK } from "../tactics.ts";
 import { regurgitationEvents, releasedSwallows } from "./swallow.ts";
 import {
@@ -455,6 +456,7 @@ export function runFinishTurn(context: Context): SystemResult {
   const events: SystemEvent[] = [
     ...(actor ? outOfCover(actor, context) : []),
     ...lightAndWakeEnds(actor, context),
+    ...suffocationEvents(actor, context),
   ];
   for (const { actor: target, effect, save } of repeated) {
     const { sourceId, casterId, modifier } = effect;
@@ -667,6 +669,7 @@ export function runAdvanceTurn(
   const events = [
     ...finished,
     ...expired,
+    ...(next ? reviveUnderwater(next, { ...context, state: after }) : []),
     ...(next ? rescueEvents(next, { ...context, state: after }) : []),
     // Rage beyond Death: conscious at 0 Hit Points, still dying.
     ...(next && next.hp <= 0 && fightingOn(next)?.delayDeath && !isStable(next)

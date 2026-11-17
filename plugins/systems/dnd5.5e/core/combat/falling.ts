@@ -37,7 +37,7 @@ import {
 } from "./effects.ts";
 import { climbsCeilings, hovers, speedsOf } from "../movement-modes.ts";
 import { speedOf } from "../tactics.ts";
-import { canAfford, type Context, speedsLeft } from "./queries.ts";
+import { canAfford, type Context, hasPassive, speedsLeft } from "./queries.ts";
 import { afterDamage, playerTakes, reactionCosts } from "./reactions.ts";
 
 // Height and falling. A flyer or a climber goes up on its turn, and Reverse Gravity or Levitate lifts creatures up.
@@ -259,8 +259,12 @@ export function fallFrames(context: Context): Frame[] {
       ({ modifier }) => modifier.kind === "aloft",
     );
     if (aloft?.modifier.kind !== "aloft") continue;
-    const { feet, mode, gentle } = aloft.modifier;
+    const { feet, mode } = aloft.modifier;
     if (mode ? staysUp(actor, mode, context) : held(actor, aloft)) continue;
+    // Earthbind brings a flyer down safely.
+    const gentle =
+      aloft.modifier.gentle === true ||
+      actor.activeEffects.some(({ modifier }) => modifier.kind === "grounded");
     const key = `${String(feet)}${gentle ? ":gentle" : ""}`;
     heights.set(key, [...(heights.get(key) ?? []), actor.id]);
   }
@@ -304,9 +308,11 @@ function catcher(
       if (!trigger?.falls || !canAfford(action, bearer, stats)) continue;
       const within = trigger.within ?? 60;
       const slow = slowFallOf(action);
+      const own = "self" in action.activation.targeting; // Slow Fall catches only its bearer
       const caught = falling
         .filter(
           (item) =>
+            (!own || item.id === bearer.id) &&
             item.side === bearer.side &&
             distanceFeet(item.position, bearer.position) <= within &&
             (item.id === bearer.id ||
@@ -318,6 +324,13 @@ function catcher(
   }
   return null;
 }
+
+const slowFallReduce = (action: KnownAction) => {
+  const { resolution } = action.activation;
+  const effects = resolution.kind === "automatic" ? resolution.effects : [];
+  const slow = effects.find((effect) => effect.kind === "slowFall");
+  return slow?.kind === "slowFall" ? slow.reduce : undefined;
+};
 
 const slowFallOf = (action: KnownAction): number => {
   const { resolution } = action.activation;
@@ -349,8 +362,15 @@ export function runFall(
     ),
   );
   if (payload.gentle) return { events };
+  // A Ring of Feather Falling's wearer comes down unhurt.
+  const safe = new Set<string>(
+    falling.flatMap((actor) =>
+      hasPassive(deriveStats(actor, context), "featherFall") ? [actor.id] : [],
+    ),
+  );
+  // Slow Fall lessens the damage by its bearer's amount.
+  const lessened = new Map<string, number>();
   // Feather Fall: each bearer that can catches some of its side's fallers, the player once asked.
-  const safe = new Set<string>();
   const passed: string[] = [];
   for (;;) {
     const left = falling.filter((item) => !safe.has(item.id));
@@ -369,7 +389,16 @@ export function runFall(
       continue;
     }
     events.push(...reactionCosts(found.bearer, found.action, context));
-    for (const item of found.caught) safe.add(item.id);
+    const reduce = slowFallReduce(found.action);
+    for (const item of found.caught) {
+      if (reduce) {
+        lessened.set(
+          item.id,
+          (lessened.get(item.id) ?? 0) +
+            evaluateFormula(reduce, deriveStats(found.bearer, context)),
+        );
+      } else safe.add(item.id);
+    }
   }
   const frames: Frame[] = [];
   const count = Math.min(20, Math.floor(payload.feet / 10));
@@ -378,10 +407,14 @@ export function runFall(
     let rolled = 0;
     for (let die = 0; die < count; die += 1) rolled += dice.roll(6);
     // Low Gravity: falls hurt half as much.
-    const amount = finalDamage(
-      context.state.combat?.environment?.halfFalls
+    const fallen = Math.max(
+      0,
+      (context.state.combat?.environment?.halfFalls
         ? Math.floor(rolled / 2)
-        : rolled,
+        : rolled) - (lessened.get(actor.id) ?? 0),
+    );
+    const amount = finalDamage(
+      fallen,
       "bludgeoning",
       damageResponses(actor, context),
     );

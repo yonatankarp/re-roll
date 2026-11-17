@@ -49,6 +49,7 @@ export function terrainOf(map: Battlemap): Terrain | null {
     dark: codeKeys(map.walls, "x"),
     light: map.light ?? "bright",
   } as const;
+  const water = codeKeys(map.walls, "w");
   const marked = [
     terrain.difficult,
     terrain.half,
@@ -56,6 +57,7 @@ export function terrainOf(map: Battlemap): Terrain | null {
     terrain.dim,
     terrain.dark,
   ].some((keys) => keys.length > 0);
+  if (water.length > 0) return { ...terrain, water };
   return marked || terrain.light !== "bright" ? terrain : null;
 }
 

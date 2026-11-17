@@ -150,7 +150,7 @@ export interface Stats {
   readonly ordeal: number; // taken from every d20 test after coming back from the dead, as Raise Dead's
   // A stat block's Speeds besides walking. Others come from effects (core/movement-modes.ts).
   readonly speeds: Readonly<
-    Partial<Record<"fly" | "climb" | "burrow", number>>
+    Partial<Record<"fly" | "climb" | "burrow" | "swim", number>>
   >;
   // From magic items worn, and attuned where they need it.
   readonly itemBonuses: Readonly<
@@ -1466,7 +1466,15 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
   // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
-  const traits = [...itemPassives, ...fromFeatures.passives];
+  // A trait that holds only without Heavy armor, or without armor and a Shield, as Fast Movement or Unarmored Movement.
+  const heavy = worn.some(
+    ([, item]) => item.type === "armor" && item.armorType === "heavy",
+  );
+  const fits = (passive: Passive): boolean =>
+    passive.kind !== "modifier" ||
+    passive.armor === undefined ||
+    (passive.armor === "noHeavy" ? !heavy : !armored);
+  const traits = [...itemPassives, ...fromFeatures.passives].filter(fits);
   const castingAbility = featSpellAbilities(
     build,
     replaced ? [] : [background.feat],
@@ -1713,12 +1721,14 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     slots,
     resources: {},
     passives: [
-      ...itemPassives,
-      ...fromFeatures.passives.map((passive) =>
-        passive.kind === "extraDamage"
-          ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
-          : passive,
-      ),
+      ...itemPassives.filter(fits),
+      ...fromFeatures.passives
+        .filter(fits)
+        .map((passive) =>
+          passive.kind === "extraDamage"
+            ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
+            : passive,
+        ),
       ...(holdsConcentration(actor)
         ? [{ kind: "concentrationAdvantage" as const }]
         : []),
@@ -1894,7 +1904,6 @@ function familiarFrom(
   return {};
 }
 
-// shortcut: a speed bonus doesn't check the armor it needs, such as Fast Movement's.
 function passiveBonus(
   stats: Stats,
   to: "speed" | "initiative" | "maxHp",
@@ -2313,7 +2322,7 @@ function statBlockStats(
       checks: 0,
     },
     speeds: Object.fromEntries(
-      (["fly", "climb", "burrow"] as const).flatMap((mode) => {
+      (["fly", "climb", "burrow", "swim"] as const).flatMap((mode) => {
         const feet = monster.speeds?.[mode];
         return feet ? [[mode, Math.max(0, feet - 5 * actor.exhaustion)]] : [];
       }),

@@ -31,7 +31,12 @@ import { encodeOption, parseOption } from "./combat/ids.ts";
 import { opportunity, provokers, teleportSquares } from "./combat/movement.ts";
 import { familiarHelpUse } from "./combat/familiar.ts";
 import { mountEvents, mountOptions } from "./combat/mounts.ts";
-import { heldInPlace, leafEvents, naturalOneEvents } from "./combat/effects.ts";
+import {
+  heldInPlace,
+  leafEvents,
+  naturalOneEvents,
+  tacticRiderEvents,
+} from "./combat/effects.ts";
 import { heightChoices, heightOf } from "./combat/falling.ts";
 import {
   SIZES,
@@ -904,7 +909,7 @@ export function tacticOptions(
     });
   }
   // shortcut: every grapple counts as nonmagical, and the 5 feet come from its Speed before the grapple stops it.
-  if (unhindered(actor, stats) && stats.speed - actor.moved >= 5) {
+  if (unhindered(actor, stats, true) && stats.speed - actor.moved >= 5) {
     for (const grapple of grapplesOn(actor)) {
       const grappler = state.actors[grapple.casterId];
       options.push({
@@ -1266,11 +1271,18 @@ export function runTactic(
                 "casterNextTurn",
               )
             : self("dash"),
+          ...tacticRiderEvents(actor, stats, "dash"),
         ],
       };
     }
     case DISENGAGE:
-      return { events: [spend("action"), self("disengage")] };
+      return {
+        events: [
+          spend("action"),
+          self("disengage"),
+          ...tacticRiderEvents(actor, stats, "disengage"),
+        ],
+      };
     case BONUS_DASH: {
       const feet = bonusDashFeet(actor, stats) + dashBonus(stats);
       return {
@@ -1294,6 +1306,7 @@ export function runTactic(
           )
             ? [self("disengage")]
             : []),
+          ...tacticRiderEvents(actor, stats, "dash"),
         ],
       };
     }
@@ -1303,6 +1316,7 @@ export function runTactic(
           spend("bonusAction"),
           ...(bonusTacticCost(actor, stats, "disengage") ?? []),
           self("disengage"),
+          ...tacticRiderEvents(actor, stats, "disengage"),
         ],
       };
     case BONUS_DODGE:

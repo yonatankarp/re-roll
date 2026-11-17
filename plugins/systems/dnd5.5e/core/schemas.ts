@@ -342,6 +342,11 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     melee: z.literal(true).optional(), // AC against melee attack rolls only, as a pirate admiral's Defensive Stance
     ranged: z.literal(true).optional(), // AC against ranged attack rolls only, as an Arrow-Catching Shield's
     weapon: z.literal(true).optional(), // weapon attack rolls only, as Magic Weapon's
+    // A Speed bonus that also goes to these Speeds the bearer has, as Superior Mobility's (core/movement-modes.ts).
+    modes: z
+      .array(z.enum(["fly", "climb", "burrow", "swim"]))
+      .min(1)
+      .optional(),
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
@@ -374,6 +379,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     concentration: z.literal(true).optional(), // saves only to keep Concentration, as an eerie chanting zone's
     // saves only against a spell of the effect's caster, as Eldritch Strike's (combat/effects.ts rollSave)
     casterSpells: z.literal(true).optional(),
+    // attacksAgainst only Opportunity Attacks, as Speedy's Agile Movement (combat/attack.ts)
+    opportunity: z.literal(true).optional(),
   }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
@@ -564,15 +571,34 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // (core/movement-modes.ts).
   z.strictObject({
     kind: z.literal("movementMode"),
-    mode: z.enum(["fly", "climb", "burrow"]),
+    mode: z.enum(["fly", "climb", "burrow", "swim"]),
     feet: z.number().int().min(5).optional(),
     times: z.number().int().min(2).optional(), // with no feet, this many times its Speed, as Perfected Armor's flight
     hover: z.literal(true).optional(), // a flyer that doesn't fall while Prone or Incapacitated, as with Fly
     ceiling: z.literal(true).optional(), // a climber that goes along ceilings, not only walls, as with Spider Climb
   }),
+  // It has no Speed of this kind while it lasts, and comes down from flying unhurt, as Earthbind's (core/movement-modes.ts).
+  z.strictObject({
+    kind: z.literal("grounded"),
+    mode: z.enum(["fly", "climb", "burrow", "swim"]),
+  }),
   // Difficult Terrain costs it no extra movement, and it escapes a grapple with 5 feet of movement, as with Freedom of
   // Movement.
-  z.strictObject({ kind: z.literal("unhindered") }),
+  // With `terrainOnly` it's only the Difficult Terrain, as Speedy's Dash over it.
+  z.strictObject({
+    kind: z.literal("unhindered"),
+    terrainOnly: z.literal(true).optional(),
+  }),
+  // Walking across water as if it were ground, as with Water Walk (core/combat/queries.ts).
+  z.strictObject({ kind: z.literal("waterWalk") }),
+  // Breathing underwater, as with Water Breathing, so an underwater fight never runs its breath out (combat/water.ts).
+  z.strictObject({ kind: z.literal("waterBreathing") }),
+  // Holding its breath this many minutes, as Aberrant Anatomy's Breathless hour, instead of 1 plus its Constitution
+  // modifier.
+  z.strictObject({
+    kind: z.literal("holdBreath"),
+    minutes: z.number().int().min(1),
+  }),
   // Knowing where creatures on the ground are, this far, through walls and darkness, as Stonecunning's Tremorsense.
   z.strictObject({
     kind: z.literal("tremorsense"),
@@ -1105,9 +1131,12 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .optional(),
   }),
   // Up to `creatures` falling creatures land without taking damage, as with Feather Fall (combat/falling.ts).
+  // With `reduce`, the fall's damage is only lessened by that much, worked out from the bearer, as Slow Fall's five
+  // times the Monk level.
   z.strictObject({
     kind: z.literal("slowFall"),
     creatures: z.number().int().min(1).default(5),
+    reduce: FormulaSchema.optional(),
   }),
   // The bearer splits in two, each with half its Hit Points, as a black pudding does, while it has at least `minHp`
   // and has split fewer than `times` times (once for each size it can shrink).
@@ -1750,6 +1779,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("modifier"),
     modifier: ModifierSchema,
     bloodied: WhileBloodied,
+    // only while wearing no Heavy armor ("noHeavy"), as Fast Movement's Speed, or no armor and no Shield ("none"), as
+    // Unarmored Movement's (stats.ts)
+    armor: z.enum(["noHeavy", "none"]).optional(),
   }),
   // An area round the bearer that moves with it, as a ghast's Stench, a balor's Fire Aura or a flameskull's
   // Illumination ("light" or "dim" for the light it sheds).
@@ -2097,6 +2129,25 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     within: z.number().int().min(0),
     dc: z.number().int(),
   }),
+  // Starting its turn underwater at 0 Hit Points, it regains `amount`, spending a use of `resource`, as a Mariner's
+  // Armor's 1d4 (combat/water.ts).
+  z.strictObject({
+    kind: z.literal("underwaterRevive"),
+    amount: AmountSchema,
+    resource: z.string().min(1),
+  }),
+  // Falling never hurts it, as a Ring of Feather Falling's slow descent (combat/falling.ts).
+  z.strictObject({ kind: z.literal("featherFall") }),
+  // Taking the Dash or Disengage action gives the bearer these until its turn ends, as Speedy's Unhindered Dash over
+  // Difficult Terrain or Fairy Trickster's Faerie Trod Trotter (combat/effects.ts tacticRiderEvents).
+  z.strictObject({
+    kind: z.literal("tacticRider"),
+    tactic: z.enum(["dash", "disengage"]),
+    modifiers: z.array(ModifierSchema).min(1),
+  }),
+  // A creature it makes a melee attack against can't make Opportunity Attacks against it for the rest of its turn,
+  // as Fancy Footwork (combat/movement.ts).
+  z.strictObject({ kind: z.literal("fancyFootwork") }),
   // Advantage on the Stealth check of the Hide action, as Skulker's Fog of War.
   z.strictObject({ kind: z.literal("hideAdvantage") }),
   // An attack roll made while hidden that misses doesn't give the bearer away, as Skulker's Sniper.
@@ -3728,9 +3779,11 @@ export const BattlemapSchema = z
     columns: z.number().int().min(2).max(60),
     rows: z.number().int().min(2).max(60),
     // One per row: "#" wall, "." open, "~" difficult terrain, "h" half cover, "t" three-quarters cover,
-    // "d" dim light, "x" darkness.
+    // "d" dim light, "x" darkness, "w" water deep enough to swim in.
     walls: z.array(
-      z.string().regex(/^[#.~htdx]*$/, "uses a code other than # . ~ h t d x"),
+      z
+        .string()
+        .regex(/^[#.~htdxw]*$/, "uses a code other than # . ~ h t d x w"),
     ),
     light: z.enum(["bright", "dim", "dark"]).optional(), // the light everywhere not marked d or x; bright if left out
     party: z.array(MapSquareSchema).min(1),
@@ -3833,6 +3886,7 @@ export const EncounterSchema = z.strictObject({
   lair: z.boolean().optional(), // fought in a monster's lair: lair actions and its "in Lair" numbers
   surprise: z.enum(["party", "enemies"]).optional(), // the side caught unaware, which rolls initiative with disadvantage
   sunlight: z.literal(true).optional(), // fought outdoors in daylight, outside the map's shade (d) and darkness (x)
+  underwater: z.literal(true).optional(), // fought underwater (combat/water.ts)
   // The environmental effects it's fought in, by id, as a slippery ice floor or a strong wind (environment.ts).
   environment: z.array(ContentIdSchema).min(1).optional(),
 });

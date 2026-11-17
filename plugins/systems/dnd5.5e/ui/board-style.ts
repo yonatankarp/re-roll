@@ -478,6 +478,7 @@ const BOARD_CSS = `
 }
 .dnd-ground-square.dim { background: rgb(8 10 30 / 26%); }
 .dnd-ground-square.dark { background: rgb(4 4 14 / 55%); }
+.dnd-ground-square.water { background: rgb(40 110 170 / 24%); }
 .plain .dnd-ground-square.difficult {
   background: repeating-linear-gradient(-45deg, rgb(110 70 10 / 28%) 0 2px, transparent 2px 7px);
 }

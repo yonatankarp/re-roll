@@ -16,7 +16,13 @@ import {
   NS,
   frame,
 } from "../state.ts";
-import { ALL, DECLINE, encodeOption, parseOption } from "./ids.ts";
+import {
+  ALL,
+  DECLINE,
+  encodeOption,
+  FANCY_FOOTWORK,
+  parseOption,
+} from "./ids.ts";
 import { forgoAdvantageFrame, forgoFrame, SNEAK_DICE } from "./strikes.ts";
 import { lastsFor } from "./durations.ts";
 import { aroundHit, replaceHitFrame, runReplaceHit } from "./ranged-smite.ts";
@@ -32,6 +38,7 @@ import {
   unseenInvisible,
 } from "../sight.ts";
 import { insideDamageEvents, swallowerOf } from "./swallow.ts";
+import { beyondUnderwaterRange, underwaterHampered } from "./water.ts";
 import {
   awaitDecision,
   type Frame,
@@ -976,6 +983,18 @@ export function runAttackRoll(
     shielded !== null ||
     crowded ||
     longRange ||
+    underwaterHampered(attacker, action, resolution, context) ||
+    // Speedy or Boots of Speed: an Opportunity Attack, one made on the target's own turn, has Disadvantage.
+    (inOwnTurn(target, context) &&
+      [
+        ...target.activeEffects.map((effect) => effect.modifier),
+        ...passiveModifiers(targetStats.passives),
+      ].some(
+        (modifier) =>
+          modifier.kind === "disadvantage" &&
+          modifier.on === "attacksAgainst" &&
+          modifier.opportunity === true,
+      )) ||
     unseenTarget ||
     proneFar ||
     dodging(target) ||
@@ -1101,12 +1120,21 @@ export function runAttackRoll(
         : [],
     ),
   );
+  // Underwater, a ranged weapon misses past its normal range.
+  const drowned = beyondUnderwaterRange(
+    attacker,
+    target,
+    action,
+    resolution,
+    state,
+  );
   const judge = (natural: number, bonus: number) => {
     const sum = natural + base + bonus;
     return {
       total: sum,
-      success: natural >= critFrom || (natural !== 1 && sum >= ac),
-      critical: natural >= critFrom,
+      success:
+        !drowned && (natural >= critFrom || (natural !== 1 && sum >= ac)),
+      critical: !drowned && natural >= critFrom,
     };
   };
   // Reactions to the roll before it lands, as Bountiful Luck or Second Chance (combat/reactions.ts).
@@ -1170,6 +1198,20 @@ export function runAttackRoll(
       : []),
     ...onceEnded(attacker, "attacks"),
     ...naturalOneEvents(attacker, roll.natural, context),
+    // Fancy Footwork: the creature it attacks in melee can't make Opportunity Attacks against it this turn.
+    ...(isMelee(action) && hasPassive(stats, "fancyFootwork")
+      ? [
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: {
+              sourceId: FANCY_FOOTWORK,
+              casterId: attacker.id,
+              modifier: { kind: "mark" },
+              ends: "casterTurnEnd",
+            },
+          }),
+        ]
+      : []),
     ...actingEnds(attacker, action),
     ...(isMelee(action) ? prisonEvents(attacker, context) : []),
     ...onceEnded(target, "attacksAgainst", attacker.id),

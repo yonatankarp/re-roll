@@ -48,6 +48,7 @@ import {
   speedsOf,
   type Through,
   throughOf,
+  walksOnWater,
 } from "../movement-modes.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
 import {
@@ -83,6 +84,7 @@ import {
 import { bossAction } from "../legendary.ts";
 import { currentShape } from "../forms.ts";
 import { aimScore, aimSquares, caughtBy } from "../targeting.ts";
+import { breathAgainEvents } from "./water.ts";
 
 // Questions about a fight that change nothing: who is an ally or a foe, what reaches, what an actor can afford.
 
@@ -150,6 +152,7 @@ export function hasFlag(
       (!("spellAttacks" in modifier) || !modifier.spellAttacks) &&
       (!("concentration" in modifier) || !modifier.concentration) &&
       (!("casterSpells" in modifier) || !modifier.casterSpells) &&
+      (!("opportunity" in modifier) || !modifier.opportunity) &&
       (!("attackers" in modifier) ||
         !modifier.attackers ||
         modifier.attackers.includes(attackerType ?? "")),
@@ -359,6 +362,8 @@ export function groundFor(
   readonly walls: ReadonlySet<string>;
   readonly squeeze: boolean;
   readonly overTerrain: boolean; // crosses difficult terrain at no extra cost, however it moves
+  readonly water: ReadonlySet<string>; // squares to swim in
+  readonly waterWalks: boolean; // walks over water as on ground, as with Water Walk
 } {
   const through = throughOf(stats, actor);
   // shortcut: going through walls means the map's own; a wall a spell raises stops it as it does anyone.
@@ -410,7 +415,25 @@ export function groundFor(
     walls: blockingSet(state, "walking"),
     squeeze: through.squeeze,
     overTerrain: through.terrain || unhindered(actor, stats),
+    water: new Set(state.combat?.terrain?.water ?? []),
+    waterWalks: walksOnWater(actor, stats),
   };
+}
+
+// The squares that aren't water, where a swimmer can't go on its Swim Speed.
+function dryLand(
+  grid: { readonly width: number; readonly height: number },
+  water: ReadonlySet<string>,
+  from: Square,
+): Set<string> {
+  const dry = new Set<string>();
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      const key = squareKey({ x, y });
+      if (!water.has(key) && (x !== from.x || y !== from.y)) dry.add(key);
+    }
+  }
+  return dry;
 }
 
 // The squares with no wall beside them, where a climber has nothing to hold.
@@ -472,19 +495,30 @@ export function moveSquares(
     ground.costly.size === 0
       ? ground.terrain
       : new Set([...ground.terrain, ...ground.costly]);
+  // Water: a walker swims it at double cost, unless it swims as fast as it walks or walks on water; a Swim Speed of
+  // its own keeps to the water (the 2024 rules switch Speeds mid-move; shortcut: each Speed moves on its own here).
+  const swimming = speedsOf(actor, stats).get("swim") ?? 0;
+  const wet =
+    ground.water.size > 0 && !ground.waterWalks && swimming < stats.speed;
+  const dry = ground.water.size > 0 ? dryLand(grid, ground.water, from) : null;
   // Each square at its cheapest, with each foot of movement costing `cost` feet.
   const search = (cost: number): Map<string, Walk> => {
     const best = new Map<string, Walk>();
     for (const [mode, left] of speedsLeft(actor, stats)) {
       const feet = Math.floor(left / cost / SQUARE_FEET) * SQUARE_FEET;
       if (feet <= 0 || (up && mode !== up)) continue;
+      if (mode === "swim" && !dry) continue;
+      const rough =
+        crossesDifficult(mode) || ground.overTerrain ? ground.costly : walking;
       const found = reachableSquares(
         from,
         feet,
         grid,
-        blocked,
+        mode === "swim" && dry ? new Set([...blocked, ...dry]) : blocked,
         ground.occupied,
-        crossesDifficult(mode) || ground.overTerrain ? ground.costly : walking,
+        wet && mode !== "fly" && mode !== "swim"
+          ? new Set([...rough, ...ground.water])
+          : rough,
         ground.walls,
         { squeeze: ground.squeeze, jump },
       );
@@ -1254,6 +1288,7 @@ export function combatEnded(
   outcome?: "defeat" | "flee",
 ): SystemEvent[] {
   return [
+    ...breathAgainEvents(state),
     {
       kind: "encounterEnded",
       encounter: state.combat?.encounter ?? "",
