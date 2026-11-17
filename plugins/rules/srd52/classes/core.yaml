@@ -50,6 +50,7 @@
   weapons: [simple, martial]
   martialWeaponProperties: [finesse, light]
   armor: [light]
+  tools: ["srd52:item/thieves-tools"]
   levels:
     - level: 1
       grants:

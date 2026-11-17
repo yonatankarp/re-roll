@@ -1074,7 +1074,7 @@ describe("playing a D&D adventure", () => {
       expect(report.failures).toEqual([]);
       expect(report.unvisitedScenes).toEqual([]);
     },
-    30_000, // many full playthroughs, which also run alongside other test files
+    120_000, // many full playthroughs alongside other test files, which took up to 48 s on CI's soak run (#204)
   );
 
   it("keeps state as plain JSON that passes its schema at every step", async () => {
@@ -1146,7 +1146,7 @@ describe("playing a D&D adventure", () => {
     expect(
       answers.some((input) => input.decisionId.startsWith("dnd5.5e:build:")),
     ).toBe(true);
-  }, 30_000); // many full playthroughs, which also run alongside other test files
+  }, 120_000); // many full playthroughs alongside other test files, which took up to 46 s on CI (#204)
 
   it("clears monsters and the combat when a fight is won", async () => {
     const run = await goblin();

@@ -15,6 +15,7 @@ import type {
   Question,
   RestOption,
   SceneAction,
+  SceneHere,
 } from "../kernel/system.ts";
 import {
   type Adventure,
@@ -196,6 +197,20 @@ function restsHere(
   return run.system.rests?.(state.system) ?? [];
 }
 
+// The checks the scene's choices offer now, for the system to fit its actions to.
+export function sceneHere(run: RunContext, state: GameState): SceneHere {
+  const scene = state.story.scene && findScene(run, state.story.scene);
+  return {
+    checks: scene
+      ? scene.choices.flatMap((choice) =>
+          "check" in choice && evaluateCondition(choice.when, run, state)
+            ? [choice.check]
+            : [],
+        )
+      : [],
+  };
+}
+
 // What the system lets the player do between this scene's choices, such as from the character sheet.
 export function sceneActionsHere(
   run: RunContext,
@@ -203,9 +218,9 @@ export function sceneActionsHere(
 ): readonly SceneAction[] {
   const scene = state.story.scene && findScene(run, state.story.scene);
   if (!scene) return [];
-  return (run.system.sceneActions?.(state.system, run) ?? []).filter(
-    (action) => !action.rest || scene.rest,
-  );
+  return (
+    run.system.sceneActions?.(state.system, run, sceneHere(run, state)) ?? []
+  ).filter((action) => !action.rest || scene.rest);
 }
 
 export type StoryDecision =
