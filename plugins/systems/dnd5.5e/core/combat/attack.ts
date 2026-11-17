@@ -38,6 +38,8 @@ import {
 import {
   afterDamage,
   type Edge,
+  effectsOf,
+  withoutMoves,
   playerTakes,
   rollRewards,
   reactFrames,
@@ -303,6 +305,7 @@ function reactionFor(
   melee: boolean,
   spell = false,
   attacker?: Actor,
+  types: readonly string[] = [],
 ): KnownAction | null {
   if (
     !target.budget.reaction ||
@@ -333,6 +336,13 @@ function reactionFor(
         (!attacker ||
           distanceFeet(attacker.position, target.position) >
             activation.trigger.within)
+      ) {
+        return false;
+      }
+      // Deflect Attacks: only an attack dealing one of these types.
+      if (
+        activation.trigger.damagedBy &&
+        !activation.trigger.damagedBy.some((type) => types.includes(type))
       ) {
         return false;
       }
@@ -468,13 +478,18 @@ function ownTrigger(
   actor: Actor,
   when: "attacked",
   context: Context,
+  advantage = false, // the attack roll has Advantage
+  pressed = true, // the bearer is hurt or the attack has Advantage, when a use worth keeping is spent
 ): KnownAction | null {
   const stats = deriveStats(actor, context);
   return (
     stats.actions.find((item) => {
       const trigger = item.activation.trigger;
+      const cheap = item.activation.cost.every((cost) => cost === "reaction");
       return (
         trigger?.[when] &&
+        !(trigger.noAdvantage && advantage) &&
+        (pressed || cheap) &&
         !redirects(item) &&
         canAfford(item, actor, stats) &&
         (actor.id !== PLAYER_ACTOR ||
@@ -1084,13 +1099,18 @@ export function runAttackRoll(
           (modifier.spellAttacks === true && action.spellLevel !== null)),
     );
   // Lucky: the target spends a Luck Point on its own once it's badly hurt or the attacker has Advantage.
+  // One that costs only the Reaction, as Shadowy Dodge, is taken whenever it can be; XGE's only against a roll
+  // without Advantage.
   const luck =
-    held ||
-    hampered ||
-    !(advantage || target.hp * 2 <= targetStats.maxHp) ||
-    isDown(target)
+    held || hampered || isDown(target)
       ? null
-      : ownTrigger(target, "attacked", context);
+      : ownTrigger(
+          target,
+          "attacked",
+          context,
+          advantage,
+          advantage || target.hp * 2 <= targetStats.maxHp,
+        );
   const disadvantage = hampered || luck !== null;
   const guarded = [
     ...(shielded
@@ -1105,11 +1125,22 @@ export function runAttackRoll(
           ...payCosts(luck, target, context),
           // Limited Foresight's Advantage is against the attacker alone, so it's aimed at it.
           ...(resolveAction(
-            luck,
+            withoutMoves(luck),
             target,
             ["self" in luck.activation.targeting ? target : attacker],
             context,
           ).events ?? []),
+          // Shadowy Dodge's move away from the attacker.
+          ...effectsOf(luck).flatMap((effect) =>
+            effect.kind === "reactionMove"
+              ? reactionMove(
+                  { ...target, budget: { ...target.budget, reaction: true } },
+                  context,
+                  effect,
+                  attacker,
+                ).filter((event) => event.kind !== `${NS}:budgetSpent`)
+              : [],
+          ),
         ]
       : []),
   ];
@@ -1311,6 +1342,7 @@ export function runAttackRoll(
     meleeReach(action) !== null,
     action.spellLevel !== null,
     attacker,
+    resolution.damage.map(({ type }) => type),
   );
   if (reaction) {
     return {
@@ -2662,31 +2694,59 @@ function passedOn(
       .flatMap((effect) => (effect.kind === "reduceDamage" ? [effect] : []))
       .find((effect) => effect.deflect)?.deflect;
     // At the attacker when it's in range, else the nearest foe that is.
-    const victim = deflect
-      ? [attacker, ...enemies(state, target)].find(
-          (item) =>
-            item.side !== target.side &&
-            !isDown(item) &&
-            distanceFeet(item.position, target.position) <= deflect.range &&
-            seeing(target, item.position, state, context) !== "none",
-        )
-      : undefined;
+    const kind = attackKind(payload, context);
+    const range =
+      deflect && kind.melee ? (deflect.melee ?? deflect.range) : deflect?.range;
+    const targetStats = deriveStats(target, context);
+    const paid =
+      !deflect?.resource ||
+      (target.resourcesSpent[deflect.resource] ?? 0) <
+        (targetStats.resources[deflect.resource] ?? 0);
+    const victim =
+      deflect && paid && range !== undefined
+        ? [attacker, ...enemies(state, target)].find(
+            (item) =>
+              item.side !== target.side &&
+              !isDown(item) &&
+              distanceFeet(item.position, target.position) <= range &&
+              seeing(target, item.position, state, context) !== "none",
+          )
+        : undefined;
     if (deflect && victim) {
-      const save = rollSave(victim, deflect.ability, deflect.dc, context);
+      if (deflect.resource) {
+        events.push(
+          dndEvent(`${NS}:resourceSpent`, {
+            actor: target.id,
+            resource: deflect.resource,
+          }),
+        );
+      }
+      const dc =
+        typeof deflect.dc === "number"
+          ? deflect.dc
+          : evaluateFormula(deflect.dc, targetStats);
+      const save = rollSave(victim, deflect.ability, dc, context);
       events.push(...save.events);
+      // Deflect Attacks: the type of the attack's own damage.
+      const own = lessened[0]?.type;
       if (!save.saved) {
-        const stats = deriveStats(target, context);
+        const stats = targetStats;
         const responses = damageResponses(victim, context);
         const dealt = dealEvents(
           victim,
-          deflect.damage.map(({ amount, type }) => ({
-            amount: finalDamage(
-              rollAmount(amount, stats, context.dice),
+          deflect.damage
+            .map(({ amount, type: printed }) => ({
+              type: deflect.sameType && own ? own : printed,
+              amount,
+            }))
+            .map(({ amount, type }) => ({
+              amount: finalDamage(
+                rollAmount(amount, stats, context.dice),
+                type,
+                responses,
+              ),
               type,
-              responses,
-            ),
-            type,
-          })),
+            })),
           false,
           context,
         );

@@ -46,6 +46,7 @@ import {
   actorOf,
   allies,
   canAfford,
+  enemies,
   CHECK_END,
   type Context,
   meleeReach,
@@ -71,7 +72,7 @@ import {
 
 type Trigger = NonNullable<KnownAction["activation"]["trigger"]>;
 
-const effectsOf = (action: KnownAction): readonly LeafEffect[] => {
+export const effectsOf = (action: KnownAction): readonly LeafEffect[] => {
   const { resolution } = action.activation;
   return resolution.kind === "attack"
     ? resolution.onHit
@@ -312,6 +313,27 @@ export function respond(
     } else if (effect.kind === "rollBonus") {
       const amount = rollAmount(effect.amount, stats, context.dice);
       bonus += want || !effect.either ? amount : -amount;
+    } else if (effect.kind === "reactionMove") {
+      // A move as part of it, as Ingenious Movement's with Flash of Genius: away from the foe that rolled, or else
+      // the nearest one.
+      const from =
+        roll.roller.side !== reactor.side
+          ? roll.roller
+          : (enemies(context.state, reactor)
+              .filter((item) => !isDown(item) && item.position)
+              .sort(
+                (a, b) =>
+                  distanceFeet(reactor.position, a.position) -
+                  distanceFeet(reactor.position, b.position),
+              )[0] ?? reactor);
+      used.push(
+        ...reactionMove(
+          { ...reactor, budget: { ...reactor.budget, reaction: true } },
+          context,
+          effect,
+          from,
+        ).filter((event) => event.kind !== `${NS}:budgetSpent`),
+      );
     } else if (effect.kind === "succeed") {
       // shortcut: a bonus no DC reaches; a natural 1 on an attack roll becomes a 2 so it can hit.
       natural = Math.max(natural, 2);
@@ -1019,7 +1041,7 @@ const selfMoves = (action: KnownAction) =>
     effect.kind === "reactionMove" ? [effect] : [],
   );
 
-function withoutMoves(action: KnownAction): KnownAction {
+export function withoutMoves(action: KnownAction): KnownAction {
   const { resolution } = action.activation;
   return resolution.kind === "automatic"
     ? {
@@ -1318,7 +1340,43 @@ function lessen(
   const events: SystemEvent[] = [...reactionCosts(bearer, action, context)];
   let left = amount;
   for (const effect of effects) {
-    if (effect.kind === "resistTrigger") left = Math.floor(left / 2);
+    if (effect.kind === "resistTrigger") {
+      left = Math.floor(left / 2);
+      events.push(
+        ...leafEvents(
+          [
+            ...(effect.lasting
+              ? [
+                  {
+                    kind: "modifier" as const,
+                    modifier: { kind: "resistance" as const, damage: type },
+                    duration: effect.lasting,
+                  },
+                ]
+              : []),
+            ...(effect.hitDamage
+              ? [
+                  {
+                    kind: "modifier" as const,
+                    modifier: {
+                      kind: "hitDamage" as const,
+                      dealtBy: "bearer" as const,
+                      weaponOnly: true,
+                      once: true,
+                      damage: { amount: effect.hitDamage, type },
+                    },
+                    duration: { until: "yourNextTurnEnd" as const },
+                  },
+                ]
+              : []),
+          ],
+          action.id,
+          bearer,
+          bearer,
+          context,
+        ),
+      );
+    }
     if (effect.kind === "reduceDamage") {
       if (effect.takes) {
         // Divine Allegiance: all of it goes to the bearer, and nothing lessens it.
@@ -1406,8 +1464,10 @@ export function spellAimedAt(
             const trigger = item.activation.trigger;
             return (
               ((trigger?.spellTargets === true && spell.spellLevel !== null) ||
+                // The same spell from any book, as Shield's Magic Missile.
                 (trigger?.targetedBySpell !== undefined &&
-                  trigger.targetedBySpell === spellId)) &&
+                  trigger.targetedBySpell.split("/").pop() ===
+                    spellId?.split("/").pop())) &&
               ready(target, item, stats)
             );
           });

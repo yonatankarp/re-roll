@@ -1001,12 +1001,17 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("reduceDamage"),
     halve: z.boolean().default(false),
     amount: AmountSchema.optional(),
+    // `dc` as a formula is the bearer's; `resource` is spent to send it, as Deflect Attacks' Focus Point; `melee` is
+    // the range against a melee attack, and `sameType` deals the type of the attack's damage instead.
     deflect: z
       .strictObject({
         range: z.number().int().min(5),
+        melee: z.number().int().min(5).optional(),
         ability: AbilitySchema,
-        dc: z.number().int(),
+        dc: z.union([z.number().int(), FormulaSchema]),
         damage: z.array(DamageSchema).min(1),
+        resource: z.string().min(1).optional(),
+        sameType: z.literal(true).optional(),
       })
       .optional(),
     toNear: z
@@ -1129,8 +1134,14 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("swapInitiative") }),
   // The bearer gains Heroic Inspiration, as with Tireless Reveler.
   z.strictObject({ kind: z.literal("inspiration") }),
-  // Resistance to the damage that set the reaction off, as with Elemental Absorption.
-  z.strictObject({ kind: z.literal("resistTrigger") }),
+  // Resistance to the damage that set the reaction off, as with Elemental Absorption, and with `lasting` to that type
+  // for so long, as Superior Hunter's Defense to the end of the turn; `hitDamage` of that type goes on the bearer's
+  // next weapon hit, as Absorb Elements' 1d6.
+  z.strictObject({
+    kind: z.literal("resistTrigger"),
+    lasting: DurationSchema.optional(),
+    hitDamage: AmountSchema.optional(),
+  }),
   // Creatures that join the fight on the caster's side, using a companion stat block's `play` numbers at the
   // slot's level, in open squares within `range` feet nearest the foes. They take their turns right after the
   // caster's, and vanish at 0 Hit Points or when the spell ends. `dc` is the caster's spell save DC, which their
@@ -1581,6 +1592,7 @@ export const ActivationSchema = z.strictObject({
       // Lucky. It's taken on its own once the bearer is at half its Hit Points or fewer, or the attacker has
       // Advantage.
       attacked: z.literal(true).optional(),
+      noAdvantage: z.literal(true).optional(), // with `attacked`, only a roll without Advantage, as XGE's Shadowy Dodge
       // Taken right after a creature's attack damages the bearer, against that creature, as with Storm's Thunder.
       damaged: z.literal(true).optional(),
       damagedBy: z.array(DamageTypeSchema).min(1).optional(), // only damage of these types, as with Delicious Pain
