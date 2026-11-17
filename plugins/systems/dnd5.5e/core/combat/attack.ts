@@ -2706,7 +2706,9 @@ function smitesFor(
     const { trigger } = action.activation;
     return (
       trigger?.afterHit !== undefined &&
-      trigger.following === following &&
+      (following === undefined
+        ? trigger.following === undefined
+        : trigger.following?.includes(following) === true) &&
       !trigger.replacesHit && // offered before the hit lands instead (combat/ranged-smite.ts)
       trigger.forgo === undefined && // picked before the damage (combat/strikes.ts)
       !trigger.forgoAdvantage && // picked before the roll
@@ -2929,7 +2931,8 @@ export function runSmite(
     featureId !== undefined &&
     known.activation.trigger?.following === undefined &&
     deriveStats(attacker, context).actions.some(
-      ({ activation }) => activation.trigger?.following === featureId,
+      ({ activation }) =>
+        activation.trigger?.following?.includes(featureId) === true,
     );
   return {
     events: [

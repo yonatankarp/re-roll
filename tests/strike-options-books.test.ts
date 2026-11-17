@@ -33,6 +33,7 @@ import {
 } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { resolveAction } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { freshActor } from "../plugins/systems/dnd5.5e/core/state.ts";
+import { encodeOption } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
 import { contextOf, scripted, settle } from "./feat-fixtures.ts";
 import { BOOK_ROOTS } from "./depth.ts";
 
@@ -510,5 +511,87 @@ describe.skipIf(!BOOKS)("strike options and riders in a fight", () => {
       "Arcane Shot Options (Bursting Arrow, Shadow Arrow) (Bursting Arrow)",
       "Arcane Shot Options (Bursting Arrow, Shadow Arrow) (Shadow Arrow)",
     ]);
+  });
+
+  // The options offered right after one feature's or spell's option lands on the hit.
+  function followUps(attacker: Actor, smite: string, slot?: string): string[] {
+    const weapon = deriveStats(attacker, run).actions.find((action) =>
+      action.id.startsWith("weapon:"),
+    );
+    if (!weapon) throw new Error("No weapon");
+    const goblin = monster("goblin", "srd52:monster/goblin-warrior", 1);
+    const { decisions } = settle(
+      run,
+      // Another goblin within reach of both.
+      [
+        attacker,
+        goblin,
+        {
+          ...monster("other", "srd52:monster/goblin-warrior", 1),
+          position: { x: 1, y: 1 },
+        },
+      ],
+      [
+        {
+          kind: `${NS}:smite`,
+          payload: {
+            attacker: attacker.id,
+            actionId: weapon.id,
+            target: "goblin",
+            critical: false,
+            answer: encodeOption(smite, "goblin", ...(slot ? [slot] : [])),
+          },
+        },
+      ],
+      scripted([]).dice,
+      () => "decline",
+    );
+    return decisions.flatMap((decision) =>
+      decision.id.startsWith(`${NS}:afterHit:`)
+        ? decision.options.map(({ label }) => label)
+        : [],
+    );
+  }
+
+  it("offers Stalker's Flurry's effects right after Dreadful Strike lands", () => {
+    const ambusher = "phb:feature/ranger-gloom-stalker-dread-ambusher";
+    const ranger = withFeatures([
+      ambusher,
+      "phb:feature/ranger-gloom-stalker-stalker-s-flurry",
+    ]);
+    const dreadful = deriveStats(ranger, run).actions.find(({ id }) =>
+      id.startsWith(`feature:${ambusher}:`),
+    );
+    if (!dreadful) throw new Error("No Dreadful Strike");
+    const offered = followUps(ranger, dreadful.id).join(" | ");
+    expect(offered).toContain("Mass Fear");
+    expect(offered).toContain("Sudden Strike");
+  });
+
+  it("offers Elemental Smite right after Divine Smite lands", () => {
+    const made = build("phb:class/paladin", 3, {
+      1: [{ kind: "spells", values: ["phb:spell/divine-smite"] }],
+      3: [
+        {
+          kind: "features",
+          values: [
+            "heroes-of-faerun:feature/paladin-oath-of-the-noble-genies-elemental-smite",
+            "phb:feature/paladin-channel-divinity",
+          ],
+        },
+      ],
+    });
+    const paladin = {
+      ...actorWith(made),
+      position: { x: 0, y: 0 },
+      inventory: ["srd52:item/longsword"],
+    };
+    const offered = followUps(
+      paladin,
+      "spell:phb:spell/divine-smite",
+      "1",
+    ).join(" | ");
+    expect(offered).toContain("Efreeti’s Fury");
+    expect(offered).toContain("Marid’s Surge");
   });
 });

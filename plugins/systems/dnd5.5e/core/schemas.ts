@@ -1387,7 +1387,7 @@ export const ActivationSchema = z.strictObject({
       sneakAttack: z.literal(true).optional(),
       // With `afterHit`, offered only right after an `afterHit` activation of this feature or spell lands on the same
       // hit, as Stalker's Flurry's effects after Dreadful Strike or Elemental Smite's after Divine Smite.
-      following: ContentIdSchema.optional(),
+      following: z.array(ContentIdSchema).min(1).optional(),
       // With `afterHit`, only on the bearer's own turn, as Shield Bash or Charge Attack.
       ownTurn: z.literal(true).optional(),
       // With `afterHit`, only right after a walk of at least this many feet in a straight line toward the target, as
