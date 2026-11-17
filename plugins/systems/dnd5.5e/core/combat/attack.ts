@@ -962,6 +962,12 @@ export function runAttackRoll(
     proneFar ||
     dodging(target) ||
     duelHampers(attacker, target) ||
+    attacker.activeEffects.some(
+      ({ modifier, casterId }) =>
+        modifier.kind === "disadvantage" &&
+        modifier.againstCaster === true &&
+        casterId === target.id,
+    ) ||
     grappledAwayFrom(attacker, target) ||
     hasFlag(attacker, "disadvantage", "attacks", stats, ability) ||
     hasFlag(

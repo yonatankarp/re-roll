@@ -134,6 +134,8 @@ export function hasFlag(
       (!("magical" in modifier) || !modifier.magical) &&
       // Disadvantage only on spell attacks is the attack's to weigh (combat/attack.ts).
       (!("spells" in modifier) || !modifier.spells) &&
+      // Disadvantage only against its caster is the attack's to weigh (combat/attack.ts).
+      (!("againstCaster" in modifier) || !modifier.againstCaster) &&
       (!("attackers" in modifier) ||
         !modifier.attackers ||
         modifier.attackers.includes(attackerType ?? "")),

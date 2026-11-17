@@ -67,6 +67,7 @@ import {
 } from "./queries.ts";
 import {
   aimSquare,
+  leafEvents,
   payCosts,
   resolveAction,
   resolveTargets,
@@ -372,6 +373,7 @@ function castAction(
         ? []
         : revealEvents(actor)),
       ...(result.events ?? []),
+      ...dealtSelfEffects(action, actor, result.events ?? [], context),
     ],
     frames: [
       ...(result.frames ?? []),
@@ -390,6 +392,24 @@ function castAction(
       frame("afterAction", { actor: actor.id }),
     ],
   };
+}
+
+// What a cast's `selfEffects` give the caster once it has hurt another creature, as Improved Blessed Strikes' gift.
+// shortcut: an attack roll left waiting on a reaction lands later and gives nothing.
+function dealtSelfEffects(
+  action: KnownAction,
+  caster: Actor,
+  events: readonly SystemEvent[],
+  context: Context,
+): SystemEvent[] {
+  const own = action.activation.selfEffects;
+  const hurt = events.some(
+    (event) =>
+      event.kind === `${NS}:damaged` &&
+      String(event.payload.actor) !== caster.id &&
+      Number(event.payload.amount) > 0,
+  );
+  return own && hurt ? leafEvents(own, action.id, caster, caster, context) : [];
 }
 
 // The action as cast in `shape`: the first is as written, and another's effects replace its resolution's.

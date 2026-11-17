@@ -640,6 +640,27 @@ function bestMentalAbility(abilities: AbilityScores): Ability {
   );
 }
 
+// A feature with the variant picked for it (or for the feature it follows) joined in; the first when none was.
+export function withVariant(
+  feature: Feature,
+  variants: Readonly<Record<string, string>>,
+): Feature {
+  const options = feature.variants;
+  if (!options) return feature;
+  const picked =
+    options.find(({ id }) => id === variants[feature.follows ?? feature.id]) ??
+    options[0];
+  return picked
+    ? {
+        ...feature,
+        name: `${feature.name} (${picked.name})`,
+        passives: [...feature.passives, ...picked.passives],
+        activations: [...feature.activations, ...picked.activations],
+        resources: [...feature.resources, ...picked.resources],
+      }
+    : feature;
+}
+
 function collectFeatureData(
   access: ContentAccess,
   featureIds: readonly string[],
@@ -647,6 +668,7 @@ function collectFeatureData(
   highestSlot = 0,
   feats: ReadonlySet<string> = new Set(),
   classLevels: Readonly<Record<string, number>> = {},
+  variants: Readonly<Record<string, string>> = {},
 ): {
   passives: Passive[];
   actions: KnownAction[];
@@ -661,8 +683,24 @@ function collectFeatureData(
   const spells = featureIds.flatMap((id) => grantedSpells(id, level));
   const free: [string, FreeCast][] = [];
   const retype: Record<string, DamageType> = {};
+  // Activations a later feature's variant takes the place of, by the feature they're on (`replaces`).
+  const replaced = new Map<string, Set<string>>();
   for (const id of featureIds) {
-    const feature = featureRules(lookup(access, FeatureSchema, id));
+    const feature = lookup(access, FeatureSchema, id);
+    const options = feature.variants ?? [];
+    const labels = (
+      options.find((item) => item.id === variants[feature.follows ?? ""]) ??
+      options[0]
+    )?.replaces;
+    if (feature.follows && labels && (feature.fromLevel ?? 1) <= level) {
+      replaced.set(feature.follows, new Set(labels));
+    }
+  }
+  for (const id of featureIds) {
+    const feature = withVariant(
+      featureRules(lookup(access, FeatureSchema, id)),
+      variants,
+    );
     if ((feature.fromLevel ?? 1) > level) continue;
     Object.assign(retype, feature.retype);
     passives.push(...feature.passives);
@@ -684,6 +722,7 @@ function collectFeatureData(
       if (Number(slot) <= highestSlot) spells.push(...ids);
     }
     feature.activations.forEach((activation, index) => {
+      if (activation.label && replaced.get(id)?.has(activation.label)) return;
       actions.push({
         id: `feature:${id}:${String(index)}`,
         name: activation.label
@@ -930,6 +969,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const freeSpells = new Map<string, FreeCast>(); // also cast without a slot
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
   const featureIds = new Set<string>(species.traits);
+  const variants: Record<string, string> = {}; // the variant picked, by feature
   // A feat picked in place of the background's, as a Dark Gift for Haunted One, is in the first level's answers.
   const replaced =
     background.featOr !== undefined &&
@@ -978,6 +1018,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         }
       } else if (answer.kind === "features") {
         for (const id of answer.values) featureIds.add(id);
+      } else if (answer.kind === "variant") {
+        variants[answer.feature] = answer.values[0] ?? "";
       } else if (answer.kind === "feats") {
         for (const id of answer.values) {
           featIds.add(id);
@@ -1097,6 +1139,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     slots.findLastIndex((count) => count > 0) + 1,
     featIds,
     classLevels,
+    variants,
   );
   // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
   const traits = [...itemPassives, ...fromFeatures.passives];
@@ -1361,6 +1404,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         fromFeatures.passives,
         abilities,
         classLevels,
+        access,
       ),
       actor,
       abilityModifier(abilities.cha),

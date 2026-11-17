@@ -363,6 +363,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     attackers: z.array(z.string()).min(1).optional(),
     skills: z.array(SkillSchema).min(1).optional(), // only checks with these skills
     spells: z.literal(true).optional(), // attacksAgainst only from spells, as a Spellguard Shield's
+    // attacks only against the effect's caster, as Perfected Armor's glimmer (combat/attack.ts)
+    againstCaster: z.literal(true).optional(),
   }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
@@ -493,6 +495,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("movementMode"),
     mode: z.enum(["fly", "climb", "burrow"]),
     feet: z.number().int().min(5).optional(),
+    times: z.number().int().min(2).optional(), // with no feet, this many times its Speed, as Perfected Armor's flight
     hover: z.literal(true).optional(), // a flyer that doesn't fall while Prone or Incapacitated, as with Fly
     ceiling: z.literal(true).optional(), // a climber that goes along ceilings, not only walls, as with Spider Climb
   }),
@@ -1744,6 +1747,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     rangePerLevel: z
       .strictObject({ class: ContentIdSchema, feet: z.number().int().min(1) })
       .optional(),
+    // Every damaging cantrip on this class's spell list instead of the best one, as Potent Spellcasting's.
+    list: ContentIdSchema.optional(),
+    // Feet added to the range of a cantrip that reaches 10 feet or more, as Improved Elemental Fury's.
+    range: z.number().int().min(5).optional(),
+    // What the caster gets once the cantrip deals damage, as Improved Blessed Strikes' Temporary Hit Points.
+    selfEffects: z.array(LeafEffectSchema).min(1).optional(),
   }),
   // Seeing through Darkness and Dim Light this far, as with Devil's Sight.
   z.strictObject({
@@ -2484,6 +2493,26 @@ export const FeatureSchema = ContentEntrySchema.extend({
     })
     .optional(),
   choices: z.lazy(() => z.array(ChoiceDefSchema)).default([]), // asked when it's taken as a class option
+  // Options printed inside the feature, one picked when it's gained (a `variant` choice), as Blessed Strikes' Divine
+  // Strike or Potent Spellcasting. The pick's passives, activations and resources join the feature's own.
+  variants: z
+    .array(
+      z.strictObject({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        passives: z.array(PassiveSchema).default([]),
+        activations: z.array(ActivationSchema).default([]),
+        resources: z.array(ResourceDefSchema).default([]),
+        // Labels of the followed feature's activations these take the place of, as Perfected Armor's bigger weapons.
+        replaces: z.array(z.string().min(1)).min(1).optional(),
+      }),
+    )
+    .min(2)
+    .optional(),
+  // Its variants follow the pick made for this feature instead of asking, as Improved Blessed Strikes'.
+  follows: ContentIdSchema.optional(),
+  // The variant picked can be changed outside a fight after a rest, as Hunter's Prey's (swap.ts).
+  variantSwap: z.literal("shortRest").optional(),
   // What it gives the bearer's familiar (combat/familiar.ts): Hit Points added to its maximum when it is found,
   // worked out from the bearer's numbers, and passives and actions of its own.
   familiar: z
@@ -2563,6 +2592,12 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     from: z.array(ContentIdSchema).min(1),
     // Picked again after a Long Rest, as Weapon Master's weapons (swap.ts).
     swap: z.literal("longRest").optional(),
+  }),
+  // One of a feature's own `variants`, asked when a level grants it.
+  z.strictObject({
+    kind: z.literal("variant"),
+    id: z.string(),
+    feature: ContentIdSchema,
   }),
 ]);
 
@@ -3148,6 +3183,12 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
     kind: z.literal("spellAbility"),
     ability: AbilitySchema,
     feat: ContentIdSchema, // whose spells it's for: a feat, or the species
+  }),
+  // The variant picked for a feature that has them (a `variant` choice).
+  z.strictObject({
+    kind: z.literal("variant"),
+    feature: ContentIdSchema,
+    values: z.array(z.string().min(1)).length(1),
   }),
 ]);
 
