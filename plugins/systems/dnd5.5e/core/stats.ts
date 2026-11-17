@@ -1388,9 +1388,14 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   );
   // A multiclass casts with the class it has the most levels in, the first taken on a tie.
   // shortcut: every spell uses that one ability, give each its own class's once Stats holds more than one.
-  const [caster] = classes
-    .filter((def) => def.spellcasting)
+  // A subclass's Spellcasting counts for its class, as an Eldritch Knight's for a Fighter.
+  const casting = (def: ClassDef) =>
+    def.spellcasting ??
+    (subclass?.class === def.id ? subclass.spellcasting : undefined);
+  const [casterClass] = classes
+    .filter((def) => casting(def))
     .sort((a, b) => (classLevels[b.id] ?? 0) - (classLevels[a.id] ?? 0));
+  const caster = casterClass && { spellcasting: casting(casterClass) };
   const trained = new Set<string>(classes.flatMap((def) => def.armor));
   for (const id of featIds) {
     if (id.endsWith("lightly-armored")) trained.add("light").add("shield");

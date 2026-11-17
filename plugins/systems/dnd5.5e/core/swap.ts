@@ -8,14 +8,16 @@ import {
   type SystemResult,
 } from "#sdk";
 import { z } from "zod";
-import { choiceOptions, latePick } from "./character.ts";
+import { choiceOptions, latePick, levelChoices } from "./character.ts";
 import {
   BackgroundSchema,
+  type CharacterBuild,
   type ChoiceDef,
   ClassSchema,
   FeatSchema,
   FeatureSchema,
   SpeciesSchema,
+  SubclassSchema,
 } from "./schemas.ts";
 import {
   type Actor,
@@ -33,7 +35,7 @@ import {
   traitCantrips,
 } from "./stats.ts";
 
-// Picks a feat or species lets the character change after a Long Rest, as Weapon Master's weapons, or once a level,
+// Picks a feat, species or class lets the character change after a Long Rest, as Weapon Master's weapons, or once a level,
 // as Magic Initiate's spells, or picks it makes between scenes, as Ritual Caster's, offered beside a scene's choices so
 // a save from before them never meets a new decision.
 // shortcut: only the player swaps, any time until the next Long Rest (or level), and only picks made since builds
@@ -58,6 +60,97 @@ interface Swappable {
   readonly open: boolean; // offered now
   readonly mark?: string; // kept as swapped in place of the key
   readonly adds?: true; // a late pick: one more, nothing dropped
+  readonly classId?: string; // a class's own pick, whose options it filters
+}
+
+// The answer each kind of choice leaves in a level's build.
+const ANSWER_KINDS: Partial<Record<ChoiceDef["kind"], string>> = {
+  spells: "spells",
+  option: "features",
+};
+
+// A class's own picks, matched to the choices its levels ask in order, that its `swaps` (or its subclass's
+// Spellcasting's) let it change: one a level, one after each Long Rest, or each after a Long Rest.
+// shortcut: a Wizard swaps in any Wizard spell it has slots for, as the spellbook isn't kept apart from its list.
+// shortcut: "prepare" changes one spell of each level's picks after a Long Rest, not the whole list at once.
+function classPicks(
+  build: CharacterBuild,
+  access: ContentAccess,
+  swapped: readonly string[],
+  highestSlot: number,
+): Swappable[] {
+  const level = build.levels.length;
+  const classLevels: Record<string, number> = {};
+  const subclasses: Record<string, string> = {};
+  return build.levels.flatMap((entry, at) => {
+    const classLevel = (classLevels[entry.classId] ?? 0) + 1;
+    classLevels[entry.classId] = classLevel;
+    for (const answer of entry.answers) {
+      if (answer.kind === "subclass" && answer.values[0]) {
+        subclasses[entry.classId] = answer.values[0];
+      }
+    }
+    const classDef = ClassSchema.safeParse(access.content(entry.classId)).data;
+    if (!classDef) return [];
+    const subclassId = subclasses[entry.classId];
+    const subclass = subclassId
+      ? SubclassSchema.safeParse(access.content(subclassId)).data
+      : undefined;
+    const rules = { ...subclass?.spellcasting?.swaps, ...classDef.swaps };
+    let next = 0;
+    return levelChoices(classDef, classLevel, subclassId, access).flatMap(
+      (choice): Swappable[] => {
+        const kind = ANSWER_KINDS[choice.kind];
+        if (!kind) return [];
+        const index = entry.answers.findIndex(
+          (answer, place) => place >= next && answer.kind === kind,
+        );
+        const answer = entry.answers[index];
+        if (!answer || !("values" in answer)) return [];
+        next = index + 1;
+        if ("feat" in answer && answer.feat) return [];
+        const group =
+          choice.kind === "option"
+            ? "options"
+            : choice.kind === "spells" && choice.maxLevel === 0
+              ? "cantrips"
+              : "spells";
+        const stated =
+          choice.kind === "spells" && choice.swap ? choice.swap : undefined;
+        const when =
+          stated ??
+          (choice.id === group || choice.kind === "option"
+            ? rules[group]
+            : undefined);
+        if (!when) return [];
+        const key = `${String(at)}:${String(index)}`;
+        const mark =
+          when === "levelUp"
+            ? `${entry.classId}:${choice.id}@${String(level)}`
+            : when === "longRest"
+              ? `${entry.classId}:${choice.id}`
+              : undefined;
+        // Prepared spells come from any level the class now has slots for.
+        const wider =
+          choice.kind === "spells" && choice.id === "spells"
+            ? { ...choice, maxLevel: Math.max(choice.maxLevel, highestSlot) }
+            : choice;
+        return [
+          {
+            key,
+            owner: `${classDef.name} ${group}`,
+            choices: [wider],
+            values: answer.values,
+            open:
+              (when !== "levelUp" || level > at + 1) &&
+              !swapped.includes(mark ?? key),
+            ...(mark ? { mark } : {}),
+            classId: entry.classId,
+          },
+        ];
+      },
+    );
+  });
 }
 
 export function swappable(
@@ -147,6 +240,12 @@ export function swappable(
     }),
   );
   const stats = deriveStats(actor, access);
+  const fromClasses = classPicks(
+    build,
+    access,
+    swapped,
+    stats.slots.findLastIndex((count) => count > 0) + 1,
+  );
   const traits = stats.features.flatMap((id): Swappable[] => {
     const feature = FeatureSchema.safeParse(access.content(id)).data;
     if (!feature?.swapCantrip) return [];
@@ -207,7 +306,7 @@ export function swappable(
       ];
     });
   });
-  return [...fromAnswers, ...traits, ...late];
+  return [...fromAnswers, ...fromClasses, ...traits, ...late];
 }
 
 // Whether the character knows the spell other than through these features, as a Light from a class.
@@ -314,7 +413,11 @@ function runSwapStep(
     };
   }
   const [first] = build.levels;
-  const classDef = lookup(context, ClassSchema, first?.classId ?? "");
+  const classDef = lookup(
+    context,
+    ClassSchema,
+    found.classId ?? first?.classId ?? "",
+  );
   const seen = new Set(found.values);
   const options = found.choices.flatMap(
     (choice) =>

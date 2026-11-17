@@ -439,6 +439,44 @@ export function levelChoices(
       ? undefined
       : lookup(access, SubclassSchema, subclassId);
   const subclassLevel = subclass?.levels.find((item) => item.level === level);
+  // A subclass's own Spellcasting asks for its cantrips and spells as its table grows, from its list.
+  const casting = subclass?.spellcasting;
+  if (casting) {
+    const upTo = (at: number) =>
+      subclass.levels
+        .filter((item) => item.level <= at)
+        .reduce<Record<string, number>>(
+          (sum, item) => ({ ...sum, ...item.scaling }),
+          {},
+        );
+    const now = upTo(level);
+    const was = upTo(level - 1);
+    const more = (key: string) =>
+      Math.max(0, (now[key] ?? 0) - (was[key] ?? 0));
+    const slots =
+      subclass.levels.findLast(
+        (item) => item.level <= level && item.slots.length,
+      )?.slots ?? [];
+    const highest = slots.findLastIndex((count) => count > 0) + 1;
+    if (more("cantrips") > 0) {
+      inferred.push({
+        kind: "spells",
+        id: "cantrips",
+        count: more("cantrips"),
+        maxLevel: 0,
+        list: casting.list,
+      });
+    }
+    if (more("preparedSpells") > 0 && highest > 0) {
+      inferred.push({
+        kind: "spells",
+        id: "spells",
+        count: more("preparedSpells"),
+        maxLevel: highest,
+        list: casting.list,
+      });
+    }
+  }
   // A feature granted here with options printed inside it asks which (`variants`), unless it follows another's pick.
   for (const grant of [...data.grants, ...(subclassLevel?.grants ?? [])]) {
     const feature = FeatureSchema.safeParse(access.content(grant)).data;
@@ -608,6 +646,9 @@ function meetsPrerequisite(
           item.levels.some(({ grants }) =>
             grants.some((id) => id.endsWith("pact-magic")),
           ),
+      ) ||
+      answered(base, "subclass").some(
+        (id) => SubclassSchema.safeParse(access.content(id)).data?.spellcasting,
       )) &&
     (needs.armor === undefined ||
       classes.some(({ armor }) => armor.some((kind) => kind === needs.armor)))

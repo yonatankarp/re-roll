@@ -3003,6 +3003,17 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
 
 export type ChoiceDef = z.infer<typeof ChoiceDefSchema>;
 
+// When the picks a class's levels asked for can be changed (swap.ts): its cantrips, its prepared spells and its
+// options such as Eldritch Invocations. "levelUp" is one pick each time it gains a level, "longRest" one after each
+// Long Rest, and "prepare" any of them after each Long Rest, as a Cleric changes its list.
+const SwapWhenSchema = z.enum(["levelUp", "longRest", "prepare"]);
+export const ClassSwapsSchema = z.strictObject({
+  cantrips: SwapWhenSchema.optional(),
+  spells: SwapWhenSchema.optional(),
+  options: SwapWhenSchema.optional(),
+});
+export type ClassSwaps = z.infer<typeof ClassSwapsSchema>;
+
 const ClassLevelSchema = z.strictObject({
   level: z.number().int().min(1).max(20),
   grants: z.array(ContentIdSchema).default([]),
@@ -3021,6 +3032,7 @@ export const ClassSchema = ContentEntrySchema.extend({
   martialWeaponProperties: z.array(WeaponPropertySchema).min(1).optional(),
   armor: z.array(z.enum(["light", "medium", "heavy", "shield"])),
   spellcasting: z.strictObject({ ability: AbilitySchema }).optional(),
+  swaps: ClassSwapsSchema.optional(),
   // Spells the class's own chapter names, for a class newer than the books that print them.
   spellList: z.array(ContentIdSchema).optional(),
   // shortcut: fewer than 20 levels are allowed while content is being added, require 20 once step 5 is done.
@@ -3034,6 +3046,15 @@ export const SubclassSchema = ContentEntrySchema.extend({
   class: ContentIdSchema,
   // Printed for the 2014 rules, whose levels don't line up with these classes, so character creation doesn't offer it.
   edition: z.literal("2014").optional(),
+  // Spellcasting the subclass gives a class without its own, from `list`'s spells, as an Eldritch Knight's Wizard
+  // spells. Its levels' `slots` and `cantrips` and `preparedSpells` scaling then ask for picks as a class's do.
+  spellcasting: z
+    .strictObject({
+      ability: AbilitySchema,
+      list: ContentIdSchema,
+      swaps: ClassSwapsSchema.optional(),
+    })
+    .optional(),
   levels: z.array(ClassLevelSchema).min(1),
 }).strict();
 export type Subclass = z.infer<typeof SubclassSchema>;

@@ -53,7 +53,7 @@
 - id: "srd52:feature/spellcasting"
   name: Spellcasting
   text: "You can cast the spells you have prepared using your spell slots."
-  automation: text
+  automation: full
 
 - id: "srd52:feature/divine-order"
   name: Divine Order
