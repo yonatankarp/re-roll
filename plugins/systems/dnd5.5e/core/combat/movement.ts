@@ -304,6 +304,8 @@ export function runMove(
   context: Context,
 ): SystemResult {
   const { state } = context;
+  // A fight that ended mid-turn has taken its monsters off the board.
+  if (!state.actors[payload.actor]) return {};
   const actor = actorOf(state, payload.actor);
   const to = parseSquare(payload.answer);
   if (payload.answer === STAY || !to) return {};
