@@ -15,7 +15,8 @@ import {
   NS,
   frame,
 } from "../state.ts";
-import { ALL, DECLINE, parseOption } from "./ids.ts";
+import { ALL, DECLINE, encodeOption, parseOption } from "./ids.ts";
+import { forgoAdvantageFrame, forgoFrame, SNEAK_DICE } from "./strikes.ts";
 import { aroundHit, replaceHitFrame, runReplaceHit } from "./ranged-smite.ts";
 import { againstTarget, missFrames, runApplyMiss } from "./spell-riders.ts";
 import { duelBroken, duelDamaged, duelHampers } from "./duel.ts";
@@ -86,6 +87,7 @@ import {
   holdsShield,
   HIGHEST,
   masteredDice,
+  markedBy,
   maximized,
   masteredTypes,
   rerolledTypes,
@@ -103,13 +105,16 @@ import {
   actorOf,
   allies,
   canAfford,
-  carriesExtraDice,
+  extraFits,
+  hitFits,
   charmersOf,
   CHECK_END,
   type Context,
   enemies,
   exemptFrom,
   findAction,
+  onceKey,
+  reaches,
   isStuck,
   fitsType,
   hasFlag,
@@ -156,6 +161,7 @@ export const AttackSchema = z.object({
     })
     .optional(),
   passed: z.array(z.string()).optional(), // creatures that already answered the roll or turned it down
+  strikes: z.array(z.string()).optional(), // strike options picked in place of the roll's Advantage, as Brutal Strike's
 });
 
 // Who a projectile or later attack actually goes for, given who is still standing.
@@ -666,6 +672,11 @@ export function missOutcome(
 ): Frame[] {
   const attacker = actorOf(context.state, hit.attacker);
   return [
+    ...(deriveStats(attacker, context).passives.some(
+      ({ kind }) => kind === "missRider",
+    )
+      ? [frame("missRider", hit)]
+      : []),
     ...missFrames(hit, context),
     ...(masteryOf(attacker, hit.actionId, context)
       ? [frame("masteryMiss", hit)]
@@ -832,47 +843,50 @@ export function runAttackRoll(
   // A monster's flat bonus names no ability: a weapon attack is Strength-based in melee and Dexterity-based at range.
   const ability =
     resolution.attack.ability ?? (meleeReach(action) === null ? "dex" : "str");
+  // Brutal Strike's options take the roll's Advantage away.
+  const forgoes = (payload.strikes ?? []).length > 0;
   const advantage =
-    packed ||
-    unseenAttacker ||
-    hasFlag(attacker, "advantage", "attacks", stats, ability) ||
-    hasFlag(
-      target,
-      "advantage",
-      "attacksAgainst",
-      targetStats,
-      undefined,
-      undefined,
-      attacker.id,
-    ) ||
-    placedFlag(attacker, "advantage", "attacks", state, context, ability) ||
-    placedFlag(target, "advantage", "attacksAgainst", state, context) ||
-    invisibleTo(attacker, target) ||
-    hasCondition(
-      target,
-      "blinded",
-      "paralyzed",
-      "petrified",
-      "restrained",
-      "stunned",
-      "unconscious",
-    ) ||
-    (hasCondition(target, "prone") && close) ||
-    (hasPassive(stats, "grappledAdvantage") &&
-      grapplesOn(target).some(({ casterId }) => casterId === attacker.id)) ||
-    // Street Justice's Headlock: allies too, against a creature the bearer grapples.
-    grapplesOn(target).some(({ casterId }) => {
-      const grappler = state.actors[casterId];
-      return (
-        grappler !== undefined &&
-        casterId !== attacker.id &&
-        grappler.side === attacker.side &&
-        deriveStats(grappler, context).passives.some(
-          (passive) => passive.kind === "grappledAdvantage" && passive.allies,
-        )
-      );
-    }) ||
-    traitAttackAdvantage(stats, attacker, target, targetStats);
+    !forgoes &&
+    (packed ||
+      unseenAttacker ||
+      hasFlag(attacker, "advantage", "attacks", stats, ability) ||
+      hasFlag(
+        target,
+        "advantage",
+        "attacksAgainst",
+        targetStats,
+        undefined,
+        undefined,
+        attacker.id,
+      ) ||
+      placedFlag(attacker, "advantage", "attacks", state, context, ability) ||
+      placedFlag(target, "advantage", "attacksAgainst", state, context) ||
+      invisibleTo(attacker, target) ||
+      hasCondition(
+        target,
+        "blinded",
+        "paralyzed",
+        "petrified",
+        "restrained",
+        "stunned",
+        "unconscious",
+      ) ||
+      (hasCondition(target, "prone") && close) ||
+      (hasPassive(stats, "grappledAdvantage") &&
+        grapplesOn(target).some(({ casterId }) => casterId === attacker.id)) ||
+      // Street Justice's Headlock: allies too, against a creature the bearer grapples.
+      grapplesOn(target).some(({ casterId }) => {
+        const grappler = state.actors[casterId];
+        return (
+          grappler !== undefined &&
+          casterId !== attacker.id &&
+          grappler.side === attacker.side &&
+          deriveStats(grappler, context).passives.some(
+            (passive) => passive.kind === "grappledAdvantage" && passive.allies,
+          )
+        );
+      }) ||
+      traitAttackAdvantage(stats, attacker, target, targetStats, state));
   const held = payload.rolled;
   // Redirect Attack: the target trades places with an ally next to it, who takes the attack instead.
   const redirected = held ? null : redirect(attacker, target, context);
@@ -972,6 +986,12 @@ export function runAttackRoll(
         ]
       : []),
   ];
+  // An attack roll with Advantage can give it up for Brutal Strike's options, picked before it's rolled.
+  const brutal =
+    held || payload.strikes !== undefined || !advantage || disadvantage
+      ? null
+      : forgoAdvantageFrame({ ...payload, target: target.id }, context);
+  if (brutal) return { frames: [brutal] };
   const edge = held ?? { advantage, disadvantage };
   const first = held
     ? { natural: held.natural }
@@ -1093,6 +1113,7 @@ export function runAttackRoll(
       : { slotLevel: payload.slotLevel }),
     ...(payload.noModifier ? { noModifier: true } : {}),
     ...(payload.poleStrike ? { poleStrike: true } : {}),
+    ...(payload.strikes ? { strikes: payload.strikes } : {}),
   };
 
   if (!hits) {
@@ -1176,6 +1197,8 @@ export const HitSchema = z.object({
   poleStrike: z.boolean().optional(),
   riposte: z.string().optional(), // the attack the target makes back if this now misses, as with Riposte ("" for its weapon)
   kept: z.boolean().optional(), // a spell to take the hit's place, as Lightning Arrow, was already offered
+  forgone: z.number().optional(), // Sneak Attack dice given up for strike options, as Cunning Strike's
+  strikes: z.array(z.string()).optional(), // the strike options chosen for this hit, resolved after its damage
   deflect: z.string().optional(), // the reaction that sends the force back out if the damage drops to 0, as Deflect Missile
   transfer: z.string().optional(), // the creature that takes what a reaction took off, as Transfer Harm's podling
 });
@@ -1337,6 +1360,38 @@ export function runRecheckHit(
   return intercepted(payload, context);
 }
 
+function deathStruck(
+  attacker: Actor,
+  target: Actor,
+  stats: Stats,
+  context: Context,
+): { readonly doubled: boolean; readonly events: SystemEvent[] } | null {
+  const passive = stats.passives.find(({ kind }) => kind === "deathStrike");
+  if (
+    passive?.kind !== "deathStrike" ||
+    (context.state.combat?.round ?? 1) > 1
+  ) {
+    return null;
+  }
+  const save = rollSave(
+    target,
+    passive.ability,
+    evaluateFormula(passive.dc, stats),
+    context,
+  );
+  return { doubled: !save.saved, events: save.events };
+}
+
+// Dice less this many, as Sneak Attack's 5d6 less 1d6 for Cunning Strike's Poison.
+function fewerDice(
+  notation: string | undefined,
+  less: number,
+): string | undefined {
+  const [count = "0", sides = "0"] = (notation ?? "").split("d");
+  const left = Number(count) - less;
+  return notation && left > 0 ? `${String(left)}d${sides}` : undefined;
+}
+
 // Pole Strike hits with the weapon's other end, whose damage die is a d4 of Bludgeoning.
 function poleEnd(
   resolution: Extract<Resolution, { kind: "attack" }>,
@@ -1357,6 +1412,73 @@ export function runApplyHit(
 ): SystemResult {
   const instead = payload.kept ? null : replaceHitFrame(payload, true, context);
   if (instead) return { frames: [instead] };
+  // Cunning Strike's options are picked before the Sneak Attack dice they give up are rolled.
+  const strike =
+    payload.strikes === undefined ? forgoFrame(payload, context) : null;
+  if (strike) return { frames: [strike] };
+  return landHit(payload, context);
+}
+
+export const StrikeChosenSchema = HitSchema.extend({ answer: z.string() });
+
+// A strike option picked for a hit: another is asked for while the hit can take more.
+export function runStrikeChosen(
+  { answer, ...hit }: z.infer<typeof StrikeChosenSchema>,
+  context: Context,
+): SystemResult {
+  const chosen = hit.strikes ?? [];
+  if (answer === DECLINE) return landHit({ ...hit, strikes: chosen }, context);
+  const [actionId = ""] = parseOption(answer);
+  const attacker = actorOf(context.state, hit.attacker);
+  const action = findAction(attacker, actionId, context);
+  const next = {
+    ...hit,
+    strikes: [...chosen, actionId],
+    forgone: (hit.forgone ?? 0) + (action.activation.trigger?.forgo ?? 0),
+  };
+  const more = forgoFrame(next, context);
+  return more ? { frames: [more] } : landHit(next, context);
+}
+
+export const AdvantageForgoneSchema = AttackSchema.extend({
+  answer: z.string(),
+});
+
+// A strike option picked in place of an attack roll's Advantage, which the roll then goes without.
+export function runAdvantageForgone(
+  { answer, ...attack }: z.infer<typeof AdvantageForgoneSchema>,
+  context: Context,
+): SystemResult {
+  const chosen = attack.strikes ?? [];
+  if (answer === DECLINE) {
+    return runAttackRoll({ ...attack, strikes: chosen }, context);
+  }
+  const [actionId = ""] = parseOption(answer);
+  const next = { ...attack, strikes: [...chosen, actionId] };
+  const more = forgoAdvantageFrame(next, context);
+  if (more) return { frames: [more] };
+  const rolled = runAttackRoll(next, context);
+  return {
+    ...rolled,
+    // The roll it's picked for spends it, whether or not it hits.
+    events: [
+      ...next.strikes.map((id) =>
+        dndEvent(`${NS}:oncePerTurnUsed`, {
+          actor: attack.attacker,
+          key: onceKey(
+            findAction(actorOf(context.state, attack.attacker), id, context),
+          ),
+        }),
+      ),
+      ...(rolled.events ?? []),
+    ],
+  };
+}
+
+function landHit(
+  payload: z.infer<typeof HitSchema>,
+  context: Context,
+): SystemResult {
   const { state, dice } = context;
   const attacker = actorOf(state, payload.attacker);
   const target = actorOf(state, payload.target);
@@ -1389,35 +1511,31 @@ export function runApplyHit(
   // Add dice-based extra damage such as Sneak Attack to the first damage roll.
   let extra = 0;
   const typedExtra: Damage[] = [];
-  const extraDice = carriesExtraDice(attacker, action, context);
-  // Pull of Death's comes with any attack, against a target missing Hit Points.
-  const hurt = (): boolean => target.hp < deriveStats(target, context).maxHp;
+  const edge = {
+    advantage: payload.hadAdvantage,
+    disadvantage: payload.hadDisadvantage === true,
+    natural: payload.natural,
+  };
+  const sneak = { landed: false };
   stats.passives.forEach((passive, index) => {
     if (passive.kind !== "extraDamage") return;
-    if (passive.when === "targetHurt" ? !hurt() : !extraDice) return;
     const key = `extra:${String(index)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return;
-    // Sneak Attack's ally must be able to act, and the ally never makes up for Disadvantage on the roll.
-    const allyPresent = allies(state, attacker).some(
-      (item) =>
-        item.id !== attacker.id &&
-        !isDown(item) &&
-        !hasCondition(item, ...INCAPACITATING) &&
-        within5(item, target),
-    );
-    const applies =
-      passive.when === "targetHurt" ||
-      (passive.when === "advantage"
-        ? payload.hadAdvantage
-        : payload.hadAdvantage ||
-          (allyPresent && payload.hadDisadvantage !== true));
-    if (!applies) return;
-    const rolled = rollDiceNotation(passive.dice, dice, multiplier);
-    if (passive.type) {
-      typedExtra.push({
-        amount: { bonus: { base: rolled, add: [] } },
-        type: passive.type,
-      });
+    if (!extraFits(passive, attacker, target, action, edge, context)) return;
+    if (passive.diceCount === SNEAK_DICE) sneak.landed = true;
+    // Cunning Strike's options give up some of Sneak Attack's dice before they're rolled.
+    const dice_ =
+      passive.diceCount === SNEAK_DICE
+        ? fewerDice(passive.dice, payload.forgone ?? 0)
+        : passive.dice;
+    const rolled =
+      (dice_ ? rollDiceNotation(dice_, dice, multiplier) : 0) +
+      (passive.bonus ? evaluateFormula(passive.bonus, stats) : 0);
+    const type = passive.types
+      ? typeAgainst(passive.types, responses)
+      : passive.type;
+    if (type) {
+      typedExtra.push({ amount: { bonus: { base: rolled, add: [] } }, type });
     } else extra += rolled;
     if (passive.oncePerTurn) {
       events.push(
@@ -1566,8 +1684,19 @@ export function runApplyHit(
       type,
     })),
   ];
+  // Death Strike: a first-round Sneak Attack doubles the hit's damage unless the target saves.
+  const struck = sneak.landed
+    ? deathStruck(attacker, target, stats, context)
+    : null;
+  if (struck) events.push(...struck.events);
+  const doubled = struck?.doubled
+    ? hits.map((item) => ({
+        ...item,
+        amount: item.amount > 0 ? item.amount * 2 : item.amount,
+      }))
+    : hits;
   const targetStats = deriveStats(target, context);
-  const armored = hits.map((item) => ({
+  const armored = doubled.map((item) => ({
     ...item,
     amount:
       item.amount < 0
@@ -1594,6 +1723,8 @@ export function runApplyHit(
       payload.critical,
       stats,
       context,
+      false,
+      action,
     ),
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
@@ -1634,14 +1765,25 @@ export function runApplyHit(
         dealt.dealt + nested.dealt,
         hasPassive(stats, "concentrationBreaker"),
       ),
-      // The attacker's own choices for its hit come before the target's answers.
-      ...(smitesFor(action, attacker, stats).length > 0
+      // The attacker's own choices for its hit come before the target's answers: the strike options picked, then
+      // what it can add now.
+      ...(payload.strikes ?? []).map((id) =>
+        frame("smite", {
+          attacker: attacker.id,
+          actionId: action.id,
+          target: target.id,
+          critical: payload.critical,
+          answer: encodeOption(id, target.id),
+        }),
+      ),
+      ...(smitesFor(action, attacker, target, stats, context).length > 0
         ? [
             frame("afterHit", {
               attacker: attacker.id,
               actionId: action.id,
               target: target.id,
               critical: payload.critical,
+              total: payload.total,
             }),
           ]
         : []),
@@ -2270,22 +2412,85 @@ function damageBonus(
 function smitesFor(
   hitWith: KnownAction,
   attacker: Actor,
+  target: Actor,
   stats: Stats,
+  context: Context,
 ): readonly KnownAction[] {
-  const { resolution } = hitWith.activation;
-  if (resolution.kind !== "attack" || resolution.attack.type !== "weapon") {
-    return [];
-  }
+  if (hitWith.activation.resolution.kind !== "attack") return [];
   return stats.actions.filter((action) => {
     const { trigger } = action.activation;
     return (
       trigger?.afterHit !== undefined &&
       !trigger.replacesHit && // offered before the hit lands instead (combat/ranged-smite.ts)
+      trigger.forgo === undefined && // picked before the damage (combat/strikes.ts)
+      !trigger.forgoAdvantage && // picked before the roll
       canAfford(action, attacker, stats) &&
-      (trigger.afterHit === "weapon" ||
-        (trigger.afterHit === "meleeWeapon") === isMelee(hitWith))
+      hitFits(trigger.afterHit, hitWith, attacker, context) &&
+      (!trigger.withFeature ||
+        hitWith.id.startsWith(`feature:${trigger.withFeature}:`)) &&
+      (!trigger.sneakAttack || sneakLanded(attacker, stats)) &&
+      (!trigger.marked || markedBy(target, attacker, trigger.marked))
     );
   });
+}
+
+// Whether the attacker's Sneak Attack has been dealt this turn, as it is once a hit carries it.
+function sneakLanded(attacker: Actor, stats: Stats): boolean {
+  return stats.passives.some(
+    (passive, index) =>
+      passive.kind === "extraDamage" &&
+      passive.diceCount === SNEAK_DICE &&
+      attacker.usedThisTurn.includes(`extra:${String(index)}`),
+  );
+}
+
+// The creatures an `afterHit` option with `near` can go for instead of the one hit: of its side, within `near` of
+// that one and within its own range, and with `sameRoll` only those the attack roll's total also hits.
+function nearHit(
+  action: KnownAction,
+  attacker: Actor,
+  hit: Actor,
+  total: number | undefined,
+  context: Context,
+): readonly Actor[] {
+  const { trigger, targeting } = action.activation;
+  if (trigger?.near === undefined || !("creatures" in targeting)) return [];
+  const { state } = context;
+  const near = trigger.near;
+  return Object.values(state.actors).filter(
+    (item) =>
+      item.id !== hit.id &&
+      item.position !== null &&
+      !isDown(item) &&
+      (item.side === attacker.side) === (targeting.side === "ally") &&
+      distanceFeet(item.position, hit.position) <= near &&
+      reaches(action, attacker, item) &&
+      (!trigger.sameRoll ||
+        (total !== undefined && total >= deriveStats(item, context).ac)),
+  );
+}
+
+// What the attacker's own features put on a creature its attack roll missed, as Studied Attacks.
+export function runMissRider(
+  hit: z.infer<typeof HitSchema>,
+  context: Context,
+): SystemResult {
+  const attacker = actorOf(context.state, hit.attacker);
+  const target = context.state.actors[hit.target];
+  if (!target || isDown(attacker)) return {};
+  return {
+    events: deriveStats(attacker, context).passives.flatMap((passive, index) =>
+      passive.kind === "missRider"
+        ? leafEvents(
+            passive.effects,
+            `miss:${hit.attacker}:${String(index)}`,
+            attacker,
+            target,
+            context,
+          )
+        : [],
+    ),
+  };
 }
 
 export const AfterHitSchema = z.object({
@@ -2293,6 +2498,7 @@ export const AfterHitSchema = z.object({
   actionId: z.string(),
   target: z.string(),
   critical: z.boolean(),
+  total: z.number().optional(), // the attack roll, for an option that must also hit another (`sameRoll`)
 });
 
 export function runAfterHit(
@@ -2305,20 +2511,30 @@ export function runAfterHit(
   const stats = deriveStats(attacker, context);
   const hitWith = findAction(attacker, payload.actionId, context);
   // One limited to a size or type, as Hill's Tumble to Large or smaller, is offered only for a target that fits.
-  const options = smitesFor(hitWith, attacker, stats)
-    .filter((action) =>
-      fitsType(target, action.activation.targeting, context, attacker),
-    )
-    .flatMap((action) =>
-      withUpcasts(action, attacker, stats, target.id, action.name),
-    );
+  const options = smitesFor(hitWith, attacker, target, stats, context).flatMap(
+    (action) =>
+      action.activation.trigger?.near === undefined
+        ? fitsType(target, action.activation.targeting, context, attacker)
+          ? withUpcasts(action, attacker, stats, target.id, action.name)
+          : []
+        : nearHit(action, attacker, target, payload.total, context).flatMap(
+            (item) =>
+              withUpcasts(
+                action,
+                attacker,
+                stats,
+                item.id,
+                `${action.name}: ${item.name}`,
+              ),
+          ),
+  );
   if (isDown(target) || isDown(attacker) || options.length === 0) return {};
   return {
     frames: [
       awaitDecision({
         id: `${NS}:afterHit:${attacker.id}`,
         actor: attacker.id,
-        prompt: `${attacker.name} hits ${target.name}. Add a spell to the hit?`,
+        prompt: `${attacker.name} hits ${target.name}. Add something to the hit?`,
         options: [...options, { id: DECLINE, label: "Not this time" }],
         resume: frame("smite", payload),
       }),
@@ -2335,9 +2551,13 @@ export function runSmite(
   if (payload.answer === DECLINE) return {};
   const { state } = context;
   const attacker = actorOf(state, payload.attacker);
-  const target = actorOf(state, payload.target);
-  const [actionId = "", , slot] = parseOption(payload.answer);
+  const [actionId = "", aimed = "", slot] = parseOption(payload.answer);
   const known = findAction(attacker, actionId, context);
+  // One aimed at another creature near the one hit goes for that one.
+  const target = actorOf(
+    state,
+    known.activation.trigger?.near === undefined ? payload.target : aimed,
+  );
   const slotLevel =
     slot === undefined
       ? (slotToSpend(known, attacker, deriveStats(attacker, context)) ??
@@ -2357,10 +2577,12 @@ export function runSmite(
     payload.critical && !("area" in action.activation.targeting),
     target.position ?? undefined,
   );
+  const own = action.activation.selfEffects ?? [];
   return {
     events: [
       ...payCosts(action, attacker, context, slotLevel),
       ...(result.events ?? []),
+      ...leafEvents(own, action.id, attacker, attacker, context),
     ],
     frames: [...(result.frames ?? [])],
   };
@@ -2444,6 +2666,15 @@ export const attackFrames = {
     run: runAfterHit,
   }),
   [`${NS}:smite`]: frameHandler({ schema: SmiteSchema, run: runSmite }),
+  [`${NS}:missRider`]: frameHandler({ schema: HitSchema, run: runMissRider }),
+  [`${NS}:strikeChosen`]: frameHandler({
+    schema: StrikeChosenSchema,
+    run: runStrikeChosen,
+  }),
+  [`${NS}:advantageForgone`]: frameHandler({
+    schema: AdvantageForgoneSchema,
+    run: runAdvantageForgone,
+  }),
   [`${NS}:replaceHit`]: frameHandler({
     schema: HitSchema.extend({ landed: z.boolean(), answer: z.string() }),
     run: runReplaceHit,

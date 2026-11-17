@@ -152,6 +152,8 @@ import {
   inReach,
   isMelee,
   meleeReach,
+  hitFits,
+  onceKey,
   reaches,
   rollBonus,
   SIZES,
@@ -187,6 +189,14 @@ export function payCosts(
           ]
         : [],
     ),
+    ...(action.activation.oncePerTurn
+      ? [
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: actor.id,
+            key: onceKey(action),
+          }),
+        ]
+      : []),
   ];
   for (const cost of action.activation.cost) {
     if (cost === "action" || cost === "bonusAction" || cost === "reaction") {
@@ -1159,12 +1169,28 @@ export function damageRiders(
   stats: Stats,
   context: Context,
   spell = false, // from a spell's damage, which only a rider with `spells` takes
+  hitWith?: KnownAction, // the attack that hit, for a rider limited to some hits
 ): SystemEvent[] {
-  return stats.passives.flatMap((passive) => {
-    if (passive.kind !== "damageRider" || !types.has(passive.damage)) return [];
+  const { combat } = context.state;
+  return stats.passives.flatMap((passive, index) => {
+    if (passive.kind !== "damageRider") return [];
+    if (passive.damage !== undefined && !types.has(passive.damage)) return [];
+    if (
+      passive.with &&
+      !(hitWith && hitFits(passive.with, hitWith, attacker, context))
+    ) {
+      return [];
+    }
+    // A hit during the target's own turn is an Opportunity Attack.
+    if (passive.opportunity && combat?.order[combat.index] !== target.id) {
+      return [];
+    }
     if (spell && !passive.spells) return [];
     if (passive.critical && !critical) return [];
-    const key = `rider:${passive.damage}:${String(passive.critical)}`;
+    const key =
+      passive.damage === undefined
+        ? `rider:${String(index)}`
+        : `rider:${passive.damage}:${String(passive.critical)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return [];
     const { resource } = passive;
     if (

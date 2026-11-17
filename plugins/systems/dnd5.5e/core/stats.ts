@@ -59,6 +59,7 @@ import { featureRules, grantedSpells } from "./feature-rules.ts";
 import { type Caster, multiclassSlots } from "./multiclass.ts";
 import { holdsConcentration, withMetamagic } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
+import { withWeaponRiders } from "./weapon-riders.ts";
 import {
   THROW_PREFIX,
   WEAPON_PREFIX,
@@ -737,9 +738,15 @@ export function weaponActivation(
       : "str";
   // shortcut: an Ammunition weapon without its range in the data reaches 80 feet with no long range.
   const range = ranged ? (weapon.range ?? { normal: 80, long: 80 }) : null;
+  const reach = !ranged && weapon.properties.includes("reach");
   return {
     cost: ["action"],
-    targeting: { creatures: 1, range: range?.long ?? 5, side: "enemy" },
+    targeting: {
+      creatures: 1,
+      range: range?.long ?? (reach ? 10 : 5),
+      side: "enemy",
+      ...(reach ? { reach: true as const } : {}),
+    },
     resolution: {
       kind: "attack",
       attack: {
@@ -1309,7 +1316,13 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ],
     actions: withMetamagic(
       withInvocations(
-        withRiders(actions, fromFeatures.passives),
+        withWeaponRiders(
+          withRiders(actions, fromFeatures.passives),
+          fromFeatures.passives,
+          actor,
+          access,
+          abilities,
+        ),
         fromFeatures.passives,
         abilities,
         classLevels,
@@ -2376,6 +2389,11 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
       case "maxHp":
         total += term.half ? Math.floor(stats.maxHp / 2) : stats.maxHp;
         break;
+      case "abilityScore":
+        total += Math.max(
+          ...term.abilities.map((ability) => stats.abilities[ability]),
+        );
+        break;
       case "dealt": // filled in by the reaction it's part of
         break;
       default:
@@ -2424,12 +2442,15 @@ export function scaledDice(
     readonly dice?: string | undefined;
     readonly diceCount?: string | undefined;
     readonly dieSize?: string | undefined;
+    readonly halfDice?: true | undefined;
   },
   scaling: Readonly<Record<string, number>>,
 ): string | undefined {
   if (!source.dice) return undefined;
   const [count = "0", sides = "0"] = source.dice.split("d");
-  return `${String(scaling[source.diceCount ?? ""] ?? count)}d${String(scaling[source.dieSize ?? ""] ?? sides)}`;
+  const dice = Number(scaling[source.diceCount ?? ""] ?? count);
+  const rolled = source.halfDice ? Math.ceil(dice / 2) : dice;
+  return `${String(rolled)}d${String(scaling[source.dieSize ?? ""] ?? sides)}`;
 }
 
 function cantripTier(level: number): number {

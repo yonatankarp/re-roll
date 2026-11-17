@@ -284,8 +284,6 @@ const WAITING_ON: Readonly<Record<string, string>> = {
   "ranger-deft-explorer": OUT_OF_COMBAT,
   "rogue-expertise": OUT_OF_COMBAT,
   "rogue-thieves-cant": OUT_OF_COMBAT,
-  "rogue-cunning-action": "needs bonus-action Dash, Disengage and Hide",
-  "rogue-cunning-strike": "needs Sneak Attack dice traded for effects",
   "sorcerer-sorcerous-restoration": SLOT_RECOVERY,
   "warlock-magical-cunning": SLOT_RECOVERY,
   "wizard-ritual-adept": OUT_OF_COMBAT,
