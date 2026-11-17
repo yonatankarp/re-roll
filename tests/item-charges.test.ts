@@ -73,6 +73,43 @@ const ITEMS = `- id: "charge-test:item/fire-wand"
   bonuses: [{ to: attack, amount: 1 }, { to: damage, amount: 1 }]
   resources: [{ id: charged-blade, max: { base: 4 }, recharge: [{ on: dawn, amount: 0, roll: 1d4 }] }]
   casts: [{ spell: searing-smite, dc: 15 }]
+- id: "charge-test:item/blade-ring"
+  name: Blade Ring
+  type: magicItem
+  category: ring
+  rarity: rare
+  attunement: false
+  text: A test ring that calls a blade.
+  automation: full
+  casts: [{ spell: test-blade, charges: 0, dc: 14 }]
+`;
+// A spell of the test's own whose blade attacks while it's held.
+const SPELLS = `- id: "charge-test:spell/test-blade"
+  name: Test Blade
+  level: 2
+  school: evocation
+  classes: []
+  castingTime: Bonus Action
+  ritual: false
+  range: Self
+  components: V
+  duration: { concentration: true, minutes: 10 }
+  text: A test blade that lasts.
+  automation: full
+  activation:
+    cost: [bonusAction, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        - { kind: zone, zone: light, radius: 10, duration: { concentration: true, minutes: 10 } }
+  lasting:
+    cost: [action]
+    targeting: { creatures: 1, range: 5, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 3d6 }, type: fire }]
 `;
 const WAND = "charge-test:item/fire-wand";
 const CIRCLET = "charge-test:item/ray-circlet";
@@ -104,6 +141,7 @@ async function pluginFiles(): Promise<Record<string, string>> {
     "distribution: shipped",
   ].join("\n");
   files["plugins/rules/charge-test/equipment/items.yaml"] = ITEMS;
+  files["plugins/rules/charge-test/spells/spells.yaml"] = SPELLS;
   return files;
 }
 
@@ -278,6 +316,23 @@ describe("magic items with charges", () => {
     const idle = scripted([]);
     recovered({}, stats, "long", idle.dice);
     expect(idle.counts[6]).toBeUndefined();
+  });
+
+  it("lets a spell cast from an item act while it's held", () => {
+    const ring = "charge-test:item/blade-ring";
+    const actor = bearer([ring], "fighter");
+    const [cast] = castsOf(actor);
+    expect(cast?.concentrates).toBe(true);
+    const lasting = (concentratingOn: string | null) =>
+      deriveStats({ ...actor, concentratingOn }, run).actions.filter((action) =>
+        action.id.startsWith("lasting:"),
+      );
+    expect(lasting(null)).toEqual([]);
+    expect(
+      lasting(itemCastId("charge-test:spell/test-blade", ring, 0)).map(
+        (action) => [action.id, action.name],
+      ),
+    ).toEqual([["lasting:charge-test:spell/test-blade", "Test Blade"]]);
   });
 
   it("carries the charges into a magic weapon made from the item", () => {
