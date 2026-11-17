@@ -41,6 +41,7 @@ export function deriveItem(
     ...(casts.length > 0 ? { casts } : {}),
     ...(resources.length > 0 ? { resources } : {}),
     ...(parent.lastCharge ? { lastCharge: parent.lastCharge } : {}),
+    ...(parent.activations ? { activations: parent.activations } : {}),
   };
   const bonus = variant.bonuses?.[0]?.amount;
   const plus = bonus !== undefined && /, \+1\b/.test(parent.name);

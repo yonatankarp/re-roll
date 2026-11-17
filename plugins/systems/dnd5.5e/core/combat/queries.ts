@@ -64,7 +64,7 @@ import {
   zonesOn,
 } from "../zones.ts";
 import { spellLevelOf } from "./dispel.ts";
-import { canRegain } from "../rest.ts";
+import { canRegain, regainCap } from "../rest.ts";
 import {
   type Ability,
   CompanionSchema,
@@ -753,7 +753,12 @@ function poolsLeft(action: KnownAction, actor: Actor, stats: Stats): boolean {
     resolution.kind !== "automatic" ||
     resolution.effects.every((effect) =>
       effect.kind === "regain"
-        ? canRegain(actor, effect.resource, stats)
+        ? canRegain(
+            actor,
+            effect.resource,
+            stats,
+            regainCap(effect, action.spellLevel),
+          )
         : effect.kind !== "heal" ||
           !effect.pool ||
           (actor.resourcesSpent[effect.pool.resource] ?? 0) <

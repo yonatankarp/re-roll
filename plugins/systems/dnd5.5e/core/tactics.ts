@@ -10,7 +10,7 @@ import {
   effectiveBuild,
   hasCondition,
 } from "./state.ts";
-import type { Stats } from "./stats.ts";
+import { type Stats, hasSteadySpeed } from "./stats.ts";
 import { limitsOf } from "./combat/durations.ts";
 
 // What the actions anyone can take (Dodge, Hide, Grapple…) and weapon masteries leave on a creature, read by
@@ -51,7 +51,10 @@ export function walkSpeed(actor: Actor, stats: Stats): number {
     0,
     stats.speed - (hasTactic(actor, "slowed") ? 10 : 0),
   );
-  const { speed: limit } = limitsOf(actor);
+  const limited = limitsOf(actor).speed;
+  // A Ring of Free Action keeps an effect from halving or stopping its Speed.
+  const limit =
+    hasSteadySpeed(stats) && limited !== "double" ? undefined : limited;
   // Shut away, it goes nowhere, unless it rolls its prison along, as in Resilient Sphere, at half Speed.
   const seals = actor.activeEffects.flatMap(({ modifier }) =>
     modifier.kind === "sealed" ? [modifier] : [],

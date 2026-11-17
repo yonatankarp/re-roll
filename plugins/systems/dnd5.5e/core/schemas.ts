@@ -244,6 +244,8 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
     kind: z.literal("maxHp"),
     half: z.literal(true).optional(),
   }),
+  // The damage that set a reaction off, as Rebuke the Violent's (combat/reactions.ts takeReaction); 0 anywhere else.
+  z.strictObject({ kind: z.literal("dealt") }),
 ]);
 
 export const FormulaSchema = z.strictObject({
@@ -539,10 +541,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     once: z.literal(true).optional(),
   }),
   // Disadvantage on attacks against anyone but the effect's caster, and no moving willingly more than `feet` from
-  // it, as Compelled Duel's; what the caster does can end it (combat/duel.ts).
+  // it, as Compelled Duel's; what the caster does can end it (combat/duel.ts). With `leashOnly` it's only the leash,
+  // which holds while the caster can act, as Champion Challenge's.
   z.strictObject({
     kind: z.literal("duel"),
     feet: z.number().int().min(5).default(30),
+    leashOnly: z.literal(true).optional(),
   }),
   // The bearer can cast this spell once without its costs, as Wish's copy of it (combat/wish.ts).
   z.strictObject({ kind: z.literal("wished"), spell: ContentIdSchema }),
@@ -637,6 +641,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     count: z
       .union([z.number().int().min(1), z.enum(["half", "all"])])
       .default(1),
+    // "slots" of this level or lower only, as a Pearl of Power's 3, or half the level it's cast with, rounded down,
+    // as Mordenkainen's Lucubration's
+    maxLevel: z
+      .union([z.number().int().min(1).max(9), z.literal("halfSlot")])
+      .optional(),
   }),
   // Ends every curse on the target, with all else the action that cursed it gave, as Remove Curse.
   z.strictObject({ kind: z.literal("uncurse") }),
@@ -719,6 +728,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("teleport"),
     feet: z.number().int().min(5),
     movement: z.number().int().min(0).default(0),
+    // The target it's used on moves instead of the bearer, as a willing ally with Telekinetic Movement.
+    others: z.literal(true).optional(),
     // A teleport paid for with movement that still provokes nothing, as Portal Step's.
     provokes: z.literal(false).optional(),
     // Creatures within `within` feet of where it lands, or with `origin` of where it left, get `conditions` and
@@ -881,6 +892,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("redirect"),
     charmed: z.boolean().default(false),
   }),
+  // The bearer becomes the attack's target instead of the ally it was made against, as with an Arrow-Catching
+  // Shield (combat/attack.ts).
+  z.strictObject({ kind: z.literal("drawAttack") }),
   // The weapon of the attack that missed sticks for as long as the grapple this reaction makes holds, as with
   // Sticky Shield (combat/reactions.ts).
   z.strictObject({ kind: z.literal("stickWeapon") }),
@@ -1207,6 +1221,7 @@ export const TargetingSchema = z.union([
     targetConditions: z.array(ConditionSchema).min(1).optional(), // only those with one of these, as Intensify Poison
     afflicted: z.string().min(1).optional(), // as a creature target's, as an arch-hag's Witch Strike
     choice: z.literal(true).optional(), // only the creatures of the caster's choice in it, its `side`, as Conjure Barrage
+    bloodied: z.literal(true).optional(), // only the Bloodied in it, as Turn the Tide's creatures at half Hit Points
   }),
 ]);
 export type Targeting = z.infer<typeof TargetingSchema>;
@@ -1361,6 +1376,16 @@ export const SpellSchoolSchema = z.enum([
   "transmutation",
 ]);
 
+// What a save is against, for a passive that holds only then: a spell of one of `schools`, or the effect of a
+// creature of one of `creatureTypes` (lowercase), with `breath` only its breath weapon, as Dragon Scale Mail's.
+// shortcut: a breath weapon is an action with "Breath" in its name.
+const SaveFromSchema = z.strictObject({
+  schools: z.array(SpellSchoolSchema).min(1).optional(),
+  creatureTypes: z.array(z.string()).min(1).optional(),
+  breath: z.literal(true).optional(),
+});
+export type SaveFrom = z.infer<typeof SaveFromSchema>;
+
 // `bloodied` on a passive means it only holds while the bearer is Bloodied, as a cultist of Myrkul's Nearer to the Dead.
 const WhileBloodied = z.literal(true).optional();
 
@@ -1451,6 +1476,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("spellTurning"),
     upTo: z.number().int().min(1).max(9),
+    // A spell that targeted only the bearer and made no area is turned back at its caster with the bearer's
+    // Reaction, the caster saving against its own spell save DC (combat/effects.ts).
+    deflect: z.literal(true).optional(),
   }),
   // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
   // save, as a displacer beast's Avoidance does, instead of Dexterity saves only.
@@ -1502,6 +1530,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     abilities: z.array(AbilitySchema).default([]),
     conditions: z.array(ConditionSchema).default([]),
     bloodied: z.literal(true).optional(), // only while Bloodied, as with Bloodied Frenzy
+    while: ConditionSchema.optional(), // only while the bearer has it, as a Dream Weaver's Mind Wall while Unconscious
+    from: SaveFromSchema.optional(), // only a save against this, which every save then counts
   }),
   // Heroic Inspiration as a rest ends, for the bearer or for its allies, as with Resourceful or Musician.
   z.strictObject({
@@ -1764,9 +1794,18 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     bonus: FormulaSchema.optional(),
     // A die rolled and added instead, when its highest roll could be enough, as Spell Resistant's 1d6.
     bonusDice: DiceSchema.optional(),
+    // Up to this many of the bearer's Hit Point Dice rolled and added, one at a time while the highest rolls could be
+    // enough, and spent, as a Ring of Dedicated Focus's two on a save to keep Concentration. `resource` is then
+    // "hitDice".
+    hitDice: z.number().int().min(1).optional(),
+    concentration: z.literal(true).optional(), // a save to keep Concentration, as the Ring of Dedicated Focus's
     magical: z.literal(true).optional(), // only a save against a spell, as Magic Resistant
+    from: SaveFromSchema.optional(), // only a save against this, as a Scarab of Protection's
     reaction: z.boolean().default(false),
     resource: z.string(),
+    // The item whose charges `resource` holds: spending its last one spends the item, as a Scarab of Protection
+    // crumbles, with no d20.
+    item: ContentIdSchema.optional(),
   }),
   // A creature the bearer damages has Disadvantage on the save to keep Concentration, as with Mage Slayer.
   z.strictObject({ kind: z.literal("concentrationBreaker") }),
@@ -1874,7 +1913,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // as a harvester devil's Diabolic Ward, or while it's Incapacitated, as an unspeakable horror's form.
   z.strictObject({
     kind: z.literal("ward"),
-    suppressed: z.enum(["attacking", "incapacitated"]),
+    // "damaged": until its next turn starts after it takes damage, and while its Speed is 0, as a Cloak of
+    // Displacement
+    suppressed: z.enum(["attacking", "incapacitated", "damaged"]),
   }),
   // These spells do nothing to the bearer, as a helmed horror's Spell Immunity.
   // With `rangedAttacks`, every spell that makes a ranged attack roll too, as a tarrasque's Reflective Carapace.
@@ -2103,6 +2144,27 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("farLobber"),
     feet: z.number().int().min(5),
   }),
+  // A spell or feature of the bearer's that makes the creatures in its area save spares another creature with this
+  // passive from the same `item`: it succeeds and takes no damage where it would take half, spending a use, as Boon
+  // Companions' Bands. shortcut: each band has its own use a dawn, not one shared by the pair.
+  z.strictObject({
+    kind: z.literal("pairedBand"),
+    item: ContentIdSchema,
+    resource: z.string(),
+  }),
+  // Attack rolls against the bearer's mount have Disadvantage, and nothing moves the bearer off it against its will
+  // while it can act, as a Saddle of the Cavalier.
+  z.strictObject({ kind: z.literal("protectedMount") }),
+  // Effects can't lower the bearer's Speed, as a Ring of Free Action stops magic doing. shortcut: every effect counts as
+  // magic, while a weapon's Slow mastery, which isn't, still slows it.
+  z.strictObject({ kind: z.literal("steadySpeed") }),
+  // A trap's damage comes off the uses of `resource` instead, as a Thief's Thimble's 30 Hit Points, and spending the
+  // last spends `item`, the bearer taking what's left (scene.ts).
+  z.strictObject({
+    kind: z.literal("trapShield"),
+    resource: z.string(),
+    item: ContentIdSchema,
+  }),
 ]);
 export type Passive = z.infer<typeof PassiveSchema>;
 
@@ -2155,6 +2217,8 @@ const ScaleStepSchema = z.union([
   }),
   z.strictObject({ addTargets: z.number().int().min(1) }),
   z.strictObject({ addRadius: z.number().int().min(5) }), // an area's radius, as Confusion's Sphere
+  // Nothing grows but what reads the slot's level, as Mordenkainen's Lucubration's `regain` `maxLevel`.
+  z.strictObject({ slotOnly: z.literal(true) }),
 ]);
 export type ScaleStep = z.infer<typeof ScaleStepSchema>;
 
@@ -2467,6 +2531,15 @@ export type ItemCast = z.infer<typeof ItemCastSchema>;
 export const ChargedSchema = {
   resources: z.array(ResourceDefSchema).min(1).optional(),
   casts: z.array(ItemCastSchema).min(1).optional(),
+  // What it does when used, as a Pearl of Power's spell slot back once a dawn (stats.ts itemUses): an activation that
+  // spends its pools as a feature's spends its own. shortcut: one on the bearer's person or held works whenever it's
+  // worn.
+  activations: z
+    .array(
+      z.strictObject({ name: z.string().min(1), activation: ActivationSchema }),
+    )
+    .min(1)
+    .optional(),
   lastCharge: z
     .union([
       z.literal("destroyed"),

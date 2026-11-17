@@ -46,6 +46,7 @@ import {
   piercing,
   repeatSaveConditions,
   rescuedSave,
+  saveSourceOf,
 } from "../trait-rules.ts";
 import {
   actorOf,
@@ -421,6 +422,20 @@ export function runFinishTurn(context: Context): SystemResult {
             rolled.events,
             events,
             context.dice,
+            false,
+            {
+              ...(context.state.actors[casterId]
+                ? {
+                    source: saveSourceOf(
+                      actorOf(context.state, casterId),
+                      sourceId,
+                      "",
+                      context,
+                    ),
+                  }
+                : {}),
+              access: context,
+            },
           );
     events.push(...rescued);
     const holder =

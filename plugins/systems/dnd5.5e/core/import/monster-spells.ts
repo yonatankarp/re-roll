@@ -159,6 +159,7 @@ function upcast(
         }
       : null;
   }
+  if ("slotOnly" in step) return activation;
   const { resolution } = activation;
   const [first, ...rest] = "damage" in resolution ? resolution.damage : [];
   if (first?.amount.dice) {
