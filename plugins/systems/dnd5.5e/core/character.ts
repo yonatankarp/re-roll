@@ -692,7 +692,9 @@ export function choiceOptions(
         choice.expertise
           ? !expert.has(skill) &&
             (choice.expertise === "any" || proficient(skill))
-          : !proficient(skill),
+          : choice.orExpertise
+            ? !expert.has(skill)
+            : !proficient(skill),
       );
       return {
         what: "a skill",
@@ -1032,6 +1034,7 @@ function answersOf(
             kind: "skills",
             values,
             ...(choice.expertise ? { expertise: true } : {}),
+            ...(choice.orExpertise ? { orExpertise: true } : {}),
             ...(choiceOwners.has(choice)
               ? { feat: choiceOwners.get(choice) }
               : {}),

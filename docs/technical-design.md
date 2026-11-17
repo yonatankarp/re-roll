@@ -390,7 +390,7 @@ A scene's `check` and `results` are the only part tied to rules. The system's sc
           - { kind: goto, scene: ambush-surprised }
 ```
 
-Scene checks are made by the player's character.
+Scene checks are made by the player's character, with the same roll as a check in a fight: Advantage limited to some skills, bonuses limited to a skill or ability, a d20 floor such as Reliable Talent's, a total floor such as Indomitable Might's, half proficiency, and a rescue that adds a die to a failed check. Effects end with a fight, so in a scene only passives and worn magic items' `passives` count. A scene never asks for a tool check yet.
 
 **Encounter outcomes.** An encounter can branch on how it ends, using three optional lists of story effects. These keys belong to the story, and the rest of the entry goes to the system's encounter schema:
 

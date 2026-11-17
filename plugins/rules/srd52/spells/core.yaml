@@ -5743,7 +5743,38 @@
   text:
     You touch a willing creature and choose a skill. Until the spell ends, the
     creature adds 1d4 to any ability check using the chosen skill.
-  automation: text
+  automation: full
+  activation:
+    cost: [action]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier: { kind: bonus, to: checks, amount: { dice: 1d4 } }
+          duration: { concentration: true, minutes: 1 }
+          pick:
+            [
+              athletics,
+              acrobatics,
+              stealth,
+              perception,
+              medicine,
+              arcana,
+              history,
+              investigation,
+              nature,
+              religion,
+              animalHandling,
+              insight,
+              survival,
+              deception,
+              intimidation,
+              performance,
+              persuasion,
+              sleightOfHand,
+            ]
 - id: srd52:spell/harm
   name: Harm
   level: 6
@@ -7663,7 +7694,21 @@
     using the chosen ability. Using a Higher-Level Spell Slot. You can target
     one additional creature for each spell slot level above 2. You can choose a
     different ability for each target.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier: { kind: advantage, on: checks }
+          duration: { concentration: true, minutes: 60 }
+          pick: [str, dex, int, wis, cha]
+  upcast:
+    perSlotLevel:
+      addTargets: 1
 - id: srd52:spell/etherealness
   name: Etherealness
   level: 7
@@ -7974,7 +8019,17 @@
     number you roll with a 15. Additionally, no matter what you say, magic that
     would determine if you are telling the truth indicates that you are being
     truthful.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier: { kind: checkFloor, value: 15, ability: cha }
+          duration: { minutes: 60 }
   outOfCombat: utility
 - id: srd52:spell/greater-invisibility
   name: Greater Invisibility

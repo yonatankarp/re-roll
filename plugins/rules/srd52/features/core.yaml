@@ -118,7 +118,9 @@
 - id: "srd52:feature/tactical-mind"
   name: Tactical Mind
   text: "You can spend a use of Second Wind to add 1d10 to a failed ability check."
-  automation: text
+  automation: full
+  passives:
+    - { kind: checkRescue, bonusDice: 1d10, resource: second-wind, keep: true }
 
 - id: "srd52:feature/fighter-subclass"
   name: Fighter Subclass
@@ -138,7 +140,12 @@
 - id: "srd52:feature/remarkable-athlete"
   name: Remarkable Athlete
   text: "You have Advantage on Initiative rolls and Strength (Athletics) checks."
-  automation: text
+  automation: partial
+  # shortcut: the move after a Critical Hit isn't given.
+  passives:
+    - { kind: initiativeAdvantage }
+    - kind: modifier
+      modifier: { kind: advantage, on: checks, skills: [athletics] }
 
 - id: "srd52:feature/cunning-action"
   name: Cunning Action
