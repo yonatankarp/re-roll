@@ -634,6 +634,12 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (decision.id.startsWith(`${NS}:wish:`)) return first.id; // the highest level
   if (decision.id.startsWith(`${NS}:shape:`)) return first.id; // as written, as Forcecage's box
   if (decision.id.startsWith(`${NS}:focus:`)) return first.id; // as listed, the one a fight uses most first
+  // Tactical Master: the weapon's own Topple, Cleave or Push is kept, else Sap blunts the foe's next attack.
+  if (decision.id.startsWith(`${NS}:mastery:`)) {
+    return ["topple", "cleave", "push"].includes(first.id)
+      ? first.id
+      : (decision.options.find(({ id }) => id === "sap") ?? first).id;
+  }
   if (decision.id.startsWith(`${NS}:damageType:`)) {
     return damageTypePolicy(decision, context);
   }
@@ -773,10 +779,17 @@ export function choosePolicy(decision: Decision, context: Context): string {
           item.target && forgo > 0
             ? judge.damageWorth(item.target, forgo * 3.5)
             : 0;
+        // Staying hidden is worth the next attack's Advantage, about a die and a half.
+        const hidden =
+          item.target && item.action.activation.keepsHidden
+            ? judge.damageWorth(item.target, 5)
+            : 0;
         return {
           id: item.option.id,
           worth:
-            judge.worth(actor, item.action.id, item.targetId, item.slot) - lost,
+            judge.worth(actor, item.action.id, item.targetId, item.slot) +
+            hidden -
+            lost,
         };
       })
       .sort((a, b) => b.worth - a.worth)[0];

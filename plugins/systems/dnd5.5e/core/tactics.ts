@@ -18,6 +18,8 @@ import { limitsOf } from "./combat/durations.ts";
 
 export const TACTIC = "tactic:"; // option ids and effect sources of those actions
 export const HIDE_SOURCE = `${TACTIC}hide`;
+// Kept hidden after an attack by Stealth Attack this turn, until the turn ends out of cover (combat/turn.ts).
+export const STEALTH_ATTACK = "stealth-attack";
 export const GRAPPLE_SOURCE = `${TACTIC}grapple`;
 export const MASTERY = "mastery:"; // effect sources of weapon masteries
 

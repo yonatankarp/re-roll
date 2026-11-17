@@ -67,6 +67,8 @@ import {
 } from "./effects.ts";
 import { releasedGrapples } from "./grapple.ts";
 import { distanceFeet } from "../grid.ts";
+import { coverFor } from "../sight.ts";
+import { hasTactic, revealEvents, STEALTH_ATTACK } from "../tactics.ts";
 import { regurgitationEvents, releasedSwallows } from "./swallow.ts";
 import {
   expiredEvents,
@@ -298,7 +300,12 @@ export function runLingeringTick(
     ? masteredTypes(stats, effect.sourceId.startsWith("spell:"))
     : [];
   const responses = caster
-    ? piercing(damageResponses(target, context), mastered, stats)
+    ? piercing(
+        damageResponses(target, context),
+        mastered,
+        stats,
+        effect.sourceId,
+      )
     : damageResponses(target, context);
   const { events, dealt } = dealEvents(
     target,
@@ -374,6 +381,24 @@ function endOfTurn(context: Context): SystemResult {
     : runFinishTurn(context);
 }
 
+// Stealth Attack kept the bearer hidden only while it ends the turn behind Three-Quarters or Total Cover from every
+// foe standing.
+function outOfCover(actor: Actor, context: Context): SystemEvent[] {
+  const { state } = context;
+  if (
+    !actor.usedThisTurn.includes(STEALTH_ATTACK) ||
+    !hasTactic(actor, "hidden")
+  ) {
+    return [];
+  }
+  const exposed = Object.values(state.actors).some((foe) => {
+    if (foe.side === actor.side || isDown(foe) || !foe.position) return false;
+    const cover = coverFor(state, foe.position, actor, [foe.id], context);
+    return cover !== 5 && cover !== "total";
+  });
+  return exposed ? revealEvents(actor) : [];
+}
+
 // A target repeats its save at the end of each of its turns, ending that spell's effects on itself on a success.
 export function runFinishTurn(context: Context): SystemResult {
   const { state } = context;
@@ -388,7 +413,7 @@ export function runFinishTurn(context: Context): SystemResult {
       : [],
   );
   const seen = new Set<string>();
-  const events: SystemEvent[] = [];
+  const events: SystemEvent[] = actor ? outOfCover(actor, context) : [];
   for (const { actor: target, effect, save } of repeated) {
     const { sourceId, casterId, modifier } = effect;
     // Each caster's effect is saved against on its own, as two snakes' grapples are two grapples.

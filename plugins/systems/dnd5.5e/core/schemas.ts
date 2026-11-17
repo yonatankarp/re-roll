@@ -295,6 +295,8 @@ export const DamageSchema = z.strictObject({
       dice: DiceSchema,
     })
     .optional(),
+  // creatures of these types take none of it, as Hurl Through Hell's Psychic damage spares a Fiend
+  except: z.array(z.string()).min(1).optional(),
 });
 export type Damage = z.infer<typeof DamageSchema>;
 
@@ -435,6 +437,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("actionLimit"),
     oneAction: z.literal(true).optional(),
+    // only one of moving, an action or a Bonus Action, as Devious Strikes' Daze
+    oneThing: z.literal(true).optional(),
     noActions: z.literal(true).optional(),
     noReactions: z.literal(true).optional(),
     noOpportunityAttacks: z.literal(true).optional(), // as Shocking Grasp's
@@ -743,6 +747,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("teleport"),
     feet: z.number().int().min(5),
+    // As far as `times` the roll of a d`dieSize` (a class scaling key) in place of `feet`, as Psychic Teleportation.
+    rolled: z
+      .strictObject({
+        dieSize: z.string().min(1),
+        times: z.number().int().min(1),
+      })
+      .optional(),
     movement: z.number().int().min(0).default(0),
     // The target it's used on moves instead of the bearer, as a willing ally with Telekinetic Movement.
     others: z.literal(true).optional(),
@@ -1424,6 +1435,21 @@ export const ActivationSchema = z.strictObject({
   // Once a turn for all its feature's activations, as Stunning Strike, or with a name, for all activations of that
   // name, as Brutal Strike's and Improved Brutal Strike's options (queries.ts gatesOpen).
   oncePerTurn: z.union([z.literal(true), z.string().min(1)]).optional(),
+  // Only as the bearer takes the Attack action: while its action is unspent or Attack-action attacks are left, as
+  // Vow of Enmity or Sacred Weapon.
+  withAttack: z.literal(true).optional(),
+  // With targeting's `afflicted`, it ends that action's effects on the target, as Quivering Palm's end does the
+  // vibrations.
+  endsAffliction: z.literal(true).optional(),
+  // Its effects stay on one creature at a time: using it again ends them on the one before, as Quivering Palm's
+  // vibrations or Vow of Enmity.
+  oneTarget: z.literal(true).optional(),
+  // When a creature under its effects drops to 0 Hit Points, they move to the foe nearest the bearer within this many
+  // feet of it, as Vow of Enmity's or Master of Hexes' curse.
+  transfers: z.number().int().min(5).optional(),
+  // A strike option that keeps its bearer hidden after an attack from hiding, while it ends the turn behind
+  // Three-Quarters or Total Cover from every foe, as Supreme Sneak's Stealth Attack.
+  keepsHidden: z.literal(true).optional(),
   // What the bearer gets as an `afterHit` activation is taken, as Cunning Strike's Withdraw move.
   selfEffects: z.array(LeafEffectSchema).min(1).optional(),
   // only while an effect of one of these features' activations is on the bearer, as Travel along the Tree in a Rage,
@@ -1795,6 +1821,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     cantrips: z.literal(true).optional(),
     levels: z.array(z.number().int().min(1).max(9)).min(1).optional(),
     resource: z.string().min(1).optional(),
+    feature: ContentIdSchema.optional(), // or an activation of this feature, as Quivering Palm's end
   }),
   // A 1 on the d20 of a D20 Test is rolled again, and the new roll stands, as with Halfling Luck.
   z.strictObject({ kind: z.literal("rerollOnes") }),
@@ -1895,6 +1922,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("overcomeResistance"),
     damage: z.array(DamageTypeSchema).min(1),
+    // only damage from these spells or features, as Death Touch's Chill Touch or Envenom Weapons' poison
+    sources: z.array(ContentIdSchema).min(1).optional(),
   }),
   // Effects on a creature the bearer hits with an attack dealing this type, as Crusher or Slasher give: with
   // `critical` only on a Critical Hit, with `oncePerTurn` once a turn.
@@ -2346,6 +2375,34 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("missRider"),
     effects: z.array(LeafEffectSchema).min(1),
   }),
+  // An afterHit activation of `feature` (with this `label`, when set) also lands on another creature: the one hit, when
+  // it was aimed at a creature near that one, as Death's Lament's Wails from the Grave, or with `other`, the nearest
+  // other foe within that many feet of the bearer that its targeting fits, as Versatile Trickster's Trip.
+  z.strictObject({
+    kind: z.literal("alsoStrikes"),
+    feature: ContentIdSchema,
+    label: z.string().min(1).optional(),
+    other: z.number().int().min(5).optional(),
+  }),
+  // On a miss that a die could still turn into a hit, one of `resource` can be rolled (a d`dieSize` from that class
+  // scaling key) and added to the roll, spent only if the attack then hits, as Soul Blades' Homing Strikes with a
+  // Psychic Blade (`withFeature`). Precision Attack works the same way (class-rules.ts).
+  z.strictObject({
+    kind: z.literal("missBoost"),
+    resource: z.string().min(1),
+    dieSize: z.string().min(1),
+    withFeature: ContentIdSchema.optional(),
+  }),
+  // Mounted Combatant: while it rides, Advantage against an unmounted creature within 5 feet of its mount and smaller
+  // than the mount; its mount takes no damage on a successful Dexterity save for half; and a hit on its mount can be
+  // made to hit it instead (combat/attack.ts, trait-rules.ts).
+  z.strictObject({ kind: z.literal("mountedCombatant") }),
+  // A hit with a mastered weapon can use one of these mastery properties in place of the weapon's own, as Tactical
+  // Master's Push, Sap or Slow (actions.ts runMasteryHit).
+  z.strictObject({
+    kind: z.literal("masterySwap"),
+    masteries: z.array(WeaponMasterySchema).min(1),
+  }),
   // A hit takes this many strike options (Cunning Strike's or Brutal Strike's) instead of one, as Improved Cunning
   // Strike.
   z.strictObject({
@@ -2508,6 +2565,14 @@ export const FeatureSchema = ContentEntrySchema.extend({
       }),
     )
     .min(2)
+    .optional(),
+  // Activations of another feature, by label, it takes the place of while the bearer has it, as Envenom Weapons'
+  // Poison for Cunning Strike's.
+  overrides: z
+    .strictObject({
+      feature: ContentIdSchema,
+      labels: z.array(z.string().min(1)).min(1),
+    })
     .optional(),
   // Its variants follow the pick made for this feature instead of asking, as Improved Blessed Strikes'.
   follows: ContentIdSchema.optional(),

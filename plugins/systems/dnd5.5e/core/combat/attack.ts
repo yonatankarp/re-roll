@@ -12,6 +12,7 @@ import {
   INCAPACITATING,
   isDead,
   isDown,
+  mountOf,
   NS,
   frame,
 } from "../state.ts";
@@ -64,8 +65,11 @@ import { finalDamage, halved, rollD20 } from "../rules.ts";
 import {
   dodging,
   grappledAwayFrom,
+  HIDE_SOURCE,
   masteryOf,
   revealEvents,
+  STEALTH_ATTACK,
+  tacticsOf,
 } from "../tactics.ts";
 import {
   asHit,
@@ -120,6 +124,7 @@ import {
   fitsType,
   hasFlag,
   hasPassive,
+  ridden,
   isMelee,
   meleeReach,
   rollBonus,
@@ -922,7 +927,8 @@ export function runAttackRoll(
           )
         );
       }) ||
-      traitAttackAdvantage(stats, attacker, target, targetStats, state));
+      traitAttackAdvantage(stats, attacker, target, targetStats, state) ||
+      mountedStrike(attacker, target, stats, context));
   const held = payload.rolled;
   // Redirect Attack: the target trades places with an ally next to it, who takes the attack instead.
   const redirected = held ? null : redirect(attacker, target, context);
@@ -1151,6 +1157,7 @@ export function runAttackRoll(
         ]
       : []),
   ];
+  const hiddenWith = tacticsOf(attacker, "hidden")[0]?.value;
   const hit = {
     attacker: attacker.id,
     actionId: action.id,
@@ -1166,6 +1173,8 @@ export function runAttackRoll(
     ...(payload.noModifier ? { noModifier: true } : {}),
     ...(payload.poleStrike ? { poleStrike: true } : {}),
     ...(payload.strikes ? { strikes: payload.strikes } : {}),
+    // The Stealth total it attacked from hiding with, for Supreme Sneak's Stealth Attack.
+    ...(hiddenWith === undefined ? {} : { hidden: hiddenWith }),
   };
 
   if (!hits) {
@@ -1250,6 +1259,7 @@ export const HitSchema = z.object({
   riposte: z.string().optional(), // the attack the target makes back if this now misses, as with Riposte ("" for its weapon)
   kept: z.boolean().optional(), // a spell to take the hit's place, as Lightning Arrow, was already offered
   forgone: z.number().optional(), // Sneak Attack dice given up for strike options, as Cunning Strike's
+  hidden: z.number().optional(), // the Stealth total the attacker was hidden with, for Supreme Sneak's Stealth Attack
   strikes: z.array(z.string()).optional(), // the strike options chosen for this hit, resolved after its damage
   deflect: z.string().optional(), // the reaction that sends the force back out if the damage drops to 0, as Deflect Missile
   transfer: z.string().optional(), // the creature that takes what a reaction took off, as Transfer Harm's podling
@@ -1458,10 +1468,47 @@ function poleEnd(
   };
 }
 
+// Mounted Strike: Advantage from the saddle against an unmounted creature next to the mount and smaller than it.
+function mountedStrike(
+  attacker: Actor,
+  target: Actor,
+  stats: Stats,
+  context: Context,
+): boolean {
+  const mount = hasPassive(stats, "mountedCombatant")
+    ? ridden(attacker, context.state)
+    : null;
+  return (
+    mount !== null &&
+    mountOf(target) === null &&
+    distanceFeet(mount.position, target.position) <= 5 &&
+    sizeOf(target, context) < sizeOf(mount, context)
+  );
+}
+
+// Veer: a rider with Mounted Combatant takes a hit meant for its mount.
+// shortcut: taken without asking, whenever the rider has more Hit Points left than the mount.
+function veered(target: Actor, context: Context): Actor | null {
+  const rider = Object.values(context.state.actors).find(
+    (item) => mountOf(item) === target.id,
+  );
+  return rider &&
+    !isDown(rider) &&
+    !hasCondition(rider, ...INCAPACITATING) &&
+    rider.hp > target.hp &&
+    hasPassive(deriveStats(rider, context), "mountedCombatant")
+    ? rider
+    : null;
+}
+
 export function runApplyHit(
   payload: z.infer<typeof HitSchema>,
   context: Context,
 ): SystemResult {
+  const rider = veered(actorOf(context.state, payload.target), context);
+  if (rider) {
+    return runApplyHit({ ...payload, target: rider.id }, context);
+  }
   const instead = payload.kept ? null : replaceHitFrame(payload, true, context);
   if (instead) return { frames: [instead] };
   // Cunning Strike's options are picked before the Sneak Attack dice they give up are rolled.
@@ -1553,7 +1600,12 @@ function landHit(
   const multiplier = payload.critical ? 2 : 1;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
   const rerolled = rerolledTypes(stats, action.spellLevel !== null);
-  const responses = piercing(damageResponses(target, context), mastered, stats);
+  const responses = piercing(
+    damageResponses(target, context),
+    mastered,
+    stats,
+    action.id,
+  );
 
   const events: SystemEvent[] = [];
   let totalDealt = 0;
@@ -1810,7 +1862,8 @@ function landHit(
     ...how,
   };
   return {
-    events,
+    // Stealth Attack: hidden again until the turn ends, unless it ends out of cover (combat/turn.ts).
+    events: [...events, ...stayHidden(payload, attacker, context)],
     frames: [
       ...concentrationFrame(
         target,
@@ -1819,13 +1872,16 @@ function landHit(
       ),
       // The attacker's own choices for its hit come before the target's answers: the strike options picked, then
       // what it can add now.
-      ...(payload.strikes ?? []).map((id) =>
+      ...(payload.strikes ?? []).map((id, index, all) =>
         frame("smite", {
           attacker: attacker.id,
           actionId: action.id,
           target: target.id,
           critical: payload.critical,
           answer: encodeOption(id, target.id),
+          ...(sharedOnce(attacker, id, all.slice(0, index), context)
+            ? { noDamage: true }
+            : {}),
         }),
       ),
       ...(smitesFor(action, attacker, target, stats, context).length > 0
@@ -2551,6 +2607,8 @@ export const AfterHitSchema = z.object({
   target: z.string(),
   critical: z.boolean(),
   total: z.number().optional(), // the attack roll, for an option that must also hit another (`sameRoll`)
+  // A second strike option of one name on a hit adds its effects but not its damage, as Brutal Strike's die.
+  noDamage: z.boolean().optional(),
 });
 
 export function runAfterHit(
@@ -2615,15 +2673,27 @@ export function runSmite(
       ? (slotToSpend(known, attacker, deriveStats(attacker, context)) ??
         undefined)
       : Number(slot);
-  const action = asHit(
+  const found = asHit(
     findAction(attacker, actionId, context, slotLevel),
     findAction(attacker, payload.actionId, context),
   );
+  const action = payload.noDamage
+    ? {
+        ...found,
+        activation: {
+          ...found.activation,
+          resolution: { ...found.activation.resolution, damage: [] },
+        },
+      }
+    : found;
   // A smite's damage is part of the attack, so a Critical Hit doubles its dice too, but not an area's round the target.
   const result = resolveAction(
     action,
     attacker,
-    aroundHit(action, attacker, target, context),
+    [
+      ...aroundHit(action, attacker, target, context),
+      ...alsoStruck(known, attacker, target, payload.target, context),
+    ],
     context,
     slotLevel,
     payload.critical && !("area" in action.activation.targeting),
@@ -2638,6 +2708,97 @@ export function runSmite(
     ],
     frames: [...(result.frames ?? [])],
   };
+}
+
+// Whether a strike option shares its once-a-turn name with one picked before it for the same hit, so the hit's
+// extra die isn't rolled twice, as Improved Brutal Strike's two effects.
+function sharedOnce(
+  attacker: Actor,
+  id: string,
+  before: readonly string[],
+  context: Context,
+): boolean {
+  const key = (actionId: string) =>
+    findAction(attacker, actionId, context).activation.oncePerTurn;
+  const own = key(id);
+  return typeof own === "string" && before.some((other) => key(other) === own);
+}
+
+// A strike option with `keepsHidden` picked by an attacker that struck from hiding hides it again.
+function stayHidden(
+  hit: {
+    readonly strikes?: readonly string[] | undefined;
+    readonly hidden?: number | undefined;
+  },
+  attacker: Actor,
+  context: Context,
+): SystemEvent[] {
+  const { hidden } = hit;
+  const keeps =
+    hidden !== undefined &&
+    (hit.strikes ?? []).some(
+      (id) => findAction(attacker, id, context).activation.keepsHidden,
+    );
+  const hide = (modifier: Actor["activeEffects"][number]["modifier"]) =>
+    dndEvent(`${NS}:effectAdded`, {
+      actor: attacker.id,
+      effect: {
+        sourceId: HIDE_SOURCE,
+        casterId: attacker.id,
+        modifier,
+        ends: "spellDuration",
+      },
+    });
+  return keeps
+    ? [
+        hide({ kind: "condition", condition: "invisible" }),
+        hide({ kind: "tactic", tactic: "hidden", value: hidden }),
+        dndEvent(`${NS}:oncePerTurnUsed`, {
+          actor: attacker.id,
+          key: STEALTH_ATTACK,
+        }),
+      ]
+    : [];
+}
+
+// Another creature an afterHit activation lands on through an `alsoStrikes` passive.
+function alsoStruck(
+  known: KnownAction,
+  attacker: Actor,
+  target: Actor,
+  hitId: string,
+  context: Context,
+): readonly Actor[] {
+  const [, featureId] = /^feature:(.+):\d+$/.exec(known.id) ?? [];
+  const passives = deriveStats(attacker, context).passives.filter(
+    (passive) =>
+      passive.kind === "alsoStrikes" &&
+      passive.feature === featureId &&
+      (passive.label === undefined || passive.label === known.activation.label),
+  );
+  return passives.flatMap((passive): Actor[] => {
+    if (passive.kind !== "alsoStrikes") return [];
+    if (passive.other === undefined) {
+      const hit = actorOf(context.state, hitId);
+      return hit.id === target.id || isDown(hit) ? [] : [hit];
+    }
+    const feet = passive.other;
+    const [nearest] = Object.values(context.state.actors)
+      .filter(
+        (other) =>
+          other.id !== target.id &&
+          other.side !== attacker.side &&
+          !isDown(other) &&
+          distanceFeet(attacker.position, other.position) <= feet &&
+          fitsType(other, known.activation.targeting, context, attacker),
+      )
+      .sort(
+        (a, b) =>
+          distanceFeet(target.position, a.position) -
+          distanceFeet(target.position, b.position),
+      );
+    return nearest ? [nearest] : [];
+  });
 }
 
 export const ConcentrationSchema = z.object({

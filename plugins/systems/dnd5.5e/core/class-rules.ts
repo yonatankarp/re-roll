@@ -202,33 +202,60 @@ function offerPrecision(
     "payload" in report
       ? Number((report.payload as { target?: unknown }).target)
       : NaN;
-  const left =
-    (stats.resources[SUPERIORITY] ?? 0) -
-    (attacker.resourcesSpent[SUPERIORITY] ?? 0);
-  if (
-    hit.natural === 1 ||
-    left <= 0 ||
-    !Number.isFinite(ac) ||
-    ac - hit.total > superiorityDie(stats) ||
-    !stats.features.some((id) => id.endsWith(PRECISION))
-  ) {
-    return null;
-  }
+  const left = (resource: string) =>
+    (stats.resources[resource] ?? 0) - (attacker.resourcesSpent[resource] ?? 0);
+  if (hit.natural === 1 || !Number.isFinite(ac)) return null;
+  const precision =
+    left(SUPERIORITY) > 0 &&
+    ac - hit.total <= superiorityDie(stats) &&
+    stats.features.some((id) => id.endsWith(PRECISION));
+  const boosts = missBoosts(stats).filter(
+    ({ passive }) =>
+      left(passive.resource) > 0 &&
+      ac - hit.total <= (stats.scaling[passive.dieSize] ?? 6) &&
+      (!passive.withFeature ||
+        hit.actionId.startsWith(`feature:${passive.withFeature}:`)),
+  );
+  if (!precision && boosts.length === 0) return null;
   return {
     events: [report],
     frames: [
       awaitDecision({
         id: `${NS}:precision:${attacker.id}`,
         actor: attacker.id,
-        prompt: `${attacker.name} misses by ${String(ac - hit.total)}. Add a Superiority Die with Precision Attack?`,
+        prompt: `${attacker.name} misses by ${String(ac - hit.total)}. Add a die to the roll?`,
         options: [
-          { id: USE, label: "Precision Attack" },
+          ...(precision ? [{ id: USE, label: "Precision Attack" }] : []),
+          ...boosts.map(({ index, name }) => ({
+            id: `${BOOST}${String(index)}`,
+            label: name,
+          })),
           { id: DECLINE, label: "Keep the miss" },
         ],
         resume: frame("precision", { ...hit, ac }),
       }),
     ],
   };
+}
+
+const BOOST = "boost:";
+type MissBoost = Extract<Stats["passives"][number], { kind: "missBoost" }>;
+
+// The bearer's `missBoost` passives, by their place among its passives, named for their feature.
+function missBoosts(
+  stats: Stats,
+): readonly { passive: MissBoost; index: number; name: string }[] {
+  return stats.passives.flatMap((passive, index) =>
+    passive.kind === "missBoost"
+      ? [
+          {
+            passive,
+            index,
+            name: `Add a ${passive.resource.replace(/-dice$/, " die").replace(/-/g, " ")}`,
+          },
+        ]
+      : [],
+  );
 }
 
 export function runPrecision(
@@ -242,17 +269,29 @@ export function runPrecision(
     ...onceEnded(attacker, "attacks"),
     ...(target ? onceEnded(target, "attacksAgainst") : []),
   ];
-  if (answer !== USE) return { events: ended };
+  const stats = deriveStats(attacker, context);
+  const boost = answer.startsWith(BOOST)
+    ? missBoosts(stats).find(
+        ({ index }) => index === Number(answer.slice(BOOST.length)),
+      )
+    : undefined;
+  if (answer !== USE && !boost) return { events: ended };
   const rolled = context.dice.roll(
-    superiorityDie(deriveStats(attacker, context)),
+    boost ? (stats.scaling[boost.passive.dieSize] ?? 6) : superiorityDie(stats),
   );
   const total = hit.total + rolled;
+  // Homing Strikes' die is spent only once it turns the miss into a hit.
+  const spent = !boost || total >= ac;
   return {
     events: [
-      dndEvent(`${NS}:resourceSpent`, {
-        actor: attacker.id,
-        resource: SUPERIORITY,
-      }),
+      ...(spent
+        ? [
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: attacker.id,
+              resource: boost?.passive.resource ?? SUPERIORITY,
+            }),
+          ]
+        : []),
       dndEvent(`${NS}:rollReported`, {
         actor: attacker.id,
         against: hit.target,
@@ -260,7 +299,7 @@ export function runPrecision(
         total,
         target: ac,
         success: total >= ac,
-        label: "Precision Attack",
+        label: boost ? boost.name : "Precision Attack",
       }),
       ...ended,
     ],

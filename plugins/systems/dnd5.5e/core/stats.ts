@@ -695,6 +695,16 @@ function collectFeatureData(
     if (feature.follows && labels && (feature.fromLevel ?? 1) <= level) {
       replaced.set(feature.follows, new Set(labels));
     }
+    const { overrides } = featureRules(feature);
+    if (overrides && (feature.fromLevel ?? 1) <= level) {
+      replaced.set(
+        overrides.feature,
+        new Set([
+          ...(replaced.get(overrides.feature) ?? []),
+          ...overrides.labels,
+        ]),
+      );
+    }
   }
   for (const id of featureIds) {
     const feature = withVariant(

@@ -250,7 +250,14 @@ export function speedsLeft(
   actor: Actor,
   stats: Stats,
 ): ReadonlyMap<Mode, number> {
-  const held = hasCondition(actor, "grappled", "restrained", ...INCAPACITATING);
+  // Daze: once it has taken an action or a Bonus Action, it can't move.
+  const dazed =
+    (!actor.budget.action || !actor.budget.bonusAction) &&
+    actor.activeEffects.some(
+      ({ modifier }) => modifier.kind === "actionLimit" && modifier.oneThing,
+    );
+  const held =
+    dazed || hasCondition(actor, "grappled", "restrained", ...INCAPACITATING);
   return new Map(
     [...speedsOf(actor, stats)].map(([mode, feet]) => [
       mode,
@@ -729,6 +736,18 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
   if (activation.afterCast && !used.includes(CAST_ACTION)) return false;
   if (activation.afterBonusAction && actor.budget.bonusAction) return false;
   if (activation.while && !underEffect(actor, activation.while)) return false;
+  if (
+    activation.withAttack &&
+    !actor.budget.action &&
+    !actor.activeEffects.some(
+      ({ modifier }) =>
+        modifier.kind === "tactic" &&
+        modifier.tactic === "attacksLeft" &&
+        (modifier.value ?? 0) > 0,
+    )
+  ) {
+    return false;
+  }
   const { resolution, cost } = activation;
   if (
     resolution.kind === "automatic" &&

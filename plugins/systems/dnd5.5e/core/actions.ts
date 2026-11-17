@@ -1,5 +1,6 @@
 import { afterDamage, reactFrames, settleRoll } from "./combat/reactions.ts";
 import {
+  awaitDecision,
   type ContentAccess,
   type Decision,
   type Frame,
@@ -60,7 +61,12 @@ import {
 export { pushTo };
 import { FLEE } from "./legendary.ts";
 import { finalDamage, rollD20 } from "./rules.ts";
-import { ABILITY_NAMES, type Ability, type Skill } from "./schemas.ts";
+import {
+  ABILITY_NAMES,
+  type Ability,
+  type Skill,
+  WeaponMasterySchema,
+} from "./schemas.ts";
 import {
   applyDndEvent,
   type ActiveEffect,
@@ -106,7 +112,7 @@ import {
   weaponOf,
 } from "./tactics.ts";
 import { fogged, knownFoes, partySight } from "./fog.ts";
-import { hasteActing } from "./combat/durations.ts";
+import { hasteActing, oneActionEvents } from "./combat/durations.ts";
 import { placedFlag } from "./zones.ts";
 import {
   STRIKE,
@@ -1591,7 +1597,12 @@ export function runAfterMove(
   const mover = state.actors[payload.actor];
   if (!state.combat || !mover?.position || isDown(mover)) return {};
   const from = { x: payload.x, y: payload.y };
-  const events: SystemEvent[] = [];
+  // Daze: having moved, it can take no action or Bonus Action.
+  const events: SystemEvent[] = mover.activeEffects.some(
+    ({ modifier }) => modifier.kind === "actionLimit" && modifier.oneThing,
+  )
+    ? oneActionEvents(mover)
+    : [];
   const frames: Frame[] = [];
   for (const foe of enemies(state, mover)) {
     const [ready] = tacticsOf(foe, "ready");
@@ -1625,7 +1636,11 @@ export function runAfterMove(
 
 export { AfterMoveSchema };
 
-const MasteryHitSchema = HitSchema.extend({ dealt: z.number() });
+// `answer` is the mastery property picked in place of the weapon's own, as with Tactical Master.
+const MasteryHitSchema = HitSchema.extend({
+  dealt: z.number(),
+  answer: z.string().optional(),
+});
 
 function masteryAttack(
   payload: z.infer<typeof HitSchema>,
@@ -1658,9 +1673,37 @@ export function runMasteryHit(
 ): SystemResult {
   const found = masteryAttack(payload, context);
   if (!found) return {};
-  const { attacker, target, action, ability, mastery } = found;
+  const { attacker, target, action, ability } = found;
   const { state } = context;
   const stats = deriveStats(attacker, context);
+  // Tactical Master: which property this hit uses is asked first.
+  const swaps = [
+    ...new Set(
+      stats.passives.flatMap((passive) =>
+        passive.kind === "masterySwap" ? passive.masteries : [],
+      ),
+    ),
+  ].filter((item) => item !== found.mastery);
+  if (swaps.length > 0 && payload.answer === undefined && !isDown(target)) {
+    const label = (item: string) =>
+      `${item.charAt(0).toUpperCase()}${item.slice(1)}`;
+    return {
+      frames: [
+        awaitDecision({
+          id: `${NS}:mastery:${attacker.id}`,
+          actor: attacker.id,
+          prompt: `${attacker.name} hits ${target.name}. Which mastery property does the hit use?`,
+          options: [found.mastery, ...swaps].map((item) => ({
+            id: item,
+            label: label(item),
+          })),
+          resume: frame("masteryHit", payload),
+        }),
+      ],
+    };
+  }
+  const mastery =
+    WeaponMasterySchema.safeParse(payload.answer).data ?? found.mastery;
   const source = `${MASTERY}${mastery}`;
   const up = !isDown(target);
   // Advantage and Disadvantage don't stack, so a second Sap or Vex before the first is used adds nothing.

@@ -127,7 +127,18 @@ export function limitEvents(
 // Once an action or a Bonus Action is spent, the other goes too for a creature that can take only one.
 export function oneActionEvents(actor: Actor): SystemEvent[] {
   const { action, bonusAction } = actor.budget;
-  if (!limitsOf(actor).oneAction || action === bonusAction) return [];
+  const limits = limitsOf(actor);
+  // Daze: having moved, it takes neither.
+  if (limits.oneThing && actor.moved > 0) {
+    return (["action", "bonusAction"] as const).flatMap((kind) =>
+      actor.budget[kind]
+        ? [dndEvent(`${NS}:budgetSpent`, { actor: actor.id, kind })]
+        : [],
+    );
+  }
+  if (!(limits.oneAction || limits.oneThing) || action === bonusAction) {
+    return [];
+  }
   return [
     dndEvent(`${NS}:budgetSpent`, {
       actor: actor.id,
@@ -204,7 +215,8 @@ export function afterActionEvents(actor: Actor): SystemEvent[] {
     hasted(actor) &&
     !actor.budget.action &&
     !actor.usedThisTurn.includes(HASTE_ACTION) &&
-    !limitsOf(actor).oneAction
+    !limitsOf(actor).oneAction &&
+    !limitsOf(actor).oneThing
   ) {
     events.push(
       dndEvent(`${NS}:actionRegained`, { actor: actor.id }),

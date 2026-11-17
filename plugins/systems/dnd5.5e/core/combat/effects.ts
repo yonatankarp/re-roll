@@ -789,6 +789,51 @@ function killEvents(fallen: Actor, context: Context): SystemEvent[] {
 
 const ON_KILL = "onKill";
 
+// Effects from an activation with `transfers` move off a creature that drops to the foe nearest their caster.
+function transferEvents(fallen: Actor, context: Context): SystemEvent[] {
+  const { state } = context;
+  const moved = new Set<string>();
+  return fallen.activeEffects.flatMap((effect) => {
+    const caster = state.actors[effect.casterId];
+    const key = `${effect.casterId}|${effect.sourceId}`;
+    if (!caster || isDown(caster) || moved.has(key)) return [];
+    if (!effect.sourceId.startsWith("feature:")) return [];
+    const feet = deriveStats(caster, context).actions.find(
+      ({ id }) => id === effect.sourceId,
+    )?.activation.transfers;
+    if (feet === undefined) return [];
+    moved.add(key);
+    const [next] = Object.values(state.actors)
+      .filter(
+        (other) =>
+          other.id !== fallen.id &&
+          other.side !== caster.side &&
+          !isDown(other) &&
+          distanceFeet(caster.position, other.position) <= feet,
+      )
+      .sort(
+        (a, b) =>
+          distanceFeet(caster.position, a.position) -
+          distanceFeet(caster.position, b.position),
+      );
+    if (!next) return [];
+    const carried = fallen.activeEffects.filter(
+      (item) =>
+        item.sourceId === effect.sourceId && item.casterId === effect.casterId,
+    );
+    return [
+      dndEvent(`${NS}:effectEnded`, {
+        actor: fallen.id,
+        sourceId: effect.sourceId,
+        casterId: effect.casterId,
+      }),
+      ...carried.map((item) =>
+        dndEvent(`${NS}:effectAdded`, { actor: next.id, effect: item }),
+      ),
+    ];
+  });
+}
+
 // A check with the caster's spellcasting ability, as Dispel Magic's against a higher spell.
 // shortcut: no reactions or rescues change the roll, as they may an ability check's (actions.ts abilityCheck).
 function spellcastingCheck(
@@ -1241,6 +1286,7 @@ export function dealEvents(
       );
     }
     events.push(...killEvents(target, { ...context, state }));
+    events.push(...transferEvents(target, { ...context, state }));
     if (!isDead(hurt))
       events.push(...downedEvents(hurt, { ...context, state }));
   }
@@ -2926,6 +2972,42 @@ export function resolveAction(
   if (spellEnds.length > 0 && isSpell(action, actor, context)) {
     events.push(...spellEnds);
   }
+  // Ending what the action it needs left on the target, as Quivering Palm's end.
+  const { targeting } = action.activation;
+  const afflicting =
+    action.activation.endsAffliction && "afflicted" in targeting
+      ? stats.actions.find(({ name }) => name === targeting.afflicted)?.id
+      : undefined;
+  if (afflicting) {
+    events.push(
+      ...targets.map((target) =>
+        dndEvent(`${NS}:effectEnded`, {
+          actor: target.id,
+          sourceId: afflicting,
+          casterId: actor.id,
+        }),
+      ),
+    );
+  }
+  // One creature at a time: used again, it leaves the last one.
+  if (action.activation.oneTarget) {
+    for (const other of Object.values(context.state.actors)) {
+      if (
+        !targets.some(({ id }) => id === other.id) &&
+        other.activeEffects.some(
+          (item) => item.sourceId === action.id && item.casterId === actor.id,
+        )
+      ) {
+        events.push(
+          dndEvent(`${NS}:effectEnded`, {
+            actor: other.id,
+            sourceId: action.id,
+            casterId: actor.id,
+          }),
+        );
+      }
+    }
+  }
   if (spell) events.push(...duelBroken(actor, targets, context.state));
 
   const usesConcentration = (effects: readonly LeafEffect[]): boolean =>
@@ -2979,7 +3061,12 @@ export function resolveAction(
         amount: finalDamage(
           scale(total),
           type,
-          piercing(damageResponses(target, context), mastered, stats),
+          piercing(
+            damageResponses(target, context),
+            mastered,
+            stats,
+            action.id,
+          ),
         ),
         type,
       })),
@@ -3143,6 +3230,7 @@ export function resolveAction(
       const met = deriveStats(target, context);
       const hurt = target.hp < met.maxHp;
       return list.flatMap((item, index) => {
+        if (item.except && exemptFrom(item.except, target, met)) return [];
         const { total = 0 } = shared[index] ?? {};
         const type = item.types
           ? typeAgainst(item.types, damageResponses(target, context))
@@ -3276,10 +3364,17 @@ export function resolveAction(
             effect.kind === "teleport" &&
             (target.id === actor.id || effect.others)
           ) {
+            const { rolled } = effect;
             frames.push(
               teleportFrame(
                 target,
-                effect.feet,
+                rolled
+                  ? rolled.times *
+                      context.dice.roll(
+                        deriveStats(actor, context).scaling[rolled.dieSize] ??
+                          6,
+                      )
+                  : effect.feet,
                 effect.movement,
                 context,
                 effect.provokes,

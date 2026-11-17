@@ -16,6 +16,8 @@ import {
   dndEvent,
   equipped,
   hasCondition,
+  isDown,
+  mountOf,
 } from "./state.ts";
 import {
   type Stats,
@@ -150,10 +152,28 @@ export function evades(
 ): boolean {
   return (
     !hasCondition(target, ...INCAPACITATING) &&
-    deriveStats(target, access).passives.some(
+    (deriveStats(target, access).passives.some(
       (passive) =>
         passive.kind === "evasion" && (passive.anySave || ability === "dex"),
-    )
+    ) ||
+      (ability === "dex" && leapsAside(target, access)))
+  );
+}
+
+// Leap Aside: a mount ridden by a creature with Mounted Combatant, neither of them Incapacitated, evades as Evasion.
+function leapsAside(
+  mount: Actor,
+  access: ContentAccess & { readonly state?: DndState },
+): boolean {
+  const { state } = access;
+  return Object.values(state?.actors ?? {}).some(
+    (rider) =>
+      mountOf(rider) === mount.id &&
+      !isDown(rider) &&
+      !hasCondition(rider, ...INCAPACITATING) &&
+      deriveStats(rider, access).passives.some(
+        ({ kind }) => kind === "mountedCombatant",
+      ),
   );
 }
 
@@ -263,11 +283,21 @@ export function masteredTypes(
 // Boon of Irresistible Offense.
 export function piercing<
   T extends { readonly resistances: readonly DamageType[] },
->(responses: T, mastered: readonly DamageType[], stats: Stats): T {
+>(
+  responses: T,
+  mastered: readonly DamageType[],
+  stats: Stats,
+  source = "", // the action or effect source the damage comes from, for `sources`
+): T {
+  const from = (id: string) =>
+    source.startsWith(`feature:${id}:`) || spellOfSource(source) === id;
   const ignored = [
     ...mastered,
     ...stats.passives.flatMap((passive) =>
-      passive.kind === "overcomeResistance" ? passive.damage : [],
+      passive.kind === "overcomeResistance" &&
+      (!passive.sources || passive.sources.some(from))
+        ? passive.damage
+        : [],
     ),
   ];
   return ignored.length === 0
