@@ -11,7 +11,7 @@ import { HIT_DICE, itemUseOf, parseOption } from "../core/combat/ids.ts";
 import { squareKey } from "../core/grid.ts";
 import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
-import { canUse, foundText } from "../core/gear.ts";
+import { canUse, foundText, sceneGearActions } from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
 import { partySight, revealedSquares, unseenFoe } from "../core/fog.ts";
 import { coins } from "../core/shop.ts";
@@ -592,6 +592,11 @@ function sheets(rawState: unknown, access: ContentAccess) {
   // What can be used between fights now (camp.ts): the player's own from its spell or feature's row, and the
   // companions' from the player's sheet, as only the player's sheet answers.
   const between = sceneCastActions(state, access);
+  const uses = sceneGearActions(state, access).filter(({ effect }) =>
+    ["dnd5.5e:coat", "dnd5.5e:storeSpell", "dnd5.5e:pickItemSkill"].includes(
+      effect,
+    ),
+  );
   const casts = new Set(between.map(({ id }) => id));
   const companions = between.filter(({ args }) => args.caster !== PLAYER_ACTOR);
   const player = actors[PLAYER_ACTOR];
@@ -611,6 +616,7 @@ function sheets(rawState: unknown, access: ContentAccess) {
             actor.id === PLAYER_ACTOR ? (gold ?? 0) : null,
             casts,
             actor.id === PLAYER_ACTOR ? companions : [],
+            actor.id === PLAYER_ACTOR ? uses : [],
           ),
         ]
       : [],
@@ -624,6 +630,7 @@ function sheetOf(
   gold: number | null, // the party's, shown on the player's sheet
   casts: ReadonlySet<string> = new Set(), // scene actions using a spell or feature between fights
   companions: readonly SceneAction[] = [], // the companions' ones, on the player's sheet
+  uses: readonly SceneAction[] = [], // items used between choices, on the player's sheet
 ) {
   const stats = deriveStats(player, access);
   const subclasses = build.levels
@@ -734,6 +741,19 @@ function sheetOf(
           ),
         ),
       },
+      // Oils applied, spells stored in an item and an item's skill picked, between a scene's choices (gear.ts).
+      ...(uses.length > 0
+        ? [
+            {
+              title: "Item uses",
+              rows: uses.map(({ id, label }) => ({
+                label,
+                value: "",
+                option: { id, label: "Use", hint: GEAR_HINT },
+              })),
+            },
+          ]
+        : []),
       {
         title: "Companions' healing",
         rows: companions.map(({ id, label }) => ({

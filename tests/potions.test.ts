@@ -1410,6 +1410,63 @@ describe("charged items' riders (#199)", () => {
     expect(asked).not.toBeNull();
   });
 
+  it("tears a Wind Fan whose chance comes up, and takes a Trip's Advantage into the roll", async () => {
+    const run = await itemRun();
+    const fan = "test:item/fan";
+    const user = {
+      ...carrying([fan]),
+      position: { x: 0, y: 0 },
+      resourcesSpent: { fan: 1 },
+    };
+    const beast = {
+      ...hero([], { id: "foe" }),
+      side: "enemy" as const,
+      position: { x: 2, y: 0 },
+    };
+    const torn = settle(
+      run,
+      [user, beast],
+      [
+        frame("castCheck", {
+          actor: PLAYER_ACTOR,
+          actionId: `spell:srd52:spell/fear:item:${fan}:1`,
+          target: "foe",
+        }),
+      ],
+      scripted([15]).dice,
+      () => "",
+    );
+    expect(payloads(torn.events, "itemUsed")).toEqual([
+      { actor: PLAYER_ACTOR, item: fan },
+    ]);
+    const staff = "test:item/martial--1--quarterstaff";
+    const tripper = { ...carrying([staff]), position: { x: 0, y: 0 } };
+    const foe = {
+      ...hero([], { id: "foe" }),
+      side: "enemy" as const,
+      hp: 40,
+      position: { x: 1, y: 0 },
+    };
+    const { counts, dice } = scripted([3, 18, 2]);
+    const { events } = settle(
+      run,
+      [tripper, foe],
+      [
+        frame("advantageGained", {
+          attacker: PLAYER_ACTOR,
+          actionId: `weapon:${staff}`,
+          target: "foe",
+          answer: `use:${staff}:1|foe`,
+        }),
+      ],
+      dice,
+      () => "",
+    );
+    // Two d20s for the roll with Advantage, keeping the 18.
+    expect(payloads(events, "rollReported")[0]).toMatchObject({ natural: 18 });
+    expect(counts[20]).toBeGreaterThanOrEqual(2);
+  });
+
   it("gives the skill picked for an Arcanist's Bestiary", async () => {
     const run = await itemRun();
     const book = "test:item/bestiary";

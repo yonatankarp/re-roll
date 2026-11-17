@@ -610,6 +610,33 @@ function allSpells(access: ContentAccess): readonly string[] {
   return found;
 }
 
+// The spells on a class's list that do something in a fight, worked out once for the content loaded.
+const listed = new WeakMap<readonly string[], Map<string, readonly string[]>>();
+function classSpells(
+  className: string,
+  access: ContentAccess,
+): readonly string[] {
+  const ids = access.contentIds();
+  let byClass = listed.get(ids);
+  if (!byClass) {
+    byClass = new Map();
+    listed.set(ids, byClass);
+  }
+  let found = byClass.get(className);
+  if (!found) {
+    found = allSpells(access).filter((spellId) => {
+      const spell = lookup(access, SpellSchema, spellId);
+      return (
+        spell.activation !== undefined &&
+        onClassList(spell, [className]) &&
+        doesSomething(spell.activation.resolution)
+      );
+    });
+    byClass.set(className, found);
+  }
+  return found;
+}
+
 // The spells an item lets its bearer try to cast without knowing them (MagicItemSchema `unknownSpell`): each behind
 // its Arcana check, spending the item's use, and for a leveled spell a slot of its level.
 function unknownSpells(
@@ -623,18 +650,16 @@ function unknownSpells(
 ): KnownAction[] {
   if (item.type !== "magicItem" || !item.unknownSpell) return [];
   const rule = item.unknownSpell;
-  return allSpells(access).flatMap((spellId): KnownAction[] => {
+  return classSpells(rule.class, access).flatMap((spellId): KnownAction[] => {
     const spell = lookup(access, SpellSchema, spellId);
     const activation = spell.activation;
     if (
       !activation ||
       known.has(spellId) ||
-      !onClassList(spell, [rule.class]) ||
       (rule.cantrips
         ? spell.level !== 0
         : spell.level < 1 || spell.level > highest) ||
-      (rule.action && !activation.cost.includes("action")) ||
-      !doesSomething(activation.resolution)
+      (rule.action && !activation.cost.includes("action"))
     ) {
       return [];
     }

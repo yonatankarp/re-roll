@@ -77,7 +77,9 @@ export function treasure(loot: Loot, context: Context): SystemResult {
         items: [...items],
         stowed: items.filter((id) => WORN_TYPES.has(itemOf(context, id).type)),
       }),
-      ...gainRolls(player(context.state), items, context),
+      ...(context.state.actors[PLAYER_ACTOR]
+        ? gainRolls(context.state.actors[PLAYER_ACTOR], items, context)
+        : []),
     ],
     frames: [frame("gearStep", { step: 0, found: { gold, items } })],
   };

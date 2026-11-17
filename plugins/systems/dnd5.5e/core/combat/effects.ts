@@ -1800,6 +1800,8 @@ export function leafEvents(
         break;
       }
       case "createItems": {
+        // An item from a book not loaded, as a dmg potion with phb alone, makes nothing.
+        if (!context.content(effect.item)) break;
         const count = Math.max(1, evaluateFormula(effect.count, stats));
         events.push(
           dndEvent(`${NS}:treasureFound`, {

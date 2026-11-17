@@ -690,7 +690,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // shortcut: "24 hours" lasts until the next Long Rest, the only clock between scenes.
   z.strictObject({ kind: z.literal("untilLongRest") }),
   // Items handed to the target, `count` of them worked out from the caster's numbers, as the potions Tasha's
-  // Bubbling Cauldron makes. shortcut: they come at once rather than a Bonus Action each, and stay after a recast.
+  // Bubbling Cauldron makes, none of an item no loaded book has. shortcut: they come at once rather than a Bonus Action each, and stay after a recast.
   z.strictObject({
     kind: z.literal("createItems"),
     item: ContentIdSchema,
@@ -2871,6 +2871,7 @@ export const ChargedSchema = {
   resources: z.array(ResourceDefSchema).min(1).optional(),
   // Pieces rolled as the item is found, each a type its own d`die` row names, counted into that row's pool, as a
   // Necklace of Prayer Beads' 1d4 + 2 beads of six types (gear.ts gainRolls).
+  // shortcut: they're rolled when it's found as treasure or bought; one come by any other way has none.
   split: z
     .strictObject({
       count: z.strictObject({
