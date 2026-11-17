@@ -105,6 +105,7 @@ export const FRAME_KINDS = [
   "reincarnate", // the player picks what a reincarnated body's species asks for (reincarnate.ts)
   "reincarnateAnswer",
   "missReroll", // a missed attack rolled again, or at another creature, as Master Duelist or Curving Shot (class-rules.ts)
+  "bringAlong", // the allies a teleport brings land beside it, as Travel along the Tree's (combat/movement.ts)
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -167,6 +168,8 @@ const ActiveEffectSchema = z.strictObject({
     }),
     // Riding its caster as a mount (combat/mounts.ts).
     z.strictObject({ kind: z.literal("riding") }),
+    // Carrying a willing ally along as it moves this turn, as Heightened Focus's Step of the Wind (combat/movement.ts).
+    z.strictObject({ kind: z.literal("carrying"), actor: z.string() }),
     // One of its own stat block's other shapes, by name, as a werewolf's wolf form (core/forms.ts).
     z.strictObject({ kind: z.literal("shape"), shape: z.string() }),
     // An area a spell left on the map, kept on its caster (core/zones.ts). With `follows` it is centred on the

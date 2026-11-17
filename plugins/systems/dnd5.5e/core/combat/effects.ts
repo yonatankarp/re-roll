@@ -2321,6 +2321,21 @@ export function leafEvents(
         }
         break;
       }
+      case "carry":
+        if (target.id !== caster.id) {
+          events.push(
+            dndEvent(`${NS}:effectAdded`, {
+              actor: caster.id,
+              effect: {
+                sourceId,
+                casterId: caster.id,
+                modifier: { kind: "carrying", actor: target.id },
+                ends: "casterTurnEnd",
+              },
+            }),
+          );
+        }
+        break;
       case "swapPlaces":
         if (caster.position && target.position && caster.id !== target.id) {
           events.push(
@@ -3681,6 +3696,18 @@ export function resolveAction(
   switch (resolution.kind) {
     case "automatic": {
       beginConcentration(resolution.effects);
+      // What it does to its bearer whatever its targets, as Step of the Wind's Dash while carrying an ally.
+      if (action.activation.alsoSelf) {
+        events.push(
+          ...leafEvents(
+            action.activation.alsoSelf,
+            action.id,
+            actor,
+            actor,
+            context,
+          ),
+        );
+      }
       for (const effect of resolution.effects) {
         if (effect.kind === "moveZone" && aim) {
           const moved = movedZone(effect.source, actor, aim, context);

@@ -589,6 +589,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("unhindered"),
     terrainOnly: z.literal(true).optional(),
   }),
+  // Once on each of its turns it can jump up to `feet` for only `movement` feet of its movement, as with the Jump spell
+  // or Boots of Striding and Springing (stats.ts jumpActions).
+  z.strictObject({
+    kind: z.literal("jumpBoost"),
+    feet: z.number().int().min(5),
+    movement: z.number().int().min(0),
+  }),
   // Walking across water as if it were ground, as with Water Walk (core/combat/queries.ts).
   z.strictObject({ kind: z.literal("waterWalk") }),
   // Breathing underwater, as with Water Breathing, so an underwater fight never runs its breath out (combat/water.ts).
@@ -930,6 +937,15 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     others: z.literal(true).optional(),
     // A teleport paid for with movement that still provokes nothing, as Portal Step's.
     provokes: z.literal(false).optional(),
+    // Up to `count` willing allies within `within` feet of where it left come too, each landing within `near` feet of
+    // where it lands, as Travel along the Tree's six (combat/movement.ts bringFrame).
+    bring: z
+      .strictObject({
+        count: z.number().int().min(1),
+        within: z.number().int().min(5),
+        near: z.number().int().min(5),
+      })
+      .optional(),
     // Creatures within `within` feet of where it lands, or with `origin` of where it left, get `conditions` and
     // `modifiers` for `duration`, after a save when `save` is set: Whirlwind of Sand's Blinded, Toxic Escape's
     // Poisoned, Temporal Disruption's halved Speed. `foes` keeps it to the bearer's foes, the creatures of its choice.
@@ -949,9 +965,14 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
         conditions: z.array(ConditionSchema).default([]),
         modifiers: z.array(ModifierSchema).default([]),
         duration: DurationSchema,
+        // a failed save pulls the creature straight toward the space left, as Warping Implosion's
+        pull: z.literal(true).optional(),
       })
       .optional(),
   }),
+  // The caster carries the target, a willing ally, along until its turn ends: after each of its moves the target lands
+  // beside it, provoking nothing, as Heightened Focus's Step of the Wind (combat/movement.ts).
+  z.strictObject({ kind: z.literal("carry") }),
   // The Dash action as part of another, as with Adrenaline Rush, or the Disengage action, as a clay golem's Hasten.
   // `half` adds only half the Speed, and `safe` makes the turn's moving provoke no Opportunity Attacks, as
   // Tactical Shift's move of half the Speed. shortcut: the move comes as Speed for the turn, not at once.
@@ -1704,6 +1725,9 @@ export const ActivationSchema = z.strictObject({
   keepsHidden: z.literal(true).optional(),
   // What the bearer gets as an `afterHit` activation is taken, as Cunning Strike's Withdraw move.
   selfEffects: z.array(LeafEffectSchema).min(1).optional(),
+  // Effects on the bearer too, whatever its targets, as the Dash and Disengage of Heightened Focus's Step of the Wind
+  // carrying an ally.
+  alsoSelf: z.array(LeafEffectSchema).min(1).optional(),
   // only while an effect of one of these features' activations is on the bearer, as Travel along the Tree in a Rage,
   // or while it concentrates on one of these spells, as Telekinetic Master's attack
   while: z.array(ContentIdSchema).min(1).optional(),
@@ -2138,6 +2162,17 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Falling never hurts it, as a Ring of Feather Falling's slow descent (combat/falling.ts).
   z.strictObject({ kind: z.literal("featherFall") }),
+  // A teleport of one of these spells or features' activations brings willing allies along, as Misty Wanderer's
+  // Misty Step (combat/movement.ts).
+  z.strictObject({
+    kind: z.literal("teleportRider"),
+    actions: z.array(ContentIdSchema).min(1),
+    bring: z.strictObject({
+      count: z.number().int().min(1),
+      within: z.number().int().min(5),
+      near: z.number().int().min(5),
+    }),
+  }),
   // Taking the Dash or Disengage action gives the bearer these until its turn ends, as Speedy's Unhindered Dash over
   // Difficult Terrain or Fairy Trickster's Faerie Trod Trotter (combat/effects.ts tacticRiderEvents).
   z.strictObject({

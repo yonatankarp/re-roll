@@ -2454,7 +2454,7 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
           ...changed,
           actions: changed.actions.filter((action) => !stuck.has(action.id)),
         };
-  const moving = zoneMoves(actor);
+  const moving = [...zoneMoves(actor), ...jumpActions(actor, stats)];
   const moved =
     moving.length > 0
       ? { ...free, actions: [...free.actions, ...moving] }
@@ -2476,6 +2476,41 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
 }
 
 export const MOVE_ZONE = "zone-move:";
+export const JUMP_BOOST = "jump-boost";
+
+// A jump farther than walking allows, once a turn, for a little movement, as the Jump spell's 30 feet for 10.
+function jumpActions(actor: Actor, stats: Stats): KnownAction[] {
+  const best = [
+    ...actor.activeEffects.map(({ modifier }) => modifier),
+    ...passiveModifiers(stats.passives),
+  ].reduce<Extract<Modifier, { kind: "jumpBoost" }> | null>(
+    (most, modifier) =>
+      modifier.kind === "jumpBoost" && modifier.feet > (most?.feet ?? 0)
+        ? modifier
+        : most,
+    null,
+  );
+  if (!best) return [];
+  return [
+    {
+      id: JUMP_BOOST,
+      name: `Jump (${String(best.feet)} ft for ${String(best.movement)} ft of movement)`,
+      activation: {
+        cost: [],
+        oncePerTurn: JUMP_BOOST,
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          damage: [],
+          effects: [
+            { kind: "teleport", feet: best.feet, movement: best.movement },
+          ],
+        },
+      },
+      spellLevel: null,
+    },
+  ];
+}
 
 // An action to move an area the bearer keeps, as Moonbeam's Magic action. shortcut: its reach is counted from the
 // bearer, not from where the area stands.
