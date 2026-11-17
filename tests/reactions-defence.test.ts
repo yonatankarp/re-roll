@@ -5,7 +5,13 @@ import {
   dealEvents,
   rollSave,
 } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
-import { reactFrames } from "../plugins/systems/dnd5.5e/core/combat/reactions.ts";
+import {
+  reactFrames,
+  spellAimedAt,
+} from "../plugins/systems/dnd5.5e/core/combat/reactions.ts";
+import { provokers } from "../plugins/systems/dnd5.5e/core/combat/movement.ts";
+import { recovered } from "../plugins/systems/dnd5.5e/core/rest.ts";
+import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import {
   type Actor,
   type DndState,
@@ -235,6 +241,146 @@ const MINE = [
       },
     ],
   }),
+
+  trait("portent", [{ kind: "foretell", count: 2 }], {
+    activations: [
+      {
+        cost: [],
+        oncePerTurn: true,
+        trigger: { rolled: { rolls: ["attack", "save", "check"], by: "any" } },
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [{ kind: "replaceRoll", foretold: true }],
+        },
+      },
+    ],
+  }),
+  trait("ward", [{ kind: "wardPool", resource: "ward", made: "ward-made" }], {
+    resources: [
+      { id: "ward", max: { base: 8 }, recharge: [] },
+      {
+        id: "ward-made",
+        max: { base: 1 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+  }),
+  trait("rebuke", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { hitByAttack: true },
+        targeting: { creatures: 1, range: 60, side: "enemy" },
+        selfEffects: [{ kind: "reduceDamage", halve: true }],
+        resolution: {
+          kind: "save",
+          ability: "wis",
+          dc: { base: 30 },
+          damage: [
+            {
+              amount: { bonus: { add: [{ kind: "dealt" }] } },
+              type: "psychic",
+            },
+          ],
+          onFail: [],
+          onSuccess: [],
+        },
+      },
+    ],
+  }),
+  trait("thief", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { spellTargets: true },
+        targeting: { self: true },
+        resolution: {
+          kind: "save",
+          ability: "int",
+          dc: { base: 30 },
+          damage: [],
+          onFail: [{ kind: "stealSpell" }],
+          onSuccess: [],
+        },
+      },
+    ],
+  }),
+  trait("defender", [{ kind: "vigilantDefender" }, { kind: "holdTheLine" }]),
+  trait("misdirect", [], {
+    activations: [
+      {
+        cost: ["reaction"],
+        trigger: { attacked: true },
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [{ kind: "redirect", cover: true }],
+        },
+      },
+    ],
+  }),
+  trait("emissary", [
+    { kind: "creatureResistance" },
+    {
+      kind: "modifier",
+      modifier: { kind: "retaliate", anyAttack: true, halfDealt: "radiant" },
+    },
+  ]),
+  trait("mirror", [{ kind: "mirrorDamage", damage: "psychic" }]),
+  trait("absorbing", [
+    {
+      kind: "modifier",
+      modifier: {
+        kind: "damageReduction",
+        amount: { bonus: { base: 3 } },
+        magical: true,
+        oncePerTurn: true,
+      },
+    },
+    { kind: "spellDamageResistance" },
+  ]),
+  trait("unarmored", [
+    {
+      kind: "modifier",
+      modifier: {
+        kind: "acFormula",
+        unarmored: true,
+        noShield: true,
+        formula: { base: 20 },
+      },
+    },
+    {
+      kind: "modifier",
+      modifier: {
+        kind: "bonus",
+        to: "ac",
+        armor: "any",
+        amount: { bonus: { base: 1 } },
+      },
+    },
+    {
+      kind: "modifier",
+      modifier: { kind: "bonus", to: "ac", amount: { bonus: { base: 2 } } },
+      concentrating: true,
+    },
+  ]),
+  trait("elusive", [
+    { kind: "modifier", modifier: { kind: "noAdvantageAgainst", able: true } },
+    {
+      kind: "modifier",
+      modifier: { kind: "checkFloor", value: 10, all: true },
+    },
+  ]),
+  trait("lethargy", [], {
+    resources: [
+      {
+        id: "lethargy",
+        max: { base: 1 },
+        recharge: [{ on: "longRest", amount: "all", everyDie: 4 }],
+      },
+    ],
+  }),
 ];
 
 async function mineRun(): Promise<RunContext> {
@@ -309,13 +455,6 @@ const at = (
   dice: ReturnType<typeof scripted>["dice"],
   run: RunContext,
 ) => ({ state, dice, content: run.content, contentIds: run.contentIds });
-const HIT = {
-  actionId: SWORD,
-  critical: false,
-  hadAdvantage: false,
-  total: 30,
-  natural: 15,
-};
 
 describe("reactions that change a d20 roll", () => {
   it("bends another creature's roll either way, but never the bearer's own, as Bend Luck does", async () => {
@@ -414,7 +553,7 @@ describe("reactions that change a d20 roll", () => {
             kind: "condition" as const,
             condition: "blinded" as const,
           },
-          ends: "never" as const,
+          ends: "spellDuration" as const,
         },
       ],
     };
@@ -462,7 +601,7 @@ describe("moments other reactions answer", () => {
           sourceId: "feature:test:feature/vow:0",
           casterId: PLAYER_ACTOR,
           modifier: { kind: "advantage", on: "attacksAgainst" },
-          ends: "never",
+          ends: "spellDuration",
         },
       ],
     });
@@ -675,5 +814,311 @@ describe("protections for the bearer and others", () => {
     expect(
       payloads(rapier, "damaged").filter((item) => item.actor === PLAYER_ACTOR),
     ).toHaveLength(0);
+  });
+});
+
+describe("pools, foretold rolls and stolen spells", () => {
+  it("rolls Portent's d20s as a Long Rest ends, and spends the one that saves an ally", async () => {
+    const run = await mineRun();
+    const rested = settle(
+      run,
+      {
+        actors: { [PLAYER_ACTOR]: hero(["portent"]), friend: friendOf() },
+        combat: null,
+      },
+      [frame("finishRest", { rest: "long" })],
+      scripted([3, 17]).dice,
+    );
+    expect(payloads(rested.events, "foretold")).toEqual([
+      { actor: PLAYER_ACTOR, rolls: [3, 17] },
+    ]);
+    const seer = rested.state.actors[PLAYER_ACTOR];
+    if (!seer) throw new Error("missing");
+    const save = rollSave(
+      friendOf(),
+      "con",
+      15,
+      at(row([seer, friendOf()]), scripted([4]).dice, run),
+    );
+    expect(save.saved).toBe(true);
+    expect(payloads(save.events, "foretoldUsed")).toEqual([
+      { actor: PLAYER_ACTOR, roll: 17 },
+    ]);
+  });
+
+  it("lets a ward take damage only once it has been made, as Arcane Ward", async () => {
+    const run = await mineRun();
+    const fresh = { ...hero(["ward"]), hp: 30 };
+    const unmade = dealEvents(
+      fresh,
+      [{ amount: 5, type: "fire" }],
+      false,
+      at(row([fresh]), scripted([]).dice, run),
+    );
+    expect(payloads(unmade.events, "damaged")).toEqual([
+      expect.objectContaining({ amount: 5 }),
+    ]);
+    const made = { ...fresh, resourcesSpent: { "ward-made": 1 } };
+    const warded = dealEvents(
+      made,
+      [{ amount: 11, type: "fire" }],
+      false,
+      at(row([made]), scripted([]).dice, run),
+    );
+    expect(payloads(warded.events, "resourceSpent")).toEqual([
+      { actor: PLAYER_ACTOR, resource: "ward", amount: 8 },
+    ]);
+    expect(payloads(warded.events, "damaged")).toEqual([
+      expect.objectContaining({ amount: 3 }),
+    ]);
+  });
+
+  it("halves a hit, then makes the attacker save against the damage taken, as Elemental Rebuke", async () => {
+    const run = await mineRun();
+    const { events } = settle(
+      run,
+      row([foeOf(), { ...hero(["rebuke"]), hp: 40 }]),
+      [
+        frame("attackRoll", {
+          attacker: "foe",
+          actionId: SWORD,
+          target: PLAYER_ACTOR,
+        }),
+      ],
+      { below: () => 0, roll: (sides) => (sides === 20 ? 15 : 8) },
+    );
+    const hurt = payloads(events, "damaged");
+    const mine = hurt.find((item) => item.actor === PLAYER_ACTOR);
+    const theirs = hurt.find((item) => item.actor === "foe");
+    expect(theirs?.amount).toBe(mine?.amount);
+  });
+
+  it("makes a spell's caster save or have it pass the bearer by, as Spell Thief, and lets Shield's spell pass", async () => {
+    const run = await mineRun();
+    const thief = { ...hero(["thief"]), hp: 30 };
+    const state = row([foeOf(), thief]);
+    const missile = {
+      id: "spell:srd52:spell/magic-missile",
+      name: "Magic Missile",
+      spellLevel: 1,
+      activation: {
+        cost: ["action" as const, "slot" as const],
+        targeting: { creatures: 3, range: 120, side: "enemy" as const },
+        resolution: { kind: "automatic" as const, damage: [], effects: [] },
+      },
+    };
+    const caster = state.actors.foe;
+    if (!caster) throw new Error("missing");
+    const aimed = spellAimedAt(
+      missile,
+      caster,
+      [thief],
+      at(state, scripted([2]).dice, run),
+    );
+    expect(aimed.targets).toEqual([]);
+    expect(payloads(aimed.events, "saveRolled")).toEqual([
+      expect.objectContaining({ actor: "foe", success: false }),
+    ]);
+    const plain = spellAimedAt(
+      missile,
+      caster,
+      [friendOf()],
+      at(row([foeOf(), friendOf()]), scripted([2]).dice, run),
+    );
+    expect(plain.targets).toHaveLength(1);
+  });
+});
+
+describe("opportunity attacks and redirected attacks", () => {
+  it("provokes a walk inside the reach, and with the Reaction spent still once on another's turn", async () => {
+    const run = await mineRun();
+    const spent = {
+      ...hero(["defender"]),
+      budget: { action: true, bonusAction: true, reaction: false },
+    };
+    const state = board(
+      [foeOf(), spent],
+      { foe: [1, 0], player: [0, 0] },
+      "foe",
+    );
+    const walker = state.actors.foe;
+    if (!walker) throw new Error("missing");
+    expect(
+      provokers(walker, { x: 1, y: 1 }, state, run).map(({ foe }) => foe.id),
+    ).toEqual([PLAYER_ACTOR]);
+  });
+
+  it("turns an attack on a creature standing between, as Misdirection", async () => {
+    const run = await mineRun();
+    const shield = { ...friendOf(), id: "shield" };
+    const state = board(
+      [foeOf(), shield, { ...hero(["misdirect"]), hp: 30 }],
+      { foe: [0, 0], shield: [1, 0], player: [2, 0] },
+      "foe",
+    );
+    const { events } = settle(
+      run,
+      state,
+      [
+        frame("attackRoll", {
+          attacker: "foe",
+          actionId: SWORD,
+          target: PLAYER_ACTOR,
+        }),
+      ],
+      scripted([15]).dice,
+    );
+    expect(rolls(events, "foe")).toEqual([
+      expect.objectContaining({ against: "shield" }),
+    ]);
+  });
+});
+
+describe("resistances and protections", () => {
+  it("resists another creature's damage and strikes back with half of a hit, until it attacks that one, as Emissary of Redemption", async () => {
+    const run = await mineRun();
+    const me = { ...hero(["emissary"]), hp: 40 };
+    const state = row([foeOf(), me]);
+    const foe = state.actors.foe;
+    if (!foe) throw new Error("missing");
+    const halved = dealEvents(
+      me,
+      [{ amount: 10, type: "fire" }],
+      false,
+      at(state, scripted([]).dice, run),
+      foe,
+    );
+    expect(payloads(halved.events, "damaged")).toEqual([
+      expect.objectContaining({ amount: 5 }),
+    ]);
+    const turned = { ...me, resourcesSpent: { "emissary:foe": 1 } };
+    const full = dealEvents(
+      turned,
+      [{ amount: 10, type: "fire" }],
+      false,
+      at(row([foe, turned]), scripted([]).dice, run),
+      foe,
+    );
+    expect(payloads(full.events, "damaged")).toEqual([
+      expect.objectContaining({ amount: 10 }),
+    ]);
+  });
+
+  it("sends Psychic damage back on its dealer, as Thought Shield", async () => {
+    const run = await mineRun();
+    const me = { ...hero(["mirror"]), hp: 40 };
+    const state = row([foeOf(), me]);
+    const foe = state.actors.foe;
+    if (!foe) throw new Error("missing");
+    const dealt = dealEvents(
+      me,
+      [{ amount: 6, type: "psychic" }],
+      false,
+      at(state, scripted([]).dice, run),
+      foe,
+    );
+    expect(payloads(dealt.events, "damaged").map((item) => item.actor)).toEqual(
+      [PLAYER_ACTOR, "foe"],
+    );
+  });
+
+  it("lessens a spell's damage once a turn and halves it, as Magic Absorption and Spell Resistance", async () => {
+    const run = await mineRun();
+    const me = { ...hero(["absorbing"]), hp: 40 };
+    const state = row([me]);
+    const spell = dealEvents(
+      me,
+      [{ amount: 10, type: "fire" }],
+      false,
+      at(state, scripted([]).dice, run),
+      undefined,
+      true,
+    );
+    expect(payloads(spell.events, "damaged")).toEqual([
+      expect.objectContaining({ amount: 2 }),
+    ]);
+    const plain = dealEvents(
+      me,
+      [{ amount: 10, type: "fire" }],
+      false,
+      at(state, scripted([]).dice, run),
+    );
+    expect(payloads(plain.events, "damaged")).toEqual([
+      expect.objectContaining({ amount: 10 }),
+    ]);
+  });
+
+  it("counts Unarmored Defense only without armor, a bonus only with it, and another only while concentrating", async () => {
+    const run = await mineRun();
+    const bare = deriveStats({ ...hero(["unarmored"]), inventory: [] }, run);
+    expect(bare.ac).toBe(20);
+    const focused = deriveStats(
+      { ...hero(["unarmored"]), inventory: [], concentratingOn: "spell:x" },
+      run,
+    );
+    expect(focused.ac).toBe(22);
+    const armored = deriveStats(
+      { ...hero(["unarmored"]), inventory: ["srd52:item/chain-mail"] },
+      run,
+    );
+    expect(armored.ac).toBe(17);
+  });
+
+  it("gives no Advantage against the bearer, and counts its low d20s as 10, as Elusive and Trance of Order", async () => {
+    const run = await mineRun();
+    const prone = {
+      ...hero(["elusive"]),
+      hp: 30,
+      activeEffects: [
+        {
+          sourceId: "test",
+          casterId: "foe",
+          modifier: {
+            kind: "condition" as const,
+            condition: "blinded" as const,
+          },
+          ends: "spellDuration" as const,
+        },
+      ],
+    };
+    const { events } = settle(
+      run,
+      row([foeOf(), prone]),
+      [
+        frame("attackRoll", {
+          attacker: "foe",
+          actionId: SWORD,
+          target: PLAYER_ACTOR,
+        }),
+      ],
+      scripted([2, 19]).dice,
+    );
+    expect(rolls(events, "foe")).toEqual([
+      expect.objectContaining({ natural: 2 }),
+    ]);
+    const save = rollSave(
+      hero(["elusive"]),
+      "con",
+      12,
+      at(row([hero(["elusive"])]), scripted([3]).dice, run),
+    );
+    expect(payloads(save.events, "saveRolled")).toEqual([
+      expect.objectContaining({ natural: 10 }),
+    ]);
+  });
+
+  it("brings a use back after a rolled number of Long Rests, as Lethargy Resilience", async () => {
+    const run = await mineRun();
+    const stats = deriveStats(hero(["lethargy"]), run);
+    const first = recovered({ lethargy: 1 }, stats, "long", scripted([3]).dice);
+    expect(first).toMatchObject({
+      lethargy: 1,
+      "lethargy:due": 3,
+      "lethargy:waited": 1,
+    });
+    const second = recovered(first, stats, "long", scripted([]).dice);
+    expect(second).toMatchObject({ lethargy: 1, "lethargy:waited": 2 });
+    const third = recovered(second, stats, "long", scripted([]).dice);
+    expect(third.lethargy).toBeUndefined();
   });
 });

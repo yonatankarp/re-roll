@@ -587,11 +587,10 @@ function matchesMoment(
       if (trigger.dueledDamages) {
         return (
           !self &&
-          source !== undefined &&
-          source.activeEffects.some(
+          source?.activeEffects.some(
             ({ modifier, casterId }) =>
               modifier.kind === "duel" && casterId === bearer.id,
-          )
+          ) === true
         );
       }
       if (trigger.otherDamaged === "bloodied" && !self) {
@@ -1266,7 +1265,7 @@ export function beforeDamage(
   const bearers = [
     target,
     ...Object.values(context.state.actors).filter(
-      (item) => item.id !== target.id && item.position !== undefined,
+      (item) => item.id !== target.id,
     ),
   ];
   for (const bearer of bearers) {
@@ -1533,8 +1532,7 @@ export function counterBeforeSave(
   if (
     !counter ||
     !target.budget.reaction ||
-    !weapon ||
-    weapon.activation.resolution.kind !== "attack" ||
+    weapon?.activation.resolution.kind !== "attack" ||
     reach === null ||
     distanceFeet(target.position, caster.position) > reach ||
     (target.id === PLAYER_ACTOR &&

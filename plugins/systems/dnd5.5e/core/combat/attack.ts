@@ -711,7 +711,6 @@ function redirect(
       (item) =>
         item.id !== target.id &&
         item.id !== attacker.id &&
-        item.position !== undefined &&
         !isDown(item) &&
         !isDead(item) &&
         within5(item, target) &&
@@ -1647,7 +1646,6 @@ function retargeted(
       (item) =>
         item.id !== attacker.id &&
         item.id !== target.id &&
-        item.position !== undefined &&
         !isDown(item) &&
         !isDead(item) &&
         distanceFeet(attacker.position, item.position) <= reach,

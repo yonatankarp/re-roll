@@ -2566,7 +2566,6 @@ export function leafEvents(
             (item) =>
               !isDown(item) &&
               !isDead(item) &&
-              item.position !== undefined &&
               distanceFeet(caster.position, item.position) <= range &&
               seeing(caster, item.position, context.state, context) !== "none",
           )
