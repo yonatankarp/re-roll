@@ -24,20 +24,21 @@ export function itemCastId(
   return `spell:${spellId}:item:${itemId}:${String(charges)}`;
 }
 
+// A content id, "plugin:kind/name", which holds one colon.
+const ID = "[^:]+:[^:/]+\\/[^:]+";
+const CAST = new RegExp(`^spell:(${ID})(?::free|:item:(${ID}):(\\d+))?$`);
+
 // The spell behind an action or a lasting effect's source: "spell:<spell>", alone, with ":free" after it, or with
-// an item's ":item:<item>:<charges>". A content id holds one colon, before its kind.
+// an item's ":item:<item>:<charges>". Any other ending, as Haste's ":lethargy", is no cast of the spell.
 export function spellOfSource(sourceId: string): string | null {
-  return /^spell:([^:]+:[^:/]+\/[^:]+)/.exec(sourceId)?.[1] ?? null;
+  return CAST.exec(sourceId)?.[1] ?? null;
 }
 
 // The item a spell is cast from, and the charges it spends, or null for any other action.
 export function castFrom(
   actionId: string,
 ): { readonly item: string; readonly charges: number } | null {
-  const [, item, charges] =
-    /^spell:[^:]+:[^:/]+\/[^:]+:item:([^:]+:[^:/]+\/[^:]+):(\d+)$/.exec(
-      actionId,
-    ) ?? [];
+  const [, , item, charges] = CAST.exec(actionId) ?? [];
   return item && charges ? { item, charges: Number(charges) } : null;
 }
 

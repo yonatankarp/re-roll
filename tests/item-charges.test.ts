@@ -193,6 +193,8 @@ describe("magic items with charges", () => {
     expect(spellOfSource(`spell:${FIREBALL}`)).toBe(FIREBALL);
     expect(castFrom(`spell:${FIREBALL}:free`)).toBeNull();
     expect(spellOfSource("monster:0")).toBeNull();
+    // Haste's lethargy comes after the spell, so it's no cast of it.
+    expect(spellOfSource("spell:phb:spell/haste:lethargy")).toBeNull();
   });
 
   it("casts a wand's spell a level higher for each charge more, at the wand's DC and with no slot", () => {
