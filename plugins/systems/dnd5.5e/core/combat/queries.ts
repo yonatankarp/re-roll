@@ -51,6 +51,7 @@ import {
 } from "../movement-modes.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
 import { encodeOption, THROW_PREFIX, weaponItemId } from "./ids.ts";
+import { markedBy } from "../trait-rules.ts";
 import { swallowerOf } from "./swallow.ts";
 import { hasteActing, limitsOf } from "./durations.ts";
 import { ownZoneAction } from "./areas.ts";
@@ -206,6 +207,7 @@ export function meleeReach(action: KnownAction): number | null {
   const { targeting } = action.activation;
   if (!("creatures" in targeting)) return null;
   const feet = rangeFeet(targeting.range);
+  if (targeting.reach) return feet;
   return feet > 0 && feet <= 10 ? feet : null;
 }
 
@@ -805,7 +807,10 @@ export function extraFits(
   const turn = state.combat?.order[state.combat.index];
   if (passive.ownTurn && turn !== attacker.id) return false;
   if (passive.firstRound && (state.combat?.round ?? 1) > 1) return false;
-  if (passive.while && !underEffect(attacker, passive.while)) return false;
+  if (passive.while?.some((id) => !underEffect(attacker, [id]))) return false;
+  if (passive.against && !markedBy(target, attacker, passive.against)) {
+    return false;
+  }
   const advantaged =
     passive.when === "advantage" || passive.when === "advantageOrAlly";
   const kind = passive.with ?? (advantaged ? "finesseOrRanged" : "attack");
@@ -1105,7 +1110,8 @@ export function isMelee(action: KnownAction): boolean {
   const { targeting } = action.activation;
   return (
     "creatures" in targeting &&
-    (targeting.range === "touch" ||
+    (targeting.reach === true ||
+      targeting.range === "touch" ||
       (typeof targeting.range === "number" && targeting.range <= 5))
   );
 }

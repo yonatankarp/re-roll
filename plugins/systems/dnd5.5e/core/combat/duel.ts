@@ -7,7 +7,9 @@ import { type Actor, type DndState, dndEvent, NS } from "../state.ts";
 
 const duelsOf = (actor: Actor) =>
   actor.activeEffects.flatMap(({ modifier, casterId }) =>
-    modifier.kind === "duel" ? [{ casterId, feet: modifier.feet }] : [],
+    modifier.kind === "duel"
+      ? [{ casterId, feet: modifier.feet, unleashed: modifier.unleashed }]
+      : [],
   );
 
 export const duelHampers = (attacker: Actor, target: Actor): boolean =>
@@ -15,7 +17,8 @@ export const duelHampers = (attacker: Actor, target: Actor): boolean =>
 
 // Squares too far from the caster for the target to walk to willingly.
 export function leashed(actor: Actor, state: DndState) {
-  const duels = duelsOf(actor).flatMap(({ casterId, feet }) => {
+  const duels = duelsOf(actor).flatMap(({ casterId, feet, unleashed }) => {
+    if (unleashed) return [];
     const caster = state.actors[casterId];
     return caster?.position ? [{ at: caster.position, feet }] : [];
   });

@@ -112,6 +112,7 @@ import {
   exemptFrom,
   findAction,
   onceKey,
+  reaches,
   isStuck,
   fitsType,
   hasFlag,
@@ -863,7 +864,7 @@ export function runAttackRoll(
           )
         );
       }) ||
-      traitAttackAdvantage(stats, attacker, target, targetStats));
+      traitAttackAdvantage(stats, attacker, target, targetStats, state));
   const held = payload.rolled;
   // Redirect Attack: the target trades places with an ally next to it, who takes the attack instead.
   const redirected = held ? null : redirect(attacker, target, context);
@@ -1704,6 +1705,7 @@ function landHit(
               actionId: action.id,
               target: target.id,
               critical: payload.critical,
+              total: payload.total,
             }),
           ]
         : []),
@@ -2329,10 +2331,51 @@ function smitesFor(
     return (
       trigger?.afterHit !== undefined &&
       !trigger.replacesHit && // offered before the hit lands instead (combat/ranged-smite.ts)
+      trigger.forgo === undefined && // picked before the damage (combat/strikes.ts)
+      !trigger.forgoAdvantage && // picked before the roll
       canAfford(action, attacker, stats) &&
-      hitFits(trigger.afterHit, hitWith, attacker, context)
+      hitFits(trigger.afterHit, hitWith, attacker, context) &&
+      (!trigger.withFeature ||
+        hitWith.id.startsWith(`feature:${trigger.withFeature}:`)) &&
+      (!trigger.sneakAttack || sneakLanded(attacker, stats))
     );
   });
+}
+
+// Whether the attacker's Sneak Attack has been dealt this turn, as it is once a hit carries it.
+function sneakLanded(attacker: Actor, stats: Stats): boolean {
+  return stats.passives.some(
+    (passive, index) =>
+      passive.kind === "extraDamage" &&
+      passive.diceCount !== undefined &&
+      attacker.usedThisTurn.includes(`extra:${String(index)}`),
+  );
+}
+
+// The creatures an `afterHit` option with `near` can go for instead of the one hit: of its side, within `near` of
+// that one and within its own range, and with `sameRoll` only those the attack roll's total also hits.
+function nearHit(
+  action: KnownAction,
+  attacker: Actor,
+  hit: Actor,
+  total: number | undefined,
+  context: Context,
+): readonly Actor[] {
+  const { trigger, targeting } = action.activation;
+  if (trigger?.near === undefined || !("creatures" in targeting)) return [];
+  const { state } = context;
+  const near = trigger.near;
+  return Object.values(state.actors).filter(
+    (item) =>
+      item.id !== hit.id &&
+      item.position !== null &&
+      !isDown(item) &&
+      (item.side === attacker.side) === (targeting.side === "ally") &&
+      distanceFeet(item.position, hit.position) <= near &&
+      reaches(action, attacker, item) &&
+      (!trigger.sameRoll ||
+        (total !== undefined && total >= deriveStats(item, context).ac)),
+  );
 }
 
 export const AfterHitSchema = z.object({
@@ -2340,6 +2383,7 @@ export const AfterHitSchema = z.object({
   actionId: z.string(),
   target: z.string(),
   critical: z.boolean(),
+  total: z.number().optional(), // the attack roll, for an option that must also hit another (`sameRoll`)
 });
 
 export function runAfterHit(
@@ -2352,13 +2396,23 @@ export function runAfterHit(
   const stats = deriveStats(attacker, context);
   const hitWith = findAction(attacker, payload.actionId, context);
   // One limited to a size or type, as Hill's Tumble to Large or smaller, is offered only for a target that fits.
-  const options = smitesFor(hitWith, attacker, stats, context)
-    .filter((action) =>
-      fitsType(target, action.activation.targeting, context, attacker),
-    )
-    .flatMap((action) =>
-      withUpcasts(action, attacker, stats, target.id, action.name),
-    );
+  const options = smitesFor(hitWith, attacker, stats, context).flatMap(
+    (action) =>
+      action.activation.trigger?.near === undefined
+        ? fitsType(target, action.activation.targeting, context, attacker)
+          ? withUpcasts(action, attacker, stats, target.id, action.name)
+          : []
+        : nearHit(action, attacker, target, payload.total, context).flatMap(
+            (item) =>
+              withUpcasts(
+                action,
+                attacker,
+                stats,
+                item.id,
+                `${action.name}: ${item.name}`,
+              ),
+          ),
+  );
   if (isDown(target) || isDown(attacker) || options.length === 0) return {};
   return {
     frames: [
@@ -2382,9 +2436,13 @@ export function runSmite(
   if (payload.answer === DECLINE) return {};
   const { state } = context;
   const attacker = actorOf(state, payload.attacker);
-  const target = actorOf(state, payload.target);
-  const [actionId = "", , slot] = parseOption(payload.answer);
+  const [actionId = "", aimed = "", slot] = parseOption(payload.answer);
   const known = findAction(attacker, actionId, context);
+  // One aimed at another creature near the one hit goes for that one.
+  const target = actorOf(
+    state,
+    known.activation.trigger?.near === undefined ? payload.target : aimed,
+  );
   const slotLevel =
     slot === undefined
       ? (slotToSpend(known, attacker, deriveStats(attacker, context)) ??

@@ -4,10 +4,12 @@ import {
   ClassSchema,
   type DamageType,
   ItemSchema,
+  type Passive,
   type Skill,
 } from "./schemas.ts";
 import {
   type Actor,
+  type DndState,
   INCAPACITATING,
   NS,
   dndEvent,
@@ -23,7 +25,7 @@ import {
   rollDiceNotation,
   scaledDice,
 } from "./stats.ts";
-import { HIT_DICE, weaponItemId } from "./combat/ids.ts";
+import { HIT_DICE, spellOfSource, weaponItemId } from "./combat/ids.ts";
 
 // Species traits and feats that change rolls combat makes, kept out of combat.ts behind one call each.
 
@@ -93,20 +95,56 @@ export function evades(
 }
 
 // Blood Frenzy, Bloodied Fury and the like: Advantage on attack rolls in a state the trait names.
+// Whether a creature is under an effect of the bearer's from this spell or feature, as Hunter's Mark.
+export function markedBy(target: Actor, bearer: Actor, id: string): boolean {
+  return target.activeEffects.some(
+    ({ sourceId, casterId }) =>
+      casterId === bearer.id &&
+      (sourceId.startsWith(`feature:${id}:`) ||
+        spellOfSource(sourceId) === id),
+  );
+}
+
+function attackAdvantaged(
+  passive: Extract<Passive, { kind: "attackAdvantage" }>,
+  stats: Stats,
+  attacker: Actor,
+  target: Actor,
+  targetStats: Stats,
+  state: DndState | undefined,
+): boolean {
+  switch (passive.when) {
+    case "bloodied":
+      return attacker.hp * 2 <= stats.maxHp;
+    case "targetHurt":
+      return target.hp < targetStats.maxHp;
+    case "targetFrightened":
+      return hasCondition(target, "frightened");
+    case "marked":
+      return (
+        passive.against !== undefined &&
+        markedBy(target, attacker, passive.against)
+      );
+    case "unacted": {
+      // In the first round, a creature yet to act stands later in the order than the one acting now.
+      const combat = state?.combat;
+      if (!combat || combat.round > 1) return false;
+      return combat.order.indexOf(target.id) > combat.index;
+    }
+  }
+}
+
 export function traitAttackAdvantage(
   stats: Stats,
   attacker: Actor,
   target: Actor,
   targetStats: Stats,
+  state?: DndState,
 ): boolean {
   return stats.passives.some(
     (passive) =>
       passive.kind === "attackAdvantage" &&
-      (passive.when === "bloodied"
-        ? attacker.hp * 2 <= stats.maxHp
-        : passive.when === "targetHurt"
-          ? target.hp < targetStats.maxHp
-          : hasCondition(target, "frightened")),
+      attackAdvantaged(passive, stats, attacker, target, targetStats, state),
   );
 }
 
