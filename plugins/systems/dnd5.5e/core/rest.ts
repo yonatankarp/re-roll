@@ -21,7 +21,7 @@ import {
   frame,
 } from "./state.ts";
 import { HIT_DICE } from "./combat/ids.ts";
-import { hitDieRoll } from "./trait-rules.ts";
+import { hitDieHealing, hitDieRoll } from "./trait-rules.ts";
 import { gearOptions } from "./gear.ts";
 import { familiarFoundEvents } from "./combat/familiar.ts";
 import { ClassSchema, type ResourceDef } from "./schemas.ts";
@@ -89,7 +89,10 @@ function spendEvents(
       : []),
     dndEvent(`${NS}:healed`, {
       actor: actor.id,
-      amount: Math.min(Math.max(1, rolled) + meal, stats.maxHp - actor.hp),
+      amount: Math.min(
+        hitDieHealing(Math.max(1, rolled), stats) + meal,
+        stats.maxHp - actor.hp,
+      ),
       max: stats.maxHp,
     }),
   ];
@@ -155,7 +158,8 @@ function diceSpent(
       const die = lookup(context, ClassSchema, classId).hitDie;
       const rolled = hitDieRoll(die, stats, context.dice);
       const amount = Math.min(
-        Math.max(1, rolled + modifierFor(stats, "con")) + extra,
+        hitDieHealing(Math.max(1, rolled + modifierFor(stats, "con")), stats) +
+          extra,
         stats.maxHp - hp,
       );
       hp += amount;
@@ -483,7 +487,11 @@ function runFinishRest(
   return {
     events: [
       ...members.flatMap((actor) => {
-        const stats = deriveStats(actor, context);
+        // A Long Rest gives back the Hit Point maximum Harm took, so it heals to the whole of it.
+        const stats = deriveStats(
+          rest === "long" ? { ...actor, maxHpLoss: 0 } : actor,
+          context,
+        );
         const resourcesSpent = recovered(
           actor.resourcesSpent,
           stats,
@@ -557,6 +565,21 @@ function restInspiration(
       dndEvent(`${NS}:inspirationGranted`, { actor }),
     ),
     ...restTempHp(members, rest, context),
+    ...(rest === "short"
+      ? members.flatMap((actor) =>
+          actor.exhaustion > 0 &&
+          deriveStats(actor, context).passives.some(
+            (passive) => passive.kind === "restExhaustion",
+          )
+            ? [
+                dndEvent(`${NS}:exhaustionChanged`, {
+                  actor: actor.id,
+                  levels: -1,
+                }),
+              ]
+            : [],
+        )
+      : []),
   ];
 }
 
@@ -573,8 +596,13 @@ function restTempHp(
       if (passive.kind !== "restTempHp" || !passive.rests.includes(rest)) {
         continue;
       }
-      const amount = evaluateFormula(passive.amount, stats);
       for (const other of passive.allies ? members : [actor]) {
+        const amount = evaluateFormula(
+          other === actor
+            ? passive.amount
+            : (passive.alliesAmount ?? passive.amount),
+          stats,
+        );
         best.set(other.id, Math.max(best.get(other.id) ?? 0, amount));
       }
     }

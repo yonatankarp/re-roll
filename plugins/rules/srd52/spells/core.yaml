@@ -3086,7 +3086,8 @@
     creation of magical force. If such a target is Huge or larger, this spell
     disintegrates a 10-foot-Cube portion of it. Using a Higher-Level Spell Slot.
     The damage increases by 3d6 for each spell slot level above 6.
-  automation: partial
+  automation: full
+  # shortcut: a creature turned to dust can still be raised, and objects aren't tracked.
   activation:
     cost:
       - action
@@ -3108,7 +3109,8 @@
               base: 40
           type: force
       onSuccessDamage: none
-      onFail: []
+      onFail:
+        - kind: disintegrate
       onSuccess: []
   upcast:
     perSlotLevel:
@@ -6090,7 +6092,7 @@
     Necrotic damage, and its Hit Point maximum is reduced by an amount equal to
     the Necrotic damage it took. On a successful save, it takes half as much
     damage only. This spell can’t reduce a target’s Hit Point maximum below 1.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -6110,7 +6112,8 @@
             dice: 14d6
           type: necrotic
       onSuccessDamage: half
-      onFail: []
+      onFail:
+        - kind: drainMaxHp
       onSuccess: []
 - id: srd52:spell/hellish-rebuke
   name: Hellish Rebuke

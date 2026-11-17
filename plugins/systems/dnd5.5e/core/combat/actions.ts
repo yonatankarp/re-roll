@@ -30,7 +30,12 @@ import {
   frame,
 } from "../state.ts";
 import { distanceFeet, type Square, squareKey } from "../grid.ts";
-import { deriveStats, evaluateFormula, type KnownAction } from "../stats.ts";
+import {
+  deriveStats,
+  evaluateFormula,
+  type KnownAction,
+  rollAmount,
+} from "../stats.ts";
 import { rollD20 } from "../rules.ts";
 import { FLEE, runFlee } from "../legendary.ts";
 import {
@@ -94,13 +99,50 @@ export function runTakeAction(
       disadvantage: false,
       rerollOnes: hasPassive(stats, "rerollOnes"),
     });
+    // Survivor's 18-20 count as a 20, and a Periapt of Wound Closure turns a failure into a 10.
+    const counts = stats.passives.reduce(
+      (roll, passive) =>
+        passive.kind !== "deathSaveRoll"
+          ? roll
+          : Math.max(
+              passive.twentyFrom !== undefined && natural >= passive.twentyFrom
+                ? 20
+                : roll,
+              passive.floor ?? 0,
+            ),
+      natural,
+    );
     const events: SystemEvent[] = [
-      dndEvent(`${NS}:deathSaveRolled`, { actor: actor.id, natural }),
+      dndEvent(`${NS}:deathSaveRolled`, {
+        actor: actor.id,
+        natural,
+        ...(counts === natural ? {} : { counts }),
+      }),
     ];
     const failuresAfter =
-      actor.deathSaves.failures + (natural < 10 ? (natural === 1 ? 2 : 1) : 0);
-    if (natural !== 20 && failuresAfter >= 3) {
+      actor.deathSaves.failures + (counts < 10 ? (counts === 1 ? 2 : 1) : 0);
+    if (counts !== 20 && failuresAfter >= 3) {
       events.push({ kind: "actorDefeated", actor: actor.id });
+    }
+    // Defy Death: a success heals, once.
+    const heal = stats.passives.find(
+      (passive) =>
+        passive.kind === "deathSaveHeal" &&
+        (actor.resourcesSpent[passive.resource] ?? 0) <
+          (stats.resources[passive.resource] ?? 0),
+    );
+    if (counts >= 10 && heal?.kind === "deathSaveHeal") {
+      events.push(
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: actor.id,
+          resource: heal.resource,
+        }),
+        dndEvent(`${NS}:healed`, {
+          actor: actor.id,
+          amount: Math.max(1, rollAmount(heal.amount, stats, dice)),
+          max: stats.maxHp,
+        }),
+      );
     }
     return {
       events,

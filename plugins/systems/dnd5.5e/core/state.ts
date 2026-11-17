@@ -328,6 +328,8 @@ const ActorSchema = z.strictObject({
   swapped: z.array(z.string()).optional(),
   // Damage taken this turn from creatures it has swallowed. Missing until there is some.
   insideDamage: z.number().int().optional(),
+  // Hit Point maximum lost until a Long Rest, as to Harm. Missing until some is.
+  maxHpLoss: z.number().int().optional(),
   // The character's familiar between fights: its form and Hit Points, 0 once it has dropped until it is found
   // again. Missing until it is first found.
   familiar: z
@@ -525,6 +527,12 @@ const DamagedSchema = z.strictObject({
   critical: z.boolean(),
   massive: z.boolean(),
 });
+// `hp` is where its Hit Points fall to under the lower maximum, when they must.
+const MaxHpReducedSchema = z.strictObject({
+  actor: z.string(),
+  amount: z.number().int(),
+  hp: z.number().int().optional(),
+});
 const HealedSchema = z.strictObject({
   actor: z.string(),
   amount: z.number().int(),
@@ -565,6 +573,7 @@ const ConcentrationStartedSchema = z.strictObject({
 const DeathSaveSchema = z.strictObject({
   actor: z.string(),
   natural: z.number().int(),
+  counts: z.number().int().optional(), // the roll it counts as, as Survivor's 18 for a 20; the natural when left out
 });
 const RollReportSchema = z.strictObject({
   actor: z.string(),
@@ -655,6 +664,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:concentrationStarted`]: ConcentrationStartedSchema,
   [`${NS}:concentrationEnded`]: ActorOnlySchema,
   [`${NS}:deathSaveRolled`]: DeathSaveSchema,
+  [`${NS}:maxHpReduced`]: MaxHpReducedSchema,
   [`${NS}:rollReported`]: RollReportSchema,
   [`${NS}:saveReported`]: SaveReportSchema,
   [`${NS}:saveRolled`]: SaveRolledSchema,
@@ -883,6 +893,11 @@ export function isDead(actor: Actor): boolean {
 }
 
 // A Long Rest takes one off the ordeal of coming back from the dead, and it's gone at 0.
+// A Long Rest gives back the Hit Point maximum Harm took.
+function withoutLoss({ maxHpLoss: _loss, ...actor }: Actor): Actor {
+  return actor;
+}
+
 function lessOrdeal({ ordeal, ...actor }: Actor): Actor {
   return ordeal && ordeal > 1 ? { ...actor, ordeal: ordeal - 1 } : actor;
 }
@@ -1182,7 +1197,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         data.rest === "short"
           ? { ...actor, resourcesSpent: data.resourcesSpent }
           : {
-              ...lessOrdeal(actor),
+              ...lessOrdeal(withoutLoss(actor)),
               resourcesSpent: data.resourcesSpent,
               hp: data.maxHp,
               tempHp: 0,
@@ -1470,6 +1485,14 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       delete calm.calmRounds;
       return { ...hurt, combat: calm };
     }
+    case `${NS}:maxHpReduced`: {
+      const data = payload(MaxHpReducedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        maxHpLoss: (actor.maxHpLoss ?? 0) + data.amount,
+        hp: data.hp ?? actor.hp,
+      }));
+    }
     case `${NS}:damagedFromInside`: {
       const data = payload(DamagedFromInsideSchema, event);
       return updateActor(state, data.actor, (actor) => ({
@@ -1570,7 +1593,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
     case `${NS}:deathSaveRolled`: {
       const data = payload(DeathSaveSchema, event);
       return updateActor(state, data.actor, (actor) =>
-        applyDeathSave(actor, data.natural),
+        applyDeathSave(actor, data.counts ?? data.natural),
       );
     }
     case `${NS}:stabilized`:

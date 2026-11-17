@@ -759,6 +759,14 @@ The player decides every reaction through a `dnd5.5e:reaction:` decision. The at
 
 A hit on a creature during that creature's own turn counts as an Opportunity Attack, for Sentinel's Halt and Zhentarim Ruffian's damage. A walk whose Speed drops to 0 before it finishes, from Halt or a grapple, ends where it started.
 
+**Hit points, Temporary Hit Points and death** (`combat/effects.ts` `enduredEvents`, `combat/actions.ts`, `combat/turn.ts`):
+
+- **Not dropping:** `dropToOne` can land on a formula's `hp` (a `maxHp` term for half the maximum), hold only `while` a feature's effect lasts, ask a `save` whose DC rises by `step` per use or by the damage (`plusDamage`), skip `except` damage types or a Critical Hit, burst on nearby foes (`burst`) and give `exhaustion`. With `allies` it holds for the bearer's allies, spending the bearer's use, as Relentless Rage, Strength of the Grave, Necrotic Husk or Gift of the Protectors.
+- **Death Saving Throws:** `deathSaveRoll` counts a roll as a 20 from `twentyFrom` or at least `floor` (the event's `counts`), `deathSaveHeal` heals on a success, and `deathSaveRescue` springs a creature up with half its maximum as its turn starts, burning and blinding foes nearby, as Searing Vengeance.
+- **Healing over time:** `regeneration` takes a rolled `hp`, `bloodied`, `turnEnd` or `whileEffect`, as Heroic Rally, Protective Spirit or Boon of Misty Escape. `turnTempHp` gives an ally Temporary Hit Points as a raging turn starts, `onKill` gives the bearer effects as a foe drops, and `restTempHp`'s `alliesAmount` is the allies' own share.
+- **The maximum:** a save's `drainMaxHp` lowers it by the damage until a Long Rest (event `maxHpReduced`, the actor's `maxHpLoss`), as Harm. `disintegrate` kills a character it drops outright, a `slayAtMost` save kills weaker targets without a save, and `heard` spares the Deafened, as Wail of the Banshee.
+- **Small pieces:** a `tempHp` effect that's `divided` is shared evenly, `hitDieRolls.double` doubles Hit Point Dice healing, `healBonus` adds to healing once a turn, `restExhaustion` takes a level off in a Short Rest, and a `castRider` with `uses` rides the spells it names.
+
 ### 8.8 Formulas
 
 Formulas are a flat sum, with no expression language:

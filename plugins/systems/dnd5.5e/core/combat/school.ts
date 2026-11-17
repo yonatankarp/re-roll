@@ -180,11 +180,16 @@ export function castRiders(
   const school = schoolOf(action.id, context);
   const rides = deriveStats(actor, context).passives.flatMap((passive) => {
     if (passive.kind !== "castRider") return [];
-    const fits = passive.school
-      ? slotLevel !== undefined &&
-        cost.includes("action") &&
-        passive.school.some((item) => item === school)
-      : passive.damage !== undefined && types.has(passive.damage);
+    const fits = passive.uses
+      ? passive.uses.some(
+          (id) =>
+            action.id === `spell:${id}` || action.id.startsWith(`spell:${id}:`),
+        )
+      : passive.school
+        ? slotLevel !== undefined &&
+          cost.includes("action") &&
+          passive.school.some((item) => item === school)
+        : passive.damage !== undefined && types.has(passive.damage);
     return fits ? [passive.effects] : [];
   });
   return {

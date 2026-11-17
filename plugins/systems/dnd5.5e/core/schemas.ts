@@ -239,6 +239,11 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
     kind: z.literal("spellSaveDc"),
     ability: AbilitySchema.optional(),
   }),
+  // The Hit Point maximum, halved and rounded down with `half`, as Boon of Recovery's Last Stand.
+  z.strictObject({
+    kind: z.literal("maxHp"),
+    half: z.literal(true).optional(),
+  }),
 ]);
 
 export const FormulaSchema = z.strictObject({
@@ -641,6 +646,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("tempHp"),
     amount: AmountSchema,
     reaction: z.literal(true).optional(),
+    divided: z.literal(true).optional(), // shared evenly among the targets, as Power Word Fortify's 120
   }),
   z.strictObject({
     kind: z.literal("applyCondition"),
@@ -931,6 +937,12 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // The caster takes this many turns in a row, ending once something it does reaches another creature, as Time Stop.
   z.strictObject({ kind: z.literal("extraTurns"), turns: AmountSchema }),
+  // A failed save's damage also lowers the target's Hit Point maximum by as much, until a Long Rest and never below 1,
+  // as Harm's (combat/effects.ts, by the save's own damage).
+  z.strictObject({ kind: z.literal("drainMaxHp") }),
+  // A failed save's damage that drops the target to 0 Hit Points turns it to dust, dead outright, as Disintegrate.
+  // shortcut: nothing stops a later raising, which only True Resurrection or Wish should manage.
+  z.strictObject({ kind: z.literal("disintegrate") }),
   // The target spends one of its Hit Point Dice and regains what it rolls plus `bonus`, as with Healer's Battle Medic.
   z.strictObject({ kind: z.literal("hitDieHeal"), bonus: FormulaSchema }),
   // The bearer takes another of its stat block's own shapes, by name, or goes back to its true one (core/forms.ts).
@@ -1085,6 +1097,10 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       .optional(),
     // Only a target its damage leaves with this many Hit Points or fewer saves, as Banishing Smite's.
     hpAtMost: z.number().int().min(1).optional(),
+    // A target with this many Hit Points or fewer dies outright instead, without a save, as Wail of the Banshee's 50.
+    slayAtMost: z.number().int().min(1).optional(),
+    // A target that can't hear (Deafened) is spared, as Wail of the Banshee's.
+    heard: z.literal(true).optional(),
     damage: z.array(DamageSchema).default([]),
     // "full" deals the damage either way, and the save is only for its effects, as with Trip Attack.
     onSuccessDamage: z.enum(["half", "none", "full"]).default("none"),
@@ -1462,10 +1478,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     bloodied: WhileBloodied,
   }),
   // Hit Points regained at the start of each of its turns, as a troll does. With `cures` it also ends the condition
-  // that hampers it most, as an inquisitor's Metabolic Control.
+  // that hampers it most, as an inquisitor's Metabolic Control. `hp` may be rolled, as Survivor's Heroic Rally's 5
+  // plus the Constitution modifier, and with `turnEnd` it comes as the turn ends instead, while it can act, as
+  // Protective Spirit's.
   z.strictObject({
     kind: z.literal("regeneration"),
-    hp: z.number().int().min(1),
+    hp: z.union([z.number().int().min(1), AmountSchema]),
+    turnEnd: z.literal(true).optional(),
+    // only while an effect from this source is on it, as Boon of Misty Escape's Gaseous Form (dropToOne's resource)
+    whileEffect: z.string().optional(),
     stoppedBy: z.array(DamageTypeSchema).default([]), // damage that stops it for a turn
     bloodied: WhileBloodied,
     cures: z.literal(true).optional(),
@@ -1490,10 +1511,39 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Dropping to 1 Hit Point instead of 0 while the resource lasts, as with Relentless Endurance.
   // With `effects` it gains these as it does, for the rest of the fight, as Boon of Misty Escape's Gaseous Form.
+  // `hp` is the Hit Points it changes to instead, as Relentless Rage's twice the Barbarian level, and `while` holds it
+  // only while an effect of one of these features' activations is on it, as Relentless Rage's Rage. A `save` must
+  // succeed first, its DC `step` higher for each use spent and with `plusDamage` the damage taken more, as Strength of
+  // the Grave's; only a success spends a use. It can't hold against `except` damage, or a Critical Hit with
+  // `notCritical`. A `burst` deals damage to the bearer's foes within `radius` feet, halved by a save against its spell
+  // save DC, as Necrotic Husk's, which also gives `exhaustion` levels. With `allies` the bearer's allies have it too,
+  // spending the bearer's use, as Gift of the Protectors.
   z.strictObject({
     kind: z.literal("dropToOne"),
     resource: z.string(),
     effects: z.array(ModifierSchema).default([]),
+    hp: FormulaSchema.optional(),
+    while: z.array(ContentIdSchema).min(1).optional(),
+    save: z
+      .strictObject({
+        ability: AbilitySchema,
+        dc: z.number().int(),
+        step: z.number().int().min(1).optional(),
+        plusDamage: z.literal(true).optional(),
+      })
+      .optional(),
+    except: z.array(DamageTypeSchema).min(1).optional(),
+    notCritical: z.literal(true).optional(),
+    burst: z
+      .strictObject({
+        radius: z.number().int().min(5),
+        save: AbilitySchema,
+        damage: AmountSchema,
+        type: DamageTypeSchema,
+      })
+      .optional(),
+    exhaustion: z.number().int().min(1).optional(),
+    allies: z.literal(true).optional(),
   }),
   // Changes to the bearer's damaging cantrip that deals the most, as Agonizing, Repelling Blast or Eldritch Spear do:
   // damage added to each roll, effects on a hit, and range for each level of a class.
@@ -1562,6 +1612,30 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Advantage on Death Saving Throws, as with Durable.
   z.strictObject({ kind: z.literal("deathSaveAdvantage") }),
+  // A Death Saving Throw's roll counts as a 20 from `twentyFrom` up, as Survivor's 18-20, and as at least `floor`, as
+  // a Periapt of Wound Closure's 10.
+  z.strictObject({
+    kind: z.literal("deathSaveRoll"),
+    twentyFrom: z.number().int().min(2).max(20).optional(),
+    floor: z.number().int().min(2).max(20).optional(),
+  }),
+  // A successful Death Saving Throw heals this much, spending a use, as the Undying's Defy Death.
+  z.strictObject({
+    kind: z.literal("deathSaveHeal"),
+    resource: z.string(),
+    amount: AmountSchema,
+  }),
+  // As the bearer, or with `within` an ally that near it, starts a turn about to make a Death Saving Throw, a use
+  // spent gives it half its Hit Point maximum and ends Prone on it, and its foes within `radius` feet take this
+  // damage and are Blinded until the turn ends, as Searing Vengeance.
+  z.strictObject({
+    kind: z.literal("deathSaveRescue"),
+    resource: z.string(),
+    within: z.number().int().min(5).optional(),
+    radius: z.number().int().min(5),
+    damage: AmountSchema,
+    type: DamageTypeSchema,
+  }),
   // Temporary Hit Points as a rest ends, for the bearer and with `allies` the whole party, as with Inspiring Leader.
   // A 1 or 2 on a damage die of a Two-Handed melee weapon counts as a 3, as with Great Weapon Fighting.
   z.strictObject({ kind: z.literal("greatWeaponFighting") }),
@@ -1570,7 +1644,18 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     rests: z.array(z.enum(["short", "long"])).min(1),
     amount: FormulaSchema,
     allies: z.boolean().default(false),
+    alliesAmount: FormulaSchema.optional(), // the allies' own, as Celestial Resilience's half the Warlock level
   }),
+  // As the bearer's turn starts, while an effect of one of these features' activations is on it, another creature of
+  // its side within `within` feet gains these Temporary Hit Points, as Vitality of the Tree's Life-Giving Force.
+  z.strictObject({
+    kind: z.literal("turnTempHp"),
+    while: z.array(ContentIdSchema).min(1),
+    within: z.number().int().min(5),
+    amount: AmountSchema,
+  }),
+  // A Short Rest takes a level of Exhaustion off the bearer, as the Ranger's Tireless.
+  z.strictObject({ kind: z.literal("restExhaustion") }),
   // Hit Points regained every so many minutes while it has at least 1, as a Ring of Regeneration's 1d6 every 10.
   // Only rests pass time, so they come over a Short Rest's hour (rest.ts); a Long Rest heals fully anyway.
   z.strictObject({
@@ -1939,6 +2024,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("allySaveAdvantage"),
     abilities: z.array(AbilitySchema).min(1),
   }),
+  // This much more whenever a healing effect heals the bearer, once until its next turn starts, as Boon of
+  // Fortitude's Fortified Health. shortcut: only healing effects, not Hit Point Dice or regeneration.
+  z.strictObject({ kind: z.literal("healBonus"), amount: FormulaSchema }),
   // This many more Temporary Hit Points whenever it gains some, as Boon of Bountiful Health's Augmented Health.
   z.strictObject({
     kind: z.literal("tempHpBonus"),
@@ -1950,6 +2038,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("hitDieRolls"),
     floor: z.number().int().min(2).optional(),
     highest: z.literal(true).optional(),
+    double: z.literal(true).optional(), // what a die heals counts twice, as with a Periapt of Wound Closure
   }),
   // A damage roll of this type uses the highest number on each die, spending a use, as Powerful Radiance.
   z.strictObject({
@@ -1962,6 +2051,17 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // An enemy dropping to 0 Hit Points gives the bearer's next attack Advantage, as Boon of Bloodshed's Killer's
   // Fortune.
   z.strictObject({ kind: z.literal("killAdvantage") }),
+  // A foe dropping to 0 Hit Points puts these effects on the bearer, as Dark One's Blessing's Temporary Hit Points:
+  // with `within`, only a foe that near it, or with `mine` one it dropped itself; spending a use of the resource, and
+  // with `reaction` its Reaction, as Boon of the Soul Drinker's Siphon Life.
+  z.strictObject({
+    kind: z.literal("onKill"),
+    effects: z.array(LeafEffectSchema).min(1),
+    within: z.number().int().min(5).optional(),
+    mine: z.literal(true).optional(),
+    resource: z.string().optional(),
+    reaction: z.literal(true).optional(),
+  }),
   // Helping an attack on an enemy also gives it Disadvantage on its next save, as Harper Teamwork.
   z.strictObject({ kind: z.literal("helpRider") }),
   // Ending Frightened or Paralyzed on itself with a save ends it on an ally within 30 feet, as Inspiring Willpower.
@@ -1973,11 +2073,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("chargeAttack") }),
   // Casting a spell that deals this type puts these effects on the bearer, as Flames of Phlegethos' flames.
   // With `school` instead, casting a spell of that school with an action and a spell slot does, as Bewitching
-  // Magic's Misty Step after an Enchantment spell.
+  // Magic's Misty Step after an Enchantment spell. With `uses`, casting one of these spells does, as Hunter's Rime's
+  // Temporary Hit Points with Hunter's Mark.
   z.strictObject({
     kind: z.literal("castRider"),
     damage: DamageTypeSchema.optional(),
     school: z.array(SpellSchoolSchema).min(1).optional(),
+    uses: z.array(ContentIdSchema).min(1).optional(),
     effects: z.array(LeafEffectSchema).min(1),
   }),
   // Using an activation of this feature also does these to the bearer, as Tactical Shift's move with Second Wind or

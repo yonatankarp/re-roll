@@ -1947,12 +1947,13 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
     moving.length > 0
       ? { ...free, actions: [...free.actions, ...moving] }
       : free;
-  return speed === 0 && maxHp === 0
+  const loss = actor.maxHpLoss ?? 0;
+  return speed === 0 && maxHp === 0 && loss === 0
     ? moved
     : {
         ...moved,
         speed: Math.max(0, stats.speed + speed),
-        maxHp: stats.maxHp + maxHp,
+        maxHp: Math.max(1, stats.maxHp + maxHp - loss),
       };
 }
 
@@ -2342,6 +2343,9 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
             modifierFor(stats, term.ability) +
             stats.itemBonuses.spellDc
           : spellSaveDc(stats);
+        break;
+      case "maxHp":
+        total += term.half ? Math.floor(stats.maxHp / 2) : stats.maxHp;
         break;
       default:
         term satisfies never;
