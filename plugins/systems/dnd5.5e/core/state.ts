@@ -98,6 +98,10 @@ export const FRAME_KINDS = [
   "applyMiss", // what an attack does on a miss, as Acid Arrow's splash (combat/spell-riders.ts)
   "burst", // a save round an attack's target, hit or miss, as Ice Knife's (combat/spell-riders.ts)
   "initiativeMove", // a move right after Initiative, as Unpredictable Movement's (combat/reactions.ts)
+  "givenDice", // the player spends Hit Dice a spell's Short Rest gave them (rest.ts)
+  "givenDiceAnswer",
+  "reincarnate", // the player picks what a reincarnated body's species asks for (reincarnate.ts)
+  "reincarnateAnswer",
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -144,6 +148,12 @@ const ActiveEffectSchema = z.strictObject({
     z.strictObject({ kind: z.literal("lethargy") }),
     // Gone berserk, as a flesh golem's Berserk, until it's no longer Bloodied (combat/madness.ts).
     z.strictObject({ kind: z.literal("berserk") }),
+    // Conscious at 0 Hit Points while it lasts; with `delayDeath`, three Death Saving Throw failures kill only once it
+    // ends, as Rage beyond Death (combat/effects.ts fightOnEvents).
+    z.strictObject({
+      kind: z.literal("fightingOn"),
+      delayDeath: z.literal(true).optional(),
+    }),
     // Time Stop: the turns in a row its caster has left, as rolled (combat/durations.ts).
     z.strictObject({ kind: z.literal("extraTurns"), turns: z.number().int() }),
     // Another creature's shape, by its stat block (core/forms.ts).
@@ -194,6 +204,7 @@ const ActiveEffectSchema = z.strictObject({
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
   endsOnDamage: z.boolean().optional(),
+  endsWithTempHp: z.boolean().optional(), // ends once damage leaves the creature no Temporary Hit Points
   endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
   endsOn: z.enum(["attack", "action"]).optional(), // ends when the creature attacks or deals damage, or acts
   // Taking damage gives this save, ending it on a success, as Dragon Fear's.
@@ -270,6 +281,8 @@ const ActorSchema = z.strictObject({
     z.strictObject({
       kind: z.literal("monster"),
       statBlockId: ContentIdSchema,
+      // the creature that animated, raised or called it, so it dies at 0 Hit Points as a monster does
+      calledBy: z.string().optional(),
       // A character's familiar in a fight (combat/familiar.ts): its owner, its Hit Point maximum as found, the
       // owner's features that give it something, and the owner's numbers those read, such as its spell save DC.
       familiarOf: z
@@ -348,6 +361,18 @@ const ActorSchema = z.strictObject({
   // while alive or just dead. `reposed` stops the count, as Gentle Repose does.
   deadHours: z.number().int().optional(),
   reposed: z.literal(true).optional(),
+  dust: z.literal(true).optional(), // turned to dust, as by Disintegrate: only True Resurrection or Wish raises it
+  deadRounds: z.number().int().optional(), // rounds of a fight it has lain dead, for Revivify's minute
+  // A new body of another species, as Reincarnate gives: the old species' picks it lost and the new one's.
+  reincarnated: z
+    .strictObject({
+      species: ContentIdSchema,
+      drop: z.array(z.string()),
+      answers: CharacterBuildSchema.shape.levels.element.shape.answers,
+    })
+    .optional(),
+  // Days until a clone of it is ready, 0 once it is (Clone). Missing without one.
+  clone: z.number().int().min(0).optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -663,6 +688,25 @@ export const EVENT_SCHEMAS = {
   [`${NS}:tempHpGained`]: TempHpSchema,
   [`${NS}:ordealBegun`]: OrdealSchema,
   [`${NS}:reposed`]: ActorOnlySchema, // its corpse's time lying dead stops counting, as with Gentle Repose
+  [`${NS}:disintegrated`]: ActorOnlySchema, // turned to dust, beyond ordinary raising
+  // A new body of this species, without the old species' picks in `drop` and with the new one's `answers`.
+  [`${NS}:reincarnated`]: z.strictObject({
+    actor: z.string(),
+    species: ContentIdSchema,
+    drop: z.array(z.string()),
+    answers: CharacterBuildSchema.shape.levels.element.shape.answers,
+  }),
+  [`${NS}:cloneStarted`]: z.strictObject({
+    actor: z.string(),
+    days: z.number().int(),
+  }),
+  // Dead, it wakes in its finished clone with these Hit Points.
+  [`${NS}:cloneAwakened`]: z.strictObject({
+    actor: z.string(),
+    hp: z.number().int(),
+  }),
+  // Time passed outside a fight, as the party goes to another scene: the dead lie dead that much longer.
+  [`${NS}:timePassed`]: z.strictObject({ hours: z.number().int().min(1) }),
   [`${NS}:effectAdded`]: EffectAddedSchema,
   [`${NS}:effectEnded`]: EffectEndedSchema,
   [`${NS}:conditionRemoved`]: ConditionRemovedSchema,
@@ -761,8 +805,41 @@ export function freshActor(
 
 // A character's build with the answers picked again after a Long Rest in place of the first ones (swap.ts).
 export function effectiveBuild(actor: Actor): CharacterBuild | null {
-  const build = actor.source.kind === "character" ? actor.source.build : null;
-  const { swaps } = actor;
+  const printed = actor.source.kind === "character" ? actor.source.build : null;
+  const { swaps, reincarnated } = actor;
+  // Reincarnate's body: its species, without the old one's picks and with the new one's (reincarnate.ts).
+  const build =
+    printed && reincarnated
+      ? {
+          ...printed,
+          speciesId: reincarnated.species,
+          levels: printed.levels.map((entry, level) =>
+            level === 0
+              ? {
+                  ...entry,
+                  answers: [
+                    ...entry.answers
+                      .map((answer) =>
+                        "values" in answer
+                          ? ({
+                              ...answer,
+                              values: answer.values.filter(
+                                (value) => !reincarnated.drop.includes(value),
+                              ),
+                            } as typeof answer)
+                          : answer,
+                      )
+                      .filter(
+                        (answer) =>
+                          !("values" in answer) || answer.values.length > 0,
+                      ),
+                    ...reincarnated.answers,
+                  ],
+                }
+              : entry,
+          ),
+        }
+      : printed;
   if (!build || !swaps) return build;
   return {
     ...build,
@@ -853,7 +930,17 @@ export function cannotHeal(actor: Actor): boolean {
 }
 
 export function isDown(actor: Actor): boolean {
-  return actor.hp <= 0;
+  return actor.hp <= 0 && fightingOn(actor) === null;
+}
+
+// What keeps a creature at 0 Hit Points conscious, as Rage beyond Death, or null.
+export function fightingOn(
+  actor: Actor,
+): { readonly delayDeath?: true | undefined } | null {
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind === "fightingOn") return modifier;
+  }
+  return null;
 }
 
 // The mount a creature rides, by id, or null.
@@ -892,8 +979,9 @@ export function isDead(actor: Actor): boolean {
   return (
     actor.side === "enemy" ||
     actor.source.kind === "summon" ||
+    (actor.source.kind === "monster" && actor.source.calledBy !== undefined) ||
     familiarOwner(actor) !== null ||
-    actor.deathSaves.failures >= 3
+    (actor.deathSaves.failures >= 3 && !fightingOn(actor)?.delayDeath)
   );
 }
 
@@ -908,6 +996,18 @@ function lessOrdeal({ ordeal, ...actor }: Actor): Actor {
 }
 
 // The hours of a rest added to the time each dead party member has lain dead, unless its body is reposed.
+// A day passes with each Long Rest, so a living creature's clone grows a day nearer ready.
+function grownClones(actors: DndState["actors"]): DndState["actors"] {
+  return Object.fromEntries(
+    Object.entries(actors).map(([id, actor]) => [
+      id,
+      actor.clone && !isDead(actor)
+        ? { ...actor, clone: actor.clone - 1 }
+        : actor,
+    ]),
+  );
+}
+
 function deadLonger(state: DndState, hours: number): DndState["actors"] {
   return Object.fromEntries(
     Object.entries(state.actors).map(([id, actor]) => [
@@ -972,6 +1072,13 @@ function advanceTurn(state: DndState): DndState {
         ...actor,
         // Damage from inside counts within a single turn.
         ...(actor.insideDamage ? { insideDamage: 0 } : {}),
+        // The rounds a fallen party member has lain dead, for Revivify's minute.
+        ...(round > combat.round &&
+        actor.side === "party" &&
+        isDead(actor) &&
+        !actor.reposed
+          ? { deadRounds: (actor.deadRounds ?? 0) + round - combat.round }
+          : {}),
         // A "until your next turn" effect ends when its caster's turn comes round.
         activeEffects: actor.activeEffects
           .filter(
@@ -1080,6 +1187,7 @@ function endCombat(state: DndState): DndState {
         ([, actor]) =>
           actor.side === "party" &&
           actor.source.kind !== "summon" &&
+          !(actor.source.kind === "monster" && actor.source.calledBy) &&
           familiarOwner(actor) === null,
       )
       .map(([id, { suppressed: _held, ...actor }]) => [
@@ -1120,7 +1228,11 @@ function applyDamage(
     ...actor,
     activeEffects:
       amount > 0
-        ? actor.activeEffects.filter((effect) => !effect.endsOnDamage)
+        ? actor.activeEffects.filter(
+            (effect) =>
+              !effect.endsOnDamage &&
+              !(effect.endsWithTempHp && actor.tempHp <= absorbed),
+          )
         : actor.activeEffects,
     tempHp: actor.tempHp - absorbed,
     hp,
@@ -1217,7 +1329,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       const data = payload(RestFinishedSchema, event);
       const { rest } = data;
       const hours = data.hours ?? REST_HOURS[rest];
-      const rested = { ...state, actors: deadLonger(state, hours) };
+      const rested = {
+        ...state,
+        actors:
+          rest === "long"
+            ? grownClones(deadLonger(state, hours))
+            : deadLonger(state, hours),
+      };
       if (rest === "long") return { ...rested, sinceLongRest: hours };
       return state.sinceLongRest === undefined
         ? rested
@@ -1526,7 +1644,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return updateActor(
         state,
         data.actor,
-        ({ deadHours: _hours, reposed: _reposed, ...actor }) => ({
+        ({
+          deadHours: _hours,
+          reposed: _reposed,
+          dust: _dust,
+          deadRounds: _rounds,
+          ...actor
+        }) => ({
           ...actor,
           hp: Math.min(data.max, Math.max(actor.hp, 0) + data.amount),
           deathSaves: { successes: 0, failures: 0 },
@@ -1540,6 +1664,52 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         ordeal: data.penalty,
       }));
     }
+    case `${NS}:timePassed`: {
+      const { hours } = payload(
+        z.strictObject({ hours: z.number().int().min(1) }),
+        event,
+      );
+      return { ...state, actors: deadLonger(state, hours) };
+    }
+    case `${NS}:reincarnated`: {
+      const { actor: id, ...reincarnated } = payload(
+        EVENT_SCHEMAS[`${NS}:reincarnated`],
+        event,
+      );
+      return updateActor(state, id, (actor) => ({ ...actor, reincarnated }));
+    }
+    case `${NS}:cloneStarted`: {
+      const data = payload(EVENT_SCHEMAS[`${NS}:cloneStarted`], event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        clone: data.days,
+      }));
+    }
+    case `${NS}:cloneAwakened`: {
+      const data = payload(EVENT_SCHEMAS[`${NS}:cloneAwakened`], event);
+      return updateActor(
+        state,
+        data.actor,
+        ({
+          deadHours: _hours,
+          reposed: _reposed,
+          dust: _dust,
+          deadRounds: _rounds,
+          clone: _clone,
+          ...actor
+        }) => ({
+          ...actor,
+          hp: data.hp,
+          deathSaves: { successes: 0, failures: 0 },
+        }),
+      );
+    }
+    case `${NS}:disintegrated`:
+      return updateActor(
+        state,
+        payload(ActorOnlySchema, event).actor,
+        (actor) => ({ ...actor, dust: true as const }),
+      );
     case `${NS}:reposed`: {
       const data = payload(ActorOnlySchema, event);
       return updateActor(state, data.actor, (actor) => ({

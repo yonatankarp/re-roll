@@ -359,7 +359,14 @@
     memories, and abilities, but none of the original’s equipment. The
     creature’s original remains, if any, become inert and can’t be revived,
     since the creature’s soul is elsewhere.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot, { gold: 1000 }]
+    outOfCombat: true
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      effects: [{ kind: clone, days: 120 }]
   outOfCombat: castingTime
 - id: srd52:spell/commune-with-nature
   name: Commune with Nature
@@ -1384,7 +1391,26 @@
     ends early if you cast it again. Using a Higher-Level Spell Slot. The bonus
     increases to +2 with a level 3–5 spell slot. The bonus increases to +3 with
     a level 6+ spell slot.
-  automation: text
+  automation: full
+  activation:
+    cost: [bonusAction, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            {
+              kind: bonus,
+              to: attacks,
+              weapon: true,
+              amount: { bonus: { base: 1 } },
+            }
+          duration: { minutes: 60 }
+        - kind: modifier
+          modifier: { kind: damageBonus, amount: { bonus: { base: 1 } } }
+          duration: { minutes: 60 }
+  upcast: { perSlotLevel: { addBonus: 1, at: [1, 4] } }
 - id: srd52:spell/mass-healing-word
   name: Mass Healing Word
   level: 3
@@ -1934,7 +1960,14 @@
   activation:
     cost: [action, slot, { gold: 300 }]
     targeting:
-      { creatures: 1, range: touch, side: ally, dead: true, diedWithin: 0 }
+      {
+        creatures: 1,
+        range: touch,
+        side: ally,
+        dead: true,
+        diedWithin: 0,
+        diedWithinRounds: 10,
+      }
     resolution:
       {
         kind: automatic,
@@ -4756,7 +4789,8 @@
   activation:
     cost: [action, slot, { gold: 25000 }]
     outOfCombat: true
-    targeting: { creatures: 1, range: touch, side: ally, dead: true }
+    targeting:
+      { creatures: 1, range: touch, side: ally, dead: true, dust: true }
     resolution:
       { kind: automatic, effects: [{ kind: heal, amount: {}, full: true }] }
   outOfCombat: castingTime
@@ -4925,7 +4959,18 @@
     and current Hit Points increase by 5 for the duration. Using a Higher-Level
     Spell Slot. Each target’s Hit Points increase by 5 for each spell slot level
     above 2.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 3, range: 30, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier: { kind: bonus, to: maxHp, amount: { bonus: { base: 5 } } }
+          duration: { minutes: 480 }
+        - { kind: heal, amount: { bonus: { base: 5 } } }
+  upcast: { perSlotLevel: { addBonus: 5 } }
 - id: srd52:spell/animal-shapes
   name: Animal Shapes
   level: 8
@@ -8052,7 +8097,14 @@
     the spell ends. Using a Higher-Level Spell Slot. You automatically end a
     spell on the target if the spell’s level is equal to or less than the level
     of the spell slot you use.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: 120, side: any }
+    resolution:
+      kind: automatic
+      effects: [{ kind: dispel, maxLevel: 3, check: true }]
+  upcast: { perSlotLevel: { addBonus: 1 } }
 - id: srd52:spell/divine-word
   name: Divine Word
   level: 7
@@ -9624,7 +9676,8 @@
     turn. On a successful save, a creature takes half the initial damage only.
     Using a Higher-Level Spell Slot. The initial damage increases by 2d4 for
     each spell slot level above 4.
-  automation: partial
+  automation: full
+  upcast: { perSlotLevel: { addDice: 2d4, initial: true } }
   activation:
     cost:
       - action
@@ -10242,7 +10295,7 @@
     attack). In addition, the ground in the Emanation is Difficult Terrain for
     your enemies. Using a Higher-Level Spell Slot. The damage increases by 1d8
     for each spell slot level above 4.
-  automation: partial
+  automation: full
   upcast:
     perSlotLevel:
       addDice: 1d8
@@ -10556,7 +10609,8 @@
   text: You gain 2d4 + 4 Temporary Hit Points. Using a Higher-Level Spell Slot.
     You gain 5 additional Temporary Hit Points for each spell slot level above
     1.
-  automation: partial
+  automation: full
+  upcast: { perSlotLevel: { addBonus: 5 } }
   activation:
     cost:
       - action
@@ -10859,14 +10913,17 @@
     reduction to one of the target’s ability scores • Any reduction to the
     target’s Hit Point maximum"
   automation: full
-  # shortcut: it ends the Charmed or Petrified condition, or else a level of Exhaustion, never a curse.
   activation:
     cost: [action, slot, { gold: 100 }]
     targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
       effects:
-        [{ kind: cure, conditions: [charmed, petrified], exhaustion: true }]
+        - kind: cure
+          conditions: [charmed, petrified]
+          curse: true
+          maxHp: true
+          exhaustion: true
 
 - id: srd52:spell/gust-of-wind
   name: Gust of Wind
@@ -10908,7 +10965,8 @@
     Blinded, Deafened, and Poisoned conditions on the target. Using a
     Higher-Level Spell Slot. The healing increases by 10 for each spell slot
     level above 6.
-  automation: partial
+  automation: full
+  upcast: { perSlotLevel: { addBonus: 10 } }
   activation:
     cost:
       - action
@@ -11677,7 +11735,25 @@
     description offers, and the creature recalls its former life. It retains the
     capabilities it had in its original form, except it loses the traits of its
     previous species and gains the traits of its new one.
-  automation: text
+  automation: full
+  # The table's species this plugin has; the spell lets the GM pick another playable species.
+  activation:
+    cost: [action, slot, { gold: 1000 }]
+    outOfCombat: true
+    targeting:
+      {
+        creatures: 1,
+        range: touch,
+        side: ally,
+        dead: true,
+        diedWithin: 240,
+        creatureTypes: [humanoid],
+      }
+    resolution:
+      kind: automatic
+      effects:
+        - kind: reincarnate
+          species: [srd52:species/dwarf, srd52:species/elf, srd52:species/human]
   outOfCombat: castingTime
 - id: srd52:spell/reverse-gravity
   name: Reverse Gravity

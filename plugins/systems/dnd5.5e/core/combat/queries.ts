@@ -151,12 +151,14 @@ export function rollBonus(
   context: Context,
   skill?: Skill, // the check's skill, for a bonus that only adds to one
   ability?: Ability, // the save's ability, for a bonus that only adds to one
+  weapon = false, // a weapon attack roll, for a bonus to those only
 ): number {
   const seen = new Set<string>();
   let total = 0;
   for (const effect of actor.activeEffects) {
     const { modifier } = effect;
     if (modifier.kind !== "bonus" || modifier.to !== to) continue;
+    if (modifier.weapon && !weapon) continue;
     if (modifier.skill && modifier.skill !== skill) continue;
     if (modifier.ability && modifier.ability !== ability) continue;
     if (seen.has(effect.sourceId)) continue;
@@ -174,6 +176,7 @@ export function rollBonus(
     if (
       modifier.kind === "bonus" &&
       modifier.to === to &&
+      (!modifier.weapon || weapon) &&
       (!modifier.skill || modifier.skill === skill) &&
       (!modifier.ability || modifier.ability === ability)
     ) {
@@ -687,6 +690,8 @@ export function canAfford(
   const { carrying, afterAction, resolution } = action.activation;
   if (carrying && !actor.inventory.includes(carrying)) return false;
   if (afterAction && actor.budget.action) return false;
+  // only while Bloodied, as Unearthly Recovery
+  if (action.activation.bloodied && actor.hp * 2 >= stats.maxHp) return false;
   if (action.activation.beforeAction && !actor.budget.action) return false;
   if (!gatesOpen(action, actor)) return false;
   // Haste's additional action takes only a weapon attack, or Dash, Disengage or Hide (actions.ts).
@@ -868,10 +873,14 @@ function poolsLeft(action: KnownAction, actor: Actor, stats: Stats): boolean {
             stats,
             regainCap(effect, action.spellLevel),
           )
-        : effect.kind !== "heal" ||
-          !effect.pool ||
-          (actor.resourcesSpent[effect.pool.resource] ?? 0) <
-            (stats.resources[effect.pool.resource] ?? 0),
+        : effect.kind === "cure" && effect.pool
+          ? (actor.resourcesSpent[effect.pool.resource] ?? 0) +
+              effect.pool.per <=
+            (stats.resources[effect.pool.resource] ?? 0)
+          : effect.kind !== "heal" ||
+            !effect.pool ||
+            (actor.resourcesSpent[effect.pool.resource] ?? 0) <
+              (stats.resources[effect.pool.resource] ?? 0),
     )
   );
 }
@@ -887,6 +896,14 @@ export function goldFor(action: KnownAction): number {
 
 // A raising reaches only the dead it's in time for, as Raise Dead's 10 days.
 export function deadWithin(item: Actor, targeting: Targeting): boolean {
+  if (item.dust && !("dust" in targeting && targeting.dust)) return false;
+  if (
+    "diedWithinRounds" in targeting &&
+    targeting.diedWithinRounds !== undefined &&
+    (item.deadRounds ?? 0) > targeting.diedWithinRounds
+  ) {
+    return false;
+  }
   return (
     !("diedWithin" in targeting) ||
     targeting.diedWithin === undefined ||
@@ -905,13 +922,16 @@ export function inReach(
   if ("self" in targeting) return [actor];
   const charmers = charmersOf(actor);
   const downed = "downed" in targeting && targeting.downed === true;
-  return (
-    targeting.side === "enemy"
+  return [
+    ...(targeting.side !== "ally"
       ? knownFoes(state, actor, access).filter(
           (item) => isDown(item) === downed && !charmers.has(item.id),
         )
-      : allies(state, actor).filter((item) => !downed || isDown(item))
-  )
+      : []),
+    ...(targeting.side !== "enemy"
+      ? allies(state, actor).filter((item) => !downed || isDown(item))
+      : []),
+  ]
     .filter(
       (item) =>
         isDead(item) === ("dead" in targeting && targeting.dead === true) &&

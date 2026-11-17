@@ -338,6 +338,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     ability: AbilitySchema.optional(), // only saves with this ability, as Slow's Dexterity saves
     melee: z.literal(true).optional(), // AC against melee attack rolls only, as a pirate admiral's Defensive Stance
     ranged: z.literal(true).optional(), // AC against ranged attack rolls only, as an Arrow-Catching Shield's
+    weapon: z.literal(true).optional(), // weapon attack rolls only, as Magic Weapon's
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
@@ -435,6 +436,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     noActions: z.literal(true).optional(),
     noReactions: z.literal(true).optional(),
     noOpportunityAttacks: z.literal(true).optional(), // as Shocking Grasp's
+    noDisengage: z.literal(true).optional(), // as Hunter's Rime's on a creature Hunter's Mark marks
     oneAttack: z.literal(true).optional(),
     speed: z.enum(["half", "double", "none"]).optional(),
     spellFailure: z.number().int().min(1).max(100).optional(),
@@ -555,6 +557,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     leashOnly: z.literal(true).optional(),
     unleashed: z.literal(true).optional(), // no leash, as Goading Attack's Disadvantage alone
   }),
+  // Casting a spell with a slot, the bearer rolls as many of its Hit Point Dice as the slot's level and regains the
+  // roll plus `bonus`, worked out from the caster's numbers, as Simbul's Synostodweomer (combat/school.ts).
+  z.strictObject({ kind: z.literal("castHitDice"), bonus: FormulaSchema }),
   // The bearer can cast this spell once without its costs, as Wish's copy of it (combat/wish.ts).
   z.strictObject({ kind: z.literal("wished"), spell: ContentIdSchema }),
   // At the start of each of its turns the bearer rolls a d8: on 1-6 it does nothing, on 7-8 it makes a melee attack
@@ -709,6 +714,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     modifier: ModifierSchema,
     duration: DurationSchema,
     repeatSave: z.boolean().optional(), // as an applyCondition's
+    whileTempHp: z.literal(true).optional(), // ends once the bearer has no Temporary Hit Points, as Armor of Agathys
     // The caster picks the modifier's damage type from these as it casts (combat/damage-choice.ts), as with
     // Protection from Energy. A cast's lists of the same length are picked together, by place, as Fire Shield's
     // warm or chill shield sets both its Resistance and its flames.
@@ -774,11 +780,20 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // Action Surge: once a turn, after the action is spent, and the action it gives can't be a Magic action.
   z.strictObject({ kind: z.literal("extraAction") }),
   // Ends one of these conditions on the target, the one that hampers it most, as Lesser Restoration does.
+  // With none of them on it, Greater Restoration ends one curse (`curse`), else restores a lowered Hit Point maximum
+  // (`maxHp`), else takes away a level of Exhaustion (`exhaustion`), in that order.
+  // shortcut: Greater Restoration picks what it ends in that order, not as the caster chooses.
   z.strictObject({
     kind: z.literal("cure"),
     conditions: z.array(ConditionSchema).min(1),
-    // with none of them on it, one level of Exhaustion instead, as Greater Restoration
     exhaustion: z.literal(true).optional(),
+    curse: z.literal(true).optional(),
+    maxHp: z.literal(true).optional(),
+    // each of them on the target ends instead, `per` of the caster's `resource` apiece while it lasts, as Restoring
+    // Touch's 5 Hit Points of Lay On Hands' pool for each condition
+    pool: z
+      .strictObject({ resource: z.string(), per: z.number().int().min(1) })
+      .optional(),
   }),
   // An area left where the spell is aimed, or round the caster: magical darkness that only Blindsight, Truesight
   // or Devil's Sight see through (Darkness), fog only Blindsight sees through (Fog Cloud), or thorns that cost
@@ -835,6 +850,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     maxLevel: z.number().int().min(0).max(9),
     // only spells cast by the target's foes, so a friend keeps its own, as Clockwork Cavalcade's chosen creatures
     hostile: z.literal(true).optional(),
+    // each higher spell ends on a spellcasting ability check against 10 plus its level, as Dispel Magic's
+    check: z.literal(true).optional(),
   }),
   // Lessens the hit that triggered a reaction, such as Uncanny Dodge or Deflect Attacks. With `deflect`, damage
   // brought to 0 is sent at a creature within `range`, which saves or takes `damage`, as Deflect Missile's force.
@@ -962,10 +979,15 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // as Harm's (combat/effects.ts, by the save's own damage).
   z.strictObject({ kind: z.literal("drainMaxHp") }),
   // A failed save's damage that drops the target to 0 Hit Points turns it to dust, dead outright, as Disintegrate.
-  // shortcut: nothing stops a later raising, which only True Resurrection or Wish should manage.
+  // Only a raising whose targeting has `dust` brings it back, as True Resurrection.
   z.strictObject({ kind: z.literal("disintegrate") }),
   // The target spends one of its Hit Point Dice and regains what it rolls plus `bonus`, as with Healer's Battle Medic.
-  z.strictObject({ kind: z.literal("hitDieHeal"), bonus: FormulaSchema }),
+  // Rolls up to `dice` of the target's Hit Point Dice (stopping once it is whole) and adds `bonus` once.
+  z.strictObject({
+    kind: z.literal("hitDieHeal"),
+    bonus: FormulaSchema,
+    dice: z.number().int().min(2).optional(),
+  }),
   // The bearer takes another of its stat block's own shapes, by name, or goes back to its true one (core/forms.ts).
   z.strictObject({ kind: z.literal("shapeShift"), shape: z.string().min(1) }),
   // One of the bearer's own actions picked at random, `times` over, never one already used this turn, at the same
@@ -996,6 +1018,23 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
   // A dying creature becomes Stable, as with Spare the Dying.
   z.strictObject({ kind: z.literal("stabilize") }),
+  // The caster takes `amount` of `type` damage, which nothing lessens, and the target regains `times` as much, as
+  // Life Transference.
+  z.strictObject({
+    kind: z.literal("transference"),
+    amount: AmountSchema,
+    type: DamageTypeSchema,
+    times: z.number().int().min(1).default(2),
+  }),
+  // A dead creature comes back in a new body of a species rolled from these, in order, and picks what that species
+  // asks for (core/reincarnate.ts), as Reincarnate.
+  z.strictObject({
+    kind: z.literal("reincarnate"),
+    species: z.array(ContentIdSchema).min(2),
+  }),
+  // A clone of the target starts growing, ready after `days`; once it is, the target dying wakes in it whole, as Clone.
+  // shortcut: a day passes with each Long Rest, the only clock between scenes, and the clone keeps the gear.
+  z.strictObject({ kind: z.literal("clone"), days: z.number().int().min(1) }),
   // Moves the bearer's area of the spell `source` to where this is aimed, as Moonbeam moved with a Magic action.
   z.strictObject({ kind: z.literal("moveZone"), source: z.string() }),
   // The target takes its Reaction to make a melee attack against a creature in its reach, one of its own side
@@ -1047,11 +1086,22 @@ export type LeafEffect = z.infer<typeof LeafEffectSchema>;
 const LeafEffectsSchema = z.array(LeafEffectSchema).default([]);
 
 // Nesting stops at one level on purpose: a small model can only produce non-recursive output reliably.
+// Each of the caster's foes within `radius` of a target saves or takes `damage`, half on a success with `half`: Ice
+// Knife's shard round an attack's target, or Jolt to Life's lightning round the creature it revives.
+const BurstSchema = z.strictObject({
+  radius: z.number().int().min(5),
+  ability: AbilitySchema,
+  dc: FormulaSchema,
+  damage: z.array(DamageSchema).min(1),
+  half: z.literal(true).optional(),
+});
+
 export const ResolutionSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("automatic"),
     damage: z.array(DamageSchema).default([]),
     effects: LeafEffectsSchema,
+    burst: BurstSchema.optional(),
   }),
   z.strictObject({
     kind: z.literal("attack"),
@@ -1063,6 +1113,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       itemBonus: z.number().int().min(1).optional(), // a magic weapon's own bonus to hit
       // Beyond this many feet, out to the targeting's range, the roll has Disadvantage, as a thrown weapon's long range.
       normalRange: z.number().int().min(5).optional(),
+      bypassCover: z.literal(true).optional(), // ignores Half and Three-Quarters Cover, as Spellfire Flare's blasts
       unarmed: z.literal(true).optional(), // an Unarmed Strike, as Martial Arts' or Vampiric Bite's
       finesse: z.literal(true).optional(), // a Finesse weapon a feature makes, as a Psychic Blade, for Sneak Attack
     }),
@@ -1091,14 +1142,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     drain: z.strictObject({ resource: z.string() }).optional(),
     missDamage: z.literal("half").optional(), // a miss still deals half the damage, as Acid Arrow's splash
     // Hit or miss, the target and each creature within `radius` of it then save or take `damage`, as Ice Knife's shard.
-    burst: z
-      .strictObject({
-        radius: z.number().int().min(5),
-        ability: AbilitySchema,
-        dc: FormulaSchema,
-        damage: z.array(DamageSchema).min(1),
-      })
-      .optional(),
+    burst: BurstSchema.optional(),
   }),
   z.strictObject({
     kind: z.literal("save"),
@@ -1129,6 +1173,9 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     onSuccessDamage: z.enum(["half", "none", "full"]).default("none"),
     onFail: LeafEffectsSchema,
     onSuccess: LeafEffectsSchema,
+    // with an area, one creature of the caster's choice in it, the most hurt of its side, also gets these, as Wither
+    // and Bloom's Hit Point Dice
+    chosen: z.array(LeafEffectSchema).min(1).optional(),
   }),
 ]);
 export type Resolution = z.infer<typeof ResolutionSchema>;
@@ -1221,14 +1268,17 @@ export const TargetingSchema = z.union([
   z.strictObject({
     creatures: z.number().int().min(1),
     range: RangeSchema,
-    side: SideSchema,
+    // "any" is a creature of either side, as Dispel Magic aimed at a friend's curse or a foe's spell
+    side: z.enum(["enemy", "ally", "any"]),
     creatureTypes: z.array(CreatureTypeSchema).optional(), // only these types can be targeted
     targetConditions: z.array(ConditionSchema).min(1).optional(), // only a creature with one of these, as for Trample
     dead: z.literal(true).optional(), // only a dead creature, as for Revivify
-    // with `dead`, only one dead no longer than this many hours, as Raise Dead's 10 days (240). Only rests pass
-    // time (state.ts REST_HOURS), so 0 is a death since the last rest.
-    // shortcut: Revivify's minute is 0, as no clock runs between rests.
+    // with `dead`, only one dead no longer than this many hours, as Raise Dead's 10 days (240). Rests pass time
+    // (state.ts REST_HOURS) and so does going to another scene (an hour), so 0 is a death in this scene since the
+    // last rest; `diedWithinRounds` also counts the rounds of the fight it died in, as Revivify's minute (10).
     diedWithin: z.number().int().min(0).optional(),
+    diedWithinRounds: z.number().int().min(0).optional(),
+    dust: z.literal(true).optional(), // with `dead`, even one turned to dust, as True Resurrection
     // only a creature this size or smaller, as for a giant frog's Swallow
     maxSize: z
       .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
@@ -1367,6 +1417,7 @@ export const ActivationSchema = z.strictObject({
   // only after casting a spell with a casting time of an action this turn, as Battle Magic
   afterCast: z.literal(true).optional(),
   unmoved: z.literal(true).optional(), // only if the bearer hasn't moved this turn, as Steady Aim
+  bloodied: z.literal(true).optional(), // only while the bearer has under half its Hit Points, as Unearthly Recovery
   // Once a turn for all its feature's activations, as Stunning Strike, or with a name, for all activations of that
   // name, as Brutal Strike's and Improved Brutal Strike's options (queries.ts gatesOpen).
   oncePerTurn: z.union([z.literal(true), z.string().min(1)]).optional(),
@@ -1657,6 +1708,31 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       .optional(),
     exhaustion: z.number().int().min(1).optional(),
     allies: z.literal(true).optional(),
+  }),
+  // An attacker of these types must pass a Wisdom save against the bearer's spell save DC or lose its attack; passing,
+  // or being attacked by the bearer, frees it of this until a Long Rest, as Among the Dead's undead.
+  // shortcut: a spell's save aimed at the bearer alone isn't turned aside, only an attack roll.
+  z.strictObject({
+    kind: z.literal("deterAttackers"),
+    creatureTypes: z.array(CreatureTypeSchema).min(1),
+  }),
+  // Dropping to 0 Hit Points leaves the bearer conscious: while an effect of one of the `while` features' activations
+  // is on it, as Rage beyond Death's Rage, still making Death Saving Throws but dying of three failures only once that
+  // ends; or, spending `resource` and its Reaction, until its next turn ends, as Strength before Death.
+  // shortcut: Strength before Death's extra turn is the samurai's next turn, not one that interrupts the current turn.
+  z.strictObject({
+    kind: z.literal("fightOn"),
+    while: z.array(ContentIdSchema).min(1).optional(),
+    resource: z.string().optional(),
+  }),
+  // Dropping to 0 Hit Points, or with `incapacitated` being Incapacitated by a foe, spends `resource` for these
+  // effects on the bearer, as Faithful Summons' beasts (an `animate` of a beast's stat block).
+  // shortcut: the beasts are the stat block given, not the bearer's pick of any Challenge Rating 2 or lower.
+  z.strictObject({
+    kind: z.literal("whenDowned"),
+    resource: z.string(),
+    effects: z.array(LeafEffectSchema).min(1),
+    incapacitated: z.literal(true).optional(),
   }),
   // Changes to the bearer's damaging cantrip that deals the most, as Agonizing, Repelling Blast or Eldritch Spear do:
   // damage added to each roll, effects on a hit, and range for each level of a class.
@@ -2181,7 +2257,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("killAdvantage") }),
   // A foe dropping to 0 Hit Points puts these effects on the bearer, as Dark One's Blessing's Temporary Hit Points:
   // with `within`, only a foe that near it, or with `mine` one it dropped itself; spending a use of the resource, and
-  // with `reaction` its Reaction, as Boon of the Soul Drinker's Siphon Life.
+  // with `reaction` its Reaction, as Boon of the Soul Drinker's Siphon Life. With `ally` they go to the most hurt of
+  // the bearer and its allies within `within`, with `fallenHitDice` a heal is the foe's number of Hit Dice, and with
+  // `oncePerTurn` it works once until the bearer's next turn starts and never while it's Incapacitated, as Keeper
+  // of Souls.
   z.strictObject({
     kind: z.literal("onKill"),
     effects: z.array(LeafEffectSchema).min(1),
@@ -2189,6 +2268,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     mine: z.literal(true).optional(),
     resource: z.string().optional(),
     reaction: z.literal(true).optional(),
+    ally: z.literal(true).optional(),
+    fallenHitDice: z.literal(true).optional(),
+    oncePerTurn: z.literal(true).optional(),
   }),
   // Helping an attack on an enemy also gives it Disadvantage on its next save, as Harper Teamwork.
   z.strictObject({ kind: z.literal("helpRider") }),
@@ -2202,13 +2284,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Casting a spell that deals this type puts these effects on the bearer, as Flames of Phlegethos' flames.
   // With `school` instead, casting a spell of that school with an action and a spell slot does, as Bewitching
   // Magic's Misty Step after an Enchantment spell. With `uses`, casting one of these spells does, as Hunter's Rime's
-  // Temporary Hit Points with Hunter's Mark.
+  // Temporary Hit Points with Hunter's Mark, and `onTargets` go on the spell's targets, as its hold on the marked.
   z.strictObject({
     kind: z.literal("castRider"),
     damage: DamageTypeSchema.optional(),
     school: z.array(SpellSchoolSchema).min(1).optional(),
     uses: z.array(ContentIdSchema).min(1).optional(),
     effects: z.array(LeafEffectSchema).min(1),
+    onTargets: z.array(LeafEffectSchema).min(1).optional(),
+    resource: z.string().optional(), // spending a use, only while one is left, as Defy Death's after Spare the Dying
   }),
   // Using an activation of this feature also does these to the bearer, as Tactical Shift's move with Second Wind or
   // Arcane Charge's teleport with Action Surge.
@@ -2320,6 +2404,9 @@ export const ResourceDefSchema = z.strictObject({
       heal: z.lazy(() => AmountSchema).optional(),
       // Dice rolled and added to `amount`, as a wand's 1d6 + 1 charges at dawn (rest.ts).
       roll: DiceSchema.optional(),
+      // Only once this many of its trigger have passed since the use was spent, as Cauldron of Rebirth's 7 days.
+      // shortcut: a day passes with each Long Rest, the only clock between scenes.
+      every: z.number().int().min(2).optional(),
     }),
   ),
 });
@@ -2329,11 +2416,18 @@ export type ResourceDef = z.infer<typeof ResourceDefSchema>;
 const ScaleStepSchema = z.union([
   // With `every`, once for each that many levels, at most `max` times; `addBonus` also raises a flat bonus a modifier
   // gives, as Elemental Weapon's +1 to hit becomes +2 with its 1d4 becoming 2d4.
+  // Without `addDice`, `addBonus` alone raises a flat number: healing, Temporary Hit Points, a damage bonus, a
+  // retaliation's damage or Dispel Magic's level, as Heal's 10 more. `at` adds once at each of these slot levels
+  // above the spell's instead, as Magic Weapon's +2 and +3. `initial` leaves damage that lingers alone, as Vitriolic
+  // Sphere's 5d4, and `hitDice` lets its Hit Point Dice healing roll that many more, as Wither and Bloom's.
   z.strictObject({
-    addDice: DiceSchema,
+    addDice: DiceSchema.optional(),
     every: z.number().int().min(2).optional(),
     max: z.number().int().min(1).optional(),
     addBonus: z.number().int().min(1).optional(),
+    at: z.array(z.number().int().min(1)).min(1).optional(),
+    initial: z.literal(true).optional(),
+    hitDice: z.number().int().min(1).optional(),
   }),
   z.strictObject({ addTargets: z.number().int().min(1) }),
   z.strictObject({ addRadius: z.number().int().min(5) }), // an area's radius, as Confusion's Sphere
@@ -2352,6 +2446,14 @@ export const FeatureSchema = ContentEntrySchema.extend({
   fromLevel: z.number().int().min(1).max(20).optional(), // the character level it starts working at
   // Dice added to its activations at character levels 5, 11 and 17, as a cantrip's are.
   perTier: ScaleStepSchema.optional(),
+  // `step` added once at each of these levels in `class`, as Jolt to Life's lightning at Artificer levels 11 and 17.
+  classTiers: z
+    .strictObject({
+      class: ContentIdSchema,
+      at: z.array(z.number().int().min(1).max(20)).min(1),
+      step: ScaleStepSchema,
+    })
+    .optional(),
   // Spells it always gives, from the character level in the key.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.
@@ -2641,6 +2743,7 @@ const ItemCastSchema = z.strictObject({
   upTo: z.number().int().min(2).optional(),
   dc: z.number().int().min(1).optional(),
   attack: z.number().int().optional(), // the spell attack bonus; `dc` less 8 when only that is printed
+  gold: z.number().int().min(0).optional(), // its costly component costs this instead, as Cauldron of Rebirth's salt
 });
 export type ItemCast = z.infer<typeof ItemCastSchema>;
 

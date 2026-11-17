@@ -10,18 +10,24 @@ import {
   storyEffect,
 } from "#sdk";
 import { z } from "zod";
-import type { LeafEffect } from "./schemas.ts";
+import { type LeafEffect, SpellSchema } from "./schemas.ts";
 import { type Actor, type DndState, NS, frame, isDead } from "./state.ts";
-import { type KnownAction, deriveStats } from "./stats.ts";
-import { canAfford, deadWithin, fitsType, goldFor } from "./combat/queries.ts";
+import { type KnownAction, deriveStats, scaleActivation } from "./stats.ts";
+import {
+  canAfford,
+  deadWithin,
+  fitsType,
+  goldFor,
+  upcastSlots,
+} from "./combat/queries.ts";
 import { leafEvents, payCosts, sharedHealing } from "./combat/effects.ts";
-import { ITEM_PREFIX } from "./combat/ids.ts";
+import { ITEM_PREFIX, spellOfSource } from "./combat/ids.ts";
 import { SHORT_REST_GIVEN, canRegain, regainCap } from "./rest.ts";
 
 // Healing between fights: a party member's spell or feature that heals or raises the dead, used on the party from
 // the character sheet, as Cure Wounds after a fight or Raise Dead, which takes an hour. It costs what it costs in a
-// fight, less the action, and reaches anyone in the party, who can walk over to be touched.
-// shortcut: a spell is cast with its lowest slot, never upcast, between fights.
+// fight, less the action, and reaches anyone in the party, who can walk over to be touched. A spell may be cast with
+// a higher slot, and a ritual is cast as one, with no slot.
 
 type Context = SystemContext<DndState>;
 
@@ -39,6 +45,9 @@ const BETWEEN: ReadonlySet<LeafEffect["kind"]> = new Set([
   "repose",
   "shortRest",
   "regain",
+  "transference",
+  "reincarnate",
+  "clone",
 ]);
 
 // Whether the effect would do something for this creature between fights.
@@ -52,11 +61,19 @@ function helps(
     case "heal":
     case "hitDieHeal":
     case "shortRest":
+    case "transference":
       return target.hp < deriveStats(target, access).maxHp;
     case "repose":
       return !target.reposed;
+    case "reincarnate":
+      return true; // its targeting already asks for the dead
+    case "clone":
+      return target.clone === undefined;
     case "cure":
-      return effect.exhaustion === true && target.exhaustion > 0;
+      return (
+        (effect.exhaustion === true && target.exhaustion > 0) ||
+        (effect.maxHp === true && (target.maxHpLoss ?? 0) > 0)
+      );
     case "regain":
       return canRegain(
         target,
@@ -69,17 +86,42 @@ function helps(
   }
 }
 
-// The action with only what it costs between fights: its slot, uses and gold, not an action of a turn.
-function between(action: KnownAction): KnownAction {
+// Whether the action is a spell that can be cast as a Ritual, with time to spare between fights.
+function ritual(action: KnownAction, access: ContentAccess): boolean {
+  const id = spellOfSource(action.id);
+  return (
+    id !== null &&
+    SpellSchema.safeParse(access.content(id)).data?.ritual === true
+  );
+}
+
+// The action with only what it costs between fights: its slot, uses and gold, not an action of a turn. A ritual
+// needs no slot.
+function between(action: KnownAction, access: ContentAccess): KnownAction {
+  const free = ritual(action, access);
   return {
     ...action,
     activation: {
       ...action.activation,
       cost: action.activation.cost.filter(
-        (cost) => typeof cost === "object" || cost === "slot",
+        (cost) => typeof cost === "object" || (cost === "slot" && !free),
       ),
     },
   };
+}
+
+// The action as cast with this slot, its upcast applied.
+function atSlot(action: KnownAction, slot: number | undefined): KnownAction {
+  return slot !== undefined && action.upcast && action.spellLevel !== null
+    ? {
+        ...action,
+        activation: scaleActivation(
+          action.activation,
+          action.upcast.perSlotLevel,
+          slot - action.spellLevel,
+        ),
+      }
+    : action;
 }
 
 function effectsOf(action: KnownAction): readonly LeafEffect[] {
@@ -145,13 +187,13 @@ function castable(
     (action) =>
       usable(action) &&
       goldFor(action) <= (state.gold ?? 0) &&
-      canAfford(between(action), caster, stats) &&
+      canAfford(between(action, access), caster, stats) &&
       targetsOf(action, caster, state, access).length > 0,
   );
 }
 
-export function castId(caster: string, action: string): string {
-  return `${CAST}${caster}:${action}`;
+export function castId(caster: string, action: string, slot?: number): string {
+  return `${CAST}${caster}:${action}${slot === undefined ? "" : `@${String(slot)}`}`;
 }
 
 export function sceneCastActions(
@@ -174,19 +216,34 @@ export function sceneCastActions(
       Object.keys(item.resourcesSpent).some((key) => key.startsWith("slot:")),
   );
   if (!needy) return [];
-  return members(state).flatMap((caster) =>
-    castable(caster, state, access).map((action) => ({
-      id: castId(caster.id, action.id),
-      label:
+  return members(state).flatMap((caster) => {
+    const stats = deriveStats(caster, access);
+    return castable(caster, state, access).flatMap((action) => {
+      const name =
         caster.id === PLAYER_ACTOR
           ? action.name
-          : `${caster.name}: ${action.name}`,
-      effect: `${NS}:castBetween`,
-      args: { caster: caster.id, action: action.id },
-      // An hour's casting only where the scene leaves time to rest.
-      ...(action.activation.outOfCombat ? { rest: true } : {}),
-    })),
-  );
+          : `${caster.name}: ${action.name}`;
+      // A ritual costs no slot, so a higher one is never worth it.
+      const slots = ritual(action, access)
+        ? []
+        : upcastSlots(action, caster, stats);
+      return [undefined, ...slots].map((slot) => ({
+        id: castId(caster.id, action.id, slot),
+        label:
+          slot === undefined
+            ? `${name}${ritual(action, access) ? " (ritual)" : ""}`
+            : `${name} (level ${String(slot)} slot)`,
+        effect: `${NS}:castBetween`,
+        args: {
+          caster: caster.id,
+          action: action.id,
+          ...(slot === undefined ? {} : { slot }),
+        },
+        // An hour's casting only where the scene leaves time to rest.
+        ...(action.activation.outOfCombat ? { rest: true } : {}),
+      }));
+    });
+  });
 }
 
 function found(
@@ -208,27 +265,55 @@ function found(
 
 function resolve(
   caster: Actor,
-  action: KnownAction,
+  action: KnownAction, // as cast with `slot`
   targets: readonly Actor[],
   context: Context,
+  slot?: number,
 ): SystemResult {
   const shared = sharedHealing(effectsOf(action), targets, caster, context);
-  const events: SystemEvent[] = payCosts(between(action), caster, context);
+  const events: SystemEvent[] = payCosts(
+    between(action, context),
+    caster,
+    context,
+    slot,
+  );
   for (const target of targets) {
     events.push(
-      ...leafEvents(shared(target), action.id, caster, target, context),
+      ...leafEvents(
+        shared(target),
+        action.id,
+        caster,
+        target,
+        context,
+        undefined,
+        slot,
+      ),
     );
   }
-  return { events };
+  // The player spends the Hit Dice a Short Rest it gave them, as they would in one (rest.ts), and picks what a
+  // reincarnated body's species asks for (reincarnate.ts).
+  const player = targets.some((target) => target.id === PLAYER_ACTOR);
+  const given = (kind: LeafEffect["kind"]) =>
+    player && effectsOf(action).some((effect) => effect.kind === kind);
+  const frames = [
+    ...(given("shortRest") ? [frame("givenDice")] : []),
+    ...(given("reincarnate") ? [frame("reincarnate", { picks: {} })] : []),
+  ];
+  return { events, ...(frames.length > 0 ? { frames } : {}) };
 }
 
-const CastSchema = z.strictObject({ caster: z.string(), action: z.string() });
+const CastSchema = z.strictObject({
+  caster: z.string(),
+  action: z.string(),
+  slot: z.number().int().min(1).max(9).optional(), // a higher slot it's cast with
+});
 
 function runCast(
-  { caster: casterId, action: actionId }: z.infer<typeof CastSchema>,
+  { caster: casterId, action: actionId, slot }: z.infer<typeof CastSchema>,
   context: Context,
 ): SystemResult {
-  const { caster, action } = found(casterId, actionId, context);
+  const { caster, action: unscaled } = found(casterId, actionId, context);
+  const action = atSlot(unscaled, slot);
   const targets = targetsOf(action, caster, context.state, context);
   const { targeting } = action.activation;
   // Several at once go to the most hurt first, as in a fight.
@@ -239,11 +324,11 @@ function runCast(
     const most =
       "creatures" in targeting ? targeting.creatures : targets.length;
     const order = [...targets].sort((a, b) => a.hp - b.hp).slice(0, most);
-    return resolve(caster, action, order, context);
+    return resolve(caster, action, order, context, slot);
   }
   const [only] = targets;
   if (only && targets.length === 1)
-    return resolve(caster, action, [only], context);
+    return resolve(caster, action, [only], context, slot);
   return {
     frames: [
       awaitDecision({
@@ -254,7 +339,11 @@ function runCast(
           ...targets.map((item) => ({ id: item.id, label: item.name })),
           { id: NEVER_MIND, label: "Never mind" },
         ],
-        resume: frame("castOn", { caster: caster.id, action: action.id }),
+        resume: frame("castOn", {
+          caster: caster.id,
+          action: action.id,
+          ...(slot === undefined ? {} : { slot }),
+        }),
       }),
     ],
   };
@@ -263,16 +352,22 @@ function runCast(
 const CastOnSchema = CastSchema.extend({ answer: z.string() });
 
 function runCastOn(
-  { caster: casterId, action: actionId, answer }: z.infer<typeof CastOnSchema>,
+  {
+    caster: casterId,
+    action: actionId,
+    answer,
+    slot,
+  }: z.infer<typeof CastOnSchema>,
   context: Context,
 ): SystemResult {
   if (answer === NEVER_MIND) return {};
-  const { caster, action } = found(casterId, actionId, context);
+  const { caster, action: unscaled } = found(casterId, actionId, context);
+  const action = atSlot(unscaled, slot);
   const target = targetsOf(action, caster, context.state, context).find(
     (item) => item.id === answer,
   );
   if (!target) throw new Error(`${action.name} can't reach ${answer}`);
-  return resolve(caster, action, [target], context);
+  return resolve(caster, action, [target], context, slot);
 }
 
 export const campEffects = {

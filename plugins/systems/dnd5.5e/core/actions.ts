@@ -627,6 +627,13 @@ function bonusTacticCost(
   return cost;
 }
 
+// Hunter's Rime: a creature Hunter's Mark marks can't take the Disengage action.
+function canDisengage(actor: Actor): boolean {
+  return !actor.activeEffects.some(
+    ({ modifier }) => modifier.kind === "actionLimit" && modifier.noDisengage,
+  );
+}
+
 function bonusTacticOptions(
   actor: Actor,
   state: DndState,
@@ -651,7 +658,11 @@ function bonusTacticOptions(
       label: `Dash as a Bonus Action (${String(extra)} ft more this turn)`,
     });
   }
-  if (allowed.has("disengage") && !hasTactic(actor, "disengage")) {
+  if (
+    allowed.has("disengage") &&
+    !hasTactic(actor, "disengage") &&
+    canDisengage(actor)
+  ) {
     options.push({
       id: BONUS_DISENGAGE,
       label: "Disengage as a Bonus Action (no Opportunity Attacks this turn)",
@@ -782,10 +793,12 @@ export function tacticOptions(
   }
   // Haste's additional action: Dash, Disengage or Hide besides its one attack.
   if (hasteActing(actor)) {
-    options.push({
-      id: DISENGAGE,
-      label: "Disengage (no Opportunity Attacks this turn)",
-    });
+    if (canDisengage(actor)) {
+      options.push({
+        id: DISENGAGE,
+        label: "Disengage (no Opportunity Attacks this turn)",
+      });
+    }
     if (!hasTactic(actor, "hidden") && hiddenFromAll(actor, state, access)) {
       options.push({
         id: HIDE,
@@ -819,10 +832,12 @@ export function tacticOptions(
   }
   // A familiar can't attack, but it can Help and take its other actions, which tacticalPolicy weighs for it.
   if (!full && familiarOwner(actor) === null) return options;
-  options.push({
-    id: DISENGAGE,
-    label: "Disengage (no Opportunity Attacks this turn)",
-  });
+  if (canDisengage(actor)) {
+    options.push({
+      id: DISENGAGE,
+      label: "Disengage (no Opportunity Attacks this turn)",
+    });
+  }
   if (!hasTactic(actor, "hidden") && hiddenFromAll(actor, state, access)) {
     options.push({
       id: HIDE,
