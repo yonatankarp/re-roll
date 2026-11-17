@@ -143,6 +143,12 @@ const ActiveEffectSchema = z.strictObject({
     z.strictObject({ kind: z.literal("lethargy") }),
     // Gone berserk, as a flesh golem's Berserk, until it's no longer Bloodied (combat/madness.ts).
     z.strictObject({ kind: z.literal("berserk") }),
+    // Conscious at 0 Hit Points while it lasts; with `delayDeath`, three Death Saving Throw failures kill only once it
+    // ends, as Rage beyond Death (combat/effects.ts fightOnEvents).
+    z.strictObject({
+      kind: z.literal("fightingOn"),
+      delayDeath: z.literal(true).optional(),
+    }),
     // Time Stop: the turns in a row its caster has left, as rolled (combat/durations.ts).
     z.strictObject({ kind: z.literal("extraTurns"), turns: z.number().int() }),
     // Another creature's shape, by its stat block (core/forms.ts).
@@ -270,6 +276,8 @@ const ActorSchema = z.strictObject({
     z.strictObject({
       kind: z.literal("monster"),
       statBlockId: ContentIdSchema,
+      // the creature that animated, raised or called it, so it dies at 0 Hit Points as a monster does
+      calledBy: z.string().optional(),
       // A character's familiar in a fight (combat/familiar.ts): its owner, its Hit Point maximum as found, the
       // owner's features that give it something, and the owner's numbers those read, such as its spell save DC.
       familiarOf: z
@@ -348,6 +356,7 @@ const ActorSchema = z.strictObject({
   // while alive or just dead. `reposed` stops the count, as Gentle Repose does.
   deadHours: z.number().int().optional(),
   reposed: z.literal(true).optional(),
+  dust: z.literal(true).optional(), // turned to dust, as by Disintegrate: only True Resurrection or Wish raises it
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -661,6 +670,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:tempHpGained`]: TempHpSchema,
   [`${NS}:ordealBegun`]: OrdealSchema,
   [`${NS}:reposed`]: ActorOnlySchema, // its corpse's time lying dead stops counting, as with Gentle Repose
+  [`${NS}:disintegrated`]: ActorOnlySchema, // turned to dust, beyond ordinary raising
   [`${NS}:effectAdded`]: EffectAddedSchema,
   [`${NS}:effectEnded`]: EffectEndedSchema,
   [`${NS}:conditionRemoved`]: ConditionRemovedSchema,
@@ -851,7 +861,17 @@ export function cannotHeal(actor: Actor): boolean {
 }
 
 export function isDown(actor: Actor): boolean {
-  return actor.hp <= 0;
+  return actor.hp <= 0 && fightingOn(actor) === null;
+}
+
+// What keeps a creature at 0 Hit Points conscious, as Rage beyond Death, or null.
+export function fightingOn(
+  actor: Actor,
+): { readonly delayDeath?: true | undefined } | null {
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind === "fightingOn") return modifier;
+  }
+  return null;
 }
 
 // The mount a creature rides, by id, or null.
@@ -890,8 +910,9 @@ export function isDead(actor: Actor): boolean {
   return (
     actor.side === "enemy" ||
     actor.source.kind === "summon" ||
+    (actor.source.kind === "monster" && actor.source.calledBy !== undefined) ||
     familiarOwner(actor) !== null ||
-    actor.deathSaves.failures >= 3
+    (actor.deathSaves.failures >= 3 && !fightingOn(actor)?.delayDeath)
   );
 }
 
@@ -1078,6 +1099,7 @@ function endCombat(state: DndState): DndState {
         ([, actor]) =>
           actor.side === "party" &&
           actor.source.kind !== "summon" &&
+          !(actor.source.kind === "monster" && actor.source.calledBy) &&
           familiarOwner(actor) === null,
       )
       .map(([id, { suppressed: _held, ...actor }]) => [
@@ -1528,7 +1550,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return updateActor(
         state,
         data.actor,
-        ({ deadHours: _hours, reposed: _reposed, ...actor }) => ({
+        ({ deadHours: _hours, reposed: _reposed, dust: _dust, ...actor }) => ({
           ...actor,
           hp: Math.min(data.max, Math.max(actor.hp, 0) + data.amount),
           deathSaves: { successes: 0, failures: 0 },
@@ -1542,6 +1564,12 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         ordeal: data.penalty,
       }));
     }
+    case `${NS}:disintegrated`:
+      return updateActor(
+        state,
+        payload(ActorOnlySchema, event).actor,
+        (actor) => ({ ...actor, dust: true as const }),
+      );
     case `${NS}:reposed`: {
       const data = payload(ActorOnlySchema, event);
       return updateActor(state, data.actor, (actor) => ({

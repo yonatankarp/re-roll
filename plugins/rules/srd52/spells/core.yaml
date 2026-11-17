@@ -4775,7 +4775,8 @@
   activation:
     cost: [action, slot, { gold: 25000 }]
     outOfCombat: true
-    targeting: { creatures: 1, range: touch, side: ally, dead: true }
+    targeting:
+      { creatures: 1, range: touch, side: ally, dead: true, dust: true }
     resolution:
       { kind: automatic, effects: [{ kind: heal, amount: {}, full: true }] }
   outOfCombat: castingTime

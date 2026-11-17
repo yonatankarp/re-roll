@@ -776,6 +776,7 @@ export function goldFor(action: KnownAction): number {
 
 // A raising reaches only the dead it's in time for, as Raise Dead's 10 days.
 export function deadWithin(item: Actor, targeting: Targeting): boolean {
+  if (item.dust && !("dust" in targeting && targeting.dust)) return false;
   return (
     !("diedWithin" in targeting) ||
     targeting.diedWithin === undefined ||

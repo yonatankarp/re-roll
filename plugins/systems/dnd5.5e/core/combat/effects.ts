@@ -1,5 +1,6 @@
 import {
   chargesOf,
+  checkBonus,
   damageResponses,
   deriveStats,
   evaluateFormula,
@@ -26,6 +27,7 @@ import {
   type DndState,
   hasCondition,
   INCAPACITATING,
+  fightingOn,
   familiarOwner,
   freshActor,
   isDead,
@@ -46,6 +48,7 @@ import { concentrationDc, finalDamage, halved, rollD20 } from "../rules.ts";
 import {
   type Ability,
   type Amount,
+  type Condition,
   type Damage,
   type DamageType,
   type Duration,
@@ -121,7 +124,6 @@ import { headDamageEvents } from "./heads.ts";
 import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
 import { movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
-import { abilityCheck } from "../actions.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
@@ -688,11 +690,48 @@ function killEvents(fallen: Actor, context: Context): SystemEvent[] {
           (bearer.resourcesSpent[passive.resource] ?? 0) >=
             (stats.resources[passive.resource] ?? 0)) ||
         (passive.reaction &&
-          (!bearer.budget.reaction || hasCondition(bearer, ...INCAPACITATING)))
+          (!bearer.budget.reaction ||
+            hasCondition(bearer, ...INCAPACITATING))) ||
+        (passive.oncePerTurn &&
+          (bearer.usedThisTurn.includes(ON_KILL) ||
+            hasCondition(bearer, ...INCAPACITATING)))
       ) {
         return [];
       }
+      // Keeper of Souls: the most hurt of the bearer and its allies near it, healed by the foe's Hit Dice.
+      const to = passive.ally
+        ? ([bearer, ...allies(context.state, bearer)]
+            .filter(
+              (item) =>
+                !isDead(item) &&
+                distanceFeet(bearer.position, item.position) <=
+                  (passive.within ?? Infinity),
+            )
+            .map((item) => ({
+              item,
+              missing: deriveStats(item, context).maxHp - item.hp,
+            }))
+            .sort((a, b) => b.missing - a.missing)
+            .find(({ missing }) => missing > 0)?.item ?? null)
+        : bearer;
+      if (!to) return [];
+      const dice = hitDiceOf(fallen, context);
+      const effects = passive.fallenHitDice
+        ? passive.effects.map((effect) =>
+            effect.kind === "heal"
+              ? { ...effect, amount: { bonus: { base: dice, add: [] } } }
+              : effect,
+          )
+        : passive.effects;
       return [
+        ...(passive.oncePerTurn
+          ? [
+              dndEvent(`${NS}:oncePerTurnUsed`, {
+                actor: bearer.id,
+                key: ON_KILL,
+              }),
+            ]
+          : []),
         ...(passive.resource
           ? [
               dndEvent(`${NS}:resourceSpent`, {
@@ -709,16 +748,151 @@ function killEvents(fallen: Actor, context: Context): SystemEvent[] {
               }),
             ]
           : []),
-        ...leafEvents(
-          passive.effects,
-          `onKill:${fallen.id}`,
-          bearer,
-          bearer,
-          context,
-        ),
+        ...leafEvents(effects, `onKill:${fallen.id}`, bearer, to, context),
       ];
     });
   });
+}
+
+const ON_KILL = "onKill";
+
+// A check with the caster's spellcasting ability, as Dispel Magic's against a higher spell.
+// shortcut: no reactions or rescues change the roll, as they may an ability check's (actions.ts abilityCheck).
+function spellcastingCheck(
+  caster: Actor,
+  stats: Stats,
+  dc: number,
+  context: Context,
+): { readonly success: boolean; events: SystemEvent[] } {
+  const { natural } = rollD20(context.dice, {
+    advantage: false,
+    disadvantage: false,
+  });
+  const total =
+    natural +
+    checkBonus(stats, caster, { ability: stats.spellAbility ?? "int" });
+  const success = total >= dc;
+  return {
+    success,
+    events: [
+      dndEvent(`${NS}:rollReported`, {
+        actor: caster.id,
+        against: "check",
+        natural,
+        total,
+        target: dc,
+        success,
+        label: success ? "ends the spell" : "fails to end the spell",
+      }),
+    ],
+  };
+}
+
+// A creature's number of Hit Dice: a character's level, or a monster's worked out from its Hit Points.
+// shortcut: a stat block gives no Hit Dice here, so they come from its Hit Points over its size's die and Constitution.
+function hitDiceOf(fallen: Actor, context: Context): number {
+  const stats = deriveStats(fallen, context);
+  if (fallen.source.kind === "character") return stats.level;
+  const die = [2.5, 3.5, 4.5, 5.5, 6.5][sizeOf(fallen, context)] ?? 10.5;
+  return Math.max(
+    1,
+    Math.round(stats.maxHp / Math.max(1, die + modifierFor(stats, "con"))),
+  );
+}
+
+// Dropping to 0 Hit Points without dying: what keeps the creature conscious, as Rage beyond Death or Strength before
+// Death, and what it calls, as Faithful Summons.
+export function downedEvents(target: Actor, context: Context): SystemEvent[] {
+  const stats = deriveStats(target, context);
+  const left = (resource: string) =>
+    (target.resourcesSpent[resource] ?? 0) < (stats.resources[resource] ?? 0);
+  const events: SystemEvent[] = [];
+  for (const passive of stats.passives) {
+    if (passive.kind === "whenDowned" && left(passive.resource)) {
+      events.push(...calledEvents(target, passive, context));
+    }
+    if (passive.kind !== "fightOn" || fightingOn(target)) continue;
+    if (passive.while) {
+      const rage = target.activeEffects.find(({ sourceId }) =>
+        passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+      );
+      if (!rage) continue;
+      events.push(
+        dndEvent(`${NS}:effectAdded`, {
+          actor: target.id,
+          effect: {
+            ...rage,
+            modifier: { kind: "fightingOn", delayDeath: true },
+          },
+        }),
+      );
+    } else if (
+      passive.resource &&
+      left(passive.resource) &&
+      target.budget.reaction
+    ) {
+      events.push(
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: target.id,
+          resource: passive.resource,
+        }),
+        dndEvent(`${NS}:budgetSpent`, { actor: target.id, kind: "reaction" }),
+        dndEvent(`${NS}:effectAdded`, {
+          actor: target.id,
+          effect: {
+            sourceId: `fightOn:${passive.resource}`,
+            casterId: target.id,
+            modifier: { kind: "fightingOn" },
+            ends: "casterNextTurnEnd",
+          },
+        }),
+      );
+    }
+    if (events.length > 0) break;
+  }
+  return events;
+}
+
+// A `whenDowned` trait's effects, spending its use.
+function calledEvents(
+  target: Actor,
+  passive: Extract<Passive, { kind: "whenDowned" }>,
+  context: Context,
+): SystemEvent[] {
+  return [
+    dndEvent(`${NS}:resourceSpent`, {
+      actor: target.id,
+      resource: passive.resource,
+    }),
+    ...passive.effects.flatMap((effect) =>
+      effect.kind === "animate"
+        ? animatedEvents(effect, target, context)
+        : leafEvents([effect], passive.resource, target, target, context),
+    ),
+  ];
+}
+
+// Incapacitated by a foe: a `whenDowned` trait with `incapacitated` answers it, as Faithful Summons does.
+export function incapacitatedEvents(
+  target: Actor,
+  caster: Actor,
+  condition: Condition,
+  context: Context,
+): SystemEvent[] {
+  if (caster.side === target.side || !INCAPACITATING.includes(condition)) {
+    return [];
+  }
+  const stats = deriveStats(target, context);
+  const passive = stats.passives.find(
+    (item) =>
+      item.kind === "whenDowned" &&
+      item.incapacitated &&
+      (target.resourcesSpent[item.resource] ?? 0) <
+        (stats.resources[item.resource] ?? 0),
+  );
+  return passive?.kind === "whenDowned"
+    ? calledEvents(target, passive, context)
+    : [];
 }
 
 // Damage to each foe of `source` within `radius` feet of `origin`, halved by a save against the source's spell save
@@ -913,6 +1087,8 @@ export function dealEvents(
       );
     }
     events.push(...killEvents(target, { ...context, state }));
+    if (!isDead(hurt))
+      events.push(...downedEvents(hurt, { ...context, state }));
   }
   for (const effect of dealt > 0 ? (hurt?.activeEffects ?? []) : []) {
     if (!hurt || !effect.saveOnDamage) continue;
@@ -1543,6 +1719,9 @@ export function leafEvents(
             dndEvent(`${NS}:concentrationEnded`, { actor: target.id }),
           );
         }
+        events.push(
+          ...incapacitatedEvents(target, caster, effect.condition, context),
+        );
         break;
       }
       case "removeCondition":
@@ -1598,16 +1777,7 @@ export function leafEvents(
             context,
             effect.hostile,
             effect.check && stats.spellAbility
-              ? (dc) =>
-                  abilityCheck(
-                    caster,
-                    undefined,
-                    stats.spellAbility ?? "int",
-                    dc,
-                    (success) =>
-                      success ? "ends the spell" : "fails to end the spell",
-                    context,
-                  )
+              ? (dc) => spellcastingCheck(caster, stats, dc, context)
               : undefined,
           ),
         );
@@ -3074,6 +3244,7 @@ export function resolveAction(
                 critical: false,
                 massive: true,
               }),
+              dndEvent(`${NS}:disintegrated`, { actor: target.id }),
               { kind: "actorDefeated", actor: target.id },
             );
           }
@@ -3522,8 +3693,10 @@ function animatedEvents(
   actor: Actor,
   context: Context,
 ): SystemEvent[] {
-  if (actor.source.kind !== "monster") return [];
-  const id = effect.monster ?? actor.source.statBlockId;
+  const id =
+    effect.monster ??
+    (actor.source.kind === "monster" ? actor.source.statBlockId : undefined);
+  if (!id) return [];
   const monster = lookup(context, MonsterSchema, id);
   const open = [
     ...teleportSquares(actor, effect.range, 0, context.state, context),
@@ -3544,6 +3717,8 @@ function animatedEvents(
             kind: "monster",
             statBlockId: id,
             ...(effect.lacks.length > 0 ? { lacks: effect.lacks } : {}),
+            // a character's beasts die at 0 Hit Points, as monsters do, and leave with the fight
+            ...(actor.source.kind === "monster" ? {} : { calledBy: actor.id }),
           },
           hp: monster.hp,
           inventory: [],

@@ -428,6 +428,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     noActions: z.literal(true).optional(),
     noReactions: z.literal(true).optional(),
     noOpportunityAttacks: z.literal(true).optional(), // as Shocking Grasp's
+    noDisengage: z.literal(true).optional(), // as Hunter's Rime's on a creature Hunter's Mark marks
     oneAttack: z.literal(true).optional(),
     speed: z.enum(["half", "double", "none"]).optional(),
     spellFailure: z.number().int().min(1).max(100).optional(),
@@ -945,7 +946,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // as Harm's (combat/effects.ts, by the save's own damage).
   z.strictObject({ kind: z.literal("drainMaxHp") }),
   // A failed save's damage that drops the target to 0 Hit Points turns it to dust, dead outright, as Disintegrate.
-  // shortcut: nothing stops a later raising, which only True Resurrection or Wish should manage.
+  // Only a raising whose targeting has `dust` brings it back, as True Resurrection.
   z.strictObject({ kind: z.literal("disintegrate") }),
   // The target spends one of its Hit Point Dice and regains what it rolls plus `bonus`, as with Healer's Battle Medic.
   // Rolls up to `dice` of the target's Hit Point Dice (stopping once it is whole) and adds `bonus` once.
@@ -1204,6 +1205,7 @@ export const TargetingSchema = z.union([
     // time (state.ts REST_HOURS), so 0 is a death since the last rest.
     // shortcut: Revivify's minute is 0, as no clock runs between rests.
     diedWithin: z.number().int().min(0).optional(),
+    dust: z.literal(true).optional(), // with `dead`, even one turned to dust, as True Resurrection
     // only a creature this size or smaller, as for a giant frog's Swallow
     maxSize: z
       .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
@@ -1561,6 +1563,24 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       .optional(),
     exhaustion: z.number().int().min(1).optional(),
     allies: z.literal(true).optional(),
+  }),
+  // Dropping to 0 Hit Points leaves the bearer conscious: while an effect of one of the `while` features' activations
+  // is on it, as Rage beyond Death's Rage, still making Death Saving Throws but dying of three failures only once that
+  // ends; or, spending `resource` and its Reaction, until its next turn ends, as Strength before Death.
+  // shortcut: Strength before Death's extra turn is the samurai's next turn, not one that interrupts the current turn.
+  z.strictObject({
+    kind: z.literal("fightOn"),
+    while: z.array(ContentIdSchema).min(1).optional(),
+    resource: z.string().optional(),
+  }),
+  // Dropping to 0 Hit Points, or with `incapacitated` being Incapacitated by a foe, spends `resource` for these
+  // effects on the bearer, as Faithful Summons' beasts (an `animate` of a beast's stat block).
+  // shortcut: the beasts are the stat block given, not the bearer's pick of any Challenge Rating 2 or lower.
+  z.strictObject({
+    kind: z.literal("whenDowned"),
+    resource: z.string(),
+    effects: z.array(LeafEffectSchema).min(1),
+    incapacitated: z.literal(true).optional(),
   }),
   // Changes to the bearer's damaging cantrip that deals the most, as Agonizing, Repelling Blast or Eldritch Spear do:
   // damage added to each roll, effects on a hit, and range for each level of a class.
@@ -2070,7 +2090,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("killAdvantage") }),
   // A foe dropping to 0 Hit Points puts these effects on the bearer, as Dark One's Blessing's Temporary Hit Points:
   // with `within`, only a foe that near it, or with `mine` one it dropped itself; spending a use of the resource, and
-  // with `reaction` its Reaction, as Boon of the Soul Drinker's Siphon Life.
+  // with `reaction` its Reaction, as Boon of the Soul Drinker's Siphon Life. With `ally` they go to the most hurt of
+  // the bearer and its allies within `within`, with `fallenHitDice` a heal is the foe's number of Hit Dice, and with
+  // `oncePerTurn` it works once until the bearer's next turn starts and never while it's Incapacitated, as Keeper
+  // of Souls.
   z.strictObject({
     kind: z.literal("onKill"),
     effects: z.array(LeafEffectSchema).min(1),
@@ -2078,6 +2101,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     mine: z.literal(true).optional(),
     resource: z.string().optional(),
     reaction: z.literal(true).optional(),
+    ally: z.literal(true).optional(),
+    fallenHitDice: z.literal(true).optional(),
+    oncePerTurn: z.literal(true).optional(),
   }),
   // Helping an attack on an enemy also gives it Disadvantage on its next save, as Harper Teamwork.
   z.strictObject({ kind: z.literal("helpRider") }),
@@ -2091,13 +2117,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Casting a spell that deals this type puts these effects on the bearer, as Flames of Phlegethos' flames.
   // With `school` instead, casting a spell of that school with an action and a spell slot does, as Bewitching
   // Magic's Misty Step after an Enchantment spell. With `uses`, casting one of these spells does, as Hunter's Rime's
-  // Temporary Hit Points with Hunter's Mark.
+  // Temporary Hit Points with Hunter's Mark, and `onTargets` go on the spell's targets, as its hold on the marked.
   z.strictObject({
     kind: z.literal("castRider"),
     damage: DamageTypeSchema.optional(),
     school: z.array(SpellSchoolSchema).min(1).optional(),
     uses: z.array(ContentIdSchema).min(1).optional(),
     effects: z.array(LeafEffectSchema).min(1),
+    onTargets: z.array(LeafEffectSchema).min(1).optional(),
+    resource: z.string().optional(), // spending a use, only while one is left, as Defy Death's after Spare the Dying
   }),
   // Using an activation of this feature also does these to the bearer, as Tactical Shift's move with Second Wind or
   // Arcane Charge's teleport with Action Surge.

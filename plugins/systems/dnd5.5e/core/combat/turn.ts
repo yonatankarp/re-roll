@@ -1,4 +1,5 @@
 import { afterDamage, reactFrames } from "./reactions.ts";
+import { deathSaveEvents } from "./actions.ts";
 import { duelStrayed } from "./duel.ts";
 import { confusedBy } from "./confusion.ts";
 import {
@@ -20,6 +21,7 @@ import {
   INCAPACITATING,
   isDead,
   isDown,
+  fightingOn,
   isStable,
   NS,
   frame,
@@ -546,6 +548,10 @@ export function runAdvanceTurn(
     ...finished,
     ...expired,
     ...(next ? rescueEvents(next, { ...context, state: after }) : []),
+    // Rage beyond Death: conscious at 0 Hit Points, still dying.
+    ...(next && next.hp <= 0 && fightingOn(next)?.delayDeath && !isStable(next)
+      ? deathSaveEvents(next, { ...context, state: after })
+      : []),
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),

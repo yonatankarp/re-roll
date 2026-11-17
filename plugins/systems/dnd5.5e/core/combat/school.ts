@@ -168,6 +168,7 @@ export function castRiders(
   action: KnownAction,
   slotLevel: number | undefined,
   context: Context,
+  targets: readonly Actor[] = [],
 ): { readonly events: SystemEvent[]; readonly frames: Frame[] } {
   if (action.spellLevel === null) return { events: [], frames: [] };
   const { resolution, cost } = action.activation;
@@ -178,8 +179,16 @@ export function castRiders(
       : []),
   ]);
   const school = schoolOf(action.id, context);
-  const rides = deriveStats(actor, context).passives.flatMap((passive) => {
+  const stats = deriveStats(actor, context);
+  const rides = stats.passives.flatMap((passive) => {
     if (passive.kind !== "castRider") return [];
+    if (
+      passive.resource &&
+      (actor.resourcesSpent[passive.resource] ?? 0) >=
+        (stats.resources[passive.resource] ?? 0)
+    ) {
+      return [];
+    }
     const fits = passive.uses
       ? passive.uses.some(
           (id) =>
@@ -190,13 +199,24 @@ export function castRiders(
           cost.includes("action") &&
           passive.school.some((item) => item === school)
         : passive.damage !== undefined && types.has(passive.damage);
-    return fits ? [passive.effects] : [];
+    return fits ? [passive] : [];
   });
   return {
-    events: rides.flatMap((effects) =>
-      leafEvents(effects, `castRider:${action.id}`, actor, actor, context),
-    ),
-    frames: rides.flatMap((effects) =>
+    events: rides.flatMap(({ effects, onTargets, resource }) => [
+      ...(resource
+        ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
+        : []),
+      ...leafEvents(effects, `castRider:${action.id}`, actor, actor, context),
+      // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
+      ...(onTargets
+        ? targets.flatMap((target) =>
+            target.id === actor.id
+              ? []
+              : leafEvents(onTargets, action.id, actor, target, context),
+          )
+        : []),
+    ]),
+    frames: rides.flatMap(({ effects }) =>
       effects.flatMap((effect) =>
         effect.kind === "teleport"
           ? [
