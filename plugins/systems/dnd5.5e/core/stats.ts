@@ -15,6 +15,7 @@ import {
   effectiveBuild,
   equipped,
   hasCondition,
+  turnId,
 } from "./state.ts";
 import { lightAt } from "./sight.ts";
 import { currentShape, formKept, formOf, usableIn } from "./forms.ts";
@@ -776,7 +777,7 @@ function bestMentalAbility(abilities: AbilityScores): Ability {
 export function ownFirstTurn(actor: Actor, access: ContentAccess): boolean {
   const combat = (access as ContentAccess & { readonly state?: DndState }).state
     ?.combat;
-  return combat?.round === 1 && combat.order[combat.index] === actor.id;
+  return combat?.round === 1 && turnId(combat) === actor.id;
 }
 
 // Whether it's the actor's own turn and it has taken its action, as for Blade Flourish's Speed.
@@ -784,7 +785,7 @@ export function ownFirstTurn(actor: Actor, access: ContentAccess): boolean {
 function ownTurnActed(actor: Actor, access: ContentAccess): boolean {
   const combat = (access as ContentAccess & { readonly state?: DndState }).state
     ?.combat;
-  return combat?.order[combat.index] === actor.id && !actor.budget.action;
+  return turnId(combat) === actor.id && !actor.budget.action;
 }
 
 // The variants picked for a feature, or for the feature it follows; with none picked, as many as it gives at first.
@@ -1028,12 +1029,52 @@ function withSpellDamage(
 }
 
 // A feature's activations with the effects other features ride on them, as Tactical Shift's move on Second Wind.
+// Improved Mystic Fighting Style: a spell of the levels and class list named, that takes an action, can also be cast
+// with the passive's costs, as part of the Bonus Action of Flurry of Blows.
+function castWithVariants(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+  access: ContentAccess,
+): readonly KnownAction[] {
+  const ways = passives.flatMap((passive) =>
+    passive.kind === "castWith" ? [passive] : [],
+  );
+  if (ways.length === 0) return actions;
+  const extra = actions.flatMap((action) => {
+    const [, spellId] = /^spell:([^:]+:[^:]+)$/.exec(action.id) ?? [];
+    if (!spellId || action.spellLevel === null) return [];
+    if (!action.activation.cost.includes("action")) return [];
+    const spell = lookup(access, SpellSchema, spellId);
+    return ways.flatMap((way) =>
+      way.levels.includes(action.spellLevel ?? -1) &&
+      spell.classes.includes(way.list)
+        ? [
+            {
+              ...action,
+              id: `${action.id}:with`,
+              name: `${action.name} (${way.label})`,
+              activation: {
+                ...action.activation,
+                cost: [
+                  ...action.activation.cost.filter((cost) => cost !== "action"),
+                  ...way.cost,
+                ],
+              },
+            },
+          ]
+        : [],
+    );
+  });
+  return extra.length === 0 ? actions : [...actions, ...extra];
+}
+
 function withRiders(
   actions: readonly KnownAction[],
   passives: readonly Passive[],
   actor: Actor,
 ): KnownAction[] {
-  return actions.map((action) => {
+  return actions.map((given) => {
+    let action = given;
     const { resolution } = action.activation;
     const riders = passives.flatMap((passive) =>
       passive.kind === "activationRider" &&
@@ -1049,6 +1090,16 @@ function withRiders(
     );
     const extra = riders.flatMap(({ effects }) => effects);
     const damage = riders.flatMap(({ damage: more }) => more ?? []);
+    const own = riders.flatMap(({ self }) => self ?? []);
+    if (own.length > 0) {
+      action = {
+        ...action,
+        activation: {
+          ...action.activation,
+          alsoSelf: [...(action.activation.alsoSelf ?? []), ...own],
+        },
+      };
+    }
     // On a save, whether it succeeds or fails, as Focused Strike's with Stunning Strike.
     if (resolution.kind === "save" && (damage.length > 0 || extra.length > 0)) {
       return {
@@ -1752,7 +1803,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         withWeaponRiders(
           withSpellDamage(
             emptyHanded(
-              withRiders(actions, fromFeatures.passives, actor),
+              withRiders(
+                castWithVariants(actions, fromFeatures.passives, access),
+                fromFeatures.passives,
+                actor,
+              ),
               actor,
               access,
             ),

@@ -64,6 +64,7 @@ import {
   findAction,
   hasPassive,
   inReach,
+  usedKey,
   moveSquares,
   reaches,
   slotLevelFor,
@@ -349,21 +350,33 @@ function castAction(
   const passedSaves = pained?.events ?? [];
   const picked = typeof target === "string" ? null : target;
   const targetId = typeof target === "string" ? target : ALL;
-  const { projectiles, resolution } = action.activation;
+  const { projectiles, resolution, distinct } = action.activation;
+  // Each at a different creature: one apiece, the most hurt first, when they aren't picked.
+  const apart =
+    distinct && !picked
+      ? [...inReach(action, actor, state, context)]
+          .sort((a, b) => a.hp - b.hp)
+          .slice(0, projectiles ?? 1)
+      : null;
   const caught = picked
     ? picked.map((id) => actorOf(state, id))
-    : resolveTargets(targetId, action, actor, context);
+    : (apart ?? resolveTargets(targetId, action, actor, context));
   const riders = castRiders(actor, action, slotLevel, context, caught);
   const result: SystemResult =
     projectiles !== undefined && resolution.kind !== "save"
       ? {
-          frames: Array.from({ length: projectiles }, (_, index) =>
-            frame(resolution.kind === "attack" ? "attackRoll" : "projectile", {
-              attacker: actor.id,
-              actionId,
-              target: picked?.[index] ?? targetId,
-              ...(slotLevel === undefined ? {} : { slotLevel }),
-            }),
+          frames: Array.from(
+            { length: apart?.length ?? projectiles },
+            (_, index) =>
+              frame(
+                resolution.kind === "attack" ? "attackRoll" : "projectile",
+                {
+                  attacker: actor.id,
+                  actionId,
+                  target: picked?.[index] ?? apart?.[index]?.id ?? targetId,
+                  ...(slotLevel === undefined ? {} : { slotLevel }),
+                },
+              ),
           ),
         }
       : resolveAction(
@@ -393,6 +406,16 @@ function castAction(
           ]
         : []),
       ...actionKindMarks(actor, action, slotLevel, context),
+      // What it does to its bearer whatever its targets, as Step of the Wind's Dash while carrying an ally.
+      ...(action.activation.alsoSelf
+        ? leafEvents(
+            action.activation.alsoSelf,
+            action.id,
+            actor,
+            actor,
+            context,
+          )
+        : []),
       ...passedSaves,
       ...(foiled?.events ?? []),
       ...lightAttackEvents(actor, actionId, context),
@@ -444,7 +467,17 @@ function actionKindMarks(
       typeof item.activation.afterAction === "string" ||
       typeof item.activation.afterCast === "string",
   );
-  if (waits.length === 0) return [];
+  // Hand of Healing's heal after its Flurry of Blows strike.
+  const labelled = /^feature:([^:]+:[^:]+):\d+$/.exec(action.id)?.[1];
+  const usedMarks = deriveStats(actor, context).actions.flatMap((item) => {
+    const after = item.activation.afterUse;
+    return after &&
+      labelled === after.feature &&
+      (after.label === undefined || after.label === action.activation.label)
+      ? [usedKey(after.feature, after.label)]
+      : [];
+  });
+  if (waits.length === 0 && usedMarks.length === 0) return [];
   const { cost, resolution } = action.activation;
   const withAction = cost.includes("action");
   const keys = [
@@ -465,7 +498,7 @@ function actionKindMarks(
       : []),
     ...((action.spellLevel ?? 0) >= 1 ? [LEVELED_CAST] : []),
   ];
-  return keys
+  return [...(waits.length > 0 ? keys : []), ...new Set(usedMarks)]
     .filter((key) => !actor.usedThisTurn.includes(key))
     .map((key) => dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key }));
 }
@@ -531,7 +564,8 @@ function pickFrame(
     action,
     slotLevelFor(actor, actionId, slot, context),
   );
-  const repeats = action.activation.projectiles !== undefined;
+  const repeats =
+    action.activation.projectiles !== undefined && !action.activation.distinct;
   return awaitDecision({
     id: encodeOption(
       `${NS}:targets:${actor.id}:${String(state.combat?.round ?? 0)}`,

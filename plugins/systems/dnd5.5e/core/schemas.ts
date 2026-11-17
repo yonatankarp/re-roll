@@ -1744,6 +1744,12 @@ export const ActivationSchema = z.strictObject({
   outOfCombat: z.literal(true).optional(),
   label: z.string().min(1).optional(), // added to its feature's name, to tell two of a feature's activations apart
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
+  distinct: z.literal(true).optional(), // with `projectiles`, each at a different creature, as Intoxicated Frenzy's
+  // Only once this turn its bearer has used the activation of this feature with this label, as Hand of Healing's heal
+  // in place of a Flurry of Blows strike (combat/actions.ts actionKindMarks).
+  afterUse: z
+    .strictObject({ feature: ContentIdSchema, label: z.string().optional() })
+    .optional(),
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
   area: AreaEffectSchema.optional(), // what the zone its resolution leaves does later
@@ -2195,6 +2201,30 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // A spell it casts doesn't give away a hiding place unless it ends the turn out of Three-Quarters or Total Cover, as
   // Spell Subterfuge's Sneaky Casting (combat/turn.ts outOfCover).
   z.strictObject({ kind: z.literal("sneakyCasting") }),
+  // Its spells of these levels on this class's list that take an action can be cast with these costs instead, as
+  // Improved Mystic Fighting Style's casting in place of two Flurry of Blows strikes (stats.ts).
+  z.strictObject({
+    kind: z.literal("castWith"),
+    levels: z.array(z.number().int().min(0).max(9)).min(1),
+    list: ContentIdSchema,
+    cost: z
+      .array(
+        z.union([
+          z.enum(["action", "bonusAction", "reaction"]),
+          z.strictObject({
+            resource: z.string(),
+            count: z.number().int().min(2).optional(),
+          }),
+        ]),
+      )
+      .min(1),
+    label: z.string().min(1),
+  }),
+  // A second turn in a fight's first round, at its Initiative less `minus`, as Thief's Reflexes (state.ts advanceTurn).
+  z.strictObject({
+    kind: z.literal("secondTurn"),
+    minus: z.number().int().min(1),
+  }),
   // Advantage on the Stealth check of the Hide action, as Skulker's Fog of War.
   z.strictObject({ kind: z.literal("hideAdvantage") }),
   // An attack roll made while hidden that misses doesn't give the bearer away, as Skulker's Sniper.
@@ -2724,7 +2754,26 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     damage: DamageTypeSchema.optional(),
     school: z.array(SpellSchoolSchema).min(1).optional(),
     uses: z.array(ContentIdSchema).min(1).optional(),
-    effects: z.array(LeafEffectSchema).min(1),
+    effects: z.array(LeafEffectSchema).default([]),
+    // One of these the caster may pick once the spell is done, as Steps of the Fey's Refreshing or Taunting Step
+    // (combat/school.ts): `effects` on the caster or one creature of its side within `within` feet of it, or `foes`
+    // effects on each foe within that far of where it cast the spell, after this save against its spell save DC.
+    choices: z
+      .array(
+        z.strictObject({
+          name: z.string().min(1),
+          within: z.number().int().min(5).optional(),
+          effects: z.array(LeafEffectSchema).default([]),
+          foes: z
+            .strictObject({
+              save: AbilitySchema.optional(),
+              effects: z.array(LeafEffectSchema).min(1),
+            })
+            .optional(),
+        }),
+      )
+      .min(1)
+      .optional(),
     onTargets: z.array(LeafEffectSchema).min(1).optional(),
     resource: z.string().optional(), // spending a use, only while one is left, as Defy Death's after Spare the Dying
   }),
@@ -2738,6 +2787,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     feature: ContentIdSchema,
     label: z.string().min(1).optional(),
     effects: z.array(LeafEffectSchema).default([]),
+    // effects on the bearer, whatever the activation's targets, as Drunken Technique's Disengage with Flurry of Blows
+    self: z.array(LeafEffectSchema).min(1).optional(),
     damage: z.array(DamageSchema).min(1).optional(),
     while: z.array(ContentIdSchema).min(1).optional(),
   }),

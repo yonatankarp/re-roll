@@ -15,6 +15,7 @@ import {
   mountOf,
   NS,
   frame,
+  turnId,
 } from "../state.ts";
 import {
   ALL,
@@ -2404,7 +2405,7 @@ function oncePerTurnHit(
 
 function inOwnTurn(target: Actor, context: Context): boolean {
   const { combat } = context.state;
-  return combat?.order[combat.index] === target.id;
+  return turnId(combat) === target.id;
 }
 
 // Lords' Alliance Agent: once a turn, a Critical Hit gives the nearest ally within 30 feet without Heroic

@@ -39,6 +39,7 @@ import {
   NS,
   frame,
   SURGED,
+  turnId,
 } from "../state.ts";
 import {
   type ContentAccess,
@@ -725,9 +726,7 @@ function enduredEvents(
 // A foe that just dropped to 0 Hit Points feeds its enemies' traits, as Dark One's Blessing.
 // shortcut: the creature whose turn it is counts as the one that dropped it, as most damage comes on its own turn.
 function killEvents(fallen: Actor, context: Context): SystemEvent[] {
-  const turn = context.state.combat
-    ? context.state.combat.order[context.state.combat.index]
-    : undefined;
+  const turn = context.state.combat ? turnId(context.state.combat) : undefined;
   return Object.values(context.state.actors).flatMap((bearer) => {
     if (bearer.side === fallen.side || isDown(bearer)) return [];
     const stats = deriveStats(bearer, context);
@@ -1506,14 +1505,14 @@ export function damageRiders(
       return [];
     }
     // A hit during the target's own turn is an Opportunity Attack.
-    if (passive.opportunity && combat?.order[combat.index] !== target.id) {
+    if (passive.opportunity && combat && turnId(combat) !== target.id) {
       return [];
     }
     if (spell && !passive.spells) return [];
     if (passive.critical && !critical) return [];
     if (passive.while && !underEffect(attacker, passive.while)) return [];
     if (passive.firstRound && (combat?.round ?? 1) > 1) return [];
-    if (passive.ownTurn && combat?.order[combat.index] !== attacker.id) {
+    if (passive.ownTurn && combat && turnId(combat) !== attacker.id) {
       return [];
     }
     const key =
@@ -3719,18 +3718,6 @@ export function resolveAction(
   switch (resolution.kind) {
     case "automatic": {
       beginConcentration(resolution.effects);
-      // What it does to its bearer whatever its targets, as Step of the Wind's Dash while carrying an ally.
-      if (action.activation.alsoSelf) {
-        events.push(
-          ...leafEvents(
-            action.activation.alsoSelf,
-            action.id,
-            actor,
-            actor,
-            context,
-          ),
-        );
-      }
       for (const effect of resolution.effects) {
         if (effect.kind === "moveZone" && aim) {
           const moved = movedZone(effect.source, actor, aim, context);

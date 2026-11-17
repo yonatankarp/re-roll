@@ -51,6 +51,7 @@ import {
   isDown,
   isStable,
   mountOf,
+  turnId,
 } from "../core/state.ts";
 import { parseState } from "./parse-state.ts";
 import {
@@ -306,7 +307,7 @@ function actorOf(event: SystemEvent, rawState: unknown): string | null {
     event.kind === "dnd5.5e:rollReported" && "payload" in event
       ? EVENT_SCHEMAS["dnd5.5e:rollReported"].parse(event.payload).actor
       : null;
-  const id = reported ?? state.combat?.order[state.combat.index];
+  const id = reported ?? turnId(state.combat);
   return id ? (state.actors[id]?.name ?? null) : null;
 }
 
@@ -908,8 +909,8 @@ function combat(
 ) {
   const state = parseState(rawState);
   if (!state.combat) return null;
-  const { index, round } = state.combat;
-  const acting = state.combat.order[index];
+  const { round } = state.combat;
+  const acting = turnId(state.combat);
   // The foes the party can't see now are left out: off the board, out of the turn order and unweighed.
   const order = state.combat.order.filter(
     (id) => !unseenFoe(state, id, access),

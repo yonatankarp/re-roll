@@ -21,6 +21,7 @@ import {
   NS,
   frame,
   SURGED,
+  turnId,
 } from "../state.ts";
 import {
   deriveStats,
@@ -822,6 +823,14 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
   if (activation.afterBonusAction && actor.budget.bonusAction) return false;
   if (activation.while && !underEffect(actor, activation.while)) return false;
   if (
+    activation.afterUse &&
+    !used.includes(
+      usedKey(activation.afterUse.feature, activation.afterUse.label),
+    )
+  ) {
+    return false;
+  }
+  if (
     activation.withAttack &&
     !actor.budget.action &&
     !actor.activeEffects.some(
@@ -848,6 +857,10 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
     cost.includes("action")
   );
 }
+
+// The usedThisTurn mark of an activation of a feature, with its label, used this turn (combat/actions.ts).
+export const usedKey = (feature: string, label?: string): string =>
+  `used:${feature}${label === undefined ? "" : `:${label}`}`;
 
 // Whether an effect of one of these features' activations is on the actor, or it concentrates on one of these
 // spells, as a Rage for Travel along the Tree or Divine Fury.
@@ -945,7 +958,7 @@ export function extraFits(
   context: Context,
 ): boolean {
   const { state } = context;
-  const turn = state.combat?.order[state.combat.index];
+  const turn = turnId(state.combat);
   if (passive.ownTurn && turn !== attacker.id) return false;
   if (passive.firstRound && (state.combat?.round ?? 1) > 1) return false;
   if (passive.while?.some((id) => !underEffect(attacker, [id]))) return false;
@@ -1319,7 +1332,7 @@ export function combatEnded(
 }
 
 export function currentActor(state: DndState): Actor | undefined {
-  const actorId = state.combat?.order[state.combat.index];
+  const actorId = turnId(state.combat);
   return actorId === undefined ? undefined : state.actors[actorId];
 }
 

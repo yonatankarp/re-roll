@@ -15,6 +15,7 @@ import {
   forAttacker,
   isDown,
   frame,
+  turnId,
 } from "./state.ts";
 import { type KnownAction, type Stats, deriveStats } from "./stats.ts";
 import { findAction, hitFits } from "./combat/queries.ts";
@@ -185,7 +186,7 @@ function missRerolls(
 ): readonly { passive: MissReroll; index: number }[] {
   const stats = deriveStats(attacker, context);
   const combat = context.state.combat;
-  const ownTurn = combat?.order[combat.index] === attacker.id;
+  const ownTurn = turnId(combat) === attacker.id;
   const hitWith = findAction(attacker, actionId, context);
   return stats.passives.flatMap((passive, index) =>
     passive.kind === "missReroll" &&

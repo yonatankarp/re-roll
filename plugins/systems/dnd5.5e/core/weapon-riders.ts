@@ -1,6 +1,6 @@
 import type { ContentAccess } from "#sdk";
 import type { Ability, AbilityScores, Passive } from "./schemas.ts";
-import type { Actor, DndState } from "./state.ts";
+import { type Actor, type DndState, turnId } from "./state.ts";
 import type { KnownAction } from "./stats.ts";
 import { hitFits, underEffect } from "./combat/queries.ts";
 import { ItemSchema } from "./schemas.ts";
@@ -139,7 +139,7 @@ function ridden(
 function ownTurn(actor: Actor, access: ContentAccess): boolean {
   const { state } = access as ContentAccess & { readonly state?: DndState };
   const combat = state?.combat;
-  return combat?.order[combat.index] === actor.id;
+  return turnId(combat) === actor.id;
 }
 
 export function withWeaponRiders(

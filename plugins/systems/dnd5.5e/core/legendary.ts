@@ -42,6 +42,7 @@ import {
   isDead,
   isDown,
   frame,
+  turnId,
 } from "./state.ts";
 import { type KnownAction, deriveStats } from "./stats.ts";
 
@@ -370,7 +371,7 @@ export function betweenTurns(
   const after = applyDndEvent(before, dndEvent(`${NS}:turnAdvanced`, {}));
   const { combat } = before;
   if (!combat) return [];
-  const ended = combat.order[combat.index];
+  const ended = turnId(combat);
   const legendary = combat.order.flatMap((id) => {
     const actor = before.actors[id];
     return id !== ended && canAct(actor) && legendOf(actor, access).legendary

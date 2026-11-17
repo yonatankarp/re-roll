@@ -7,6 +7,7 @@ import {
   NS,
   PICKED_UP,
   frame,
+  turnId,
 } from "../state.ts";
 import { type ContentAccess, type Decision, PLAYER_ACTOR } from "#sdk";
 import {
@@ -123,7 +124,8 @@ function turnOptions(
     }
     // Each slot can give a different number of targets: one is a click on a creature, more are chosen one by one.
     // Darts or rays can also all go at one creature, or at the lowest HP first.
-    const repeats = activation.projectiles !== undefined;
+    const repeats =
+      activation.projectiles !== undefined && !activation.distinct;
     const base = slotToSpend(action, actor, stats) ?? undefined;
     for (const slot of [undefined, ...upcastSlots(action, actor, stats)]) {
       const count = targetCount(action, slot ?? base);
@@ -208,7 +210,7 @@ export function nextDndDecision(
 
   const { combat } = state;
   if (!combat) return null;
-  const actorId = combat.order[combat.index];
+  const actorId = turnId(combat);
   if (actorId === undefined) return null;
   const actor = actorOf(state, actorId);
 

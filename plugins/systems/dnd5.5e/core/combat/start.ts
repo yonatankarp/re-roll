@@ -151,6 +151,21 @@ export function startCombat(
     (a, b) => b.total - a.total || a.position - b.position,
   );
   const order = sorted.map((item) => item.id);
+  // Thief's Reflexes: a second turn in the first round, before the first creature whose Initiative is lower than
+  // its own less ten, or at the round's end.
+  const fighters = [...party, ...familiars, ...monsters];
+  const secondTurns = sorted.flatMap((item) => {
+    const actor = fighters.find((other) => other.id === item.id);
+    const passive = actor
+      ? deriveStats(actor, context).passives.find(
+          (entry) => entry.kind === "secondTurn",
+        )
+      : undefined;
+    if (passive?.kind !== "secondTurn") return [];
+    const at = item.total - passive.minus;
+    const before = sorted.find((other) => other.total < at)?.id ?? null;
+    return [{ actor: item.id, before }];
+  });
   // Lair actions come on initiative count 20 and lose ties, so after everyone who rolled 20 or more.
   const lair = encounter.lair
     ? { at: sorted.filter((item) => item.total >= 20).length }
@@ -220,6 +235,7 @@ export function startCombat(
     ...(environment ? { environment } : {}),
     ...(surprised ? { surprised } : {}),
     ...(lair ? { lair } : {}),
+    ...(secondTurns.length > 0 ? { secondTurns } : {}),
     ...(familiars.length > 0 ? { familiars } : {}),
   };
   // Weighed as the fight starts, with everyone in it the party can see, and kept: a fight's share never

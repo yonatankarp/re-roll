@@ -8,6 +8,7 @@ import {
   type DndState,
   dndEvent,
   NS,
+  turnId,
 } from "../state.ts";
 
 // Durations counted in rounds, and the limits Slow and its kin put on a creature's turn.
@@ -47,7 +48,7 @@ export function lastsFor(
       case "turnEnd":
         return {
           lasts: {
-            actor: combat.order[combat.index] ?? target.id,
+            actor: turnId(combat) ?? target.id,
             round: combat.round,
             at: "end",
           },

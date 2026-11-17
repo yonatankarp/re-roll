@@ -603,7 +603,7 @@ function pickNext(
     inReach(action, actor, context.state, context),
     picked,
     targetCount(findAction(actor, actionId, context), slotLevel),
-    projectiles !== undefined,
+    projectiles !== undefined && !action.activation.distinct,
     { sourceId: spellSource(action), perHit },
   );
 }

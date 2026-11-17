@@ -1,17 +1,25 @@
-import type { Frame, SystemEvent } from "#sdk";
+import {
+  awaitDecision,
+  type Frame,
+  frameHandler,
+  type SystemEvent,
+} from "#sdk";
+import { z } from "zod";
 import { ClassSchema, type Passive, SpellSchema } from "../schemas.ts";
-import { type Actor, dndEvent, NS } from "../state.ts";
+import { type Actor, dndEvent, frame, isDown, NS } from "../state.ts";
+import { distanceFeet } from "../grid.ts";
 import {
   deriveStats,
   evaluateFormula,
   type KnownAction,
   lookup,
   spellModifier,
+  spellSaveDc,
   type Stats,
 } from "../stats.ts";
 import { HIT_DICE, spellOfSource } from "./ids.ts";
 import { hitDieRoll } from "../trait-rules.ts";
-import { leafEvents } from "./effects.ts";
+import { leafEvents, rollSave } from "./effects.ts";
 import { teleportFrame } from "./movement.ts";
 import type { Context } from "./queries.ts";
 
@@ -247,8 +255,9 @@ export function castRiders(
           : []),
       ]),
     ],
-    frames: rides.flatMap(({ effects }) =>
-      effects.flatMap((effect) =>
+    frames: rides.flatMap(({ effects, choices }) => [
+      ...(choices ? riderChoiceFrame(actor, choices, action, context) : []),
+      ...effects.flatMap((effect) =>
         effect.kind === "teleport"
           ? [
               teleportFrame(
@@ -261,9 +270,113 @@ export function castRiders(
             ]
           : [],
       ),
-    ),
+    ]),
   };
 }
+
+type Choice = NonNullable<
+  Extract<Passive, { kind: "castRider" }>["choices"]
+>[number];
+
+const NONE = "none";
+
+// Steps of the Fey: once the spell is done the caster picks one of its rider's choices, or none: effects on itself or
+// an ally near it, or a save for each foe near where it cast the spell.
+function riderChoiceFrame(
+  actor: Actor,
+  choices: readonly Choice[],
+  action: KnownAction,
+  context: Context,
+): Frame[] {
+  const options = choices.flatMap((choice, index) => {
+    if (choice.foes) {
+      return [{ id: String(index), label: choice.name }];
+    }
+    const near = Object.values(context.state.actors).filter(
+      (item) =>
+        item.side === actor.side &&
+        !isDown(item) &&
+        (item.id === actor.id ||
+          (choice.within !== undefined &&
+            distanceFeet(item.position, actor.position) <= choice.within)),
+    );
+    return near.map((item) => ({
+      id: `${String(index)}|${item.id}`,
+      label:
+        item.id === actor.id ? choice.name : `${choice.name}: ${item.name}`,
+    }));
+  });
+  if (options.length === 0) return [];
+  return [
+    awaitDecision({
+      id: `${NS}:riderChoice:${actor.id}:${action.id}`,
+      actor: actor.id,
+      prompt: `${action.name}: which of its extra effects?`,
+      options: [...options, { id: NONE, label: "None" }],
+      resume: frame("riderChoice", {
+        actor: actor.id,
+        sourceId: action.id,
+        choices,
+        ...(actor.position ? { from: actor.position } : {}),
+      }),
+    }),
+  ];
+}
+
+const RiderChoiceSchema = z.object({
+  actor: z.string(),
+  sourceId: z.string(),
+  choices: z.array(z.unknown()),
+  from: z.object({ x: z.number(), y: z.number() }).optional(),
+  answer: z.string(),
+});
+
+export const riderChoiceFrames = {
+  [`${NS}:riderChoice`]: frameHandler({
+    schema: RiderChoiceSchema,
+    run: (payload, context: Context) => {
+      const caster = context.state.actors[payload.actor];
+      if (!caster || payload.answer === NONE) return {};
+      const [index = "", targetId] = payload.answer.split("|");
+      const choice = payload.choices[Number(index)] as Choice | undefined;
+      if (!choice) throw new Error(`${payload.answer} isn't offered`);
+      if (!choice.foes) {
+        const target = context.state.actors[targetId ?? caster.id] ?? caster;
+        return {
+          events: leafEvents(
+            choice.effects,
+            payload.sourceId,
+            caster,
+            target,
+            context,
+          ),
+        };
+      }
+      const { save, effects } = choice.foes;
+      const dc = spellSaveDc(deriveStats(caster, context));
+      const from = payload.from ?? caster.position;
+      const events = Object.values(context.state.actors).flatMap((foe) => {
+        if (
+          foe.side === caster.side ||
+          isDown(foe) ||
+          distanceFeet(foe.position, from ?? null) > (choice.within ?? 5)
+        ) {
+          return [];
+        }
+        const rolled = save
+          ? rollSave(foe, save, dc, context, true)
+          : { saved: false, events: [] };
+        return [
+          ...rolled.events,
+          ...(rolled.saved
+            ? []
+            : leafEvents(effects, payload.sourceId, caster, foe, context)),
+        ];
+      });
+      return { events };
+    },
+  }),
+};
 
 // Persistent Conjuration: the bonus to the save to keep Concentration on a Conjuration spell.
 // shortcut: the spellcasting modifier, rather than the one the feat raised, which it usually is.

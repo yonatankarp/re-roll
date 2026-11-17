@@ -106,6 +106,7 @@ export const FRAME_KINDS = [
   "reincarnateAnswer",
   "missReroll", // a missed attack rolled again, or at another creature, as Master Duelist or Curving Shot (class-rules.ts)
   "bringAlong", // the allies a teleport brings land beside it, as Travel along the Tree's (combat/movement.ts)
+  "riderChoice", // what a spell's cast rider does, picked once it's done, as Steps of the Fey's (combat/school.ts)
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -321,6 +322,27 @@ const GridSchema = z.strictObject({
   width: z.number().int(),
   height: z.number().int(),
 });
+const SecondTurnSchema = z.strictObject({
+  actor: z.string(),
+  before: z.string().nullable(),
+});
+
+// Whose turn it is: a creature taking a second turn between others', or the one the order is at.
+export function turnId(
+  combat:
+    | {
+        readonly order: readonly string[];
+        readonly index: number;
+        readonly interlude?: { readonly actor: string } | undefined;
+      }
+    | null
+    | undefined,
+): string | undefined {
+  return combat
+    ? (combat.interlude?.actor ?? combat.order[combat.index])
+    : undefined;
+}
+
 // A battle map's ground, cover and light, as "x,y" squares. Missing in fights on plain maps and older saves.
 export const TerrainSchema = z.strictObject({
   difficult: z.array(z.string()),
@@ -495,6 +517,17 @@ export const StateSchema = z.strictObject({
       map: FightMapSchema.optional(),
       loot: LootSchema.optional(), // found if the party wins
       lair: LairSchema.optional(),
+      // Second turns in the first round, as Thief's Reflexes': each before `before`'s turn, or at the round's end
+      // with none. Missing in older saves.
+      secondTurns: z.array(SecondTurnSchema).optional(),
+      // A creature taking one of those turns now, between others' turns (`resume` "same" goes back to the turn it came
+      // before, "advance" to the one after it). Missing outside one.
+      interlude: z
+        .strictObject({
+          actor: z.string(),
+          resume: z.enum(["same", "advance"]),
+        })
+        .optional(),
       // The share of damage the party takes this fight, set as it starts. Missing in older saves, which
       // played at the difficulty's own share.
       damageToParty: z.number().optional(),
@@ -556,6 +589,7 @@ const CombatStartedSchema = z.strictObject({
   loot: LootSchema.optional(),
   surprised: SurpriseSchema.optional(),
   lair: LairSchema.optional(),
+  secondTurns: z.array(SecondTurnSchema).optional(),
   damageToParty: z.number().optional(),
   fog: z.literal(true).optional(),
   sunlight: z.literal(true).optional(),
@@ -1173,6 +1207,11 @@ function advanceTurn(state: DndState): DndState {
   if (!combat) return state;
   const count = combat.order.length;
   let { index, round } = combat;
+  const { interlude, ...rest } = combat;
+  // A second turn ending goes back to the turn it came before, unless it came at the round's end.
+  if (interlude?.resume === "same") {
+    return turnStarts(state, rest, index, round, interlude.actor);
+  }
   for (let step = 0; step < count; step += 1) {
     index += 1;
     if (index >= count) {
@@ -1189,11 +1228,52 @@ function advanceTurn(state: DndState): DndState {
       break;
     }
   }
-  const nextId = combat.order[index] ?? "";
+  // Thief's Reflexes: a second turn in the first round, before the turn it comes before, or before the second round.
+  // A creature it came before that's gone from the turns still has it come there, or at the round's end.
+  const due = (rest.secondTurns ?? []).find(
+    ({ before }) =>
+      combat.round === 1 &&
+      (round > 1 || (before !== null && index >= combat.order.indexOf(before))),
+  );
+  const thief = due ? state.actors[due.actor] : undefined;
+  if (due && thief && !isDead(thief)) {
+    const left = (rest.secondTurns ?? []).filter((item) => item !== due);
+    const planned = { ...rest, secondTurns: left };
+    return round > 1
+      ? turnStarts(
+          state,
+          planned,
+          combat.index,
+          combat.round,
+          interlude?.actor,
+          {
+            actor: due.actor,
+            resume: "advance",
+          },
+        )
+      : turnStarts(state, planned, index, round, interlude?.actor, {
+          actor: due.actor,
+          resume: "same",
+        });
+  }
+  return turnStarts(state, rest, index, round, interlude?.actor);
+}
+
+// The turn coming: `index` and `round` in the order, or a second turn between them. `ended` is whoever's turn just
+// ended, when it wasn't the order's at its index.
+function turnStarts(
+  state: DndState,
+  combat: NonNullable<DndState["combat"]>,
+  index: number,
+  round: number,
+  ended?: string,
+  interlude?: { readonly actor: string; readonly resume: "same" | "advance" },
+): DndState {
+  const nextId = interlude?.actor ?? combat.order[index] ?? "";
   // A controlled mount's turn comes with its rider's.
   const nextActor = state.actors[nextId];
   const nextMount = nextActor ? mountOf(nextActor) : null;
-  const endingId = combat.order[combat.index];
+  const endingId = ended ?? combat.order[combat.index];
   const actors = Object.fromEntries(
     Object.entries(state.actors).map(([id, actor]) => [
       id,
@@ -1240,6 +1320,7 @@ function advanceTurn(state: DndState): DndState {
       index,
       round,
       ...(calmRounds > 0 ? { calmRounds } : {}),
+      ...(interlude ? { interlude } : {}),
     },
   };
 }
@@ -1541,6 +1622,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           ...(data.map ? { map: data.map } : {}),
           ...(data.loot ? { loot: data.loot } : {}),
           ...(data.lair ? { lair: data.lair } : {}),
+          ...(data.secondTurns ? { secondTurns: data.secondTurns } : {}),
           ...(data.damageToParty === undefined
             ? {}
             : { damageToParty: data.damageToParty }),
