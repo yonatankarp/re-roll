@@ -1,4 +1,5 @@
 import { campEffects, campFrames, sceneCastActions } from "./camp.ts";
+import { reincarnateFrames } from "./reincarnate.ts";
 import {
   type ContentAccess,
   type FrameDef,
@@ -148,6 +149,7 @@ import {
   StateSchema,
   applyDndEvent,
   dndEvent,
+  isDead,
   frame,
   freshActor,
 } from "./state.ts";
@@ -519,6 +521,7 @@ export const dnd55e = defineSystem<DndState>({
     ...shopFrames,
     ...classOptionFrames,
     ...campFrames,
+    ...reincarnateFrames,
     [`${NS}:takeAction`]: frameHandler({
       schema: TakeActionSchema,
       run: (payload, context: Context) =>
@@ -654,6 +657,28 @@ export const dnd55e = defineSystem<DndState>({
   nextDecision: (state, access) =>
     withTactics(nextDndDecision(state, access), state, access),
   rests: availableRests,
+  // Going to another scene takes about an hour, so the party's dead lie dead longer, past Revivify's minute, and
+  // one with a finished clone wakes in it, whole (Clone).
+  sceneEntered: (state, access) => {
+    const dead = Object.values(state.actors).filter(
+      (actor) => actor.side === "party" && isDead(actor),
+    );
+    return [
+      ...dead.flatMap((actor) =>
+        actor.clone === 0 && actor.source.kind === "character"
+          ? [
+              dndEvent(`${NS}:cloneAwakened`, {
+                actor: actor.id,
+                hp: deriveStats(actor, access).maxHp,
+              }),
+            ]
+          : [],
+      ),
+      ...(dead.some((actor) => !actor.reposed && actor.clone !== 0)
+        ? [dndEvent(`${NS}:timePassed`, { hours: 1 })]
+        : []),
+    ];
+  },
   sceneActions: (state, access) => [
     ...sceneGearActions(state, access),
     ...sceneSwapActions(state, access),

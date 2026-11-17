@@ -359,7 +359,14 @@
     memories, and abilities, but none of the original’s equipment. The
     creature’s original remains, if any, become inert and can’t be revived,
     since the creature’s soul is elsewhere.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot, { gold: 1000 }]
+    outOfCombat: true
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      effects: [{ kind: clone, days: 120 }]
   outOfCombat: castingTime
 - id: srd52:spell/commune-with-nature
   name: Commune with Nature
@@ -1953,7 +1960,14 @@
   activation:
     cost: [action, slot, { gold: 300 }]
     targeting:
-      { creatures: 1, range: touch, side: ally, dead: true, diedWithin: 0 }
+      {
+        creatures: 1,
+        range: touch,
+        side: ally,
+        dead: true,
+        diedWithin: 0,
+        diedWithinRounds: 10,
+      }
     resolution:
       {
         kind: automatic,
@@ -10899,14 +10913,17 @@
     reduction to one of the target’s ability scores • Any reduction to the
     target’s Hit Point maximum"
   automation: full
-  # shortcut: it ends the Charmed or Petrified condition, or else a level of Exhaustion, never a curse.
   activation:
     cost: [action, slot, { gold: 100 }]
     targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
       effects:
-        [{ kind: cure, conditions: [charmed, petrified], exhaustion: true }]
+        - kind: cure
+          conditions: [charmed, petrified]
+          curse: true
+          maxHp: true
+          exhaustion: true
 
 - id: srd52:spell/gust-of-wind
   name: Gust of Wind
@@ -11718,7 +11735,25 @@
     description offers, and the creature recalls its former life. It retains the
     capabilities it had in its original form, except it loses the traits of its
     previous species and gains the traits of its new one.
-  automation: text
+  automation: full
+  # The table's species this plugin has; the spell lets the GM pick another playable species.
+  activation:
+    cost: [action, slot, { gold: 1000 }]
+    outOfCombat: true
+    targeting:
+      {
+        creatures: 1,
+        range: touch,
+        side: ally,
+        dead: true,
+        diedWithin: 240,
+        creatureTypes: [humanoid],
+      }
+    resolution:
+      kind: automatic
+      effects:
+        - kind: reincarnate
+          species: [srd52:species/dwarf, srd52:species/elf, srd52:species/human]
   outOfCombat: castingTime
 - id: srd52:spell/reverse-gravity
   name: Reverse Gravity

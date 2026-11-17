@@ -434,6 +434,15 @@ export function recovered(
           ? on === "turnStart" || on === "shortRest" || rest === "long"
           : on === (rest === "long" ? "longRest" : "shortRest");
       if (!applies || !canUse(entry, used, stats) || used(id) === 0) continue;
+      // Cauldron of Rebirth's 7 days: only once that many have passed since the use was spent.
+      if (entry.every) {
+        const waited = `${id}:waited`;
+        if (used(waited) + 1 < entry.every) {
+          left.set(waited, used(waited) + 1);
+          continue;
+        }
+        left.set(waited, 0);
+      }
       const rolled =
         entry.roll && dice ? rollDiceNotation(entry.roll, dice) : 0;
       const back = rechargeAmount(

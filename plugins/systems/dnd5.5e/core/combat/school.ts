@@ -3,6 +3,7 @@ import { ClassSchema, type Passive, SpellSchema } from "../schemas.ts";
 import { type Actor, dndEvent, NS } from "../state.ts";
 import {
   deriveStats,
+  evaluateFormula,
   type KnownAction,
   lookup,
   spellModifier,
@@ -201,21 +202,51 @@ export function castRiders(
         : passive.damage !== undefined && types.has(passive.damage);
     return fits ? [passive] : [];
   });
+  // Simbul's Synostodweomer: a slot spell rolls as many Hit Point Dice as the slot's level.
+  const mended =
+    slotLevel === undefined
+      ? []
+      : actor.activeEffects.flatMap(({ modifier, casterId, sourceId }) => {
+          if (modifier.kind !== "castHitDice") return [];
+          const by = context.state.actors[casterId] ?? actor;
+          return leafEvents(
+            [
+              {
+                kind: "hitDieHeal",
+                dice: slotLevel,
+                bonus: {
+                  base: evaluateFormula(
+                    modifier.bonus,
+                    deriveStats(by, context),
+                  ),
+                  add: [],
+                },
+              },
+            ],
+            sourceId,
+            by,
+            actor,
+            context,
+          );
+        });
   return {
-    events: rides.flatMap(({ effects, onTargets, resource }) => [
-      ...(resource
-        ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
-        : []),
-      ...leafEvents(effects, `castRider:${action.id}`, actor, actor, context),
-      // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
-      ...(onTargets
-        ? targets.flatMap((target) =>
-            target.id === actor.id
-              ? []
-              : leafEvents(onTargets, action.id, actor, target, context),
-          )
-        : []),
-    ]),
+    events: [
+      ...mended,
+      ...rides.flatMap(({ effects, onTargets, resource }) => [
+        ...(resource
+          ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
+          : []),
+        ...leafEvents(effects, `castRider:${action.id}`, actor, actor, context),
+        // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
+        ...(onTargets
+          ? targets.flatMap((target) =>
+              target.id === actor.id
+                ? []
+                : leafEvents(onTargets, action.id, actor, target, context),
+            )
+          : []),
+      ]),
+    ],
     frames: rides.flatMap(({ effects }) =>
       effects.flatMap((effect) =>
         effect.kind === "teleport"

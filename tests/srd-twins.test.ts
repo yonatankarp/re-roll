@@ -45,6 +45,7 @@ const TWINS: readonly (readonly [srd: string, phb: string])[] = [
     "conjure-minor-elementals",
     "dispel-magic",
     "false-life",
+    "greater-restoration",
     "heal",
     "magic-weapon",
     "vitriolic-sphere",

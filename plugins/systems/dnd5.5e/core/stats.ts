@@ -441,7 +441,17 @@ function itemCasts(
           activation: {
             ...numbered,
             cost: [
-              ...activation.cost.filter((cost) => cost !== "slot"),
+              ...activation.cost.filter(
+                (cost) =>
+                  cost !== "slot" &&
+                  !(
+                    cast.gold !== undefined &&
+                    typeof cost === "object" &&
+                    "gold" in cost
+                  ),
+              ),
+              // the item's own costly component in place of the spell's, as Cauldron of Rebirth's salt
+              ...(cast.gold ? [{ gold: cast.gold }] : []),
               ...(charges > 0 && resource
                 ? [{ resource, ...(charges > 1 ? { count: charges } : {}) }]
                 : []),
@@ -2500,6 +2510,9 @@ export function scaleActivation(
   const effects = (list: readonly LeafEffect[]): LeafEffect[] =>
     list.map((effect): LeafEffect => {
       if (effect.kind === "heal" || effect.kind === "tempHp") {
+        return { ...effect, amount: more(effect.amount) };
+      }
+      if (effect.kind === "transference") {
         return { ...effect, amount: more(effect.amount) };
       }
       if (effect.kind === "hitDieHeal") {

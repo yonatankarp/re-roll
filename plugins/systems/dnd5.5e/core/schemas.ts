@@ -546,6 +546,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("duel"),
     feet: z.number().int().min(5).default(30),
   }),
+  // Casting a spell with a slot, the bearer rolls as many of its Hit Point Dice as the slot's level and regains the
+  // roll plus `bonus`, worked out from the caster's numbers, as Simbul's Synostodweomer (combat/school.ts).
+  z.strictObject({ kind: z.literal("castHitDice"), bonus: FormulaSchema }),
   // The bearer can cast this spell once without its costs, as Wish's copy of it (combat/wish.ts).
   z.strictObject({ kind: z.literal("wished"), spell: ContentIdSchema }),
   // At the start of each of its turns the bearer rolls a d8: on 1-6 it does nothing, on 7-8 it makes a melee attack
@@ -759,11 +762,20 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // Action Surge: once a turn, after the action is spent, and the action it gives can't be a Magic action.
   z.strictObject({ kind: z.literal("extraAction") }),
   // Ends one of these conditions on the target, the one that hampers it most, as Lesser Restoration does.
+  // With none of them on it, Greater Restoration ends one curse (`curse`), else restores a lowered Hit Point maximum
+  // (`maxHp`), else takes away a level of Exhaustion (`exhaustion`), in that order.
+  // shortcut: Greater Restoration picks what it ends in that order, not as the caster chooses.
   z.strictObject({
     kind: z.literal("cure"),
     conditions: z.array(ConditionSchema).min(1),
-    // with none of them on it, one level of Exhaustion instead, as Greater Restoration
     exhaustion: z.literal(true).optional(),
+    curse: z.literal(true).optional(),
+    maxHp: z.literal(true).optional(),
+    // each of them on the target ends instead, `per` of the caster's `resource` apiece while it lasts, as Restoring
+    // Touch's 5 Hit Points of Lay On Hands' pool for each condition
+    pool: z
+      .strictObject({ resource: z.string(), per: z.number().int().min(1) })
+      .optional(),
   }),
   // An area left where the spell is aimed, or round the caster: magical darkness that only Blindsight, Truesight
   // or Devil's Sight see through (Darkness), fog only Blindsight sees through (Fog Cloud), or thorns that cost
@@ -985,6 +997,23 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
   // A dying creature becomes Stable, as with Spare the Dying.
   z.strictObject({ kind: z.literal("stabilize") }),
+  // The caster takes `amount` of `type` damage, which nothing lessens, and the target regains `times` as much, as
+  // Life Transference.
+  z.strictObject({
+    kind: z.literal("transference"),
+    amount: AmountSchema,
+    type: DamageTypeSchema,
+    times: z.number().int().min(1).default(2),
+  }),
+  // A dead creature comes back in a new body of a species rolled from these, in order, and picks what that species
+  // asks for (core/reincarnate.ts), as Reincarnate.
+  z.strictObject({
+    kind: z.literal("reincarnate"),
+    species: z.array(ContentIdSchema).min(2),
+  }),
+  // A clone of the target starts growing, ready after `days`; once it is, the target dying wakes in it whole, as Clone.
+  // shortcut: a day passes with each Long Rest, the only clock between scenes, and the clone keeps the gear.
+  z.strictObject({ kind: z.literal("clone"), days: z.number().int().min(1) }),
   // Moves the bearer's area of the spell `source` to where this is aimed, as Moonbeam moved with a Magic action.
   z.strictObject({ kind: z.literal("moveZone"), source: z.string() }),
   // The target takes its Reaction to make a melee attack against a creature in its reach, one of its own side
@@ -1201,10 +1230,11 @@ export const TargetingSchema = z.union([
     creatureTypes: z.array(CreatureTypeSchema).optional(), // only these types can be targeted
     targetConditions: z.array(ConditionSchema).min(1).optional(), // only a creature with one of these, as for Trample
     dead: z.literal(true).optional(), // only a dead creature, as for Revivify
-    // with `dead`, only one dead no longer than this many hours, as Raise Dead's 10 days (240). Only rests pass
-    // time (state.ts REST_HOURS), so 0 is a death since the last rest.
-    // shortcut: Revivify's minute is 0, as no clock runs between rests.
+    // with `dead`, only one dead no longer than this many hours, as Raise Dead's 10 days (240). Rests pass time
+    // (state.ts REST_HOURS) and so does going to another scene (an hour), so 0 is a death in this scene since the
+    // last rest; `diedWithinRounds` also counts the rounds of the fight it died in, as Revivify's minute (10).
     diedWithin: z.number().int().min(0).optional(),
+    diedWithinRounds: z.number().int().min(0).optional(),
     dust: z.literal(true).optional(), // with `dead`, even one turned to dust, as True Resurrection
     // only a creature this size or smaller, as for a giant frog's Swallow
     maxSize: z
@@ -1323,6 +1353,7 @@ export const ActivationSchema = z.strictObject({
   // only after casting a spell with a casting time of an action this turn, as Battle Magic
   afterCast: z.literal(true).optional(),
   unmoved: z.literal(true).optional(), // only if the bearer hasn't moved this turn, as Steady Aim
+  bloodied: z.literal(true).optional(), // only while the bearer has under half its Hit Points, as Unearthly Recovery
   // only while an effect of one of these features' activations is on the bearer, as Travel along the Tree in a Rage,
   // or while it concentrates on one of these spells, as Telekinetic Master's attack
   while: z.array(ContentIdSchema).min(1).optional(),
@@ -1563,6 +1594,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       .optional(),
     exhaustion: z.number().int().min(1).optional(),
     allies: z.literal(true).optional(),
+  }),
+  // An attacker of these types must pass a Wisdom save against the bearer's spell save DC or lose its attack; passing,
+  // or being attacked by the bearer, frees it of this until a Long Rest, as Among the Dead's undead.
+  // shortcut: a spell's save aimed at the bearer alone isn't turned aside, only an attack roll.
+  z.strictObject({
+    kind: z.literal("deterAttackers"),
+    creatureTypes: z.array(CreatureTypeSchema).min(1),
   }),
   // Dropping to 0 Hit Points leaves the bearer conscious: while an effect of one of the `while` features' activations
   // is on it, as Rage beyond Death's Rage, still making Death Saving Throws but dying of three failures only once that
@@ -2183,6 +2221,9 @@ export const ResourceDefSchema = z.strictObject({
       heal: z.lazy(() => AmountSchema).optional(),
       // Dice rolled and added to `amount`, as a wand's 1d6 + 1 charges at dawn (rest.ts).
       roll: DiceSchema.optional(),
+      // Only once this many of its trigger have passed since the use was spent, as Cauldron of Rebirth's 7 days.
+      // shortcut: a day passes with each Long Rest, the only clock between scenes.
+      every: z.number().int().min(2).optional(),
     }),
   ),
 });
@@ -2517,6 +2558,7 @@ const ItemCastSchema = z.strictObject({
   upTo: z.number().int().min(2).optional(),
   dc: z.number().int().min(1).optional(),
   attack: z.number().int().optional(), // the spell attack bonus; `dc` less 8 when only that is printed
+  gold: z.number().int().min(0).optional(), // its costly component costs this instead, as Cauldron of Rebirth's salt
 });
 export type ItemCast = z.infer<typeof ItemCastSchema>;
 

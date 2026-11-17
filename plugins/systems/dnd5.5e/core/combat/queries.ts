@@ -688,6 +688,8 @@ export function canAfford(
   const { carrying, afterAction, resolution } = action.activation;
   if (carrying && !actor.inventory.includes(carrying)) return false;
   if (afterAction && actor.budget.action) return false;
+  // only while Bloodied, as Unearthly Recovery
+  if (action.activation.bloodied && actor.hp * 2 >= stats.maxHp) return false;
   if (!gatesOpen(action, actor)) return false;
   // Haste's additional action takes only a weapon attack, or Dash, Disengage or Hide (actions.ts).
   if (
@@ -757,10 +759,14 @@ function poolsLeft(action: KnownAction, actor: Actor, stats: Stats): boolean {
     resolution.effects.every((effect) =>
       effect.kind === "regain"
         ? canRegain(actor, effect.resource, stats)
-        : effect.kind !== "heal" ||
-          !effect.pool ||
-          (actor.resourcesSpent[effect.pool.resource] ?? 0) <
-            (stats.resources[effect.pool.resource] ?? 0),
+        : effect.kind === "cure" && effect.pool
+          ? (actor.resourcesSpent[effect.pool.resource] ?? 0) +
+              effect.pool.per <=
+            (stats.resources[effect.pool.resource] ?? 0)
+          : effect.kind !== "heal" ||
+            !effect.pool ||
+            (actor.resourcesSpent[effect.pool.resource] ?? 0) <
+              (stats.resources[effect.pool.resource] ?? 0),
     )
   );
 }
@@ -777,6 +783,13 @@ export function goldFor(action: KnownAction): number {
 // A raising reaches only the dead it's in time for, as Raise Dead's 10 days.
 export function deadWithin(item: Actor, targeting: Targeting): boolean {
   if (item.dust && !("dust" in targeting && targeting.dust)) return false;
+  if (
+    "diedWithinRounds" in targeting &&
+    targeting.diedWithinRounds !== undefined &&
+    (item.deadRounds ?? 0) > targeting.diedWithinRounds
+  ) {
+    return false;
+  }
   return (
     !("diedWithin" in targeting) ||
     targeting.diedWithin === undefined ||

@@ -45,6 +45,9 @@ const BETWEEN: ReadonlySet<LeafEffect["kind"]> = new Set([
   "repose",
   "shortRest",
   "regain",
+  "transference",
+  "reincarnate",
+  "clone",
 ]);
 
 // Whether the effect would do something for this creature between fights.
@@ -57,11 +60,19 @@ function helps(
     case "heal":
     case "hitDieHeal":
     case "shortRest":
+    case "transference":
       return target.hp < deriveStats(target, access).maxHp;
     case "repose":
       return !target.reposed;
+    case "reincarnate":
+      return true; // its targeting already asks for the dead
+    case "clone":
+      return target.clone === undefined;
     case "cure":
-      return effect.exhaustion === true && target.exhaustion > 0;
+      return (
+        (effect.exhaustion === true && target.exhaustion > 0) ||
+        (effect.maxHp === true && (target.maxHpLoss ?? 0) > 0)
+      );
     case "regain":
       return canRegain(target, effect.resource, deriveStats(target, access));
     default:
@@ -271,11 +282,16 @@ function resolve(
       ),
     );
   }
-  // The player spends the Hit Dice a Short Rest it gave them, as they would in one (rest.ts).
-  const given =
-    targets.some((target) => target.id === PLAYER_ACTOR) &&
-    effectsOf(action).some((effect) => effect.kind === "shortRest");
-  return { events, ...(given ? { frames: [frame("givenDice")] } : {}) };
+  // The player spends the Hit Dice a Short Rest it gave them, as they would in one (rest.ts), and picks what a
+  // reincarnated body's species asks for (reincarnate.ts).
+  const player = targets.some((target) => target.id === PLAYER_ACTOR);
+  const given = (kind: LeafEffect["kind"]) =>
+    player && effectsOf(action).some((effect) => effect.kind === kind);
+  const frames = [
+    ...(given("shortRest") ? [frame("givenDice")] : []),
+    ...(given("reincarnate") ? [frame("reincarnate", { picks: {} })] : []),
+  ];
+  return { events, ...(frames.length > 0 ? { frames } : {}) };
 }
 
 const CastSchema = z.strictObject({

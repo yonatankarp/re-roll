@@ -55,7 +55,9 @@ import {
   evaluateFormula,
   rollAmount,
   rollDiceNotation,
+  scaledDice,
   saveBonus,
+  spellSaveDc,
   type Stats,
 } from "../stats.ts";
 import { finalDamage, halved, rollD20 } from "../rules.ts";
@@ -133,6 +135,8 @@ import {
   typeAgainst,
 } from "./effects.ts";
 
+// A resource spent on the bearer: this attacker is freed of its Among the Dead until a Long Rest.
+const DETERRED = "deterred:";
 // Attack rolls and what follows a hit: reactions, damage, riders, smites and concentration saves.
 
 export const AttackSchema = z.object({
@@ -783,6 +787,39 @@ export function runAttackRoll(
   }
   const stats = deriveStats(attacker, context);
   const targetStats = deriveStats(target, context);
+  // Among the Dead: an undead attacker saves or loses the attack, and once it saves, or the bearer attacks it, it's
+  // free of this until a Long Rest.
+  const deterred = (bearer: Actor, other: Actor, bearerStats: Stats) =>
+    bearerStats.passives.some(
+      (passive) =>
+        passive.kind === "deterAttackers" &&
+        (passive.creatureTypes as readonly string[]).includes(
+          deriveStats(other, context).creatureType ?? "",
+        ),
+    ) && !bearer.resourcesSpent[`${DETERRED}${other.id}`];
+  const freed = (bearer: Actor, other: Actor) =>
+    dndEvent(`${NS}:resourceSpent`, {
+      actor: bearer.id,
+      resource: `${DETERRED}${other.id}`,
+    });
+  const freedOwn = deterred(attacker, target, stats)
+    ? [freed(attacker, target)]
+    : [];
+  if (
+    attacker.side !== target.side &&
+    deterred(target, attacker, targetStats)
+  ) {
+    const save = rollSave(
+      attacker,
+      "wis",
+      spellSaveDc(targetStats),
+      context,
+      true,
+    );
+    if (!save.saved) return { events: [...unwarded, ...save.events] };
+    unwarded.push(...save.events, freed(target, attacker));
+  }
+  unwarded.push(...freedOwn);
   const packed =
     hasPassive(stats, "packTactics") &&
     allies(state, attacker).some(
@@ -1391,7 +1428,11 @@ export function runApplyHit(
         : payload.hadAdvantage ||
           (allyPresent && payload.hadDisadvantage !== true));
     if (!applies) return;
-    const rolled = rollDiceNotation(passive.dice, dice, multiplier);
+    const rolled = rollDiceNotation(
+      scaledDice(passive, stats.scaling) ?? passive.dice,
+      dice,
+      multiplier,
+    );
     if (passive.type) {
       typedExtra.push({
         amount: { bonus: { base: rolled, add: [] } },

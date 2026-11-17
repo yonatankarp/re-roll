@@ -386,6 +386,11 @@ export interface SystemDefinition<S> {
   readonly nextDecision: (state: S, access: ContentAccess) => Decision | null;
   // The rests the rules allow right now, offered with each scene's choices.
   readonly rests?: (state: S) => readonly RestOption[];
+  // What happens to the system's state as the party enters a scene, as time passing for the dead.
+  readonly sceneEntered?: (
+    state: S,
+    access: ContentAccess,
+  ) => readonly SystemEvent[];
   // What the player may do between the scene's choices right now, offered with them.
   readonly sceneActions?: (
     state: S,

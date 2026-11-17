@@ -11,6 +11,7 @@ import {
   rerollingOnes,
   rollAmount,
   rollDiceNotation,
+  scaledDice,
   wishedKey,
   saveBonus,
   scoreFloor,
@@ -124,6 +125,7 @@ import { headDamageEvents } from "./heads.ts";
 import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
 import { movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
+import { reincarnateEvents } from "../reincarnate.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
@@ -1734,9 +1736,63 @@ export function leafEvents(
         break;
       case "cure": {
         const condition = cureFor(target, effect.conditions);
-        if (condition) {
+        const curse = target.activeEffects.find(
+          ({ modifier }) => modifier.kind === "mark" && modifier.curse,
+        );
+        if (effect.pool) {
+          const { resource, per } = effect.pool;
+          let left =
+            (stats.resources[resource] ?? 0) -
+            (caster.resourcesSpent[resource] ?? 0);
+          let spent = 0;
+          let rest = target;
+          for (
+            let next = cureFor(rest, effect.conditions);
+            next && left >= per;
+            next = cureFor(rest, effect.conditions)
+          ) {
+            const removed = dndEvent(`${NS}:conditionRemoved`, {
+              actor: target.id,
+              condition: next,
+            });
+            events.push(removed);
+            rest = {
+              ...rest,
+              activeEffects: rest.activeEffects.filter(
+                ({ modifier }) =>
+                  modifier.kind !== "condition" || modifier.condition !== next,
+              ),
+            };
+            left -= per;
+            spent += per;
+          }
+          if (spent > 0) {
+            events.push(
+              dndEvent(`${NS}:resourceSpent`, {
+                actor: caster.id,
+                resource,
+                amount: spent,
+              }),
+            );
+          }
+        } else if (condition) {
           events.push(
             dndEvent(`${NS}:conditionRemoved`, { actor: target.id, condition }),
+          );
+        } else if (effect.curse && curse) {
+          events.push(
+            dndEvent(`${NS}:effectEnded`, {
+              actor: target.id,
+              sourceId: curse.sourceId,
+              casterId: curse.casterId,
+            }),
+          );
+        } else if (effect.maxHp && (target.maxHpLoss ?? 0) > 0) {
+          events.push(
+            dndEvent(`${NS}:maxHpReduced`, {
+              actor: target.id,
+              amount: -(target.maxHpLoss ?? 0),
+            }),
           );
         } else if (effect.exhaustion && target.exhaustion > 0) {
           events.push(
@@ -1915,6 +1971,47 @@ export function leafEvents(
       case "stabilize":
         if (target.hp <= 0 && !isDead(target) && !isStable(target)) {
           events.push(dndEvent(`${NS}:stabilized`, { actor: target.id }));
+        }
+        break;
+      // Life Transference: the caster's own damage, which nothing lessens, heals the target twice over.
+      case "transference": {
+        const taken = rollAmount(effect.amount, stats, context.dice);
+        events.push(
+          dndEvent(`${NS}:damaged`, {
+            actor: caster.id,
+            amount: taken,
+            type: effect.type,
+            critical: false,
+            massive: false,
+          }),
+        );
+        if (unhealed || cannotHeal(target) || isDead(target)) break;
+        const max = deriveStats(target, context).maxHp;
+        const room = max - Math.max(target.hp, 0);
+        if (room > 0) {
+          events.push(
+            dndEvent(`${NS}:healed`, {
+              actor: target.id,
+              amount: Math.min(room, taken * effect.times),
+              max,
+            }),
+          );
+        }
+        break;
+      }
+      case "reincarnate":
+        if (isDead(target) && target.source.kind === "character") {
+          events.push(...reincarnateEvents(target, effect.species, context));
+        }
+        break;
+      case "clone":
+        if (target.clone === undefined && !isDead(target)) {
+          events.push(
+            dndEvent(`${NS}:cloneStarted`, {
+              actor: target.id,
+              days: effect.days,
+            }),
+          );
         }
         break;
       case "lift":
@@ -2678,6 +2775,7 @@ export function resolveAction(
   let ridden = false;
   const overload = { prone: false };
   let lastDealt = 0;
+  const pulled = new Set<string>(); // Pull of Death's once a turn, within this cast
   const applyRolled = (
     target: Actor,
     damage: readonly {
@@ -2724,6 +2822,51 @@ export function resolveAction(
           context,
         ),
       );
+    }
+    // Pull of Death: a spell's damage by a save or with no roll, once a turn, to a creature already missing Hit
+    // Points (combat/attack.ts adds it to an attack's).
+    if (
+      action.spellLevel !== null &&
+      result.dealt > 0 &&
+      resolution.kind !== "attack"
+    ) {
+      const hurt = target.hp < deriveStats(target, context).maxHp;
+      stats.passives.forEach((passive, index) => {
+        const key = `extra:${String(index)}`;
+        if (
+          !hurt ||
+          passive.kind !== "extraDamage" ||
+          passive.when !== "targetHurt" ||
+          !passive.type ||
+          (passive.oncePerTurn &&
+            (actor.usedThisTurn.includes(key) || pulled.has(key)))
+        ) {
+          return;
+        }
+        if (passive.oncePerTurn) {
+          pulled.add(key);
+          events.push(
+            dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key }),
+          );
+        }
+        const now = events.reduce(applyDndEvent, context.state);
+        events.push(
+          ...dealEvents(
+            now.actors[target.id] ?? target,
+            [
+              {
+                amount: rollDiceNotation(
+                  scaledDice(passive, stats.scaling) ?? passive.dice,
+                  context.dice,
+                ),
+                type: passive.type,
+              },
+            ],
+            false,
+            { ...context, state: now },
+          ).events,
+        );
+      });
     }
     // A spell's riders, as Putrefy's, go on the first creature it damages.
     // shortcut: only the first, since a use spent on one isn't seen by the next in the same cast.
