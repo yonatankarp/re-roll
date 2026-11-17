@@ -397,6 +397,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     able: z.literal(true).optional(),
     halfDealt: DamageTypeSchema.optional(),
   }),
+  // The spell's `spheres` actions are the bearer's while it lasts.
+  z.strictObject({ kind: z.literal("spheres") }),
   // A spell stolen by Spell Thief: the bearer has it prepared ("stolen") or its caster can't cast it ("lost").
   z.strictObject({
     kind: z.literal("stolenSpell"),
@@ -2893,6 +2895,8 @@ export const FreeCastSchema = z.union([
     minutes: z.number().int().min(1).optional(),
     slotLevel: z.record(z.string(), z.number().int().min(1).max(9)).optional(),
     self: z.literal(true).optional(), // cast so only on the caster, as Vampire Touched's Spider Climb
+    // cast with a Bonus Action in place of an action, a cantrip too, as Spellfire Spark's Sacred Flame
+    bonusAction: z.literal(true).optional(),
   }),
 ]);
 export type FreeCast = z.infer<typeof FreeCastSchema>;
@@ -3276,6 +3280,16 @@ export const SpellSchema = ContentEntrySchema.extend({
   lasting: ActivationSchema.optional(),
   // An action its target can take while a `grantedAction` it gave lasts, as Dragon's Breath's breath.
   granted: ActivationSchema.optional(),
+  // Uses its caster spends on these activations while its `spheres` effect lasts: `count`, and `perSlot` more for
+  // each slot level above the spell's, as Elminster's Effulgent Spheres (stats.ts). Casting it again gives them all
+  // back with a `regain` of "spheres:<spell id>".
+  spheres: z
+    .strictObject({
+      count: z.number().int().min(1),
+      perSlot: z.number().int().min(0).default(0),
+      actions: z.array(ActivationSchema).min(1),
+    })
+    .optional(),
   // What its `randomAction` picks from, each named by its label, as Prismatic Spray's rays.
   rolled: z.array(ActivationSchema).min(2).optional(),
   // Why a spell with no activation needs none: it takes longer than a turn to cast ("castingTime"), or does

@@ -305,7 +305,8 @@ function freeCastActions(
     if (!access.content(spellId)) return [];
     const spell = lookup(access, SpellSchema, spellId);
     const { activation } = spell;
-    if (spell.level === 0 || !activation) return [];
+    const quick = (how: FreeCast) => typeof how === "object" && how.bonusAction;
+    if (!activation || (spell.level === 0 && !ways.some(quick))) return [];
     if (!doesSomething(activation.resolution)) return [];
     const isOwn = (how: FreeCast) => how === true || how === "shortRest";
     const own = ways.filter(isOwn);
@@ -315,6 +316,7 @@ function freeCastActions(
       ...new Set(ways.filter((how) => !isOwn(how))),
     ];
     return kinds.flatMap((how, index) => {
+      if (spell.level === 0 && !quick(how)) return [];
       const id = typeof how === "object" ? how.resource : `free:${spellId}`;
       const slot =
         typeof how === "object" && how.slotLevel
@@ -325,9 +327,15 @@ function freeCastActions(
       if (slot < spell.level) return [];
       const step = spell.upcast?.perSlotLevel;
       const leveled =
-        slot > spell.level && step
-          ? scaleActivation(activation, step, slot - spell.level)
-          : activation;
+        spell.level === 0 && spell.cantrip
+          ? scaleActivation(
+              activation,
+              spell.cantrip.perTier,
+              cantripTier(level),
+            )
+          : slot > spell.level && step
+            ? scaleActivation(activation, step, slot - spell.level)
+            : activation;
       const lasting =
         typeof how === "object" && how.minutes !== undefined
           ? unconcentrated(leveled, how.minutes)
@@ -346,7 +354,11 @@ function freeCastActions(
             activation: {
               ...cast,
               cost: [
-                ...activation.cost.filter((cost) => cost !== "slot"),
+                ...activation.cost
+                  .filter((cost) => cost !== "slot")
+                  .map((cost) =>
+                    quick(how) && cost === "action" ? "bonusAction" : cost,
+                  ),
                 ...(how === "atWill" ? [] : [{ resource: id }]),
               ],
             },
@@ -2504,7 +2516,8 @@ function withEffectActions(
         modifier.kind === "weaponSpell" ||
         modifier.kind === "grantedAction" ||
         modifier.kind === "wished" ||
-        modifier.kind === "stolenSpell",
+        modifier.kind === "stolenSpell" ||
+        modifier.kind === "spheres",
     ) &&
     !stats.actions.some((action) =>
       weaponAttackOf(action.activation.resolution),
@@ -2513,8 +2526,32 @@ function withEffectActions(
     return stats;
   }
   const granted: KnownAction[] = [];
+  const pools: Record<string, number> = {};
   let actions = stats.actions;
   for (const { modifier, sourceId, level } of actor.activeEffects) {
+    // Elminster's Effulgent Spheres: each of its actions spends a sphere.
+    if (modifier.kind === "spheres") {
+      const spellId = spellOfSource(sourceId) ?? "";
+      const spell = lookup(access, SpellSchema, spellId);
+      if (!spell.spheres) continue;
+      const key = `spheres:${spellId}`;
+      pools[key] =
+        spell.spheres.count +
+        spell.spheres.perSlot *
+          Math.max(0, (level ?? spell.level) - spell.level);
+      spell.spheres.actions.forEach((activation, index) => {
+        granted.push({
+          id: `spheres:${sourceId}:${String(index)}`,
+          name: `${spell.name}${activation.label ? `: ${activation.label}` : ""}`,
+          activation: {
+            ...activation,
+            cost: [...activation.cost, { resource: key }],
+          },
+          spellLevel: null,
+        });
+      });
+      continue;
+    }
     // Spell Thief: the thief has the spell prepared, cast with its own slots, and its caster can't cast it.
     if (modifier.kind === "stolenSpell") {
       const id = `spell:${modifier.spell}`;
@@ -2621,7 +2658,11 @@ function withEffectActions(
     reaching.length === actions.length &&
     reaching.every((action, index) => action === actions[index])
     ? stats
-    : { ...stats, actions: [...reaching, ...granted] };
+    : {
+        ...stats,
+        actions: [...reaching, ...granted],
+        resources: { ...stats.resources, ...pools },
+      };
 }
 
 // In usedThisTurn once Wish's copy of the spell has been cast.
@@ -3024,16 +3065,28 @@ export function scaleActivation(
     return longer ? withDuration(activation, longer) : activation;
   }
   if ("addRadius" in step) {
-    const { targeting } = activation;
-    return "area" in targeting
+    const { targeting, trigger } = activation;
+    const more = step.addRadius * times;
+    if ("area" in targeting) {
+      return {
+        ...activation,
+        targeting: {
+          ...targeting,
+          area: { ...targeting.area, radius: targeting.area.radius + more },
+        },
+      };
+    }
+    // A reaction's reach grows, as Aura of the Guardian's 10 feet becoming 30.
+    return trigger?.within !== undefined && "range" in targeting
       ? {
           ...activation,
+          trigger: { ...trigger, within: trigger.within + more },
           targeting: {
             ...targeting,
-            area: {
-              ...targeting.area,
-              radius: targeting.area.radius + step.addRadius * times,
-            },
+            range:
+              typeof targeting.range === "number"
+                ? targeting.range + more
+                : targeting.range,
           },
         }
       : activation;
