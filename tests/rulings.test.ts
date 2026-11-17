@@ -142,6 +142,10 @@ describe("what a ruling names", () => {
     expect(
       mentions(INDEX, "Does a quiet step make noise?", "new", glossary),
     ).toEqual(["hb:rule-term/quiet-steps"]);
+    // A term before a word naming no such thing is the term.
+    expect(
+      mentions(INDEX, "Is a Quiet Step weapon silent?", "new", glossary),
+    ).toEqual(["hb:rule-term/quiet-steps"]);
     expect(mentions(INDEX, "Are loud rooms loud?", "new", glossary)).toEqual(
       [],
     );

@@ -46,6 +46,12 @@ const HINTS: Readonly<Record<string, readonly string[]>> = {
   species: ["species"],
   race: ["species"],
 };
+// The rules terms a word after a name allows where nothing of the kind it names has that name: "a Reaction
+// spell" is the term, "a Finesse weapon" the property, but "Heavy armor" isn't the weapon property.
+const TERM_HINTS: Readonly<Record<string, readonly string[]>> = {
+  spell: ["rule-term", "action"],
+  weapon: ["weapon-property", "weapon-mastery", "rule-term"],
+};
 const JOINERS = new Set(["of", "the", "and", "to", "a", "an", "in", "from"]);
 // Words that come before a spell a book names in lower case: "by gloomshape", "casting hush".
 const SPELL_CUES = new Set([
@@ -157,22 +163,30 @@ export function mentions(
         if (!named && !plain && !word && !kinds?.includes("spell")) continue;
         const key = slug(run.join(" "));
         const keys = plain ? [key] : [key, singular(key)];
-        const hits = [
-          ...(index.bySlug.get(key) ?? []),
-          ...(index.bySlug.get(singular(key)) ?? []),
-        ].filter(
-          (entity) =>
-            entity.edition === edition &&
-            subject(entity) &&
-            (!kinds || kinds.includes(entity.kind)) &&
-            (!word || glossary.lower.has(entity.kind)) &&
-            // Lower-case words are a rules term ("opportunity attacks") but never other lore ("magic items").
-            (!plain || !entity.lore || isTerm(entity, glossary)) &&
-            (plain
-              ? [bare(entity), singular(bare(entity))]
-              : [bare(entity)]
-            ).some((name) => keys.includes(name)),
-        );
+        const find = (only: readonly string[] | undefined) =>
+          [
+            ...(index.bySlug.get(key) ?? []),
+            ...(index.bySlug.get(singular(key)) ?? []),
+          ].filter(
+            (entity) =>
+              entity.edition === edition &&
+              subject(entity) &&
+              (!only || only.includes(entity.kind)) &&
+              (!word || glossary.lower.has(entity.kind)) &&
+              // Lower-case words are a rules term ("opportunity attacks") but never other lore ("magic items").
+              (!plain || !entity.lore || isTerm(entity, glossary)) &&
+              // A rules term in either number ("short rests"), anything else by its whole name.
+              (isTerm(entity, glossary)
+                ? singular(bare(entity)) === singular(key)
+                : keys.includes(bare(entity))),
+          );
+        const typed = find(kinds);
+        // A rules term before a word naming no such thing is the term: "a Reaction spell", "a Finesse weapon".
+        const allowed = TERM_HINTS[after.toLowerCase()];
+        const hits =
+          typed.length > 0 || !hinted || !allowed
+            ? typed
+            : find(allowed).filter((hit) => isTerm(hit, glossary));
         // A rules term's name is the term's entity (#132), not the spell that shares it, unless the next
         // word says so. With no entity for the term in this edition, it names nothing.
         const term =
