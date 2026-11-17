@@ -141,7 +141,9 @@ export function traitSaveAdvantage(
         (!passive.bloodied || bloodied) &&
         (!passive.while ||
           (target !== undefined && hasCondition(target, passive.while))) &&
-        coversSave(passive, ability, conditions, source)) ||
+        (passive.shapeChange
+          ? conditions.includes("polymorph")
+          : coversSave(passive, ability, conditions, source))) ||
       (passive.kind === "concentrationAdvantage" &&
         conditions.includes("concentration")),
   );

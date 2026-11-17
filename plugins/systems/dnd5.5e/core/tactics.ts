@@ -56,7 +56,7 @@ export function walkSpeed(actor: Actor, stats: Stats): number {
   const limited = limitsOf(actor).speed;
   // A Ring of Free Action keeps an effect from halving or stopping its Speed.
   const limit =
-    hasSteadySpeed(stats) && limited !== "double" ? undefined : limited;
+    hasSteadySpeed(stats, actor) && limited !== "double" ? undefined : limited;
   // Shut away, it goes nowhere, unless it rolls its prison along, as in Resilient Sphere, at half Speed.
   const seals = actor.activeEffects.flatMap(({ modifier }) =>
     modifier.kind === "sealed" ? [modifier] : [],

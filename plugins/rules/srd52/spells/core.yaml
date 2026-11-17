@@ -2565,8 +2565,20 @@
     This spell grants up to ten willing creatures of your choice within range
     the ability to breathe underwater until the spell ends. Affected creatures
     also retain their normal mode of respiration.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 10, range: 30, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        [
+          {
+            kind: modifier,
+            modifier: { kind: waterBreathing },
+            duration: { minutes: 1440 },
+          },
+        ]
 - id: srd52:spell/wind-wall
   name: Wind Wall
   level: 3
@@ -3141,26 +3153,21 @@
     something opaque, such as a bowl or helm, blocks the sunlight. If any of
     this spell’s area overlaps with an area of Darkness created by a spell of
     level 3 or lower, that other spell is dispelled.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: sphere
-        radius: 60
-      range: 60
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 60 }, range: 60, side: enemy }
     resolution:
       kind: automatic
-      damage: []
       effects:
-        - kind: zone
-          zone: sunlight
-          radius: 60
-          duration:
-            minutes: 60
+        - {
+            kind: zone,
+            zone: sunlight,
+            radius: 60,
+            dim: 60,
+            duration: { minutes: 60 },
+          }
+        - { kind: disperse, zones: [darkness], maxLevel: 3 }
 - id: srd52:spell/detect-magic
   name: Detect Magic
   level: 1
@@ -3563,35 +3570,38 @@
     escape from nonmagical restraints, such as manacles or a creature imposing
     the Grappled condition on it. Using a Higher-Level Spell Slot. You can
     target one additional creature for each spell slot level above 4.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      creatures: 1
-      range: touch
-      side: ally
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
       effects:
-        - kind: modifier
-          modifier:
-            kind: unhindered
-          duration:
-            minutes: 60
-        - kind: modifier
-          modifier:
-            kind: conditionImmunity
-            condition: paralyzed
-          duration:
-            minutes: 60
-        - kind: modifier
-          modifier:
-            kind: conditionImmunity
-            condition: restrained
-          duration:
-            minutes: 60
+        - {
+            kind: modifier,
+            modifier: { kind: unhindered },
+            duration: { minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: steadySpeed },
+            duration: { minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: movementMode, mode: swim },
+            duration: { minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: conditionImmunity, condition: paralyzed },
+            duration: { minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: conditionImmunity, condition: restrained },
+            duration: { minutes: 60 },
+          }
   upcast:
     perSlotLevel:
       addTargets: 1
@@ -5057,8 +5067,20 @@
     the liquid’s surface into the liquid itself and vice versa, but if the
     target falls into the liquid, the target passes through the surface into the
     liquid below.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 10, range: 30, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        [
+          {
+            kind: modifier,
+            modifier: { kind: waterWalk },
+            duration: { minutes: 60 },
+          },
+        ]
 - id: srd52:spell/wish
   name: Wish
   level: 9
@@ -6061,32 +6083,30 @@
     creatures shed Dim Light in a 10-foot radius and can’t benefit from the
     Invisible condition. Attack rolls against an affected creature or object
     have Advantage if the attacker can see it.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: cube
-        radius: 20
-      range: 60
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: cube, radius: 20 }, range: 60, side: enemy }
     resolution:
       kind: save
       ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage: []
+      dc: { add: [{ kind: spellSaveDc }] }
       onFail:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: advantage
-            on: attacksAgainst
+        - {
+            kind: modifier,
+            modifier: { kind: advantage, on: attacksAgainst },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: outlined },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: sheds, light: dim, feet: 10 },
+            duration: { concentration: true, minutes: 1 },
+          }
       onSuccess: []
 - id: srd52:spell/find-familiar
   name: Find Familiar
@@ -6690,24 +6710,21 @@
     spell ends early immediately after the target makes an attack roll, deals
     damage, or casts a spell. Using a Higher-Level Spell Slot. You can target
     one additional creature for each spell slot level above 2.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      creatures: 1
-      range: touch
-      side: ally
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
-      damage: []
       effects:
-        - kind: applyCondition
-          condition: invisible
-          duration:
-            concentration: true
-            minutes: 60
+        [
+          {
+            kind: applyCondition,
+            condition: invisible,
+            endsOn: spell,
+            duration: { concentration: true, minutes: 60 },
+          },
+        ]
   upcast:
     perSlotLevel:
       addTargets: 1
@@ -6736,7 +6753,7 @@
     down as part of your move. Otherwise, you can take a Magic action to move
     the target, which must remain within the spell’s range. When the spell ends,
     the target floats gently to the ground if it is still aloft.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -7690,7 +7707,20 @@
     minutes: 60
   text: For the duration, the willing creature you touch has Truesight with a
     range of 120 feet.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot, { gold: 25 }]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        [
+          {
+            kind: modifier,
+            modifier: { kind: sense, sense: truesight, feet: 120 },
+            duration: { minutes: 60 },
+          },
+        ]
 - id: srd52:spell/vicious-mockery
   name: Vicious Mockery
   level: 0
@@ -8371,7 +8401,22 @@
     in a 10foot radius. As a Bonus Action, you can move the lights up to 60 feet
     to a space within range. A light must be within 20 feet of another light
     created by this spell, and a light vanishes if it exceeds the spell’s range.
-  automation: text
+  automation: full
+  activation:
+    cost: [action]
+    targeting: { area: { shape: sphere, radius: 10 }, range: 120, side: enemy }
+    resolution:
+      kind: automatic
+      effects:
+        [
+          {
+            kind: zone,
+            zone: dim,
+            radius: 10,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
+    area: { moves: 60, moveWith: bonusAction }
 - id: srd52:spell/delayed-blast-fireball
   name: Delayed Blast Fireball
   level: 7
@@ -8952,7 +8997,7 @@
     concentration: true
     minutes: 1
   text: A creature you touch has the Invisible condition until the spell ends.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -9237,7 +9282,21 @@
     ends, that creature can jump up to 30 feet by spending 10 feet of movement.
     Using a Higher-Level Spell Slot. You can target one additional creature for
     each spell slot level above 1.
-  automation: text
+  automation: full
+  activation:
+    cost: [bonusAction, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        [
+          {
+            kind: modifier,
+            modifier: { kind: jumpBoost, feet: 30, movement: 10 },
+            duration: { minutes: 1 },
+          },
+        ]
+  upcast: { perSlotLevel: { addTargets: 1 } }
 - id: srd52:spell/light
   name: Light
   level: 0
@@ -9257,7 +9316,23 @@
     20-foot radius and Dim Light for an additional 20 feet. The light can be
     colored as you like. Covering the object with something opaque blocks the
     light. The spell ends if you cast it again.
-  automation: text
+  automation: full
+  activation:
+    cost: [action]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        [
+          {
+            kind: zone,
+            zone: light,
+            radius: 20,
+            dim: 20,
+            follows: true,
+            duration: { minutes: 60 },
+          },
+        ]
 - id: srd52:spell/longstrider
   name: Longstrider
   level: 1
@@ -10776,7 +10851,23 @@
     Light in a 20-foot radius and Dim Light for an additional 20 feet. It looks
     like a regular flame, but it creates no heat and consumes no fuel. The flame
     can be covered or hidden but not smothered or quenched.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot, { gold: 50 }]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        [
+          {
+            kind: zone,
+            zone: light,
+            radius: 20,
+            dim: 20,
+            follows: true,
+            duration: { until: rest },
+          },
+        ]
 - id: srd52:spell/create-or-destroy-water
   name: Create or Destroy Water
   level: 1
@@ -10819,7 +10910,21 @@
     something opaque, such as a bowl or helm, blocks the Darkness. If any of
     this spell’s area overlaps with an area of Bright Light or Dim Light created
     by a spell of level 2 or lower, that other spell is dispelled.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 15 }, range: 60, side: enemy }
+    resolution:
+      kind: automatic
+      effects:
+        [
+          {
+            kind: zone,
+            zone: darkness,
+            radius: 15,
+            duration: { concentration: true, minutes: 10 },
+          },
+        ]
 - id: srd52:spell/demiplane
   name: Demiplane
   level: 8
@@ -11844,7 +11949,34 @@
   text: You radiate a concealing aura in a 30-foot Emanation for the duration.
     While in the aura, you and each creature you choose have a +10 bonus to
     Dexterity (Stealth) checks and leave no tracks.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      effects:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 30,
+            follows: true,
+            duration: { concentration: true, minutes: 60 },
+          },
+        ]
+    area:
+      side: ally
+      self: true
+      grants:
+        [
+          {
+            kind: bonus,
+            to: checks,
+            skill: stealth,
+            amount: { bonus: { base: 10 } },
+          },
+        ]
 - id: srd52:spell/planar-binding
   name: Planar Binding
   level: 5

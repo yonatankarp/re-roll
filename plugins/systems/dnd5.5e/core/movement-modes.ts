@@ -30,7 +30,11 @@ export function speedsOf(
   }
   // Earthbind: no Speed of that kind.
   for (const modifier of modifiersOf(actor, stats)) {
-    if (modifier.kind === "grounded") speeds.delete(modifier.mode);
+    if (modifier.kind !== "grounded") continue;
+    const feet = speeds.get(modifier.mode);
+    if (modifier.feet === undefined || feet === undefined) {
+      speeds.delete(modifier.mode);
+    } else speeds.set(modifier.mode, Math.min(feet, modifier.feet));
   }
   // A Speed bonus that goes to the other Speeds it has too, as Superior Mobility's, onto those of feet of their own.
   for (const modifier of passiveModifiers(stats.passives)) {

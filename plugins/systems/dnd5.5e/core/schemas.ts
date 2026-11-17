@@ -585,10 +585,14 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     ceiling: z.literal(true).optional(), // a climber that goes along ceilings, not only walls, as with Spider Climb
   }),
   // It has no Speed of this kind while it lasts, and comes down from flying unhurt, as Earthbind's (core/movement-modes.ts).
+  // With `feet`, that Speed is at most this instead, as Wind Soul's own flight lowered to 30 feet.
   z.strictObject({
     kind: z.literal("grounded"),
     mode: z.enum(["fly", "climb", "burrow", "swim"]),
+    feet: z.number().int().min(5).optional(),
   }),
+  // Effects can't lower its Speed, as Freedom of Movement keeps magic from doing (stats.ts).
+  z.strictObject({ kind: z.literal("steadySpeed") }),
   // Difficult Terrain costs it no extra movement, and it escapes a grapple with 5 feet of movement, as with Freedom of
   // Movement.
   // With `terrainOnly` it's only the Difficult Terrain, as Speedy's Dash over it.
@@ -643,7 +647,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // Umbral Sight's 60 feet.
   z.strictObject({
     kind: z.literal("sense"),
-    sense: z.enum(["darkvision", "blindsight", "truesight"]),
+    // "xray" sees through solid walls this far, as a Ring of X-ray Vision's 30 feet (core/fog.ts)
+    sense: z.enum(["darkvision", "blindsight", "truesight", "xray"]),
     feet: z.number().int().min(5),
     extend: z.number().int().min(5).optional(),
   }),
@@ -1852,6 +1857,8 @@ export const ActivationSchema = z.strictObject({
       z.strictObject({
         name: z.string().min(1),
         effects: z.array(LeafEffectSchema).optional(),
+        // or a whole resolution of its own in place of the one written, as Pyrotechnics' Smoke
+        resolution: ResolutionSchema.optional(),
       }),
     )
     .min(2)
@@ -1913,6 +1920,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // only while wearing no Heavy armor ("noHeavy"), as Fast Movement's Speed, or no armor and no Shield ("none"), as
     // Unarmored Movement's (stats.ts)
     armor: z.enum(["noHeavy", "none"]).optional(),
+    // only while an effect of one of these features' activations is on the bearer, as Stride of the Elements' Speeds
+    // in Elemental Attunement
+    while: z.array(ContentIdSchema).min(1).optional(),
   }),
   // An area round the bearer that moves with it, as a ghast's Stench, a balor's Fire Aura or a flameskull's
   // Illumination ("light" or "dim" for the light it sheds).
@@ -2094,6 +2104,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("saveAdvantage"),
     abilities: z.array(AbilitySchema).default([]),
     conditions: z.array(ConditionSchema).default([]),
+    shapeChange: z.literal(true).optional(), // against an effect that changes its shape, as Transmuted Anatomy's
     bloodied: z.literal(true).optional(), // only while Bloodied, as with Bloodied Frenzy
     while: ConditionSchema.optional(), // only while the bearer has it, as a Dream Weaver's Mind Wall while Unconscious
     from: SaveFromSchema.optional(), // only a save against this, which every save then counts

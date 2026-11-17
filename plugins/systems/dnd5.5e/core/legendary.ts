@@ -129,9 +129,15 @@ const DISABLING: readonly string[] = [
   "restrained",
 ];
 
+// The conditions a save's failure applies, with "polymorph" for one that changes the target's shape, which
+// Transmuted Anatomy's Advantage looks for.
 export function conditionsApplied(effects: readonly LeafEffect[]): string[] {
   return effects.flatMap((effect) =>
-    effect.kind === "applyCondition" ? [effect.condition] : [],
+    effect.kind === "applyCondition"
+      ? [effect.condition]
+      : effect.kind === "polymorph"
+        ? ["polymorph"]
+        : [],
   );
 }
 

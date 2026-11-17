@@ -565,6 +565,12 @@ function withShape(action: KnownAction, shape: string): KnownAction {
   const chosen = action.activation.shapes?.find(({ name }) => name === shape);
   if (!chosen) throw new Error(`${action.name} has no shape ${shape}`);
   const { resolution } = action.activation;
+  if (chosen.resolution) {
+    return {
+      ...action,
+      activation: { ...action.activation, resolution: chosen.resolution },
+    };
+  }
   if (!chosen.effects || resolution.kind !== "automatic") return action;
   return {
     ...action,

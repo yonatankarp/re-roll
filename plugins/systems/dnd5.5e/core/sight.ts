@@ -196,6 +196,7 @@ export interface Senses {
   readonly truesight: number; // sees in magical and normal darkness, and the Invisible
   readonly devilsSight: number; // sees normally in Dim Light and Darkness, magical too, as Devil's Sight
   readonly ownDarkness: boolean; // sees through the Darkness of its own spells, as Power of Shadow
+  readonly xray: number; // sees through solid walls, as a Ring of X-ray Vision
 }
 
 type SenseModifier = Extract<Modifier, { kind: "sense" }>;
@@ -206,7 +207,7 @@ function fromModifiers(
   base: Senses,
   modifiers: readonly ActiveEffect["modifier"][],
 ): Senses {
-  let { darkvision, blindsight, truesight } = base;
+  let { darkvision, blindsight, truesight, xray } = base;
   const extending: SenseModifier[] = [];
   for (const modifier of modifiers) {
     if (modifier.kind === "darkvision") {
@@ -218,13 +219,14 @@ function fromModifiers(
         darkvision = Math.max(darkvision, modifier.feet);
       else if (modifier.sense === "blindsight")
         blindsight = Math.max(blindsight, modifier.feet);
+      else if (modifier.sense === "xray") xray = Math.max(xray, modifier.feet);
       else truesight = Math.max(truesight, modifier.feet);
     }
   }
   for (const { feet, extend = 0 } of extending) {
     darkvision = darkvision > 0 ? darkvision + extend : feet;
   }
-  return { ...base, darkvision, blindsight, truesight };
+  return { ...base, darkvision, blindsight, truesight, xray };
 }
 
 const NO_SENSES: Senses = {
@@ -233,6 +235,7 @@ const NO_SENSES: Senses = {
   truesight: 0,
   devilsSight: 0,
   ownDarkness: false,
+  xray: 0,
 };
 
 // What a stat block's or companion's printed senses give.

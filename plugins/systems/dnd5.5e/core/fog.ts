@@ -18,6 +18,7 @@ import {
   NS,
   applyDndEvent,
   dndEvent,
+  hasCondition,
   isDown,
 } from "./state.ts";
 import { hasTactic } from "./tactics.ts";
@@ -202,10 +203,18 @@ export function partySight(state: DndState, access: ContentAccess): PartySight {
     const feet = tremorsenseOf(viewer, stats);
     return feet > 0 && viewer.position ? [{ at: viewer.position, feet }] : [];
   });
+  // X-ray vision sees a foe through walls in range, though not one that's Invisible.
+  const xrays = viewers.flatMap((viewer) => {
+    const feet = sensesOf(viewer, access).xray;
+    return feet > 0 && viewer.position ? [{ at: viewer.position, feet }] : [];
+  });
   const felt = (actor: Actor): boolean =>
-    feels.length > 0 &&
-    !speedsOf(actor, deriveStats(actor, access)).has("fly") &&
-    feels.some(({ at, feet }) => distanceFeet(at, actor.position) <= feet);
+    (feels.length > 0 &&
+      !speedsOf(actor, deriveStats(actor, access)).has("fly") &&
+      feels.some(({ at, feet }) => distanceFeet(at, actor.position) <= feet)) ||
+    (xrays.length > 0 &&
+      !hasCondition(actor, "invisible") &&
+      xrays.some(({ at, feet }) => distanceFeet(at, actor.position) <= feet));
   const foes = new Set<string>();
   for (const actor of Object.values(state.actors)) {
     // A foe that has hidden isn't seen, even where its square is.

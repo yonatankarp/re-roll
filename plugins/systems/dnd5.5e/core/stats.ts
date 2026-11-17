@@ -1992,9 +1992,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ([, item]) => item.type === "armor" && item.armorType === "heavy",
   );
   const fits = (passive: Passive): boolean =>
-    (passive.kind !== "modifier" && passive.kind !== "weaponRider") ||
-    passive.armor === undefined ||
-    (passive.armor === "noHeavy" ? !heavy : !armored);
+    (passive.kind !== "modifier" ||
+      !passive.while ||
+      passive.while.some((id) =>
+        actor.activeEffects.some(({ sourceId }) =>
+          sourceId.startsWith(`feature:${id}:`),
+        ),
+      )) &&
+    ((passive.kind !== "modifier" && passive.kind !== "weaponRider") ||
+      passive.armor === undefined ||
+      (passive.armor === "noHeavy" ? !heavy : !armored));
   const traits = [...itemPassives, ...kept, ...fromFeatures.passives].filter(
     fits,
   );
@@ -3137,7 +3144,7 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
       }
     : own;
   // A Ring of Free Action: nothing takes Speed off.
-  const speed = effectBonus(actor, "speed", hasSteadySpeed(stats));
+  const speed = effectBonus(actor, "speed", hasSteadySpeed(stats, actor));
   const maxHp = effectBonus(actor, "maxHp");
   const stuck = new Set(
     actor.activeEffects.flatMap(({ modifier }) =>
@@ -3534,8 +3541,14 @@ function effectBonus(
   return total;
 }
 
-export function hasSteadySpeed(stats: Stats): boolean {
-  return stats.passives.some((passive) => passive.kind === "steadySpeed");
+export function hasSteadySpeed(stats: Stats, actor?: Actor): boolean {
+  return (
+    stats.passives.some((passive) => passive.kind === "steadySpeed") ||
+    (actor?.activeEffects.some(
+      ({ modifier }) => modifier.kind === "steadySpeed",
+    ) ??
+      false)
+  );
 }
 
 export function modifierFor(stats: Stats, ability: Ability): number {
