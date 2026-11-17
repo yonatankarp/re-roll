@@ -115,6 +115,32 @@ describe("a term's quick answer", () => {
     ]);
   });
 
+  it("adds the paragraph led by the word in bold, one or many", () => {
+    const types = [
+      "### Kinds",
+      "",
+      "Every thing has a kind.",
+      "",
+      "**Blobs** are round.",
+      "",
+      "**Fuzzies** are soft.",
+      "",
+      "**Fey** are fair.",
+    ].join("\n");
+    expect(excerpt(types, "Blob").paragraphs).toEqual([
+      "Every thing has a kind.",
+      "Blobs are round.",
+    ]);
+    expect(excerpt(types, "Fuzzy").paragraphs).toEqual([
+      "Every thing has a kind.",
+      "Fuzzies are soft.",
+    ]);
+    expect(excerpt(types, "Fey").paragraphs).toEqual([
+      "Every thing has a kind.",
+      "Fey are fair.",
+    ]);
+  });
+
   it("stays short for a long section", () => {
     const long = `### Long\n\n${"Many words here. ".repeat(80)}\n\nMore.`;
     const { paragraphs } = excerpt(long, "Long");
@@ -148,6 +174,34 @@ describe("finding terms in the game's text", () => {
       "Opportunity Attacks=rule:opportunity-attack",
       "Help=action:help",
     ]);
+  });
+
+  it("links nothing inside a name from the run's content, as a creature type's or a skill's word", () => {
+    const named = termFinder(
+      [
+        entry("creature-type:giant", ["Giant", "Giants"]),
+        entry("creature-type:fey", ["Fey"]),
+        entry("skill:nature", ["Nature"]),
+      ],
+      [
+        "Giant Rat",
+        "Storm Giant",
+        "Fey Step",
+        "Nature’s Veil",
+        "Giant",
+        "Longsword",
+      ],
+    );
+    const words = (text: string) => named(text).map(({ word }) => word);
+    expect(
+      words("A Giant Rat, a Storm Giant and Fey Step; Nature's Veil."),
+    ).toEqual([]);
+    expect(words("Giants and Fey call on Nature.")).toEqual([
+      "Giants",
+      "Fey",
+      "Nature",
+    ]);
+    expect(words("The Giant swings.")).toEqual(["Giant"]);
   });
 
   it("finds nothing without terms", () => {

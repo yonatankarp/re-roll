@@ -1,5 +1,6 @@
 import {
   ALL_SKILLS,
+  CREATURE_TYPES,
   ConditionSchema,
   DAMAGE_TYPES,
   WeaponMasterySchema,
@@ -17,6 +18,7 @@ export interface GlossaryTerm {
   readonly id: string;
   readonly entity: string;
   readonly words: readonly string[];
+  readonly books?: readonly string[]; // where to look in place of GLOSSARY_BOOKS
 }
 
 // Books whose glossary entities may explain a term, best first. 2014 books are left out, as their rules differ.
@@ -24,6 +26,13 @@ export const GLOSSARY_BOOKS = ["phb", "dmg", "basic-rules", "srd52"] as const;
 
 const capital = (word: string): string =>
   word.charAt(0).toUpperCase() + word.slice(1);
+// A creature type for many: Fey and Undead stay as they are.
+const plural = (type: string): string =>
+  type === "fey" || type === "undead"
+    ? type
+    : type.endsWith("y")
+      ? `${type.slice(0, -1)}ies`
+      : `${type}s`;
 // The game writes a word lower-case in running text and capitalized in a label.
 const both = (...words: string[]): string[] =>
   words.flatMap((word) => [word, capital(word)]);
@@ -296,8 +305,16 @@ export const GLOSSARY_TERMS: readonly GlossaryTerm[] = [
       : term;
   }),
   ...RULES,
-  // Capitalized only, since "history" is a word of a sentence too. Not the creature types, whose words start
-  // monsters' and spells' names (Giant Rat, Fey Step), and whose entities list monsters rather than explain.
+  // Capitalized, one or many, from the Monster Manual's section that explains each type: the types' own entities
+  // list monsters rather than explain. A name holding a type's word, as Giant Rat or Fey Step, isn't linked
+  // (termFinder's names).
+  ...CREATURE_TYPES.map((type) => ({
+    id: `creature-type:${type}`,
+    entity: "rule-term/creature-type",
+    books: ["monster-manual"],
+    words: [...new Set([capital(type), capital(plural(type))])],
+  })),
+  // Capitalized only, since "history" is a word of a sentence too.
   ...ALL_SKILLS.map((skill) => ({
     id: `skill:${skill}`,
     entity: `skill/${glossaryName(skill)}`,

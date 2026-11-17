@@ -1,6 +1,12 @@
 import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
-import { carriedWeight, carryingCapacity, encumberedSpeed } from "./carry.ts";
+import {
+  carriedWeight,
+  carryingCapacity,
+  encumberedSpeed,
+  encumbrance,
+} from "./carry.ts";
+import { ENCUMBRANCE, variantOn } from "./variant-rules.ts";
 import {
   type Actor,
   type DndState,
@@ -838,6 +844,16 @@ function attacksFrom(featureId: string): number {
 
 const isPactMagic = (id: string): boolean => id.endsWith("pact-magic");
 
+// Heavily encumbered: Disadvantage on ability checks, attack rolls and saving throws that use Strength, Dexterity or
+// Constitution.
+const HEAVILY_ENCUMBERED = (["checks", "attacks", "saves"] as const).flatMap(
+  (on) =>
+    (["str", "dex", "con"] as const).map((ability) => ({
+      kind: "modifier" as const,
+      modifier: { kind: "disadvantage" as const, on, ability },
+    })),
+);
+
 function characterStats(actor: Actor, access: ContentAccess): Stats {
   const build = effectiveBuild(actor);
   if (!build) throw new Error(`${actor.id} has no character build`);
@@ -1228,6 +1244,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   }
 
   const pools = itemPools(actor, access);
+  const carried = carriedWeight(actor, access);
+  const capacity = carryingCapacity(
+    abilities.str,
+    species.size,
+    traits.some(({ kind }) => kind === "powerfulBuild"),
+  );
+  // With the Encumbrance variant the load slows, in place of armor's Strength score.
+  const load = variantOn(access, ENCUMBRANCE)
+    ? encumbrance(carried, capacity)
+    : null;
   const partial: Stats = {
     abilities,
     proficiency: proficiencyBonus(level) + magic.proficiency,
@@ -1239,15 +1265,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       flatBonus: flatBonus + shield,
       passives: traits,
     }),
-    speed: encumberedSpeed(
-      species.speed,
-      carriedWeight(actor, access),
-      carryingCapacity(
-        abilities.str,
-        species.size,
-        traits.some(({ kind }) => kind === "powerfulBuild"),
-      ),
-    ),
+    speed: encumberedSpeed(species.speed - 10 * (load ?? 0), carried, capacity),
     savingThrows: [
       ...new Set([
         ...firstClass.savingThrows,
@@ -1291,6 +1309,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
             },
           ]
         : []),
+      ...(load === 2 ? HEAVILY_ENCUMBERED : []),
     ],
     actions: withMetamagic(
       withInvocations(
@@ -1352,7 +1371,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       0,
       partial.speed +
         passiveBonus(partial, "speed") -
-        (tooHeavy ? 10 : 0) -
+        (tooHeavy && load === null ? 10 : 0) -
         5 * actor.exhaustion,
     ),
     resources: Object.fromEntries(

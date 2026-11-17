@@ -39,3 +39,10 @@ export function encumberedSpeed(
   if (carried > capacity * 2) return 0;
   return carried > capacity ? Math.min(speed, 5) : speed;
 }
+
+// The Encumbrance variant rule (variant-rules.ts): over 5 times Strength, a third of a Medium creature's capacity, the
+// bearer is encumbered (1), and over 10 times, heavily encumbered (2). Measured against capacity, size counts as it does.
+export function encumbrance(carried: number, capacity: number): 0 | 1 | 2 {
+  if (carried > (capacity * 2) / 3) return 2;
+  return carried > capacity / 3 ? 1 : 0;
+}
