@@ -42,7 +42,7 @@ import {
   type Stats,
 } from "../stats.ts";
 import { finalDamage, rollD20 } from "../rules.ts";
-import { DECLINE, spellOfSource } from "./ids.ts";
+import { DECLINE, ITEM_PREFIX, spellOfSource } from "./ids.ts";
 import { teleportFrame } from "./movement.ts";
 import {
   actorOf,
@@ -107,15 +107,26 @@ export function reactionCosts(
   action: KnownAction,
   context: Context,
 ): SystemEvent[] {
-  return payCosts(action, actor, context).map((event) =>
-    event.kind === `${NS}:budgetSpent`
-      ? dndEvent(`${NS}:budgetSpent`, {
-          actor: actor.id,
-          kind: "reaction",
-          label: action.name,
-        })
-      : event,
-  );
+  return [
+    ...payCosts(action, actor, context).map((event) =>
+      event.kind === `${NS}:budgetSpent`
+        ? dndEvent(`${NS}:budgetSpent`, {
+            actor: actor.id,
+            kind: "reaction",
+            label: action.name,
+          })
+        : event,
+    ),
+    // An item used up, as a Lucky Foot.
+    ...(action.id.startsWith(ITEM_PREFIX)
+      ? [
+          dndEvent(`${NS}:itemUsed`, {
+            actor: actor.id,
+            item: action.id.slice(ITEM_PREFIX.length),
+          }),
+        ]
+      : []),
+  ];
 }
 
 // ---- A d20 roll, before its result applies ----

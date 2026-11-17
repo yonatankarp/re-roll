@@ -152,7 +152,72 @@ function choose(run: RunContext, state: DndState): string {
   });
 }
 
+// Potions of the test's own (#142): ids and mechanics only.
+const drink = (name: string, effects: object[]) => ({
+  id: `test:item/${name}`,
+  name,
+  type: "magicItem",
+  category: "potion",
+  rarity: "rare",
+  attunement: false,
+  text: "Test.",
+  automation: "full",
+  activation: {
+    cost: ["bonusAction"],
+    targeting: { self: true },
+    resolution: { kind: "automatic", effects },
+  },
+});
+const POTIONS = {
+  "test:item/speed": drink("speed", [
+    {
+      kind: "modifier",
+      modifier: { kind: "hasted", noLethargy: true },
+      duration: { minutes: 1 },
+    },
+  ]),
+  "test:item/giant": drink("giant", [
+    {
+      kind: "modifier",
+      modifier: { kind: "setScore", ability: "str", score: 25 },
+      duration: { minutes: 60 },
+    },
+  ]),
+  "test:item/poison": {
+    ...drink("poison", []),
+    activation: {
+      cost: ["bonusAction"],
+      targeting: { self: true },
+      resolution: {
+        kind: "save",
+        ability: "con",
+        dc: { base: 13 },
+        damage: [{ amount: { dice: "4d6" }, type: "poison" }],
+        onSuccessDamage: "full",
+      },
+    },
+  },
+};
+
 describe("how the party fights", () => {
+  it("drinks a Potion of Speed or Giant Strength before a hard fight, and never a Potion of Poison", async () => {
+    const run = await arena(POTIONS);
+    const picks = Object.keys(POTIONS).map((item) =>
+      choose(
+        run,
+        fight(
+          hero(run, { inventory: ["srd52:item/longsword", item] }),
+          monster("brute", "brute", 200),
+        ),
+      ),
+    );
+    expect(picks).toEqual([
+      `item:test:item/speed|${PLAYER_ACTOR}`,
+      `item:test:item/giant|${PLAYER_ACTOR}`,
+      "weapon:srd52:item/longsword|brute",
+    ]);
+  });
+
   it("brings a downed ally back with a Bonus Action, keeping the Action to attack", async () => {
     const run = await arena();
     const healer = hero(run, {

@@ -56,6 +56,7 @@ import { cureFor } from "./dispel.ts";
 import {
   masteredDice,
   masteredTypes,
+  flooredTypes,
   rerolledTypes,
   piercing,
   repeatSaveConditions,
@@ -330,7 +331,9 @@ export function runLingeringTick(
             masteredDice(
               dice,
               type,
-              mastered,
+              caster
+                ? flooredTypes(stats, effect.sourceId.startsWith("spell:"))
+                : mastered,
               caster
                 ? rerolledTypes(stats, effect.sourceId.startsWith("spell:"))
                 : [],
