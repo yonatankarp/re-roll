@@ -155,8 +155,8 @@
     means. You and any creatures you designate when you cast the spell can open
     and close the object despite the lock. You can also set a password that,
     when spoken within 5 feet of the object, unlocks it for 1 minute.
-  automation: text
   outOfCombat: utility
+  automation: full
 - id: srd52:spell/aura-of-life
   name: Aura of Life
   level: 4
@@ -489,8 +489,27 @@
     creature takes half as much damage. A creature can swim away from the
     whirlpool only if it first takes an action to pull away and succeeds on a
     Strength (Athletics) check against your spell save DC.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - water
+            aid: success
+          duration:
+            concentration: true
+            minutes: 10
 - id: srd52:spell/create-undead
   name: Create Undead
   level: 6
@@ -1022,7 +1041,24 @@
     it leave such a pit if it was created at the bottom. If you move more than
     100 feet from the disk (typically because it can’t move around an obstacle
     to follow you), the spell ends.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: holds
+            pounds: 500
+          duration:
+            minutes: 60
 - id: srd52:spell/foresight
   name: Foresight
   level: 9
@@ -1391,8 +1427,8 @@
     holding or carrying the object, crushing the sapphire doesn’t transport it,
     but instead you learn who that creature is and where that creature is
     currently located.
-  automation: text
   outOfCombat: castingTime
+  automation: full
 - id: srd52:spell/legend-lore
   name: Legend Lore
   level: 5
@@ -1454,8 +1490,8 @@
     control the hand thus again. As part of that action, you can move the hand
     up to 30 feet. The hand can’t attack, activate magic items, or carry more
     than 10 pounds.
-  automation: text
   outOfCombat: utility
+  automation: full
 - id: srd52:spell/magic-weapon
   name: Magic Weapon
   level: 2
@@ -2500,8 +2536,24 @@
     the task, then waits for your next command. If you command the servant to
     perform a task that would move it more than 60 feet away from you, the spell
     ends.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: holds
+            pounds: 30
+          duration:
+            minutes: 60
 - id: srd52:spell/wall-of-force
   name: Wall of Force
   level: 5
@@ -3092,8 +3144,28 @@
     ground fog Rain, hail, or snow Torrential rain, driving hail, or blizzard
     Temperature Wind Stage Condition Stage Heat wave Calm Hot Moderate wind Warm
     Strong wind Cool Gale Cold Storm Freezing Condition
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  activation:
+    cost:
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: weather
+            ends:
+              - cold
+              - heat
+              - rain
+              - wind
+          duration:
+            concentration: true
+            minutes: 480
 - id: srd52:spell/creation
   name: Creation
   level: 5
@@ -3119,8 +3191,26 @@
     or crystal 12 hours Precious metals 1 hour Gems 10 minutes Adamantine or
     mithral 1 minute Using a Higher-Level Spell Slot. The Cube increases by 5
     feet for each spell slot level above 5.
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  activation:
+    cost:
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - climb
+              - gap
+            aid: success
+          duration:
+            minutes: 1440
 - id: srd52:spell/daylight
   name: Daylight
   level: 3
@@ -3404,8 +3494,25 @@
     be created by this spell. You also can’t use it to create items that require
     a high degree of skill—such as weapons and armor—unless you have proficiency
     with the type of Artisan’s Tools used to craft such objects.
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  activation:
+    cost:
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - climb
+              - gap
+            aid: success
+          duration: instantaneous
 - id: srd52:spell/feather-fall
   name: Feather Fall
   level: 1
@@ -4272,8 +4379,28 @@
     terrain. If the way you shape the terrain would make a structure unstable,
     it might collapse. Similarly, this spell doesn’t directly affect plant
     growth. The moved earth carries any plants along with it.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - climb
+              - gap
+            aid: success
+          duration:
+            concentration: true
+            minutes: 120
 - id: srd52:spell/phantasmal-killer
   name: Phantasmal Killer
   level: 4
@@ -4373,7 +4500,47 @@
     radius centered on a point within range become enriched for 365 days. The
     plants yield twice the normal amount of food when harvested. They can
     benefit from only one Plant Growth per year.
-  automation: text
+  automation: partial
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 100
+      range: 150
+      side: enemy
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: zone
+          zone: area
+          radius: 100
+          duration:
+            text: Until dispelled
+    area:
+      difficult: true
+  scene:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - chase
+            aid: success
+            once: true
+          duration: instantaneous
 - id: srd52:spell/power-word-stun
   name: Power Word Stun
   level: 8
@@ -4818,8 +4985,28 @@
     could also shape a stone door or its frame to seal the door shut. The object
     you create can have up to two hinges and a latch, but finer mechanical
     detail isn’t possible.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - wall
+              - climb
+              - stuck
+            aid: success
+            once: true
+          duration: instantaneous
 - id: srd52:spell/sunbeam
   name: Sunbeam
   level: 6
@@ -6021,8 +6208,8 @@
     Sculpt Element. You cause dirt, sand, fire, smoke, mist, or water that can
     fit in a 1-foot Cube to assume a crude shape (such as that of a creature)
     for 1 hour.
-  automation: text
   outOfCombat: utility
+  automation: full
 - id: srd52:spell/enthrall
   name: Enthrall
   level: 2
@@ -8349,8 +8536,23 @@
     malnutrition and dehydration. The food is bland but nourishing and looks
     like a food of your choice, and the water is clean. The food spoils after 24
     hours if uneaten.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: water
+          duration:
+            minutes: 1440
 - id: srd52:spell/dancing-lights
   name: Dancing Lights
   level: 0
@@ -9400,8 +9602,27 @@
     into a different substance) expels you and deals 50 Force damage to you. If
     expelled, you move into an unoccupied space closest to where you first
     entered and have the Prone condition.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - chase
+            aid: success
+            once: true
+          duration:
+            minutes: 480
 - id: srd52:spell/mind-spike
   name: Mind Spike
   level: 2
@@ -9492,8 +9713,27 @@
     surrounding it. When the opening disappears, any creatures or objects still
     in the passage created by the spell are safely ejected to an unoccupied
     space nearest to the surface on which you cast the spell."
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - wall
+              - stuck
+            aid: success
+          duration:
+            minutes: 60
 - id: srd52:spell/planar-ally
   name: Planar Ally
   level: 6
@@ -9589,8 +9829,8 @@
     Creation. You create a nonmagical trinket or an illusory image that can fit
     in your hand. It lasts until the end of your next turn. A trinket can deal
     no damage and has no monetary worth.
-  automation: text
   outOfCombat: utility
+  automation: full
 - id: srd52:spell/programmed-illusion
   name: Programmed Illusion
   level: 6
@@ -9636,8 +9876,8 @@
   duration: instantaneous
   text: You remove poison and rot from nonmagical food and drink in a
     5-foot-radius Sphere centered on a point within range.
-  automation: text
   outOfCombat: utility
+  automation: full
 - id: srd52:spell/ray-of-sickness
   name: Ray of Sickness
   level: 1
@@ -10023,8 +10263,8 @@
     point of your choice within range, such as a rumble of thunder, the cry of a
     raven, or ominous whispers. Tremors. You cause harmless tremors in the
     ground for 1 minute.
-  automation: text
   outOfCombat: utility
+  automation: full
 - id: srd52:spell/transport-via-plants
   name: Transport via Plants
   level: 6
@@ -10797,7 +11037,23 @@
     within range. Using a Higher-Level Spell Slot. You create or destroy 10
     additional gallons of water, or the size of the Cube increases by 5 feet,
     for each spell slot level above 1."
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: water
+          duration:
+            minutes: 1440
 - id: srd52:spell/darkness
   name: Darkness
   level: 2
@@ -10960,8 +11216,8 @@
     as falling leaves, spectral dancing fairies, a gentle breeze, the sound of
     an animal, or the faint odor of skunk. The effect must fit in a 5-foot Cube.
     Fire Play. You light or snuff out a candle, a torch, or a campfire.
-  automation: text
   outOfCombat: utility
+  automation: full
 - id: srd52:spell/enlarge-reduce
   name: Enlarge/Reduce
   level: 2
@@ -11597,8 +11853,27 @@
     suppressed for 10 minutes, during which time the target can be opened and
     closed. When you cast the spell, a loud knock, audible up to 300 feet away,
     emanates from the target.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - lock
+              - stuck
+            aid: success
+            once: true
+          duration: instantaneous
 - id: srd52:spell/lightning-bolt
   name: Lightning Bolt
   level: 3
@@ -11756,8 +12031,8 @@
     dimension, you mend it, leaving no trace of the former damage. This spell
     can physically repair a magic item, but it can’t restore magic to such an
     object.
-  automation: text
   outOfCombat: castingTime
+  automation: full
 - id: srd52:spell/minor-illusion
   name: Minor Illusion
   level: 0
@@ -12629,7 +12904,6 @@
     from you, and a thunderous boom is audible within 300 feet. Using a
     Higher-Level Spell Slot. The damage increases by 1d8 for each spell slot
     level above 1.
-  automation: partial
   activation:
     cost:
       - action
@@ -12658,6 +12932,26 @@
   upcast:
     perSlotLevel:
       addDice: 1d8
+  automation: full
+  scene:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - heavy
+            aid: success
+            once: true
+          duration: instantaneous
 - id: srd52:spell/tree-stride
   name: Tree Stride
   level: 5

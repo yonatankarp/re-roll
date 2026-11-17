@@ -333,6 +333,9 @@ export const ObstacleSchema = z.enum([
 ]);
 export type Obstacle = z.infer<typeof ObstacleSchema>;
 
+// The weather an environmental effect is, which magic that changes the weather calms (environment.ts).
+export const WeatherSchema = z.enum(["cold", "heat", "rain", "wind"]);
+
 // "attacksAgainst" sits on the creature being attacked, as with Faerie Fire or Blur.
 const RollFlagSchema = z.enum(["attacks", "saves", "checks", "attacksAgainst"]);
 
@@ -442,11 +445,11 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     chance: z.number().int().min(1).max(99).optional(),
     spends: z.literal(true).optional(),
   }),
-  // These environmental effects don't touch the party while it lasts, as Control Weather calms a storm or a heat wave
-  // (environment.ts).
+  // Environmental effects of these kinds of weather don't touch the party while it lasts, as Control Weather calms a
+  // storm or a heat wave (environment.ts).
   z.strictObject({
     kind: z.literal("weather"),
-    ends: z.array(ContentIdSchema).min(1),
+    ends: z.array(WeatherSchema).min(1),
   }),
   // Carries this many pounds of the bearer's gear for it, weightless, as a Bag of Holding or a Floating Disk (carry.ts).
   z.strictObject({ kind: z.literal("holds"), pounds: z.number().int().min(1) }),
@@ -2249,6 +2252,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // enough, and spent, as a Ring of Dedicated Focus's two on a save to keep Concentration. `resource` is then
     // "hitDice".
     hitDice: z.number().int().min(1).optional(),
+    // With `hitDice`, a use of this resource spent too, as Sustained Symbiosis's uses a Long Rest.
+    uses: z.string().min(1).optional(),
     concentration: z.literal(true).optional(), // a save to keep Concentration, as the Ring of Dedicated Focus's
     magical: z.literal(true).optional(), // only a save against a spell, as Magic Resistant
     from: SaveFromSchema.optional(), // only a save against this, as a Scarab of Protection's
@@ -3386,7 +3391,7 @@ const ToolSchema = ItemBaseSchema.extend({
   type: z.literal("tool"),
   ability: AbilitySchema.optional(), // 2014 books print no ability for a tool
   // What it deals with, so a check about that counts its proficiency when it's carried, as Thieves' Tools a lock.
-  about: z.array(ObstacleSchema).min(1).optional(),
+  handles: z.array(ObstacleSchema).min(1).optional(),
   artisan: z.literal(true).optional(), // one of the Artisan's Tools, which a Manifold Tool can become
   text: z.string().min(1),
 }).strict();
@@ -3889,6 +3894,7 @@ const EnvironmentRowSchema = z.strictObject({
 
 export const EnvironmentalEffectSchema = GlossaryEntrySchema.extend({
   automation: AutomationSchema.default("text"),
+  weather: WeatherSchema.optional(), // the weather it is, as Extreme Cold's cold
   exposure: ExposureSchema.optional(),
   // In a fight fought in it, or a scene spent in it, every creature not of an `except` type has these passives, as
   // Arcadian Vitality's Immunity to Frightened.

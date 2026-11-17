@@ -1630,7 +1630,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     if (spell.scene) {
       actions.push({
         id: `spell:${spellId}:scene`,
-        name: spell.name,
+        name: `${spell.name} (between fights)`,
         activation: { ...spell.scene, outOfCombat: "scene" },
         spellLevel: spell.level,
         upcast: spell.upcast,

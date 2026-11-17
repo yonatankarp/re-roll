@@ -28,6 +28,7 @@ import {
   type Stats,
 } from "../stats.ts";
 import type { HitKind, Passive, Skill } from "../schemas.ts";
+import { toolKeyOf } from "../tools.ts";
 import {
   distanceFeet,
   rangeFeet,
@@ -196,7 +197,8 @@ function usesTool(
   access: ContentAccess,
 ): boolean {
   if (tool === undefined) return false;
-  if (wanted !== "artisan") return wanted === tool;
+  if (wanted !== "artisan")
+    return toolKeyOf(wanted, access) === toolKeyOf(tool, access);
   const item = ItemSchema.safeParse(access.content(tool)).data;
   return item?.type === "tool" && item.artisan === true;
 }

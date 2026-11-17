@@ -59,10 +59,10 @@ function partyOf(state: DndState): Actor[] {
   );
 }
 
-// The effects a party member's magic keeps off the party, as Control Weather's calm.
-export function calmed(state: DndState | undefined): ReadonlySet<string> {
+// The weather a party member's magic keeps off the party, as Control Weather's calm.
+function calmed(state: DndState): ReadonlySet<string> {
   return new Set(
-    partyOf(state ?? { actors: {}, combat: null }).flatMap((actor) =>
+    partyOf(state).flatMap((actor) =>
       actor.activeEffects.flatMap(({ modifier }) =>
         modifier.kind === "weather" ? modifier.ends : [],
       ),
@@ -70,22 +70,30 @@ export function calmed(state: DndState | undefined): ReadonlySet<string> {
   );
 }
 
-// Those of `ids` the party's magic doesn't keep off.
+// Those of `ids` the party's magic doesn't calm.
 export function uncalmed(
   ids: readonly string[] | undefined,
   state: DndState,
+  access: ContentAccess,
 ): readonly string[] | undefined {
   if (!ids || ids.length === 0) return ids;
   const calm = calmed(state);
-  return calm.size > 0 ? ids.filter((id) => !calm.has(id)) : ids;
+  if (calm.size === 0) return ids;
+  return ids.filter((id) => {
+    const { weather } = effectOf(access, id);
+    return weather === undefined || !calm.has(weather);
+  });
 }
 
 // The effects around a creature now: a fight's, or between fights the scene's, less what the party's magic calms.
-export function environmentIds(state: DndState | undefined): readonly string[] {
+export function environmentIds(
+  state: DndState | undefined,
+  access?: ContentAccess,
+): readonly string[] {
   const ids = state?.combat
     ? (state.combat.environment?.ids ?? [])
     : (state?.ambient ?? []);
-  return state ? (uncalmed(ids, state) ?? []) : ids;
+  return state && access ? (uncalmed(ids, state, access) ?? []) : ids;
 }
 
 // The passives the effects around it give a creature not of an excepted type, as Arcadian Vitality's Immunity to
@@ -95,7 +103,7 @@ export function environmentPassives(
   access: ContentAccess,
 ): readonly Passive[] {
   const { state } = access as { state?: DndState };
-  return environmentIds(state).flatMap((id) => {
+  return environmentIds(state, access).flatMap((id) => {
     const effect = effectOf(access, id);
     return effect.except?.includes(creatureType ?? "") ? [] : effect.passives;
   });
@@ -345,7 +353,7 @@ export function environmentEvents(
   const events: SystemEvent[] = [
     dndEvent(`${NS}:environmentEntered`, { effects: args.effects }),
   ];
-  for (const id of uncalmed(args.effects, context.state) ?? []) {
+  for (const id of uncalmed(args.effects, context.state, context) ?? []) {
     const effect = effectOf(context, id);
     const periods =
       effect.exposure?.every === "minute" ? args.minutes : args.hours;

@@ -13,7 +13,7 @@ import {
 } from "./schemas.ts";
 import { type Actor, type DndState, NS, dndEvent } from "./state.ts";
 import { deriveStats, lookup } from "./stats.ts";
-import { toolByName } from "./tools.ts";
+import { toolByName, toolKeyOf } from "./tools.ts";
 import { SKILLS_WITH_DIFFERENT_ABILITIES, variantOn } from "./variant-rules.ts";
 
 // Exploring outside a fight (#153, #185): a scene check says what it acts on (`about`), as a lock or a climb, and
@@ -109,8 +109,8 @@ export function obstaclesOf(
   return "about" in parsed ? (parsed.about ?? []) : [];
 }
 
-// The tools a character is proficient with: its first class's, its background's (a choice of kind, as "one kind of
-// Gaming Set", names none), and those its features give.
+// The tools a character is proficient with, by name (toolKeyOf): its classes', its background's (a choice of kind, as
+// "one kind of Gaming Set", names none), and those its features give.
 // shortcut: a class taken later gives its tools too, where multiclassing gives only some of them.
 export function toolProficiencies(
   actor: Actor,
@@ -121,15 +121,17 @@ export function toolProficiencies(
   const background = build
     ? BackgroundSchema.safeParse(access.content(build.backgroundId)).data
     : undefined;
-  return new Set([
-    ...Object.keys(stats.classLevels).flatMap(
-      (id) => lookup(access, ClassSchema, id).tools ?? [],
-    ),
-    ...(background ? [toolByName(background.tool, access) ?? []].flat() : []),
-    ...stats.passives.flatMap((passive) =>
-      passive.kind === "toolProficiency" ? passive.tools : [],
-    ),
-  ]);
+  return new Set(
+    [
+      ...Object.keys(stats.classLevels).flatMap(
+        (id) => lookup(access, ClassSchema, id).tools ?? [],
+      ),
+      ...(background ? [toolByName(background.tool, access) ?? []].flat() : []),
+      ...stats.passives.flatMap((passive) =>
+        passive.kind === "toolProficiency" ? passive.tools : [],
+      ),
+    ].map((id) => toolKeyOf(id, access)),
+  );
 }
 
 export function isArtisan(tool: string, access: ContentAccess): boolean {
@@ -150,8 +152,9 @@ export function hasTool(
   tool: string,
   access: ContentAccess,
 ): boolean {
+  const wanted = toolKeyOf(tool, access);
   return (
-    actor.inventory.includes(tool) ||
+    actor.inventory.some((id) => toolKeyOf(id, access) === wanted) ||
     (isArtisan(tool, access) && anyArtisan(actor, access))
   );
 }
@@ -171,7 +174,8 @@ function toolFor(
   const known = toolProficiencies(actor, access);
   const proficient = {
     has: (id: string) =>
-      known.has(id) || (isArtisan(id, access) && anyArtisan(actor, access)),
+      known.has(toolKeyOf(id, access)) ||
+      (isArtisan(id, access) && anyArtisan(actor, access)),
   };
   if ("tool" in check)
     return { id: check.tool, proficient: proficient.has(check.tool) };
@@ -179,7 +183,7 @@ function toolFor(
   const carried = actor.inventory.flatMap((id) => {
     const item = ItemSchema.safeParse(access.content(id)).data;
     return item?.type === "tool" &&
-      item.about?.some((obstacle) => about.includes(obstacle))
+      item.handles?.some((obstacle) => about.includes(obstacle))
       ? [{ id, proficient: proficient.has(id) }]
       : [];
   });

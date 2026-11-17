@@ -178,5 +178,5 @@
   weightLb: 1
   type: tool
   ability: dex
-  about: [lock, trap]
+  handles: [lock, trap]
   text: Used to pick a lock or disarm a trap.

@@ -36,6 +36,13 @@ export function toolByName(
   return names.get(toolKey(name));
 }
 
+// The same tool from two books, as the SRD's Thieves' Tools and the Player's Handbook's, is one tool: tools match by
+// name.
+export function toolKeyOf(id: string, access: ContentAccess): string {
+  const item = ItemSchema.safeParse(access.content(id)).data;
+  return item?.type === "tool" ? toolKey(item.name) : id;
+}
+
 // The tools a new character carries: its class's and its background's, as a Rogue's Thieves' Tools.
 export function startingTools(
   classDef: ClassDef,

@@ -228,7 +228,7 @@ export function startCombat(
     : [];
 
   // What the party's magic calms, as Control Weather a storm, doesn't come into the fight.
-  const around = uncalmed(encounter.environment, context.state);
+  const around = uncalmed(encounter.environment, context.state, context);
   const environment = fightEnvironment(around, context);
   const started = {
     encounter: encounter.id,

@@ -33,7 +33,7 @@ const FIXTURES = [
     name: "Lockpicks",
     type: "tool",
     ability: "dex",
-    about: ["lock", "trap"],
+    handles: ["lock", "trap"],
     text: "Test.",
   },
   {
@@ -238,6 +238,7 @@ const FIXTURES = [
     text: "Test.",
     source: "Test",
     automation: "full",
+    weather: "heat",
     exposure: { every: "hour", ability: "con", dc: 30, water: true },
   },
 ];
@@ -419,7 +420,8 @@ describe("tool checks (#185)", () => {
           ? { ...run.content(id), id, tool: "Lockpicks" }
           : run.content(id),
     });
-    expect([...tools]).toEqual([PICKS]);
+    // Tools match by name, so a book's Lockpicks and another's are one tool.
+    expect([...tools]).toEqual(["lockpicks"]);
     const rogue = lookup(run, ClassSchema, "srd52:class/rogue");
     expect(startingTools(rogue, "Lockpicks", run)).toEqual([
       "srd52:item/thieves-tools",
@@ -717,7 +719,7 @@ describe("the rest of the pieces (#153, #185)", () => {
           casterId: PLAYER_ACTOR,
           modifier: {
             kind: "weather" as const,
-            ends: ["test:environmental-effect/heat"],
+            ends: ["heat" as const],
           },
           ends: "spellDuration" as const,
           lingers: 8,
