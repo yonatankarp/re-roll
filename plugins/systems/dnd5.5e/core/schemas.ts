@@ -842,6 +842,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     exhaustion: z.literal(true).optional(),
     curse: z.literal(true).optional(),
     maxHp: z.literal(true).optional(),
+    // and it ends a spell that keeps the target from casting, as Greater Restoration and Heal end Befuddlement
+    befuddled: z.literal(true).optional(),
     // each of them on the target ends instead, `per` of the caster's `resource` apiece while it lasts, as Restoring
     // Touch's 5 Hit Points of Lay On Hands' pool for each condition
     pool: z
@@ -1034,8 +1036,6 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // A failed save's damage that drops the target to 0 Hit Points turns it to dust, dead outright, as Disintegrate.
   // Only a raising whose targeting has `dust` brings it back, as True Resurrection.
   z.strictObject({ kind: z.literal("disintegrate") }),
-  // A target with this many Hit Points or fewer dies, as Divine Word's lowest band on a failed save.
-  z.strictObject({ kind: z.literal("slay"), hpAtMost: z.number().int().min(1) }),
   // The target is sent off to another plane, gone from the fight for good: only one of these lowercase types with
   // `creatureTypes`, as Divine Word's Celestials and Fiends, and with `crByLevel` only one whose Challenge Rating is at
   // most the one for the caster's level in `class`, as Arcane Abjuration's banishing (combat/fear.ts).

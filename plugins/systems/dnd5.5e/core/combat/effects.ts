@@ -138,7 +138,7 @@ import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
 import { damageTypeFrame, zoneTypeFrame } from "./damage-choice.ts";
 import { focusFrame } from "./check-choice.ts";
-import { sendAwayEvents, slayEvents } from "./fear.ts";
+import { clingSave, sendAwayEvents } from "./fear.ts";
 import { optionFrame } from "./options.ts";
 import { weaponAttackResult } from "./weapon-spell.ts";
 import { duelBroken, duelDamaged } from "./duel.ts";
@@ -1246,13 +1246,23 @@ export function dealEvents(
     if (!isDead(hurt))
       events.push(...downedEvents(hurt, { ...context, state }));
   }
+  const resaved = new Set<string>();
   for (const effect of dealt > 0 ? (hurt?.activeEffects ?? []) : []) {
     if (!hurt || !effect.saveOnDamage) continue;
+    // One save for each source, as Hideous Laughter's Prone and Incapacitated end together.
+    const key = `${effect.sourceId}|${effect.casterId}`;
+    if (resaved.has(key)) continue;
+    resaved.add(key);
     const save = rollSave(
       hurt,
       effect.saveOnDamage.ability,
       effect.saveOnDamage.dc,
       { ...context, state },
+      effect.sourceId.startsWith("spell:"),
+      0,
+      [],
+      false,
+      effect.saveOnDamage.advantage === true,
     );
     events.push(...save.events);
     if (save.saved) {
@@ -1897,7 +1907,9 @@ export function leafEvents(
               ...(effect.failExhaustion
                 ? { failExhaustion: true as const }
                 : {}),
-              ...(effect.clings ? { clings: true as const } : {}),
+              ...(effect.clings && conditionSave
+                ? { clings: conditionSave }
+                : {}),
               ...lingersFor(effect.duration),
               ...(effect.banish && save
                 ? { banish: { ability: effect.banish.ability, dc: save.dc } }
@@ -1958,7 +1970,10 @@ export function leafEvents(
         );
         break;
       }
-      case "removeCondition":
+      case "removeCondition": {
+        const clung = clingSave(target, effect.condition, context);
+        events.push(...clung.events);
+        if (clung.held) break;
         events.push(
           dndEvent(`${NS}:conditionRemoved`, {
             actor: target.id,
@@ -1966,8 +1981,29 @@ export function leafEvents(
           }),
         );
         break;
+      }
       case "cure": {
         const condition = cureFor(target, effect.conditions);
+        const clung = condition
+          ? clingSave(target, condition, context)
+          : { held: false, events: [] };
+        events.push(...clung.events);
+        // Befuddlement's hold on its spellcasting, which Greater Restoration and Heal end.
+        const befuddled = effect.befuddled
+          ? target.activeEffects.find(
+              ({ modifier }) =>
+                modifier.kind === "actionLimit" && modifier.noSpells,
+            )
+          : undefined;
+        if (befuddled) {
+          events.push(
+            dndEvent(`${NS}:effectEnded`, {
+              actor: target.id,
+              sourceId: befuddled.sourceId,
+              casterId: befuddled.casterId,
+            }),
+          );
+        }
         const curse = target.activeEffects.find(
           ({ modifier }) => modifier.kind === "mark" && modifier.curse,
         );
@@ -2007,6 +2043,8 @@ export function leafEvents(
               }),
             );
           }
+        } else if (condition && clung.held) {
+          // the save failed, and the condition stays
         } else if (condition) {
           events.push(
             dndEvent(`${NS}:conditionRemoved`, { actor: target.id, condition }),
@@ -2272,9 +2310,6 @@ export function leafEvents(
             { kind: "actorDefeated", actor: target.id },
           );
         }
-        break;
-      case "slay":
-        events.push(...slayEvents(effect, target));
         break;
       case "sendAway":
         events.push(

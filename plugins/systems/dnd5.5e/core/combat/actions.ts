@@ -78,6 +78,7 @@ import { spellFumble, timeStopEnds } from "./durations.ts";
 import { castRiders, schoolCastEvents } from "./school.ts";
 import { tradeEvents } from "./trade.ts";
 import { spellFoiled } from "./areas.ts";
+import { castSaveFoiled } from "./fear.ts";
 
 // Taking an action on a turn: casting it, choosing its targets one by one, or aiming its area.
 
@@ -307,19 +308,35 @@ function castAction(
       );
   if (counter) return { frames: [counter] };
   const fumbled = spellFumble(actor, action, context);
-  const foiled = fumbled
+  const pained = fumbled
     ? null
-    : (spellFoiled(actor, action, context) ?? caged(actor, action, context));
-  if (fumbled || foiled?.failed) {
+    : castSaveFoiled(actor, action.spellLevel !== null, context);
+  const foiled =
+    fumbled || pained?.failed
+      ? null
+      : (spellFoiled(actor, action, context) ?? caged(actor, action, context));
+  if (fumbled || pained?.failed || foiled?.failed) {
+    // Power Word Pain keeps the slot of the spell it wastes.
+    const paid = pained?.keepSlot
+      ? {
+          ...action,
+          activation: {
+            ...action.activation,
+            cost: action.activation.cost.filter((cost) => cost !== "slot"),
+          },
+        }
+      : action;
     return {
       events: [
-        ...payCosts(action, actor, context, slotLevel),
+        ...payCosts(paid, actor, context, slotLevel),
         ...(fumbled ? [fumbled] : []),
+        ...(pained?.events ?? []),
         ...(foiled?.events ?? []),
       ],
       frames: [CHECK_END, frame("afterAction", { actor: actor.id })],
     };
   }
+  const passedSaves = pained?.events ?? [];
   const picked = typeof target === "string" ? null : target;
   const targetId = typeof target === "string" ? target : ALL;
   const { projectiles, resolution } = action.activation;
@@ -365,6 +382,7 @@ function castAction(
             }),
           ]
         : []),
+      ...passedSaves,
       ...(foiled?.events ?? []),
       ...lightAttackEvents(actor, actionId, context),
       // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.

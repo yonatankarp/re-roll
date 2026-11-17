@@ -113,7 +113,9 @@ export function hasFlag(
   stats: Stats,
   ability?: Ability,
   attackerType?: string, // the attacker's creature type, for attacksAgainst
-  attackerId?: string, // for attacksAgainst, which a caster's own Advantage needs
+  // for attacksAgainst, which a caster's own Advantage needs; for attacks, the target, which Disadvantage on attacks
+  // against a caster needs, as Bestow Curse's
+  attackerId?: string,
   skill?: Skill, // the check's skill, for Advantage on only some, as Remarkable Athlete's Athletics
 ): boolean {
   return [
@@ -126,6 +128,9 @@ export function hasFlag(
       modifier.kind === kind &&
       modifier.on === on &&
       (!modifier.ability || modifier.ability === ability) &&
+      (!("except" in modifier) ||
+        !modifier.except ||
+        modifier.except !== ability) &&
       (!("skills" in modifier) ||
         !modifier.skills ||
         (skill !== undefined && modifier.skills.includes(skill))) &&
@@ -694,6 +699,19 @@ export function canAfford(
   if (action.activation.bloodied && actor.hp * 2 >= stats.maxHp) return false;
   if (action.activation.beforeAction && !actor.budget.action) return false;
   if (!gatesOpen(action, actor)) return false;
+  const limits = limitsOf(actor);
+  // Befuddlement: no spells at all.
+  if (limits.noSpells && action.spellLevel !== null) return false;
+  // Abjure Foes: having moved this turn, it takes no action or Bonus Action.
+  if (
+    limits.oneThing &&
+    actor.moved > 0 &&
+    action.activation.cost.some(
+      (cost) => cost === "action" || cost === "bonusAction",
+    )
+  ) {
+    return false;
+  }
   // Haste's additional action takes only a weapon attack, or Dash, Disengage or Hide (actions.ts).
   if (
     hasteActing(actor) &&

@@ -230,7 +230,9 @@ const ActiveEffectSchema = z.strictObject({
   cantStand: z.literal(true).optional(),
   actionSave: z.literal(true).optional(),
   failExhaustion: z.literal(true).optional(),
-  clings: z.literal(true).optional(),
+  clings: z
+    .strictObject({ ability: AbilitySchema, dc: z.number().int() })
+    .optional(),
   // Hours it outlasts a fight by, counted down by rests, or "cured" for one that lasts until magic ends it (rest.ts).
   // Missing for an effect that ends with the fight.
   lingers: z.union([z.number().int(), z.literal("cured")]).optional(),
@@ -906,7 +908,7 @@ export function forAttacker(
 ): boolean {
   const { modifier } = effect;
   return (
-    modifier.kind !== "advantage" ||
+    (modifier.kind !== "advantage" && modifier.kind !== "disadvantage") ||
     !modifier.casterOnly ||
     effect.casterId === attackerId
   );
@@ -1026,6 +1028,31 @@ function grownClones(actors: DndState["actors"]): DndState["actors"] {
       id,
       actor.clone && !isDead(actor)
         ? { ...actor, clone: actor.clone - 1 }
+        : actor,
+    ]),
+  );
+}
+
+// Effects that outlast a fight run down with the hours that pass, as a curse's 8 hours (core/combat/effects.ts
+// lingersFor). Those that last until cured stay.
+function lingerLess(
+  actors: DndState["actors"],
+  hours: number,
+): DndState["actors"] {
+  return Object.fromEntries(
+    Object.entries(actors).map(([id, actor]) => [
+      id,
+      actor.activeEffects.some(({ lingers }) => typeof lingers === "number")
+        ? {
+            ...actor,
+            activeEffects: actor.activeEffects.flatMap((effect) =>
+              typeof effect.lingers !== "number"
+                ? [effect]
+                : effect.lingers > hours
+                  ? [{ ...effect, lingers: effect.lingers - hours }]
+                  : [],
+            ),
+          }
         : actor,
     ]),
   );
@@ -1181,6 +1208,22 @@ function settleSummons(state: DndState): DndState {
   return actors === state.actors ? state : { ...state, actors };
 }
 
+// What outlasts a fight, without its count in rounds (lingers): a curse that hampers attacks against its caster,
+// or hits from it, goes with the caster.
+// shortcut: repeat saves still being counted when the fight ends stop where they are, as Contagion's.
+function outlasting(effect: ActiveEffect): ActiveEffect[] {
+  const { modifier, lingers, lasts: _lasts, ...rest } = effect;
+  if (lingers === undefined) return [];
+  if (
+    ((modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
+      modifier.casterOnly) ||
+    (modifier.kind === "hitDamage" && modifier.dealtBy === "caster")
+  ) {
+    return [];
+  }
+  return [{ ...rest, modifier, lingers }];
+}
+
 function endCombat(state: DndState): DndState {
   // Whatever was thrown is gathered up after the fight.
   const gathered = (state.combat?.dropped ?? []).reduce(
@@ -1217,7 +1260,7 @@ function endCombat(state: DndState): DndState {
         id,
         {
           ...actor,
-          activeEffects: [],
+          activeEffects: actor.activeEffects.flatMap(outlasting),
           concentratingOn: null,
           budget: { action: true, bonusAction: true, reaction: true },
           usedThisTurn: [],
@@ -1354,10 +1397,12 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       const hours = data.hours ?? REST_HOURS[rest];
       const rested = {
         ...state,
-        actors:
+        actors: lingerLess(
           rest === "long"
             ? grownClones(deadLonger(state, hours))
             : deadLonger(state, hours),
+          hours,
+        ),
       };
       if (rest === "long") return { ...rested, sinceLongRest: hours };
       return state.sinceLongRest === undefined
@@ -1692,7 +1737,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         z.strictObject({ hours: z.number().int().min(1) }),
         event,
       );
-      return { ...state, actors: deadLonger(state, hours) };
+      return { ...state, actors: lingerLess(deadLonger(state, hours), hours) };
     }
     case `${NS}:reincarnated`: {
       const { actor: id, ...reincarnated } = payload(

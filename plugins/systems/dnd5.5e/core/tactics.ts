@@ -65,7 +65,11 @@ export function walkSpeed(actor: Actor, stats: Stats): number {
     ({ modifier }) => modifier.kind === "hasted",
   );
   const doubled = hasted || limit === "double" ? speed * 2 : speed;
-  return limit === "half" ? Math.floor(doubled / 10) * 5 : doubled;
+  const walked = limit === "half" ? Math.floor(doubled / 10) * 5 : doubled;
+  const { speedMax, oneThing } = limitsOf(actor);
+  // Abjure Foes: having acted this turn, it doesn't move too.
+  if (oneThing && (!actor.budget.action || !actor.budget.bonusAction)) return 0;
+  return speedMax === undefined ? walked : Math.min(walked, speedMax);
 }
 
 // Each Dash adds that Speed again, or the feet it holds, as a Charge's half Speed.

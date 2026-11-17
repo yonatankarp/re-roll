@@ -6,6 +6,7 @@ import {
   type Actor,
   applyDndEvent,
   dndEvent,
+  type DndState,
   hasCondition,
   INCAPACITATING,
   isDead,
@@ -22,7 +23,7 @@ import { type Context, currentActor, moveSquares } from "./queries.ts";
 
 // Fear and its kin (core/schemas.ts applyCondition): fleeing on its turns, as from Fear or Turn Undead; shaking a
 // creature out of a spell, as out of Sleep; saving with an action, as against Irresistible Dance; the Dodge a curse
-// forces; and creatures a spell slays or sends away, as Divine Word does.
+// forces; a save before casting; and creatures a spell sends away, as Divine Word does.
 
 export const fleeingFrom = (actor: Actor): ActiveEffect | undefined =>
   actor.activeEffects.find(
@@ -161,11 +162,8 @@ export const SHAKE = `${TACTIC}shake`;
 export const COLLECT = `${TACTIC}collect`;
 
 // The allies within 5 feet that `actor` can shake out of a spell with its action, as out of Sleep.
-export function shakeable(
-  actor: Actor,
-  context: Context,
-): readonly Actor[] {
-  return Object.values(context.state.actors).filter(
+export function shakeable(actor: Actor, state: DndState): readonly Actor[] {
+  return Object.values(state.actors).filter(
     (item) =>
       item.id !== actor.id &&
       item.side === actor.side &&
@@ -214,25 +212,6 @@ export function collectEvents(
   ];
 }
 
-// Divine Word's lowest band: a target with few enough Hit Points dies.
-export function slayEvents(
-  effect: Extract<LeafEffect, { kind: "slay" }>,
-  target: Actor,
-): SystemEvent[] {
-  return target.hp > 0 && target.hp <= effect.hpAtMost
-    ? [
-        dndEvent(`${NS}:damaged`, {
-          actor: target.id,
-          amount: target.hp + target.tempHp,
-          type: "radiant",
-          critical: false,
-          massive: true,
-        }),
-        { kind: "actorDefeated", actor: target.id },
-      ]
-    : [];
-}
-
 // Sent off to another plane: shut away for good, which counts as beaten (combat/turn.ts shutAway).
 // shortcut: Arcane Abjuration's banishing reaches any creature its CR allows, as if none were on its own plane.
 export function sendAwayEvents(
@@ -271,3 +250,50 @@ export const fearFrames = {
     run: (_payload, context: Context) => runFleeTurn(context),
   }),
 };
+
+// Power Word Pain or Gehennan Cruelty: a save before casting a spell, whose failure wastes the action, and the slot too
+// unless the effect keeps it.
+export function castSaveFoiled(
+  actor: Actor,
+  spell: boolean,
+  context: Context,
+): {
+  readonly failed: boolean;
+  readonly keepSlot: boolean;
+  readonly events: SystemEvent[];
+} | null {
+  if (!spell) return null;
+  const events: SystemEvent[] = [];
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind !== "castSave") continue;
+    const save = rollSave(actor, modifier.ability, modifier.dc ?? 10, context);
+    events.push(...save.events);
+    if (!save.saved) {
+      return { failed: true, keepSlot: modifier.keepSlot === true, events };
+    }
+  }
+  return events.length > 0 ? { failed: false, keepSlot: false, events } : null;
+}
+
+// Contagion's Poisoned: what would end it does so only if the creature passes the save it came with.
+export function clingSave(
+  target: Actor,
+  condition: string,
+  context: Context,
+): { readonly held: boolean; readonly events: SystemEvent[] } {
+  const effect = target.activeEffects.find(
+    ({ clings, modifier }) =>
+      clings &&
+      modifier.kind === "condition" &&
+      modifier.condition === condition,
+  );
+  if (!effect?.clings) return { held: false, events: [] };
+  const save = rollSave(
+    target,
+    effect.clings.ability,
+    effect.clings.dc,
+    context,
+    true,
+  );
+  return { held: !save.saved, events: save.events };
+}

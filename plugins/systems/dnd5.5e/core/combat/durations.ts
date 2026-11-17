@@ -127,7 +127,8 @@ export function limitEvents(
 // Once an action or a Bonus Action is spent, the other goes too for a creature that can take only one.
 export function oneActionEvents(actor: Actor): SystemEvent[] {
   const { action, bonusAction } = actor.budget;
-  if (!limitsOf(actor).oneAction || action === bonusAction) return [];
+  const { oneAction, oneThing } = limitsOf(actor);
+  if (!(oneAction || oneThing) || action === bonusAction) return [];
   return [
     dndEvent(`${NS}:budgetSpent`, {
       actor: actor.id,

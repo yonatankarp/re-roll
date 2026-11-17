@@ -705,7 +705,10 @@ export const dnd55e = defineSystem<DndState>({
             ]
           : [],
       ),
-      ...(dead.some((actor) => !actor.reposed && actor.clone !== 0)
+      ...(dead.some((actor) => !actor.reposed && actor.clone !== 0) ||
+      Object.values(state.actors).some((actor) =>
+        actor.activeEffects.some(({ lingers }) => typeof lingers === "number"),
+      )
         ? [dndEvent(`${NS}:timePassed`, { hours: 1 })]
         : []),
     ];

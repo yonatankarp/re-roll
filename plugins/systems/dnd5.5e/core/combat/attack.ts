@@ -963,7 +963,15 @@ export function runAttackRoll(
     dodging(target) ||
     duelHampers(attacker, target) ||
     grappledAwayFrom(attacker, target) ||
-    hasFlag(attacker, "disadvantage", "attacks", stats, ability) ||
+    hasFlag(
+      attacker,
+      "disadvantage",
+      "attacks",
+      stats,
+      ability,
+      undefined,
+      target.id,
+    ) ||
     hasFlag(
       target,
       "disadvantage",

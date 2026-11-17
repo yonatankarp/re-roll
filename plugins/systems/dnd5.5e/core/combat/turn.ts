@@ -500,7 +500,8 @@ export function runFinishTurn(context: Context): SystemResult {
     if (!worse && (rolled.saved || resisted || rescued.length > 0)) {
       events.push(...sharedRecovery(target, modifier, context));
     }
-    // A second failure leaves the worse condition instead, with no more saves.
+    // A second failure leaves the worse condition instead, with no more saves, and the source's other effects stay,
+    // as Contagion's Disadvantage on the chosen ability's saves.
     if (
       worse &&
       !rolled.saved &&
@@ -508,6 +509,20 @@ export function runFinishTurn(context: Context): SystemResult {
       rescued.length === 0 &&
       !immuneToCondition(deriveStats(target, context), worse.condition)
     ) {
+      for (const companion of target.activeEffects) {
+        if (
+          companion.sourceId === sourceId &&
+          companion.casterId === casterId &&
+          companion.modifier.kind !== "condition"
+        ) {
+          events.push(
+            dndEvent(`${NS}:effectAdded`, {
+              actor: target.id,
+              effect: companion,
+            }),
+          );
+        }
+      }
       events.push(
         dndEvent(`${NS}:effectAdded`, {
           actor: target.id,
@@ -518,6 +533,7 @@ export function runFinishTurn(context: Context): SystemResult {
             ends: worse.ends,
             ...(worse.endsOnDamage ? { endsOnDamage: true } : {}),
             ...(holder.shake ? { shake: true } : {}),
+            ...(holder.clings ? { clings: holder.clings } : {}),
             ...(holder.lingers === undefined ? {} : { lingers: holder.lingers }),
           },
         }),
