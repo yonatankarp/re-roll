@@ -90,6 +90,7 @@ export const FRAME_KINDS = [
   "copySpell",
   "wallLayer",
   "chooseShape",
+  "castOn", // whom a spell or feature used between fights goes to (camp.ts)
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -328,6 +329,12 @@ const ActorSchema = z.strictObject({
       maxHp: z.number().int(),
     })
     .optional(),
+  // Taken off its D20 Tests after coming back from the dead, one less each Long Rest, as Raise Dead's. Missing at 0.
+  ordeal: z.number().int().optional(),
+  // Hours a dead party member has lain dead, counted by the rests passed since, for a raising's time limit. Missing
+  // while alive or just dead. `reposed` stops the count, as Gentle Repose does.
+  deadHours: z.number().int().optional(),
+  reposed: z.literal(true).optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
@@ -512,6 +519,11 @@ const HealedSchema = z.strictObject({
   amount: z.number().int(),
   max: z.number().int(),
 });
+// Coming back from the dead, as with Raise Dead: this much off its D20 Tests, one less each Long Rest.
+const OrdealSchema = z.strictObject({
+  actor: z.string(),
+  penalty: z.number().int().min(1),
+});
 const TempHpSchema = z.strictObject({
   actor: z.string(),
   amount: z.number().int(),
@@ -624,6 +636,8 @@ export const EVENT_SCHEMAS = {
   [`${NS}:damagedFromInside`]: DamagedFromInsideSchema,
   [`${NS}:healed`]: HealedSchema,
   [`${NS}:tempHpGained`]: TempHpSchema,
+  [`${NS}:ordealBegun`]: OrdealSchema,
+  [`${NS}:reposed`]: ActorOnlySchema, // its corpse's time lying dead stops counting, as with Gentle Repose
   [`${NS}:effectAdded`]: EffectAddedSchema,
   [`${NS}:effectEnded`]: EffectEndedSchema,
   [`${NS}:conditionRemoved`]: ConditionRemovedSchema,
@@ -854,6 +868,23 @@ export function isDead(actor: Actor): boolean {
     actor.source.kind === "summon" ||
     familiarOwner(actor) !== null ||
     actor.deathSaves.failures >= 3
+  );
+}
+
+// A Long Rest takes one off the ordeal of coming back from the dead, and it's gone at 0.
+function lessOrdeal({ ordeal, ...actor }: Actor): Actor {
+  return ordeal && ordeal > 1 ? { ...actor, ordeal: ordeal - 1 } : actor;
+}
+
+// The hours of a rest added to the time each dead party member has lain dead, unless its body is reposed.
+function deadLonger(state: DndState, hours: number): DndState["actors"] {
+  return Object.fromEntries(
+    Object.entries(state.actors).map(([id, actor]) => [
+      id,
+      actor.side === "party" && isDead(actor) && !actor.reposed
+        ? { ...actor, deadHours: (actor.deadHours ?? 0) + hours }
+        : actor,
+    ]),
   );
 }
 
@@ -1140,7 +1171,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         data.rest === "short"
           ? { ...actor, resourcesSpent: data.resourcesSpent }
           : {
-              ...actor,
+              ...lessOrdeal(actor),
               resourcesSpent: data.resourcesSpent,
               hp: data.maxHp,
               tempHp: 0,
@@ -1153,10 +1184,11 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
     }
     case `${NS}:restFinished`: {
       const { rest } = payload(RestFinishedSchema, event);
-      if (rest === "long") return { ...state, sinceLongRest: REST_HOURS.long };
+      const rested = { ...state, actors: deadLonger(state, REST_HOURS[rest]) };
+      if (rest === "long") return { ...rested, sinceLongRest: REST_HOURS.long };
       return state.sinceLongRest === undefined
-        ? state
-        : { ...state, sinceLongRest: state.sinceLongRest + REST_HOURS.short };
+        ? rested
+        : { ...rested, sinceLongRest: state.sinceLongRest + REST_HOURS.short };
     }
     case `${NS}:combatStarted`: {
       const data = payload(CombatStartedSchema, event);
@@ -1446,10 +1478,29 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
     }
     case `${NS}:healed`: {
       const data = payload(HealedSchema, event);
+      // Back from the dead, its time lying dead is over.
+      return updateActor(
+        state,
+        data.actor,
+        ({ deadHours: _hours, reposed: _reposed, ...actor }) => ({
+          ...actor,
+          hp: Math.min(data.max, Math.max(actor.hp, 0) + data.amount),
+          deathSaves: { successes: 0, failures: 0 },
+        }),
+      );
+    }
+    case `${NS}:ordealBegun`: {
+      const data = payload(OrdealSchema, event);
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
-        hp: Math.min(data.max, Math.max(actor.hp, 0) + data.amount),
-        deathSaves: { successes: 0, failures: 0 },
+        ordeal: data.penalty,
+      }));
+    }
+    case `${NS}:reposed`: {
+      const data = payload(ActorOnlySchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        reposed: true as const,
       }));
     }
     case `${NS}:tempHpGained`: {

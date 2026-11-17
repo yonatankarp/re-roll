@@ -179,6 +179,10 @@
   name: Channel Divinity
   text: "You can channel divine energy for effects such as Divine Spark and Turn Undead."
   automation: text
+  resources:
+    - id: cleric-channel-divinity
+      max: { base: 0, add: [{ kind: scaling, key: channelDivinity }] }
+      recharge: [{ on: shortRest, amount: 1 }, { on: longRest, amount: all }]
 
 - id: "srd52:feature/cleric-subclass"
   name: Cleric Subclass
@@ -198,7 +202,30 @@
 - id: "srd52:feature/preserve-life"
   name: Preserve Life
   text: "As a Magic action, use Channel Divinity to divide healing among Bloodied creatures near you."
-  automation: text
+  automation: full
+  activations:
+    - cost: [action, { resource: cleric-channel-divinity }]
+      targeting: { creatures: 20, range: 30, side: ally, bloodied: true }
+      resolution:
+        kind: automatic
+        effects:
+          - kind: heal
+            amount:
+              {
+                bonus:
+                  {
+                    add:
+                      [
+                        {
+                          kind: classLevel,
+                          class: "srd52:class/cleric",
+                          times: 5,
+                        },
+                      ],
+                  },
+              }
+            divided: true
+            half: true
 
 - id: "srd52:feature/scholar"
   name: Scholar

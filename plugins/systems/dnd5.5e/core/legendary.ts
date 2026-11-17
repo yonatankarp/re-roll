@@ -197,6 +197,7 @@ function actionsOf(
     action.activation.cost.every(
       (cost) =>
         typeof cost !== "object" ||
+        !("resource" in cost) ||
         (actor.resourcesSpent[cost.resource] ?? 0) <
           (stats.resources[cost.resource] ?? 0),
     ),
@@ -302,7 +303,7 @@ function takeEvents(
   const frames: Frame[] = [];
   for (const action of actions) {
     for (const cost of action.activation.cost) {
-      if (typeof cost === "object") {
+      if (typeof cost === "object" && "resource" in cost) {
         events.push(
           dndEvent(`${NS}:resourceSpent`, {
             actor: actor.id,

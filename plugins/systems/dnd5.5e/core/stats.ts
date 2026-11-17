@@ -123,6 +123,7 @@ export interface Stats {
   // Wearing armor without training: Disadvantage on Strength and Dexterity rolls, and no spellcasting.
   readonly untrainedArmor: boolean;
   readonly exhaustion: number; // each level takes 2 from every d20 test and 5 feet from speed
+  readonly ordeal: number; // taken from every d20 test after coming back from the dead, as Raise Dead's
   // A stat block's Speeds besides walking. Others come from effects (core/movement-modes.ts).
   readonly speeds: Readonly<
     Partial<Record<"fly" | "climb" | "burrow", number>>
@@ -1066,7 +1067,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ),
     routines: null,
     creatureType: species.creatureType.toLowerCase(),
-    initiative: abilityModifier(abilities.dex) - 2 * actor.exhaustion,
+    initiative:
+      abilityModifier(abilities.dex) -
+      2 * actor.exhaustion -
+      (actor.ordeal ?? 0),
     // Proficiency Bonus as a scaling key, for dice that number it, as Healing Hands' d4s.
     scaling: {
       ...scaling,
@@ -1080,6 +1084,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     pactMagic: [...featureIds].some(isPactMagic),
     untrainedArmor,
     exhaustion: actor.exhaustion,
+    ordeal: actor.ordeal ?? 0,
     itemBonuses: magic,
     speeds: {},
   };
@@ -1476,7 +1481,9 @@ function statBlockStats(
     resources: Object.fromEntries(
       monster.actions.flatMap((action) =>
         action.activation.cost.flatMap((cost) =>
-          typeof cost === "object" ? [[cost.resource, action.perDay ?? 1]] : [],
+          typeof cost === "object" && "resource" in cost
+            ? [[cost.resource, action.perDay ?? 1]]
+            : [],
         ),
       ),
     ),
@@ -1506,13 +1513,14 @@ function statBlockStats(
     ),
     routines,
     creatureType: monster.creatureType?.toLowerCase(),
-    initiative: monster.initiative - 2 * actor.exhaustion,
+    initiative: monster.initiative - 2 * actor.exhaustion - (actor.ordeal ?? 0),
     scaling: {},
     features: monster.features,
     resourceDefs: fromFeatures.resources,
     pactMagic: false,
     untrainedArmor: false,
     exhaustion: actor.exhaustion,
+    ordeal: actor.ordeal ?? 0,
     itemBonuses: {
       attack: 0,
       spellAttack: 0,
@@ -1935,7 +1943,7 @@ export function attackBonus(
   stats: Stats,
 ): number {
   const { attack } = resolution;
-  const exhaustion = 2 * stats.exhaustion;
+  const exhaustion = 2 * stats.exhaustion + stats.ordeal;
   if (attack.flatBonus !== undefined) return attack.flatBonus - exhaustion;
   const ability =
     attack.type === "spell"
@@ -1959,7 +1967,8 @@ export function saveBonus(stats: Stats, ability: Ability): number {
     modifierFor(stats, ability) +
     (stats.savingThrows.includes(ability) ? stats.proficiency : 0) +
     stats.itemBonuses.savingThrows -
-    2 * stats.exhaustion
+    2 * stats.exhaustion -
+    stats.ordeal
   );
 }
 
@@ -1975,7 +1984,8 @@ export function checkBonus(
     modifierFor(stats, check.ability) +
     (proficient ? stats.proficiency * (expert ? 2 : 1) : 0) +
     stats.itemBonuses.checks -
-    2 * actor.exhaustion
+    2 * actor.exhaustion -
+    (actor.ordeal ?? 0)
   );
 }
 
@@ -1996,9 +2006,10 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
         total += stats.proficiency;
         break;
       case "classLevel":
-        total += Math.floor(
-          (stats.classLevels[term.class] ?? 0) / (term.half ? 2 : 1),
-        );
+        total +=
+          Math.floor(
+            (stats.classLevels[term.class] ?? 0) / (term.half ? 2 : 1),
+          ) * (term.times ?? 1);
         break;
       case "level":
         total += stats.level;

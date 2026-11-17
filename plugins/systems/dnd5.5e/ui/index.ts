@@ -2,6 +2,7 @@ import {
   type ContentAccess,
   type Decision,
   PLAYER_ACTOR,
+  type SceneAction,
   type SystemEvent,
 } from "#sdk";
 import { z } from "zod";
@@ -14,6 +15,7 @@ import { canUse, foundText } from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
 import { partySight, revealedSquares, unseenFoe } from "../core/fog.ts";
 import { coins } from "../core/shop.ts";
+import { castId, sceneCastActions } from "../core/camp.ts";
 import { SHAPE } from "../core/forms.ts";
 import { shop } from "./shop.ts";
 import { creation, featureInPlay } from "./creation.ts";
@@ -556,7 +558,13 @@ function carryRow(carried: number, capacity: number) {
 }
 
 function sheets(rawState: unknown, access: ContentAccess) {
-  const { actors, gold } = parseState(rawState);
+  const state = parseState(rawState);
+  const { actors, gold } = state;
+  // What can be used between fights now (camp.ts): the player's own from its spell or feature's row, and the
+  // companions' from the player's sheet, as only the player's sheet answers.
+  const between = sceneCastActions(state, access);
+  const casts = new Set(between.map(({ id }) => id));
+  const companions = between.filter(({ args }) => args.caster !== PLAYER_ACTOR);
   const player = actors[PLAYER_ACTOR];
   if (player?.source.kind !== "character" || !player.source.build) return [];
   return [
@@ -572,6 +580,8 @@ function sheets(rawState: unknown, access: ContentAccess) {
             actor.source.build,
             access,
             actor.id === PLAYER_ACTOR ? (gold ?? 0) : null,
+            casts,
+            actor.id === PLAYER_ACTOR ? companions : [],
           ),
         ]
       : [],
@@ -583,6 +593,8 @@ function sheetOf(
   build: CharacterBuild,
   access: ContentAccess,
   gold: number | null, // the party's, shown on the player's sheet
+  casts: ReadonlySet<string> = new Set(), // scene actions using a spell or feature between fights
+  companions: readonly SceneAction[] = [], // the companions' ones, on the player's sheet
 ) {
   const stats = deriveStats(player, access);
   const subclasses = build.levels
@@ -606,11 +618,22 @@ function sheetOf(
   const perception =
     10 + checkBonus(stats, player, { ability: "wis", skill: "perception" });
   const spells = stats.actions.filter((action) => action.spellLevel !== null);
-  const actionRow = (action: KnownAction) => ({
-    label: action.name,
-    value: actionSummary(action, stats),
-    detail: actionDetail(action, stats, access),
-  });
+  const actionRow = (action: KnownAction) => {
+    const cast = castId(player.id, action.id);
+    return {
+      label: action.name,
+      value: actionSummary(action, stats),
+      detail: actionDetail(action, stats, access),
+      ...(casts.has(cast)
+        ? {
+            option: {
+              id: cast,
+              label: action.spellLevel === null ? "Use" : "Cast",
+            },
+          }
+        : {}),
+    };
+  };
   return {
     id: player.id,
     title: player.name,
@@ -681,6 +704,14 @@ function sheetOf(
             stats.passives.some(({ kind }) => kind === "powerfulBuild"),
           ),
         ),
+      },
+      {
+        title: "Companions' healing",
+        rows: companions.map(({ id, label }) => ({
+          label,
+          value: "",
+          option: { id, label: "Use" },
+        })),
       },
       {
         title: "Abilities",

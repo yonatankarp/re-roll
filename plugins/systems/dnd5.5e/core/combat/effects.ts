@@ -14,6 +14,7 @@ import {
   type Stats,
 } from "../stats.ts";
 import { metamagicSaves } from "../metamagic.ts";
+import { shortRestFor } from "../rest.ts";
 import {
   type Actor,
   applyDndEvent,
@@ -40,9 +41,11 @@ import {
 import { concentrationDc, finalDamage, halved, rollD20 } from "../rules.ts";
 import {
   type Ability,
+  type Amount,
   type Damage,
   type DamageType,
   type Duration,
+  type Formula,
   type LeafEffect,
   type Modifier,
   MonsterSchema,
@@ -131,6 +134,7 @@ import {
   SIZES,
   sizeOf,
   slotToSpend,
+  deadWithin,
   spellSource,
   walledApart,
 } from "./queries.ts";
@@ -186,11 +190,14 @@ export function payCosts(
           }),
         );
       }
+    } else if ("gold" in cost) {
+      events.push(dndEvent(`${NS}:goldSpent`, { gold: cost.gold }));
     } else {
       events.push(
         dndEvent(`${NS}:resourceSpent`, {
           actor: actor.id,
           resource: cost.resource,
+          ...(cost.count ? { amount: cost.count } : {}),
         }),
       );
     }
@@ -743,6 +750,79 @@ export function damageRiders(
   });
 }
 
+// Healing shared among the targets, as Mass Heal: rolled once, then given out to the most hurt first, each as much
+// as it can take, so each target's own heal is its share.
+export function sharedHealing(
+  effects: readonly LeafEffect[],
+  targets: readonly Actor[],
+  caster: Actor,
+  context: Context,
+): (target: Actor) => readonly LeafEffect[] {
+  const divided = effects.find(
+    (effect) => effect.kind === "heal" && effect.divided,
+  );
+  if (divided?.kind !== "heal") return () => effects;
+  const room = (target: Actor): number => {
+    const max = deriveStats(target, context).maxHp;
+    return Math.max(
+      0,
+      (divided.half ? Math.floor(max / 2) : max) - Math.max(target.hp, 0),
+    );
+  };
+  let left = rollAmount(
+    divided.amount,
+    deriveStats(caster, context),
+    context.dice,
+  );
+  const shares = new Map<string, number>();
+  for (const target of [...targets].sort((a, b) => room(b) - room(a))) {
+    const share = Math.min(left, room(target));
+    shares.set(target.id, share);
+    left -= share;
+  }
+  return (target) =>
+    effects.map((effect) =>
+      effect === divided
+        ? {
+            kind: "heal" as const,
+            amount: { bonus: { base: shares.get(target.id) ?? 0, add: [] } },
+            ...(divided.half ? { half: true as const } : {}),
+          }
+        : effect,
+    );
+}
+
+const MEAN: Dice = { below: () => 0, roll: (sides) => (sides + 1) / 2 };
+
+// A healing pool spends one of its resource for each `amount` it heals: as many as fill `room`, never more than
+// are left or than `most` allows, as Lay On Hands' Hit Points or Healing Light's dice.
+export function poolHealing(
+  pool: { readonly resource: string; readonly most?: Formula | undefined },
+  amount: Amount,
+  room: number,
+  caster: Actor,
+  stats: Stats,
+  dice: Dice,
+): { resource: string; spent: number; healed: number } {
+  const left =
+    (stats.resources[pool.resource] ?? 0) -
+    (caster.resourcesSpent[pool.resource] ?? 0);
+  const each = Math.max(1, rollAmount(amount, stats, MEAN));
+  const spent = Math.max(
+    0,
+    Math.min(
+      left,
+      pool.most ? Math.max(1, evaluateFormula(pool.most, stats)) : left,
+      Math.ceil(room / each),
+    ),
+  );
+  let healed = 0;
+  for (let index = 0; index < spent; index += 1) {
+    healed += rollAmount(amount, stats, dice);
+  }
+  return { resource: pool.resource, spent, healed };
+}
+
 export function leafEvents(
   effects: readonly LeafEffect[],
   sourceId: string,
@@ -753,10 +833,13 @@ export function leafEvents(
   slotLevel?: number, // the slot a spell was cast with, so Dispel Magic knows its level
 ): SystemEvent[] {
   const stats = deriveStats(caster, context);
-  // Healing Rerolls: a healing die that rolls 1 is rolled again.
-  const rerolled = hasPassive(stats, "healingRerolls")
-    ? rerollingOnes(context.dice)
-    : context.dice;
+  // Healing Rerolls: a healing die that rolls 1 is rolled again, for a spell or Battle Medic's Hit Point Die.
+  const rerolled =
+    hasPassive(stats, "healingRerolls") &&
+    (sourceId.startsWith("spell:") ||
+      effects.some((effect) => effect.kind === "hitDieHeal"))
+      ? rerollingOnes(context.dice)
+      : context.dice;
   // A Soothing Familiar's Healing Beacon: a healer beside it treats low rolls as its floor.
   const floor = Math.max(
     0,
@@ -808,17 +891,76 @@ export function leafEvents(
       case "heal": {
         if (unhealed || cannotHeal(target)) break;
         const max = deriveStats(target, context).maxHp + raisedMax;
-        const rolled = rollAmount(effect.amount, stats, healDice);
+        const room = Math.max(
+          0,
+          (effect.half ? Math.floor(max / 2) : max) - Math.max(target.hp, 0),
+        );
+        // Circle of Mortality: dice healing a creature at 0 Hit Points give their highest faces.
+        const dice =
+          target.hp <= 0 && hasPassive(stats, "maxHealingAtZero")
+            ? HIGHEST
+            : healDice;
+        const pool = effect.pool
+          ? poolHealing(effect.pool, effect.amount, room, caster, stats, dice)
+          : null;
+        if (pool && pool.spent > 0) {
+          events.push(
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: caster.id,
+              resource: pool.resource,
+              amount: pool.spent,
+            }),
+          );
+        }
+        const rolled = effect.full
+          ? max
+          : (pool?.healed ?? rollAmount(effect.amount, stats, dice));
         // Healing beyond the maximum is lost, so only what's really gained is reported.
         events.push(
           dndEvent(`${NS}:healed`, {
             actor: target.id,
-            amount: Math.min(rolled, max - Math.max(target.hp, 0)),
+            amount: Math.min(rolled, room),
             max,
           }),
         );
         break;
       }
+      case "ordeal":
+        events.push(
+          dndEvent(`${NS}:ordealBegun`, {
+            actor: target.id,
+            penalty: effect.penalty,
+          }),
+        );
+        break;
+      case "uncurse": {
+        const cursed = new Set(
+          target.activeEffects.flatMap(({ modifier, sourceId, casterId }) =>
+            modifier.kind === "mark" && modifier.curse
+              ? [`${casterId}|${sourceId}`]
+              : [],
+          ),
+        );
+        for (const key of cursed) {
+          const [casterId = "", ...rest] = key.split("|");
+          events.push(
+            dndEvent(`${NS}:effectEnded`, {
+              actor: target.id,
+              sourceId: rest.join("|"),
+              casterId,
+            }),
+          );
+        }
+        break;
+      }
+      case "shortRest":
+        events.push(...shortRestFor(target, context));
+        break;
+      case "repose":
+        if (isDead(target)) {
+          events.push(dndEvent(`${NS}:reposed`, { actor: target.id }));
+        }
+        break;
       case "hitDieHeal": {
         // shortcut: a Healer's Kit's ten uses aren't counted; the target's Hit Point Dice are the limit.
         const die = nextHitDie(target, context);
@@ -1017,6 +1159,13 @@ export function leafEvents(
         if (condition) {
           events.push(
             dndEvent(`${NS}:conditionRemoved`, { actor: target.id, condition }),
+          );
+        } else if (effect.exhaustion && target.exhaustion > 0) {
+          events.push(
+            dndEvent(`${NS}:exhaustionChanged`, {
+              actor: target.id,
+              levels: -1,
+            }),
           );
         }
         break;
@@ -1759,7 +1908,9 @@ export function resolveTargets(
     targeting.side === "enemy" ? enemies(state, actor) : allies(state, actor)
   ).filter(
     (item) =>
-      isDead(item) === dead && fitsType(item, targeting, context, actor),
+      isDead(item) === dead &&
+      deadWithin(item, targeting) &&
+      fitsType(item, targeting, context, actor),
   );
   if ("area" in targeting) {
     const { shape, radius } = targeting.area;
@@ -2052,6 +2203,7 @@ export function resolveAction(
       );
       if (element) frames.push(element);
       const damage = rollSharedDamage(resolution.damage);
+      const shared = sharedHealing(resolution.effects, targets, actor, context);
       const slay = resolution.effects.find((effect) => effect.kind === "slay");
       for (const target of targets) {
         // Power Word Kill: a target with few enough Hit Points dies, and only the others take the damage.
@@ -2075,7 +2227,7 @@ export function resolveAction(
         applyRolled(target, damage, (amount) => amount);
         events.push(
           ...leafEvents(
-            resolution.effects,
+            shared(target),
             spellSource(action),
             actor,
             target,

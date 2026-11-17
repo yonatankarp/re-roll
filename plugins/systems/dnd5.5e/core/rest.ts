@@ -14,6 +14,7 @@ import {
   type DndState,
   NS,
   REST_HOURS,
+  applyDndEvent,
   dndEvent,
   isDead,
   frame,
@@ -74,8 +75,36 @@ export function shortRestEvents(
   context: Context,
   skip?: string,
 ): SystemEvent[] {
-  return Object.values(context.state.actors).flatMap((actor) => {
-    if (actor.side !== "party" || isDead(actor) || actor.id === skip) return [];
+  return Object.values(context.state.actors).flatMap((actor) =>
+    actor.id === skip ? [] : diceSpent(actor, context),
+  );
+}
+
+// A Short Rest's benefits for one creature, as Prayer of Healing gives: Hit Dice spent until healed, then what the
+// rest restores.
+export function shortRestFor(actor: Actor, context: Context): SystemEvent[] {
+  if (actor.side !== "party" || isDead(actor)) return [];
+  const spent = diceSpent(actor, context);
+  const after = spent.reduce(applyDndEvent, context.state).actors[actor.id];
+  const stats = deriveStats(actor, context);
+  return [
+    ...spent,
+    dndEvent(`${NS}:rested`, {
+      actor: actor.id,
+      rest: "short",
+      maxHp: stats.maxHp,
+      resourcesSpent: recovered(
+        (after ?? actor).resourcesSpent,
+        stats,
+        "short",
+      ),
+    }),
+  ];
+}
+
+function diceSpent(actor: Actor, context: Context): SystemEvent[] {
+  {
+    if (actor.side !== "party" || isDead(actor)) return [];
     if (actor.source.kind !== "character" || !actor.source.build) return [];
     const stats = deriveStats(actor, context);
     const events: SystemEvent[] = [];
@@ -100,7 +129,7 @@ export function shortRestEvents(
       );
     }
     return events;
-  });
+  }
 }
 
 // Dice are spent in level order, so a multiclass character's dice stay in step with shortRestEvents.

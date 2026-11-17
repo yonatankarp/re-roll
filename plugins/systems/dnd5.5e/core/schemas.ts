@@ -101,6 +101,7 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
     kind: z.literal("classLevel"),
     class: ContentIdSchema,
     half: z.boolean().optional(), // rounded down, as for Rally
+    times: z.number().int().min(2).optional(), // multiplied, as Lay On Hands' five times the Paladin level
   }),
   z.strictObject({ kind: z.literal("level") }), // character level
   z.strictObject({ kind: z.literal("scaling"), key: z.string() }),
@@ -391,7 +392,11 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   }),
   // No rule of its own: a curse, a mark or a hold that another of its giver's actions looks for (a targeting's
   // `afflicted`), as a nightmare's Haunter's Spear curse.
-  z.strictObject({ kind: z.literal("mark") }),
+  // `curse` makes it a curse, which Remove Curse ends with everything else the same action gave.
+  z.strictObject({
+    kind: z.literal("mark"),
+    curse: z.literal(true).optional(),
+  }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
 
@@ -428,7 +433,38 @@ export const ZoneKindSchema = z.enum([
 export type ZoneKind = z.infer<typeof ZoneKindSchema>;
 
 export const LeafEffectSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("heal"), amount: AmountSchema }),
+  // `full` restores all its Hit Points, as Resurrection. `divided` rolls the amount once and shares it among the
+  // targets, the most hurt first, as Mass Heal, and `half` heals none past half its Hit Point maximum, as Preserve
+  // Life. `pool` spends a resource for each `amount` it heals, as many as the target needs and at most `most`, as
+  // Lay On Hands' Hit Points or Healing Light's dice, and can't be used with that resource spent.
+  z.strictObject({
+    kind: z.literal("heal"),
+    amount: AmountSchema,
+    full: z.literal(true).optional(),
+    divided: z.literal(true).optional(),
+    half: z.literal(true).optional(),
+    pool: z
+      .strictObject({
+        resource: z.string().min(1),
+        most: FormulaSchema.optional(),
+      })
+      .optional(),
+  }),
+  // Coming back from the dead: the target takes `penalty` off its D20 Tests, one less after each Long Rest, as
+  // Raise Dead's ordeal.
+  z.strictObject({
+    kind: z.literal("ordeal"),
+    penalty: z.number().int().min(1),
+  }),
+  // A corpse kept from decay: the time it has been dead stops counting against `diedWithin`, as Gentle Repose.
+  // shortcut: it lasts until the creature is raised, as the spell's 10 days outlast an adventure.
+  z.strictObject({ kind: z.literal("repose") }),
+  // The target gains a Short Rest's benefits: it spends Hit Dice until healed and gets back what a Short Rest
+  // restores, as Prayer of Healing (rest.ts).
+  // shortcut: the player's Hit Dice are spent as a companion's are, and it can benefit again before a Long Rest.
+  z.strictObject({ kind: z.literal("shortRest") }),
+  // Ends every curse on the target, with all else the action that cursed it gave, as Remove Curse.
+  z.strictObject({ kind: z.literal("uncurse") }),
   // With `reaction` the target spends its Reaction to gain them, and gains none without one, as a death's head tree's
   // Head Fruits.
   z.strictObject({
@@ -525,6 +561,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("cure"),
     conditions: z.array(ConditionSchema).min(1),
+    // with none of them on it, one level of Exhaustion instead, as Greater Restoration
+    exhaustion: z.literal(true).optional(),
   }),
   // An area left where the spell is aimed, or round the caster: magical darkness that only Blindsight, Truesight
   // or Devil's Sight see through (Darkness), fog only Blindsight sees through (Fog Cloud), or thorns that cost
@@ -878,7 +916,13 @@ export type AreaEffect = z.infer<typeof AreaEffectSchema>;
 
 const CostSchema = z.union([
   z.enum(["action", "bonusAction", "reaction", "slot"]),
-  z.strictObject({ resource: z.string() }),
+  // `count` spends that many at once, as Lay On Hands' 5 Hit Points to end Poisoned.
+  z.strictObject({
+    resource: z.string(),
+    count: z.number().int().min(2).optional(),
+  }),
+  // A costly material component the spell consumes, paid from the party's gold, as Revivify's 300 GP diamond.
+  z.strictObject({ gold: z.number().min(0) }),
 ]);
 export type Cost = z.infer<typeof CostSchema>;
 
@@ -894,6 +938,10 @@ export const TargetingSchema = z.union([
     creatureTypes: z.array(z.string()).optional(), // only these lowercase types can be targeted
     targetConditions: z.array(ConditionSchema).min(1).optional(), // only a creature with one of these, as for Trample
     dead: z.literal(true).optional(), // only a dead creature, as for Revivify
+    // with `dead`, only one dead no longer than this many hours, as Raise Dead's 10 days (240). Only rests pass
+    // time (state.ts REST_HOURS), so 0 is a death since the last rest.
+    // shortcut: Revivify's minute is 0, as no clock runs between rests.
+    diedWithin: z.number().int().min(0).optional(),
     // only a creature this size or smaller, as for a giant frog's Swallow
     maxSize: z
       .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
@@ -1006,6 +1054,8 @@ export const ActivationSchema = z.strictObject({
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
   whileIn: z.literal("shadows").optional(), // only in Dim Light or Darkness, as Merge with Shadows
   afterAction: z.literal(true).optional(), // only once the bearer has taken its action, as Blink Steps
+  // Only between fights, from the character sheet (camp.ts), as a spell that takes an hour to cast, as Raise Dead.
+  outOfCombat: z.literal(true).optional(),
   label: z.string().min(1).optional(), // added to its feature's name, to tell two of a feature's activations apart
   projectiles: z.number().int().min(1).optional(), // separate darts, rays or beams, each aimed on its own
   targeting: TargetingSchema,
@@ -1111,8 +1161,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     dice: DiceSchema,
     diceCount: z.string().optional(), // a class scaling key that replaces the number of dice
     dieSize: z.string().optional(), // a class scaling key that replaces the die size
-    // "advantageOrAlly" also counts an ally within 5 feet of the target, as Sneak Attack does.
-    when: z.enum(["advantage", "advantageOrAlly"]),
+    // "advantageOrAlly" also counts an ally within 5 feet of the target, as Sneak Attack does. "targetHurt" is a
+    // target missing any Hit Points, as Circle of Mortality's Pull of Death.
+    when: z.enum(["advantage", "advantageOrAlly", "targetHurt"]),
+    type: DamageTypeSchema.optional(), // the damage's own type, not the weapon's, as Pull of Death's Necrotic
     oncePerTurn: z.boolean().default(false),
   }),
   z.strictObject({ kind: z.literal("packTactics") }),
@@ -1307,6 +1359,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // A healing die that rolls 1 is rolled again and the new roll stands, as with Healer's Healing Rerolls.
   z.strictObject({ kind: z.literal("healingRerolls") }),
+  // Healing dice the bearer rolls for a creature at 0 Hit Points count as their highest faces, as Circle of
+  // Mortality.
+  z.strictObject({ kind: z.literal("maxHealingAtZero") }),
+  // At the end of each of its turns the bearer ends one of these conditions on itself, as Self-Restoration.
+  z.strictObject({
+    kind: z.literal("shakeOff"),
+    conditions: z.array(ConditionSchema).min(1),
+  }),
   // An ally within `within` feet of the bearer treats a healing die's roll below `at` as `at`, as with a Soothing
   // Familiar's Healing Beacon.
   z.strictObject({

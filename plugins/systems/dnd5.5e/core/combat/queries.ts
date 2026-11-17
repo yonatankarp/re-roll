@@ -684,16 +684,52 @@ export function canAfford(
   ) {
     return false;
   }
-  return action.activation.cost.every((cost) => {
-    if (cost === "action") return actor.budget.action;
-    if (cost === "bonusAction") return actor.budget.bonusAction;
-    if (cost === "reaction") return actor.budget.reaction;
-    if (cost === "slot") return slotToSpend(action, actor, stats) !== null;
-    return (
-      (actor.resourcesSpent[cost.resource] ?? 0) <
-      (stats.resources[cost.resource] ?? 0)
-    );
-  });
+  return (
+    action.activation.cost.every((cost) => {
+      if (cost === "action") return actor.budget.action;
+      if (cost === "bonusAction") return actor.budget.bonusAction;
+      if (cost === "reaction") return actor.budget.reaction;
+      if (cost === "slot") return slotToSpend(action, actor, stats) !== null;
+      if ("gold" in cost) return true; // the party's purse is checked where it's offered (goldFor)
+      return (
+        (actor.resourcesSpent[cost.resource] ?? 0) + (cost.count ?? 1) <=
+        (stats.resources[cost.resource] ?? 0)
+      );
+    }) && poolsLeft(action, actor, stats)
+  );
+}
+
+// A healing pool with nothing left in it can't heal, as Lay On Hands spent.
+function poolsLeft(action: KnownAction, actor: Actor, stats: Stats): boolean {
+  const { resolution } = action.activation;
+  return (
+    resolution.kind !== "automatic" ||
+    resolution.effects.every(
+      (effect) =>
+        effect.kind !== "heal" ||
+        !effect.pool ||
+        (actor.resourcesSpent[effect.pool.resource] ?? 0) <
+          (stats.resources[effect.pool.resource] ?? 0),
+    )
+  );
+}
+
+// The gold an action's costly component takes, which the party's purse must hold, as Revivify's diamond.
+export function goldFor(action: KnownAction): number {
+  return action.activation.cost.reduce(
+    (sum, cost) =>
+      typeof cost === "object" && "gold" in cost ? sum + cost.gold : sum,
+    0,
+  );
+}
+
+// A raising reaches only the dead it's in time for, as Raise Dead's 10 days.
+export function deadWithin(item: Actor, targeting: Targeting): boolean {
+  return (
+    !("diedWithin" in targeting) ||
+    targeting.diedWithin === undefined ||
+    (item.deadHours ?? 0) <= targeting.diedWithin
+  );
 }
 
 // The creatures an action can be aimed at from where the actor stands.
@@ -712,11 +748,12 @@ export function inReach(
       ? knownFoes(state, actor, access).filter(
           (item) => isDown(item) === downed && !charmers.has(item.id),
         )
-      : allies(state, actor)
+      : allies(state, actor).filter((item) => !downed || isDown(item))
   )
     .filter(
       (item) =>
-        isDead(item) === ("dead" in targeting && targeting.dead === true),
+        isDead(item) === ("dead" in targeting && targeting.dead === true) &&
+        deadWithin(item, targeting),
     )
     .filter((item) => fitsType(item, targeting, access, actor))
     .filter((item) => reaches(action, actor, item))

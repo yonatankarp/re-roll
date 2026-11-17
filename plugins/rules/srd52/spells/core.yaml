@@ -1847,8 +1847,12 @@
   text: At your touch, all curses affecting one creature or object end. If the
     object is a cursed magic item, its curse remains, but the spell breaks its
     owner’s Attunement to the object so it can be removed or discarded.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution: { kind: automatic, effects: [{ kind: uncurse }] }
+
 - id: srd52:spell/revivify
   name: Revivify
   level: 3
@@ -1863,7 +1867,17 @@
   text: You touch a creature that has died within the last minute. That creature
     revives with 1 Hit Point. This spell can’t revive a creature that has died
     of old age, nor does it restore any missing body parts.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot, { gold: 300 }]
+    targeting:
+      { creatures: 1, range: touch, side: ally, dead: true, diedWithin: 0 }
+    resolution:
+      {
+        kind: automatic,
+        effects: [{ kind: heal, amount: { bonus: { base: 1 } } }],
+      }
+
 - id: srd52:spell/scrying
   name: Scrying
   level: 5
@@ -3364,8 +3378,12 @@
     extends the time limit on raising the target from the dead, since days spent
     under the influence of this spell don’t count against the time limit of
     spells such as Raise Dead.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost: [action, slot, { gold: 0.02 }]
+    targeting: { creatures: 1, range: touch, side: ally, dead: true }
+    resolution: { kind: automatic, effects: [{ kind: repose }] }
+
 - id: srd52:spell/goodberry
   name: Goodberry
   level: 1
@@ -3382,7 +3400,15 @@
     berry restores 1 Hit Point, and the berry provides enough nourishment to
     sustain a creature for one day. Uneaten berries disappear when the spell
     ends.
-  automation: text
+  automation: full
+  # shortcut: the berries are eaten as they're made, one Hit Point each to whoever needs it most.
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 10, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      effects: [{ kind: heal, amount: { bonus: { base: 10 } }, divided: true }]
+
 - id: srd52:spell/guards-and-wards
   name: Guards and Wards
   level: 6
@@ -4529,8 +4555,15 @@
     provide a new body if the original no longer exists, in which case you must
     speak the creature’s name. The creature then appears in an unoccupied space
     you choose within 10 feet of you.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot, { gold: 25000 }]
+    outOfCombat: true
+    targeting: { creatures: 1, range: touch, side: ally, dead: true }
+    resolution:
+      { kind: automatic, effects: [{ kind: heal, amount: {}, full: true }] }
   outOfCombat: castingTime
+
 - id: srd52:spell/vampiric-touch
   name: Vampiric Touch
   level: 3
@@ -6320,8 +6353,17 @@
     Hit Points. A creature can’t be affected by this spell again until that
     creature finishes a Long Rest. Using a Higher-Level Spell Slot. The healing
     increases by 1d8 for each spell slot level above 2.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    outOfCombat: true
+    targeting: { creatures: 5, range: 30, side: ally }
+    resolution:
+      kind: automatic
+      effects: [{ kind: shortRest }, { kind: heal, amount: { dice: 2d8 } }]
+  upcast: { perSlotLevel: { addDice: 1d8 } }
   outOfCombat: castingTime
+
 - id: srd52:spell/produce-flame
   name: Produce Flame
   level: 0
@@ -6393,8 +6435,18 @@
   text: A creature you touch regains 4d8 + 15 Hit Points. For the duration, the
     target regains 1 Hit Point at the start of each of its turns, and any
     severed body parts regrow after 2 minutes.
-  automation: text
+  automation: full
+  # Cast only between fights, where the hour's Hit Point a turn heals what the first roll leaves.
+  activation:
+    cost: [action, slot]
+    outOfCombat: true
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        [{ kind: heal, amount: { dice: 4d8, bonus: { base: 15 } }, full: true }]
   outOfCombat: castingTime
+
 - id: srd52:spell/resistance
   name: Resistance
   level: 0
@@ -8704,8 +8756,17 @@
     1 until it becomes 0. Casting this spell to revive a creature that has been
     dead for 365 days or longer taxes you. Until you finish a Long Rest, you
     can’t cast spells again, and you have Disadvantage on D20 Tests.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot, { gold: 1000 }]
+    outOfCombat: true
+    targeting: { creatures: 1, range: touch, side: ally, dead: true }
+    resolution:
+      kind: automatic
+      effects:
+        [{ kind: heal, amount: {}, full: true }, { kind: ordeal, penalty: 4 }]
   outOfCombat: castingTime
+
 - id: srd52:spell/sanctuary
   name: Sanctuary
   level: 1
@@ -10291,7 +10352,16 @@
     curse, including the target’s Attunement to a cursed magic item • Any
     reduction to one of the target’s ability scores • Any reduction to the
     target’s Hit Point maximum"
-  automation: text
+  automation: full
+  # shortcut: it ends the Charmed or Petrified condition, or else a level of Exhaustion, never a curse.
+  activation:
+    cost: [action, slot, { gold: 100 }]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        [{ kind: cure, conditions: [charmed, petrified], exhaustion: true }]
+
 - id: srd52:spell/gust-of-wind
   name: Gust of Wind
   level: 2
@@ -10634,7 +10704,18 @@
     restore up to 700 Hit Points, divided as you choose among any number of
     creatures that you can see within range. Creatures healed by this spell also
     have the Blinded, Deafened, and Poisoned conditions removed from them.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 20, range: 60, side: ally }
+    resolution:
+      kind: automatic
+      effects:
+        - { kind: heal, amount: { bonus: { base: 700 } }, divided: true }
+        - { kind: removeCondition, condition: blinded }
+        - { kind: removeCondition, condition: deafened }
+        - { kind: removeCondition, condition: poisoned }
+
 - id: srd52:spell/mending
   name: Mending
   level: 0
@@ -11029,8 +11110,21 @@
     automatically fails. Coming back from the dead is an ordeal. The target
     takes a −4 penalty to D20 Tests. Every time the target finishes a Long Rest,
     the penalty is reduced by 1 until it becomes 0.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot, { gold: 500 }]
+    outOfCombat: true
+    targeting:
+      { creatures: 1, range: touch, side: ally, dead: true, diedWithin: 240 }
+    resolution:
+      kind: automatic
+      effects:
+        [
+          { kind: heal, amount: { bonus: { base: 1 } } },
+          { kind: ordeal, penalty: 4 },
+        ]
   outOfCombat: castingTime
+
 - id: srd52:spell/reincarnate
   name: Reincarnate
   level: 5
