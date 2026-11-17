@@ -23,12 +23,13 @@ import {
   saveBonus,
   type Stats,
   weaponFits,
+  UNARMED_STRIKE,
 } from "./stats.ts";
 import { knownFoes } from "./fog.ts";
 import type { Condition, LeafEffect, Modifier, Resolution } from "./schemas.ts";
 import { finalDamage } from "./rules.ts";
 import type { Square } from "./grid.ts";
-import { dodging, grappledAwayFrom } from "./tactics.ts";
+import { dodging, grappledAwayFrom, masteryOf } from "./tactics.ts";
 import { grapplesOn } from "./combat/grapple.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX, THROW_PREFIX } from "./combat/ids.ts";
@@ -1449,6 +1450,15 @@ export function makeJudge(context: Context, side: Actor): Judge {
       gained = worthOn(actor, target, action, darts);
     }
     if (gained <= 0) return gained;
+    // A bare Unarmed Strike gives up the mastery a mastered weapon would put on the hit, as Topple's.
+    if (
+      actionId === UNARMED_STRIKE &&
+      stats(actor).actions.some(
+        (item) => masteryOf(actor, item.id, context) !== null,
+      )
+    ) {
+      gained *= 0.75;
+    }
     // What it spends: a slot by its level, a limited use or an item a little.
     const reference =
       rate * Math.max(1, freeThreat(actor), 0.5 * threat(actor));

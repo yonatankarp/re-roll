@@ -1715,7 +1715,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         (bonus) => bonus.to === to && bonus.weapons.includes(UNARMED_STRIKE),
       )
       .reduce((total, bonus) => total + bonus.amount, 0);
-  actions.push(unarmedStrike(abilities), ...fromFeatures.actions);
+  // Last, so an attack chosen as the first that fits, as an Opportunity Attack is, takes a weapon or Martial Arts.
+  actions.push(...fromFeatures.actions, unarmedStrike(abilities));
   actions.splice(
     0,
     actions.length,
