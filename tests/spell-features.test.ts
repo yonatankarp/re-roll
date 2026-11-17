@@ -346,6 +346,29 @@ const FIXTURES = [
     ],
   },
   {
+    id: "test:feature/storm",
+    name: "Storm",
+    text,
+    automation: "full",
+    passives: [
+      {
+        kind: "castRider",
+        types: ["lightning", "thunder"],
+        slot: true,
+        nearby: {
+          within: 10,
+          damage: [
+            {
+              amount: { bonus: { base: 3, add: [] } },
+              type: "lightning",
+              types: ["lightning", "thunder"],
+            },
+          ],
+        },
+      },
+    ],
+  },
+  {
     id: "test:feature/ritual-adept",
     name: "Ritual Adept",
     text,
@@ -1143,5 +1166,61 @@ describe("spells of other types and longer reach", () => {
 
   it("reaches 60 feet farther with an attack spell", () => {
     expect(bolt(warlock())?.activation.targeting).toMatchObject({ range: 180 });
+  });
+});
+
+describe("a rider round the caster", () => {
+  it("hits the foes within reach when a slot spell deals lightning or thunder", () => {
+    const caster = {
+      ...priest([
+        [
+          { kind: "features", values: ["test:feature/storm"] },
+          { kind: "spells", values: ["srd52:spell/thunderwave"] },
+        ],
+      ]),
+      position: { x: 0, y: 0 },
+    };
+    const near = {
+      ...freshActor({
+        id: "near",
+        name: "Near",
+        side: "enemy",
+        source: {
+          kind: "monster",
+          statBlockId: "srd52:monster/goblin-warrior",
+        },
+        hp: 10,
+        inventory: [],
+      }),
+      position: { x: 1, y: 1 },
+    };
+    const far = { ...near, id: "far", position: { x: 6, y: 0 } };
+    const context = {
+      ...run,
+      state: {
+        actors: { [PLAYER_ACTOR]: caster, near, far },
+        combat: {
+          encounter: "arena",
+          order: [PLAYER_ACTOR, "near", "far"],
+          index: 0,
+          round: 1,
+        },
+      },
+      dice: { below: () => 0, roll: () => 1 },
+    };
+    const wave = stats(caster).actions.find(
+      (item) => item.id === "spell:srd52:spell/thunderwave",
+    );
+    if (!wave) throw new Error("no Thunderwave");
+    const hit = (slot: number | undefined) =>
+      castRiders(caster, wave, slot, context).events.flatMap((item) =>
+        item.kind === `${NS}:damaged` && "payload" in item
+          ? [item.payload as { actor: string; amount: number }]
+          : [],
+      );
+    expect(hit(1)).toEqual([
+      expect.objectContaining({ actor: "near", amount: 3 }),
+    ]);
+    expect(hit(undefined)).toEqual([]);
   });
 });

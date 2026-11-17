@@ -2696,11 +2696,19 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("castRider"),
     damage: DamageTypeSchema.optional(),
+    types: z.array(DamageTypeSchema).min(1).optional(), // a spell dealing any of these, as Heart of the Storm's
+    // `damage` to each foe within `within` feet of the caster, as Heart of the Storm's eruption
+    nearby: z
+      .strictObject({
+        within: z.number().int().min(5),
+        damage: z.array(DamageSchema).min(1),
+      })
+      .optional(),
     school: z.array(SpellSchoolSchema).min(1).optional(),
     uses: z.array(ContentIdSchema).min(1).optional(),
     heals: z.literal(true).optional(),
     slot: z.literal(true).optional(),
-    effects: z.array(LeafEffectSchema).min(1),
+    effects: z.array(LeafEffectSchema).default([]),
     onTargets: z.array(LeafEffectSchema).min(1).optional(),
     resource: z.string().optional(), // spending a use, only while one is left, as Defy Death's after Spare the Dying
   }),

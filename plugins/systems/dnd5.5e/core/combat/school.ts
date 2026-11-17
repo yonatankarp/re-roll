@@ -1,20 +1,24 @@
 import type { Frame, SystemEvent } from "#sdk";
 import { ClassSchema, type Passive, SpellSchema } from "../schemas.ts";
-import { type Actor, dndEvent, NS } from "../state.ts";
+import { type Actor, dndEvent, isDown, NS } from "../state.ts";
+import { finalDamage } from "../rules.ts";
+import { distanceFeet } from "../grid.ts";
 import {
   atSlotLevel,
+  damageResponses,
   deriveStats,
   evaluateFormula,
   type KnownAction,
   lookup,
+  rollAmount,
   spellModifier,
   type Stats,
 } from "../stats.ts";
 import { HIT_DICE, spellOfSource } from "./ids.ts";
 import { hitDieRoll } from "../trait-rules.ts";
-import { leafEvents } from "./effects.ts";
+import { dealEvents, leafEvents, typeAgainst } from "./effects.ts";
 import { teleportFrame } from "./movement.ts";
-import type { Context } from "./queries.ts";
+import { type Context, enemies } from "./queries.ts";
 
 // The Arcana Unleashed adepts' riders on casting a spell of their school (passive `schoolCast`).
 
@@ -215,7 +219,9 @@ export function castRiders(
           passive.school.some((item) => item === school)
         : passive.heals
           ? heals(action) && targets.some((item) => item.id !== actor.id)
-          : passive.damage !== undefined && types.has(passive.damage);
+          : passive.types
+            ? passive.types.some((type) => types.has(type))
+            : passive.damage !== undefined && types.has(passive.damage);
     return fits ? [passive] : [];
   });
   // Simbul's Synostodweomer: a slot spell rolls as many Hit Point Dice as the slot's level.
@@ -248,9 +254,39 @@ export function castRiders(
   return {
     events: [
       ...mended,
-      ...rides.flatMap(({ effects, onTargets, resource }) => [
+      ...rides.flatMap(({ effects, onTargets, resource, nearby }) => [
         ...(resource
           ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
+          : []),
+        // Heart of the Storm: the foes round the caster take its damage, in the type each resists least.
+        ...(nearby
+          ? enemies(context.state, actor)
+              .filter(
+                (foe) =>
+                  !isDown(foe) &&
+                  distanceFeet(foe.position, actor.position) <= nearby.within,
+              )
+              .flatMap(
+                (foe) =>
+                  dealEvents(
+                    foe,
+                    nearby.damage.map((item) => {
+                      const type = item.types
+                        ? typeAgainst(item.types, damageResponses(foe, context))
+                        : item.type;
+                      return {
+                        amount: finalDamage(
+                          rollAmount(item.amount, stats, context.dice),
+                          type,
+                          damageResponses(foe, context),
+                        ),
+                        type,
+                      };
+                    }),
+                    false,
+                    context,
+                  ).events,
+              )
           : []),
         ...leafEvents(
           atSlotLevel(effects, slotLevel ?? 0),
