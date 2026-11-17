@@ -2,6 +2,7 @@ import type { ContentAccess, Dice, SystemEvent } from "#sdk";
 import {
   type Ability,
   ClassSchema,
+  DAMAGE_TYPES,
   type DamageType,
   ItemSchema,
   type SaveFrom,
@@ -219,6 +220,10 @@ function attackAdvantaged(
         passive.against !== undefined &&
         markedBy(target, attacker, passive.against)
       );
+    case "creatureType":
+      return (passive.creatureTypes ?? []).some(
+        (type) => type === targetStats.creatureType,
+      );
     case "unacted": {
       // In the first round, a creature yet to act stands later in the order than the one acting now.
       const combat = state?.combat;
@@ -281,6 +286,17 @@ export function masteredTypes(
         passive.kind === "energyMastery" ? [passive.damage] : [],
       )
     : [];
+}
+
+// The damage types whose 1s count as 2s on the bearer's spells: the mastered ones, or every type with a Robe of Thayan
+// Arcana's Empowered Magic.
+export function flooredTypes(
+  stats: Stats,
+  spell: boolean,
+): readonly DamageType[] {
+  return spell && stats.passives.some(({ kind }) => kind === "empoweredSpells")
+    ? DAMAGE_TYPES
+    : masteredTypes(stats, spell);
 }
 
 // Resistance the bearer's damage goes through: the mastered types, and any the bearer always overcomes, as with the

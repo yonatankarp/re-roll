@@ -1,5 +1,6 @@
 import type { ContentAccess } from "#sdk";
-import { type Item, ItemSchema } from "./schemas.ts";
+import { type Item, ItemSchema, SpellSchema } from "./schemas.ts";
+import { boundNumbers, spellNamed } from "./stats.ts";
 
 const SEPARATOR = "--";
 
@@ -13,7 +14,26 @@ export function deriveItem(
   id: string,
   access: ContentAccess,
 ): Item | undefined {
-  const [parentId = "", index = "", baseSlug, ...extra] = id.split(SEPARATOR);
+  const parts = id.split(SEPARATOR);
+  if (parts.length < 2) return undefined;
+  const bound = ItemSchema.safeParse(access.content(parts[0] ?? "")).data;
+  if (bound?.type === "magicItem" && bound.boundSpell) {
+    const inner = parts.slice(0, -1);
+    const made = inner.length === 1 ? bound : version(inner, access);
+    return (
+      made && withSpell(made, bound.boundSpell, parts.at(-1) ?? "", id, access)
+    );
+  }
+  return version(parts, access);
+}
+
+// The version an id's parts name: the entry, its version's number, and the plain item it's made from.
+function version(
+  parts: readonly string[],
+  access: ContentAccess,
+): Item | undefined {
+  const id = parts.join(SEPARATOR);
+  const [parentId = "", index = "", baseSlug, ...extra] = parts;
   if (extra.length > 0 || !/^[1-9]\d*$/.test(index)) return undefined;
   const parent = ItemSchema.safeParse(access.content(parentId)).data;
   if (parent?.type !== "magicItem") return undefined;
@@ -23,17 +43,36 @@ export function deriveItem(
       ? { name: parent.name, bonuses: parent.bonuses }
       : undefined;
   if (!variant) return undefined;
+  // An evolving item's version has what the versions before it have too.
+  const kept =
+    parent.evolving && parent.variants
+      ? parent.variants.slice(0, Number(index))
+      : "rarity" in variant
+        ? [variant]
+        : [];
   const passives = [
     ...(parent.passives ?? []),
-    ...("passives" in variant ? (variant.passives ?? []) : []),
+    ...kept.flatMap((entry) => entry.passives ?? []),
   ];
   const casts = [
     ...(parent.casts ?? []),
-    ...("casts" in variant ? (variant.casts ?? []) : []),
+    ...kept.flatMap((entry) => entry.casts ?? []),
   ];
   const resources = [
     ...(parent.resources ?? []),
-    ...("resources" in variant ? (variant.resources ?? []) : []),
+    ...kept.flatMap((entry) => entry.resources ?? []),
+  ];
+  const activations = [
+    ...(parent.activations ?? []),
+    ...kept.flatMap((entry) => entry.activations ?? []),
+  ];
+  const forms = [
+    ...(parent.forms ?? []),
+    ...kept.flatMap((entry) => entry.forms ?? []),
+  ];
+  const hitDamage = [
+    ...(parent.hitDamage ?? []),
+    ...kept.flatMap((entry) => entry.hitDamage ?? []),
   ];
   const magic = {
     ...(passives.length > 0 ? { passives } : {}),
@@ -41,7 +80,7 @@ export function deriveItem(
     ...(casts.length > 0 ? { casts } : {}),
     ...(resources.length > 0 ? { resources } : {}),
     ...(parent.lastCharge ? { lastCharge: parent.lastCharge } : {}),
-    ...(parent.activations ? { activations: parent.activations } : {}),
+    ...(activations.length > 0 ? { activations } : {}),
   };
   const bonus = variant.bonuses?.[0]?.amount;
   const plus = bonus !== undefined && /, \+1\b/.test(parent.name);
@@ -50,18 +89,31 @@ export function deriveItem(
     (plus
       ? `${parent.name.replace(/, \+1\b.*$/, "")}, +${String(bonus)}`
       : `${parent.name} (${rarityName("rarity" in variant ? variant.rarity : parent.rarity)})`);
+  // An evolving item's version without bonuses of its own keeps the last earlier one's, as an Idol of Good Fortunes'
+  // +1 to AC.
+  const own =
+    variant.bonuses ?? kept.findLast((entry) => entry.bonuses)?.bonuses;
   if (baseSlug === undefined) {
     const item: Item = {
       ...parent,
       id,
       name,
       rarity: "rarity" in variant ? variant.rarity : parent.rarity,
-      ...(variant.bonuses ? { bonuses: variant.bonuses } : {}),
+      ...(own ? { bonuses: own } : {}),
       ...("abilities" in variant && variant.abilities
         ? { abilities: variant.abilities }
         : {}),
       ...("healing" in variant && variant.healing
         ? { healing: variant.healing }
+        : {}),
+      ...("activation" in variant && variant.activation
+        ? { activation: variant.activation }
+        : {}),
+      ...("storesSpells" in variant && variant.storesSpells
+        ? { storesSpells: variant.storesSpells }
+        : {}),
+      ...("granted" in variant && variant.granted
+        ? { granted: variant.granted }
         : {}),
       ...magic,
     };
@@ -87,8 +139,8 @@ export function deriveItem(
       ? `${name.slice(0, -1)}, ${base.name})`
       : `${name} (${base.name})`;
   // A version with no bonuses of its own has the item's, as a Dragon Scale Mail's +1 for every kind of dragon.
-  const own = variant.bonuses ?? parent.bonuses;
-  const bonuses = own ? { bonuses: own } : {};
+  const bonuses =
+    (own ?? parent.bonuses) ? { bonuses: own ?? parent.bonuses } : {};
   let item: Item;
   if (base.type === "weapon") {
     item = {
@@ -99,7 +151,8 @@ export function deriveItem(
       ...bonuses,
       ...magic,
       ...(parent.returning ? { returning: true as const } : {}),
-      ...(parent.hitDamage ? { hitDamage: parent.hitDamage } : {}),
+      ...(hitDamage.length > 0 ? { hitDamage } : {}),
+      ...(forms.length > 0 ? { forms } : {}),
     };
   } else if (base.type === "armor") {
     item = {
@@ -135,3 +188,40 @@ const rarityName = (rarity: string): string =>
   rarity
     .replace(/([A-Z])/g, " $1")
     .replace(/^./, (first) => first.toUpperCase());
+
+// An item with the spell named `slug` bound into it (MagicItemSchema `boundSpell`), or nothing for a spell it can't
+// hold. "Enspelled Staff (Fireball)".
+function withSpell(
+  item: Item,
+  bound: NonNullable<Extract<Item, { type: "magicItem" }>["boundSpell"]>,
+  slug: string,
+  id: string,
+  access: ContentAccess,
+): Item | undefined {
+  const spellId = spellNamed(slug, access);
+  const spell = spellId
+    ? SpellSchema.safeParse(access.content(spellId)).data
+    : undefined;
+  if (
+    !spellId ||
+    !spell ||
+    spell.level < bound.minLevel ||
+    spell.level > bound.maxLevel ||
+    (bound.schools && !bound.schools.includes(spell.school))
+  ) {
+    return undefined;
+  }
+  const name = `${item.name} (${spell.name})`;
+  if (bound.as !== "charges") {
+    return item.type === "magicItem"
+      ? { ...item, id, name, spell: spellId, boundSpell: bound }
+      : undefined;
+  }
+  const cast = { spell: slug, charges: 1, ...boundNumbers(spell.level) };
+  return {
+    ...item,
+    id,
+    name,
+    casts: [...("casts" in item ? (item.casts ?? []) : []), cast],
+  } as Item;
+}
