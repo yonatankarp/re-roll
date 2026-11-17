@@ -18,6 +18,8 @@ import {
   NS,
   StateSchema,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
+import { resolveAction } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { sceneGearActions } from "../plugins/systems/dnd5.5e/core/gear.ts";
 import {
   damageResponses,
   deriveStats,
@@ -300,5 +302,85 @@ describe.skipIf(!BOOKS)("the book's magic items' passives", () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+});
+
+// A sample of #142's single-use items and #180's riders, as the books encode them.
+describe.skipIf(!BOOKS)("the book's single-use items and riders", () => {
+  const action = (actor: Actor, id: string) => {
+    const found = deriveStats(actor, run).actions.find(
+      (item) => item.id === id,
+    );
+    if (!found) throw new Error(`No ${id}`);
+    return found;
+  };
+  const added = (actor: Actor, id: string) =>
+    (
+      resolveAction(action(actor, id), actor, [actor], {
+        state: { actors: { [actor.id]: actor }, combat: null },
+        dice: { roll: () => 3, below: () => 0 },
+        content: run.content,
+        contentIds: run.contentIds,
+      }).events ?? []
+    ).flatMap((event) =>
+      event.kind === `${NS}:effectAdded` && "payload" in event
+        ? [
+            (event.payload as { effect: { modifier: { kind: string } } }).effect
+              .modifier,
+          ]
+        : [],
+    );
+
+  it("drinks a Potion of Speed's Haste without lethargy, and a storm Potion of Giant Strength's Strength 29", () => {
+    const speed = "dmg:item/potion-of-speed";
+    expect(added(wearing([speed]), `item:${speed}`)).toContainEqual({
+      kind: "hasted",
+      noLethargy: true,
+    });
+    const storm = "dmg:item/potion-of-giant-strength--6";
+    expect(run.content(storm)).toMatchObject({
+      name: "Potion of Giant Strength (storm)",
+    });
+    expect(added(wearing([storm]), `item:${storm}`)).toContainEqual({
+      kind: "setScore",
+      ability: "str",
+      score: 29,
+    });
+  });
+
+  it("reads a Spell Scroll of Fireball with the scroll's DC, and gives Wraps of Unarmed Power to Unarmed Strikes", () => {
+    const scroll = "dmg:item/spell-scroll--fireball";
+    const read = action(wearing([scroll], "wizard"), `item:${scroll}`);
+    expect(read.activation.resolution).toMatchObject({ dc: { base: 15 } });
+    expect(read.castCheck).toMatchObject({ dc: 13 });
+    const strike = action(
+      wearing(["dmg:item/wraps-of-unarmed-power--2"]),
+      "unarmed-strike",
+    ).activation.resolution;
+    expect(strike).toMatchObject({ attack: { itemBonus: 2 } });
+  });
+
+  it("fires +3 Ammunition, and offers Oil of Sharpness for a Longsword", () => {
+    const shot = action(
+      wearing(["srd52:item/shortbow", "dmg:item/ammunition-1-2-or-3--3"]),
+      "weapon:srd52:item/shortbow",
+    );
+    expect(shot.ammunition).toBe("dmg:item/ammunition-1-2-or-3--3");
+    expect(shot.activation.resolution).toMatchObject({
+      attack: { itemBonus: 3 },
+    });
+    const oiled = wearing([
+      "srd52:item/longsword",
+      "dmg:item/oil-of-sharpness",
+    ]);
+    const options = sceneGearActions(
+      { actors: { [PLAYER_ACTOR]: oiled }, combat: null },
+      run,
+    ).map((option) => option.args);
+    expect(options).toContainEqual(
+      expect.objectContaining({
+        items: ["dmg:item/weapon-1-2-or-3--3--longsword"],
+      }),
+    );
   });
 });
