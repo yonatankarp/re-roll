@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
 import type { RunContext } from "../engine/run/turn.ts";
+import type { SheetRow } from "../engine/shell/system-ui.ts";
 import { sceneCastActions } from "../plugins/systems/dnd5.5e/core/camp.ts";
+import { dndUi } from "../plugins/systems/dnd5.5e/ui/index.ts";
 import {
   dealEvents,
   leafEvents,
@@ -902,6 +904,16 @@ describe("casting between fights (#186)", () => {
         String(resource).startsWith("slot:"),
       ),
     ).toEqual([]);
+    // Each one offered has a button on the player's sheet, so the page and headless play agree (#203).
+    const buttons = dndUi
+      .sheets(state, content)
+      .flatMap((sheet) =>
+        sheet.sections.flatMap((section): readonly SheetRow[] => section.rows),
+      )
+      .flatMap((row) => (row.option ? [row.option.id] : []));
+    expect(buttons).toEqual(
+      expect.arrayContaining(offered.map((action) => action.id)),
+    );
   });
 });
 
