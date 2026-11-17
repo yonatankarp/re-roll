@@ -70,6 +70,32 @@ const FIXTURES = [
     ],
   },
   trait("rage", []),
+  trait("reckless", [], {
+    activations: [
+      {
+        cost: [],
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "modifier",
+              modifier: { kind: "advantage", on: "attacks" },
+              duration: { until: "yourNextTurnStart" },
+            },
+          ],
+        },
+      },
+    ],
+  }),
+  trait("abandon", [
+    {
+      kind: "activationRider",
+      feature: "test:feature/reckless",
+      while: [RAGE],
+      effects: [{ kind: "tempHp", amount: { bonus: { base: 2 } } }],
+    },
+  ]),
   trait("beyond", [{ kind: "fightOn", while: [RAGE] }]),
   trait("before", [{ kind: "fightOn", resource: "before" }], use("before")),
   trait("keeper", [
@@ -476,6 +502,19 @@ describe("hit points and death (#201)", () => {
     expect(beast.source.calledBy).toBe(PLAYER_ACTOR);
     expect(beast.side).toBe("party");
     expect(isDead({ ...beast, hp: 0 })).toBe(true);
+  });
+
+  it("rides an activation only while raging with `while`, as Reckless Abandon's Temporary Hit Points", async () => {
+    const content = await run();
+    const effects = (actor: Actor) => {
+      const action = deriveStats(actor, content).actions.find((item) =>
+        item.id.startsWith("feature:test:feature/reckless"),
+      );
+      return action ? effectsOf(action.activation).map(({ kind }) => kind) : [];
+    };
+    const barbarian = hero(["reckless", "abandon"]);
+    expect(effects(barbarian)).toEqual(["modifier"]);
+    expect(effects(raging(barbarian))).toEqual(["modifier", "tempHp"]);
   });
 
   it("puts a limit on a cast's targets and spends a use, as Hunter's Rime's no Disengage and Defy Death", async () => {
