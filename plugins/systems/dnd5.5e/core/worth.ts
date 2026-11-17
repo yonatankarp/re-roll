@@ -149,6 +149,11 @@ export function makeJudge(context: Context, side: Actor): Judge {
   const partyShare = damageToParty(state);
   const stats = cached((actor) => deriveStats(actor, context));
   const responses = cached((actor) => damageResponses(actor, context));
+  const masters = cached((actor) =>
+    stats(actor).actions.some(
+      (item) => masteryOf(actor, item.id, context) !== null,
+    ),
+  );
 
   // Advantage (1), Disadvantage (-1) or neither on an attack, as attack.ts rolls it, leaving out sight and
   // reactions. The fight's opening positions don't say who will stand where: a melee attack with 5-foot reach
@@ -1451,12 +1456,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
     }
     if (gained <= 0) return gained;
     // A bare Unarmed Strike gives up the mastery a mastered weapon would put on the hit, as Topple's.
-    if (
-      actionId === UNARMED_STRIKE &&
-      stats(actor).actions.some(
-        (item) => masteryOf(actor, item.id, context) !== null,
-      )
-    ) {
+    if (actionId === UNARMED_STRIKE && masters(actor)) {
       gained *= 0.75;
     }
     // What it spends: a slot by its level, a limited use or an item a little.
