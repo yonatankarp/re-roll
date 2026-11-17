@@ -1290,13 +1290,19 @@ function applyDamage(
   const hitWhileDown =
     wasDown && remaining > 0 && actor.side === "party" ? (critical ? 2 : 1) : 0;
   const unsettled = hitWhileDown > 0 && isStable(actor);
+  // An effect that ends on damage takes the rest of its spell on the creature with it, as Hypnotic Pattern's Speed 0.
+  const broken = new Set(
+    actor.activeEffects.flatMap((effect) =>
+      effect.endsOnDamage ? [`${effect.sourceId}|${effect.casterId}`] : [],
+    ),
+  );
   return {
     ...actor,
     activeEffects:
       amount > 0
         ? actor.activeEffects.filter(
             (effect) =>
-              !effect.endsOnDamage &&
+              !broken.has(`${effect.sourceId}|${effect.casterId}`) &&
               !(effect.endsWithTempHp && actor.tempHp <= absorbed),
           )
         : actor.activeEffects,

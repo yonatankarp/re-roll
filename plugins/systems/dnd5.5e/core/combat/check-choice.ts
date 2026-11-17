@@ -22,7 +22,9 @@ type Picking = Extract<LeafEffect, { kind: "modifier" }> & {
 const picking = (effects: readonly LeafEffect[]): Picking[] =>
   effects.filter(
     (effect): effect is Picking =>
-      effect.kind === "modifier" && effect.pick !== undefined,
+      effect.kind === "modifier" &&
+      effect.pick !== undefined &&
+      effect.option === undefined, // an option's waits until it's picked (combat/options.ts)
   );
 
 // The modifier limited to checks with that skill, or rolls with that ability.

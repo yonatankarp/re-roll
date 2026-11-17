@@ -2,6 +2,7 @@ import { awaitDecision, type Frame, frameHandler } from "#sdk";
 import { z } from "zod";
 import { AbilitySchema, type LeafEffect, LeafEffectSchema } from "../schemas.ts";
 import { type Actor, frame, NS } from "../state.ts";
+import { focusFrame } from "./check-choice.ts";
 import { leafEvents } from "./effects.ts";
 import type { Context } from "./queries.ts";
 
@@ -76,6 +77,14 @@ export const optionFrames = {
       if (picked.length === 0) {
         throw new Error(`${payload.answer} isn't offered`);
       }
+      // An option with an ability to pick asks for it next, as Bestow Curse's.
+      const focus = focusFrame(
+        picked,
+        payload.sourceId,
+        caster,
+        target,
+        payload.slotLevel,
+      );
       return {
         events: leafEvents(
           picked,
@@ -86,6 +95,7 @@ export const optionFrames = {
           payload.save,
           payload.slotLevel,
         ),
+        ...(focus ? { frames: [focus] } : {}),
       };
     },
   }),

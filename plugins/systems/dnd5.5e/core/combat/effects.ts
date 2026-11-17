@@ -1820,6 +1820,12 @@ export function leafEvents(
         // its option is (combat/options.ts)
         if (effect.choose || effect.pick || effect.option) break;
         if (!inHpBand(target, effect)) break;
+        if (
+          effect.immuneWith &&
+          immuneToCondition(deriveStats(target, context), effect.immuneWith)
+        ) {
+          break;
+        }
         events.push(
           dndEvent(`${NS}:effectAdded`, {
             actor: target.id,
@@ -1832,7 +1838,16 @@ export function leafEvents(
               ...(effect.gone?.includes(deriveStats(target, context).creatureType ?? "")
                 ? {}
                 : lastsFor(effect.duration, caster, target, context.state)),
-              ...(effect.repeatSave && save ? { repeatSave: save } : {}),
+              ...(effect.endSave
+                ? {
+                    repeatSave: {
+                      ability: effect.endSave.ability,
+                      dc: evaluateFormula(effect.endSave.dc, stats),
+                    },
+                  }
+                : effect.repeatSave && save
+                  ? { repeatSave: save }
+                  : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...lingersFor(effect.duration),
               ...swallowed,
@@ -3539,7 +3554,8 @@ export function resolveAction(
           (!edge.minSize ||
             sizeOf(target, context) >= SIZES.indexOf(edge.minSize)) &&
           (!edge.maxScore ||
-            met.abilities[edge.maxScore.ability] <= edge.maxScore.score)
+            met.abilities[edge.maxScore.ability] <= edge.maxScore.score) &&
+          (!edge.immuneTo || immuneToCondition(met, edge.immuneTo))
             ? [edge.roll]
             : [],
         );
@@ -3664,6 +3680,16 @@ export function resolveAction(
             slotLevel,
           ),
         );
+        const focused = turned
+          ? null
+          : focusFrame(
+              saved ? resolution.onSuccess : resolution.onFail,
+              spellSource(action),
+              actor,
+              target,
+              slotLevel,
+            );
+        if (focused) frames.push(focused);
         const picked = turned
           ? null
           : optionFrame(

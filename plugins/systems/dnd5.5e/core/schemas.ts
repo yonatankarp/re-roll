@@ -770,6 +770,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     option: z.string().min(1).optional(),
     hpAtMost: z.number().int().min(1).optional(),
     hpAbove: z.number().int().min(1).optional(),
+    // A save at the end of each of its turns that ends it, as an applyCondition's, for an effect that came with none,
+    // as Power Word Pain's (2014).
+    endSave: z
+      .strictObject({ ability: AbilitySchema, dc: FormulaSchema })
+      .optional(),
+    // Not on a creature immune to this condition, as Power Word Pain's on one that can't be Charmed.
+    immuneWith: ConditionSchema.optional(),
     // On a creature of these lowercase types it runs out only with Concentration, so held for its whole duration the
     // creature doesn't come back and counts as beaten meanwhile, as Banishment's (combat/turn.ts shutAway).
     gone: z.array(z.string()).min(1).optional(),
@@ -1240,6 +1247,8 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
           maxScore: z
             .strictObject({ ability: AbilitySchema, score: z.number().int() })
             .optional(),
+          // a creature immune to this condition, as Mental Prison's that can't be Charmed
+          immuneTo: ConditionSchema.optional(),
           // "immune" leaves the creature out altogether, as Cause Fear's Constructs and Undead
           roll: z.enum(["advantage", "disadvantage", "fail", "succeed", "immune"]),
         }),
