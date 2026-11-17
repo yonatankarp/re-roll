@@ -256,14 +256,17 @@ export const castCheckFrames = {
       const action = findAction(actor, cast.actionId, context, slotLevel);
       const check = action.castCheck;
       if (!check) throw new Error(`${action.id} needs no check`);
-      const rolled = abilityCheck(
-        actor,
-        check.skill,
-        check.ability,
-        check.dc,
-        (success) => (success ? action.name : `${action.name} fails`),
-        context,
-      );
+      const rolled =
+        check.chance === undefined
+          ? abilityCheck(
+              actor,
+              check.skill,
+              check.ability,
+              check.dc,
+              (success) => (success ? action.name : `${action.name} fails`),
+              context,
+            )
+          : failChance(actor, action.name, check.chance, context);
       if (rolled.success) {
         const taken = castAction(
           actor,
@@ -304,11 +307,11 @@ export const castCheckFrames = {
           ...payCosts(paid, actor, context, slotLevel),
         ],
         frames: [
-          ...(cast.actionId.startsWith(ITEM_PREFIX)
+          ...(cast.actionId.startsWith(ITEM_PREFIX) || check.breaks
             ? [
                 frame("useItem", {
                   actor: actor.id,
-                  item: cast.actionId.slice(ITEM_PREFIX.length),
+                  item: check.breaks ?? cast.actionId.slice(ITEM_PREFIX.length),
                 }),
               ]
             : []),
@@ -319,6 +322,31 @@ export const castCheckFrames = {
     },
   }),
 };
+
+// A percent chance that something fails, as a Wind Fan's tearing: a d100 at or under it fails.
+function failChance(
+  actor: Actor,
+  label: string,
+  chance: number,
+  context: Context,
+): { readonly success: boolean; readonly events: SystemEvent[] } {
+  const roll = context.dice.roll(100);
+  const success = roll > chance;
+  return {
+    success,
+    events: [
+      dndEvent(`${NS}:rollReported`, {
+        actor: actor.id,
+        against: "check",
+        natural: roll,
+        total: roll,
+        target: chance + 1,
+        success,
+        label: success ? label : `${label} fails`,
+      }),
+    ],
+  };
+}
 
 // An ability check, in a fight or a scene. Help's Advantage on a check is used up by it.
 export function abilityCheck(

@@ -78,6 +78,7 @@ export const FRAME_KINDS = [
   "strikeChosen",
   "missRider",
   "advantageForgone",
+  "advantageGained",
   "swapInitiative",
   "takeAction",
   "teleport",
@@ -376,6 +377,8 @@ const ActorSchema = z.strictObject({
       z.strictObject({ source: z.string(), passives: z.array(PassiveSchema) }),
     )
     .optional(),
+  // The skill picked for an item that lets its bearer pick one, by the item's id, as an Arcanist's Bestiary's.
+  itemSkills: z.record(z.string(), z.string()).optional(),
   // What a pool's `rolled` dice came to, by its id, as a Necklace of Fireballs' beads (ResourceDefSchema).
   rolledPools: z.record(z.string(), z.number().int()).optional(),
   // Spells stored in an item carried, by the item's id, with the numbers they were cast with (MagicItemSchema
@@ -550,6 +553,11 @@ const RestPassivesSchema = z.strictObject({
   actor: z.string(),
   source: z.string(),
   passives: z.array(PassiveSchema),
+});
+const ItemSkillSchema = z.strictObject({
+  actor: z.string(),
+  item: z.string(),
+  skill: z.string(),
 });
 const PoolRolledSchema = z.strictObject({
   actor: z.string(),
@@ -777,6 +785,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:itemUsed`]: ItemUsedSchema,
   [`${NS}:abilityRaised`]: AbilityRaisedSchema,
   [`${NS}:poolRolled`]: PoolRolledSchema,
+  [`${NS}:itemSkillPicked`]: ItemSkillSchema,
   [`${NS}:restPassivesGained`]: RestPassivesSchema,
   [`${NS}:spellStored`]: SpellStoredSchema,
   [`${NS}:storedSpellUsed`]: StoredSpellUsedSchema,
@@ -1999,6 +2008,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           ),
           { source: data.source, passives: data.passives },
         ],
+      }));
+    }
+    case `${NS}:itemSkillPicked`: {
+      const data = payload(ItemSkillSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        itemSkills: { ...actor.itemSkills, [data.item]: data.skill },
       }));
     }
     case `${NS}:poolRolled`: {

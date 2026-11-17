@@ -583,6 +583,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("confused"),
     spell: z.literal(true).optional(),
   }),
+  // The item whose activation gave it is a Thrown weapon of this range that comes back once thrown, as a
+  // Martialist's Quarterstaff's Throw (stats.ts imbuedRange).
+  z.strictObject({
+    kind: z.literal("thrownWeapon"),
+    normal: z.number().int().min(5),
+    long: z.number().int().min(5),
+  }),
   // A character's ability score is this while it lasts, unless its own is higher, as a Potion of Giant Strength's
   // Strength (stats.ts).
   z.strictObject({
@@ -920,10 +927,25 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts). In an
   // automatic resolution it fails outright, only of `maxLevel` or lower, spending as many of `levels` as its level,
   // with what cast it wasted, slot and all, as an Ioun Stone of Absorption's 20 levels.
+  // With `gains`, `levels` gains as many as the spell's level instead, only for a spell aimed at the bearer alone,
+  // and past its maximum the item breaks as its `retribution` does, as a Staff of the Magi's Spell Absorption.
   z.strictObject({
     kind: z.literal("counter"),
     maxLevel: z.number().int().min(0).max(9).optional(),
     levels: z.string().min(1).optional(),
+    gains: z.literal(true).optional(),
+  }),
+  // The item used breaks in an explosion as wide as `radius` round its bearer, dealing Force damage by the charges
+  // left in its `resource`: `self` times them to the bearer, unless a d100 of 50 or less sends it away first, and
+  // `others` times them to each other creature there, halved by a Dexterity save against `dc`, as a Staff of Power's
+  // Retributive Strike. shortcut: a bearer sent away stays in the fight, as other planes aren't played.
+  z.strictObject({
+    kind: z.literal("retribution"),
+    resource: z.string().min(1),
+    radius: z.number().int().min(5),
+    self: z.number().int().min(1),
+    others: z.number().int().min(1),
+    dc: z.number().int().min(1),
   }),
   // Responses to a d20 roll made before its result applies (combat/reactions.ts): the roller rolls the die again
   // and must use the new roll, as with Bountiful Luck; the roll gains or loses `amount`, as with Boon of Fate
@@ -1327,6 +1349,7 @@ export const TargetingSchema = z.union([
       .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
       .optional(),
     bloodied: z.literal(true).optional(), // only a Bloodied creature, as for a gnoll's Rampage
+    swimmers: z.literal(true).optional(), // only a creature with a Swim Speed, as a Trident of Fish Command's
     downed: z.literal(true).optional(), // only a living creature at 0 Hit Points, as for a will-o'-wisp's Consume Life
     // only a creature under an effect of the bearer's action of this name, as a nightmare's spear curse for Narcotize
     afflicted: z.string().min(1).optional(),
@@ -1367,6 +1390,9 @@ export const ActivationSchema = z.strictObject({
       // With `afterHit`, a strike option chosen before an attack roll that has Advantage, which then has none, as
       // Brutal Strike's (combat/strikes.ts).
       forgoAdvantage: z.literal(true).optional(),
+      // With `afterHit`, a strike option chosen before an attack roll without Advantage, which then has it, as a
+      // Martialist's Quarterstaff's Trip (combat/strikes.ts). shortcut: its cost is paid only on a hit.
+      gainsAdvantage: z.literal(true).optional(),
       // With `afterHit`, only once the hit has dealt Sneak Attack damage, as Wails from the Grave.
       sneakAttack: z.literal(true).optional(),
       // With `afterHit`, only a hit with this feature's own attacks, as Rend Mind's Psychic Blades.
@@ -1646,6 +1672,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // A spell that targeted only the bearer and made no area is turned back at its caster with the bearer's
     // Reaction, the caster saving against its own spell save DC (combat/effects.ts).
     deflect: z.literal(true).optional(),
+    // Only spells of these schools, only the deflection, and a use of this resource for it, as a Staff of
+    // Charming's Reflect Enchantment.
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
+    deflectOnly: z.literal(true).optional(),
+    resource: z.string().min(1).optional(),
   }),
   // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
   // save, as a displacer beast's Avoidance does, instead of Dexterity saves only.
@@ -1665,8 +1696,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       "targetFrightened",
       "marked",
       "unacted",
+      "creatureType", // against a creature of one of `creatureTypes`, as a Ring of Elemental Command's Elementals
     ]),
     against: z.array(ContentIdSchema).min(1).optional(),
+    creatureTypes: z.array(CreatureTypeSchema).min(1).optional(),
   }),
   // Its shape can't change, so Polymorph does nothing to it, as with a golem's Immutable Form.
   z.strictObject({ kind: z.literal("immutableForm") }),
@@ -2798,6 +2831,27 @@ const MagicBonusSchema = z.strictObject({
 // leads plays it.
 const ItemCastSchema = z.strictObject({
   spell: z.string().min(1),
+  // Limits on the cast: on its caster only (`self`), as a Hag Eye's Darkvision; an area this many feet across
+  // (`radius`), as a Wand of Fear's 60-foot Cone; only creatures of these types (`creatureTypes`), as a Ring of Animal
+  // Influence's Fear on Beasts, and with a Swim Speed (`swimmers`), as a Trident of Fish Command's; and how its save
+  // goes for some creatures (`edges`), as an Arcanist's Bestiary's Disadvantage for one not Humanoid.
+  self: z.literal(true).optional(),
+  radius: z.number().int().min(5).optional(),
+  creatureTypes: z.array(CreatureTypeSchema).min(1).optional(),
+  swimmers: z.literal(true).optional(),
+  edges: z
+    .array(
+      z.strictObject({
+        creatureTypes: z.array(z.string()).min(1).optional(),
+        minSize: SizeSchema.optional(),
+        roll: z.enum(["advantage", "disadvantage", "fail", "succeed"]),
+      }),
+    )
+    .min(1)
+    .optional(),
+  // Each use after the first since its pool came back has this many percent more chance to fail, tearing the item
+  // apart, as a Wind Fan's 20.
+  tears: z.number().int().min(1).max(100).optional(),
   charges: z.number().int().min(0).default(1), // 0 casts it whenever
   resource: z.string().min(1).optional(),
   level: z.number().int().min(0).max(9).optional(),
@@ -2860,11 +2914,17 @@ export const ChargedSchema = {
     )
     .min(1)
     .optional(),
+  // "vanishes" is gone with its last charge, with no d20, as an Arcane Chatelaine with its last key.
   lastCharge: z
     .union([
       z.literal("destroyed"),
+      z.literal("vanishes"),
       z.strictObject({ becomes: ContentIdSchema }),
     ])
+    .optional(),
+  // The last charge's d20 on a 20 gives back this many, as a Staff of Power's 1d8 + 2.
+  lastChargeTwenty: z
+    .strictObject({ dice: DiceSchema, base: z.number().int().min(0) })
     .optional(),
 };
 
@@ -3014,6 +3074,9 @@ const MagicItemSchema = ItemBaseSchema.extend({
       max: z.number().int().min(1),
     })
     .optional(),
+  // Skills its bearer picks one of to be proficient in while it works, changed only where the party could rest, as an
+  // Arcanist's Bestiary's Extensive Knowledge (gear.ts).
+  chooseSkill: z.array(SkillSchema).min(2).optional(),
   // Weapons it trains its wearer with, and magic ones made from them, named as a bonus's `weapons` are.
   weaponTraining: z.array(z.string().min(1)).min(1).optional(),
   // Magic armor made from a plain one: worn as if trained with it, as Elven Chain, or with no Strength it needs,

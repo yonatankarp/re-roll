@@ -20,6 +20,7 @@ import {
   ALL_SKILLS,
   type Item,
   type ItemCast,
+  type Targeting,
   type ResourceDef,
   DAMAGE_TYPES,
   ABILITIES,
@@ -73,6 +74,7 @@ import {
   castFrom,
   itemCastId,
   itemUseId,
+  itemUseOf,
   spellOfSource,
   weaponItemId,
 } from "./combat/ids.ts";
@@ -123,6 +125,8 @@ export interface KnownAction {
     readonly skill?: Skill;
     readonly dc: number;
     readonly keep?: string; // a resource a failure doesn't spend
+    readonly chance?: number; // in place of the check, the percent chance it fails, as a Wind Fan's tearing
+    readonly breaks?: string; // the item a failure destroys
   };
 }
 
@@ -472,6 +476,7 @@ function itemCasts(
   item: Item,
   level: number,
   access: ContentAccess,
+  actor: Actor,
 ): KnownAction[] {
   const { resources, casts } = chargesOf(item);
   return casts.flatMap((cast) => {
@@ -503,7 +508,11 @@ function itemCasts(
           : step
             ? scaleActivation(activation, step, at - spell.level)
             : activation;
-      const numbered = withItemNumbers(scaled, cast.dc, cast.attack);
+      const numbered = limitedCast(
+        withItemNumbers(scaled, cast.dc, cast.attack),
+        cast,
+      );
+      const used = resource ? (actor.resourcesSpent[resource] ?? 0) : 0;
       return [
         {
           id: itemCastId(spellId, itemId, charges),
@@ -532,10 +541,54 @@ function itemCasts(
           },
           spellLevel: at,
           ...(lasting ? { concentrates: true as const } : {}),
+          // A Wind Fan used again before dawn may tear.
+          ...(cast.tears && used > 0
+            ? {
+                castCheck: {
+                  ability: "int" as const,
+                  dc: 0,
+                  chance: Math.min(100, cast.tears * used),
+                  breaks: itemId,
+                },
+              }
+            : {}),
         },
       ];
     });
   });
+}
+
+// An item's cast with its limits (ItemCastSchema): on its caster alone, an area of its size, only some creatures,
+// and how some creatures' saves go.
+function limitedCast(activation: Activation, cast: ItemCast): Activation {
+  const { targeting, resolution } = activation;
+  const narrowed: Targeting = cast.self
+    ? { self: true }
+    : "area" in targeting
+      ? {
+          ...targeting,
+          ...(cast.radius
+            ? { area: { ...targeting.area, radius: cast.radius } }
+            : {}),
+          ...(cast.creatureTypes ? { creatureTypes: cast.creatureTypes } : {}),
+        }
+      : "creatures" in targeting
+        ? {
+            ...targeting,
+            ...(cast.creatureTypes
+              ? { creatureTypes: cast.creatureTypes }
+              : {}),
+            ...(cast.swimmers ? { swimmers: true as const } : {}),
+          }
+        : targeting;
+  return {
+    ...activation,
+    targeting: narrowed,
+    resolution:
+      cast.edges && resolution.kind === "save"
+        ? { ...resolution, edges: [...(resolution.edges ?? []), ...cast.edges] }
+        : resolution,
+  };
 }
 
 // Every spell by its name after the plugin, from the book that leads, as spellNamed finds them.
@@ -974,6 +1027,19 @@ function bestForm(
     ? best.properties
     : [...best.properties, "finesse" as const];
   return { ...weapon, damage: best.damage, properties };
+}
+
+// The range a weapon is thrown to while its own activation's `thrownWeapon` lasts, as a Martialist's Quarterstaff's.
+export function imbuedRange(
+  actor: Actor,
+  itemId: string,
+): { readonly normal: number; readonly long: number } | undefined {
+  for (const { modifier, sourceId } of actor.activeEffects) {
+    if (modifier.kind === "thrownWeapon" && itemUseOf(sourceId) === itemId) {
+      return { normal: modifier.normal, long: modifier.long };
+    }
+  }
+  return undefined;
 }
 
 // The magic ammunition carried with the biggest bonus to attack rolls, as +3 Ammunition over +1.
@@ -1467,6 +1533,18 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   );
   // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
   const kept = (actor.restPassives ?? []).flatMap((entry) => entry.passives);
+  // The skill picked for an item that gives one, as an Arcanist's Bestiary's, while it works.
+  for (const [itemId, item] of worn) {
+    const picked = actor.itemSkills?.[itemId];
+    if (
+      item.type === "magicItem" &&
+      works(itemId, item) &&
+      picked &&
+      item.chooseSkill?.some((skill) => skill === picked)
+    ) {
+      skills.add(picked as Skill);
+    }
+  }
   const traits = [...itemPassives, ...kept, ...fromFeatures.passives];
   const castingAbility = featSpellAbilities(
     build,
@@ -1500,7 +1578,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
     if (works(itemId, item) && !untrainedArmor) {
       actions.push(
-        ...itemCasts(itemId, item, level, access),
+        ...itemCasts(itemId, item, level, access, actor),
         ...itemUses(itemId, item, actor),
         ...storedCasts(itemId, item, actor, access),
       );
@@ -1584,11 +1662,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         spellLevel: null,
         ...(shot ? { ammunition: shot.id } : {}),
       });
-      if (weapon.properties.includes("thrown") && weapon.range) {
+      // A Martialist's Quarterstaff made a Thrown weapon for a while by its own activation.
+      const imbued = imbuedRange(actor, itemId);
+      const range = weapon.properties.includes("thrown")
+        ? weapon.range
+        : imbued;
+      if (range) {
         actions.push({
           id: `${THROW_PREFIX}${itemId}`,
           name: `Throw ${item.name}`,
-          activation: thrownActivation(activation, weapon.range, traits),
+          activation: thrownActivation(activation, range, traits),
           spellLevel: null,
         });
       }

@@ -3,6 +3,7 @@ import {
   awaitDecision,
   type Frame,
   frameHandler,
+  type SystemEvent,
   type SystemResult,
 } from "#sdk";
 import { DECLINE } from "./ids.ts";
@@ -17,7 +18,6 @@ import {
 } from "../state.ts";
 import { distanceFeet, rangeFeet } from "../grid.ts";
 import { deriveStats, evaluateFormula, type KnownAction } from "../stats.ts";
-import type { LeafEffect } from "../schemas.ts";
 import { seeing } from "../sight.ts";
 import {
   actorOf,
@@ -28,7 +28,14 @@ import {
   findAction,
   slotLevelFor,
 } from "./queries.ts";
-import { payCosts, resolveAction, rollSave } from "./effects.ts";
+import {
+  payCosts,
+  resolveAction,
+  retributionEvents,
+  rollSave,
+} from "./effects.ts";
+import { itemUseOf } from "./ids.ts";
+import { ItemSchema, type LeafEffect } from "../schemas.ts";
 import { isSpell, spellLevelOf } from "./dispel.ts";
 
 // Counterspell: a foe who sees a spell being cast nearby may spend its reaction to make the caster save, and on a
@@ -56,11 +63,13 @@ function outright(
   return found?.kind === "counter" ? found : null;
 }
 
-// The foe's reaction it could counter this spell, of `level`, with, if any.
+// The foe's reaction it could counter this spell, of `level`, with, if any. `alone` is whether the spell is aimed
+// at that foe alone.
 function counterOf(
   foe: Actor,
   caster: Actor,
   level: number,
+  alone: boolean,
   context: Context,
 ): KnownAction | null {
   if (!foe.budget.reaction || isDown(foe)) return null;
@@ -80,7 +89,9 @@ function counterOf(
           rangeFeet(targeting.range) &&
         canAfford(action, foe, stats) &&
         (limits?.maxLevel === undefined || level <= limits.maxLevel) &&
+        (!limits?.gains || (alone && level > 0)) &&
         (limits?.levels === undefined ||
+          limits.gains === true ||
           (level > 0 &&
             (stats.resources[limits.levels] ?? 0) -
               (foe.resourcesSpent[limits.levels] ?? 0) >=
@@ -106,7 +117,9 @@ export function counterWindow(
     spellLevelOf(action.id, caster, context) ??
     0;
   for (const foe of enemies(context.state, caster)) {
-    const counter = counterOf(foe, caster, level, context);
+    const aimed = typeof cast.target === "string" ? [cast.target] : cast.target;
+    const alone = aimed.length > 0 && aimed.every((id) => id === foe.id);
+    const counter = counterOf(foe, caster, level, alone, context);
     if (!counter) continue;
     const options = [
       { id: counter.id, label: `${counter.name} (${caster.name})` },
@@ -149,15 +162,17 @@ export function runCounterspell(
     return {
       events: [
         ...payCosts(counter, counterer, context),
-        ...(limits.levels
-          ? [
-              dndEvent(`${NS}:resourceSpent`, {
-                actor: counterer.id,
-                resource: limits.levels,
-                amount: level,
-              }),
-            ]
-          : []),
+        ...(limits.levels && limits.gains
+          ? absorbed(counterer, counter, limits.levels, level, context)
+          : limits.levels
+            ? [
+                dndEvent(`${NS}:resourceSpent`, {
+                  actor: counterer.id,
+                  resource: limits.levels,
+                  amount: level,
+                }),
+              ]
+            : []),
         ...payCosts(action, caster, context, level || undefined),
       ],
       frames: [CHECK_END, frame("afterAction", { actor: caster.id })],
@@ -204,6 +219,46 @@ export function runCounterspell(
     events: [...paid, ...save.events, ...payCosts(wasted, caster, context)],
     frames: [CHECK_END, frame("afterAction", { actor: caster.id })],
   };
+}
+
+// A Staff of the Magi's absorbed spell: its levels back as charges, and past its maximum, the staff breaks as its
+// Retributive Strike does.
+function absorbed(
+  bearer: Actor,
+  counter: KnownAction,
+  resource: string,
+  level: number,
+  context: Context,
+): SystemEvent[] {
+  const spent = bearer.resourcesSpent[resource] ?? 0;
+  if (level <= spent) {
+    return [
+      dndEvent(`${NS}:resourceRestored`, {
+        actor: bearer.id,
+        resource,
+        amount: level,
+      }),
+    ];
+  }
+  const itemId = itemUseOf(counter.id);
+  const item = itemId
+    ? ItemSchema.safeParse(context.content(itemId)).data
+    : undefined;
+  const strike = (item && "activations" in item ? (item.activations ?? []) : [])
+    .flatMap(({ activation }) =>
+      activation.resolution.kind === "automatic"
+        ? activation.resolution.effects
+        : [],
+    )
+    .find((effect) => effect.kind === "retribution");
+  // Charges past the maximum blast as though held, so the staff is at its maximum and more.
+  const over = {
+    ...bearer,
+    resourcesSpent: { ...bearer.resourcesSpent, [resource]: spent - level },
+  };
+  return itemId && strike?.kind === "retribution"
+    ? retributionEvents(over, itemId, strike, context)
+    : [];
 }
 
 export const counterFrame = (

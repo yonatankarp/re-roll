@@ -674,6 +674,16 @@ export function fitsType(
   ) {
     return false;
   }
+  if (
+    "swimmers" in targeting &&
+    targeting.swimmers &&
+    !(
+      item.source.kind === "monster" &&
+      lookup(access, MonsterSchema, item.source.statBlockId).speeds?.swim
+    )
+  ) {
+    return false;
+  }
   const largest = "maxSize" in targeting ? targeting.maxSize : undefined;
   if (largest && sizeOf(item, access) > SIZES.indexOf(largest)) return false;
   if (!targeting.creatureTypes) return true;

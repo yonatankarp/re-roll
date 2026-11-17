@@ -27,6 +27,7 @@ import { castFrom, spellOfSource } from "./combat/ids.ts";
 import {
   type Stats,
   chargesOf,
+  imbuedRange,
   deriveStats,
   rollDiceNotation,
   evaluateFormula,
@@ -336,6 +337,21 @@ export function sceneGearActions(
     ...coatActions(actor, access),
     ...[...new Set(actor.inventory)].flatMap((id) => {
       const item = itemOf(access, id);
+      if (item.type !== "magicItem" || !item.chooseSkill) return [];
+      const picked = actor.itemSkills?.[id];
+      return item.chooseSkill
+        .filter((skill) => skill !== picked)
+        .map((skill) => ({
+          id: `skill:${id}:${skill}`,
+          label: `${item.name}: proficiency in ${skill.replace(/^./, (first) => first.toUpperCase())}`,
+          effect: `${NS}:pickItemSkill`,
+          args: { item: id, skill },
+          // The first pick comes with attuning; a change waits on a Long Rest's time.
+          ...(picked ? { rest: true as const } : {}),
+        }));
+    }),
+    ...[...new Set(actor.inventory)].flatMap((id) => {
+      const item = itemOf(access, id);
       return studyGain(actor, item) > 0
         ? [
             {
@@ -606,6 +622,26 @@ export const gearEffects = {
     references: ({ item }) => [item],
     apply: ({ item }, context: Context) => drink(item, context),
   }),
+  [`${NS}:pickItemSkill`]: storyEffect({
+    schema: z.object({ item: z.string(), skill: z.string() }),
+    references: ({ item }) => [item],
+    apply: ({ item, skill }, context: Context) => {
+      const actor = player(context.state);
+      const entry = itemOf(context, item);
+      if (
+        !actor.inventory.includes(item) ||
+        entry.type !== "magicItem" ||
+        !entry.chooseSkill?.some((option) => option === skill)
+      ) {
+        throw new Error(`${item} gives no ${skill}`);
+      }
+      return {
+        events: [
+          dndEvent(`${NS}:itemSkillPicked`, { actor: actor.id, item, skill }),
+        ],
+      };
+    },
+  }),
   [`${NS}:coat`]: storyEffect({
     schema: CoatSchema,
     references: ({ oil, target, items }) => [oil, target, ...items],
@@ -656,7 +692,12 @@ function throwWeapon(
   if (!thrower || !equipped(thrower).includes(payload.item)) return {};
   // A Returning Weapon comes back to the hand that threw it.
   const item = itemOf(context, payload.item);
-  if (item.type === "weapon" && item.returning) return {};
+  if (
+    item.type === "weapon" &&
+    (item.returning || imbuedRange(thrower, payload.item))
+  ) {
+    return {};
+  }
   const at = actors[payload.target]?.position ??
     thrower.position ?? { x: 0, y: 0 };
   return {

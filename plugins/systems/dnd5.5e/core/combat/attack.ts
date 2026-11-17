@@ -16,7 +16,12 @@ import {
   frame,
 } from "../state.ts";
 import { ALL, DECLINE, encodeOption, parseOption } from "./ids.ts";
-import { forgoAdvantageFrame, forgoFrame, SNEAK_DICE } from "./strikes.ts";
+import {
+  forgoAdvantageFrame,
+  forgoFrame,
+  gainAdvantageFrame,
+  SNEAK_DICE,
+} from "./strikes.ts";
 import { aroundHit, replaceHitFrame, runReplaceHit } from "./ranged-smite.ts";
 import { againstTarget, missFrames, runApplyMiss } from "./spell-riders.ts";
 import { duelBroken, duelDamaged, duelHampers } from "./duel.ts";
@@ -166,6 +171,7 @@ export const AttackSchema = z.object({
     .optional(),
   passed: z.array(z.string()).optional(), // creatures that already answered the roll or turned it down
   strikes: z.array(z.string()).optional(), // strike options picked in place of the roll's Advantage, as Brutal Strike's
+  advantaged: z.boolean().optional(), // a strike option picked gives the roll Advantage, as a Martialist's Trip
 });
 
 // Who a projectile or later attack actually goes for, given who is still standing.
@@ -897,49 +903,53 @@ export function runAttackRoll(
   const ability =
     resolution.attack.ability ?? (meleeReach(action) === null ? "dex" : "str");
   // Brutal Strike's options take the roll's Advantage away.
-  const forgoes = (payload.strikes ?? []).length > 0;
+  const forgoes = (payload.strikes ?? []).length > 0 && !payload.advantaged;
   const advantage =
-    !forgoes &&
-    (packed ||
-      unseenAttacker ||
-      hasFlag(attacker, "advantage", "attacks", stats, ability) ||
-      hasFlag(
-        target,
-        "advantage",
-        "attacksAgainst",
-        targetStats,
-        undefined,
-        undefined,
-        attacker.id,
-      ) ||
-      placedFlag(attacker, "advantage", "attacks", state, context, ability) ||
-      placedFlag(target, "advantage", "attacksAgainst", state, context) ||
-      invisibleTo(attacker, target) ||
-      hasCondition(
-        target,
-        "blinded",
-        "paralyzed",
-        "petrified",
-        "restrained",
-        "stunned",
-        "unconscious",
-      ) ||
-      (hasCondition(target, "prone") && close) ||
-      (hasPassive(stats, "grappledAdvantage") &&
-        grapplesOn(target).some(({ casterId }) => casterId === attacker.id)) ||
-      // Street Justice's Headlock: allies too, against a creature the bearer grapples.
-      grapplesOn(target).some(({ casterId }) => {
-        const grappler = state.actors[casterId];
-        return (
-          grappler !== undefined &&
-          casterId !== attacker.id &&
-          grappler.side === attacker.side &&
-          deriveStats(grappler, context).passives.some(
-            (passive) => passive.kind === "grappledAdvantage" && passive.allies,
-          )
-        );
-      }) ||
-      traitAttackAdvantage(stats, attacker, target, targetStats, state));
+    payload.advantaged === true ||
+    (!forgoes &&
+      (packed ||
+        unseenAttacker ||
+        hasFlag(attacker, "advantage", "attacks", stats, ability) ||
+        hasFlag(
+          target,
+          "advantage",
+          "attacksAgainst",
+          targetStats,
+          undefined,
+          undefined,
+          attacker.id,
+        ) ||
+        placedFlag(attacker, "advantage", "attacks", state, context, ability) ||
+        placedFlag(target, "advantage", "attacksAgainst", state, context) ||
+        invisibleTo(attacker, target) ||
+        hasCondition(
+          target,
+          "blinded",
+          "paralyzed",
+          "petrified",
+          "restrained",
+          "stunned",
+          "unconscious",
+        ) ||
+        (hasCondition(target, "prone") && close) ||
+        (hasPassive(stats, "grappledAdvantage") &&
+          grapplesOn(target).some(
+            ({ casterId }) => casterId === attacker.id,
+          )) ||
+        // Street Justice's Headlock: allies too, against a creature the bearer grapples.
+        grapplesOn(target).some(({ casterId }) => {
+          const grappler = state.actors[casterId];
+          return (
+            grappler !== undefined &&
+            casterId !== attacker.id &&
+            grappler.side === attacker.side &&
+            deriveStats(grappler, context).passives.some(
+              (passive) =>
+                passive.kind === "grappledAdvantage" && passive.allies,
+            )
+          );
+        }) ||
+        traitAttackAdvantage(stats, attacker, target, targetStats, state)));
   const held = payload.rolled;
   // Redirect Attack: the target trades places with an ally next to it, who takes the attack instead.
   const redirected = held ? null : redirect(attacker, target, context);
@@ -1045,6 +1055,12 @@ export function runAttackRoll(
       ? null
       : forgoAdvantageFrame({ ...payload, target: target.id }, context);
   if (brutal) return { frames: [brutal] };
+  // One without it can take a strike option that gives it, picked before it's rolled, as a Martialist's Trip.
+  const trip =
+    held || payload.strikes !== undefined || advantage || disadvantage
+      ? null
+      : gainAdvantageFrame({ ...payload, target: target.id }, context);
+  if (trip) return { frames: [trip] };
   const edge = held ?? { advantage, disadvantage };
   const first = held
     ? { natural: held.natural }
@@ -1546,6 +1562,21 @@ export function runAdvantageForgone(
       ...(rolled.events ?? []),
     ],
   };
+}
+
+// A strike option picked to give the roll Advantage, as a Martialist's Trip, or none.
+export function runAdvantageGained(
+  { answer, ...attack }: z.infer<typeof AdvantageForgoneSchema>,
+  context: Context,
+): SystemResult {
+  if (answer === DECLINE) {
+    return runAttackRoll({ ...attack, strikes: [] }, context);
+  }
+  const [actionId = ""] = parseOption(answer);
+  return runAttackRoll(
+    { ...attack, strikes: [actionId], advantaged: true },
+    context,
+  );
 }
 
 function landHit(
@@ -2507,6 +2538,7 @@ function smitesFor(
       !trigger.replacesHit && // offered before the hit lands instead (combat/ranged-smite.ts)
       trigger.forgo === undefined && // picked before the damage (combat/strikes.ts)
       !trigger.forgoAdvantage && // picked before the roll
+      !trigger.gainsAdvantage &&
       canAfford(action, attacker, stats) &&
       hitFits(trigger.afterHit, hitWith, attacker, context) &&
       (!trigger.withFeature ||
@@ -2753,6 +2785,10 @@ export const attackFrames = {
   [`${NS}:strikeChosen`]: frameHandler({
     schema: StrikeChosenSchema,
     run: runStrikeChosen,
+  }),
+  [`${NS}:advantageGained`]: frameHandler({
+    schema: AdvantageForgoneSchema,
+    run: runAdvantageGained,
   }),
   [`${NS}:advantageForgone`]: frameHandler({
     schema: AdvantageForgoneSchema,

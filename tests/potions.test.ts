@@ -9,6 +9,7 @@ import {
 } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { sceneCastActions } from "../plugins/systems/dnd5.5e/core/camp.ts";
 import { itemUseId } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
+import { gainAdvantageFrame } from "../plugins/systems/dnd5.5e/core/combat/strikes.ts";
 import {
   counterWindow,
   runCounterspell,
@@ -341,6 +342,156 @@ const ITEMS = [
         ],
       },
     ],
+  }),
+  item("fan", {
+    category: "wondrousItem",
+    resources: [
+      {
+        id: "fan",
+        max: { base: 6 },
+        recharge: [{ on: "dawn", amount: "all" }],
+      },
+    ],
+    casts: [
+      {
+        spell: "fear",
+        dc: 13,
+        radius: 60,
+        creatureTypes: ["beast"],
+        tears: 20,
+      },
+      { spell: "darkvision", self: true },
+      {
+        spell: "hold-person",
+        edges: [{ creatureTypes: ["humanoid"], roll: "advantage" }],
+      },
+    ],
+  }),
+  item("power", {
+    category: "staff",
+    resources: [{ id: "power", max: { base: 20 }, recharge: [] }],
+    lastCharge: { becomes: "srd52:item/longsword" },
+    lastChargeTwenty: { dice: "1d8", base: 2 },
+    activations: [
+      {
+        name: "Retributive Strike",
+        activation: {
+          cost: ["action"],
+          targeting: { self: true },
+          resolution: {
+            kind: "automatic",
+            effects: [
+              {
+                kind: "retribution",
+                resource: "power",
+                radius: 30,
+                self: 16,
+                others: 4,
+                dc: 17,
+              },
+            ],
+          },
+        },
+      },
+      {
+        name: "Bolt",
+        activation: {
+          cost: ["action", { resource: "power" }],
+          targeting: { creatures: 1, range: 60, side: "enemy" },
+          resolution: {
+            kind: "automatic",
+            damage: [{ amount: { dice: "1d4" }, type: "force" }],
+            effects: [],
+          },
+        },
+      },
+    ],
+  }),
+  item("magi", {
+    category: "staff",
+    resources: [{ id: "magi", max: { base: 50 }, recharge: [] }],
+    activations: [
+      {
+        name: "Spell Absorption",
+        activation: {
+          cost: ["reaction"],
+          trigger: { spellCast: true },
+          targeting: { creatures: 1, range: 120, side: "enemy" },
+          resolution: {
+            kind: "automatic",
+            effects: [{ kind: "counter", levels: "magi", gains: true }],
+          },
+        },
+      },
+      {
+        name: "Retributive Strike",
+        activation: {
+          cost: ["action"],
+          targeting: { self: true },
+          resolution: {
+            kind: "automatic",
+            effects: [
+              {
+                kind: "retribution",
+                resource: "magi",
+                radius: 30,
+                self: 16,
+                others: 6,
+                dc: 17,
+              },
+            ],
+          },
+        },
+      },
+    ],
+  }),
+  item("martial", {
+    category: "weapon",
+    resources: [{ id: "martial", max: { base: 4 }, recharge: [] }],
+    activations: [
+      {
+        name: "Throw",
+        activation: {
+          cost: [{ resource: "martial" }],
+          targeting: { self: true },
+          resolution: {
+            kind: "automatic",
+            effects: [
+              {
+                kind: "modifier",
+                modifier: { kind: "thrownWeapon", normal: 20, long: 60 },
+                duration: { until: "yourNextTurnEnd" },
+              },
+            ],
+          },
+        },
+      },
+      {
+        name: "Trip",
+        activation: {
+          cost: [{ resource: "martial" }],
+          trigger: { afterHit: "meleeWeapon", gainsAdvantage: true },
+          targeting: { creatures: 1, range: 5, side: "enemy" },
+          resolution: {
+            kind: "save",
+            ability: "str",
+            dc: { base: 13 },
+            onFail: [
+              {
+                kind: "applyCondition",
+                condition: "prone",
+                duration: "instantaneous",
+              },
+            ],
+          },
+        },
+      },
+    ],
+    variants: [{ rarity: "uncommon" }],
+  }),
+  item("bestiary", {
+    category: "wondrousItem",
+    chooseSkill: ["arcana", "history", "nature", "religion"],
   }),
 ];
 
@@ -1116,5 +1267,169 @@ describe("pieces rolled as an item is found (#199)", () => {
     };
     expect(resists(helmed)).toBe(true);
     expect(resists({ ...helmed, resourcesSpent: { ruby: 3 } })).toBe(false);
+  });
+});
+
+describe("charged items' riders (#199)", () => {
+  it("limits an item's casts to its caster, an area's size, a creature type and how a save goes, and tears a Wind Fan", async () => {
+    const run = await itemRun();
+    const fan = "test:item/fan";
+    const fresh = carrying([fan]);
+    const fear = actionOf(run, fresh, `spell:srd52:spell/fear:item:${fan}:1`);
+    expect(fear.activation.targeting).toMatchObject({
+      area: { radius: 60 },
+      creatureTypes: ["beast"],
+    });
+    expect(fear.castCheck).toBeUndefined();
+    const used = { ...fresh, resourcesSpent: { fan: 2 } };
+    expect(actionOf(run, used, fear.id).castCheck).toMatchObject({
+      chance: 40,
+      breaks: fan,
+    });
+    expect(
+      actionOf(run, fresh, `spell:srd52:spell/darkvision:item:${fan}:1`)
+        .activation.targeting,
+    ).toEqual({ self: true });
+    expect(
+      actionOf(run, fresh, `spell:srd52:spell/hold-person:item:${fan}:1`)
+        .activation.resolution,
+    ).toMatchObject({
+      edges: [{ creatureTypes: ["humanoid"], roll: "advantage" }],
+    });
+  });
+
+  it("regains charges on the last charge's 20, and breaks in a Retributive Strike by the charges left", async () => {
+    const run = await itemRun();
+    const staff = "test:item/power";
+    const last = { ...carrying([staff]), resourcesSpent: { power: 19 } };
+    const bolt = actionOf(run, last, itemUseId(staff, 1));
+    const twenty = payCosts(
+      bolt,
+      last,
+      contextOf(run, [last], scripted([20, 5]).dice),
+    );
+    expect(payloads(twenty, "resourceRestored")).toEqual([
+      { actor: PLAYER_ACTOR, resource: "power", amount: 7 },
+    ]);
+    const bearer = {
+      ...carrying([staff]),
+      position: { x: 0, y: 0 },
+      resourcesSpent: { power: 15 },
+    };
+    const foe = {
+      ...hero([], { id: "foe" }),
+      side: "enemy" as const,
+      hp: 60,
+      position: { x: 2, y: 0 },
+    };
+    const { events = [] } = resolveAction(
+      actionOf(run, bearer, itemUseId(staff, 0)),
+      bearer,
+      [bearer],
+      contextOf(run, [bearer, foe], scripted([10, 2]).dice),
+    );
+    expect(payloads(events, "itemUsed")).toEqual([
+      { actor: PLAYER_ACTOR, item: staff },
+    ]);
+    // A d100 of 10 sends the bearer away; the foe fails its save and takes 4 times the 5 charges left.
+    expect(
+      payloads(events, "damaged").map((item) => [item.actor, item.amount]),
+    ).toEqual([["foe", 20]]);
+  });
+
+  it("absorbs a spell aimed at it alone into a Staff of the Magi's charges", async () => {
+    const run = await itemRun();
+    const staff = "test:item/magi";
+    const bearer = {
+      ...carrying([staff]),
+      position: { x: 0, y: 0 },
+      resourcesSpent: { magi: 10 },
+    };
+    const caster = {
+      ...wizard([], 3, ["srd52:spell/hold-person"]),
+      id: "foe",
+      side: "enemy" as const,
+      position: { x: 4, y: 0 },
+    };
+    const action = actionOf(run, caster, "spell:srd52:spell/hold-person");
+    const at = (target: string | string[]) => ({
+      actor: "foe",
+      actionId: action.id,
+      target,
+    });
+    const context = contextOf(run, [bearer, caster], scripted([]).dice);
+    expect(
+      counterWindow(caster, action, at(PLAYER_ACTOR), 2, context),
+    ).not.toBeNull();
+    expect(counterWindow(caster, action, at(["foe"]), 2, context)).toBeNull();
+    const { events = [] } = runCounterspell(
+      {
+        ...at(PLAYER_ACTOR),
+        counterer: PLAYER_ACTOR,
+        answer: itemUseId(staff, 0),
+      },
+      context,
+      () => ({}),
+    );
+    expect(payloads(events, "resourceRestored")).toEqual([
+      { actor: PLAYER_ACTOR, resource: "magi", amount: 2 },
+    ]);
+  });
+
+  it("throws a Martialist's Quarterstaff while its Throw lasts, and asks for Trip before a roll", async () => {
+    const run = await itemRun();
+    const staff = "test:item/martial--1--quarterstaff";
+    const bearer = { ...carrying([staff]), position: { x: 0, y: 0 } };
+    const throwId = `throw:${staff}`;
+    expect(
+      deriveStats(bearer, run).actions.some((action) => action.id === throwId),
+    ).toBe(false);
+    const imbued = {
+      ...bearer,
+      activeEffects: [
+        {
+          sourceId: itemUseId(staff, 0),
+          casterId: PLAYER_ACTOR,
+          ends: "spellDuration" as const,
+          modifier: { kind: "thrownWeapon" as const, normal: 20, long: 60 },
+        },
+      ],
+    };
+    expect(actionOf(run, imbued, throwId).activation.targeting).toMatchObject({
+      range: 60,
+    });
+    const foe = {
+      ...hero([], { id: "foe" }),
+      side: "enemy" as const,
+      position: { x: 1, y: 0 },
+    };
+    const asked = gainAdvantageFrame(
+      { attacker: PLAYER_ACTOR, actionId: `weapon:${staff}`, target: "foe" },
+      contextOf(run, [bearer, foe], scripted([]).dice),
+    );
+    expect(asked).not.toBeNull();
+  });
+
+  it("gives the skill picked for an Arcanist's Bestiary", async () => {
+    const run = await itemRun();
+    const book = "test:item/bestiary";
+    const reader = carrying([book]);
+    const state = {
+      ...contextOf(run, [reader], scripted([]).dice).state,
+      combat: null,
+    };
+    const pick = sceneGearActions(state, run).find(
+      (option) => option.id === `skill:${book}:history`,
+    );
+    if (!pick) throw new Error("No pick");
+    const { events = [] } =
+      run.system.storyEffects[`${NS}:pickItemSkill`]?.apply(pick.args, {
+        state,
+        dice: scripted([]).dice,
+        content: run.content,
+        contentIds: run.contentIds,
+      }) ?? {};
+    expect(deriveStats(after(reader, events), run).skills).toContain("history");
+    expect(deriveStats(reader, run).skills).not.toContain("history");
   });
 });

@@ -136,7 +136,13 @@ import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
 import { movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
 import { reincarnateEvents } from "../reincarnate.ts";
-import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
+import {
+  cureFor,
+  dispelEvents,
+  isSpell,
+  snuffedLights,
+  spellOf,
+} from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
 import { damageTypeFrame, zoneTypeFrame } from "./damage-choice.ts";
@@ -295,7 +301,25 @@ function lastCharge(
     (deriveStats(actor, context).resources[pool] ?? 0) -
     (actor.resourcesSpent[pool] ?? 0) -
     charges;
-  if (charges === 0 || left > 0 || context.dice.roll(20) !== 1) return [];
+  if (charges === 0 || left > 0) return [];
+  // An Arcane Chatelaine is gone with its last key, with no d20.
+  const face = fate === "vanishes" ? 1 : context.dice.roll(20);
+  // A Staff of Power's 20 gives charges back.
+  const twenty =
+    item && "lastChargeTwenty" in item ? item.lastChargeTwenty : undefined;
+  if (face === 20 && twenty) {
+    return [
+      dndEvent(`${NS}:resourceRestored`, {
+        actor: actor.id,
+        resource: pool,
+        amount: Math.max(
+          1,
+          twenty.base + rollDiceNotation(twenty.dice, context.dice),
+        ),
+      }),
+    ];
+  }
+  if (face !== 1) return [];
   return [
     dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: itemId }),
     dndEvent(`${NS}:resourceRestored`, { actor: actor.id, resource: pool }),
@@ -1020,18 +1044,22 @@ function deflectedSpell(
   caster: Actor,
   target: Actor,
   context: Context,
+  turning: Extract<Passive, { kind: "spellTurning" }>,
 ): { readonly events: SystemEvent[]; readonly frames: Frame[] } {
   const none = { events: [], frames: [] };
   const { targeting } = action.activation;
+  const stats = deriveStats(target, context);
   if (
     target.id === caster.id ||
     !("creatures" in targeting) ||
     targeting.creatures !== 1 ||
     !target.budget.reaction ||
     hasCondition(target, ...INCAPACITATING) ||
-    !deriveStats(target, context).passives.some(
-      (passive) => passive.kind === "spellTurning" && passive.deflect,
-    ) ||
+    !turning.deflect ||
+    (turning.resource !== undefined &&
+      (stats.resources[turning.resource] ?? 0) -
+        (target.resourcesSpent[turning.resource] ?? 0) <
+        1) ||
     !deriveStats(caster, context).actions.some(
       (item) => item.id === action.id,
     ) ||
@@ -1052,6 +1080,14 @@ function deflectedSpell(
         kind: "reaction",
         label: "Spell Turning",
       }),
+      ...(turning.resource
+        ? [
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: target.id,
+              resource: turning.resource,
+            }),
+          ]
+        : []),
     ],
     frames: [
       frame("useAction", {
@@ -1123,6 +1159,60 @@ export function protectedMount(
 
 // Several hits on one target, reported in turn so each one sees the HP the last one left.
 // Tyro of the Gauntlet's Stand as One: an ally within 5 feet spends its Reaction to keep the target from being moved.
+// A Staff of Power's Retributive Strike: the staff breaks, and its charges left blast its bearer and those near.
+export function retributionEvents(
+  bearer: Actor,
+  itemId: string,
+  effect: Extract<LeafEffect, { kind: "retribution" }>,
+  context: Context,
+): SystemEvent[] {
+  const stats = deriveStats(bearer, context);
+  const left = Math.max(
+    0,
+    (stats.resources[effect.resource] ?? 0) -
+      (bearer.resourcesSpent[effect.resource] ?? 0),
+  );
+  const events: SystemEvent[] = [
+    dndEvent(`${NS}:itemUsed`, { actor: bearer.id, item: itemId }),
+  ];
+  if (context.dice.roll(100) > 50) {
+    events.push(
+      ...dealEvents(
+        bearer,
+        [{ amount: effect.self * left, type: "force" }],
+        false,
+        context,
+      ).events,
+    );
+  }
+  for (const other of Object.values(context.state.actors)) {
+    if (
+      other.id === bearer.id ||
+      isDead(other) ||
+      distanceFeet(bearer.position, other.position) > effect.radius
+    ) {
+      continue;
+    }
+    const save = rollSave(other, "dex", effect.dc, context, true);
+    const amount = effect.others * left;
+    events.push(
+      ...save.events,
+      ...dealEvents(
+        other,
+        [
+          {
+            amount: save.saved ? Math.floor(amount / 2) : amount,
+            type: "force",
+          },
+        ],
+        false,
+        context,
+      ).events,
+    );
+  }
+  return events;
+}
+
 // A push along the ground made shorter by the target's Reaction, as Dwarven Plate's 10 feet less: the feet it's
 // still moved, and the Reaction spent. shortcut: the Reaction is always taken when it can be.
 export function braced(
@@ -1685,6 +1775,13 @@ export function leafEvents(
           }),
         );
         break;
+      case "retribution": {
+        const itemId = itemUseOf(sourceId);
+        if (itemId) {
+          events.push(...retributionEvents(target, itemId, effect, context));
+        }
+        break;
+      }
       case "untilLongRest": {
         const item = sourceId.startsWith(ITEM_PREFIX)
           ? lookup(context, ItemSchema, sourceId.slice(ITEM_PREFIX.length))
@@ -3601,17 +3698,30 @@ export function resolveAction(
           frames.push(...warded.frames);
         }
         // Ring of Spell Turning: a spell up to some level does nothing to a target that saves against it.
-        const turned =
-          saved &&
-          action.spellLevel !== null &&
-          deriveStats(target, context).passives.some(
-            (passive) =>
-              passive.kind === "spellTurning" &&
-              (slotLevel ?? action.spellLevel ?? 0) <= passive.upTo,
-          );
+        const school =
+          action.spellLevel === null
+            ? undefined
+            : spellOf(action.id, actor, context)?.school;
+        const turning = saved
+          ? deriveStats(target, context).passives.find(
+              (passive) =>
+                passive.kind === "spellTurning" &&
+                action.spellLevel !== null &&
+                (slotLevel ?? action.spellLevel) <= passive.upTo &&
+                (!passive.schools ||
+                  (school !== undefined && passive.schools.includes(school))),
+            )
+          : undefined;
+        const turned = turning?.kind === "spellTurning" && !turning.deflectOnly;
         // And with its Reaction, a spell aimed at it alone is turned back at its caster, who saves against it.
-        if (turned && targets.length === 1) {
-          const deflected = deflectedSpell(action, actor, target, context);
+        if (turning?.kind === "spellTurning" && targets.length === 1) {
+          const deflected = deflectedSpell(
+            action,
+            actor,
+            target,
+            context,
+            turning,
+          );
           events.push(...deflected.events);
           frames.push(...deflected.frames);
         }

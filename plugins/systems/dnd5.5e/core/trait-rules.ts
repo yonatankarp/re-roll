@@ -196,6 +196,10 @@ function attackAdvantaged(
         passive.against !== undefined &&
         markedBy(target, attacker, passive.against)
       );
+    case "creatureType":
+      return (passive.creatureTypes ?? []).some(
+        (type) => type === targetStats.creatureType,
+      );
     case "unacted": {
       // In the first round, a creature yet to act stands later in the order than the one acting now.
       const combat = state?.combat;
