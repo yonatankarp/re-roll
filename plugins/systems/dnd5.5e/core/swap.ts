@@ -432,14 +432,67 @@ export function sceneSwapActions(
 ): SceneAction[] {
   const actor = state.actors[PLAYER_ACTOR];
   if (!actor || state.combat || state.sinceLongRest === undefined) return [];
-  return swappable(actor, access)
-    .filter(({ open }) => open)
-    .map(({ key, owner, adds }) => ({
-      id: `swap:${key}`,
-      label: adds ? `Make a pick of ${owner}` : `Change a pick of ${owner}`,
-      effect: `${NS}:swap`,
-      args: { key },
-    }));
+  const open = swappable(actor, access).filter((item) => item.open);
+  // A class's picks of a kind are one action, which asks which of them to change, rather than one for each level.
+  const grouped = new Set<string>();
+  return open.flatMap(({ key, owner, adds, classId }) => {
+    const many =
+      classId !== undefined &&
+      open.filter((item) => item.owner === owner && item.classId).length > 1;
+    if (many && grouped.has(owner)) return [];
+    if (many) grouped.add(owner);
+    const step = many ? `${GROUP}${owner}` : key;
+    return [
+      {
+        id: `swap:${step}`,
+        label: adds ? `Make a pick of ${owner}` : `Change a pick of ${owner}`,
+        effect: `${NS}:swap`,
+        args: { key: step },
+      },
+    ];
+  });
+}
+
+const GROUP = "group:"; // a class's picks of a kind, by their owner's name
+const AT = "="; // a grouped pick: "<key>=<value>"
+
+// Which of a group's picks changes, then its own step, as if it had been offered alone.
+function groupStep(
+  actor: Actor,
+  payload: z.infer<typeof StepSchema>,
+  context: Context,
+): SystemResult {
+  const owner = payload.key.slice(GROUP.length);
+  const picks = swappable(actor, context).filter(
+    (item) => item.open && item.owner === owner && item.classId,
+  );
+  if (payload.drop !== undefined) {
+    const at = payload.drop.indexOf(AT);
+    const key = payload.drop.slice(0, at);
+    const drop = payload.drop.slice(at + AT.length);
+    return picks.some((item) => item.key === key)
+      ? { frames: [frame("swapStep", { actor: actor.id, key, drop })] }
+      : {};
+  }
+  return {
+    frames: [
+      awaitDecision({
+        id: `${NS}:swap:${actor.id}:${payload.key}:`,
+        actor: actor.id,
+        prompt: `Which pick of ${owner} do you change?`,
+        options: [
+          ...picks.flatMap((item) =>
+            item.values.map((value) => ({
+              id: `${item.key}${AT}${value}`,
+              label: nameOf(value, context),
+            })),
+          ),
+          { id: KEEP, label: "Keep it as it is" },
+        ],
+        resume: frame("swapAnswer", { actor: actor.id, key: payload.key }),
+      }),
+    ],
+  };
 }
 
 function nameOf(id: string, access: ContentAccess, choice?: ChoiceDef): string {
@@ -465,6 +518,9 @@ function runSwapStep(
   context: Context,
 ): SystemResult {
   const actor = context.state.actors[payload.actor];
+  if (actor && payload.key.startsWith(GROUP)) {
+    return groupStep(actor, payload, context);
+  }
   const found = actor
     ? swappable(actor, context).find(({ key }) => key === payload.key)
     : undefined;
@@ -543,6 +599,9 @@ function runSwapAnswer(
 ): SystemResult {
   const { actor, key, drop, answer } = payload;
   if (answer === KEEP) return {};
+  if (key.startsWith(GROUP)) {
+    return { frames: [frame("swapStep", { actor, key, drop: answer })] };
+  }
   const holder = context.state.actors[actor];
   const found = holder
     ? swappable(holder, context).find((item) => item.key === key)

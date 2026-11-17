@@ -6,7 +6,11 @@ import {
   choiceOptions,
   levelChoices,
 } from "../plugins/systems/dnd5.5e/core/character.ts";
-import { swappable } from "../plugins/systems/dnd5.5e/core/swap.ts";
+import {
+  sceneSwapActions,
+  swapFrames,
+  swappable,
+} from "../plugins/systems/dnd5.5e/core/swap.ts";
 import { sceneCastActions } from "../plugins/systems/dnd5.5e/core/camp.ts";
 import {
   classOptions,
@@ -585,5 +589,59 @@ describe("Mystic Focus", () => {
     const left = recovered(actor.resourcesSpent, stats(actor), "short");
     // The points come back, then three pay for the level 2 slot.
     expect(left).toEqual({ focus: 3, "slot:1": 2 });
+  });
+});
+
+describe("a class's picks as one scene action", () => {
+  it("asks which of a kind's picks to change, then what in its place", () => {
+    const picks: Answers = [
+      {
+        kind: "spells",
+        values: ["srd52:spell/light", "srd52:spell/sacred-flame"],
+      },
+      {
+        kind: "spells",
+        values: ["srd52:spell/bless", "srd52:spell/cure-wounds"],
+      },
+    ];
+    const two = priest([
+      picks,
+      [{ kind: "spells", values: ["srd52:spell/shield-of-faith"] }],
+    ]);
+    const state = {
+      actors: { [PLAYER_ACTOR]: two },
+      combat: null,
+      sinceLongRest: 0,
+    };
+    const spells = sceneSwapActions(state, run).filter((item) =>
+      item.label.endsWith("Test Priest spells"),
+    );
+    expect(spells).toHaveLength(1);
+    const key = String(spells[0]?.args.key);
+    const context = { ...run, state, dice: { below: () => 0, roll: () => 1 } };
+    const step = swapFrames[`${NS}:swapStep`].run(
+      { actor: PLAYER_ACTOR, key },
+      context,
+    );
+    const asked = step.frames?.[0]?.payload as {
+      decision: { options: { id: string }[] };
+    };
+    const ids = asked.decision.options.map((item) => item.id);
+    expect(ids).toContain("0:1=srd52:spell/bless");
+    expect(ids).toContain("1:0=srd52:spell/shield-of-faith");
+    const next = swapFrames[`${NS}:swapAnswer`].run(
+      { actor: PLAYER_ACTOR, key, answer: "1:0=srd52:spell/shield-of-faith" },
+      context,
+    );
+    const then = swapFrames[`${NS}:swapStep`].run(
+      next.frames?.[0]?.payload as { actor: string; key: string; drop: string },
+      context,
+    );
+    // The pick's own step, which asks what takes its place.
+    expect(then.frames?.[0]?.payload).toEqual({
+      actor: PLAYER_ACTOR,
+      key: "1:0",
+      drop: "srd52:spell/shield-of-faith",
+    });
   });
 });
