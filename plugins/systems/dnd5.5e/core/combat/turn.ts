@@ -486,6 +486,7 @@ export function runFinishTurn(context: Context): SystemResult {
     ...(actor ? duelStrayed(actor, state) : []),
     ...regurgitationEvents(context),
     ...(actor ? rechargeEvents(actor, context) : []),
+    ...(actor ? shakeOffEvents(actor, context) : []),
     ...(actor ? regrowEvents(actor, context) : []),
     ...(actor ? expiredEvents(state, actor.id, "end") : []),
   ];
@@ -611,6 +612,18 @@ function banishEvents(caster: Actor, context: Context): SystemEvent[] {
 }
 
 // shortcut: Regeneration isn't stopped by the damage types that should stop it, as no damage type taken is kept yet.
+// Self-Restoration: at the end of its turn the bearer ends the worst of these conditions on itself.
+function shakeOffEvents(actor: Actor, context: Context): SystemEvent[] {
+  if (isDown(actor)) return [];
+  return deriveStats(actor, context).passives.flatMap((passive) => {
+    const condition =
+      passive.kind === "shakeOff" ? cureFor(actor, passive.conditions) : null;
+    return condition
+      ? [dndEvent(`${NS}:conditionRemoved`, { actor: actor.id, condition })]
+      : [];
+  });
+}
+
 function regenerationEvents(actor: Actor, context: Context): SystemEvent[] {
   if (isDown(actor) || healingStopped(actor, context.state, context)) return [];
   const stats = deriveStats(actor, context);
@@ -684,9 +697,9 @@ function rechargeEvents(actor: Actor, context: Context): SystemEvent[] {
   return monster.actions.flatMap((action) => {
     if (action.recharge === undefined) return [];
     const cost = action.activation.cost.find(
-      (item) => typeof item === "object",
+      (item) => typeof item === "object" && "resource" in item,
     );
-    if (typeof cost !== "object") return [];
+    if (typeof cost !== "object" || !("resource" in cost)) return [];
     return (actor.resourcesSpent[cost.resource] ?? 0) > 0 &&
       context.dice.roll(6) >= action.recharge
       ? [

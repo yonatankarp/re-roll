@@ -101,10 +101,14 @@ export function dispellable(
   maxLevel: number,
   state: DndState,
   access: ContentAccess,
+  hostile = false, // only the target's foes' spells
 ): readonly Dispelled[] {
   const found = new Map<string, Dispelled>();
   for (const effect of target.activeEffects) {
     if (effect.modifier.kind === "tactic") continue;
+    if (hostile && state.actors[effect.casterId]?.side === target.side) {
+      continue;
+    }
     const key = `${effect.casterId} ${effect.sourceId}`;
     if (found.has(key)) continue;
     // shortcut: a monster's spell cast at a higher level counts at its own, since its effects don't say.
@@ -151,6 +155,7 @@ export function dispelEvents(
   maxLevel: number,
   state: DndState,
   access: ContentAccess,
+  hostile = false,
 ): SystemEvent[] {
   const events: SystemEvent[] = [];
   const ended = new Set<string>();
@@ -159,6 +164,7 @@ export function dispelEvents(
     maxLevel,
     state,
     access,
+    hostile,
   )) {
     const caster = state.actors[casterId];
     if (concentration && caster?.concentratingOn === sourceId) {

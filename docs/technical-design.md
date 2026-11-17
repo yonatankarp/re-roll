@@ -458,6 +458,8 @@ A scene decision also offers the system's optional `sceneActions(state, access)`
 
 The D&D plugin (`sceneGearActions` in `core/gear.ts`) offers, outside a fight, one gear change per item (`equip:`, `stow:`), `drink:` for a healing potion, and `attune:` and `unattune:` only where the party could rest, since attuning takes a Short Rest. Drinking rolls its healing into the `healed` event and uses the potion up with `itemUsed`. Armor and shields the character isn't trained with are never offered to put on, here or in a rest's Change gear.
 
+It also offers (`sceneCastActions` in `core/camp.ts`) `cast:<caster>:<action>` for each party member's spell or feature that heals, cures Exhaustion, gives a Short Rest's benefits or raises the dead, when it can pay for it and someone would gain from it. Between fights it costs its slot, uses and gold, not an action, and reaches anyone in the party. One that goes to a single creature asks whom (the `castOn` frame). An activation marked `outOfCombat`, such as Raise Dead's hour, is offered only here. The player's own show on their spell or feature rows, and companions' on the player's sheet, since only the player's sheet answers. The time a party member has lain dead counts in rest hours (`deadHours`, stopped by Gentle Repose's `reposed`) against a raising's `diedWithin`, and a raising's `ordeal` takes from D20 Tests, one less each Long Rest.
+
 **Gap:** attuning between choices doesn't pass the Short Rest's hour.
 
 ### 7.2 Narration and ambience

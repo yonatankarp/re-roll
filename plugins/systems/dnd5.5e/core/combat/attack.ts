@@ -1327,9 +1327,13 @@ export function runApplyHit(
 
   // Add dice-based extra damage such as Sneak Attack to the first damage roll.
   let extra = 0;
+  const typedExtra: Damage[] = [];
   const extraDice = carriesExtraDice(attacker, action, context);
+  // Pull of Death's comes with any attack, against a target missing Hit Points.
+  const hurt = target.hp < deriveStats(target, context).maxHp;
   stats.passives.forEach((passive, index) => {
-    if (passive.kind !== "extraDamage" || !extraDice) return;
+    if (passive.kind !== "extraDamage") return;
+    if (passive.when === "targetHurt" ? !hurt : !extraDice) return;
     const key = `extra:${String(index)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return;
     // Sneak Attack's ally must be able to act, and the ally never makes up for Disadvantage on the roll.
@@ -1341,12 +1345,19 @@ export function runApplyHit(
         within5(item, target),
     );
     const applies =
-      passive.when === "advantage"
+      passive.when === "targetHurt" ||
+      (passive.when === "advantage"
         ? payload.hadAdvantage
         : payload.hadAdvantage ||
-          (allyPresent && payload.hadDisadvantage !== true);
+          (allyPresent && payload.hadDisadvantage !== true));
     if (!applies) return;
-    extra += rollDiceNotation(passive.dice, dice, multiplier);
+    const rolled = rollDiceNotation(passive.dice, dice, multiplier);
+    if (passive.type) {
+      typedExtra.push({
+        amount: { bonus: { base: rolled, add: [] } },
+        type: passive.type,
+      });
+    } else extra += rolled;
     if (passive.oncePerTurn) {
       events.push(
         dndEvent(`${NS}:oncePerTurnUsed`, { actor: attacker.id, key }),
@@ -1482,16 +1493,17 @@ export function runApplyHit(
   const hits = [
     ...(firstType ? [{ amount: totalDealt, type: firstType }] : []),
     ...absorbed,
-    ...hitRiders(attacker, target, resolution, responses).map(
-      ({ amount, type }) => ({
-        amount: finalDamage(
-          rollAmount(amount, stats, dice, multiplier),
-          type,
-          responses,
-        ),
+    ...[
+      ...typedExtra,
+      ...hitRiders(attacker, target, resolution, responses),
+    ].map(({ amount, type }) => ({
+      amount: finalDamage(
+        rollAmount(amount, stats, dice, multiplier),
         type,
-      }),
-    ),
+        responses,
+      ),
+      type,
+    })),
   ];
   const targetStats = deriveStats(target, context);
   const armored = hits.map((item) => ({

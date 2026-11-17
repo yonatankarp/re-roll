@@ -83,7 +83,12 @@ function castable(
   access: ContentAccess,
 ): boolean {
   const cost = action.activation.cost.flatMap((item) => {
-    if (typeof item === "object" && item.resource === SORCERY_POINTS) return [];
+    if (
+      typeof item === "object" &&
+      "resource" in item &&
+      item.resource === SORCERY_POINTS
+    )
+      return [];
     return [option === "quickened" && item === "action" ? "bonusAction" : item];
   });
   const waiting = markersOf(actor)

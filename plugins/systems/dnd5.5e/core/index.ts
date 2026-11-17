@@ -1,3 +1,4 @@
+import { campEffects, campFrames, sceneCastActions } from "./camp.ts";
 import {
   type ContentAccess,
   type FrameDef,
@@ -399,6 +400,7 @@ export const dnd55e = defineSystem<DndState>({
     ...surpriseEffects,
     ...shopEffects,
     ...sceneEffects,
+    ...campEffects,
   },
   storyPredicates: {
     [`${NS}:hasInspiration`]: storyPredicate({
@@ -455,6 +457,7 @@ export const dnd55e = defineSystem<DndState>({
     ...areaFrames,
     ...shopFrames,
     ...classOptionFrames,
+    ...campFrames,
     [`${NS}:takeAction`]: frameHandler({
       schema: TakeActionSchema,
       run: (payload, context: Context) =>
@@ -593,6 +596,7 @@ export const dnd55e = defineSystem<DndState>({
   sceneActions: (state, access) => [
     ...sceneGearActions(state, access),
     ...sceneSwapActions(state, access),
+    ...sceneCastActions(state, access),
   ],
   decidePolicy: (decision, context) =>
     decision.id.endsWith(`:build:${decision.actor}:${SHEET_KEY}`)

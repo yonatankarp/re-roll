@@ -31,6 +31,7 @@ import { silencedSpells } from "../zones.ts";
 import {
   actorOf,
   canAfford,
+  goldFor,
   inReach,
   moveSquares,
   ridden,
@@ -56,8 +57,14 @@ function turnOptions(
   const hushed = silencedSpells(actor, state, access);
   for (const action of stats.actions) {
     const { activation } = action;
-    // An eye ray is only taken when Eye Rays rolls it.
-    if (activation.trigger || action.rolled || !canAfford(action, actor, stats))
+    // An eye ray is only taken when Eye Rays rolls it, and an hour's casting only between fights (camp.ts).
+    if (
+      activation.trigger ||
+      activation.outOfCombat ||
+      action.rolled ||
+      !canAfford(action, actor, stats) ||
+      goldFor(action) > (state.gold ?? 0)
+    )
       continue;
     if (hushed?.(action)) continue;
     if (activation.whileIn && lightAt(actor.position, state) === "bright") {

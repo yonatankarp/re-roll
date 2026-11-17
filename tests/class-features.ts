@@ -255,7 +255,10 @@ function spentElsewhere(resource: string, featureId: string, stats: Stats) {
     (action) =>
       !action.id.startsWith(`feature:${featureId}:`) &&
       action.activation.cost.some(
-        (cost) => typeof cost === "object" && cost.resource === resource,
+        (cost) =>
+          typeof cost === "object" &&
+          "resource" in cost &&
+          cost.resource === resource,
       ),
   );
 }
@@ -318,7 +321,13 @@ export function classify(
     const kinds = resolutionKinds(activation.resolution);
     if (kinds.length === 0) continue;
     const cost = activation.cost
-      .map((item) => (typeof item === "string" ? item : item.resource))
+      .map((item) =>
+        typeof item === "string"
+          ? item
+          : "resource" in item
+            ? item.resource
+            : `${String(item.gold)} gp`,
+      )
       .join("+");
     const when = activation.trigger ? " (triggered)" : "";
     reasons.push(`${cost || "free"}${when}: ${counted(kinds)}`);
