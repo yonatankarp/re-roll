@@ -2350,6 +2350,8 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "weaponAttack" ||
       effect.kind === "randomAction" ||
       effect.kind === "copySpell" ||
+      effect.kind === "createItems" ||
+      (effect.kind === "exhaustion" && effect.clear === true) ||
       // what raises or mends the dead and dying, mostly between fights (camp.ts)
       effect.kind === "repose" ||
       effect.kind === "transference" ||

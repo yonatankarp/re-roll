@@ -290,6 +290,7 @@ export function sceneGearActions(
         : [];
     }),
     ...storeActions(state, access),
+    ...coatActions(actor, access),
     ...[...new Set(actor.inventory)].flatMap((id) => {
       const item = itemOf(access, id);
       return studyGain(actor, item) > 0
@@ -306,6 +307,73 @@ export function sceneGearActions(
     }),
   ];
 }
+
+// Applying an oil to a plain weapon or ammunition carried (MagicItemSchema `coats`), as Oil of Sharpness.
+function coatActions(actor: Actor, access: ContentAccess): SceneAction[] {
+  return [...new Set(actor.inventory)].flatMap((oilId) => {
+    const oil = itemOf(access, oilId);
+    if (oil.type !== "magicItem" || !oil.coats) return [];
+    const { coats } = oil;
+    return [...new Set(actor.inventory)].flatMap((targetId) => {
+      const target = itemOf(access, targetId);
+      const melee =
+        target.type === "weapon" &&
+        !target.baseWeapon &&
+        !target.properties.includes("ammunition") &&
+        coats.damage.includes(target.damage.type);
+      const ammunition =
+        target.type === "gear" && target.category === "ammunition";
+      if (!melee && !ammunition) return [];
+      const made = melee
+        ? `${coats.weapon}--${targetId.slice(targetId.lastIndexOf("/") + 1)}`
+        : coats.ammunition;
+      if (!access.content(made)) return [];
+      return [
+        {
+          id: `coat:${oilId}:${targetId}`,
+          label: `Apply ${oil.name} to ${target.name}`,
+          effect: `${NS}:coat`,
+          args: {
+            oil: oilId,
+            target: targetId,
+            items: Array<string>(melee ? 1 : coats.pieces).fill(made),
+          },
+        },
+      ];
+    });
+  });
+}
+
+// The oil and what it coats are used up, and what it makes is carried in their place.
+function coat(
+  args: z.infer<typeof CoatSchema>,
+  context: Context,
+): SystemResult {
+  const actor = player(context.state);
+  const offered = coatActions(actor, context).find(
+    (option) => option.id === `coat:${args.oil}:${args.target}`,
+  );
+  if (!offered) throw new Error(`${args.oil} can't coat ${args.target}`);
+  const { items } = CoatSchema.parse(offered.args);
+  return {
+    events: [
+      dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: args.oil }),
+      dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: args.target }),
+      dndEvent(`${NS}:treasureFound`, {
+        actor: actor.id,
+        gold: 0,
+        items,
+        stowed: [],
+      }),
+    ],
+  };
+}
+
+const CoatSchema = z.object({
+  oil: z.string(),
+  target: z.string(),
+  items: z.array(z.string()),
+});
 
 // Casting a spell into an item a party member carries, as into a Ring of Spell Storing (MagicItemSchema
 // `storesSpells`): each party caster's leveled spells that fit, with the lowest slot they have that the item takes.
@@ -494,6 +562,11 @@ export const gearEffects = {
     schema: z.object({ item: z.string() }),
     references: ({ item }) => [item],
     apply: ({ item }, context: Context) => drink(item, context),
+  }),
+  [`${NS}:coat`]: storyEffect({
+    schema: CoatSchema,
+    references: ({ oil, target, items }) => [oil, target, ...items],
+    apply: coat,
   }),
   [`${NS}:storeSpell`]: storyEffect({
     schema: StoreSchema,

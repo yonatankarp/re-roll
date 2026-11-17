@@ -43,17 +43,28 @@ function version(
       ? { name: parent.name, bonuses: parent.bonuses }
       : undefined;
   if (!variant) return undefined;
+  // An evolving item's version has what the versions before it have too.
+  const kept =
+    parent.evolving && parent.variants
+      ? parent.variants.slice(0, Number(index))
+      : "rarity" in variant
+        ? [variant]
+        : [];
   const passives = [
     ...(parent.passives ?? []),
-    ...("passives" in variant ? (variant.passives ?? []) : []),
+    ...kept.flatMap((entry) => entry.passives ?? []),
   ];
   const casts = [
     ...(parent.casts ?? []),
-    ...("casts" in variant ? (variant.casts ?? []) : []),
+    ...kept.flatMap((entry) => entry.casts ?? []),
   ];
   const resources = [
     ...(parent.resources ?? []),
-    ...("resources" in variant ? (variant.resources ?? []) : []),
+    ...kept.flatMap((entry) => entry.resources ?? []),
+  ];
+  const activations = [
+    ...(parent.activations ?? []),
+    ...kept.flatMap((entry) => entry.activations ?? []),
   ];
   const magic = {
     ...(passives.length > 0 ? { passives } : {}),
@@ -61,7 +72,7 @@ function version(
     ...(casts.length > 0 ? { casts } : {}),
     ...(resources.length > 0 ? { resources } : {}),
     ...(parent.lastCharge ? { lastCharge: parent.lastCharge } : {}),
-    ...(parent.activations ? { activations: parent.activations } : {}),
+    ...(activations.length > 0 ? { activations } : {}),
   };
   const bonus = variant.bonuses?.[0]?.amount;
   const plus = bonus !== undefined && /, \+1\b/.test(parent.name);

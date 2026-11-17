@@ -671,6 +671,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .union([z.number().int().min(1).max(9), z.literal("halfSlot")])
       .optional(),
   }),
+  // Items handed to the target, `count` of them worked out from the caster's numbers, as the potions Tasha's
+  // Bubbling Cauldron makes. shortcut: they come at once rather than a Bonus Action each, and stay after a recast.
+  z.strictObject({
+    kind: z.literal("createItems"),
+    item: ContentIdSchema,
+    count: FormulaSchema,
+  }),
   // Ends every curse on the target, with all else the action that cursed it gave, as Remove Curse.
   z.strictObject({ kind: z.literal("uncurse") }),
   // With `reaction` the target spends its Reaction to gain them, and gains none without one, as a death's head tree's
@@ -1060,11 +1067,17 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("slay"),
     hpAtMost: z.number().int().min(1),
   }),
-  // The target gains this many levels of Exhaustion, as a sphinx's Weight of Years.
-  z.strictObject({
-    kind: z.literal("exhaustion"),
-    levels: z.number().int().min(1),
-  }),
+  // The target gains this many levels of Exhaustion, as a sphinx's Weight of Years, or with `clear` loses them
+  // all, as from a Potion of Vitality.
+  z
+    .strictObject({
+      kind: z.literal("exhaustion"),
+      levels: z.number().int().min(1).optional(),
+      clear: z.literal(true).optional(),
+    })
+    .refine((effect) => (effect.levels === undefined) !== !effect.clear, {
+      message: "needs levels or clear",
+    }),
   // `count` of this monster (the bearer's own stat block when left out) come to life in open squares within `range`
   // on the bearer's side, without the actions named in `lacks`, taking their turns right after the bearer's, as a
   // treant's Animate Trees or a priest's Soul Tattoo.
@@ -2968,6 +2981,18 @@ const MagicItemSchema = ItemBaseSchema.extend({
     })
     .optional(),
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
+  // What applying it between fights makes of a plain weapon or ammunition carried, the oil used up, as Oil of
+  // Sharpness: a Melee weapon dealing one of `damage` becomes `weapon` made from it (`<weapon>--<its slug>`), and
+  // one ammunition item becomes `pieces` of `ammunition` (gear.ts).
+  // shortcut: any ammunition counts, though Sling Bullets deal Bludgeoning damage.
+  coats: z
+    .strictObject({
+      weapon: ContentIdSchema,
+      damage: z.array(DamageTypeSchema).min(1),
+      ammunition: ContentIdSchema,
+      pieces: z.number().int().min(1),
+    })
+    .optional(),
   // Spells cast into it between fights, up to `levels` levels of them, each of level `maxLevel` or lower, which its
   // attuned bearer casts with the slot level, DC, attack and modifier they were stored with, as a Ring of Spell
   // Storing (gear.ts, stats.ts storedCasts). shortcut: it's found empty, rather than holding what the DM chose.
@@ -2991,6 +3016,9 @@ const MagicItemSchema = ItemBaseSchema.extend({
     })
     .optional(),
   ...ChargedSchema,
+  // An evolving item, whose each version keeps the properties of the versions before it (their passives, casts,
+  // pools and activations) and adds its own, as a Staff of Skulls' Rare version keeps its Uncommon one's Chill Touch.
+  evolving: z.literal(true).optional(),
   // Set when one entry covers several rarities, such as +1, +2 or +3. Content names one as `<id>--<n>` (variants.ts).
   variants: z
     .array(
@@ -3006,6 +3034,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
         passives: z.array(PassiveSchema).min(1).optional(),
         casts: z.array(ItemCastSchema).min(1).optional(), // added to the item's own, as a Staff of Skulls' Chill Touch
         resources: z.array(ResourceDefSchema).min(1).optional(), // added to the item's own too
+        // added to the item's own too, as a Staff of Skulls' Pulverizing
+        activations: ChargedSchema.activations,
       }),
     )
     .min(1)

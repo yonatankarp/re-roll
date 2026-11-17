@@ -1654,6 +1654,18 @@ export function leafEvents(
           }),
         );
         break;
+      case "createItems": {
+        const count = Math.max(1, evaluateFormula(effect.count, stats));
+        events.push(
+          dndEvent(`${NS}:treasureFound`, {
+            actor: target.id,
+            gold: 0,
+            items: Array<string>(count).fill(effect.item),
+            stowed: [],
+          }),
+        );
+        break;
+      }
       case "uncurse": {
         const cursed = new Set(
           target.activeEffects.flatMap(({ modifier, sourceId, casterId }) =>
@@ -2238,12 +2250,14 @@ export function leafEvents(
         events.push(...liftEvents(effect, sourceId, caster, target, context));
         break;
       case "exhaustion":
-        events.push(
-          dndEvent(`${NS}:exhaustionChanged`, {
-            actor: target.id,
-            levels: effect.levels,
-          }),
-        );
+        if (effect.clear ? target.exhaustion > 0 : effect.levels) {
+          events.push(
+            dndEvent(`${NS}:exhaustionChanged`, {
+              actor: target.id,
+              levels: effect.clear ? -target.exhaustion : (effect.levels ?? 0),
+            }),
+          );
+        }
         break;
       // On a failed save, or a creature already at 0 Hit Points, as Steal Body or Consume Life. An automatic one
       // is worked out with its damage (resolveAction).

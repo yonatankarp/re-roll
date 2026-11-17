@@ -2,9 +2,11 @@ import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
 import type { RunContext } from "../engine/run/turn.ts";
 import { describe, expect, it } from "vitest";
 import {
+  leafEvents,
   payCosts,
   resolveAction,
 } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { sceneCastActions } from "../plugins/systems/dnd5.5e/core/camp.ts";
 import { itemUseId } from "../plugins/systems/dnd5.5e/core/combat/ids.ts";
 import { sceneGearActions } from "../plugins/systems/dnd5.5e/core/gear.ts";
 import {
@@ -181,6 +183,42 @@ const ITEMS = [
   item("ring", {
     category: "ring",
     storesSpells: { levels: 5, maxLevel: 5 },
+  }),
+  item("staff-evolving", {
+    category: "staff",
+    evolving: true,
+    variants: [1, 2, 3].map((n) => ({
+      rarity: ["uncommon", "rare", "veryRare"][n - 1],
+      name: `Evolving ${String(n)}`,
+      activations: [
+        {
+          name: `Power ${String(n)}`,
+          activation: self([{ kind: "note", text: "Test." }]),
+        },
+      ],
+    })),
+  }),
+  item("plus", {
+    category: "weapon",
+    variants: [1, 2, 3].map((n) => ({
+      rarity: "rare",
+      bonuses: [{ to: "attack", amount: n }],
+    })),
+  }),
+  item("sharpness", {
+    verb: "Apply",
+    coats: {
+      weapon: "test:item/plus--3",
+      damage: ["slashing", "piercing"],
+      ammunition: "test:item/arrow--1",
+      pieces: 20,
+    },
+  }),
+  item("vitality", {
+    activation: self([
+      { kind: "removeCondition", condition: "poisoned" },
+      { kind: "exhaustion", clear: true },
+    ]),
   }),
 ];
 
@@ -638,5 +676,94 @@ describe("rolled pools and stored spells (#142, #199)", () => {
         (action) => action.id === cast.id,
       ),
     ).toBe(false);
+  });
+});
+
+describe("evolving items, made items and coatings (#142, #199)", () => {
+  it("keeps the activations of an evolving item's lower versions", async () => {
+    const run = await itemRun();
+    const names = (id: string) =>
+      deriveStats(carrying([id]), run)
+        .actions.filter((action) => action.id.startsWith(`use:${id}:`))
+        .map((action) => action.name);
+    expect(names("test:item/staff-evolving--3")).toEqual([
+      "Power 1 (Evolving 3)",
+      "Power 2 (Evolving 3)",
+      "Power 3 (Evolving 3)",
+    ]);
+    expect(names("test:item/staff-evolving--1")).toEqual(["Power 1"]);
+  });
+
+  it("hands over the items a spell makes, as Tasha's Bubbling Cauldron's potions", async () => {
+    const run = await itemRun();
+    const actor = carrying([]);
+    const events = leafEvents(
+      [
+        {
+          kind: "createItems",
+          item: "test:item/speed",
+          count: { base: 3, add: [] },
+        },
+      ],
+      "test",
+      actor,
+      actor,
+      contextOf(run, [actor], scripted([]).dice),
+    );
+    expect(payloads(events, "treasureFound")).toEqual([
+      {
+        actor: PLAYER_ACTOR,
+        gold: 0,
+        items: ["test:item/speed", "test:item/speed", "test:item/speed"],
+        stowed: [],
+      },
+    ]);
+  });
+
+  it("turns a plain weapon into a +3 one with Oil of Sharpness, between fights", async () => {
+    const run = await itemRun();
+    const actor = carrying(["test:item/sharpness"]);
+    const state = {
+      ...contextOf(run, [actor], scripted([]).dice).state,
+      combat: null,
+    };
+    const coat = sceneGearActions(state, run).find(
+      (option) => option.effect === `${NS}:coat`,
+    );
+    expect(coat?.label).toBe("Apply sharpness to Longsword");
+    if (!coat) throw new Error("No coat");
+    const { events = [] } =
+      run.system.storyEffects[`${NS}:coat`]?.apply(coat.args, {
+        state,
+        dice: scripted([]).dice,
+        content: run.content,
+        contentIds: run.contentIds,
+      }) ?? {};
+    expect(after(actor, events).inventory).toEqual([
+      "test:item/plus--3--longsword",
+    ]);
+  });
+
+  it("uses an item between fights where it does something then, as a Potion of Vitality on Exhaustion", async () => {
+    const run = await itemRun();
+    const tired = { ...carrying(["test:item/vitality"]), exhaustion: 2 };
+    const state = {
+      ...contextOf(run, [tired], scripted([]).dice).state,
+      combat: null,
+    };
+    const use = sceneCastActions(state, run).find((option) =>
+      option.id.includes("item:test:item/vitality"),
+    );
+    if (!use) throw new Error("No use");
+    const { events = [] } =
+      run.system.storyEffects[`${NS}:castBetween`]?.apply(use.args, {
+        state,
+        dice: scripted([]).dice,
+        content: run.content,
+        contentIds: run.contentIds,
+      }) ?? {};
+    const rested = after(tired, events);
+    expect(rested.exhaustion).toBe(0);
+    expect(rested.inventory).not.toContain("test:item/vitality");
   });
 });
