@@ -341,6 +341,12 @@ describe("shared feat and species mechanics", () => {
     const free = "spell:srd52:spell/bless:free";
     const cleric = hero(["blessed"]);
     const context = contextOf(run, [cleric], scripted([]).dice);
+    // The turn offers it, as the player and the bot see it (#198).
+    expect(
+      run.system
+        .nextDecision(context.state, run)
+        ?.options.map((item) => item.id),
+    ).toContain(`${free}|pick`);
     const result = run.system.frames[`${NS}:takeAction`]?.run(
       { actor: PLAYER_ACTOR, answer: `${free}|${PLAYER_ACTOR}` },
       context,
