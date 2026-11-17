@@ -1042,7 +1042,11 @@ export function makeJudge(context: Context, side: Actor): Judge {
             0.5 *
               healWorth(
                 target,
-                rollAmount(effect.amount, stats(actor), AVERAGE) -
+                rollAmount(effect.amount, stats(actor), AVERAGE) /
+                  // Power Word Fortify's 120 are shared among as many as it can reach.
+                  (effect.divided && "creatures" in action.activation.targeting
+                    ? action.activation.targeting.creatures
+                    : 1) -
                   target.tempHp,
               );
       case "applyCondition": {
