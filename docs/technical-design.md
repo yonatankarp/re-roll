@@ -270,6 +270,7 @@ Every slot must make sense for both systems. If a Daggerheart cell had to say "n
 | Slot | D&D 5.5e | Daggerheart |
 |---|---|---|
 | Content kinds | Classes, species, backgrounds, feats, spells, monsters | Classes, ancestries, communities, domain cards, adversaries, environments |
+| World kinds (engine) | Places and their keyed areas, deities, factions, NPCs, eras | The same kinds, filled by that system's books |
 | Check | Ability or skill against a DC | Trait against a Difficulty, using a pair of d12s |
 | Outcome keys | `success`, `failure` | `critical`, `successHope`, `successFear`, `failureHope`, `failureFear` |
 | `nextDecision` | Initiative order, turn by turn | Spotlight moves with the story and roll results, with no initiative |
@@ -288,6 +289,7 @@ Every slot must make sense for both systems. If a Daggerheart cell had to say "n
 - **The grid belongs to the D&D plugin.** The engine shell only provides space for a system's encounter view: `app/` passes `mountShell` a board for each system id, and the shell hands it the view, the pending decision and the cues since its last update. A system's `cue` turns each event into plain data to animate, so the board is the only system code that touches the DOM.
 - **HP isn't an engine concept.** Damage and health stay entirely inside each system.
 - **Clocks stay in the engine.** Daggerheart's countdowns map onto them directly, which suggests that the concept is general enough.
+- **Setting lore belongs to the engine.** A Faerûn place is the same under any rule system, so the engine owns its world kinds (`engine/kernel/world.ts`), and any system's plugins can fill them. They are `place`, `area`, `deity`, `pantheon`, `faction`, `npc`, `people`, `adventure`, `era`, `event`, `calendar-day`, `phenomenon`, `setting` and `material`, each in a content folder of its own, such as `places/`. Every entry has an id, name, source, page and text, the same shape as an `automation: text` rule. `page` is optional while the imported library has no printed page numbers. Links are optional: an `area` must name its `place`, a place can sit in another, a deity can name its `pantheon`, and an NPC can name its `faction` and `place`. The loader checks each link like any other reference. A system can't take a world kind's folder or id prefix. Lore is only read, so it stays out of a plugin's save hash. `npm run import:world` drafts an entry for each library heading that coverage says should be one. It works by code alone: the heading is the name, the text under it is the text, and the links come from how the book nests its headings.
 - **The director doubles as the GM.** It answers `gmOpportunity` events, which handles Daggerheart's GM moves without a new mechanism.
 
 ## 6. Engine kernel
@@ -1008,7 +1010,7 @@ An independent audit checked 145 encoded spells and 120 monsters against their o
 | Property tests | Engine: any input keeps state valid. D&D plugin: HP stays in range, advantage and disadvantage always cancel, Resistance never stacks |
 | Replay test | Same seed and inputs always produce the same events and final state |
 | `check-pack` | Broken references, unreachable scenes, uncovered outcomes, code in data plugins, automation coverage |
-| Library coverage (in `check-pack`) | Every heading in a book's library links to an entity or is structural. It only reports until #127–#136 land (#126). The matcher is in `engine/tools/coverage.ts`. Each book's rules are in the private `books/coverage/<book>.yaml`, since they name its headings. An entry's `library` field, or the file's `links`, names a link the matcher can't find |
+| Library coverage (in `check-pack`) | Every heading in a book's library links to an entity or is structural. It only reports until #127–#136 land (#126). The matcher is in `engine/tools/coverage.ts`. Each book's rules are in the private `books/coverage/<book>.yaml`, since they name its headings. An entry's `library` field, or the file's `links`, names a link the matcher can't find. A world entity links by name only within its own book, unless a rule asks for its kind |
 | Test bot | Each adventure can be finished, with no dead ends or crashes across many seeds |
 | Headless play | The game layer the UI uses offers every choice a decision has, and only those, through whole adventures |
 | Second adventure | The engine is adventure-agnostic: it must work with no engine change |
