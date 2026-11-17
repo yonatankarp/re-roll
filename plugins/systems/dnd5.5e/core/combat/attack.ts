@@ -339,9 +339,15 @@ function reactionFor(
       // Mythal Ward's table may turn the spell aside, so a spell attack's hit is always offered to it.
       if (activation.table) return true;
       const { resolution } = activation;
-      // Jinx or Warding Charm: the attacker's save may make even a Critical Hit miss.
+      // Jinx or Warding Charm: the attacker's save may make even a Critical Hit miss. Elemental Rebuke halves the
+      // hit, then the attacker saves.
       if (resolution.kind === "save") {
-        return resolution.onFail.some((effect) => effect.kind === "negateHit");
+        return (
+          resolution.onFail.some((effect) => effect.kind === "negateHit") ||
+          (activation.selfEffects ?? []).some(
+            (effect) => effect.kind === "reduceDamage",
+          )
+        );
       }
       if (resolution.kind !== "automatic") return false;
       // Illusory Self: the hit misses outright; Sentinel at Death's Door: a Critical Hit is a normal one.
@@ -1349,6 +1355,7 @@ export const HitSchema = z.object({
   hidden: z.number().optional(), // the Stealth total the attacker was hidden with, for Supreme Sneak's Stealth Attack
   strikes: z.array(z.string()).optional(), // the strike options chosen for this hit, resolved after its damage
   deflect: z.string().optional(), // the reaction that sends the force back out if the damage drops to 0, as Deflect Missile
+  echo: z.string().optional(), // the target's reaction whose save the attacker makes once the damage lands, as Elemental Rebuke's
   transfer: z.string().optional(), // the creature that takes what a reaction took off, as Transfer Harm's podling
 });
 
@@ -1365,6 +1372,15 @@ export function runAfterReaction(
   const target = actorOf(state, payload.target);
   const action = findAction(target, answer, context);
   const { resolution } = action.activation;
+  // Elemental Rebuke: the hit is halved now, and the attacker saves once its damage lands (runReactAnswer pays).
+  const halves = (action.activation.selfEffects ?? []).some(
+    (effect) => effect.kind === "reduceDamage" && effect.halve,
+  );
+  if (resolution.kind === "save" && halves) {
+    return {
+      frames: [frame("applyHit", { ...hit, halve: true, echo: action.id })],
+    };
+  }
   // Jinx or Warding Charm: the attacker saves, and on a failure the hit misses.
   if (resolution.kind === "save") {
     const attacker = actorOf(state, payload.attacker);
@@ -2174,7 +2190,20 @@ function landHit(
         : []),
       ...passed.frames,
       ...afterDamage(target, dealt.dealt + nested.dealt, cause, [], landed),
-      ...reactFrames({ kind: "struck", actor: target.id, ...cause }, landed),
+      // Elemental Rebuke's save comes once the halved damage is in, and the hit is then offered to the rest.
+      ...(payload.echo
+        ? [
+            frame("reactAnswer", {
+              kind: "struck",
+              actor: target.id,
+              ...cause,
+              dealt: dealt.dealt + nested.dealt,
+              reactor: target.id,
+              actionId: payload.echo,
+              answer: payload.echo,
+            }),
+          ]
+        : reactFrames({ kind: "struck", actor: target.id, ...cause }, landed)),
       ...reactFrames(
         {
           kind: "hitOther",

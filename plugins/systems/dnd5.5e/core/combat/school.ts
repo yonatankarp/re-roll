@@ -197,7 +197,7 @@ export function castRiders(
         )
       : passive.school
         ? slotLevel !== undefined &&
-          cost.includes("action") &&
+          (cost.includes("action") || passive.slotted === true) &&
           passive.school.some((item) => item === school)
         : passive.damage !== undefined && types.has(passive.damage);
     return fits ? [passive] : [];
@@ -236,7 +236,15 @@ export function castRiders(
         ...(resource
           ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
           : []),
-        ...leafEvents(effects, `castRider:${action.id}`, actor, actor, context),
+        ...leafEvents(
+          effects,
+          `castRider:${action.id}`,
+          actor,
+          actor,
+          context,
+          undefined,
+          slotLevel,
+        ),
         // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
         ...(onTargets
           ? targets.flatMap((target) =>

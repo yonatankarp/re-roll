@@ -119,6 +119,7 @@ import { teleportFrame, teleportSquares } from "./movement.ts";
 import {
   afterDamage,
   beforeDamage,
+  spellAimedAt,
   besideSquare,
   reactFrames,
   settleRoll,
@@ -666,6 +667,8 @@ function enduredEvents(
           actor: bearer.id,
           resource: trait.resource,
         }),
+        // For a reaction right after it, as Orcish Fury's attack (combat/reactions.ts).
+        dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key: ENDURED }),
         ...(trait.burst
           ? burstEvents(target, target, trait.burst, context)
           : []),
@@ -709,6 +712,8 @@ function enduredEvents(
   }
   return { rolled, endured: null };
 }
+
+export const ENDURED = "endured";
 
 // A foe that just dropped to 0 Hit Points feeds its enemies' traits, as Dark One's Blessing.
 // shortcut: the creature whose turn it is counts as the one that dropped it, as most damage comes on its own turn.
@@ -1526,6 +1531,16 @@ export function damageRiders(
         ? [dndEvent(`${NS}:resourceSpent`, { actor: attacker.id, resource })]
         : []),
       ...leafEvents(passive.effects, key, attacker, target, context),
+      ...(passive.selfEffects ?? []).flatMap((effect) =>
+        effect.kind === "reactionMove"
+          ? reactionMove(
+              { ...attacker, budget: { ...attacker.budget, reaction: true } },
+              context,
+              effect,
+              target,
+            ).filter((event) => event.kind !== `${NS}:budgetSpent`)
+          : leafEvents([effect], key, attacker, attacker, context),
+      ),
     ];
   });
 }
@@ -1795,7 +1810,9 @@ export function leafEvents(
           ...regainEvents(
             target,
             effect.resource,
-            effect.count,
+            effect.perSlot && slotLevel
+              ? effect.perSlot * slotLevel
+              : effect.count,
             deriveStats(target, context),
             regainCap(effect, slotLevel),
           ),
@@ -2512,6 +2529,7 @@ export function leafEvents(
       case "drawAttack":
       case "negateHit":
       case "noCritical":
+      case "stealSpell":
       case "stickWeapon":
       case "slowFall":
       case "split":
@@ -3177,9 +3195,14 @@ export function resolveAction(
   const frames: Frame[] = [];
   // A helmed horror's Spell Immunity: the spells it names pass it by.
   const spell = isSpell(action, actor, context) ? action.name : null;
+  // Shield against Magic Missile, or Spell Thief: a reaction may turn the spell aside before it lands.
+  const aside = spell
+    ? spellAimedAt(action, actor, aimedAt, context)
+    : { targets: aimedAt, events: [] };
+  events.push(...aside.events);
   const targets = spell
     ? sculpted(
-        aimedAt.filter(
+        aside.targets.filter(
           (target) => !immuneToSpell(target, spell, context, action),
         ),
         action,

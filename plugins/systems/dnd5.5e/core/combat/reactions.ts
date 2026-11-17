@@ -34,12 +34,13 @@ import {
 import {
   damageResponses,
   deriveStats,
+  evaluateFormula,
   type KnownAction,
   rollAmount,
   type Stats,
 } from "../stats.ts";
 import { rollD20 } from "../rules.ts";
-import { DECLINE } from "./ids.ts";
+import { DECLINE, spellOfSource } from "./ids.ts";
 import { teleportFrame } from "./movement.ts";
 import {
   actorOf,
@@ -54,7 +55,9 @@ import {
 } from "./queries.ts";
 import {
   damageEvents,
+  ENDURED,
   leafEvents,
+  rollSave,
   payCosts,
   reactionMove,
   resolveAction,
@@ -222,6 +225,9 @@ function helps(
     const moves = swing(effect, stats);
     if (!moves) return false;
     if (effect.kind === "succeed") return want;
+    if (effect.kind === "replaceRoll" && effect.foretold) {
+      return foretoldFor(bearer, roll, want) !== null;
+    }
     if (effect.kind === "replaceRoll" && effect.value !== undefined) {
       return want ? effect.value > roll.natural : effect.value < roll.natural;
     }
@@ -280,6 +286,7 @@ export function respond(
   let natural = roll.natural;
   let bonus = 0;
   let tempHp: Amount | undefined;
+  const used: SystemEvent[] = [];
   for (const effect of effectsOf(action)) {
     if (effect.kind === "reroll") {
       natural = rollD20(
@@ -291,6 +298,14 @@ export function respond(
             : edge,
       ).natural;
       tempHp = effect.tempHp ?? tempHp;
+    } else if (effect.kind === "replaceRoll" && effect.foretold) {
+      const roll1 = foretoldFor(reactor, roll, want);
+      if (roll1 !== null) {
+        natural = roll1;
+        used.push(
+          dndEvent(`${NS}:foretoldUsed`, { actor: reactor.id, roll: roll1 }),
+        );
+      }
     } else if (effect.kind === "replaceRoll") {
       const die = effect.value ?? context.dice.roll(20);
       if (want ? die > natural : die < natural) natural = die;
@@ -304,11 +319,26 @@ export function respond(
     }
   }
   return {
-    events: reactionCosts(reactor, action, context),
+    events: [...reactionCosts(reactor, action, context), ...used],
     natural,
     bonus,
     ...(tempHp ? { tempHp } : {}),
   };
+}
+
+// The foretelling roll that turns this roll the bearer's way: the lowest that makes its side's roll succeed, or the
+// highest that makes a foe's fail. A natural 20 or 1 on an attack always hits or misses.
+function foretoldFor(bearer: Actor, roll: Roll, want: boolean): number | null {
+  const rest = roll.total - roll.natural;
+  const works = (die: number): boolean => {
+    const success =
+      roll.kind === "attack"
+        ? die === 20 || (die !== 1 && die + rest >= roll.goal)
+        : die + rest >= roll.goal;
+    return success === want;
+  };
+  const fits = (bearer.foretold ?? []).filter(works).sort((a, b) => a - b);
+  return (want ? fits[0] : fits.at(-1)) ?? null;
 }
 
 // Reweave Fate's Temporary Hit Points, once the roll it changed succeeds.
@@ -538,6 +568,8 @@ function matchesMoment(
         self &&
         trigger.damaged === true &&
         !trigger.before &&
+        (!trigger.endured ||
+          (subject.hp === 1 && subject.usedThisTurn.includes(ENDURED))) &&
         (kindOk ||
           (trigger.bloodied === true &&
             subject.hp * 2 <= deriveStats(subject, context).maxHp)) &&
@@ -1146,7 +1178,11 @@ export function beforeDamage(
   context: Context,
   source?: Actor,
 ): { readonly amount: number; readonly events: SystemEvent[] } {
-  if (amount <= 0 || !context.state.combat) return { amount, events: [] };
+  if (amount <= 0) return { amount, events: [] };
+  // Arcane Ward: the bearer's own ward takes what it can first.
+  const warded = wardTakes(target, target, amount, context);
+  if (warded.amount <= 0 || !context.state.combat) return warded;
+  amount = warded.amount;
   const fits = (bearer: Actor, item: KnownAction, stats: Stats): boolean => {
     const trigger = item.activation.trigger;
     const own = bearer.id === target.id;
@@ -1160,7 +1196,15 @@ export function beforeDamage(
           bearer.side === target.side &&
           near(bearer, target, trigger.within) &&
           sees(bearer, target, context)) &&
-      ready(bearer, item, stats)
+      ready(bearer, item, stats) &&
+      // Projected Ward needs Hit Points left in the ward.
+      effectsOf(item).every(
+        (effect) =>
+          effect.kind !== "reduceDamage" ||
+          !effect.pool ||
+          wardTakes(bearer, target, amount, context, effect.pool).amount <
+            amount,
+      )
     );
   };
   const bearers = [
@@ -1184,9 +1228,73 @@ export function beforeDamage(
     ) {
       continue;
     }
-    return lessen(bearer, action, stats, target, amount, type, context, source);
+    const lessened = lessen(
+      bearer,
+      action,
+      stats,
+      target,
+      amount,
+      type,
+      context,
+      source,
+    );
+    return { ...lessened, events: [...warded.events, ...lessened.events] };
   }
-  return { amount, events: [] };
+  return warded;
+}
+
+// A ward pool's Hit Points, as Arcane Ward's: the most of the damage it takes, spent from the bearer's resource.
+function wardTakes(
+  bearer: Actor,
+  target: Actor,
+  amount: number,
+  context: Context,
+  resource?: string,
+): { readonly amount: number; readonly events: SystemEvent[] } {
+  const stats = deriveStats(bearer, context);
+  const pool = stats.passives.find(
+    (passive) =>
+      passive.kind === "wardPool" &&
+      (resource === undefined || passive.resource === resource),
+  );
+  if (
+    pool?.kind !== "wardPool" ||
+    (bearer.resourcesSpent[pool.made] ?? 0) < 1
+  ) {
+    return { amount, events: [] };
+  }
+  const left =
+    (stats.resources[pool.resource] ?? 0) -
+    (bearer.resourcesSpent[pool.resource] ?? 0);
+  const taken = Math.min(left, amount);
+  if (bearer.id !== target.id && resource === undefined) {
+    return { amount, events: [] };
+  }
+  return taken > 0
+    ? {
+        amount: amount - taken,
+        events: [
+          dndEvent(`${NS}:resourceSpent`, {
+            actor: bearer.id,
+            resource: pool.resource,
+            amount: taken,
+          }),
+        ],
+      }
+    : { amount, events: [] };
+}
+
+// The level of the spell slot these costs spend, or 0.
+function slotSpent(events: readonly SystemEvent[]): number {
+  for (const event of events) {
+    const resource =
+      event.kind === `${NS}:resourceSpent` && "payload" in event
+        ? (event.payload as { resource?: string }).resource
+        : undefined;
+    const level = resource?.startsWith("slot:") ? Number(resource.slice(5)) : 0;
+    if (level > 0) return level;
+  }
+  return 0;
 }
 
 // With `within`, a before-damage reaction is for others' damage only, as Spirit Shield; without it, the bearer's own.
@@ -1218,9 +1326,17 @@ function lessen(
         left = 0;
         continue;
       }
+      if (effect.pool) {
+        // Projected Ward: the bearer's ward takes it.
+        const warded = wardTakes(bearer, target, left, context, effect.pool);
+        events.push(...warded.events);
+        left = warded.amount;
+        continue;
+      }
       const before = left;
       left = effect.halve ? Math.floor(left / 2) : left;
       if (effect.amount) left -= rollAmount(effect.amount, stats, context.dice);
+      if (effect.perSlot) left -= effect.perSlot * slotSpent(events);
       left = Math.max(0, left);
       if (effect.echo && source && before > left) {
         events.push(
@@ -1266,6 +1382,120 @@ function lessen(
     events.push(...(rest.events ?? []));
   }
   return { amount: Math.max(0, left), events };
+}
+
+// A foe's spell aimed at the bearer: Shield passes Magic Missile by, and Spell Thief makes the caster save or loses
+// the spell to the thief. The player is asked; anyone else takes it whenever it can.
+// shortcut: Spell Thief's use is spent even when the caster saves, not only once a spell is stolen.
+export function spellAimedAt(
+  spell: KnownAction,
+  caster: Actor,
+  targets: readonly Actor[],
+  context: Context,
+): { readonly targets: readonly Actor[]; readonly events: SystemEvent[] } {
+  if (!context.state.combat) return { targets, events: [] };
+  const spellId = spellOfSource(spell.id);
+  const events: SystemEvent[] = [];
+  const kept: Actor[] = [];
+  for (const target of targets) {
+    const stats = deriveStats(target, context);
+    const action =
+      target.side === caster.side
+        ? undefined
+        : stats.actions.find((item) => {
+            const trigger = item.activation.trigger;
+            return (
+              ((trigger?.spellTargets === true && spell.spellLevel !== null) ||
+                (trigger?.targetedBySpell !== undefined &&
+                  trigger.targetedBySpell === spellId)) &&
+              ready(target, item, stats)
+            );
+          });
+    if (
+      !action ||
+      (target.id === PLAYER_ACTOR &&
+        !playerTakes(
+          `spell:${caster.id}`,
+          `${caster.name} casts ${spell.name} at you. Use ${action.name}?`,
+          action,
+          context,
+        ))
+    ) {
+      kept.push(target);
+      continue;
+    }
+    events.push(...reactionCosts(target, action, context));
+    const { resolution } = action.activation;
+    if (resolution.kind === "save") {
+      const dc = evaluateFormula(resolution.dc, stats);
+      const save = rollSave(caster, resolution.ability, dc, context);
+      events.push(...save.events);
+      if (save.saved) {
+        kept.push(target);
+        continue;
+      }
+      events.push(
+        ...stealEvents(
+          resolution.onFail,
+          spell,
+          caster,
+          target,
+          action,
+          context,
+        ),
+      );
+      continue;
+    }
+    // Shield: its own effects, then the spell passes it by.
+    events.push(
+      ...(resolveAction(action, target, [target], context).events ?? []),
+    );
+  }
+  return { targets: kept, events };
+}
+
+function stealEvents(
+  effects: readonly LeafEffect[],
+  spell: KnownAction,
+  caster: Actor,
+  thief: Actor,
+  action: KnownAction,
+  context: Context,
+): SystemEvent[] {
+  const steal = effects.find((effect) => effect.kind === "stealSpell");
+  const spellId = spellOfSource(spell.id);
+  const level = spell.spellLevel ?? 0;
+  if (steal?.kind !== "stealSpell" || !spellId || level < 1) return [];
+  if (deriveStats(thief, context).slots.length < level) return [];
+  const duration = { minutes: steal.minutes };
+  return [
+    ...leafEvents(
+      [
+        {
+          kind: "modifier",
+          modifier: { kind: "stolenSpell", spell: spellId },
+          duration,
+        },
+      ],
+      action.id,
+      thief,
+      thief,
+      context,
+    ),
+    ...leafEvents(
+      [
+        {
+          kind: "modifier",
+          modifier: { kind: "stolenSpell", spell: spellId, lost: true },
+          duration,
+        },
+      ],
+      action.id,
+      thief,
+      caster,
+      context,
+    ),
+  ];
 }
 
 // A reaction's table, as Mythal Ward's: the die picks a row, which is resolved at those it names. `negate` says the

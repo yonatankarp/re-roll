@@ -2503,7 +2503,8 @@ function withEffectActions(
       ({ modifier }) =>
         modifier.kind === "weaponSpell" ||
         modifier.kind === "grantedAction" ||
-        modifier.kind === "wished",
+        modifier.kind === "wished" ||
+        modifier.kind === "stolenSpell",
     ) &&
     !stats.actions.some((action) =>
       weaponAttackOf(action.activation.resolution),
@@ -2514,6 +2515,29 @@ function withEffectActions(
   const granted: KnownAction[] = [];
   let actions = stats.actions;
   for (const { modifier, sourceId, level } of actor.activeEffects) {
+    // Spell Thief: the thief has the spell prepared, cast with its own slots, and its caster can't cast it.
+    if (modifier.kind === "stolenSpell") {
+      const id = `spell:${modifier.spell}`;
+      if (modifier.lost) {
+        actions = actions.filter(
+          (action) => spellOfSource(action.id) !== modifier.spell,
+        );
+      } else if (!actions.some((action) => action.id === id)) {
+        const spell = lookup(access, SpellSchema, modifier.spell);
+        if (spell.activation) {
+          actions = [
+            ...actions,
+            {
+              id,
+              name: spell.name,
+              activation: spell.activation,
+              spellLevel: spell.level,
+              upcast: spell.upcast,
+            },
+          ];
+        }
+      }
+    }
     if (modifier.kind === "wished") {
       const id = `spell:${modifier.spell}`;
       const spell = lookup(access, SpellSchema, modifier.spell);

@@ -154,7 +154,7 @@ export function provokers(
   return enemies(state, actor).flatMap((foe) => {
     if (
       dragged.has(foe.id) ||
-      !foe.budget.reaction ||
+      !canOpportune(foe, state, access) ||
       isDown(foe) ||
       sealed(foe) ||
       limitsOf(foe).noOpportunityAttacks === true || // Shocking Grasp
@@ -173,12 +173,14 @@ export function provokers(
             : heightOf(actor)) - heightOf(foe),
         ),
       );
+    // Hold the Line: a step that stays inside the reach provokes too.
+    const holds = hasPassive(deriveStats(foe, access), "holdTheLine");
     const leaves = (reach: number): boolean =>
       steps.some(
         (_, index) =>
           index + 1 < steps.length &&
           far(index) <= reach &&
-          far(index + 1) > reach,
+          (far(index + 1) > reach || holds),
       );
     const melee = deriveStats(foe, access).actions.find((item) => {
       const reach = meleeReach(item);
@@ -238,7 +240,12 @@ export function opportunity(
   }
   return {
     events: [
-      dndEvent(`${NS}:budgetSpent`, { actor: foe.id, kind: "reaction" }),
+      foe.budget.reaction
+        ? dndEvent(`${NS}:budgetSpent`, { actor: foe.id, kind: "reaction" })
+        : dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: foe.id,
+            key: vigilantKey(context.state),
+          }),
     ],
     frames: [
       frame("attackRoll", {
@@ -248,6 +255,26 @@ export function opportunity(
       }),
     ],
   };
+}
+
+// Vigilant Defender's special reaction is spent for this one turn of the fight.
+const vigilantKey = (state: DndState): string =>
+  `vigilant@${String(state.combat?.round ?? 0)}:${String(state.combat?.index ?? 0)}`;
+
+// Whether a foe can still make an Opportunity Attack: its Reaction, or Vigilant Defender's once on another's turn.
+// shortcut: the special reaction is open whenever the Reaction is spent, even when it was spent on this same turn.
+function canOpportune(
+  foe: Actor,
+  state: DndState,
+  access: ContentAccess,
+): boolean {
+  if (foe.budget.reaction) return true;
+  const turn = state.combat?.order[state.combat.index];
+  return (
+    turn !== foe.id &&
+    !foe.usedThisTurn.includes(vigilantKey(state)) &&
+    hasPassive(deriveStats(foe, access), "vigilantDefender")
+  );
 }
 
 // The first step of a walk that enters the reach of an enemy's reaction to that, as Polearm Master's, or null.

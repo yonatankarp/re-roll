@@ -389,6 +389,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     damage: z.array(DamageSchema).default([]),
     grapple: z.literal(true).optional(),
   }),
+  // A spell stolen by Spell Thief: the bearer has it prepared ("stolen") or its caster can't cast it ("lost").
+  z.strictObject({
+    kind: z.literal("stolenSpell"),
+    spell: ContentIdSchema,
+    lost: z.literal(true).optional(),
+  }),
   // Can't gain this condition while it lasts, as Lordly Resolve's bolstered targets.
   z.strictObject({
     kind: z.literal("conditionImmunity"),
@@ -739,6 +745,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     maxLevel: z
       .union([z.number().int().min(1).max(9), z.literal("halfSlot")])
       .optional(),
+    // this many for each level of the slot spent on it instead, as Arcane Ward's twice the slot's level
+    perSlot: z.number().int().min(1).optional(),
   }),
   // Ends every curse on the target, with all else the action that cursed it gave, as Remove Curse.
   z.strictObject({ kind: z.literal("uncurse") }),
@@ -1009,6 +1017,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     // it, as this type, as Vengeful Ancestors' Force.
     takes: z.literal(true).optional(),
     echo: DamageTypeSchema.optional(),
+    perSlot: z.number().int().min(1).optional(), // this much more for each level of the slot spent, as Song of Defense's 5
+    // the bearer's ward pool (a `wardPool` resource) takes it instead, as Projected Ward
+    pool: z.string().min(1).optional(),
   }),
   // Adds to AC against the hit that triggered a reaction only, possibly turning it into a miss, as with Parry.
   z.strictObject({
@@ -1046,6 +1057,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("replaceRoll"),
     value: z.number().int().min(1).max(20).optional(),
+    foretold: z.literal(true).optional(), // one of the bearer's foretelling rolls, as Portent's
   }),
   // The roll succeeds instead, as Noble Scion's Minor Wish.
   z.strictObject({ kind: z.literal("succeed") }),
@@ -1079,6 +1091,12 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("negateHit"),
     retarget: z.literal(true).optional(),
+  }),
+  // The spell that set the reaction off passes the bearer by, and one of level 1 or more that the bearer has slots
+  // for is stolen: the bearer has it prepared, and its caster can't cast it, for `minutes`, as Spell Thief.
+  z.strictObject({
+    kind: z.literal("stealSpell"),
+    minutes: z.number().int().min(1).default(480),
   }),
   // The triggering Critical Hit is a normal hit instead, as Sentinel at Death's Door makes it.
   z.strictObject({ kind: z.literal("noCritical") }),
@@ -1509,7 +1527,11 @@ export const ActivationSchema = z.strictObject({
     .strictObject({
       hitByAttack: z.literal(true).optional(),
       melee: z.literal(true).optional(), // only a melee attack's hit triggers it, as with Parry
+      // Taken when this spell of a foe's is aimed at the bearer, which it then passes by, as Shield against Magic
+      // Missile; or with `spellTargets` any spell that targets it or catches it in its area, before it lands on it, as
+      // Spell Thief (combat/reactions.ts spellAimedAt).
       targetedBySpell: z.string().optional(),
+      spellTargets: z.literal(true).optional(),
       // Taken when a foe it can see within the activation's range casts a spell, as with Counterspell.
       spellCast: z.literal(true).optional(),
       // Taken right after hitting with a weapon, as with the smite spells. An area it targets is centred on the
@@ -1613,6 +1635,9 @@ export const ActivationSchema = z.strictObject({
       ownSave: z.enum(["failed", "succeeded"]).optional(),
       allySave: z.enum(["failed", "succeeded"]).optional(),
       conditions: z.array(ConditionSchema).min(1).optional(),
+      // With `damaged`, only right after a trait such as Relentless Endurance leaves the bearer at 1 Hit Point instead
+      // of 0, as Orcish Fury's attack.
+      endured: z.literal(true).optional(),
       // Taken when an enemy ends its turn within `within`, as with Skirmisher.
       turnEnds: z.literal(true).optional(),
       // Taken right after a foe within `within` hits or misses anyone with an attack roll; with `marked`, only one
@@ -1636,6 +1661,8 @@ export const ActivationSchema = z.strictObject({
     })
     .optional(),
   carrying: ContentIdSchema.optional(), // an item the bearer must carry to use it, as Battle Medic's Healer's Kit
+  // A `slot` cost spends one of at least this level, as a level 2+ slot restoring Illusory Self's use.
+  minSlot: z.number().int().min(1).max(9).optional(),
   whileIn: z.literal("shadows").optional(), // only in Dim Light or Darkness, as Merge with Shadows
   afterAction: z.literal(true).optional(), // only once the bearer has taken its action, as Blink Steps
   beforeAction: z.literal(true).optional(), // only before it takes its action, as Reckless Attack's first attack roll
@@ -2180,6 +2207,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     resource: z.string().optional(), // each use spends one, as Putrefy's once per rest
     spells: z.literal(true).optional(), // a spell's damage triggers it too, as Putrefy's
     effects: z.array(LeafEffectSchema).min(1),
+    // what the bearer gets, as Relentless Avenger's move of half its Speed that provokes nothing
+    selfEffects: z.array(LeafEffectSchema).min(1).optional(),
     // only while an effect of one of these features' activations is on the bearer, as Ancestral Protectors' Rage
     while: z.array(ContentIdSchema).min(1).optional(),
     ownTurn: z.literal(true).optional(), // only on the bearer's own turn
@@ -2326,6 +2355,24 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("peerlessAim") }),
   // A failed save is rolled again, once until the bearer's next turn starts, as with Boon of Fortune's Favor.
   z.strictObject({ kind: z.literal("saveReroll") }),
+  // As a Long Rest ends, this many d20s are rolled and kept, which a `replaceRoll` with `foretold` spends, as
+  // Portent's two or Greater Portent's three (the most of these passives counts).
+  z.strictObject({
+    kind: z.literal("foretell"),
+    count: z.number().int().min(1),
+  }),
+  // A ward whose Hit Points are this resource's unspent uses takes the bearer's damage first, after its Resistances,
+  // once `made` has been spent since its last rest, as Arcane Ward (combat/reactions.ts).
+  z.strictObject({
+    kind: z.literal("wardPool"),
+    resource: z.string().min(1),
+    made: z.string().min(1),
+  }),
+  // A walk of 5 feet or more inside the bearer's reach provokes its Opportunity Attack too, as Hold the Line.
+  z.strictObject({ kind: z.literal("holdTheLine") }),
+  // An Opportunity Attack once on each other creature's turn once its Reaction is spent, as Vigilant Defender's
+  // special reaction (combat/movement.ts).
+  z.strictObject({ kind: z.literal("vigilantDefender") }),
   // Resistance to every damage type but these while Bloodied, or while in Dim Light or Darkness ("shadows"), as Boon
   // of Desperate Resilience or Boon of the Night Spirit's Shadowy Form gives.
   z.strictObject({
@@ -2585,6 +2632,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     effects: z.array(LeafEffectSchema).min(1),
     onTargets: z.array(LeafEffectSchema).min(1).optional(),
     resource: z.string().optional(), // spending a use, only while one is left, as Defy Death's after Spare the Dying
+    // with `school`, a spell of any casting time cast with a slot, as Arcane Ward's Abjuration spells
+    slotted: z.literal(true).optional(),
   }),
   // Using an activation of this feature also does these to the bearer, as Tactical Shift's move with Second Wind or
   // Arcane Charge's teleport with Action Surge; with `while`, only while an effect of one of those features'

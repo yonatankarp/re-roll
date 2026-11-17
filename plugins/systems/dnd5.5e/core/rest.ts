@@ -607,6 +607,7 @@ function runFinishRest(
       }),
       ...restInspiration(members, rest, context),
       ...(rest === "long" ? restItems(members, context) : []),
+      ...(rest === "long" ? foretelling(members, context) : []),
       ...(rest === "long" ? afterLongRest(members, context) : []),
       ...familiarFoundEvents(members, context, rest),
       dndEvent(`${NS}:restFinished`, {
@@ -647,6 +648,29 @@ function afterLongRest(
     }
   }
   return events;
+}
+
+// Portent: a Long Rest ends with fresh foretelling rolls in place of any left.
+function foretelling(
+  members: readonly Actor[],
+  context: Context,
+): SystemEvent[] {
+  return members.flatMap((actor) => {
+    const count = Math.max(
+      0,
+      ...deriveStats(actor, context).passives.map((passive) =>
+        passive.kind === "foretell" ? passive.count : 0,
+      ),
+    );
+    return count > 0
+      ? [
+          dndEvent(`${NS}:foretold`, {
+            actor: actor.id,
+            rolls: Array.from({ length: count }, () => context.dice.roll(20)),
+          }),
+        ]
+      : [];
+  });
 }
 
 // Decanting: a Long Rest leaves the bearer one of the item, put in its pack.

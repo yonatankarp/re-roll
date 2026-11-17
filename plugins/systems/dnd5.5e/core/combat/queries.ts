@@ -591,7 +591,10 @@ export function slotToSpend(
   actor: Actor,
   stats: Stats,
 ): number | null {
-  const lowest = action.spellLevel ?? 1;
+  const lowest = Math.max(
+    action.spellLevel ?? 1,
+    action.activation.minSlot ?? 1,
+  );
   for (let level = lowest; level <= stats.slots.length; level += 1) {
     const spent = actor.resourcesSpent[`slot:${String(level)}`] ?? 0;
     if (spent < (stats.slots[level - 1] ?? 0)) return level;
