@@ -361,6 +361,12 @@ export interface SceneAction {
   readonly hidden?: true; // still answerable, so older saves replay, but not shown, such as a potion at full health
 }
 
+// The scene the party is in, as far as a system's actions care: the checks its choices offer now, so an action
+// fits what's here, as a spell that opens a lock where a check is about one.
+export interface SceneHere {
+  readonly checks: readonly unknown[];
+}
+
 export interface SystemDefinition<S> {
   readonly id: string;
   readonly version: string;
@@ -398,6 +404,7 @@ export interface SystemDefinition<S> {
   readonly sceneActions?: (
     state: S,
     access: ContentAccess,
+    here?: SceneHere,
   ) => readonly SceneAction[];
   readonly importKinds?: Readonly<Record<string, ImportKind>>; // keyed by content folder
   // Ranks a plugin when entries of the same name collide, lower first. Unset ranks all plugins alike, by id.

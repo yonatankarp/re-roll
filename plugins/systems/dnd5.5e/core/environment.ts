@@ -31,6 +31,7 @@ import {
   damageResponses,
   deriveStats,
   lookup,
+  passiveModifiers,
   rollDiceNotation,
 } from "./stats.ts";
 import { finalDamage } from "./rules.ts";
@@ -159,6 +160,17 @@ export function everySquare(state: DndState): readonly string[] {
   );
 }
 
+// Whether the party has drinkable water to share, as Create Food and Water's or a Decanter of Endless Water's.
+export function hasWater(state: DndState, access: ContentAccess): boolean {
+  return partyOf(state).some(
+    (actor) =>
+      actor.activeEffects.some(({ modifier }) => modifier.kind === "water") ||
+      passiveModifiers(deriveStats(actor, access).passives).some(
+        ({ kind }) => kind === "water",
+      ),
+  );
+}
+
 // The saves of time spent exposed to an effect: each hour or minute, a failure giving a level of Exhaustion.
 function exposureEvents(
   effect: EnvironmentalEffect,
@@ -167,6 +179,7 @@ function exposureEvents(
 ): SystemEvent[] {
   const { exposure } = effect;
   if (!exposure || periods <= 0) return [];
+  if (exposure.water && hasWater(context.state, context)) return [];
   return partyOf(context.state).flatMap((actor) => {
     const stats = deriveStats(actor, context);
     if (exposure.swimSpeed && swims(actor, context)) return [];
@@ -667,13 +680,20 @@ export function featureCheck(check: Check, access: ContentAccess): Check {
   if (!("feature" in check)) return check;
   const feature = lookup(access, DungeonFeatureSchema, check.feature);
   if (!feature.check) throw new Error(`${check.feature} has no check`);
-  return feature.check.skill
-    ? {
-        skill: feature.check.skill,
-        ability: feature.check.ability,
-        dc: check.dc,
-      }
-    : { ability: feature.check.ability, dc: check.dc };
+  const { skill, ability, tool, about } = feature.check;
+  const what = about ? { about } : {};
+  if (tool)
+    return {
+      tool,
+      ability,
+      ...(skill ? { skill } : {}),
+      dc: check.dc,
+      needs: true,
+      ...what,
+    };
+  return skill
+    ? { skill, ability, dc: check.dc, ...what }
+    : { ability, dc: check.dc, ...what };
 }
 
 export const environmentEffects = {

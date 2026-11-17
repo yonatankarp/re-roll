@@ -2773,12 +2773,18 @@ export function saveBonus(stats: Stats, ability: Ability): number {
 export function checkBonus(
   stats: Stats,
   actor: Actor,
-  check: { readonly ability: Ability; readonly skill?: Skill },
+  // A tool's proficiency counts once, as the skill's would (core/explore.ts).
+  check: {
+    readonly ability: Ability;
+    readonly skill?: Skill;
+    readonly toolProficient?: boolean;
+  },
 ): number {
   const { skill } = check;
-  const proficient = skill !== undefined && stats.skills.includes(skill);
+  const skilled = skill !== undefined && stats.skills.includes(skill);
+  const proficient = skilled || check.toolProficient === true;
   const expert =
-    skill !== undefined &&
+    skilled &&
     (stats.expertise.includes(skill) ||
       actor.activeEffects.some(
         ({ modifier }) =>

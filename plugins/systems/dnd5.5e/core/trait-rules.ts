@@ -605,8 +605,10 @@ export function checkFloor(
   stats: Stats,
   ability: Ability,
   skill?: Skill,
+  toolProficient = false, // a tool check with a tool it's proficient with (core/explore.ts)
 ): number {
-  const proficient = skill !== undefined && stats.skills.includes(skill);
+  const proficient =
+    toolProficient || (skill !== undefined && stats.skills.includes(skill));
   return Math.max(
     1,
     ...[

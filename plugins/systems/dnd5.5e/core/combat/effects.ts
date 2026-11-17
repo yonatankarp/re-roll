@@ -1425,17 +1425,30 @@ function inHpBand(
   );
 }
 
-// An hour or more without Concentration outlasts the fight, counted down by rests after it (rest.ts).
+// An hour or more without Concentration outlasts the fight, counted down by rests after it (rest.ts), and one that
+// lasts until a Long Rest outlasts fights and scenes until then.
 // shortcut: anything shorter ends with the fight, as the scenes between fights take longer than ten minutes.
-export function lingersFor(duration: Duration): {
-  lingers?: number;
+// Outside a fight (`between`), as cast in a scene (camp.ts), the effect lasts the scene, or its hours, Concentration
+// or not; a scene takes about an hour.
+export function lingersFor(
+  duration: Duration,
+  between = false,
+): {
+  lingers?: number | "longRest";
 } {
-  return typeof duration === "object" &&
-    "minutes" in duration &&
-    !("concentration" in duration) &&
-    duration.minutes >= 60
-    ? { lingers: Math.floor(duration.minutes / 60) }
-    : {};
+  if (typeof duration === "object" && "until" in duration)
+    return duration.until === "longRest"
+      ? { lingers: "longRest" }
+      : between
+        ? { lingers: 0 }
+        : {};
+  if (typeof duration === "object" && "minutes" in duration)
+    return between || !("concentration" in duration)
+      ? duration.minutes >= 60 || between
+        ? { lingers: Math.floor(duration.minutes / 60) }
+        : {}
+      : {};
+  return between ? { lingers: 0 } : {};
 }
 
 // A timed spell's minutes, and a turn of the target's, are counted in rounds by its `lasts` (lastsFor).
@@ -1944,7 +1957,7 @@ export function leafEvents(
                   : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
-              ...lingersFor(effect.duration),
+              ...lingersFor(effect.duration, !context.state.combat),
               ...swallowed,
             },
           }),
@@ -2025,7 +2038,7 @@ export function leafEvents(
               ...(effect.clings && conditionSave
                 ? { clings: conditionSave }
                 : {}),
-              ...lingersFor(effect.duration),
+              ...lingersFor(effect.duration, !context.state.combat),
               ...(effect.banish && save
                 ? { banish: { ability: effect.banish.ability, dc: save.dc } }
                 : {}),

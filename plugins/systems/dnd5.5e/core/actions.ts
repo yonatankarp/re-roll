@@ -274,6 +274,7 @@ export function abilityCheck(
   label: (success: boolean) => string,
   context: Context,
   advantage = false, // from a trait, as Powerful Build gives to escape a grapple
+  tool?: { readonly id: string; readonly proficient: boolean }, // a tool check's (core/explore.ts)
 ): {
   readonly success: boolean;
   readonly total: number;
@@ -323,9 +324,12 @@ export function abilityCheck(
     rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
   });
   const base =
-    checkBonus(stats, actor, { ability, ...(skill ? { skill } : {}) }) +
-    rollBonus(actor, "checks", context, skill, ability);
-  const floor = checkFloor(actor, stats, ability, skill);
+    checkBonus(stats, actor, {
+      ability,
+      ...(skill ? { skill } : {}),
+      ...(tool?.proficient ? { toolProficient: true } : {}),
+    }) + rollBonus(actor, "checks", context, skill, ability, false, tool?.id);
+  const floor = checkFloor(actor, stats, ability, skill, tool?.proficient);
   const least = scoreFloor(stats, ability);
   const totalOf = (natural: number, bonus: number) =>
     Math.max(Math.max(natural, floor) + base + bonus, least);

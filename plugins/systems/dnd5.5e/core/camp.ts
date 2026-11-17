@@ -2,6 +2,7 @@ import {
   type ContentAccess,
   PLAYER_ACTOR,
   type SceneAction,
+  type SceneHere,
   type SystemContext,
   type SystemEvent,
   type SystemResult,
@@ -10,14 +11,40 @@ import {
   storyEffect,
 } from "#sdk";
 import { z } from "zod";
-import { type LeafEffect, SpellSchema } from "./schemas.ts";
-import { type Actor, type DndState, NS, frame, isDead } from "./state.ts";
-import { type KnownAction, deriveStats, scaleActivation } from "./stats.ts";
+import {
+  type Check,
+  CheckSchema,
+  EnvironmentalEffectSchema,
+  type LeafEffect,
+  type Modifier,
+  SKILL_ABILITIES,
+  SpeciesSchema,
+  SpellSchema,
+} from "./schemas.ts";
+import { carriedWeight, carryingCapacity } from "./carry.ts";
+import { focusFrame } from "./combat/check-choice.ts";
+import { featureCheck, hasWater } from "./environment.ts";
+import { aidsAny } from "./explore.ts";
+import {
+  type Actor,
+  type DndState,
+  NS,
+  dndEvent,
+  frame,
+  isDead,
+} from "./state.ts";
+import {
+  type KnownAction,
+  deriveStats,
+  lookup,
+  scaleActivation,
+} from "./stats.ts";
 import {
   canAfford,
   deadWithin,
   fitsType,
   goldFor,
+  spellSource,
   upcastSlots,
 } from "./combat/queries.ts";
 import { leafEvents, payCosts, sharedHealing } from "./combat/effects.ts";
@@ -28,6 +55,9 @@ import { SHORT_REST_GIVEN, canRegain, regainCap } from "./rest.ts";
 // the character sheet, as Cure Wounds after a fight or Raise Dead, which takes an hour. It costs what it costs in a
 // fight, less the action, and reaches anyone in the party, who can walk over to be touched. A spell may be cast with
 // a higher slot, and a ritual is cast as one, with no slot.
+// Exploring (#153): a spell or feature that helps the player's scene checks, as Guidance, or deals with what a check
+// here is about, as Knock with a lock (explore.ts), offered only where the scene has such a check; drinkable water
+// where the party is exposed without it; and a load carried for one who is over capacity, as Floating Disk.
 
 type Context = SystemContext<DndState>;
 
@@ -48,7 +78,102 @@ const BETWEEN: ReadonlySet<LeafEffect["kind"]> = new Set([
   "transference",
   "reincarnate",
   "clone",
+  "modifier", // only those modifierHelps allows
 ]);
+
+// What the scene here offers, and the state, for what a modifier would do between fights. `here` is unknown while
+// the cast resolves, which trusts the offer.
+interface Between {
+  readonly state: DndState;
+  readonly here: readonly Check[] | undefined;
+}
+
+// The skill and ability a check rolls, for the modifiers that apply to it.
+function focusOf(
+  check: Check,
+  access: ContentAccess,
+): { skill: string | undefined; ability: string | undefined } {
+  const parsed = featureCheck(check, access);
+  const skill = "skill" in parsed ? parsed.skill : undefined;
+  return {
+    skill,
+    ability:
+      ("ability" in parsed ? parsed.ability : undefined) ??
+      (skill ? SKILL_ABILITIES[skill] : undefined),
+  };
+}
+
+function appliesTo(
+  modifier: Modifier,
+  pick: readonly string[] | undefined,
+  { skill, ability }: ReturnType<typeof focusOf>,
+): boolean {
+  if (pick) return pick.some((focus) => focus === skill || focus === ability);
+  const skills =
+    "skills" in modifier
+      ? modifier.skills
+      : "skill" in modifier && modifier.skill
+        ? [modifier.skill]
+        : undefined;
+  return (
+    (!skills || (skill !== undefined && skills.includes(skill as never))) &&
+    (!("ability" in modifier) ||
+      !modifier.ability ||
+      modifier.ability === ability)
+  );
+}
+
+// Whether a modifier would mean something to the target between fights: on the player's checks (only the player
+// makes a scene's), dealing with what one here is about, water where the party is exposed without it, or a load
+// for one carrying more than it can.
+function modifierHelps(
+  modifier: Modifier,
+  pick: readonly string[] | undefined,
+  target: Actor,
+  access: ContentAccess,
+  { state, here }: Between,
+): boolean {
+  const player = target.id === PLAYER_ACTOR;
+  switch (modifier.kind) {
+    case "sceneAid":
+      return player && (!here || aidsAny(modifier.about, here, access));
+    case "water":
+      return (
+        player &&
+        !hasWater(state, access) &&
+        (state.ambient ?? []).some(
+          (id) =>
+            EnvironmentalEffectSchema.safeParse(access.content(id)).data
+              ?.exposure?.water === true,
+        )
+      );
+    case "holds": {
+      const build =
+        target.source.kind === "character" ? target.source.build : null;
+      if (!build) return false;
+      const { size } = lookup(access, SpeciesSchema, build.speciesId);
+      return (
+        carriedWeight(target, access) >
+        carryingCapacity(deriveStats(target, access).abilities.str, size)
+      );
+    }
+    case "bonus":
+    case "advantage":
+      if (("to" in modifier ? modifier.to : modifier.on) !== "checks")
+        return false;
+      break;
+    case "checkFloor":
+    case "expertise":
+      break;
+    default:
+      return false;
+  }
+  return (
+    player &&
+    (!here ||
+      here.some((check) => appliesTo(modifier, pick, focusOf(check, access))))
+  );
+}
 
 // Whether the effect would do something for this creature between fights.
 function helps(
@@ -56,8 +181,17 @@ function helps(
   target: Actor,
   access: ContentAccess,
   slotLevel: number | null,
+  between: Between,
 ): boolean {
   switch (effect.kind) {
+    case "modifier":
+      return modifierHelps(
+        effect.modifier,
+        effect.pick,
+        target,
+        access,
+        between,
+      );
     case "heal":
     case "hitDieHeal":
     case "shortRest":
@@ -156,12 +290,27 @@ function targetsOf(
   caster: Actor,
   state: DndState,
   access: ContentAccess,
+  here?: readonly Check[],
 ): readonly Actor[] {
   const { targeting } = action.activation;
   const dead = "dead" in targeting && targeting.dead === true;
-  const pool = "self" in targeting ? [caster] : members(state);
+  // What deals with a scene's obstacle, or waters the party, is the player's to use, whoever casts it.
+  const party = effectsOf(action).every(
+    (effect) =>
+      effect.kind === "modifier" &&
+      (effect.modifier.kind === "sceneAid" || effect.modifier.kind === "water"),
+  );
+  const player = state.actors[PLAYER_ACTOR];
+  const pool =
+    party && player
+      ? [player]
+      : "self" in targeting
+        ? [caster]
+        : members(state);
   return pool.filter(
     (item) =>
+      // Not again on one it already lasts on.
+      !item.activeEffects.some(({ sourceId }) => sourceId === action.id) &&
       isDead(item) === dead &&
       deadWithin(item, targeting) &&
       fitsType(item, targeting, access, caster) &&
@@ -171,7 +320,7 @@ function targetsOf(
         effectsOf(action).some((effect) => effect.kind === "shortRest")
       ) &&
       effectsOf(action).some((effect) =>
-        helps(effect, item, access, action.spellLevel),
+        helps(effect, item, access, action.spellLevel, { state, here }),
       ),
   );
 }
@@ -180,6 +329,7 @@ function castable(
   caster: Actor,
   state: DndState,
   access: ContentAccess,
+  here?: readonly Check[],
 ): readonly KnownAction[] {
   if (isDead(caster) || caster.hp <= 0) return [];
   const stats = deriveStats(caster, access);
@@ -188,7 +338,7 @@ function castable(
       usable(action) &&
       goldFor(action) <= (state.gold ?? 0) &&
       canAfford(between(action, access), caster, stats) &&
-      targetsOf(action, caster, state, access).length > 0,
+      targetsOf(action, caster, state, access, here).length > 0,
   );
 }
 
@@ -199,7 +349,12 @@ export function castId(caster: string, action: string, slot?: number): string {
 export function sceneCastActions(
   state: DndState,
   access: ContentAccess,
+  scene: SceneHere = { checks: [] },
 ): SceneAction[] {
+  const here = scene.checks.flatMap((check) => {
+    const parsed = CheckSchema.safeParse(check);
+    return parsed.success ? [parsed.data] : [];
+  });
   const player = state.actors[PLAYER_ACTOR];
   if (
     state.combat ||
@@ -215,10 +370,10 @@ export function sceneCastActions(
       item.exhaustion > 0 ||
       Object.keys(item.resourcesSpent).some((key) => key.startsWith("slot:")),
   );
-  if (!needy) return [];
+  if (!needy && here.length === 0 && !state.ambient) return [];
   return members(state).flatMap((caster) => {
     const stats = deriveStats(caster, access);
-    return castable(caster, state, access).flatMap((action) => {
+    return castable(caster, state, access, here).flatMap((action) => {
       const name =
         caster.id === PLAYER_ACTOR
           ? action.name
@@ -277,6 +432,23 @@ function resolve(
     context,
     slot,
   );
+  // A spell held with Concentration ends the one held before, as in a fight.
+  const held = effectsOf(action).some(
+    (effect) =>
+      effect.kind === "modifier" &&
+      typeof effect.duration === "object" &&
+      "concentration" in effect.duration,
+  );
+  if (held) {
+    if (caster.concentratingOn !== null)
+      events.push(dndEvent(`${NS}:concentrationEnded`, { actor: caster.id }));
+    events.push(
+      dndEvent(`${NS}:concentrationStarted`, {
+        actor: caster.id,
+        spell: spellSource(action),
+      }),
+    );
+  }
   for (const target of targets) {
     events.push(
       ...leafEvents(
@@ -295,9 +467,22 @@ function resolve(
   const player = targets.some((target) => target.id === PLAYER_ACTOR);
   const given = (kind: LeafEffect["kind"]) =>
     player && effectsOf(action).some((effect) => effect.kind === kind);
+  // The player picks a skill or ability the spell asks for, as Guidance's, for whoever casts it.
+  const focus = targets.flatMap((target) => {
+    const asked = focusFrame(
+      effectsOf(action),
+      action.id,
+      caster,
+      target,
+      slot,
+      PLAYER_ACTOR,
+    );
+    return asked ? [asked] : [];
+  });
   const frames = [
     ...(given("shortRest") ? [frame("givenDice")] : []),
     ...(given("reincarnate") ? [frame("reincarnate", { picks: {} })] : []),
+    ...focus,
   ];
   return { events, ...(frames.length > 0 ? { frames } : {}) };
 }
