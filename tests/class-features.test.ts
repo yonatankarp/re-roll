@@ -556,11 +556,8 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
       ).status,
     ).toBe("working");
     expect(
-      classify("phb:feature/rogue-cunning-action", stats, run),
-    ).toMatchObject({
-      status: "text-only",
-      why: "needs bonus-action Dash, Disengage and Hide",
-    });
+      classify("phb:feature/rogue-thieves-cant", stats, run),
+    ).toMatchObject({ status: "text-only" });
   });
 
   it("Hunter's Mark is prepared and adds 1d6 to the Ranger's hits on the mark", () => {
