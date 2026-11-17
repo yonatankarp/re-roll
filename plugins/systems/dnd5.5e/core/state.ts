@@ -412,7 +412,10 @@ const RestedSchema = z.strictObject({
 });
 // Rests are the only thing that passes time, so they're the clock for the one-Long-Rest-a-day rule.
 export const REST_HOURS = { short: 1, long: 8 } as const;
-const RestFinishedSchema = z.strictObject({ rest: z.enum(["short", "long"]) });
+const RestFinishedSchema = z.strictObject({
+  rest: z.enum(["short", "long"]),
+  hours: z.number().int().min(1).optional(), // a Long Rest shorter than REST_HOURS, as an all-elf party's Trance
+});
 const CombatStartedSchema = z.strictObject({
   encounter: z.string(),
   monsters: z.array(ActorSchema),
@@ -1184,9 +1187,11 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       );
     }
     case `${NS}:restFinished`: {
-      const { rest } = payload(RestFinishedSchema, event);
-      const rested = { ...state, actors: deadLonger(state, REST_HOURS[rest]) };
-      if (rest === "long") return { ...rested, sinceLongRest: REST_HOURS.long };
+      const data = payload(RestFinishedSchema, event);
+      const { rest } = data;
+      const hours = data.hours ?? REST_HOURS[rest];
+      const rested = { ...state, actors: deadLonger(state, hours) };
+      if (rest === "long") return { ...rested, sinceLongRest: hours };
       return state.sinceLongRest === undefined
         ? rested
         : { ...rested, sinceLongRest: state.sinceLongRest + REST_HOURS.short };

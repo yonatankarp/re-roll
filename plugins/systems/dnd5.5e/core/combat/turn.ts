@@ -35,7 +35,7 @@ import {
 import { z } from "zod";
 import { finalDamage, halved } from "../rules.ts";
 import { betweenTurns, legendaryResistance } from "../legendary.ts";
-import { turnRecharge } from "../class-rules.ts";
+import { turnInspiration, turnRecharge } from "../class-rules.ts";
 import { ConditionSchema, MonsterSchema } from "../schemas.ts";
 import { cureFor } from "./dispel.ts";
 import {
@@ -541,6 +541,7 @@ export function runAdvanceTurn(
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),
+    ...(next ? turnInspiration(next, { ...context, state: after }) : []),
     ...(next ? fogBoundEvents(next, { ...context, state: after }) : []),
     ...antimagicEvents(after),
     ...placedConditionEvents(after),

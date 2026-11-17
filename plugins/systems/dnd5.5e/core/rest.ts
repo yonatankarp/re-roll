@@ -23,13 +23,14 @@ import { HIT_DICE } from "./combat/ids.ts";
 import { hitDieRoll } from "./trait-rules.ts";
 import { gearOptions } from "./gear.ts";
 import { familiarFoundEvents } from "./combat/familiar.ts";
-import { ClassSchema } from "./schemas.ts";
+import { ClassSchema, type ResourceDef } from "./schemas.ts";
 import {
   type Stats,
   deriveStats,
   evaluateFormula,
   lookup,
   modifierFor,
+  rollAmount,
 } from "./stats.ts";
 
 type Context = SystemContext<DndState>;
@@ -51,6 +52,24 @@ function canSpend(actor: Actor, stats: Stats): boolean {
   );
 }
 
+// Marks a creature that ate a Chef's Replenishing Meal this Short Rest. Any rest clears it.
+const MEAL = "rest:meal";
+
+// What a party member's Replenishing Meal adds to the first Hit Point Die it spends in a Short Rest, and the mark.
+function mealBonus(actor: Actor, context: Context): number {
+  if (actor.resourcesSpent[MEAL]) return 0;
+  return party(context.state).reduce((most, member) => {
+    const stats = deriveStats(member, context);
+    return stats.passives.reduce(
+      (best, passive) =>
+        passive.kind === "restMeal"
+          ? Math.max(best, rollAmount(passive.amount, stats, context.dice))
+          : best,
+      most,
+    );
+  }, 0);
+}
+
 // Each die heals its roll plus the Constitution modifier, and always at least 1.
 function spendEvents(
   actor: Actor,
@@ -58,13 +77,17 @@ function spendEvents(
   stats: Stats,
   context: Context,
 ): readonly SystemEvent[] {
+  const meal = mealBonus(actor, context);
   const rolled =
     hitDieRoll(die, stats, context.dice) + modifierFor(stats, "con");
   return [
     dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource: HIT_DICE }),
+    ...(meal > 0
+      ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource: MEAL })]
+      : []),
     dndEvent(`${NS}:healed`, {
       actor: actor.id,
-      amount: Math.min(Math.max(1, rolled), stats.maxHp - actor.hp),
+      amount: Math.min(Math.max(1, rolled) + meal, stats.maxHp - actor.hp),
       max: stats.maxHp,
     }),
   ];
@@ -76,7 +99,7 @@ export function shortRestEvents(
   skip?: string,
 ): SystemEvent[] {
   return Object.values(context.state.actors).flatMap((actor) =>
-    actor.id === skip ? [] : diceSpent(actor, context),
+    actor.id === skip ? [] : diceSpent(actor, context, true),
   );
 }
 
@@ -110,13 +133,19 @@ export function shortRestFor(actor: Actor, context: Context): SystemEvent[] {
   ];
 }
 
-function diceSpent(actor: Actor, context: Context): SystemEvent[] {
+// With `meal`, in a real Short Rest, where a Chef's Replenishing Meal adds to the first die.
+function diceSpent(
+  actor: Actor,
+  context: Context,
+  meal = false,
+): SystemEvent[] {
   {
     if (actor.side !== "party" || isDead(actor)) return [];
     if (actor.source.kind !== "character" || !actor.source.build) return [];
     const stats = deriveStats(actor, context);
     const events: SystemEvent[] = [];
     let { hp } = actor;
+    let extra = meal ? mealBonus(actor, context) : 0;
     for (const { classId } of actor.source.build.levels.slice(
       actor.resourcesSpent[HIT_DICE] ?? 0,
     )) {
@@ -124,7 +153,7 @@ function diceSpent(actor: Actor, context: Context): SystemEvent[] {
       const die = lookup(context, ClassSchema, classId).hitDie;
       const rolled = hitDieRoll(die, stats, context.dice);
       const amount = Math.min(
-        Math.max(1, rolled + modifierFor(stats, "con")),
+        Math.max(1, rolled + modifierFor(stats, "con")) + extra,
         stats.maxHp - hp,
       );
       hp += amount;
@@ -133,8 +162,17 @@ function diceSpent(actor: Actor, context: Context): SystemEvent[] {
           actor: actor.id,
           resource: HIT_DICE,
         }),
+        ...(extra > 0
+          ? [
+              dndEvent(`${NS}:resourceSpent`, {
+                actor: actor.id,
+                resource: MEAL,
+              }),
+            ]
+          : []),
         dndEvent(`${NS}:healed`, { actor: actor.id, amount, max: stats.maxHp }),
       );
+      extra = 0;
     }
     return events;
   }
@@ -219,31 +257,200 @@ function runCompanionsSpend(context: Context): SystemResult {
   };
 }
 
-function recovered(
+// The most uses of a resource, a slot level ("slot:<level>") or all spell slots ("slots").
+function maxUses(resource: string, stats: Stats): number {
+  if (resource === "slots") return stats.slots.reduce((sum, n) => sum + n, 0);
+  if (resource.startsWith("slot:")) {
+    return stats.slots[Number(resource.slice(5)) - 1] ?? 0;
+  }
+  return stats.resources[resource] ?? 0;
+}
+
+function slotKeys(stats: Stats): string[] {
+  return stats.slots.map((_, index) => `slot:${String(index + 1)}`).reverse();
+}
+
+// Whether there's anything spent for a `regain` effect to give back.
+export function canRegain(
+  actor: Actor,
+  resource: string,
+  stats: Stats,
+): boolean {
+  const keys = resource === "slots" ? slotKeys(stats) : [resource];
+  return keys.some((key) => (actor.resourcesSpent[key] ?? 0) > 0);
+}
+
+// A `regain` effect: spent uses back, at most `count`, half the most rounded up, or all; for "slots", slots of
+// any level, the highest first.
+export function regainEvents(
+  actor: Actor,
+  resource: string,
+  count: number | "half" | "all",
+  stats: Stats,
+): SystemEvent[] {
+  let left =
+    count === "all"
+      ? Infinity
+      : count === "half"
+        ? Math.ceil(maxUses(resource, stats) / 2)
+        : count;
+  return (resource === "slots" ? slotKeys(stats) : [resource]).flatMap(
+    (key) => {
+      const amount = Math.min(left, actor.resourcesSpent[key] ?? 0);
+      left -= amount;
+      return amount > 0
+        ? [
+            dndEvent(`${NS}:resourceRestored`, {
+              actor: actor.id,
+              resource: key,
+              amount,
+            }),
+          ]
+        : [];
+    },
+  );
+}
+
+type Recharge = ResourceDef["recharge"][number];
+
+// How many spent uses a recharge gives back: its amount, no more than are spent, nor than leave `upTo` unspent.
+export function rechargeAmount(
+  entry: Recharge,
+  spent: number,
+  max: number,
+  stats: Stats,
+): number {
+  const { amount, upTo } = entry;
+  const back =
+    amount === "all"
+      ? spent
+      : typeof amount === "number"
+        ? amount
+        : evaluateFormula(amount, stats);
+  const room = upTo === undefined ? spent : upTo - (max - spent);
+  return Math.max(0, Math.min(back, spent, room));
+}
+
+// Whether a recharge with `uses` has that resource's use to spend.
+export function canUse(
+  entry: Recharge,
+  spent: (id: string) => number,
+  stats: Stats,
+): boolean {
+  return (
+    entry.uses === undefined ||
+    spent(entry.uses) < (stats.resources[entry.uses] ?? 0)
+  );
+}
+
+export function recovered(
   spent: Actor["resourcesSpent"],
   stats: Stats,
   rest: "short" | "long",
 ): Actor["resourcesSpent"] {
   const left = new Map(Object.entries(spent));
+  const used = (id: string): number => left.get(id) ?? 0;
   for (const key of left.keys()) {
     const slot = key.startsWith("slot:");
     const daily = key === HIT_DICE || key === SHORT_REST_GIVEN;
-    if (rest === "long" ? slot || daily : slot && stats.pactMagic) {
+    if (
+      key === MEAL ||
+      (rest === "long" ? slot || daily : slot && stats.pactMagic)
+    ) {
       left.set(key, 0);
     }
   }
   for (const { id, recharge } of stats.resourceDefs) {
-    for (const { on, amount } of recharge) {
+    for (const entry of recharge) {
+      const { on } = entry;
       // shortcut: there's no clock, so dawn comes with a Long Rest.
       // A once-a-turn use left spent when a fight ended comes back with any rest, and a Short Rest's with a Long one.
       const applies =
-        on === "turnStart" || on === "shortRest" || rest === "long";
-      if (applies) {
-        left.set(id, amount === "all" ? 0 : (left.get(id) ?? 0) - amount);
+        entry.uses === undefined
+          ? on === "turnStart" || on === "shortRest" || rest === "long"
+          : on === (rest === "long" ? "longRest" : "shortRest");
+      if (!applies || !canUse(entry, used, stats)) continue;
+      const back = rechargeAmount(
+        entry,
+        used(id),
+        stats.resources[id] ?? 0,
+        stats,
+      );
+      left.set(id, used(id) - back);
+      if (entry.uses !== undefined && back > 0) {
+        left.set(entry.uses, used(entry.uses) + 1);
       }
     }
   }
+  if (rest === "short") recoverSlots(left, stats);
   return Object.fromEntries([...left].filter(([, value]) => value > 0));
+}
+
+// Arcane Recovery and the like: spent slots back, highest first, while their levels fit the budget.
+// shortcut: the slots are picked for the player, the highest that fit, which is what's nearly always best.
+function recoverSlots(left: Map<string, number>, stats: Stats): void {
+  for (const passive of stats.passives) {
+    if (passive.kind !== "slotRecovery") continue;
+    const { resource } = passive;
+    if ((left.get(resource) ?? 0) >= (stats.resources[resource] ?? 0)) continue;
+    let budget = evaluateFormula(passive.levels, stats);
+    let recovered = false;
+    for (let level = Math.min(5, stats.slots.length); level >= 1; level -= 1) {
+      const key = `slot:${String(level)}`;
+      while ((left.get(key) ?? 0) > 0 && level <= budget) {
+        left.set(key, (left.get(key) ?? 0) - 1);
+        budget -= level;
+        recovered = true;
+      }
+    }
+    if (recovered) left.set(resource, (left.get(resource) ?? 0) + 1);
+  }
+}
+
+// The Scarlet Spellbook's Arcane Stamina: healing as slots are recovered in a Short Rest.
+function recoveryHeal(
+  actor: Actor,
+  after: Actor["resourcesSpent"],
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  const used = stats.passives.some(
+    (passive) =>
+      passive.kind === "slotRecovery" &&
+      (after[passive.resource] ?? 0) >
+        (actor.resourcesSpent[passive.resource] ?? 0),
+  );
+  if (!used) return [];
+  const amount = stats.passives.reduce(
+    (sum, passive) =>
+      passive.kind === "recoveryHeal"
+        ? sum + rollAmount(passive.amount, stats, context.dice)
+        : sum,
+    0,
+  );
+  const healed = Math.min(amount, stats.maxHp - actor.hp);
+  return healed > 0
+    ? [
+        dndEvent(`${NS}:healed`, {
+          actor: actor.id,
+          amount: healed,
+          max: stats.maxHp,
+        }),
+      ]
+    : [];
+}
+
+// A Long Rest is as long as its slowest member's: 8 hours, or less for a party all with Trance or the like.
+function longRestHours(members: readonly Actor[], context: Context): number {
+  return Math.max(
+    ...members.map((actor) =>
+      deriveStats(actor, context).passives.reduce<number>(
+        (hours, passive) =>
+          passive.kind === "restHours" ? Math.min(hours, passive.hours) : hours,
+        REST_HOURS.long,
+      ),
+    ),
+  );
 }
 
 const FinishSchema = z.object({ rest: z.enum(["short", "long"]) });
@@ -252,21 +459,33 @@ function runFinishRest(
   { rest }: z.infer<typeof FinishSchema>,
   context: Context,
 ): SystemResult {
+  const members = party(context.state);
+  const hours =
+    rest === "long" ? longRestHours(members, context) : REST_HOURS.short;
   return {
     events: [
-      ...party(context.state).map((actor) => {
+      ...members.flatMap((actor) => {
         const stats = deriveStats(actor, context);
-        return dndEvent(`${NS}:rested`, {
-          actor: actor.id,
-          rest,
-          maxHp: stats.maxHp,
-          resourcesSpent: recovered(actor.resourcesSpent, stats, rest),
-        });
+        const resourcesSpent = recovered(actor.resourcesSpent, stats, rest);
+        return [
+          dndEvent(`${NS}:rested`, {
+            actor: actor.id,
+            rest,
+            maxHp: stats.maxHp,
+            resourcesSpent,
+          }),
+          ...(rest === "short"
+            ? recoveryHeal(actor, resourcesSpent, stats, context)
+            : []),
+        ];
       }),
-      ...restInspiration(party(context.state), rest, context),
-      ...(rest === "long" ? restItems(party(context.state), context) : []),
-      ...familiarFoundEvents(party(context.state), context, rest),
-      dndEvent(`${NS}:restFinished`, { rest }),
+      ...restInspiration(members, rest, context),
+      ...(rest === "long" ? restItems(members, context) : []),
+      ...familiarFoundEvents(members, context, rest),
+      dndEvent(`${NS}:restFinished`, {
+        rest,
+        ...(hours < REST_HOURS[rest] ? { hours } : {}),
+      }),
     ],
   };
 }
