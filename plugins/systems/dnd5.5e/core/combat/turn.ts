@@ -593,7 +593,15 @@ export function runFinishTurn(context: Context): SystemResult {
   const stopped = actor ? after.actors[actor.id] : undefined;
   const again = stopped && !isDown(stopped) ? extraTurnEvents(stopped) : null;
   if (again) return { events: [...ending, ...again] };
-  const between = betweenTurns(state, ending, context);
+  // A reaction to a creature ending its turn nearby, as with Skirmisher.
+  const watched =
+    actor && stopped && !isDown(stopped)
+      ? reactFrames(
+          { kind: "turnEnd", actor: actor.id },
+          { ...context, state: after },
+        )
+      : [];
+  const between = [...watched, ...betweenTurns(state, ending, context)];
   return between.length > 0
     ? { events: ending, frames: [...between, frame("advanceTurn", {})] }
     : runAdvanceTurn(context, ending);

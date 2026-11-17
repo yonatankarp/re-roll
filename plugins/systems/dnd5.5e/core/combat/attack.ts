@@ -39,6 +39,7 @@ import {
   afterDamage,
   type Edge,
   playerTakes,
+  rollRewards,
   reactFrames,
   respond,
   type Roll,
@@ -301,6 +302,7 @@ function reactionFor(
   critical: boolean,
   melee: boolean,
   spell = false,
+  attacker?: Actor,
 ): KnownAction | null {
   if (
     !target.budget.reaction ||
@@ -318,6 +320,22 @@ function reactionFor(
       if (activation.trigger.melee && !melee) return false;
       if (activation.trigger.ranged && melee) return false;
       if (activation.trigger.bySpell && !spell) return false;
+      if (!holds(target, activation.trigger.holding, context)) return false;
+      // Armor of Hexes: only a creature the bearer cursed; Instinctive Charm: only one this near.
+      if (
+        activation.trigger.marked &&
+        (!attacker || !markedBy(attacker, target, activation.trigger.marked))
+      ) {
+        return false;
+      }
+      if (
+        activation.trigger.within !== undefined &&
+        (!attacker ||
+          distanceFeet(attacker.position, target.position) >
+            activation.trigger.within)
+      ) {
+        return false;
+      }
       // Mythal Ward's table may turn the spell aside, so a spell attack's hit is always offered to it.
       if (activation.table) return true;
       const { resolution } = activation;
@@ -326,6 +344,16 @@ function reactionFor(
         return resolution.onFail.some((effect) => effect.kind === "negateHit");
       }
       if (resolution.kind !== "automatic") return false;
+      // Illusory Self: the hit misses outright; Sentinel at Death's Door: a Critical Hit is a normal one.
+      if (resolution.effects.some((effect) => effect.kind === "negateHit")) {
+        return true;
+      }
+      if (
+        critical &&
+        resolution.effects.some((effect) => effect.kind === "noCritical")
+      ) {
+        return true;
+      }
       const reduce = resolution.effects.find(
         (effect) => effect.kind === "reduceDamage",
       );
@@ -355,13 +383,20 @@ function reactionFor(
 // Whether the bearer holds what a reaction needs, such as a Shield for Protection.
 function holds(
   actor: Actor,
-  holding: "shield" | "shieldOrWeapon" | "polearm" | undefined,
+  holding: "shield" | "shieldOrWeapon" | "polearm" | "finesse" | undefined,
   context: Context,
 ): boolean {
   return (
     holding === undefined ||
     equipped(actor).some((id) => {
       const item = ItemSchema.safeParse(context.content(id)).data;
+      if (holding === "finesse") {
+        return (
+          item?.type === "weapon" &&
+          "properties" in item &&
+          item.properties.includes("finesse")
+        );
+      }
       return (
         item?.type === "shield" ||
         (holding !== "shield" && item?.type === "weapon")
@@ -401,6 +436,9 @@ function guardFor(
         distanceFeet(guard.position, target.position) <=
           (item.activation.trigger.within ?? 5) &&
         holds(guard, item.activation.trigger.holding, context) &&
+        // Sentinel at Death's Door: only for a Bloodied creature.
+        (!item.activation.trigger.bloodied ||
+          target.hp * 2 <= deriveStats(target, context).maxHp) &&
         canAfford(item, guard, stats),
     );
     if (
@@ -482,7 +520,7 @@ function rollWindow(
   | { readonly events: SystemEvent[]; readonly frames: Frame[] } {
   const passed = [...(attack.passed ?? [])];
   const events: SystemEvent[] = [];
-  let current = roll;
+  let current = { ...roll, edged: held.advantage !== held.disadvantage };
   let bonus = held.bonus;
   for (;;) {
     const found = rollResponder(current, passed, context);
@@ -526,6 +564,16 @@ function rollWindow(
       natural: taken.natural,
       ...judge(taken.natural, bonus),
     };
+    events.push(
+      ...rollRewards(
+        reactor,
+        action,
+        roll.roller,
+        taken.tempHp,
+        current.success,
+        context,
+      ),
+    );
   }
 }
 
@@ -759,8 +807,15 @@ function intercepted(
       effect.modifier.kind === "bonus" &&
       effect.modifier.to === "ac",
   );
+  const strike = effects.find((effect) => effect.kind === "strike");
   const lessened = {
     ...hit,
+    ...(strike?.kind === "strike"
+      ? { riposte: strike.action ?? "", riposter: guard.id }
+      : {}),
+    ...(effects.some((effect) => effect.kind === "noCritical")
+      ? { critical: false }
+      : {}),
     ...(reduceBy > 0 ? { reduceBy: (hit.reduceBy ?? 0) + reduceBy } : {}),
     ...(acBonus > 0 ? { acBonus: (hit.acBonus ?? 0) + acBonus } : {}),
     ...(effects.some((effect) => effect.kind === "reduceDamage" && effect.halve)
@@ -1249,6 +1304,7 @@ export function runAttackRoll(
     critical,
     meleeReach(action) !== null,
     action.spellLevel !== null,
+    attacker,
   );
   if (reaction) {
     return {
@@ -1287,6 +1343,7 @@ export const HitSchema = z.object({
   noModifier: z.boolean().optional(),
   poleStrike: z.boolean().optional(),
   riposte: z.string().optional(), // the attack the target makes back if this now misses, as with Riposte ("" for its weapon)
+  riposter: z.string().optional(), // who makes it, when not the target, as Glorious Defense's paladin
   kept: z.boolean().optional(), // a spell to take the hit's place, as Lightning Arrow, was already offered
   forgone: z.number().optional(), // Sneak Attack dice given up for strike options, as Cunning Strike's
   hidden: z.number().optional(), // the Stealth total the attacker was hidden with, for Supreme Sneak's Stealth Attack
@@ -1318,10 +1375,31 @@ export function runAfterReaction(
       const guard = intercepted(hit, context);
       return { events: [...paid, ...guard.events], frames: guard.frames };
     }
+    const turned = resolution.onFail.some(
+      (effect) => effect.kind === "negateHit" && effect.retarget,
+    )
+      ? retargeted(hit, attacker, target, context)
+      : null;
     return {
       events: [
         ...paid,
         ...leafEvents(resolution.onFail, action.id, target, attacker, context),
+      ],
+      frames: [
+        ...missedFrames(hit, context),
+        ...(turned ? [frame("recheckHit", turned)] : []),
+      ],
+    };
+  }
+  // Illusory Self: the hit misses outright.
+  if (
+    resolution.kind === "automatic" &&
+    resolution.effects.some((effect) => effect.kind === "negateHit")
+  ) {
+    return {
+      events: [
+        ...payCosts(action, target, context),
+        ...(resolveAction(action, target, [target], context).events ?? []),
       ],
       frames: missedFrames(hit, context),
     };
@@ -1392,6 +1470,12 @@ export function runAfterReaction(
       ...table.frames,
       frame("recheckHit", {
         ...hit,
+        // Sentinel at Death's Door: a Critical Hit is a normal hit.
+        ...((resolution.kind === "automatic" ? resolution.effects : []).some(
+          (effect) => effect.kind === "noCritical",
+        )
+          ? { critical: false }
+          : {}),
         ...(lessened.some((effect) => effect.halve) ? { halve: true } : {}),
         ...(reduceBy > 0 ? { reduceBy: (hit.reduceBy ?? 0) + reduceBy } : {}),
         ...(acBonus > 0 ? { acBonus: (hit.acBonus ?? 0) + acBonus } : {}),
@@ -1403,6 +1487,49 @@ export function runAfterReaction(
       }),
     ],
   };
+}
+
+// Instinctive Charm: the attack goes on at the nearest other creature within its reach or range, with the same roll.
+function retargeted(
+  hit: z.infer<typeof HitSchema>,
+  attacker: Actor,
+  target: Actor,
+  context: Context,
+): z.infer<typeof HitSchema> | null {
+  const attack = findAction(attacker, hit.actionId, context, hit.slotLevel);
+  const { targeting } = attack.activation;
+  const reach =
+    meleeReach(attack) ??
+    ("range" in targeting && typeof targeting.range === "number"
+      ? targeting.range
+      : 5);
+  const other = Object.values(context.state.actors)
+    .filter(
+      (item) =>
+        item.id !== attacker.id &&
+        item.id !== target.id &&
+        item.position !== undefined &&
+        !isDown(item) &&
+        !isDead(item) &&
+        distanceFeet(attacker.position, item.position) <= reach,
+    )
+    .sort(
+      (a, b) =>
+        distanceFeet(attacker.position, a.position) -
+        distanceFeet(attacker.position, b.position),
+    )[0];
+  return other
+    ? {
+        attacker: hit.attacker,
+        actionId: hit.actionId,
+        target: other.id,
+        critical: false,
+        hadAdvantage: hit.hadAdvantage,
+        total: hit.total,
+        natural: hit.natural,
+        ...(hit.slotLevel === undefined ? {} : { slotLevel: hit.slotLevel }),
+      }
+    : null;
 }
 
 function transferTo(
@@ -1429,17 +1556,23 @@ export function runRecheckHit(
     coverAgainst(state, attacker, target, context) +
     (payload.acBonus ?? 0);
   if (!payload.critical && payload.total < ac) {
-    // Riposte: on the miss, the target makes its attack back.
+    // Riposte: on the miss, the target makes its attack back, or the guard that turned it aside does.
+    const riposter = payload.riposter ? state.actors[payload.riposter] : target;
     const attack =
-      payload.riposte === undefined
+      payload.riposte === undefined || !riposter
         ? undefined
-        : strikeAction(target, payload.riposte || undefined, context);
+        : strikeAction(riposter, payload.riposte || undefined, context);
+    const reaches =
+      attack !== undefined &&
+      riposter !== undefined &&
+      distanceFeet(riposter.position, attacker.position) <=
+        (meleeReach(attack) ?? 5);
     return {
       frames: [
-        ...(attack
+        ...(attack && riposter && reaches
           ? [
               frame("attackRoll", {
-                attacker: target.id,
+                attacker: riposter.id,
                 actionId: attack.id,
                 target: payload.attacker,
               }),
@@ -1885,7 +2018,13 @@ function landHit(
           ),
   }));
   const lessened = lessenHits(armored, payload);
-  const dealt = dealEvents(target, lessened, payload.critical, context);
+  const dealt = dealEvents(
+    target,
+    lessened,
+    payload.critical,
+    context,
+    attacker,
+  );
   const passed = passedOn(armored, lessened, payload, attacker, target, {
     ...context,
     state: dealt.events.reduce(applyDndEvent, state),

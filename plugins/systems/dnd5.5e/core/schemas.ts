@@ -1004,6 +1004,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     toNear: z
       .strictObject({ monster: ContentIdSchema, within: z.number().int() })
       .optional(),
+    // Before damage lands on another creature (combat/reactions.ts beforeDamage): the bearer takes it all instead,
+    // and nothing lessens it, as Divine Allegiance; or what this takes off is dealt back to the creature that dealt
+    // it, as this type, as Vengeful Ancestors' Force.
+    takes: z.literal(true).optional(),
+    echo: DamageTypeSchema.optional(),
   }),
   // Adds to AC against the hit that triggered a reaction only, possibly turning it into a miss, as with Parry.
   z.strictObject({
@@ -1024,13 +1029,26 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // and must use the new roll, as with Bountiful Luck; the roll gains or loses `amount`, as with Boon of Fate
   // (`either`) or a sphinx's Burst of Ingenuity; or the bearer rolls a d20 that may stand in for it, as with
   // Portent.
-  z.strictObject({ kind: z.literal("reroll") }),
+  // `advantage` rerolls with Advantage, as Countercharm; `straight` with neither edge, as Restore Balance takes the
+  // roll's Advantage or Disadvantage away; `tempHp` goes to the roller if the new roll succeeds, as Reweave Fate's.
+  z.strictObject({
+    kind: z.literal("reroll"),
+    advantage: z.literal(true).optional(),
+    straight: z.literal(true).optional(),
+    tempHp: AmountSchema.optional(),
+  }),
   z.strictObject({
     kind: z.literal("rollBonus"),
     amount: AmountSchema,
     either: z.boolean().default(false),
   }),
-  z.strictObject({ kind: z.literal("replaceRoll") }),
+  // With `value`, the d20 shows that instead, as Stroke of Luck's 20.
+  z.strictObject({
+    kind: z.literal("replaceRoll"),
+    value: z.number().int().min(1).max(20).optional(),
+  }),
+  // The roll succeeds instead, as Noble Scion's Minor Wish.
+  z.strictObject({ kind: z.literal("succeed") }),
   // The bearer makes one attack against the creature that set the reaction off: the action named, or else an
   // Opportunity Attack with its melee weapon. `approach` moves it next to the creature first without provoking,
   // as with Bloodthirsty Slash.
@@ -1041,6 +1059,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     approach: z.boolean().default(false),
     // A teleport it uses lands within this many feet of the creature that set it off, as with Pursuit.
     near: z.number().int().min(5).optional(),
+    ranged: z.literal(true).optional(), // with its ranged weapon instead, as Masterful Shots' shot back
+    damage: AmountSchema.optional(), // added to the attack's damage, as Riposte's Superiority Die
   }),
   // A Small or Medium ally within 5 feet trades places with the bearer and becomes the attack's target, as with
   // Redirect Attack; with `charmed`, any Charmed creature there instead.
@@ -1054,8 +1074,14 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // The weapon of the attack that missed sticks for as long as the grapple this reaction makes holds, as with
   // Sticky Shield (combat/reactions.ts).
   z.strictObject({ kind: z.literal("stickWeapon") }),
-  // The triggering attack misses instead, as with Jinx on a failed save.
-  z.strictObject({ kind: z.literal("negateHit") }),
+  // The triggering attack misses instead, as with Jinx on a failed save or Illusory Self. With `retarget`, it goes on
+  // at another creature within its reach or range, with the same roll, as Instinctive Charm turns it.
+  z.strictObject({
+    kind: z.literal("negateHit"),
+    retarget: z.literal(true).optional(),
+  }),
+  // The triggering Critical Hit is a normal hit instead, as Sentinel at Death's Door makes it.
+  z.strictObject({ kind: z.literal("noCritical") }),
   // Lifts the target `feet` up, where it can't move and nothing below reaches it, until `duration` is over and it
   // falls, as with Reverse Gravity (combat/falling.ts). With `grab`, a creature beside a wall may save to hold on.
   z.strictObject({
@@ -1524,8 +1550,11 @@ export const ActivationSchema = z.strictObject({
       // as with Protection and Interception. It's taken as soon as it can be.
       allyAttacked: z.literal(true).optional(),
       allyHit: z.literal(true).optional(),
-      // what the bearer must hold to take it; "polearm" is a Quarterstaff, a Spear or a Heavy weapon with Reach
-      holding: z.enum(["shield", "shieldOrWeapon", "polearm"]).optional(),
+      // what the bearer must hold to take it; "polearm" is a Quarterstaff, a Spear or a Heavy weapon with Reach,
+      // and "finesse" a Finesse weapon, as Defensive Duelist's
+      holding: z
+        .enum(["shield", "shieldOrWeapon", "polearm", "finesse"])
+        .optional(),
       // Taken by the bearer when a creature attacks it, before the roll, giving that roll Disadvantage, as with
       // Lucky. It's taken on its own once the bearer is at half its Hit Points or fewer, or the attacker has
       // Advantage.
@@ -1552,11 +1581,16 @@ export const ActivationSchema = z.strictObject({
       rolled: z
         .strictObject({
           rolls: z.array(z.enum(["attack", "save", "check"])).min(1),
-          by: z.enum(["self", "ally", "selfOrAlly", "foe", "any"]),
+          // "others" is anyone but the bearer, as Bend Luck's
+          by: z.enum(["self", "ally", "selfOrAlly", "foe", "any", "others"]),
           when: z
             .enum(["natural1", "hit", "failed", "hitOrFailed", "any"])
             .default("any"),
           magical: z.literal(true).optional(),
+          // only a save to avoid or end one of these conditions, as Countercharm's Charmed or Frightened
+          conditions: z.array(ConditionSchema).min(1).optional(),
+          // only a roll with Advantage or Disadvantage, as Restore Balance
+          edged: z.literal(true).optional(),
         })
         .optional(),
       // Taken right after an attack hits the bearer (`struck`) or misses it (`missed`), as with Counterattack or
@@ -1574,8 +1608,16 @@ export const ActivationSchema = z.strictObject({
       turnStart: z.literal(true).optional(),
       // With `turnStart`, only a Frightened creature sets it off, as Boon of Terror's Flee, Fools!
       frightened: z.literal(true).optional(),
-      // Taken after the bearer's own save against a creature's effect fails or succeeds, as with Mind Corrosion.
+      // Taken after the bearer's own save against a creature's effect fails or succeeds, as with Mind Corrosion, or
+      // an ally's within `within`, as with Beguiling Twist; with `conditions`, only a save against one of these.
       ownSave: z.enum(["failed", "succeeded"]).optional(),
+      allySave: z.enum(["failed", "succeeded"]).optional(),
+      conditions: z.array(ConditionSchema).min(1).optional(),
+      // Taken when an enemy ends its turn within `within`, as with Skirmisher.
+      turnEnds: z.literal(true).optional(),
+      // Taken right after a foe within `within` hits or misses anyone with an attack roll; with `marked`, only one
+      // under an effect of the bearer's from one of those, as Soul of Vengeance's foe under Vow of Enmity.
+      foeAttacks: z.literal(true).optional(),
       // With `ownSave`, `missed` or `struck`, only a spell sets it off, as with Spell Reflection.
       bySpell: z.literal(true).optional(),
       // Taken when a creature within `within` makes a save to keep Concentration, or takes the Study action, as

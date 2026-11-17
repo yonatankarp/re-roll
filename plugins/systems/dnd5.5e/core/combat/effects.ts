@@ -1242,6 +1242,7 @@ export function dealEvents(
   hits: readonly { readonly amount: number; readonly type: Damage["type"] }[],
   critical: boolean,
   context: Context,
+  source?: Actor, // the creature dealing it, for a reaction aimed back at it, as Backlash's
 ): { events: SystemEvent[]; dealt: number } {
   let { state } = context;
   const events: SystemEvent[] = [];
@@ -1253,10 +1254,13 @@ export function dealEvents(
       state,
     });
     // A reaction such as Vitality Ward may lessen it before it lands.
-    const lessened = beforeDamage(current, reduced.amount, hit.type, {
-      ...context,
-      state,
-    });
+    const lessened = beforeDamage(
+      current,
+      reduced.amount,
+      hit.type,
+      { ...context, state },
+      source && (state.actors[source.id] ?? source),
+    );
     const { amount, type } = { ...hit, amount: lessened.amount };
     for (const event of [
       ...reduced.events,
@@ -2502,10 +2506,12 @@ export function leafEvents(
       case "reroll":
       case "rollBonus":
       case "replaceRoll":
+      case "succeed":
       case "strike":
       case "redirect":
       case "drawAttack":
       case "negateHit":
+      case "noCritical":
       case "stickWeapon":
       case "slowFall":
       case "split":
@@ -3005,6 +3011,7 @@ export function rollSave(
       natural: roll.natural,
       goal: dc,
       magical,
+      conditions,
       ...judge(roll.natural, 0),
     },
     edge,
@@ -3300,6 +3307,7 @@ export function resolveAction(
       })),
       false,
       context,
+      actor,
     );
     lastDealt = result.dealt;
     events.push(
@@ -3982,6 +3990,7 @@ export function resolveAction(
               source: actor.id,
               success: saved,
               spell: action.spellLevel !== null,
+              conditions: conditionsApplied(resolution.onFail),
             },
             context,
           ),
