@@ -26,6 +26,7 @@ import {
   evaluateFormula,
   type KnownAction,
   rollAmount,
+  UNARMED_STRIKE,
 } from "../stats.ts";
 import { finalDamage } from "../rules.ts";
 import type { Damage } from "../schemas.ts";
@@ -186,13 +187,22 @@ export function provokers(
           far(index) <= reach &&
           far(index + 1) > reach,
       );
-    const melee = deriveStats(foe, access).actions.find((item) => {
+    const actions = deriveStats(foe, access).actions;
+    // A bare Unarmed Strike isn't worth the Reaction to one that has another use for it, as Shield.
+    // shortcut: the Opportunity Attack is still taken without asking, with a weapon or one's only use for it.
+    const saves = actions.some(
+      (item) =>
+        item.activation.cost.includes("reaction") &&
+        item.activation.trigger !== undefined,
+    );
+    const melee = actions.find((item) => {
       const reach = meleeReach(item);
       return (
         reach !== null &&
         item.activation.resolution.kind === "attack" &&
         !item.activation.trigger &&
         item.spellLevel === null &&
+        !(saves && item.id === UNARMED_STRIKE) &&
         leaves(reach)
       );
     });

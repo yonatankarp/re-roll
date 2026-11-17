@@ -22,12 +22,13 @@ import {
   saveBonus,
   type Stats,
   weaponFits,
+  UNARMED_STRIKE,
 } from "./stats.ts";
 import { knownFoes } from "./fog.ts";
 import type { Condition, LeafEffect, Modifier, Resolution } from "./schemas.ts";
 import { finalDamage } from "./rules.ts";
 import type { Square } from "./grid.ts";
-import { dodging, grappledAwayFrom } from "./tactics.ts";
+import { dodging, grappledAwayFrom, masteryOf } from "./tactics.ts";
 import { grapplesOn } from "./combat/grapple.ts";
 import { AIM_AREA, PICK } from "./targeting.ts";
 import { ALL, ITEM_PREFIX, THROW_PREFIX } from "./combat/ids.ts";
@@ -152,6 +153,11 @@ export function makeJudge(context: Context, side: Actor): Judge {
   const partyShare = damageToParty(state);
   const stats = cached((actor) => deriveStats(actor, context));
   const responses = cached((actor) => damageResponses(actor, context));
+  const masters = cached((actor) =>
+    stats(actor).actions.some(
+      (item) => masteryOf(actor, item.id, context) !== null,
+    ),
+  );
 
   // Advantage (1), Disadvantage (-1) or neither on an attack, as attack.ts rolls it, leaving out sight and
   // reactions. The fight's opening positions don't say who will stand where: a melee attack with 5-foot reach
@@ -974,6 +980,17 @@ export function makeJudge(context: Context, side: Actor): Judge {
       // Haste's extra attack each turn, and its AC.
       case "hasted":
         return 0.45 * own * lasting(span);
+      // A Potion of Giant Strength's score: about a tenth of its threat for each point its attack modifier rises.
+      case "setScore": {
+        const scores = stats(target).abilities;
+        const gain =
+          Math.floor((modifier.score - 10) / 2) -
+          Math.floor((scores[modifier.ability] - 10) / 2);
+        return gain > 0 &&
+          (modifier.ability === "str" || modifier.ability === "dex")
+          ? 0.1 * gain * own * lasting(span)
+          : 0;
+      }
       // Sealing or slowing a friend costs it what it would cost a foe.
       case "sealed":
         return -0.9 * own * lasting(span);
@@ -1439,6 +1456,10 @@ export function makeJudge(context: Context, side: Actor): Judge {
       gained = worthOn(actor, target, action, darts);
     }
     if (gained <= 0) return gained;
+    // A bare Unarmed Strike gives up the mastery a mastered weapon would put on the hit, as Topple's.
+    if (actionId === UNARMED_STRIKE && masters(actor)) {
+      gained *= 0.75;
+    }
     // What it spends: a slot by its level, a limited use or an item a little.
     const reference =
       rate * Math.max(1, freeThreat(actor), 0.5 * threat(actor));
