@@ -1,4 +1,5 @@
 import { afterDamage, reactFrames } from "./reactions.ts";
+import { deathSaveEvents } from "./actions.ts";
 import { duelStrayed } from "./duel.ts";
 import { confusedBy } from "./confusion.ts";
 import {
@@ -20,6 +21,7 @@ import {
   INCAPACITATING,
   isDead,
   isDown,
+  fightingOn,
   isStable,
   NS,
   frame,
@@ -46,6 +48,7 @@ import {
   piercing,
   repeatSaveConditions,
   rescuedSave,
+  saveSourceOf,
 } from "../trait-rules.ts";
 import {
   actorOf,
@@ -421,6 +424,20 @@ export function runFinishTurn(context: Context): SystemResult {
             rolled.events,
             events,
             context.dice,
+            false,
+            {
+              ...(context.state.actors[casterId]
+                ? {
+                    source: saveSourceOf(
+                      actorOf(context.state, casterId),
+                      sourceId,
+                      "",
+                      context,
+                    ),
+                  }
+                : {}),
+              access: context,
+            },
           );
     events.push(...rescued);
     const holder =
@@ -546,6 +563,10 @@ export function runAdvanceTurn(
     ...finished,
     ...expired,
     ...(next ? rescueEvents(next, { ...context, state: after }) : []),
+    // Rage beyond Death: conscious at 0 Hit Points, still dying.
+    ...(next && next.hp <= 0 && fightingOn(next)?.delayDeath && !isStable(next)
+      ? deathSaveEvents(next, { ...context, state: after })
+      : []),
     ...(next ? banishEvents(next, { ...context, state: after }) : []),
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? regenerationEvents(next, context) : []),

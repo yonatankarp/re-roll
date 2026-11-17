@@ -45,6 +45,19 @@ export function castFrom(
   return item && charges ? { item, charges: Number(charges) } : null;
 }
 
+// A magic item's own activation, the `index`th it has (stats.ts itemUses): "use:<item>:<index>".
+export const USE_PREFIX = "use:";
+export function itemUseId(itemId: string, index: number): string {
+  return `${USE_PREFIX}${itemId}:${String(index)}`;
+}
+
+// The item behind an item's own activation, or null for any other action.
+export function itemUseOf(actionId: string): string | null {
+  return actionId.startsWith(USE_PREFIX)
+    ? actionId.slice(USE_PREFIX.length, actionId.lastIndexOf(":"))
+    : null;
+}
+
 // The weapon behind a weapon attack or a throw, or "" for any other action.
 export function weaponItemId(actionId: string): string {
   for (const prefix of [WEAPON_PREFIX, THROW_PREFIX]) {

@@ -13,6 +13,10 @@ import {
   it,
   vi,
 } from "vitest";
+import {
+  ENCUMBRANCE,
+  SKILLS_WITH_DIFFERENT_ABILITIES,
+} from "../plugins/systems/dnd5.5e/core/variant-rules.ts";
 import { BOOK_ROOTS } from "./depth.ts";
 import { systems } from "../app/systems.ts";
 import {
@@ -258,20 +262,35 @@ describe("playing through the shell's session", () => {
   it("starts with the chosen difficulty and keeps it through a save and a restart", async () => {
     const game = newGame();
     const settings = await game.settingsFor("goblin-ambush");
-    expect(settings.map((setting) => setting.id)).toEqual(["difficulty"]);
+    expect(settings.map((setting) => setting.id)).toEqual([
+      "difficulty",
+      ENCUMBRANCE,
+      SKILLS_WITH_DIFFERENT_ABILITIES,
+    ]);
     await game.start("goblin-ambush", "difficulty-test", {
       difficulty: "story",
+      [ENCUMBRANCE]: "on",
     });
-    const difficulty = (): unknown =>
-      (game.view().systemState as { difficulty?: string }).difficulty;
-    expect(difficulty()).toBe("story");
+    const chosen = (): unknown => {
+      const { difficulty, variantRules } = game.view().systemState as {
+        difficulty?: string;
+        variantRules?: string[];
+      };
+      return { difficulty, variantRules };
+    };
+    const story = { difficulty: "story", variantRules: [ENCUMBRANCE] };
+    expect(chosen()).toEqual(story);
     const path = await game.save("difficulty");
+    // A variant rule that's on is named with the save, and one that's off isn't.
+    expect(
+      (await game.listSaves()).find((save) => save.path === path)?.settings,
+    ).toEqual(["Story", "Encumbrance"]);
     await game.start("goblin-ambush", "other", { difficulty: "hard" });
-    expect(difficulty()).toBe("hard");
+    expect(chosen()).toEqual({ difficulty: "hard", variantRules: undefined });
     await game.load(path);
-    expect(difficulty()).toBe("story");
+    expect(chosen()).toEqual(story);
     await game.restart("again");
-    expect(difficulty()).toBe("story");
+    expect(chosen()).toEqual(story);
   });
 
   const pick = async (

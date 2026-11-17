@@ -24,7 +24,7 @@ import { HIT_DICE } from "./combat/ids.ts";
 import { hitDieHealing, hitDieRoll } from "./trait-rules.ts";
 import { gearOptions } from "./gear.ts";
 import { familiarFoundEvents } from "./combat/familiar.ts";
-import { ClassSchema, type ResourceDef } from "./schemas.ts";
+import { ClassSchema, type LeafEffect, type ResourceDef } from "./schemas.ts";
 import {
   type Stats,
   deriveStats,
@@ -78,8 +78,9 @@ function spendEvents(
   die: string,
   stats: Stats,
   context: Context,
+  withMeal = true,
 ): readonly SystemEvent[] {
-  const meal = mealBonus(actor, context);
+  const meal = withMeal ? mealBonus(actor, context) : 0;
   const rolled =
     hitDieRoll(die, stats, context.dice) + modifierFor(stats, "con");
   return [
@@ -112,11 +113,15 @@ export function shortRestEvents(
 export const SHORT_REST_GIVEN = "shortRest:given";
 
 // A Short Rest's benefits for one creature, as Prayer of Healing gives: Hit Dice spent until healed, then what the
-// rest restores.
+// rest restores. Between fights the player spends theirs die by die afterwards (`givenDice`, from camp.ts), so
+// theirs aren't spent here; in a fight, as by Catnap, they're spent as a companion's are.
 export function shortRestFor(actor: Actor, context: Context): SystemEvent[] {
   if (actor.side !== "party" || isDead(actor)) return [];
   if (actor.resourcesSpent[SHORT_REST_GIVEN]) return [];
-  const spent = diceSpent(actor, context);
+  const spent =
+    actor.id === PLAYER_ACTOR && !context.state.combat
+      ? []
+      : diceSpent(actor, context);
   const after = spent.reduce(applyDndEvent, context.state).actors[actor.id];
   const stats = deriveStats(actor, context);
   return [
@@ -256,6 +261,49 @@ function runShortRestAnswer(
   };
 }
 
+const GIVEN = "given";
+
+// The player spends Hit Dice a spell's Short Rest gave them, die by die, as in a Short Rest of their own.
+function runGivenDice(context: Context): SystemResult {
+  const player = context.state.actors[PLAYER_ACTOR];
+  if (!player) return {};
+  const stats = deriveStats(player, context);
+  if (!canSpend(player, stats)) return {};
+  const left = stats.level - (player.resourcesSpent[HIT_DICE] ?? 0);
+  return {
+    frames: [
+      awaitDecision({
+        id: `${NS}:givenDice:${String(left)}`,
+        actor: player.id,
+        prompt: `You have ${String(player.hp)} of ${String(stats.maxHp)} HP and ${String(left)} Hit Dice left.`,
+        options: [
+          { id: SPEND, label: `Spend a Hit Die (${nextDie(player, context)})` },
+          { id: GIVEN, label: "Keep the rest" },
+        ],
+        resume: frame("givenDiceAnswer"),
+      }),
+    ],
+  };
+}
+
+function runGivenDiceAnswer(
+  { answer }: z.infer<typeof AnswerSchema>,
+  context: Context,
+): SystemResult {
+  const player = context.state.actors[PLAYER_ACTOR];
+  if (answer !== SPEND || !player) return {};
+  return {
+    events: spendEvents(
+      player,
+      nextDie(player, context),
+      deriveStats(player, context),
+      context,
+      false,
+    ),
+    frames: [frame("givenDice")],
+  };
+}
+
 function runCompanionsSpend(context: Context): SystemResult {
   return {
     events: shortRestEvents(context, PLAYER_ACTOR),
@@ -272,8 +320,22 @@ function maxUses(resource: string, stats: Stats): number {
   return stats.resources[resource] ?? 0;
 }
 
-function slotKeys(stats: Stats): string[] {
-  return stats.slots.map((_, index) => `slot:${String(index + 1)}`).reverse();
+// Spell slot keys, the highest first, up to `maxLevel`.
+function slotKeys(stats: Stats, maxLevel = 9): string[] {
+  return stats.slots
+    .slice(0, maxLevel)
+    .map((_, index) => `slot:${String(index + 1)}`)
+    .reverse();
+}
+
+// The highest slot level a `regain` effect gives back, cast with a slot of this level.
+export function regainCap(
+  effect: Extract<LeafEffect, { kind: "regain" }>,
+  slotLevel: number | null | undefined,
+): number | undefined {
+  return effect.maxLevel === "halfSlot"
+    ? Math.floor((slotLevel ?? 0) / 2)
+    : effect.maxLevel;
 }
 
 // Whether there's anything spent for a `regain` effect to give back.
@@ -281,18 +343,20 @@ export function canRegain(
   actor: Actor,
   resource: string,
   stats: Stats,
+  maxLevel?: number,
 ): boolean {
-  const keys = resource === "slots" ? slotKeys(stats) : [resource];
+  const keys = resource === "slots" ? slotKeys(stats, maxLevel) : [resource];
   return keys.some((key) => (actor.resourcesSpent[key] ?? 0) > 0);
 }
 
 // A `regain` effect: spent uses back, at most `count`, half the most rounded up, or all; for "slots", slots of
-// any level, the highest first.
+// any level up to `maxLevel`, the highest first.
 export function regainEvents(
   actor: Actor,
   resource: string,
   count: number | "half" | "all",
   stats: Stats,
+  maxLevel?: number,
 ): SystemEvent[] {
   let left =
     count === "all"
@@ -300,21 +364,21 @@ export function regainEvents(
       : count === "half"
         ? Math.ceil(maxUses(resource, stats) / 2)
         : count;
-  return (resource === "slots" ? slotKeys(stats) : [resource]).flatMap(
-    (key) => {
-      const amount = Math.min(left, actor.resourcesSpent[key] ?? 0);
-      left -= amount;
-      return amount > 0
-        ? [
-            dndEvent(`${NS}:resourceRestored`, {
-              actor: actor.id,
-              resource: key,
-              amount,
-            }),
-          ]
-        : [];
-    },
-  );
+  return (
+    resource === "slots" ? slotKeys(stats, maxLevel) : [resource]
+  ).flatMap((key) => {
+    const amount = Math.min(left, actor.resourcesSpent[key] ?? 0);
+    left -= amount;
+    return amount > 0
+      ? [
+          dndEvent(`${NS}:resourceRestored`, {
+            actor: actor.id,
+            resource: key,
+            amount,
+          }),
+        ]
+      : [];
+  });
 }
 
 type Recharge = ResourceDef["recharge"][number];
@@ -372,7 +436,10 @@ export function recovered(
   const used = (id: string): number => left.get(id) ?? 0;
   for (const key of left.keys()) {
     const slot = key.startsWith("slot:");
-    const daily = key === HIT_DICE || key === SHORT_REST_GIVEN;
+    const daily =
+      key === HIT_DICE ||
+      key === SHORT_REST_GIVEN ||
+      key.startsWith("deterred:"); // Among the Dead's freed attackers
     if (
       key === MEAL ||
       (rest === "long" ? slot || daily : slot && stats.pactMagic)
@@ -390,6 +457,15 @@ export function recovered(
           ? on === "turnStart" || on === "shortRest" || rest === "long"
           : on === (rest === "long" ? "longRest" : "shortRest");
       if (!applies || !canUse(entry, used, stats) || used(id) === 0) continue;
+      // Cauldron of Rebirth's 7 days: only once that many have passed since the use was spent.
+      if (entry.every) {
+        const waited = `${id}:waited`;
+        if (used(waited) + 1 < entry.every) {
+          left.set(waited, used(waited) + 1);
+          continue;
+        }
+        left.set(waited, 0);
+      }
       const rolled =
         entry.roll && dice ? rollDiceNotation(entry.roll, dice) : 0;
       const back = rechargeAmount(
@@ -697,6 +773,14 @@ export const restFrames = {
   [`${NS}:shortRestAnswer`]: frameHandler({
     schema: AnswerSchema,
     run: runShortRestAnswer,
+  }),
+  [`${NS}:givenDice`]: frameHandler({
+    schema: z.object({}),
+    run: (_payload, context: Context) => runGivenDice(context),
+  }),
+  [`${NS}:givenDiceAnswer`]: frameHandler({
+    schema: AnswerSchema,
+    run: runGivenDiceAnswer,
   }),
   [`${NS}:companionsSpend`]: frameHandler({
     schema: z.object({}),

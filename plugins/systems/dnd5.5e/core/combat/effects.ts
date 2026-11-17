@@ -1,5 +1,6 @@
 import {
   chargesOf,
+  checkBonus,
   damageResponses,
   deriveStats,
   evaluateFormula,
@@ -7,6 +8,7 @@ import {
   type KnownAction,
   lookup,
   modifierFor,
+  passiveModifiers,
   rerollingOnes,
   rollAmount,
   rollDiceNotation,
@@ -17,7 +19,7 @@ import {
   type Stats,
 } from "../stats.ts";
 import { metamagicSaves } from "../metamagic.ts";
-import { regainEvents, shortRestFor } from "../rest.ts";
+import { regainCap, regainEvents, shortRestFor } from "../rest.ts";
 import {
   type Actor,
   applyDndEvent,
@@ -26,10 +28,12 @@ import {
   type DndState,
   hasCondition,
   INCAPACITATING,
+  fightingOn,
   familiarOwner,
   freshActor,
   isDead,
   isStable,
+  mountOf,
   isDown,
   NS,
   frame,
@@ -39,6 +43,7 @@ import {
   type ContentAccess,
   type Dice,
   type Frame,
+  PLAYER_ACTOR,
   type SystemEvent,
   type SystemResult,
 } from "#sdk";
@@ -46,6 +51,7 @@ import { concentrationDc, finalDamage, halved, rollD20 } from "../rules.ts";
 import {
   type Ability,
   type Amount,
+  type Condition,
   type Damage,
   type DamageType,
   type Duration,
@@ -72,7 +78,10 @@ import {
   interposedShield,
   evades,
   rescuedSave,
+  type SaveSource,
+  saveSourceOf,
   traitSaveAdvantage,
+  WARD_DOWN,
 } from "../trait-rules.ts";
 import { dodging, speedOf, walkSpeed } from "../tactics.ts";
 import {
@@ -81,6 +90,7 @@ import {
   HIT_DICE,
   THROW_PREFIX,
   castFrom,
+  itemUseOf,
   spellOfSource,
   weaponItemId,
 } from "./ids.ts";
@@ -111,6 +121,7 @@ import {
   reactFrames,
   settleRoll,
   beforeFailedSave,
+  playerTakes,
   slotRefund,
 } from "./reactions.ts";
 import { summonEvents } from "./summon.ts";
@@ -121,6 +132,7 @@ import { headDamageEvents } from "./heads.ts";
 import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
 import { movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
+import { reincarnateEvents } from "../reincarnate.ts";
 import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
@@ -144,6 +156,8 @@ import {
   inReach,
   isMelee,
   meleeReach,
+  hitFits,
+  onceKey,
   reaches,
   rollBonus,
   SIZES,
@@ -179,6 +193,14 @@ export function payCosts(
           ]
         : [],
     ),
+    ...(action.activation.oncePerTurn
+      ? [
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: actor.id,
+            key: onceKey(action),
+          }),
+        ]
+      : []),
   ];
   for (const cost of action.activation.cost) {
     if (cost === "action" || cost === "bonusAction" || cost === "reaction") {
@@ -221,29 +243,32 @@ export function payCosts(
 }
 
 // Spending a charged item's last charge rolls a d20, and on a 1 the item is gone, or left as the plain item it
-// becomes, as an Enspelled Staff's Quarterstaff (ChargedSchema).
+// becomes, as an Enspelled Staff's Quarterstaff (ChargedSchema). That's a spell cast from it or its own activation.
 // shortcut: a Staff of Power's or the Magi's other rolls, keeping its bonus or regaining charges on a 20, don't play.
 function lastCharge(
   actor: Actor,
   action: KnownAction,
   context: Context,
 ): SystemEvent[] {
-  const from = castFrom(action.id);
-  const item = from ? lookup(context, ItemSchema, from.item) : undefined;
+  const itemId = castFrom(action.id)?.item ?? itemUseOf(action.id);
+  const item = itemId ? lookup(context, ItemSchema, itemId) : undefined;
   const fate = item && "lastCharge" in item ? item.lastCharge : undefined;
   const pool = item ? chargesOf(item).resources[0]?.id : undefined;
-  if (!from || !fate || !pool) return [];
-  const spends = action.activation.cost.some(
-    (cost) =>
-      typeof cost === "object" && "resource" in cost && cost.resource === pool,
+  if (!itemId || !fate || !pool) return [];
+  const charges = action.activation.cost.reduce(
+    (total, cost) =>
+      typeof cost === "object" && "resource" in cost && cost.resource === pool
+        ? total + (cost.count ?? 1)
+        : total,
+    0,
   );
   const left =
     (deriveStats(actor, context).resources[pool] ?? 0) -
     (actor.resourcesSpent[pool] ?? 0) -
-    from.charges;
-  if (!spends || left > 0 || context.dice.roll(20) !== 1) return [];
+    charges;
+  if (charges === 0 || left > 0 || context.dice.roll(20) !== 1) return [];
   return [
-    dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: from.item }),
+    dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: itemId }),
     dndEvent(`${NS}:resourceRestored`, { actor: actor.id, resource: pool }),
     ...(typeof fate === "object"
       ? [
@@ -344,6 +369,17 @@ function afterDamageEvents(
   context: Context,
 ): SystemEvent[] {
   const events: SystemEvent[] = headDamageEvents(target, amount, type, stats);
+  // A Cloak of Displacement stops working until the bearer's next turn starts.
+  if (
+    stats.passives.some(
+      (passive) => passive.kind === "ward" && passive.suppressed === "damaged",
+    ) &&
+    !target.usedThisTurn.includes(WARD_DOWN)
+  ) {
+    events.push(
+      dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key: WARD_DOWN }),
+    );
+  }
   for (const passive of stats.passives) {
     if (passive.kind === "onDamage" && passive.damage.includes(type)) {
       for (const modifier of passive.modifiers) {
@@ -687,11 +723,48 @@ function killEvents(fallen: Actor, context: Context): SystemEvent[] {
           (bearer.resourcesSpent[passive.resource] ?? 0) >=
             (stats.resources[passive.resource] ?? 0)) ||
         (passive.reaction &&
-          (!bearer.budget.reaction || hasCondition(bearer, ...INCAPACITATING)))
+          (!bearer.budget.reaction ||
+            hasCondition(bearer, ...INCAPACITATING))) ||
+        (passive.oncePerTurn &&
+          (bearer.usedThisTurn.includes(ON_KILL) ||
+            hasCondition(bearer, ...INCAPACITATING)))
       ) {
         return [];
       }
+      // Keeper of Souls: the most hurt of the bearer and its allies near it, healed by the foe's Hit Dice.
+      const to = passive.ally
+        ? ([bearer, ...allies(context.state, bearer)]
+            .filter(
+              (item) =>
+                !isDead(item) &&
+                distanceFeet(bearer.position, item.position) <=
+                  (passive.within ?? Infinity),
+            )
+            .map((item) => ({
+              item,
+              missing: deriveStats(item, context).maxHp - item.hp,
+            }))
+            .sort((a, b) => b.missing - a.missing)
+            .find(({ missing }) => missing > 0)?.item ?? null)
+        : bearer;
+      if (!to) return [];
+      const dice = hitDiceOf(fallen, context);
+      const effects = passive.fallenHitDice
+        ? passive.effects.map((effect) =>
+            effect.kind === "heal"
+              ? { ...effect, amount: { bonus: { base: dice, add: [] } } }
+              : effect,
+          )
+        : passive.effects;
       return [
+        ...(passive.oncePerTurn
+          ? [
+              dndEvent(`${NS}:oncePerTurnUsed`, {
+                actor: bearer.id,
+                key: ON_KILL,
+              }),
+            ]
+          : []),
         ...(passive.resource
           ? [
               dndEvent(`${NS}:resourceSpent`, {
@@ -708,16 +781,151 @@ function killEvents(fallen: Actor, context: Context): SystemEvent[] {
               }),
             ]
           : []),
-        ...leafEvents(
-          passive.effects,
-          `onKill:${fallen.id}`,
-          bearer,
-          bearer,
-          context,
-        ),
+        ...leafEvents(effects, `onKill:${fallen.id}`, bearer, to, context),
       ];
     });
   });
+}
+
+const ON_KILL = "onKill";
+
+// A check with the caster's spellcasting ability, as Dispel Magic's against a higher spell.
+// shortcut: no reactions or rescues change the roll, as they may an ability check's (actions.ts abilityCheck).
+function spellcastingCheck(
+  caster: Actor,
+  stats: Stats,
+  dc: number,
+  context: Context,
+): { readonly success: boolean; events: SystemEvent[] } {
+  const { natural } = rollD20(context.dice, {
+    advantage: false,
+    disadvantage: false,
+  });
+  const total =
+    natural +
+    checkBonus(stats, caster, { ability: stats.spellAbility ?? "int" });
+  const success = total >= dc;
+  return {
+    success,
+    events: [
+      dndEvent(`${NS}:rollReported`, {
+        actor: caster.id,
+        against: "check",
+        natural,
+        total,
+        target: dc,
+        success,
+        label: success ? "ends the spell" : "fails to end the spell",
+      }),
+    ],
+  };
+}
+
+// A creature's number of Hit Dice: a character's level, or a monster's worked out from its Hit Points.
+// shortcut: a stat block gives no Hit Dice here, so they come from its Hit Points over its size's die and Constitution.
+function hitDiceOf(fallen: Actor, context: Context): number {
+  const stats = deriveStats(fallen, context);
+  if (fallen.source.kind === "character") return stats.level;
+  const die = [2.5, 3.5, 4.5, 5.5, 6.5][sizeOf(fallen, context)] ?? 10.5;
+  return Math.max(
+    1,
+    Math.round(stats.maxHp / Math.max(1, die + modifierFor(stats, "con"))),
+  );
+}
+
+// Dropping to 0 Hit Points without dying: what keeps the creature conscious, as Rage beyond Death or Strength before
+// Death, and what it calls, as Faithful Summons.
+export function downedEvents(target: Actor, context: Context): SystemEvent[] {
+  const stats = deriveStats(target, context);
+  const left = (resource: string) =>
+    (target.resourcesSpent[resource] ?? 0) < (stats.resources[resource] ?? 0);
+  const events: SystemEvent[] = [];
+  for (const passive of stats.passives) {
+    if (passive.kind === "whenDowned" && left(passive.resource)) {
+      events.push(...calledEvents(target, passive, context));
+    }
+    if (passive.kind !== "fightOn" || fightingOn(target)) continue;
+    if (passive.while) {
+      const rage = target.activeEffects.find(({ sourceId }) =>
+        passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+      );
+      if (!rage) continue;
+      events.push(
+        dndEvent(`${NS}:effectAdded`, {
+          actor: target.id,
+          effect: {
+            ...rage,
+            modifier: { kind: "fightingOn", delayDeath: true },
+          },
+        }),
+      );
+    } else if (
+      passive.resource &&
+      left(passive.resource) &&
+      target.budget.reaction
+    ) {
+      events.push(
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: target.id,
+          resource: passive.resource,
+        }),
+        dndEvent(`${NS}:budgetSpent`, { actor: target.id, kind: "reaction" }),
+        dndEvent(`${NS}:effectAdded`, {
+          actor: target.id,
+          effect: {
+            sourceId: `fightOn:${passive.resource}`,
+            casterId: target.id,
+            modifier: { kind: "fightingOn" },
+            ends: "casterNextTurnEnd",
+          },
+        }),
+      );
+    }
+    if (events.length > 0) break;
+  }
+  return events;
+}
+
+// A `whenDowned` trait's effects, spending its use.
+function calledEvents(
+  target: Actor,
+  passive: Extract<Passive, { kind: "whenDowned" }>,
+  context: Context,
+): SystemEvent[] {
+  return [
+    dndEvent(`${NS}:resourceSpent`, {
+      actor: target.id,
+      resource: passive.resource,
+    }),
+    ...passive.effects.flatMap((effect) =>
+      effect.kind === "animate"
+        ? animatedEvents(effect, target, context)
+        : leafEvents([effect], passive.resource, target, target, context),
+    ),
+  ];
+}
+
+// Incapacitated by a foe: a `whenDowned` trait with `incapacitated` answers it, as Faithful Summons does.
+export function incapacitatedEvents(
+  target: Actor,
+  caster: Actor,
+  condition: Condition,
+  context: Context,
+): SystemEvent[] {
+  if (caster.side === target.side || !INCAPACITATING.includes(condition)) {
+    return [];
+  }
+  const stats = deriveStats(target, context);
+  const passive = stats.passives.find(
+    (item) =>
+      item.kind === "whenDowned" &&
+      item.incapacitated &&
+      (target.resourcesSpent[item.resource] ?? 0) <
+        (stats.resources[item.resource] ?? 0),
+  );
+  return passive?.kind === "whenDowned"
+    ? calledEvents(target, passive, context)
+    : [];
 }
 
 // Damage to each foe of `source` within `radius` feet of `origin`, halved by a save against the source's spell save
@@ -775,6 +983,115 @@ export function burstEvents(
   });
 }
 
+// A Ring of Spell Turning's Reaction: a spell that targeted only the bearer, with no area, is cast back at its caster,
+// who saves against its own spell save DC. The player is asked first. shortcut: it comes back at the spell's own
+// level, whatever slot it took, and not at all when the caster can't cast it again as an action of its own.
+function deflectedSpell(
+  action: KnownAction,
+  caster: Actor,
+  target: Actor,
+  context: Context,
+): { readonly events: SystemEvent[]; readonly frames: Frame[] } {
+  const none = { events: [], frames: [] };
+  const { targeting } = action.activation;
+  if (
+    target.id === caster.id ||
+    !("creatures" in targeting) ||
+    targeting.creatures !== 1 ||
+    !target.budget.reaction ||
+    hasCondition(target, ...INCAPACITATING) ||
+    !deriveStats(target, context).passives.some(
+      (passive) => passive.kind === "spellTurning" && passive.deflect,
+    ) ||
+    !deriveStats(caster, context).actions.some(
+      (item) => item.id === action.id,
+    ) ||
+    (target.id === PLAYER_ACTOR &&
+      !playerTakes(
+        "spellTurning",
+        `You save against ${caster.name}'s ${action.name}. Turn it back with Spell Turning?`,
+        { ...action, id: "spellTurning", name: "Spell Turning" },
+        context,
+      ))
+  ) {
+    return none;
+  }
+  return {
+    events: [
+      dndEvent(`${NS}:budgetSpent`, {
+        actor: target.id,
+        kind: "reaction",
+        label: "Spell Turning",
+      }),
+    ],
+    frames: [
+      frame("useAction", {
+        actor: caster.id,
+        actionId: action.id,
+        target: caster.id,
+        anyone: true,
+        free: true,
+      }),
+    ],
+  };
+}
+
+// Boon Companions' Bands: an area that makes creatures save spares the one wearing the band paired with the
+// caster's, spending the caster's use.
+function pairedBandSpares(
+  action: KnownAction,
+  caster: Actor,
+  stats: Stats,
+  targets: readonly Actor[],
+  context: Context,
+): { readonly spared: readonly string[]; readonly events: SystemEvent[] } {
+  const none = { spared: [], events: [] };
+  if (!("area" in action.activation.targeting)) return none;
+  for (const band of stats.passives) {
+    if (
+      band.kind !== "pairedBand" ||
+      (caster.resourcesSpent[band.resource] ?? 0) >=
+        (stats.resources[band.resource] ?? 0)
+    ) {
+      continue;
+    }
+    const partner = targets.find(
+      (target) =>
+        target.id !== caster.id &&
+        target.side === caster.side &&
+        deriveStats(target, context).passives.some(
+          (passive) =>
+            passive.kind === "pairedBand" && passive.item === band.item,
+        ),
+    );
+    if (partner) {
+      return {
+        spared: [partner.id],
+        events: [
+          dndEvent(`${NS}:resourceSpent`, {
+            actor: caster.id,
+            resource: band.resource,
+          }),
+        ],
+      };
+    }
+  }
+  return none;
+}
+
+// A Saddle of the Cavalier's Protected Mount: attacks against a mount whose rider sits in it have Disadvantage.
+export function protectedMount(
+  target: Actor,
+  context: Pick<Context, "state" | "content" | "contentIds">,
+): boolean {
+  return Object.values(context.state.actors).some(
+    (rider) =>
+      mountOf(rider) === target.id &&
+      !isDown(rider) &&
+      hasPassive(deriveStats(rider, context), "protectedMount"),
+  );
+}
+
 // Several hits on one target, reported in turn so each one sees the HP the last one left.
 // Tyro of the Gauntlet's Stand as One: an ally within 5 feet spends its Reaction to keep the target from being moved.
 export function heldInPlace(
@@ -782,6 +1099,18 @@ export function heldInPlace(
   context: Pick<Context, "state" | "content" | "contentIds">,
 ): SystemEvent[] {
   if (hasCondition(target, ...INCAPACITATING)) return [];
+  // A Saddle of the Cavalier's Secure Rider: nothing moves its rider off its mount.
+  if (
+    mountOf(target) !== null &&
+    hasPassive(deriveStats(target, context), "protectedMount")
+  ) {
+    return [
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: target.id,
+        key: "secure-rider",
+      }),
+    ];
+  }
   const guard = Object.values(context.state.actors).find(
     (other) =>
       other.id !== target.id &&
@@ -912,6 +1241,8 @@ export function dealEvents(
       );
     }
     events.push(...killEvents(target, { ...context, state }));
+    if (!isDead(hurt))
+      events.push(...downedEvents(hurt, { ...context, state }));
   }
   for (const effect of dealt > 0 ? (hurt?.activeEffects ?? []) : []) {
     if (!hurt || !effect.saveOnDamage) continue;
@@ -935,13 +1266,25 @@ export function dealEvents(
   return { events, dealt };
 }
 
-// Resistance (the cantrip): damage of the type picked is cut by a die, once a turn.
+// Resistance (the cantrip): damage of the type picked is cut by a die, once a turn. A worn item's cuts it every time,
+// as a Ring of Warmth's 2d8 off Cold damage.
 function reducedHit(
   target: Actor,
   amount: number,
   type: Damage["type"],
   context: Context,
 ): { amount: number; events: SystemEvent[] } {
+  const targetStats = deriveStats(target, context);
+  const worn = passiveModifiers(targetStats.passives).find(
+    (modifier) =>
+      modifier.kind === "damageReduction" && modifier.damage === type,
+  );
+  if (worn?.kind === "damageReduction" && amount > 0) {
+    amount = Math.max(
+      0,
+      amount - rollAmount(worn.amount, targetStats, context.dice),
+    );
+  }
   const effect = target.activeEffects.find(
     ({ modifier }) =>
       modifier.kind === "damageReduction" && modifier.damage === type,
@@ -1004,12 +1347,28 @@ export function damageRiders(
   stats: Stats,
   context: Context,
   spell = false, // from a spell's damage, which only a rider with `spells` takes
+  hitWith?: KnownAction, // the attack that hit, for a rider limited to some hits
 ): SystemEvent[] {
-  return stats.passives.flatMap((passive) => {
-    if (passive.kind !== "damageRider" || !types.has(passive.damage)) return [];
+  const { combat } = context.state;
+  return stats.passives.flatMap((passive, index) => {
+    if (passive.kind !== "damageRider") return [];
+    if (passive.damage !== undefined && !types.has(passive.damage)) return [];
+    if (
+      passive.with &&
+      !(hitWith && hitFits(passive.with, hitWith, attacker, context))
+    ) {
+      return [];
+    }
+    // A hit during the target's own turn is an Opportunity Attack.
+    if (passive.opportunity && combat?.order[combat.index] !== target.id) {
+      return [];
+    }
     if (spell && !passive.spells) return [];
     if (passive.critical && !critical) return [];
-    const key = `rider:${passive.damage}:${String(passive.critical)}`;
+    const key =
+      passive.damage === undefined
+        ? `rider:${String(index)}`
+        : `rider:${passive.damage}:${String(passive.critical)}`;
     if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return [];
     const { resource } = passive;
     if (
@@ -1298,6 +1657,7 @@ export function leafEvents(
             effect.resource,
             effect.count,
             deriveStats(target, context),
+            regainCap(effect, slotLevel),
           ),
         );
         break;
@@ -1311,22 +1671,51 @@ export function leafEvents(
         break;
       case "hitDieHeal": {
         // shortcut: a Healer's Kit's ten uses aren't counted; the target's Hit Point Dice are the limit.
-        const die = nextHitDie(target, context);
-        if (!die || unhealed || cannotHeal(target)) break;
-        const max = deriveStats(target, context).maxHp;
-        const rolled = hitDieHealing(
-          hitDieRoll(die, deriveStats(target, context), healDice) +
-            evaluateFormula(effect.bonus, stats),
-          deriveStats(target, context),
+        // shortcut: it rolls as many of the dice it may as the target has, until the target is whole, rather than
+        // asking how many.
+        if (unhealed || cannotHeal(target)) break;
+        const targetStats = deriveStats(target, context);
+        const { maxHp: max } = targetStats;
+        const missing = max - Math.max(target.hp, 0);
+        let rolled = 0;
+        let spent = 0;
+        for (
+          let left = effect.dice ?? 1;
+          left > 0 && rolled < missing;
+          left--
+        ) {
+          const die = nextHitDie(
+            {
+              ...target,
+              resourcesSpent: {
+                ...target.resourcesSpent,
+                [HIT_DICE]: (target.resourcesSpent[HIT_DICE] ?? 0) + spent,
+              },
+            },
+            context,
+          );
+          if (!die) break;
+          rolled += hitDieHealing(
+            hitDieRoll(die, targetStats, healDice),
+            targetStats,
+          );
+          spent++;
+        }
+        if (spent === 0) break;
+        rolled += hitDieHealing(
+          evaluateFormula(effect.bonus, stats),
+          targetStats,
         );
         events.push(
-          dndEvent(`${NS}:resourceSpent`, {
-            actor: target.id,
-            resource: HIT_DICE,
-          }),
+          ...Array.from({ length: spent }, () =>
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: target.id,
+              resource: HIT_DICE,
+            }),
+          ),
           dndEvent(`${NS}:healed`, {
             actor: target.id,
-            amount: Math.max(0, Math.min(rolled, max - Math.max(target.hp, 0))),
+            amount: Math.max(0, Math.min(rolled, missing)),
             max,
           }),
         );
@@ -1396,6 +1785,7 @@ export function leafEvents(
               ends: effectEnds(effect.duration),
               ...lastsFor(effect.duration, caster, target, context.state),
               ...(effect.repeatSave && save ? { repeatSave: save } : {}),
+              ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...swallowed,
             },
           }),
@@ -1512,6 +1902,9 @@ export function leafEvents(
             dndEvent(`${NS}:concentrationEnded`, { actor: target.id }),
           );
         }
+        events.push(
+          ...incapacitatedEvents(target, caster, effect.condition, context),
+        );
         break;
       }
       case "removeCondition":
@@ -1524,9 +1917,63 @@ export function leafEvents(
         break;
       case "cure": {
         const condition = cureFor(target, effect.conditions);
-        if (condition) {
+        const curse = target.activeEffects.find(
+          ({ modifier }) => modifier.kind === "mark" && modifier.curse,
+        );
+        if (effect.pool) {
+          const { resource, per } = effect.pool;
+          let left =
+            (stats.resources[resource] ?? 0) -
+            (caster.resourcesSpent[resource] ?? 0);
+          let spent = 0;
+          let rest = target;
+          for (
+            let next = cureFor(rest, effect.conditions);
+            next && left >= per;
+            next = cureFor(rest, effect.conditions)
+          ) {
+            const removed = dndEvent(`${NS}:conditionRemoved`, {
+              actor: target.id,
+              condition: next,
+            });
+            events.push(removed);
+            rest = {
+              ...rest,
+              activeEffects: rest.activeEffects.filter(
+                ({ modifier }) =>
+                  modifier.kind !== "condition" || modifier.condition !== next,
+              ),
+            };
+            left -= per;
+            spent += per;
+          }
+          if (spent > 0) {
+            events.push(
+              dndEvent(`${NS}:resourceSpent`, {
+                actor: caster.id,
+                resource,
+                amount: spent,
+              }),
+            );
+          }
+        } else if (condition) {
           events.push(
             dndEvent(`${NS}:conditionRemoved`, { actor: target.id, condition }),
+          );
+        } else if (effect.curse && curse) {
+          events.push(
+            dndEvent(`${NS}:effectEnded`, {
+              actor: target.id,
+              sourceId: curse.sourceId,
+              casterId: curse.casterId,
+            }),
+          );
+        } else if (effect.maxHp && (target.maxHpLoss ?? 0) > 0) {
+          events.push(
+            dndEvent(`${NS}:maxHpReduced`, {
+              actor: target.id,
+              amount: -(target.maxHpLoss ?? 0),
+            }),
           );
         } else if (effect.exhaustion && target.exhaustion > 0) {
           events.push(
@@ -1566,6 +2013,9 @@ export function leafEvents(
             context.state,
             context,
             effect.hostile,
+            effect.check && stats.spellAbility
+              ? (dc) => spellcastingCheck(caster, stats, dc, context)
+              : undefined,
           ),
         );
         // Shutdown: the dispelled construct may fall Unconscious.
@@ -1704,6 +2154,47 @@ export function leafEvents(
           events.push(dndEvent(`${NS}:stabilized`, { actor: target.id }));
         }
         break;
+      // Life Transference: the caster's own damage, which nothing lessens, heals the target twice over.
+      case "transference": {
+        const taken = rollAmount(effect.amount, stats, context.dice);
+        events.push(
+          dndEvent(`${NS}:damaged`, {
+            actor: caster.id,
+            amount: taken,
+            type: effect.type,
+            critical: false,
+            massive: false,
+          }),
+        );
+        if (unhealed || cannotHeal(target) || isDead(target)) break;
+        const max = deriveStats(target, context).maxHp;
+        const room = max - Math.max(target.hp, 0);
+        if (room > 0) {
+          events.push(
+            dndEvent(`${NS}:healed`, {
+              actor: target.id,
+              amount: Math.min(room, taken * effect.times),
+              max,
+            }),
+          );
+        }
+        break;
+      }
+      case "reincarnate":
+        if (isDead(target) && target.source.kind === "character") {
+          events.push(...reincarnateEvents(target, effect.species, context));
+        }
+        break;
+      case "clone":
+        if (target.clone === undefined && !isDead(target)) {
+          events.push(
+            dndEvent(`${NS}:cloneStarted`, {
+              actor: target.id,
+              days: effect.days,
+            }),
+          );
+        }
+        break;
       case "lift":
         events.push(...liftEvents(effect, sourceId, caster, target, context));
         break;
@@ -1750,6 +2241,7 @@ export function leafEvents(
       case "replaceRoll":
       case "strike":
       case "redirect":
+      case "drawAttack":
       case "negateHit":
       case "stickWeapon":
       case "slowFall":
@@ -2167,6 +2659,7 @@ export function rollSave(
   conditions: readonly string[] = [],
   disadvantage = false, // from the caster, as with Heightened Spell
   advantage = false, // from the spell itself, as Modify Memory gives a foe it fights
+  source?: SaveSource, // what it's against, for Dragon Scale Mail's Advantage against a dragon's breath
 ): { readonly saved: boolean; readonly events: SystemEvent[] } {
   if (
     (ability === "str" || ability === "dex") &&
@@ -2196,6 +2689,8 @@ export function rollSave(
         ability,
         conditions,
         target.hp * 2 <= stats.maxHp,
+        target,
+        source,
       ) ||
       strongerTogether(target, ability, context),
     disadvantage:
@@ -2329,7 +2824,11 @@ export function resolveTargets(
   // Revivify is the one aimed at the dead.
   const dead = "dead" in targeting && targeting.dead === true;
   const side = (
-    targeting.side === "enemy" ? enemies(state, actor) : allies(state, actor)
+    targeting.side === "enemy"
+      ? enemies(state, actor)
+      : targeting.side === "ally"
+        ? allies(state, actor)
+        : [...enemies(state, actor), ...allies(state, actor)]
   ).filter(
     (item) =>
       isDead(item) === dead &&
@@ -2465,6 +2964,7 @@ export function resolveAction(
   let ridden = false;
   const overload = { prone: false };
   let lastDealt = 0;
+  const pulled = new Set<string>(); // Pull of Death's once a turn, within this cast
   const applyRolled = (
     target: Actor,
     damage: readonly {
@@ -2511,6 +3011,50 @@ export function resolveAction(
           context,
         ),
       );
+    }
+    // Pull of Death: a spell's damage by a save or with no roll, once a turn, to a creature already missing Hit
+    // Points (combat/attack.ts adds it to an attack's).
+    if (
+      action.spellLevel !== null &&
+      result.dealt > 0 &&
+      resolution.kind !== "attack"
+    ) {
+      const hurt = target.hp < deriveStats(target, context).maxHp;
+      stats.passives.forEach((passive, index) => {
+        const key = `extra:${String(index)}`;
+        if (
+          !hurt ||
+          passive.kind !== "extraDamage" ||
+          passive.when !== "targetHurt" ||
+          !passive.type ||
+          (passive.oncePerTurn &&
+            (actor.usedThisTurn.includes(key) || pulled.has(key)))
+        ) {
+          return;
+        }
+        if (passive.oncePerTurn) {
+          pulled.add(key);
+          events.push(
+            dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key }),
+          );
+        }
+        const now = events.reduce(applyDndEvent, context.state);
+        events.push(
+          ...dealEvents(
+            now.actors[target.id] ?? target,
+            [
+              {
+                amount: passive.dice
+                  ? rollDiceNotation(passive.dice, context.dice)
+                  : 0,
+                type: passive.type,
+              },
+            ],
+            false,
+            { ...context, state: now },
+          ).events,
+        );
+      });
     }
     // A spell's riders, as Putrefy's, go on the first creature it damages.
     // shortcut: only the first, since a use spent on one isn't seen by the next in the same cast.
@@ -2728,10 +3272,13 @@ export function resolveAction(
         if (focus) frames.push(focus);
         // Where it lands is chosen, as a move is, and so is a form for a friend.
         for (const effect of resolution.effects) {
-          if (effect.kind === "teleport" && target.id === actor.id) {
+          if (
+            effect.kind === "teleport" &&
+            (target.id === actor.id || effect.others)
+          ) {
             frames.push(
               teleportFrame(
-                actor,
+                target,
                 effect.feet,
                 effect.movement,
                 context,
@@ -2791,6 +3338,17 @@ export function resolveAction(
             frames.push(...struck.frames);
           }
         }
+        // A save round the target, as Jolt to Life's lightning (combat/spell-riders.ts).
+        if (resolution.burst) {
+          frames.push(
+            frame("burst", {
+              attacker: actor.id,
+              actionId: action.id,
+              target: target.id,
+              ...(slotLevel === undefined ? {} : { slotLevel }),
+            }),
+          );
+        }
       }
       break;
     }
@@ -2818,12 +3376,17 @@ export function resolveAction(
       const dc = evaluateFormula(resolution.dc, stats);
       // Damage against several targets at once is rolled once for all of them.
       const damage = rollSharedDamage(resolution.damage);
-      const { spared, heightened } = metamagicSaves(
+      const source = saveSourceOf(actor, action.id, action.name, context);
+      const careful = metamagicSaves(
         action,
         actor,
         targets,
         modifierFor(stats, "cha"),
       );
+      const { heightened } = careful;
+      const banded = pairedBandSpares(action, actor, stats, targets, context);
+      events.push(...banded.events);
+      const spared = new Set([...careful.spared, ...banded.spared]);
       for (const struck of targets) {
         if (resolution.heard && hasCondition(struck, "deafened")) continue;
         // Wail of the Banshee: a target with few enough Hit Points dies, and only the others save.
@@ -2881,6 +3444,7 @@ export function resolveAction(
                 conditionsApplied(resolution.onFail),
                 heightened === target.id || edges.includes("disadvantage"),
                 resolution.advantage === true || edges.includes("advantage"),
+                source,
               );
         events.push(...saveEvents);
         const resisted = rolledSave
@@ -2904,6 +3468,7 @@ export function resolveAction(
                 events,
                 context.dice,
                 action.spellLevel !== null,
+                { source, access: context },
               );
         events.push(...rescued);
         const saved = rolledSave || resisted !== null || rescued.length > 0;
@@ -2936,6 +3501,12 @@ export function resolveAction(
               passive.kind === "spellTurning" &&
               (slotLevel ?? action.spellLevel ?? 0) <= passive.upTo,
           );
+        // And with its Reaction, a spell aimed at it alone is turned back at its caster, who saves against it.
+        if (turned && targets.length === 1) {
+          const deflected = deflectedSpell(action, actor, target, context);
+          events.push(...deflected.events);
+          frames.push(...deflected.frames);
+        }
         const evaded =
           resolution.onSuccessDamage === "half" &&
           (evades(target, resolution.ability, context) ||
@@ -3020,6 +3591,7 @@ export function resolveAction(
                 critical: false,
                 massive: true,
               }),
+              dndEvent(`${NS}:disintegrated`, { actor: target.id }),
               { kind: "actorDefeated", actor: target.id },
             );
           }
@@ -3056,6 +3628,40 @@ export function resolveAction(
             context,
           ),
         );
+      }
+      // One creature of the caster's choice in the area, the most hurt of its side there, also gets these, as
+      // Wither and Bloom's Hit Point Dice.
+      const { targeting } = action.activation;
+      if (resolution.chosen && "area" in targeting) {
+        const caught = [actor, ...allies(context.state, actor)].filter(
+          (item) =>
+            !isDead(item) &&
+            inArea(
+              targeting.area.shape,
+              targeting.area.radius,
+              actor.position,
+              aim ?? actor.position,
+              item.position,
+            ),
+        );
+        const now = events.reduce(applyDndEvent, context.state);
+        const missing = (item: Actor) =>
+          deriveStats(item, context).maxHp -
+          (now.actors[item.id]?.hp ?? item.hp);
+        const chosen = [...caught].sort((a, b) => missing(b) - missing(a))[0];
+        if (chosen && missing(chosen) > 0) {
+          events.push(
+            ...leafEvents(
+              resolution.chosen,
+              spellSource(action),
+              actor,
+              now.actors[chosen.id] ?? chosen,
+              { ...context, state: now },
+              undefined,
+              slotLevel,
+            ),
+          );
+        }
       }
       break;
     }
@@ -3434,8 +4040,10 @@ function animatedEvents(
   actor: Actor,
   context: Context,
 ): SystemEvent[] {
-  if (actor.source.kind !== "monster") return [];
-  const id = effect.monster ?? actor.source.statBlockId;
+  const id =
+    effect.monster ??
+    (actor.source.kind === "monster" ? actor.source.statBlockId : undefined);
+  if (!id) return [];
   const monster = lookup(context, MonsterSchema, id);
   const open = [
     ...teleportSquares(actor, effect.range, 0, context.state, context),
@@ -3456,6 +4064,8 @@ function animatedEvents(
             kind: "monster",
             statBlockId: id,
             ...(effect.lacks.length > 0 ? { lacks: effect.lacks } : {}),
+            // a character's beasts die at 0 Hit Points, as monsters do, and leave with the fight
+            ...(actor.source.kind === "monster" ? {} : { calledBy: actor.id }),
           },
           hp: monster.hp,
           inventory: [],

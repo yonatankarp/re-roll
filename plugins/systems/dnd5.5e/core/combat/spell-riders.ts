@@ -159,7 +159,11 @@ export function runBurst(
     context,
     payload.slotLevel,
   );
-  const burst = attackOf(action)?.burst;
+  const { resolution } = action.activation;
+  const burst =
+    resolution.kind === "attack" || resolution.kind === "automatic"
+      ? resolution.burst
+      : undefined;
   if (!burst || !target.position) return {};
   const { targeting } = action.activation;
   const exploding: KnownAction = {
@@ -176,7 +180,7 @@ export function runBurst(
         ability: burst.ability,
         dc: burst.dc,
         damage: burst.damage,
-        onSuccessDamage: "none",
+        onSuccessDamage: burst.half ? "half" : "none",
         onFail: [],
         onSuccess: [],
       },

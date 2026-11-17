@@ -692,7 +692,7 @@ const FIXTURES = [
     freeCast: { resource: "climb", self: true },
   }),
   trait(
-    "fortitude",
+    "aberrant-fortitude",
     [
       {
         kind: "saveRescue",
@@ -714,7 +714,7 @@ const FIXTURES = [
     },
   ),
   trait(
-    "greater-fortitude",
+    "greater-aberrant",
     [{ kind: "scalingFloor", key: "fortitudeDie", value: 6 }],
     {
       resources: [

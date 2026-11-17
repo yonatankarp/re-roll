@@ -196,7 +196,7 @@ export function wireTerms(ctx: ShellContext): void {
     loadedFor = log;
     const terms = log ? await ctx.game.terms().catch(() => []) : [];
     entries = new Map(terms.map((term) => [term.id, term]));
-    find = termFinder(terms);
+    find = termFinder(terms, log ? ctx.game.termNames() : []);
     document.documentElement.toggleAttribute(
       "data-rules-terms",
       terms.length > 0,

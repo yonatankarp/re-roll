@@ -1105,6 +1105,18 @@ function answersOf(
 
 const LevelEntrySchema = CharacterBuildSchema.shape.levels.element;
 
+// What a species' choices come to with these picks, by choice id, as a reincarnated body's (reincarnate.ts).
+export function speciesAnswers(
+  speciesId: string,
+  picks: Draft["picks"],
+  access: ContentAccess,
+): LevelEntry["answers"] {
+  const species = lookup(access, SpeciesSchema, speciesId);
+  return LevelEntrySchema.shape.answers.parse(
+    answersOf(owned(species, species.choices), picks),
+  );
+}
+
 export function placeholderEntry(classDef: ClassDef): LevelEntry {
   return { classId: classDef.id, hitPointGain: 1, answers: [] };
 }

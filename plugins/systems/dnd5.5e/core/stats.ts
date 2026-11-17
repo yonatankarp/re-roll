@@ -1,6 +1,12 @@
 import type { ContentAccess, Dice } from "#sdk";
 import type { z } from "zod";
-import { carriedWeight, carryingCapacity, encumberedSpeed } from "./carry.ts";
+import {
+  carriedWeight,
+  carryingCapacity,
+  encumberedSpeed,
+  encumbrance,
+} from "./carry.ts";
+import { ENCUMBRANCE, variantOn } from "./variant-rules.ts";
 import {
   type Actor,
   type DndState,
@@ -59,11 +65,13 @@ import { featureRules, grantedSpells } from "./feature-rules.ts";
 import { type Caster, multiclassSlots } from "./multiclass.ts";
 import { holdsConcentration, withMetamagic } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
+import { withWeaponRiders } from "./weapon-riders.ts";
 import {
   THROW_PREFIX,
   WEAPON_PREFIX,
   castFrom,
   itemCastId,
+  itemUseId,
   spellOfSource,
   weaponItemId,
 } from "./combat/ids.ts";
@@ -548,7 +556,17 @@ function itemCasts(
           activation: {
             ...numbered,
             cost: [
-              ...activation.cost.filter((cost) => cost !== "slot"),
+              ...activation.cost.filter(
+                (cost) =>
+                  cost !== "slot" &&
+                  !(
+                    cast.gold !== undefined &&
+                    typeof cost === "object" &&
+                    "gold" in cost
+                  ),
+              ),
+              // the item's own costly component in place of the spell's, as Cauldron of Rebirth's salt
+              ...(cast.gold ? [{ gold: cast.gold }] : []),
               ...(charges > 0 && resource
                 ? [{ resource, ...(charges > 1 ? { count: charges } : {}) }]
                 : []),
@@ -560,6 +578,17 @@ function itemCasts(
       ];
     });
   });
+}
+
+// A worn item's own activations (ChargedSchema `activations`), named after it, as a Pearl of Power's.
+function itemUses(itemId: string, item: Item): KnownAction[] {
+  const uses = "activations" in item ? (item.activations ?? []) : [];
+  return uses.map(({ name, activation }, index) => ({
+    id: itemUseId(itemId, index),
+    name: uses.length > 1 ? `${name} (${item.name})` : name,
+    activation,
+    spellLevel: null,
+  }));
 }
 
 // The abilities a level's feat raised, when that feat makes its raised save proficient, as Resilient does.
@@ -734,6 +763,7 @@ function collectFeatureData(
   level = 1,
   highestSlot = 0,
   feats: ReadonlySet<string> = new Set(),
+  classLevels: Readonly<Record<string, number>> = {},
   swaps: Readonly<Record<string, readonly string[]>> = {},
 ): {
   passives: Passive[];
@@ -791,9 +821,13 @@ function collectFeatureData(
         name: activation.label
           ? `${feature.name} (${activation.label})`
           : feature.name,
-        activation: feature.perTier
-          ? scaleActivation(activation, feature.perTier, cantripTier(level))
-          : activation,
+        activation: classTiered(
+          feature.perTier
+            ? scaleActivation(activation, feature.perTier, cantripTier(level))
+            : activation,
+          feature.classTiers,
+          classLevels,
+        ),
         spellLevel: null,
         ...(feature.upcast ? { upcast: feature.upcast } : {}),
         ...(feature.hitType ? { hitType: true as const } : {}),
@@ -807,12 +841,17 @@ function collectFeatureData(
 function withRiders(
   actions: readonly KnownAction[],
   passives: readonly Passive[],
+  actor: Actor,
 ): KnownAction[] {
   return actions.map((action) => {
     const { resolution } = action.activation;
     const extra = passives.flatMap((passive) =>
       passive.kind === "activationRider" &&
-      action.id.startsWith(`feature:${passive.feature}:`)
+      action.id.startsWith(`feature:${passive.feature}:`) &&
+      (!passive.while ||
+        actor.activeEffects.some(({ sourceId }) =>
+          passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+        ))
         ? passive.effects
         : [],
     );
@@ -857,9 +896,15 @@ export function weaponActivation(
       : "str";
   // shortcut: an Ammunition weapon without its range in the data reaches 80 feet with no long range.
   const range = ranged ? (weapon.range ?? { normal: 80, long: 80 }) : null;
+  const reach = !ranged && weapon.properties.includes("reach");
   return {
     cost: ["action"],
-    targeting: { creatures: 1, range: range?.long ?? 5, side: "enemy" },
+    targeting: {
+      creatures: 1,
+      range: range?.long ?? (reach ? 10 : 5),
+      side: "enemy",
+      ...(reach ? { reach: true as const } : {}),
+    },
     resolution: {
       kind: "attack",
       attack: {
@@ -969,6 +1014,16 @@ function attacksFrom(featureId: string): number {
 }
 
 const isPactMagic = (id: string): boolean => id.endsWith("pact-magic");
+
+// Heavily encumbered: Disadvantage on ability checks, attack rolls and saving throws that use Strength, Dexterity or
+// Constitution.
+const HEAVILY_ENCUMBERED = (["checks", "attacks", "saves"] as const).flatMap(
+  (on) =>
+    (["str", "dex", "con"] as const).map((ability) => ({
+      kind: "modifier" as const,
+      modifier: { kind: "disadvantage" as const, on, ability },
+    })),
+);
 
 function characterStats(actor: Actor, access: ContentAccess): Stats {
   const build = effectiveBuild(actor);
@@ -1181,6 +1236,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     level,
     slots.findLastIndex((count) => count > 0) + 1,
     featIds,
+    classLevels,
     swaps,
   );
   for (const pick of latePicks(
@@ -1221,7 +1277,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       );
     }
     if (works(itemId, item) && !untrainedArmor) {
-      actions.push(...itemCasts(itemId, item, level, access));
+      actions.push(
+        ...itemCasts(itemId, item, level, access),
+        ...itemUses(itemId, item),
+      );
     }
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
@@ -1376,6 +1435,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   }
 
   const pools = itemPools(actor, access);
+  const carried = carriedWeight(actor, access);
+  const capacity = carryingCapacity(
+    abilities.str,
+    species.size,
+    traits.some(({ kind }) => kind === "powerfulBuild"),
+  );
+  // With the Encumbrance variant the load slows, in place of armor's Strength score.
+  const load = variantOn(access, ENCUMBRANCE)
+    ? encumbrance(carried, capacity)
+    : null;
   const partial: Stats = {
     abilities,
     proficiency: proficiencyBonus(level) + magic.proficiency,
@@ -1387,15 +1456,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       flatBonus: flatBonus + shield,
       passives: traits,
     }),
-    speed: encumberedSpeed(
-      species.speed,
-      carriedWeight(actor, access),
-      carryingCapacity(
-        abilities.str,
-        species.size,
-        traits.some(({ kind }) => kind === "powerfulBuild"),
-      ),
-    ),
+    speed: encumberedSpeed(species.speed - 10 * (load ?? 0), carried, capacity),
     savingThrows: [
       ...new Set([
         ...firstClass.savingThrows,
@@ -1439,10 +1500,17 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
             },
           ]
         : []),
+      ...(load === 2 ? HEAVILY_ENCUMBERED : []),
     ],
     actions: withMetamagic(
       withInvocations(
-        withRiders(actions, fromFeatures.passives),
+        withWeaponRiders(
+          withRiders(actions, fromFeatures.passives, actor),
+          fromFeatures.passives,
+          actor,
+          access,
+          abilities,
+        ),
         fromFeatures.passives,
         abilities,
         classLevels,
@@ -1500,7 +1568,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       0,
       partial.speed +
         passiveBonus(partial, "speed") -
-        (tooHeavy ? 10 : 0) -
+        (tooHeavy && load === null ? 10 : 0) -
         5 * actor.exhaustion,
     ),
     resources: Object.fromEntries(
@@ -2016,6 +2084,11 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "weaponAttack" ||
       effect.kind === "randomAction" ||
       effect.kind === "copySpell" ||
+      // what raises or mends the dead and dying, mostly between fights (camp.ts)
+      effect.kind === "repose" ||
+      effect.kind === "transference" ||
+      effect.kind === "reincarnate" ||
+      effect.kind === "clone" ||
       (effect.kind === "applyCondition" &&
         effect.condition !== "deafened" &&
         effect.condition !== "grappled"),
@@ -2075,7 +2148,8 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
           : {}),
       }
     : own;
-  const speed = effectBonus(actor, "speed");
+  // A Ring of Free Action: nothing takes Speed off.
+  const speed = effectBonus(actor, "speed", hasSteadySpeed(stats));
   const maxHp = effectBonus(actor, "maxHp");
   const stuck = new Set(
     actor.activeEffects.flatMap(({ modifier }) =>
@@ -2352,16 +2426,29 @@ function changedWeapon(
 
 // A spell's flat Speed or Hit Point maximum increase, as with Longstrider or Aid, counted once per source.
 // shortcut: Hit Points above the maximum aren't taken away when the increase ends.
-function effectBonus(actor: Actor, to: "speed" | "maxHp"): number {
+function effectBonus(
+  actor: Actor,
+  to: "speed" | "maxHp",
+  increasesOnly = false,
+): number {
   const seen = new Set<string>();
   let total = 0;
   for (const { sourceId, modifier } of actor.activeEffects) {
-    if (modifier.kind !== "bonus" || modifier.to !== to || seen.has(sourceId))
+    if (
+      modifier.kind !== "bonus" ||
+      modifier.to !== to ||
+      seen.has(sourceId) ||
+      (increasesOnly && modifier.subtract)
+    )
       continue;
     seen.add(sourceId);
     total += (modifier.subtract ? -1 : 1) * (modifier.amount.bonus?.base ?? 0);
   }
   return total;
+}
+
+export function hasSteadySpeed(stats: Stats): boolean {
+  return stats.passives.some((passive) => passive.kind === "steadySpeed");
 }
 
 export function modifierFor(stats: Stats, ability: Ability): number {
@@ -2495,6 +2582,13 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
       case "maxHp":
         total += term.half ? Math.floor(stats.maxHp / 2) : stats.maxHp;
         break;
+      case "abilityScore":
+        total += Math.max(
+          ...term.abilities.map((ability) => stats.abilities[ability]),
+        );
+        break;
+      case "dealt": // filled in by the reaction it's part of
+        break;
       default:
         term satisfies never;
     }
@@ -2541,12 +2635,30 @@ export function scaledDice(
     readonly dice?: string | undefined;
     readonly diceCount?: string | undefined;
     readonly dieSize?: string | undefined;
+    readonly halfDice?: true | undefined;
   },
   scaling: Readonly<Record<string, number>>,
 ): string | undefined {
   if (!source.dice) return undefined;
   const [count = "0", sides = "0"] = source.dice.split("d");
-  return `${String(scaling[source.diceCount ?? ""] ?? count)}d${String(scaling[source.dieSize ?? ""] ?? sides)}`;
+  const dice = Number(scaling[source.diceCount ?? ""] ?? count);
+  const rolled = source.halfDice ? Math.ceil(dice / 2) : dice;
+  return `${String(rolled)}d${String(scaling[source.dieSize ?? ""] ?? sides)}`;
+}
+
+// A feature's dice that grow at levels in one class, as Jolt to Life's lightning at Artificer levels 11 and 17.
+function classTiered(
+  activation: Activation,
+  tiers: Feature["classTiers"],
+  classLevels: Readonly<Record<string, number>>,
+): Activation {
+  if (!tiers) return activation;
+  const level = classLevels[tiers.class] ?? 0;
+  return scaleActivation(
+    activation,
+    tiers.step,
+    tiers.at.filter((at) => level >= at).length,
+  );
 }
 
 function cantripTier(level: number): number {
@@ -2571,7 +2683,7 @@ export function scaleActivation(
   step: ScaleStep,
   times: number,
 ): Activation {
-  if (times <= 0) return activation;
+  if (times <= 0 || "slotOnly" in step) return activation;
   if ("addRadius" in step) {
     const { targeting } = activation;
     return "area" in targeting
@@ -2600,68 +2712,108 @@ export function scaleActivation(
         }
       : activation;
   }
-  const steps = step.every
-    ? Math.min(step.max ?? times, Math.floor(times / step.every))
-    : times;
+  const steps = step.at
+    ? step.at.filter((above) => times >= above).length
+    : step.every
+      ? Math.min(step.max ?? times, Math.floor(times / step.every))
+      : times;
   if (steps <= 0) return activation;
+  const { addBonus, hitDice } = step;
+  const more = (amount: Amount): Amount => {
+    const dice = step.addDice ? addDice(amount, step.addDice, steps) : amount;
+    if (!addBonus) return dice;
+    const { bonus } = dice;
+    return {
+      ...dice,
+      bonus: {
+        ...bonus,
+        base: (bonus?.base ?? 0) + addBonus * steps,
+        add: bonus?.add ?? [],
+      },
+    };
+  };
+  const dice = (amount: Amount): Amount =>
+    step.addDice ? addDice(amount, step.addDice, steps) : amount;
   const damage = (list: readonly Damage[]): Damage[] =>
-    list.map((item) => ({
-      ...item,
-      amount: addDice(item.amount, step.addDice, steps),
-    }));
+    list.map((item) => ({ ...item, amount: dice(item.amount) }));
   const effects = (list: readonly LeafEffect[]): LeafEffect[] =>
-    list.map((effect) => {
+    list.map((effect): LeafEffect => {
       if (effect.kind === "heal" || effect.kind === "tempHp") {
-        return {
-          ...effect,
-          amount: addDice(effect.amount, step.addDice, steps),
-        };
+        return { ...effect, amount: more(effect.amount) };
       }
-      if (effect.kind === "modifier" && effect.modifier.kind === "hitDamage") {
-        const [hit] = damage([effect.modifier.damage]);
-        return hit
-          ? { ...effect, modifier: { ...effect.modifier, damage: hit } }
+      if (effect.kind === "transference") {
+        return { ...effect, amount: more(effect.amount) };
+      }
+      if (effect.kind === "hitDieHeal") {
+        return hitDice
+          ? { ...effect, dice: (effect.dice ?? 1) + hitDice * steps }
           : effect;
       }
-      const { addBonus } = step;
-      if (
-        addBonus &&
-        effect.kind === "modifier" &&
-        effect.modifier.kind === "bonus" &&
-        effect.modifier.amount.dice === undefined
-      ) {
-        const { bonus } = effect.modifier.amount;
-        return {
-          ...effect,
-          modifier: {
-            ...effect.modifier,
-            amount: {
-              ...effect.modifier.amount,
-              bonus: {
-                base: (bonus?.base ?? 0) + addBonus * steps,
-                add: bonus?.add ?? [],
-              },
-            },
-          },
-        };
-      }
-      // An extra hit's damage grows too, as Conjure Minor Elementals'.
-      if (effect.kind === "modifier" && effect.modifier.kind === "hitDamage") {
-        const [scaled] = damage([effect.modifier.damage]);
-        return scaled
-          ? { ...effect, modifier: { ...effect.modifier, damage: scaled } }
+      if (effect.kind === "dispel") {
+        return addBonus
+          ? {
+              ...effect,
+              maxLevel: Math.min(9, effect.maxLevel + addBonus * steps),
+            }
           : effect;
       }
-      return effect.kind === "modifier" &&
-        effect.modifier.kind === "lingeringDamage"
-        ? {
+      if (effect.kind !== "modifier") return effect;
+      const { modifier } = effect;
+      switch (modifier.kind) {
+        // An extra hit's damage grows too, as Conjure Minor Elementals'.
+        case "hitDamage": {
+          const [hit] = damage([modifier.damage]);
+          return hit
+            ? { ...effect, modifier: { ...modifier, damage: hit } }
+            : effect;
+        }
+        // A flat bonus grows only by `addBonus`, as Elemental Weapon's +1 to hit or Aid's Hit Point maximum.
+        case "bonus":
+          return addBonus && modifier.amount.dice === undefined
+            ? {
+                ...effect,
+                modifier: {
+                  ...modifier,
+                  amount: {
+                    ...modifier.amount,
+                    bonus: {
+                      base:
+                        (modifier.amount.bonus?.base ?? 0) + addBonus * steps,
+                      add: modifier.amount.bonus?.add ?? [],
+                    },
+                  },
+                },
+              }
+            : effect;
+        case "damageBonus":
+          return addBonus
+            ? {
+                ...effect,
+                modifier: { ...modifier, amount: more(modifier.amount) },
+              }
+            : effect;
+        // The cold that strikes back grows with Armor of Agathys' Temporary Hit Points.
+        case "retaliate":
+          return {
             ...effect,
             modifier: {
-              ...effect.modifier,
-              damage: damage(effect.modifier.damage),
+              ...modifier,
+              damage: modifier.damage.map((item) => ({
+                ...item,
+                amount: more(item.amount),
+              })),
             },
-          }
-        : effect;
+          };
+        case "lingeringDamage":
+          return step.initial
+            ? effect
+            : {
+                ...effect,
+                modifier: { ...modifier, damage: damage(modifier.damage) },
+              };
+        default:
+          return effect;
+      }
     });
   const scaled = (resolution: Resolution): Resolution => {
     switch (resolution.kind) {
@@ -2670,6 +2822,14 @@ export function scaleActivation(
           ...resolution,
           damage: damage(resolution.damage),
           effects: effects(resolution.effects),
+          ...(resolution.burst
+            ? {
+                burst: {
+                  ...resolution.burst,
+                  damage: damage(resolution.burst.damage),
+                },
+              }
+            : {}),
         };
       case "attack":
         return {
@@ -2692,6 +2852,7 @@ export function scaleActivation(
           damage: damage(resolution.damage),
           onFail: effects(resolution.onFail),
           onSuccess: effects(resolution.onSuccess),
+          ...(resolution.chosen ? { chosen: effects(resolution.chosen) } : {}),
         };
       default:
         return resolution satisfies never;

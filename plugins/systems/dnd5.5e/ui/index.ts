@@ -7,7 +7,7 @@ import {
 } from "#sdk";
 import { z } from "zod";
 import { meleeReachOf, moveSquares, provokers } from "../core/combat.ts";
-import { HIT_DICE, parseOption } from "../core/combat/ids.ts";
+import { HIT_DICE, itemUseOf, parseOption } from "../core/combat/ids.ts";
 import { squareKey } from "../core/grid.ts";
 import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
@@ -25,6 +25,7 @@ import type { AreaView, BoardExtra, FightMap } from "./board-data.ts";
 import { zonesOf } from "../core/zones.ts";
 import { dndCue } from "./cues.ts";
 import { GLOSSARY_TERMS } from "../core/glossary.ts";
+import { playing } from "../core/variant-rules.ts";
 import {
   ABILITIES,
   ABILITY_NAMES,
@@ -35,6 +36,7 @@ import {
   ItemSchema,
   LootSchema,
   SKILL_ABILITIES,
+  type ScaleStep,
   type Skill,
   SpeciesSchema,
 } from "../core/schemas.ts";
@@ -118,6 +120,32 @@ function actionNumbers(action: KnownAction, stats: Stats): string {
   }
 }
 
+// What a higher slot adds, for the action's details.
+function upcastText(
+  step: Exclude<ScaleStep, { slotOnly: true }>,
+  level: number,
+): string {
+  if ("addRadius" in step) {
+    return `Each slot level above ${String(level)} adds ${String(step.addRadius)} feet to its radius.`;
+  }
+  if ("addTargets" in step) {
+    return `Each slot level above ${String(level)} adds ${String(step.addTargets)} target${step.addTargets > 1 ? "s" : ""}.`;
+  }
+  const adds = [
+    step.addDice
+      ? `${step.addDice} ${step.initial ? "initial " : ""}damage`
+      : "",
+    step.addBonus ? `${String(step.addBonus)} to its number` : "",
+    step.hitDice ? `${String(step.hitDice)} Hit Point Die` : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
+  if (step.at) {
+    return `It adds ${adds} with a slot of level ${step.at.map((above) => String(level + above)).join(" and again ")}.`;
+  }
+  return `${step.every ? `Every ${String(step.every)} slot levels` : "Each slot level"} above ${String(level)} adds ${adds}.`;
+}
+
 function actionDetail(
   action: KnownAction,
   stats: Stats,
@@ -125,13 +153,14 @@ function actionDetail(
 ): string {
   const source = contentText(
     access,
-    action.id.replace(/^[a-z]+:/, "").replace(/:free(?::[a-z0-9-]+)?$/, ""),
+    itemUseOf(action.id) ??
+      action.id.replace(/^[a-z]+:/, "").replace(/:free(?::[a-z0-9-]+)?$/, ""),
   );
   const upcast = action.upcast?.perSlotLevel;
   return [
     actionNumbers(action, stats),
-    upcast
-      ? `${"every" in upcast && upcast.every ? `Every ${String(upcast.every)} slot levels` : "Each slot level"} above ${String(action.spellLevel)} adds ${"addDice" in upcast ? `${upcast.addDice} damage` : "addRadius" in upcast ? `${String(upcast.addRadius)} feet to its radius` : `${String(upcast.addTargets)} target${upcast.addTargets > 1 ? "s" : ""}`}.`
+    upcast && !("slotOnly" in upcast)
+      ? upcastText(upcast, action.spellLevel ?? 0)
       : "",
     source?.text ?? "",
   ]
@@ -1344,20 +1373,37 @@ function playerDied(rawState: unknown): boolean {
 }
 
 export const dndUi = {
-  cue: dndCue,
+  cue: (
+    event: SystemEvent,
+    before: unknown,
+    after: unknown,
+    access: ContentAccess,
+  ) => dndCue(event, before, after, playing(after, access)),
   roll,
   systemId: "dnd5.5e",
   about: "Compatible with fifth edition.",
-  sheets,
-  combat,
-  describe,
+  sheets: (rawState: unknown, access: ContentAccess) =>
+    sheets(rawState, playing(rawState, access)),
+  combat: (
+    rawState: unknown,
+    access: ContentAccess,
+    encounter?: (id: string) => unknown,
+  ) => combat(rawState, playing(rawState, access), encounter),
+  describe: (event: SystemEvent, rawState: unknown, access: ContentAccess) =>
+    describe(event, rawState, playing(rawState, access)),
   actorOf,
-  optionGroups,
-  card,
-  shop,
+  optionGroups: (
+    decision: Decision,
+    rawState: unknown,
+    access: ContentAccess,
+  ) => optionGroups(decision, rawState, playing(rawState, access)),
+  card: (decision: Decision, rawState: unknown, access: ContentAccess) =>
+    card(decision, rawState, playing(rawState, access)),
+  shop: (decision: Decision, rawState: unknown, access: ContentAccess) =>
+    shop(decision, rawState, playing(rawState, access)),
   creation: (decision: Decision, rawState: unknown, access: ContentAccess) =>
-    sheetCreation(decision, rawState, access) ??
-    creation(decision, rawState, access),
+    sheetCreation(decision, rawState, playing(rawState, access)) ??
+    creation(decision, rawState, playing(rawState, access)),
   playerDied,
   terms: GLOSSARY_TERMS,
 };

@@ -94,6 +94,7 @@ export interface Dispelled {
   readonly sourceId: string;
   readonly casterId: string;
   readonly concentration: boolean;
+  readonly level: number;
 }
 
 // Each spell on the target that a dispel of this level ends, once per caster.
@@ -121,6 +122,7 @@ export function dispellable(
       sourceId: effect.sourceId,
       casterId: effect.casterId,
       concentration: effect.ends === "concentration",
+      level,
     });
   }
   return [...found.values()];
@@ -157,16 +159,23 @@ export function dispelEvents(
   state: DndState,
   access: ContentAccess,
   hostile = false,
+  // with this, a spell above `maxLevel` ends only on a check passed against 10 plus its level
+  check?: (dc: number) => { readonly success: boolean; events: SystemEvent[] },
 ): SystemEvent[] {
   const events: SystemEvent[] = [];
   const ended = new Set<string>();
-  for (const { sourceId, casterId, concentration } of dispellable(
+  for (const { sourceId, casterId, concentration, level } of dispellable(
     target,
-    maxLevel,
+    check ? 9 : maxLevel,
     state,
     access,
     hostile,
   )) {
+    if (level > maxLevel && check) {
+      const rolled = check(10 + level);
+      events.push(...rolled.events);
+      if (!rolled.success) continue;
+    }
     const caster = state.actors[casterId];
     if (concentration && caster?.concentratingOn === sourceId) {
       if (ended.has(casterId)) continue;

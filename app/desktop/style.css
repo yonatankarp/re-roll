@@ -1913,6 +1913,17 @@ button:active {
   background: #fdf1dc;
 }
 
+/* Variant rules, folded under the main settings. */
+.variant-rules {
+  margin-top: 16px;
+}
+
+.variant-rules > summary {
+  margin-bottom: 10px;
+  font: 1.1rem var(--font-head);
+  cursor: pointer;
+}
+
 .begin {
   width: 100%;
   margin-top: 24px;

@@ -247,13 +247,18 @@ describe("feat and trait riders", () => {
         scripted([5]).dice,
       ).map((event) => event.kind);
     };
-    expect(rescue(["fortitude"], "con")).toEqual([]); // 9 + 4 can't reach 14
-    expect(rescue(["fortitude", "greater-fortitude"], "con")).toEqual([
+    expect(rescue(["aberrant-fortitude"], "con")).toEqual([]); // 9 + 4 can't reach 14
+    expect(rescue(["aberrant-fortitude", "greater-aberrant"], "con")).toEqual([
       `${NS}:budgetSpent`,
       `${NS}:resourceSpent`,
     ]);
-    expect(rescue(["fortitude", "greater-fortitude"], "dex")).toEqual([]);
-    const greater = deriveStats(hero(["fortitude", "greater-fortitude"]), run);
+    expect(rescue(["aberrant-fortitude", "greater-aberrant"], "dex")).toEqual(
+      [],
+    );
+    const greater = deriveStats(
+      hero(["aberrant-fortitude", "greater-aberrant"]),
+      run,
+    );
     expect(
       greater.resourceDefs
         .filter((item) => item.id === "fortitude")
