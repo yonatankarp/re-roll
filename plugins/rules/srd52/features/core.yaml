@@ -432,7 +432,9 @@
 - id: "srd52:feature/disciple-of-life"
   name: Disciple of Life
   text: "Your healing spells restore additional Hit Points based on the slot used."
-  automation: text
+  automation: full
+  passives:
+    - { kind: spellHealing, bonus: { base: 2 }, perSlot: true, slot: true }
 
 - id: "srd52:feature/preserve-life"
   name: Preserve Life

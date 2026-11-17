@@ -4,6 +4,7 @@ import {
   type Cost,
   type Damage,
   type DamageType,
+  type Passive,
 } from "./schemas.ts";
 import { type Actor, dndEvent, frame, NS } from "./state.ts";
 import type { KnownAction } from "./stats.ts";
@@ -162,6 +163,50 @@ export function joins(
   );
 }
 
+const DAY = 24 * 60;
+
+// The activation with its effects' minutes doubled, as Extended Spell's.
+function doubled(activation: Activation): Activation {
+  const longer = <T extends { kind: string }>(effect: T): T =>
+    "duration" in effect &&
+    typeof effect.duration === "object" &&
+    effect.duration !== null &&
+    "minutes" in effect.duration &&
+    typeof effect.duration.minutes === "number"
+      ? {
+          ...effect,
+          duration: {
+            ...effect.duration,
+            minutes: Math.min(DAY, effect.duration.minutes * 2),
+          },
+        }
+      : effect;
+  const { resolution } = activation;
+  switch (resolution.kind) {
+    case "automatic":
+      return {
+        ...activation,
+        resolution: { ...resolution, effects: resolution.effects.map(longer) },
+      };
+    case "save":
+      return {
+        ...activation,
+        resolution: {
+          ...resolution,
+          onFail: resolution.onFail.map(longer),
+          onSuccess: resolution.onSuccess.map(longer),
+        },
+      };
+    case "attack":
+      return {
+        ...activation,
+        resolution: { ...resolution, onHit: resolution.onHit.map(longer) },
+      };
+    default:
+      return resolution satisfies never;
+  }
+}
+
 const withDamage = (
   activation: Activation,
   change: (damage: Damage) => Damage,
@@ -196,7 +241,6 @@ function shaped(
         ...item,
         amount: { ...item.amount, reroll: Math.max(1, charisma) },
       }));
-    // shortcut: it doesn't bar another level 1+ spell on the same turn; check that once spells cast per turn are tracked.
     case "quickened":
       return {
         ...activation,
@@ -224,11 +268,11 @@ function shaped(
             },
           }
         : activation;
-    // These change the saves, the hiding or a miss as the spell resolves.
-    // shortcut: Extended Spell doesn't double durations, which no fight lasts long enough to show; double them once
-    // durations outlast a fight.
-    case "careful":
+    // Its effects last twice as long, up to 24 hours.
     case "extended":
+      return doubled(activation);
+    // These change the saves, the hiding or a miss as the spell resolves.
+    case "careful":
     case "heightened":
     case "seeking":
     case "subtle":
@@ -251,22 +295,47 @@ const NAMES: Readonly<Record<Metamagic, string>> = {
   twinned: "Twinned",
 };
 
+const FREE = "free-metamagic"; // the turn's option Arcane Apotheosis pays for
+
+// Whether this turn's first option is free (`freeMetamagic`).
+export function freeOption(
+  actor: Actor,
+  passives: readonly Passive[],
+): boolean {
+  return (
+    !actor.usedThisTurn.includes(FREE) &&
+    passives.some(
+      (passive) =>
+        passive.kind === "freeMetamagic" &&
+        actor.activeEffects.some(({ sourceId }) =>
+          passive.while.some((id) => sourceId.startsWith(`feature:${id}:`)),
+        ),
+    )
+  );
+}
+
+// The Sorcery Points the options waiting on a spell cost, the dearest free with Arcane Apotheosis.
+function pointsFor(mine: readonly Marker[], free: boolean): number {
+  const costs = mine.map((item): number =>
+    item.option === "seeking" ? 0 : METAMAGIC_COSTS[item.option],
+  );
+  const total = costs.reduce((sum, cost) => sum + cost, 0);
+  return free ? total - Math.max(0, ...costs) : total;
+}
+
 // The spells with options waiting on them, changed and costing their Sorcery Points, so the turn lists them as cast.
 // Seeking Spell is paid for only on a miss.
 export function withMetamagic(
   actions: readonly KnownAction[],
   actor: Actor,
   charisma: number,
+  free = false,
 ): KnownAction[] {
   const markers = markersOf(actor);
   return actions.map((action) => {
     const mine = markers.filter((item) => item.action === action.id);
     if (mine.length === 0) return action;
-    const points = mine.reduce(
-      (sum, item) =>
-        sum + (item.option === "seeking" ? 0 : METAMAGIC_COSTS[item.option]),
-      0,
-    );
+    const points = pointsFor(mine, free);
     const activation = mine.reduce(
       (current, marker) => shaped(current, marker, action.upcast, charisma),
       action.activation,
@@ -291,7 +360,7 @@ function waiting(actor: Actor, actionId: string, option: Metamagic) {
 
 // Careful Spell's creatures, which succeed and take no half damage, and Heightened Spell's one target, which saves
 // with Disadvantage. Both go to the first creatures the save catches: the caster's side for Careful, a foe for Heightened.
-// shortcut: Heightened gives Disadvantage on the first save only, not on the saves the spell repeats.
+// Heightened's Disadvantage stays on the saves a spell held by Concentration repeats (combat/effects.ts).
 export function metamagicSaves(
   action: KnownAction,
   caster: Actor,
@@ -314,6 +383,11 @@ export function metamagicSaves(
   };
 }
 
+// Whether this cast is Quickened, which keeps other level 1+ spells off the turn.
+export function quickens(actor: Actor, actionId: string): boolean {
+  return waiting(actor, actionId, "quickened");
+}
+
 // Subtle Spell casts without Verbal or Somatic components, so it doesn't give a hidden caster away.
 export function keepsHidden(actor: Actor, actionId: string): boolean {
   return waiting(actor, actionId, "subtle");
@@ -329,10 +403,14 @@ export function metamagicCast(actor: Actor, actionId: string): Frame[] {
 export function metamagicSpentEvents(
   actor: Actor,
   actionId: string,
+  free = false,
 ): SystemEvent[] {
   const mine = markersOf(actor).filter((item) => item.action === actionId);
   const extended = mine.find((item) => item.option === "extended");
   return [
+    ...(free && pointsFor(mine, false) > pointsFor(mine, true)
+      ? [dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key: FREE })]
+      : []),
     ...mine.map((item) =>
       dndEvent(`${NS}:effectEnded`, {
         actor: actor.id,

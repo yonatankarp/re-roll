@@ -8,6 +8,7 @@ import {
 import { DECLINE } from "./ids.ts";
 import {
   type Actor,
+  dndEvent,
   frame,
   hasCondition,
   INCAPACITATING,
@@ -15,7 +16,13 @@ import {
   NS,
 } from "../state.ts";
 import { distanceFeet, rangeFeet } from "../grid.ts";
-import { deriveStats, evaluateFormula, type KnownAction } from "../stats.ts";
+import {
+  castsSilently,
+  deriveStats,
+  evaluateFormula,
+  type KnownAction,
+  rollDiceNotation,
+} from "../stats.ts";
 import { seeing } from "../sight.ts";
 import {
   actorOf,
@@ -24,7 +31,10 @@ import {
   type Context,
   enemies,
   findAction,
+  hasPassive,
+  slotToSpend,
 } from "./queries.ts";
+import { slotRefund } from "./reactions.ts";
 import { payCosts, resolveAction, rollSave } from "./effects.ts";
 import { isSpell, spellLevelOf } from "./dispel.ts";
 
@@ -79,6 +89,10 @@ export function counterWindow(
   context: Context,
 ): Frame | null {
   if (!isSpell(action, caster, context)) return null;
+  // A spell cast with no components isn't seen being cast.
+  if (castsSilently(caster, action, deriveStats(caster, context), context)) {
+    return null;
+  }
   for (const foe of enemies(context.state, caster)) {
     const counter = counterOf(foe, caster, context);
     if (!counter) continue;
@@ -137,14 +151,39 @@ export function runCounterspell(
       ? evaluateFormula(resolution.dc, deriveStats(counterer, context))
       : 0;
   const save = rollSave(caster, "con", dc, context, true);
+  const own = deriveStats(counterer, context);
+  const slot = slotToSpend(counter, counterer, own);
   const paid = payCosts(counter, counterer, context);
   if (save.saved) {
     const result = cast(rest, context);
+    // Spell Breaker: a Counterspell that stops nothing keeps its slot.
+    const kept =
+      slot !== null && hasPassive(own, "spellBreaker")
+        ? slotRefund(counterer, counter, slot)
+        : [];
     return {
       ...result,
-      events: [...paid, ...save.events, ...(result.events ?? [])],
+      events: [...paid, ...kept, ...save.events, ...(result.events ?? [])],
     };
   }
+  // Absorb Spells: points back for a spell countered.
+  const absorbed = own.passives.flatMap((passive) => {
+    if (passive.kind !== "counterRegain") return [];
+    const spent = counterer.resourcesSpent[passive.resource] ?? 0;
+    const amount = Math.min(
+      spent,
+      rollDiceNotation(passive.dice, context.dice),
+    );
+    return amount > 0
+      ? [
+          dndEvent(`${NS}:resourceRestored`, {
+            actor: counterer.id,
+            resource: passive.resource,
+            amount,
+          }),
+        ]
+      : [];
+  });
   const action = findAction(caster, payload.actionId, context);
   const wasted = {
     ...action,
@@ -154,7 +193,12 @@ export function runCounterspell(
     },
   };
   return {
-    events: [...paid, ...save.events, ...payCosts(wasted, caster, context)],
+    events: [
+      ...paid,
+      ...absorbed,
+      ...save.events,
+      ...payCosts(wasted, caster, context),
+    ],
     frames: [CHECK_END, frame("afterAction", { actor: caster.id })],
   };
 }

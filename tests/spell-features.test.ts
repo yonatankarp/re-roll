@@ -20,6 +20,12 @@ import { recovered } from "../plugins/systems/dnd5.5e/core/rest.ts";
 import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { castRiders } from "../plugins/systems/dnd5.5e/core/combat/school.ts";
 import {
+  freeOption,
+  withMetamagic,
+} from "../plugins/systems/dnd5.5e/core/metamagic.ts";
+import { castsSilently } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { quickenedBars } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import {
   type CharacterBuild,
   ClassSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
@@ -261,6 +267,21 @@ const FIXTURES = [
         types: ["fire"],
         oncePerTurn: true,
       },
+    ],
+  },
+  {
+    id: "test:feature/evoker-tricks",
+    name: "Evoker Tricks",
+    text,
+    automation: "full",
+    passives: [
+      { kind: "potentCantrip" },
+      {
+        kind: "castsAs",
+        spells: ["srd52:spell/dispel-magic"],
+        cost: "bonusAction",
+      },
+      { kind: "silentCasting", schools: ["enchantment"], slot: true },
     ],
   },
   {
@@ -804,5 +825,115 @@ describe("spells that heal more and hit harder", () => {
     expect(
       flame?.activation.resolution.damage[0]?.amount.bonus,
     ).toBeUndefined();
+  });
+});
+
+describe("spells changed as they're cast", () => {
+  const tricks = () =>
+    priest([
+      [
+        { kind: "features", values: ["test:feature/evoker-tricks"] },
+        {
+          kind: "spells",
+          values: [
+            "srd52:spell/fire-bolt",
+            "srd52:spell/sacred-flame",
+            "srd52:spell/dispel-magic",
+            "srd52:spell/hold-person",
+            "srd52:spell/bless",
+          ],
+        },
+      ],
+    ]);
+  const act = (actor: Actor, id: string) => {
+    const found = stats(actor).actions.find(
+      (item) => item.id === `spell:srd52:spell/${id}`,
+    );
+    if (!found) throw new Error(`no ${id}`);
+    return found;
+  };
+
+  it("deals a cantrip's half damage on a miss or a save, as Potent Cantrip", () => {
+    const actor = tricks();
+    expect(act(actor, "fire-bolt").activation.resolution).toMatchObject({
+      missDamage: "half",
+    });
+    expect(act(actor, "sacred-flame").activation.resolution).toMatchObject({
+      onSuccessDamage: "half",
+    });
+  });
+
+  it("casts a named spell with a Bonus Action, and a school's with no components", () => {
+    const actor = tricks();
+    expect(act(actor, "dispel-magic").activation.cost).toContain("bonusAction");
+    expect(act(actor, "dispel-magic").activation.cost).not.toContain("action");
+    const derived = stats(actor);
+    expect(castsSilently(actor, act(actor, "hold-person"), derived, run)).toBe(
+      true,
+    );
+    expect(castsSilently(actor, act(actor, "fire-bolt"), derived, run)).toBe(
+      false,
+    );
+  });
+
+  it("doubles Extended Spell's durations, and makes a turn's option free with Arcane Apotheosis", () => {
+    const sorcerer: Actor = {
+      ...tricks(),
+      activeEffects: [
+        {
+          sourceId: "phb:feature/sorcerer-metamagic-extended-spell",
+          casterId: PLAYER_ACTOR,
+          modifier: {
+            kind: "tactic",
+            tactic: "metamagic",
+            action: "spell:srd52:spell/bless",
+          },
+          ends: "casterTurnEnd",
+        },
+      ],
+    };
+    const bless = act(tricks(), "bless");
+    const [paid] = withMetamagic([bless], sorcerer, 3);
+    expect(JSON.stringify(paid?.activation.resolution)).toContain(
+      '"minutes":2',
+    );
+    expect(paid?.activation.cost).toContainEqual({
+      resource: "sorcery-points",
+    });
+    const [free] = withMetamagic([bless], sorcerer, 3, true);
+    expect(free?.activation.cost).not.toContainEqual({
+      resource: "sorcery-points",
+    });
+    expect(
+      freeOption(sorcerer, [
+        { kind: "freeMetamagic", while: ["test:feature/innate"] },
+      ]),
+    ).toBe(false);
+  });
+
+  it("bars another level 1+ spell on a Quickened Spell's turn, but not a cantrip", () => {
+    const actor = { ...tricks(), usedThisTurn: ["quickened"] };
+    expect(quickenedBars(act(actor, "hold-person"), actor)).toBe(true);
+    expect(quickenedBars(act(actor, "fire-bolt"), actor)).toBe(false);
+    expect(quickenedBars(act(tricks(), "hold-person"), tricks())).toBe(false);
+  });
+
+  it("raises the spell save DC while an effect says so, as Innate Sorcery", () => {
+    const actor: Actor = {
+      ...tricks(),
+      activeEffects: [
+        {
+          sourceId: "feature:test:feature/innate:0",
+          casterId: PLAYER_ACTOR,
+          modifier: {
+            kind: "bonus",
+            to: "spellDc",
+            amount: { bonus: { base: 1, add: [] } },
+          },
+          ends: "casterTurnEnd",
+        },
+      ],
+    };
+    expect(stats(actor).itemBonuses.spellDc).toBe(1);
   });
 });

@@ -14,6 +14,7 @@ import { encodeOption, parseOption } from "./combat/ids.ts";
 import { FeatureSchema } from "./schemas.ts";
 import {
   type Actor,
+  CAST_LEVELED,
   type DndState,
   INCAPACITATING,
   NS,
@@ -34,6 +35,7 @@ import {
   joins,
   markersOf,
   metamagicOf,
+  freeOption,
   metamagicSpentEvents,
 } from "./metamagic.ts";
 
@@ -104,6 +106,8 @@ function castable(
   );
   return (
     !action.activation.trigger &&
+    // Quickened Spell can't follow a level 1+ spell cast this turn.
+    !(option === "quickened" && actor.usedThisTurn.includes(CAST_LEVELED)) &&
     fits(option, action) &&
     joins(option, waiting, two) &&
     canAfford(
@@ -215,9 +219,11 @@ export function classOptions(
   const left = pointsLeft(actor, stats);
   const busy = new Set(markersOf(actor).map((item) => item.featureId));
   const options: { id: string; label: string }[] = [];
+  // Arcane Apotheosis: one option a turn needs no points, while none waits on a spell yet.
+  const free = busy.size === 0 && freeOption(actor, stats.passives);
   for (const [featureId, option] of knownOptions(stats)) {
     const cost = METAMAGIC_COSTS[option];
-    if (busy.has(featureId) || cost > left) continue;
+    if (busy.has(featureId) || (cost > left && !free)) continue;
     if (spellsFor(option, actor, stats, state, access).length === 0) continue;
     options.push({
       id: encodeOption(METAMAGIC, featureId),
@@ -406,7 +412,13 @@ export const classOptionFrames = {
     run: (payload, context: Context) => {
       const actor = context.state.actors[payload.actor];
       return actor
-        ? { events: metamagicSpentEvents(actor, payload.action) }
+        ? {
+            events: metamagicSpentEvents(
+              actor,
+              payload.action,
+              freeOption(actor, deriveStats(actor, context).passives),
+            ),
+          }
         : {};
     },
   }),

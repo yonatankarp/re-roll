@@ -22,6 +22,8 @@ import {
 import {
   type Actor,
   CAST_ACTION,
+  CAST_LEVELED,
+  QUICKENED,
   dndEvent,
   fightingOn,
   hasCondition,
@@ -32,6 +34,7 @@ import {
 } from "../state.ts";
 import { distanceFeet, type Square, squareKey } from "../grid.ts";
 import {
+  castsSilently,
   deriveStats,
   evaluateFormula,
   type KnownAction,
@@ -73,7 +76,7 @@ import {
   resolveTargets,
   rollSave,
 } from "./effects.ts";
-import { keepsHidden, metamagicCast } from "../metamagic.ts";
+import { metamagicCast, quickens } from "../metamagic.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
 import { spellFumble, timeStopEnds } from "./durations.ts";
 import { castRiders, schoolCastEvents } from "./school.ts";
@@ -387,11 +390,29 @@ function castAction(
             }),
           ]
         : []),
+      // Quickened Spell can't share a turn with another level 1+ spell (metamagic.ts).
+      ...(action.spellLevel !== null && action.spellLevel > 0
+        ? [
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: actor.id,
+              key: CAST_LEVELED,
+            }),
+          ]
+        : []),
+      ...(quickens(actor, actionId)
+        ? [
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: actor.id,
+              key: QUICKENED,
+            }),
+          ]
+        : []),
       ...passedSaves,
       ...(foiled?.events ?? []),
       ...lightAttackEvents(actor, actionId, context),
       // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.
-      ...(resolution.kind === "attack" || keepsHidden(actor, actionId)
+      ...(resolution.kind === "attack" ||
+      castsSilently(actor, action, deriveStats(actor, context), context)
         ? []
         : revealEvents(actor)),
       ...(result.events ?? []),

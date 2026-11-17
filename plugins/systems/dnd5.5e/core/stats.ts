@@ -66,7 +66,12 @@ import {
 } from "./schemas.ts";
 import { featureRules, grantedSpells } from "./feature-rules.ts";
 import { type Caster, multiclassSlots } from "./multiclass.ts";
-import { holdsConcentration, withMetamagic } from "./metamagic.ts";
+import {
+  freeOption,
+  holdsConcentration,
+  keepsHidden,
+  withMetamagic,
+} from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
 import { withWeaponRiders } from "./weapon-riders.ts";
 import {
@@ -347,7 +352,13 @@ function freeCastActions(
               ...cast,
               cost: [
                 ...activation.cost.filter((cost) => cost !== "slot"),
-                ...(how === "atWill" ? [] : [{ resource: id }]),
+                ...(how === "atWill"
+                  ? []
+                  : [
+                      typeof how === "object" && how.perLevel && slot > 1
+                        ? { resource: id, count: slot }
+                        : { resource: id },
+                    ]),
               ],
             },
             spellLevel: slot,
@@ -954,7 +965,15 @@ function collectFeatureData(
     if (!from) continue;
     for (const spell of ownSpells.get(from.feature) ?? []) {
       const level = SpellSchema.safeParse(access.content(spell)).data?.level;
-      if (level) free.push([spell, { resource: from.resource }]);
+      if (level) {
+        free.push([
+          spell,
+          {
+            resource: from.resource,
+            ...(from.perLevel ? { perLevel: true as const } : {}),
+          },
+        ]);
+      }
     }
   }
   return { passives, actions, resources, spells, free, retype, abilities };
@@ -985,6 +1004,89 @@ function emptyHanded(
         },
       },
     };
+  });
+}
+
+// Potent Cantrip: a damaging cantrip's miss or successful save still deals half its damage.
+function withPotentCantrips(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+): KnownAction[] {
+  if (!passives.some((passive) => passive.kind === "potentCantrip")) {
+    return [...actions];
+  }
+  return actions.map((action) => {
+    const { resolution } = action.activation;
+    if (
+      action.spellLevel !== 0 ||
+      spellOfSource(action.id) === null ||
+      resolution.damage.length === 0
+    ) {
+      return action;
+    }
+    const potent =
+      resolution.kind === "save" && resolution.onSuccessDamage === "none"
+        ? { ...resolution, onSuccessDamage: "half" as const }
+        : resolution.kind === "attack" && !resolution.missDamage
+          ? { ...resolution, missDamage: "half" as const }
+          : resolution;
+    return potent === resolution
+      ? action
+      : { ...action, activation: { ...action.activation, resolution: potent } };
+  });
+}
+
+// Whether this cast needs no components (`silentCasting`, or Subtle Spell waiting on it), so nobody sees it cast.
+export function castsSilently(
+  actor: Actor,
+  action: KnownAction,
+  stats: Pick<Stats, "passives">,
+  access: ContentAccess,
+): boolean {
+  if (keepsHidden(actor, action.id)) return true;
+  const spellId = spellOfSource(action.id);
+  if (spellId === null) return false;
+  const spell = SpellSchema.safeParse(access.content(spellId)).data;
+  return stats.passives.some(
+    (passive) =>
+      passive.kind === "silentCasting" &&
+      (!passive.schools || (spell && passive.schools.includes(spell.school))) &&
+      (!passive.list || onList(spellId, spell, passive.list, access)) &&
+      (!passive.spells || passive.spells.includes(spellId)) &&
+      (!passive.slot || action.activation.cost.includes("slot")) &&
+      (!passive.via ||
+        (/:free(:|$)/.test(action.id) &&
+          action.activation.cost.some(
+            (cost) =>
+              typeof cost === "object" &&
+              "resource" in cost &&
+              cost.resource === passive.via,
+          ))),
+  );
+}
+
+// Spells cast with a Bonus Action in place of an action (`castsAs`).
+function withCastsAs(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+): KnownAction[] {
+  const quick = passives.flatMap((passive) =>
+    passive.kind === "castsAs" ? passive.spells : [],
+  );
+  if (quick.length === 0) return [...actions];
+  return actions.map((action) => {
+    const spell = spellOfSource(action.id);
+    return spell !== null && quick.includes(spell)
+      ? {
+          ...action,
+          activation: {
+            ...action.activation,
+            cost: action.activation.cost.map((cost) =>
+              cost === "action" ? "bonusAction" : cost,
+            ),
+          },
+        }
+      : action;
   });
 }
 
@@ -1538,6 +1640,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
 
+  // An effect raising the bearer's spell save DC, as Innate Sorcery's +1.
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind === "bonus" && modifier.to === "spellDc") {
+      magic.spellDc += modifier.amount.bonus?.base ?? 0;
+    }
+  }
   const fromFeatures = collectFeatureData(
     access,
     [...featureIds],
@@ -1840,8 +1948,14 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         withWeaponRiders(
           withSpellDamage(
             emptyHanded(
-              withExtraTargets(
-                withRiders(actions, fromFeatures.passives, actor),
+              withPotentCantrips(
+                withCastsAs(
+                  withExtraTargets(
+                    withRiders(actions, fromFeatures.passives, actor),
+                    fromFeatures.passives,
+                  ),
+                  fromFeatures.passives,
+                ),
                 fromFeatures.passives,
               ),
               actor,
@@ -1864,6 +1978,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       ),
       actor,
       abilityModifier(abilities.cha),
+      freeOption(actor, fromFeatures.passives),
     ),
     multiattack:
       Math.max(

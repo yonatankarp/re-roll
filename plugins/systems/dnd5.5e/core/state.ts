@@ -114,6 +114,8 @@ export function frame(kind: FrameKind, payload: Frame["payload"] = {}): Frame {
 export const LEGENDARY_USE = "legendary";
 export const PICKED_UP = "pickedUp"; // in usedThisTurn: the one free pick-up of a turn
 export const CAST_ACTION = "castAction"; // in usedThisTurn: a spell with a casting time of an action was cast
+export const CAST_LEVELED = "castLeveled"; // in usedThisTurn: a level 1+ spell was cast
+export const QUICKENED = "quickened"; // in usedThisTurn: a spell was cast with Quickened Spell
 export const SURGED = "surged"; // in usedThisTurn: Action Surge's extra action, which can't be a Magic action
 export const LEGENDARY_RESISTANCE = "legendaryResistance";
 

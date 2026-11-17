@@ -128,7 +128,7 @@ import {
   slotRefund,
 } from "./reactions.ts";
 import { summonEvents } from "./summon.ts";
-import { fueledDamage } from "./school.ts";
+import { fueledDamage, schoolOf } from "./school.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { headDamageEvents } from "./heads.ts";
@@ -2112,7 +2112,9 @@ export function leafEvents(
           (["petrified", "unconscious"].includes(effect.condition) ||
             !deriveStats(target, context).passives.some(
               (passive) =>
-                passive.kind === "unshakableFocus" && !passive.spells,
+                passive.kind === "unshakableFocus" &&
+                !passive.spells &&
+                !passive.schools,
             ))
         ) {
           events.push(
@@ -2250,18 +2252,46 @@ export function leafEvents(
         break;
       }
       case "dispel": {
-        events.push(
-          ...dispelEvents(
-            target,
-            effect.maxLevel,
-            context.state,
-            context,
-            effect.hostile,
-            effect.check && stats.spellAbility
-              ? (dc) => spellcastingCheck(caster, stats, dc, context)
-              : undefined,
-          ),
+        // Spell Breaker: the Proficiency Bonus on the check, and the slot back when nothing ends.
+        const breaker = hasPassive(stats, "spellBreaker");
+        const ended = dispelEvents(
+          target,
+          effect.maxLevel,
+          context.state,
+          context,
+          effect.hostile,
+          effect.check && stats.spellAbility
+            ? (dc) =>
+                spellcastingCheck(
+                  caster,
+                  stats,
+                  dc - (breaker ? stats.proficiency : 0),
+                  context,
+                )
+            : undefined,
         );
+        events.push(...ended);
+        const stopped = ended.some(
+          (item) =>
+            item.kind === `${NS}:effectEnded` ||
+            item.kind === `${NS}:concentrationEnded`,
+        );
+        const spell = spellOfSource(sourceId);
+        if (
+          breaker &&
+          !stopped &&
+          slotLevel !== undefined &&
+          spell !== null &&
+          !/:free(:|$)/.test(sourceId)
+        ) {
+          events.push(
+            dndEvent(`${NS}:resourceRestored`, {
+              actor: caster.id,
+              resource: `slot:${String(slotLevel)}`,
+              amount: 1,
+            }),
+          );
+        }
         // Shutdown: the dispelled construct may fall Unconscious.
         const shutdown = deriveStats(target, context).passives.find(
           (passive) => passive.kind === "dispelShutdown",
@@ -3214,6 +3244,8 @@ export function resolveAction(
         action,
         actor,
         stats,
+        context,
+        slotLevel ?? action.spellLevel ?? 0,
       )
     : aimedAt;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
@@ -3754,6 +3786,29 @@ export function resolveAction(
         modifierFor(stats, "cha"),
       );
       const { heightened } = careful;
+      // Heightened Spell: the target's later saves against a spell held by Concentration are at Disadvantage too.
+      if (heightened !== undefined && action.concentrates) {
+        events.push(
+          dndEvent(`${NS}:effectAdded`, {
+            actor: heightened,
+            effect: {
+              sourceId: action.id,
+              casterId: actor.id,
+              modifier: {
+                kind: "disadvantage",
+                on: "saves",
+                casterSpells: true,
+              },
+              ends: "concentration",
+            },
+          }),
+        );
+      }
+      // Magical Ambush: an Invisible caster's spell is saved against with Disadvantage.
+      const ambushing =
+        action.spellLevel !== null &&
+        hasCondition(actor, "invisible") &&
+        hasPassive(stats, "magicalAmbush");
       const banded = pairedBandSpares(action, actor, stats, targets, context);
       events.push(...banded.events);
       const spared = new Set([...careful.spared, ...banded.spared]);
@@ -3817,7 +3872,9 @@ export function resolveAction(
                 action.spellLevel !== null,
                 coverAgainst(context.state, actor, target, context),
                 conditionsApplied(resolution.onFail),
-                heightened === target.id || edges.includes("disadvantage"),
+                heightened === target.id ||
+                  edges.includes("disadvantage") ||
+                  ambushing,
                 resolution.advantage === true || edges.includes("advantage"),
                 source,
               );
@@ -4540,14 +4597,21 @@ function immuneToSpell(
 }
 
 // Evocation Sculptor: an area spell passes over the caster and up to that many of its side, who save and take nothing.
+// Sculpt Spells: only an Evocation, sparing 1 plus the spell's level of the caster's side.
+// shortcut: the spared are the caster's side, the ones it would pick, and they're spared the whole spell.
 function sculpted(
   targets: readonly Actor[],
   action: KnownAction,
   actor: Actor,
   stats: ReturnType<typeof deriveStats>,
+  context: Context,
+  slotLevel: number,
 ): readonly Actor[] {
+  const school = schoolOf(action.id, context);
   const sculptor = stats.passives.find(
-    (passive) => passive.kind === "sculptor",
+    (passive) =>
+      passive.kind === "sculptor" &&
+      (!passive.schools || passive.schools.some((item) => item === school)),
   );
   if (
     sculptor?.kind !== "sculptor" ||
@@ -4555,11 +4619,12 @@ function sculpted(
   ) {
     return targets;
   }
+  const most = sculptor.creatures + (sculptor.perLevel ? slotLevel : 0);
   let spared = 0;
   return targets.filter((target) => {
     if (target.side !== actor.side) return true;
-    if (target.id === actor.id) return false;
+    if (target.id === actor.id && !sculptor.perLevel) return false;
     spared += 1;
-    return spared > sculptor.creatures;
+    return spared > most;
   });
 }

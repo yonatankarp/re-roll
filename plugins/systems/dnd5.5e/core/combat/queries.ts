@@ -4,6 +4,7 @@ import { knownFoes, knows } from "../fog.ts";
 import {
   type Actor,
   CAST_ACTION,
+  QUICKENED,
   controllingRider,
   dndEvent,
   type DndState,
@@ -701,6 +702,15 @@ export function fitsType(
   if (!targeting.creatureTypes) return true;
   return targeting.creatureTypes.includes(
     deriveStats(item, access).creatureType ?? "",
+  );
+}
+
+// Quickened Spell: no other level 1+ spell on the turn it was used (offered by combat/turn.ts).
+export function quickenedBars(action: KnownAction, actor: Actor): boolean {
+  return (
+    actor.usedThisTurn.includes(QUICKENED) &&
+    action.spellLevel !== null &&
+    action.spellLevel > 0
   );
 }
 

@@ -336,6 +336,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
       "initiative",
       "maxHp",
       "attacksAgainst", // an attacker's roll against the bearer, as Blade Ward's -1d4 with `subtract`
+      "spellDc", // the bearer's spell save DC, as Innate Sorcery's +1 (stats.ts)
     ]),
     amount: AmountSchema,
     once: z.boolean().optional(),
@@ -359,6 +360,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     // attacksAgainst only for the effect's caster, as Lords' Alliance Agent's Reassert Honor.
     casterOnly: z.literal(true).optional(),
     skills: z.array(SkillSchema).min(1).optional(), // only checks with these skills, as Remarkable Athlete's Athletics
+    spellAttacks: z.literal(true).optional(), // attacks only spell attacks, as Innate Sorcery's (combat/attack.ts)
   }),
   // "attackers" limits attacksAgainst to creatures of these lowercase types, as with Protection from Evil and Good.
   z.strictObject({
@@ -2002,6 +2004,38 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     spells: z.array(ContentIdSchema).min(1),
     creatures: z.number().int().min(1).default(1),
   }),
+  // These spells are cast with no Verbal, Somatic or Material components, so they give a hidden caster away to no one
+  // and can't be seen to be countered: of these `schools`, of `list`'s, these `spells`, only with a slot (`slot`), or
+  // only cast by spending `via` in place of a slot, as Psionic Sorcery's Sorcery Points.
+  z.strictObject({
+    kind: z.literal("silentCasting"),
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
+    list: ContentIdSchema.optional(),
+    spells: z.array(ContentIdSchema).min(1).optional(),
+    slot: z.literal(true).optional(),
+    via: z.string().min(1).optional(),
+  }),
+  // Dispel Magic adds the Proficiency Bonus to its check, and a slot spent on Dispel Magic or Counterspell comes back
+  // when the spell stops nothing, as Spell Breaker's (combat/effects.ts, combat/counter.ts).
+  z.strictObject({ kind: z.literal("spellBreaker") }),
+  // A spell the bearer counters gives back these dice of `resource`, as Absorb Spells' 1d4 Sorcery Points.
+  z.strictObject({
+    kind: z.literal("counterRegain"),
+    resource: z.string().min(1),
+    dice: DiceSchema,
+  }),
+  // These spells' action is a Bonus Action instead, as Spell Breaker's Dispel Magic.
+  z.strictObject({
+    kind: z.literal("castsAs"),
+    spells: z.array(ContentIdSchema).min(1),
+    cost: z.literal("bonusAction"),
+  }),
+  // While the bearer is Invisible, the saves against its spells as it casts them have Disadvantage, as Magical Ambush.
+  // shortcut: only the saves the casting asks for, not ones the spell asks for later in the turn.
+  z.strictObject({ kind: z.literal("magicalAmbush") }),
+  // The bearer's damaging cantrips deal half their damage on a miss or a successful save, as Potent Cantrip.
+  // shortcut: the cantrip's other effects still come on a miss or save only where the cantrip says so.
+  z.strictObject({ kind: z.literal("potentCantrip") }),
   // Ritual spells on this class's list, of a level it has slots for, can be cast as Rituals between fights without
   // being prepared, as Ritual Adept's from a Wizard's spellbook (camp.ts).
   z.strictObject({ kind: z.literal("ritualAdept"), list: ContentIdSchema }),
@@ -2155,6 +2189,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // as Sorcery Incarnate with Innate Sorcery.
   z.strictObject({
     kind: z.literal("doubleMetamagic"),
+    while: z.array(ContentIdSchema).min(1),
+  }),
+  // While an effect of these features' activations is on the bearer, one Metamagic option a turn costs no Sorcery
+  // Points, as Arcane Apotheosis with Innate Sorcery (metamagic.ts).
+  z.strictObject({
+    kind: z.literal("freeMetamagic"),
     while: z.array(ContentIdSchema).min(1),
   }),
   // The bearer's spells of this type ignore Resistance to it, and a 1 on their damage dice counts as a 2, as with
@@ -2345,6 +2385,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("unshakableFocus"),
     // only Concentration on one of these spells, as Guided Precision's Faerie Fire
     spells: z.array(ContentIdSchema).min(1).optional(),
+    // only on a spell of these schools, as Focused Conjuration's Conjuration spells
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
   }),
   // A 1 on a damage die of this type for the bearer's spell is rolled again, as with Flames of Phlegethos.
   // Casting with a level 1-4 slot rolls a d4, and a roll equal to the slot's level keeps it, as with Boon of Spell
@@ -2430,9 +2472,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     burn: z.array(DamageSchema).optional(),
   }),
   // Its area spells spare itself and up to `creatures` others of its side, as an evoker's Evocation Sculptor.
+  // With `schools` only spells of those, and with `perLevel` the spell's level more, as Sculpt Spells' 1 plus the
+  // level of Evocation spells; the caster then counts as one of them.
   z.strictObject({
     kind: z.literal("sculptor"),
     creatures: z.number().int().min(1),
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
+    perLevel: z.literal(true).optional(),
   }),
   // A hydra's heads: `heads` to begin with, one dies to `damage` or more in a turn, each dead one grows `regrow` back
   // at its turn's end unless it took a `stoppedBy` type, healing `heal`. It makes one bite and, beyond the first, has
@@ -2795,6 +2841,7 @@ export const FreeCastSchema = z.union([
     minutes: z.number().int().min(1).optional(),
     slotLevel: z.record(z.string(), z.number().int().min(1).max(9)).optional(),
     self: z.literal(true).optional(), // cast so only on the caster, as Vampire Touched's Spider Climb
+    perLevel: z.literal(true).optional(), // as many of `resource` as the spell's level, as Psionic Sorcery's points
   }),
 ]);
 export type FreeCast = z.infer<typeof FreeCastSchema>;
@@ -2896,7 +2943,11 @@ export const FeatureSchema = ContentEntrySchema.extend({
   // Each level 1+ spell of another feature's can be cast without a slot by spending `resource`, as Natural
   // Recovery's free Circle spell once a Long Rest.
   freeCastsFrom: z
-    .strictObject({ feature: ContentIdSchema, resource: z.string().min(1) })
+    .strictObject({
+      feature: ContentIdSchema,
+      resource: z.string().min(1),
+      perLevel: z.literal(true).optional(), // spending as many as the spell's level, as Psionic Sorcery
+    })
     .optional(),
   // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.
   spellsBySlot: z.record(z.string(), z.array(ContentIdSchema)).optional(),

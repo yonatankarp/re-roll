@@ -17,7 +17,13 @@ import {
   NS,
   frame,
 } from "../state.ts";
-import { ALL, DECLINE, encodeOption, parseOption } from "./ids.ts";
+import {
+  ALL,
+  DECLINE,
+  encodeOption,
+  parseOption,
+  spellOfSource,
+} from "./ids.ts";
 import { forgoAdvantageFrame, forgoFrame, SNEAK_DICE } from "./strikes.ts";
 import { lastsFor } from "./durations.ts";
 import { aroundHit, replaceHitFrame, runReplaceHit } from "./ranged-smite.ts";
@@ -90,6 +96,7 @@ import {
   type LeafEffect,
   MonsterSchema,
   type Resolution,
+  SpellSchema,
 } from "../schemas.ts";
 import {
   armoredReduction,
@@ -934,7 +941,18 @@ export function runAttackRoll(
         );
       }) ||
       traitAttackAdvantage(stats, attacker, target, targetStats, state) ||
-      mountedStrike(attacker, target, stats, context));
+      mountedStrike(attacker, target, stats, context) ||
+      // Innate Sorcery: Advantage on spell attacks only.
+      (action.spellLevel !== null &&
+        [
+          ...attacker.activeEffects.map((effect) => effect.modifier),
+          ...passiveModifiers(stats.passives),
+        ].some(
+          (modifier) =>
+            modifier.kind === "advantage" &&
+            modifier.on === "attacks" &&
+            modifier.spellAttacks === true,
+        )));
   const held = payload.rolled;
   // Redirect Attack: the target trades places with an ally next to it, who takes the attack instead.
   const redirected = held ? null : redirect(attacker, target, context);
@@ -3091,12 +3109,17 @@ export function runConcentrationSave(
   const held = actor.concentratingOn
     .replace(/^spell:/, "")
     .replace(/:free$/, "");
+  const school = SpellSchema.safeParse(
+    context.content(spellOfSource(actor.concentratingOn) ?? held),
+  ).data?.school;
   if (
     !isDown(actor) &&
     deriveStats(actor, context).passives.some(
       (passive) =>
         passive.kind === "unshakableFocus" &&
-        (!passive.spells || passive.spells.includes(held)),
+        (!passive.spells || passive.spells.includes(held)) &&
+        (!passive.schools ||
+          (school !== undefined && passive.schools.includes(school))),
     )
   ) {
     return {};
