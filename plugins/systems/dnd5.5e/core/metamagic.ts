@@ -147,10 +147,16 @@ export function fits(option: Metamagic, action: KnownAction): boolean {
 }
 
 // Whether one more option can join those already waiting on this spell.
-export function joins(option: Metamagic, waiting: readonly Metamagic[]) {
+// With `two`, any two options join, as with Sorcery Incarnate.
+export function joins(
+  option: Metamagic,
+  waiting: readonly Metamagic[],
+  two = false,
+) {
   return (
     !waiting.includes(option) &&
     (waiting.length === 0 ||
+      (two && waiting.length < 2) ||
       COMBINES.includes(option) ||
       waiting.every((item) => COMBINES.includes(item)))
   );

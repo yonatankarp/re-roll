@@ -62,6 +62,7 @@ import {
   zonesOn,
 } from "../zones.ts";
 import { spellLevelOf } from "./dispel.ts";
+import { canRegain } from "../rest.ts";
 import {
   type Ability,
   CompanionSchema,
@@ -703,17 +704,19 @@ export function canAfford(
   );
 }
 
-// A healing pool with nothing left in it can't heal, as Lay On Hands spent.
+// A healing pool with nothing left in it can't heal, as Lay On Hands spent, and nothing is regained with nothing
+// spent, as Font of Inspiration's use for a slot.
 function poolsLeft(action: KnownAction, actor: Actor, stats: Stats): boolean {
   const { resolution } = action.activation;
   return (
     resolution.kind !== "automatic" ||
-    resolution.effects.every(
-      (effect) =>
-        effect.kind !== "heal" ||
-        !effect.pool ||
-        (actor.resourcesSpent[effect.pool.resource] ?? 0) <
-          (stats.resources[effect.pool.resource] ?? 0),
+    resolution.effects.every((effect) =>
+      effect.kind === "regain"
+        ? canRegain(actor, effect.resource, stats)
+        : effect.kind !== "heal" ||
+          !effect.pool ||
+          (actor.resourcesSpent[effect.pool.resource] ?? 0) <
+            (stats.resources[effect.pool.resource] ?? 0),
     )
   );
 }

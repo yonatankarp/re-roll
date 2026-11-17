@@ -13,10 +13,12 @@ import {
   NS,
   dndEvent,
   forAttacker,
+  isDown,
   frame,
 } from "./state.ts";
 import { type KnownAction, type Stats, deriveStats } from "./stats.ts";
 import { seekingReroll } from "./metamagic.ts";
+import { rechargeAmount } from "./rest.ts";
 
 // Rules that class features and Heroic Inspiration need in a fight, kept apart from the combat flow in combat.ts.
 
@@ -48,14 +50,39 @@ export function onceEnded(
 // left spent when a fight ended on the bearer's turn.
 // shortcut: a fight started with no rest after that one begins with the use still spent; reset it in startCombat
 // once a hook there is free of the sessions changing it.
+// One with `upTo: 1` comes back only once the pool is empty, as Relentless's die.
 export function turnRecharge(actor: Actor, context: Context): SystemEvent[] {
   const stats = deriveStats(actor, context);
   return stats.resourceDefs.flatMap(({ id, recharge }) =>
-    recharge.some((item) => item.on === "turnStart") &&
-    (actor.resourcesSpent[id] ?? 0) > 0
-      ? [dndEvent(`${NS}:resourceRestored`, { actor: actor.id, resource: id })]
-      : [],
+    recharge.flatMap((entry) => {
+      if (entry.on !== "turnStart") return [];
+      const amount = rechargeAmount(
+        entry,
+        actor.resourcesSpent[id] ?? 0,
+        stats.resources[id] ?? 0,
+        stats,
+      );
+      return amount > 0
+        ? [
+            dndEvent(`${NS}:resourceRestored`, {
+              actor: actor.id,
+              resource: id,
+              amount,
+            }),
+          ]
+        : [];
+    }),
   );
+}
+
+// Heroic Warrior: Heroic Inspiration as each of the bearer's turns starts, when it has none.
+// shortcut: not on its first turn of a fight, which starts with no turn ending before it.
+export function turnInspiration(actor: Actor, context: Context): SystemEvent[] {
+  if (actor.heroicInspiration || isDown(actor)) return [];
+  const stats = deriveStats(actor, context);
+  return stats.passives.some((passive) => passive.kind === "turnInspiration")
+    ? [dndEvent(`${NS}:inspirationGranted`, { actor: actor.id })]
+    : [];
 }
 
 // The lowest natural roll that is a Critical Hit.

@@ -816,14 +816,22 @@ export const ResourceDefSchema = z.object({
   id: ResourceIdSchema,
   max: FormulaSchema,
   recharge: z.array(z.object({
-    on: z.enum(["turnStart", "shortRest", "longRest", "dawn"]),
-    amount: z.union([z.literal("all"), z.number()]),
+    on: z.enum(["turnStart", "shortRest", "longRest", "dawn", "initiative"]),
+    amount: z.union([z.literal("all"), z.number(), FormulaSchema]),
     rollAtLeast: z.number().optional(),          // monster abilities such as Recharge 5-6
+    upTo: z.number().optional(),                 // no more back than leave this many, as Superior Inspiration
+    uses: ResourceIdSchema.optional(),           // spends a use of another pool, as Persistent Rage's once a rest
+    heal: AmountSchema.optional(),               // Hit Points regained with it, as Uncanny Metabolism
   })),
 });
 ```
 
 Multiclass spell slots are computed using the SRD's multiclass table, and Pact Magic stays a separate pool.
+
+Two features can give the same pool, and each adds its recharges, as Font of Inspiration adds a Short Rest to Bardic Inspiration's. Pools also move:
+- **Conversions:** a `regain` effect gives back spent uses, a slot (`slot:<level>`) or slots of any level (`slots`), as Font of Inspiration's use for a slot or Magical Cunning's rite. An activation with one isn't offered while nothing is spent.
+- **Rest recovery:** a `slotRecovery` passive gives spent slots back as a Short Rest ends, the highest that fit its budget, spending its once-a-Long-Rest use, as Arcane Recovery. A Long Rest takes the hours of the party's slowest member (`restHours`, as Trance).
+- **Free casts:** a feature's or choice's `freeCast` casts its spells without a slot once a Long Rest (`true`), once a Short Rest (`"shortRest"`), at will (`"atWill"`) or by spending a pool's use, without Concentration for `minutes` (`{ resource, minutes }`, as War God's Blessing).
 
 ### 8.11 Frames
 
