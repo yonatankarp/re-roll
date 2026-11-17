@@ -1315,11 +1315,11 @@ describe("Battle Master maneuvers", () => {
   });
 
   it("Pushing Attack pushes a creature that fails 15 feet away", () => {
-    // The hit on 15, then the save fails on 2.
+    // The hit on 15, its damage rolled twice (the Soldier's Savage Attacker), then the save fails on 2.
     const done = settle(
       fight(fighter(3), creature("a", "enemy", 1)),
       [act(`${SWORD}|a`)],
-      dice(15, 8, 8, 2),
+      dice(15, 8, 8, 8, 2),
       [`feature:${maneuver("pushing")}:0|a`],
     );
     expect(done.state.actors.a?.position).toEqual({ x: 4, y: 0 });

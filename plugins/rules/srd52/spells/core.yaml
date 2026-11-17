@@ -534,7 +534,25 @@
   text:
     For the duration, a willing creature you touch has Darkvision with a range
     of 150 feet.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: touch
+      side: ally
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: darkvision
+            feet: 150
+          duration:
+            minutes: 480
 - id: srd52:spell/detect-evil-and-good
   name: Detect Evil and Good
   level: 1
@@ -860,7 +878,31 @@
     Dexterity saving throw, taking 7d10 Fire damage on a failed save or half as
     much damage on a successful one. Flammable objects in the area that aren’t
     being worn or carried start burning.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: cube
+        radius: 40
+      range: 150
+      side: enemy
+    resolution:
+      kind: save
+      ability: dex
+      dc:
+        base: 0
+        add:
+          - kind: spellSaveDc
+      damage:
+        - amount:
+            dice: 7d10
+          type: fire
+      onSuccessDamage: half
+      onFail: []
+      onSuccess: []
 - id: srd52:spell/floating-disk
   name: Floating Disk
   level: 1
@@ -1571,7 +1613,24 @@
   text:
     You compel one creature you can see within range to die. If the target has
     100 Hit Points or fewer, it dies. Otherwise, it takes 12d12 Psychic damage.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 60
+      side: enemy
+    resolution:
+      kind: automatic
+      damage:
+        - amount:
+            dice: 12d12
+          type: psychic
+      effects:
+        - kind: slay
+          hpAtMost: 100
 - id: srd52:spell/prismatic-wall
   name: Prismatic Wall
   level: 9
@@ -3204,8 +3263,23 @@
     rate of descent slows to 60 feet per round until the spell ends. If a
     creature lands before the spell ends, the creature takes no damage from the
     fall, and the spell ends for that creature.
-  automation: text
+  automation: full
   outOfCombat: utility
+  activation:
+    cost:
+      - reaction
+      - slot
+    trigger:
+      falls: true
+      within: 60
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: slowFall
+          creatures: 5
 - id: srd52:spell/finger-of-death
   name: Finger of Death
   level: 7
@@ -3691,7 +3765,25 @@
   duration: instantaneous
   text: "You touch a creature and end one condition on it: Blinded, Deafened,
     Paralyzed, or Poisoned."
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - bonusAction
+      - slot
+    targeting:
+      creatures: 1
+      range: touch
+      side: ally
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: cure
+          conditions:
+            - blinded
+            - deafened
+            - paralyzed
+            - poisoned
 - id: srd52:spell/locate-creature
   name: Locate Creature
   level: 4
@@ -3852,7 +3944,34 @@
     Sphere is affected only once. A nonmagical object that isn’t being worn or
     carried also takes the damage if it’s in the spell’s area, and the object
     starts burning if it’s flammable.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 40
+      range: 5280
+      side: enemy
+    resolution:
+      kind: save
+      ability: dex
+      dc:
+        base: 0
+        add:
+          - kind: spellSaveDc
+      damage:
+        - amount:
+            dice: 20d6
+          type: fire
+        - amount:
+            dice: 20d6
+          type: bludgeoning
+      onSuccessDamage: half
+      onFail: []
+      onSuccess: []
 - id: srd52:spell/mirror-image
   name: Mirror Image
   level: 2
@@ -3874,7 +3993,23 @@
     destroyed. The duplicates otherwise ignore all other damage and effects. The
     spell ends when all three duplicates are destroyed. A creature is unaffected
     by this spell if it has the Blinded condition, Blindsight, or Truesight.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: images
+            count: 3
+          duration:
+            minutes: 1
 - id: srd52:spell/move-earth
   name: Move Earth
   level: 6
@@ -4359,7 +4494,19 @@
   text: Choose a creature within range that has 0 Hit Points and isn’t dead. The
     creature becomes Stable. Cantrip Upgrade. The range doubles when you reach
     levels 5 (30 feet), 11 (60 feet), and 17 (120 feet).
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+    targeting:
+      creatures: 1
+      range: 15
+      side: ally
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: stabilize
 - id: srd52:spell/spike-growth
   name: Spike Growth
   level: 2
@@ -4832,7 +4979,45 @@
     must subtract 1d4 from the attack roll or save. Using a Higher-Level Spell
     Slot. You can target one additional creature for each spell slot level above
     1.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 3
+      range: 30
+      side: enemy
+    resolution:
+      kind: save
+      ability: cha
+      dc:
+        add:
+          - kind: spellSaveDc
+      onFail:
+        - kind: modifier
+          modifier:
+            kind: bonus
+            to: attacks
+            amount:
+              dice: 1d4
+            subtract: true
+          duration:
+            concentration: true
+            minutes: 1
+        - kind: modifier
+          modifier:
+            kind: bonus
+            to: saves
+            amount:
+              dice: 1d4
+            subtract: true
+          duration:
+            concentration: true
+            minutes: 1
+  upcast:
+    perSlotLevel:
+      addTargets: 1
 - id: srd52:spell/bestow-curse
   name: Bestow Curse
   level: 3
@@ -5861,7 +6046,33 @@
     It makes a Dexterity saving throw, taking 2d10 Fire damage on a failed save
     or half as much damage on a successful one. Using a Higher-Level Spell Slot.
     The damage increases by 1d10 for each spell slot level above 1.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - reaction
+      - slot
+    trigger:
+      damaged: true
+    targeting:
+      creatures: 1
+      range: 60
+      side: enemy
+    resolution:
+      kind: save
+      ability: dex
+      dc:
+        add:
+          - kind: spellSaveDc
+      damage:
+        - amount:
+            dice: 2d10
+          type: fire
+      onFail: []
+      onSuccess: []
+      onSuccessDamage: half
+  upcast:
+    perSlotLevel:
+      addDice: 1d10
 - id: srd52:spell/hold-monster
   name: Hold Monster
   level: 5
@@ -7391,7 +7602,32 @@
     damage on a failed save or half as much damage on a successful one. Using a
     Higher-Level Spell Slot. One additional bolt leaps from the first target to
     another target for each spell slot level above 6.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 4
+      range: 150
+      side: enemy
+    resolution:
+      kind: save
+      ability: dex
+      dc:
+        base: 0
+        add:
+          - kind: spellSaveDc
+      damage:
+        - amount:
+            dice: 10d8
+          type: lightning
+      onSuccessDamage: half
+      onFail: []
+      onSuccess: []
+  upcast:
+    perSlotLevel:
+      addTargets: 1
 - id: srd52:spell/circle-of-death
   name: Circle of Death
   level: 6
@@ -8418,7 +8654,30 @@
   text: You touch a creature. The target’s Speed increases by 10 feet until the
     spell ends. Using a Higher-Level Spell Slot. You can target one additional
     creature for each spell slot level above 1.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: touch
+      side: ally
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: bonus
+            to: speed
+            amount:
+              bonus:
+                base: 10
+          duration:
+            minutes: 60
+  upcast:
+    perSlotLevel:
+      addTargets: 1
 - id: srd52:spell/magic-missile
   name: Magic Missile
   level: 1
@@ -8583,7 +8842,18 @@
   duration: instantaneous
   text: Briefly surrounded by silvery mist, you teleport up to 30 feet to an
     unoccupied space you can see.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - bonusAction
+      - slot
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      effects:
+        - kind: teleport
+          feet: 30
 - id: srd52:spell/passwall
   name: Passwall
   level: 5
@@ -8856,7 +9126,22 @@
   text: For the duration, you see creatures and objects that have the Invisible
     condition as if they were visible, and you can see into the Ethereal Plane.
     Creatures and objects there appear ghostly.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          modifier:
+            kind: seeInvisible
+          duration:
+            minutes: 60
 - id: srd52:spell/shatter
   name: Shatter
   level: 2
@@ -10927,7 +11212,33 @@
     Charmed, Frightened, Paralyzed, Poisoned, or Stunned condition, the
     condition ends. If the creature has the Prone condition, it can use its
     Reaction to stand up.
-  automation: text
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 60
+      side: ally
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: heal
+          amount:
+            bonus:
+              base: 999
+        - kind: removeCondition
+          condition: charmed
+        - kind: removeCondition
+          condition: frightened
+        - kind: removeCondition
+          condition: paralyzed
+        - kind: removeCondition
+          condition: poisoned
+        - kind: removeCondition
+          condition: stunned
 - id: srd52:spell/prismatic-spray
   name: Prismatic Spray
   level: 7
