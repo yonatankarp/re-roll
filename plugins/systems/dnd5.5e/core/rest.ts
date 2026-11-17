@@ -1,4 +1,5 @@
 import {
+  type Dice,
   PLAYER_ACTOR,
   type RestOption,
   type SystemContext,
@@ -332,6 +333,17 @@ export function rechargeAmount(
   return Math.max(0, Math.min(back, spent, room));
 }
 
+// A recharge's amount with a roll added to it.
+function addedAmount(
+  amount: Recharge["amount"],
+  rolled: number,
+): Recharge["amount"] {
+  if (rolled === 0 || amount === "all") return amount;
+  return typeof amount === "number"
+    ? amount + rolled
+    : { ...amount, base: amount.base + rolled };
+}
+
 // Whether a recharge with `uses` has that resource's use to spend.
 export function canUse(
   entry: Recharge,
@@ -344,10 +356,13 @@ export function canUse(
   );
 }
 
+// With `dice`, a recharge's `roll` is rolled and added, as a wand's 1d6 + 1 charges at dawn. The rested event
+// carries what came back, so a save replays the roll.
 export function recovered(
   spent: Actor["resourcesSpent"],
   stats: Stats,
   rest: "short" | "long",
+  dice?: Dice,
 ): Actor["resourcesSpent"] {
   const left = new Map(Object.entries(spent));
   const used = (id: string): number => left.get(id) ?? 0;
@@ -370,9 +385,11 @@ export function recovered(
         entry.uses === undefined
           ? on === "turnStart" || on === "shortRest" || rest === "long"
           : on === (rest === "long" ? "longRest" : "shortRest");
-      if (!applies || !canUse(entry, used, stats)) continue;
+      if (!applies || !canUse(entry, used, stats) || used(id) === 0) continue;
+      const rolled =
+        entry.roll && dice ? rollDiceNotation(entry.roll, dice) : 0;
       const back = rechargeAmount(
-        entry,
+        { ...entry, amount: addedAmount(entry.amount, rolled) },
         used(id),
         stats.resources[id] ?? 0,
         stats,
@@ -467,7 +484,12 @@ function runFinishRest(
     events: [
       ...members.flatMap((actor) => {
         const stats = deriveStats(actor, context);
-        const resourcesSpent = recovered(actor.resourcesSpent, stats, rest);
+        const resourcesSpent = recovered(
+          actor.resourcesSpent,
+          stats,
+          rest,
+          context.dice,
+        );
         return [
           dndEvent(`${NS}:rested`, {
             actor: actor.id,

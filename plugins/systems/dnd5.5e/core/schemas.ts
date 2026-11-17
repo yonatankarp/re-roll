@@ -2034,6 +2034,8 @@ export const ResourceDefSchema = z.strictObject({
       uses: z.string().min(1).optional(),
       // Hit Points regained as it applies, as Uncanny Metabolism's Martial Arts die plus the Monk level.
       heal: z.lazy(() => AmountSchema).optional(),
+      // Dice rolled and added to `amount`, as a wand's 1d6 + 1 charges at dawn (rest.ts).
+      roll: DiceSchema.optional(),
     }),
   ),
 });
@@ -2339,6 +2341,38 @@ const MagicBonusSchema = z.strictObject({
   weapons: z.array(z.string().min(1)).min(1).optional(),
 });
 
+// Spells a magic item casts (stats.ts itemCasts): each spends charges from the item's first resource, or from
+// `resource`, another of its own, as a Blossom Rod's Plant Growth once a dawn. Its version is `level`, as
+// "Fireball (level 5 version)", raised by one for each charge spent beyond `charges` up to `upTo`, as a Wand of
+// Fireballs' "no more than 3 charges". Its numbers are the item's `dc` and `attack` where it prints them, as "save
+// DC 15", or else the bearer's. The spell is named after its plugin, as a bonus's `weapons` are, so the book that
+// leads plays it.
+const ItemCastSchema = z.strictObject({
+  spell: z.string().min(1),
+  charges: z.number().int().min(0).default(1), // 0 casts it whenever
+  resource: z.string().min(1).optional(),
+  level: z.number().int().min(0).max(9).optional(),
+  upTo: z.number().int().min(2).optional(),
+  dc: z.number().int().min(1).optional(),
+  attack: z.number().int().optional(), // the spell attack bonus; `dc` less 8 when only that is printed
+});
+export type ItemCast = z.infer<typeof ItemCastSchema>;
+
+// What a magic item with charges has, carried into a magic weapon, armor or Shield made from it (variants.ts):
+// its pools, recharged as a feature's are, the spells they cast, and what spending the first pool's last charge
+// does: a d20 that on a 1 destroys the item, or leaves this plain item in its place, as an Enspelled Staff's
+// Quarterstaff.
+export const ChargedSchema = {
+  resources: z.array(ResourceDefSchema).min(1).optional(),
+  casts: z.array(ItemCastSchema).min(1).optional(),
+  lastCharge: z
+    .union([
+      z.literal("destroyed"),
+      z.strictObject({ becomes: ContentIdSchema }),
+    ])
+    .optional(),
+};
+
 // An ability score an item sets while worn, as Gauntlets of Ogre Power's Strength 19, which does nothing to a higher
 // score, or raises, as an Ioun Stone's +2 to a maximum of 20.
 const ItemAbilitySchema = z.union([
@@ -2375,6 +2409,7 @@ export const WeaponSchema = ItemBaseSchema.extend({
   returning: z.literal(true).optional(), // back in hand once thrown, as a Returning Weapon
   passives: z.array(PassiveSchema).min(1).optional(), // its magic item's, as Frost Brand's Resistance to Fire
   hitDamage: z.array(DamageSchema).min(1).optional(), // its magic item's, as Frost Brand's 1d6 Cold
+  ...ChargedSchema,
   // A Thrown or Ammunition weapon's range in feet: normal, and long with Disadvantage.
   range: z
     .strictObject({
@@ -2399,6 +2434,7 @@ export const ArmorSchema = ItemBaseSchema.extend({
   // From its magic item: its bonuses and passives work only while attuned, and its passives, as Armor of Resistance's.
   attunement: z.literal(true).optional(),
   passives: z.array(PassiveSchema).min(1).optional(),
+  ...ChargedSchema,
 }).strict();
 export type Armor = z.infer<typeof ArmorSchema>;
 
@@ -2409,6 +2445,7 @@ const ShieldItemSchema = ItemBaseSchema.extend({
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   attunement: z.literal(true).optional(), // as armor's
   passives: z.array(PassiveSchema).min(1).optional(),
+  ...ChargedSchema,
 }).strict();
 
 const GearSchema = ItemBaseSchema.extend({
@@ -2493,6 +2530,7 @@ const MagicItemSchema = ItemBaseSchema.extend({
   hitDamage: z.array(DamageSchema).min(1).optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
+  ...ChargedSchema,
   // Set when one entry covers several rarities, such as +1, +2 or +3. Content names one as `<id>--<n>` (variants.ts).
   variants: z
     .array(
@@ -2504,6 +2542,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
         healing: AmountSchema.optional(),
         // added to the item's own, as a Ring of Resistance's one damage type
         passives: z.array(PassiveSchema).min(1).optional(),
+        casts: z.array(ItemCastSchema).min(1).optional(), // added to the item's own, as a Staff of Skulls' Chill Touch
+        resources: z.array(ResourceDefSchema).min(1).optional(), // added to the item's own too
       }),
     )
     .min(1)

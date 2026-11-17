@@ -14,6 +14,7 @@ import {
   SpellSchema,
 } from "../schemas.ts";
 import { slugOf } from "../import/spells.ts";
+import { spellOfSource } from "./ids.ts";
 import { distanceFeet, type Square } from "../grid.ts";
 
 // Ending conditions and spells on a creature, as Lesser Restoration and Dispel Magic do.
@@ -65,7 +66,7 @@ export function spellOf(
   caster: Actor | undefined,
   access: ContentAccess,
 ): Spell | null {
-  const own = /^spell:(.+?)(?::free)?$/.exec(sourceId)?.[1];
+  const own = spellOfSource(sourceId);
   if (own) return SpellSchema.safeParse(access.content(own)).data ?? null;
   const index = /^monster:(\d+)$/.exec(sourceId)?.[1];
   if (index === undefined || caster?.source.kind !== "monster") return null;
