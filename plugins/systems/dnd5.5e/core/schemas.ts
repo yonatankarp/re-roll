@@ -130,6 +130,34 @@ export const MONSTER_TEXT_KINDS = {
   lairs: "lair",
 } as const;
 
+// Text kinds for what a book describes beside its rules (#134–#136), each entry the glossary's shape:
+// content folder -> id kind. Only read for now; what they do in play is later work (#149 for curses).
+export const ENVIRONMENT_KINDS = {
+  "environmental-effects": "environmental-effect",
+  diseases: "disease",
+  curses: "curse",
+  "dungeon-features": "dungeon-feature",
+} as const;
+export const DOWNTIME_KINDS = {
+  "downtime-activities": "downtime-activity",
+  lifestyles: "lifestyle",
+  services: "service",
+  "renown-tracks": "renown-track",
+  "group-patrons": "group-patron",
+  "marks-of-prestige": "mark-of-prestige",
+  "bastion-orders": "bastion-order",
+  "vehicle-upgrades": "vehicle-upgrade",
+} as const;
+// A variant rule is a switch a run could turn on; here it is only its text.
+export const OPTION_KINDS = {
+  "supernatural-gifts": "supernatural-gift",
+  "epic-destinies": "epic-destiny",
+  "survivor-talents": "survivor-talent",
+  "circle-casting-options": "circle-casting-option",
+  "beast-shape-lists": "beast-shape-list",
+  "variant-rules": "variant-rule",
+} as const;
+
 // A family heading (Bandits, Black Dragons): the stat blocks and families it holds or, for a group, lists.
 export const MonsterFamilySchema = GlossaryEntrySchema.extend({
   members: z.array(ContentIdSchema).default([]),

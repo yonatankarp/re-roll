@@ -1,7 +1,8 @@
 // Writes an entity for every library heading that coverage says should be one of the engine's text
-// kinds (world lore #127–#129, rulings #130), the D&D rules glossary (#132) or monster families and lairs (#133),
+// kinds (world lore #127–#129, rulings #130), the D&D rules glossary (#132), monster families and lairs (#133)
+// or the environment, downtime and character option kinds (#134–#136),
 // into the book's own rules plugin, each ruling book's index of the sections its rulings rule on, and each
-// book's index of the sections its families and lairs link. Run it from the main checkout, since storage refuses a symlink.
+// book's indexes of the sections its families and lairs link and of its sections' text kinds. Run it from the main checkout, since storage refuses a symlink.
 //   npm run import:world
 // The systems load first: the glossary reaches the D&D modules, which import each other.
 import { systems } from "../systems.ts";
@@ -28,8 +29,11 @@ import {
   linksIndex,
 } from "../../plugins/systems/dnd5.5e/core/import/families.ts";
 import {
+  DOWNTIME_KINDS,
+  ENVIRONMENT_KINDS,
   GLOSSARY_KINDS,
   MONSTER_TEXT_KINDS,
+  OPTION_KINDS,
 } from "../../plugins/systems/dnd5.5e/core/schemas.ts";
 
 const ROOTS = ["plugins", "books"];
@@ -38,12 +42,22 @@ const ALIASES: Readonly<Record<string, string>> = {
   "5e player's handbook": "basic-rules-2014",
 };
 
-// The D&D rules glossary's kinds (#132) and monster families and lairs (#133), drafted like lore: id kind -> folder.
+// The D&D rules glossary's kinds (#132), monster families and lairs (#133), and the environment, downtime and
+// character option kinds (#134–#136), drafted like lore: id kind -> folder.
 const TEXT_KINDS = Object.fromEntries(
-  Object.entries({ ...GLOSSARY_KINDS, ...MONSTER_TEXT_KINDS }).map(
-    ([folder, kind]) => [kind, folder],
-  ),
+  Object.entries({
+    ...GLOSSARY_KINDS,
+    ...MONSTER_TEXT_KINDS,
+    ...ENVIRONMENT_KINDS,
+    ...DOWNTIME_KINDS,
+    ...OPTION_KINDS,
+  }).map(([folder, kind]) => [kind, folder]),
 );
+const SHOWN_KINDS = new Set<string>([
+  ...Object.values(ENVIRONMENT_KINDS),
+  ...Object.values(DOWNTIME_KINDS),
+  ...Object.values(OPTION_KINDS),
+]);
 const plain = (title: string) => title.replace(/[’‘]/g, "'").toLowerCase();
 
 const storage = await createNodeStorage(process.cwd());
@@ -210,6 +224,19 @@ for (const plan of plans) {
     );
   for (const [id, ids] of links)
     if (ids.length === 0) console.warn(`${id}: no stat blocks found`);
+
+  // The sections that are an environment, downtime or character option entity, and which (#134–#136).
+  const kinds: Record<string, { heading: string; kind: string }[]> = {};
+  for (const { file, text, entity } of placed) {
+    const kind = entity?.slice(entity.indexOf(":") + 1, entity.indexOf("/"));
+    if (kind !== undefined && SHOWN_KINDS.has(kind))
+      (kinds[file] ??= []).push({ heading: text, kind });
+  }
+  if (Object.keys(kinds).length > 0)
+    await storage.replaceAtomically(
+      `${rootOf.get(book) ?? "books"}/library/${book}/kinds.json`,
+      `${JSON.stringify({ kinds }, null, 2)}\n`,
+    );
 
   for (const { file, entry } of drafts) {
     if (skipped.has(entry.id)) continue;
