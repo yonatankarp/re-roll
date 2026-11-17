@@ -79,6 +79,13 @@ const isCreatureType = (type: string) =>
 const CreatureTypeSchema = z
   .string()
   .refine(isCreatureType, "must be a lowercase creature type");
+// A book may print it capitalized ("Humanoid"), and stats read it lowercase.
+const PrintedCreatureTypeSchema = z
+  .string()
+  .refine(
+    (type) => isCreatureType(type.toLowerCase()),
+    "must be a creature type",
+  );
 export type DamageType = z.infer<typeof DamageTypeSchema>;
 
 export const ConditionSchema = z.enum([
@@ -2105,13 +2112,7 @@ export type Subclass = z.infer<typeof SubclassSchema>;
 export const SpeciesSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
   text: z.string().min(1),
-  // A species' book prints it capitalized ("Humanoid"), and stats read it lowercase.
-  creatureType: z
-    .string()
-    .refine(
-      (type) => isCreatureType(type.toLowerCase()),
-      "must be a creature type",
-    ),
+  creatureType: PrintedCreatureTypeSchema,
   size: z.enum(["tiny", "small", "medium", "large"]),
   speed: z.number().int(),
   traits: z.array(ContentIdSchema).default([]),
@@ -2460,7 +2461,7 @@ export const MonsterSchema = ContentEntrySchema.extend({
   proficiency: z.number().int(),
   saves: z.array(AbilitySchema).default([]),
   initiative: z.number().int(),
-  creatureType: CreatureTypeSchema.optional(),
+  creatureType: PrintedCreatureTypeSchema.optional(),
   features: z.array(ContentIdSchema).default([]),
   passives: z.array(PassiveSchema).default([]),
   multiattack: z.number().int().min(1).default(1),

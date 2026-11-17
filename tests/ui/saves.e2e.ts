@@ -23,7 +23,7 @@ test("keeps saves in IndexedDB and moves old localStorage saves there", async ({
   await page.getByRole("button", { name: /^Pick a ready hero/ }).click();
   await page.getByRole("button", { name: /^Human Fighter/ }).click();
   await expect(
-    page.getByRole("button", { name: "[Perception] Check the treeline" }),
+    page.getByRole("button", { name: /Perception ?\] Check the treeline$/ }),
   ).toBeVisible();
 
   let saved: Entries = {};

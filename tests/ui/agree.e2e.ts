@@ -127,7 +127,7 @@ test("the page and headless play offer the same choices", async ({ page }) => {
 
     // Into the fight, until the player's turn waits on the page.
     await page
-      .getByRole("button", { name: "[Perception] Check the treeline" })
+      .getByRole("button", { name: /Perception ?\] Check the treeline$/ })
       .click();
     const map = page.locator(".dnd-cell").first();
     const turn = page.locator(".options > .tabs > .tab").first();
