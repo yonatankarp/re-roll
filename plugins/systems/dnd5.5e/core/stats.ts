@@ -1356,7 +1356,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         5 * actor.exhaustion,
     ),
     resources: Object.fromEntries(
-      [...fromFeatures.resources, ...pools].map((resource) => [
+      partial.resourceDefs.map((resource) => [
         resource.id,
         evaluateFormula(resource.max, partial),
       ]),
