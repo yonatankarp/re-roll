@@ -36,6 +36,8 @@ export function withFocus(modifier: Modifier, focus: string): Modifier {
         : skill.success
           ? { ...modifier, skill: skill.data }
           : modifier;
+    case "expertise":
+      return skill.success ? { ...modifier, skills: [skill.data] } : modifier;
     case "advantage":
     case "disadvantage":
       return ability.success

@@ -1986,7 +1986,13 @@ export function checkBonus(
 ): number {
   const { skill } = check;
   const proficient = skill !== undefined && stats.skills.includes(skill);
-  const expert = skill !== undefined && stats.expertise.includes(skill);
+  const expert =
+    skill !== undefined &&
+    (stats.expertise.includes(skill) ||
+      actor.activeEffects.some(
+        ({ modifier }) =>
+          modifier.kind === "expertise" && modifier.skills?.includes(skill),
+      ));
   const half =
     skill !== undefined &&
     stats.passives.some(({ kind }) => kind === "halfProficiency");

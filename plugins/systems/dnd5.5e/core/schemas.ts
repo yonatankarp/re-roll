@@ -226,6 +226,11 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     condition: ConditionSchema,
   }),
   z.strictObject({ kind: z.literal("acFormula"), formula: FormulaSchema }),
+  // Expertise in these skills while it lasts, where the bearer is proficient, as Skill Empowerment's.
+  z.strictObject({
+    kind: z.literal("expertise"),
+    skills: z.array(SkillSchema).min(1).optional(), // set by the cast's `pick`
+  }),
   // A check's d20 roll below `value` counts as `value`, as Reliable Talent's 10 on a check it's proficient in or
   // Glibness's 15 on Charisma checks. `ability` and `skills` limit which checks.
   z.strictObject({

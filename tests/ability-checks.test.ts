@@ -10,6 +10,7 @@ import {
 import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { rollSave } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import {
+  LeafEffectSchema,
   SpellSchema,
   type Skill,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
@@ -344,6 +345,36 @@ describe("ability checks", () => {
       on: "checks",
       ability: "dex",
     });
+  });
+
+  it("doubles proficiency in a picked skill while an effect lasts, as Skill Empowerment", async () => {
+    const run = await checkRun();
+    const empowered = (skill: Skill): Actor => {
+      const effects = LeafEffectSchema.array().parse([
+        {
+          kind: "modifier",
+          modifier: { kind: "expertise" },
+          duration: { concentration: true, minutes: 60 },
+          pick: ["athletics", "stealth"],
+        },
+      ]);
+      const caster = hero([]);
+      const frame = focusFrame(effects, "empower", caster, caster);
+      const { state } = settle(
+        run,
+        [caster],
+        frame ? [frame] : [],
+        scripted([]).dice,
+        () => skill,
+      );
+      const actor = state.actors[PLAYER_ACTOR];
+      if (!actor) throw new Error("No hero");
+      return actor;
+    };
+    const bonus = (actor: Actor, skill: Skill, ability: "str" | "dex") =>
+      checkBonus(deriveStats(actor, run), actor, { ability, skill });
+    expect(bonus(empowered("athletics"), "athletics", "str")).toBe(7);
+    expect(bonus(empowered("stealth"), "stealth", "dex")).toBe(2);
   });
 
   it("uses an SRD Fighter's Second Wind to rescue a failed check, as Tactical Mind", async () => {
