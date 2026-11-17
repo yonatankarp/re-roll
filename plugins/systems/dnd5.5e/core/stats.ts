@@ -315,7 +315,12 @@ function freeCastActions(
       ...new Set(ways.filter((how) => !isOwn(how))),
     ];
     return kinds.flatMap((how, index) => {
-      const id = typeof how === "object" ? how.resource : `free:${spellId}`;
+      const id =
+        typeof how === "object" && how.resource
+          ? how.resource
+          : `free:${spellId}`;
+      const unlimited =
+        how === "atWill" || (typeof how === "object" && !how.resource);
       const slot =
         typeof how === "object" && how.slotLevel
           ? Object.entries(how.slotLevel)
@@ -332,12 +337,18 @@ function freeCastActions(
         typeof how === "object" && how.minutes !== undefined
           ? unconcentrated(leveled, how.minutes)
           : leveled;
-      const cast =
+      const targeted =
         typeof how === "object" && how.self
           ? { ...lasting, targeting: { self: true as const } }
           : lasting;
+      const cast =
+        typeof how === "object" && how.whileIn
+          ? { ...targeted, whileIn: how.whileIn }
+          : targeted;
       const suffix =
-        index === 0 ? "" : `:${typeof how === "object" ? how.resource : how}`;
+        index === 0
+          ? ""
+          : `:${typeof how === "object" ? (how.resource ?? "free") : how}`;
       return [
         {
           action: {
@@ -347,7 +358,7 @@ function freeCastActions(
               ...cast,
               cost: [
                 ...activation.cost.filter((cost) => cost !== "slot"),
-                ...(how === "atWill" ? [] : [{ resource: id }]),
+                ...(unlimited ? [] : [{ resource: id }]),
               ],
             },
             spellLevel: slot,
@@ -419,7 +430,7 @@ function freeCastOf(
 ): FreeCast | undefined {
   if (how === undefined || how === true || typeof how === "string") return how;
   return "resource" in how && typeof how.resource === "string"
-    ? (how as FreeCast)
+    ? how
     : (how as Record<string, FreeCast>)[spell];
 }
 

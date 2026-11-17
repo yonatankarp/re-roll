@@ -31,7 +31,7 @@ import { encodeOption, parseOption } from "./combat/ids.ts";
 import { opportunity, provokers, teleportSquares } from "./combat/movement.ts";
 import { familiarHelpUse } from "./combat/familiar.ts";
 import { mountEvents, mountOptions } from "./combat/mounts.ts";
-import { heldInPlace, leafEvents } from "./combat/effects.ts";
+import { heldInPlace, leafEvents, naturalOneEvents } from "./combat/effects.ts";
 import { heightChoices, heightOf } from "./combat/falling.ts";
 import {
   SIZES,
@@ -377,6 +377,7 @@ export function abilityCheck(
         success,
         label: label(success),
       }),
+      ...naturalOneEvents(actor, roll.natural, context),
       ...(helped
         ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId: HELP })]
         : []),

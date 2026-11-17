@@ -2659,6 +2659,9 @@ function zoneEvents(
       events.push(...snuffedLights(at, radius, context));
     }
     const centre = effect.follows ? (actor.position ?? at) : at;
+    if (effect.zone === "sunlight") {
+      events.push(...dazzled(centre, spellSource(action), actor, context));
+    }
     const wall =
       effect.zone === "wall"
         ? wallRing(centre, radius, context, effect.walls !== "sight")
@@ -2712,6 +2715,40 @@ function zoneEvents(
     );
   }
   return events;
+}
+
+// A Robe of Eyes' wearer within its reach of a spell's sunlight is Blinded for a minute, saving at each turn's end.
+function dazzled(
+  centre: Square,
+  sourceId: string,
+  caster: Actor,
+  context: Context,
+): SystemEvent[] {
+  return Object.values(context.state.actors).flatMap((bearer) => {
+    if (!bearer.position || isDead(bearer)) return [];
+    const passive = deriveStats(bearer, context).passives.find(
+      (item) => item.kind === "dazzledBy",
+    );
+    if (
+      passive?.kind !== "dazzledBy" ||
+      distanceFeet(bearer.position, centre) > passive.within
+    ) {
+      return [];
+    }
+    return [
+      dndEvent(`${NS}:effectAdded`, {
+        actor: bearer.id,
+        effect: {
+          sourceId: `${sourceId}:dazzled`,
+          casterId: caster.id,
+          modifier: { kind: "condition", condition: "blinded" },
+          ends: "spellDuration",
+          ...lastsFor({ minutes: 1 }, caster, bearer, context.state),
+          repeatSave: { ability: "con", dc: passive.dc },
+        },
+      }),
+    ];
+  });
 }
 
 // Daylight's sunlight ends Darkness of level 3 or lower that its area overlaps, and the Boon of the Bright Sun's
@@ -3128,10 +3165,70 @@ export function rollSave(
       ],
     };
   }
-  return { saved, events: [...settled.events, rolled, ...spent] };
+  return {
+    saved,
+    events: [
+      ...settled.events,
+      rolled,
+      ...spent,
+      ...naturalOneEvents(target, settled.natural, context),
+    ],
+  };
 }
 
 const SAVE_REROLL = "save-reroll";
+
+// Set while Warping Flesh's own save is rolled, whose 1 sets off nothing more.
+let warping = false;
+
+// Warping Flesh: right after a 1 on the d20 of a D20 Test, the bearer saves or has the condition until the end of its
+// next turn.
+export function naturalOneEvents(
+  roller: Actor,
+  natural: number,
+  context: Context,
+): SystemEvent[] {
+  if (natural !== 1 || warping) return [];
+  const stats = deriveStats(roller, context);
+  const passive = stats.passives.find((item) => item.kind === "naturalOne");
+  if (passive?.kind !== "naturalOne") return [];
+  warping = true;
+  try {
+    const save = rollSave(
+      roller,
+      passive.ability,
+      evaluateFormula(passive.dc, stats),
+      context,
+      false,
+      0,
+      [passive.condition],
+    );
+    return [
+      ...save.events,
+      ...(save.saved
+        ? []
+        : [
+            dndEvent(`${NS}:effectAdded`, {
+              actor: roller.id,
+              effect: {
+                sourceId: "naturalOne",
+                casterId: roller.id,
+                modifier: { kind: "condition", condition: passive.condition },
+                ends: "spellDuration",
+                ...lastsFor(
+                  { until: "itsNextTurnEnd" },
+                  roller,
+                  roller,
+                  context.state,
+                ),
+              },
+            }),
+          ]),
+    ];
+  } finally {
+    warping = false;
+  }
+}
 
 // The square an answer aims at ("@x,y" or "@id"), or null for one that aims at no square.
 export function aimSquare(

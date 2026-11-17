@@ -145,6 +145,7 @@ import {
 } from "./queries.ts";
 import {
   actingEnds,
+  naturalOneEvents,
   concentrationFrame,
   damageRiders,
   dealEvents,
@@ -1168,6 +1169,7 @@ export function runAttackRoll(
         ]
       : []),
     ...onceEnded(attacker, "attacks"),
+    ...naturalOneEvents(attacker, roll.natural, context),
     ...actingEnds(attacker, action),
     ...(isMelee(action) ? prisonEvents(attacker, context) : []),
     ...onceEnded(target, "attacksAgainst", attacker.id),
@@ -2136,12 +2138,19 @@ function retaliated(
   action: KnownAction,
   context: Context,
 ): SystemEvent[] {
-  if (!isMelee(action) || !within5(attacker, target)) return [];
   const stats = deriveStats(target, context);
+  const near = distanceFeet(attacker.position, target.position);
   const backs = [
     ...target.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
-  ].flatMap((modifier) => (modifier.kind === "retaliate" ? [modifier] : []));
+  ].flatMap((modifier) =>
+    modifier.kind === "retaliate" &&
+    (modifier.within !== undefined
+      ? near <= modifier.within
+      : isMelee(action) && within5(attacker, target))
+      ? [modifier]
+      : [],
+  );
   if (backs.length === 0 || isDown(attacker)) return [];
   const responses = damageResponses(attacker, context);
   const hits = backs.flatMap(({ damage }) =>

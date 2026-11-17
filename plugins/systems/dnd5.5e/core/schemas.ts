@@ -384,10 +384,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // A creature within 5 feet that hits the bearer with a melee attack takes this, as Flames of Phlegethos' flames, Fire
   // Shield or a black pudding's Corrosive Form, and with `grapple` is Grappled by the bearer, as by a mimic's Adhesive.
   // shortcut: the grapple's escape DC is the bearer's Unarmed Strike one (combat/grapple.ts), not a printed number.
+  // With `within`, any attack's hit from that near sets it off, as Shadow of Moil's shadows at 10 feet.
   z.strictObject({
     kind: z.literal("retaliate"),
     damage: z.array(DamageSchema).default([]),
     grapple: z.literal(true).optional(),
+    within: z.number().int().min(5).optional(),
   }),
   // Can't gain this condition while it lasts, as Lordly Resolve's bolstered targets.
   z.strictObject({
@@ -1832,6 +1834,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     squeeze: z.boolean().default(false),
     open: z.boolean().default(false),
     terrain: z.boolean().default(false),
+    // only while an effect of one of these features' activations is on it, as Cloak of Shadows' shroud
+    while: z.array(ContentIdSchema).min(1).optional(),
   }),
   // A longer Long Jump, as a frog's Standing Leap (`feet` 20, `runUp` 0) or Athlete's Jumping (`runUp` 5): its feet
   // after a run-up of `runUp` feet, instead of the Strength score after 10.
@@ -2077,6 +2081,22 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("rerollOnes") }),
   // A creature at least one size larger is cover enough to Hide behind, as with Naturally Stealthy.
   z.strictObject({ kind: z.literal("hideBehindLarger") }),
+  // Right after a 1 on the d20 of one of its D20 Tests, the bearer saves against `dc` or has `condition` until the end
+  // of its next turn, as Aberrant Anatomy's Warping Flesh (combat/effects.ts).
+  z.strictObject({
+    kind: z.literal("naturalOne"),
+    ability: AbilitySchema,
+    dc: FormulaSchema,
+    condition: ConditionSchema,
+  }),
+  // A spell's sunlight placed within `within` feet Blinds the bearer for a minute, saving with Constitution against
+  // `dc` at the end of each of its turns, as a Robe of Eyes' drawback (combat/effects.ts).
+  // shortcut: a Light spell cast on the robe isn't played, as no one in a fight casts it there.
+  z.strictObject({
+    kind: z.literal("dazzledBy"),
+    within: z.number().int().min(0),
+    dc: z.number().int(),
+  }),
   // Advantage on the Stealth check of the Hide action, as Skulker's Fog of War.
   z.strictObject({ kind: z.literal("hideAdvantage") }),
   // An attack roll made while hidden that misses doesn't give the bearer away, as Skulker's Sniper.
@@ -2796,11 +2816,17 @@ export type Passive = z.infer<typeof PassiveSchema>;
 export const FreeCastSchema = z.union([
   z.literal(true),
   z.enum(["shortRest", "atWill"]),
+  // Without `resource` it's cast so whenever, as Ascendant Step's Levitate on the caster.
   z.strictObject({
-    resource: z.string().regex(/^[a-z0-9-]+$/),
+    resource: z
+      .string()
+      .regex(/^[a-z0-9-]+$/)
+      .optional(),
     minutes: z.number().int().min(1).optional(),
     slotLevel: z.record(z.string(), z.number().int().min(1).max(9)).optional(),
     self: z.literal(true).optional(), // cast so only on the caster, as Vampire Touched's Spider Climb
+    // only in Dim Light or Darkness, as One with Shadows' Invisibility
+    whileIn: z.enum(["shadows", "sunlight"]).optional(),
   }),
 ]);
 export type FreeCast = z.infer<typeof FreeCastSchema>;

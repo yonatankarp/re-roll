@@ -360,7 +360,7 @@ export function groundFor(
   readonly squeeze: boolean;
   readonly overTerrain: boolean; // crosses difficult terrain at no extra cost, however it moves
 } {
-  const through = throughOf(stats);
+  const through = throughOf(stats, actor);
   // shortcut: going through walls means the map's own; a wall a spell raises stops it as it does anyone.
   const walls = state.combat?.walls ?? [];
   const solid = blockedSquares(state, "walking");

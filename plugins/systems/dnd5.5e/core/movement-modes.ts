@@ -69,12 +69,23 @@ export function crossesDifficult(mode: Mode): boolean {
   return mode !== "walk";
 }
 
-export type Through = Omit<Extract<Passive, { kind: "moveThrough" }>, "kind">;
+export type Through = Omit<
+  Extract<Passive, { kind: "moveThrough" }>,
+  "kind" | "while"
+>;
 
-// Everything its traits let it move through, together.
-export function throughOf(stats: Stats): Through {
+// Everything its traits let it move through, together; one held to a feature's effect only while that's on it.
+export function throughOf(stats: Stats, actor?: Actor): Through {
   const all = stats.passives.flatMap((passive) =>
-    passive.kind === "moveThrough" ? [passive] : [],
+    passive.kind === "moveThrough" &&
+    (!passive.while ||
+      passive.while.some((id) =>
+        actor?.activeEffects.some(({ sourceId }) =>
+          sourceId.startsWith(`feature:${id}:`),
+        ),
+      ))
+      ? [passive]
+      : [],
   );
   const creatures = all.some((item) => item.creatures === "any")
     ? "any"

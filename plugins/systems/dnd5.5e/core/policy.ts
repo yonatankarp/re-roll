@@ -160,7 +160,7 @@ export function stepToward(
   // A wall whose layers would hurt it, as Prismatic Wall's, it walks round as if it were solid.
   const layered = layeredSquares(actor, context);
   const walls = [...blockedSquares(state, "walking"), ...layered];
-  const through = throughOf(stats);
+  const through = throughOf(stats, actor);
   const overGround = [...speedsOf(actor, stats).keys()].some(crossesDifficult);
   const walkFrom = new Map<string, ReadonlyMap<string, number>>();
   const walk = (from: Square | null, foe: Actor): number => {
