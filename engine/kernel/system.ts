@@ -70,6 +70,12 @@ export interface ContentKind {
     id: string,
     access: ContentAccess,
   ) => ContentEntry | undefined;
+  // Text a book prints that play never reads, like world lore: kept out of the save hash. Its names are
+  // common words, so coverage links a heading to one only where a rule names the kind.
+  readonly lore?: true;
+  // The engine's own values that name an entity of this kind, by the id's name: condition "blinded" is
+  // "<book>:condition/blinded". Coverage reports one no book has.
+  readonly keys?: readonly string[];
 }
 
 // The closure keeps each kind's exact type, so the engine never needs to cast entries.
@@ -78,11 +84,15 @@ export function contentKind<T extends ContentEntry>(definition: {
   readonly schema: z.ZodType<T>;
   readonly references?: (entry: T) => readonly string[];
   readonly derive?: (id: string, access: ContentAccess) => T | undefined;
+  readonly lore?: true;
+  readonly keys?: readonly string[];
 }): ContentKind {
-  const { derive, schema } = definition;
+  const { derive, schema, lore, keys } = definition;
   return {
     idPrefix: definition.idPrefix,
     parse: parser(schema, definition.references),
+    ...(lore ? { lore } : {}),
+    ...(keys ? { keys } : {}),
     // A derived entry is checked like a listed one, so a bug building it can't reach play.
     ...(derive
       ? {

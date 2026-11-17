@@ -4,9 +4,12 @@
 import { WORLD_KINDS, type WorldEntry } from "../kernel/world.ts";
 import { STRUCTURAL, type Verdict, slug } from "./coverage.ts";
 
-const FOLDERS: ReadonlyMap<string, string> = new Map(
+// The world kinds' folders by id kind. A system's text kinds, such as a rules glossary, come as `more`.
+const WORLD_FOLDERS: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(WORLD_KINDS).map(([folder, kind]) => [kind.idPrefix, folder]),
 );
+// A glossary heading's label says its kind ("Blinded [Condition]"), which the id and name leave out.
+const LABEL = /\s*\[[^\]]*\]$/;
 const kindOf = (id: string): string => /:([^/]+)\//.exec(id)?.[1] ?? "";
 const tailOf = (id: string): string => id.slice(id.indexOf("/") + 1);
 
@@ -25,7 +28,10 @@ export function draftWorld(
   source: string,
   verdicts: readonly Verdict[], // the book's, in reading order
   taken: ReadonlySet<string>, // files the plugin already has
+  more: Readonly<Record<string, string>> = {}, // a system's text kinds: id kind -> folder
 ): WorldDrafts {
+  const FOLDERS = new Map(Object.entries({ ...WORLD_FOLDERS, ...more }));
+  const labelled = (kind: string) => Object.hasOwn(more, kind);
   const used = new Set(taken);
   const ids = verdicts.map((verdict) =>
     verdict.status === "linked" && FOLDERS.has(verdict.kind)
@@ -77,8 +83,11 @@ export function draftWorld(
       return;
     }
     // An area's id starts with its place's, since many places have a "1. Entrance".
+    const shown = labelled(kind)
+      ? heading.text.replace(LABEL, "")
+      : heading.text;
     const full =
-      slug(heading.text.normalize("NFD").replace(/\p{M}/gu, "")) || "untitled";
+      slug(shown.normalize("NFD").replace(/\p{M}/gu, "")) || "untitled";
     // A ruling's heading is a whole question, so its name stops at a word near 60 letters.
     const name =
       full.length > 60 ? full.slice(0, 61).replace(/-[^-]*$/, "") : full;
@@ -98,7 +107,7 @@ export function draftWorld(
       file,
       entry: {
         id,
-        name: heading.text,
+        name: shown,
         source,
         text: textOf(at),
         library: [heading.id],

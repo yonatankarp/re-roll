@@ -6,7 +6,13 @@ const BOOK = "fixture-book";
 const FILES: Readonly<Record<string, string>> = {
   "books/library/glossary.json": JSON.stringify({
     system: "dnd5.5e",
-    terms: { "action:dodge": { book: BOOK, file: "0001-dodge.md" } },
+    terms: {
+      "action:dodge": {
+        book: BOOK,
+        file: "0001-dodge.md",
+        entity: "actions/dodge.yaml",
+      },
+    },
     missing: [],
   }),
   [`books/library/${BOOK}/index.json`]: JSON.stringify({
@@ -14,8 +20,11 @@ const FILES: Readonly<Record<string, string>> = {
     title: "Fixture Book",
     entries: [{ path: ["Rules Glossary", "Dodge"], file: "0001-dodge.md" }],
   }),
+  // The book's entity for the term, which the quick answer reads (#132), and the section More opens.
+  [`books/rules/${BOOK}/actions/dodge.yaml`]:
+    "- id: fixture-book:action/dodge\n  name: Ducking\n  source: Fixture Book\n  text: You bob and weave like a fixture.\n",
   [`books/library/${BOOK}/0001-dodge.md`]:
-    "### Ducking [Made Up]\n\nYou bob and weave like a fixture.\n\nA second fixture line.",
+    "### Ducking [Made Up]\n\nA fixture section.\n\nA second fixture line.",
 };
 
 test("explains a term in a fight and opens its book section", async ({
@@ -34,7 +43,9 @@ test("explains a term in a fight and opens its book section", async ({
   await page.route("**/__content/list?*", (route) =>
     new URL(route.request().url()).searchParams.get("path") === "books/library"
       ? route.fulfill({
-          json: Object.keys(FILES).map((path) => ({ path, symlink: false })),
+          json: Object.keys(FILES)
+            .filter((path) => path.startsWith("books/library/"))
+            .map((path) => ({ path, symlink: false })),
         })
       : route.fallback(),
   );
@@ -98,7 +109,7 @@ test("explains a term in a fight and opens its book section", async ({
   await blockOver(true);
   await redraw();
   await expect(pop).toBeVisible();
-  await expect(pop.locator("h4")).toHaveText("Ducking [Made Up]");
+  await expect(pop.locator("h4")).toHaveText("Ducking");
   await expect(pop).toContainText("You bob and weave like a fixture.");
   await redraw();
   await expect(term).toBeVisible();

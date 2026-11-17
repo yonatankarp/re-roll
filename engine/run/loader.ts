@@ -435,7 +435,8 @@ export async function loadRun(
     // Narration's index changes as clips are made, and lore is only read, so neither changes the story.
     extensionOf(file) === YAML &&
     !file.startsWith(`${NARRATION_FOLDER}/`) &&
-    !Object.hasOwn(WORLD_KINDS, file.split("/")[0] ?? "");
+    !Object.hasOwn(WORLD_KINDS, file.split("/")[0] ?? "") &&
+    !system.contentKinds[file.split("/")[0] ?? ""]?.lore;
 
   for (const record of order) {
     const plugin = record.manifest.id;

@@ -71,6 +71,8 @@ const LIBRARY = "books/library";
 const GLOSSARY = `${LIBRARY}/glossary.json`;
 const IMAGE_FILE = /\.(png|jpe?g|webp|gif)$/i;
 const BARE_NAME = /^[^/\\]+$/;
+const ENTITY_FILE = /^[a-z0-9-]+\/[a-z0-9-]+\.yaml$/;
+const PLUGIN_ID = /^[a-z0-9][a-z0-9.-]*$/;
 
 // Something worth more than the ticker: the player's level-up, or a foe defeated, which the ending counts.
 export type Moment = "levelUp" | "foeDefeated";
@@ -259,10 +261,18 @@ const BookIndexSchema = z.object({
   entries: z.array(z.object({ path: z.array(z.string()), file: z.string() })),
 });
 
-// The owner's glossary index: for each of a system's rules terms, the book section that explains it.
+// The owner's glossary index: for each of a system's rules terms, the book section that explains it, and
+// the book's entity for it (#132), which older indexes lack.
 const GlossarySchema = z.object({
   system: z.string(),
-  terms: z.record(z.string(), z.object({ book: z.string(), file: z.string() })),
+  terms: z.record(
+    z.string(),
+    z.object({
+      book: z.string(),
+      file: z.string(),
+      entity: z.string().optional(),
+    }),
+  ),
 });
 
 // A ruling book's index: for each section ("<book>/<file>") its rulings rule on, where those rulings are.
@@ -283,6 +293,7 @@ export interface TermEntry {
   readonly words: readonly string[];
   readonly book: string;
   readonly file: string;
+  readonly entity?: string; // its file in the book's rules plugin, as "conditions/prone.yaml"
 }
 
 // "Goblin Warrior", "goblin-warrior" and "srd52:monster/goblin-warrior" all find the same picture.
@@ -1023,6 +1034,23 @@ export function createGame({
       return (await storage.read(`${LIBRARY}/${id}/${file}`)) ?? "";
     },
 
+    // A rules term's entity (#132), as a section of its own: its name as the heading, then its text.
+    async readTerm(book: string, entity: string): Promise<string> {
+      if (!PLUGIN_ID.test(book) || !ENTITY_FILE.test(entity)) {
+        throw new Error("That isn't part of a book");
+      }
+      const raw: unknown = parse(
+        (await storage.read(`books/rules/${book}/${entity}`)) ?? "",
+      );
+      const entry = (Array.isArray(raw) ? raw[0] : raw) as {
+        name?: unknown;
+        text?: unknown;
+      } | null;
+      return typeof entry?.name === "string" && typeof entry.text === "string"
+        ? `### ${entry.name}\n\n${entry.text}`
+        : "";
+    },
+
     // The rulings (#130) on what a book's section describes, from every ruling book's index.
     async rulings(id: string, file: string): Promise<readonly RulingRef[]> {
       rulingIndex ??= storage
@@ -1072,9 +1100,20 @@ export function createGame({
       if (glossary.system !== ui.systemId) return [];
       return ui.terms.flatMap((term) => {
         const at = glossary.terms[term.id];
-        return at && BARE_NAME.test(at.book) && BARE_NAME.test(at.file)
-          ? [{ id: term.id, words: term.words, ...at }]
-          : [];
+        if (!at || !BARE_NAME.test(at.book) || !BARE_NAME.test(at.file))
+          return [];
+        const { book, file, entity } = at;
+        return [
+          {
+            id: term.id,
+            words: term.words,
+            book,
+            file,
+            ...(entity !== undefined && ENTITY_FILE.test(entity)
+              ? { entity }
+              : {}),
+          },
+        ];
       });
     },
 
