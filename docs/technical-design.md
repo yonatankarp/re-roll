@@ -541,7 +541,7 @@ export const FeatureSchema = z.object({
 
 | `automation` | Meaning |
 |---|---|
-| `full` | The plugin applies the feature completely |
+| `full` | The plugin applies the feature completely, or it has no rules effect to apply (an item that only looks, sounds or tidies differently) |
 | `partial` | The plugin handles the numbers, and the rest becomes a prepared choice or a note to you |
 | `text` | Readable only. `check-pack` reports these |
 
