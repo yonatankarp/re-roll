@@ -3184,7 +3184,7 @@ function smitesFor(
       !trigger.gainsAdvantage &&
       canAfford(action, attacker, stats) &&
       hitFits(trigger.afterHit, hitWith, attacker, context) &&
-      itemFits(action, hitWith) &&
+      itemFits(action, hitWith, context) &&
       (!trigger.withFeature ||
         hitWith.id.startsWith(`feature:${trigger.withFeature}:`)) &&
       (!trigger.sneakAttack || sneakLanded(attacker, stats)) &&

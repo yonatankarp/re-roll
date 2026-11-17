@@ -263,10 +263,10 @@ describe.skipIf(!BOOKS)("the book's magic weapons", () => {
     expect(uses).toHaveLength(3);
     const [one] = uses;
     if (!one) throw new Error("No use");
-    expect(itemFits(one, actionOf(actor, `weapon:${staff}`))).toBe(true);
-    expect(itemFits(one, actionOf(actor, "weapon:srd52:item/dagger"))).toBe(
-      false,
-    );
+    expect(itemFits(one, actionOf(actor, `weapon:${staff}`), run)).toBe(true);
+    expect(
+      itemFits(one, actionOf(actor, "weapon:srd52:item/dagger"), run),
+    ).toBe(false);
   });
 
   it("turns an Executioner's Axe's extra damage on a Humanoid into Temporary Hit Points", () => {

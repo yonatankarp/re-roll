@@ -12,6 +12,7 @@ import {
   type Actor,
   type DndState,
   dndEvent,
+  equipped,
   hasCondition,
   INCAPACITATING,
   isDead,
@@ -116,6 +117,9 @@ function auraZones(state: DndState, access: ContentAccess): readonly Zone[] {
   return Object.values(state.actors).flatMap((actor): Zone[] => {
     if (!actor.position) return [];
     if (isDead(actor) || sealed(actor)) return [];
+    if (actor.source.kind === "character" && !carriesAura(actor, access)) {
+      return [];
+    }
     const at = actor.position;
     const stats = statsOf(actor, access);
     const levelIn = (slug: string): number =>
@@ -142,6 +146,29 @@ function auraZones(state: DndState, access: ContentAccess): readonly Zone[] {
             },
           ]
         : [],
+    );
+  });
+}
+
+// Whether a character carries an item with an aura, read off the raw entries so the rest of its stats aren't derived
+// for every new state.
+function carriesAura(actor: Actor, access: ContentAccess): boolean {
+  const aura = (passives: unknown): boolean =>
+    Array.isArray(passives) &&
+    passives.some(
+      (passive: unknown) =>
+        typeof passive === "object" &&
+        passive !== null &&
+        "kind" in passive &&
+        passive.kind === "aura",
+    );
+  return equipped(actor).some((id) => {
+    const entry: unknown = access.content(id);
+    return (
+      typeof entry === "object" &&
+      entry !== null &&
+      "passives" in entry &&
+      aura(entry.passives)
     );
   });
 }

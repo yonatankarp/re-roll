@@ -86,7 +86,7 @@ export function replaceHitFrame(
       (action) =>
         action.activation.trigger?.replacesHit &&
         (landed || !action.activation.trigger.hitOnly) &&
-        itemFits(action, hitWith) &&
+        itemFits(action, hitWith, context) &&
         canAfford(action, attacker, stats),
     )
     .flatMap((action) =>

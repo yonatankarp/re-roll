@@ -830,10 +830,17 @@ export function pactWeaponId(
 }
 
 // Whether a hit with this action is one a rider of this kind answers (schemas.ts HitKindSchema).
-// An item's own strike option answers only a hit with that item, as a Staff of Striking's charges.
-export function itemFits(action: KnownAction, hitWith: KnownAction): boolean {
+// A magic weapon's own strike option answers only a hit with that weapon, as a Staff of Striking's charges as a
+// Quarterstaff; any other item's answers any hit its trigger allows.
+export function itemFits(
+  action: KnownAction,
+  hitWith: KnownAction,
+  access: Pick<ContentAccess, "content">,
+): boolean {
   const item = itemUseOf(action.id);
-  return item === null || weaponItemId(hitWith.id) === item;
+  if (item === null) return true;
+  const weapon = ItemSchema.safeParse(access.content(item)).data;
+  return weapon?.type !== "weapon" || weaponItemId(hitWith.id) === item;
 }
 
 export function hitFits(

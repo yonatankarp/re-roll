@@ -102,7 +102,7 @@ function optionsFor(
               attacker,
               context,
             ) &&
-            itemFits(action, hitWith) &&
+            itemFits(action, hitWith, context) &&
             fitsType(target, targeting, context, attacker)
           );
         });
