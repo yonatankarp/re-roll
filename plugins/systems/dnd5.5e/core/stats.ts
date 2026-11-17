@@ -988,6 +988,35 @@ function emptyHanded(
   });
 }
 
+// Spells that reach more creatures (`extraTarget`).
+function withExtraTargets(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+): KnownAction[] {
+  const extra = passives.filter((passive) => passive.kind === "extraTarget");
+  if (extra.length === 0) return [...actions];
+  return actions.map((action) => {
+    const spell = spellOfSource(action.id);
+    const { targeting } = action.activation;
+    const more = extra.reduce(
+      (sum, item) =>
+        spell !== null && item.spells.includes(spell)
+          ? sum + item.creatures
+          : sum,
+      0,
+    );
+    return more > 0 && "creatures" in targeting
+      ? {
+          ...action,
+          activation: {
+            ...action.activation,
+            targeting: { ...targeting, creatures: targeting.creatures + more },
+          },
+        }
+      : action;
+  });
+}
+
 // Spells with a `spellDamage` bonus added to their damage, while its once-a-turn use is left.
 function withSpellDamage(
   actions: readonly KnownAction[],
@@ -1784,7 +1813,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         withWeaponRiders(
           withSpellDamage(
             emptyHanded(
-              withRiders(actions, fromFeatures.passives, actor),
+              withExtraTargets(
+                withRiders(actions, fromFeatures.passives, actor),
+                fromFeatures.passives,
+              ),
               actor,
               access,
             ),

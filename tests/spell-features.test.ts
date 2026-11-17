@@ -7,6 +7,7 @@ import {
   levelChoices,
 } from "../plugins/systems/dnd5.5e/core/character.ts";
 import { swappable } from "../plugins/systems/dnd5.5e/core/swap.ts";
+import { sceneCastActions } from "../plugins/systems/dnd5.5e/core/camp.ts";
 import {
   type CharacterBuild,
   ClassSchema,
@@ -101,6 +102,14 @@ const FIXTURES = [
       {
         level: 3,
         grants: ["test:feature/secrets"],
+        choices: [
+          {
+            kind: "option",
+            id: "pacts",
+            count: 1,
+            from: ["test:feature/tome"],
+          },
+        ],
         slots: [4, 2],
         scaling: { cantrips: 2, preparedSpells: 4 },
       },
@@ -152,6 +161,29 @@ const FIXTURES = [
     automation: "full",
     spells: { 1: ["srd52:spell/hold-person"] },
     spellAbility: "cha",
+    passives: [{ kind: "extraTarget", spells: ["srd52:spell/hold-person"] }],
+  },
+  {
+    id: "test:feature/tome",
+    name: "Tome",
+    text,
+    automation: "full",
+    choices: [
+      {
+        kind: "spells",
+        id: "tome-cantrips",
+        count: 1,
+        maxLevel: 0,
+        swap: "shortRest",
+      },
+    ],
+  },
+  {
+    id: "test:feature/ritual-adept",
+    name: "Ritual Adept",
+    text,
+    automation: "full",
+    passives: [{ kind: "ritualAdept", list: WIZARD }],
   },
   {
     id: "test:feature/blade-subclass",
@@ -253,23 +285,24 @@ function priest(levels: readonly Answers[]): Actor {
     id: PLAYER_ACTOR,
     name: "Priest",
     side: "party",
-    source: {
-      kind: "character",
-      build: {
-        baseAbilities: { str: 10, dex: 12, con: 13, int: 8, wis: 16, cha: 14 },
-        speciesId: "srd52:species/human",
-        backgroundId: "srd52:background/acolyte",
-        backgroundIncrease: { wis: 2, con: 1 },
-        levels: levels.map((answers) => ({
-          classId: PRIEST,
-          hitPointGain: 8,
-          answers,
-        })),
-      },
-    },
+    source: { kind: "character", build: priestBuild(levels) },
     hp: 20,
     inventory: [],
   });
+}
+
+function priestBuild(levels: readonly Answers[]): CharacterBuild {
+  return {
+    baseAbilities: { str: 10, dex: 12, con: 13, int: 8, wis: 16, cha: 14 },
+    speciesId: "srd52:species/human",
+    backgroundId: "srd52:background/acolyte",
+    backgroundIncrease: { wis: 2, con: 1 },
+    levels: levels.map((answers) => ({
+      classId: PRIEST,
+      hitPointGain: 8,
+      answers,
+    })),
+  };
 }
 
 describe("class pick swaps", () => {
@@ -409,11 +442,68 @@ describe("spells from a feature's pick and its free casts", () => {
     ).toBe(false);
   });
 
-  it("casts a feature's spells with its own ability", () => {
+  it("casts a feature's spells with its own ability, at more targets", () => {
     const charmer = priest([features(["test:feature/charmer"])]);
     const hold = stats(charmer).actions.find(
       (item) => item.id === "spell:srd52:spell/hold-person",
     );
     expect(JSON.stringify(hold?.activation)).toContain('"ability":"cha"');
+    // And reaches one creature more.
+    expect(hold?.activation.targeting).toMatchObject({ creatures: 2 });
+  });
+});
+
+describe("Ritual Adept", () => {
+  it("casts a list's ritual it hasn't prepared, between fights and with no slot", () => {
+    const adept = priest([
+      [{ kind: "features", values: ["test:feature/ritual-adept"] }],
+      [],
+      [],
+    ]);
+    const fallen = freshActor({
+      id: "friend",
+      name: "Friend",
+      side: "party",
+      source: { kind: "character", build: priestBuild([[]]) },
+      hp: 0,
+      inventory: [],
+    });
+    const dead = { ...fallen, deathSaves: { successes: 0, failures: 3 } };
+    const state = {
+      actors: { [PLAYER_ACTOR]: adept, friend: dead },
+      combat: null,
+      gold: 10,
+    };
+    const labels = sceneCastActions(state, run).map((item) => item.label);
+    expect(labels).toContain("Gentle Repose (ritual)");
+    const plain = priest([[], [], []]);
+    expect(
+      sceneCastActions(
+        { ...state, actors: { [PLAYER_ACTOR]: plain, friend: dead } },
+        run,
+      ).map((item) => item.label),
+    ).not.toContain("Gentle Repose (ritual)");
+  });
+});
+
+describe("an option's own picks", () => {
+  it("can be picked again after any rest, as a Book of Shadows' spells", () => {
+    const tome = priest([
+      [],
+      [],
+      [
+        { kind: "features", values: ["test:feature/tome"] },
+        { kind: "spells", values: ["srd52:spell/cure-wounds"] },
+        { kind: "spells", values: ["srd52:spell/fire-bolt"] },
+      ],
+    ]);
+    expect(swappable(tome, run)).toContainEqual(
+      expect.objectContaining({
+        key: "2:2",
+        owner: "Tome",
+        values: ["srd52:spell/fire-bolt"],
+        open: true,
+      }),
+    );
   });
 });

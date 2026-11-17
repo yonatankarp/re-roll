@@ -63,7 +63,8 @@
 - id: "srd52:feature/ritual-adept"
   name: Ritual Adept
   text: "You can cast spells in your spellbook as Rituals."
-  automation: text
+  automation: full
+  passives: [{ kind: ritualAdept, list: srd52:class/wizard }]
 
 - id: "srd52:feature/arcane-recovery"
   name: Arcane Recovery

@@ -103,17 +103,73 @@ function classPicks(
       : undefined;
     const rules = { ...subclass?.spellcasting?.swaps, ...classDef.swaps };
     let next = 0;
-    return levelChoices(classDef, classLevel, subclassId, access).flatMap(
+    // The answer a choice left, the next of its kind in the level's answers.
+    const answerFor = (choice: ChoiceDef) => {
+      const kind = ANSWER_KINDS[choice.kind];
+      const index = entry.answers.findIndex(
+        (answer, place) => place >= next && answer.kind === kind,
+      );
+      const answer = entry.answers[index];
+      if (!kind || !answer || !("values" in answer)) return null;
+      next = index + 1;
+      return "feat" in answer && answer.feat
+        ? null
+        : { index, values: answer.values };
+    };
+    // Prepared spells come from any level the class now has slots for, and the lists its features add by now.
+    const now = widening(
+      classDef,
+      build.levels.filter((item) => item.classId === entry.classId).length,
+      subclass,
+      access,
+    );
+    const widen = (choice: ChoiceDef): ChoiceDef => {
+      if (choice.kind !== "spells") return choice;
+      const widened =
+        choice.id === "spells" || (choice.id === "cantrips" && now.cantrips)
+          ? {
+              ...choice,
+              ...(now.lists.length > 0 ? { lists: now.lists } : {}),
+              ...(now.spells.length > 0 ? { also: now.spells } : {}),
+            }
+          : choice;
+      return widened.id === "spells" || widened.upToSlots
+        ? { ...widened, maxLevel: Math.max(widened.maxLevel, highestSlot) }
+        : widened;
+    };
+    const swap = (
+      choice: ChoiceDef,
+      found: { index: number; values: readonly string[] },
+      when: string,
+      owner: string,
+    ): Swappable => {
+      const key = `${String(at)}:${String(found.index)}`;
+      const mark =
+        when === "levelUp"
+          ? `${entry.classId}:${choice.id}@${String(level)}`
+          : when === "longRest"
+            ? `${entry.classId}:${choice.id}`
+            : undefined;
+      return {
+        key,
+        owner,
+        choices: [widen(choice)],
+        values: found.values,
+        // "shortRest" is offered whenever the party is between fights, as a Book of Shadows conjured again.
+        open:
+          when === "shortRest" ||
+          ((when !== "levelUp" || level > at + 1) &&
+            !swapped.includes(mark ?? key)),
+        ...(mark ? { mark } : {}),
+        classId: entry.classId,
+      };
+    };
+    const options: string[] = []; // options picked here, whose own choices come after the level's
+    const own = levelChoices(classDef, classLevel, subclassId, access).flatMap(
       (choice): Swappable[] => {
-        const kind = ANSWER_KINDS[choice.kind];
-        if (!kind) return [];
-        const index = entry.answers.findIndex(
-          (answer, place) => place >= next && answer.kind === kind,
-        );
-        const answer = entry.answers[index];
-        if (!answer || !("values" in answer)) return [];
-        next = index + 1;
-        if ("feat" in answer && answer.feat) return [];
+        const found = answerFor(choice);
+        if (!found) return [];
+        if (choice.kind === "option") options.push(...found.values);
         const group =
           choice.kind === "option"
             ? "options"
@@ -127,50 +183,22 @@ function classPicks(
           (choice.id === group || choice.kind === "option"
             ? rules[group]
             : undefined);
-        if (!when) return [];
-        const key = `${String(at)}:${String(index)}`;
-        const mark =
-          when === "levelUp"
-            ? `${entry.classId}:${choice.id}@${String(level)}`
-            : when === "longRest"
-              ? `${entry.classId}:${choice.id}`
-              : undefined;
-        // Prepared spells come from any level the class now has slots for, and the lists its features add by now.
-        const now = widening(
-          classDef,
-          build.levels.filter((item) => item.classId === entry.classId).length,
-          subclass,
-          access,
-        );
-        const widened =
-          choice.kind === "spells" &&
-          (choice.id === "spells" || (choice.id === "cantrips" && now.cantrips))
-            ? {
-                ...choice,
-                ...(now.lists.length > 0 ? { lists: now.lists } : {}),
-                ...(now.spells.length > 0 ? { also: now.spells } : {}),
-              }
-            : choice;
-        const wider =
-          widened.kind === "spells" &&
-          (widened.id === "spells" || widened.upToSlots)
-            ? { ...widened, maxLevel: Math.max(widened.maxLevel, highestSlot) }
-            : widened;
-        return [
-          {
-            key,
-            owner: `${classDef.name} ${group}`,
-            choices: [wider],
-            values: answer.values,
-            open:
-              (when !== "levelUp" || level > at + 1) &&
-              !swapped.includes(mark ?? key),
-            ...(mark ? { mark } : {}),
-            classId: entry.classId,
-          },
-        ];
+        return when
+          ? [swap(choice, found, when, `${classDef.name} ${group}`)]
+          : [];
       },
     );
+    // An option's own choices that can be picked again, as Pact of the Tome's after a rest.
+    const fromOptions = options.flatMap((id) => {
+      const feature = FeatureSchema.safeParse(access.content(id)).data;
+      return (feature?.choices ?? []).flatMap((choice): Swappable[] => {
+        const found = answerFor(choice);
+        return found && choice.kind === "spells" && choice.swap
+          ? [swap(choice, found, choice.swap, feature?.name ?? id)]
+          : [];
+      });
+    });
+    return [...own, ...fromOptions];
   });
 }
 

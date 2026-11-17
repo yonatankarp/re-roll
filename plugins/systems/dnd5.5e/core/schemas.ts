@@ -1992,6 +1992,16 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
   z.strictObject({ kind: z.literal("concentrationAdvantage") }),
+  // These spells, when they target creatures, reach this many more, as Words of Creation's second creature for
+  // Power Word Heal and Power Word Kill. shortcut: how near the first target the others are isn't checked.
+  z.strictObject({
+    kind: z.literal("extraTarget"),
+    spells: z.array(ContentIdSchema).min(1),
+    creatures: z.number().int().min(1).default(1),
+  }),
+  // Ritual spells on this class's list, of a level it has slots for, can be cast as Rituals between fights without
+  // being prepared, as Ritual Adept's from a Wizard's spellbook (camp.ts).
+  z.strictObject({ kind: z.literal("ritualAdept"), list: ContentIdSchema }),
   // A creature leaving the bearer's reach can be answered with a one-target spell of one action instead of an
   // Opportunity Attack, as with War Caster's Reactive Spell.
   z.strictObject({ kind: z.literal("reactiveSpell") }),
@@ -2989,8 +2999,9 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     // The list of the version of this feat the character took, as "the list you chose for Magic Initiate".
     listOf: ContentIdSchema.optional(),
     also: z.array(ContentIdSchema).min(1).optional(), // these too, beside the list, as Boon of Siberys' own table
-    // One of the picks can be replaced each time the character gains a level, as Magic Initiate's (swap.ts).
-    swap: z.literal("levelUp").optional(),
+    // One of the picks can be replaced each time the character gains a level, as Magic Initiate's, or with
+    // "shortRest" all of them after any rest, as Pact of the Tome's (swap.ts).
+    swap: z.enum(["levelUp", "shortRest"]).optional(),
     // As many picks as the Proficiency Bonus, made between scenes and one more as it rises, as Ritual Caster's
     // (swap.ts). Such a choice and an `ifKnown` one are never asked as the feat is taken, so old saves replay.
     grows: z.literal("proficiency").optional(),

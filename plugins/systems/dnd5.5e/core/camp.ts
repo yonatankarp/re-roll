@@ -10,9 +10,14 @@ import {
   storyEffect,
 } from "#sdk";
 import { z } from "zod";
-import { type LeafEffect, SpellSchema } from "./schemas.ts";
+import { ClassSchema, type LeafEffect, SpellSchema } from "./schemas.ts";
 import { type Actor, type DndState, NS, frame, isDead } from "./state.ts";
-import { type KnownAction, deriveStats, scaleActivation } from "./stats.ts";
+import {
+  type KnownAction,
+  type Stats,
+  deriveStats,
+  scaleActivation,
+} from "./stats.ts";
 import {
   canAfford,
   deadWithin,
@@ -176,6 +181,48 @@ function targetsOf(
   );
 }
 
+// Ritual spells a Ritual Adept casts from its list without having them prepared, of levels it has slots for.
+// shortcut: the spellbook is the Wizard list, as it isn't kept apart from it (swap.ts says the same).
+function ritualsOnHand(
+  stats: Stats,
+  access: ContentAccess,
+): readonly KnownAction[] {
+  const lists = stats.passives.flatMap((passive) =>
+    passive.kind === "ritualAdept" ? [passive.list] : [],
+  );
+  if (lists.length === 0) return [];
+  const highest = stats.slots.findLastIndex((count) => count > 0) + 1;
+  const known = new Set(stats.actions.map((action) => action.id));
+  const named = new Set(
+    lists.flatMap(
+      (list) =>
+        ClassSchema.safeParse(access.content(list)).data?.spellList ?? [],
+    ),
+  );
+  return access.contentIds().flatMap((id): KnownAction[] => {
+    if (!id.includes(":spell/") || known.has(`spell:${id}`)) return [];
+    const spell = SpellSchema.safeParse(access.content(id)).data;
+    if (
+      !spell?.ritual ||
+      !spell.activation ||
+      spell.level < 1 ||
+      spell.level > highest ||
+      !(named.has(id) || spell.classes.some((item) => lists.includes(item)))
+    ) {
+      return [];
+    }
+    return [
+      {
+        id: `spell:${id}`,
+        name: spell.name,
+        activation: spell.activation,
+        spellLevel: spell.level,
+        upcast: spell.upcast,
+      },
+    ];
+  });
+}
+
 function castable(
   caster: Actor,
   state: DndState,
@@ -183,7 +230,7 @@ function castable(
 ): readonly KnownAction[] {
   if (isDead(caster) || caster.hp <= 0) return [];
   const stats = deriveStats(caster, access);
-  return stats.actions.filter(
+  return [...stats.actions, ...ritualsOnHand(stats, access)].filter(
     (action) =>
       usable(action) &&
       goldFor(action) <= (state.gold ?? 0) &&
