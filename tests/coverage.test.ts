@@ -27,6 +27,7 @@ const entity = (
   name,
   edition,
   library,
+  about: [],
 });
 
 const ENTITIES = [
@@ -256,6 +257,8 @@ describe("the coverage report", () => {
       "id: hb\nkind: rules\nversion: 1.0.0\nsdk: ^1\nsystem: sys@^1\ndistribution: private\n",
     "books/rules/hb/spells/gloom.yaml":
       "- id: hb:spell/gloom\n  name: Gloom\n  library: [hb/0002-gloom, hb/0009-gone]\n",
+    "books/rules/hb/rulings/gloom-at-noon.yaml":
+      "- id: hb:ruling/gloom-at-noon\n  name: Gloom at noon?\n  about: [hb:spell/gloom, hb:spell/none]\n",
     "books/library/hb/0001-intro.md": "# Chapter 1: Intro\n",
     "books/library/hb/0002-gloom.md": "## Shadows\n### Bane\n",
     "books/coverage/hb.yaml":
@@ -289,6 +292,7 @@ describe("the coverage report", () => {
       "links hb/0002-gloom#nothing, which no heading has",
       "links hb/0002-gloom#nothing to hb:spell/none, which no entity has",
       "hb:spell/gloom names library heading hb/0009-gone, which no book has",
+      "hb:ruling/gloom-at-noon rules on hb:spell/none, which no entity has",
     ]);
   });
 
