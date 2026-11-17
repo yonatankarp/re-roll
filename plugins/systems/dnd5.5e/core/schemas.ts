@@ -1293,6 +1293,7 @@ export type AreaEffect = z.infer<typeof AreaEffectSchema>;
 export const HitKindSchema = z.enum([
   "weapon",
   "pactWeapon", // the melee weapon a Warlock's Pact of the Blade bonds with: the first one it holds
+  "heldMelee", // the melee weapon it holds, the first one, as Sacred Weapon's
   "meleeWeapon",
   "rangedWeapon",
   "unarmed",
@@ -2492,6 +2493,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     bonusAction: z.literal(true).optional(),
     advantage: z.literal(true).optional(),
     newTarget: z.number().int().min(5).optional(),
+    orSame: z.literal(true).optional(), // with `newTarget`, the creature missed may be picked again
+    onceKey: z.string().min(1).optional(), // the once-a-turn use it shares with an activation's `oncePerTurn` name
   }),
   // On a miss that a die could still turn into a hit, one of `resource` can be rolled (a d`dieSize` from that class
   // scaling key) and added to the roll, spent only if the attack then hits, as Soul Blades' Homing Strikes with a

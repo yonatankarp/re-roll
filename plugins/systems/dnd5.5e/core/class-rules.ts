@@ -174,7 +174,8 @@ export function runInspiration(
 }
 
 type MissReroll = Extract<Stats["passives"][number], { kind: "missReroll" }>;
-const missKey = (index: number) => `miss-reroll:${String(index)}`;
+const missKey = (index: number, passive?: MissReroll) =>
+  passive?.onceKey ? `once:${passive.onceKey}` : `miss-reroll:${String(index)}`;
 
 // The `missReroll` passives that can answer this miss, by their place among the bearer's passives.
 function missRerolls(
@@ -191,7 +192,10 @@ function missRerolls(
     hitFits(passive.with, hitWith, attacker, context) &&
     (!passive.ownTurn || ownTurn) &&
     (!passive.bonusAction || (ownTurn && attacker.budget.bonusAction)) &&
-    !(passive.oncePerTurn && attacker.usedThisTurn.includes(missKey(index))) &&
+    !(
+      passive.oncePerTurn &&
+      attacker.usedThisTurn.includes(missKey(index, passive))
+    ) &&
     (!passive.resource ||
       (attacker.resourcesSpent[passive.resource] ?? 0) <
         (stats.resources[passive.resource] ?? 0))
@@ -217,17 +221,28 @@ function offerMissReroll(
         ];
       }
       const feet = passive.newTarget;
+      // Within the weapon's reach or range too.
+      const { targeting } = findAction(
+        attacker,
+        payload.actionId,
+        context,
+      ).activation;
+      const range =
+        "range" in targeting && typeof targeting.range === "number"
+          ? targeting.range
+          : 5;
       return Object.values(state.actors)
         .filter(
           (other) =>
-            other.id !== target.id &&
+            (passive.orSame === true || other.id !== target.id) &&
             other.side !== attacker.side &&
             !isDown(other) &&
-            distanceFeet(other.position, target.position) <= feet,
+            distanceFeet(other.position, target.position) <= feet &&
+            distanceFeet(other.position, attacker.position) <= range,
         )
         .map((other) => ({
           id: `${String(index)}|${other.id}`,
-          label: `Curve the shot at ${other.name}`,
+          label: `${passive.bonusAction ? "Curve the shot at" : "Attack"} ${other.name}`,
         }));
     },
   );
@@ -279,7 +294,7 @@ export function runMissReroll(
         ? [
             dndEvent(`${NS}:oncePerTurnUsed`, {
               actor: attacker.id,
-              key: missKey(Number(index)),
+              key: missKey(Number(index), passive),
             }),
           ]
         : []),

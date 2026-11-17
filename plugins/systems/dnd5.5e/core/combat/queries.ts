@@ -814,6 +814,7 @@ export function hitFits(
     case "weapon":
       return true;
     case "pactWeapon":
+    case "heldMelee":
       return id === pactWeaponId(attacker, access);
     case "meleeWeapon":
       return isMelee(hitWith);
