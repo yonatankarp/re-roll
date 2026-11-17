@@ -1077,6 +1077,7 @@ function withSpellTypes(
   passives: readonly Passive[],
   actor: Actor,
   access: ContentAccess,
+  usesLeft: (resource: string) => boolean,
 ): KnownAction[] {
   const changes = passives.flatMap((passive, index) =>
     passive.kind === "spellTypes" &&
@@ -1084,7 +1085,7 @@ function withSpellTypes(
       passive.oncePerTurn &&
       actor.usedThisTurn.includes(`spellTypes:${String(index)}`)
     ) &&
-    !(passive.resource && (actor.resourcesSpent[passive.resource] ?? 0) > 0)
+    !(passive.resource && !usesLeft(passive.resource))
       ? [{ passive, key: `spellTypes:${String(index)}` }]
       : [],
   );
@@ -1124,8 +1125,40 @@ function withSpellTypes(
   });
 }
 
-// Spells cast with a Bonus Action in place of an action (`castsAs`).
+// Spells cast with a Bonus Action in place of an action (`castsAs`), and attack spells reaching farther
+// (`spellRange`).
 function withCastsAs(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+): KnownAction[] {
+  const farther = passives.reduce(
+    (sum, passive) =>
+      passive.kind === "spellRange" ? sum + passive.feet : sum,
+    0,
+  );
+  const reached =
+    farther === 0
+      ? actions
+      : actions.map((action) => {
+          const { targeting, resolution } = action.activation;
+          return spellOfSource(action.id) !== null &&
+            resolution.kind === "attack" &&
+            "range" in targeting &&
+            typeof targeting.range === "number" &&
+            targeting.range >= 10
+            ? {
+                ...action,
+                activation: {
+                  ...action.activation,
+                  targeting: { ...targeting, range: targeting.range + farther },
+                },
+              }
+            : action;
+        });
+  return castsAs(reached, passives);
+}
+
+function castsAs(
   actions: readonly KnownAction[],
   passives: readonly Passive[],
 ): KnownAction[] {
@@ -1184,6 +1217,7 @@ function withSpellDamage(
   passives: readonly Passive[],
   actor: Actor,
   access: ContentAccess,
+  usesLeft: (resource: string) => boolean,
 ): KnownAction[] {
   const bonuses = passives.flatMap((passive, index) =>
     passive.kind === "spellDamage" &&
@@ -1191,8 +1225,7 @@ function withSpellDamage(
       passive.oncePerTurn &&
       actor.usedThisTurn.includes(`spellDamage:${String(index)}`)
     ) &&
-    // shortcut: a resource counts as left only while none of it is spent, as maximums are worked out after this.
-    !(passive.resource && (actor.resourcesSpent[passive.resource] ?? 0) > 0)
+    !(passive.resource && !usesLeft(passive.resource))
       ? [{ passive, key: `spellDamage:${String(index)}` }]
       : [],
   );
@@ -1935,6 +1968,15 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   }
 
   const pools = itemPools(actor, access);
+  // Whether a use of a resource is left, for the spell changes that spend one, from its flat maximum (1 when it's
+  // worked out from the bearer, as maximums are only after this).
+  const usesLeft = (id: string): boolean => {
+    const def = [...fromFeatures.resources, ...pools].find(
+      (item) => item.id === id,
+    );
+    const most = def?.max.add.length === 0 ? def.max.base : 1;
+    return (actor.resourcesSpent[id] ?? 0) < most;
+  };
   const carried = carriedWeight(actor, access);
   const capacity = carryingCapacity(
     abilities.str,
@@ -2017,18 +2059,20 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
                       ),
                       fromFeatures.passives,
                     ),
-                    fromFeatures.passives,
+                    [...itemPassives, ...fromFeatures.passives],
                     actor,
                     access,
+                    usesLeft,
                   ),
                   fromFeatures.passives,
                 ),
                 actor,
                 access,
               ),
-              fromFeatures.passives,
+              [...itemPassives, ...fromFeatures.passives],
               actor,
               access,
+              usesLeft,
             ),
             fromFeatures.passives,
             actor,

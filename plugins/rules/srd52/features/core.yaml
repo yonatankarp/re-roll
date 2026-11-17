@@ -487,4 +487,5 @@
 - id: "srd52:feature/potent-cantrip"
   name: Potent Cantrip
   text: "A creature that saves against your damaging cantrip still takes half its damage."
-  automation: text
+  automation: full
+  passives: [{ kind: potentCantrip }]

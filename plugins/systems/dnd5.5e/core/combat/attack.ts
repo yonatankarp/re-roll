@@ -105,6 +105,7 @@ import {
   masteredDice,
   markedBy,
   maximized,
+  flooredTypes,
   masteredTypes,
   rerolledTypes,
   piercing,
@@ -1794,7 +1795,7 @@ function landHit(
           : masteredDice(
               weaponDice,
               type,
-              mastered,
+              flooredTypes(stats, action.spellLevel !== null),
               rerolled,
               state.combat?.environment?.forceFloor,
             );

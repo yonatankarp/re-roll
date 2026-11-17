@@ -71,6 +71,7 @@ import {
   HIGHEST,
   masteredDice,
   maximized,
+  flooredTypes,
   masteredTypes,
   rerolledTypes,
   hitDieHealing,
@@ -3251,6 +3252,7 @@ export function resolveAction(
       )
     : aimedAt;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
+  const diceFloored = flooredTypes(stats, action.spellLevel !== null);
   const rerolled = rerolledTypes(stats, action.spellLevel !== null);
   // Another spell aimed at a creature ends what lasts only until one is, as Modify Memory's charm.
   const spellEnds = targets.flatMap((target) =>
@@ -3510,7 +3512,7 @@ export function resolveAction(
         stats,
         index === maxIndex
           ? HIGHEST
-          : floored(masteredDice(context.dice, type, mastered, rerolled)),
+          : floored(masteredDice(context.dice, type, diceFloored, rerolled)),
         critical ? 2 : 1,
       ) + (index === 0 ? fuel.bonus : 0);
     const shared = list.map(({ amount, type }, index) => ({

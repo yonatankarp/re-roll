@@ -3,6 +3,7 @@ import {
   type Ability,
   ClassSchema,
   type DamageType,
+  DamageTypeSchema,
   ItemSchema,
   type SaveFrom,
   type Passive,
@@ -281,6 +282,18 @@ export function masteredTypes(
         passive.kind === "energyMastery" ? [passive.damage] : [],
       )
     : [];
+}
+
+// The types whose 1s on a spell's damage dice count as 2s: the mastered ones, or every type with `spellDiceFloor`, as
+// Spell-Fueling Armor's Potent Spellcasting.
+export function flooredTypes(
+  stats: Stats,
+  spell: boolean,
+): readonly DamageType[] {
+  return spell &&
+    stats.passives.some((passive) => passive.kind === "spellDiceFloor")
+    ? DamageTypeSchema.options
+    : masteredTypes(stats, spell);
 }
 
 // Resistance the bearer's damage goes through: the mastered types, and any the bearer always overcomes, as with the

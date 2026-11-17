@@ -328,6 +328,24 @@ const FIXTURES = [
     ],
   },
   {
+    id: "test:feature/warlockish",
+    name: "Warlockish",
+    text,
+    automation: "full",
+    resources: [
+      {
+        id: "rune",
+        max: { base: 2 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+    passives: [
+      { kind: "spellTypes", add: ["psychic"], list: WIZARD },
+      { kind: "spellTypes", add: ["thunder"], resource: "rune" },
+      { kind: "spellRange", feet: 60 },
+    ],
+  },
+  {
     id: "test:feature/ritual-adept",
     name: "Ritual Adept",
     text,
@@ -1077,5 +1095,53 @@ describe("cast options", () => {
           : [],
       ),
     ).toEqual([4]);
+  });
+});
+
+describe("spells of other types and longer reach", () => {
+  const warlock = (spent: Record<string, number> = {}) => ({
+    ...priest([
+      [
+        { kind: "features", values: ["test:feature/warlockish"] },
+        {
+          kind: "spells",
+          values: ["srd52:spell/fire-bolt", "srd52:spell/sacred-flame"],
+        },
+      ],
+    ]),
+    resourcesSpent: spent,
+  });
+  const bolt = (actor: Actor) =>
+    stats(actor).actions.find(
+      (item) => item.id === "spell:srd52:spell/fire-bolt",
+    );
+
+  it("may deal a list's spell as Psychic, or any spell's as another type for a charge", () => {
+    const fresh = bolt(warlock());
+    expect(fresh?.activation.resolution.damage[0]?.types).toEqual([
+      "fire",
+      "psychic",
+      "thunder",
+    ]);
+    expect(fresh?.activation.cost).toContainEqual({ resource: "rune" });
+    // Sacred Flame is no Wizard spell, so only the rune's type joins it.
+    const flame = stats(warlock()).actions.find(
+      (item) => item.id === "spell:srd52:spell/sacred-flame",
+    );
+    expect(flame?.activation.resolution.damage[0]?.types).toEqual([
+      "radiant",
+      "thunder",
+    ]);
+    // One charge of two spent leaves one; both spent, the type stays its own.
+    expect(bolt(warlock({ rune: 1 }))?.activation.cost).toContainEqual({
+      resource: "rune",
+    });
+    expect(
+      bolt(warlock({ rune: 2 }))?.activation.resolution.damage[0]?.types,
+    ).toEqual(["fire", "psychic"]);
+  });
+
+  it("reaches 60 feet farther with an attack spell", () => {
+    expect(bolt(warlock())?.activation.targeting).toMatchObject({ range: 180 });
   });
 });

@@ -1998,6 +1998,20 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
   z.strictObject({ kind: z.literal("concentrationAdvantage") }),
+  // The bearer's spells that make an attack roll reach this much farther when their range is 10 feet or more, as
+  // Spell Sniper's Increased Range.
+  z.strictObject({
+    kind: z.literal("spellRange"),
+    feet: z.number().int().min(5),
+  }),
+  // A creature Charmed by one of these spells of the bearer's can't cast spells with Verbal components, as Boon of
+  // Revelry's Sing Out with Otto's Irresistible Dance (zones.ts silencedSpells).
+  z.strictObject({
+    kind: z.literal("singOut"),
+    spells: z.array(ContentIdSchema).min(1),
+  }),
+  // A 1 on a damage die of the bearer's spell counts as a 2, as Spell-Fueling Armor's Potent Spellcasting.
+  z.strictObject({ kind: z.literal("spellDiceFloor") }),
   // A change the bearer can make to a spell as it casts it, paying `cost` (cast-options.ts), as Overchannel's maximum
   // damage, Enhanced Necromancy's second target for a Channel Divinity, or Split Enchantment's level more for a use.
   // Which spells: `spells`, `schools`, `list`'s, cast with a slot (`slot`), of levels `minLevel` to `maxLevel`, that
