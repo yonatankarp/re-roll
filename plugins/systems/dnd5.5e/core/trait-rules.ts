@@ -336,7 +336,8 @@ export function masteredDice(
     const floored = masteredDice(dice, type, mastered, rerolled);
     return {
       below: (count) => floored.below(count),
-      roll: (sides) => Math.max(Math.min(forceFloor, sides), floored.roll(sides)),
+      roll: (sides) =>
+        Math.max(Math.min(forceFloor, sides), floored.roll(sides)),
     };
   }
   // Flames of Phlegethos: a 1 on a die of its type is rolled again, and the new roll stands.

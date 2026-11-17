@@ -34,6 +34,8 @@ import {
   rollDiceNotation,
 } from "./stats.ts";
 import { finalDamage } from "./rules.ts";
+import { carriedWeight } from "./carry.ts";
+import { SIZES, sizeOf } from "./combat/queries.ts";
 import { leafEvents, rollSave } from "./combat/effects.ts";
 
 // Environmental effects, diseases and dungeon features in play (#191). A scene names the effects the party spends time
@@ -86,7 +88,9 @@ export function fightEnvironment(
     (merged, id) => {
       const { fight } = effectOf(access, id);
       if (!fight) return merged;
-      const { conditions: _conditions, ...rest } = fight;
+      const rest = Object.fromEntries(
+        Object.entries(fight).filter(([key]) => key !== "conditions"),
+      ) as Omit<typeof fight, "conditions">;
       return {
         ...merged,
         ...rest,
@@ -209,8 +213,7 @@ function exposureEvents(
 function swims(actor: Actor, access: ContentAccess): boolean {
   if (actor.source.kind !== "monster") return false;
   const entry = access.content(actor.source.statBlockId) as
-    | { speeds?: { swim?: number } }
-    | undefined;
+    { speeds?: { swim?: number } } | undefined;
   return (entry?.speeds?.swim ?? 0) > 0;
 }
 
@@ -226,7 +229,10 @@ function heavyArmored(actor: Actor, access: ContentAccess): boolean {
 
 // An effect's tables, as a psychic wind's: a party roll whose row passes time, then each traveler's save, whose
 // failure rolls the table for that traveler's damage and conditions.
-function tableEvents(effect: EnvironmentalEffect, context: Context): SystemEvent[] {
+function tableEvents(
+  effect: EnvironmentalEffect,
+  context: Context,
+): SystemEvent[] {
   return (effect.tables ?? []).flatMap((table) => {
     const pick = (): (typeof table.rows)[number] | undefined => {
       const roll = context.dice.roll(table.die);
@@ -308,8 +314,35 @@ export function environmentEvents(
       effect.exposure?.every === "minute" ? args.minutes : args.hours;
     events.push(...exposureEvents(effect, periods, context));
     events.push(...tableEvents(effect, context));
+    if (effect.breaks) {
+      const { dice, times, into } = effect.breaks;
+      const water = effectOf(context, into);
+      const through = partyOf(context.state).filter(
+        (actor) =>
+          bodyWeight(actor, context) >
+          rollDiceNotation(dice, context.dice) * times,
+      );
+      events.push(
+        ...exposureEvents(water, args.minutes, {
+          ...context,
+          state: {
+            ...context.state,
+            actors: Object.fromEntries(
+              through.map((actor) => [actor.id, actor]),
+            ),
+          },
+        }),
+      );
+    }
   }
   return events;
+}
+
+// What a creature weighs on the ice, with what it carries.
+// shortcut: every body weighs as a Medium one, 150 pounds, a Small one half that.
+function bodyWeight(actor: Actor, context: Context): number {
+  const small = sizeOf(actor, context) < SIZES.indexOf("medium");
+  return (small ? 75 : 150) + carriedWeight(actor, context);
 }
 
 // Whether a creature can catch this disease: its type, and no species that's immune.
@@ -394,11 +427,23 @@ function symptomEvents(
         ]
       : []),
     ...(symptoms.blinded
-      ? [diseaseEffect(actor, disease, { kind: "condition", condition: "blinded" })]
+      ? [
+          diseaseEffect(actor, disease, {
+            kind: "condition",
+            condition: "blinded",
+          }),
+        ]
       : []),
-    ...(symptoms.sightPenalty ? penaltyEvents(actor, disease, record.penalty ?? 1) : []),
+    ...(symptoms.sightPenalty
+      ? penaltyEvents(actor, disease, record.penalty ?? 1)
+      : []),
     ...(symptoms.laughter
-      ? [diseaseEffect(actor, disease, { kind: "laughter", ...symptoms.laughter })]
+      ? [
+          diseaseEffect(actor, disease, {
+            kind: "laughter",
+            ...symptoms.laughter,
+          }),
+        ]
       : []),
   ];
 }
@@ -416,7 +461,12 @@ function penaltyEvents(
       sourceId: `disease:${disease.id}`,
     }),
     ...(penalty >= 5
-      ? [diseaseEffect(actor, disease, { kind: "condition", condition: "blinded" })]
+      ? [
+          diseaseEffect(actor, disease, {
+            kind: "condition",
+            condition: "blinded",
+          }),
+        ]
       : [
           diseaseEffect(actor, disease, {
             kind: "bonus",
@@ -438,7 +488,10 @@ function penaltyEvents(
 // shortcut: the days a disease takes pass as Long Rests, so its 1d4 days are the next Long Rest, and its dawn saves
 // come after each Long Rest. It doesn't spread from one party member to another, and a 2014 Cackle Fever's three failed
 // saves bring no madness.
-export function diseaseRestEvents(actor: Actor, context: Context): SystemEvent[] {
+export function diseaseRestEvents(
+  actor: Actor,
+  context: Context,
+): SystemEvent[] {
   return (actor.diseases ?? []).flatMap((record) => {
     const disease = diseaseOf(context, record.disease);
     if (record.onset > 0) {
@@ -519,18 +572,17 @@ export function restHampered(
     .filter((record) => record.onset === 0)
     .map((record) => diseaseOf(access, record.disease).symptoms);
   const exhausted = actor.exhaustion > 0;
-  const held = showing.reduce(
-    (sum, symptoms) => sum + (symptoms.holdsExhaustion ? symptoms.exhaustion : 0),
-    0,
-  );
+  // Its Exhaustion lasts until it ends, as Cackle Fever's or Lichen Plague's.
+  const held = showing.some((symptoms) => symptoms.holdsExhaustion);
   const kept =
+    held ||
     (exhausted && showing.some((symptoms) => symptoms.keepExhaustion)) ||
     (access.state.ambient ?? []).some(
       (id) => effectOf(access, id).rest?.keepExhaustion,
     );
   return {
     keepHp: exhausted && showing.some((symptoms) => symptoms.noRestHealing),
-    exhaustionFloor: kept ? actor.exhaustion : held,
+    exhaustionFloor: kept ? actor.exhaustion : 0,
   };
 }
 
@@ -550,10 +602,15 @@ export function halvesHitDice(actor: Actor, access: ContentAccess): boolean {
 // condition for the next fight, as a psionic field's fright.
 // shortcut: the fright lasts into the next fight rather than 1d10 minutes, and Lesser Restoration ends every
 // condition it could.
-export function ambientRestEvents(actor: Actor, context: Context): SystemEvent[] {
+export function ambientRestEvents(
+  actor: Actor,
+  context: Context,
+): SystemEvent[] {
   return (context.state.ambient ?? []).flatMap((id) => {
     const effect = effectOf(context, id);
-    if (effect.except?.includes(deriveStats(actor, context).creatureType ?? "")) {
+    if (
+      effect.except?.includes(deriveStats(actor, context).creatureType ?? "")
+    ) {
       return [];
     }
     const { rest } = effect;
@@ -563,7 +620,10 @@ export function ambientRestEvents(actor: Actor, context: Context): SystemEvent[]
         ? (["blinded", "deafened", "paralyzed", "poisoned"] as const)
             .filter((condition) => hasCondition(actor, condition))
             .map((condition) =>
-              dndEvent(`${NS}:conditionRemoved`, { actor: actor.id, condition }),
+              dndEvent(`${NS}:conditionRemoved`, {
+                actor: actor.id,
+                condition,
+              }),
             )
         : []),
       ...(rest.condition
@@ -584,7 +644,10 @@ export function ambientRestEvents(actor: Actor, context: Context): SystemEvent[]
 }
 
 // Lesser Restoration or Heal ends a disease that magic cures.
-export function curedDiseaseEvents(actor: Actor, access: ContentAccess): SystemEvent[] {
+export function curedDiseaseEvents(
+  actor: Actor,
+  access: ContentAccess,
+): SystemEvent[] {
   return (actor.diseases ?? []).flatMap((record) =>
     diseaseOf(access, record.disease).cureSpells
       ? [
@@ -603,7 +666,11 @@ export function featureCheck(check: Check, access: ContentAccess): Check {
   const feature = lookup(access, DungeonFeatureSchema, check.feature);
   if (!feature.check) throw new Error(`${check.feature} has no check`);
   return feature.check.skill
-    ? { skill: feature.check.skill, ability: feature.check.ability, dc: check.dc }
+    ? {
+        skill: feature.check.skill,
+        ability: feature.check.ability,
+        dc: check.dc,
+      }
     : { ability: feature.check.ability, dc: check.dc };
 }
 

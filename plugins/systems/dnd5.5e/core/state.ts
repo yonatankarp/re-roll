@@ -1798,8 +1798,10 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         EVENT_SCHEMAS[`${NS}:environmentEntered`],
         event,
       );
-      const { ambient: _left, ...rest } = state;
-      return effects.length > 0 ? { ...rest, ambient: effects } : rest;
+      if (effects.length > 0) return { ...state, ambient: effects };
+      return Object.fromEntries(
+        Object.entries(state).filter(([key]) => key !== "ambient"),
+      ) as DndState;
     }
     case `${NS}:diseaseCaught`:
     case `${NS}:diseaseChanged`: {
@@ -1823,7 +1825,9 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         event,
       );
       return updateActor(state, id, ({ diseases, ...actor }) => {
-        const left = (diseases ?? []).filter((item) => item.disease !== disease);
+        const left = (diseases ?? []).filter(
+          (item) => item.disease !== disease,
+        );
         return {
           ...actor,
           activeEffects: actor.activeEffects.filter(

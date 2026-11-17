@@ -1707,6 +1707,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     feet: z.number().int().min(5).optional(),
     runUp: z.number().int().min(0).default(10),
     ability: z.literal("dex").optional(), // jumps by Dexterity instead of Strength, as a cat's Jumper
+    times: z.number().int().min(2).optional(), // its jumps go this many times as far, as in a Low Gravity Zone
   }),
   // Webs never hold it (applyCondition `web`), as a spider's Web Walker.
   z.strictObject({ kind: z.literal("webWalker") }),
@@ -3520,6 +3521,15 @@ export const EnvironmentalEffectSchema = GlossaryEntrySchema.extend({
       condition: ConditionSchema.optional(),
     })
     .optional(),
+  // Thin Ice: each party member's square holds this roll times `times` pounds, and one heavier breaks through into
+  // `into`, spending the scene's minutes in it, as Frigid Water.
+  breaks: z
+    .strictObject({
+      dice: DiceSchema,
+      times: z.number().int().min(1),
+      into: ContentIdSchema,
+    })
+    .optional(),
   // Tables rolled once it comes, as a psychic wind's: once for the party, or with `save` once for each traveler
   // that fails it.
   tables: z
@@ -3543,12 +3553,14 @@ export const DiseaseSchema = GlossaryEntrySchema.extend({
   // who can catch it, by lowercase type, and species that can't, as Cackle Fever's gnomes
   creatureTypes: z.array(z.string()).optional(),
   immuneSpecies: z.array(z.string()).optional(),
-  catch: z.strictObject({ ability: AbilitySchema, dc: z.number().int() }).optional(),
+  catch: z
+    .strictObject({ ability: AbilitySchema, dc: z.number().int() })
+    .optional(),
   onsetRests: z.number().int().min(0).default(0),
   symptoms: z
     .strictObject({
       exhaustion: z.number().int().min(0).default(0), // levels at onset
-      holdsExhaustion: z.literal(true).optional(), // its Exhaustion stays until it ends, as Cackle Fever's
+      holdsExhaustion: z.literal(true).optional(), // a Long Rest takes no Exhaustion away while it lasts
       blinded: z.literal(true).optional(), // as 2024 Sight Rot
       sightPenalty: z.literal(true).optional(), // -1 to sight-based attack rolls and checks, 1 worse each Long Rest
       halfHitDice: z.literal(true).optional(), // half healing from Hit Point Dice while Exhausted, as Sewer Plague's

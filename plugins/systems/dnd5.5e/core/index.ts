@@ -658,7 +658,8 @@ export const dnd55e = defineSystem<DndState>({
   // Scene checks are made by the player's character, with the same roll as a check in a fight.
   resolveCheck: (check, context) => {
     const parsed = featureCheck(CheckSchema.parse(check), context);
-    if ("feature" in parsed) throw new Error("A feature check resolves to a skill");
+    if ("feature" in parsed)
+      throw new Error("A feature check resolves to a skill");
     const player = context.state.actors[PLAYER_ACTOR];
     if (!player) throw new Error("The player has no character");
     // A skill paired with another ability adds the skill's proficiency only with Skills with Different Abilities, and
