@@ -259,7 +259,7 @@ describe("headless play of goblin-ambush", () => {
 
   it("keeps a sheet's hinted buttons, disabled, while the fight doesn't offer them", async () => {
     const play = await driver();
-    await play.start("goblin-ambush", { seed: "gear-hint" });
+    await play.start("goblin-ambush", { seed: "gear-hint-1" });
     await play.choose("Human Fighter");
     const gear = (): string[] =>
       (play.view().sheets[0]?.sections ?? []).flatMap((section) =>
