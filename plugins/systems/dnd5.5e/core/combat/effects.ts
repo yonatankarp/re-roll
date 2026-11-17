@@ -2432,6 +2432,15 @@ export function resolveAction(
           events.push(...warded.events);
           frames.push(...warded.frames);
         }
+        // Ring of Spell Turning: a spell up to some level does nothing to a target that saves against it.
+        const turned =
+          saved &&
+          action.spellLevel !== null &&
+          deriveStats(target, context).passives.some(
+            (passive) =>
+              passive.kind === "spellTurning" &&
+              (slotLevel ?? action.spellLevel ?? 0) <= passive.upTo,
+          );
         const evaded =
           resolution.onSuccessDamage === "half" &&
           (evades(target, resolution.ability, context) ||
@@ -2450,6 +2459,7 @@ export function resolveAction(
             : null;
         if (interposed) events.push(interposed);
         applyRolled(target, damage, (amount) => {
+          if (turned) return 0;
           if (evaded) return saved ? 0 : halved(amount);
           if (!saved || resolution.onSuccessDamage === "full") return amount;
           return resolution.onSuccessDamage === "half" &&
@@ -2460,7 +2470,7 @@ export function resolveAction(
         });
         events.push(
           ...leafEvents(
-            saved ? resolution.onSuccess : resolution.onFail,
+            turned ? [] : saved ? resolution.onSuccess : resolution.onFail,
             spellSource(action),
             actor,
             target,

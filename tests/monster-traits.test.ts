@@ -114,6 +114,9 @@ const BLOCKS = [
   statBlock("test:monster/dodger", {
     passives: [{ kind: "evasion", anySave: true }],
   }),
+  statBlock("test:monster/turner", {
+    passives: [{ kind: "spellTurning", upTo: 7 }],
+  }),
   statBlock("test:monster/frenzied", {
     passives: [{ kind: "attackAdvantage", when: "targetHurt" }],
   }),
@@ -533,6 +536,17 @@ describe("Evasion", () => {
     expect(await dealt("evader", burst("con", 30))).toEqual([10]);
     expect(await dealt("dodger", burst("con", 30))).toEqual([5]);
     expect(await dealt("evader", burst("dex", 30), true)).toEqual([10]);
+  });
+
+  it("takes nothing from a spell up to its level it saves against, as with a Ring of Spell Turning", async () => {
+    const spell = (dc: number, spellLevel: number) => ({
+      ...burst("con", dc),
+      spellLevel,
+    });
+    expect(await dealt("turner", spell(1, 7))).toEqual([]);
+    expect(await dealt("turner", spell(1, 8))).toEqual([5]);
+    expect(await dealt("turner", spell(30, 3))).toEqual([10]);
+    expect(await dealt("turner", burst("con", 1))).toEqual([5]); // not a spell
   });
 });
 

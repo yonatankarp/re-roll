@@ -1256,6 +1256,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("webWalker") }),
   // Leaving a foe's reach never provokes an Opportunity Attack, as with Flyby or Agile.
   z.strictObject({ kind: z.literal("noOpportunityAttacks") }),
+  // A successful save against a spell of this level or lower means the spell does nothing to the bearer, as a Ring of
+  // Spell Turning's level 7. shortcut: only a spell's own save, not a save its lasting effects call for later.
+  z.strictObject({
+    kind: z.literal("spellTurning"),
+    upTo: z.number().int().min(1).max(9),
+  }),
   // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
   // save, as a displacer beast's Avoidance does, instead of Dexterity saves only.
   z.strictObject({
@@ -1379,6 +1385,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     rests: z.array(z.enum(["short", "long"])).min(1),
     amount: FormulaSchema,
     allies: z.boolean().default(false),
+  }),
+  // Hit Points regained every so many minutes while it has at least 1, as a Ring of Regeneration's 1d6 every 10.
+  // Only rests pass time, so they come over a Short Rest's hour (rest.ts); a Long Rest heals fully anyway.
+  z.strictObject({
+    kind: z.literal("slowRegeneration"),
+    dice: DiceSchema,
+    minutes: z.number().int().min(1),
   }),
   // The bearer's spells of this type ignore Resistance to it, and a 1 on their damage dice counts as a 2, as with
   // Elemental Adept.
@@ -2100,6 +2113,7 @@ export const WeaponSchema = ItemBaseSchema.extend({
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   attunement: z.literal(true).optional(), // its bonuses work only while attuned, as a Keyholes Dagger's
   returning: z.literal(true).optional(), // back in hand once thrown, as a Returning Weapon
+  passives: z.array(PassiveSchema).min(1).optional(), // its magic item's, as Frost Brand's Resistance to Fire
   // A Thrown or Ammunition weapon's range in feet: normal, and long with Disadvantage.
   range: z
     .strictObject({
@@ -2121,6 +2135,9 @@ export const ArmorSchema = ItemBaseSchema.extend({
   baseArmor: ContentIdSchema.optional(),
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   anyTraining: z.literal(true).optional(), // worn as if trained with it, as Elven Chain
+  // From its magic item: its bonuses and passives work only while attuned, and its passives, as Armor of Resistance's.
+  attunement: z.literal(true).optional(),
+  passives: z.array(PassiveSchema).min(1).optional(),
 }).strict();
 export type Armor = z.infer<typeof ArmorSchema>;
 
@@ -2129,6 +2146,8 @@ const ShieldItemSchema = ItemBaseSchema.extend({
   bonus: z.number().int(),
   baseArmor: ContentIdSchema.optional(), // a magic Shield's plain one, as a +1 Shield's (variants.ts)
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
+  attunement: z.literal(true).optional(), // as armor's
+  passives: z.array(PassiveSchema).min(1).optional(),
 }).strict();
 
 const GearSchema = ItemBaseSchema.extend({
@@ -2220,6 +2239,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
         bonuses: z.array(MagicBonusSchema).min(1).optional(),
         abilities: z.array(ItemAbilitySchema).min(1).optional(),
         healing: AmountSchema.optional(),
+        // added to the item's own, as a Ring of Resistance's one damage type
+        passives: z.array(PassiveSchema).min(1).optional(),
       }),
     )
     .min(1)
