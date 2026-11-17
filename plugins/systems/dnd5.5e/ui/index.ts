@@ -614,6 +614,10 @@ function sheets(rawState: unknown, access: ContentAccess) {
   const between = sceneCastActions(state, access);
   const casts = new Set(between.map(({ id }) => id));
   const companions = between.filter(({ args }) => args.caster !== PLAYER_ACTOR);
+  // A spell's row casts it with its lowest slot, so the player's higher slots get rows of their own.
+  const upcasts = between.filter(
+    ({ args }) => args.caster === PLAYER_ACTOR && args.slot !== undefined,
+  );
   const player = actors[PLAYER_ACTOR];
   if (player?.source.kind !== "character" || !player.source.build) return [];
   return [
@@ -631,6 +635,7 @@ function sheets(rawState: unknown, access: ContentAccess) {
             actor.id === PLAYER_ACTOR ? (gold ?? 0) : null,
             casts,
             actor.id === PLAYER_ACTOR ? companions : [],
+            actor.id === PLAYER_ACTOR ? upcasts : [],
           ),
         ]
       : [],
@@ -644,6 +649,7 @@ function sheetOf(
   gold: number | null, // the party's, shown on the player's sheet
   casts: ReadonlySet<string> = new Set(), // scene actions using a spell or feature between fights
   companions: readonly SceneAction[] = [], // the companions' ones, on the player's sheet
+  upcasts: readonly SceneAction[] = [], // the player's own with a higher slot
 ) {
   const stats = deriveStats(player, access);
   const subclasses = build.levels
@@ -753,6 +759,14 @@ function sheetOf(
             stats.passives.some(({ kind }) => kind === "powerfulBuild"),
           ),
         ),
+      },
+      {
+        title: "Higher slots",
+        rows: upcasts.map(({ id, label }) => ({
+          label,
+          value: "",
+          option: { id, label: "Cast" },
+        })),
       },
       {
         title: "Companions' healing",
