@@ -93,6 +93,7 @@ import {
   rerolledTypes,
   piercing,
   rescuedSave,
+  saveSourceOf,
   evades,
   steadyShot,
   traitAttackAdvantage,
@@ -133,6 +134,7 @@ import {
   dealEvents,
   leafEvents,
   payCosts,
+  protectedMount,
   resolveAction,
   rollSave,
   typeAgainst,
@@ -361,6 +363,9 @@ function guardFor(
   attacker: Actor,
   when: "allyAttacked" | "allyHit",
   context: Context,
+  // A ranged attack sets off a guard that only answers those, and `draw` looks for one that takes the attack on
+  // itself, as an Arrow-Catching Shield, instead of one that protects, as Protection.
+  how: { readonly ranged?: boolean; readonly draw?: boolean } = {},
 ): { readonly guard: Actor; readonly action: KnownAction } | null {
   const { state } = context;
   for (const guard of allies(state, target)) {
@@ -377,6 +382,8 @@ function guardFor(
     const action = stats.actions.find(
       (item) =>
         item.activation.trigger?.[when] &&
+        (!item.activation.trigger.ranged || how.ranged === true) &&
+        draws(item) === (how.draw === true) &&
         distanceFeet(guard.position, target.position) <=
           (item.activation.trigger.within ?? 5) &&
         holds(guard, item.activation.trigger.holding, context) &&
@@ -626,6 +633,14 @@ function redirect(
   };
 }
 
+const draws = (action: KnownAction): boolean => {
+  const { resolution } = action.activation;
+  return (
+    resolution.kind === "automatic" &&
+    resolution.effects.some((effect) => effect.kind === "drawAttack")
+  );
+};
+
 const redirects = (action: KnownAction): boolean => {
   const { resolution } = action.activation;
   return (
@@ -702,6 +717,7 @@ function intercepted(
     actorOf(state, hit.attacker),
     "allyHit",
     context,
+    { ranged: attackKind(hit, context).ranged },
   );
   if (!found) return { events: [], frames: [frame("applyHit", hit)] };
   const { guard, action } = found;
@@ -880,10 +896,24 @@ export function runAttackRoll(
       frames: [frame("attackRoll", { ...payload, target: redirected.ally })],
     };
   }
+  // An Arrow-Catching Shield: an ally beside the target takes a ranged attack on itself.
+  const ranged = attackKind(payload, context).ranged;
+  const drawn = held
+    ? null
+    : guardFor(target, attacker, "allyAttacked", context, {
+        ranged,
+        draw: true,
+      });
+  if (drawn) {
+    return {
+      events: guardCosts(drawn.guard, drawn.action, context),
+      frames: [frame("attackRoll", { ...payload, target: drawn.guard.id })],
+    };
+  }
   // Protection: an ally's Shield gives this roll, and the others against the target, Disadvantage.
   const shielded = held
     ? null
-    : guardFor(target, attacker, "allyAttacked", context);
+    : guardFor(target, attacker, "allyAttacked", context, { ranged });
   const { normalRange } = resolution.attack;
   const longRange =
     normalRange !== undefined &&
@@ -918,6 +948,7 @@ export function runAttackRoll(
     ) ||
     invisibleTo(target, attacker) ||
     warded(target, targetStats) ||
+    protectedMount(target, context) ||
     (action.spellLevel !== null &&
       passiveModifiers(targetStats.passives).some(
         (modifier) =>
@@ -1762,7 +1793,15 @@ function landHit(
       ...passed.frames,
       ...afterDamage(target, dealt.dealt + nested.dealt, cause, [], landed),
       ...reactFrames({ kind: "struck", actor: target.id, ...cause }, landed),
-      ...reactFrames({ kind: "hitOther", actor: target.id, ...cause }, landed),
+      ...reactFrames(
+        {
+          kind: "hitOther",
+          actor: target.id,
+          ...cause,
+          dealt: dealt.dealt + nested.dealt,
+        },
+        landed,
+      ),
       CHECK_END,
     ],
   };
@@ -2294,6 +2333,10 @@ function nestedSave(
         [],
         context.dice,
         action.spellLevel !== null,
+        {
+          source: saveSourceOf(attacker, action.id, action.name, context),
+          access: context,
+        },
       );
   const succeeded = rolled.saved || rescued.length > 0;
   const responses = damageResponses(target, context);
@@ -2577,12 +2620,27 @@ export function runConcentrationSave(
         ["concentration"],
         payload.disadvantage,
       );
-  const rolled = save?.events ?? [];
+  // A Ring of Dedicated Focus: Hit Point Dice added to a failed save.
+  const rescued =
+    save && !save.saved
+      ? rescuedSave(
+          actor,
+          "con",
+          ["concentration"],
+          deriveStats(actor, context),
+          save.events,
+          [],
+          context.dice,
+          false,
+          { access: context },
+        )
+      : [];
+  const rolled = [...(save?.events ?? []), ...rescued];
   // A reaction to the save, as with Warp Mind.
   const watched = save
     ? reactFrames({ kind: "concentrationSave", actor: actor.id }, context)
     : [];
-  if (!save?.saved) {
+  if (!save?.saved && rescued.length === 0) {
     return {
       events: [
         ...rolled,

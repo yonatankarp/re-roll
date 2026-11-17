@@ -71,6 +71,7 @@ import {
   WEAPON_PREFIX,
   castFrom,
   itemCastId,
+  itemUseId,
   spellOfSource,
   weaponItemId,
 } from "./combat/ids.ts";
@@ -460,6 +461,17 @@ function itemCasts(
       ];
     });
   });
+}
+
+// A worn item's own activations (ChargedSchema `activations`), named after it, as a Pearl of Power's.
+function itemUses(itemId: string, item: Item): KnownAction[] {
+  const uses = "activations" in item ? (item.activations ?? []) : [];
+  return uses.map(({ name, activation }, index) => ({
+    id: itemUseId(itemId, index),
+    name: uses.length > 1 ? `${name} (${item.name})` : name,
+    activation,
+    spellLevel: null,
+  }));
 }
 
 // The abilities a level's feat raised, when that feat makes its raised save proficient, as Resilient does.
@@ -1097,7 +1109,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       );
     }
     if (works(itemId, item) && !untrainedArmor) {
-      actions.push(...itemCasts(itemId, item, level, access));
+      actions.push(
+        ...itemCasts(itemId, item, level, access),
+        ...itemUses(itemId, item),
+      );
     }
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
@@ -1959,7 +1974,8 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
           : {}),
       }
     : own;
-  const speed = effectBonus(actor, "speed");
+  // A Ring of Free Action: nothing takes Speed off.
+  const speed = effectBonus(actor, "speed", hasSteadySpeed(stats));
   const maxHp = effectBonus(actor, "maxHp");
   const stuck = new Set(
     actor.activeEffects.flatMap(({ modifier }) =>
@@ -2236,16 +2252,29 @@ function changedWeapon(
 
 // A spell's flat Speed or Hit Point maximum increase, as with Longstrider or Aid, counted once per source.
 // shortcut: Hit Points above the maximum aren't taken away when the increase ends.
-function effectBonus(actor: Actor, to: "speed" | "maxHp"): number {
+function effectBonus(
+  actor: Actor,
+  to: "speed" | "maxHp",
+  increasesOnly = false,
+): number {
   const seen = new Set<string>();
   let total = 0;
   for (const { sourceId, modifier } of actor.activeEffects) {
-    if (modifier.kind !== "bonus" || modifier.to !== to || seen.has(sourceId))
+    if (
+      modifier.kind !== "bonus" ||
+      modifier.to !== to ||
+      seen.has(sourceId) ||
+      (increasesOnly && modifier.subtract)
+    )
       continue;
     seen.add(sourceId);
     total += (modifier.subtract ? -1 : 1) * (modifier.amount.bonus?.base ?? 0);
   }
   return total;
+}
+
+export function hasSteadySpeed(stats: Stats): boolean {
+  return stats.passives.some((passive) => passive.kind === "steadySpeed");
 }
 
 export function modifierFor(stats: Stats, ability: Ability): number {
@@ -2384,6 +2413,8 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
           ...term.abilities.map((ability) => stats.abilities[ability]),
         );
         break;
+      case "dealt": // filled in by the reaction it's part of
+        break;
       default:
         term satisfies never;
     }
@@ -2463,7 +2494,7 @@ export function scaleActivation(
   step: ScaleStep,
   times: number,
 ): Activation {
-  if (times <= 0) return activation;
+  if (times <= 0 || "slotOnly" in step) return activation;
   if ("addRadius" in step) {
     const { targeting } = activation;
     return "area" in targeting

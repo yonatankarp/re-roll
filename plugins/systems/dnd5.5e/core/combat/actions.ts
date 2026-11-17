@@ -535,6 +535,8 @@ export const UseActionSchema = z.object({
   target: z.string(),
   // At that creature whatever its side, as a confused or berserk creature's attack (combat/madness.ts).
   anyone: z.boolean().optional(),
+  // With nothing at all to pay, as a spell a Ring of Spell Turning sends back at its caster.
+  free: z.boolean().optional(),
 });
 
 // An action a Multiattack uses after its attacks: at their target if it still reaches it, or else the weakest
@@ -558,7 +560,9 @@ export function runUseAction(
     ...found,
     activation: {
       ...found.activation,
-      cost: found.activation.cost.filter((cost) => typeof cost === "object"),
+      cost: payload.free
+        ? []
+        : found.activation.cost.filter((cost) => typeof cost === "object"),
     },
   };
   if (!canAfford(action, actor, deriveStats(actor, context))) return {};

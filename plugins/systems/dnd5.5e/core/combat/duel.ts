@@ -1,14 +1,31 @@
 import type { SystemEvent } from "#sdk";
 import { distanceFeet } from "../grid.ts";
-import { type Actor, type DndState, dndEvent, NS } from "../state.ts";
+import {
+  type Actor,
+  type DndState,
+  INCAPACITATING,
+  dndEvent,
+  hasCondition,
+  isDown,
+  NS,
+} from "../state.ts";
 
 // Compelled Duel: the target has Disadvantage on attacks against anyone but the caster and stays within reach of it,
-// and the caster's turning on someone else ends the spell.
+// and the caster's turning on someone else ends the spell. Champion Challenge's (`leashOnly`) is only the leash,
+// which holds while its caster can act and the target is still within reach.
 
-const duelsOf = (actor: Actor) =>
+// The duels a creature is held by: with `all`, Champion Challenge's leashes too.
+const duelsOf = (actor: Actor, all = false) =>
   actor.activeEffects.flatMap(({ modifier, casterId }) =>
-    modifier.kind === "duel"
-      ? [{ casterId, feet: modifier.feet, unleashed: modifier.unleashed }]
+    modifier.kind === "duel" && (all || !modifier.leashOnly)
+      ? [
+          {
+            casterId,
+            feet: modifier.feet,
+            leashOnly: modifier.leashOnly,
+            unleashed: modifier.unleashed,
+          },
+        ]
       : [],
   );
 
@@ -17,11 +34,19 @@ export const duelHampers = (attacker: Actor, target: Actor): boolean =>
 
 // Squares too far from the caster for the target to walk to willingly.
 export function leashed(actor: Actor, state: DndState) {
-  const duels = duelsOf(actor).flatMap(({ casterId, feet, unleashed }) => {
-    if (unleashed) return [];
-    const caster = state.actors[casterId];
-    return caster?.position ? [{ at: caster.position, feet }] : [];
-  });
+  const duels = duelsOf(actor, true).flatMap(
+    ({ casterId, feet, leashOnly, unleashed }) => {
+      if (unleashed) return [];
+      const caster = state.actors[casterId];
+      const holds =
+        !leashOnly ||
+        (caster !== undefined &&
+          !isDown(caster) &&
+          !hasCondition(caster, ...INCAPACITATING) &&
+          distanceFeet(caster.position, actor.position) <= feet);
+      return caster?.position && holds ? [{ at: caster.position, feet }] : [];
+    },
+  );
   return (square: { readonly x: number; readonly y: number }): boolean =>
     duels.some(({ at, feet }) => distanceFeet(at, square) > feet);
 }

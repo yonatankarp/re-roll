@@ -233,6 +233,57 @@ describe.skipIf(!BOOKS)("the book's magic items' passives", () => {
     ]);
   });
 
+  // Issues #189 and #193: item activations and the passives #138 left.
+  it("uses a Pearl of Power or a Spell-Refueling Ring for a slot, and an Arrow-Catching Shield's Reaction", () => {
+    const uses = (actor: Actor) =>
+      deriveStats(actor, run)
+        .actions.filter((action) => action.id.startsWith("use:"))
+        .map((action) => [action.name, action.activation.cost[0]]);
+    expect(uses(wearing(["dmg:item/pearl-of-power"], "wizard"))).toEqual([
+      ["Pearl of Power", "action"],
+    ]);
+    expect(
+      uses(
+        wearing(
+          ["eberron-forge-of-the-artificer:item/spell-refueling-ring"],
+          "wizard",
+        ),
+      ),
+    ).toEqual([["Spell-Refueling Ring", "bonusAction"]]);
+    expect(
+      uses(wearing(["dmg:item/arrow-catching-shield--1--shield"])),
+    ).toEqual([["Arrow-Catching Shield", "reaction"]]);
+  });
+
+  it("plays #193's passives: displacement, warmth, a saddle, free action, spell turning, a scarab and a dragon's breath", () => {
+    expect(kinds(wearing(["dmg:item/cloak-of-displacement"]))).toContain(
+      "ward",
+    );
+    expect(kinds(wearing(["dmg:item/saddle-of-the-cavalier"]))).toContain(
+      "protectedMount",
+    );
+    expect(kinds(wearing(["dmg:item/ring-of-free-action"]))).toContain(
+      "steadySpeed",
+    );
+    expect(
+      deriveStats(wearing(["dmg:item/ring-of-spell-turning"]), run).passives,
+    ).toContainEqual({ kind: "spellTurning", upTo: 7, deflect: true });
+    const scarab = deriveStats(wearing(["dmg:item/scarab-of-protection"]), run);
+    expect(scarab.resources["scarab-of-protection"]).toBe(12);
+    expect(kinds(wearing(["dmg:item/scarab-of-protection"]))).toContain(
+      "saveRescue",
+    );
+    expect(
+      deriveStats(wearing(["dmg:item/dragon-scale-mail--9--scale-mail"]), run)
+        .passives,
+    ).toContainEqual(
+      expect.objectContaining({
+        kind: "saveAdvantage",
+        from: { creatureTypes: ["dragon"], breath: true },
+      }),
+    );
+  });
+
   it("names only spells some book has, for every item that casts", async () => {
     const missing: string[] = [];
     for (const book of await readdir("books/rules")) {
