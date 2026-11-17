@@ -44,6 +44,7 @@ const METAMAGIC = `${TACTIC}metamagic`;
 const CANCEL = `${TACTIC}metamagic-cancel`;
 const TO_POINTS = `${TACTIC}font-points`;
 const TO_SLOT = `${TACTIC}font-slot`;
+const SLOT_POINTS = `${TACTIC}slot-points`; // a `slotToPoints` passive's trade, as Mystic Focus
 
 // Font of Magic's Creating Spell Slots table: the Sorcery Points a slot costs and the Sorcerer level it needs.
 const CREATED_SLOTS = [
@@ -55,7 +56,7 @@ const CREATED_SLOTS = [
 ] as const;
 
 export function isClassOption(answer: string): boolean {
-  return [METAMAGIC, CANCEL, TO_POINTS, TO_SLOT].includes(
+  return [METAMAGIC, CANCEL, TO_POINTS, TO_SLOT, SLOT_POINTS].includes(
     parseOption(answer)[0] ?? "",
   );
 }
@@ -179,6 +180,29 @@ function fontOptions(actor: Actor, stats: Stats): Decision["options"] {
   return options;
 }
 
+// A slot spent for points of a `slotToPoints` resource, no action needed and no more than were spent.
+function slotPointOptions(actor: Actor, stats: Stats): Decision["options"] {
+  return stats.passives.flatMap((passive) => {
+    if (passive.kind !== "slotToPoints") return [];
+    const spent = actor.resourcesSpent[passive.resource] ?? 0;
+    if (spent === 0 || stats.resources[passive.resource] === undefined) {
+      return [];
+    }
+    return stats.slots.flatMap((count, index) => {
+      const level = index + 1;
+      const used = actor.resourcesSpent[`slot:${String(level)}`] ?? 0;
+      return count - used > 0
+        ? [
+            {
+              id: encodeOption(SLOT_POINTS, level, passive.resource),
+              label: `Turn a level ${String(level)} slot into ${plural(Math.min(level, spent), "point")} of ${passive.resource.replace(/-/g, " ")}`,
+            },
+          ]
+        : [];
+    });
+  });
+}
+
 export function classOptions(
   actor: Actor,
   state: DndState,
@@ -206,7 +230,11 @@ export function classOptions(
       label: "Metamagic: drop what waits on a spell",
     });
   }
-  return [...options, ...fontOptions(actor, stats)];
+  return [
+    ...options,
+    ...fontOptions(actor, stats),
+    ...slotPointOptions(actor, stats),
+  ];
 }
 
 export function runClassOption(
@@ -283,6 +311,23 @@ export function runClassOption(
             actor: actor.id,
             resource: SORCERY_POINTS,
             amount: Math.min(level, spent),
+          }),
+        ],
+      };
+    }
+    case SLOT_POINTS: {
+      const [, , resource = ""] = parseOption(payload.answer);
+      const spent = actor.resourcesSpent[resource] ?? 0;
+      return {
+        events: [
+          dndEvent(`${NS}:resourceSpent`, {
+            actor: actor.id,
+            resource: `slot:${detail}`,
+          }),
+          dndEvent(`${NS}:resourceRestored`, {
+            actor: actor.id,
+            resource,
+            amount: Math.min(Number(detail), spent),
           }),
         ],
       };

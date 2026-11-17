@@ -9,6 +9,11 @@ import {
 import { swappable } from "../plugins/systems/dnd5.5e/core/swap.ts";
 import { sceneCastActions } from "../plugins/systems/dnd5.5e/core/camp.ts";
 import {
+  classOptions,
+  runClassOption,
+} from "../plugins/systems/dnd5.5e/core/class-options.ts";
+import { recovered } from "../plugins/systems/dnd5.5e/core/rest.ts";
+import {
   type CharacterBuild,
   ClassSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
@@ -175,6 +180,31 @@ const FIXTURES = [
         count: 1,
         maxLevel: 0,
         swap: "shortRest",
+      },
+    ],
+  },
+  {
+    id: "test:feature/mystic-focus",
+    name: "Mystic Focus",
+    text,
+    automation: "full",
+    resources: [
+      {
+        id: "focus",
+        max: { base: 6 },
+        recharge: [{ on: "shortRest", amount: "all" }],
+      },
+    ],
+    passives: [
+      { kind: "slotToPoints", resource: "focus" },
+      {
+        kind: "pointsToSlot",
+        resource: "focus",
+        class: PRIEST,
+        costs: [
+          { level: 1, points: 2, from: 1 },
+          { level: 2, points: 3, from: 3 },
+        ],
       },
     ],
   },
@@ -505,5 +535,45 @@ describe("an option's own picks", () => {
         open: true,
       }),
     );
+  });
+});
+
+describe("Mystic Focus", () => {
+  const monk = (spent: Record<string, number>) => ({
+    ...priest([
+      [{ kind: "features", values: ["test:feature/mystic-focus"] }],
+      [],
+      [],
+    ]),
+    resourcesSpent: spent,
+  });
+
+  it("spends a slot in a fight for as many points back as its level", () => {
+    const actor = monk({ focus: 4 });
+    const state = {
+      actors: { [PLAYER_ACTOR]: actor },
+      combat: { encounter: "arena", order: [PLAYER_ACTOR], index: 0, round: 1 },
+    };
+    const option = classOptions(actor, state, run).find((item) =>
+      item.label.startsWith("Turn a level 2 slot"),
+    );
+    if (!option) throw new Error("no option");
+    const { events = [] } = runClassOption(
+      { actor: PLAYER_ACTOR, answer: option.id },
+      { ...run, state, dice: { below: () => 0, roll: () => 1 } },
+    );
+    expect(
+      events.map((item) => ("payload" in item ? item.payload : null)),
+    ).toEqual([
+      { actor: PLAYER_ACTOR, resource: "slot:2" },
+      { actor: PLAYER_ACTOR, resource: "focus", amount: 2 },
+    ]);
+  });
+
+  it("buys back the highest spent slot it can afford after a Short Rest", () => {
+    const actor = monk({ focus: 6, "slot:1": 2, "slot:2": 1 });
+    const left = recovered(actor.resourcesSpent, stats(actor), "short");
+    // The points come back, then three pay for the level 2 slot.
+    expect(left).toEqual({ focus: 3, "slot:1": 2 });
   });
 });

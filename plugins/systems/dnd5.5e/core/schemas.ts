@@ -2106,6 +2106,25 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     levels: FormulaSchema,
     resource: z.string().min(1),
   }),
+  // A spell slot can be spent in a fight, with no action, for as many of `resource` back as its level, as Mystic
+  // Focus' Focus Points (class-options.ts).
+  z.strictObject({ kind: z.literal("slotToPoints"), resource: z.string() }),
+  // A Short Rest ends with one spent slot back for `resource`, its cost by `costs` (the slot's level, what it costs
+  // and the level in `class` it needs), as Mystic Focus' Recovering Spell Slots (rest.ts).
+  z.strictObject({
+    kind: z.literal("pointsToSlot"),
+    resource: z.string(),
+    class: ContentIdSchema,
+    costs: z
+      .array(
+        z.strictObject({
+          level: z.number().int().min(1).max(9),
+          points: z.number().int().min(1),
+          from: z.number().int().min(1).max(20),
+        }),
+      )
+      .min(1),
+  }),
   // Recovering slots that way also heals, as the Scarlet Spellbook's Arcane Stamina.
   z.strictObject({ kind: z.literal("recoveryHeal"), amount: AmountSchema }),
   // Each party member's first Hit Point Die spent in a Short Rest heals this much more, as Chef's Replenishing Meal.

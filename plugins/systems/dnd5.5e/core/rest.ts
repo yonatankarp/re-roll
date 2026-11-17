@@ -490,7 +490,10 @@ export function recovered(
       }
     }
   }
-  if (rest === "short") recoverSlots(left, stats);
+  if (rest === "short") {
+    recoverSlots(left, stats);
+    pointsToSlot(left, stats);
+  }
   return Object.fromEntries([...left].filter(([, value]) => value > 0));
 }
 
@@ -512,6 +515,30 @@ function recoverSlots(left: Map<string, number>, stats: Stats): void {
       }
     }
     if (recovered) left.set(resource, (left.get(resource) ?? 0) + 1);
+  }
+}
+
+// Mystic Focus: one spent slot back for points left after the rest, at the costs its table gives.
+// shortcut: picked for the player, the highest spent slot the points pay for, as recoverSlots does, and only at a
+// Short Rest, not on Uncanny Metabolism.
+function pointsToSlot(left: Map<string, number>, stats: Stats): void {
+  for (const passive of stats.passives) {
+    if (passive.kind !== "pointsToSlot") continue;
+    const { resource } = passive;
+    const points = (stats.resources[resource] ?? 0) - (left.get(resource) ?? 0);
+    const level = stats.classLevels[passive.class] ?? 0;
+    const row = [...passive.costs]
+      .sort((a, b) => b.level - a.level)
+      .find(
+        (item) =>
+          item.from <= level &&
+          item.points <= points &&
+          (left.get(`slot:${String(item.level)}`) ?? 0) > 0,
+      );
+    if (!row) continue;
+    const key = `slot:${String(row.level)}`;
+    left.set(key, (left.get(key) ?? 0) - 1);
+    left.set(resource, (left.get(resource) ?? 0) + row.points);
   }
 }
 
