@@ -149,6 +149,8 @@ export function hasFlag(
       (!("spellAttacks" in modifier) || !modifier.spellAttacks) &&
       (!("concentration" in modifier) || !modifier.concentration) &&
       (!("casterSpells" in modifier) || !modifier.casterSpells) &&
+      // Escape the Horde's is the Opportunity Attack's to weigh (combat/attack.ts).
+      (!("opportunity" in modifier) || !modifier.opportunity) &&
       (!("attackers" in modifier) ||
         !modifier.attackers ||
         modifier.attackers.includes(attackerType ?? "")),

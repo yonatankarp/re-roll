@@ -101,6 +101,7 @@ import {
   holdsShield,
   HIGHEST,
   masteredDice,
+  d20Floor,
   markedBy,
   maximized,
   masteredTypes,
@@ -307,7 +308,10 @@ function meleeAc(target: Actor, melee: boolean, stats: Stats): number {
       modifier.to === "ac" &&
       (melee ? modifier.melee : modifier.ranged)
     ) {
-      sources.set(sourceId, modifier.amount.bonus?.base ?? 0);
+      sources.set(
+        sourceId,
+        evaluateFormula(modifier.amount.bonus ?? { base: 0, add: [] }, stats),
+      );
     }
   }
   return [...sources.values()].reduce((sum, bonus) => sum + bonus, 0);
@@ -406,7 +410,11 @@ function reactionFor(
           effect.modifier.to === "ac" &&
           (!effect.modifier.melee || melee) &&
           (!effect.modifier.ranged || !melee)
-          ? sum + (effect.modifier.amount.bonus?.base ?? 0)
+          ? sum +
+              evaluateFormula(
+                effect.modifier.amount.bonus ?? { base: 0, add: [] },
+                stats,
+              )
           : sum;
       }, 0);
       return total < ac + acBonus;
@@ -937,6 +945,14 @@ export function runAttackRoll(
   }
   const stats = deriveStats(attacker, context);
   const targetStats = deriveStats(target, context);
+  // XGE's Unbreakable Majesty: the attacker saves before its first attack on the bearer this turn, or loses it.
+  const daunted = payload.rolled
+    ? null
+    : majestic(attacker, target, targetStats, true, context);
+  if (daunted && !daunted.saved) {
+    return { events: [...unwarded, ...daunted.events] };
+  }
+  if (daunted) unwarded.push(...daunted.events);
   // Among the Dead: an undead attacker saves or loses the attack, and once it saves, or the bearer attacks it, it's
   // free of this until a Long Rest.
   const deterred = (bearer: Actor, other: Actor, bearerStats: Stats) =>
@@ -1007,6 +1023,7 @@ export function runAttackRoll(
   const forgoes = (payload.strikes ?? []).length > 0;
   const advantage =
     !forgoes &&
+    !unadvantaged(target, targetStats) &&
     (packed ||
       unseenAttacker ||
       hasFlag(attacker, "advantage", "attacks", stats, ability) ||
@@ -1117,6 +1134,17 @@ export function runAttackRoll(
     ) ||
     invisibleTo(target, attacker) ||
     warded(target, targetStats) ||
+    // Escape the Horde: an Opportunity Attack is one made on the bearer's own turn.
+    (inOwnTurn(target, context) &&
+      [
+        ...target.activeEffects.map(({ modifier }) => modifier),
+        ...passiveModifiers(targetStats.passives),
+      ].some(
+        (modifier) =>
+          modifier.kind === "disadvantage" &&
+          modifier.on === "attacksAgainst" &&
+          modifier.opportunity,
+      )) ||
     protectedMount(target, context) ||
     (action.spellLevel !== null &&
       passiveModifiers(targetStats.passives).some(
@@ -1188,7 +1216,7 @@ export function runAttackRoll(
       : forgoAdvantageFrame({ ...payload, target: target.id }, context);
   if (brutal) return { frames: [brutal] };
   const edge = held ?? { advantage, disadvantage };
-  const first = held
+  const rolledFirst = held
     ? { natural: held.natural }
     : rollD20(dice, {
         advantage,
@@ -1196,6 +1224,10 @@ export function runAttackRoll(
         rerollOnes: hasPassive(stats, "rerollOnes"),
         thirdDie: ability !== "str" && hasPassive(stats, "elvenAccuracy"),
       });
+  // Trance of Order: a d20 of 9 or lower counts as 10.
+  const first = held
+    ? rolledFirst
+    : { natural: Math.max(rolledFirst.natural, d20Floor(attacker, stats)) };
   const hadAdvantage = edge.advantage && !edge.disadvantage;
   const hadDisadvantage = edge.disadvantage && !edge.advantage;
   const base =
@@ -1369,6 +1401,27 @@ export function runAttackRoll(
     };
   }
 
+  // Unbreakable Majesty: the first creature to hit the bearer on a turn saves or misses instead.
+  const awed = majestic(attacker, target, targetStats, false, context);
+  if (awed && !awed.saved) {
+    return {
+      events: [
+        dndEvent(`${NS}:rollReported`, {
+          actor: attacker.id,
+          against: target.id,
+          natural: roll.natural,
+          total,
+          target: ac,
+          success: false,
+          label: action.name,
+        }),
+        ...spent,
+        ...awed.events,
+      ],
+      frames: missOutcome(hit, context),
+    };
+  }
+  if (awed) spent.push(...awed.events);
   const duplicate = imageHit(attacker, target, context);
   if (duplicate) return { events: [report, ...spent, ...duplicate] };
   const reaction = reactionFor(
@@ -2117,7 +2170,13 @@ function landHit(
         : Math.max(
             0,
             item.amount -
-              armoredReduction(target, targetStats, item.type, context),
+              armoredReduction(
+                target,
+                targetStats,
+                item.type,
+                context,
+                item.amount,
+              ),
           ),
   }));
   const lessened = lessenHits(armored, payload);
@@ -2459,6 +2518,74 @@ function retaliated(
     );
   }
   return events;
+}
+
+// Elusive or Trance of Order: attack rolls against the bearer can't have Advantage.
+function unadvantaged(target: Actor, stats: Stats): boolean {
+  return [
+    ...target.activeEffects.map(({ modifier }) => modifier),
+    ...passiveModifiers(stats.passives),
+  ].some(
+    (modifier) =>
+      modifier.kind === "noAdvantageAgainst" &&
+      (!modifier.able || !hasCondition(target, ...INCAPACITATING)),
+  );
+}
+
+// Unbreakable Majesty: the save of the first creature to hit the bearer on a turn, or with `before` of each
+// creature as it first attacks it on a turn; null when none is called for.
+function majestic(
+  attacker: Actor,
+  target: Actor,
+  stats: Stats,
+  before: boolean,
+  context: Context,
+): { readonly saved: boolean; readonly events: SystemEvent[] } | null {
+  const majesty = target.activeEffects.find(
+    ({ modifier }) =>
+      modifier.kind === "majesty" && (modifier.before === true) === before,
+  );
+  if (majesty?.modifier.kind !== "majesty" || attacker.side === target.side) {
+    return null;
+  }
+  const { combat } = context.state;
+  const turn = `@${String(combat?.round ?? 0)}:${String(combat?.index ?? 0)}`;
+  const key = before ? `majesty:${target.id}${turn}` : `majesty${turn}`;
+  const holder = before ? attacker : target;
+  if (holder.usedThisTurn.includes(key)) return null;
+  const save = rollSave(
+    attacker,
+    majesty.modifier.ability,
+    spellSaveDc(stats),
+    context,
+    true,
+  );
+  return {
+    saved: save.saved,
+    events: [
+      dndEvent(`${NS}:oncePerTurnUsed`, { actor: holder.id, key }),
+      ...save.events,
+      ...(before && save.saved
+        ? leafEvents(
+            [
+              {
+                kind: "modifier",
+                modifier: {
+                  kind: "disadvantage",
+                  on: "saves",
+                  casterSpells: true,
+                },
+                duration: { until: "yourNextTurnEnd" },
+              },
+            ],
+            majesty.sourceId,
+            target,
+            attacker,
+            context,
+          )
+        : []),
+    ],
+  };
 }
 
 const PEERLESS_AIM = "peerless-aim";

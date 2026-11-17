@@ -179,18 +179,24 @@ function bestAc(
     armorBases: readonly number[];
     flatBonus: number;
     passives: readonly Passive[];
+    armorTypes?: readonly string[]; // the armor worn: none for a monster's printed AC
+    shielded?: boolean;
+    proficiency?: number;
   },
 ): number {
   const dex = abilityModifier(abilities.dex);
+  const armorTypes = context.armorTypes ?? [];
   // Only one way of calculating AC applies at a time, so the best one is used.
   const bases = [10 + dex, ...context.armorBases];
   const fixed = passiveModifiers(context.passives);
-  // shortcut: Mage Armor's and Unarmored Defense's rule about not wearing armor isn't checked, since the best calculation wins anyway.
+  // shortcut: Mage Armor's rule about not wearing armor isn't checked, since the best calculation wins anyway.
   for (const modifier of [
     ...actor.activeEffects.map((effect) => effect.modifier),
     ...fixed,
   ]) {
     if (modifier.kind !== "acFormula") continue;
+    if (modifier.unarmored && armorTypes.length > 0) continue;
+    if (modifier.noShield && context.shielded) continue;
     const { base, add } = modifier.formula;
     bases.push(
       add.reduce(
@@ -202,26 +208,42 @@ function bestAc(
       ),
     );
   }
+  // A flat AC bonus, its ability modifiers worked out, as Bladesong's Intelligence; one tied to armor only with it on.
+  const flat = (
+    modifier: Actor["activeEffects"][number]["modifier"],
+  ): number | null => {
+    if (
+      modifier.kind !== "bonus" ||
+      modifier.to !== "ac" ||
+      modifier.melee ||
+      modifier.ranged ||
+      (modifier.armor === "any" && armorTypes.length === 0) ||
+      (modifier.armor === "heavy" && !armorTypes.includes("heavy"))
+    ) {
+      return null;
+    }
+    const formula = modifier.amount.bonus;
+    if (!formula) return 0;
+    const sum = formula.add.reduce(
+      (total, term) =>
+        term.kind === "abilityMod"
+          ? total + abilityModifier(abilities[term.ability])
+          : term.kind === "proficiency"
+            ? total + (context.proficiency ?? 0)
+            : total,
+      formula.base,
+    );
+    return formula.min === undefined ? sum : Math.max(formula.min, sum);
+  };
   let bonus = fixed.reduce(
-    (total, modifier) =>
-      modifier.kind === "bonus" &&
-      modifier.to === "ac" &&
-      !modifier.melee &&
-      !modifier.ranged
-        ? total + (modifier.amount.bonus?.base ?? 0)
-        : total,
+    (total, modifier) => total + (flat(modifier) ?? 0),
     context.flatBonus,
   );
   const seen = new Set<string>();
   for (const effect of actor.activeEffects) {
-    const { modifier } = effect;
-    if (
-      modifier.kind === "bonus" &&
-      modifier.to === "ac" &&
-      !modifier.melee &&
-      !modifier.ranged
-    ) {
-      if (!seen.has(effect.sourceId)) bonus += modifier.amount.bonus?.base ?? 0;
+    const amount = flat(effect.modifier);
+    if (amount !== null) {
+      if (!seen.has(effect.sourceId)) bonus += amount;
       seen.add(effect.sourceId);
     }
   }
@@ -1467,7 +1489,13 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
   // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
-  const traits = [...itemPassives, ...fromFeatures.passives];
+  // Durable Magic's bonuses hold only while the bearer concentrates.
+  const traits = [...itemPassives, ...fromFeatures.passives].filter(
+    (passive) =>
+      passive.kind !== "modifier" ||
+      !passive.concentrating ||
+      actor.concentratingOn !== null,
+  );
   const castingAbility = featSpellAbilities(
     build,
     replaced ? [] : [background.feat],
@@ -1476,8 +1504,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     swaps,
   );
   const armorBases: number[] = [];
+  const armorTypes: string[] = [];
   const flatBonus = magic.ac;
   let shield = 0;
+  let shielded = false;
   const actions: KnownAction[] = [];
   for (const [itemId, item] of worn) {
     const usable = itemAction(
@@ -1513,7 +1543,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       armorBases.push(
         parsed.base + allowed + ownAc(item.bonuses, !works(itemId, item)),
       );
+      armorTypes.push(parsed.armorType);
     } else if (item.type === "shield") {
+      shielded = true;
       // Only one shield is held, and it protects only with training.
       if (trained.has("shield")) {
         shield = Math.max(
@@ -1691,6 +1723,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       armorBases,
       flatBonus: flatBonus + shield,
       passives: traits,
+      armorTypes,
+      shielded,
+      proficiency: proficiencyBonus(level) + magic.proficiency,
     }),
     speed: encumberedSpeed(species.speed - 10 * (load ?? 0), carried, capacity),
     savingThrows: [
@@ -2454,10 +2489,24 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
   const loss = actor.maxHpLoss ?? 0;
   // The environmental effects around it give their passives too, as Arcadian Vitality (environment.ts).
   const around = environmentPassives(moved.creatureType, access);
-  const placed =
+  const surrounded =
     around.length > 0
       ? { ...moved, passives: [...moved.passives, ...around] }
       : moved;
+  // A character's passive marked `bloodied` holds only while it is, as Boon of the Furious Storm's Immunity.
+  const placed =
+    actor.source.kind === "character" &&
+    surrounded.passives.some(
+      (passive) => "bloodied" in passive && passive.bloodied,
+    ) &&
+    actor.hp * 2 > surrounded.maxHp
+      ? {
+          ...surrounded,
+          passives: surrounded.passives.filter(
+            (passive) => !("bloodied" in passive && passive.bloodied),
+          ),
+        }
+      : surrounded;
   return speed === 0 && maxHp === 0 && loss === 0
     ? placed
     : {

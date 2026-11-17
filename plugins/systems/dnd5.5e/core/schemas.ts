@@ -342,6 +342,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     melee: z.literal(true).optional(), // AC against melee attack rolls only, as a pirate admiral's Defensive Stance
     ranged: z.literal(true).optional(), // AC against ranged attack rolls only, as an Arrow-Catching Shield's
     weapon: z.literal(true).optional(), // weapon attack rolls only, as Magic Weapon's
+    // AC only while the bearer wears armor ("any"), or Heavy armor, as the Defense feat's or Soul of the Forge's
+    armor: z.enum(["any", "heavy"]).optional(),
   }),
   // "once" ends the effect after the next attack roll it applies to, as with Guiding Bolt.
   // "ability" limits it to rolls with that ability, as with Strength-based D20 Tests.
@@ -374,6 +376,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     concentration: z.literal(true).optional(), // saves only to keep Concentration, as an eerie chanting zone's
     // saves only against a spell of the effect's caster, as Eldritch Strike's (combat/effects.ts rollSave)
     casterSpells: z.literal(true).optional(),
+    opportunity: z.literal(true).optional(), // attacksAgainst only Opportunity Attacks, as Escape the Horde
   }),
   z.strictObject({ kind: z.literal("resistance"), damage: DamageTypeSchema }),
   z.strictObject({
@@ -410,7 +413,14 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("conditionImmunity"),
     condition: ConditionSchema,
   }),
-  z.strictObject({ kind: z.literal("acFormula"), formula: FormulaSchema }),
+  // `unarmored` only while the bearer wears no armor, and `noShield` only while it holds no Shield, as Unarmored
+  // Defense's.
+  z.strictObject({
+    kind: z.literal("acFormula"),
+    formula: FormulaSchema,
+    unarmored: z.literal(true).optional(),
+    noShield: z.literal(true).optional(),
+  }),
   // Expertise in these skills while it lasts, where the bearer is proficient, as Skill Empowerment's.
   z.strictObject({
     kind: z.literal("expertise"),
@@ -424,6 +434,20 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     ability: AbilitySchema.optional(),
     skills: z.array(SkillSchema).min(1).optional(),
     proficient: z.literal(true).optional(),
+    all: z.literal(true).optional(), // every D20 Test: attack rolls and saves too, as Trance of Order's 10
+  }),
+  // Attack rolls against the bearer can't have Advantage, with `able` only while it isn't Incapacitated, as Elusive.
+  z.strictObject({
+    kind: z.literal("noAdvantageAgainst"),
+    able: z.literal(true).optional(),
+  }),
+  // The first creature to hit the bearer on a turn saves with `ability` against the bearer's spell save DC or
+  // misses, as Unbreakable Majesty; with `before`, it saves as it attacks, and on a failure the attack is lost, and
+  // on a success it has Disadvantage on saves against the bearer's spells until the bearer's next turn ends.
+  z.strictObject({
+    kind: z.literal("majesty"),
+    ability: AbilitySchema.default("cha"),
+    before: z.literal(true).optional(),
   }),
   // Seeing creatures that have the Invisible condition as if they were visible, as See Invisibility does.
   z.strictObject({ kind: z.literal("seeInvisible") }),
@@ -1132,6 +1156,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     range: z.number().int().min(5),
     damage: z.array(DamageSchema).min(1),
   }),
+  // The target's Concentration ends, as entering a Rage does.
+  z.strictObject({ kind: z.literal("endConcentration") }),
   // The triggering Critical Hit is a normal hit instead, as Sentinel at Death's Door makes it.
   z.strictObject({ kind: z.literal("noCritical") }),
   // Lifts the target `feet` up, where it can't move and nothing below reaches it, until `duration` is over and it
@@ -1821,6 +1847,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("modifier"),
     modifier: ModifierSchema,
     bloodied: WhileBloodied,
+    concentrating: z.literal(true).optional(), // only while the bearer concentrates on a spell, as Durable Magic
+  }),
+  // Saves against the bearer's spells that deal one of these types have Disadvantage, as Storm's Strength.
+  z.strictObject({
+    kind: z.literal("stormStrength"),
+    damage: z.array(DamageTypeSchema).min(1),
   }),
   // An area round the bearer that moves with it, as a ghast's Stench, a balor's Fire Aura or a flameskull's
   // Illumination ("light" or "dim" for the light it sheds).
@@ -1995,6 +2027,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     conditions: z.array(ConditionSchema).default([]),
     bloodied: z.literal(true).optional(), // only while Bloodied, as with Bloodied Frenzy
     while: ConditionSchema.optional(), // only while the bearer has it, as a Dream Weaver's Mind Wall while Unconscious
+    // never while the bearer has it ("incapacitated" counting what Incapacitates), as Danger Sense
+    notWhile: ConditionSchema.optional(),
     from: SaveFromSchema.optional(), // only a save against this, which every save then counts
   }),
   // Heroic Inspiration as a rest ends, for the bearer or for its allies, as with Resourceful or Musician.
@@ -2264,7 +2298,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("armoredReduction"),
     armor: z.enum(["light", "medium", "heavy"]),
     damage: z.array(DamageTypeSchema).min(1),
-    amount: FormulaSchema,
+    amount: FormulaSchema.default({ base: 0, add: [] }),
+    halve: z.literal(true).optional(), // Resistance instead, as Saint of Forge and Fire's
   }),
   // The most Dexterity this armor adds to AC, as Medium Armor Master raises it to 3.
   z.strictObject({
@@ -2923,6 +2958,9 @@ export const ResourceDefSchema = z.strictObject({
       // Only once this many of its trigger have passed since the use was spent, as Cauldron of Rebirth's 7 days.
       // shortcut: a day passes with each Long Rest, the only clock between scenes.
       every: z.number().int().min(2).optional(),
+      // With `every` left out, once as many of its trigger have passed as a roll of this die, rolled as the first
+      // of them passes, as Lethargy Resilience's 1d4 Long Rests.
+      everyDie: z.number().int().min(2).optional(),
     }),
   ),
 });

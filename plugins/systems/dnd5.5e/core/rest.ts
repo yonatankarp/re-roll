@@ -468,6 +468,19 @@ export function recovered(
           ? on === "turnStart" || on === "shortRest" || rest === "long"
           : on === (rest === "long" ? "longRest" : "shortRest");
       if (!applies || !canUse(entry, used, stats) || used(id) === 0) continue;
+      // Lethargy Resilience's 1d4 Long Rests: the count is rolled as the first of them passes, and kept.
+      if (entry.everyDie && dice) {
+        const due = `${id}:due`;
+        const waited = `${id}:waited`;
+        const needs = used(due) || dice.roll(entry.everyDie);
+        if (used(waited) + 1 < needs) {
+          left.set(due, needs);
+          left.set(waited, used(waited) + 1);
+          continue;
+        }
+        left.set(due, 0);
+        left.set(waited, 0);
+      }
       // Cauldron of Rebirth's 7 days: only once that many have passed since the use was spent.
       if (entry.every) {
         const waited = `${id}:waited`;

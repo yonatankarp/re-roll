@@ -77,6 +77,7 @@ import {
   nextHitDie,
   piercing,
   interposedShield,
+  d20Floor,
   evades,
   markedBy,
   rescuedSave,
@@ -2596,6 +2597,13 @@ export function leafEvents(
         }
         break;
       }
+      case "endConcentration":
+        if (target.concentratingOn !== null) {
+          events.push(
+            dndEvent(`${NS}:concentrationEnded`, { actor: target.id }),
+          );
+        }
+        break;
       case "note":
       case "disperse":
       case "animate":
@@ -3025,6 +3033,17 @@ function strongerTogether(
   return near.length > 0 && (bears(target) || near.some(bears));
 }
 
+// Storm's Strength: saves against the caster's spells dealing these types have Disadvantage.
+function stormStrength(action: KnownAction, stats: Stats): boolean {
+  if (action.spellLevel === null) return false;
+  const types = action.activation.resolution.damage.map(({ type }) => type);
+  return stats.passives.some(
+    (passive) =>
+      passive.kind === "stormStrength" &&
+      passive.damage.some((type) => types.includes(type)),
+  );
+}
+
 // The saved flag, and the roll for the history. An automatic failure rolls no die, so it has no event.
 export function rollSave(
   target: Actor,
@@ -3102,10 +3121,15 @@ export function rollSave(
           ),
       ),
   };
-  const roll = rollD20(context.dice, {
+  const rolled0 = rollD20(context.dice, {
     ...edge,
     rerollOnes: hasPassive(stats, "rerollOnes"),
   });
+  // Trance of Order: a d20 of 9 or lower counts as 10.
+  const roll = {
+    ...rolled0,
+    natural: Math.max(rolled0.natural, d20Floor(target, stats)),
+  };
   const base =
     saveBonus(stats, ability) +
     rollBonus(target, "saves", context, undefined, ability) +
@@ -3910,7 +3934,9 @@ export function resolveAction(
                 action.spellLevel !== null,
                 coverAgainst(context.state, actor, target, context),
                 conditionsApplied(resolution.onFail),
-                heightened === target.id || edges.includes("disadvantage"),
+                heightened === target.id ||
+                  edges.includes("disadvantage") ||
+                  stormStrength(action, stats),
                 resolution.advantage === true || edges.includes("advantage"),
                 source,
               );

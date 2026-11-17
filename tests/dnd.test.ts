@@ -339,11 +339,14 @@ describe("encoded spells", () => {
     });
   });
 
-  it("expresses Shield as a reaction, and marks it partly automated", async () => {
+  it("expresses Shield as a reaction to a hit or to Magic Missile, fully automated", async () => {
     const parsed = spell(await goblin(), "shield");
-    expect(parsed.automation).toBe("partial");
+    expect(parsed.automation).toBe("full");
     expect(parsed.activation?.cost).toEqual(["reaction", "slot"]);
     expect(parsed.activation?.trigger?.hitByAttack).toBe(true);
+    expect(parsed.activation?.trigger?.targetedBySpell).toBe(
+      "srd52:spell/magic-missile",
+    );
   });
 
   it("builds a Longsword attack from weapon data", async () => {
