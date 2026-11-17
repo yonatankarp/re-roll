@@ -159,6 +159,7 @@ import {
   SKILLS_WITH_DIFFERENT_ABILITIES,
   VARIANT_SETTINGS,
   chosenVariants,
+  playing,
   variantOn,
 } from "./variant-rules.ts";
 
@@ -672,14 +673,22 @@ export const dnd55e = defineSystem<DndState>({
       context,
     ),
   applyEvent: applyDndEvent,
+  // The engine hands these the state and the access apart, so the access gets the state for the variant rules.
   nextDecision: (state, access) =>
-    withTactics(nextDndDecision(state, access), state, access),
+    withTactics(
+      nextDndDecision(state, playing(state, access)),
+      state,
+      playing(state, access),
+    ),
   rests: availableRests,
-  sceneActions: (state, access) => [
-    ...sceneGearActions(state, access),
-    ...sceneSwapActions(state, access),
-    ...sceneCastActions(state, access),
-  ],
+  sceneActions: (state, bare) => {
+    const access = playing(state, bare);
+    return [
+      ...sceneGearActions(state, access),
+      ...sceneSwapActions(state, access),
+      ...sceneCastActions(state, access),
+    ];
+  },
   decidePolicy: (decision, context) =>
     decision.id.endsWith(`:build:${decision.actor}:${SHEET_KEY}`)
       ? ACCEPT // the sheet is always a sound, recommended build

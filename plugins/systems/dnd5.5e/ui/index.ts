@@ -25,6 +25,7 @@ import type { AreaView, BoardExtra, FightMap } from "./board-data.ts";
 import { zonesOf } from "../core/zones.ts";
 import { dndCue } from "./cues.ts";
 import { GLOSSARY_TERMS } from "../core/glossary.ts";
+import { playing } from "../core/variant-rules.ts";
 import {
   ABILITIES,
   ABILITY_NAMES,
@@ -1341,13 +1342,6 @@ function card(decision: Decision, rawState: unknown, access: ContentAccess) {
 function playerDied(rawState: unknown): boolean {
   const player = parseState(rawState).actors[PLAYER_ACTOR];
   return player !== undefined && isDead(player);
-}
-
-// The access with the run's state beside it, as the engine's context has it, so stats play the run's variant rules
-// (variant-rules.ts).
-function playing(rawState: unknown, access: ContentAccess): ContentAccess {
-  const withState = { ...access, state: rawState };
-  return withState;
 }
 
 export const dndUi = {

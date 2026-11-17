@@ -73,8 +73,18 @@ export function chosenVariants(
   ).map((setting) => setting.id);
 }
 
-// Whether the run plays a variant rule. The engine's context carries the run's state, and so does the access the
-// ui passes along (playing() in ui/index.ts); access with no state, as in character creation's preview, plays none.
+// The access with the run's state beside it, as the engine's context has it, for a hook or the ui handed the two
+// apart, so stats play the run's variant rules.
+export function playing(
+  rawState: unknown,
+  access: ContentAccess,
+): ContentAccess {
+  const withState = { ...access, state: rawState };
+  return withState;
+}
+
+// Whether the run plays a variant rule. The engine's context carries the run's state, and so does access passed
+// through playing(); access with no state, as in character creation's preview, plays none.
 export function variantOn(access: ContentAccess, id: string): boolean {
   const { state } = access as { state?: { variantRules?: unknown } };
   return Array.isArray(state?.variantRules) && state.variantRules.includes(id);
