@@ -22,7 +22,7 @@
 - id: "srd52:feature/sneak-attack"
   name: Sneak Attack
   text: "Once per turn, deal extra damage to a creature you hit with Advantage, or when an ally is near it. It starts at 1d6 and grows with your Rogue level."
-  automation: partial
+  automation: full
   passives:
     - kind: extraDamage
       dice: 1d6
@@ -224,7 +224,34 @@
 - id: "srd52:feature/cunning-strike"
   name: Cunning Strike
   text: "You can trade Sneak Attack dice for effects when you hit, such as poisoning or tripping the target."
-  automation: text
+  automation: full
+  activations:
+    - label: Poison
+      cost: []
+      trigger: { afterHit: weapon, forgo: 1 }
+      targeting: { creatures: 1, range: 120, side: enemy }
+      resolution:
+        kind: save
+        ability: con
+        dc: { base: 8, add: [{ kind: proficiency }, { kind: abilityMod, ability: dex }] }
+        onFail:
+          - { kind: applyCondition, condition: poisoned, duration: { minutes: 1 }, repeatSave: true }
+    - label: Trip
+      cost: []
+      trigger: { afterHit: weapon, forgo: 1 }
+      targeting: { creatures: 1, range: 120, side: enemy, maxSize: large }
+      resolution:
+        kind: save
+        ability: dex
+        dc: { base: 8, add: [{ kind: proficiency }, { kind: abilityMod, ability: dex }] }
+        onFail:
+          - { kind: applyCondition, condition: prone, duration: { minutes: 1 } }
+    - label: Withdraw
+      cost: []
+      trigger: { afterHit: weapon, forgo: 1 }
+      targeting: { creatures: 1, range: 120, side: enemy }
+      resolution: { kind: automatic, effects: [] }
+      selfEffects: [{ kind: dash, half: true, safe: true }]
 
 - id: "srd52:feature/uncanny-dodge"
   name: Uncanny Dodge

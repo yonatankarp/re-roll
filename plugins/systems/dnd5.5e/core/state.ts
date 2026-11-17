@@ -75,6 +75,7 @@ export const FRAME_KINDS = [
   "sheetStep",
   "smite",
   "strikeChosen",
+  "missRider",
   "advantageForgone",
   "swapInitiative",
   "takeAction",

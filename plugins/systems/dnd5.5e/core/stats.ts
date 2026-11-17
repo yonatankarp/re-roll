@@ -2359,6 +2359,11 @@ export function evaluateFormula(formula: Formula, stats: Stats): number {
       case "maxHp":
         total += term.half ? Math.floor(stats.maxHp / 2) : stats.maxHp;
         break;
+      case "abilityScore":
+        total += Math.max(
+          ...term.abilities.map((ability) => stats.abilities[ability]),
+        );
+        break;
       default:
         term satisfies never;
     }

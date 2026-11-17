@@ -717,7 +717,7 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
   const { activation } = action;
   const used = actor.usedThisTurn;
   if (activation.unmoved && actor.moved > 0) return false;
-  if (activation.oncePerTurn && used.includes(onceKey(action.id))) return false;
+  if (activation.oncePerTurn && used.includes(onceKey(action))) return false;
   if (activation.afterCast && !used.includes(CAST_ACTION)) return false;
   if (activation.afterBonusAction && actor.budget.bonusAction) return false;
   if (activation.while && !underEffect(actor, activation.while)) return false;
@@ -791,6 +791,12 @@ export function hitFits(
       );
     case "heavy":
       return weapon?.properties.includes("heavy") === true;
+    case "heavyOrVersatile":
+      return (
+        weapon?.properties.some(
+          (property) => property === "heavy" || property === "versatile",
+        ) === true
+      );
   }
 }
 
@@ -800,7 +806,11 @@ export function extraFits(
   attacker: Actor,
   target: Actor,
   hitWith: KnownAction,
-  edge: { readonly advantage: boolean; readonly disadvantage: boolean },
+  edge: {
+    readonly advantage: boolean;
+    readonly disadvantage: boolean;
+    readonly natural?: number;
+  },
   context: Context,
 ): boolean {
   const { state } = context;
@@ -816,6 +826,7 @@ export function extraFits(
   const kind = passive.with ?? (advantaged ? "finesseOrRanged" : "attack");
   if (!hitFits(kind, hitWith, attacker, context)) return false;
   if (passive.when === "always") return true;
+  if (passive.when === "natural20") return edge.natural === 20;
   if (passive.when === "targetHurt") {
     return target.hp < deriveStats(target, context).maxHp;
   }
@@ -834,9 +845,12 @@ export function extraFits(
   );
 }
 
-// The usedThisTurn key of an activation limited to once a turn.
-export function onceKey(actionId: string): string {
-  return `once:${actionId}`;
+// The usedThisTurn key of an activation limited to once a turn: its name, or its feature's (or its own) id.
+export function onceKey(action: KnownAction): string {
+  const once = action.activation.oncePerTurn;
+  return typeof once === "string"
+    ? `once:${once}`
+    : `once:${action.id.replace(/^(feature:[^:]+:[^:]+):\d+$/, "$1")}`;
 }
 
 // A healing pool with nothing left in it can't heal, as Lay On Hands spent, and nothing is regained with nothing
@@ -1143,6 +1157,8 @@ export function carriesExtraDice(
   access: Pick<ContentAccess, "content">,
 ): boolean {
   if (attacker.source.kind !== "character") return true;
+  const { resolution } = action.activation;
+  if (resolution.kind === "attack" && resolution.attack.finesse) return true;
   const itemId = weaponItemId(action.id);
   const item =
     itemId && access.content(itemId)

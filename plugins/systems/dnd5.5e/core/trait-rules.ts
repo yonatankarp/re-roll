@@ -95,13 +95,20 @@ export function evades(
 }
 
 // Blood Frenzy, Bloodied Fury and the like: Advantage on attack rolls in a state the trait names.
-// Whether a creature is under an effect of the bearer's from this spell or feature, as Hunter's Mark.
-export function markedBy(target: Actor, bearer: Actor, id: string): boolean {
+// Whether a creature is under an effect of the bearer's from one of these spells or features, as Hunter's Mark.
+export function markedBy(
+  target: Actor,
+  bearer: Actor,
+  ids: readonly string[],
+): boolean {
   return target.activeEffects.some(
     ({ sourceId, casterId }) =>
       casterId === bearer.id &&
-      (sourceId.startsWith(`feature:${id}:`) ||
-        spellOfSource(sourceId) === id),
+      ids.some(
+        (id) =>
+          sourceId.startsWith(`feature:${id}:`) ||
+          spellOfSource(sourceId) === id,
+      ),
   );
 }
 

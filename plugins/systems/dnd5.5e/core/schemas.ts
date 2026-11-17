@@ -239,6 +239,11 @@ const FormulaTermSchema = z.discriminatedUnion("kind", [
     kind: z.literal("spellSaveDc"),
     ability: AbilitySchema.optional(),
   }),
+  // The best of these ability scores themselves, as Overwhelming Strike's damage.
+  z.strictObject({
+    kind: z.literal("abilityScore"),
+    abilities: z.array(AbilitySchema).min(1),
+  }),
   // The Hit Point maximum, halved and rounded down with `half`, as Boon of Recovery's Last Stand.
   z.strictObject({
     kind: z.literal("maxHp"),
@@ -1045,6 +1050,7 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       // Beyond this many feet, out to the targeting's range, the roll has Disadvantage, as a thrown weapon's long range.
       normalRange: z.number().int().min(5).optional(),
       unarmed: z.literal(true).optional(), // an Unarmed Strike, as Martial Arts' or Vampiric Bite's
+      finesse: z.literal(true).optional(), // a Finesse weapon a feature makes, as a Psychic Blade, for Sneak Attack
     }),
     damage: z.array(DamageSchema).min(1),
     onHit: LeafEffectsSchema,
@@ -1164,7 +1170,7 @@ export type AreaEffect = z.infer<typeof AreaEffectSchema>;
 
 // Which hits a rider answers (combat/queries.ts hitFits): "unarmed" an Unarmed Strike, "monkWeapon" one or a Simple
 // Melee or Light Martial Melee weapon, "magicWeapon" a magic one, "strength" a Strength-based one, "heavy" a Heavy
-// weapon's, "finesseOrRanged" a Finesse or Ranged weapon's (a monster's any), as Sneak Attack's, and "attack" any
+// weapon's ("heavyOrVersatile" or a Versatile one's), "finesseOrRanged" a Finesse or Ranged weapon's (a monster's any), as Sneak Attack's, and "attack" any
 // attack roll, a spell's too, as Hurl Through Hell's.
 export const HitKindSchema = z.enum([
   "weapon",
@@ -1175,6 +1181,7 @@ export const HitKindSchema = z.enum([
   "magicWeapon",
   "strength",
   "heavy",
+  "heavyOrVersatile",
   "finesseOrRanged",
   "attack",
 ]);
@@ -1341,7 +1348,9 @@ export const ActivationSchema = z.strictObject({
   // only after casting a spell with a casting time of an action this turn, as Battle Magic
   afterCast: z.literal(true).optional(),
   unmoved: z.literal(true).optional(), // only if the bearer hasn't moved this turn, as Steady Aim
-  oncePerTurn: z.literal(true).optional(), // once a turn, as Stunning Strike (queries.ts gatesOpen)
+  // Once a turn for all its feature's activations, as Stunning Strike, or with a name, for all activations of that
+  // name, as Brutal Strike's and Improved Brutal Strike's options (queries.ts gatesOpen).
+  oncePerTurn: z.union([z.literal(true), z.string().min(1)]).optional(),
   // What the bearer gets as an `afterHit` activation is taken, as Cunning Strike's Withdraw move.
   selfEffects: z.array(LeafEffectSchema).min(1).optional(),
   // only while an effect of one of these features' activations is on the bearer, as Travel along the Tree in a Rage,
@@ -1457,7 +1466,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     bonus: FormulaSchema.optional(), // added to the dice, as Divine Fury's half the Barbarian level
     // "advantageOrAlly" also counts an ally within 5 feet of the target, as Sneak Attack does. "targetHurt" is a
     // target missing any Hit Points, as Circle of Mortality's Pull of Death. "always" is every hit `with` allows.
-    when: z.enum(["advantage", "advantageOrAlly", "targetHurt", "always"]),
+    // "natural20" is a hit whose d20 rolled a 20, as Overwhelming Strike's.
+    when: z.enum([
+      "advantage",
+      "advantageOrAlly",
+      "targetHurt",
+      "always",
+      "natural20",
+    ]),
     // which hits carry it: unset, a Finesse or Ranged weapon's for Advantage, and any other hit
     with: HitKindSchema.optional(),
     type: DamageTypeSchema.optional(), // the damage's own type, not the weapon's, as Pull of Death's Necrotic
@@ -1469,9 +1485,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // only while an effect of each of these features' activations is on the bearer, as Divine Fury's Rage, or
     // Frenzy's Rage and Reckless Attack
     while: z.array(ContentIdSchema).min(1).optional(),
-    // only against a creature under an effect of the bearer's from this spell or feature, as Guided Precision's
-    // Faerie Fire
-    against: ContentIdSchema.optional(),
+    // only against a creature under an effect of the bearer's from one of these spells or features, as Guided
+    // Precision's Faerie Fire
+    against: z.array(ContentIdSchema).min(1).optional(),
   }),
   z.strictObject({ kind: z.literal("packTactics") }),
   // Moving through other creatures' spaces or through walls, as a swarm, a ghost's Incorporeal Movement or Halfling
@@ -1512,7 +1528,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     anySave: z.boolean().default(false),
   }),
   // Advantage on attack rolls while Bloodied, against a target missing Hit Points, or against a Frightened one.
-  // "marked" is against a creature under an effect of the bearer's from `against`, as Precise Hunter's Hunter's Mark,
+  // "marked" is against a creature under an effect of the bearer's from one of `against`, as Precise Hunter's Hunter's
+  // Mark (the spell's or Favored Enemy's),
   // and "unacted" against one yet to take a turn in a fight's first round, as Assassinate's.
   z.strictObject({
     kind: z.literal("attackAdvantage"),
@@ -1523,7 +1540,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       "marked",
       "unacted",
     ]),
-    against: ContentIdSchema.optional(),
+    against: z.array(ContentIdSchema).min(1).optional(),
   }),
   // Its shape can't change, so Polymorph does nothing to it, as with a golem's Immutable Form.
   z.strictObject({ kind: z.literal("immutableForm") }),
@@ -1762,9 +1779,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // Effects on a creature the bearer hits with an attack dealing this type, as Crusher or Slasher give: with
   // `critical` only on a Critical Hit, with `oncePerTurn` once a turn.
+  // Without `damage`, any hit `with` allows sets it off, as Eldritch Strike's weapon hit, and with `opportunity` only an
+  // Opportunity Attack's, as Relentless Avenger's.
   z.strictObject({
     kind: z.literal("damageRider"),
-    damage: DamageTypeSchema,
+    damage: DamageTypeSchema.optional(),
+    with: HitKindSchema.optional(),
+    opportunity: z.literal(true).optional(),
     critical: z.boolean().default(false),
     oncePerTurn: z.boolean().default(false),
     resource: z.string().optional(), // each use spends one, as Putrefy's once per rest
@@ -2173,6 +2194,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     types: z.array(DamageTypeSchema).min(1).optional(),
     reach: z.number().int().min(5).optional(),
     while: z.array(ContentIdSchema).min(1).optional(),
+  }),
+  // Effects on a creature the bearer's attack roll misses, as Studied Attacks' Advantage on the next attack against it.
+  z.strictObject({
+    kind: z.literal("missRider"),
+    effects: z.array(LeafEffectSchema).min(1),
   }),
   // A hit takes this many strike options (Cunning Strike's or Brutal Strike's) instead of one, as Improved Cunning
   // Strike.

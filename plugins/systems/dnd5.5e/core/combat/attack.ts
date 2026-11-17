@@ -656,6 +656,11 @@ export function missOutcome(
 ): Frame[] {
   const attacker = actorOf(context.state, hit.attacker);
   return [
+    ...(deriveStats(attacker, context).passives.some(
+      ({ kind }) => kind === "missRider",
+    )
+      ? [frame("missRider", hit)]
+      : []),
     ...missFrames(hit, context),
     ...(masteryOf(attacker, hit.actionId, context)
       ? [frame("masteryMiss", hit)]
@@ -1406,7 +1411,9 @@ export function runAdvantageForgone(
       ...next.strikes.map((id) =>
         dndEvent(`${NS}:oncePerTurnUsed`, {
           actor: attack.attacker,
-          key: onceKey(id),
+          key: onceKey(
+            findAction(actorOf(context.state, attack.attacker), id, context),
+          ),
         }),
       ),
       ...(rolled.events ?? []),
@@ -1453,6 +1460,7 @@ function landHit(
   const edge = {
     advantage: payload.hadAdvantage,
     disadvantage: payload.hadDisadvantage === true,
+    natural: payload.natural,
   };
   stats.passives.forEach((passive, index) => {
     if (passive.kind !== "extraDamage") return;
@@ -1647,6 +1655,8 @@ function landHit(
       payload.critical,
       stats,
       context,
+      false,
+      action,
     ),
     ...insideDamageEvents(attacker, target, dealt.dealt),
     ...leafEvents(resolution.onHit, action.id, attacker, target, context),
@@ -2378,6 +2388,29 @@ function nearHit(
   );
 }
 
+// What the attacker's own features put on a creature its attack roll missed, as Studied Attacks.
+export function runMissRider(
+  hit: z.infer<typeof HitSchema>,
+  context: Context,
+): SystemResult {
+  const attacker = actorOf(context.state, hit.attacker);
+  const target = context.state.actors[hit.target];
+  if (!target || isDown(attacker)) return {};
+  return {
+    events: deriveStats(attacker, context).passives.flatMap((passive, index) =>
+      passive.kind === "missRider"
+        ? leafEvents(
+            passive.effects,
+            `miss:${hit.attacker}:${String(index)}`,
+            attacker,
+            target,
+            context,
+          )
+        : [],
+    ),
+  };
+}
+
 export const AfterHitSchema = z.object({
   attacker: z.string(),
   actionId: z.string(),
@@ -2536,6 +2569,7 @@ export const attackFrames = {
     run: runAfterHit,
   }),
   [`${NS}:smite`]: frameHandler({ schema: SmiteSchema, run: runSmite }),
+  [`${NS}:missRider`]: frameHandler({ schema: HitSchema, run: runMissRider }),
   [`${NS}:strikeChosen`]: frameHandler({
     schema: StrikeChosenSchema,
     run: runStrikeChosen,
