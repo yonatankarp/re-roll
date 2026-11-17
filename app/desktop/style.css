@@ -741,6 +741,16 @@ summary {
   overflow-wrap: anywhere;
 }
 
+.book-rulings {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.book-ruling {
+  margin: 8px 0 0 12px;
+}
+
 @media (max-width: 760px) {
   .book-layout {
     grid-template-columns: minmax(0, 1fr);

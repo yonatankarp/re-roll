@@ -265,6 +265,19 @@ const GlossarySchema = z.object({
   terms: z.record(z.string(), z.object({ book: z.string(), file: z.string() })),
 });
 
+// A ruling book's index: for each section ("<book>/<file>") its rulings rule on, where those rulings are.
+const RulingIndexSchema = z.object({
+  rulings: z.record(
+    z.string(),
+    z.array(
+      z.object({ book: z.string(), file: z.string(), heading: z.string() }),
+    ),
+  ),
+});
+export type RulingRef = z.infer<
+  typeof RulingIndexSchema
+>["rulings"][string][number];
+
 export interface TermEntry {
   readonly id: string;
   readonly words: readonly string[];
@@ -548,6 +561,8 @@ export function createGame({
   let chapters: ReadonlyMap<string, string> = new Map(); // by "<adventure>:<scene>"
   let things: ReadonlyMap<string, string> = new Map(); // by item id or treasure kind
   let glossaryText: Promise<string | null> | undefined; // read once, as the books don't change in play
+  let rulingIndex:
+    Promise<ReadonlyMap<string, readonly RulingRef[]>> | undefined; // likewise
   // The cover of the book an id such as "phb:background/acolyte" comes from. Spells and features keep
   // none, so a list of them isn't a wall of the same cover.
   const coverOf = (id: string): string | undefined =>
@@ -1006,6 +1021,31 @@ export function createGame({
         throw new Error("That isn't part of a book");
       }
       return (await storage.read(`${LIBRARY}/${id}/${file}`)) ?? "";
+    },
+
+    // The rulings (#130) on what a book's section describes, from every ruling book's index.
+    async rulings(id: string, file: string): Promise<readonly RulingRef[]> {
+      rulingIndex ??= storage
+        .list(LIBRARY)
+        .catch(() => [])
+        .then(async (entries) => {
+          const found = new Map<string, RulingRef[]>();
+          for (const { path } of entries) {
+            if (!/^books\/library\/[^/]+\/rulings\.json$/.test(path)) continue;
+            let parsed;
+            try {
+              parsed = RulingIndexSchema.parse(
+                JSON.parse((await storage.read(path)) ?? ""),
+              );
+            } catch {
+              continue; // a damaged index hides its rulings, not the book
+            }
+            for (const [key, refs] of Object.entries(parsed.rulings))
+              found.set(key, [...(found.get(key) ?? []), ...refs]);
+          }
+          return found;
+        });
+      return (await rulingIndex).get(`${id}/${file}`) ?? [];
     },
 
     // The current system's terms that a book in the library explains, or none without the owner's books.

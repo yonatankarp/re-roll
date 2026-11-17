@@ -21,6 +21,14 @@ export const WorldEntrySchema = ContentEntrySchema.extend({
 }).strict();
 export type WorldEntry = z.infer<typeof WorldEntrySchema>;
 
+// A ruling (#130): a Sage Advice answer or an erratum. Text a book prints, under any rule system, so
+// the engine owns it like lore. `about` names what it rules on, a soft link like `library`, so a
+// ruling book needn't require every book it mentions: coverage checks the ids instead of the loader.
+export const RulingSchema = WorldEntrySchema.extend({
+  about: z.array(ContentIdSchema).optional(),
+}).strict();
+export type Ruling = z.infer<typeof RulingSchema>;
+
 // A keyed adventure area always belongs to its place.
 const AreaSchema = WorldEntrySchema.extend({ place: ContentIdSchema });
 
@@ -58,6 +66,7 @@ export const WORLD_KINDS: Readonly<Record<string, ContentKind>> = {
     schema: AreaSchema,
     references: links,
   }),
+  rulings: contentKind({ idPrefix: "ruling", schema: RulingSchema }),
 };
 
 // A system's kinds can't take a world kind's folder or id prefix, so a world id means one thing.

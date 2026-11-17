@@ -25,6 +25,7 @@ export interface Entity {
   readonly name: string;
   readonly edition: string;
   readonly library: readonly string[]; // heading ids the entity says it describes
+  readonly about: readonly string[]; // a ruling's: the entity ids it rules on
 }
 
 const RuleSchema = z.strictObject({
@@ -348,8 +349,10 @@ export function classifyBook(
 export interface CoverageReport {
   readonly books: readonly {
     readonly book: string;
+    readonly edition: string;
     readonly verdicts: readonly Verdict[];
   }[];
+  readonly entities: readonly Entity[];
   readonly issues: readonly Issue[]; // unreadable coverage files and links to nothing
 }
 
@@ -382,18 +385,22 @@ export async function checkCoverage(
           id?: unknown;
           name?: unknown;
           library?: unknown;
+          about?: unknown;
         } | null;
         if (typeof entry?.id !== "string") continue;
         const kind = /^[^:]+:([^/]+)\//.exec(entry.id)?.[1] ?? "";
+        const ids = (list: unknown): string[] =>
+          Array.isArray(list)
+            ? list.filter((id) => typeof id === "string")
+            : [];
         entities.push({
           id: entry.id,
           plugin,
           kind,
           name: typeof entry.name === "string" ? entry.name : "",
           edition,
-          library: Array.isArray(entry.library)
-            ? entry.library.filter((id) => typeof id === "string")
-            : [],
+          library: ids(entry.library),
+          about: ids(entry.about),
         });
       }
     }
@@ -433,6 +440,7 @@ export async function checkCoverage(
       const edition = coverage?.edition ?? editionOf(book) ?? "";
       books.push({
         book,
+        edition,
         verdicts: classifyBook(
           { book, edition, coverage, headings },
           index,
@@ -462,8 +470,14 @@ export async function checkCoverage(
         file: null,
         message: `${entity.id} names library heading ${id}, which no book has`,
       });
+    for (const id of entity.about.filter((item) => !index.byId.has(item)))
+      issues.push({
+        plugin: entity.plugin,
+        file: null,
+        message: `${entity.id} rules on ${id}, which no entity has`,
+      });
   }
-  return { books, issues };
+  return { books, entities, issues };
 }
 
 // One line per book, then the missing headings by the kind of entity each should have.
