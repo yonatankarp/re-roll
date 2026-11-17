@@ -15,6 +15,7 @@ import {
   type Check,
   CheckSchema,
   EnvironmentalEffectSchema,
+  ItemSchema,
   type LeafEffect,
   type Modifier,
   SKILL_ABILITIES,
@@ -36,6 +37,7 @@ import {
 import {
   type KnownAction,
   deriveStats,
+  itemHealing,
   lookup,
   scaleActivation,
 } from "./stats.ts";
@@ -79,6 +81,8 @@ const BETWEEN: ReadonlySet<LeafEffect["kind"]> = new Set([
   "reincarnate",
   "clone",
   "modifier", // only those modifierHelps allows
+  "exhaustion",
+  "untilLongRest",
 ]);
 
 // What the scene here offers, and the state, for what a modifier would do between fights. `here` is unknown while
@@ -203,6 +207,10 @@ function helps(
       return true; // its targeting already asks for the dead
     case "clone":
       return target.clone === undefined;
+    case "exhaustion":
+      return effect.clear === true && target.exhaustion > 0;
+    case "untilLongRest":
+      return true;
     case "cure":
       return (
         (effect.exhaustion === true && target.exhaustion > 0) ||
@@ -263,11 +271,17 @@ function effectsOf(action: KnownAction): readonly LeafEffect[] {
   return resolution.kind === "automatic" ? resolution.effects : [];
 }
 
-// A potion is drunk from its own row (gear.ts), so only spells and features are used here.
-function usable(action: KnownAction): boolean {
+// A healing potion is drunk from its own row (gear.ts), so only spells, features and other items are used here,
+// as a Potion of Vitality's end to Exhaustion.
+function usable(action: KnownAction, access: ContentAccess): boolean {
   const effects = effectsOf(action);
   return (
-    !action.id.startsWith(ITEM_PREFIX) &&
+    !(
+      action.id.startsWith(ITEM_PREFIX) &&
+      itemHealing(
+        lookup(access, ItemSchema, action.id.slice(ITEM_PREFIX.length)),
+      )
+    ) &&
     !action.activation.trigger &&
     !(
       "side" in action.activation.targeting &&
@@ -335,7 +349,7 @@ function castable(
   const stats = deriveStats(caster, access);
   return stats.actions.filter(
     (action) =>
-      usable(action) &&
+      usable(action, access) &&
       goldFor(action) <= (state.gold ?? 0) &&
       canAfford(between(action, access), caster, stats) &&
       targetsOf(action, caster, state, access, here).length > 0,
@@ -426,12 +440,18 @@ function resolve(
   slot?: number,
 ): SystemResult {
   const shared = sharedHealing(effectsOf(action), targets, caster, context);
-  const events: SystemEvent[] = payCosts(
-    between(action, context),
-    caster,
-    context,
-    slot,
-  );
+  const events: SystemEvent[] = [
+    ...payCosts(between(action, context), caster, context, slot),
+    // An item used up, as a potion drunk.
+    ...(action.id.startsWith(ITEM_PREFIX)
+      ? [
+          dndEvent(`${NS}:itemUsed`, {
+            actor: caster.id,
+            item: action.id.slice(ITEM_PREFIX.length),
+          }),
+        ]
+      : []),
+  ];
   // A spell held with Concentration ends the one held before, as in a fight.
   const held = effectsOf(action).some(
     (effect) =>

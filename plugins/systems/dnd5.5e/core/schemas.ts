@@ -487,6 +487,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     once: z.boolean().optional(),
     // all the hit's own damage takes this type, as Planar Warrior's Force
     retype: DamageTypeSchema.optional(),
+    unarmed: z.literal(true).optional(), // only with an Unarmed Strike, as a Potion of Pugilism's
   }),
   // Limits on what the bearer can do on its turns, as Slow gives: `oneAction` is an action or a Bonus Action, not
   // both; `noActions` neither; `oneAttack` one attack with the Attack action; `speed` halves, doubles or stops its
@@ -538,8 +539,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     dc: z.number().int().optional(),
   }),
   // Haste's additional action each turn: the Attack (one attack only), Dash, Disengage or Hide action. When it
-  // ends, the bearer is Incapacitated with a Speed of 0 until the end of its next turn.
-  z.strictObject({ kind: z.literal("hasted") }),
+  // ends, the bearer is Incapacitated with a Speed of 0 until the end of its next turn, unless `noLethargy`, as a
+  // Potion of Speed's.
+  z.strictObject({
+    kind: z.literal("hasted"),
+    noLethargy: z.literal(true).optional(),
+  }),
   // Shut away where nothing reaches it and it reaches nothing, as in Otiluke's Resilient Sphere, a Forcecage box
   // or Maze. With `escape` it can spend its action on that check to end the effect, as Maze's DC 20 Intelligence.
   z.strictObject({
@@ -639,10 +644,16 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     count: z.number().int().min(1),
   }),
   // An attacker must pass a Wisdom save against `dc` (the caster's, filled in as it's cast) or lose the attack, as
-  // Sanctuary.
+  // Sanctuary. With `creatureTypes` only those attackers, with `ability` another save, and with `lasting` the bearer's
+  // own attacks don't end it and an attacker that saves is free of it, as a Scroll of Protection's ward.
+  // shortcut: a Scroll of Protection's save is made as the attack is, not with a Magic action, and it wards only
+  // its reader.
   z.strictObject({
     kind: z.literal("sanctuary"),
     dc: z.number().int().optional(),
+    ability: AbilitySchema.optional(),
+    creatureTypes: z.array(z.string()).min(1).optional(),
+    lasting: z.literal(true).optional(),
   }),
   // Damage of this type the bearer takes is cut by `amount`, once a turn, as with Resistance (the cantrip).
   z.strictObject({
@@ -651,11 +662,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     amount: AmountSchema,
   }),
   // The bearer can take its spell's `granted` action, dealing this type at the save DC it was cast with (filled in
-  // as it's cast), as Dragon's Breath's breath.
+  // as it's cast), as Dragon's Breath's breath, or an item's, as a Potion of Fire Breath's, `uses` times at most.
   z.strictObject({
     kind: z.literal("grantedAction"),
     damage: DamageTypeSchema,
     dc: z.number().int().optional(),
+    uses: z.number().int().min(1).optional(),
   }),
   // The bearer's next weapon hit that deals damage also makes its target make this save, which spends it, as a
   // Poisoner's dose (combat/attack.ts). Its DC is worked out from the bearer's numbers as it hits.
@@ -695,6 +707,20 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("confused"),
     spell: z.literal(true).optional(),
+  }),
+  // The item whose activation gave it is a Thrown weapon of this range that comes back once thrown, as a
+  // Martialist's Quarterstaff's Throw (stats.ts imbuedRange).
+  z.strictObject({
+    kind: z.literal("thrownWeapon"),
+    normal: z.number().int().min(5),
+    long: z.number().int().min(5),
+  }),
+  // A character's ability score is this while it lasts, unless its own is higher, as a Potion of Giant Strength's
+  // Strength (stats.ts).
+  z.strictObject({
+    kind: z.literal("setScore"),
+    ability: AbilitySchema,
+    score: z.number().int().min(1),
   }),
   // No rule of its own: a curse, a mark or a hold that another of its giver's actions looks for (a targeting's
   // `afflicted`), as a nightmare's Haunter's Spear curse.
@@ -785,6 +811,17 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .union([z.number().int().min(1).max(9), z.literal("halfSlot")])
       .optional(),
   }),
+  // The item used's `untilLongRest` passives, which the target keeps until it finishes a Long Rest, in a fight or out
+  // of one, as a Potion of Vitality's highest Hit Point Dice.
+  // shortcut: "24 hours" lasts until the next Long Rest, the only clock between scenes.
+  z.strictObject({ kind: z.literal("untilLongRest") }),
+  // Items handed to the target, `count` of them worked out from the caster's numbers, as the potions Tasha's
+  // Bubbling Cauldron makes, none of an item no loaded book has. shortcut: they come at once rather than a Bonus Action each, and stay after a recast.
+  z.strictObject({
+    kind: z.literal("createItems"),
+    item: ContentIdSchema,
+    count: FormulaSchema,
+  }),
   // Ends every curse on the target, with all else the action that cursed it gave, as Remove Curse.
   z.strictObject({ kind: z.literal("uncurse") }),
   // With `reaction` the target spends its Reaction to gain them, and gains none without one, as a death's head tree's
@@ -835,8 +872,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
       .optional(),
     endsOnDamage: z.boolean().default(false),
     endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature, as Modify Memory's
-    // Ends when the creature attacks or deals damage ("attack"), or takes any action ("action"), as Fade Away's.
-    endsOn: z.enum(["attack", "action"]).optional(),
+    // Ends when the creature attacks or deals damage ("attack"), also when it casts a spell ("spell"), as a Potion of
+    // Invisibility's, or takes any action ("action"), as Fade Away's.
+    endsOn: z.enum(["attack", "action", "spell"]).optional(),
     // Taking damage gives it a save to end it, as Dragon Fear's, using the save it came with, with Advantage on
     // "advantage", as Hideous Laughter's.
     saveOnDamage: z.union([z.literal(true), z.literal("advantage")]).optional(),
@@ -1063,8 +1101,29 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     action: z.string().min(1),
     range: z.number().int().min(5),
   }),
-  // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts).
-  z.strictObject({ kind: z.literal("counter") }),
+  // The spell that triggered the reaction fails, as Counterspell's does on a failed save (combat/counter.ts). In an
+  // automatic resolution it fails outright, only of `maxLevel` or lower, spending as many of `levels` as its level,
+  // with what cast it wasted, slot and all, as an Ioun Stone of Absorption's 20 levels.
+  // With `gains`, `levels` gains as many as the spell's level instead, only for a spell aimed at the bearer alone,
+  // and past its maximum the item breaks as its `retribution` does, as a Staff of the Magi's Spell Absorption.
+  z.strictObject({
+    kind: z.literal("counter"),
+    maxLevel: z.number().int().min(0).max(9).optional(),
+    levels: z.string().min(1).optional(),
+    gains: z.literal(true).optional(),
+  }),
+  // The item used breaks in an explosion as wide as `radius` round its bearer, dealing Force damage by the charges
+  // left in its `resource`: `self` times them to the bearer, unless a d100 of 50 or less sends it away first, and
+  // `others` times them to each other creature there, halved by a Dexterity save against `dc`, as a Staff of Power's
+  // Retributive Strike. shortcut: a bearer sent away stays in the fight, as other planes aren't played.
+  z.strictObject({
+    kind: z.literal("retribution"),
+    resource: z.string().min(1),
+    radius: z.number().int().min(5),
+    self: z.number().int().min(1),
+    others: z.number().int().min(1),
+    dc: z.number().int().min(1),
+  }),
   // Responses to a d20 roll made before its result applies (combat/reactions.ts): the roller rolls the die again
   // and must use the new roll, as with Bountiful Luck; the roll gains or loses `amount`, as with Boon of Fate
   // (`either`) or a sphinx's Burst of Ingenuity; or the bearer rolls a d20 that may stand in for it, as with
@@ -1245,11 +1304,17 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("slay"),
     hpAtMost: z.number().int().min(1),
   }),
-  // The target gains this many levels of Exhaustion, as a sphinx's Weight of Years.
-  z.strictObject({
-    kind: z.literal("exhaustion"),
-    levels: z.number().int().min(1),
-  }),
+  // The target gains this many levels of Exhaustion, as a sphinx's Weight of Years, or with `clear` loses them
+  // all, as from a Potion of Vitality.
+  z
+    .strictObject({
+      kind: z.literal("exhaustion"),
+      levels: z.number().int().min(1).optional(),
+      clear: z.literal(true).optional(),
+    })
+    .refine((effect) => (effect.levels === undefined) !== !effect.clear, {
+      message: "needs levels or clear",
+    }),
   // `count` of this monster (the bearer's own stat block when left out) come to life in open squares within `range`
   // on the bearer's side, without the actions named in `lacks`, taking their turns right after the bearer's, as a
   // treant's Animate Trees or a priest's Soul Tattoo.
@@ -1500,6 +1565,7 @@ export const TargetingSchema = z.union([
       .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
       .optional(),
     bloodied: z.literal(true).optional(), // only a Bloodied creature, as for a gnoll's Rampage
+    swimmers: z.literal(true).optional(), // only a creature with a Swim Speed, as a Trident of Fish Command's
     downed: z.literal(true).optional(), // only a living creature at 0 Hit Points, as for a will-o'-wisp's Consume Life
     // only a creature under an effect of the bearer's action of this name, as a nightmare's spear curse for Narcotize
     afflicted: z.string().min(1).optional(),
@@ -1540,6 +1606,9 @@ export const ActivationSchema = z.strictObject({
       // With `afterHit`, a strike option chosen before an attack roll that has Advantage, which then has none, as
       // Brutal Strike's (combat/strikes.ts).
       forgoAdvantage: z.literal(true).optional(),
+      // With `afterHit`, a strike option chosen before an attack roll without Advantage, which then has it, as a
+      // Martialist's Quarterstaff's Trip (combat/strikes.ts). shortcut: its cost is paid only on a hit.
+      gainsAdvantage: z.literal(true).optional(),
       // With `afterHit`, only once the hit has dealt Sneak Attack damage, as Wails from the Grave.
       sneakAttack: z.literal(true).optional(),
       // With `afterHit`, offered only right after an `afterHit` activation of this feature or spell lands on the same
@@ -1859,6 +1928,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // A spell that targeted only the bearer and made no area is turned back at its caster with the bearer's
     // Reaction, the caster saving against its own spell save DC (combat/effects.ts).
     deflect: z.literal(true).optional(),
+    // Only spells of these schools, only the deflection, and a use of this resource for it, as a Staff of
+    // Charming's Reflect Enchantment.
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
+    deflectOnly: z.literal(true).optional(),
+    resource: z.string().min(1).optional(),
   }),
   // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
   // save, as a displacer beast's Avoidance does, instead of Dexterity saves only.
@@ -1880,8 +1954,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       "targetCharmed",
       "marked",
       "unacted",
+      "creatureType", // against a creature of one of `creatureTypes`, as a Ring of Elemental Command's Elementals
     ]),
     against: z.array(ContentIdSchema).min(1).optional(),
+    creatureTypes: z.array(CreatureTypeSchema).min(1).optional(),
   }),
   // Its shape can't change, so Polymorph does nothing to it, as with a golem's Immutable Form.
   z.strictObject({ kind: z.literal("immutableForm") }),
@@ -2165,6 +2241,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("energyMastery"),
     damage: DamageTypeSchema,
   }),
+  // A 1 on a damage die of the bearer's spells counts as a 2, as a Robe of Thayan Arcana's Empowered Magic.
+  z.strictObject({ kind: z.literal("empoweredSpells") }),
   // Damage of these types the bearer deals ignores Resistance, as with the Boon of Irresistible Offense.
   z.strictObject({
     kind: z.literal("overcomeResistance"),
@@ -2211,6 +2289,13 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     attack: z.enum(["weapon", "spell"]),
     crossbows: z.boolean().default(false),
     bypassCover: z.boolean().default(false),
+  }),
+  // A Reaction moves the bearer this many feet less when something pushes or pulls it, as Dwarven Plate's 10.
+  z.strictObject({ kind: z.literal("bracing"), feet: z.number().int().min(5) }),
+  // Attacks of this kind ignore Half Cover, as with a Wand of the War Mage's spell attacks.
+  z.strictObject({
+    kind: z.literal("ignoreHalfCover"),
+    attack: z.enum(["weapon", "spell"]),
   }),
   // A healing die that rolls 1 is rolled again and the new roll stands, as with Healer's Healing Rerolls.
   z.strictObject({ kind: z.literal("healingRerolls") }),
@@ -2821,6 +2906,10 @@ export type FreeCast = z.infer<typeof FreeCastSchema>;
 export const ResourceDefSchema = z.strictObject({
   id: z.string().min(1),
   max: FormulaSchema,
+  // Dice rolled once, as it's first spent, and added to `max` for good, as Keoghtom's Ointment's 1d4 + 1 doses
+  // (combat/effects.ts payCosts). Until then they count at their least.
+  // shortcut: a second item with the same pool keeps the first one's roll.
+  rolled: DiceSchema.optional(),
   recharge: z.array(
     z.strictObject({
       // "initiative" comes back as a fight starts, as Boon of Fate's Improve Fate does.
@@ -3241,6 +3330,9 @@ const MagicBonusSchema = z.strictObject({
   ]),
   amount: z.number().int().min(1),
   unarmored: z.literal(true).optional(), // only while wearing no armor and using no Shield, as Bracers of Defense
+  // Only for the spells of this class, by its name after the plugin, as a Rod of the Pact Keeper's DC for Warlock
+  // spells: those its levels of that class gave (stats.ts).
+  class: z.string().min(1).optional(),
   // Only with these weapons, or a magic one made from them, by their names after the plugin, as Bracers of
   // Archery's "longbow" and "shortbow", so any book's Longbow counts. It adds to a magic weapon's own bonus,
   // which other bonuses to attack and damage don't.
@@ -3255,6 +3347,28 @@ const MagicBonusSchema = z.strictObject({
 // leads plays it.
 const ItemCastSchema = z.strictObject({
   spell: z.string().min(1),
+  // Limits on the cast: on its caster only (`self`), as a Hag Eye's Darkvision; an area this many feet across
+  // (`radius`), as a Wand of Fear's 60-foot Cone; only creatures of these types (`creatureTypes`), as a Ring of Animal
+  // Influence's Fear on Beasts, and with a Swim Speed (`swimmers`), as a Trident of Fish Command's; and how its save
+  // goes for some creatures (`edges`), as an Arcanist's Bestiary's Disadvantage for one not Humanoid.
+  self: z.literal(true).optional(),
+  radius: z.number().int().min(5).optional(),
+  creatureTypes: z.array(CreatureTypeSchema).min(1).optional(),
+  swimmers: z.literal(true).optional(),
+  edges: z
+    .array(
+      z.strictObject({
+        creatureTypes: z.array(z.string()).min(1).optional(),
+        minSize: SizeSchema.optional(),
+        roll: z.enum(["advantage", "disadvantage", "fail", "succeed"]),
+      }),
+    )
+    .min(1)
+    .optional(),
+  // Each use after the first since its pool came back has this many percent more chance to fail, tearing the item
+  // apart, as a Wind Fan's 20.
+  tears: z.number().int().min(1).max(100).optional(),
+  bonusAction: z.literal(true).optional(), // cast as a Bonus Action, as a Necklace of Prayer Beads' beads
   charges: z.number().int().min(0).default(1), // 0 casts it whenever
   resource: z.string().min(1).optional(),
   level: z.number().int().min(0).max(9).optional(),
@@ -3271,21 +3385,64 @@ export type ItemCast = z.infer<typeof ItemCastSchema>;
 // Quarterstaff.
 export const ChargedSchema = {
   resources: z.array(ResourceDefSchema).min(1).optional(),
+  // Pieces rolled as the item is found, each a type its own d`die` row names, counted into that row's pool, as a
+  // Necklace of Prayer Beads' 1d4 + 2 beads of six types (gear.ts gainRolls).
+  // shortcut: they're rolled when it's found as treasure or bought; one come by any other way has none.
+  split: z
+    .strictObject({
+      count: z.strictObject({
+        dice: DiceSchema,
+        base: z.number().int().min(0),
+      }),
+      die: z.number().int().min(2),
+      rows: z
+        .array(
+          z.strictObject({
+            min: z.number().int().min(1),
+            max: z.number().int().min(1),
+            resource: z.string().min(1),
+          }),
+        )
+        .min(1),
+    })
+    .optional(),
+  // Passives that hold only while one of the item's pools has a use left, as a Helm of Brilliance's Resistance to
+  // Fire while it has a ruby.
+  whileCharged: z
+    .array(
+      z.strictObject({
+        resource: z.string().min(1),
+        passives: z.array(PassiveSchema).min(1),
+      }),
+    )
+    .min(1)
+    .optional(),
   casts: z.array(ItemCastSchema).min(1).optional(),
   // What it does when used, as a Pearl of Power's spell slot back once a dawn (stats.ts itemUses): an activation that
   // spends its pools as a feature's spends its own. shortcut: one on the bearer's person or held works whenever it's
   // worn.
   activations: z
     .array(
-      z.strictObject({ name: z.string().min(1), activation: ActivationSchema }),
+      z.strictObject({
+        name: z.string().min(1),
+        activation: ActivationSchema,
+        // only while this pool of its own has a use left, as a Helm of Brilliance's flames while it has a fire opal
+        whileCharged: z.string().min(1).optional(),
+      }),
     )
     .min(1)
     .optional(),
+  // "vanishes" is gone with its last charge, with no d20, as an Arcane Chatelaine with its last key.
   lastCharge: z
     .union([
       z.literal("destroyed"),
+      z.literal("vanishes"),
       z.strictObject({ becomes: ContentIdSchema }),
     ])
+    .optional(),
+  // The last charge's d20 on a 20 gives back this many, as a Staff of Power's 1d8 + 2.
+  lastChargeTwenty: z
+    .strictObject({ dice: DiceSchema, base: z.number().int().min(0) })
     .optional(),
 };
 
@@ -3323,6 +3480,7 @@ export const WeaponSchema = ItemBaseSchema.extend({
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   attunement: z.literal(true).optional(), // its bonuses work only while attuned, as a Keyholes Dagger's
   returning: z.literal(true).optional(), // back in hand once thrown, as a Returning Weapon
+  forms: z.array(z.string().min(1)).min(1).optional(), // its magic item's, as a Keyholes Dagger's
   passives: z.array(PassiveSchema).min(1).optional(), // its magic item's, as Frost Brand's Resistance to Fire
   hitDamage: z.array(DamageSchema).min(1).optional(), // its magic item's, as Frost Brand's 1d6 Cold
   ...ChargedSchema,
@@ -3437,19 +3595,88 @@ const MagicItemSchema = ItemBaseSchema.extend({
       max: z.number().int().min(1),
     })
     .optional(),
+  // Skills its bearer picks one of to be proficient in while it works, changed only where the party could rest, as an
+  // Arcanist's Bestiary's Extensive Knowledge (gear.ts).
+  chooseSkill: z.array(SkillSchema).min(2).optional(),
   // Weapons it trains its wearer with, and magic ones made from them, named as a bonus's `weapons` are.
   weaponTraining: z.array(z.string().min(1)).min(1).optional(),
   // Magic armor made from a plain one: worn as if trained with it, as Elven Chain, or with no Strength it needs,
   // as Mithral Armor. Carried into the armor content names as `<id>--<n>--<armor>` (variants.ts).
   anyTraining: z.literal(true).optional(),
   noStrength: z.literal(true).optional(),
+  // Magic ammunition, one piece of it: its bonuses go to a shot from an Ammunition weapon, and a hit spends it, as
+  // +1 Ammunition (stats.ts). Several pieces are several of it carried.
+  ammunition: z.literal(true).optional(),
+  // Weapons a magic weapon made from it changes into as it attacks, by their names after the plugin, attacking with
+  // Strength or Dexterity in any of them, as a Keyholes Dagger's Handaxe or Mace, carried the same way (stats.ts).
+  forms: z.array(z.string().min(1)).min(1).optional(),
   // A magic weapon that comes back once thrown, as a Returning Weapon, carried the same way.
   returning: z.literal(true).optional(),
   // Damage a magic weapon made from it adds on a hit, as Frost Brand's 1d6 Cold, carried the same way.
   hitDamage: z.array(DamageSchema).min(1).optional(),
   healing: AmountSchema.optional(), // drinking it heals, as a Potion of Healing does
+  // What using it up does, as drinking a Potion of Speed or throwing a Bead of Force (stats.ts itemAction): an
+  // action that spends the item, named with `verb` ("Drink" for a potion, "Read" for a scroll, else "Use").
+  activation: ActivationSchema.optional(),
+  verb: z.string().min(1).optional(),
+  // What an `untilLongRest` effect of its activation gives, as a Potion of Vitality's highest Hit Point Dice.
+  untilLongRest: z.array(PassiveSchema).min(1).optional(),
+  // An action its user can take while a `grantedAction` its activation gave lasts, as a Potion of Fire Breath's.
+  granted: ActivationSchema.optional(),
+  // Casting a spell its bearer doesn't know, from a class's list (by its name after the plugin), behind an
+  // Intelligence (Arcana) check of `dc` (plus the spell's level with `perLevel`), as a Hat of Wizardry's (stats.ts
+  // unknownSpells): cantrips, or spells of a level its slots reach, spending one; with `action` only those cast with
+  // an action. Each use spends `resource`, kept on a failure with `keepOnFailure`, as a Hat of Many Spells' is.
+  unknownSpell: z
+    .strictObject({
+      class: z.string().min(1),
+      cantrips: z.literal(true).optional(),
+      action: z.literal(true).optional(),
+      dc: z.number().int().min(1),
+      perLevel: z.literal(true).optional(),
+      resource: z.string().min(1),
+      keepOnFailure: z.literal(true).optional(),
+    })
+    .optional(),
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
+  // What applying it between fights makes of a plain weapon or ammunition carried, the oil used up, as Oil of
+  // Sharpness: a Melee weapon dealing one of `damage` becomes `weapon` made from it (`<weapon>--<its slug>`), and
+  // one ammunition item becomes `pieces` of `ammunition` (gear.ts).
+  // shortcut: any ammunition counts, though Sling Bullets deal Bludgeoning damage.
+  coats: z
+    .strictObject({
+      weapon: ContentIdSchema,
+      damage: z.array(DamageTypeSchema).min(1),
+      ammunition: ContentIdSchema,
+      pieces: z.number().int().min(1),
+    })
+    .optional(),
+  // Spells cast into it between fights, up to `levels` levels of them, each of level `maxLevel` or lower, which its
+  // attuned bearer casts with the slot level, DC, attack and modifier they were stored with, as a Ring of Spell
+  // Storing (gear.ts, stats.ts storedCasts). shortcut: it's found empty, rather than holding what the DM chose.
+  storesSpells: z
+    .strictObject({
+      levels: z.number().int().min(1),
+      maxLevel: z.number().int().min(1).max(9),
+    })
+    .optional(),
+  // A spell bound into it as it's made, named after its plugin by the content id's last part, as
+  // "dmg:item/enspelled-staff--fireball" or "dmg:item/enspelled-armor--1--chain-mail--shield" (variants.ts), with
+  // the DC and attack its level gives (stats.ts boundNumbers): read once as a Spell Scroll's ("scroll"), cast with
+  // the item's charges as an Enspelled Staff's ("charges"), or kept prepared and cast once without a slot, the item
+  // gone after, as a Thayan Spell Tattoo's ("tattoo"). The levels and schools are those it can hold.
+  boundSpell: z
+    .strictObject({
+      as: z.enum(["scroll", "charges", "tattoo"]),
+      minLevel: z.number().int().min(0).max(9).default(0),
+      maxLevel: z.number().int().min(0).max(9).default(9),
+      schools: z.array(SpellSchoolSchema).min(1).optional(),
+    })
+    .optional(),
   ...ChargedSchema,
+  // An evolving item, whose each version keeps the properties of the versions before it (their passives, casts,
+  // pools and activations) and adds its own, as a Staff of Skulls' Rare version keeps its Uncommon one's Chill Touch.
+  evolving: z.literal(true).optional(),
   // Set when one entry covers several rarities, such as +1, +2 or +3. Content names one as `<id>--<n>` (variants.ts).
   variants: z
     .array(
@@ -3459,10 +3686,23 @@ const MagicItemSchema = ItemBaseSchema.extend({
         bonuses: z.array(MagicBonusSchema).min(1).optional(),
         abilities: z.array(ItemAbilitySchema).min(1).optional(),
         healing: AmountSchema.optional(),
+        activation: ActivationSchema.optional(), // in place of the item's own, as a Potion of Resistance's type
+        granted: ActivationSchema.optional(),
         // added to the item's own, as a Ring of Resistance's one damage type
         passives: z.array(PassiveSchema).min(1).optional(),
         casts: z.array(ItemCastSchema).min(1).optional(), // added to the item's own, as a Staff of Skulls' Chill Touch
         resources: z.array(ResourceDefSchema).min(1).optional(), // added to the item's own too
+        // added to the item's own too, as a Staff of Skulls' Pulverizing
+        activations: ChargedSchema.activations,
+        forms: z.array(z.string().min(1)).min(1).optional(), // added too, as a Keyholes Dagger's
+        // in place of the item's own, as an Ioun Stone of Reserve's
+        storesSpells: z
+          .strictObject({
+            levels: z.number().int().min(1),
+            maxLevel: z.number().int().min(1).max(9),
+          })
+          .optional(),
+        hitDamage: z.array(DamageSchema).min(1).optional(), // added too
       }),
     )
     .min(1)

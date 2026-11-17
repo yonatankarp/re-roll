@@ -12,6 +12,7 @@ import { z } from "zod";
 import { type Item, ItemSchema } from "./schemas.ts";
 import { type DndState, NS, dndEvent, frame, isDead } from "./state.ts";
 import { deriveStats, lookup } from "./stats.ts";
+import { gainRolls } from "./gear.ts";
 
 type Context = SystemContext<DndState>;
 
@@ -202,6 +203,7 @@ function runShopAnswer(
         partyDiscount(context.state, context),
       ) ?? 0)
     : (sellPriceCp(item) ?? 0);
+  const buyer = context.state.actors[PLAYER_ACTOR];
   return {
     events: [
       dndEvent(`${NS}:traded`, {
@@ -212,6 +214,7 @@ function runShopAnswer(
         priceCp: price,
         stowed: buying && WORN_TYPES.has(item.type),
       }),
+      ...(buying && buyer ? gainRolls(buyer, [id], context) : []),
     ],
     frames: [frame("shopStep", { step: step + 1, shop })],
   };
