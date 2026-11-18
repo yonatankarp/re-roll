@@ -19,6 +19,7 @@ import {
   type KnownAction,
   lookup,
   onClassList,
+  rollDiceNotation,
   spellModifier,
   spellSaveDc,
   type Stats,
@@ -325,8 +326,30 @@ export function castRiders(
       },
     ];
   });
+  // Wish's stress: each spell cast costs Necrotic damage by its level, which nothing reduces.
+  const recoil = actor.activeEffects.flatMap(({ modifier }) =>
+    modifier.kind === "castRecoil" &&
+    action.spellLevel !== null &&
+    action.spellLevel > 0
+      ? [
+          dndEvent(`${NS}:damaged`, {
+            actor: actor.id,
+            amount: Array.from({
+              length: slotLevel ?? action.spellLevel,
+            }).reduce<number>(
+              (sum) => sum + rollDiceNotation(modifier.dice, context.dice),
+              0,
+            ),
+            type: "necrotic",
+            critical: false,
+            massive: false,
+          }),
+        ]
+      : [],
+  );
   return {
     events: [
+      ...recoil,
       ...surged,
       ...mended,
       ...tables.flatMap((rolled) => rolled.events),

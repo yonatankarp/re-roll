@@ -858,6 +858,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     from: ContentIdSchema,
     face: z.number().int().min(1),
   }),
+  // Each spell the bearer casts deals it `dice` Necrotic damage for each of the spell's levels, which nothing reduces,
+  // as Wish's stress (combat/school.ts).
+  z.strictObject({ kind: z.literal("castRecoil"), dice: DiceSchema }),
   // In a fury (passive `fury`): on its turns it attacks the nearest creature it reaches, friend or foe, or with `at`
   // that creature until either drops (combat/madness.ts).
   z.strictObject({ kind: z.literal("furious"), at: z.string().optional() }),
@@ -1603,6 +1606,19 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     classes: z.array(z.string().min(1)).min(1).optional(),
     noReaction: z.literal(true).optional(),
     spells: z.array(ContentIdSchema).min(1).optional(),
+    // Other choices beside a copied spell, as Wish's Instant Health: `effects` on the caster, and with `allies` on
+    // each of its allies standing too; `stress` puts these on the caster after, as Wish's stress (combat/wish.ts).
+    extras: z
+      .array(
+        z.strictObject({
+          name: z.string().min(1),
+          effects: z.array(z.unknown()).min(1), // leaf effects, parsed as used (combat/wish.ts)
+          allies: z.literal(true).optional(),
+        }),
+      )
+      .min(1)
+      .optional(),
+    stress: z.array(z.unknown()).min(1).optional(), // leaf effects too
   }),
   // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
   // A dying creature becomes Stable, as with Spare the Dying.
