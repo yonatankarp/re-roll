@@ -2,11 +2,19 @@ import { describe, expect, it } from "vitest";
 import { PLAYER_ACTOR } from "../engine/kernel/events.ts";
 import { tacticOptions } from "../plugins/systems/dnd5.5e/core/actions.ts";
 import {
+  awaitsCommand,
   companionActors,
   companionFoundEvents,
 } from "../plugins/systems/dnd5.5e/core/combat/companions.ts";
-import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
-import { canAfford } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
+import {
+  leafEvents,
+  resolveAction,
+} from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
+import { mountOptions } from "../plugins/systems/dnd5.5e/core/combat/mounts.ts";
+import {
+  canAfford,
+  touchCourier,
+} from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import { runAdvanceTurn } from "../plugins/systems/dnd5.5e/core/combat/turn.ts";
 import {
   type DndState,
@@ -14,9 +22,12 @@ import {
   applyDndEvent,
   dndEvent,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
-import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import {
+  deriveStats,
+  type KnownAction,
+} from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { hero, trait } from "./feat-fixtures.ts";
-import { at, onMap, runWith } from "./senses-fixtures.ts";
+import { at, block, monster, onMap, runWith } from "./senses-fixtures.ts";
 
 // A made-up lasting companion for #145: ids and mechanics only.
 
@@ -90,6 +101,76 @@ const FIXTURES = [
   trait("trainer", [], {
     companion: { multiattack: 2, damageTypes: ["force"] },
   }),
+  {
+    id: "test:spell/servant",
+    name: "Servant",
+    level: 2,
+    school: "conjuration",
+    classes: [],
+    castingTime: "1 hour",
+    range: "10 feet",
+    components: "V, S",
+    duration: "instantaneous",
+    text: "Test.",
+    automation: "full",
+    companion: { companion: "test:companion/servant" },
+  },
+  {
+    id: "test:companion/servant",
+    name: "Servant",
+    ac: "13",
+    hp: "15",
+    speed: "20 ft.",
+    abilities: { str: 4, dex: 15, con: 12, int: 10, wis: 10, cha: 7 },
+    text: "Test.",
+    play: {
+      level: 2,
+      ac: 13,
+      hp: 15,
+      hpPerLevel: 5,
+      speed: 20,
+      passives: [],
+      actions: [],
+    },
+  },
+  trait("servant-caster", [], { spells: { "1": ["test:spell/servant"] } }),
+  trait("horseshoes", [
+    {
+      kind: "companionGear",
+      passives: [
+        {
+          kind: "modifier",
+          modifier: {
+            kind: "bonus",
+            to: "speed",
+            amount: { bonus: { base: 30 } },
+          },
+        },
+      ],
+    },
+  ]),
+  trait("saddle", [{ kind: "quickMount" }]),
+  trait("golem-maker", [], {
+    activations: [
+      {
+        label: "Animate",
+        cost: ["action"],
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "animate",
+              monster: "test:monster/horse",
+              range: 5,
+              lasting: true,
+            },
+          ],
+        },
+      },
+    ],
+  }),
+  block("horse", { size: "large", speed: 60 }),
 ];
 const dice = { below: () => 0, roll: () => 10 };
 
@@ -157,5 +238,114 @@ describe("lasting companions", () => {
     const ready = turn(commanded).actors[hound.id] ?? hound;
     expect(canAfford(bite, ready, deriveStats(ready, run))).toBe(true);
     expect(keeper.id).toBe(PLAYER_ACTOR);
+  });
+
+  it("come from a known spell at the spell's level, free of commands, wearing their owner's gear", async () => {
+    const run = await runWith(FIXTURES);
+    const owner = hero(["servant-caster", "horseshoes"], { level: 3 });
+    const keeper =
+      companionFoundEvents([owner], run, "fight").reduce<DndState>(
+        applyDndEvent,
+        {
+          actors: { [owner.id]: owner },
+          combat: null,
+        },
+      ).actors[owner.id] ?? owner;
+    expect(keeper.companions?.[0]).toMatchObject({
+      companion: "test:companion/servant",
+      level: 2,
+      free: true,
+      maxHp: 15,
+    });
+    const [servant] = companionActors([keeper], run);
+    if (!servant) throw new Error("no servant");
+    expect(deriveStats(servant, run).speed).toBe(50);
+    expect(awaitsCommand(servant, keeper)).toBe(false);
+  });
+
+  it("keeps a creature animated to last, as a golem, for later fights", async () => {
+    const run = await runWith(FIXTURES);
+    const maker = at(hero(["golem-maker"]), 0, 0);
+    const state = onMap(["...."], [maker]);
+    const animate = deriveStats(maker, run).actions.find(({ id }) =>
+      id.includes("golem-maker"),
+    );
+    if (!animate) throw new Error("no animate");
+    const made = (
+      resolveAction(animate, maker, [maker], { ...run, state, dice }).events ??
+      []
+    ).reduce(applyDndEvent, state);
+    const keeper = made.actors[PLAYER_ACTOR] ?? maker;
+    expect(keeper.companions?.[0]).toMatchObject({ monster: true, free: true });
+    const [golem] = companionActors([keeper], run);
+    expect(golem?.source).toMatchObject({
+      kind: "monster",
+      calledBy: PLAYER_ACTOR,
+    });
+  });
+
+  it("lets a rider with Born to the Saddle mount for 5 feet of movement", async () => {
+    const run = await runWith(FIXTURES);
+    const rider = at(hero(["saddle"]), 0, 0);
+    const horse = monster("steed", "horse", "party");
+    const mount = at(
+      {
+        ...horse,
+        source: {
+          kind: "monster",
+          statBlockId: "test:monster/horse",
+          calledBy: PLAYER_ACTOR,
+          lasting: { feature: "test:monster/horse" },
+        },
+      },
+      1,
+      0,
+    );
+    const state = onMap(["...."], [rider, mount]);
+    const labels = mountOptions(rider, state, run).map(({ label }) => label);
+    expect(labels.some((label) => label.includes("5 ft"))).toBe(true);
+  });
+
+  it("lets a familiar deliver its owner's touch spell to a creature beside it, with its Reaction", () => {
+    const owner = at(hero([]), 0, 0);
+    const owl = at(
+      {
+        ...monster("owl", "horse", "party"),
+        source: {
+          kind: "monster" as const,
+          statBlockId: "test:monster/horse",
+          familiarOf: {
+            owner: PLAYER_ACTOR,
+            maxHp: 1,
+            features: [],
+            scaling: {},
+          },
+        },
+      },
+      10,
+      0,
+    );
+    const foe = at(monster("foe", "horse"), 11, 0);
+    const far = at(monster("far", "horse"), 14, 0);
+    const state = onMap(["..............."], [owner, owl, foe, far]);
+    const touch: KnownAction = {
+      id: "test:spell/touch",
+      name: "Touch",
+      spellLevel: 1,
+      activation: {
+        cost: ["action"],
+        targeting: { creatures: 1, range: "touch", side: "enemy" },
+        resolution: { kind: "automatic", damage: [], effects: [] },
+      },
+    } as unknown as KnownAction;
+    expect(touchCourier(touch, owner, foe, state)?.id).toBe("owl");
+    expect(touchCourier(touch, owner, far, state)).toBeNull();
+    const spent = { ...owl, budget: { ...owl.budget, reaction: false } };
+    expect(
+      touchCourier(touch, owner, foe, {
+        ...state,
+        actors: { ...state.actors, owl: spent },
+      }),
+    ).toBeNull();
   });
 });

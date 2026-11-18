@@ -3946,7 +3946,7 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
     actor.source.kind === "monster" || actor.source.kind === "summon"
       ? (actor.source.gear ?? [])
       : [];
-  const own =
+  const base =
     actor.source.kind === "monster" && actor.source.lasting
       ? {
           ...built,
@@ -3955,6 +3955,15 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
       : gear.length > 0
         ? { ...built, passives: [...built.passives, ...gear] }
         : built;
+  // Gear comes after the stat block's own numbers, so its Speed bonus is added here.
+  const own =
+    gear.length > 0
+      ? {
+          ...base,
+          speed:
+            base.speed + passiveBonus({ ...base, passives: gear }, "speed"),
+        }
+      : base;
   // A form's stat block replaces the creature's own, but it keeps its creature type and Hit Point maximum, and with
   // Shapechange its Intelligence, Wisdom and Charisma and its spellcasting.
   const form = formOf(actor);

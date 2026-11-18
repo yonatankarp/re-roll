@@ -6148,7 +6148,7 @@ function animatedEvents(
   const made = Object.keys(context.state.actors).filter((key) =>
     key.startsWith(`${actor.id}:animated-`),
   ).length;
-  // Find Greater Steed: its maker keeps the mount, to bring it to later fights.
+  // Manual of Golems: its maker keeps the golem, to bring it to later fights.
   const stats = deriveStats(actor, context);
   const kept =
     effect.lasting && actor.source.kind !== "monster"

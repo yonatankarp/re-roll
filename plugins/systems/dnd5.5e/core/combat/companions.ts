@@ -136,14 +136,10 @@ export function companionActors(
     );
     const worn = gear.length > 0 ? { gear } : {};
     return (owner.companions ?? []).flatMap((held) => {
-      // A Find Steed steed stays until it dies; anything else only while a feature or known spell gives it.
+      // One made once, as a Find Steed steed, a homunculus or a golem, stays until it dies; a feature's only while
+      // the feature gives it.
       if (held.hp <= 0) return [];
-      if (
-        !given.has(held.feature) &&
-        !(held.free && held.level !== undefined)
-      ) {
-        return [];
-      }
+      if (!given.has(held.feature) && !held.free) return [];
       const slug = held.companion.slice(held.companion.lastIndexOf("/") + 1);
       // Find Greater Steed's mount: a monster's stat block, called by its owner.
       if (held.monster) {
