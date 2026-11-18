@@ -17,7 +17,13 @@ import {
   NS,
   frame,
 } from "../state.ts";
-import { ALL, DECLINE, encodeOption, parseOption } from "./ids.ts";
+import {
+  ALL,
+  DECLINE,
+  encodeOption,
+  parseOption,
+  weaponItemId,
+} from "./ids.ts";
 import {
   forgoAdvantageFrame,
   forgoFrame,
@@ -44,6 +50,7 @@ import {
   afterDamage,
   type Edge,
   playerTakes,
+  reactionCosts,
   reactFrames,
   respond,
   type Roll,
@@ -95,6 +102,7 @@ import {
   type LeafEffect,
   MonsterSchema,
   type Resolution,
+  WeaponSchema,
 } from "../schemas.ts";
 import {
   armoredReduction,
@@ -185,6 +193,7 @@ export const AttackSchema = z.object({
   passed: z.array(z.string()).optional(), // creatures that already answered the roll or turned it down
   strikes: z.array(z.string()).optional(), // strike options picked in place of the roll's Advantage, as Brutal Strike's
   advantaged: z.boolean().optional(), // a strike option picked gives the roll Advantage, as a Martialist's Trip
+  fixed: z.number().int().min(1).max(20).optional(), // the d20 shows this, unrolled, as a Clockwork Amulet's 10
 });
 
 // Who a projectile or later attack actually goes for, given who is still standing.
@@ -1100,12 +1109,14 @@ export function runAttackRoll(
   const edge = held ?? { advantage, disadvantage: disadvantage && !lucky };
   const first = held
     ? { natural: held.natural }
-    : rollD20(dice, {
-        advantage,
-        disadvantage: edge.disadvantage,
-        rerollOnes: hasPassive(stats, "rerollOnes"),
-        thirdDie: ability !== "str" && hasPassive(stats, "elvenAccuracy"),
-      });
+    : payload.fixed !== undefined
+      ? { natural: payload.fixed }
+      : rollD20(dice, {
+          advantage,
+          disadvantage: edge.disadvantage,
+          rerollOnes: hasPassive(stats, "rerollOnes"),
+          thirdDie: ability !== "str" && hasPassive(stats, "elvenAccuracy"),
+        });
   const hadAdvantage = edge.advantage && !edge.disadvantage;
   const hadDisadvantage = edge.disadvantage && !edge.advantage;
   const base =
@@ -1667,10 +1678,104 @@ export function runAdvantageGained(
     return runAttackRoll({ ...attack, strikes: [] }, context);
   }
   const [actionId = ""] = parseOption(answer);
+  const attacker = actorOf(context.state, attack.attacker);
+  const chosen = findAction(attacker, actionId, context);
+  // A Clockwork Amulet's 10 is paid for as it's picked, and is no strike of its own.
+  const fixed = chosen.activation.trigger?.fixedRoll;
+  if (fixed !== undefined) {
+    const rolled = runAttackRoll({ ...attack, strikes: [], fixed }, context);
+    return {
+      ...rolled,
+      events: [
+        ...payCosts(chosen, attacker, context),
+        ...(rolled.events ?? []),
+      ],
+    };
+  }
   return runAttackRoll(
     { ...attack, strikes: [actionId], advantaged: true },
     context,
   );
+}
+
+// The type of these the target takes most damage from.
+function leastResisted(
+  types: readonly DamageType[],
+  responses: ReturnType<typeof damageResponses>,
+): DamageType {
+  const taken = (type: DamageType): number =>
+    responses.immunities.includes(type)
+      ? 0
+      : responses.resistances.includes(type)
+        ? 0.5
+        : responses.vulnerabilities.includes(type)
+          ? 2
+          : 1;
+  return (
+    [...types].sort((a, b) => taken(b) - taken(a))[0] ?? types[0] ?? "force"
+  );
+}
+
+// A Brooch of the Elements' Reaction: a creature that can answer a hit turns its first damage into the type that
+// serves its own side best, the type the target resists least when the attacker is its ally, and most otherwise.
+// shortcut: it's taken without asking whenever it changes something, by the first bearer that can.
+function retypedHit(
+  attacker: Actor,
+  target: Actor,
+  resolution: Extract<Resolution, { kind: "attack" }>,
+  context: Context,
+): {
+  readonly resolution: Extract<Resolution, { kind: "attack" }>;
+  readonly events: SystemEvent[];
+} {
+  const unchanged = { resolution, events: [] };
+  const [first, ...rest] = resolution.damage;
+  if (!first) return unchanged;
+  const responses = damageResponses(target, context);
+  const taken = (type: DamageType): number =>
+    responses.immunities.includes(type)
+      ? 0
+      : responses.resistances.includes(type)
+        ? 0.5
+        : responses.vulnerabilities.includes(type)
+          ? 2
+          : 1;
+  for (const bearer of Object.values(context.state.actors)) {
+    if (
+      !bearer.budget.reaction ||
+      isDown(bearer) ||
+      hasCondition(bearer, ...INCAPACITATING)
+    ) {
+      continue;
+    }
+    const stats = deriveStats(bearer, context);
+    const action = stats.actions.find(
+      (item) =>
+        item.activation.trigger?.hitDamages === true &&
+        canAfford(item, bearer, stats) &&
+        distanceFeet(bearer.position, attacker.position) <=
+          (item.activation.trigger.within ?? 60),
+    );
+    const { resolution: own } = action?.activation ?? {};
+    const effect =
+      own?.kind === "automatic"
+        ? own.effects.find((item) => item.kind === "retypeHit")
+        : undefined;
+    if (!action || effect?.kind !== "retypeHit") continue;
+    const helps = bearer.side === attacker.side ? 1 : -1;
+    const best = [...effect.types].sort(
+      (a, b) => helps * (taken(b) - taken(a)),
+    )[0];
+    if (!best || helps * (taken(best) - taken(first.type)) <= 0) continue;
+    return {
+      resolution: {
+        ...resolution,
+        damage: [{ ...first, type: best }, ...rest],
+      },
+      events: reactionCosts(bearer, action, context),
+    };
+  }
+  return unchanged;
 }
 
 function landHit(
@@ -1698,7 +1803,7 @@ function landHit(
       casterId === attacker.id,
   )?.modifier;
   const shaped = payload.poleStrike ? poleEnd(printed) : printed;
-  const resolution = againstTarget(
+  const marked =
     retype?.kind === "hitDamage" && retype.retype
       ? {
           ...shaped,
@@ -1707,10 +1812,29 @@ function landHit(
             type: retype.retype ?? item.type,
           })),
         }
-      : shaped,
-    target,
-    context,
-  );
+      : shaped;
+  // A Javelin of Lightning deals whichever of its types the target resists least.
+  const altTypes = WeaponSchema.safeParse(
+    context.content(weaponItemId(action.id)),
+  ).data?.altTypes;
+  const chosen =
+    altTypes && marked.damage[0]
+      ? {
+          ...marked,
+          damage: [
+            {
+              ...marked.damage[0],
+              type: leastResisted(
+                [marked.damage[0].type, ...altTypes],
+                damageResponses(target, context),
+              ),
+            },
+            ...marked.damage.slice(1),
+          ],
+        }
+      : marked;
+  const brooch = retypedHit(attacker, target, chosen, context);
+  const resolution = againstTarget(brooch.resolution, target, context);
   const stats = deriveStats(attacker, context);
   const multiplier = payload.critical ? 2 : 1;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
@@ -1724,14 +1848,17 @@ function landHit(
   );
 
   // Magic ammunition is no longer magical once it hits.
-  const events: SystemEvent[] = action.ammunition
-    ? [
-        dndEvent(`${NS}:itemUsed`, {
-          actor: attacker.id,
-          item: action.ammunition,
-        }),
-      ]
-    : [];
+  const events: SystemEvent[] = [
+    ...brooch.events,
+    ...(action.ammunition
+      ? [
+          dndEvent(`${NS}:itemUsed`, {
+            actor: attacker.id,
+            item: action.ammunition,
+          }),
+        ]
+      : []),
+  ];
   let totalDealt = 0;
   const absorbed: { amount: number; type: DamageType }[] = [];
   const firstType = resolution.damage[0]?.type;
@@ -2812,6 +2939,7 @@ function smitesFor(
       trigger.forgo === undefined && // picked before the damage (combat/strikes.ts)
       !trigger.forgoAdvantage && // picked before the roll
       !trigger.gainsAdvantage &&
+      trigger.fixedRoll === undefined &&
       canAfford(action, attacker, stats) &&
       hitFits(trigger.afterHit, hitWith, attacker, context) &&
       (!trigger.withFeature ||

@@ -81,6 +81,7 @@ function version(
     ...(resources.length > 0 ? { resources } : {}),
     ...(parent.lastCharge ? { lastCharge: parent.lastCharge } : {}),
     ...(activations.length > 0 ? { activations } : {}),
+    ...(parent.granted ? { granted: parent.granted } : {}),
   };
   const bonus = variant.bonuses?.[0]?.amount;
   const plus = bonus !== undefined && /, \+1\b/.test(parent.name);
@@ -153,6 +154,17 @@ function version(
       ...(parent.returning ? { returning: true as const } : {}),
       ...(hitDamage.length > 0 ? { hitDamage } : {}),
       ...(forms.length > 0 ? { forms } : {}),
+      ...(parent.altTypes ? { altTypes: parent.altTypes } : {}),
+      // A Quarterstaff of the Acrobat is thrown as far as its magic says.
+      ...(parent.thrown
+        ? {
+            properties: [
+              ...base.properties.filter((property) => property !== "thrown"),
+              "thrown" as const,
+            ],
+            range: parent.thrown,
+          }
+        : {}),
     };
   } else if (base.type === "armor") {
     item = {

@@ -408,6 +408,15 @@ export function castAction(
         : revealEvents(actor)),
       ...(result.events ?? []),
       ...dealtSelfEffects(action, actor, result.events ?? [], context),
+      ...(action.activation.userEffects
+        ? leafEvents(
+            action.activation.userEffects,
+            action.id,
+            actor,
+            actor,
+            context,
+          )
+        : []),
       ...(action.onceKeys ?? []).map((key) =>
         dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key }),
       ),

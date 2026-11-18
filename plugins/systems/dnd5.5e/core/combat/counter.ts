@@ -89,7 +89,10 @@ function counterOf(
           rangeFeet(targeting.range) &&
         canAfford(action, foe, stats) &&
         (limits?.maxLevel === undefined || level <= limits.maxLevel) &&
-        (!limits?.gains || (alone && level > 0)) &&
+        (!limits?.gains ||
+          (alone &&
+            level > 0 &&
+            roomFor(foe, action, limits, level, context))) &&
         (limits?.levels === undefined ||
           limits.gains === true ||
           (level > 0 &&
@@ -219,6 +222,30 @@ export function runCounterspell(
     events: [...paid, ...save.events, ...payCosts(wasted, caster, context)],
     frames: [CHECK_END, frame("afterAction", { actor: caster.id })],
   };
+}
+
+// Whether an absorbing item holds this many more levels, or breaks past its maximum as a Staff of the Magi does.
+// A Rod of Absorption with no room lets the spell through.
+function roomFor(
+  foe: Actor,
+  counter: KnownAction,
+  limits: Extract<LeafEffect, { kind: "counter" }>,
+  level: number,
+  context: Context,
+): boolean {
+  if (!limits.levels) return true;
+  if ((foe.resourcesSpent[limits.levels] ?? 0) >= level) return true;
+  const itemId = itemUseOf(counter.id);
+  const item = itemId
+    ? ItemSchema.safeParse(context.content(itemId)).data
+    : undefined;
+  return (item && "activations" in item ? (item.activations ?? []) : []).some(
+    ({ activation }) =>
+      activation.resolution.kind === "automatic" &&
+      activation.resolution.effects.some(
+        (effect) => effect.kind === "retribution",
+      ),
+  );
 }
 
 // A Staff of the Magi's absorbed spell: its levels back as charges, and past its maximum, the staff breaks as its

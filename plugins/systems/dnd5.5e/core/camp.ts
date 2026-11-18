@@ -36,6 +36,7 @@ import {
 } from "./state.ts";
 import {
   type KnownAction,
+  chargesOf,
   deriveStats,
   itemHealing,
   lookup,
@@ -83,6 +84,7 @@ const BETWEEN: ReadonlySet<LeafEffect["kind"]> = new Set([
   "modifier", // only those modifierHelps allows
   "exhaustion",
   "untilLongRest",
+  "rechargeItem",
 ]);
 
 // What the scene here offers, and the state, for what a modifier would do between fights. `here` is unknown while
@@ -211,6 +213,19 @@ function helps(
       return effect.clear === true && target.exhaustion > 0;
     case "untilLongRest":
       return true;
+    // An Arcane Battery, for an item with charges spent that come back at dawn.
+    case "rechargeItem":
+      return [...new Set(target.inventory)].some((id) => {
+        const item = ItemSchema.safeParse(access.content(id)).data;
+        return (
+          item !== undefined &&
+          chargesOf(item).resources.some(
+            (pool) =>
+              pool.recharge.some((entry) => entry.on === "dawn") &&
+              (target.resourcesSpent[pool.id] ?? 0) > 0,
+          )
+        );
+      });
     case "cure":
       return (
         (effect.exhaustion === true && target.exhaustion > 0) ||
