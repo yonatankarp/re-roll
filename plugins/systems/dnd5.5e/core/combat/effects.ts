@@ -72,6 +72,7 @@ import {
   type Passive,
   type Resolution,
   SpellSchema,
+  type AlliesRider,
 } from "../schemas.ts";
 import { multiattackUses } from "../multiattack-uses.ts";
 import {
@@ -125,6 +126,7 @@ import {
   squaresOf,
   type Zone,
   zoneImmune,
+  zoneModifiers,
   zonesOf,
   zonesOn,
 } from "../zones.ts";
@@ -1767,6 +1769,36 @@ function reducedHit(
       );
     }
   }
+  // Bastion of Law: as many of the ward's dice as the damage needs, on average, spent and rolled.
+  // shortcut: a hit of two damage types reads the ward as it was before the hit for each.
+  const ward = target.activeEffects.find(
+    ({ modifier }) => modifier.kind === "wardDice",
+  );
+  if (ward?.modifier.kind === "wardDice" && amount > 0) {
+    const { count, die } = ward.modifier;
+    const spend = Math.min(count, Math.ceil(amount / ((die + 1) / 2)));
+    let cut = 0;
+    for (let left = spend; left > 0; left--) cut += context.dice.roll(die);
+    amount = Math.max(0, amount - cut);
+    wornEvents.push(
+      dndEvent(`${NS}:effectEnded`, {
+        actor: target.id,
+        sourceId: ward.sourceId,
+        casterId: ward.casterId,
+      }),
+      ...(count > spend
+        ? [
+            dndEvent(`${NS}:effectAdded`, {
+              actor: target.id,
+              effect: {
+                ...ward,
+                modifier: { ...ward.modifier, count: count - spend },
+              },
+            }),
+          ]
+        : []),
+    );
+  }
   const effect = target.activeEffects.find(
     ({ modifier }) =>
       modifier.kind === "damageReduction" && modifier.damage === type,
@@ -2119,6 +2151,7 @@ function spellHealing(
       (!passive.list || onList(spell, known, passive.list, context))
         ? sum +
           evaluateFormula(passive.bonus, stats) +
+          (passive.dice ? rollDiceNotation(passive.dice, context.dice) : 0) +
           (passive.perSlot && slotted ? slotLevel : 0)
         : sum,
     0,
@@ -2651,6 +2684,9 @@ export function leafEvents(
               ...(effect.untilIncapacitated
                 ? { untilIncapacitated: true as const }
                 : {}),
+              ...(effect.casterIncapacitated
+                ? { casterIncapacitated: true as const }
+                : {}),
               ...(effect.studyEnds && save ? { studyDc: save.dc } : {}),
               ...lingersFor(effect.duration, !context.state.combat),
               ...swallowed,
@@ -2733,6 +2769,9 @@ export function leafEvents(
               ...(effect.endsInLight ? { endsInLight: true as const } : {}),
               ...(effect.untilIncapacitated
                 ? { untilIncapacitated: true as const }
+                : {}),
+              ...(effect.casterIncapacitated
+                ? { casterIncapacitated: true as const }
                 : {}),
               ...(effect.saveOnDamage && conditionSave
                 ? {
@@ -4573,6 +4612,9 @@ export function rollSave(
         context.state,
         context,
         ability,
+        conditions,
+        magical,
+        source?.caster,
       ) ||
       (ability === "dex" && hasCondition(target, "restrained")) ||
       stats.passives.some(
@@ -5777,11 +5819,15 @@ export function resolveAction(
             );
         if (picked) frames.push(picked);
         // Harm: the damage taken comes off the Hit Point maximum too.
+        // Aura of Life keeps the maximum whole.
         if (
           !saved &&
           !turned &&
           lastDealt > 0 &&
-          resolution.onFail.some((effect) => effect.kind === "drainMaxHp")
+          resolution.onFail.some((effect) => effect.kind === "drainMaxHp") &&
+          !zoneModifiers(target, context.state, context).some(
+            (modifier) => modifier.kind === "keepMaxHp",
+          )
         ) {
           const now = events.reduce(applyDndEvent, context.state).actors[
             target.id
@@ -6417,5 +6463,66 @@ function sculpted(
     if (target.id === actor.id && !sculptor.perLevel) return false;
     spared += 1;
     return spared > most;
+  });
+}
+
+// What an activation or a spell's rider does to the bearer's allies near it, whatever its targets, as Rallying Cry's
+// healing with Second Wind: the most hurt first, up to each rider's count.
+export function alliesRiderEvents(
+  riders: readonly AlliesRider[],
+  sourceId: string,
+  actor: Actor,
+  context: Context,
+): SystemEvent[] {
+  const stats = deriveStats(actor, context);
+  const spent: Record<string, number> = {};
+  return riders.flatMap((rider) => {
+    if (rider.without?.some((id) => stats.features.includes(id))) return [];
+    const effects = [
+      ...rider.effects,
+      ...(rider.with ?? []).flatMap((more) =>
+        stats.features.includes(more.feature) ? more.effects : [],
+      ),
+    ];
+    const near = allies(context.state, actor)
+      .filter(
+        (ally) =>
+          ally.id !== actor.id &&
+          !isDead(ally) &&
+          distanceFeet(actor.position, ally.position) <= rider.within,
+      )
+      .sort(
+        (a, b) =>
+          a.hp / deriveStats(a, context).maxHp -
+          b.hp / deriveStats(b, context).maxHp,
+      )
+      .slice(
+        0,
+        rider.count
+          ? Math.max(1, evaluateFormula(rider.count, stats))
+          : Infinity,
+      );
+    if (near.length === 0) return [];
+    const costs: SystemEvent[] = [];
+    if (rider.resource) {
+      const left =
+        (stats.resources[rider.resource] ?? 0) -
+        (actor.resourcesSpent[rider.resource] ?? 0) -
+        (spent[rider.resource] ?? 0);
+      if (left <= 0) return [];
+      spent[rider.resource] = (spent[rider.resource] ?? 0) + 1;
+      costs.push(
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: actor.id,
+          resource: rider.resource,
+        }),
+      );
+    }
+    return [
+      ...costs,
+      ...near.flatMap((ally) =>
+        leafEvents(effects, sourceId, actor, ally, context),
+      ),
+    ];
   });
 }

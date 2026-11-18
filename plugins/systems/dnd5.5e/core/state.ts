@@ -265,6 +265,7 @@ const ActiveEffectSchema = z.strictObject({
   endsOn: z.enum(["attack", "action", "spell"]).optional(),
   endsInLight: z.literal(true).optional(), // ends as the creature's turn ends in Bright Light
   untilIncapacitated: z.literal(true).optional(), // ends once the creature is Incapacitated
+  casterIncapacitated: z.literal(true).optional(), // ends once its caster is Incapacitated or dies
   studyDc: z.number().int().optional(), // a Study with Investigation against this ends it, as Phantasmal Force's
   // Taking damage gives this save, ending it on a success, as Dragon Fear's.
   saveOnDamage: z

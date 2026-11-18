@@ -176,7 +176,36 @@
     in the aura, you and your allies have Resistance to Necrotic damage, and
     your Hit Point maximums can’t be reduced. If an ally with 0 Hit Points
     starts its turn in the aura, that ally regains 1 Hit Point.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting:
+      { area: { shape: emanation, radius: 30 }, range: self, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: zone,
+            zone: area,
+            radius: 30,
+            follows: true,
+            duration: { concentration: true, minutes: 10 },
+          }
+    area:
+      {
+        side: ally,
+        self: true,
+        grants: [{ kind: resistance, damage: necrotic }, { kind: keepMaxHp }],
+        when: turnStart,
+        downed: true,
+        resolution:
+          {
+            kind: automatic,
+            damage: [],
+            effects: [{ kind: heal, amount: { bonus: { base: 1 } } }],
+          },
+      }
 - id: srd52:spell/beacon-of-hope
   name: Beacon of Hope
   level: 3
