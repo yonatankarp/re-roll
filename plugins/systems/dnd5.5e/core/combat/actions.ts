@@ -85,7 +85,14 @@ import {
   resolveAction,
   resolveTargets,
   rollSave,
+  zoneEvents,
 } from "./effects.ts";
+import {
+  anchorAt,
+  anchorLeaves,
+  anchorMoved,
+  anchorSquare,
+} from "./anchor.ts";
 import { metamagicCast, quickens } from "../metamagic.ts";
 import { castOptionCast } from "../cast-options.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
@@ -394,6 +401,8 @@ export function castAction(
     ? picked.map((id) => actorOf(state, id))
     : (apart ?? resolveTargets(targetId, action, actor, context));
   const riders = castRiders(actor, action, slotLevel, context, caught);
+  // An object the spell keeps goes to the first creature it acts on, or is placed there as the spell is cast.
+  const anchored = anchoredEvents(actor, action, caught, slotLevel, context);
   const result: SystemResult =
     projectiles !== undefined && resolution.kind !== "save"
       ? {
@@ -423,6 +432,7 @@ export function castAction(
   return {
     events: [
       ...payCosts(action, actor, context, slotLevel),
+      ...anchored,
       ...timeStopEnds(actor, caught),
       ...schoolCastEvents(actor, action, slotLevel, context),
       ...riders.events,
@@ -531,6 +541,32 @@ export function castAction(
 // shortcut: an attack roll left waiting on a reaction lands later and gives nothing.
 // What Sudden Strike, Blink Steps, Spell Subterfuge or Tempestuous Magic wait on, marked only for a creature with
 // such an activation, so the turns of everyone else are kept as before.
+// The events that bring an anchored action's object to its first target: moved there, or placed as it's cast.
+function anchoredEvents(
+  actor: Actor,
+  action: KnownAction,
+  caught: readonly Actor[],
+  slotLevel: number | undefined,
+  context: Context,
+): SystemEvent[] {
+  const grid = context.state.combat?.grid;
+  const first = caught[0]?.position;
+  if (!action.activation.anchor || !grid || !first) return [];
+  const to = anchorSquare(actor, action, first, grid);
+  if (!to) return [];
+  return anchorAt(actor, action)
+    ? anchorMoved(actor, action, to)
+    : zoneEvents(
+        anchorLeaves(action.activation.resolution),
+        action,
+        actor,
+        context,
+        to,
+        slotLevel,
+        true,
+      );
+}
+
 function actionKindMarks(
   actor: Actor,
   action: KnownAction,

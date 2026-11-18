@@ -163,7 +163,7 @@ import {
   limitEvents,
   timeStopEnds,
 } from "./durations.ts";
-import { movedFrames } from "./areas.ts";
+import { carriedEvents, movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
 import { reincarnateEvents } from "../reincarnate.ts";
 import {
@@ -3720,14 +3720,16 @@ function commandedResult(
 
 // The zones a spell leaves, once for the whole cast, where the area was aimed or round the caster, whoever it
 // caught. Its area's save DC is fixed as cast; a wall rings the area with squares no one can pass.
-function zoneEvents(
+export function zoneEvents(
   effects: readonly LeafEffect[],
   action: KnownAction,
   actor: Actor,
   context: Context,
   aim: Square | undefined,
   slotLevel: number | undefined,
+  placing = false, // an anchored action's object, which combat/actions.ts places where it goes
 ): SystemEvent[] {
+  if (action.activation.anchor && !placing) return [];
   const at = aim ?? actor.position;
   if (!at) return [];
   const stats = deriveStats(actor, context);
@@ -3805,13 +3807,30 @@ function zoneEvents(
     const uses =
       kept.uses === undefined
         ? undefined
-        : kept.uses + (usesPerSlot ?? 0) * above;
+        : Math.max(
+            kept.usesAtLeast ?? 1,
+            kept.uses +
+              (usesPerSlot ?? 0) * above +
+              (kept.usesMod
+                ? evaluateFormula(
+                    { base: 0, add: [{ kind: "spellMod" }] },
+                    stats,
+                  )
+                : 0),
+          );
     return {
       area: area
         ? {
             ...kept,
             ...(resolution ? { resolution } : {}),
             ...(holding ? { holding } : {}),
+            ...(kept.schedule
+              ? {
+                  schedule: kept.schedule.map(
+                    (step) => retyped(fixed(step), type) ?? step,
+                  ),
+                }
+              : {}),
             ...(kept.foilsSpells
               ? {
                   foilsSpells: {
@@ -3949,6 +3968,9 @@ function zoneEvents(
             ...(line ? { dir: line.dir } : {}),
             ...(effect.width ? { width: effect.width } : {}),
             ...(uses === undefined || effect.bare ? {} : { uses }),
+            ...(area?.schedule && !effect.bare
+              ? { since: context.state.combat?.round ?? 0 }
+              : {}),
             name: action.name,
           },
           ends: effectEnds(effect.duration),
@@ -4270,6 +4292,9 @@ function movedZone(
   return {
     events: [
       dndEvent(`${NS}:zoneMoved`, { actor: actor.id, sourceId: source, to }),
+      ...zones.flatMap((zone) =>
+        carriedEvents(zone, zone.at, to, context.state),
+      ),
     ],
     frames: zones.flatMap((zone) =>
       movedFrames({ ...zone, at: to }, zone.at, context),
@@ -4960,6 +4985,10 @@ export function resolveAction(
 
   const beginConcentration = (effects: readonly LeafEffect[]): void => {
     if (!usesConcentration(effects) && !action.concentrates) return;
+    // What a held spell lets its caster do keeps that spell's Concentration, as Witch Bolt's later lightning.
+    if (action.id.startsWith("lasting:") || action.id.startsWith("spheres:")) {
+      return;
+    }
     // An area acting later, at no cost, keeps the Concentration its spell began, as Conjure Elemental's spirit
     // restraining. A recast still begins it anew.
     if (

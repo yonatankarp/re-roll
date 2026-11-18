@@ -2188,6 +2188,18 @@ export const AreaEffectSchema = z.strictObject({
   // the ground, as Earthquake's tremor
   flying: z.literal(true).optional(),
   ground: z.literal(true).optional(),
+  // it acts on a creature its owner moves it onto, and stops there for the turn, as Flaming Sphere rolled into a foe
+  whenMoved: z.literal(true).optional(),
+  // the creatures it holds with a condition move with it, as Whirlwind's
+  carries: z.literal(true).optional(),
+  // as its owner's turn starts, it acts with the next of these each time instead of `resolution`, the last
+  // repeating, as Storm of Vengeance's turns (combat/areas.ts)
+  schedule: z.array(ResolutionSchema).min(1).optional(),
+  // its owner-turn resolution picks the most hurt it affects first, as Aura of Vitality's healing
+  mostHurt: z.literal(true).optional(),
+  // its `uses` gain the caster's spellcasting modifier, at least `usesAtLeast` in all, as Healing Spirit's
+  usesMod: z.literal(true).optional(),
+  usesAtLeast: z.number().int().min(1).optional(),
   // a fall that ends in it deals half damage, as in Control Winds' updraft (combat/falling.ts)
   softFalls: z.literal(true).optional(),
   // no fog, smoke or other gas hides a square in it, as Warding Wind hedges them out (core/zones.ts obscuring)
@@ -2585,6 +2597,18 @@ export const ActivationSchema = z.strictObject({
   afterUse: z
     .strictObject({ feature: ContentIdSchema, label: z.string().optional() })
     .optional(),
+  // It's done from an object the spell keeps on the map, as Spiritual Weapon's force: the object moves up to `moves`
+  // feet (placed that far from the caster as the spell is cast) to within `reach` feet of the first target, and the
+  // targeting's range counts from it (combat/anchor.ts). Its zone leaves are that object.
+  anchor: z
+    .strictObject({
+      moves: z.number().int().min(0),
+      reach: z.number().int().min(5).default(5),
+    })
+    .optional(),
+  // A spell's `lasting` action only while no creature but its caster bears what the spell put on it, so its mark
+  // moves to a new creature once the old one drops, as Hunter's Mark's (stats.ts).
+  remark: z.literal(true).optional(),
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
   area: AreaEffectSchema.optional(), // what the zone its resolution leaves does later

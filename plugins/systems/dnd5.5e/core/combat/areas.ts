@@ -102,7 +102,7 @@ export function zoneFrames(
   const frames: Frame[] = [];
   for (const zone of zonesOf(state, context)) {
     const { area } = zone;
-    if (!area?.resolution || !area.when) continue;
+    if ((!area?.resolution && !area?.schedule) || !area.when) continue;
     const key = zoneKey(zone);
     if (area.when === occupant) {
       if (seen.has(key) || !inZone(zone, actor.position)) continue;
@@ -117,10 +117,13 @@ export function zoneFrames(
             inZone(zone, item.position) &&
             affects(zone, item, state, context),
         )
-        .sort(
-          (a, b) =>
-            distanceFeet(zone.at, a.position) -
-              distanceFeet(zone.at, b.position) || a.hp - b.hp,
+        .sort((a, b) =>
+          area.mostHurt
+            ? statsOf(b, context).maxHp -
+              b.hp -
+              (statsOf(a, context).maxHp - a.hp)
+            : distanceFeet(zone.at, a.position) -
+                distanceFeet(zone.at, b.position) || a.hp - b.hp,
         )
         .slice(0, area.targets ?? Infinity);
       if (caught.length === 0) continue;
@@ -328,7 +331,9 @@ export function movedFrames(
   context: ContentAccess & { readonly state: DndState },
 ): Frame[] {
   const { state } = context;
-  if (!zone.area?.enters || !zone.area.resolution) return [];
+  if ((!zone.area?.enters && !zone.area?.whenMoved) || !zone.area.resolution) {
+    return [];
+  }
   const before = { ...zone, at: from };
   const reached = Object.values(state.actors).filter(
     (item) =>
@@ -346,6 +351,34 @@ export function movedFrames(
         ),
       ]
     : [];
+}
+
+// The creatures an area holds with a condition it gave, carried along as it moves from `from` to `to`, as Whirlwind's.
+export function carriedEvents(
+  zone: Zone,
+  from: Square,
+  to: Square,
+  state: DndState,
+): SystemEvent[] {
+  if (!zone.area?.carries) return [];
+  const grid = state.combat?.grid;
+  return Object.values(state.actors).flatMap((item) => {
+    const held =
+      item.position &&
+      !isDead(item) &&
+      item.activeEffects.some(
+        ({ sourceId, casterId, modifier }) =>
+          sourceId === zone.sourceId &&
+          casterId === zone.owner &&
+          modifier.kind === "condition",
+      );
+    if (!held || !item.position) return [];
+    const at = {
+      x: Math.max(0, Math.min((grid?.width ?? Infinity) - 1, item.position.x + to.x - from.x)),
+      y: Math.max(0, Math.min((grid?.height ?? Infinity) - 1, item.position.y + to.y - from.y)),
+    };
+    return [dndEvent(`${NS}:moved`, { actor: item.id, to: at, feet: 0 })];
+  });
 }
 
 // The areas `owner` keeps that drift away from it as its turn starts, as Cloudkill's 10 feet: where each goes, and
@@ -410,14 +443,27 @@ export function runZoneTick(
   const { state } = context;
   const owner = state.actors[payload.owner];
   // A spell may leave several zones, as Prismatic Wall's wall and light: the one that acts.
-  const zone = zonesOf(state, context).find(
+  const found = zonesOf(state, context).find(
     (item) =>
       item.owner === payload.owner &&
       item.sourceId === payload.sourceId &&
       item.part === payload.part &&
-      item.area?.resolution !== undefined,
+      (item.area?.resolution !== undefined ||
+        item.area?.schedule !== undefined),
   );
-  if (!owner || !zone) return {};
+  if (!owner || !found) return {};
+  // One that acts by turns uses this turn's step, as Storm of Vengeance's acid on its second.
+  const step =
+    found.area?.schedule?.[
+      Math.min(
+        found.area.schedule.length - 1,
+        Math.max(0, (state.combat?.round ?? 0) - (found.since ?? 0) - 1),
+      )
+    ];
+  const zone =
+    step && found.area
+      ? { ...found, area: { ...found.area, resolution: step } }
+      : found;
   const targets = payload.targets.flatMap((id) => {
     const target = state.actors[id];
     return target &&

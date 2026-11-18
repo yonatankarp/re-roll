@@ -2845,12 +2845,24 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     if (
       lasting &&
       spellOfSource(actor.concentratingOn ?? "") === spellId &&
-      !castFrom(actor.concentratingOn ?? "")
+      !castFrom(actor.concentratingOn ?? "") &&
+      !(lasting.remark && stillMarked(actor, spellId, access))
     ) {
+      // It grows with the slot the spell was cast with, as Witch Bolt's or Flaming Sphere's later damage.
+      const cast = actor.activeEffects.find(
+        ({ sourceId, level }) =>
+          level !== undefined &&
+          (sourceId === actor.concentratingOn ||
+            sourceId === `lasting:${spellId}`),
+      )?.level;
+      const step = spell.upcast?.perSlotLevel;
       actions.push({
         id: `lasting:${spellId}`,
         name: spell.name,
-        activation: lasting,
+        activation:
+          step && cast !== undefined && cast > spell.level
+            ? scaleActivation(lasting, step, cast - spell.level)
+            : lasting,
         spellLevel: null,
       });
     }
@@ -4348,6 +4360,27 @@ function changedWeapon(
       },
     },
   };
+}
+
+// Whether a creature other than the caster still bears what its spell, or that spell's lasting action, put on it, so
+// the spell's mark doesn't move yet, as Hunter's Mark's.
+function stillMarked(
+  actor: Actor,
+  spellId: string,
+  access: ContentAccess,
+): boolean {
+  const state = (access as ContentAccess & { readonly state?: DndState }).state;
+  if (!state) return false;
+  const sources = new Set([`spell:${spellId}`, `lasting:${spellId}`]);
+  return Object.values(state.actors).some(
+    (item) =>
+      item.id !== actor.id &&
+      item.hp > 0 &&
+      item.activeEffects.some(
+        ({ sourceId, casterId }) =>
+          casterId === actor.id && sources.has(sourceId),
+      ),
+  );
 }
 
 // Its levels of Exhaustion, with those that last only while an effect does, as Sickening Radiance's.
