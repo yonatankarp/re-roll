@@ -106,6 +106,32 @@ describe.skipIf(!BOOKS)("the books' class spellcasting features", () => {
     expect(offered).toContain("phb:spell/blur");
   });
 
+  it("heals more as a Life cleric, and an Evoker's cantrips hit harder and never miss for nothing", () => {
+    const life = stats(
+      levelTo(run, "phb:class/cleric", "phb:subclass/cleric-life-domain", 6),
+    );
+    expect(life.passives).toContainEqual(
+      expect.objectContaining({ kind: "spellHealing", perSlot: true }),
+    );
+    expect(life.passives).toContainEqual(
+      expect.objectContaining({ kind: "castRider", heals: true }),
+    );
+    const evoker = levelTo(
+      run,
+      "phb:class/wizard",
+      "phb:subclass/wizard-evoker",
+      10,
+    );
+    const derived = stats(evoker);
+    expect(derived.passives).toContainEqual({ kind: "potentCantrip" });
+    expect(derived.passives).toContainEqual(
+      expect.objectContaining({ kind: "spellDamage", schools: ["evocation"] }),
+    );
+    expect(derived.passives).toContainEqual(
+      expect.objectContaining({ kind: "sculptor", perLevel: true }),
+    );
+  });
+
   it("reaches a second creature with Words of Creation's Power Word Heal", () => {
     const bard = stats(levelTo(run, "phb:class/bard", null, 20));
     expect(
