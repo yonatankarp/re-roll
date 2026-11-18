@@ -12,6 +12,7 @@ import {
   controllingRider,
   dndEvent,
   type DndState,
+  effectiveBuild,
   equipped,
   forAttacker,
   hasCondition,
@@ -33,7 +34,7 @@ import {
   scaleActivation,
   type Stats,
 } from "../stats.ts";
-import type { HitKind, Passive, Skill } from "../schemas.ts";
+import type { HitKind, Modifier, Passive, Skill } from "../schemas.ts";
 import { toolKeyOf, toolOf } from "../tools.ts";
 import {
   distanceFeet,
@@ -82,7 +83,7 @@ import {
   iceKeys,
   slowingKeys,
   stepCost,
-  zoneModifiers,
+  zoneGrants,
   zonesOf,
   zonesOn,
 } from "../zones.ts";
@@ -257,23 +258,36 @@ export function rollBonus(
     total += modifier.subtract ? -rolled : rolled;
   }
   const stats = deriveStats(actor, context);
-  // What a zone it stands in grants, as Pass without Trace's +10 to Stealth.
-  const placed = context.state.combat
-    ? zoneModifiers(actor, context.state, context)
-    : [];
-  for (const modifier of [...passiveModifiers(stats.passives), ...placed]) {
-    if (
-      modifier.kind === "bonus" &&
-      modifier.to === to &&
-      !modifier.concentration &&
-      (!modifier.weapon || weapon) &&
-      (!modifier.skill || modifier.skill === skill) &&
-      (!modifier.tool || usesTool(modifier.tool, tool, context)) &&
-      (!modifier.ability || modifier.ability === ability)
-    ) {
+  const fits = (modifier: Modifier): boolean =>
+    modifier.kind === "bonus" &&
+    modifier.to === to &&
+    !modifier.concentration &&
+    (!modifier.weapon || weapon) &&
+    (!modifier.skill || modifier.skill === skill) &&
+    (!modifier.tool || usesTool(modifier.tool, tool, context)) &&
+    (!modifier.ability || modifier.ability === ability);
+  for (const modifier of passiveModifiers(stats.passives)) {
+    if (modifier.kind === "bonus" && fits(modifier)) {
       total += rollAmount(modifier.amount, stats, context.dice);
     }
   }
+  // What a zone it stands in grants, as Pass without Trace's +10 to Stealth, worked out from the zone owner's
+  // numbers, as Aura of Protection's Charisma modifier. Two of the same aura count once, the better one.
+  const best = new Map<string, number>();
+  for (const { modifier, zone } of context.state.combat
+    ? zoneGrants(actor, context.state, context)
+    : []) {
+    if (modifier.kind !== "bonus" || !fits(modifier)) continue;
+    const owner = context.state.actors[zone.owner] ?? actor;
+    const rolled = rollAmount(
+      modifier.amount,
+      owner === actor ? stats : deriveStats(owner, context),
+      context.dice,
+    );
+    const key = `${zone.sourceId}|${modifier.to}`;
+    best.set(key, Math.max(best.get(key) ?? -Infinity, rolled));
+  }
+  for (const value of best.values()) total += value;
   return total;
 }
 
@@ -1046,6 +1060,21 @@ export function pactWeaponId(
   });
 }
 
+const kindOf = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
+
+// The kinds of weapons a character picked as Monk weapons, as a Kensei's weapons.
+function monkWeaponsOf(actor: Actor): ReadonlySet<string> {
+  return new Set(
+    (effectiveBuild(actor)?.levels ?? []).flatMap((entry) =>
+      entry.answers.flatMap((answer) =>
+        answer.kind === "weapons" && answer.monk
+          ? answer.values.map(kindOf)
+          : [],
+      ),
+    ),
+  );
+}
+
 // Whether a hit with this action is one a rider of this kind answers (schemas.ts HitKindSchema).
 // A magic weapon's own strike option answers only a hit with that weapon, as a Staff of Striking's charges as a
 // Quarterstaff; any other item's answers any hit its trigger allows.
@@ -1096,8 +1125,10 @@ export function hitFits(
       return (
         unarmed ||
         (weapon !== undefined &&
-          isMelee(hitWith) &&
-          (weapon.category === "simple" || weapon.properties.includes("light")))
+          ((isMelee(hitWith) &&
+            (weapon.category === "simple" ||
+              weapon.properties.includes("light"))) ||
+            monkWeaponsOf(attacker).has(kindOf(weapon.baseWeapon ?? id))))
       );
     case "magicWeapon":
       return weapon?.baseWeapon !== undefined;

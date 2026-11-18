@@ -5,6 +5,7 @@
   savingThrows: [str, con]
   weapons: [simple, martial]
   armor: [light, medium, heavy, shield]
+  swaps: { weaponMastery: longRest }
   levels:
     - level: 1
       grants:
@@ -51,6 +52,7 @@
   martialWeaponProperties: [finesse, light]
   armor: [light]
   tools: ["srd52:item/thieves-tools"]
+  swaps: { weaponMastery: prepare }
   levels:
     - level: 1
       grants:
@@ -77,6 +79,31 @@
               sleightOfHand,
               stealth,
             ]
+        - kind: skills
+          id: expertise
+          count: 2
+          from:
+            [
+              acrobatics,
+              animalHandling,
+              arcana,
+              athletics,
+              deception,
+              history,
+              insight,
+              intimidation,
+              investigation,
+              medicine,
+              nature,
+              perception,
+              performance,
+              persuasion,
+              religion,
+              sleightOfHand,
+              stealth,
+              survival,
+            ]
+          expertise: proficient
       scaling: { sneakAttackD6: 1, weaponMastery: 2 }
     - level: 2
       grants: ["srd52:feature/cunning-action"]
@@ -160,6 +187,12 @@
       scaling: { cantrips: 3, preparedSpells: 4 }
     - level: 2
       grants: ["srd52:feature/scholar"]
+      choices:
+        - kind: skills
+          id: scholar
+          count: 1
+          from: [arcana, history, investigation, medicine, nature, religion]
+          expertise: proficient
       slots: [3]
       scaling: { cantrips: 3, preparedSpells: 5 }
     - level: 3

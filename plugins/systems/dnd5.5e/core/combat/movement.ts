@@ -39,6 +39,7 @@ import {
   discernEvent,
   inZone,
   placedConditionEvents,
+  zoneCureEvents,
   blockingSet,
   sealed,
   thornHits,
@@ -621,6 +622,7 @@ export function runFinishMove(
       }),
       ...fogBoundEvents(arrived, context),
       ...(fields ? placedEvents(applyDndEvent(context.state, moved)) : []),
+      ...zoneCureEvents(applyDndEvent(context.state, moved), context),
       ...forcedThrough(
         walker,
         context.state,

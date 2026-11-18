@@ -38,6 +38,7 @@ import {
   thornKeys,
   coverKeys,
   hazed,
+  zoneModifiers,
   type ZoneKind,
 } from "./zones.ts";
 
@@ -119,10 +120,23 @@ export function coverFor(
   access?: ContentAccess,
 ): Cover {
   const found = squaresCover(state, from, target, ignore);
-  return found !== "total" && access && coveredByHost(target, state, access)
+  return found !== "total" &&
+    access &&
+    (coveredByHost(target, state, access) || shielded(target, state, access))
     ? (Math.max(found, 2) as Cover)
     : found;
 }
+
+// Half Cover an effect or an area gives, as Bulwark of Force's.
+const shielded = (
+  target: Actor,
+  state: DndState,
+  access: ContentAccess,
+): boolean =>
+  target.activeEffects.some(({ modifier }) => modifier.kind === "halfCover") ||
+  zoneModifiers(target, state, access).some(
+    (modifier) => modifier.kind === "halfCover",
+  );
 
 function squaresCover(
   state: DndState,

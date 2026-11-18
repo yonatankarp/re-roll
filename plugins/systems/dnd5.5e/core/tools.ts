@@ -55,6 +55,13 @@ export function toolKeyOf(id: string, access: ContentAccess): string {
   return item?.type === "tool" ? toolKey(item.name) : id;
 }
 
+// Every tool once, by its first id, and whether it's one of the Artisan's Tools, for a choice of tools.
+export function everyTool(
+  access: ContentAccess,
+): readonly { readonly id: string; readonly artisan: boolean }[] {
+  return [...toolsOf(access).values()];
+}
+
 // What a tool deals with and whether it's one of the Artisan's Tools, from any of its copies.
 export function toolOf(id: string, access: ContentAccess): Tool | undefined {
   const item = ItemSchema.safeParse(access.content(id)).data;

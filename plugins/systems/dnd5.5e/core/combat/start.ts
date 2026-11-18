@@ -28,7 +28,10 @@ import {
   dndEvent,
   frame,
   freshActor,
+  hasCondition,
+  INCAPACITATING,
   isDead,
+  isDown,
   NS,
 } from "../state.ts";
 import {
@@ -157,9 +160,15 @@ export function startCombat(
   // Ambush: a die of its resource added to Initiative, spent.
   // shortcut: it's spent on every Initiative while one is left, where the player would choose when.
   const dieSpent: SystemEvent[] = [];
-  const initiativeDie = (actor: Actor, stats: Stats): number => {
+  const initiativeDie = (
+    actor: Actor,
+    stats: Stats,
+    allies = false,
+  ): number => {
     for (const passive of stats.passives) {
       if (passive.kind !== "initiativeDie") continue;
+      if ((passive.allies === true) !== allies) continue;
+      if (allies && hasCondition(actor, ...INCAPACITATING)) continue;
       const left =
         (stats.resources[passive.resource] ?? 0) -
         (actor.resourcesSpent[passive.resource] ?? 0);
@@ -180,6 +189,13 @@ export function startCombat(
     }
     return 0;
   };
+  // Tandem Footwork: one bearer's die, rolled once, for the whole party.
+  // shortcut: every ally gains it, as the party isn't placed yet to measure 30 feet.
+  let tandem = 0;
+  for (const actor of party) {
+    tandem = initiativeDie(actor, deriveStats(actor, context), true);
+    if (tandem > 0) break;
+  }
   const rolled = [...party, ...familiars, ...monsters].map(
     (actor, position) => {
       const stats = deriveStats(actor, context);
@@ -207,6 +223,7 @@ export function startCombat(
           natural +
           stats.initiative +
           initiativeDie(actor, stats) +
+          (actor.side === "party" ? tandem : 0) +
           (atlas && actor.side === "party"
             ? rollDiceNotation(atlas, context.dice)
             : 0),
@@ -330,6 +347,7 @@ export function startCombat(
         ...(lowered ? { damageToParty: share } : {}),
       }),
       ...dieSpent,
+      ...rallyEvents(party, context),
       ...party.flatMap((actor) => initiativeRecharge(actor, context)),
       ...environmentConditionEvents(around, [...party, ...monsters], context),
     ],
@@ -417,6 +435,43 @@ export function initiativeRecharge(
     }
   }
   return events;
+}
+
+// Rallying Cry: as a fight starts, a use spent gives Heroic Inspiration to as many of the party as the bearer's
+// Proficiency Bonus, the bearer and those without it first (schemas.ts initiativeRally).
+function rallyEvents(party: readonly Actor[], context: Context): SystemEvent[] {
+  const inspired = new Set(
+    party.flatMap((actor) => (actor.heroicInspiration ? [actor.id] : [])),
+  );
+  return party.flatMap((actor) => {
+    const stats = deriveStats(actor, context);
+    const rally = stats.passives.find(
+      (passive) => passive.kind === "initiativeRally",
+    );
+    if (
+      rally?.kind !== "initiativeRally" ||
+      isDown(actor) ||
+      hasCondition(actor, ...INCAPACITATING) ||
+      (stats.resources[rally.resource] ?? 0) -
+        (actor.resourcesSpent[rally.resource] ?? 0) <=
+        0
+    ) {
+      return [];
+    }
+    const chosen = [actor, ...party.filter((other) => other !== actor)]
+      .filter((other) => !isDown(other) && !inspired.has(other.id))
+      .slice(0, stats.proficiency);
+    for (const other of chosen) inspired.add(other.id);
+    return [
+      dndEvent(`${NS}:resourceSpent`, {
+        actor: actor.id,
+        resource: rally.resource,
+      }),
+      ...chosen.map((other) =>
+        dndEvent(`${NS}:inspirationGranted`, { actor: other.id }),
+      ),
+    ];
+  });
 }
 
 // The wards the party readied in this scene go off as the fight starts: each `prepared` activation at the first foe in
