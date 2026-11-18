@@ -29,6 +29,11 @@ import {
   type Amount,
   DamageTypeSchema,
   type LeafEffect,
+  SpellSchema,
+  FeatureSchema,
+  ItemSchema,
+  type Table,
+  type TableRow,
   WeaponSchema,
 } from "../schemas.ts";
 import {
@@ -40,6 +45,7 @@ import {
   rollAmount,
   rollDiceNotation,
   type Stats,
+  withItemNumbers,
 } from "../stats.ts";
 import { finalDamage, rollD20 } from "../rules.ts";
 import {
@@ -1883,7 +1889,50 @@ export function rollOnTable(
 } {
   const { table } = action.activation;
   if (!table) return { events: [], frames: [], negate: false };
-  const die = context.dice.roll(table.die);
+  return tableRoll(
+    table,
+    action,
+    bearer,
+    source,
+    undefined,
+    spellLevel,
+    context,
+  );
+}
+
+// The table a feature or magic item holds, which a `rollTable` names it for.
+export function tableOf(from: string, context: Context): Table | undefined {
+  const entry = context.content(from);
+  const item = ItemSchema.safeParse(entry).data;
+  return (
+    FeatureSchema.safeParse(entry).data?.table ??
+    (item?.type === "magicItem" ? item.table : undefined)
+  );
+}
+
+// A roll on a table (TableSchema): the die's face is reported, and the row it lands on resolved at its targets, a
+// row's own table rolled on in turn. `pick` is a face already rolled, as when a pick of two chose it.
+interface AnyTable {
+  readonly die: number;
+  readonly rows: readonly (TableRow & {
+    readonly table?: AnyTable | undefined;
+  })[];
+}
+export function tableRoll(
+  table: AnyTable,
+  action: KnownAction,
+  bearer: Actor,
+  source: Actor | undefined,
+  target: Actor | undefined,
+  spellLevel: number,
+  context: Context,
+  pick?: number,
+): {
+  readonly events: SystemEvent[];
+  readonly frames: Frame[];
+  readonly negate: boolean;
+} {
+  const die = pick ?? context.dice.roll(table.die);
   const events: SystemEvent[] = [
     dndEvent(`${NS}:rollReported`, {
       actor: bearer.id,
@@ -1896,13 +1945,28 @@ export function rollOnTable(
     }),
   ];
   const row = table.rows.find((item) => item.min <= die && die <= item.max);
-  if (!row?.resolution) {
-    return { events, frames: [], negate: row?.negate === true };
+  const negate = row?.negate === true;
+  const inner = row?.table;
+  if (inner) {
+    const deeper = tableRoll(
+      inner,
+      action,
+      bearer,
+      source,
+      target,
+      spellLevel,
+      context,
+    );
+    return { ...deeper, events: [...events, ...deeper.events] };
+  }
+  if (!row || (!row.resolution && !row.spell)) {
+    return { events, frames: [], negate };
   }
   const within = row.within;
   const targets = [
     ...(row.targets.includes("self") ? [bearer] : []),
     ...(row.targets.includes("source") && source ? [source] : []),
+    ...(row.targets.includes("target") && target ? [target] : []),
     ...(within === undefined
       ? []
       : Object.values(context.state.actors).filter(
@@ -1913,7 +1977,14 @@ export function rollOnTable(
     (item, index, list) =>
       list.findIndex((other) => other.id === item.id) === index,
   );
-  const { resolution } = row;
+  const spell = row.spell
+    ? SpellSchema.safeParse(context.content(row.spell)).data
+    : undefined;
+  const cast = spell?.activation
+    ? withItemNumbers(spell.activation, row.dc, row.attack)
+    : undefined;
+  const resolution = cast?.resolution ?? row.resolution;
+  if (!resolution) return { events, frames: [], negate };
   const scaled =
     row.perSpellLevel && "damage" in resolution
       ? {
@@ -1938,8 +2009,12 @@ export function rollOnTable(
   const rolled = resolveAction(
     {
       ...action,
+      ...(spell
+        ? { id: `spell:${spell.id}`, spellLevel: row.level ?? spell.level }
+        : {}),
       activation: {
         ...action.activation,
+        ...(cast ?? {}),
         cost: [],
         targeting: { self: true },
         resolution: scaled,
@@ -1948,11 +2023,12 @@ export function rollOnTable(
     bearer,
     targets,
     context,
+    spell ? (row.level ?? spell.level) : undefined,
   );
   return {
     events: [...events, ...(rolled.events ?? [])],
     frames: [...(rolled.frames ?? [])],
-    negate: row.negate === true,
+    negate,
   };
 }
 

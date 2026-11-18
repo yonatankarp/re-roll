@@ -115,6 +115,7 @@ export const FRAME_KINDS = [
   "reincarnateAnswer",
   "missReroll", // a missed attack rolled again, or at another creature, as Master Duelist or Curving Shot (class-rules.ts)
   "bringAlong", // the allies a teleport brings land beside it, as Travel along the Tree's (combat/movement.ts)
+  "tablePick", // a table's row picked, as Tamed Surge's or Controlled Chaos's (combat/school.ts)
   "riderChoice", // what a spell's cast rider does, picked once it's done, as Steps of the Fey's (combat/school.ts)
   "redirectHit", // where a missed attack lands instead, as Tipsy Sway's Redirect Attack (combat/reactions.ts)
   "hideNow", // the Hide action as part of another, as Shrouding Spells' (actions.ts)
@@ -470,6 +471,8 @@ const ActorSchema = z.strictObject({
   attuned: z.array(ContentIdSchema).optional(), // magic items attuned to, at most MAX_ATTUNED
   // Ability scores raised for good, as by studying a Manual of Bodily Health. Missing when none has been.
   raised: z.partialRecord(AbilitySchema, z.number().int()).optional(),
+  // The passives rolled for an item as it was found, by the item's id (MagicItemSchema `properties`). Missing until one.
+  itemProperties: z.record(z.string(), z.array(PassiveSchema)).optional(),
   // Items studied whose study gives passives for good or is made once, as a Book of Exalted Deeds. Missing until one.
   studied: z.array(ContentIdSchema).optional(),
   xp: z.number().int().optional(), // only the player's is tracked, and the party levels together
@@ -717,6 +720,11 @@ const AbilityRaisedSchema = z.strictObject({
   ability: AbilitySchema,
   amount: z.number().int(),
   item: ContentIdSchema,
+});
+const PropertiesRolledSchema = z.strictObject({
+  actor: z.string(),
+  item: ContentIdSchema,
+  passives: z.array(PassiveSchema),
 });
 const ItemStudiedSchema = z.strictObject({
   actor: z.string(),
@@ -969,6 +977,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:goldSpent`]: GoldSpentSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemStudied`]: ItemStudiedSchema,
+  [`${NS}:propertiesRolled`]: PropertiesRolledSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
   [`${NS}:abilityRaised`]: AbilityRaisedSchema,
   [`${NS}:poolRolled`]: PoolRolledSchema,
@@ -2417,6 +2426,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         rolledPools: { ...actor.rolledPools, [data.resource]: data.amount },
+      }));
+    }
+    case `${NS}:propertiesRolled`: {
+      const data = payload(PropertiesRolledSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        itemProperties: { ...actor.itemProperties, [data.item]: data.passives },
       }));
     }
     case `${NS}:itemStudied`: {
