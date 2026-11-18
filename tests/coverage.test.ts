@@ -297,6 +297,11 @@ describe("the coverage report", () => {
       "- id: hb:condition/dizzy\n  name: Dizzy\n",
     "books/library/hb/0001-intro.md": "# Chapter 1: Intro\n",
     "books/library/hb/0002-gloom.md": "## Shadows\n### Bane\n",
+    // An adventure's own stat blocks link only by their library: Bane names no heading, so it isn't matched.
+    "books/adventures/adv/plugin.yaml":
+      "id: adv\nkind: adventure\nversion: 1.0.0\nsdk: ^1\nsystem: sys@^1\ndistribution: private\n",
+    "books/adventures/adv/monsters/local.yaml":
+      "- id: adv:monster/bane\n  name: Bane\n- id: adv:monster/shade\n  name: Shade\n  library: [hb/0002-gloom#bane]\n",
     "books/library/ob/0001-gloom.md": "# Gloom\n## Bane\n",
     "books/coverage/hb.yaml":
       "rules:\n  - { levels: [3], is: deity }\nlinks:\n  hb/0002-gloom#nothing: [hb:spell/none]\n",
@@ -332,10 +337,10 @@ describe("the coverage report", () => {
       [system],
     );
     expect(formatCoverage(report)).toEqual([
-      "Library coverage, 2 books, 5 headings: 3 linked, 1 structural, 1 missing",
-      "  hb: 3 headings: 1 linked, 1 structural, 1 missing (deity 1)",
+      "Library coverage, 2 books, 5 headings: 4 linked, 1 structural, 0 missing",
+      "  hb: 3 headings: 2 linked, 1 structural, 0 missing",
       "  ob: 2 headings: 2 linked (2 to a reprint), 0 structural, 0 missing",
-      "Missing by kind: deity 1",
+      "Missing by kind: none",
     ]);
     expect(report.issues.map((issue) => issue.message)).toEqual([
       'condition "gone", which the system plays, has no entity in any book',

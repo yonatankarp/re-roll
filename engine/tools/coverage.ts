@@ -28,6 +28,7 @@ export interface Entity {
   readonly about: readonly string[]; // a ruling's: the entity ids it rules on
   readonly lore?: boolean; // a system's lore kind, such as a rules glossary term: linked only where a rule asks
   readonly reprint?: string; // an older entry's: its version in the edition the game plays
+  readonly linkOnly?: boolean; // an adventure's own: linked only by its `library`, never matched by name
 }
 
 const RuleSchema = z.strictObject({
@@ -125,6 +126,7 @@ export function indexEntities(entities: readonly Entity[]): EntityIndex {
     if (key) map.set(key, [...(map.get(key) ?? []), entity]);
   };
   for (const entity of entities) {
+    if (entity.linkOnly) continue;
     const tail = entity.id.slice(entity.id.indexOf("/") + 1);
     const name = slug(entity.name);
     const keys = new Set([
@@ -395,7 +397,9 @@ export async function checkCoverage(
   );
   const entities: Entity[] = [];
   for (const [plugin, record] of catalog.plugins) {
-    if (record.manifest.kind !== "rules") continue;
+    // An adventure's own entities, such as a stat block it prints, count only where they name a heading.
+    const linkOnly = record.manifest.kind === "adventure";
+    if (record.manifest.kind !== "rules" && !linkOnly) continue;
     const edition = editionOf(plugin) ?? "";
     for (const file of record.files) {
       if (!/^[^/]+\/[^/]+\.yaml$/.test(file)) continue;
@@ -411,6 +415,7 @@ export async function checkCoverage(
           reprint?: unknown;
         } | null;
         if (typeof entry?.id !== "string") continue;
+        if (linkOnly && !Array.isArray(entry.library)) continue;
         const kind = /^[^:]+:([^/]+)\//.exec(entry.id)?.[1] ?? "";
         const ids = (list: unknown): string[] =>
           Array.isArray(list)
@@ -425,6 +430,7 @@ export async function checkCoverage(
           library: ids(entry.library),
           about: ids(entry.about),
           lore: lore.has(kind),
+          ...(linkOnly ? { linkOnly } : {}),
           ...(typeof entry.reprint === "string"
             ? { reprint: entry.reprint }
             : {}),
