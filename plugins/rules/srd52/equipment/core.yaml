@@ -134,7 +134,7 @@
   rarity: common
   attunement: false
   text: Reading it casts Magic Missile without a spell slot, and the scroll crumbles to dust.
-  automation: partial
+  automation: full
   spell: "srd52:spell/magic-missile"
 - id: "srd52:item/spell-scroll-disintegrate"
   name: Spell Scroll (Disintegrate)
@@ -143,7 +143,7 @@
   rarity: veryRare
   attunement: false
   text: Reading it casts Disintegrate without a spell slot, and the scroll crumbles to dust.
-  automation: partial
+  automation: full
   spell: "srd52:spell/disintegrate"
 - id: "srd52:item/spell-scroll-teleport"
   name: Spell Scroll (Teleport)
@@ -172,3 +172,11 @@
   text: Reading it casts Magic Circle without a spell slot, and the scroll crumbles to dust.
   automation: partial
   spell: "srd52:spell/magic-circle"
+- id: "srd52:item/thieves-tools"
+  name: Thieves' Tools
+  costCp: 2500
+  weightLb: 1
+  type: tool
+  ability: dex
+  handles: [lock, trap]
+  text: Used to pick a lock or disarm a trap.

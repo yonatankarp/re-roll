@@ -22,6 +22,7 @@ import {
   ALL_SKILLS,
   type Item,
   type ItemCast,
+  type Targeting,
   type ResourceDef,
   DAMAGE_TYPES,
   ABILITIES,
@@ -80,11 +81,13 @@ import {
 } from "./cast-options.ts";
 import { withWeaponRiders } from "./weapon-riders.ts";
 import {
+  ITEM_PREFIX,
   THROW_PREFIX,
   WEAPON_PREFIX,
   castFrom,
   itemCastId,
   itemUseId,
+  itemUseOf,
   spellOfSource,
   weaponItemId,
 } from "./combat/ids.ts";
@@ -126,6 +129,18 @@ export interface KnownAction {
   readonly hitType?: true; // its damage takes the type of the hit it adds to, as a maneuver's die does
   readonly rolled?: true; // taken only when a randomAction picks it, as one eye ray
   readonly concentrates?: true; // casting it starts Concentration even with no lasting effect, as Flame Blade
+  readonly ammunition?: string; // the magic ammunition it fires, which a hit spends (combat/attack.ts landHit)
+  readonly stored?: string; // the item it's cast from, which no longer holds it once cast (storedCasts)
+  // A check made as it's taken, which on a failure wastes it, as reading a Spell Scroll above the reader's level
+  // (combat/actions.ts castAction).
+  readonly castCheck?: {
+    readonly ability: Ability;
+    readonly skill?: Skill;
+    readonly dc: number;
+    readonly keep?: string; // a resource a failure doesn't spend
+    readonly chance?: number; // in place of the check, the percent chance it fails, as a Wind Fan's tearing
+    readonly breaks?: string; // the item a failure destroys
+  };
   readonly onceKeys?: readonly string[]; // once-a-turn uses its cast spends, as a `spellDamage` bonus (combat/actions.ts)
   readonly saveDice?: string; // dice taken off each target's first save, as Modify Magic's Tenacious Spell (cast-options.ts)
 }
@@ -288,6 +303,43 @@ function withItemAbilities(
     }
   }
   return raised;
+}
+
+// The activation with `bonus` added to each save DC worked out from its caster's spellcasting, as a Rod of the Pact
+// Keeper's for a Warlock spell.
+function withDcBonus(activation: Activation, bonus: number): Activation {
+  return JSON.parse(JSON.stringify(activation), (_key, value: unknown) =>
+    typeof value === "object" &&
+    value !== null &&
+    "add" in value &&
+    Array.isArray(value.add) &&
+    value.add.some(
+      (term: unknown) =>
+        typeof term === "object" &&
+        term !== null &&
+        "kind" in term &&
+        term.kind === "spellSaveDc",
+    )
+      ? {
+          ...value,
+          base:
+            ("base" in value && typeof value.base === "number"
+              ? value.base
+              : 0) + bonus,
+        }
+      : value,
+  ) as Activation;
+}
+
+// Scores an effect on the character sets while it lasts, as a Potion of Giant Strength's, never lowering one.
+function withEffectScores(scores: AbilityScores, actor: Actor): AbilityScores {
+  const set = { ...scores };
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind === "setScore") {
+      set[modifier.ability] = Math.max(set[modifier.ability], modifier.score);
+    }
+  }
+  return set;
 }
 
 // The activation with each Concentration duration made a plain one of these minutes, as War God's Blessing's.
@@ -483,7 +535,10 @@ export function chargesOf(item: Item): {
 // Spells by their names after the plugin, the first loaded of each, so the book that leads plays it. Kept for each
 // run's list of ids, which doesn't change.
 const namedSpells = new WeakMap<readonly string[], Map<string, string>>();
-function spellNamed(slug: string, access: ContentAccess): string | undefined {
+export function spellNamed(
+  slug: string,
+  access: ContentAccess,
+): string | undefined {
   const ids = access.contentIds();
   let bySlug = namedSpells.get(ids);
   if (!bySlug) {
@@ -503,6 +558,7 @@ function withItemNumbers(
   activation: Activation,
   dc: number | undefined,
   attack: number | undefined,
+  mod?: number, // the spellcasting modifier, as a stored spell's caster's
 ): Activation {
   const toHit = attack ?? (dc === undefined ? undefined : dc - 8);
   const mapped = (value: unknown, key = ""): unknown => {
@@ -514,11 +570,24 @@ function withItemNumbers(
     const terms = Array.isArray(copy.add)
       ? (copy.add as { readonly kind: string }[])
       : [];
-    if (dc !== undefined && terms.some((term) => term.kind === "spellSaveDc")) {
+    const fixed = (kind: string, amount: number | undefined): boolean =>
+      amount !== undefined && terms.some((term) => term.kind === kind);
+    if (fixed("spellSaveDc", dc) || fixed("spellMod", mod)) {
+      const replaced = terms.filter(
+        (term) =>
+          (term.kind === "spellSaveDc" && dc !== undefined) ||
+          (term.kind === "spellMod" && mod !== undefined),
+      );
       return {
         ...copy,
-        base: (typeof copy.base === "number" ? copy.base : 0) + dc,
-        add: terms.filter((term) => term.kind !== "spellSaveDc"),
+        base:
+          (typeof copy.base === "number" ? copy.base : 0) +
+          replaced.reduce(
+            (total, term) =>
+              total + (term.kind === "spellSaveDc" ? (dc ?? 0) : (mod ?? 0)),
+            0,
+          ),
+        add: terms.filter((term) => !replaced.includes(term)),
       };
     }
     return key === "attack" && copy.type === "spell" && toHit !== undefined
@@ -535,6 +604,7 @@ function itemCasts(
   item: Item,
   level: number,
   access: ContentAccess,
+  actor: Actor,
 ): KnownAction[] {
   const { resources, casts } = chargesOf(item);
   return casts.flatMap((cast) => {
@@ -566,7 +636,11 @@ function itemCasts(
           : step
             ? scaleActivation(activation, step, at - spell.level)
             : activation;
-      const numbered = withItemNumbers(scaled, cast.dc, cast.attack);
+      const numbered = limitedCast(
+        withItemNumbers(scaled, cast.dc, cast.attack),
+        cast,
+      );
+      const used = resource ? (actor.resourcesSpent[resource] ?? 0) : 0;
       return [
         {
           id: itemCastId(spellId, itemId, charges),
@@ -577,15 +651,19 @@ function itemCasts(
           activation: {
             ...numbered,
             cost: [
-              ...activation.cost.filter(
-                (cost) =>
-                  cost !== "slot" &&
-                  !(
-                    cast.gold !== undefined &&
-                    typeof cost === "object" &&
-                    "gold" in cost
-                  ),
-              ),
+              ...activation.cost
+                .map((cost) =>
+                  cast.bonusAction && cost === "action" ? "bonusAction" : cost,
+                )
+                .filter(
+                  (cost) =>
+                    cost !== "slot" &&
+                    !(
+                      cast.gold !== undefined &&
+                      typeof cost === "object" &&
+                      "gold" in cost
+                    ),
+                ),
               // the item's own costly component in place of the spell's, as Cauldron of Rebirth's salt
               ...(cast.gold ? [{ gold: cast.gold }] : []),
               ...(charges > 0 && resource
@@ -595,21 +673,223 @@ function itemCasts(
           },
           spellLevel: at,
           ...(lasting ? { concentrates: true as const } : {}),
+          // A Wind Fan used again before dawn may tear.
+          ...(cast.tears && used > 0
+            ? {
+                castCheck: {
+                  ability: "int" as const,
+                  dc: 0,
+                  chance: Math.min(100, cast.tears * used),
+                  breaks: itemId,
+                },
+              }
+            : {}),
         },
       ];
     });
   });
 }
 
+// An item's cast with its limits (ItemCastSchema): on its caster alone, an area of its size, only some creatures,
+// and how some creatures' saves go.
+function limitedCast(activation: Activation, cast: ItemCast): Activation {
+  const { targeting, resolution } = activation;
+  const narrowed: Targeting = cast.self
+    ? { self: true }
+    : "area" in targeting
+      ? {
+          ...targeting,
+          ...(cast.radius
+            ? { area: { ...targeting.area, radius: cast.radius } }
+            : {}),
+          ...(cast.creatureTypes ? { creatureTypes: cast.creatureTypes } : {}),
+        }
+      : "creatures" in targeting
+        ? {
+            ...targeting,
+            ...(cast.creatureTypes
+              ? { creatureTypes: cast.creatureTypes }
+              : {}),
+            ...(cast.swimmers ? { swimmers: true as const } : {}),
+          }
+        : targeting;
+  return {
+    ...activation,
+    targeting: narrowed,
+    resolution:
+      cast.edges && resolution.kind === "save"
+        ? { ...resolution, edges: [...(resolution.edges ?? []), ...cast.edges] }
+        : resolution,
+  };
+}
+
+// Every spell by its name after the plugin, from the book that leads, as spellNamed finds them.
+const leadingSpells = new WeakMap<readonly string[], readonly string[]>();
+function allSpells(access: ContentAccess): readonly string[] {
+  const ids = access.contentIds();
+  let found = leadingSpells.get(ids);
+  if (!found) {
+    found = ids.filter((id) => {
+      const at = id.indexOf(":spell/");
+      return at >= 0 && spellNamed(id.slice(at + 7), access) === id;
+    });
+    leadingSpells.set(ids, found);
+  }
+  return found;
+}
+
+// The spells on a class's list that do something in a fight, worked out once for the content loaded.
+const listed = new WeakMap<readonly string[], Map<string, readonly string[]>>();
+function classSpells(
+  className: string,
+  access: ContentAccess,
+): readonly string[] {
+  const ids = access.contentIds();
+  let byClass = listed.get(ids);
+  if (!byClass) {
+    byClass = new Map();
+    listed.set(ids, byClass);
+  }
+  let found = byClass.get(className);
+  if (!found) {
+    found = allSpells(access).filter((spellId) => {
+      const spell = lookup(access, SpellSchema, spellId);
+      return (
+        spell.activation !== undefined &&
+        onClassList(spell, [className]) &&
+        doesSomething(spell.activation.resolution)
+      );
+    });
+    byClass.set(className, found);
+  }
+  return found;
+}
+
+// The spells an item lets its bearer try to cast without knowing them (MagicItemSchema `unknownSpell`): each behind
+// its Arcana check, spending the item's use, and for a leveled spell a slot of its level.
+function unknownSpells(
+  itemId: string,
+  item: Item,
+  known: ReadonlySet<string>,
+  highest: number,
+  ability: Ability,
+  level: number,
+  access: ContentAccess,
+): KnownAction[] {
+  if (item.type !== "magicItem" || !item.unknownSpell) return [];
+  const rule = item.unknownSpell;
+  return classSpells(rule.class, access).flatMap((spellId): KnownAction[] => {
+    const spell = lookup(access, SpellSchema, spellId);
+    const activation = spell.activation;
+    if (
+      !activation ||
+      known.has(spellId) ||
+      (rule.cantrips
+        ? spell.level !== 0
+        : spell.level < 1 || spell.level > highest) ||
+      (rule.action && !activation.cost.includes("action"))
+    ) {
+      return [];
+    }
+    const scaled =
+      spell.level === 0 && spell.cantrip
+        ? scaleActivation(activation, spell.cantrip.perTier, cantripTier(level))
+        : activation;
+    const cast = castWith(scaled, ability);
+    return [
+      {
+        id: itemCastId(spellId, itemId, 0),
+        name: `${spell.name} (${item.name})`,
+        activation: {
+          ...cast,
+          cost: [...cast.cost, { resource: rule.resource }],
+        },
+        spellLevel: spell.level,
+        upcast: spell.upcast,
+        castCheck: {
+          ability: "int",
+          skill: "arcana",
+          dc: rule.dc + (rule.perLevel ? spell.level : 0),
+          ...(rule.keepOnFailure ? { keep: rule.resource } : {}),
+        },
+      },
+    ];
+  });
+}
+
+// The spells stored in a worn item, each cast once with the slot and numbers it was stored with, as from a Ring of
+// Spell Storing. Two of one spell are one action, which casts the first stored.
+function storedCasts(
+  itemId: string,
+  item: Item,
+  actor: Actor,
+  access: ContentAccess,
+): KnownAction[] {
+  if (item.type !== "magicItem" || !item.storesSpells) return [];
+  const seen = new Set<string>();
+  return (actor.storedSpells?.[itemId] ?? []).flatMap((stored) => {
+    const spell = SpellSchema.safeParse(access.content(stored.spell)).data;
+    if (!spell?.activation || seen.has(stored.spell)) return [];
+    seen.add(stored.spell);
+    const step = spell.upcast?.perSlotLevel;
+    const scaled = step
+      ? scaleActivation(spell.activation, step, stored.level - spell.level)
+      : spell.activation;
+    const numbered = withItemNumbers(
+      scaled,
+      stored.dc,
+      stored.attack,
+      stored.mod,
+    );
+    const lasting =
+      spell.lasting &&
+      typeof spell.duration === "object" &&
+      "concentration" in spell.duration;
+    return [
+      {
+        id: itemCastId(stored.spell, itemId, 0),
+        name: `${spell.name}, level ${String(stored.level)} (${item.name})`,
+        activation: {
+          ...numbered,
+          cost: numbered.cost.filter(
+            (cost) =>
+              cost !== "slot" && !(typeof cost === "object" && "gold" in cost),
+          ),
+        },
+        spellLevel: stored.level,
+        stored: itemId,
+        ...(lasting ? { concentrates: true as const } : {}),
+      },
+    ];
+  });
+}
+
 // A worn item's own activations (ChargedSchema `activations`), named after it, as a Pearl of Power's.
-function itemUses(itemId: string, item: Item): KnownAction[] {
+function itemUses(itemId: string, item: Item, actor: Actor): KnownAction[] {
   const uses = "activations" in item ? (item.activations ?? []) : [];
-  return uses.map(({ name, activation }, index) => ({
-    id: itemUseId(itemId, index),
-    name: uses.length > 1 ? `${name} (${item.name})` : name,
-    activation,
-    spellLevel: null,
-  }));
+  return uses.flatMap(({ name, activation, whileCharged }, index) =>
+    whileCharged && !charged(actor, item, whileCharged)
+      ? []
+      : [
+          {
+            id: itemUseId(itemId, index),
+            name: uses.length > 1 ? `${name} (${item.name})` : name,
+            activation,
+            spellLevel: null,
+          },
+        ],
+  );
+}
+
+// Whether one of the item's pools has a use left, as a Helm of Brilliance's rubies.
+// shortcut: a pool's maximum here is its base and what was rolled, without terms worked out from the bearer.
+function charged(actor: Actor, item: Item, resource: string): boolean {
+  const def = chargesOf(item).resources.find((pool) => pool.id === resource);
+  if (!def) return false;
+  const most =
+    def.max.base +
+    (actor.rolledPools?.[resource] ?? (def.rolled ? diceCount(def.rolled) : 0));
+  return most - (actor.resourcesSpent[resource] ?? 0) > 0;
 }
 
 // The abilities a level's feat raised, when that feat makes its raised save proficient, as Resilient does.
@@ -1388,6 +1668,163 @@ export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
   );
 }
 
+// The weapon, or one of the forms it changes into, whose damage die is biggest, attacked with as a Finesse weapon.
+function bestForm(
+  weapon: Weapon,
+  forms: readonly string[],
+  access: ContentAccess,
+): Weapon {
+  const average = (item: Weapon): number => {
+    const [count = 1, sides = 0] = (item.damage.dice ?? "0d0")
+      .split("d")
+      .map(Number);
+    return (item.damage.flat ?? 0) + (count * (sides + 1)) / 2;
+  };
+  const shaped = forms
+    .map((slug) =>
+      access
+        .contentIds()
+        .filter((id) => id.endsWith(`:item/${slug}`))
+        .map((id) => WeaponSchema.safeParse(access.content(id)).data)
+        .find((item) => item !== undefined),
+    )
+    .filter((item): item is Weapon => item !== undefined);
+  const best = [weapon, ...shaped].reduce((most, item) =>
+    average(item) > average(most) ? item : most,
+  );
+  const properties = best.properties.includes("finesse")
+    ? best.properties
+    : [...best.properties, "finesse" as const];
+  return { ...weapon, damage: best.damage, properties };
+}
+
+// The range a weapon is thrown to while its own activation's `thrownWeapon` lasts, as a Martialist's Quarterstaff's.
+export function imbuedRange(
+  actor: Actor,
+  itemId: string,
+): { readonly normal: number; readonly long: number } | undefined {
+  for (const { modifier, sourceId } of actor.activeEffects) {
+    if (modifier.kind === "thrownWeapon" && itemUseOf(sourceId) === itemId) {
+      return { normal: modifier.normal, long: modifier.long };
+    }
+  }
+  return undefined;
+}
+
+// The magic ammunition carried with the biggest bonus to attack rolls, as +3 Ammunition over +1.
+function bestAmmunition(
+  worn: readonly (readonly [string, Item])[],
+  works: (itemId: string, item: Item) => boolean,
+):
+  | {
+      readonly id: string;
+      readonly name: string;
+      readonly attack: number;
+      readonly damage: number;
+    }
+  | undefined {
+  const bonus = (item: Item, to: string): number =>
+    (item.type === "magicItem"
+      ? (item.bonuses ?? item.variants?.[0]?.bonuses ?? [])
+      : []
+    )
+      .filter((entry) => entry.to === to)
+      .reduce((total, entry) => total + entry.amount, 0);
+  return worn
+    .filter(
+      ([itemId, item]) =>
+        item.type === "magicItem" && item.ammunition && works(itemId, item),
+    )
+    .map(([id, item]) => ({
+      id,
+      name: item.name,
+      attack: bonus(item, "attack"),
+      damage: bonus(item, "damage"),
+    }))
+    .sort((a, b) => b.attack - a.attack)[0];
+}
+
+// The Unarmed Strike every character can make: a Strength attack it's proficient with, dealing 1 plus its
+// Strength modifier in Bludgeoning damage. Its Grapple and Shove are actions of their own (actions.ts).
+export const UNARMED_STRIKE = "unarmed-strike";
+function unarmedStrike(abilities: AbilityScores): KnownAction {
+  const activation = weaponActivation(
+    {
+      id: UNARMED_STRIKE,
+      name: "Unarmed Strike",
+      type: "weapon",
+      category: "simple",
+      damage: { flat: 1, type: "bludgeoning" },
+      properties: [],
+      mastery: "nick",
+    },
+    abilities,
+  );
+  const { resolution } = activation;
+  return {
+    id: UNARMED_STRIKE,
+    name: "Unarmed Strike",
+    activation:
+      resolution.kind === "attack"
+        ? {
+            ...activation,
+            resolution: {
+              ...resolution,
+              attack: { ...resolution.attack, unarmed: true },
+            },
+          }
+        : activation,
+    spellLevel: null,
+  };
+}
+
+// An Unarmed Strike with what items add to its attack and damage rolls, as Wraps of Unarmed Power's +1.
+function withUnarmedBonus(
+  action: KnownAction,
+  attack: number,
+  damage: number,
+): KnownAction {
+  const { resolution } = action.activation;
+  if (
+    (attack === 0 && damage === 0) ||
+    resolution.kind !== "attack" ||
+    !resolution.attack.unarmed
+  ) {
+    return action;
+  }
+  const [first, ...rest] = resolution.damage;
+  return {
+    ...action,
+    activation: {
+      ...action.activation,
+      resolution: {
+        ...resolution,
+        attack: {
+          ...resolution.attack,
+          ...(attack > 0
+            ? { itemBonus: (resolution.attack.itemBonus ?? 0) + attack }
+            : {}),
+        },
+        damage: first
+          ? [
+              {
+                ...first,
+                amount: {
+                  ...first.amount,
+                  bonus: {
+                    base: (first.amount.bonus?.base ?? 0) + damage,
+                    add: first.amount.bonus?.add ?? [],
+                  },
+                },
+              },
+              ...rest,
+            ]
+          : resolution.damage,
+      },
+    },
+  };
+}
+
 export function weaponActivation(
   weapon: Weapon,
   abilities: AbilityScores,
@@ -1560,18 +1997,27 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       ? [
           ...("passives" in item ? (item.passives ?? []) : []),
           ...(item.type === "magicItem"
+            ? (item.whileCharged ?? []).flatMap((entry) =>
+                charged(actor, item, entry.resource) ? entry.passives : [],
+              )
+            : []),
+          ...(item.type === "magicItem"
             ? (item.variants?.[0]?.passives ?? [])
             : []),
         ]
       : [],
   );
-  const abilities = withItemAbilities(ownAbilities(actor, build), working);
+  const abilities = withEffectScores(
+    withItemAbilities(ownAbilities(actor, build), working),
+    actor,
+  );
 
   const level = build.levels.length;
   const classLevels: Record<string, number> = {};
   const skills = new Set<Skill>(background.skills);
   const expertise = new Set<Skill>();
   const knownSpells = new Set<string>();
+  const spellClass = new Map<string, string>(); // the class whose levels gave each known spell
   const freeSpells = new Map<string, FreeCast[]>(); // also cast without a slot
   const freeAlso = (spell: string, how: FreeCast) =>
     freeSpells.set(spell, [...(freeSpells.get(spell) ?? []), how]);
@@ -1628,6 +2074,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       } else if (answer.kind === "spells") {
         for (const spell of answer.values) {
           knownSpells.add(spell);
+          spellClass.set(spell, entry.classId);
           if (answer.freeCast) freeAlso(spell, answer.freeCast);
           if (answer.ability) answerAbilities.set(spell, answer.ability);
         }
@@ -1740,12 +2187,22 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const weaponTraining = new Set(
     working.flatMap((item) => item.weaponTraining ?? []),
   );
+  const classDc: Record<string, number> = {}; // DC bonuses for one class's spells, by its name after the plugin
   for (const item of working) {
+    if (item.ammunition) continue; // its bonus goes only to the shot that fires it
     // An entry with versions counts as its first, as older saves hold; content names a version as `<id>--<n>` (variants.ts).
-    for (const { to, amount, unarmored, weapons } of item.bonuses ??
-      item.variants?.[0]?.bonuses ??
-      []) {
+    for (const {
+      to,
+      amount,
+      unarmored,
+      weapons,
+      class: only,
+    } of item.bonuses ?? item.variants?.[0]?.bonuses ?? []) {
       if (unarmored && armored) continue;
+      if (only && to === "spellDc") {
+        classDc[only] = (classDc[only] ?? 0) + amount;
+        continue;
+      }
       if (weapons) {
         weaponBonuses.push({ to, amount, weapons });
         continue;
@@ -1796,7 +2253,20 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
   // Traits from features and from worn magic items, for what they change here, as a Robe of the Archmagi's AC.
-  const traits = [...itemPassives, ...fromFeatures.passives];
+  const kept = (actor.restPassives ?? []).flatMap((entry) => entry.passives);
+  // The skill picked for an item that gives one, as an Arcanist's Bestiary's, while it works.
+  for (const [itemId, item] of worn) {
+    const picked = actor.itemSkills?.[itemId];
+    if (
+      item.type === "magicItem" &&
+      works(itemId, item) &&
+      picked &&
+      item.chooseSkill?.some((skill) => skill === picked)
+    ) {
+      skills.add(picked as Skill);
+    }
+  }
+  const traits = [...itemPassives, ...kept, ...fromFeatures.passives];
   const castingAbility = new Map([
     ...answerAbilities,
     ...fromFeatures.abilities,
@@ -1817,7 +2287,13 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       itemId,
       item,
       access,
-      untrainedArmor ? undefined : caster?.spellcasting,
+      untrainedArmor || !caster?.spellcasting
+        ? undefined
+        : {
+            classes: Object.keys(classLevels),
+            ability: caster.spellcasting.ability,
+            highest: slots.findLastIndex((count) => count > 0) + 1,
+          },
     );
     if (usable) {
       actions.push(
@@ -1828,9 +2304,19 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
     if (works(itemId, item) && !untrainedArmor) {
       actions.push(
-        ...itemCasts(itemId, item, level, access),
-        ...itemUses(itemId, item),
+        ...itemCasts(itemId, item, level, access, actor),
+        ...itemUses(itemId, item, actor),
+        ...storedCasts(itemId, item, actor, access),
       );
+      // A Thayan Spell Tattoo's spell is always prepared, cast with the bearer's slots.
+      if (
+        item.type === "magicItem" &&
+        item.boundSpell?.as === "tattoo" &&
+        item.spell &&
+        caster?.spellcasting
+      ) {
+        knownSpells.add(item.spell);
+      }
     }
     if (item.type === "armor") {
       const parsed = ArmorSchema.parse(item);
@@ -1876,7 +2362,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
               kinds.some((kind) => bonus.weapons.includes(kind)),
           )
           .reduce((total, bonus) => total + bonus.amount, 0);
-      const { hitDamage, ...plain } = weapon;
+      const { hitDamage, ...unchanged } = weapon;
+      // A Keyholes Dagger attacks as the form of its own its version allows that hits hardest, with Strength or
+      // Dexterity. shortcut: it keeps its own mastery, and it changes back to throw.
+      const plain = weapon.forms
+        ? bestForm(unchanged, weapon.forms, access)
+        : unchanged;
+      // shortcut: an Ammunition weapon fires the best magic ammunition carried, without asking.
+      const shot = weapon.properties.includes("ammunition")
+        ? bestAmmunition(worn, works)
+        : undefined;
       const activation = weaponActivation(
         works(itemId, item) && hitDamage ? { ...plain, hitDamage } : plain,
         abilities,
@@ -1886,26 +2381,40 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           ) ||
           kinds.some((kind) => weaponTraining.has(kind)) ||
           classes.some((def) => weaponProficient(def, weapon)),
-        own("damage") + scoped("damage"),
-        own("attack") - magic.attack + scoped("attack"),
+        own("damage") + scoped("damage") + (shot?.damage ?? 0),
+        own("attack") - magic.attack + scoped("attack") + (shot?.attack ?? 0),
       );
       actions.push({
         id: `${WEAPON_PREFIX}${itemId}`,
-        name: item.name,
+        name: shot ? `${item.name} (${shot.name})` : item.name,
         activation,
         spellLevel: null,
+        ...(shot ? { ammunition: shot.id } : {}),
       });
-      if (weapon.properties.includes("thrown") && weapon.range) {
+      // A Martialist's Quarterstaff made a Thrown weapon for a while by its own activation.
+      const imbued = imbuedRange(actor, itemId);
+      const range = weapon.properties.includes("thrown")
+        ? weapon.range
+        : imbued;
+      if (range) {
         actions.push({
           id: `${THROW_PREFIX}${itemId}`,
           name: `Throw ${item.name}`,
-          activation: thrownActivation(activation, weapon.range, traits),
+          activation: thrownActivation(activation, range, traits),
           spellLevel: null,
         });
       }
     }
   }
 
+  // Every character's Unarmed Strike, and what items add to it, as Wraps of Unarmed Power, also to the Unarmed
+  // Strikes features make, as Martial Arts'. shortcut: they keep their own damage type rather than offering Force.
+  const unarmed = (to: "attack" | "damage"): number =>
+    weaponBonuses
+      .filter(
+        (bonus) => bonus.to === to && bonus.weapons.includes(UNARMED_STRIKE),
+      )
+      .reduce((total, bonus) => total + bonus.amount, 0);
   actions.push(
     ...fromFeatures.actions.map((action) => {
       const { targeting } = action.activation;
@@ -1922,6 +2431,15 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         },
       };
     }),
+    // Last, so an attack chosen as the first that fits, as an Opportunity Attack is, takes a weapon or Martial Arts.
+    unarmedStrike(abilities),
+  );
+  actions.splice(
+    0,
+    actions.length,
+    ...actions.map((action) =>
+      withUnarmedBonus(action, unarmed("attack"), unarmed("damage")),
+    ),
   );
   for (const spellId of fromFeatures.spells) {
     if (access.content(spellId)) knownSpells.add(spellId);
@@ -1961,7 +2479,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           : spell.activation;
       const ability = castingAbility.get(spellId);
       const type = fromFeatures.retype[spellId];
-      const cast = ability ? castWith(activation, ability) : activation;
+      const given = spellClass.get(spellId);
+      const bonusDc = given
+        ? classDc[given.slice(given.lastIndexOf("/") + 1)]
+        : undefined;
+      const bumped = bonusDc ? withDcBonus(activation, bonusDc) : activation;
+      const cast = ability ? castWith(bumped, ability) : bumped;
       actions.push({
         id: `spell:${spellId}`,
         name: spell.name,
@@ -1969,6 +2492,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         spellLevel: spell.level,
         upcast: spell.upcast,
         ...(lasting ? { concentrates: true as const } : {}),
+      });
+    }
+    // What it does only outside a fight, as Freezing Sphere's frozen water, cast from the sheet (camp.ts).
+    if (spell.scene) {
+      actions.push({
+        id: `spell:${spellId}:scene`,
+        name: `${spell.name} (between fights)`,
+        activation: { ...spell.scene, outOfCombat: "scene" },
+        spellLevel: spell.level,
+        upcast: spell.upcast,
       });
     }
     // What the spell lets its caster do while it holds, as Flame Blade's attack, is no cast of its own.
@@ -1984,6 +2517,23 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         activation: lasting,
         spellLevel: null,
       });
+    }
+  }
+
+  // Spells a worn item lets its bearer try to cast without knowing them, as a Hat of Wizardry's cantrips.
+  for (const [itemId, item] of worn) {
+    if (works(itemId, item) && !untrainedArmor && caster?.spellcasting) {
+      actions.push(
+        ...unknownSpells(
+          itemId,
+          item,
+          knownSpells,
+          slots.findLastIndex((count) => count > 0) + 1,
+          caster.spellcasting.ability,
+          level,
+          access,
+        ),
+      );
     }
   }
 
@@ -2035,15 +2585,20 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       passives: traits,
     }),
     speed: encumberedSpeed(species.speed - 10 * (load ?? 0), carried, capacity),
-    savingThrows: [
-      ...new Set([
-        ...firstClass.savingThrows,
-        ...raisedSaves,
-        ...traits.flatMap((passive) =>
-          passive.kind === "saveProficiency" ? passive.abilities : [],
-        ),
-      ]),
-    ],
+    savingThrows: withFallbackSaves(
+      [
+        ...new Set([
+          ...firstClass.savingThrows,
+          ...raisedSaves,
+          ...traits.flatMap((passive) =>
+            passive.kind === "saveProficiency" ? passive.abilities : [],
+          ),
+        ]),
+      ],
+      [...firstClass.savingThrows, ...raisedSaves],
+      traits,
+      abilities,
+    ),
     skills: traits.some((passive) => passive.kind === "allSkills")
       ? ALL_SKILLS
       : [...skills],
@@ -2057,6 +2612,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     resources: {},
     passives: [
       ...itemPassives,
+      ...kept,
       ...fromFeatures.passives.map((passive) =>
         passive.kind === "extraDamage"
           ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
@@ -2230,11 +2786,17 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     resources: Object.fromEntries(
       partial.resourceDefs.map((resource) => [
         resource.id,
-        evaluateFormula(resource.max, partial),
+        evaluateFormula(resource.max, partial) +
+          (actor.rolledPools?.[resource.id] ??
+            (resource.rolled ? diceCount(resource.rolled) : 0)),
       ]),
     ),
   };
 }
+
+// How many dice a notation rolls, the least it can come to: 3 for "3d10".
+export const diceCount = (notation: string): number =>
+  Number(/^(\d+)d/.exec(notation)?.[1] ?? 1);
 
 // The pools of every item carried, stowed or not, so a wand in the pack still regains its charges. Two of one item
 // share theirs.
@@ -2294,12 +2856,41 @@ export function itemHealing(item: z.infer<typeof ItemSchema>) {
       : undefined;
 }
 
+// A spell's save DC and attack bonus when an item made with it casts it, by the spell's level, as a Spell Scroll's or
+// an Enspelled Staff's.
+export function boundNumbers(level: number): {
+  readonly dc: number;
+  readonly attack: number;
+} {
+  const dc =
+    level <= 2 ? 13 : level <= 4 ? 15 : level <= 6 ? 17 : level <= 8 ? 18 : 19;
+  return { dc, attack: dc - 8 };
+}
+
+// Whether a spell is on one of these classes' spell lists, by their names after the plugin, so any book's Wizard
+// counts. shortcut: a subclass's or feature's own list doesn't count.
+export function onClassList(
+  spell: Spell,
+  classIds: readonly string[],
+): boolean {
+  const slug = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
+  const names = new Set(classIds.map(slug));
+  return spell.classes.some((id) => names.has(slug(id)));
+}
+
 // A potion to drink or a scroll to read, used up once used. Their action ids start "item:", which spends the item.
 function itemAction(
   itemId: string,
   item: z.infer<typeof ItemSchema>,
   access: ContentAccess,
-  spellcasting: unknown,
+  // the reader's spellcasting: its classes, ability and highest slot level
+  reader:
+    | {
+        readonly classes: readonly string[];
+        readonly ability: Ability;
+        readonly highest: number;
+      }
+    | undefined,
 ): KnownAction | null {
   const healing = itemHealing(item);
   if (healing) {
@@ -2326,20 +2917,77 @@ function itemAction(
       spellLevel: null,
     };
   }
-  // shortcut: any spellcaster can read any scroll, with their own spellcasting numbers rather than the scroll's.
-  if (item.type !== "magicItem" || !item.spell || !spellcasting) return null;
+  if (item.type === "magicItem" && item.activation) {
+    const verb =
+      item.verb ??
+      (item.category === "potion"
+        ? "Drink"
+        : item.category === "scroll"
+          ? "Read"
+          : "Use");
+    return {
+      id: `item:${itemId}`,
+      name: `${verb} ${item.name}`,
+      activation: item.activation,
+      spellLevel: null,
+    };
+  }
+  // A Thayan Spell Tattoo's spell cast once without a slot or components, the tattoo gone after, with the bearer's
+  // spellcasting or else DC 13 and +5.
+  if (
+    item.type === "magicItem" &&
+    item.spell &&
+    item.boundSpell?.as === "tattoo"
+  ) {
+    const spell = lookup(access, SpellSchema, item.spell);
+    if (!spell.activation || !doesSomething(spell.activation.resolution)) {
+      return null;
+    }
+    const activation = reader
+      ? spell.activation
+      : withItemNumbers(spell.activation, 13, 5);
+    return {
+      id: `item:${itemId}`,
+      name: `${spell.name} (${item.name})`,
+      activation: {
+        ...activation,
+        cost: activation.cost.filter(
+          (cost) =>
+            cost !== "slot" && !(typeof cost === "object" && "gold" in cost),
+        ),
+      },
+      spellLevel: spell.level,
+    };
+  }
+  // A Spell Scroll is read by a caster with its spell on their list, with the scroll's numbers. A spell above the
+  // slots they have takes a check of their spellcasting ability first, whose failure wastes the scroll.
+  if (item.type !== "magicItem" || !item.spell || !reader) return null;
   const spell = lookup(access, SpellSchema, item.spell);
-  if (!spell.activation || !doesSomething(spell.activation.resolution)) {
+  if (
+    !spell.activation ||
+    !doesSomething(spell.activation.resolution) ||
+    !onClassList(spell, reader.classes)
+  ) {
     return null;
   }
+  const { dc, attack } = boundNumbers(spell.level);
+  const numbered = withItemNumbers(spell.activation, dc, attack);
   return {
     id: `item:${itemId}`,
     name: `Read ${item.name}`,
     activation: {
-      ...spell.activation,
-      cost: spell.activation.cost.filter((cost) => cost !== "slot"),
+      ...numbered,
+      cost: numbered.cost.filter(
+        (cost) =>
+          cost !== "slot" && !(typeof cost === "object" && "gold" in cost),
+      ),
     },
     spellLevel: spell.level,
+    ...(spell.level > Math.max(reader.highest, 0)
+      ? {
+          castCheck: { ability: reader.ability, dc: 10 + spell.level },
+        }
+      : {}),
   };
 }
 
@@ -2740,6 +3388,9 @@ export function doesSomething(resolution: Resolution): boolean {
       effect.kind === "weaponAttack" ||
       effect.kind === "randomAction" ||
       effect.kind === "copySpell" ||
+      effect.kind === "createItems" ||
+      effect.kind === "untilLongRest" ||
+      (effect.kind === "exhaustion" && effect.clear === true) ||
       // what raises or mends the dead and dying, mostly between fights (camp.ts)
       effect.kind === "repose" ||
       effect.kind === "transference" ||
@@ -2898,6 +3549,7 @@ function withEffectActions(
     return stats;
   }
   const granted: KnownAction[] = [];
+  const resources: Record<string, number> = {};
   let actions = stats.actions;
   for (const { modifier, sourceId, level } of actor.activeEffects) {
     if (modifier.kind === "wished") {
@@ -2931,28 +3583,38 @@ function withEffectActions(
       );
     }
     if (modifier.kind !== "grantedAction") continue;
-    const spell = lookup(access, SpellSchema, spellOfSource(sourceId) ?? "");
-    if (!spell.granted) continue;
-    const scaled = spell.upcast
-      ? scaleActivation(
-          spell.granted,
-          spell.upcast.perSlotLevel,
-          (level ?? spell.level) - spell.level,
-        )
-      : spell.granted;
+    const giver = grantedBy(sourceId, access);
+    if (!giver) continue;
+    const scaled =
+      giver.spell?.upcast && giver.spell.granted
+        ? scaleActivation(
+            giver.activation,
+            giver.spell.upcast.perSlotLevel,
+            (level ?? giver.spell.level) - giver.spell.level,
+          )
+        : giver.activation;
     const { resolution } = scaled;
+    const retypedAction = retyped(
+      resolution.kind === "save" && modifier.dc !== undefined
+        ? {
+            ...scaled,
+            resolution: { ...resolution, dc: { base: modifier.dc, add: [] } },
+          }
+        : scaled,
+      modifier.damage,
+    );
+    const uses = modifier.uses;
+    if (uses !== undefined) resources[grantedKey(sourceId)] = uses;
     granted.push({
       id: `granted:${sourceId}`,
-      name: spell.name,
-      activation: retyped(
-        resolution.kind === "save" && modifier.dc !== undefined
-          ? {
-              ...scaled,
-              resolution: { ...resolution, dc: { base: modifier.dc, add: [] } },
-            }
-          : scaled,
-        modifier.damage,
-      ),
+      name: giver.name,
+      activation:
+        uses === undefined
+          ? retypedAction
+          : {
+              ...retypedAction,
+              cost: [...retypedAction.cost, { resource: grantedKey(sourceId) }],
+            },
       spellLevel: null,
     });
   }
@@ -2983,7 +3645,39 @@ function withEffectActions(
     reaching.length === actions.length &&
     reaching.every((action, index) => action === actions[index])
     ? stats
-    : { ...stats, actions: [...reaching, ...granted] };
+    : {
+        ...stats,
+        actions: [...reaching, ...granted],
+        ...(Object.keys(resources).length > 0
+          ? { resources: { ...stats.resources, ...resources } }
+          : {}),
+      };
+}
+
+// The pool of a `grantedAction` that allows only so many uses, as a Potion of Fire Breath's three exhales.
+export const grantedKey = (sourceId: string): string => `granted:${sourceId}`;
+
+// What gave a `grantedAction`: a spell's `granted` action, or a magic item's, as a Potion of Fire Breath's.
+function grantedBy(
+  sourceId: string,
+  access: ContentAccess,
+):
+  | {
+      readonly name: string;
+      readonly activation: Activation;
+      readonly spell?: Spell;
+    }
+  | undefined {
+  if (sourceId.startsWith(ITEM_PREFIX)) {
+    const item = lookup(access, ItemSchema, sourceId.slice(ITEM_PREFIX.length));
+    return item.type === "magicItem" && item.granted
+      ? { name: item.name, activation: item.granted }
+      : undefined;
+  }
+  const spell = lookup(access, SpellSchema, spellOfSource(sourceId) ?? "");
+  return spell.granted
+    ? { name: spell.name, activation: spell.granted, spell }
+    : undefined;
 }
 
 // In usedThisTurn once Wish's copy of the spell has been cast.
@@ -3156,15 +3850,46 @@ export function saveBonus(stats: Stats, ability: Ability): number {
   );
 }
 
+// Elegant Courtier: a save proficiency the character already had from elsewhere gives one of `orElse` instead, the
+// highest score's it isn't proficient in.
+// shortcut: the book has the player choose; the higher score is the one worth having.
+function withFallbackSaves(
+  saves: Ability[],
+  otherwise: readonly Ability[],
+  passives: readonly Passive[],
+  abilities: AbilityScores,
+): Ability[] {
+  const out = [...saves];
+  for (const passive of passives) {
+    if (
+      passive.kind !== "saveProficiency" ||
+      !passive.orElse ||
+      !passive.abilities.every((ability) => otherwise.includes(ability))
+    )
+      continue;
+    const pick = [...passive.orElse]
+      .filter((ability) => !out.includes(ability))
+      .sort((a, b) => abilities[b] - abilities[a])[0];
+    if (pick) out.push(pick);
+  }
+  return out;
+}
+
 export function checkBonus(
   stats: Stats,
   actor: Actor,
-  check: { readonly ability: Ability; readonly skill?: Skill },
+  // A tool's proficiency counts once, as the skill's would (core/explore.ts).
+  check: {
+    readonly ability: Ability;
+    readonly skill?: Skill;
+    readonly toolProficient?: boolean;
+  },
 ): number {
   const { skill } = check;
-  const proficient = skill !== undefined && stats.skills.includes(skill);
+  const skilled = skill !== undefined && stats.skills.includes(skill);
+  const proficient = skilled || check.toolProficient === true;
   const expert =
-    skill !== undefined &&
+    skilled &&
     (stats.expertise.includes(skill) ||
       actor.activeEffects.some(
         ({ modifier }) =>
@@ -3193,6 +3918,12 @@ export function scoreFloor(stats: Stats, ability: Ability): number {
   )
     ? stats.abilities[ability]
     : -Infinity;
+}
+
+export function spellAttackBonus(stats: Stats): number {
+  return (
+    stats.proficiency + spellModifier(stats) + stats.itemBonuses.spellAttack
+  );
 }
 
 export function spellSaveDc(stats: Stats): number {

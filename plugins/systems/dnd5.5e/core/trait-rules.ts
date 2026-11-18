@@ -2,8 +2,8 @@ import type { ContentAccess, Dice, SystemEvent } from "#sdk";
 import {
   type Ability,
   ClassSchema,
+  DAMAGE_TYPES,
   type DamageType,
-  DamageTypeSchema,
   ItemSchema,
   type SaveFrom,
   type Passive,
@@ -220,6 +220,10 @@ function attackAdvantaged(
         passive.against !== undefined &&
         markedBy(target, attacker, passive.against)
       );
+    case "creatureType":
+      return (passive.creatureTypes ?? []).some(
+        (type) => type === targetStats.creatureType,
+      );
     case "unacted": {
       // In the first round, a creature yet to act stands later in the order than the one acting now.
       const combat = state?.combat;
@@ -284,15 +288,14 @@ export function masteredTypes(
     : [];
 }
 
-// The types whose 1s on a spell's damage dice count as 2s: the mastered ones, or every type with `spellDiceFloor`, as
-// Spell-Fueling Armor's Potent Spellcasting.
+// The damage types whose 1s count as 2s on the bearer's spells: the mastered ones, or every type with a Robe of Thayan
+// Arcana's Empowered Magic.
 export function flooredTypes(
   stats: Stats,
   spell: boolean,
 ): readonly DamageType[] {
-  return spell &&
-    stats.passives.some((passive) => passive.kind === "spellDiceFloor")
-    ? DamageTypeSchema.options
+  return spell && stats.passives.some(({ kind }) => kind === "empoweredSpells")
+    ? DAMAGE_TYPES
     : masteredTypes(stats, spell);
 }
 
@@ -490,6 +493,15 @@ export function rescuedSave(
       continue;
     }
     if (passive.hitDice) {
+      const { uses } = passive;
+      if (
+        uses !== undefined &&
+        (stats.resources[uses] ?? 0) -
+          (target.resourcesSpent[uses] ?? 0) -
+          spentNow("resourceSpent", uses) <=
+          0
+      )
+        continue;
       const spending = hitDiceRescue(
         target,
         passive.hitDice,
@@ -504,6 +516,14 @@ export function rescuedSave(
             resource: HIT_DICE,
             ...(spending > 1 ? { amount: spending } : {}),
           }),
+          ...(uses
+            ? [
+                dndEvent(`${NS}:resourceSpent`, {
+                  actor: target.id,
+                  resource: uses,
+                }),
+              ]
+            : []),
         ];
       }
       continue;
@@ -618,8 +638,10 @@ export function checkFloor(
   stats: Stats,
   ability: Ability,
   skill?: Skill,
+  toolProficient = false, // a tool check with a tool it's proficient with (core/explore.ts)
 ): number {
-  const proficient = skill !== undefined && stats.skills.includes(skill);
+  const proficient =
+    toolProficient || (skill !== undefined && stats.skills.includes(skill));
   return Math.max(
     1,
     ...[

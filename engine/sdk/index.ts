@@ -28,6 +28,7 @@ export type {
   RunSetup,
   RestOption,
   SceneAction,
+  SceneHere,
   StoryEffectDef,
   StoryPredicateDef,
   Question,

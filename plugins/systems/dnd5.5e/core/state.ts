@@ -10,6 +10,7 @@ import {
   AreaEffectSchema,
   LootSchema,
   ModifierSchema,
+  PassiveSchema,
   ResolutionSchema,
   ZoneKindSchema,
 } from "./schemas.ts";
@@ -79,6 +80,7 @@ export const FRAME_KINDS = [
   "strikeChosen",
   "missRider",
   "advantageForgone",
+  "advantageGained",
   "swapInitiative",
   "takeAction",
   "teleport",
@@ -87,6 +89,7 @@ export const FRAME_KINDS = [
   "swapAnswer",
   "useAction",
   "useItem",
+  "castCheck",
   "zoneTick",
   "chooseDamageType",
   "chooseZoneType",
@@ -141,6 +144,16 @@ const EndsSchema = z.enum([
   "casterTurnEnd",
   "spellDuration",
 ]);
+
+// A spell stored in an item, as cast into a Ring of Spell Storing: its slot level and its caster's numbers.
+const StoredSpellSchema = z.strictObject({
+  spell: z.string(),
+  level: z.number().int().min(1).max(9),
+  dc: z.number().int(),
+  attack: z.number().int(),
+  mod: z.number().int(),
+});
+export type StoredSpell = z.infer<typeof StoredSpellSchema>;
 
 const ActiveEffectSchema = z.strictObject({
   sourceId: z.string(),
@@ -213,7 +226,8 @@ const ActiveEffectSchema = z.strictObject({
   endsOnDamage: z.boolean().optional(),
   endsWithTempHp: z.boolean().optional(), // ends once damage leaves the creature no Temporary Hit Points
   endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
-  endsOn: z.enum(["attack", "action"]).optional(), // ends when the creature attacks or deals damage, or acts
+  // ends when the creature attacks or deals damage, also when it casts a spell, or when it acts
+  endsOn: z.enum(["attack", "action", "spell"]).optional(),
   // Taking damage gives this save, ending it on a success, as Dragon Fear's.
   saveOnDamage: z
     .strictObject({
@@ -238,9 +252,12 @@ const ActiveEffectSchema = z.strictObject({
   clings: z
     .strictObject({ ability: AbilitySchema, dc: z.number().int() })
     .optional(),
-  // Hours it outlasts a fight by, counted down by rests, or "cured" for one that lasts until magic ends it (rest.ts).
-  // Missing for an effect that ends with the fight.
-  lingers: z.union([z.number().int(), z.literal("cured")]).optional(),
+  // Hours it outlasts a fight by, counted down by rests, "cured" for one that lasts until magic ends it (rest.ts), or
+  // "longRest" for one that lasts through fights and scenes until a Long Rest, as Blessing of the Trickster. Missing
+  // for an effect that ends with the fight. Cast between fights (camp.ts), 0 lasts until the next scene.
+  lingers: z
+    .union([z.number().int(), z.literal("cured"), z.literal("longRest")])
+    .optional(),
   level: z.number().int().optional(), // the slot a spell was cast with, when it was given one
   // Inside its caster, as swallowed (combat/swallow.ts): what took the creature out of a grapple and into itself.
   swallowed: z.boolean().optional(),
@@ -420,6 +437,19 @@ const ActorSchema = z.strictObject({
     .optional(),
   // Taken off its D20 Tests after coming back from the dead, one less each Long Rest, as Raise Dead's. Missing at 0.
   ordeal: z.number().int().optional(),
+  // Passives kept until the next Long Rest, as a Potion of Vitality's, by what gave them.
+  restPassives: z
+    .array(
+      z.strictObject({ source: z.string(), passives: z.array(PassiveSchema) }),
+    )
+    .optional(),
+  // The skill picked for an item that lets its bearer pick one, by the item's id, as an Arcanist's Bestiary's.
+  itemSkills: z.record(z.string(), z.string()).optional(),
+  // What a pool's `rolled` dice came to, by its id, as a Necklace of Fireballs' beads (ResourceDefSchema).
+  rolledPools: z.record(z.string(), z.number().int()).optional(),
+  // Spells stored in an item carried, by the item's id, with the numbers they were cast with (MagicItemSchema
+  // `storesSpells`).
+  storedSpells: z.record(z.string(), z.array(StoredSpellSchema)).optional(),
   // Hours a dead party member has lain dead, counted by the rests passed since, for a raising's time limit. Missing
   // while alive or just dead. `reposed` stops the count, as Gentle Repose does.
   deadHours: z.number().int().optional(),
@@ -585,6 +615,31 @@ const ItemUsedSchema = z.strictObject({
   item: ContentIdSchema,
 });
 // A score raised for good, by as much as it rose, as by a Manual of Bodily Health.
+const SpellStoredSchema = z.strictObject({
+  actor: z.string(), // who carries the item
+  item: z.string(),
+  stored: z.lazy(() => StoredSpellSchema),
+});
+const StoredSpellUsedSchema = z.strictObject({
+  actor: z.string(),
+  item: z.string(),
+  spell: z.string(),
+});
+const RestPassivesSchema = z.strictObject({
+  actor: z.string(),
+  source: z.string(),
+  passives: z.array(PassiveSchema),
+});
+const ItemSkillSchema = z.strictObject({
+  actor: z.string(),
+  item: z.string(),
+  skill: z.string(),
+});
+const PoolRolledSchema = z.strictObject({
+  actor: z.string(),
+  resource: z.string(),
+  amount: z.number().int(),
+});
 const AbilityRaisedSchema = z.strictObject({
   actor: z.string(),
   ability: AbilitySchema,
@@ -803,6 +858,16 @@ export const EVENT_SCHEMAS = {
   [`${NS}:deathSaveRolled`]: DeathSaveSchema,
   [`${NS}:maxHpReduced`]: MaxHpReducedSchema,
   [`${NS}:rollReported`]: RollReportSchema,
+  // A scene check done without a roll by what deals with its obstacle, as Knock with a lock (core/explore.ts).
+  [`${NS}:obstacleCleared`]: z.strictObject({
+    actor: z.string(),
+    source: z.string(),
+  }),
+  // A scene check that needs a tool the creature doesn't have, failed without a roll (core/explore.ts).
+  [`${NS}:toolMissing`]: z.strictObject({
+    actor: z.string(),
+    tool: ContentIdSchema,
+  }),
   [`${NS}:saveReported`]: SaveReportSchema,
   [`${NS}:saveRolled`]: SaveRolledSchema,
   // A die rolled for what befalls a creature, as Confusion's d10 or Prismatic Spray's d8, kept for the log: what
@@ -820,6 +885,11 @@ export const EVENT_SCHEMAS = {
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
   [`${NS}:abilityRaised`]: AbilityRaisedSchema,
+  [`${NS}:poolRolled`]: PoolRolledSchema,
+  [`${NS}:itemSkillPicked`]: ItemSkillSchema,
+  [`${NS}:restPassivesGained`]: RestPassivesSchema,
+  [`${NS}:spellStored`]: SpellStoredSchema,
+  [`${NS}:storedSpellUsed`]: StoredSpellUsedSchema,
   [`${NS}:weaponThrown`]: WeaponThrownSchema,
   [`${NS}:answerSwapped`]: AnswerSwappedSchema,
   [`${NS}:itemPickedUp`]: ItemPickedUpSchema,
@@ -1073,13 +1143,14 @@ export function isDead(actor: Actor): boolean {
   );
 }
 
-// A Long Rest takes one off the ordeal of coming back from the dead, and it's gone at 0.
+// A Long Rest takes one off the ordeal of coming back from the dead, and it's gone at 0. Passives kept until a Long
+// Rest go too.
 // A Long Rest gives back the Hit Point maximum Harm took.
 function withoutLoss({ maxHpLoss: _loss, ...actor }: Actor): Actor {
   return actor;
 }
 
-function lessOrdeal({ ordeal, ...actor }: Actor): Actor {
+function lessOrdeal({ ordeal, restPassives: _kept, ...actor }: Actor): Actor {
   return ordeal && ordeal > 1 ? { ...actor, ordeal: ordeal - 1 } : actor;
 }
 
@@ -1097,25 +1168,50 @@ function grownClones(actors: DndState["actors"]): DndState["actors"] {
 }
 
 // Effects that outlast a fight run down with the hours that pass, as a curse's 8 hours (core/combat/effects.ts
-// lingersFor). Those that last until cured stay.
+// lingersFor). Those that last until cured stay, and those that last until a Long Rest stay until one (`long`).
+// Concentration on a spell whose effects have all run out ends with them.
 function lingerLess(
   actors: DndState["actors"],
   hours: number,
+  long = false,
 ): DndState["actors"] {
-  return Object.fromEntries(
+  const ends = (lingers: ActiveEffect["lingers"]) =>
+    typeof lingers === "number" || (long && lingers === "longRest");
+  if (
+    !Object.values(actors).some((actor) =>
+      actor.activeEffects.some(({ lingers }) => ends(lingers)),
+    )
+  )
+    return actors;
+  const after = Object.fromEntries(
     Object.entries(actors).map(([id, actor]) => [
       id,
-      actor.activeEffects.some(({ lingers }) => typeof lingers === "number")
+      actor.activeEffects.some(({ lingers }) => ends(lingers))
         ? {
             ...actor,
             activeEffects: actor.activeEffects.flatMap((effect) =>
-              typeof effect.lingers !== "number"
+              !ends(effect.lingers)
                 ? [effect]
-                : effect.lingers > hours
+                : typeof effect.lingers === "number" && effect.lingers > hours
                   ? [{ ...effect, lingers: effect.lingers - hours }]
                   : [],
             ),
           }
+        : actor,
+    ]),
+  );
+  const held = new Set(
+    Object.values(after).flatMap((actor) =>
+      actor.activeEffects.flatMap(({ casterId, ends: until }) =>
+        until === "concentration" ? [casterId] : [],
+      ),
+    ),
+  );
+  return Object.fromEntries(
+    Object.entries(after).map(([id, actor]) => [
+      id,
+      actor.concentratingOn !== null && !held.has(id)
+        ? { ...actor, concentratingOn: null }
         : actor,
     ]),
   );
@@ -1284,7 +1380,11 @@ function outlasting(
   const { modifier, lingers, casterId } = rest;
   if (lingers === undefined) return [];
   const caster = state.actors[casterId];
-  if (lingers !== "cured" && (!caster || caster.side === bearer.side))
+  if (
+    lingers !== "cured" &&
+    lingers !== "longRest" &&
+    (!caster || caster.side === bearer.side)
+  )
     return [];
   if (
     ((modifier.kind === "advantage" || modifier.kind === "disadvantage") &&
@@ -1481,6 +1581,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
             ? grownClones(deadLonger(state, hours))
             : deadLonger(state, hours),
           hours,
+          rest === "long",
         ),
       };
       if (rest === "long") return { ...rested, sinceLongRest: hours };
@@ -2101,6 +2202,61 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         inventory: without(actor.inventory, [data.item]),
+      }));
+    }
+    case `${NS}:spellStored`: {
+      const data = payload(SpellStoredSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        storedSpells: {
+          ...actor.storedSpells,
+          [data.item]: [
+            ...(actor.storedSpells?.[data.item] ?? []),
+            data.stored,
+          ],
+        },
+      }));
+    }
+    case `${NS}:storedSpellUsed`: {
+      const data = payload(StoredSpellUsedSchema, event);
+      return updateActor(state, data.actor, (actor) => {
+        const held = actor.storedSpells?.[data.item] ?? [];
+        const at = held.findIndex((entry) => entry.spell === data.spell);
+        return at < 0
+          ? actor
+          : {
+              ...actor,
+              storedSpells: {
+                ...actor.storedSpells,
+                [data.item]: held.filter((_, index) => index !== at),
+              },
+            };
+      });
+    }
+    case `${NS}:restPassivesGained`: {
+      const data = payload(RestPassivesSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        restPassives: [
+          ...(actor.restPassives ?? []).filter(
+            (entry) => entry.source !== data.source,
+          ),
+          { source: data.source, passives: data.passives },
+        ],
+      }));
+    }
+    case `${NS}:itemSkillPicked`: {
+      const data = payload(ItemSkillSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        itemSkills: { ...actor.itemSkills, [data.item]: data.skill },
+      }));
+    }
+    case `${NS}:poolRolled`: {
+      const data = payload(PoolRolledSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        rolledPools: { ...actor.rolledPools, [data.resource]: data.amount },
       }));
     }
     case `${NS}:abilityRaised`: {

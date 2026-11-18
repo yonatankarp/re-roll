@@ -14,6 +14,7 @@ import {
   rollAmount,
   rollDiceNotation,
   wishedKey,
+  grantedKey,
   saveBonus,
   scoreFloor,
   spellSaveDc,
@@ -92,6 +93,7 @@ import {
   AIM,
   ALL,
   HIT_DICE,
+  ITEM_PREFIX,
   THROW_PREFIX,
   castFrom,
   itemUseOf,
@@ -137,7 +139,13 @@ import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
 import { movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
 import { reincarnateEvents } from "../reincarnate.ts";
-import { cureFor, dispelEvents, isSpell, snuffedLights } from "./dispel.ts";
+import {
+  cureFor,
+  dispelEvents,
+  isSpell,
+  snuffedLights,
+  spellOf,
+} from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
 import { formEvents, formFrame } from "./form-choice.ts";
 import { damageTypeFrame, zoneTypeFrame } from "./damage-choice.ts";
@@ -162,6 +170,7 @@ import {
   hasPassive,
   inReach,
   isMelee,
+  luckyEdge,
   meleeReach,
   hitFits,
   onceKey,
@@ -238,11 +247,37 @@ export function payCosts(
     } else if ("gold" in cost) {
       events.push(dndEvent(`${NS}:goldSpent`, { gold: cost.gold }));
     } else {
+      // A pool whose size is rolled is rolled as it's first spent, as a Necklace of Fireballs' beads.
+      const rolled = deriveStats(actor, context).resourceDefs.find(
+        (def) => def.id === cost.resource,
+      )?.rolled;
+      if (rolled && actor.rolledPools?.[cost.resource] === undefined) {
+        events.push(
+          dndEvent(`${NS}:poolRolled`, {
+            actor: actor.id,
+            resource: cost.resource,
+            amount: rollDiceNotation(rolled, context.dice),
+          }),
+        );
+      }
       events.push(
         dndEvent(`${NS}:resourceSpent`, {
           actor: actor.id,
           resource: cost.resource,
           ...(cost.count ? { amount: cost.count } : {}),
+        }),
+      );
+    }
+  }
+  // A stored spell leaves the item it's cast from.
+  if (action.stored) {
+    const spell = spellOfSource(action.id);
+    if (spell) {
+      events.push(
+        dndEvent(`${NS}:storedSpellUsed`, {
+          actor: actor.id,
+          item: action.stored,
+          spell,
         }),
       );
     }
@@ -261,8 +296,10 @@ function lastCharge(
   const itemId = castFrom(action.id)?.item ?? itemUseOf(action.id);
   const item = itemId ? lookup(context, ItemSchema, itemId) : undefined;
   const fate = item && "lastCharge" in item ? item.lastCharge : undefined;
+  const twenty =
+    item && "lastChargeTwenty" in item ? item.lastChargeTwenty : undefined;
   const pool = item ? chargesOf(item).resources[0]?.id : undefined;
-  if (!itemId || !fate || !pool) return [];
+  if (!itemId || (!fate && !twenty) || !pool) return [];
   const charges = action.activation.cost.reduce(
     (total, cost) =>
       typeof cost === "object" && "resource" in cost && cost.resource === pool
@@ -274,7 +311,23 @@ function lastCharge(
     (deriveStats(actor, context).resources[pool] ?? 0) -
     (actor.resourcesSpent[pool] ?? 0) -
     charges;
-  if (charges === 0 || left > 0 || context.dice.roll(20) !== 1) return [];
+  if (charges === 0 || left > 0) return [];
+  // An Arcane Chatelaine is gone with its last key, with no d20.
+  const face = fate === "vanishes" ? 1 : context.dice.roll(20);
+  // A Staff of Power's 20 gives charges back.
+  if (face === 20 && twenty) {
+    return [
+      dndEvent(`${NS}:resourceRestored`, {
+        actor: actor.id,
+        resource: pool,
+        amount: Math.max(
+          1,
+          twenty.base + rollDiceNotation(twenty.dice, context.dice),
+        ),
+      }),
+    ];
+  }
+  if (face !== 1 || !fate) return [];
   return [
     dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: itemId }),
     dndEvent(`${NS}:resourceRestored`, { actor: actor.id, resource: pool }),
@@ -1045,18 +1098,22 @@ function deflectedSpell(
   caster: Actor,
   target: Actor,
   context: Context,
+  turning: Extract<Passive, { kind: "spellTurning" }>,
 ): { readonly events: SystemEvent[]; readonly frames: Frame[] } {
   const none = { events: [], frames: [] };
   const { targeting } = action.activation;
+  const stats = deriveStats(target, context);
   if (
     target.id === caster.id ||
     !("creatures" in targeting) ||
     targeting.creatures !== 1 ||
     !target.budget.reaction ||
     hasCondition(target, ...INCAPACITATING) ||
-    !deriveStats(target, context).passives.some(
-      (passive) => passive.kind === "spellTurning" && passive.deflect,
-    ) ||
+    !turning.deflect ||
+    (turning.resource !== undefined &&
+      (stats.resources[turning.resource] ?? 0) -
+        (target.resourcesSpent[turning.resource] ?? 0) <
+        1) ||
     !deriveStats(caster, context).actions.some(
       (item) => item.id === action.id,
     ) ||
@@ -1077,6 +1134,14 @@ function deflectedSpell(
         kind: "reaction",
         label: "Spell Turning",
       }),
+      ...(turning.resource
+        ? [
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: target.id,
+              resource: turning.resource,
+            }),
+          ]
+        : []),
     ],
     frames: [
       frame("useAction", {
@@ -1148,6 +1213,86 @@ export function protectedMount(
 
 // Several hits on one target, reported in turn so each one sees the HP the last one left.
 // Tyro of the Gauntlet's Stand as One: an ally within 5 feet spends its Reaction to keep the target from being moved.
+// A Staff of Power's Retributive Strike: the staff breaks, and its charges left blast its bearer and those near.
+export function retributionEvents(
+  bearer: Actor,
+  itemId: string,
+  effect: Extract<LeafEffect, { kind: "retribution" }>,
+  context: Context,
+): SystemEvent[] {
+  const stats = deriveStats(bearer, context);
+  const left = Math.max(
+    0,
+    (stats.resources[effect.resource] ?? 0) -
+      (bearer.resourcesSpent[effect.resource] ?? 0),
+  );
+  const events: SystemEvent[] = [
+    dndEvent(`${NS}:itemUsed`, { actor: bearer.id, item: itemId }),
+  ];
+  if (context.dice.roll(100) > 50) {
+    events.push(
+      ...dealEvents(
+        bearer,
+        [{ amount: effect.self * left, type: "force" }],
+        false,
+        context,
+      ).events,
+    );
+  }
+  for (const other of Object.values(context.state.actors)) {
+    if (
+      other.id === bearer.id ||
+      isDead(other) ||
+      distanceFeet(bearer.position, other.position) > effect.radius
+    ) {
+      continue;
+    }
+    const save = rollSave(other, "dex", effect.dc, context, true);
+    const amount = effect.others * left;
+    events.push(
+      ...save.events,
+      ...dealEvents(
+        other,
+        [
+          {
+            amount: save.saved ? Math.floor(amount / 2) : amount,
+            type: "force",
+          },
+        ],
+        false,
+        context,
+      ).events,
+    );
+  }
+  return events;
+}
+
+// A push along the ground made shorter by the target's Reaction, as Dwarven Plate's 10 feet less: the feet it's
+// still moved, and the Reaction spent. shortcut: the Reaction is always taken when it can be.
+export function braced(
+  target: Actor,
+  feet: number,
+  context: Pick<Context, "state" | "content" | "contentIds">,
+): { readonly feet: number; readonly events: SystemEvent[] } {
+  const brace = deriveStats(target, context).passives.find(
+    (passive) => passive.kind === "bracing",
+  );
+  if (
+    brace?.kind !== "bracing" ||
+    !target.budget.reaction ||
+    isDown(target) ||
+    hasCondition(target, ...INCAPACITATING)
+  ) {
+    return { feet, events: [] };
+  }
+  return {
+    feet: Math.max(0, feet - brace.feet),
+    events: [
+      dndEvent(`${NS}:budgetSpent`, { actor: target.id, kind: "reaction" }),
+    ],
+  };
+}
+
 export function heldInPlace(
   target: Actor,
   context: Pick<Context, "state" | "content" | "contentIds">,
@@ -1427,17 +1572,30 @@ function inHpBand(
   );
 }
 
-// An hour or more without Concentration outlasts the fight, counted down by rests after it (rest.ts).
+// An hour or more without Concentration outlasts the fight, counted down by rests after it (rest.ts), and one that
+// lasts until a Long Rest outlasts fights and scenes until then.
 // shortcut: anything shorter ends with the fight, as the scenes between fights take longer than ten minutes.
-export function lingersFor(duration: Duration): {
-  lingers?: number;
+// Outside a fight (`between`), as cast in a scene (camp.ts), the effect lasts the scene, or its hours, Concentration
+// or not; a scene takes about an hour.
+export function lingersFor(
+  duration: Duration,
+  between = false,
+): {
+  lingers?: number | "longRest";
 } {
-  return typeof duration === "object" &&
-    "minutes" in duration &&
-    !("concentration" in duration) &&
-    duration.minutes >= 60
-    ? { lingers: Math.floor(duration.minutes / 60) }
-    : {};
+  if (typeof duration === "object" && "until" in duration)
+    return duration.until === "longRest"
+      ? { lingers: "longRest" }
+      : between
+        ? { lingers: 0 }
+        : {};
+  if (typeof duration === "object" && "minutes" in duration)
+    return between || !("concentration" in duration)
+      ? duration.minutes >= 60 || between
+        ? { lingers: Math.floor(duration.minutes / 60) }
+        : {}
+      : {};
+  return between ? { lingers: 0 } : {};
 }
 
 // A timed spell's minutes, and a turn of the target's, are counted in rounds by its `lasts` (lastsFor).
@@ -1464,8 +1622,11 @@ export function actingEnds(
   const harms =
     resolution !== undefined &&
     (resolution.kind !== "automatic" || resolution.damage.length > 0);
+  const casts = action?.spellLevel !== null && action?.spellLevel !== undefined;
   return actor.activeEffects.flatMap(({ endsOn, sourceId, casterId }) =>
-    endsOn === "action" || (endsOn === "attack" && harms)
+    endsOn === "action" ||
+    (endsOn === "attack" && harms) ||
+    (endsOn === "spell" && (harms || casts))
       ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId, casterId })]
       : [],
   );
@@ -1868,6 +2029,44 @@ export function leafEvents(
           }),
         );
         break;
+      case "retribution": {
+        const itemId = itemUseOf(sourceId);
+        if (itemId) {
+          events.push(...retributionEvents(target, itemId, effect, context));
+        }
+        break;
+      }
+      case "untilLongRest": {
+        const item = sourceId.startsWith(ITEM_PREFIX)
+          ? lookup(context, ItemSchema, sourceId.slice(ITEM_PREFIX.length))
+          : undefined;
+        const passives =
+          item?.type === "magicItem" ? (item.untilLongRest ?? []) : [];
+        if (passives.length > 0) {
+          events.push(
+            dndEvent(`${NS}:restPassivesGained`, {
+              actor: target.id,
+              source: sourceId,
+              passives,
+            }),
+          );
+        }
+        break;
+      }
+      case "createItems": {
+        // An item from a book not loaded, as a dmg potion with phb alone, makes nothing.
+        if (!context.content(effect.item)) break;
+        const count = Math.max(1, evaluateFormula(effect.count, stats));
+        events.push(
+          dndEvent(`${NS}:treasureFound`, {
+            actor: target.id,
+            gold: 0,
+            items: Array<string>(count).fill(effect.item),
+            stowed: [],
+          }),
+        );
+        break;
+      }
       case "uncurse": {
         const cursed = new Set(
           target.activeEffects.flatMap(({ modifier, sourceId, casterId }) =>
@@ -2049,14 +2248,26 @@ export function leafEvents(
                   : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
-              ...lingersFor(effect.duration),
+              ...lingersFor(effect.duration, !context.state.combat),
               ...swallowed,
             },
           }),
         );
-        if (effect.modifier.kind === "hasted") {
+        if (effect.modifier.kind === "hasted" && !effect.modifier.noLethargy) {
           const waiting = lethargyEffect(sourceId, caster.id, target);
           if (waiting) events.push(waiting);
+        }
+        // A fresh grant's uses start over, as a second Potion of Fire Breath's three exhales.
+        if (
+          effect.modifier.kind === "grantedAction" &&
+          effect.modifier.uses !== undefined
+        ) {
+          events.push(
+            dndEvent(`${NS}:resourceRestored`, {
+              actor: target.id,
+              resource: grantedKey(sourceId),
+            }),
+          );
         }
         if (effect.modifier.kind === "actionLimit") {
           events.push(
@@ -2130,7 +2341,7 @@ export function leafEvents(
               ...(effect.clings && conditionSave
                 ? { clings: conditionSave }
                 : {}),
-              ...lingersFor(effect.duration),
+              ...lingersFor(effect.duration, !context.state.combat),
               ...(effect.banish && save
                 ? { banish: { ability: effect.banish.ability, dc: save.dc } }
                 : {}),
@@ -2473,16 +2684,22 @@ export function leafEvents(
         break;
       // A push or pull is made on the grid as Shove's is, in a straight line.
       case "forcedMove": {
-        const to =
+        const fits =
           (effect.maxSize === undefined ||
             sizeOf(target, context) <= SIZES.indexOf(effect.maxSize)) &&
           (effect.largerBy === undefined ||
             sizeOf(target, context) <=
-              sizeOf(caster, context) + effect.largerBy)
+              sizeOf(caster, context) + effect.largerBy);
+        const brace = fits
+          ? braced(target, effect.feet, context)
+          : { feet: 0, events: [] };
+        events.push(...brace.events);
+        const to =
+          fits && brace.feet > 0
             ? pushTo(
                 caster.position,
                 target,
-                effect.feet,
+                brace.feet,
                 context.state,
                 effect.direction === "toward",
               )
@@ -2591,12 +2808,14 @@ export function leafEvents(
         events.push(...liftEvents(effect, sourceId, caster, target, context));
         break;
       case "exhaustion":
-        events.push(
-          dndEvent(`${NS}:exhaustionChanged`, {
-            actor: target.id,
-            levels: effect.levels,
-          }),
-        );
+        if (effect.clear ? target.exhaustion > 0 : effect.levels) {
+          events.push(
+            dndEvent(`${NS}:exhaustionChanged`, {
+              actor: target.id,
+              levels: effect.clear ? -target.exhaustion : (effect.levels ?? 0),
+            }),
+          );
+        }
         break;
       // On a failed save, or a creature already at 0 Hit Points, as Steal Body or Consume Life. An automatic one
       // is worked out with its damage (resolveAction).
@@ -3147,6 +3366,8 @@ export function rollSave(
           ),
       ),
   };
+  const lucky = luckyEdge(target, stats, edge.advantage, edge.disadvantage);
+  if (lucky) edge.disadvantage = false;
   const roll = rollD20(context.dice, {
     ...edge,
     rerollOnes: hasPassive(stats, "rerollOnes"),
@@ -3235,10 +3456,61 @@ export function rollSave(
       ],
     };
   }
-  return { saved, events: [...settled.events, rolled, ...spent] };
+  return {
+    saved,
+    events: [
+      ...(lucky ?? []),
+      ...settled.events,
+      rolled,
+      ...spent,
+      ...naturalOneEvents(target, settled.natural, context),
+    ],
+  };
 }
 
 const SAVE_REROLL = "save-reroll";
+
+// Set while a natural 1's own save is rolled, so that save doesn't set it off again.
+let echoing = false;
+
+// Echoing Soul's Intrusive Echoes: right after a D20 Test of the bearer's rolls a 1, its save, and on a failure what
+// the passive does to it (schemas.ts naturalOne).
+export function naturalOneEvents(
+  actor: Actor,
+  natural: number,
+  context: Context,
+): SystemEvent[] {
+  if (natural !== 1 || echoing) return [];
+  const stats = deriveStats(actor, context);
+  const events: SystemEvent[] = [];
+  for (const passive of stats.passives) {
+    if (passive.kind !== "naturalOne") continue;
+    echoing = true;
+    try {
+      const against = {
+        ability: passive.save.ability,
+        dc: evaluateFormula(passive.save.dc, stats),
+      };
+      const save = rollSave(actor, against.ability, against.dc, context);
+      events.push(...save.events);
+      // The same save ends a condition that a later one can, as Symbiotic Agenda's Charmed when its bearer is hurt.
+      if (!save.saved)
+        events.push(
+          ...leafEvents(
+            passive.effects,
+            `trigger:${passive.name}`,
+            actor,
+            actor,
+            context,
+            against,
+          ),
+        );
+    } finally {
+      echoing = false;
+    }
+  }
+  return events;
+}
 
 // The square an answer aims at ("@x,y" or "@id"), or null for one that aims at no square.
 export function aimSquare(
@@ -3347,7 +3619,7 @@ export function resolveAction(
       )
     : aimedAt;
   const mastered = masteredTypes(stats, action.spellLevel !== null);
-  const diceFloored = flooredTypes(stats, action.spellLevel !== null);
+  const floors = flooredTypes(stats, action.spellLevel !== null);
   const rerolled = rerolledTypes(stats, action.spellLevel !== null);
   // Another spell aimed at a creature ends what lasts only until one is, as Modify Memory's charm.
   const spellEnds = targets.flatMap((target) =>
@@ -3607,7 +3879,7 @@ export function resolveAction(
         stats,
         index === maxIndex
           ? HIGHEST
-          : floored(masteredDice(context.dice, type, diceFloored, rerolled)),
+          : floored(masteredDice(context.dice, type, floors, rerolled)),
         critical ? 2 : 1,
       ) + (index === 0 ? fuel.bonus : 0);
     const shared = list.map(({ amount, type }, index) => ({
@@ -4027,17 +4299,30 @@ export function resolveAction(
           frames.push(...warded.frames);
         }
         // Ring of Spell Turning: a spell up to some level does nothing to a target that saves against it.
-        const turned =
-          saved &&
-          action.spellLevel !== null &&
-          deriveStats(target, context).passives.some(
-            (passive) =>
-              passive.kind === "spellTurning" &&
-              (slotLevel ?? action.spellLevel ?? 0) <= passive.upTo,
-          );
+        const school =
+          action.spellLevel === null
+            ? undefined
+            : spellOf(action.id, actor, context)?.school;
+        const turning = saved
+          ? deriveStats(target, context).passives.find(
+              (passive) =>
+                passive.kind === "spellTurning" &&
+                action.spellLevel !== null &&
+                (slotLevel ?? action.spellLevel) <= passive.upTo &&
+                (!passive.schools ||
+                  (school !== undefined && passive.schools.includes(school))),
+            )
+          : undefined;
+        const turned = turning?.kind === "spellTurning" && !turning.deflectOnly;
         // And with its Reaction, a spell aimed at it alone is turned back at its caster, who saves against it.
-        if (turned && targets.length === 1) {
-          const deflected = deflectedSpell(action, actor, target, context);
+        if (turning?.kind === "spellTurning" && targets.length === 1) {
+          const deflected = deflectedSpell(
+            action,
+            actor,
+            target,
+            context,
+            turning,
+          );
           events.push(...deflected.events);
           frames.push(...deflected.frames);
         }

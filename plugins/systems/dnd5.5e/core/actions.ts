@@ -7,6 +7,7 @@ import {
   PLAYER_ACTOR,
   type SystemEvent,
   type SystemResult,
+  frameHandler,
 } from "#sdk";
 import { z } from "zod";
 import {
@@ -27,11 +28,19 @@ import {
   stepToward,
   within5,
 } from "./combat.ts";
-import { encodeOption, parseOption } from "./combat/ids.ts";
+import { ITEM_PREFIX, encodeOption, parseOption } from "./combat/ids.ts";
+import { CastCheckSchema, castAction } from "./combat/actions.ts";
+import { actorOf, findAction, slotLevelFor } from "./combat/queries.ts";
 import { opportunity, provokers, teleportSquares } from "./combat/movement.ts";
 import { familiarHelpUse } from "./combat/familiar.ts";
 import { mountEvents, mountOptions } from "./combat/mounts.ts";
-import { heldInPlace, leafEvents } from "./combat/effects.ts";
+import {
+  braced,
+  heldInPlace,
+  leafEvents,
+  naturalOneEvents,
+  payCosts,
+} from "./combat/effects.ts";
 import { heightChoices, heightOf } from "./combat/falling.ts";
 import {
   SIZES,
@@ -41,6 +50,7 @@ import {
   hitFits,
   inReach,
   sizeOf,
+  luckyEdge,
 } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { coverFor, seeing } from "./sight.ts";
@@ -265,6 +275,109 @@ function reportedSave(
   };
 }
 
+// The check an action needs as it's taken (KnownAction `castCheck`), as reading a Spell Scroll above the reader's
+// level: a failure pays for it and wastes it, an item with it, and a success takes it.
+export const castCheckFrames = {
+  [`${NS}:castCheck`]: frameHandler({
+    schema: CastCheckSchema,
+    run: (cast, context: Context): SystemResult => {
+      const actor = actorOf(context.state, cast.actor);
+      const slotLevel = slotLevelFor(actor, cast.actionId, cast.slot, context);
+      const action = findAction(actor, cast.actionId, context, slotLevel);
+      const check = action.castCheck;
+      if (!check) throw new Error(`${action.id} needs no check`);
+      const rolled =
+        check.chance === undefined
+          ? abilityCheck(
+              actor,
+              check.skill,
+              check.ability,
+              check.dc,
+              (success) => (success ? action.name : `${action.name} fails`),
+              context,
+            )
+          : failChance(actor, action.name, check.chance, context);
+      if (rolled.success) {
+        const taken = castAction(
+          actor,
+          cast.actionId,
+          cast.slot,
+          cast.target,
+          context,
+          false,
+          cast.shape,
+          true,
+        );
+        return {
+          ...taken,
+          events: [...rolled.events, ...(taken.events ?? [])],
+        };
+      }
+      // A Hat of Many Spells' use is kept on a failure, though the slot is spent.
+      const keep = check.keep;
+      const paid = keep
+        ? {
+            ...action,
+            activation: {
+              ...action.activation,
+              cost: action.activation.cost.filter(
+                (cost) =>
+                  !(
+                    typeof cost === "object" &&
+                    "resource" in cost &&
+                    cost.resource === keep
+                  ),
+              ),
+            },
+          }
+        : action;
+      return {
+        events: [
+          ...rolled.events,
+          ...payCosts(paid, actor, context, slotLevel),
+        ],
+        frames: [
+          ...(cast.actionId.startsWith(ITEM_PREFIX) || check.breaks
+            ? [
+                frame("useItem", {
+                  actor: actor.id,
+                  item: check.breaks ?? cast.actionId.slice(ITEM_PREFIX.length),
+                }),
+              ]
+            : []),
+          CHECK_END,
+          frame("afterAction", { actor: actor.id }),
+        ],
+      };
+    },
+  }),
+};
+
+// A percent chance that something fails, as a Wind Fan's tearing: a d100 at or under it fails.
+function failChance(
+  actor: Actor,
+  label: string,
+  chance: number,
+  context: Context,
+): { readonly success: boolean; readonly events: SystemEvent[] } {
+  const roll = context.dice.roll(100);
+  const success = roll > chance;
+  return {
+    success,
+    events: [
+      dndEvent(`${NS}:rollReported`, {
+        actor: actor.id,
+        against: "check",
+        natural: roll,
+        total: roll,
+        target: chance + 1,
+        success,
+        label: success ? label : `${label} fails`,
+      }),
+    ],
+  };
+}
+
 // An ability check, in a fight or a scene. Help's Advantage on a check is used up by it.
 export function abilityCheck(
   actor: Actor,
@@ -274,6 +387,7 @@ export function abilityCheck(
   label: (success: boolean) => string,
   context: Context,
   advantage = false, // from a trait, as Powerful Build gives to escape a grapple
+  tool?: { readonly id: string; readonly proficient: boolean }, // a tool check's (core/explore.ts)
 ): {
   readonly success: boolean;
   readonly total: number;
@@ -318,14 +432,19 @@ export function abilityCheck(
       ) ||
       hasCondition(actor, "poisoned", "frightened"),
   };
+  const lucky = luckyEdge(actor, stats, edge.advantage, edge.disadvantage);
+  if (lucky) edge.disadvantage = false;
   const first = rollD20(context.dice, {
     ...edge,
     rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
   });
   const base =
-    checkBonus(stats, actor, { ability, ...(skill ? { skill } : {}) }) +
-    rollBonus(actor, "checks", context, skill, ability);
-  const floor = checkFloor(actor, stats, ability, skill);
+    checkBonus(stats, actor, {
+      ability,
+      ...(skill ? { skill } : {}),
+      ...(tool?.proficient ? { toolProficient: true } : {}),
+    }) + rollBonus(actor, "checks", context, skill, ability, false, tool?.id);
+  const floor = checkFloor(actor, stats, ability, skill, tool?.proficient);
   const least = scoreFloor(stats, ability);
   const totalOf = (natural: number, bonus: number) =>
     Math.max(Math.max(natural, floor) + base + bonus, least);
@@ -362,6 +481,7 @@ export function abilityCheck(
     success,
     total,
     events: [
+      ...(lucky ?? []),
       ...(befriended ? [befriended] : []),
       ...settled.events,
       ...rescue.events,
@@ -383,6 +503,7 @@ export function abilityCheck(
           ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId })]
           : [],
       ),
+      ...naturalOneEvents(actor, roll.natural, context),
     ],
   };
 }
@@ -397,10 +518,17 @@ function pushEvents(
   feet: number,
   context: Context,
 ): SystemEvent[] {
-  const to = pushTo(by.position, target, feet, context.state);
+  const brace = braced(target, feet, context);
+  const to =
+    brace.feet > 0
+      ? pushTo(by.position, target, brace.feet, context.state)
+      : null;
   const held = to ? heldInPlace(target, context) : [];
-  if (held.length > 0) return held;
-  return to ? [dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 })] : [];
+  if (held.length > 0) return [...brace.events, ...held];
+  return [
+    ...brace.events,
+    ...(to ? [dndEvent(`${NS}:moved`, { actor: target.id, to, feet: 0 })] : []),
+  ];
 }
 
 function standing(list: readonly Actor[]): readonly Actor[] {
