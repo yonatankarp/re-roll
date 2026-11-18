@@ -1236,12 +1236,13 @@ export function beforeDamage(
   source?: Actor,
 ): { readonly amount: number; readonly events: SystemEvent[] } {
   if (amount <= 0) return { amount, events: [] };
+  const targetStats = deriveStats(target, context);
   // Emissary of Redemption: Resistance to another creature's damage, unless the bearer has turned on it.
   if (
     source &&
     source.id !== target.id &&
     !spared(target, source) &&
-    deriveStats(target, context).passives.some(
+    targetStats.passives.some(
       (passive) => passive.kind === "creatureResistance",
     ) &&
     !damageResponses(target, context).resistances.includes(type)
@@ -1249,7 +1250,14 @@ export function beforeDamage(
     amount = Math.floor(amount / 2);
   }
   // Arcane Ward: the bearer's own ward takes what it can first.
-  const warded = wardTakes(target, target, amount, context);
+  const warded = wardTakes(
+    target,
+    target,
+    amount,
+    context,
+    undefined,
+    targetStats,
+  );
   if (warded.amount <= 0 || !context.state.combat) return warded;
   amount = warded.amount;
   const fits = (bearer: Actor, item: KnownAction, stats: Stats): boolean => {
@@ -1276,14 +1284,20 @@ export function beforeDamage(
       )
     );
   };
+  // Others' reactions reach no farther than 60 feet, so only allies that near are looked at.
   const bearers = [
     target,
     ...Object.values(context.state.actors).filter(
-      (item) => item.id !== target.id,
+      (item) =>
+        item.id !== target.id &&
+        item.side === target.side &&
+        item.budget.reaction &&
+        near(item, target, 60),
     ),
   ];
   for (const bearer of bearers) {
-    const stats = deriveStats(bearer, context);
+    const stats =
+      bearer.id === target.id ? targetStats : deriveStats(bearer, context);
     const action = stats.actions.find((item) => fits(bearer, item, stats));
     if (!action) continue;
     if (
@@ -1319,8 +1333,12 @@ function wardTakes(
   amount: number,
   context: Context,
   resource?: string,
+  known?: Stats,
 ): { readonly amount: number; readonly events: SystemEvent[] } {
-  const stats = deriveStats(bearer, context);
+  const stats = known ?? deriveStats(bearer, context);
+  if (!stats.passives.some((passive) => passive.kind === "wardPool")) {
+    return { amount, events: [] };
+  }
   const pool = stats.passives.find(
     (passive) =>
       passive.kind === "wardPool" &&
