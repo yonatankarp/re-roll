@@ -1800,6 +1800,7 @@ describe("parsing a character book page", () => {
       abilities: ["int", "wis", "cha"],
       feat: "my-book:feat/spark-touched",
       skills: ["sleightOfHand", "arcana"],
+      choices: [],
       tool: "Choose one kind of Pliers",
     });
     expect(backgrounds[0]?.notes.join(" ")).toContain("Warden");
