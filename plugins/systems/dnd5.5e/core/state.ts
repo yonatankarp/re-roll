@@ -620,6 +620,8 @@ const RestedSchema = z.strictObject({
   // A disease or the winds of Pandemonium keep a Long Rest from healing, or from lessening Exhaustion below this.
   keepHp: z.literal(true).optional(),
   exhaustionFloor: z.number().int().optional(),
+  // Swaps a Short Rest allows again, as Memorize Spell's prepared spells (swap.ts keys).
+  swapsBack: z.array(z.string()).optional(),
 });
 // Rests are the only thing that passes time, so they're the clock for the one-Long-Rest-a-day rule.
 export const REST_HOURS = { short: 1, long: 8 } as const;
@@ -1701,7 +1703,17 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       const data = payload(RestedSchema, event);
       return updateActor(state, data.actor, (actor) =>
         data.rest === "short"
-          ? { ...actor, resourcesSpent: data.resourcesSpent }
+          ? {
+              ...actor,
+              resourcesSpent: data.resourcesSpent,
+              ...(data.swapsBack && actor.swapped
+                ? {
+                    swapped: actor.swapped.filter(
+                      (key) => !data.swapsBack?.includes(key),
+                    ),
+                  }
+                : {}),
+            }
           : {
               ...lessOrdeal(withoutLoss(actor)),
               resourcesSpent: data.resourcesSpent,

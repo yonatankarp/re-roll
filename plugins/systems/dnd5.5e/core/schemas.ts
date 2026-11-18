@@ -3161,6 +3161,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Reads any Spell Scroll with this ability, cantrips and level 1 spells reliably and a higher one behind a check of
   // it with Arcana of 10 plus the spell's level, whose failure wastes the scroll, as Use Magic Device's (stats.ts).
   z.strictObject({ kind: z.literal("anyScroll"), ability: AbilitySchema }),
+  // A Short Rest lets the bearer change its prepared spells of this class (by name after the plugin) again, as Memorize
+  // Spell (rest.ts, swap.ts). shortcut: every pick it changes after a Long Rest, not only one.
+  z.strictObject({ kind: z.literal("memorize"), class: z.string().min(1) }),
   // Rolling on the table `from` holds, the bearer rolls twice and picks, as Controlled Chaos (combat/school.ts).
   z.strictObject({ kind: z.literal("tableTwice"), from: ContentIdSchema }),
   // Attuned to up to this many magic items at once, as an Artificer's Magic Item Adept's four (gear.ts).
