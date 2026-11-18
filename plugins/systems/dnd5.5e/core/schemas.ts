@@ -991,6 +991,8 @@ export const ZoneKindSchema = z.enum([
   "shade",
   // An illusion: it hides what's in it from whoever hasn't seen through it, as Silent Image's (core/zones.ts).
   "image",
+  // Lightly Obscured, as Web's strands: seen only dimly however bright (core/sight.ts seeing).
+  "haze",
 ]);
 export type ZoneKind = z.infer<typeof ZoneKindSchema>;
 
@@ -2137,8 +2139,10 @@ export const AreaEffectSchema = z.strictObject({
   // ranged weapon attacks that pass into, out of or through it miss, as past Wind Wall, or have Disadvantage, as
   // through Wall of Water (combat/attack.ts)
   deflects: z.enum(["miss", "disadvantage"]).optional(),
-  // its resolution acts only on creatures flying in it, as Control Winds' downdraft
+  // its resolution acts only on creatures flying in it, as Control Winds' downdraft, or with `ground` only on those on
+  // the ground, as Earthquake's tremor
   flying: z.literal(true).optional(),
+  ground: z.literal(true).optional(),
   // no fog, smoke or other gas hides a square in it, as Warding Wind hedges them out (core/zones.ts obscuring)
   clearsFog: z.literal(true).optional(),
   targets: z.number().int().min(1).optional(),
@@ -2229,7 +2233,17 @@ export const TargetingSchema = z.union([
   }),
   z.strictObject({
     area: z.strictObject({
-      shape: z.enum(["sphere", "cone", "cube", "line", "emanation"]),
+      // "wall": a line `radius` long across the way to the point aimed at, centred there, as Wall of Sand's, and
+      // "ring" the squares `radius` from it, a ring wall's own space, as Wall of Fire's
+      shape: z.enum([
+        "sphere",
+        "cone",
+        "cube",
+        "line",
+        "emanation",
+        "wall",
+        "ring",
+      ]),
       radius: z.number(),
       width: z.number().int().min(10).optional(), // a line this many feet wide, as Festering Blast's 10, not 5
     }),

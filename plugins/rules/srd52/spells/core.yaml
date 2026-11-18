@@ -113,7 +113,7 @@
     through it. An affected creature can cast spells or make attacks with Ranged
     or Reach weapons through the barrier. If you move so that an affected
     creature is forced to pass through the barrier, the spell ends.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -757,7 +757,33 @@
     and is buried in the rubble, requiring a DC 20 Strength (Athletics) check as
     an action to escape. On a successful save, the creature takes half as much
     damage only.
-  automation: text
+  automation: full
+  # No structure stands on a battle map, so none takes the tremor's damage or collapses.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 100 }, range: 500, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - { kind: applyCondition, condition: prone, duration: instantaneous }
+        - { kind: endConcentration }
+        - { kind: zone, zone: area, radius: 100, duration: { concentration: true, minutes: 1 } }
+      onSuccess: []
+      fissure: { count: 1d6, depth: { dice: 1d10, times: 10 } }
+    area:
+      terrain: ground
+      ground: true
+      when: ownerTurnEnd
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        onFail:
+          - { kind: applyCondition, condition: prone, duration: instantaneous }
+          - { kind: endConcentration }
+        onSuccess: []
 - id: srd52:spell/ensnaring-strike
   name: Ensnaring Strike
   level: 1
@@ -1899,7 +1925,8 @@
     failed save, the condition ends, and the creature teleports to another plane
     of existence (GM’s choice). Additional Effects: This layer is destroyed by
     Dispel Magic."
-  automation: partial
+  automation: full
+  # Nothing in play aims at a wall, so its layers aren't destroyed; it blocks sight, so nothing is aimed through it.
   activation:
     cost:
       - action
@@ -2684,7 +2711,8 @@
     be dispelled by Dispel Magic. A Disintegrate spell destroys the wall
     instantly, however. The wall also extends into the Ethereal Plane and blocks
     ethereal travel through the wall.
-  automation: partial
+  automation: full
+  # Nothing in play aims at a wall, so no Disintegrate destroys it.
   activation:
     cost:
       - action
@@ -2760,7 +2788,26 @@
     are deflected upward and miss automatically. Boulders hurled by Giants or
     siege engines, and similar projectiles, are unaffected. Creatures in gaseous
     form can’t pass through it.
-  automation: text
+  automation: full
+  # Its Small flyers and gaseous creatures that can't pass, and a giant's boulder it doesn't stop, are left out.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: wall, radius: 50 }, range: 120, side: enemy }
+    resolution:
+      kind: save
+      ability: str
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 4d8 }, type: bludgeoning }]
+      onSuccessDamage: half
+      onFail:
+        - { kind: disperse }
+        - kind: zone
+          zone: area
+          shape: line
+          radius: 50
+          duration: { concentration: true, minutes: 1 }
+      onSuccess: []
+    area: { deflects: miss, clearsFog: true }
 - id: srd52:spell/acid-splash
   name: Acid Splash
   level: 0
@@ -2856,7 +2903,8 @@
     suppressed counts against its duration. Dispel Magic has no effect on the
     aura, and the auras created by different Antimagic Field spells don’t
     nullify each other.
-  automation: partial
+  automation: full
+  # Spells, magic items' properties and activations, and teleports into or out of it are all held off.
   activation:
     cost:
       - action
@@ -3588,7 +3636,22 @@
     can take an action to make a Strength (Athletics) check against your spell
     save DC. On a success, it frees itself from the grasping plants and is no
     longer Restrained by them.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: cube, radius: 20 }, range: 90, side: enemy }
+    resolution:
+      kind: save
+      ability: str
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - kind: applyCondition
+          condition: restrained
+          duration: { concentration: true, minutes: 1 }
+          escape: { ability: str, skill: athletics }
+        - { kind: zone, zone: area, radius: 10, duration: { concentration: true, minutes: 1 } }
+      onSuccess: []
+    area: { terrain: ground }
 - id: srd52:spell/fabricate
   name: Fabricate
   level: 4
@@ -4626,7 +4689,8 @@
     radius centered on a point within range become enriched for 365 days. The
     plants yield twice the normal amount of food when harvested. They can
     benefit from only one Plant Growth per year.
-  automation: partial
+  automation: full
+  # The areas it spares are left out: it covers its whole Sphere.
   activation:
     cost:
       - action
@@ -4647,7 +4711,7 @@
           duration:
             text: Until dispelled
     area:
-      difficult: true
+      cost: 4
   scene:
     cost:
       - action
@@ -5091,7 +5155,19 @@
     when the spell is cast must take a Search action and succeed on a Wisdom
     (Perception or Survival) check against your spell save DC to recognize the
     terrain as hazardous before entering it.
-  automation: text
+  automation: full
+  # The camouflage changes only whether a creature knows to walk round the spikes.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 20 }, range: 150, side: enemy }
+    resolution:
+      kind: automatic
+      effects:
+        - kind: zone
+          zone: thorns
+          radius: 20
+          duration: { concentration: true, minutes: 10 }
+          damage: [{ amount: { dice: 2d4 }, type: piercing }]
 - id: srd52:spell/stone-shape
   name: Stone Shape
   level: 4
@@ -5349,7 +5425,24 @@
     Higher-Level Spell Slot. The damage the wall deals when it appears increases
     by 2d6 and the damage from passing through the sheet of frigid air increases
     by 1d6 for each spell slot level above 6.
-  automation: text
+  automation: full
+  # A dome round the point aimed at. Nothing in play attacks a wall, so its sections stand and their sheets of frigid
+  # air never form.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: ring, radius: 10 }, range: 120, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 10d6 }, type: cold }]
+      onSuccessDamage: half
+      onFail:
+        - { kind: zone, zone: wall, radius: 10, duration: { concentration: true, minutes: 10 } }
+      onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 2d6
 - id: srd52:spell/water-walk
   name: Water Walk
   level: 3
@@ -6079,7 +6172,7 @@
     damage of the spirit’s type. On a successful save, the target isn’t
     Restrained by the spirit. Using a Higher-Level Spell Slot. The damage
     increases by 1d8 for each spell slot level above 5."
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -6858,7 +6951,28 @@
     a Dexterity saving throw or have the Prone condition. A creature that enters
     the area or ends its turn there must also succeed on that save or fall
     Prone.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: cube, radius: 10 }, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - { kind: applyCondition, condition: prone, duration: instantaneous }
+        - { kind: zone, zone: area, radius: 5, duration: { minutes: 1 } }
+      onSuccess: []
+    area:
+      terrain: ground
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        onFail: [{ kind: applyCondition, condition: prone, duration: instantaneous }]
+        onSuccess: []
 - id: srd52:spell/guidance
   name: Guidance
   level: 0
@@ -7108,7 +7222,8 @@
     turn there. A creature makes this save only once per turn. The cloud moves
     10 feet away from you in a direction you choose at the start of each of your
     turns.
-  automation: partial
+  automation: full
+  # shortcut: the cloud drifts away from its caster rather than the way it chooses.
   activation:
     cost:
       - action
@@ -8111,28 +8226,20 @@
     creature takes half as much damage. A creature makes this save only once per
     turn. Using a Higher-Level Spell Slot. The damage increases by 1d8 for each
     spell slot level above 3.
-  automation: partial
+  automation: full
+  # Radiant or Necrotic by the caster's alignment: the one its foes resist least.
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: emanation
-        radius: 15
-      range: self
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: emanation, radius: 15 }, range: self, side: enemy }
     resolution:
       kind: automatic
-      damage: []
       effects:
         - kind: zone
           zone: area
           radius: 15
-          duration:
-            concentration: true
-            minutes: 10
           follows: true
+          choose: [radiant, necrotic]
+          duration: { concentration: true, minutes: 10 }
     area:
       side: enemy
       when: turnEnd
@@ -8141,13 +8248,8 @@
       resolution:
         kind: save
         ability: wis
-        dc:
-          add:
-            - kind: spellSaveDc
-        damage:
-          - amount:
-              dice: 3d8
-            type: radiant
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 3d8 }, type: radiant }]
         onSuccessDamage: half
         onFail: []
         onSuccess: []
@@ -8418,7 +8520,8 @@
     maintain your Concentration on this spell for its full duration, the wall
     becomes permanent and can’t be dispelled. Otherwise, the wall disappears
     when the spell ends.
-  automation: partial
+  automation: full
+  # Nothing in play attacks a wall, so its panels stand; a fight ends long before it could become permanent.
   activation:
     cost:
       - action
@@ -8466,7 +8569,39 @@
     your spell save DC. If it succeeds, it is no longer Restrained. The webs are
     flammable. Any 5-foot Cube of webs exposed to fire burns away in 1 round,
     dealing 2d4 Fire damage to any creature that starts its turn in the fire.
-  automation: text
+  automation: full
+  # The webs are taken to be anchored, as across a floor or between walls.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: cube, radius: 20 }, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - kind: applyCondition
+          condition: restrained
+          web: true
+          duration: { concentration: true, minutes: 60 }
+          escape: { ability: str, skill: athletics }
+        - { kind: zone, zone: haze, radius: 10, duration: { concentration: true, minutes: 60 } }
+      onSuccess: []
+    area:
+      terrain: ground
+      when: turnStart
+      enters: true
+      burns: [{ amount: { dice: 2d4 }, type: fire }]
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        onFail:
+          - kind: applyCondition
+            condition: restrained
+            web: true
+            duration: { concentration: true, minutes: 60 }
+            escape: { ability: str, skill: athletics }
+        onSuccess: []
 - id: srd52:spell/word-of-recall
   name: Word of Recall
   level: 6
@@ -8685,69 +8820,39 @@
     only once per turn. A Restrained creature can take an action to make a
     Strength (Athletics) check against your spell save DC, ending the condition
     on itself on a success.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: cube
-        radius: 20
-      range: 90
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: cube, radius: 20 }, range: 90, side: enemy }
     resolution:
       kind: save
       ability: str
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 3d6
-          type: bludgeoning
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 3d6 }, type: bludgeoning }]
       onSuccessDamage: none
       onFail:
         - kind: applyCondition
           condition: restrained
-          duration:
-            concentration: true
-            minutes: 1
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 3d6
-                type: bludgeoning
-            save:
-              ability: str
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: none
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 3d6
-                type: bludgeoning
-            save:
-              ability: str
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: none
+          duration: { concentration: true, minutes: 1 }
+          escape: { ability: str, skill: athletics }
+        - { kind: zone, zone: area, radius: 10, duration: { concentration: true, minutes: 1 } }
+      onSuccess: []
+    area:
+      terrain: ground
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: save
+        ability: str
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 3d6 }, type: bludgeoning }]
+        onSuccessDamage: none
+        onFail:
+          - kind: applyCondition
+            condition: restrained
+            duration: { concentration: true, minutes: 1 }
+            escape: { ability: str, skill: athletics }
+        onSuccess: []
 - id: srd52:spell/blink
   name: Blink
   level: 3
@@ -9968,31 +10073,22 @@
     the Cylinder into Difficult Terrain until the end of your next turn. Using a
     Higher-Level Spell Slot. The Bludgeoning damage increases by 1d10 for each
     spell slot level above 4.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: sphere
-        radius: 20
-      range: 300
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 20 }, range: 300, side: enemy }
     resolution:
       kind: save
       ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
+      dc: { add: [{ kind: spellSaveDc }] }
       damage:
-        - amount:
-            dice: 2d10
-          type: bludgeoning
-        - amount:
-            dice: 4d6
-          type: cold
+        - { amount: { dice: 2d10 }, type: bludgeoning }
+        - { amount: { dice: 4d6 }, type: cold }
       onSuccessDamage: half
+      onFail:
+        - { kind: zone, zone: area, radius: 20, duration: { until: yourNextTurnEnd } }
+      onSuccess: []
+    area: { terrain: ice }
   upcast:
     perSlotLevel:
       addDice: 1d10
@@ -10772,7 +10868,26 @@
     is Difficult Terrain. When a creature enters the Cylinder for the first time
     on a turn or starts its turn there, it must succeed on a Dexterity saving
     throw or have the Prone condition and lose Concentration.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 20 }, range: 150, side: enemy }
+    resolution:
+      kind: automatic
+      effects:
+        - { kind: zone, zone: fog, radius: 20, duration: { concentration: true, minutes: 1 } }
+    area:
+      terrain: ice
+      when: turnStart
+      enters: true
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        onFail:
+          - { kind: applyCondition, condition: prone, duration: instantaneous }
+          - { kind: endConcentration }
+        onSuccess: []
 - id: srd52:spell/speak-with-dead
   name: Speak with Dead
   level: 3
@@ -11066,7 +11181,39 @@
     creature makes this save only once per turn. Using a Higher-Level Spell
     Slot. Both types of damage increase by 1d8 for each spell slot level above
     6.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: wall, radius: 60 }, range: 120, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 7d8 }, type: piercing }]
+      onSuccessDamage: half
+      onFail:
+        - kind: zone
+          zone: wall
+          shape: line
+          radius: 60
+          walls: sight
+          duration: { concentration: true, minutes: 10 }
+      onSuccess: []
+    area:
+      cost: 4
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 7d8 }, type: slashing }]
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
 - id: srd52:spell/weird
   name: Weird
   level: 9
@@ -11417,64 +11564,37 @@
     a failed save or half as much damage on a successful one. A creature also
     makes that save if it enters the wall’s space or ends it turn there. A
     creature makes that save only once per turn.
-  automation: partial
+  automation: full
+  # The straight wall, across the point aimed at.
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: line
-        radius: 100
-      range: 90
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: wall, radius: 100 }, range: 90, side: enemy }
     resolution:
       kind: save
       ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 6d10
-          type: force
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 6d10 }, type: force }]
       onSuccessDamage: half
       onFail:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 6d10
-                type: force
-            save:
-              ability: dex
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 6d10
-                type: force
-            save:
-              ability: dex
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+        - kind: zone
+          zone: area
+          shape: line
+          radius: 100
+          duration: { concentration: true, minutes: 10 }
+      onSuccess: []
+    area:
+      cover: threeQuarters
+      terrain: ground
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 6d10 }, type: force }]
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
 - id: srd52:spell/blur
   name: Blur
   level: 2
@@ -12341,7 +12461,7 @@
     the creature doesn’t exit the cage and wastes the spell or effect. The cage
     also extends into the Ethereal Plane, blocking ethereal travel. This spell
     can’t be dispelled by Dispel Magic.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -12519,7 +12639,37 @@
     area. It causes protected flames, such as those of lanterns, to dance wildly
     and has a 50 percent chance to extinguish them. As a Bonus Action on your
     later turns, you can change the direction in which the Line blasts from you.
-  automation: text
+  automation: full
+  # shortcut: the Line keeps the direction it was cast in as its caster moves; it isn't turned with a Bonus Action.
+  # Candles and lanterns it snuffs change nothing in a fight.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: line, radius: 60, width: 10 }, range: self, side: enemy }
+    resolution:
+      kind: save
+      ability: str
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - { kind: forcedMove, feet: 15, direction: away }
+        - { kind: disperse }
+        - kind: zone
+          zone: area
+          shape: line
+          radius: 60
+          width: 10
+          follows: true
+          duration: { concentration: true, minutes: 1 }
+      onSuccess: []
+    area:
+      headwind: true
+      disperses: true
+      when: turnEnd
+      resolution:
+        kind: save
+        ability: str
+        dc: { add: [{ kind: spellSaveDc }] }
+        onFail: [{ kind: forcedMove, feet: 15, direction: away }]
+        onSuccess: []
 - id: srd52:spell/heal
   name: Heal
   level: 6
@@ -12645,50 +12795,28 @@
     time on a turn or ends its turn there. A creature makes this save only once
     per turn. Using a Higher-Level Spell Slot. The damage increases by 1d10 for
     each spell slot level above 5.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: sphere
-        radius: 20
-      range: 300
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 20 }, range: 300, side: enemy }
     resolution:
       kind: save
       ability: con
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 4d10
-          type: piercing
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 4d10 }, type: piercing }]
       onSuccessDamage: half
       onFail:
-        - kind: zone
-          zone: area
-          radius: 20
-          duration:
-            concentration: true
-            minutes: 10
+        - { kind: zone, zone: haze, radius: 20, duration: { concentration: true, minutes: 10 } }
       onSuccess: []
     area:
       when: turnEnd
       enters: true
-      difficult: true
+      terrain: ground
       resolution:
         kind: save
         ability: con
-        dc:
-          add:
-            - kind: spellSaveDc
-        damage:
-          - amount:
-              dice: 4d10
-            type: piercing
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 4d10 }, type: piercing }]
         onSuccessDamage: half
         onFail: []
         onSuccess: []
@@ -13484,7 +13612,28 @@
     or object reaches the Cylinder’s top without striking anything, it hovers
     there for the duration. When the spell ends, affected objects and creatures
     fall downward.
-  automation: text
+  automation: full
+  # There are no ceilings on a battle map to strike.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 50 }, range: 100, side: enemy }
+    resolution:
+      kind: automatic
+      effects:
+        - kind: lift
+          feet: 100
+          duration: { concentration: true, minutes: 1 }
+          grab: { ability: dex, dc: { add: [{ kind: spellSaveDc }] } }
+        - { kind: zone, zone: area, radius: 50, duration: { concentration: true, minutes: 1 } }
+    area:
+      enters: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: lift
+            feet: 100
+            duration: { concentration: true, minutes: 1 }
+            grab: { ability: dex, dc: { add: [{ kind: spellSaveDc }] } }
 - id: srd52:spell/scorching-ray
   name: Scorching Ray
   level: 2
@@ -14037,14 +14186,15 @@
     on a turn or ends its turn there. The other side of the wall deals no
     damage. Using a Higher-Level Spell Slot. The damage increases by 1d8 for
     each spell slot level above 4.
-  automation: partial
+  automation: full
+  # The ringed wall: its burning side is the inside.
   activation:
     cost:
       - action
       - slot
     targeting:
       area:
-        shape: sphere
+        shape: ring
         radius: 10
       range: 120
       side: enemy

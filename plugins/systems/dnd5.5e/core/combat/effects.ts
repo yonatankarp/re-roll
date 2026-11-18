@@ -111,6 +111,7 @@ import {
   distanceFeet,
   inArea,
   parseSquare,
+  lineFrom,
   pushTo,
   type Square,
   squareKey,
@@ -119,7 +120,6 @@ import {
   blockedSquares,
   healingStopped,
   inZone,
-  lineFrom,
   placedFlag,
   sealed,
   squaresOf,
@@ -4768,7 +4768,12 @@ export function resolveTargets(
     if (aim && actor.position) {
       // Total cover from where it spreads keeps a creature out of it.
       const centre =
-        shape === "sphere" || shape === "cube" ? aim : actor.position;
+        shape === "sphere" ||
+        shape === "cube" ||
+        shape === "wall" ||
+        shape === "ring"
+          ? aim
+          : actor.position;
       // Creatures of the caster's choice in it are only its side, as Conjure Barrage's.
       const chosen = targeting.choice
         ? new Set(side.map((item) => item.id))

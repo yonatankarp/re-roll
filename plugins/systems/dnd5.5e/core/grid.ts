@@ -270,7 +270,14 @@ export function reachableSquares(
     });
 }
 
-export type AreaShape = "sphere" | "cone" | "cube" | "line" | "emanation";
+export type AreaShape =
+  | "sphere"
+  | "cone"
+  | "cube"
+  | "line"
+  | "emanation"
+  | "wall"
+  | "ring";
 
 // Whether a square is caught by an area cast from `origin` and aimed at `aim`.
 // Spheres and cubes centre on the aim, emanations on the caster, and cones and lines point at the aim.
@@ -290,6 +297,14 @@ export function inArea(
       return distanceFeet(aim, point) <= Math.max(SQUARE_FEET, size / 2);
     case "emanation":
       return distanceFeet(origin, point) <= size;
+    // A ring wall's own squares, `size` from the point aimed at.
+    case "ring":
+      return distanceFeet(aim, point) === size;
+    // A wall `size` long across the way from the caster to the point aimed at, centred there.
+    case "wall": {
+      const ends = lineFrom(origin, aim, size, true);
+      return alongLine(ends.at, ends.dir, point, width);
+    }
     case "cone":
     case "line": {
       const ax = aim.x - origin.x;
@@ -309,6 +324,51 @@ export function inArea(
         : across <= 0.75 + (width - SQUARE_FEET) / SQUARE_FEET / 2;
     }
   }
+}
+
+// Whether `square` lies on the line from `from` to `from` plus `dir`, `width` feet wide.
+export function alongLine(
+  from: Square,
+  dir: Square,
+  square: Square,
+  width: number,
+): boolean {
+  const px = square.x - from.x;
+  const py = square.y - from.y;
+  const length = dir.x * dir.x + dir.y * dir.y;
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, (px * dir.x + py * dir.y) / length));
+  const across = Math.hypot(px - t * dir.x, py - t * dir.y);
+  return across <= 0.5 + (width - 5) / 10;
+}
+
+// A line zone's ends: a wall `feet` long across the way from `from` to `aim`, centred on `aim`, or a blast `feet`
+// long from `from` toward `aim`, as Gust of Wind's.
+export function lineFrom(
+  from: Square,
+  aim: Square,
+  feet: number,
+  across: boolean,
+): { readonly at: Square; readonly dir: Square } {
+  const dx = aim.x - from.x;
+  const dy = aim.y - from.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const squares = feet / 5;
+  if (!across) {
+    const ux = dx / length;
+    const uy = dy / length;
+    return {
+      at: { x: from.x + Math.round(ux), y: from.y + Math.round(uy) },
+      dir: { x: Math.round(ux * (squares - 1)), y: Math.round(uy * (squares - 1)) },
+    };
+  }
+  // Square to the way it's aimed, or east to west when aimed at the caster's own square.
+  const px = dx === 0 && dy === 0 ? 1 : -dy / length;
+  const py = dx === 0 && dy === 0 ? 0 : dx / length;
+  const half = (squares - 1) / 2;
+  return {
+    at: { x: aim.x - Math.round(px * half), y: aim.y - Math.round(py * half) },
+    dir: { x: Math.round(px * (squares - 1)), y: Math.round(py * (squares - 1)) },
+  };
 }
 
 // The squares of a battle map marked with one code, from one string per row.

@@ -37,6 +37,7 @@ import {
   statsOf,
   thornKeys,
   coverKeys,
+  hazed,
   type ZoneKind,
 } from "./zones.ts";
 
@@ -404,12 +405,14 @@ export function seeing(
     return reaches(feet, through) ? "clear" : "none";
   }
   const light = lightAt(at, state, access);
-  if (light === "bright") return "clear";
-  if (reaches(feet, senses.devilsSight)) return "clear";
-  if (light === "dark" && reaches(feet, senses.truesight)) return "clear";
+  // A Lightly Obscured area, as Web's strands, is seen only dimly, however bright.
+  const clear = hazed(at, state) ? "dim" : "clear";
+  if (light === "bright") return clear;
+  if (reaches(feet, senses.devilsSight)) return clear;
+  if (light === "dark" && reaches(feet, senses.truesight)) return clear;
   const inRange = reaches(feet, senses.darkvision);
   if (light === "dark") return inRange ? "dim" : "none";
-  return inRange ? "clear" : "dim";
+  return inRange ? clear : "dim";
 }
 
 // The cover `target` has against what `actor` does to it. From inside its swallower there is none, wherever

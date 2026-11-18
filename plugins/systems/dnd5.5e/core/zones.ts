@@ -20,6 +20,7 @@ import {
   NS,
 } from "./state.ts";
 import {
+  alongLine,
   distanceFeet,
   type Square,
   squareKey,
@@ -246,51 +247,6 @@ export function inZone(zone: Zone, square: Square | null): boolean {
   return zone.shape === "ring" ? feet === zone.radius : feet <= zone.radius;
 }
 
-// Whether `square` lies on the line from `from` to `from` plus `dir`, `width` feet wide.
-function alongLine(
-  from: Square,
-  dir: Square,
-  square: Square,
-  width: number,
-): boolean {
-  const px = square.x - from.x;
-  const py = square.y - from.y;
-  const length = dir.x * dir.x + dir.y * dir.y;
-  const t = length === 0 ? 0 : Math.max(0, Math.min(1, (px * dir.x + py * dir.y) / length));
-  const across = Math.hypot(px - t * dir.x, py - t * dir.y);
-  return across <= 0.5 + (width - 5) / 10;
-}
-
-// A line zone's ends: a wall `feet` long across the way from `from` to `aim`, centred on `aim`, or a blast `feet`
-// long from `from` toward `aim`, as Gust of Wind's.
-export function lineFrom(
-  from: Square,
-  aim: Square,
-  feet: number,
-  across: boolean,
-): { readonly at: Square; readonly dir: Square } {
-  const dx = aim.x - from.x;
-  const dy = aim.y - from.y;
-  const length = Math.hypot(dx, dy) || 1;
-  const squares = feet / 5;
-  if (!across) {
-    const ux = dx / length;
-    const uy = dy / length;
-    return {
-      at: { x: from.x + Math.round(ux), y: from.y + Math.round(uy) },
-      dir: { x: Math.round(ux * (squares - 1)), y: Math.round(uy * (squares - 1)) },
-    };
-  }
-  // Square to the way it's aimed, or east to west when aimed at the caster's own square.
-  const px = dx === 0 && dy === 0 ? 1 : -dy / length;
-  const py = dx === 0 && dy === 0 ? 0 : dx / length;
-  const half = (squares - 1) / 2;
-  return {
-    at: { x: aim.x - Math.round(px * half), y: aim.y - Math.round(py * half) },
-    dir: { x: Math.round(px * (squares - 1)), y: Math.round(py * (squares - 1)) },
-  };
-}
-
 // Inside an Antimagic Field, where no other spell's area reaches (its own and ones like it aside).
 export const inAntimagic = (actor: Actor, state: DndState): boolean =>
   antimagicAt(actor.position, state);
@@ -427,13 +383,11 @@ export function affects(
   }
   if (area.grappling && !grappleBetween(owner, actor)) return false;
   // Only a creature flying there, as Control Winds' downdraft knocks out of the air.
-  if (
-    area.flying &&
-    !actor.activeEffects.some(
-      ({ modifier }) => modifier.kind === "aloft" && modifier.mode !== "climb",
-    )
-  ) {
-    return false;
+  if (area.flying || area.ground) {
+    const up = actor.activeEffects.flatMap(({ modifier }) =>
+      modifier.kind === "aloft" ? [modifier.mode] : [],
+    );
+    if (area.flying ? !up.includes("fly") : up.length > 0) return false;
   }
   if (area.creatureTypes || area.exceptTypes) {
     const type = access ? statsOf(actor, access).creatureType : undefined;
@@ -584,6 +538,10 @@ export const glows = (
         square !== null &&
         distanceFeet(zone.at, square) <= zone.radius + zone.dim),
   );
+
+// In a Lightly Obscured zone, as Web's or Insect Plague's (core/sight.ts seeing).
+export const hazed = (square: Square | null, state: DndState): boolean =>
+  zonesOf(state).some((zone) => zone.zone === "haze" && inZone(zone, square));
 
 // In a zone that makes light a step dimmer, as round Shadow of Moil's caster.
 export const shaded = (square: Square | null, state: DndState): boolean =>
