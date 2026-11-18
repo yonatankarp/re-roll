@@ -273,25 +273,18 @@ const SLOT_RECOVERY = "needs a way to regain spell slots";
 // What the engine would need first, for the level 1 to 5 class features left as text.
 const WAITING_ON: Readonly<Record<string, string>> = {
   "barbarian-danger-sense": "needs Advantage on one ability's saves",
-  "barbarian-primal-knowledge": OUT_OF_COMBAT,
-  "bard-expertise": OUT_OF_COMBAT,
   "bard-jack-of-all-trades": OUT_OF_COMBAT,
-  "cleric-divine-order": "needs a choice between the orders at level-up",
   "cleric-sear-undead": "needs damage added to Turn Undead",
   "druid-druidic": OUT_OF_COMBAT,
-  "druid-primal-order": "needs a choice between the orders at level-up",
   "druid-wild-resurgence": SLOT_RECOVERY,
   "fighter-tactical-mind": OUT_OF_COMBAT,
   "fighter-tactical-shift": "needs free movement after Second Wind",
   "monk-uncanny-metabolism": "needs Focus Points regained on Initiative",
   "monk-slow-fall": "no falling in fights",
-  "ranger-deft-explorer": OUT_OF_COMBAT,
-  "rogue-expertise": OUT_OF_COMBAT,
   "rogue-thieves-cant": OUT_OF_COMBAT,
   "sorcerer-sorcerous-restoration": SLOT_RECOVERY,
   "warlock-magical-cunning": SLOT_RECOVERY,
   "wizard-arcane-recovery": SLOT_RECOVERY,
-  "wizard-scholar": OUT_OF_COMBAT,
   "wizard-memorize-spell": "needs prepared spells swapped on a Short Rest",
 };
 

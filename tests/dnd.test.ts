@@ -1572,5 +1572,7 @@ describe("encounter outcomes in real fights", () => {
     const loaded = loadSave(JSON.stringify(save), registry, run);
     if (!loaded.ok) throw new Error(loaded.error);
     expect(loaded.state).toStrictEqual(played.state);
-  }, 30_000);
+    // The SRD's Humans take a second origin feat and its Elves a lineage (#168), so these runs take longer, most of all
+    // under coverage.
+  }, 60_000);
 });
