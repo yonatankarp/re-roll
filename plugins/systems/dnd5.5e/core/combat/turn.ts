@@ -1,3 +1,4 @@
+import { awaitsCommand, companionOwner } from "./companions.ts";
 import { afterDamage, reactFrames } from "./reactions.ts";
 import { deathSaveEvents } from "./actions.ts";
 import { duelStrayed } from "./duel.ts";
@@ -744,6 +745,7 @@ export function runAdvanceTurn(
     ...(next ? turnStartEvents(next, after) : []),
     ...(next ? turnTempHpEvents(next, { ...context, state: after }) : []),
     ...(next ? regenerationEvents(next, context) : []),
+    ...(next ? uncommandedEvents(next, after) : []),
     ...grappled.events,
     ...casting.events,
     ...(next ? sharedTempHp(next, { ...context, state: after }) : []),
@@ -1122,6 +1124,24 @@ export const turnFrames = {
     run: (_payload, context: Context) => runEndTurn(context),
   }),
 };
+
+// A lasting companion its owner didn't command takes only the Dodge action this turn.
+function uncommandedEvents(actor: Actor, state: DndState): SystemEvent[] {
+  const owner = companionOwner(actor);
+  if (!owner || !awaitsCommand(actor, state.actors[owner])) return [];
+  return [
+    dndEvent(`${NS}:effectAdded`, {
+      actor: actor.id,
+      effect: {
+        sourceId: "companion:uncommanded",
+        casterId: owner,
+        modifier: { kind: "actionLimit", dodgeOnly: true },
+        ends: "spellDuration",
+        lasts: { actor: actor.id, round: state.combat?.round ?? 1, at: "end" },
+      },
+    }),
+  ];
+}
 
 // Heroism: Temporary Hit Points as the bearer's turn starts, from its caster's numbers, the best of them.
 function turnTempHpEvents(actor: Actor, context: Context): SystemEvent[] {

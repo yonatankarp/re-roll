@@ -1316,6 +1316,29 @@ export function makeJudge(context: Context, side: Actor): Judge {
             )
           : 0;
       }
+      // A Steel Defender's or Primal Companion's best action, which it takes only once commanded.
+      case "commandCompanion": {
+        if (target.id !== actor.id) return 0;
+        return Math.max(
+          0,
+          ...Object.values(state.actors).flatMap((companion) =>
+            companion.source.kind === "summon" &&
+            companion.source.lasting &&
+            companion.source.casterId === actor.id &&
+            !isDown(companion) &&
+            !companion.activeEffects.some(
+              ({ modifier }) => modifier.kind === "commanded",
+            )
+              ? stats(companion).actions.map((item) =>
+                  resolveTargets(ALL, item, companion, context).reduce(
+                    (sum, aimed) => sum + worthOn(companion, aimed, item),
+                    0,
+                  ),
+                )
+              : [],
+          ),
+        );
+      }
       // Thorns: about two squares of them walked by each creature caught. Darkness or fog: worth something only
       // to a caster who sees through it, against the foes it hides.
       case "zone":

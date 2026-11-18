@@ -813,6 +813,8 @@ export function choosePolicy(decision: Decision, context: Context): string {
     return best && best.worth > 0 ? best.id : DECLINE;
   }
 
+  // What to add to a lasting companion's hit: the first, as Arcane Jolt's damage.
+  if (decision.id.startsWith(`${NS}:companionHit:`)) return first.id;
   if (decision.id.startsWith(`${NS}:afterHit:`)) {
     if (actor.side !== "party") return spendsSlot ? first.id : DECLINE;
     // The party adds what's worth its cost, as a Superiority Die or a Focus Point (worth.ts prices each), and a
