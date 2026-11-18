@@ -354,8 +354,9 @@ fn swap_in(staging: &Path, target: &Path) -> Result<bool, String> {
 const STORE_TAG: &str = "store";
 const STORE_INDEX: &str = "store.json";
 const KEYCHAIN: &str = "app.re-roll.desktop.store";
-// install.ts refuses a zip that unpacks to more than 4 GB, so a bigger download is refused before that.
-const MAX_DOWNLOAD: u64 = 4 * 1024 * 1024 * 1024;
+// The whole zip is held in memory here, then again in the page, so the cap stays well under that.
+// The biggest store zip is about 180 MB.
+const MAX_DOWNLOAD: u64 = 1024 * 1024 * 1024;
 
 // Tokens kept only while the app is open, when the OS has no keychain to keep them in.
 #[derive(Default)]
