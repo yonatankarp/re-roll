@@ -34,7 +34,7 @@ The engine contains no game rules and no adventure content. **Everything specifi
 | Syntax | `erasableSyntaxOnly` and `verbatimModuleSyntax`, so no enums, runtime namespaces or parameter properties | Node can then run the source directly | [Node TypeScript docs](https://nodejs.org/api/typescript.html) |
 | Import extensions | Write `.ts` in relative imports, with `allowImportingTsExtensions` and `noEmit` in every config | Nothing emits JavaScript, as Node strips types and Vite bundles, so `rewriteRelativeImportExtensions` isn't needed | [Node TypeScript docs](https://nodejs.org/api/typescript.html), [Choosing compiler options](https://www.typescriptlang.org/docs/handbook/modules/guides/choosing-compiler-options.html) |
 | Closed sets | `as const` lists turned into Zod enums and inferred literal unions | Replaces enums, and gives runtime checks and types from one definition | Follows from the syntax row |
-| Runtime | Node 26.13.0, pinned in `.nvmrc`, minimum 24.12 | Type stripping is marked stable from 24.12 and 25.2 | [Node TypeScript docs](https://nodejs.org/api/typescript.html), [Node releases](https://nodejs.org/dist/index.json) |
+| Runtime | Node 26.13.0, pinned in `.nvmrc`; `engines` asks for 26 or later, the only major CI tests | Type stripping is stable from 24.12 and 25.2, but older majors go untested | [Node TypeScript docs](https://nodejs.org/api/typescript.html), [Node releases](https://nodejs.org/dist/index.json) |
 | Modules | `module: nodenext` for shared code, bundler settings only in the UI | Bundler-only code can fail in Node, while Node-valid code generally works in bundlers | [Choosing compiler options](https://www.typescriptlang.org/docs/handbook/modules/guides/choosing-compiler-options.html) |
 | Aliases | No tsconfig `paths`. Plugins import the SDK through the `#sdk` subpath import | Node ignores `tsconfig.json` at runtime, and subpath imports are its supported alternative | [Node TypeScript docs](https://nodejs.org/api/typescript.html) |
 | Repo shape | One package, with plugins as folders rather than workspace packages | Node refuses to strip types under `node_modules`, and workspaces link packages there | [Node TypeScript docs](https://nodejs.org/api/typescript.html) |
@@ -139,12 +139,12 @@ Each layer gets a config that limits what it can reach:
 
 | Config | Covers | `lib` and `types` | Effect |
 |---|---|---|---|
-| `tsconfig.core.json` | `engine/{kernel,story,prep,sdk}`, `plugins/systems/*/core` | `ES2023`, `types: []` | Can't compile against DOM or Node APIs |
-| `tsconfig.tools.json` | `engine/tools`, `engine/platform/node`, `app/cli` | `ES2023`, `types: ["node"]` | Runs directly in Node |
+| `tsconfig.core.json` | `engine/{kernel,run,story,prep,sdk}`, `plugins/systems/*/core`, the fixture system in `tests/fixtures/system-d6` | `ES2023`, `types: []` | Can't compile against DOM or Node APIs |
+| `tsconfig.tools.json` | `engine/tools`, `engine/platform/node`, `app/cli`, and the Vite, Vitest and Playwright configs | `ES2023`, `types: ["node"]` | Runs directly in Node |
 | `tsconfig.test.json` | `tests/`, except the fixture system | `ES2023`, `types: ["node"]` | Tests can read fixtures from disk |
-| `tsconfig.ui.json` (added in step 6) | `engine/shell`, `engine/platform/tauri`, `plugins/systems/*/ui`, `app/desktop` | `ES2023, DOM`, bundler resolution | Built by Vite |
+| `tsconfig.ui.json` (added in step 6) | `engine/shell`, `engine/platform/browser`, `engine/platform/tauri`, `plugins/systems/*/ui`, `app/desktop` | `ES2023, DOM`, bundler resolution | Built by Vite |
 
-All three set `strict`, `types` and `rootDir` explicitly, so changes in compiler defaults can't alter behavior on a later upgrade.
+All four extend `tsconfig.base.json`, which sets `strict` and `rootDir`, and each sets `types` explicitly, so changes in compiler defaults can't alter behavior on a later upgrade.
 
 ### File and network access
 
@@ -164,7 +164,7 @@ export interface ModelClient {
 
 The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `books/` through a read-only endpoint on the dev server. A built desktop app has no checkout: it reads the shipped plugins from its bundled resources, and the player's own from a content folder in its app data, laid out like `books/` (see the README). The fs plugin can only read the two content folders. The app's own commands do its writing: saves go to its app data, and **Install from a zip** unzips a plugin or a book into the content folder's `adventures/`, `rules/`, `assets/` and `library/`, with every path checked again in Rust (section 9).
 
-One exception to "only `engine/platform` touches the network": the narration worker in `engine/shell` downloads the Kokoro-82M model from Hugging Face on first use, and the Tauri CSP allows only that host (section 7.2).
+One exception to "only `engine/platform` touches the network": the narration worker in `engine/shell` downloads the Kokoro-82M model from Hugging Face on first use (section 7.3). The Tauri CSP's `connect-src` allows the page only its own origin, the app's IPC, `blob:`, the model's `huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/` path and Hugging Face's file CDN, `*.cdn.hf.co`. The Store's downloads don't go through the page: the app's `store_fetch` command fetches release assets in Rust from `github.com`, or from `api.github.com` with the repo's token.
 
 ### Domain model
 
@@ -550,7 +550,7 @@ The engine also hands `sceneActions` and the UI's `sheets` the scene the party i
 
 **Gap:** attuning between choices doesn't pass the Short Rest's hour.
 
-### 7.2 Narration and ambience
+### 7.3 Narration and ambience
 
 **Ambience.** A scene may name an `ambience` (`wind`, `cave`, `town`, `rain`, `storm`, `campfire` or `none`). Without one, `guessAmbience` in `engine/story/ambience.ts` picks one from words in the text. `engine/shell/ambience.ts` makes each soundscape with Web Audio from looped noise, filters and random one-off sounds, so there are no sound files. A new scene crossfades, and a fight or the narrator ducks it.
 
@@ -560,11 +560,11 @@ The engine also hands `sceneActions` and the UI's `sheets` the scene the party i
 - **Read in the app:** when a clip is missing, `engine/shell/narration-worker.ts` reads the scene in a worker, a sentence at a time, on WebGPU or else WASM. `narration.ts` reads ahead the scenes the current choices lead to, because a CPU reads slower than speech, and restarts a worker that stays silent too long. If no voice can be had, the controls hide rather than fall back to a system voice.
 - **Settings** live in the Sound panel (`sound-panel.ts`), from the game menu.
 
-### 7.3 Adventure covers
+### 7.4 Adventure covers
 
 The main menu shows each adventure as a cover card (`engine/shell/adventure-picker.ts`) with a title plate under the picture. A cover is an entry in a `books/assets/<folder>/index.json` art index with `cover: [<adventure id>, …]`. An adventure with no cover, or one whose picture won't load, still gets a designed card with its title and levels. The shipped adventures have none.
 
-### 7.4 Roll history, Leads and rewind
+### 7.5 Roll history, Leads and rewind
 
 The Journal drawer has three tabs (`engine/shell/journal-tabs.ts`):
 
@@ -1097,8 +1097,12 @@ export interface SaveFile {
 - **Autosaves:** each run has one, `saves/<adventure>-<seed>-autosave.json`, written after the start, every choice and every undo. Starting the same seed again replaces it. A failed autosave warns and play carries on. Continue on the main menu loads the newest save.
 - **Manual saves** from the game menu each get a file of their own. Only a run's own autosave is ever overwritten.
 - **Save cards:** the Load screen (`engine/shell/load-screen.ts`) lists saves newest first, as cards with the adventure, character, health, scene, party level, settings such as the difficulty, and scene art. It deletes on a second press. The save format has no clock and no card data, so two records sit beside the saves: `saves/times` (path to ISO time, kept in its old shape so older builds can read it) and `saves/details` (what each card shows). A save made before details existed shows a bare card until it's next loaded.
-- **Where they live:** the browser and the Tauri app keep saves in the webview's `localStorage`, under `saves/` (`withSaves` in `engine/platform/browser/storage.ts`). Content stays read-only, and only `saves/` paths can be written. That store is about 5 MB and tied to the page's origin, so another dev-server port has its own saves. Moving them to real files is still to do. `npm run play` writes files under `<dir>/saves` through Node storage.
-- **Writes:** Node storage writes a temporary file and renames it, so a crash can't destroy a save. `localStorage` writes one key at a time, which is atomic per save.
+- **Where they live:** `app/desktop/main.ts` picks the store, and `withSaveFiles` in `engine/platform/browser/storage.ts` puts it behind `Storage`. Content stays read-only, and only `saves/` paths can be written.
+  - The desktop app keeps each save as a gzipped file in `saves/` inside its app data folder (the README lists it per OS), through the `save_*` commands in `main.rs` (`engine/platform/tauri/saves.ts`). A file name is the percent-encoded save path plus `.gz`.
+  - The browser build keeps saves in the page's IndexedDB (database `re-roll`, `engine/platform/browser/indexeddb.ts`), tied to the page's origin, so another dev-server port has its own saves. When IndexedDB won't open they stay in `localStorage`, which holds about 5 MB.
+  - Saves an older build kept in `localStorage` are copied into the new store once (`moveSavesToFiles`), never over a newer copy, and the originals stay as a backup.
+  - `npm run play` writes files under `<dir>/saves` through Node storage.
+- **Writes:** Node storage and the desktop app write a temporary file and rename it, so a crash can't destroy a save. IndexedDB and `localStorage` write one save at a time, which is atomic per save.
 - **Snapshots** wait until loading is actually slow.
 
 ## 10. Session prep
