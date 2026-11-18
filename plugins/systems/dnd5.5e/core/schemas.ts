@@ -1472,6 +1472,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
           .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
           .optional(),
         noFly: z.literal(true).optional(), // only a form without a Fly Speed, as Wild Shape's before level 8
+        // only these stat blocks, whatever their Challenge Rating, as the Apparatus of Kwalish its pilot drives
+        ids: z.array(ContentIdSchema).min(1).optional(),
         // The highest Challenge Rating by the bearer's level in `class`: the last of `tiers` it has reached (a
         // form with a Fly Speed only from a tier with `fly`), as Wild Shape's, or the level divided by `per`, as
         // Circle Forms'.
@@ -2446,6 +2448,8 @@ export const ActivationSchema = z.strictObject({
       // With `afterHit`, a strike option picked before the damage that makes the hit a Critical Hit, as a Namer's
       // Needle's Named Target (combat/strikes.ts).
       critical: z.literal(true).optional(),
+      // With `afterHit`, offered only on a Critical Hit, as Savage Attacks' extra weapon die.
+      onCritical: z.literal(true).optional(),
       // Taken for another creature within 5 feet that a creature the bearer can see attacks, before the roll, or hits,
       // as with Protection and Interception. It's taken as soon as it can be.
       allyAttacked: z.literal(true).optional(),
@@ -4871,7 +4875,8 @@ export type Subclass = z.infer<typeof SubclassSchema>;
 export const SpeciesSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
   text: z.string().min(1),
-  creatureType: PrintedCreatureTypeSchema,
+  // A 2014 race prints none, as every one of them is a Humanoid.
+  creatureType: PrintedCreatureTypeSchema.default("Humanoid"),
   size: z.enum(["tiny", "small", "medium", "large"]),
   speed: z.number().int(),
   traits: z.array(ContentIdSchema).default([]),
@@ -4881,10 +4886,20 @@ export type Species = z.infer<typeof SpeciesSchema>;
 
 export const BackgroundSchema = ContentEntrySchema.extend({
   name: z.string().min(1),
-  abilities: z.array(AbilitySchema).length(3),
-  feat: ContentIdSchema,
-  skills: z.array(SkillSchema).length(2),
-  tool: z.string().min(1),
+  // An older book's background lists all six: its increases go to any of them.
+  abilities: z
+    .array(AbilitySchema)
+    .refine(
+      (list) => list.length === 3 || list.length === 6,
+      "must list 3 or 6",
+    ),
+  // An older book's background names none, and gives an Origin feat of the player's choice.
+  feat: ContentIdSchema.optional(),
+  // An older book's background may give fewer, and its `choices` ask for the rest.
+  skills: z.array(SkillSchema).max(2),
+  choices: z.array(ChoiceDefSchema).default([]), // asked at character creation, as "one from among Arcana and History"
+  // An older book's background may print none.
+  tool: z.string().min(1).optional(),
   // Its feat, or one of this category instead, as with "Survivor or a Dark Gift feat of your choice".
   featOr: z.literal("darkGift").optional(),
 }).strict();
@@ -6178,8 +6193,11 @@ const LevelBandSchema = z.strictObject({
 // Traps and hazards share one shape. `text` is the printed entry as plain text, copied by code.
 const DangerShape = {
   name: z.string().min(1),
-  severity: z.enum(["nuisance", "deadly"]),
-  levels: z.array(LevelBandSchema).min(1), // the character levels it is meant for
+  // A 2014 trap prints a threat (setback, moderate, dangerous or deadly) instead, and a glossary hazard neither.
+  severity: z
+    .enum(["nuisance", "deadly", "setback", "moderate", "dangerous"])
+    .optional(),
+  levels: z.array(LevelBandSchema).min(1).optional(), // the character levels it is meant for
   trigger: z.string().optional(),
   duration: z.string().optional(),
   // How the numbers change with character level, one row per band of the book's scaling table.
