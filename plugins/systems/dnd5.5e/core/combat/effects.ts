@@ -165,7 +165,7 @@ import {
   limitEvents,
   timeStopEnds,
 } from "./durations.ts";
-import { movedFrames } from "./areas.ts";
+import { carriedEvents, movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
 import { reincarnateEvents } from "../reincarnate.ts";
 import {
@@ -3210,7 +3210,9 @@ export function leafEvents(
             ? pushTo(
                 effect.direction === "random"
                   ? randomFrom(target, context.dice.roll(4))
-                  : caster.position,
+                  : effect.fromObject
+                    ? (objectAt(caster, sourceId) ?? caster.position)
+                    : caster.position,
                 target,
                 brace.feet,
                 context.state,
@@ -3699,6 +3701,27 @@ export function leafEvents(
           );
         }
         break;
+      case "revertShape": {
+        // shortcut: it can shape-shift again at once, rather than only once out of the light.
+        const ended = new Set<string>();
+        for (const own of target.activeEffects) {
+          const key = `${own.sourceId}|${own.casterId}`;
+          if (
+            (own.modifier.kind === "form" || own.modifier.kind === "shape") &&
+            !ended.has(key)
+          ) {
+            ended.add(key);
+            events.push(
+              dndEvent(`${NS}:effectEnded`, {
+                actor: target.id,
+                sourceId: own.sourceId,
+                casterId: own.casterId,
+              }),
+            );
+          }
+        }
+        break;
+      }
       case "note":
       case "disperse":
       case "animate":
@@ -3791,14 +3814,16 @@ function commandedResult(
 
 // The zones a spell leaves, once for the whole cast, where the area was aimed or round the caster, whoever it
 // caught. Its area's save DC is fixed as cast; a wall rings the area with squares no one can pass.
-function zoneEvents(
+export function zoneEvents(
   effects: readonly LeafEffect[],
   action: KnownAction,
   actor: Actor,
   context: Context,
   aim: Square | undefined,
   slotLevel: number | undefined,
+  placing = false, // an anchored action's object, which combat/actions.ts places where it goes
 ): SystemEvent[] {
+  if (action.activation.anchor && !placing) return [];
   const at = aim ?? actor.position;
   if (!at) return [];
   const stats = deriveStats(actor, context);
@@ -3876,13 +3901,30 @@ function zoneEvents(
     const uses =
       kept.uses === undefined
         ? undefined
-        : kept.uses + (usesPerSlot ?? 0) * above;
+        : Math.max(
+            kept.usesAtLeast ?? 1,
+            kept.uses +
+              (usesPerSlot ?? 0) * above +
+              (kept.usesMod
+                ? evaluateFormula(
+                    { base: 0, add: [{ kind: "spellMod" }] },
+                    stats,
+                  )
+                : 0),
+          );
     return {
       area: area
         ? {
             ...kept,
             ...(resolution ? { resolution } : {}),
             ...(holding ? { holding } : {}),
+            ...(kept.schedule
+              ? {
+                  schedule: kept.schedule.map(
+                    (step) => retyped(fixed(step), type) ?? step,
+                  ),
+                }
+              : {}),
             ...(kept.foilsSpells
               ? {
                   foilsSpells: {
@@ -3965,15 +4007,24 @@ function zoneEvents(
         : action.activation.areas?.[effect.part],
     );
     // A new cast starts its counts afresh: what an earlier one dealt or used up.
+    const spell = spellOfSource(spellSource(action)) ?? "";
     const counts = [
-      ...(uses !== undefined && !effect.bare ? [":used"] : []),
-      ...(area?.maxDamage !== undefined && !effect.bare ? [":dealt"] : []),
-    ].flatMap((suffix) =>
-      actor.resourcesSpent[`${spellSource(action)}${suffix}`]
+      ...(uses !== undefined && !effect.bare
+        ? [`${spellSource(action)}:used`]
+        : []),
+      ...(area?.maxDamage !== undefined && !effect.bare
+        ? [`${spellSource(action)}:dealt`]
+        : []),
+      // Spirit Lantern's fragments are gone with the spell it was cast before.
+      ...(area?.gathers
+        ? [`spheres:${spell}`, `spheres:${spell}:gathered`]
+        : []),
+    ].flatMap((resource) =>
+      actor.resourcesSpent[resource]
         ? [
             dndEvent(`${NS}:resourceRestored`, {
               actor: actor.id,
-              resource: `${spellSource(action)}${suffix}`,
+              resource,
             }),
           ]
         : [],
@@ -4020,6 +4071,9 @@ function zoneEvents(
             ...(line ? { dir: line.dir } : {}),
             ...(effect.width ? { width: effect.width } : {}),
             ...(uses === undefined || effect.bare ? {} : { uses }),
+            ...(context.state.combat
+              ? { since: context.state.combat.round }
+              : {}),
             name: action.name,
           },
           ends: effectEnds(effect.duration),
@@ -4094,6 +4148,59 @@ function fissureEvents(
     );
   }
   return events;
+}
+
+// An area that acts on those in it as it appears, as Conjure Celestial's light: its tick on each creature it covers.
+function appearFrames(
+  action: KnownAction,
+  actor: Actor,
+  events: readonly SystemEvent[],
+  context: Context,
+): Frame[] {
+  if (
+    !action.activation.area?.appears &&
+    !action.activation.areas?.some((area) => area.appears)
+  ) {
+    return [];
+  }
+  const state = events.reduce(applyDndEvent, context.state);
+  const far = { x: -1000, y: -1000 };
+  return zonesOf(state, context)
+    .filter(
+      (zone) =>
+        zone.owner === actor.id &&
+        zone.sourceId === spellSource(action) &&
+        zone.area?.appears,
+    )
+    .flatMap((zone) => movedFrames(zone, far, { ...context, state }));
+}
+
+// Where a caster's spell object stands, for an action of that spell (combat/anchor.ts), as Grasping Vine's vine.
+function objectAt(caster: Actor, sourceId: string): Square | null {
+  const source = sourceId.startsWith("lasting:")
+    ? `spell:${sourceId.slice("lasting:".length)}`
+    : sourceId;
+  for (const effect of caster.activeEffects) {
+    if (effect.sourceId === source && effect.modifier.kind === "zone") {
+      return effect.modifier.at;
+    }
+  }
+  return null;
+}
+
+// Half the damage an action deals comes back to its user as Hit Points, as Vampiric Touch's.
+export function siphoned(
+  action: KnownAction,
+  user: Actor,
+  dealt: number,
+  stats: Stats,
+): SystemEvent[] {
+  if (!action.activation.siphon || dealt <= 0 || isDead(user)) return [];
+  const missing = stats.maxHp - Math.max(user.hp, 0);
+  const amount = Math.min(Math.floor(dealt / 2), missing);
+  return amount > 0
+    ? [dndEvent(`${NS}:healed`, { actor: user.id, amount, max: stats.maxHp })]
+    : [];
 }
 
 // A Robe of Eyes' wearer within its reach of a spell's sunlight is Blinded for a minute, saving at each turn's end.
@@ -4341,6 +4448,9 @@ function movedZone(
   return {
     events: [
       dndEvent(`${NS}:zoneMoved`, { actor: actor.id, sourceId: source, to }),
+      ...zones.flatMap((zone) =>
+        carriedEvents(zone, zone.at, to, context.state),
+      ),
     ],
     frames: zones.flatMap((zone) =>
       movedFrames({ ...zone, at: to }, zone.at, context),
@@ -5034,6 +5144,10 @@ export function resolveAction(
 
   const beginConcentration = (effects: readonly LeafEffect[]): void => {
     if (!usesConcentration(effects) && !action.concentrates) return;
+    // What a held spell lets its caster do keeps that spell's Concentration, as Witch Bolt's later lightning.
+    if (action.id.startsWith("lasting:") || action.id.startsWith("spheres:")) {
+      return;
+    }
     // An area acting later, at no cost, keeps the Concentration its spell began, as Conjure Elemental's spirit
     // restraining. A recast still begins it anew.
     if (
@@ -5088,6 +5202,7 @@ export function resolveAction(
     lastDealt = result.dealt;
     events.push(
       ...result.events,
+      ...siphoned(action, actor, result.dealt, stats),
       ...insideDamageEvents(actor, target, result.dealt),
       ...duelDamaged(actor, target, result.dealt, context.state),
     );
@@ -5319,6 +5434,7 @@ export function resolveAction(
           slotLevel,
         ),
       );
+      frames.push(...appearFrames(action, actor, events, context));
       const element = zoneTypeFrame(
         resolution.effects,
         spellSource(action),
@@ -5718,8 +5834,14 @@ export function resolveAction(
           action.spellLevel === null
             ? undefined
             : spellOf(action.id, actor, context)?.school;
+        // A spell's own, as Holy Star of Mystra's mote, turns spells the same way.
+        const held = target.activeEffects.flatMap(({ modifier }) =>
+          modifier.kind === "spellTurning"
+            ? [{ ...modifier, schools: undefined, resource: undefined }]
+            : [],
+        );
         const turning = saved
-          ? deriveStats(target, context).passives.find(
+          ? [...deriveStats(target, context).passives, ...held].find(
               (passive) =>
                 passive.kind === "spellTurning" &&
                 action.spellLevel !== null &&
@@ -5997,6 +6119,8 @@ export function resolveAction(
       break;
     }
     case "attack": {
+      // A spell attack that leaves something held by Concentration begins it, as Spiritual Weapon's force.
+      beginConcentration([...resolution.onHit, ...resolution.onMiss]);
       const thrown: Frame[] = [];
       for (const target of targets) {
         for (const actionId of attackRoutine(action, actor, stats)) {

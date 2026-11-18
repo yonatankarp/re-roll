@@ -798,6 +798,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("deathWard") }),
   // Dash as a Bonus Action, as Expeditious Retreat gives.
   z.strictObject({ kind: z.literal("bonusDash") }),
+  // Disengage as a Bonus Action, as Conjure Woodland Beings gives.
+  z.strictObject({ kind: z.literal("bonusDisengage") }),
   // Darkvision this far, and with `truesight` seeing through magical darkness and invisibility, as Darkvision or True
   // Seeing give.
   z.strictObject({
@@ -999,6 +1001,14 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // Which of a transformation's options the bearer has taken, by name, for what holds only `whileAspect` it lasts, as
   // Starry Form's Archer, Chalice or Dragon.
   z.strictObject({ kind: z.literal("aspect"), name: z.string().min(1) }),
+  // While it lasts, the bearer turns spells as the Spell Turning passive does, as Holy Star of Mystra's mote: only
+  // the deflection with `deflectOnly` (combat/effects.ts).
+  z.strictObject({
+    kind: z.literal("spellTurning"),
+    upTo: z.number().int().min(1).max(9),
+    deflect: z.literal(true).optional(),
+    deflectOnly: z.literal(true).optional(),
+  }),
   // The bearer has at least Half Cover against everything, as Bulwark of Force's or Smite of Protection's (sight.ts).
   z.strictObject({ kind: z.literal("halfCover") }),
   // A save for half damage the bearer makes with Dexterity deals none on a success and half on a failure, as Evasion,
@@ -1045,6 +1055,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("exhausted"),
     levels: z.number().int().min(1).max(6),
+    upTo: z.number().int().min(1).max(6).optional(), // it never takes the total past this, as Waves of Exhaustion's 4
   }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
@@ -1334,6 +1345,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("forcedMove"),
     feet: z.number(),
     direction: z.enum(["away", "toward", "random"]),
+    // from the spell's object instead of the caster, as Grasping Vine's pull toward the vine (combat/anchor.ts)
+    fromObject: z.literal(true).optional(),
     maxSize: SizeSchema.optional(),
     largerBy: z.number().int().min(0).optional(), // only a target at most this many sizes larger than the caster
     option: z.string().min(1).optional(), // as an applyCondition's, as Telekinetic Thrust's push or Prone
@@ -1704,6 +1717,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // The target's Concentration ends, as entering a Rage does.
   z.strictObject({ kind: z.literal("endConcentration") }),
+  // A target in a shape not its own, by a spell or its own trait, goes back to its true form, as Moonbeam's light
+  // forces (combat/effects.ts).
+  z.strictObject({ kind: z.literal("revertShape") }),
   // The caster picks one of these sets of modifiers for the target, for `duration`, as Alter Self's options or
   // Enlarge/Reduce's (combat/effects.ts). The player is asked; anyone else takes the first.
   z.strictObject({
@@ -2276,6 +2292,22 @@ export const AreaEffectSchema = z.strictObject({
   // the ground, as Earthquake's tremor
   flying: z.literal(true).optional(),
   ground: z.literal(true).optional(),
+  // a foe that dies in it fills one of its spell's `spheres`, as Spirit Lantern's Dim Light gathers soul fragments
+  gathers: z.literal(true).optional(),
+  // it acts on those in it as it appears, as Conjure Celestial's light shines on each creature it's cast over
+  appears: z.literal(true).optional(),
+  // it acts on a creature its owner moves it onto, and stops there for the turn, as Flaming Sphere rolled into a foe
+  whenMoved: z.literal(true).optional(),
+  // the creatures it holds with a condition move with it, as Whirlwind's
+  carries: z.literal(true).optional(),
+  // as its owner's turn starts, it acts with the next of these each time instead of `resolution`, the last
+  // repeating, as Storm of Vengeance's turns (combat/areas.ts)
+  schedule: z.array(ResolutionSchema).min(1).optional(),
+  // its owner-turn resolution picks the most hurt it affects first, as Aura of Vitality's healing
+  mostHurt: z.literal(true).optional(),
+  // its `uses` gain the caster's spellcasting modifier, at least `usesAtLeast` in all, as Healing Spirit's
+  usesMod: z.literal(true).optional(),
+  usesAtLeast: z.number().int().min(1).optional(),
   // a fall that ends in it deals half damage, as in Control Winds' updraft (combat/falling.ts)
   softFalls: z.literal(true).optional(),
   // no fog, smoke or other gas hides a square in it, as Warding Wind hedges them out (core/zones.ts obscuring)
@@ -2678,6 +2710,23 @@ export const ActivationSchema = z.strictObject({
   afterUse: z
     .strictObject({ feature: ContentIdSchema, label: z.string().optional() })
     .optional(),
+  // It's done from an object the spell keeps on the map, as Spiritual Weapon's force: the object moves up to `moves`
+  // feet (placed that far from the caster as the spell is cast) to within `reach` feet of the first target, and the
+  // targeting's range counts from it (combat/anchor.ts). Its zone leaves are that object.
+  anchor: z
+    .strictObject({
+      moves: z.number().int().min(0),
+      reach: z.number().int().min(5).default(5),
+    })
+    .optional(),
+  // These dice more to its damage for each round since its spell's zone was placed, as Delayed Blast
+  // Fireball's bead growing at each of its caster's turn ends (stats.ts).
+  growsBy: DiceSchema.optional(),
+  // Its user regains Hit Points equal to half the damage it deals, as Vampiric Touch's (combat/effects.ts siphoned).
+  siphon: z.literal(true).optional(),
+  // A spell's `lasting` action only while no creature but its caster bears what the spell put on it, so its mark
+  // moves to a new creature once the old one drops, as Hunter's Mark's (stats.ts).
+  remark: z.literal(true).optional(),
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
   area: AreaEffectSchema.optional(), // what the zone its resolution leaves does later
@@ -2693,6 +2742,7 @@ export const ActivationSchema = z.strictObject({
         effects: z.array(LeafEffectSchema).optional(),
         // or a whole resolution of its own in place of the one written, as Pyrotechnics' Smoke
         resolution: ResolutionSchema.optional(),
+        self: z.literal(true).optional(), // with `resolution`, aimed at the caster alone, as a globe held to throw
       }),
     )
     .min(2)
@@ -4641,6 +4691,13 @@ export const FeatureSchema = ContentEntrySchema.extend({
     .optional(),
   // These spells' damage takes this type instead, as Rimekin's Cold Fire Magic.
   retype: z.record(ContentIdSchema, DamageTypeSchema).optional(),
+  // These spells' extra damage on a hit rolls this die instead, as Foe Slayer's d10 for Hunter's Mark (stats.ts).
+  redice: z.record(ContentIdSchema, DiceSchema).optional(),
+  // These spells do these too, with the options their effects name, as Eldritch Hex's Disadvantage on saves of the
+  // ability chosen for Hex (stats.ts).
+  addsTo: z
+    .record(ContentIdSchema, z.array(LeafEffectSchema).min(1))
+    .optional(),
   // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched, or each
   // as its own entry says, as Drow High Magic's at-will Detect Magic beside its once-a-day spells.
   freeCast: z
@@ -5013,6 +5070,10 @@ export const SpellSchema = ContentEntrySchema.extend({
       count: z.number().int().min(1),
       perSlot: z.number().int().min(0).default(0),
       actions: z.array(ActivationSchema).min(1),
+      // It starts empty, and each foe that dies in its zone fills one, up to `count`, or the caster's spellcasting
+      // modifier with `countMod` (cast from an item, `count`), as Spirit Lantern's soul fragments (combat/areas.ts).
+      gathered: z.literal(true).optional(),
+      countMod: z.literal(true).optional(),
     })
     .optional(),
   // What its `randomAction` picks from, each named by its label, as Prismatic Spray's rays.

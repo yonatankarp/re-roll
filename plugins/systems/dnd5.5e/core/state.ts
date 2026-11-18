@@ -235,6 +235,7 @@ const ActiveEffectSchema = z.strictObject({
         .optional(),
       width: z.number().int().optional(), // a line's, in feet
       uses: z.number().int().optional(), // the times it acts in all before it ends
+      since: z.number().int().optional(), // the round it was placed in, for a `schedule`
     }),
     // What an action anyone can take, such as Dodge, or a weapon mastery, leaves behind (core/tactics.ts).
     z.strictObject({
