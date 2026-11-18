@@ -40,6 +40,7 @@ const INDEX = indexEntities([
   entity("hb:monster/husher", "Husher"),
   { ...entity("hb:monster-family/hushers", "Hushers"), lore: true },
   { ...entity("hb:rule-term/quiet-steps", "Quiet Steps"), lore: true },
+  { ...entity("hb:rule-term/hushing", "Hushing"), lore: true },
   { ...entity("hb:variant-rule/loud-rooms", "Loud Rooms"), lore: true },
 ]);
 
@@ -149,6 +150,18 @@ describe("what a ruling names", () => {
     expect(mentions(INDEX, "Are loud rooms loud?", "new", glossary)).toEqual(
       [],
     );
+  });
+
+  it("takes one lower-case word of another kind only where the glossary lists the term (#196)", () => {
+    const glossary = {
+      kinds: new Set(["condition", "rule-term"]),
+      lower: new Set(["condition"]),
+    };
+    const ask = "Can hushing end early?";
+    expect(mentions(INDEX, ask, "new", glossary)).toEqual([]);
+    expect(
+      mentions(INDEX, ask, "new", { ...glossary, words: new Set(["hushing"]) }),
+    ).toEqual(["hb:rule-term/hushing"]);
   });
 
   it("names the thing itself over each of its variants", () => {

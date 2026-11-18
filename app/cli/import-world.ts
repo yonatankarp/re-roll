@@ -62,6 +62,8 @@ const SHOWN_KINDS = new Set<string>([
 ]);
 // The 2014 books print a condition or a sense in lower case, unlike an action or a skill ("help", "history").
 const LOWER_CASE = new Set(["condition", "sense"]);
+// Rules terms a book names in one lower-case word that is rarely anything else (#196).
+const TERM_WORDS = new Set(["concentration", "surprise", "cantrip"]);
 const plain = (title: string) => title.replace(/[’‘]/g, "'").toLowerCase();
 
 const storage = await createNodeStorage(process.cwd());
@@ -300,6 +302,7 @@ for (const plan of plans) {
         terms,
         kinds: new Set(Object.values(GLOSSARY_KINDS)),
         lower: LOWER_CASE,
+        words: TERM_WORDS,
       });
       written = { ...entry, ...(about.length > 0 ? { about } : {}) };
       rulings.push({ plugin: book, library: entry.library ?? [], about });
