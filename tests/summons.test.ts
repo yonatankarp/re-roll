@@ -218,7 +218,7 @@ describe("summons", () => {
           spell: lasting.id,
         }),
       ]),
-      resolveAction(lasting, hero, [], contextOf(state)).events ?? [],
+      resolveAction(lasting, hero, [hero], contextOf(state)).events ?? [],
     );
     const animated = Object.values(called.actors).filter((actor) =>
       actor.id.includes(":animated-"),
@@ -238,7 +238,7 @@ describe("summons", () => {
     ]);
     const angry = apply(
       state,
-      resolveAction(hostile, hero, [], contextOf(state)).events ?? [],
+      resolveAction(hostile, hero, [hero], contextOf(state)).events ?? [],
     );
     expect(
       Object.values(angry.actors).find((actor) =>

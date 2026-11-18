@@ -116,6 +116,27 @@ function changed(
       };
     }
   }
+  if (option.splinter) {
+    next = {
+      ...next,
+      resolution: {
+        ...next.resolution,
+        ...(next.resolution.kind === "automatic"
+          ? {
+              effects: next.resolution.effects.map((effect) =>
+                effect.kind === "summon"
+                  ? {
+                      ...effect,
+                      count: { base: 2, add: [] },
+                      halfHp: true as const,
+                    }
+                  : effect,
+              ),
+            }
+          : {}),
+      },
+    };
+  }
   if (option.maxDamage) {
     next = {
       ...next,

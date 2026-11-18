@@ -37,7 +37,9 @@ export function summonedActors(
 ): readonly Actor[] {
   const companion = lookup(context, CompanionSchema, effect.companion);
   if (!companion.play) return [];
-  const level = slotLevel ?? action.spellLevel ?? companion.play.level;
+  const level = effect.level
+    ? evaluateFormula(effect.level, stats)
+    : (slotLevel ?? action.spellLevel ?? companion.play.level);
   const spellDc = evaluateFormula(effect.dc, stats);
   const count = Math.max(1, evaluateFormula(effect.count, stats));
   const slug = effect.companion.slice(effect.companion.lastIndexOf("/") + 1);
@@ -73,8 +75,28 @@ export function summonedActors(
       hp: 1,
       inventory: [],
     });
+    const maxHp = deriveStats(actor, context).maxHp;
+    const half = Math.floor(maxHp / 2);
     return boosted(
-      { ...actor, hp: deriveStats(actor, context).maxHp },
+      effect.halfHp
+        ? {
+            ...actor,
+            hp: half,
+            activeEffects: [
+              {
+                sourceId: "summon-halved",
+                casterId: caster.id,
+                modifier: {
+                  kind: "bonus",
+                  to: "maxHp",
+                  subtract: true,
+                  amount: { bonus: { base: maxHp - half, add: [] } },
+                },
+                ends: "spellDuration",
+              },
+            ],
+          }
+        : { ...actor, hp: maxHp },
       caster,
       action.id,
       action.activation.cost.includes("slot"),

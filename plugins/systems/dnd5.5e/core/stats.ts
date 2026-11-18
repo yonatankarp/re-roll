@@ -746,15 +746,20 @@ function itemCasts(
               : `${spell.name}, level ${String(at)} (${item.name})`,
           activation: {
             ...numbered,
-            ...(cast.doom
+            ...(cast.doom || cast.userEffects
               ? {
                   userEffects: [
                     ...(numbered.userEffects ?? []),
-                    {
-                      kind: "slay" as const,
-                      hpAtMost: Number.MAX_SAFE_INTEGER,
-                      chance: cast.doom,
-                    },
+                    ...(cast.userEffects ?? []),
+                    ...(cast.doom
+                      ? [
+                          {
+                            kind: "slay" as const,
+                            hpAtMost: Number.MAX_SAFE_INTEGER,
+                            chance: cast.doom,
+                          },
+                        ]
+                      : []),
                   ],
                 }
               : {}),
@@ -3619,7 +3624,10 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
     access,
   );
   // Damage "plus the spell's level" reads it as a scaling key.
-  return { ...stats, scaling: { spellLevel: source.level } };
+  return {
+    ...stats,
+    scaling: { spellLevel: source.level, spellDc: source.spellDc },
+  };
 }
 
 function statBlockStats(

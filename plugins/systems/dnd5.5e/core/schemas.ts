@@ -1724,6 +1724,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     count: FormulaSchema.default({ base: 1, add: [] }),
     dc: FormulaSchema.default({ base: 0, add: [{ kind: "spellSaveDc" }] }),
     form: z.string().min(1).optional(), // one of the companion's forms, by name, picked through the cast's `shapes`
+    halfHp: z.literal(true).optional(), // each with half its Hit Point maximum, as Splintered Summons
+    // the level its numbers grow with, from the caster's numbers, for a feature's, as an Eldritch Cannon's Artificer level
+    level: FormulaSchema.optional(),
   }),
   // A strong wind: it ends the gas and vapour zones in its area, as Gust of Wind does Fog Cloud.
   // With `zones`, it ends the spells' zones of those kinds in its area instead, as Sunburst does Darkness.
@@ -1911,6 +1914,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     lacks: z.array(z.string().min(1)).default([]),
     duration: DurationSchema.optional(),
     hostile: z.literal(true).optional(),
+    chance: z.number().int().min(1).max(100).optional(), // only this many percent of the time, as a Staff of the Lost's 1 in 20
   }),
   // The target spends its Reaction on one melee attack against a foe in its reach, as a gnoll pack lord's Incite
   // Rampage.
@@ -2984,6 +2988,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     levels: z.number().int().min(1).optional(),
     addTargets: z.number().int().min(1).optional(),
     maxDamage: z.literal(true).optional(),
+    // its summons come two at once, each with half its Hit Points, as Splintered Summons
+    splinter: z.literal(true).optional(),
     tempHp: AmountSchema.optional(),
     saveDice: DiceSchema.optional(),
     // effects added to the failed saves its lasting area calls for, as Blessing of Moonlight's healing on Moonbeam
@@ -4855,6 +4861,8 @@ const ItemCastSchema = z.strictObject({
   // This many percent chance with each cast that its caster dies outright, as the Eye of Vecna's 5, Vecna tearing
   // its soul away.
   doom: z.number().int().min(1).max(100).optional(),
+  // What its user gets with each cast, as a Staff of the Lost's Minotaurs that may come (Activation `userEffects`).
+  userEffects: z.array(LeafEffectSchema).min(1).optional(),
   bonusAction: z.literal(true).optional(), // cast as a Bonus Action, as a Necklace of Prayer Beads' beads
   charges: z.number().int().min(0).default(1), // 0 casts it whenever
   resource: z.string().min(1).optional(),

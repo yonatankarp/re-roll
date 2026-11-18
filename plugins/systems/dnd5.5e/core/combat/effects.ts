@@ -3668,16 +3668,35 @@ export function leafEvents(
         );
         break;
       }
-      case "raiseCorpse":
-        if (effect.slain) {
+      case "animate":
+        if (
+          effect.chance === undefined ||
+          context.dice.roll(100) <= effect.chance
+        ) {
           events.push(
-            ...raisedEvents(effect, caster, context, target, sourceId),
+            ...animatedEvents(
+              effect,
+              caster,
+              context,
+              sourceId,
+              slotLevel !== undefined,
+            ),
           );
         }
         break;
+      case "raiseCorpse":
+        events.push(
+          ...raisedEvents(
+            effect,
+            caster,
+            context,
+            effect.slain ? target : undefined,
+            sourceId,
+          ),
+        );
+        break;
       case "note":
       case "disperse":
-      case "animate":
       case "reactionAttack":
       case "reactionMove":
       case "randomAction":
@@ -5103,32 +5122,10 @@ export function resolveAction(
             ...summonEvents(effect, action, actor, stats, context, slotLevel),
           );
         }
-        if (effect.kind === "raiseCorpse") {
-          events.push(
-            ...raisedEvents(
-              effect,
-              actor,
-              context,
-              undefined,
-              spellSource(action),
-            ),
-          );
-        }
         if (effect.kind === "commandFamiliar") {
           const commanded = commandedResult(effect, actor, context);
           events.push(...(commanded.events ?? []));
           frames.push(...(commanded.frames ?? []));
-        }
-        if (effect.kind === "animate") {
-          events.push(
-            ...animatedEvents(
-              effect,
-              actor,
-              context,
-              spellSource(action),
-              action.activation.cost.includes("slot"),
-            ),
-          );
         }
       }
       events.push(
