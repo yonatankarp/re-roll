@@ -478,7 +478,22 @@ export function sceneCastActions(
       item.exhaustion > 0 ||
       Object.keys(item.resourcesSpent).some((key) => key.startsWith("slot:")),
   );
-  if (!needy && here.length === 0 && !state.ambient) return [];
+  // A spell that keeps creatures between fights, as Animate Dead, is worth casting in any scene.
+  const keeps = (action: KnownAction): boolean =>
+    action.activation.resolution.kind === "automatic" &&
+    action.activation.resolution.effects.some(
+      (effect) => effect.kind === "retain",
+    );
+  if (
+    !needy &&
+    here.length === 0 &&
+    !state.ambient &&
+    !members(state).some((item) =>
+      deriveStats(item, access).actions.some(keeps),
+    )
+  ) {
+    return [];
+  }
   return members(state).flatMap((caster) => {
     const stats = deriveStats(caster, access);
     return castable(caster, state, access, here, scene.fights).flatMap(

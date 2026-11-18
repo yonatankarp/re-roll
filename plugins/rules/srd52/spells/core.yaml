@@ -3129,31 +3129,47 @@
     creature’s size. The creature’s statistics become those of the object, and
     the creature has no memory of time spent in this form after the spell ends
     and it returns to normal.
-  automation: partial
+  # shortcut: a creature made an object is gone from the fight; an object made a creature is the story's.
+  automation: full
   # shortcut: a creature into another creature only; objects wait on re-roll#144.
   activation:
-    {
-      "cost": ["action", "slot"],
-      "targeting": { "creatures": 1, "range": 30, "side": "any" },
-      "resolution":
-        {
-          "kind": "save",
-          "ability": "wis",
-          "dc": { "base": 0, "add": [{ "kind": "spellSaveDc" }] },
-          "willing": true,
-          "damage": [],
-          "onSuccessDamage": "none",
-          "onFail":
-            [
-              {
-                "kind": "polymorph",
-                "duration": { "concentration": true, "minutes": 60 },
-                "forms": {},
-              },
-            ],
-          "onSuccess": [],
-        },
-    }
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 30
+      side: any
+    resolution:
+      kind: save
+      ability: wis
+      dc: &a7
+        base: 0
+        add:
+          - kind: spellSaveDc
+      willing: true
+      damage: &a8 []
+      onSuccessDamage: none
+      onFail:
+        - kind: polymorph
+          duration:
+            concentration: true
+            minutes: 60
+          forms: {}
+      onSuccess: &a9 []
+    shapes:
+      - name: Into a Creature
+      - name: Into an Object
+        resolution:
+          kind: save
+          ability: wis
+          dc: *a7
+          willing: true
+          damage: *a8
+          onSuccessDamage: none
+          onFail:
+            - kind: sendAway
+          onSuccess: *a9
 - id: srd52:spell/unseen-servant
   name: Unseen Servant
   level: 1
@@ -6069,7 +6085,8 @@
     the repair. The simulacrum lasts until it drops to 0 Hit Points, at which
     point it reverts to snow and melts away. If you cast this spell again, any
     simulacrum you created with this spell is instantly destroyed.
-  automation: text
+  # no rules effect in play: a duplicate of a creature is the story's.
+  automation: full
   outOfCombat: castingTime
 - id: srd52:spell/spare-the-dying
   name: Spare the Dying
@@ -8855,7 +8872,8 @@
     (see “Monsters”), except it has a Speed of 100 feet and can travel 13 miles
     in an hour. When the spell ends, the steed gradually fades, giving the rider
     1 minute to dismount. The spell ends early if the steed takes any damage.
-  automation: text
+  # no rules effect in play: the steed carries the party between scenes.
+  automation: full
   outOfCombat: castingTime
 - id: srd52:spell/poison-spray
   name: Poison Spray
@@ -12111,7 +12129,8 @@
     creature returns to its home plane after reporting back to you if possible.
     If you are unable to agree on a price for the creature’s service, the
     creature immediately returns to its home plane."
-  automation: text
+  # no rules effect in play: which creature answers and its price are the story's.
+  automation: full
   outOfCombat: castingTime
 - id: srd52:spell/polymorph
   name: Polymorph
@@ -14588,7 +14607,8 @@
     your side of the portal. You gain no special power over the creature, and it
     is free to act as the GM deems appropriate. It might leave, attack you, or
     help you.
-  automation: partial
+  # the creature it calls by name is the story's; its portal plays as the party getting away.
+  automation: full
   # Gate's summoning waits on re-roll#144; its portal lets the party get away where it may flee.
   activation:
     cost: [action, slot]

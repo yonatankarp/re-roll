@@ -800,15 +800,20 @@ function itemCasts(
               : `${spell.name}, level ${String(at)} (${item.name})`,
           activation: {
             ...numbered,
-            ...(cast.doom
+            ...(cast.doom || cast.userEffects
               ? {
                   userEffects: [
                     ...(numbered.userEffects ?? []),
-                    {
-                      kind: "slay" as const,
-                      hpAtMost: Number.MAX_SAFE_INTEGER,
-                      chance: cast.doom,
-                    },
+                    ...(cast.userEffects ?? []),
+                    ...(cast.doom
+                      ? [
+                          {
+                            kind: "slay" as const,
+                            hpAtMost: Number.MAX_SAFE_INTEGER,
+                            chance: cast.doom,
+                          },
+                        ]
+                      : []),
                   ],
                 }
               : {}),
@@ -3877,6 +3882,9 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
   const { play } = companion;
   if (!play) throw new Error(`${companion.id} has no numbers to play`);
   const above = Math.max(0, source.level - play.level);
+  const form =
+    play.forms?.find((item) => item.name === source.form) ?? play.forms?.[0];
+  const speeds = form?.speeds ?? play.speeds;
   const casterNumbers = (resolution: Resolution): Resolution => {
     const dc = { base: source.spellDc, add: [] };
     switch (resolution.kind) {
@@ -3922,10 +3930,10 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
       ...(companion.size ? { size: companion.size } : {}),
       abilities: companion.abilities,
       // a lasting companion's, worked out from its owner as it was found
-      ac: source.ac ?? play.ac + play.acPerLevel * above,
-      hp: source.maxHp ?? play.hp + play.hpPerLevel * above,
-      speed: play.speed,
-      ...(play.speeds ? { speeds: play.speeds } : {}),
+      ac: source.ac ?? (form?.ac ?? play.ac) + play.acPerLevel * above,
+      hp: source.maxHp ?? (form?.hp ?? play.hp) + play.hpPerLevel * above,
+      speed: form?.speed ?? play.speed,
+      ...(speeds ? { speeds } : {}),
       proficiency: source.proficiency,
       saves: play.saves,
       initiative: 0, // it goes right after its caster
@@ -3933,6 +3941,7 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
       features: [],
       passives: [
         ...play.passives,
+        ...(form?.passives ?? []),
         ...boons.flatMap(({ passives }) => passives),
       ],
       multiattack: Math.max(
@@ -3941,8 +3950,15 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
           : play.multiattack,
         ...boons.map(({ multiattack }) => multiattack ?? 0),
       ),
+      // an action printed for some forms only is out of reach in the others
       actions: [
-        ...play.actions.filter(({ name }) => !replaced.has(name)),
+        ...play.actions
+          .filter(
+            ({ name, shapes }) =>
+              !replaced.has(name) &&
+              (!shapes || (form !== undefined && shapes.includes(form.name))),
+          )
+          .map(({ shapes: _shapes, ...action }) => action),
         ...boons.flatMap(({ actions }) => actions),
       ].map((action) => ({
         ...action,
@@ -3955,12 +3971,13 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
     access,
   );
   // Damage "plus the spell's level" reads it as a scaling key, and "plus your Intelligence modifier" as its caster's
-  // spellcasting modifier, as a Steel Defender's.
+  // spellcasting modifier, as a Steel Defender's; its save DC is the caster's, for its auras.
   return {
     ...stats,
     scaling: {
       spellLevel: source.level,
       ownerMod: source.spellAttack - source.proficiency,
+      spellDc: source.spellDc,
     },
   };
 }

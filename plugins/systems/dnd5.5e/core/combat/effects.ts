@@ -3,6 +3,7 @@ import {
   checkBonus,
   damageResponses,
   deriveStats,
+  atSlotLevel,
   evaluateFormula,
   immuneToCondition,
   type KnownAction,
@@ -38,6 +39,7 @@ import {
   fightingOn,
   familiarOwner,
   freshActor,
+  RETINUE,
   isDead,
   isStable,
   mountOf,
@@ -152,7 +154,7 @@ import {
   tableRoll,
 } from "./reactions.ts";
 import { channelPickFrame } from "./school.ts";
-import { summonEvents } from "./summon.ts";
+import { boosted, summonEvents } from "./summon.ts";
 import { fueledDamage, schoolOf, spendHitDice } from "./school.ts";
 import {
   conditionsApplied,
@@ -3737,6 +3739,76 @@ export function leafEvents(
           );
         }
         break;
+      case "retain": {
+        const monster = lookup(context, MonsterSchema, effect.monster);
+        const count = Math.max(
+          1,
+          evaluateFormula(
+            slotLevel === undefined
+              ? effect.count
+              : atSlotLevel(effect.count, slotLevel),
+            stats,
+          ),
+        );
+        const slug = effect.monster.slice(effect.monster.lastIndexOf("/") + 1);
+        const used = (caster.retinue ?? []).map(
+          ({ key }) => Number(key.slice(key.lastIndexOf("-") + 1)) || 0,
+        );
+        const first = Math.max(0, ...used) + 1;
+        const hp = boosted(
+          freshActor({
+            id: `${caster.id}${RETINUE}new`,
+            name: monster.name,
+            side: caster.side,
+            source: { kind: "monster", statBlockId: effect.monster },
+            hp: monster.hp,
+            inventory: [],
+          }),
+          caster,
+          sourceId,
+          slotLevel !== undefined,
+          context,
+        ).hp;
+        events.push(
+          dndEvent(`${NS}:retinueGained`, {
+            actor: caster.id,
+            entries: Array.from({ length: count }, (_, index) => ({
+              key: `${slug}-${String(first + index)}`,
+              monster: effect.monster,
+              hp,
+              lasts: effect.lasts,
+            })),
+          }),
+        );
+        break;
+      }
+      case "animate":
+        if (
+          effect.chance === undefined ||
+          context.dice.roll(100) <= effect.chance
+        ) {
+          events.push(
+            ...animatedEvents(
+              effect,
+              caster,
+              context,
+              sourceId,
+              slotLevel !== undefined,
+            ),
+          );
+        }
+        break;
+      case "raiseCorpse":
+        events.push(
+          ...raisedEvents(
+            effect,
+            caster,
+            context,
+            effect.slain ? target : undefined,
+            sourceId,
+          ),
+        );
+        break;
       case "revertShape": {
         // shortcut: it can shape-shift again at once, rather than only once out of the light.
         const ended = new Set<string>();
@@ -3760,13 +3832,11 @@ export function leafEvents(
       }
       case "note":
       case "disperse":
-      case "animate":
       case "reactionAttack":
       case "reactionMove":
       case "randomAction":
       case "rollTable":
       case "escape":
-      case "raiseCorpse":
       case "reduceDamage":
       case "acAgainstHit":
       case "commandFamiliar":
@@ -5452,16 +5522,10 @@ export function resolveAction(
             ...summonEvents(effect, action, actor, stats, context, slotLevel),
           );
         }
-        if (effect.kind === "raiseCorpse") {
-          events.push(...raisedEvents(effect, actor, context));
-        }
         if (effect.kind === "commandFamiliar") {
           const commanded = commandedResult(effect, actor, context);
           events.push(...(commanded.events ?? []));
           frames.push(...(commanded.frames ?? []));
-        }
-        if (effect.kind === "animate") {
-          events.push(...animatedEvents(effect, actor, context));
         }
       }
       events.push(
@@ -6534,11 +6598,14 @@ export function reactionMove(
 }
 
 // Copies of a monster, or another stat block, come to life next to the bearer, as Animate Trees or Soul Tattoo.
-// shortcut: they stay until they drop, not until the bearer dies or moves too far away.
+// shortcut: they stay until they drop, not until the bearer dies or moves too far away; with `duration` they go when
+// what called them (`sourceId`) ends, which outside Concentration is the fight's end.
 function animatedEvents(
   effect: Extract<LeafEffect, { kind: "animate" }>,
   actor: Actor,
   context: Context,
+  sourceId?: string,
+  slotted?: boolean,
 ): SystemEvent[] {
   const id =
     effect.monster ??
@@ -6571,7 +6638,13 @@ function animatedEvents(
           }),
         ]
       : [];
-  return [...kept, ...animatedSummons(effect, actor, monster, id, open, made)];
+  return [
+    ...kept,
+    ...animatedSummons(effect, actor, monster, id, open, made, context, {
+      sourceId,
+      slotted: slotted ?? false,
+    }),
+  ];
 }
 
 function animatedSummons(
@@ -6581,30 +6654,55 @@ function animatedSummons(
   id: string,
   open: readonly Square[],
   made: number,
+  context: Context,
+  { sourceId, slotted }: { sourceId: string | undefined; slotted: boolean }, // what called them, for how long and what boosts them
 ): SystemEvent[] {
   return open.slice(0, effect.count).map((square, index) =>
     dndEvent(`${NS}:summoned`, {
-      actor: {
-        ...freshActor({
-          id: `${actor.id}:animated-${String(made + index + 1)}`,
-          name: `${monster.name} ${String(made + index + 1)}`,
-          side: actor.side,
-          source: {
-            kind: "monster",
-            statBlockId: id,
-            ...(effect.lacks.length > 0 ? { lacks: effect.lacks } : {}),
-            // a character's beasts die at 0 Hit Points, as monsters do, and leave with the fight
-            ...(actor.source.kind === "monster" ? {} : { calledBy: actor.id }),
-            // Find Greater Steed's mount stays between fights.
-            ...(effect.lasting && actor.source.kind !== "monster"
-              ? { lasting: { feature: id } }
-              : {}),
-          },
-          hp: monster.hp,
-          inventory: [],
-        }),
-        position: square,
-      },
+      actor: boosted(
+        {
+          ...freshActor({
+            id: `${actor.id}:animated-${String(made + index + 1)}`,
+            name: `${monster.name} ${String(made + index + 1)}`,
+            side: effect.hostile
+              ? actor.side === "party"
+                ? "enemy"
+                : "party"
+              : actor.side,
+            source: {
+              kind: "monster",
+              statBlockId: id,
+              ...(effect.lacks.length > 0 ? { lacks: effect.lacks } : {}),
+              // a character's beasts die at 0 Hit Points, as monsters do, and leave with the fight
+              ...(actor.source.kind === "monster"
+                ? {}
+                : { calledBy: actor.id }),
+              // Find Greater Steed's mount stays between fights.
+              ...(effect.lasting && actor.source.kind !== "monster"
+                ? { lasting: { feature: id } }
+                : {}),
+              ...(effect.duration && sourceId
+                ? {
+                    lasts: {
+                      casterId: actor.id,
+                      sourceId,
+                      concentration:
+                        typeof effect.duration === "object" &&
+                        "concentration" in effect.duration,
+                    },
+                  }
+                : {}),
+            },
+            hp: monster.hp,
+            inventory: [],
+          }),
+          position: square,
+        },
+        actor,
+        sourceId,
+        slotted,
+        context,
+      ),
       after: actor.id,
     }),
   );
@@ -6616,10 +6714,13 @@ function raisedEvents(
   effect: Extract<LeafEffect, { kind: "raiseCorpse" }>,
   actor: Actor,
   context: Context,
+  slain?: Actor, // the target its action just killed, the only corpse a `slain` raising takes
+  source?: string, // the spell that raised it, for what boosts the raiser's undead
 ): SystemEvent[] {
   const { state } = context;
   const corpses = Object.values(state.actors).filter(
     (item) =>
+      (!effect.slain || item.id === slain?.id) &&
       isDead(item) &&
       item.position !== null &&
       state.actors[`${item.id}:risen`] === undefined &&
@@ -6631,17 +6732,30 @@ function raisedEvents(
   const monster = lookup(context, MonsterSchema, effect.monster);
   return (effect.all ? corpses : corpses.slice(0, 1)).map((corpse) =>
     dndEvent(`${NS}:summoned`, {
-      actor: {
-        ...freshActor({
-          id: `${corpse.id}:risen`,
-          name: `${monster.name} (${corpse.name})`,
-          side: actor.side,
-          source: { kind: "monster", statBlockId: effect.monster },
-          hp: monster.hp,
-          inventory: [],
-        }),
-        position: corpse.position,
-      },
+      actor: boosted(
+        {
+          ...freshActor({
+            id: `${corpse.id}:risen`,
+            name: `${monster.name} (${corpse.name})`,
+            side: actor.side,
+            source: {
+              kind: "monster",
+              statBlockId: effect.monster,
+              // a character's dead die again at 0 Hit Points, and leave with the fight
+              ...(actor.source.kind === "monster"
+                ? {}
+                : { calledBy: actor.id }),
+            },
+            hp: monster.hp,
+            inventory: [],
+          }),
+          position: corpse.position,
+        },
+        actor,
+        source,
+        false,
+        context,
+      ),
       after: actor.id,
     }),
   );

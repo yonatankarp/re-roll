@@ -56,7 +56,11 @@ import { lairTurns } from "../legendary.ts";
 import { type Context, hasPassive } from "./queries.ts";
 import { DAMAGE_TO_PARTY, resolveAction } from "./effects.ts";
 import { damageToPartyFor } from "../worth.ts";
-import { familiarActors, familiarFoundEvents } from "./familiar.ts";
+import {
+  familiarActors,
+  familiarFoundEvents,
+  retinueActors,
+} from "./familiar.ts";
 import {
   companionActors,
   companionFoundEvents,
@@ -136,6 +140,8 @@ export function startCombat(
   const familiars = [
     ...familiarActors(owners, { ...context, state: foundState }),
     ...companionActors(owners, context),
+    // and so do the creatures they keep between fights, as Animate Dead's undead
+    ...retinueActors(party, context),
   ];
 
   // The story's word on surprise, such as from a Stealth check, beats the encounter's own.
