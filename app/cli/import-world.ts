@@ -122,10 +122,17 @@ for (const entity of report.entities.filter((e) => e.kind === "monster")) {
 // Each book's drafts, and its families' and lairs' links, from where the book nests them.
 const plans = report.books.map(({ book, edition, verdicts, members }) => {
   const record = catalog.plugins.get(book);
+  // A heading linked to another edition's entity is its reprint's reference text, not lore of its own (#182).
+  const reprinted = (entity?: string) =>
+    entity !== undefined && index.byId.get(entity)?.edition !== edition;
   const { drafts, homeless } = draftWorld(
     book,
     titles.get(book) ?? book,
-    verdicts,
+    verdicts.map((v) =>
+      v.status === "linked" && reprinted(v.entity)
+        ? { ...v, kind: "reprint" }
+        : v,
+    ),
     new Set(record?.files),
     TEXT_KINDS,
   );
