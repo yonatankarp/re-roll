@@ -513,6 +513,39 @@ describe.skipIf(!BOOKS)("strike options and riders in a fight", () => {
     ]);
   });
 
+  it("plays Arcana Unleashed's Arcane Shot options, with its die growing with Fighter levels", () => {
+    const shot = "arcana-unleashed:feature/fighter-arcane-archer-arcane-shot";
+    const archer = (levels: number) =>
+      deriveStats(
+        actorWith(
+          build("phb:class/fighter", levels, {
+            3: [
+              {
+                kind: "subclass",
+                values: ["arcana-unleashed:subclass/fighter-arcane-archer"],
+              },
+              {
+                kind: "variant",
+                feature: shot,
+                values: ["bursting-shot", "grasping-shot"],
+              },
+            ],
+          }),
+        ),
+        run,
+      );
+    expect(
+      archer(3)
+        .actions.filter(({ name }) => name.includes("Shot ("))
+        .map(({ name }) => name),
+    ).toEqual([
+      "Arcane Shot (Bursting Shot, Grasping Shot) (Bursting Shot)",
+      "Arcane Shot (Bursting Shot, Grasping Shot) (Grasping Shot)",
+    ]);
+    expect(archer(3).scaling.arcaneShotDie).toBe(6);
+    expect(archer(18).scaling.arcaneShotDie).toBe(12);
+  });
+
   // The options offered right after one feature's or spell's option lands on the hit.
   function followUps(attacker: Actor, smite: string, slot?: string): string[] {
     const weapon = deriveStats(attacker, run).actions.find((action) =>

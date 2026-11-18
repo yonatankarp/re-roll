@@ -1,0 +1,521 @@
+# SRD 5.2 companion stat blocks for the srd52 spells that summon them (#126).
+- id: srd52:companion/draconic-spirit
+  name: Draconic Spirit
+  size: large
+  ac: 14 + the spell’s level
+  hp: 50 + 10 for each spell level above 5
+  speed: 30 ft., Fly 60 ft., Swim 30 ft.
+  abilities:
+    str: 19
+    dex: 14
+    con: 17
+    int: 10
+    wis: 14
+    cha: 14
+  text: "Draconic Spirit Large Dragon, Neutral AC 14 + the spell’s level HP 50 + 10 for each spell level above 5 Speed 30 ft., Fly 60 ft., Swim 30 ft. MOD SAVE MOD SAVE MOD SAVE Str 19 +4 +4 Dex 14 +2 +2 Con 17 +3 +3 Int 10 +0 +0 Wis 14 +2 +2 Cha 14 +2 +2 Resistances Acid, Cold, Fire, Lightning, Poison Immunities Charmed, Frightened, Poisoned Senses Blindsight 30 ft., Darkvision 60 ft.; Passive Perception 12 Languages Draconic, understands the languages you know CR None (XP 0; PB equals your Proficiency Bonus) Traits Shared Resistances. When you summon the spirit, choose one of its Resistances. You have Resistance to the chosen damage type until the spell ends. Actions Multiattack. The spirit makes a number of Rend attacks equal to half the spell’s level (round down), and it uses Breath Weapon. Rend. Melee Attack Roll: Bonus equals your spell attack modifier, reach 10 feet. Hit: 1d6 + 4 + the spell’s level Piercing damage. Breath Weapon. Dexterity Saving Throw: DC equals your spell save DC, each creature in a 30-foot Cone. Failure: 2d6 damage of a type this spirit has Resistance to (your choice when you cast the spell). Success: Half damage."
+  play:
+    level: 5
+    ac: 19
+    acPerLevel: 1
+    hp: 50
+    hpPerLevel: 10
+    speed: 30
+    speeds:
+      walk: 30
+      fly: 60
+      swim: 30
+    creatureType: dragon
+    halfLevelAttacks: true
+    passives:
+      - kind: modifier
+        modifier:
+          kind: resistance
+          damage: acid
+      - kind: modifier
+        modifier:
+          kind: resistance
+          damage: cold
+      - kind: modifier
+        modifier:
+          kind: resistance
+          damage: fire
+      - kind: modifier
+        modifier:
+          kind: resistance
+          damage: lightning
+      - kind: modifier
+        modifier:
+          kind: resistance
+          damage: poison
+      - kind: conditionImmunity
+        condition: charmed
+      - kind: conditionImmunity
+        condition: frightened
+      - kind: conditionImmunity
+        condition: poisoned
+    actions:
+      - name: Rend
+        activation:
+          cost:
+            - action
+          targeting:
+            creatures: 1
+            range: 10
+            side: enemy
+          resolution:
+            kind: attack
+            attack:
+              type: spell
+            damage:
+              - amount:
+                  dice: 1d6
+                  bonus:
+                    base: 4
+                    add:
+                      - kind: scaling
+                        key: spellLevel
+                type: piercing
+            onHit: []
+            onMiss: []
+      - name: Breath Weapon (acid)
+        shapes:
+          - Acid
+        activation:
+          cost:
+            - action
+          targeting:
+            area:
+              shape: cone
+              radius: 30
+            range: self
+            side: enemy
+          resolution:
+            kind: save
+            ability: dex
+            dc: &a1
+              base: 0
+              add:
+                - kind: scaling
+                  key: spellDc
+            damage:
+              - amount:
+                  dice: 2d6
+                type: acid
+            onSuccessDamage: half
+            onFail: []
+      - name: Breath Weapon (cold)
+        shapes:
+          - Cold
+        activation:
+          cost:
+            - action
+          targeting:
+            area:
+              shape: cone
+              radius: 30
+            range: self
+            side: enemy
+          resolution:
+            kind: save
+            ability: dex
+            dc: *a1
+            damage:
+              - amount:
+                  dice: 2d6
+                type: cold
+            onSuccessDamage: half
+            onFail: []
+      - name: Breath Weapon (fire)
+        shapes:
+          - Fire
+        activation:
+          cost:
+            - action
+          targeting:
+            area:
+              shape: cone
+              radius: 30
+            range: self
+            side: enemy
+          resolution:
+            kind: save
+            ability: dex
+            dc: *a1
+            damage:
+              - amount:
+                  dice: 2d6
+                type: fire
+            onSuccessDamage: half
+            onFail: []
+      - name: Breath Weapon (lightning)
+        shapes:
+          - Lightning
+        activation:
+          cost:
+            - action
+          targeting:
+            area:
+              shape: cone
+              radius: 30
+            range: self
+            side: enemy
+          resolution:
+            kind: save
+            ability: dex
+            dc: *a1
+            damage:
+              - amount:
+                  dice: 2d6
+                type: lightning
+            onSuccessDamage: half
+            onFail: []
+      - name: Breath Weapon (poison)
+        shapes:
+          - Poison
+        activation:
+          cost:
+            - action
+          targeting:
+            area:
+              shape: cone
+              radius: 30
+            range: self
+            side: enemy
+          resolution:
+            kind: save
+            ability: dex
+            dc: *a1
+            damage:
+              - amount:
+                  dice: 2d6
+                type: poison
+            onSuccessDamage: half
+            onFail: []
+    forms:
+      - name: Acid
+      - name: Cold
+      - name: Fire
+      - name: Lightning
+      - name: Poison
+- id: srd52:companion/animated-object
+  name: Animated Object
+  size: huge
+  ac: "15"
+  hp: 10 (Medium or smaller), 20 (Large), 40 (Huge)
+  speed: 30 ft.
+  abilities:
+    str: 16
+    dex: 10
+    con: 10
+    int: 3
+    wis: 3
+    cha: 1
+  text: "Animated Object Huge or Smaller Construct, Unaligned AC 15 HP 10 (Medium or smaller), 20 (Large), 40 (Huge) Speed 30 ft. MOD SAVE MOD SAVE MOD SAVE Str 16 +3 +3 Dex 10 +0 +0 Con 10 +0 +0 Int 3 −4 −4 Wis 3 −4 −4 Cha 1 −5 −5 Immunities Poison, Psychic; Charmed, Exhaustion, Frightened, Paralyzed, Poisoned Senses Blindsight 30 ft.; Passive Perception 6 Languages Understands the languages you know CR None (XP 0; PB equals your Proficiency Bonus) Actions Slam. Melee Attack Roll: Bonus equals your spell attack modifier, reach 5 ft. Hit: Force damage equal to 1d4 + 3 (Medium or smaller), 2d6 + 3 + your spellcasting ability modifier (Large), or 2d12 + 3 + your spellcasting ability modifier (Huge)."
+  play:
+    level: 5
+    ac: 15
+    hp: 10
+    speed: 30
+    creatureType: construct
+    passives:
+      - kind: modifier
+        modifier:
+          kind: immunity
+          damage: poison
+      - kind: modifier
+        modifier:
+          kind: immunity
+          damage: psychic
+      - kind: conditionImmunity
+        condition: charmed
+      - kind: conditionImmunity
+        condition: frightened
+      - kind: conditionImmunity
+        condition: paralyzed
+      - kind: conditionImmunity
+        condition: poisoned
+    actions:
+      - name: Slam
+        activation:
+          cost:
+            - action
+          targeting:
+            creatures: 1
+            range: 5
+            side: enemy
+          resolution:
+            kind: attack
+            attack:
+              type: spell
+            damage:
+              - amount:
+                  dice: 1d4
+                  bonus:
+                    base: 3
+                    add: []
+                type: force
+            onHit: []
+            onMiss: []
+- id: srd52:companion/giant-insect
+  name: Giant Insect
+  size: large
+  ac: 11 + the spell’s level
+  hp: 30 + 10 for each spell level above 4
+  speed: 40 ft., Climb 40 ft., Fly 40 ft. (Wasp only)
+  abilities:
+    str: 17
+    dex: 13
+    con: 15
+    int: 4
+    wis: 14
+    cha: 3
+  text: "Giant Insect Large Beast, Unaligned AC 11 + the spell’s level HP 30 + 10 for each spell level above 4 Speed 40 ft., Climb 40 ft., Fly 40 ft. (Wasp only) MOD SAVE MOD SAVE MOD SAVE Str 17 +3 +3 Dex 13 +1 +1 Con 15 +2 +2 Int 4 −3 −3 Wis 14 +2 +2 Cha 3 −4 −4 Senses Darkvision 60 ft.; Passive Perception 12 Languages Understands the languages you know CR None (XP 0; PB equals your Proficiency Bonus) Traits Spider Climb. The insect can climb difficult surfaces, including along ceilings, without needing to make an ability check. Actions Multiattack. The insect makes a number of attacks equal to half this spell’s level (round down). Poison Jab. Melee Attack Roll: Bonus equals your spell attack modifier, reach 10 ft. Hit: 1d6 + 3 plus the spell’s level Piercing damage plus 1d4 Poison damage. Web Bolt (Spider Only). Ranged Attack Roll: Bonus equals your spell attack modifier, range 60 ft. Hit: 1d10 + 3 plus the spell’s level Bludgeoning damage, and the target’s Speed is reduced to 0 until the start of the insect’s next turn. Bonus Actions Venomous Spew (Centipede Only). Constitution Saving Throw: Your spell save DC, one creature the insect can see within 10 feet. Failure: The target has the Poisoned condition until the start of the insect’s next turn."
+  play:
+    level: 4
+    ac: 15
+    acPerLevel: 1
+    hp: 30
+    hpPerLevel: 10
+    speed: 40
+    speeds:
+      walk: 40
+      climb: 40
+    creatureType: beast
+    halfLevelAttacks: true
+    actions:
+      - name: Poison Jab
+        activation:
+          cost:
+            - action
+          targeting:
+            creatures: 1
+            range: 10
+            side: enemy
+          resolution:
+            kind: attack
+            attack:
+              type: spell
+            damage:
+              - amount:
+                  dice: 1d6
+                  bonus:
+                    base: 3
+                    add:
+                      - kind: scaling
+                        key: spellLevel
+                type: piercing
+              - amount:
+                  dice: 1d4
+                  bonus:
+                    base: 0
+                    add: []
+                type: poison
+            onHit: []
+            onMiss: []
+      - name: Web Bolt
+        shapes:
+          - Spider
+        activation:
+          cost:
+            - action
+          targeting:
+            creatures: 1
+            range: 60
+            side: enemy
+          resolution:
+            kind: attack
+            attack:
+              type: spell
+            damage:
+              - amount:
+                  dice: 1d10
+                  bonus:
+                    base: 3
+                    add:
+                      - kind: scaling
+                        key: spellLevel
+                type: bludgeoning
+            onHit:
+              - kind: modifier
+                modifier:
+                  kind: actionLimit
+                  speed: none
+                duration:
+                  until: yourNextTurnStart
+      - name: Venomous Spew
+        shapes:
+          - Centipede
+        activation:
+          cost:
+            - bonusAction
+          targeting:
+            creatures: 1
+            range: 10
+            side: enemy
+          resolution:
+            kind: save
+            ability: con
+            dc:
+              base: 0
+              add:
+                - kind: scaling
+                  key: spellDc
+            damage: []
+            onSuccessDamage: none
+            onFail:
+              - kind: applyCondition
+                condition: poisoned
+                duration:
+                  until: yourNextTurnStart
+    forms:
+      - name: Spider
+      - name: Centipede
+      - name: Wasp
+        speeds:
+          walk: 40
+          climb: 40
+          fly: 40
+- id: srd52:companion/otherworldly-steed
+  name: Otherworldly Steed
+  size: large
+  ac: 10 + 1 per spell level
+  hp: 5 + 10 per spell level (the steed has a number of Hit Dice [d10s] equal to
+    the spell’s level)
+  speed: 60 ft., Fly 60 ft. (requires level 4+ spell)
+  abilities:
+    str: 18
+    dex: 12
+    con: 14
+    int: 6
+    wis: 12
+    cha: 8
+  text: "Otherworldly Steed Large Celestial, Fey, or Fiend (Your Choice), Neutral AC 10 + 1 per spell level HP 5 + 10 per spell level (the steed has a number of Hit Dice [d10s] equal to the spell’s level) Speed 60 ft., Fly 60 ft. (requires level 4+ spell) MOD SAVE MOD SAVE MOD SAVE Str 18 +4 +4 Dex 12 +1 +1 Con 14 +2 +2 Int 6 −2 −2 Wis 12 +1 +1 Cha 8 −1 −1 Senses Passive Perception 11 Languages Telepathy 1 mile (works only with you) CR None (XP 0; PB equals your Proficiency Bonus) Traits Life Bond. When you regain Hit Points from a level 1+ spell, the steed regains the same number of Hit Points if you’re within 5 feet of it. Actions Otherworldly Slam. Melee Attack Roll: Bonus equals your spell attack modifier, reach 5 ft. Hit: 1d8 plus the spell’s level of Radiant (Celestial), Psychic (Fey), or Necrotic (Fiend) damage. Bonus Actions Fell Glare (Fiend Only; Recharges after a Long Rest). Wisdom Saving Throw: DC equals your spell save DC, one creature within 60 feet the steed can see. Failure: The target has the Frightened condition until the end of your next turn. Fey Step (Fey Only; Recharges after a Long Rest). The steed teleports, along with its rider, to an unoccupied space of your choice up to 60 feet away from itself. Healing Touch (Celestial Only; Recharges after a Long Rest). One creature within 5 feet of the steed regains a number of Hit Points equal to 2d8 plus the spell’s level."
+  play:
+    level: 2
+    ac: 12
+    acPerLevel: 1
+    hp: 25
+    hpPerLevel: 10
+    speed: 60
+    creatureType: celestial
+    passives:
+      - kind: rideable
+    actions:
+      - name: Otherworldly Slam (Celestial)
+        activation:
+          cost: &a1
+            - action
+          targeting: &a2
+            creatures: 1
+            range: 5
+            side: enemy
+          resolution:
+            kind: attack
+            attack: &a3
+              type: spell
+            damage:
+              - amount: &a4
+                  dice: 1d8
+                  bonus:
+                    base: 0
+                    add:
+                      - kind: scaling
+                        key: spellLevel
+                type: radiant
+        shapes:
+          - Celestial
+      - name: Otherworldly Slam (Fey)
+        activation:
+          cost: *a1
+          targeting: *a2
+          resolution:
+            kind: attack
+            attack: *a3
+            damage:
+              - amount: *a4
+                type: psychic
+        shapes:
+          - Fey
+      - name: Otherworldly Slam (Fiend)
+        activation:
+          cost: *a1
+          targeting: *a2
+          resolution:
+            kind: attack
+            attack: *a3
+            damage:
+              - amount: *a4
+                type: necrotic
+        shapes:
+          - Fiend
+      - name: Healing Touch
+        perDay: 1
+        activation:
+          cost:
+            - bonusAction
+            - resource: day:healing-touch
+          targeting:
+            creatures: 1
+            range: 5
+            side: ally
+          resolution:
+            kind: automatic
+            damage: []
+            effects:
+              - kind: heal
+                amount:
+                  dice: 2d8
+                  bonus:
+                    base: 0
+                    add:
+                      - kind: scaling
+                        key: spellLevel
+        shapes:
+          - Celestial
+      - name: Fell Glare
+        shapes:
+          - Fiend
+        perDay: 1
+        activation:
+          cost:
+            - bonusAction
+            - resource: day:fell-glare
+          targeting:
+            creatures: 1
+            range: 60
+            side: enemy
+          resolution:
+            kind: save
+            ability: wis
+            dc:
+              base: 0
+              add:
+                - kind: scaling
+                  key: spellDc
+            damage: []
+            onSuccessDamage: none
+            onFail:
+              - kind: applyCondition
+                condition: frightened
+                duration:
+                  until: yourNextTurnEnd
+      - name: Fey Step
+        shapes:
+          - Fey
+        perDay: 1
+        activation:
+          cost:
+            - bonusAction
+            - resource: day:fey-step
+          targeting:
+            self: true
+          resolution:
+            kind: automatic
+            damage: []
+            effects:
+              - kind: teleport
+                feet: 60
+    forms:
+      - name: Celestial
+      - name: Fey
+      - name: Fiend

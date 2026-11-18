@@ -1,7 +1,7 @@
 # Technical Design: Re-roll
 
 **Status:** Draft for review. The engine, the D&D 5.5e plugin, the importer and the UI are playable in the browser, the Tauri app and the terminal.
-**Checked:** 5 November 2026. Package versions came from the npm registry that day. Sections 3, 7.1 to 7.4, 8.12 to 8.17 and 9 were brought up to date against the code on 12 November 2026.
+**Checked:** 5 November 2026. Package versions came from the npm registry that day. Sections 3, 7.1 to 7.4, 8.12 to 8.17 and 9 were brought up to date against the code on 12 November 2026, and section 3's domain model was written against it on 18 November 2026.
 
 ## 1. Goal and assumptions
 
@@ -165,6 +165,83 @@ export interface ModelClient {
 The UI runs in Tauri through `npm run desktop`, which needs a Rust toolchain for development but not for playing. It also runs in a plain browser through `npm run ui`, reading `plugins/` and `books/` through a read-only endpoint on the dev server. A built desktop app has no checkout: it reads the shipped plugins from its bundled resources, and the player's own from a content folder in its app data, laid out like `books/` (see the README). The fs plugin can only read the two content folders. The app's own commands do its writing: saves go to its app data, and **Install from a zip** unzips a plugin or a book into the content folder's `adventures/`, `rules/`, `assets/` and `library/`, with every path checked again in Rust (section 9).
 
 One exception to "only `engine/platform` touches the network": the narration worker in `engine/shell` downloads the Kokoro-82M model from Hugging Face on first use, and the Tauri CSP allows only that host (section 7.2).
+
+### Domain model
+
+The project's style is domain-driven design, applied to the code as it stands and step by step, never as a big rewrite. The engine already splits along domain lines, the boundaries above enforce most of that split, and state changes only by folding events. This section names the parts so new code keeps to them. Repositories, service layers and application layers are out of scope.
+
+#### Bounded contexts
+
+| Context | Code | Owns | May depend on |
+|---|---|---|---|
+| Engine core | `engine/kernel`, `engine/sdk` | Content ids and entries, plugin manifests, the `GameSystem` seam, dice, events, frames, decisions, game state, `Storage` | Nothing. `kernel` imports no other part of the engine, and `sdk` only re-exports `kernel` |
+| World lore | `engine/kernel/world.ts` | Setting lore under any rule system: places, areas, deities, pantheons, factions, NPCs, peoples, adventures, eras, events, calendar days, phenomena, settings, materials, and rulings | Engine core |
+| Rules system | `plugins/systems/dnd5.5e` (`core/`, `ui/`), the rules data plugins such as `plugins/rules/srd52` | The D&D 5.5e rules: content kinds and their schemas, characters, monsters, fights, checks, rests, gear, tactics, and the system's frames and events. `ui/` draws its sheet and board | `#sdk` and its own folder. `ui/` may also use `core/` and the DOM |
+| Adventures and scenes | `engine/story`, the adventure plugins such as `plugins/adventures/goblin-ambush` | Scenes, choices, flags, clocks, attitudes, resources, secrets, beats, variants, NPC profiles, companions, narration clip names and ambience ids | Engine core. Adventure plugins are data: they name a system (`system: dnd5.5e@^1`) and the rules plugins they need, and give the system's content by id |
+| Run and saves | `engine/run` | Loading plugins into a registry, the turn loop that folds events into game state, saves, replay and migrations | Engine core, Adventures and scenes |
+| Session prep | `engine/prep` | Background prep jobs and the `ModelClient` seam. It never changes game state | Adventures and scenes |
+| UI shell | `engine/shell`, `app/desktop` | Screens, menus, drawers, the option list, saves on disk, autosave, undo, narration and sound. It knows no rule system: a system draws its own parts through `system-ui.ts` | Engine core, Adventures and scenes, Run and saves. Never a system plugin |
+| Tools | `engine/tools`, `app/cli`, `engine/platform/node` | check-pack, coverage, the importer's logic, the test bot and headless play | Everything in the engine, including `platform` and the shell's game layer (`session.ts`) for headless play |
+
+`app/` is where contexts are wired together: `app/systems.ts` is the one static list of system plugins. The importer's parsers (`plugins/systems/dnd5.5e/core/import/`) belong to Tools in spirit. They live in the system because they know its schemas.
+
+The lint rules and tsconfigs above enforce these boundaries. Two rules are not yet enforced by them: that `engine/kernel` imports nothing else in the engine, and that Run, Prep and Story never import the shell.
+
+#### Ubiquitous language
+
+Each context's terms are its entity kinds, named the way the code names them. A content id always reads `plugin:kind/name`, where `kind` is the kind's id prefix.
+
+- **Engine core:** content entry, content id, kind, plugin (system, rules, adventure), manifest, game state, event, narrative event, frame, decision, option, input, dice.
+- **World lore** (`WORLD_KINDS`): `place`, `area`, `deity`, `pantheon`, `faction`, `npc`, `people`, `adventure`, `era`, `event`, `calendar-day`, `phenomenon`, `setting`, `material`, `ruling`.
+- **Rules system** (the kinds in `core/index.ts`, with the glossary-shaped kinds from `core/schemas.ts`):
+  - Character options: `class`, `subclass`, `species`, `background`, `feat`, `feature`, `pregen`, and `supernatural-gift`, `epic-destiny`, `survivor-talent`, `circle-casting-option`, `beast-shape-list`, `variant-rule`.
+  - Things in play: `spell`, `item`, `monster`, `monster-family`, `lair`, `companion`, `table`, `lookup`, `budget`.
+  - The world's dangers: `trap`, `hazard`, `poison`, `environmental-effect`, `disease`, `curse`, `dungeon-feature`.
+  - Downtime: `bastion`, `downtime-activity`, `lifestyle`, `service`, `renown-track`, `group-patron`, `mark-of-prestige`, `bastion-order`, `vehicle-upgrade`.
+  - The rules glossary: `rule-term`, `condition`, `action`, `sense`, `skill`, `creature-type`, `area-of-effect`, `weapon-property`, `weapon-mastery`, `attitude`.
+  - In a run: actor (a character, monster, companion or summon), party, side, fight (`combat` in state), turn, round, effect, resource, Concentration.
+- **Adventures and scenes:** adventure, scene, choice, check choice, encounter, outcome, flag, clock, attitude, resource, secret, clue, beat, variant, NPC, companion, ending, dead end.
+- **Run and saves:** run, save, log entry, replay, migration, format version.
+
+New code uses these words for these things. A new kind of thing gets a kind, with an id prefix, before code refers to it.
+
+#### Aggregates and the events that change them
+
+All state is one `GameState`, changed only by folding events: `applyEvent` in `engine/run/turn.ts` for the engine's, and the system's `applyEvent` (`applyDndEvent` in `core/state.ts`) for the system's. Each part below is folded only by its own events.
+
+| Aggregate | Where it lives | Changed by |
+|---|---|---|
+| Run | `GameState`: `rng`, `partyIds`, `companions`, `stack` | `runStarted` sets all of it as the run starts, then `diceRolled` (the play dice), `framePushed` and `framePopped` |
+| Scene and story | `GameState.story` | `sceneEntered`, `flagSet`, `clockAdvanced`, `attitudeAdjusted`, `resourceAdjusted`, `secretRevealed`, `beatFired`, `restTaken`, `adventureEnded`, and the narrative `encounterEnded` (its outcome) |
+| Character (any actor) | `DndState.actors[id]` | The `dnd5.5e:` events that update one actor, such as `characterChosen`, `characterAdvanced`, `xpAwarded`, `rested`, `moved`, `damaged`, `healed`, `hpSet`, `tempHpGained`, `effectAdded`, `effectEnded`, `conditionRemoved`, `concentrationStarted`, `deathSaveRolled`, `stabilized`, `resourceSpent`, `resourceRestored`, `budgetSpent`, `exhaustionChanged`, `treasureFound`, `gearChanged`, `itemUsed`, `traded`, `optionGranted`, `abilityRaised` |
+| Encounter | `DndState.combat` | `combatStarted`, `combatEnded`, `turnAdvanced`, `summoned`, `initiativeSwapped`, `damageShareLowered`, `weaponThrown` and `itemPickedUp` (weapons lying on the field), and `damaged` (the rounds since anyone was hurt) |
+| Party between fights | `DndState`: `gold`, `shopBought`, `ambient`, `surprise`, `revealed`, `sinceLongRest` | `goldSpent`, `traded`, `environmentEntered`, `surpriseSet`, `squaresSeen`, `timePassed` |
+
+Frames on the `stack` are the steps a run is waiting on, such as `dnd5.5e:attackRoll` or `dnd5.5e:afterMove`. A frame handler reads state and returns events and frames. It never changes state itself. Narrative events (`checkResolved`, `actorDowned`, `encounterStarted` and the rest in `kernel/events.ts`) are how a system tells the story and prep what happened without their knowing the rules. Of them only `encounterEnded` changes story state, through its outcome.
+
+Some events cross aggregates in one fold. `damaged` changes an actor and the fight's count of calm rounds, `weaponThrown` and `itemPickedUp` change an actor and the field, and `timePassed` ages every actor. That is accepted today. A new event changes one aggregate where it can.
+
+#### References by id
+
+Contexts refer to each other's entities by id, never by name or free text:
+- Content refers to content by content id (`ContentIdSchema`): an encounter's `monster: "srd52:monster/goblin-warrior"`, an NPC's `statsId`, an item in loot. A kind lists the ids its entries reference (`references` in `contentKind`), so the loader can check that they resolve. A ruling's `about` is a soft link, which check-pack's coverage checks instead of the loader.
+- An adventure's own things (scenes, flags, clocks, NPCs, secrets, encounters) have slug ids that are local to the adventure, and the story refers to them by slug.
+- State refers to actors by actor id, and to content by content id.
+
+Exceptions in the code today. They stay until the area is touched:
+- An entity's own parts are named rather than given ids, and other parts of the same entity refer to them by name: a monster's actions (multiattack, legendary actions), a stat block's forms and shapes, a companion's forms, and a transformation's options.
+- `DndState.shopBought` keys a merchant's sold stock by the merchant's name.
+- Spell lists of a class, as some rules name them, are "by name after the plugin", and tool proficiencies are keyed by name (`explore.ts`).
+
+#### Event and frame names
+
+Saves store events and frames, so every existing kind keeps its name and payload (see the save rules in `CLAUDE.md` and section 9). That covers both those that already follow this style and those that don't. The naming below applies to new kinds only:
+- **Events** are named for what happened, in the past tense, in the domain's words: the thing, then what happened to it (`effectAdded`, `concentrationStarted`, `diseaseCured`). A system's events are namespaced (`dnd5.5e:`). Their payloads carry outcomes, not inputs a reducer would re-derive.
+- **Frames** are named for the step the run waits on (`attackRoll`, `aimArea`, `afterMove`). A new frame kind goes into `FRAME_KINDS`.
+
+#### Refactoring as areas are touched
+
+When an issue touches an area, that change brings the area in line with this section: the right context, the context's words, references by id, and one concept per module. There is no separate cleanup pass, and no change that only renames. A file that mixes concepts is split into a folder of modules beside it, one module per concept. The old module stays as a re-export, so imports elsewhere don't change. `core/actions.ts` is split this way into `core/actions/`. Splits move code without changing what it does, and every test passes unchanged.
 
 ## 4. Plugin system
 
@@ -1101,7 +1178,7 @@ An independent audit checked 145 encoded spells and 120 monsters against their o
 | Property tests | Engine: any input keeps state valid. D&D plugin: HP stays in range, advantage and disadvantage always cancel, Resistance never stacks |
 | Replay test | Same seed and inputs always produce the same events and final state |
 | `check-pack` | Broken references, unreachable scenes, uncovered outcomes, code in data plugins, automation coverage |
-| Library coverage (in `check-pack`) | Every heading in a book's library links to an entity or is structural. It only reports until #127–#136 land (#126). The matcher is in `engine/tools/coverage.ts`. Each book's rules are in the private `books/coverage/<book>.yaml`, since they name its headings. An entry's `library` field, or the file's `links`, names a link the matcher can't find. A world entity links by name only within its own book, unless a rule asks for its kind |
+| Library coverage (in `check-pack`) | Every heading in a book's library links to an entity or is structural, or `check-pack` fails (#126). The matcher is in `engine/tools/coverage.ts`. Each book's rules are in the private `books/coverage/<book>.yaml`, since they name its headings. An entry's `library` field, or the file's `links`, names a link the matcher can't find. A world entity links by name only within its own book, unless a rule asks for its kind |
 | Test bot | Each adventure can be finished, with no dead ends or crashes across many seeds |
 | Headless play | The game layer the UI uses offers every choice a decision has, and only those, through whole adventures |
 | Second adventure | The engine is adventure-agnostic: it must work with no engine change |
