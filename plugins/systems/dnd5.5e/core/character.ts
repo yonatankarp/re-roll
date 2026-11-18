@@ -366,7 +366,37 @@ function optionFeatures(classDef: ClassDef, access: ContentAccess): string[] {
 
 // What a level asks for. A class can state this in `choices`. Imported classes don't, so the rest is read from
 // what the level grants and how its table changes. A stated choice replaces an inferred one with the same id.
+// What a level asks depends only on the content, and class picks look it up for every level each scene (swap.ts).
+const askedByLevel = new WeakMap<
+  ContentAccess["content"],
+  WeakMap<ClassDef, Map<string, readonly ChoiceDef[]>>
+>();
+
 export function levelChoices(
+  classDef: ClassDef,
+  level: number,
+  subclassId: string | undefined,
+  access: ContentAccess,
+): readonly ChoiceDef[] {
+  let byClass = askedByLevel.get(access.content);
+  if (!byClass) {
+    byClass = new WeakMap();
+    askedByLevel.set(access.content, byClass);
+  }
+  let cache = byClass.get(classDef);
+  if (!cache) {
+    cache = new Map();
+    byClass.set(classDef, cache);
+  }
+  const key = `${String(level)}|${subclassId ?? ""}`;
+  const known = cache.get(key);
+  if (known) return known;
+  const asked = askedAt(classDef, level, subclassId, access);
+  cache.set(key, asked);
+  return asked;
+}
+
+function askedAt(
   classDef: ClassDef,
   level: number,
   subclassId: string | undefined,
