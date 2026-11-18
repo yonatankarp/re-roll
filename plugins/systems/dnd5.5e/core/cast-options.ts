@@ -128,6 +128,16 @@ function changed(
       },
     };
   }
+  const area = next.area?.resolution;
+  if (option.areaOnFail && area?.kind === "save") {
+    next = {
+      ...next,
+      area: {
+        ...next.area,
+        resolution: { ...area, onFail: [...area.onFail, ...option.areaOnFail] },
+      },
+    };
+  }
   if (option.tempHp && next.resolution.kind === "automatic") {
     next = {
       ...next,

@@ -973,7 +973,11 @@ function collectFeatureData(
       ?.freeCastsFrom;
     if (!from) continue;
     for (const spell of ownSpells.get(from.feature) ?? []) {
-      const level = SpellSchema.safeParse(access.content(spell)).data?.level;
+      const known = SpellSchema.safeParse(access.content(spell)).data;
+      const level = known?.level;
+      if (from.schools && !(known && from.schools.includes(known.school))) {
+        continue;
+      }
       if (level) {
         free.push([
           spell,
@@ -1261,8 +1265,10 @@ function withSpellDamage(
       const entry = resolution.damage[at];
       if (!entry) continue;
       const { bonus, dice } = passive;
+      // Damage of its own, with dice or in its own `type`, as Alchemical Eruption's 2d8 Force or Power Surge's Force.
+      const apart = dice !== undefined || passive.type !== undefined;
       const raised = resolution.damage.map((item, index) =>
-        index === at && bonus
+        index === at && bonus && !apart
           ? {
               ...item,
               amount: {
@@ -1276,9 +1282,17 @@ function withSpellDamage(
             }
           : item,
       );
-      // Dice of their own, in the damage's type or `type`, as Alchemical Eruption's Force.
-      const damage = dice
-        ? [...raised, { amount: { dice }, type: passive.type ?? entry.type }]
+      const damage = apart
+        ? [
+            ...raised,
+            {
+              amount: {
+                ...(dice ? { dice } : {}),
+                ...(bonus ? { bonus } : {}),
+              },
+              type: passive.type ?? entry.type,
+            },
+          ]
         : raised;
       resolution = { ...resolution, damage };
       if (passive.resource) cost = [...cost, { resource: passive.resource }];

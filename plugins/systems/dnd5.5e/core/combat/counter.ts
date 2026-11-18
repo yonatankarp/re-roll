@@ -35,7 +35,7 @@ import {
   slotToSpend,
 } from "./queries.ts";
 import { slotRefund } from "./reactions.ts";
-import { payCosts, resolveAction, rollSave } from "./effects.ts";
+import { payCosts, resolveAction, rollSave, stopRegains } from "./effects.ts";
 import { isSpell, spellLevelOf } from "./dispel.ts";
 
 // Counterspell: a foe who sees a spell being cast nearby may spend its reaction to make the caster save, and on a
@@ -196,6 +196,7 @@ export function runCounterspell(
     events: [
       ...paid,
       ...absorbed,
+      ...stopRegains(counterer, own),
       ...save.events,
       ...payCosts(wasted, caster, context),
     ],

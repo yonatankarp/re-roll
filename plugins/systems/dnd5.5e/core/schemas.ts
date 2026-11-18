@@ -862,6 +862,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     largerBy: z.number().int().min(0).optional(), // only a target at most this many sizes larger than the caster
   }),
   z.strictObject({ kind: z.literal("note"), text: z.string() }),
+  // The caster's most hurt ally within `within` feet of it, other than the target, regains `amount`, as Blessing of
+  // Moonlight's 2d4 when a creature fails its save against the Moonbeam.
+  z.strictObject({
+    kind: z.literal("allyHeal"),
+    amount: AmountSchema,
+    within: z.number().int().min(5),
+  }),
   // The bearer teleports up to `feet` to an open square it can see, or with `movement` jumps there for that much
   // of the turn's movement (a monster's Leap), provoking Opportunity Attacks as a walk would.
   z.strictObject({
@@ -2016,6 +2023,17 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("fueledSpell"),
     types: z.array(DamageTypeSchema).min(1),
   }),
+  // The healing dice of a spell cast by the bearer or an ally within 5 feet of it are rolled again once when low, for
+  // a use of `resource` once a turn, as Empowered Healing's Sorcery Point (combat/effects.ts).
+  z.strictObject({ kind: z.literal("empoweredHealing"), resource: z.string() }),
+  // Helping a dying creature to stabilize gives the bearer Heroic Inspiration, spending a use, as Arcane Undertaker's
+  // Understanding of Death (actions.ts).
+  z.strictObject({
+    kind: z.literal("stabilizeInspiration"),
+    resource: z.string(),
+  }),
+  // A spell ended with Dispel Magic, or one countered, gives a use of `resource` back, as Power Surge's surges.
+  z.strictObject({ kind: z.literal("stopRegain"), resource: z.string() }),
   // A 1 on a damage die of the bearer's spell counts as a 2, as Spell-Fueling Armor's Potent Spellcasting.
   z.strictObject({ kind: z.literal("spellDiceFloor") }),
   // A change the bearer can make to a spell as it casts it, paying `cost` (cast-options.ts), as Overchannel's maximum
@@ -2048,6 +2066,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     maxDamage: z.literal(true).optional(),
     tempHp: AmountSchema.optional(),
     saveDice: DiceSchema.optional(),
+    // effects added to the failed saves its lasting area calls for, as Blessing of Moonlight's healing on Moonbeam
+    areaOnFail: z.array(LeafEffectSchema).min(1).optional(),
     escalate: z
       .strictObject({
         resource: z.string().min(1),
@@ -2716,12 +2736,28 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       .optional(),
     // a spell whose cost spends this, as Spellfire Burst's Sorcery Points
     spends: z.string().min(1).optional(),
+    cantrip: z.literal(true).optional(), // only a cantrip, as Mark of Inspiration's
+    fromFeat: ContentIdSchema.optional(), // only a spell picked for this feat, as Aberrant Surge's level 1 spell
+    // `onTargets` dispels end no spell above the slot's level, as the 2014 Arcana Domain's Spell Breaker
+    slotCaps: z.literal(true).optional(),
+    // Hit Point Dice spent and rolled, up to `count`: with `parity` an even roll gives that many Temporary Hit Points
+    // and an odd one deals it as Force damage to the most hurt foe within `within` feet (or the caster with none
+    // there), as Aberrant Surge; without, both, the Temporary Hit Points with the Constitution modifier added, as Mark
+    // of Inspiration.
+    hitDice: z
+      .strictObject({
+        count: z.number().int().min(1),
+        within: z.number().int().min(5),
+        parity: z.literal(true).optional(),
+      })
+      .optional(),
     oncePerTurn: z.literal(true).optional(),
     // only while the bearer has none of these features, as Spellfire Burst before Honed Spellfire takes its place
     without: z.array(ContentIdSchema).min(1).optional(),
     school: z.array(SpellSchoolSchema).min(1).optional(),
     uses: z.array(ContentIdSchema).min(1).optional(),
     heals: z.literal(true).optional(),
+    mends: z.literal(true).optional(), // a spell that restores Hit Points or ends a condition, as Dispelling Recovery's
     slot: z.literal(true).optional(),
     effects: z.array(LeafEffectSchema).default([]),
     onTargets: z.array(LeafEffectSchema).min(1).optional(),
@@ -3042,6 +3078,7 @@ export const FeatureSchema = ContentEntrySchema.extend({
       feature: ContentIdSchema,
       resource: z.string().min(1),
       perLevel: z.literal(true).optional(), // spending as many as the spell's level, as Psionic Sorcery
+      schools: z.array(SpellSchoolSchema).min(1).optional(), // only these, as Mind Magic's Divination spells
     })
     .optional(),
   // Spells it gives once the character has spell slots of the level in the key, as an Arcana Unleashed adept's table.
@@ -3207,6 +3244,8 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     cantrips: z.literal(true).optional(), // cantrips too, beside spells up to `maxLevel`
     upToSlots: z.literal(true).optional(), // `maxLevel` is the highest slot the class has at that level
     ability: AbilitySchema.optional(), // the spells' casting ability, as Arcane Archer Lore's Intelligence
+    // only spells of the school of the one picked for that choice, as Boon of Magic School Mastery's
+    sameSchoolAs: z.string().optional(),
   }),
   // The spellcasting ability of the feat's spells, as Magic Initiate's "Intelligence, Wisdom, or Charisma".
   z.strictObject({

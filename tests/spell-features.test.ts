@@ -416,6 +416,34 @@ const FIXTURES = [
     },
   },
   {
+    id: "test:feature/surges",
+    name: "Surges",
+    text,
+    automation: "full",
+    resources: [
+      {
+        id: "points",
+        max: { base: 2 },
+        recharge: [{ on: "longRest", amount: "all" }],
+      },
+    ],
+    passives: [
+      { kind: "empoweredHealing", resource: "points" },
+      { kind: "stopRegain", resource: "points" },
+      {
+        kind: "spellDamage",
+        bonus: { base: 3 },
+        type: "force",
+        oncePerTurn: true,
+      },
+      {
+        kind: "castRider",
+        cantrip: true,
+        hitDice: { count: 1, within: 30, parity: true },
+      },
+    ],
+  },
+  {
     id: "test:feature/ritual-adept",
     name: "Ritual Adept",
     text,
@@ -1369,5 +1397,77 @@ describe("riders on spending points, and passives while an effect lasts", () => 
       kind: "evasion",
       anySave: true,
     });
+  });
+});
+
+describe("Hit Point Dice surges, empowered healing and stopped spells", () => {
+  const caster = (spent: Record<string, number> = {}) => ({
+    ...priest([
+      [
+        { kind: "features", values: ["test:feature/surges"] },
+        { kind: "spells", values: ["srd52:spell/fire-bolt"] },
+      ],
+      [],
+    ]),
+    resourcesSpent: spent,
+    position: { x: 0, y: 0 },
+  });
+  const context = (actors: readonly Actor[], roll: number) => ({
+    ...run,
+    state: {
+      actors: Object.fromEntries(actors.map((item) => [item.id, item])),
+      combat: {
+        encounter: "arena",
+        order: actors.map((item) => item.id),
+        index: 0,
+        round: 1,
+      },
+    },
+    dice: { below: () => 0, roll: () => roll },
+  });
+  const bolt = (actor: Actor) => {
+    const found = stats(actor).actions.find(
+      (item) => item.id === "spell:srd52:spell/fire-bolt",
+    );
+    if (!found) throw new Error("no Fire Bolt");
+    return found;
+  };
+
+  it("adds damage of its own type in a damage entry of its own", () => {
+    expect(bolt(caster()).activation.resolution.damage).toEqual([
+      expect.objectContaining({ type: "fire" }),
+      { amount: { bonus: { base: 3, add: [] } }, type: "force" },
+    ]);
+  });
+
+  it("spends a Hit Point Die on a cantrip: even, Temporary Hit Points; odd, Force on the caster with no foe near", () => {
+    const actor = caster();
+    const kinds = (roll: number) =>
+      castRiders(
+        actor,
+        bolt(actor),
+        undefined,
+        context([actor], roll),
+      ).events.map((item) => item.kind.replace(`${NS}:`, ""));
+    expect(kinds(4)).toEqual(["resourceSpent", "tempHpGained"]);
+    expect(kinds(3)).toContain("damaged");
+  });
+
+  it("rolls a spell's low healing dice again for a point, once a turn", () => {
+    const actor = { ...caster(), hp: 1 };
+    const events = leafEvents(
+      [{ kind: "heal", amount: { dice: "2d8" } }],
+      "spell:srd52:spell/cure-wounds",
+      actor,
+      actor,
+      context([actor], 2),
+      undefined,
+      1,
+    );
+    expect(events.map((item) => item.kind.replace(`${NS}:`, ""))).toEqual([
+      "resourceSpent",
+      "oncePerTurnUsed",
+      "healed",
+    ]);
   });
 });

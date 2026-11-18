@@ -1,5 +1,10 @@
 import type { Frame, SystemEvent } from "#sdk";
-import { ClassSchema, type Passive, SpellSchema } from "../schemas.ts";
+import {
+  ClassSchema,
+  type LeafEffect,
+  type Passive,
+  SpellSchema,
+} from "../schemas.ts";
 import { type Actor, dndEvent, isDown, NS } from "../state.ts";
 import { finalDamage } from "../rules.ts";
 import { distanceFeet } from "../grid.ts";
@@ -10,6 +15,7 @@ import {
   evaluateFormula,
   type KnownAction,
   lookup,
+  modifierFor,
   rollAmount,
   spellModifier,
   type Stats,
@@ -33,6 +39,69 @@ export function schoolOf(
   const id = sourceId === null ? null : spellOfSource(sourceId);
   if (!id) return null;
   return SpellSchema.safeParse(context.content(id)).data?.school ?? null;
+}
+
+// Whether the spell is one picked for this feat, as Aberrant Dragonmark's level 1 spell.
+function featSpell(actor: Actor, featId: string, actionId: string): boolean {
+  const spell = spellOfSource(actionId);
+  const build = actor.source.kind === "character" ? actor.source.build : null;
+  return (
+    spell !== null &&
+    (build?.levels ?? []).some((entry) =>
+      entry.answers.some(
+        (answer) =>
+          answer.kind === "spells" &&
+          answer.feat === featId &&
+          answer.values.includes(spell),
+      ),
+    )
+  );
+}
+
+// Hit Point Dice spent as a spell is cast (castRider `hitDice`): Aberrant Surge's even Temporary Hit Points or odd
+// Force damage, or Mark of Inspiration's both.
+function hitDiceSurge(
+  actor: Actor,
+  surge: NonNullable<Extract<Passive, { kind: "castRider" }>["hitDice"]>,
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  const { total, events } = spendHitDice(actor, surge.count, context);
+  if (events.length === 0) return [];
+  const [foe] = enemies(context.state, actor)
+    .filter(
+      (item) =>
+        !isDown(item) &&
+        distanceFeet(item.position, actor.position) <= surge.within,
+    )
+    .sort((a, b) => a.hp - b.hp);
+  const shield = (amount: number): SystemEvent[] =>
+    amount > actor.tempHp
+      ? [dndEvent(`${NS}:tempHpGained`, { actor: actor.id, amount })]
+      : [];
+  const strike = (target: Actor): SystemEvent[] =>
+    dealEvents(
+      target,
+      [
+        {
+          amount: finalDamage(total, "force", damageResponses(target, context)),
+          type: "force",
+        },
+      ],
+      false,
+      context,
+    ).events;
+  if (surge.parity) {
+    return [
+      ...events,
+      ...(total % 2 === 0 ? shield(total) : strike(foe ?? actor)),
+    ];
+  }
+  return [
+    ...events,
+    ...shield(total + modifierFor(stats, "con")),
+    ...(foe ? strike(foe) : []),
+  ];
 }
 
 // The once-a-turn use a cast rider spends, by what it rides on.
@@ -185,16 +254,25 @@ export function fueledDamage(
   };
 }
 
+function effectsOf(action: KnownAction): readonly LeafEffect[] {
+  const { resolution } = action.activation;
+  return resolution.kind === "automatic"
+    ? resolution.effects
+    : resolution.kind === "save"
+      ? [...resolution.onFail, ...resolution.onSuccess]
+      : resolution.onHit;
+}
+
 // Whether a spell restores Hit Points.
 function heals(action: KnownAction): boolean {
-  const { resolution } = action.activation;
-  const effects =
-    resolution.kind === "automatic"
-      ? resolution.effects
-      : resolution.kind === "save"
-        ? [...resolution.onFail, ...resolution.onSuccess]
-        : resolution.onHit;
-  return effects.some((effect) => effect.kind === "heal");
+  return effectsOf(action).some((effect) => effect.kind === "heal");
+}
+
+// Whether a spell ends a condition.
+function cures(action: KnownAction): boolean {
+  return effectsOf(action).some(
+    (effect) => effect.kind === "removeCondition" || effect.kind === "cure",
+  );
 }
 
 // Flames of Phlegethos: casting a spell that deals the type puts the rider's effects on the caster. Bewitching
@@ -226,6 +304,10 @@ export function castRiders(
       return [];
     }
     if (passive.slot && slotLevel === undefined) return [];
+    if (passive.cantrip && action.spellLevel !== 0) return [];
+    if (passive.fromFeat && !featSpell(actor, passive.fromFeat, action.id)) {
+      return [];
+    }
     if (passive.oncePerTurn && actor.usedThisTurn.includes(riderKey(passive))) {
       return [];
     }
@@ -246,17 +328,19 @@ export function castRiders(
           (id) =>
             action.id === `spell:${id}` || action.id.startsWith(`spell:${id}:`),
         )
-      : passive.spends
+      : passive.spends || passive.cantrip || passive.fromFeat
         ? true
         : passive.school
           ? slotLevel !== undefined &&
             cost.includes("action") &&
             passive.school.some((item) => item === school)
-          : passive.heals
-            ? heals(action) && targets.some((item) => item.id !== actor.id)
-            : passive.types
-              ? passive.types.some((type) => types.has(type))
-              : passive.damage !== undefined && types.has(passive.damage);
+          : passive.mends
+            ? heals(action) || cures(action)
+            : passive.heals
+              ? heals(action) && targets.some((item) => item.id !== actor.id)
+              : passive.types
+                ? passive.types.some((type) => types.has(type))
+                : passive.damage !== undefined && types.has(passive.damage);
     return fits ? [passive] : [];
   });
   // Simbul's Synostodweomer: a slot spell rolls as many Hit Point Dice as the slot's level.
@@ -358,8 +442,29 @@ export function castRiders(
             ? targets.flatMap((target) =>
                 target.id === actor.id
                   ? []
-                  : leafEvents(onTargets, action.id, actor, target, context),
+                  : leafEvents(
+                      ride.slotCaps
+                        ? onTargets.map((effect) =>
+                            effect.kind === "dispel"
+                              ? {
+                                  ...effect,
+                                  maxLevel: Math.min(
+                                    effect.maxLevel,
+                                    slotLevel ?? 0,
+                                  ),
+                                }
+                              : effect,
+                          )
+                        : onTargets,
+                      action.id,
+                      actor,
+                      target,
+                      context,
+                    ),
               )
+            : []),
+          ...(ride.hitDice
+            ? hitDiceSurge(actor, ride.hitDice, stats, context)
             : []),
         ];
       }),

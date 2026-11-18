@@ -846,6 +846,15 @@ export function choiceOptions(
           )
         : choice.list;
       const also = new Set(choice.also);
+      // Boon of Magic School Mastery: the school of the spell picked for the other choice, whose id has the same
+      // prefix as this one's when a feat asks them (stepChoices).
+      const sibling = choice.sameSchoolAs
+        ? `${choice.id.slice(0, choice.id.lastIndexOf("-") + 1)}${choice.sameSchoolAs}`
+        : undefined;
+      const picked = sibling ? draft.picks[sibling]?.[0] : undefined;
+      const school = picked
+        ? SpellSchema.safeParse(access.content(picked)).data?.school
+        : undefined;
       const levelFits = (spell: Spell) =>
         choice.maxLevel === 0 || (choice.cantrips && spell.level === 0)
           ? spell.level === 0
@@ -855,6 +864,7 @@ export function choiceOptions(
         !also.has(spell.id) &&
         (listed?.has(spell.id) ?? true) &&
         (choice.schools?.includes(spell.school) ?? true) &&
+        (school === undefined || spell.school === school) &&
         (!choice.ritual || spell.ritual) &&
         levelFits(spell);
       const seen = new Set<string>();

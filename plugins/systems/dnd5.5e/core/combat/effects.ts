@@ -1626,6 +1626,65 @@ export function poolHealing(
   return { resource: pool.resource, spent, healed };
 }
 
+// A spell stopped, by Dispel Magic or a counter: a use of each `stopRegain` resource back.
+export function stopRegains(caster: Actor, stats: Stats): SystemEvent[] {
+  return stats.passives.flatMap((passive) =>
+    passive.kind === "stopRegain" &&
+    (caster.resourcesSpent[passive.resource] ?? 0) > 0
+      ? [
+          dndEvent(`${NS}:resourceRestored`, {
+            actor: caster.id,
+            resource: passive.resource,
+            amount: 1,
+          }),
+        ]
+      : [],
+  );
+}
+
+// Empowered Healing: the caster or an ally within 5 feet of it whose `empoweredHealing` use is left this turn spends
+// it, and its resource, for the healing dice to be rolled again when low.
+function empowerer(
+  caster: Actor,
+  context: Context,
+): { readonly events: SystemEvent[] } | null {
+  for (const bearer of [caster, ...allies(context.state, caster)]) {
+    if (
+      bearer.id !== caster.id &&
+      distanceFeet(bearer.position, caster.position) > 5
+    ) {
+      continue;
+    }
+    if (bearer.usedThisTurn.includes(EMPOWERED_HEALING)) continue;
+    if (hasCondition(bearer, ...INCAPACITATING) || isDown(bearer)) continue;
+    const own = deriveStats(bearer, context);
+    const passive = own.passives.find(
+      (item) => item.kind === "empoweredHealing",
+    );
+    if (passive?.kind !== "empoweredHealing") continue;
+    if (
+      (bearer.resourcesSpent[passive.resource] ?? 0) >=
+      (own.resources[passive.resource] ?? 0)
+    ) {
+      continue;
+    }
+    return {
+      events: [
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: bearer.id,
+          resource: passive.resource,
+        }),
+        dndEvent(`${NS}:oncePerTurnUsed`, {
+          actor: bearer.id,
+          key: EMPOWERED_HEALING,
+        }),
+      ],
+    };
+  }
+  return null;
+}
+const EMPOWERED_HEALING = "empoweredHealing";
+
 // What a caster's `spellHealing` passives add to the healing of a spell, cast with a slot of this level unless it's a
 // free cast or one from an item.
 function spellHealing(
@@ -1754,10 +1813,19 @@ export function leafEvents(
               : []),
           );
         }
+        // Empowered Healing: a Sorcery Point rolls a spell's low healing dice again, once a turn.
+        const empowering =
+          spell !== null && !effect.full && !pool && effect.amount.dice
+            ? empowerer(caster, context)
+            : null;
+        if (empowering) events.push(...empowering.events);
+        const amount = empowering
+          ? { ...effect.amount, reroll: 1 }
+          : effect.amount;
         const rolled =
           (effect.full
             ? max
-            : (pool?.healed ?? rollAmount(effect.amount, stats, dice))) +
+            : (pool?.healed ?? rollAmount(amount, stats, dice))) +
           (spell === null
             ? 0
             : spellHealing(spell, sourceId, stats, context, slotLevel));
@@ -2278,6 +2346,8 @@ export function leafEvents(
             item.kind === `${NS}:concentrationEnded`,
         );
         const spell = spellOfSource(sourceId);
+        // Power Surge: a spell ended gives a surge back.
+        if (stopped) events.push(...stopRegains(caster, stats));
         if (
           breaker &&
           !stopped &&
@@ -2552,6 +2622,31 @@ export function leafEvents(
           ...sendAwayEvents(effect, sourceId, caster, target, context),
         );
         break;
+      case "allyHeal": {
+        const hurt = allies(context.state, caster)
+          .filter(
+            (item) =>
+              item.id !== target.id &&
+              !isDead(item) &&
+              distanceFeet(item.position, caster.position) <= effect.within,
+          )
+          .map((item) => ({ item, max: deriveStats(item, context).maxHp }))
+          .filter(({ item, max }) => item.hp < max)
+          .sort((a, b) => a.item.hp - a.max - (b.item.hp - b.max))[0];
+        if (hurt) {
+          events.push(
+            dndEvent(`${NS}:healed`, {
+              actor: hurt.item.id,
+              amount: Math.min(
+                rollAmount(effect.amount, stats, healDice),
+                hurt.max - Math.max(hurt.item.hp, 0),
+              ),
+              max: hurt.max,
+            }),
+          );
+        }
+        break;
+      }
       case "note":
       case "disperse":
       case "animate":
