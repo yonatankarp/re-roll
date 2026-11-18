@@ -1,5 +1,6 @@
 import { type Dice, PLAYER_ACTOR } from "#sdk";
 import { healingStopped, placedFlag } from "./zones.ts";
+import { castRoundsOf } from "./combat/casting.ts";
 import {
   type Actor,
   cannotHeal,
@@ -1569,6 +1570,10 @@ export function makeJudge(context: Context, side: Actor): Judge {
       gained = worthOn(actor, target, action, darts);
     }
     if (gained <= 0) return gained;
+    // A spell cast over several turns pays off only once they've passed, if the fight lasts that long, and takes
+    // each of their actions (combat/casting.ts).
+    const rounds = castRoundsOf(action, actor, context);
+    if (rounds !== undefined) gained /= rounds * rounds;
     // A bare Unarmed Strike gives up the mastery a mastered weapon would put on the hit, as Topple's.
     if (actionId === UNARMED_STRIKE && masters(actor)) {
       gained *= 0.75;

@@ -56,6 +56,7 @@ export const FRAME_KINDS = [
   "sunlightTick",
   "damageBurst",
   "burnAway",
+  "castCompleted",
   "masteryHit",
   "masteryMiss",
   "metamagic",
@@ -203,6 +204,15 @@ const ActiveEffectSchema = z.strictObject({
       keep: z.array(z.enum(["mind", "spells", "features"])).optional(), // what it keeps of its own (stats.ts)
       ac: z.number().int().optional(), // its AC is at least this, as with Circle Forms
       lasting: z.literal(true).optional(), // running out of Temporary Hit Points doesn't end it, as Wild Shape
+    }),
+    // A spell being cast over several turns (combat/casting.ts): the action, where it's aimed, the slot, and the turns
+    // still to go before it takes effect.
+    z.strictObject({
+      kind: z.literal("casting"),
+      actionId: z.string(),
+      target: z.union([z.string(), z.array(z.string())]),
+      slot: z.string().optional(),
+      left: z.number().int(),
     }),
     // Riding its caster as a mount (combat/mounts.ts).
     z.strictObject({ kind: z.literal("riding") }),

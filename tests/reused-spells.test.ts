@@ -11,6 +11,7 @@ import type { Dice } from "../engine/kernel/dice.ts";
 import type { RunContext } from "../engine/run/turn.ts";
 import type { Context } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import { zoneFrames } from "../plugins/systems/dnd5.5e/core/combat/areas.ts";
+import { castingTurn } from "../plugins/systems/dnd5.5e/core/combat/casting.ts";
 import {
   ClassSchema,
   PregenSchema,
@@ -352,5 +353,45 @@ describe("areas that move or act by turns", () => {
     );
     expect(damageTo(bolts.events, "foe")).toEqual([10]);
     expect(hasCondition(actor(storm, "foe"), "deafened")).toBe(false);
+  });
+});
+
+describe("spells cast over several turns", () => {
+  it("takes Tsunami's ten turns of actions before the wave rises, and loses it with Concentration", async () => {
+    const run = await arena();
+    const start = fight(hero(run, ["tsunami"]), dummy("foe", 15, 10));
+    const begun = settle(
+      run,
+      start,
+      [act("spell:srd52:spell/tsunami|@15,10")],
+      LOW,
+    ).state;
+    expect(zonesOf(begun)).toHaveLength(0);
+    expect(actor(begun, PLAYER_ACTOR).concentratingOn).toBe(
+      "casting:spell:srd52:spell/tsunami",
+    );
+    let state = begun;
+    let completed: readonly Frame[] = [];
+    for (let turn = 2; turn <= 10; turn += 1) {
+      state = nextTurn(state, turn);
+      const taken = castingTurn(actor(state, PLAYER_ACTOR));
+      state = taken.events.reduce(applyDndEvent, state);
+      expect(actor(state, PLAYER_ACTOR).budget.action).toBe(false);
+      completed = taken.frames;
+      if (completed.length > 0) break;
+    }
+    expect(state.combat?.round).toBe(10);
+    const risen = settle(run, state, completed, LOW);
+    expect(zonesOf(risen.state)).toHaveLength(1);
+    expect(damageTo(risen.events, "foe")).toEqual([6]);
+    expect(actor(risen.state, PLAYER_ACTOR).concentratingOn).toBe(
+      "spell:srd52:spell/tsunami",
+    );
+    // Broken Concentration on the casting loses the spell.
+    const broken = applyDndEvent(begun, {
+      kind: `${NS}:concentrationEnded`,
+      payload: { actor: PLAYER_ACTOR },
+    });
+    expect(castingTurn(actor(broken, PLAYER_ACTOR)).events).toEqual([]);
   });
 });
