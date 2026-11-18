@@ -32,6 +32,7 @@ export function withType(modifier: Modifier, type: DamageType): Modifier {
     case "immunity":
     case "damageReduction":
     case "grantedAction":
+    case "bane":
       return { ...modifier, damage: type };
     case "retaliate":
       return {
@@ -58,6 +59,8 @@ function describe(modifier: Modifier, type: DamageType): string {
       return `${name} damage to attackers`;
     case "hitDamage":
       return `Extra ${name} damage`;
+    case "bane":
+      return `Bane of ${name}`;
     default:
       return `${name} damage`;
   }

@@ -482,7 +482,7 @@ export function sceneCastActions(
   return members(state).flatMap((caster) => {
     const stats = deriveStats(caster, access);
     return castable(caster, state, access, here, scene.fights).flatMap(
-      (action) => {
+      (action): SceneAction[] => {
         const name =
           caster.id === PLAYER_ACTOR
             ? action.name
@@ -491,6 +491,17 @@ export function sceneCastActions(
         const slots = ritual(action, access)
           ? []
           : upcastSlots(action, caster, stats);
+        // A spell of several shapes, as Ceremony's rites, is one choice for each, at its own level.
+        const { shapes } = action.activation;
+        if (shapes) {
+          return shapes.map((shape, index) => ({
+            id: `${castId(caster.id, action.id, undefined)}:shape${String(index)}`,
+            label: `${name}: ${shape.name}${ritual(action, access) ? " (ritual)" : ""}`,
+            effect: `${NS}:castBetween`,
+            args: { caster: caster.id, action: action.id, shape: index },
+            ...(action.activation.outOfCombat === true ? { rest: true } : {}),
+          }));
+        }
         return [undefined, ...slots].map((slot) => ({
           id: castId(caster.id, action.id, slot),
           label:
@@ -613,14 +624,39 @@ const CastSchema = z.strictObject({
   caster: z.string(),
   action: z.string(),
   slot: z.number().int().min(1).max(9).optional(), // a higher slot it's cast with
+  shape: z.number().int().min(0).optional(), // which of its shapes, as Ceremony's rite
 });
 
+// The action as cast in one of its shapes: the shape's effects or resolution in place of its own.
+function inShape(action: KnownAction, index: number | undefined): KnownAction {
+  const shape =
+    index === undefined ? undefined : action.activation.shapes?.[index];
+  if (!shape) return action;
+  const { resolution } = action.activation;
+  return {
+    ...action,
+    activation: {
+      ...action.activation,
+      resolution:
+        shape.resolution ??
+        (shape.effects && resolution.kind === "automatic"
+          ? { ...resolution, effects: shape.effects }
+          : resolution),
+    },
+  };
+}
+
 function runCast(
-  { caster: casterId, action: actionId, slot }: z.infer<typeof CastSchema>,
+  {
+    caster: casterId,
+    action: actionId,
+    slot,
+    shape,
+  }: z.infer<typeof CastSchema>,
   context: Context,
 ): SystemResult {
   const { caster, action: unscaled } = found(casterId, actionId, context);
-  const action = atSlot(unscaled, slot);
+  const action = inShape(atSlot(unscaled, slot), shape);
   const targets = targetsOf(action, caster, context.state, context);
   const { targeting } = action.activation;
   // Several at once go to the most hurt first, as in a fight.
@@ -650,6 +686,7 @@ function runCast(
           caster: caster.id,
           action: action.id,
           ...(slot === undefined ? {} : { slot }),
+          ...(shape === undefined ? {} : { shape }),
         }),
       }),
     ],
@@ -664,12 +701,13 @@ function runCastOn(
     action: actionId,
     answer,
     slot,
+    shape,
   }: z.infer<typeof CastOnSchema>,
   context: Context,
 ): SystemResult {
   if (answer === NEVER_MIND) return {};
   const { caster, action: unscaled } = found(casterId, actionId, context);
-  const action = atSlot(unscaled, slot);
+  const action = inShape(atSlot(unscaled, slot), shape);
   const target = targetsOf(action, caster, context.state, context).find(
     (item) => item.id === answer,
   );

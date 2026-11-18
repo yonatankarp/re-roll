@@ -223,7 +223,30 @@
     Choose any number of creatures within range. For the duration, each target
     has Advantage on Wisdom saving throws and Death Saving Throws and regains
     the maximum number of Hit Points possible from any healing.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting:
+      { area: { shape: emanation, radius: 30 }, range: self, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: advantage, on: saves, ability: wis },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: deathSaveAdvantage },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: healedMax },
+            duration: { concentration: true, minutes: 1 },
+          }
 - id: srd52:spell/bless
   name: Bless
   level: 1
@@ -1242,8 +1265,36 @@
     immediate future. For the duration, the target has Advantage on D20 Tests,
     and other creatures have Disadvantage on attack rolls against it. The spell
     ends early if you cast it again.
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  activation:
+    cost: [slot]
+    outOfCombat: true
+    oneTarget: true
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: advantage, on: attacks },
+            duration: { minutes: 480 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: advantage, on: saves },
+            duration: { minutes: 480 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: advantage, on: checks },
+            duration: { minutes: 480 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: attacksAgainst },
+            duration: { minutes: 480 },
+          }
 - id: srd52:spell/geas
   name: Geas
   level: 5
@@ -2357,7 +2408,46 @@
     Strength-based D20 Tests for the duration. During that time, it also
     subtracts 1d8 from all its damage rolls. The target repeats the save at the
     end of each of its turns, ending the spell on a success.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: attacks, ability: str },
+            duration: { concentration: true, minutes: 1 },
+            repeatSave: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: saves, ability: str },
+            duration: { concentration: true, minutes: 1 },
+            repeatSave: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: checks, ability: str },
+            duration: { concentration: true, minutes: 1 },
+            repeatSave: true,
+          }
+        - {
+            kind: modifier,
+            modifier:
+              { kind: damageBonus, amount: { dice: 1d8 }, subtract: true },
+            duration: { concentration: true, minutes: 1 },
+            repeatSave: true,
+          }
+      onSuccess:
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: attacks, once: true },
+            duration: { until: yourNextTurnStart },
+          }
 - id: srd52:spell/remove-curse
   name: Remove Curse
   level: 3
@@ -5252,7 +5342,54 @@
     the target is already possessed, Charmed, or Frightened by such a creature,
     the target has Advantage on any new saving throw against the relevant
     effect.
-  automation: text
+  automation: full
+  # shortcut: possession isn't held off, and the Advantage holds on saves against Charmed or Frightened from any source.
+  activation:
+    cost: [action, slot, { gold: 25 }]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: disadvantage,
+                on: attacksAgainst,
+                attackers:
+                  [aberration, celestial, elemental, fey, fiend, undead],
+              },
+            duration: { concentration: true, minutes: 10 },
+          }
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: conditionImmunity,
+                condition: charmed,
+                creatureTypes:
+                  [aberration, celestial, elemental, fey, fiend, undead],
+              },
+            duration: { concentration: true, minutes: 10 },
+          }
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: conditionImmunity,
+                condition: frightened,
+                creatureTypes:
+                  [aberration, celestial, elemental, fey, fiend, undead],
+              },
+            duration: { concentration: true, minutes: 10 },
+          }
+        - {
+            kind: modifier,
+            modifier:
+              { kind: advantage, on: saves, conditions: [charmed, frightened] },
+            duration: { concentration: true, minutes: 10 },
+          }
 - id: srd52:spell/ray-of-frost
   name: Ray of Frost
   level: 0
@@ -6880,7 +7017,19 @@
     still in effect when the target is subjected to an effect that would kill it
     instantly without dealing damage, that effect is negated against the target,
     and the spell ends.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: deathWard },
+            duration: { minutes: 480 },
+          }
 - id: srd52:spell/detect-poison-and-disease
   name: Detect Poison and Disease
   level: 1
@@ -6944,7 +7093,70 @@
     succeed on a Charisma saving throw or be sent back to its home plane if it
     isn’t there already. If they aren’t on their home plane, Undead are sent to
     the Shadowfell, and Fey are sent to the Feywild.
-  automation: text
+  automation: full
+  # shortcut: Break Enchantment ends Charmed and Frightened whatever caused them, and possession isn't played.
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: disadvantage,
+                on: attacksAgainst,
+                attackers: [celestial, elemental, fey, fiend, undead],
+              },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: spheres },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: regain,
+            resource: "spheres:srd52:spell/dispel-evil-and-good",
+            count: all,
+          }
+  spheres:
+    count: 1
+    actions:
+      - label: Break Enchantment
+        cost: [action]
+        dismisses: true
+        targeting: { creatures: 1, range: touch, side: ally }
+        resolution:
+          {
+            kind: automatic,
+            effects:
+              [
+                { kind: removeCondition, condition: charmed },
+                { kind: removeCondition, condition: frightened },
+              ],
+          }
+      - label: Dismissal
+        cost: [action]
+        dismisses: true
+        targeting:
+          {
+            creatures: 1,
+            range: 5,
+            side: enemy,
+            creatureTypes: [celestial, elemental, fey, fiend, undead],
+          }
+        resolution:
+          {
+            kind: save,
+            ability: cha,
+            dc: { add: [{ kind: spellSaveDc }] },
+            damage: [],
+            onFail: [{ kind: sendAway }],
+            onSuccess: [],
+          }
 - id: srd52:spell/divine-smite
   name: Divine Smite
   level: 1
@@ -8103,25 +8315,25 @@
     anything that would sense its emotions or alignment, read its thoughts, or
     magically detect its location, and no spell—not even Wish—can gather
     information about the target, observe it remotely, or control its mind.
-  automation: partial
+  automation: full
+  # Nothing in play senses, reads or scries a creature, so the rest of its protection has nothing to stop.
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      creatures: 1
-      range: touch
-      side: ally
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
       damage: []
       effects:
-        - kind: modifier
-          modifier:
-            kind: immunity
-            damage: psychic
-          duration:
-            minutes: 1440
+        - {
+            kind: modifier,
+            modifier: { kind: immunity, damage: psychic },
+            duration: { minutes: 1440 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: conditionImmunity, condition: charmed },
+            duration: { minutes: 1440 },
+          }
 - id: srd52:spell/mislead
   name: Mislead
   level: 5
@@ -8347,27 +8559,25 @@
   text: You touch a creature and end the Poisoned condition on it. For the
     duration, the target has Advantage on saving throws to avoid or end the
     Poisoned condition, and it has Resistance to Poison damage.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      creatures: 1
-      range: touch
-      side: ally
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
       damage: []
       effects:
-        - kind: removeCondition
-          condition: poisoned
-        - kind: modifier
-          modifier:
-            kind: resistance
-            damage: poison
-          duration:
-            minutes: 60
+        - { kind: removeCondition, condition: poisoned }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: poison },
+            duration: { minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: advantage, on: saves, conditions: [poisoned] },
+            duration: { minutes: 60 },
+          }
 - id: srd52:spell/regenerate
   name: Regenerate
   level: 7
@@ -9501,7 +9711,19 @@
     your choice that you can see within 10 feet of the space you left. If no
     unoccupied space is available within that range, you appear in the nearest
     unoccupied space.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: blink },
+            duration: { minutes: 1 },
+          }
 - id: srd52:spell/chain-lightning
   name: Chain Lightning
   level: 6
@@ -10791,8 +11013,38 @@
     Resistance to Poison damage, and it has Immunity to the Frightened and
     Poisoned conditions. Its Hit Point maximum also increases by 2d10, and it
     gains the same number of Hit Points.
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  # shortcut: the Hit Points gained are rolled apart from the maximum's rise.
+  activation:
+    cost: [slot, { gold: 1000 }]
+    outOfCombat: true
+    targeting:
+      { area: { shape: emanation, radius: 30 }, range: self, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: poison },
+            duration: { minutes: 1440 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: conditionImmunity, condition: frightened },
+            duration: { minutes: 1440 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: conditionImmunity, condition: poisoned },
+            duration: { minutes: 1440 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: bonus, to: maxHp, amount: { dice: 2d10 } },
+            duration: { minutes: 1440 },
+          }
+        - { kind: heal, amount: { dice: 2d10 } }
 - id: srd52:spell/hold-person
   name: Hold Person
   level: 2
@@ -11524,7 +11776,20 @@
     attack or spell. This spell doesn’t protect the warded creature from areas
     of effect. The spell ends if the warded creature makes an attack roll, casts
     a spell, or deals damage.
-  automation: text
+  automation: full
+  activation:
+    cost: [bonusAction, slot]
+    targeting: { creatures: 1, range: 30, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: sanctuary },
+            duration: { minutes: 1 },
+            endsOn: spell,
+          }
 - id: srd52:spell/see-invisibility
   name: See Invisibility
   level: 2
@@ -12420,25 +12685,18 @@
   text: You touch a willing creature. Until the spell ends, the target’s skin
     assumes a bark-like appearance, and the target has an Armor Class of 17 if
     its AC is lower than that.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - bonusAction
-      - slot
-    targeting:
-      creatures: 1
-      range: touch
-      side: ally
+    cost: [bonusAction, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
       effects:
-        - kind: modifier
-          duration:
-            minutes: 60
-          modifier:
-            kind: acFormula
-            formula:
-              base: 17
+        - {
+            kind: modifier,
+            duration: { minutes: 60 },
+            modifier: { kind: acFormula, formula: { base: 17 } },
+          }
 - id: srd52:spell/blade-barrier
   name: Blade Barrier
   level: 6
@@ -13323,38 +13581,35 @@
     you hits you with a melee attack roll, the shield erupts with flame. The
     attacker takes 2d8 Fire damage from a warm shield or 2d8 Cold damage from a
     chill shield.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      self: true
+    cost: [action, slot]
+    targeting: { self: true }
     resolution:
       kind: automatic
       damage: []
       effects:
-        - kind: modifier
-          modifier:
-            kind: resistance
-            damage: cold
-          duration:
-            minutes: 10
-          choose:
-            - cold
-            - fire
-        - kind: modifier
-          modifier:
-            kind: retaliate
-            damage:
-              - amount:
-                  dice: 2d8
-                type: fire
-          duration:
-            minutes: 10
-          choose:
-            - fire
-            - cold
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: cold },
+            duration: { minutes: 10 },
+            choose: [cold, fire],
+          }
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: retaliate,
+                damage: [{ amount: { dice: 2d8 }, type: fire }],
+              },
+            duration: { minutes: 10 },
+            choose: [fire, cold],
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: sheds, light: light, feet: 10, dim: 10 },
+            duration: { minutes: 10 },
+          }
 - id: srd52:spell/flesh-to-stone
   name: Flesh to Stone
   level: 6
@@ -13732,7 +13987,31 @@
     Points equal to your spellcasting ability modifier at the start of each of
     its turns. Using a Higher-Level Spell Slot. You can target one additional
     creature for each spell slot level above 1.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: conditionImmunity, condition: frightened },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: turnTempHp,
+                amount: { bonus: { add: [{ kind: spellMod }] } },
+              },
+            duration: { concentration: true, minutes: 1 },
+          }
+  upcast:
+    perSlotLevel:
+      addTargets: 1
 - id: srd52:spell/holy-aura
   name: Holy Aura
   level: 8
@@ -13752,7 +14031,38 @@
     when a Fiend or an Undead hits an affected creature with a melee attack
     roll, the attacker must succeed on a Constitution saving throw or have the
     Blinded condition until the end of its next turn.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting:
+      { area: { shape: emanation, radius: 30 }, range: self, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: zone,
+            zone: area,
+            radius: 30,
+            follows: true,
+            duration: { concentration: true, minutes: 1 },
+          }
+    area:
+      {
+        side: ally,
+        self: true,
+        grants:
+          [
+            { kind: advantage, on: saves },
+            { kind: disadvantage, on: attacksAgainst },
+            {
+              kind: retaliate,
+              creatureTypes: [fiend, undead],
+              save: { ability: con, dc: { add: [{ kind: spellSaveDc }] } },
+              condition: blinded,
+            },
+          ],
+      }
 - id: srd52:spell/identify
   name: Identify
   level: 1
@@ -13946,28 +14256,25 @@
   text: You touch a willing creature who isn’t wearing armor. Until the spell
     ends, the target’s base AC becomes 13 plus its Dexterity modifier. The spell
     ends early if the target dons armor.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      creatures: 1
-      range: touch
-      side: ally
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
+      damage: []
       effects:
-        - kind: modifier
-          duration:
-            minutes: 480
-          modifier:
-            kind: acFormula
-            formula:
-              base: 13
-              add:
-                - kind: abilityMod
-                  ability: dex
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: acFormula,
+                formula:
+                  { base: 13, add: [{ kind: abilityMod, ability: dex }] },
+                unarmored: true,
+              },
+            duration: { minutes: 480 },
+          }
 - id: srd52:spell/magic-mouth
   name: Magic Mouth
   level: 2
@@ -15316,7 +15623,113 @@
     amount of damage. The spell ends if you drop to 0 Hit Points or if you and
     the target become separated by more than 60 feet. It also ends if the spell
     is cast again on either of the connected creatures.
-  automation: text
+  automation: full
+  # shortcut: it doesn't end when the two are more than 60 feet apart.
+  activation:
+    cost: [action, slot]
+    oneTarget: true
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: bonus, to: ac, amount: { bonus: { base: 1 } } },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier:
+              { kind: bonus, to: saves, amount: { bonus: { base: 1 } } },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: bonded },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: acid },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: bludgeoning },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: cold },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: fire },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: force },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: lightning },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: necrotic },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: piercing },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: poison },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: psychic },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: radiant },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: slashing },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: thunder },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
 - id: srd52:spell/wind-walk
   name: Wind Walk
   level: 6

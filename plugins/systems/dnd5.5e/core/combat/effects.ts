@@ -1567,8 +1567,11 @@ export function dealEvents(
   let { state } = context;
   const events: SystemEvent[] = [];
   let dealt = 0;
-  for (const hit of hits) {
+  for (const given of hits) {
     const current = state.actors[target.id] ?? target;
+    // Elemental Bane: the first damage of its type each turn deals more.
+    const baned = baneExtra(current, given, { ...context, state });
+    const hit = { ...given, amount: given.amount + baned.amount };
     const reduced = reducedHit(
       current,
       hit.amount,
@@ -1598,11 +1601,26 @@ export function dealEvents(
             state,
           })
         : [];
+    // Warding Bond: its caster takes as much.
+    const bonded =
+      amount > 0
+        ? current.activeEffects.flatMap(({ modifier, casterId }) => {
+            const caster = state.actors[casterId];
+            return modifier.kind === "bonded" &&
+              caster &&
+              caster.id !== current.id &&
+              !isDown(caster)
+              ? damageEvents(caster, amount, type, false, { ...context, state })
+              : [];
+          })
+        : [];
     for (const event of [
+      ...baned.events,
       ...reduced.events,
       ...lessened.events,
       ...damageEvents(current, amount, type, critical, { ...context, state }),
       ...mirrored,
+      ...bonded,
     ]) {
       events.push(event);
       if (state.actors[target.id]) state = applyDndEvent(state, event);
@@ -2303,7 +2321,10 @@ export function leafEvents(
         const divine = sourceId.includes("channel-divinity");
         const dice =
           (target.hp <= 0 && hasPassive(stats, "maxHealingAtZero")) ||
-          ((spell !== null || divine) && hasPassive(stats, "maxHealingDice"))
+          ((spell !== null || divine) && hasPassive(stats, "maxHealingDice")) ||
+          target.activeEffects.some(
+            ({ modifier }) => modifier.kind === "healedMax",
+          )
             ? HIGHEST
             : healDice;
         const pool = effect.pool
@@ -2679,6 +2700,7 @@ export function leafEvents(
                   : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
+              ...(effect.endsOn ? { endsOn: effect.endsOn } : {}),
               ...(effect.saveOnDamage && save ? { saveOnDamage: save } : {}),
               ...(effect.endsInLight ? { endsInLight: true as const } : {}),
               ...(effect.untilIncapacitated
@@ -2733,7 +2755,13 @@ export function leafEvents(
           target.activeEffects.some(
             ({ modifier }) =>
               modifier.kind === "conditionImmunity" &&
-              modifier.condition === effect.condition,
+              modifier.condition === effect.condition &&
+              (!modifier.creatureTypes ||
+                modifier.creatureTypes.includes(
+                  (
+                    deriveStats(caster, context).creatureType ?? ""
+                  ).toLowerCase(),
+                )),
           ) ||
           (effect.web &&
             hasPassive(deriveStats(target, context), "webWalker")) ||
@@ -3342,6 +3370,10 @@ export function leafEvents(
         events.push(...beheadEvents(effect, caster, target, context));
         break;
       case "slay":
+        if (warded(target)) {
+          events.push(...wardBroken(target));
+          break;
+        }
         if (
           !isDead(target) &&
           target.hp <= effect.hpAtMost &&
@@ -5303,6 +5335,10 @@ export function resolveAction(
           target.hp > 0 &&
           target.hp <= slay.hpAtMost
         ) {
+          if (warded(target)) {
+            events.push(...wardBroken(target));
+            continue;
+          }
           events.push(
             dndEvent(`${NS}:damaged`, {
               actor: target.id,
@@ -5563,7 +5599,8 @@ export function resolveAction(
         if (
           resolution.slayAtMost !== undefined &&
           struck.hp > 0 &&
-          struck.hp <= resolution.slayAtMost
+          struck.hp <= resolution.slayAtMost &&
+          !warded(struck)
         ) {
           events.push(
             dndEvent(`${NS}:damaged`, {
@@ -5706,7 +5743,12 @@ export function resolveAction(
         }
         const evaded =
           resolution.onSuccessDamage === "half" &&
-          (evades(target, resolution.ability, context) ||
+          (evades(
+            target,
+            resolution.ability,
+            context,
+            action.spellLevel !== null,
+          ) ||
             (action.spellLevel !== null &&
               zonesOn(target, context.state, context).some(
                 (zone) => zone.area?.magicWard,
@@ -6525,4 +6567,46 @@ export function alliesRiderEvents(
       ),
     ];
   });
+}
+
+// Death Ward: an effect that would kill its bearer outright without damage is negated, and the ward ends.
+// shortcut: a Wail of the Banshee it negates still calls for the save its other targets make.
+const warded = (target: Actor): boolean =>
+  target.activeEffects.some(({ modifier }) => modifier.kind === "deathWard");
+const wardBroken = (target: Actor): SystemEvent[] =>
+  target.activeEffects
+    .filter(({ modifier }) => modifier.kind === "deathWard")
+    .map(({ sourceId }) =>
+      dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId }),
+    );
+
+// Elemental Bane's extra damage on the first hit of its type on a turn, from its caster's numbers.
+function baneExtra(
+  target: Actor,
+  hit: { readonly amount: number; readonly type: Damage["type"] },
+  context: Context,
+): { amount: number; events: SystemEvent[] } {
+  const { combat } = context.state;
+  const turn = `@${String(combat?.round ?? 0)}:${String(combat?.index ?? 0)}`;
+  let amount = 0;
+  const events: SystemEvent[] = [];
+  for (const { modifier, sourceId, casterId } of target.activeEffects) {
+    const key = `bane:${sourceId}${turn}`;
+    if (
+      modifier.kind !== "bane" ||
+      modifier.damage !== hit.type ||
+      hit.amount <= 0 ||
+      target.usedThisTurn.includes(key)
+    ) {
+      continue;
+    }
+    const caster = context.state.actors[casterId] ?? target;
+    amount += rollAmount(
+      modifier.amount,
+      deriveStats(caster, context),
+      context.dice,
+    );
+    events.push(dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key }));
+  }
+  return { amount, events };
 }

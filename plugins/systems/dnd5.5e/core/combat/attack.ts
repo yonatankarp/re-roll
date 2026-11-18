@@ -2991,11 +2991,24 @@ function retaliated(
   const stats = deriveStats(target, context);
   const onceKey = `retaliate:${attacker.id}`;
   const near = distanceFeet(attacker.position, target.position);
+  // An aura's strikes back are worked out from its owner's numbers, as Holy Aura's save DC.
+  const giver = new Map<Actor["activeEffects"][number]["modifier"], Actor>(
+    zoneGrants(target, context.state, context).map(({ modifier, zone }) => [
+      modifier,
+      context.state.actors[zone.owner] ?? target,
+    ]),
+  );
+  const attackerType = (
+    deriveStats(attacker, context).creatureType ?? ""
+  ).toLowerCase();
   const backs = [
     ...target.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
+    ...giver.keys(),
   ].flatMap((modifier) =>
     modifier.kind === "retaliate" &&
+    (!modifier.creatureTypes ||
+      modifier.creatureTypes.includes(attackerType)) &&
     (modifier.within !== undefined
       ? near <= modifier.within
       : close || modifier.anyAttack === true) &&
@@ -3026,7 +3039,42 @@ function retaliated(
         ]
       : []),
   ]);
+  // Holy Aura: a save against the giver's DC, or the attacker gets the effects.
+  const struck = backs.flatMap((back) => {
+    if (!back.condition) return [];
+    const by = giver.get(back) ?? target;
+    const rolled = back.save
+      ? rollSave(
+          attacker,
+          back.save.ability,
+          evaluateFormula(back.save.dc, deriveStats(by, context)),
+          context,
+          true,
+        )
+      : { saved: false, events: [] };
+    return [
+      ...rolled.events,
+      ...(rolled.saved
+        ? []
+        : leafEvents(
+            [
+              {
+                kind: "applyCondition",
+                condition: back.condition,
+                duration: { until: "itsNextTurnEnd" },
+                repeatSave: false,
+                endsOnDamage: false,
+              },
+            ],
+            `retaliate:${by.id}`,
+            by,
+            attacker,
+            context,
+          )),
+    ];
+  });
   const events = [
+    ...struck,
     ...(backs.some(({ oncePerTurn }) => oncePerTurn)
       ? [
           dndEvent(`${NS}:oncePerTurnUsed`, {

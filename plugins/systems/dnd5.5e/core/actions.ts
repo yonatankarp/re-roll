@@ -1000,6 +1000,12 @@ function bonusTacticCost(
   return cost;
 }
 
+// Uncertain Footing: a hampered creature can't take the Dash action.
+const canDash = (actor: Actor): boolean =>
+  !actor.activeEffects.some(
+    ({ modifier }) => modifier.kind === "actionLimit" && modifier.noDash,
+  );
+
 // Hunter's Rime: a creature Hunter's Mark marks can't take the Disengage action.
 function canDisengage(actor: Actor): boolean {
   return !actor.activeEffects.some(
@@ -1025,7 +1031,8 @@ function bonusTacticOptions(
   if (
     allowed.has("dash") &&
     extra > 0 &&
-    !hasCondition(actor, "grappled", "restrained")
+    !hasCondition(actor, "grappled", "restrained") &&
+    canDash(actor)
   ) {
     options.push({
       id: BONUS_DASH,
@@ -1241,7 +1248,11 @@ export function tacticOptions(
   const foes = standing(knownFoes(state, actor, access));
   const near = foes.filter((foe) => within5(actor, foe));
   const extra = walkSpeed(actor, stats) + dashBonus(stats);
-  if (extra > 0 && !hasCondition(actor, "grappled", "restrained")) {
+  if (
+    extra > 0 &&
+    !hasCondition(actor, "grappled", "restrained") &&
+    canDash(actor)
+  ) {
     options.push({
       id: DASH,
       label: `Dash (${String(extra)} ft more this turn)`,
