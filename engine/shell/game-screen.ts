@@ -550,6 +550,7 @@ export function showGame(ctx: ShellContext): void {
     linesShown: 0,
     tickerShown: 0,
     tickerScene: null,
+    tickerInPlay: false,
     choiceShown: 0,
   };
   draw();

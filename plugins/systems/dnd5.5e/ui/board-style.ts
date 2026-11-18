@@ -357,15 +357,22 @@ const BOARD_CSS = `
   color: var(--muted, #5e5240);
 }
 .dnd-legend li { display: inline-flex; align-items: center; gap: 6px; }
-/* A swatch is drawn by the mark's own rule, on the parchment mat's ink, at a fixed size. */
-.dnd-legend .dnd-swatch {
-  position: static;
+/* A swatch is drawn as its mark is on the parchment mat. */
+.dnd-swatch {
   display: inline-block;
   width: 16px;
   height: 16px;
+  box-sizing: border-box;
   border: 1px solid rgb(110 70 10 / 35%);
   border-radius: 3px;
 }
+.dnd-swatch.risky { background: repeating-linear-gradient(45deg, rgb(170 40 20 / 40%) 0 3px, transparent 3px 8px); }
+.dnd-swatch.difficult { background: repeating-linear-gradient(-45deg, rgb(110 70 10 / 28%) 0 2px, transparent 2px 7px); }
+.dnd-swatch.half { box-shadow: inset 0 0 0 2px rgb(110 70 10 / 35%); }
+.dnd-swatch.threeQuarters { box-shadow: inset 0 0 0 3px rgb(110 70 10 / 50%); }
+.dnd-swatch.dim { background: rgb(8 10 30 / 26%); }
+.dnd-swatch.dark { background: rgb(4 4 14 / 55%); }
+.dnd-swatch.water { background: rgb(40 110 170 / 24%); }
 .dnd-zoom button:focus-visible { outline: 2px solid #ffd36b; outline-offset: 2px; }
 .dnd-field.gridded::before {
   background:

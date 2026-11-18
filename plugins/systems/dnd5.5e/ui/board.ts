@@ -15,6 +15,7 @@ import {
   showFog,
   showAreas,
   showGround,
+  showLegend,
   showPickBar,
 } from "./board-overlays.ts";
 import { play } from "./board-playback.ts";
@@ -290,6 +291,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     ctx.playing = true;
     board.classList.add("playing");
     cells.replaceChildren();
+    showLegend(ctx); // the squares' key goes with them
     closeMenu(ctx);
     try {
       for (let cue = ctx.queue.shift(); cue; cue = ctx.queue.shift()) {

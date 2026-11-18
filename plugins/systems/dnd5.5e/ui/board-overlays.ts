@@ -27,27 +27,28 @@ const HOW_TO = "Click a square to move, or a foe to attack";
 
 // The key to the marks on the map now, each with a swatch drawn as the mark is, so none needs a hover to read.
 const LEGEND = [
-  ["dnd-cell risky", "Gives a foe an Opportunity Attack"],
-  ["dnd-ground-square difficult", "Difficult terrain"],
-  ["dnd-ground-square half", "Half cover"],
-  ["dnd-ground-square threeQuarters", "Three-quarters cover"],
-  ["dnd-ground-square dim", "Dim light"],
-  ["dnd-ground-square dark", "Darkness"],
-  ["dnd-ground-square water", "Water"],
+  ["risky", ".dnd-cell.risky", "Gives a foe an Opportunity Attack"],
+  ["difficult", ".dnd-ground-square.difficult", "Difficult terrain"],
+  ["half", ".dnd-ground-square.half", "Half cover"],
+  ["threeQuarters", ".dnd-ground-square.threeQuarters", "Three-quarters cover"],
+  ["dim", ".dnd-ground-square.dim", "Dim light"],
+  ["dark", ".dnd-ground-square.dark", "Darkness"],
+  ["water", ".dnd-ground-square.water", "Water"],
 ] as const;
 
 export function showLegend(ctx: BoardContext): void {
-  const shown = LEGEND.filter(([mark]) =>
-    (mark.startsWith("dnd-cell") ? ctx.cells : ctx.ground).querySelector(
-      `.${mark.replace(/ /g, ".")}`,
-    ),
+  const shown = LEGEND.filter(
+    ([kind, selector]) =>
+      (kind === "risky" ? ctx.cells : ctx.ground).querySelector(selector) !==
+      null,
   );
-  const key = shown.map(([mark]) => mark).join("|");
+  const key = shown.map(([kind]) => kind).join("|");
   if (ctx.legend.dataset.shown === key) return;
   ctx.legend.dataset.shown = key;
   ctx.legend.replaceChildren(
-    ...shown.map(([mark, text]) => {
-      const swatch = el("span", `dnd-swatch ${mark}`);
+    ...shown.map(([kind, , text]) => {
+      // Its own class, drawn like the mark, so nothing that looks for the map's squares finds it.
+      const swatch = el("span", `dnd-swatch ${kind}`);
       swatch.setAttribute("aria-hidden", "true");
       const item = el("li", "");
       item.append(swatch, text);

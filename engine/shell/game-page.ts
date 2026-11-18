@@ -41,5 +41,6 @@ export interface GamePage {
   linesShown: number;
   tickerShown: number; // the latest ticker update, so a stale one never lands
   tickerScene: string | null; // the scene the ticker's lines came in, so they don't follow into the next
+  tickerInPlay: boolean; // whether the last draw was in play, not making the character
   choiceShown: number; // the same, for revealing the choices
 }
