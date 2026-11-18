@@ -36,6 +36,7 @@ import {
   obscuring,
   statsOf,
   thornKeys,
+  coverKeys,
   type ZoneKind,
 } from "./zones.ts";
 
@@ -146,12 +147,20 @@ function squaresCover(
     // it; tell seeing from aiming here if attacks at unseen creatures across one should play.
     blockingSet(state, "sight"),
     {
-      half: setOf(terrain?.half),
-      threeQuarters: setOf(terrain?.threeQuarters),
+      half: withZones(setOf(terrain?.half), coverKeys(state, "half")),
+      threeQuarters: withZones(
+        setOf(terrain?.threeQuarters),
+        coverKeys(state, "threeQuarters"),
+      ),
     },
     creatures,
   );
 }
+
+const withZones = (
+  map: ReadonlySet<string>,
+  zones: readonly string[],
+): ReadonlySet<string> => (zones.length === 0 ? map : new Set([...map, ...zones]));
 
 // What cover adds to AC and Dexterity saves. Total cover has no bonus, since nothing can target through it.
 export function coverBonus(cover: Cover): number {

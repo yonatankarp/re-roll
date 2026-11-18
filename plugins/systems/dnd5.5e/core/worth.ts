@@ -1305,8 +1305,18 @@ export function makeJudge(context: Context, side: Actor): Judge {
       case "zone":
         if (effect.zone === "wall") return wallWorth(actor, target, foe);
         if (effect.zone === "sunlight") return sunlightWorth(target, foe);
-        if (action.activation.area) {
-          return areaWorth(action, actor, target, effect.follows === true);
+        if (
+          effect.part === undefined
+            ? action.activation.area
+            : action.activation.areas?.[effect.part]
+        ) {
+          return areaWorth(
+            action,
+            actor,
+            target,
+            effect.follows === true,
+            effect.part,
+          );
         }
         if (effect.zone === "thorns") {
           return hurtWorth(
@@ -1333,8 +1343,12 @@ export function makeJudge(context: Context, side: Actor): Judge {
     actor: Actor,
     target: Actor,
     follows: boolean,
+    part?: number,
   ): number => {
-    const area = action.activation.area;
+    const area =
+      part === undefined
+        ? action.activation.area
+        : action.activation.areas?.[part];
     if (!area) return 0;
     const foe = target.side !== actor.side;
     if ((area.side === "enemy" && !foe) || (area.side === "ally" && foe)) {
@@ -1356,11 +1370,13 @@ export function makeJudge(context: Context, side: Actor): Judge {
       );
     return (
       each * stay +
-      (area.grants ?? []).reduce(
+      [...(area.grants ?? []), ...(area.places ?? [])].reduce(
         (sum, modifier) => sum + modifierWorth(modifier, target, foe, stay),
         0,
       ) +
-      (area.difficult && foe ? 0.05 * threat(target) : 0) +
+      ((area.difficult || area.terrain || area.cost) && foe
+        ? (area.cost ? 0.1 : 0.05) * threat(target)
+        : 0) +
       (casts ? 0.3 * threat(target) * lasting(stay) : 0)
     );
   };

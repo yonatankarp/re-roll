@@ -181,13 +181,15 @@ export function reachableSquares(
       readonly running: number;
       readonly runUp: number;
     };
+    // feet each foot of a step costs where that's more than Difficult Terrain's 2, as Plant Growth's 4
+    readonly cost?: ((from: Square, to: Square) => number) | null;
   } = {},
 ): readonly {
   readonly square: Square;
   readonly feet: number;
   readonly path: readonly Square[]; // the squares walked through, ending on this one
 }[] {
-  // Cheapest first, from one bucket per 5 feet spent, since a square costs 5 or 10 feet.
+  // Cheapest first, from one bucket per 5 feet spent, since a square costs a multiple of 5 feet.
   const cost = new Map<string, number>([[squareKey(start), 0]]);
   const from = new Map<string, Square>();
   const buckets: Square[][] = [[start]];
@@ -213,9 +215,10 @@ export function reachableSquares(
         if (dx === 0 && dy === 0) continue;
         const square = { x: next.x + dx, y: next.y + dy };
         if (!open(next, square, dx, dy)) continue;
-        const step = difficult.has(squareKey(square))
-          ? SQUARE_FEET * 2
-          : SQUARE_FEET;
+        const step = Math.max(
+          difficult.has(squareKey(square)) ? SQUARE_FEET * 2 : SQUARE_FEET,
+          SQUARE_FEET * (how.cost?.(next, square) ?? 1),
+        );
         reach(square, next, spent + step);
         if (how.jump && difficult.has(squareKey(square))) {
           leap(next, dx, dy, spent, how.jump);

@@ -36,6 +36,7 @@ import {
   sealed,
   sunlit,
   type Zone,
+  zoneKey,
   zonesOf,
   zonesOn,
 } from "../zones.ts";
@@ -102,18 +103,12 @@ export function zoneFrames(
   for (const zone of zonesOf(state, context)) {
     const { area } = zone;
     if (!area?.resolution || !area.when) continue;
-    const key = `${zone.owner}|${zone.sourceId}`;
+    const key = zoneKey(zone);
     if (area.when === occupant) {
       if (seen.has(key) || !inZone(zone, actor.position)) continue;
       if (!affects(zone, actor, state, context)) continue;
       seen.add(key);
-      frames.push(
-        frame("zoneTick", {
-          owner: zone.owner,
-          sourceId: zone.sourceId,
-          targets: [actor.id],
-        }),
-      );
+      frames.push(tickFrame(zone, [actor.id]));
     } else if (area.when === own && zone.owner === actor.id) {
       const caught = Object.values(state.actors)
         .filter(
@@ -130,23 +125,31 @@ export function zoneFrames(
         .slice(0, area.targets ?? Infinity);
       if (caught.length === 0) continue;
       frames.push(
-        frame("zoneTick", {
-          owner: zone.owner,
-          sourceId: zone.sourceId,
-          targets: caught.map((item) => item.id),
-        }),
+        tickFrame(
+          zone,
+          caught.map((item) => item.id),
+        ),
       );
     }
   }
   return frames;
 }
 
+// A zone acting on these creatures.
+const tickFrame = (zone: Zone, targets: readonly string[]): Frame =>
+  frame("zoneTick", {
+    owner: zone.owner,
+    sourceId: zone.sourceId,
+    targets,
+    ...(zone.part === undefined ? {} : { part: zone.part }),
+  });
+
 // Kept in a creature's usedThisTurn: an area that acts on whoever enters it has caught it on this turn, so it acts
 // on it only once a turn. The turn is in the key, since the mark stays until the creature's own turn clears it.
 export function caughtKey(zone: Zone, state: DndState): string {
   const round = state.combat?.round ?? 0;
   const index = state.combat?.index ?? 0;
-  return `area:${zone.owner}|${zone.sourceId}@${String(round)}.${String(index)}`;
+  return `area:${zoneKey(zone)}@${String(round)}.${String(index)}`;
 }
 
 const caught = (zone: Zone, actor: Actor, state: DndState): boolean =>
@@ -242,8 +245,7 @@ export function entryFrames(
   context: ContentAccess & { readonly state: DndState },
 ): Frame[] {
   const { state } = context;
-  const tick = (zone: Zone, targets: readonly string[]): Frame =>
-    frame("zoneTick", { owner: zone.owner, sourceId: zone.sourceId, targets });
+  const tick = tickFrame;
   const swept = entering(state).flatMap((zone) => {
     if (!zone.follows || zone.owner !== walker.id || !from) return [];
     const before = { ...zone, at: from };
@@ -338,11 +340,10 @@ export function movedFrames(
   );
   return reached.length > 0
     ? [
-        frame("zoneTick", {
-          owner: zone.owner,
-          sourceId: zone.sourceId,
-          targets: reached.map((item) => item.id),
-        }),
+        tickFrame(
+          zone,
+          reached.map((item) => item.id),
+        ),
       ]
     : [];
 }
@@ -398,6 +399,7 @@ export const ZoneTickSchema = z.object({
   owner: z.string(),
   sourceId: z.string(),
   targets: z.array(z.string()),
+  part: z.number().int().optional(), // which of the spell's areas, when it leaves several that act
 });
 
 // The zone acts on whoever is still in it. One that deals only so much damage ends once it has, as Guardian of Faith.
@@ -412,6 +414,7 @@ export function runZoneTick(
     (item) =>
       item.owner === payload.owner &&
       item.sourceId === payload.sourceId &&
+      item.part === payload.part &&
       item.area?.resolution !== undefined,
   );
   if (!owner || !zone) return {};
@@ -426,9 +429,15 @@ export function runZoneTick(
   });
   // A spirit holding the creature it Restrained acts only on that one, as Conjure Elemental's.
   const held = zone.area?.holding ? heldBy(zone, state) : undefined;
-  const acting = held
-    ? targets.filter((target) => target.id === held.id)
-    : targets;
+  // One that acts only so many times acts on no more creatures than it has left, as Cordon of Arrows' pieces.
+  const usesKey = `${zone.sourceId}${USED}`;
+  const left =
+    zone.uses === undefined
+      ? Infinity
+      : zone.uses - (owner.resourcesSpent[usesKey] ?? 0);
+  const acting = (
+    held ? targets.filter((target) => target.id === held.id) : targets
+  ).slice(0, Math.max(0, left));
   const action = zoneAction(
     held && zone.area?.holding
       ? { ...zone, area: { ...zone.area, resolution: zone.area.holding } }
@@ -463,6 +472,24 @@ export function runZoneTick(
     ...marks,
     ...(result.events ?? []),
   ];
+  if (zone.uses !== undefined) {
+    events.push(
+      dndEvent(`${NS}:resourceSpent`, {
+        actor: owner.id,
+        resource: usesKey,
+        amount: acting.length,
+      }),
+    );
+    if (acting.length >= left) {
+      events.push(
+        dndEvent(`${NS}:effectEnded`, {
+          actor: owner.id,
+          sourceId: zone.sourceId,
+          casterId: owner.id,
+        }),
+      );
+    }
+  }
   const { maxDamage } = zone.area ?? {};
   if (maxDamage !== undefined) {
     const dealt = events.reduce(
@@ -513,8 +540,9 @@ function heldBy(zone: Zone, state: DndState): Actor | undefined {
 // Kept in a creature's usedThisTurn: a zone's effects went on it this turn, so they aren't saved against yet.
 export const FRESH = "zone-fresh:";
 
-// Kept on a zone's owner: the damage it has dealt so far.
+// Kept on a zone's owner: the damage it has dealt so far, and the times it has acted.
 export const DEALT = ":dealt";
+const USED = ":used";
 export const BURST = "death-burst";
 
 // A creature that has just died bursts where it fell, once, as a flaming skeleton or a balor does. The burst
@@ -597,7 +625,8 @@ export function spellFoiled(
     (zone) => zone.area?.foilsSpells,
   )?.area?.foilsSpells;
   if (!foil) return null;
-  const save = rollSave(actor, foil.ability, foil.dc, context, true);
+  // The DC is filled in as the zone is cast (combat/effects.ts); 10 only for a zone from before that.
+  const save = rollSave(actor, foil.ability, foil.dc ?? 10, context, true);
   return { failed: !save.saved, events: save.events };
 }
 
@@ -673,6 +702,72 @@ export function runDamageBurst(
   );
   return {
     events: [mark, ...(result.events ?? [])],
+    frames: [...(result.frames ?? []), CHECK_END],
+  };
+}
+
+// Fire dealt to a creature in a flammable area burns it away, as Web's strands.
+export function burnFrames(
+  target: Actor,
+  types: readonly string[],
+  context: ContentAccess & { readonly state: DndState },
+): Frame[] {
+  if (!types.includes("fire")) return [];
+  return zonesOf(context.state)
+    .filter((zone) => zone.area?.burns && inZone(zone, target.position))
+    .map((zone) =>
+      frame("burnAway", { owner: zone.owner, sourceId: zone.sourceId }),
+    );
+}
+
+// The area burns away: the spell ends, on everyone it holds too, and the flames hurt each creature in it.
+// shortcut: all of it burns at once and its fire hurts at once, not each 5-foot cube in turn at turn starts.
+export function runBurnAway(
+  payload: { readonly owner: string; readonly sourceId: string },
+  context: Context,
+): SystemResult {
+  const { state } = context;
+  const owner = state.actors[payload.owner];
+  const zone = zonesOf(state).find(
+    (item) =>
+      item.owner === payload.owner &&
+      item.sourceId === payload.sourceId &&
+      item.area?.burns,
+  );
+  if (!owner || !zone?.area?.burns) return {};
+  const caught = Object.values(state.actors).filter(
+    (item) => !isDead(item) && inZone(zone, item.position),
+  );
+  const ended = Object.values(state.actors).flatMap((item) =>
+    item.activeEffects.some(
+      (effect) =>
+        effect.sourceId === zone.sourceId && effect.casterId === owner.id,
+    )
+      ? [
+          dndEvent(`${NS}:effectEnded`, {
+            actor: item.id,
+            sourceId: zone.sourceId,
+            casterId: owner.id,
+          }),
+        ]
+      : [],
+  );
+  const after = { ...context, state: ended.reduce(applyDndEvent, state) };
+  const result =
+    caught.length > 0
+      ? resolveAction(
+          burstAction(`${zone.name ?? "Webs"} burning`, zone.radius, {
+            kind: "automatic",
+            damage: zone.area.burns,
+            effects: [],
+          }),
+          owner,
+          caught,
+          after,
+        )
+      : {};
+  return {
+    events: [...ended, ...(result.events ?? [])],
     frames: [...(result.frames ?? []), CHECK_END],
   };
 }
@@ -795,6 +890,10 @@ export const areaFrames = {
   [`${NS}:damageBurst`]: frameHandler({
     schema: z.object({ actor: z.string(), types: z.array(z.string()) }),
     run: runDamageBurst,
+  }),
+  [`${NS}:burnAway`]: frameHandler({
+    schema: z.object({ owner: z.string(), sourceId: z.string() }),
+    run: runBurnAway,
   }),
   [`${NS}:sunlightTick`]: frameHandler({
     schema: z.object({ actor: z.string() }),

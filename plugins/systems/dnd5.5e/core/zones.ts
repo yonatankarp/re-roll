@@ -9,6 +9,7 @@ import type {
 } from "./schemas.ts";
 import type { SystemEvent } from "#sdk";
 import {
+  type ActiveEffect,
   type Actor,
   type DndState,
   dndEvent,
@@ -18,7 +19,12 @@ import {
   isDead,
   NS,
 } from "./state.ts";
-import { distanceFeet, type Square, squareKey, wallSet } from "./grid.ts";
+import {
+  distanceFeet,
+  type Square,
+  squareKey,
+  wallSet,
+} from "./grid.ts";
 import {
   bareSpell,
   deriveStats,
@@ -26,7 +32,7 @@ import {
   type Stats,
 } from "./stats.ts";
 import { spellOf } from "./combat/dispel.ts";
-import { spellOfSource } from "./combat/ids.ts";
+import { ITEM_PREFIX, spellOfSource } from "./combat/ids.ts";
 import { lightAt } from "./sight.ts";
 
 // Lasting areas on the map: what a spell leaves (Darkness, Fog Cloud, Spike Growth, Spirit Guardians, a wall), kept
@@ -54,7 +60,16 @@ export interface Zone {
   readonly reveals?: true | undefined; // light: no benefit from the Invisible condition in its Bright Light
   readonly dc?: number | undefined; // an image: the Investigation DC to see through it
   readonly decoy?: true | undefined; // an image of its owner, which hides nothing
+  readonly part?: number | undefined; // which of its spell's areas, when it leaves several that act
+  readonly shape?: "ring" | "line" | undefined; // round when left out
+  readonly dir?: Square | undefined; // a line runs from `at` toward `at` plus this
+  readonly width?: number | undefined; // a line's, in feet
+  readonly uses?: number | undefined; // the times it acts in all before it ends
 }
+
+// The key a zone's own frames and marks go by: its owner, its spell and which of the spell's areas it is.
+export const zoneKey = (zone: Zone): string =>
+  `${zone.owner}|${zone.sourceId}${zone.part === undefined ? "" : `#${String(zone.part)}`}`;
 
 export const AURA = "aura:";
 
@@ -119,6 +134,11 @@ function castZones(state: DndState): readonly Zone[] {
               reveals: modifier.reveals,
               dc: modifier.dc,
               decoy: modifier.decoy,
+              part: modifier.part,
+              shape: modifier.shape,
+              dir: modifier.dir,
+              width: modifier.width,
+              uses: modifier.uses,
             },
           ];
         }),
@@ -216,13 +236,68 @@ export function zonesOf(
   return zones;
 }
 
-export const inZone = (zone: Zone, square: Square | null): boolean =>
-  square !== null && distanceFeet(zone.at, square) <= zone.radius;
+// A round zone holds the squares within its radius, a ring only those at it, and a line those along it.
+export function inZone(zone: Zone, square: Square | null): boolean {
+  if (square === null) return false;
+  if (zone.shape === "line" && zone.dir) {
+    return alongLine(zone.at, zone.dir, square, zone.width ?? 5);
+  }
+  const feet = distanceFeet(zone.at, square);
+  return zone.shape === "ring" ? feet === zone.radius : feet <= zone.radius;
+}
+
+// Whether `square` lies on the line from `from` to `from` plus `dir`, `width` feet wide.
+function alongLine(
+  from: Square,
+  dir: Square,
+  square: Square,
+  width: number,
+): boolean {
+  const px = square.x - from.x;
+  const py = square.y - from.y;
+  const length = dir.x * dir.x + dir.y * dir.y;
+  const t = length === 0 ? 0 : Math.max(0, Math.min(1, (px * dir.x + py * dir.y) / length));
+  const across = Math.hypot(px - t * dir.x, py - t * dir.y);
+  return across <= 0.5 + (width - 5) / 10;
+}
+
+// A line zone's ends: a wall `feet` long across the way from `from` to `aim`, centred on `aim`, or a blast `feet`
+// long from `from` toward `aim`, as Gust of Wind's.
+export function lineFrom(
+  from: Square,
+  aim: Square,
+  feet: number,
+  across: boolean,
+): { readonly at: Square; readonly dir: Square } {
+  const dx = aim.x - from.x;
+  const dy = aim.y - from.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const squares = feet / 5;
+  if (!across) {
+    const ux = dx / length;
+    const uy = dy / length;
+    return {
+      at: { x: from.x + Math.round(ux), y: from.y + Math.round(uy) },
+      dir: { x: Math.round(ux * (squares - 1)), y: Math.round(uy * (squares - 1)) },
+    };
+  }
+  // Square to the way it's aimed, or east to west when aimed at the caster's own square.
+  const px = dx === 0 && dy === 0 ? 1 : -dy / length;
+  const py = dx === 0 && dy === 0 ? 0 : dx / length;
+  const half = (squares - 1) / 2;
+  return {
+    at: { x: aim.x - Math.round(px * half), y: aim.y - Math.round(py * half) },
+    dir: { x: Math.round(px * (squares - 1)), y: Math.round(py * (squares - 1)) },
+  };
+}
 
 // Inside an Antimagic Field, where no other spell's area reaches (its own and ones like it aside).
 export const inAntimagic = (actor: Actor, state: DndState): boolean =>
+  antimagicAt(actor.position, state);
+
+export const antimagicAt = (square: Square | null, state: DndState): boolean =>
   castZones(state).some(
-    (zone) => zone.area?.noSpells === "all" && inZone(zone, actor.position),
+    (zone) => zone.area?.noSpells === "all" && inZone(zone, square),
   );
 
 // The events that hold off the spell and item effects of every creature in an Antimagic Field, and bring them back
@@ -256,10 +331,15 @@ export function antimagicEvents(state: DndState): SystemEvent[] {
 
 const PLACED = "placed:";
 
-// The conditions spells' areas put on those in them while there, as Silence's Deafened: added for each creature that
-// stands in one and ended for each that left it, checked where Antimagic Field's are.
+// The conditions and modifiers spells' areas put on those in them while there, as Silence's Deafened or Grasping
+// Mist's lower Speed: added for each creature that stands in one and ended for each that left it, checked where
+// Antimagic Field's are.
 export function placedConditionEvents(state: DndState): SystemEvent[] {
-  const placing = castZones(state).filter((zone) => zone.area?.conditions);
+  const placing = castZones(state).filter(
+    (zone) => zone.area?.conditions || zone.area?.places,
+  );
+  const keyOf = (zone: Zone): string =>
+    `${PLACED}${zone.sourceId}${zone.part === undefined ? "" : `#${String(zone.part)}`}`;
   return Object.values(state.actors).flatMap((actor): SystemEvent[] => {
     const had = actor.activeEffects.filter(({ sourceId }) =>
       sourceId.startsWith(PLACED),
@@ -268,27 +348,30 @@ export function placedConditionEvents(state: DndState): SystemEvent[] {
     const wanted = placing.filter(
       (zone) => inZone(zone, actor.position) && affects(zone, actor, state),
     );
-    const keys = new Set(wanted.map((zone) => `${PLACED}${zone.sourceId}`));
+    const keys = new Set(wanted.map(keyOf));
     const ended = [...new Set(had.map((effect) => effect.sourceId))]
       .filter((sourceId) => !keys.has(sourceId))
       .map((sourceId) =>
         dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId }),
       );
     const added = wanted
-      .filter(
-        (zone) =>
-          !had.some(
-            (effect) => effect.sourceId === `${PLACED}${zone.sourceId}`,
-          ),
-      )
+      .filter((zone) => !had.some((effect) => effect.sourceId === keyOf(zone)))
       .flatMap((zone) =>
-        (zone.area?.conditions ?? []).map((condition) =>
+        [
+          ...(zone.area?.conditions ?? []).map(
+            (condition): ActiveEffect["modifier"] => ({
+              kind: "condition",
+              condition,
+            }),
+          ),
+          ...(zone.area?.places ?? []),
+        ].map((modifier) =>
           dndEvent(`${NS}:effectAdded`, {
             actor: actor.id,
             effect: {
-              sourceId: `${PLACED}${zone.sourceId}`,
+              sourceId: keyOf(zone),
               casterId: zone.owner,
-              modifier: { kind: "condition", condition },
+              modifier,
               ends: "spellDuration",
             },
           }),
@@ -343,6 +426,15 @@ export function affects(
     return false;
   }
   if (area.grappling && !grappleBetween(owner, actor)) return false;
+  // Only a creature flying there, as Control Winds' downdraft knocks out of the air.
+  if (
+    area.flying &&
+    !actor.activeEffects.some(
+      ({ modifier }) => modifier.kind === "aloft" && modifier.mode !== "climb",
+    )
+  ) {
+    return false;
+  }
   if (area.creatureTypes || area.exceptTypes) {
     const type = access ? statsOf(actor, access).creatureType : undefined;
     if (area.creatureTypes && !area.creatureTypes.includes(type ?? "")) {
@@ -404,10 +496,14 @@ export function obscuring(
   viewer?: string,
   ownDarkness = false,
 ): "darkness" | "fog" | "image" | undefined {
+  // A wind that hedges out fog, as Warding Wind's, keeps its squares clear of it.
+  const cleared = zonesOf(state).some(
+    (zone) => zone.area?.clearsFog === true && inZone(zone, square),
+  );
   const zones = zonesOf(state).filter(
     (zone) =>
       (zone.zone === "darkness" ||
-        zone.zone === "fog" ||
+        (zone.zone === "fog" && !cleared) ||
         (zone.zone === "image" && believes(zone, state, viewer))) &&
       inZone(zone, square) &&
       !(
@@ -523,7 +619,7 @@ export function sunlit(square: Square | null, state: DndState): boolean {
 }
 
 // The squares inside a zone, on the map.
-function squaresOf(zone: Zone, state: DndState): readonly string[] {
+export function squaresOf(zone: Zone, state: DndState): readonly string[] {
   const grid = state.combat?.grid;
   if (!grid) return [];
   const reach = Math.floor(zone.radius / 5);
@@ -538,23 +634,97 @@ function squaresOf(zone: Zone, state: DndState): readonly string[] {
   return keys;
 }
 
-// Squares a thorny zone covers, which cost double to walk through.
+// Squares a thorny zone covers, which cost double to walk through, and Difficult Terrain spells make on the ground
+// for everyone, as Grease's.
 export function thornKeys(state: DndState): readonly string[] {
   return zonesOf(state).flatMap((zone) =>
-    zone.zone === "thorns" ? squaresOf(zone, state) : [],
+    zone.zone === "thorns" || (zone.area?.terrain && !zone.area.side)
+      ? squaresOf(zone, state)
+      : [],
   );
 }
 
-// Squares that cost `mover` double besides the map's own: a zone that halves its Speed, as Spirit Guardians does.
+// The squares of a spell's ice or snow, as Sleet Storm's, which Winter Strider walks over freely.
+export function iceKeys(state: DndState): readonly string[] {
+  return zonesOf(state).flatMap((zone) =>
+    zone.area?.terrain === "ice" ? squaresOf(zone, state) : [],
+  );
+}
+
+// Squares that cost `mover` double besides the map's own: a zone that halves its Speed, as Spirit Guardians does,
+// or Difficult Terrain only for its owner's foes, as Grave Ground's.
 export function slowingKeys(
   mover: Actor,
   state: DndState,
   access?: ContentAccess,
 ): readonly string[] {
   return zonesOf(state, access).flatMap((zone) =>
-    zone.area?.difficult && affects(zone, mover, state, access)
+    (zone.area?.difficult || (zone.area?.terrain && zone.area.side)) &&
+    affects(zone, mover, state, access)
       ? squaresOf(zone, state)
       : [],
+  );
+}
+
+// What each foot of a step costs `mover` in the zones that make it dearer than Difficult Terrain does: 3 or 4 feet in
+// one with a `cost`, as Plant Growth's, and 2 toward the owner of a headwind, as Gust of Wind's. Null with none.
+export function stepCost(
+  mover: Actor,
+  state: DndState,
+  access?: ContentAccess,
+): ((from: Square, to: Square) => number) | null {
+  const zones = zonesOf(state, access).filter(
+    (zone) =>
+      (zone.area?.cost !== undefined || zone.area?.headwind) &&
+      affects(zone, mover, state, access),
+  );
+  if (zones.length === 0) return null;
+  return (from, to) =>
+    zones.reduce((most, zone) => {
+      if (!inZone(zone, to)) return most;
+      const owner = state.actors[zone.owner]?.position ?? zone.at;
+      const closer =
+        zone.area?.headwind === true &&
+        distanceFeet(owner, to) < distanceFeet(owner, from);
+      return Math.max(most, zone.area?.cost ?? 1, closer ? 2 : 1);
+    }, 1);
+}
+
+// What the zones between two squares do to a ranged weapon attack from one at the other: one that passes into, out
+// of or through a zone that deflects it misses, as past Wind Wall, or has Disadvantage, as through Wall of Water.
+export function deflection(
+  state: DndState,
+  from: Square | null,
+  to: Square | null,
+): "miss" | "disadvantage" | null {
+  if (!from || !to) return null;
+  const zones = zonesOf(state).filter((zone) => zone.area?.deflects);
+  if (zones.length === 0) return null;
+  const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) * 4));
+  const hit = zones.filter((zone) => {
+    for (let step = 0; step <= steps; step += 1) {
+      const point = {
+        x: Math.round(from.x + ((to.x - from.x) * step) / steps),
+        y: Math.round(from.y + ((to.y - from.y) * step) / steps),
+      };
+      if (inZone(zone, point)) return true;
+    }
+    return false;
+  });
+  return hit.some((zone) => zone.area?.deflects === "miss")
+    ? "miss"
+    : hit.length > 0
+      ? "disadvantage"
+      : null;
+}
+
+// The squares spells' areas give cover through, as Blade Barrier's Three-Quarters Cover.
+export function coverKeys(
+  state: DndState,
+  cover: "half" | "threeQuarters",
+): readonly string[] {
+  return zonesOf(state).flatMap((zone) =>
+    zone.area?.cover === cover ? squaresOf(zone, state) : [],
   );
 }
 
@@ -706,7 +876,8 @@ export function silencedSpells(
   );
   return (action) => {
     const spell = spellOf(action.id, actor, access);
-    if (!spell) return false;
+    // A magic item's activation doesn't work in an Antimagic Field either.
+    if (!spell) return kinds.has("all") && action.id.startsWith(ITEM_PREFIX);
     return (
       kinds.has("all") ||
       (!elsewhere &&
