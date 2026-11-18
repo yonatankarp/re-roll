@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import { systems } from "../app/systems.ts";
 import { loadRun, scanPlugins } from "../engine/run/loader.ts";
 import { loadSave, migrate } from "../engine/run/save.ts";
-import { createRunContext, pendingDecision, step } from "../engine/run/turn.ts";
+import {
+  applyEvent,
+  createRunContext,
+  pendingDecision,
+  step,
+} from "../engine/run/turn.ts";
 import { createNodeStorage } from "../engine/platform/node/storage.ts";
 
 // Saves written by older code, from tests/golden-saves.ts. A save (.json) is frozen: if one stops
@@ -67,6 +72,43 @@ describe("golden saves", () => {
       expect(outcome.ok || outcome.error).toBe(true);
     },
   );
+
+  // #213: a save made before the fix may hold a stun from a creature that has since died, which never ended.
+  it("loads a save holding an effect tied to a dead caster's turn, and clears it as that turn is passed over", async () => {
+    const save = JSON.parse(await read("mid-combat.json")) as {
+      log: { events: object[] }[];
+    };
+    save.log.at(-1)?.events.push({
+      kind: "dnd5.5e:effectAdded",
+      payload: {
+        actor: "player",
+        effect: {
+          sourceId: "stuck",
+          casterId: "rearguard:chief-1", // dead, first in the order
+          modifier: { kind: "condition", condition: "stunned" },
+          ends: "casterNextTurn",
+        },
+      },
+    });
+    const { registry, run } = await open("goblin-ambush");
+    const loaded = loadSave(JSON.stringify(save), registry, run);
+    if (!loaded.ok) throw new Error(loaded.error);
+    const stuck = (state: typeof loaded.state): boolean =>
+      (
+        state.system as {
+          actors: Record<string, { activeEffects: { sourceId: string }[] }>;
+        }
+      ).actors.player?.activeEffects.some(
+        ({ sourceId }) => sourceId === "stuck",
+      ) ?? false;
+    expect(stuck(loaded.state)).toBe(true);
+    const advance = (state: typeof loaded.state) =>
+      applyEvent(run, state, { kind: "dnd5.5e:turnAdvanced", payload: {} });
+    // From the player's turn to the last in the order, still on; round 3 passes over the dead chief and ends it.
+    const late = advance(advance(advance(loaded.state)));
+    expect(stuck(late)).toBe(true);
+    expect(stuck(advance(late))).toBe(false);
+  });
 
   it("refuses at load a save whose waiting step the rules no longer know", async () => {
     const text = (await read("mid-rest.json")).replaceAll(
