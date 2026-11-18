@@ -3497,7 +3497,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // with `school`, a spell of any casting time cast with a slot, as Arcane Ward's Abjuration spells
     slotted: z.literal(true).optional(),
     // A spell of one of these classes' lists (by name after the plugin) cast with a slot, as a Sorcerer spell for
-    // Wild Magic Surge; with `chance` only when a d`die` shows `at` or more, once a turn, as its d20 of 20.
+    // Wild Magic Surge; with `chance` only when a d`die` shows `at` or more, once a turn, as its d20 of 20, and with
+    // `chance` and no `classes` any slot spell, as in a Wild Magic Zone.
     classes: z.array(z.string().min(1)).min(1).optional(),
     chance: z
       .strictObject({

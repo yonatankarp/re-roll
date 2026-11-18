@@ -211,7 +211,8 @@ export function castRiders(
       return [];
     }
     // Wild Magic Surge: a spell of the class's list cast with a slot, once a turn behind its die.
-    if (passive.classes) {
+    // A Wild Magic Zone's surge: any slot spell, with no class named.
+    if (passive.classes || passive.chance) {
       const spellId = spellOfSource(action.id);
       const spell = spellId
         ? SpellSchema.safeParse(context.content(spellId)).data
@@ -219,7 +220,7 @@ export function castRiders(
       if (
         slotLevel === undefined ||
         !spell ||
-        !onClassList(spell, passive.classes) ||
+        (passive.classes && !onClassList(spell, passive.classes)) ||
         (passive.chance && actor.usedThisTurn.includes(SURGE))
       ) {
         return [];
