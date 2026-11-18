@@ -1124,6 +1124,37 @@ function featSpellAbilities(
   return bySpell;
 }
 
+// A feature's changes to a spell: its hit damage's die (Foe Slayer) and effects it adds (Eldritch Hex).
+function spellChanged(
+  activation: Activation,
+  dice: string | undefined,
+  adds: readonly LeafEffect[] | undefined,
+): Activation {
+  const { resolution } = activation;
+  if (resolution.kind !== "automatic" || (!dice && !adds)) return activation;
+  const effects = resolution.effects.map((effect): LeafEffect =>
+    dice &&
+    effect.kind === "modifier" &&
+    effect.modifier.kind === "hitDamage" &&
+    effect.modifier.damage.amount.dice
+      ? {
+          ...effect,
+          modifier: {
+            ...effect.modifier,
+            damage: {
+              ...effect.modifier.damage,
+              amount: { ...effect.modifier.damage.amount, dice },
+            },
+          },
+        }
+      : effect,
+  );
+  return {
+    ...activation,
+    resolution: { ...resolution, effects: [...effects, ...(adds ?? [])] },
+  };
+}
+
 // Cold Fire Magic: a spell's damage takes another type.
 function retyped(activation: Activation, type: DamageType): Activation {
   const { resolution } = activation;
@@ -1259,6 +1290,8 @@ function collectFeatureData(
   spells: string[];
   free: [string, FreeCast][];
   retype: Record<string, DamageType>;
+  redice: Record<string, string>;
+  addsTo: Record<string, readonly LeafEffect[]>;
   abilities: ReadonlyMap<string, Ability>;
   gated: readonly NonNullable<Feature["whileActive"]>[];
 } {
@@ -1271,6 +1304,8 @@ function collectFeatureData(
   const spells = featureIds.flatMap((id) => grantedSpells(id, levelFor(id)));
   const free: [string, FreeCast][] = [];
   const retype: Record<string, DamageType> = {};
+  const redice: Record<string, string> = {};
+  const addsTo: Record<string, readonly LeafEffect[]> = {};
   const ownSpells = new Map<string, readonly string[]>(); // each feature's own spells, by feature
   const gated: NonNullable<Feature["whileActive"]>[] = []; // passives only while an effect is on the bearer
   const abilities = new Map<string, Ability>(); // a feature's spells cast with its own ability
@@ -1306,6 +1341,10 @@ function collectFeatureData(
     );
     if ((feature.fromLevel ?? 1) > level) continue;
     Object.assign(retype, feature.retype);
+    Object.assign(redice, feature.redice);
+    for (const [spell, effects] of Object.entries(feature.addsTo ?? {})) {
+      addsTo[spell] = [...(addsTo[spell] ?? []), ...effects];
+    }
     passives.push(...feature.passives);
     if (feature.whileActive) gated.push(feature.whileActive);
     resources.push(...feature.resources);
@@ -1390,6 +1429,8 @@ function collectFeatureData(
     spells,
     free,
     retype,
+    redice,
+    addsTo,
     abilities,
     gated,
   };
@@ -2763,10 +2804,19 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     : freeCastActions(freeSpells, access, level);
   actions.push(
     ...freeCasts.map(({ action }) => {
-      const ability = castingAbility.get(spellOfSource(action.id) ?? "");
-      return ability
-        ? { ...action, activation: castWith(action.activation, ability) }
-        : action;
+      const spellId = spellOfSource(action.id) ?? "";
+      const ability = castingAbility.get(spellId);
+      const type = fromFeatures.retype[spellId];
+      // A free cast takes the features' changes to the spell too, as Cold Fire Magic's cold Flame Blade.
+      const changed = spellChanged(
+        type ? retyped(action.activation, type) : action.activation,
+        fromFeatures.redice[spellId],
+        fromFeatures.addsTo[spellId],
+      );
+      return {
+        ...action,
+        activation: ability ? castWith(changed, ability) : changed,
+      };
     }),
   );
 
@@ -2815,7 +2865,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         );
       const bumped = bonusDc ? withDcBonus(activation, bonusDc) : activation;
       const cast = ability ? castWith(bumped, ability) : bumped;
-      const typed = type ? retyped(cast, type) : cast;
+      const typed = spellChanged(
+        type ? retyped(cast, type) : cast,
+        fromFeatures.redice[spellId],
+        fromFeatures.addsTo[spellId],
+      );
       actions.push({
         id: `spell:${spellId}`,
         name: spell.name,
@@ -2871,13 +2925,19 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         lasting.growsBy && since?.kind === "zone" && since.since !== undefined
           ? (state?.combat?.round ?? since.since) - since.since
           : 0;
+      const grown =
+        lasting.growsBy && rounds > 0
+          ? scaleActivation(scaled, { addDice: lasting.growsBy }, rounds)
+          : scaled;
+      const retypedTo = fromFeatures.retype[spellId];
       actions.push({
         id: `lasting:${spellId}`,
         name: spell.name,
-        activation:
-          lasting.growsBy && rounds > 0
-            ? scaleActivation(scaled, { addDice: lasting.growsBy }, rounds)
-            : scaled,
+        activation: spellChanged(
+          retypedTo ? retyped(grown, retypedTo) : grown,
+          fromFeatures.redice[spellId],
+          fromFeatures.addsTo[spellId],
+        ),
         spellLevel: null,
       });
     }

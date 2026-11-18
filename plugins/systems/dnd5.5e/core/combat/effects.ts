@@ -3628,6 +3628,27 @@ export function leafEvents(
           );
         }
         break;
+      case "revertShape": {
+        // shortcut: it can shape-shift again at once, rather than only once out of the light.
+        const ended = new Set<string>();
+        for (const own of target.activeEffects) {
+          const key = `${own.sourceId}|${own.casterId}`;
+          if (
+            (own.modifier.kind === "form" || own.modifier.kind === "shape") &&
+            !ended.has(key)
+          ) {
+            ended.add(key);
+            events.push(
+              dndEvent(`${NS}:effectEnded`, {
+                actor: target.id,
+                sourceId: own.sourceId,
+                casterId: own.casterId,
+              }),
+            );
+          }
+        }
+        break;
+      }
       case "note":
       case "disperse":
       case "animate":
@@ -5693,8 +5714,14 @@ export function resolveAction(
           action.spellLevel === null
             ? undefined
             : spellOf(action.id, actor, context)?.school;
+        // A spell's own, as Holy Star of Mystra's mote, turns spells the same way.
+        const held = target.activeEffects.flatMap(({ modifier }) =>
+          modifier.kind === "spellTurning"
+            ? [{ ...modifier, schools: undefined, resource: undefined }]
+            : [],
+        );
         const turning = saved
-          ? deriveStats(target, context).passives.find(
+          ? [...deriveStats(target, context).passives, ...held].find(
               (passive) =>
                 passive.kind === "spellTurning" &&
                 action.spellLevel !== null &&

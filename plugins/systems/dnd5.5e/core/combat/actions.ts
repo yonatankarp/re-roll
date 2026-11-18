@@ -676,7 +676,12 @@ function withShape(action: KnownAction, shape: string): KnownAction {
   if (chosen.resolution) {
     return {
       ...action,
-      activation: { ...action.activation, resolution: chosen.resolution },
+      activation: {
+        ...action.activation,
+        resolution: chosen.resolution,
+        // a shape kept for later goes on its caster, as Freezing Sphere's globe held to throw
+        ...(chosen.self ? { targeting: { self: true as const } } : {}),
+      },
     };
   }
   if (!chosen.effects || resolution.kind !== "automatic") return action;

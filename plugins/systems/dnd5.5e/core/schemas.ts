@@ -787,6 +787,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("deathWard") }),
   // Dash as a Bonus Action, as Expeditious Retreat gives.
   z.strictObject({ kind: z.literal("bonusDash") }),
+  // Disengage as a Bonus Action, as Conjure Woodland Beings gives.
+  z.strictObject({ kind: z.literal("bonusDisengage") }),
   // Darkvision this far, and with `truesight` seeing through magical darkness and invisibility, as Darkvision or True
   // Seeing give.
   z.strictObject({
@@ -988,6 +990,14 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // Which of a transformation's options the bearer has taken, by name, for what holds only `whileAspect` it lasts, as
   // Starry Form's Archer, Chalice or Dragon.
   z.strictObject({ kind: z.literal("aspect"), name: z.string().min(1) }),
+  // While it lasts, the bearer turns spells as the Spell Turning passive does, as Holy Star of Mystra's mote: only
+  // the deflection with `deflectOnly` (combat/effects.ts).
+  z.strictObject({
+    kind: z.literal("spellTurning"),
+    upTo: z.number().int().min(1).max(9),
+    deflect: z.literal(true).optional(),
+    deflectOnly: z.literal(true).optional(),
+  }),
   // Levels of Exhaustion that last only while the effect does, as Sickening Radiance's (stats.ts exhaustionOf).
   z.strictObject({
     kind: z.literal("exhausted"),
@@ -1643,6 +1653,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // The target's Concentration ends, as entering a Rage does.
   z.strictObject({ kind: z.literal("endConcentration") }),
+  // A target in a shape not its own, by a spell or its own trait, goes back to its true form, as Moonbeam's light
+  // forces (combat/effects.ts).
+  z.strictObject({ kind: z.literal("revertShape") }),
   // The caster picks one of these sets of modifiers for the target, for `duration`, as Alter Self's options or
   // Enlarge/Reduce's (combat/effects.ts). The player is asked; anyone else takes the first.
   z.strictObject({
@@ -2631,6 +2644,7 @@ export const ActivationSchema = z.strictObject({
         effects: z.array(LeafEffectSchema).optional(),
         // or a whole resolution of its own in place of the one written, as Pyrotechnics' Smoke
         resolution: ResolutionSchema.optional(),
+        self: z.literal(true).optional(), // with `resolution`, aimed at the caster alone, as a globe held to throw
       }),
     )
     .min(2)
@@ -4510,6 +4524,11 @@ export const FeatureSchema = ContentEntrySchema.extend({
     .optional(),
   // These spells' damage takes this type instead, as Rimekin's Cold Fire Magic.
   retype: z.record(ContentIdSchema, DamageTypeSchema).optional(),
+  // These spells' extra damage on a hit rolls this die instead, as Foe Slayer's d10 for Hunter's Mark (stats.ts).
+  redice: z.record(ContentIdSchema, DiceSchema).optional(),
+  // These spells do these too, with the options their effects name, as Eldritch Hex's Disadvantage on saves of the
+  // ability chosen for Hex (stats.ts).
+  addsTo: z.record(ContentIdSchema, z.array(LeafEffectSchema).min(1)).optional(),
   // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched, or each
   // as its own entry says, as Drow High Magic's at-will Detect Magic beside its once-a-day spells.
   freeCast: z
