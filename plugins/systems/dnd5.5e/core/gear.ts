@@ -344,6 +344,177 @@ export function changed(
   }
 }
 
+// Replicate Magic Item: a plan made where the party could rest, while a use is left, or with Magic Item Tinker's
+// Transmute the oldest made turned into it.
+function replicateActions(actor: Actor, access: ContentAccess): SceneAction[] {
+  const make = replicable(actor, access, false);
+  const turn = replicable(actor, access, true);
+  return [
+    ...(make.length > 0
+      ? [
+          {
+            id: "replicate",
+            label: "Replicate a magic item",
+            effect: `${NS}:replicateMenu`,
+            args: {},
+            rest: true as const,
+          },
+        ]
+      : []),
+    ...(turn.length > 0
+      ? [
+          {
+            id: "transmute",
+            label: "Transmute a replicated item",
+            effect: `${NS}:replicateMenu`,
+            args: { transmute: true },
+          },
+        ]
+      : []),
+  ];
+}
+
+// The plans a replicated item can be made from now, while a use is left, or with Magic Item Tinker's Transmute the
+// oldest made turned into.
+function replicable(
+  actor: Actor,
+  access: ContentAccess,
+  transmute: boolean,
+): string[] {
+  const stats = deriveStats(actor, access);
+  const left = (resource: string) =>
+    (stats.resources[resource] ?? 0) - (actor.resourcesSpent[resource] ?? 0) >
+    0;
+  const turn = stats.passives.find(
+    (passive) => passive.kind === "replicateTransmute",
+  );
+  const made = actor.replicated ?? [];
+  return stats.passives.flatMap((passive) => {
+    if (passive.kind !== "replicate") return [];
+    const open = transmute
+      ? turn?.kind === "replicateTransmute" &&
+        left(turn.resource) &&
+        made.length > 0
+      : left(passive.resource);
+    if (!open) return [];
+    const level = Object.entries(stats.classLevels).reduce(
+      (most, [id, count]) =>
+        id.endsWith(`/${passive.class}`) ? Math.max(most, count) : most,
+      0,
+    );
+    return passive.plans
+      .filter(
+        (plan) =>
+          plan.level <= level &&
+          !made.includes(plan.item) &&
+          access.content(plan.item) !== undefined,
+      )
+      .map((plan) => plan.item);
+  });
+}
+
+// A plan picked from all those it can be made from now, or none.
+function replicateMenu(transmute: boolean, context: Context): SystemResult {
+  const actor = player(context.state);
+  const plans = replicable(actor, context, transmute);
+  return {
+    frames: [
+      awaitDecision({
+        id: `${NS}:replicate:${String(actor.inventory.length)}`,
+        actor: actor.id,
+        prompt: transmute
+          ? "Which plan does the oldest replicated item become?"
+          : "Which magic item do you replicate?",
+        options: [
+          ...plans.map((id) => ({ id, label: itemOf(context, id).name })),
+          { id: DONE, label: "Not now" },
+        ],
+        resume: frame("replicatePick", { transmute }),
+      }),
+    ],
+  };
+}
+
+export const replicateFrames = {
+  [`${NS}:replicatePick`]: frameHandler({
+    schema: z.object({ transmute: z.boolean(), answer: z.string() }),
+    run: ({ transmute, answer }, context: Context): SystemResult =>
+      answer === DONE ? {} : replicate(answer, transmute, context),
+  }),
+};
+
+// Making a replicated item: it's carried, attuned where it needs it and there's room, and the oldest made goes
+// once there are more than the cap, or the one transmuted.
+function replicate(
+  id: string,
+  transmute: boolean,
+  context: Context,
+): SystemResult {
+  const actor = player(context.state);
+  const stats = deriveStats(actor, context);
+  const rule = stats.passives.find((passive) => passive.kind === "replicate");
+  const turn = stats.passives.find(
+    (passive) => passive.kind === "replicateTransmute",
+  );
+  if (
+    rule?.kind !== "replicate" ||
+    (transmute && turn?.kind !== "replicateTransmute")
+  ) {
+    throw new Error(`${actor.id} can't replicate ${id}`);
+  }
+  const made = actor.replicated ?? [];
+  const cap =
+    (stats.scaling[rule.cap] ?? 0) +
+    stats.passives.reduce(
+      (sum, passive) =>
+        passive.kind === "replicateExtra" ? sum + passive.count : sum,
+      0,
+    );
+  const vanished = transmute
+    ? made.slice(0, 1)
+    : made.slice(0, Math.max(0, made.length + 1 - cap));
+  const item = itemOf(context, id);
+  const attuned = actor.attuned ?? [];
+  const attunes =
+    "attunement" in item &&
+    item.attunement === true &&
+    attuned.length - vanished.filter((gone) => attuned.includes(gone)).length <
+      attunementLimit(stats);
+  return {
+    events: [
+      dndEvent(`${NS}:resourceSpent`, {
+        actor: actor.id,
+        resource:
+          transmute && turn?.kind === "replicateTransmute"
+            ? turn.resource
+            : rule.resource,
+      }),
+      ...vanished.map((gone) =>
+        dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: gone }),
+      ),
+      dndEvent(`${NS}:itemReplicated`, { actor: actor.id, item: id, vanished }),
+      dndEvent(`${NS}:treasureFound`, {
+        actor: actor.id,
+        gold: 0,
+        items: [id],
+        stowed: [],
+      }),
+      ...(attunes
+        ? [
+            dndEvent(`${NS}:gearChanged`, {
+              actor: actor.id,
+              stowed: actor.stowed ?? [],
+              attuned: [
+                ...attuned.filter((other) => !vanished.includes(other)),
+                id,
+              ],
+            }),
+          ]
+        : []),
+    ],
+  };
+}
+
 // The save attuning to an item calls for, as the Wand of Orcus's, read off the magic item a weapon is made from.
 export function attuneSaveFrames(
   actor: Actor,
@@ -437,6 +608,7 @@ export function sceneGearActions(
   const rows = new Set<string>();
   const full = actor.hp >= deriveStats(actor, access).maxHp;
   return [
+    ...replicateActions(actor, access),
     ...gearOptions(actor, access)
       .filter(({ id }) => {
         const item = id.slice(id.indexOf(":") + 1);
@@ -827,6 +999,17 @@ export const gearEffects = {
     schema: StoreSchema,
     references: ({ item, spell }) => [item, spell],
     apply: storeSpell,
+  }),
+  [`${NS}:replicateMenu`]: storyEffect({
+    schema: z.object({ transmute: z.boolean().optional() }),
+    apply: ({ transmute }, context: Context) =>
+      replicateMenu(transmute === true, context),
+  }),
+  [`${NS}:replicate`]: storyEffect({
+    schema: z.object({ item: z.string(), transmute: z.boolean().optional() }),
+    references: ({ item }) => [item],
+    apply: ({ item, transmute }, context: Context) =>
+      replicate(item, transmute === true, context),
   }),
   [`${NS}:study`]: storyEffect({
     schema: z.object({ item: z.string(), ability: AbilitySchema.optional() }),

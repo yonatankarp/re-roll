@@ -1,7 +1,6 @@
 - id: "srd52:feature/second-wind"
   name: Second Wind
-  text: "As a Bonus Action, regain Hit Points equal to 1d10 plus your Fighter
-    level. You regain one use on a Short Rest, and all on a Long Rest."
+  text: "As a Bonus Action, regain Hit Points equal to 1d10 plus your Fighter level. You regain one use on a Short Rest, and all on a Long Rest."
   automation: full
   resources:
     - id: second-wind
@@ -22,9 +21,7 @@
                 { add: [{ kind: classLevel, class: "srd52:class/fighter" }] }
 - id: "srd52:feature/sneak-attack"
   name: Sneak Attack
-  text:
-    "Once per turn, deal extra damage to a creature you hit with Advantage, or
-    when an ally is near it. It starts at 1d6 and grows with your Rogue level."
+  text: "Once per turn, deal extra damage to a creature you hit with Advantage, or when an ally is near it. It starts at 1d6 and grows with your Rogue level."
   automation: full
   passives:
     - kind: extraDamage
@@ -54,9 +51,7 @@
   # shortcut: the other language of the rogue's choice isn't asked for.
   automation: full
   passives:
-    - kind: languages
-      languages:
-        - thieves-cant
+    - { kind: languages, languages: [thieves-cant] }
 
 - id: "srd52:feature/spellcasting"
   name: Spellcasting
@@ -112,8 +107,7 @@
 
 - id: "srd52:feature/alert"
   name: Alert
-  text: "Add your Proficiency Bonus to Initiative, and you may swap Initiative
-    with an ally."
+  text: "Add your Proficiency Bonus to Initiative, and you may swap Initiative with an ally."
   automation: full
   passives:
     - kind: modifier
@@ -144,8 +138,7 @@
 
 - id: "srd52:feature/ability-score-improvement"
   name: Ability Score Improvement
-  text: "You gain the Ability Score Improvement feat or another feat you qualify
-    for."
+  text: "You gain the Ability Score Improvement feat or another feat you qualify for."
   automation: full
 
 - id: "srd52:feature/extra-attack"
@@ -180,8 +173,7 @@
 
 - id: "srd52:feature/tactical-shift"
   name: Tactical Shift
-  text: "When you use Second Wind, you can move up to half your Speed without
-    provoking Opportunity Attacks."
+  text: "When you use Second Wind, you can move up to half your Speed without provoking Opportunity Attacks."
   automation: full
   passives:
     - kind: activationRider
@@ -217,8 +209,7 @@
 
 - id: "srd52:feature/steady-aim"
   name: Steady Aim
-  text: "As a Bonus Action, give yourself Advantage on your next attack if you
-    haven't moved this turn."
+  text: "As a Bonus Action, give yourself Advantage on your next attack if you haven't moved this turn."
   automation: full
   activations:
     - cost: [bonusAction]
@@ -236,8 +227,7 @@
 
 - id: "srd52:feature/cunning-strike"
   name: Cunning Strike
-  text: "You can trade Sneak Attack dice for effects when you hit, such as
-    poisoning or tripping the target."
+  text: "You can trade Sneak Attack dice for effects when you hit, such as poisoning or tripping the target."
   automation: full
   activations:
     - label: Poison
@@ -282,9 +272,7 @@
 
 - id: "srd52:feature/uncanny-dodge"
   name: Uncanny Dodge
-  text:
-    "When an attacker you can see hits you, you can use your Reaction to halve
-    the damage."
+  text: "When an attacker you can see hits you, you can use your Reaction to halve the damage."
   automation: full
   activations:
     - cost: [reaction]
@@ -297,9 +285,7 @@
 
 - id: "srd52:feature/fast-hands"
   name: Fast Hands
-  text:
-    "You can use Cunning Action for Sleight of Hand, thieves' tools or a Magic
-    item."
+  text: "You can use Cunning Action for Sleight of Hand, thieves' tools or a Magic item."
   automation: full
   passives:
     - { kind: fastHands }
@@ -455,9 +441,7 @@
 
 - id: "srd52:feature/preserve-life"
   name: Preserve Life
-  text:
-    "As a Magic action, use Channel Divinity to divide healing among Bloodied
-    creatures near you."
+  text: "As a Magic action, use Channel Divinity to divide healing among Bloodied creatures near you."
   automation: full
   activations:
     - cost: [action, { resource: cleric-channel-divinity }]
@@ -485,8 +469,7 @@
 
 - id: "srd52:feature/scholar"
   name: Scholar
-  text: "You gain Expertise in one of your scholarly skills, such as Arcana or
-    History."
+  text: "You gain Expertise in one of your scholarly skills, such as Arcana or History."
   automation: text
 
 - id: "srd52:feature/wizard-subclass"
@@ -496,22 +479,19 @@
 
 - id: "srd52:feature/memorize-spell"
   name: Memorize Spell
-  text:
-    "When you finish a Short Rest, you can swap one prepared spell for another
-    in your spellbook."
-  automation: text
+  text: "When you finish a Short Rest, you can swap one prepared spell for another in your spellbook."
+  automation: full
+  passives:
+    - { kind: memorize, class: wizard }
 
 - id: "srd52:feature/evocation-savant"
   name: Evocation Savant
-  text:
-    "You add two Evocation spells to your spellbook for free, and another with
-    each new spell level."
-  automation: text
+  text: "You add two Evocation spells to your spellbook for free, and another with each new spell level."
+  automation: full
+  # The spellbook is the whole Wizard list here (swap.ts), so the free spells are already in it.
 
 - id: "srd52:feature/potent-cantrip"
   name: Potent Cantrip
-  text:
-    "A creature that saves against your damaging cantrip still takes half its
-    damage."
+  text: "A creature that saves against your damaging cantrip still takes half its damage."
   automation: full
   passives: [{ kind: potentCantrip }]

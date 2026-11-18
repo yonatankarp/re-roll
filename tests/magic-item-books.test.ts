@@ -545,3 +545,19 @@ describe.skipIf(!BOOKS)("the book's random tables", () => {
     ).toBe(true);
   });
 });
+
+// A sample of #175's crafting, as the books encode it.
+describe.skipIf(!BOOKS)("the book's crafting", () => {
+  it("names only items that exist for Replicate Magic Item's plans", () => {
+    const feature = FeatureSchema.parse(
+      run.content(
+        "eberron-forge-of-the-artificer:feature/artificer-replicate-magic-item",
+      ),
+    );
+    const plans = feature.passives.flatMap((passive) =>
+      passive.kind === "replicate" ? passive.plans : [],
+    );
+    expect(plans.length).toBeGreaterThan(40);
+    expect(plans.filter(({ item }) => !run.content(item))).toEqual([]);
+  });
+});
