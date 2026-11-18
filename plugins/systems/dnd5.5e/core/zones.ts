@@ -179,6 +179,7 @@ function auraZones(state: DndState, access: ContentAccess): readonly Zone[] {
               follows: true,
               area: passive.area,
               name: passive.name,
+              dim: passive.dim,
             },
           ]
         : [],
@@ -384,6 +385,17 @@ export function affects(
     return false;
   }
   if (area.downed && actor.hp > 0) return false;
+  if (
+    area.frightened &&
+    !actor.activeEffects.some(
+      ({ modifier, casterId }) =>
+        modifier.kind === "condition" &&
+        modifier.condition === "frightened" &&
+        casterId === owner.id,
+    )
+  ) {
+    return false;
+  }
   if (area.grappling && !grappleBetween(owner, actor)) return false;
   if (area.creatureTypes || area.exceptTypes) {
     const type = access ? statsOf(actor, access).creatureType : undefined;
@@ -679,19 +691,23 @@ export function placedFlag(
   ability?: Ability,
   conditions: readonly string[] = [], // what the save would put on it or end, for Advantage only against those
   magical = false, // a save against a spell or magic
+  caster?: string, // whose spell it is, for Disadvantage only against the area owner's, as Corona of Light's
 ): boolean {
   if (!state.combat || !actor.position) return false;
   const given =
     zonesOf(state, access).length > 0 &&
-    zoneModifiers(actor, state, access).some(
-      (modifier) =>
+    zoneGrants(actor, state, access).some(
+      ({ modifier, zone }) =>
         modifier.kind === kind &&
         modifier.on === on &&
         (!modifier.ability || modifier.ability === ability) &&
         (!("conditions" in modifier) ||
           !modifier.conditions ||
           modifier.conditions.some((item) => conditions.includes(item))) &&
-        (!("magical" in modifier) || !modifier.magical || magical),
+        (!("magical" in modifier) || !modifier.magical || magical) &&
+        (!("casterSpells" in modifier) ||
+          !modifier.casterSpells ||
+          (magical && caster === zone.owner)),
     );
   // Light sensitivity is a stat block's trait, so a character is never asked for it.
   if (

@@ -440,7 +440,7 @@ function outOfCover(actor: Actor, context: Context): SystemEvent[] {
 }
 
 // Effects that end as the bearer's turn ends in Bright Light, as Cloak of Shadows', and those of anyone who has become
-// Incapacitated, as Draconic Flight's wings. shortcut: the second is checked as each turn ends, not the moment it comes.
+// Incapacitated, as Draconic Flight's wings, or whose caster has, as Bulwark of Force's. shortcut: the second is checked as each turn ends, not the moment it comes.
 function lightAndWakeEnds(
   actor: Actor | undefined,
   context: Context,
@@ -448,11 +448,23 @@ function lightAndWakeEnds(
   const { state } = context;
   return Object.values(state.actors).flatMap((bearer) =>
     bearer.activeEffects.flatMap(
-      ({ endsInLight, untilIncapacitated, sourceId, casterId }) =>
+      ({
+        endsInLight,
+        untilIncapacitated,
+        casterIncapacitated,
+        sourceId,
+        casterId,
+      }) =>
         (endsInLight &&
           bearer.id === actor?.id &&
           lightAt(bearer.position, state, context) === "bright") ||
-        (untilIncapacitated && hasCondition(bearer, ...INCAPACITATING))
+        (untilIncapacitated && hasCondition(bearer, ...INCAPACITATING)) ||
+        (casterIncapacitated &&
+          ((caster) =>
+            !caster ||
+            isDead(caster) ||
+            isDown(caster) ||
+            hasCondition(caster, ...INCAPACITATING))(state.actors[casterId]))
           ? [
               dndEvent(`${NS}:effectEnded`, {
                 actor: bearer.id,

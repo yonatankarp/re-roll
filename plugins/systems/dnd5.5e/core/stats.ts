@@ -1575,12 +1575,13 @@ function castsAs(
   passives: readonly Passive[],
 ): KnownAction[] {
   const quick = passives.flatMap((passive) =>
-    passive.kind === "castsAs" ? passive.spells : [],
+    passive.kind === "castsAs" ? (passive.spells ?? ["*"]) : [],
   );
   if (quick.length === 0) return [...actions];
+  // With no spells named, every spell, as Elder Champion's Swift Spells.
   return actions.map((action) => {
     const spell = spellOfSource(action.id);
-    return spell !== null && quick.includes(spell)
+    return spell !== null && (quick.includes(spell) || quick.includes("*"))
       ? {
           ...action,
           activation: {
@@ -4999,7 +5000,10 @@ export function rollAmount(
           )
         : rollDiceNotation(notation, rolling, diceMultiplier)
     : 0;
-  return rolled + (amount.bonus ? evaluateFormula(amount.bonus, stats) : 0);
+  return (
+    rolled * (amount.times ?? 1) +
+    (amount.bonus ? evaluateFormula(amount.bonus, stats) : 0)
+  );
 }
 
 // Each die showing its highest face, the added ones too, adds another die, at most `most` more, as Sorcerous Burst's.

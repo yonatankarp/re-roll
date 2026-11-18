@@ -278,6 +278,7 @@ export const AmountSchema = z.strictObject({
   // a die showing its highest face adds another die, at most this many more, as Sorcerous Burst's 8s up to the
   // spellcasting modifier
   explode: FormulaSchema.optional(),
+  times: z.number().int().min(2).optional(), // what the dice roll counts this many times, as Mantle of Inspiration's two
 });
 export type Amount = z.infer<typeof AmountSchema>;
 
@@ -965,6 +966,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // (combat/reactions.ts inspiredSwing): added to a failed D20 test it makes a success, and with the giver's
   // `combatInspiration`, to AC against a hit it makes a miss for the bearer's Reaction, or to a hit's damage.
   z.strictObject({ kind: z.literal("inspired"), amount: AmountSchema }),
+  // A ward of `count` dice of `die`: when the bearer takes damage, as many as the damage needs are spent and rolled,
+  // and it takes that much less, as Bastion of Law's d8s (combat/effects.ts reducedHit).
+  z.strictObject({
+    kind: z.literal("wardDice"),
+    count: z.number().int().min(1),
+    die: z.number().int().min(2),
+  }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
 
@@ -1176,6 +1184,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     endsInLight: z.literal(true).optional(),
     // Ends once the creature has the Incapacitated condition, as Draconic Flight's wings (combat/turn.ts).
     untilIncapacitated: z.literal(true).optional(),
+    casterIncapacitated: z.literal(true).optional(), // as a modifier's
     // Taking damage gives it a save to end it, as Dragon Fear's, using the save it came with, with Advantage on
     // "advantage", as Hideous Laughter's.
     saveOnDamage: z.union([z.literal(true), z.literal("advantage")]).optional(),
@@ -1223,6 +1232,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     whileTempHp: z.literal(true).optional(), // ends once the bearer has no Temporary Hit Points, as Armor of Agathys
     endsInLight: z.literal(true).optional(), // as an applyCondition's
     untilIncapacitated: z.literal(true).optional(), // as an applyCondition's
+    // it ends once its caster is Incapacitated or dies, as Bulwark of Force's Half Cover (combat/turn.ts)
+    casterIncapacitated: z.literal(true).optional(),
     // The creature can take the Study action to end it with an Investigation check against the save's DC, as
     // Phantasmal Force's phantasm (actions.ts).
     studyEnds: z.literal(true).optional(),
@@ -2106,6 +2117,7 @@ export const AreaEffectSchema = z.strictObject({
   enters: z.literal(true).optional(),
   bloodied: z.literal(true).optional(), // only on Bloodied creatures, as a Dead Three scion's Culling Aura
   downed: z.literal(true).optional(), // only on creatures at 0 Hit Points, as Aura of Life's 1 Hit Point
+  frightened: z.literal(true).optional(), // only on creatures its owner has Frightened, as Aura of Conquest
   // a success against a spell or magic that halves damage takes none, as Circle of Power
   magicWard: z.literal(true).optional(),
   // spellShield blocks one level higher for each slot level above the spell's, as Globe of Invulnerability
@@ -2578,6 +2590,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     name: z.string().min(1),
     zone: ZoneKindSchema.default("area"),
     radius: z.number().int().min(5),
+    dim: z.number().int().min(5).optional(), // light: feet of Dim Light beyond its Bright, as Corona of Light's 30
     area: AreaEffectSchema.default({}),
     // this wide instead from a level in one class (its name after the plugin), as a Holy Avenger's 30 feet for a
     // Paladin of level 17
@@ -3014,10 +3027,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     resource: z.string().min(1),
     dice: DiceSchema,
   }),
-  // These spells' action is a Bonus Action instead, as Spell Breaker's Dispel Magic.
+  // These spells' action is a Bonus Action instead, as Spell Breaker's Dispel Magic, or every spell's with none named,
+  // as Elder Champion's Swift Spells.
   z.strictObject({
     kind: z.literal("castsAs"),
-    spells: z.array(ContentIdSchema).min(1),
+    spells: z.array(ContentIdSchema).min(1).optional(),
     cost: z.literal("bonusAction"),
   }),
   // While the bearer is Invisible, the saves against its spells as it casts them have Disadvantage, as Magical Ambush.
@@ -3239,9 +3253,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // A spell the bearer casts heals this much more on each creature it heals, as Disciple of Life's 2 plus the slot's
   // level (`perSlot`), only cast with a slot (`slot`) or of this class's list (`list`).
   // shortcut: the bonus goes to every creature a spell heals, not to one roll, as Alchemical Savant says.
+  // `dice` are rolled and added too, as Power from Beyond's 1d6 on a Bard spell.
   z.strictObject({
     kind: z.literal("spellHealing"),
-    bonus: FormulaSchema,
+    bonus: FormulaSchema.default({ base: 0, add: [] }),
+    dice: DiceSchema.optional(),
     perSlot: z.literal(true).optional(),
     slot: z.literal(true).optional(),
     list: ContentIdSchema.optional(),
@@ -3982,6 +3998,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
         z.strictObject({
           name: z.string().min(1),
           within: z.number().int().min(5).optional(),
+          // offered only with a use left, spent once picked, as Inspiring Smite's Channel Divinity
+          resource: z.string().min(1).optional(),
           effects: z.array(LeafEffectSchema).default([]),
           foes: z
             .strictObject({
@@ -3995,6 +4013,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       .min(1)
       .optional(),
     onTargets: z.array(LeafEffectSchema).min(1).optional(),
+    allies: AlliesRiderSchema.optional(), // on the caster's allies near it, as Unicorn Spirit's healing
     resource: z.string().optional(), // spending a use, only while one is left, as Defy Death's after Spare the Dying
     // with `school`, a spell of any casting time cast with a slot, as Arcane Ward's Abjuration spells
     slotted: z.literal(true).optional(),
