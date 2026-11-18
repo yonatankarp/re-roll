@@ -1908,6 +1908,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ]
       : [],
   );
+  // An item's rolled properties, while it works, as an artifact's random ones (gear.ts gainRolls).
+  for (const [itemId, item] of worn) {
+    if (works(itemId, item)) {
+      itemPassives.push(...(actor.itemProperties?.[itemId] ?? []));
+    }
+  }
   // What studying a book gave for good, as the Book of Exalted Deeds' Halo, the book itself gone or not (gear.ts).
   for (const itemId of actor.studied ?? []) {
     const item = lookup(access, ItemSchema, itemId);

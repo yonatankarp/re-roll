@@ -4513,6 +4513,21 @@ const MagicItemSchema = ItemBaseSchema.extend({
   attunementBy: z.string().min(1).optional(),
   attuneBy: AttuneBySchema.optional(), // what `attunementBy` asks, as the engine checks it
   table: TableSchema.optional(), // a table it rolls on, which `rollTable` names it for, as a Wand of Wonder's
+  // Rolls made on these roll tables as it's found, `count` of each, whose rows' passives work while it does, as an
+  // artifact's random properties or a Moonblade's runes (gear.ts gainRolls). shortcut: one come by other than as
+  // treasure or bought has none.
+  properties: z
+    .array(
+      z.strictObject({
+        table: ContentIdSchema,
+        count: z.strictObject({
+          base: z.number().int().min(0).default(0),
+          dice: DiceSchema.optional(),
+        }),
+      }),
+    )
+    .min(1)
+    .optional(),
   curse: CurseSchema.optional(),
   // A save attuning to it calls for, whose failure is the attuner's end, as the Wand of Orcus's Constitution save
   // (actions.ts attuneSave): a creature of one of `unless` makes none, and a success takes `saved`, as the wand's 10d6
@@ -5246,6 +5261,9 @@ export const RollTableSchema = ContentEntrySchema.extend({
         min: z.number().int().min(1),
         max: z.number().int().min(1),
         cells: z.array(z.string()),
+        // what the row gives an item it's rolled for, while the item works, as an artifact's random property
+        // (MagicItemSchema `properties`)
+        passives: z.array(PassiveSchema).min(1).optional(),
       }),
     )
     .min(1),
