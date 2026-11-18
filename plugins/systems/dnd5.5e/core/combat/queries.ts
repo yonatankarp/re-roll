@@ -150,6 +150,8 @@ export function hasFlag(
       (!("skills" in modifier) ||
         !modifier.skills ||
         (skill !== undefined && modifier.skills.includes(skill))) &&
+      // Advantage only with some creatures is the scene check's to weigh (core/explore.ts).
+      (!("with" in modifier) || !modifier.with) &&
       // Advantage only against some conditions is the save's to weigh (placedFlag).
       (!("conditions" in modifier) || !modifier.conditions) &&
       (!("magical" in modifier) || !modifier.magical) &&

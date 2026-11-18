@@ -140,7 +140,7 @@ function evaluateLeaf(
     case "system": {
       const predicate = run.system.storyPredicates[leaf.predicate];
       if (!predicate) throw new Error(`Unknown predicate ${leaf.predicate}`);
-      return predicate.evaluate(leaf.args, state.system);
+      return predicate.evaluate(leaf.args, state.system, run);
     }
     default:
       return leaf satisfies never;
