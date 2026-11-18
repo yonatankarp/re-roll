@@ -527,3 +527,21 @@ describe.skipIf(!BOOKS)("the book's cursed and attuned items", () => {
     );
   });
 });
+
+// A sample of #177's random tables, as the books encode them.
+describe.skipIf(!BOOKS)("the book's random tables", () => {
+  it("gives a Wand of Wonder its roll, the Wild Magic Surge feature its table, and a Ring of Three Wishes Wish", () => {
+    const wand = "dmg:item/wand-of-wonder";
+    const ids = (items: readonly string[]) =>
+      deriveStats(wearing(items), run).actions.map((item) => item.id);
+    expect(ids([wand])).toContain(`use:${wand}:0`);
+    const surge = FeatureSchema.parse(
+      run.content("phb:feature/sorcerer-wild-magic-sorcery-wild-magic-surge"),
+    );
+    expect(surge.table?.die).toBe(100);
+    expect(surge.table?.rows.at(-1)?.max).toBe(100);
+    expect(
+      ids(["dmg:item/ring-of-three-wishes"]).some((id) => id.includes("wish")),
+    ).toBe(true);
+  });
+});

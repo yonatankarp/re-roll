@@ -25,7 +25,14 @@ import {
   UNARMED_STRIKE,
 } from "./stats.ts";
 import { knownFoes } from "./fog.ts";
-import type { Condition, LeafEffect, Modifier, Resolution } from "./schemas.ts";
+import {
+  type Condition,
+  type LeafEffect,
+  type Modifier,
+  type Resolution,
+  SpellSchema,
+} from "./schemas.ts";
+import { tableOf } from "./combat/reactions.ts";
 import { finalDamage } from "./rules.ts";
 import type { Square } from "./grid.ts";
 import { dodging, grappledAwayFrom, masteryOf } from "./tactics.ts";
@@ -1032,6 +1039,44 @@ export function makeJudge(context: Context, side: Actor): Judge {
     const unhealable =
       cannotHeal(target) || healingStopped(target, state, context);
     switch (effect.kind) {
+      // A table's rows, each by its share of the die, aimed as the row says; a channeled spirit's only its face.
+      case "rollTable": {
+        const table = tableOf(effect.from, context);
+        if (!table) return 0;
+        const kept = effect.channeled
+          ? actor.activeEffects.find(
+              ({ modifier }) =>
+                modifier.kind === "channeled" && modifier.from === effect.from,
+            )?.modifier
+          : undefined;
+        if (effect.channeled && kept?.kind !== "channeled") return 0;
+        const face = kept?.kind === "channeled" ? kept.face : undefined;
+        return table.rows.reduce((total, row) => {
+          if (face !== undefined && (face < row.min || face > row.max)) {
+            return total;
+          }
+          const share =
+            face !== undefined ? 1 : (row.max - row.min + 1) / table.die;
+          const spell = row.spell
+            ? SpellSchema.safeParse(context.content(row.spell)).data
+            : undefined;
+          const resolution = spell?.activation?.resolution ?? row.resolution;
+          if (!resolution) return total;
+          const step: KnownAction = {
+            ...action,
+            activation: { ...action.activation, resolution },
+          };
+          const aimed = [
+            ...(row.targets.includes("self") ? [actor] : []),
+            ...(row.targets.includes("target") ? [target] : []),
+          ];
+          return (
+            total +
+            share *
+              aimed.reduce((sum, item) => sum + worthOn(actor, item, step), 0)
+          );
+        }, 0);
+      }
       case "heal": {
         if (foe || unhealable) return 0;
         const room = stats(target).maxHp - Math.max(target.hp, 0);
