@@ -4,12 +4,7 @@ A single-player fantasy role-playing game on the fifth edition 2024 rules (SRD 5
 
 It runs as a desktop app on macOS, Windows and Linux, or in your browser.
 
-![A scene: art, the story so far, and numbered choices, some with a skill check](docs/images/scene.webp)
-
-|                                                                                                                                    |                                                                           |
-| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| ![The adventure library, with the shipped adventures and adventures from your books](docs/images/library.webp)                     | ![Picking a ready hero to play](docs/images/character.webp)               |
-| ![A fight on the battle map: your party at the bottom, the foes at the top, and your move drawn as a path](docs/images/fight.webp) | ![The character sheet in a drawer beside the map](docs/images/sheet.webp) |
+![A slideshow of five screenshots: a scene with art, the story and numbered choices, some with a skill check; the adventure library with the shipped adventures and adventures from your books; picking a ready hero; a fight on the battle map with your party at the bottom and the foes at the top; and the character sheet in a drawer beside the map](docs/images/tour.webp)
 
 ## Play it
 
