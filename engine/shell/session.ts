@@ -56,6 +56,7 @@ import type {
   SystemUi,
 } from "./system-ui.ts";
 import { type ShownChoice, shownChoices } from "./choices.ts";
+import { PlayerError } from "./player-error.ts";
 
 // Everything the page does to the game, with no DOM, so tests can play through the same code.
 
@@ -855,7 +856,7 @@ export function createGame({
   };
 
   const removeSave = async (path: string): Promise<void> => {
-    if (!storage.remove) throw new Error("Saves can't be deleted here");
+    if (!storage.remove) throw new PlayerError("Saves can't be deleted here.");
     await storage.remove(path);
     const { times, details } = await readRecords();
     for (const [record, entries] of [
@@ -1249,6 +1250,11 @@ export function createGame({
       return imageUrl ? imageUrl(path) : null;
     },
 
+    // The files in a content folder, so a recording that isn't there is never asked for.
+    async listFiles(folder: string): Promise<readonly string[]> {
+      return (await storage.list(folder)).map((entry) => entry.path);
+    },
+
     // A book's cover is cropped to fill whatever small frame it stands in.
     isCover(path: string): boolean {
       return [...covers.values()].includes(path);
@@ -1332,9 +1338,12 @@ export function createGame({
     // so making the same choice again rolls the same numbers.
     async undo(): Promise<void> {
       const game = active();
-      if (game.log.length < 2) throw new Error("There is no choice to undo");
+      if (game.log.length < 2)
+        throw new PlayerError("There is no choice to undo.");
       if (!canTakeBack(game.run, game.state, game.log)) {
-        throw new Error("This difficulty doesn't allow undoing a choice");
+        throw new PlayerError(
+          "This difficulty doesn't allow undoing a choice.",
+        );
       }
       const log = game.log.slice(0, -1);
       const told = retell(game.run, game.ui, log);

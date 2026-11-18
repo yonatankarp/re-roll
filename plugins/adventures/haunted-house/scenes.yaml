@@ -23,8 +23,9 @@
       results:
         success:
           - { kind: goto, scene: escape }
+        # Each failure raises the dread by one, so the doors seal only after the party has kept trying.
         failure:
-          - { kind: advanceClock, clock: rising-dread, by: 3 }
+          - { kind: advanceClock, clock: rising-dread }
 - id: footsteps-above
   title: Footsteps Above
   text: Slow footsteps cross the floor above, though the house has no upstairs.

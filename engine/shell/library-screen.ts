@@ -1,8 +1,11 @@
 import { OPENING, type ShellContext } from "./context.ts";
 import { button, el } from "./dom.ts";
+import { renderMarkdown } from "./markdown.ts";
 import type { KindRef, LinkRef, RulingRef } from "./session.ts";
 
 // The book library: a book's headings, and the text of the one chosen.
+
+const SHOWN_HEADINGS = 300;
 
 // A book's title as a reader would write it: a folder-style name such as "Project_Lamordia" gets
 // spaces and capitals.
@@ -51,7 +54,7 @@ function rulingDrawer(
     { class: "book-rulings" },
     el("summary", { text: `Rulings (${String(refs.length)})` }),
     ...refs.map((ref) => {
-      const body = el("pre", { class: "book-text" });
+      const body = el("div", { class: "book-text" });
       const item = el(
         "details",
         { class: "book-ruling" },
@@ -59,11 +62,13 @@ function rulingDrawer(
         body,
       );
       item.addEventListener("toggle", () => {
-        if (!item.open || body.textContent) return;
+        if (!item.open || body.childNodes.length > 0) return;
         void ctx.game
           .readSection(ref.book, ref.file)
           .then((markdown) => {
-            body.textContent = headingPart(markdown, ref.heading);
+            body.replaceChildren(
+              ...renderMarkdown(headingPart(markdown, ref.heading)),
+            );
           })
           .catch(() => {
             body.textContent = "This ruling's book can't be read.";
@@ -125,10 +130,11 @@ export async function showLibrary(
         ctx.game
           .openBook(id)
           .then((book) => ({ id, title: bookTitle(book.title) }))
-          .catch(() => null),
+          .catch(() => ({ id, title: bookTitle(id), broken: true })),
       ),
     )
-  ).sort((a, b) => (a?.title ?? "").localeCompare(b?.title ?? ""));
+  ).sort((a, b) => a.title.localeCompare(b.title));
+  const broken = opened.filter((book) => "broken" in book);
   const heading = el("h2", { text: "Book library" });
   heading.tabIndex = -1;
   ctx.screen.replaceChildren(
@@ -140,17 +146,29 @@ export async function showLibrary(
         "div",
         { class: "options" },
         ...opened.flatMap((book) =>
-          book
-            ? [
+          "broken" in book
+            ? []
+            : [
                 button(book.title, () => {
                   ctx.act(() => ctx.showBook(books, book.id), {
                     busy: OPENING,
                   });
                 }),
-              ]
-            : [],
+              ],
         ),
       ),
+      // A book that won't open is named, so it isn't missing without a word.
+      ...(broken.length > 0
+        ? [
+            el("p", {
+              class: "empty",
+              text: `${broken.map((book) => book.title).join(", ")} couldn't be opened. Its files may be damaged; install it again to fix it.`,
+            }),
+          ]
+        : []),
+      ...(opened.length === 0
+        ? [el("p", { class: "empty", text: "There are no books here yet." })]
+        : []),
     ),
   );
   ctx.focusNext = heading;
@@ -185,7 +203,7 @@ export async function showBook(
   search.placeholder = "Search headings";
   search.setAttribute("aria-label", "Search headings");
   const contents = el("nav", { class: "book-contents" });
-  const text = el("pre", { class: "book-text" });
+  const text = el("div", { class: "book-text" });
   text.tabIndex = -1;
   const kindsBox = el("div");
   const rulings = el("div");
@@ -198,7 +216,7 @@ export async function showBook(
       ctx.game.kinds(from, file),
     ]);
     const links = all.filter((ref) => !ref.book || books.includes(ref.book));
-    text.textContent = words;
+    text.replaceChildren(...renderMarkdown(words));
     kindsBox.replaceChildren(...(kinds.length > 0 ? [kindRow(kinds)] : []));
     rulings.replaceChildren(
       ...(links.length > 0
@@ -214,10 +232,11 @@ export async function showBook(
   };
   const drawContents = (): void => {
     const wanted = search.value.trim().toLowerCase();
-    // shortcut: only the first matches are drawn, which is plenty once a search narrows them.
-    const matches = book.sections
-      .filter((section) => section.heading.toLowerCase().includes(wanted))
-      .slice(0, 300);
+    // Only the first matches are drawn, which is plenty once a search narrows them, and the list says so.
+    const found = book.sections.filter((section) =>
+      section.heading.toLowerCase().includes(wanted),
+    );
+    const matches = found.slice(0, SHOWN_HEADINGS);
     contents.replaceChildren(
       ...matches.map((section) => {
         const open = button(section.heading, () => {
@@ -226,6 +245,17 @@ export async function showBook(
         open.style.marginLeft = `${String((section.depth - 1) * 12)}px`;
         return open;
       }),
+      ...(found.length > matches.length
+        ? [
+            el("p", {
+              class: "empty",
+              text: `The first ${String(matches.length)} of ${String(found.length)} headings. Search to find the rest.`,
+            }),
+          ]
+        : []),
+      ...(found.length === 0
+        ? [el("p", { class: "empty", text: "No heading has that in it." })]
+        : []),
     );
   };
   search.addEventListener("input", drawContents);

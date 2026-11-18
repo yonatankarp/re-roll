@@ -1,10 +1,11 @@
 import { PLAYER_ACTOR } from "#sdk";
-import type {
-  BoardUpdate,
-  Combatant,
-  Face,
-  TokenArt,
-  Vitals,
+import {
+  type BoardUpdate,
+  type Combatant,
+  type Face,
+  type TokenArt,
+  type Vitals,
+  wounds,
 } from "./board-data.ts";
 import {
   type BoardContext,
@@ -80,12 +81,17 @@ export function float(
     });
 }
 
+// The party's own HP in numbers; a foe's in words.
+export function hpText(token: Token): string {
+  return token.side === "enemy"
+    ? wounds(token.hp, token.maxHp)
+    : `${String(Math.max(0, token.hp))}/${String(token.maxHp)} HP`;
+}
+
 export function setTip(token: Token): void {
-  token.tip.textContent = [
-    token.name,
-    `${String(Math.max(0, token.hp))}/${String(token.maxHp)} HP`,
-    ...token.notes,
-  ].join(" · ");
+  token.tip.textContent = [token.name, hpText(token), ...token.notes].join(
+    " · ",
+  );
 }
 
 // HP shows as a ring round the disc that empties as the creature is hurt.

@@ -16,10 +16,17 @@ test("starts the shipped adventure and plays a turn on the map", async ({
     plate.click(),
   );
   await page.goto("/");
+  // A filter that matches nothing says so, rather than leaving an empty page.
+  const filter = page.getByRole("searchbox", { name: "Filter adventures" });
+  await filter.fill("no such adventure");
+  await expect(page.getByText(/No adventure's title has/)).toBeVisible();
+  await filter.fill("");
   await page.getByRole("button", { name: "Ambush on the Old Road" }).click();
   await page.getByRole("button", { name: "Begin the adventure" }).click();
   await page.getByRole("button", { name: /^Pick a ready hero/ }).click();
   await page.getByRole("button", { name: /^Human Fighter/ }).click();
+  // A ready hero has a name of its own.
+  await expect(page.locator(".hud")).toContainText("Hollis Brand");
   await page
     .getByRole("button", { name: /Perception ?\] Check the treeline$/ })
     .click();

@@ -23,6 +23,7 @@ import {
 } from "../state.ts";
 import { distanceFeet, squareKey, type Square } from "../grid.ts";
 import { seeing } from "../sight.ts";
+import { healthNote } from "../wounds.ts";
 import { markedBy } from "../trait-rules.ts";
 import {
   type Activation,
@@ -1114,7 +1115,7 @@ export function takeReaction(
           prompt: "Which creature does the attack hit instead?",
           options: others.map((item) => ({
             id: item.id,
-            label: `${item.name} (${String(item.hp)} HP)`,
+            label: `${item.name} (${healthNote(item, context)})`,
           })),
           resume: frame("redirectHit", {
             attacker: moment.source,

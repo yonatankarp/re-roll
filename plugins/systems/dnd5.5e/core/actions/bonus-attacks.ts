@@ -20,6 +20,7 @@ import {
   isDown,
 } from "../state.ts";
 import { deriveStats, type Stats } from "../stats.ts";
+import { healthNote } from "../wounds.ts";
 import {
   hasTactic,
   HEW_READY,
@@ -83,7 +84,7 @@ function offhandOptions(
       .filter((foe) => distanceFeet(actor.position, foe.position) <= reach)
       .map((foe) => ({
         id: encodeOption(OFFHAND, foe.id, action.id),
-        label: `Off-hand ${action.name}: ${foe.name} (${String(foe.hp)} HP)${nick ? ", with Nick" : ""}`,
+        label: `Off-hand ${action.name}: ${foe.name} (${healthNote(foe, access)})${nick ? ", with Nick" : ""}`,
       }));
   });
 }
@@ -126,7 +127,7 @@ function poleStrikeOptions(
       .filter((foe) => distanceFeet(actor.position, foe.position) <= reach)
       .map((foe) => ({
         id: encodeOption(POLE_STRIKE, foe.id, action.id),
-        label: `Pole Strike with the ${weapon.name}'s other end: ${foe.name} (${String(foe.hp)} HP)`,
+        label: `Pole Strike with the ${weapon.name}'s other end: ${foe.name} (${healthNote(foe, access)})`,
       }));
   });
 }
@@ -155,7 +156,7 @@ function hewOptions(
       .filter((foe) => foe.side !== actor.side)
       .map((foe) => ({
         id: encodeOption(HEW, foe.id, action.id),
-        label: `Hew with the ${action.name}: ${foe.name} (${String(foe.hp)} HP)`,
+        label: `Hew with the ${action.name}: ${foe.name} (${healthNote(foe, access)})`,
       }));
   });
 }
@@ -198,7 +199,7 @@ function strikeOptions(
       .filter((foe) => foe.side !== actor.side)
       .map((foe) => ({
         id: encodeOption(STRIKE, foe.id, action.id),
-        label: `${action.name}: ${foe.name} (${String(foe.hp)} HP), ${String(left)} ${left === 1 ? "attack" : "attacks"} left`,
+        label: `${action.name}: ${foe.name} (${healthNote(foe, access)}), ${String(left)} ${left === 1 ? "attack" : "attacks"} left`,
       }));
   });
 }

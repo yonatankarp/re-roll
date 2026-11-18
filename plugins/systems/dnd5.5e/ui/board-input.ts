@@ -28,7 +28,7 @@ import {
   showRoute,
   squareAt,
 } from "./board-overlays.ts";
-import { tokenAt, tokensAt } from "./board-tokens.ts";
+import { hpText, tokenAt, tokensAt } from "./board-tokens.ts";
 
 // Clicks, drags and keys on the board: each answers an option the list below also offers.
 
@@ -56,7 +56,7 @@ function openMenu(
   pointer = false,
 ): void {
   const own = id === PLAYER_ACTOR;
-  // Study stays in the Actions tab, so a click on a foe out of reach still does nothing.
+  // Study stays in the Actions tab, so a click on a foe out of reach only says it's out of reach.
   const options = playerOptions(ctx).filter((option) => {
     if (SQUARE.test(option.id) || option.id === MOVE) return false;
     if (option.id.startsWith(STUDY)) return false;
@@ -72,6 +72,34 @@ function openMenu(
     );
   });
   if (options.length === 0) {
+    const token = ctx.tokens.get(id);
+    const player = ctx.tokens.get(PLAYER_ACTOR);
+    // A foe with nothing to do to it, on the player's turn, says why rather than only its name: out of
+    // reach while an attack on another foe is still on offer, or else no attack left.
+    if (
+      token &&
+      player &&
+      token.side !== player.side &&
+      playerOptions(ctx).length > 0
+    ) {
+      const canAttack = playerOptions(ctx).some((option) => {
+        const target = parseOption(option.id)[1]?.replace(AIM, "");
+        return (
+          target !== undefined && ctx.tokens.get(target)?.side === token.side
+        );
+      });
+      ctx.menu.replaceChildren(
+        el(
+          "p",
+          "dnd-menu-note",
+          canAttack
+            ? `${token.name} is out of reach. Move closer first.`
+            : "You have no attack left this turn.",
+        ),
+      );
+      placeMenu(ctx, anchor);
+      return;
+    }
     closeMenu(ctx);
     return;
   }
@@ -96,14 +124,21 @@ function openMenu(
       return button;
     }),
   );
+  placeMenu(ctx, anchor);
+}
+
+// Beside the token, kept inside the board by the menu's own width, however narrow the board is.
+function placeMenu(ctx: BoardContext, anchor: HTMLElement): void {
+  ctx.menu.hidden = false;
+  ctx.menu.style.left = "0px"; // measured from the left, where it has the whole board's width
   const box = ctx.board.getBoundingClientRect();
   const at = anchor.getBoundingClientRect();
-  ctx.menu.style.left = `${String(Math.max(0, Math.min(at.right - box.left, box.width - 220)))}px`;
+  const width = ctx.menu.offsetWidth;
+  ctx.menu.style.left = `${String(Math.max(0, Math.min(at.right - box.left, box.width - width)))}px`;
   // In the lower half it opens upwards, so the board's edge doesn't cut it off.
   const lower = at.top - box.top > box.height / 2;
   ctx.menu.style.top = lower ? "" : `${String(at.top - box.top)}px`;
   ctx.menu.style.bottom = lower ? `${String(box.bottom - at.bottom)}px` : "";
-  ctx.menu.hidden = false;
 }
 
 // "C4" for the third column of the fourth row, as the move list names squares.
@@ -135,10 +170,7 @@ export function placeCursor(ctx: BoardContext, x: number, y: number): void {
   const name = squareName(ctx.cursor.x, ctx.cursor.y);
   if (found) {
     ctx.said.textContent = `${name}: ${tokensAt(ctx, ctx.cursor.x, ctx.cursor.y)
-      .map(
-        ([, token]) =>
-          `${token.name}, ${String(Math.max(0, token.hp))} of ${String(token.maxHp)} HP`,
-      )
+      .map(([, token]) => `${token.name}, ${hpText(token)}`)
       .join("; ")}.`;
   } else {
     ctx.said.textContent = cell
@@ -355,7 +387,10 @@ export function wireInput(ctx: BoardContext): void {
         ctx.menuFor = found[0];
         const first = ctx.menu.querySelector<HTMLElement>("button");
         if (first && !ctx.menu.hidden) first.focus();
-        else ctx.said.textContent = "Nothing to do there.";
+        else
+          ctx.said.textContent = ctx.menu.hidden
+            ? "Nothing to do there."
+            : ctx.menu.textContent; // such as out of reach
       } else if (cell) {
         answerCell(ctx, cell);
       }

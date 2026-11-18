@@ -1028,7 +1028,7 @@ describe("playing a D&D adventure", () => {
     expect(chosen.state.story.scene).toBe("road");
     const player = systemState(chosen.state).actors[PLAYER_ACTOR];
     expect(player?.hp).toBe(12);
-    expect(player?.name).toBe("Human Fighter");
+    expect(player?.name).toBe("Hollis Brand");
   });
 
   it("gives companions real characters from the start", async () => {

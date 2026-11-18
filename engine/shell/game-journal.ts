@@ -2,6 +2,8 @@ import type { GameView } from "./session.ts";
 import type { GamePage } from "./game-page.ts";
 import { el, enter } from "./dom.ts";
 
+const LOG_KEPT = 500;
+
 // The journal's new lines, the ticker of the latest under the board, a level-up, and the About section.
 
 export function drawJournal(
@@ -23,12 +25,21 @@ export function drawJournal(
       ),
     ),
   );
+  // A long run's journal keeps its newest lines, so the page doesn't grow without end.
+  while (page.log.childElementCount > LOG_KEPT)
+    page.log.firstElementChild?.remove();
   page.linesShown = view.log.length;
   page.journalTabsView.update(view);
   page.log.scrollTop = page.log.scrollHeight;
   const levels = added.filter((line) => line.moment === "levelUp");
   // A card stands in for the prompt, which repeats a journal line, so the ticker leaves that line out.
+  // Only what happened since the latest scene began: the last scene's check result doesn't follow the party.
+  // Coming from making the character, what led in, such as who you are playing, still shows.
+  const sceneStart = page.tickerInPlay
+    ? added.findLastIndex((line) => line.kind === "scene")
+    : -1;
   const events = added
+    .slice(sceneStart + 1)
     .filter((line) => line.kind === "event" && !levels.includes(line))
     .filter((line) => !(view.card && line.text === decision?.prompt));
   // A fight has more to tell; the player's own latest result stays, even when allies act after it.
@@ -71,6 +82,7 @@ export function drawJournal(
     page.levelUp.hidden = true;
   }
   page.tickerScene = view.scene;
+  page.tickerInPlay = view.creation === null;
   page.about.replaceChildren(
     el("summary", { text: "About" }),
     el("p", { text: `Re-roll. ${view.about}` }),

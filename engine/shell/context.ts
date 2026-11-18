@@ -1,6 +1,7 @@
 import type { Board, BoardHost } from "./system-ui.ts";
 import type { AdventureChoice, Game, SaveChoice } from "./session.ts";
 import { el } from "./dom.ts";
+import { PlayerError } from "./player-error.ts";
 
 // What every screen shares: the game, the page's fixed parts, the state the screens hand each other, and
 // the way to move between screens. mountShell makes it once; each screen takes it.
@@ -9,6 +10,8 @@ export const OPENING = "Opening the book…";
 export const CANT_OPEN = "This adventure couldn't be opened.";
 export const CANT_LOAD =
   "This save couldn't be opened. It may be damaged, or from an older version of the adventure.";
+export const SOMETHING_WRONG =
+  "That didn't work. Try again; Details says what went wrong.";
 const BUSY_AFTER_MS = 300; // a step quicker than this shows no overlay, so it doesn't flicker
 
 // A system's own encounter view, such as a combat board, keyed by system id. It draws its own DOM in the slot,
@@ -131,10 +134,9 @@ export function act(
   work()
     .catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
-      if (failed) ctx.say(failed, true, message);
-      else if (message.includes("\n"))
-        ctx.say("Something went wrong.", true, message);
-      else ctx.say(message, true);
+      // The engine's own messages name options and decisions by id, so only a PlayerError is shown as it is.
+      if (error instanceof PlayerError) ctx.say(message, true);
+      else ctx.say(failed || SOMETHING_WRONG, true, message);
     })
     .finally(() => {
       clearTimeout(slow);

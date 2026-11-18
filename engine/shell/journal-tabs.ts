@@ -1,4 +1,5 @@
 import type { GameView, RollLine } from "./session.ts";
+import { el } from "./dom.ts";
 
 // The Journal's tabs: the story so far, the rolls made, and the leads found. Also the small
 // "why?" pop-over under the ticker, with the rolls of the latest choice. Knows no rule system:
@@ -6,41 +7,26 @@ import type { GameView, RollLine } from "./session.ts";
 
 const SHOWN_ROLLS = 100; // the Rolls tab is a recent history, not the whole run
 
-function node<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className: string,
-  text?: string,
-  ...children: readonly Node[]
-): HTMLElementTagNameMap[K] {
-  const item = document.createElement(tag);
-  if (className) item.className = className;
-  if (text !== undefined) item.textContent = text;
-  item.append(...children);
-  return item;
-}
-
 // "Sera · Longsword → Goblin · 14 + 5 = 19 vs AC 15 ✓", with the mark spoken as a word.
 function rollItem(roll: RollLine): HTMLLIElement {
   const mark =
     roll.success === null
       ? []
       : [
-          node(
-            "span",
-            roll.success ? "roll-mark hit" : "roll-mark miss",
-            roll.success ? " ✓" : " ✗",
-          ),
+          el("span", {
+            class: roll.success ? "roll-mark hit" : "roll-mark miss",
+            text: roll.success ? " ✓" : " ✗",
+          }),
         ];
   for (const item of mark) {
     item.setAttribute("aria-label", roll.success ? "success" : "failure");
   }
-  return node(
+  return el(
     "li",
-    "roll",
-    undefined,
-    node("span", "roll-who", roll.actor),
+    { class: "roll" },
+    el("span", { class: "roll-who", text: roll.actor }),
     document.createTextNode(` · ${roll.label} · `),
-    node("span", "roll-math", roll.math),
+    el("span", { class: "roll-math", text: roll.math }),
     ...mark,
   );
 }
@@ -50,18 +36,18 @@ export function journalTabs(story: HTMLElement): {
   readonly body: HTMLElement;
   readonly update: (view: GameView) => void;
 } {
-  const rolls = node("ol", "rolls");
+  const rolls = el("ol", { class: "rolls" });
   rolls.setAttribute("aria-label", "Recent rolls, newest first");
-  const leads = node("div", "leads");
+  const leads = el("div", { class: "leads" });
   const panels = { Story: story, Rolls: rolls, Leads: leads } as const;
   type Tab = keyof typeof panels;
   let open: Tab = "Story";
   let last: GameView | null = null;
   let seen: number | null = null; // the step the leads were last looked at, so later ones are new
 
-  const tabs = node("div", "tabs");
+  const tabs = el("div", { class: "tabs" });
   const buttons = (Object.keys(panels) as Tab[]).map((name) => {
-    const tab = node("button", "tab", name);
+    const tab = el("button", { class: "tab", text: name });
     tab.type = "button";
     tab.addEventListener("click", () => {
       open = name;
@@ -70,11 +56,10 @@ export function journalTabs(story: HTMLElement): {
     return [name, tab] as const;
   });
   tabs.append(...buttons.map(([, tab]) => tab));
-  const head = node(
+  const head = el(
     "div",
-    "journal-head",
-    undefined,
-    node("h2", "", "Journal"),
+    { class: "journal-head" },
+    el("h2", { text: "Journal" }),
     tabs,
   );
 
@@ -95,7 +80,7 @@ export function journalTabs(story: HTMLElement): {
     }
     rolls.replaceChildren(
       ...(view.rolls.length === 0
-        ? [node("li", "empty", "No rolls yet.")]
+        ? [el("li", { class: "empty", text: "No rolls yet." })]
         : view.rolls
             .slice(-SHOWN_ROLLS)
             // The latest choice first, but its rolls in the order they happened, so damage follows its hit.
@@ -112,24 +97,23 @@ export function journalTabs(story: HTMLElement): {
     leads.replaceChildren(
       ...(view.leads.length === 0
         ? [
-            node(
-              "p",
-              "empty",
-              "No leads yet. The clues you find are kept here.",
-            ),
+            el("p", {
+              class: "empty",
+              text: "No leads yet. The clues you find are kept here.",
+            }),
           ]
         : view.leads.map((group) =>
-            node(
+            el(
               "ul",
-              "lead",
-              undefined,
+              { class: "lead" },
               ...group.clues.map((clue) => {
                 const fresh = clue.step >= (seen ?? 0);
-                return node(
+                return el(
                   "li",
-                  fresh ? "new" : "",
-                  undefined,
-                  ...(fresh ? [node("span", "new-mark", "New")] : []),
+                  { class: fresh ? "new" : "" },
+                  ...(fresh
+                    ? [el("span", { class: "new-mark", text: "New" })]
+                    : []),
                   document.createTextNode(clue.text),
                 );
               }),
@@ -142,7 +126,7 @@ export function journalTabs(story: HTMLElement): {
   };
   return {
     head,
-    body: node("div", "journal-panels", undefined, story, rolls, leads),
+    body: el("div", { class: "journal-panels" }, story, rolls, leads),
     update,
   };
 }
@@ -152,12 +136,11 @@ export function rollsWhy(): {
   readonly node: HTMLDetailsElement;
   readonly update: (view: GameView | null) => void;
 } {
-  const list = node("ol", "rolls");
-  const why = node(
+  const list = el("ol", { class: "rolls" });
+  const why = el(
     "details",
-    "rolls-why",
-    undefined,
-    node("summary", "", "Why?"),
+    { class: "rolls-why" },
+    el("summary", { text: "Why?" }),
     list,
   );
   why.hidden = true;

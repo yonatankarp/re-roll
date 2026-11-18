@@ -7,8 +7,9 @@ import type { NarrationHealth } from "./sound-settings.ts";
 // Reads the scene aloud: a clip made ahead of time (npm run narrate) when there is one, or else
 // read in a worker, a sentence at a time, as it plays. On a CPU that reads slower than speech,
 // the scenes the choices lead to are read ahead while the player listens. Play, pause and skip;
-// a new scene or a choice stops it, and it never moves the story on. If no voice can be had,
-// the controls hide for that scene rather than fall back to a robotic one.
+// a new scene or a choice stops it, and it never moves the story on. The voice is downloaded only
+// once the player asks for it. If no voice can be had, the controls say why and offer to try again,
+// rather than fall back to a robotic one.
 
 // The narrator's play and pause marks, drawn in the button's ink rather than as text glyphs.
 const PLAY_ICON =
@@ -28,6 +29,7 @@ interface Clip {
   lastPiece: number; // when its last piece came
   done: boolean;
   failed: boolean;
+  why: string | null; // when failed, what the player is told, or null when the voice is only waiting to be allowed
   job: number | null; // the worker's reading of it, while that's under way
   readonly text: string; // as sent to the worker, to send again after a restart
   readonly voice: string;
@@ -42,6 +44,24 @@ let loading: ((percent: number) => void) | null = null;
 let heard = 0; // when the worker last said anything
 let restarts = 0;
 let cpu = false; // after a hung reading, the CPU model for the rest of the session
+// The voice is a big download, so it's fetched only once the player has asked for it, and that's remembered.
+const ALLOWED_KEY = "re-roll-voice-allowed";
+let voiceAllowed = ((): boolean => {
+  try {
+    return localStorage.getItem(ALLOWED_KEY) === "1";
+  } catch {
+    return false;
+  }
+})();
+function allowVoice(): void {
+  voiceAllowed = true;
+  try {
+    localStorage.setItem(ALLOWED_KEY, "1");
+  } catch {
+    // Storage blocked: asked again next launch.
+  }
+}
+const CANT_READ = "The narrator couldn't read this scene";
 // Readings asked for while the page is hidden, sent once it's shown. WebKit slows a hidden page's
 // GPU work, and a WebGPU reading started then once hung for good. One already under way goes on,
 // so a scene being listened to from another window isn't cut off.
@@ -123,6 +143,7 @@ function narrationWorker(): Worker | null {
             working.delete(reply.id);
             clip.job = null;
             clip.failed = true;
+            clip.why = `${CANT_READ}: ${reply.message}`;
             clips.delete(clip.key);
             console.warn(`Narration unavailable: ${reply.message}`);
           }
@@ -140,6 +161,7 @@ function narrationWorker(): Worker | null {
         for (const clip of working.values()) {
           clip.job = null;
           clip.failed = true;
+          clip.why = `${CANT_READ}: the voice didn't load on this device.`;
           clips.delete(clip.key);
           tell(clip);
         }
@@ -208,6 +230,7 @@ setInterval(() => {
       speak(clip);
     } else {
       clip.failed = true;
+      clip.why = `${CANT_READ}: the voice stopped answering.`;
       clips.delete(clip.key);
       tell(clip);
     }
@@ -279,6 +302,7 @@ function obtain(
     lastPiece: 0,
     done: false,
     failed: false,
+    why: null,
     job: null,
     text, // its paragraphs too, for the longer pause between them
     voice,
@@ -294,11 +318,18 @@ function obtain(
       if (recorded) {
         clip.buffers.push(recorded);
         clip.done = true;
-      } else if (clips.get(key) === clip && narrationWorker()) {
+      } else if (clips.get(key) !== clip) {
+        return; // dropped while its recording was looked for
+      } else if (!voiceAllowed) {
+        clip.failed = true; // why stays null: the player is asked first
+        clips.delete(key);
+      } else if (narrationWorker()) {
         speak(clip);
         return;
       } else {
         clip.failed = true;
+        clip.why = `${CANT_READ}: this device can't run the voice.`;
+        clips.delete(key);
       }
       tell(clip);
     },
@@ -354,6 +385,8 @@ export function narrator(
     held: boolean; // waiting for enough to be read, at the start or after running dry
   } | null = null;
   let readAhead = false;
+  // Why the scene isn't being read, shown until the player tries again: a failure, or the ask to download.
+  let notice: { readonly text: string; readonly button: string } | null = null;
   let recheck: ReturnType<typeof setTimeout> | undefined; // while held, as the piece being read gets nearer
 
   const speaking = (): boolean => reading?.source != null && !reading.paused;
@@ -368,12 +401,13 @@ export function narrator(
       ? "Pause"
       : reading?.paused
         ? "Resume"
-        : "Read aloud";
+        : (notice?.button ?? "Read aloud");
     play.innerHTML = speaking() ? PAUSE_ICON : PLAY_ICON;
     play.append(label);
     play.disabled = waiting;
     skip.hidden = reading === null;
-    if (!waiting) status.textContent = "";
+    if (!waiting)
+      status.textContent = reading === null ? (notice?.text ?? "") : "";
     else if (!status.textContent) status.textContent = "Preparing voice…";
     onChange();
   };
@@ -401,7 +435,12 @@ export function narrator(
     const { clip } = reading;
     if (clip.failed) {
       reading = null;
-      controls.hidden = true; // no voice for this scene, so it just isn't read
+      notice = clip.why
+        ? { text: clip.why, button: "Try again" }
+        : {
+            text: "Reading aloud downloads the narrator's voice once (90 MB).",
+            button: "Download voice",
+          };
       draw();
       return;
     }
@@ -470,12 +509,15 @@ export function narrator(
       paused: false,
       held: true,
     };
+    notice = null;
     loading = (percent) => {
       if (reading?.clip === clip && !reading.source) {
         status.textContent =
-          health.store === "none"
-            ? `Downloading voice… ${String(percent)}% (not kept on this device)`
-            : `Preparing voice… ${String(percent)}%`;
+          percent >= 100
+            ? "Voice downloaded. Getting ready to read…"
+            : health.store === "none"
+              ? `Downloading voice… ${String(percent)}% (not kept on this device)`
+              : `Downloading voice… ${String(percent)}%`;
       }
     };
     draw();
@@ -484,6 +526,7 @@ export function narrator(
 
   play.addEventListener("click", () => {
     if (!reading) {
+      allowVoice(); // pressing Read aloud or Download voice is the player's say-so
       start();
     } else if (reading.paused) {
       reading.paused = false;
@@ -507,6 +550,7 @@ export function narrator(
       if (key === shown) return;
       shown = key;
       stop();
+      notice = null;
       readAhead = false;
       scene = text === null ? null : { text, ahead, root, voice };
       controls.hidden = text === null;

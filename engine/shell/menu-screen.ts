@@ -13,7 +13,45 @@ import { button, el } from "./dom.ts";
 
 // The main menu, and the screen for loading a save.
 
+// A menu that can't be read, say the content or the saves won't open, says so and offers to try again,
+// rather than leave an empty page.
 export async function showMenu(ctx: ShellContext): Promise<void> {
+  try {
+    await drawMenu(ctx);
+  } catch (error) {
+    ctx.actions.replaceChildren();
+    const heading = el("h2", { text: "The menu couldn't be opened" });
+    heading.tabIndex = -1;
+    ctx.screen.replaceChildren(
+      el(
+        "section",
+        { class: "menu" },
+        heading,
+        el("p", {
+          text: "The game couldn't read its adventures or saves. Try again, or restart the game.",
+        }),
+        el(
+          "details",
+          {},
+          el("summary", { text: "Details" }),
+          el("pre", {
+            text: error instanceof Error ? error.message : String(error),
+          }),
+        ),
+        el(
+          "div",
+          { class: "options" },
+          button("Try again", () => {
+            ctx.act(ctx.showMenu);
+          }),
+        ),
+      ),
+    );
+    ctx.focusNext = heading;
+  }
+}
+
+async function drawMenu(ctx: ShellContext): Promise<void> {
   ctx.actions.replaceChildren();
   document.title = "Re-roll";
   const listing = ctx.game.listAdventures();
@@ -72,6 +110,9 @@ export async function showMenu(ctx: ShellContext): Promise<void> {
         ]
       : [];
   });
+  const noMatch = el("p", { class: "empty" });
+  noMatch.setAttribute("role", "status");
+  noMatch.hidden = true;
   filter.addEventListener("input", () => {
     const wanted = filter.value.trim().toLowerCase();
     for (const group of groups) {
@@ -81,7 +122,30 @@ export async function showMenu(ctx: ShellContext): Promise<void> {
       }
       group.hidden = rows.every((item) => item.hidden);
     }
+    noMatch.hidden = groups.some((group) => !group.hidden);
+    noMatch.textContent = noMatch.hidden
+      ? ""
+      : `No adventure's title has “${filter.value.trim()}” in it. Try a shorter word.`;
   });
+  const more = [
+    ...storeOption(ctx),
+    ...contentFolderOption(ctx.act, ctx.showMenu, (text) => {
+      ctx.say(text);
+    }),
+  ];
+  // With nothing to play, the page says where adventures come from.
+  const none =
+    adventures.length === 0
+      ? [
+          el("p", {
+            class: "empty",
+            text:
+              more.length > 0
+                ? "There are no adventures here yet. Install one from the Store or a zip, or open the content folder and put one there."
+                : "There are no adventures here yet. Put an adventure plugin in the game's plugins folder, then reload the page.",
+          }),
+        ]
+      : [];
 
   // Saves come newest first, so the first is the game to carry on with. It reads as its save card does.
   const [newest] = playable;
@@ -112,8 +176,10 @@ export async function showMenu(ctx: ShellContext): Promise<void> {
           ]
         : []),
       heading,
-      filter,
+      ...(adventures.length > 0 ? [filter] : []),
       ...groups,
+      noMatch,
+      ...none,
       ...(books.length > 0
         ? [
             el(
@@ -125,14 +191,7 @@ export async function showMenu(ctx: ShellContext): Promise<void> {
             ),
           ]
         : []),
-      ...storeOption(ctx),
-      ...contentFolderOption(
-        ctx.act,
-        () => showMenu(ctx),
-        (text) => {
-          ctx.say(text);
-        },
-      ),
+      ...more,
     ),
   );
   ctx.focusNext = heading;

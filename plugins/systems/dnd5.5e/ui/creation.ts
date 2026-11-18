@@ -433,6 +433,7 @@ export function pregenChoices(
       id: option.id,
       label: pregen.name,
       summary: [
+        pregen.hero,
         `Level ${String(pregen.build.levels.length)}`,
         nameOf(access, pregen.build.backgroundId),
       ]

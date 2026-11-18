@@ -1,4 +1,5 @@
 import type { ShopCard, ShopView } from "./system-ui.ts";
+import { el } from "./dom.ts";
 
 // A merchant's screen in place of the choices: the merchant, the purse, and Buy and Sell tabs of item cards.
 // Knows no rules: every card's button answers the pending decision with the option the system gave it.
@@ -9,17 +10,6 @@ const TABS: readonly { readonly id: Tab; readonly label: string }[] = [
   { id: "sell", label: "Sell" },
 ];
 
-function node<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className: string,
-  text = "",
-): HTMLElementTagNameMap[K] {
-  const item = document.createElement(tag);
-  if (className) item.className = className;
-  item.textContent = text;
-  return item;
-}
-
 export function shopPanel(
   answer: (optionId: string) => void,
   coin: () => void, // played on a trade, when sound is on
@@ -28,29 +18,29 @@ export function shopPanel(
   readonly update: (view: ShopView | null) => void;
   readonly focusTarget: () => HTMLElement | null; // where focus goes after a redraw, while open
 } {
-  const element = node("section", "shop");
+  const element = el("section", { class: "shop" });
   element.hidden = true;
   let tab: Tab = "buy";
   let shown: ShopView | null = null;
   let refocus: string | null = null; // the card traded, so focus stays there after the redraw
 
-  const head = node("header", "shop-head");
-  const title = node("h3", "");
-  const purse = node("p", "shop-purse");
+  const head = el("header", { class: "shop-head" });
+  const title = el("h3");
+  const purse = el("p", { class: "shop-purse" });
   head.append(title, purse);
-  const tabList = node("div", "shop-tabs");
+  const tabList = el("div", { class: "shop-tabs" });
   tabList.setAttribute("role", "tablist");
-  const panel = node("div", "shop-wares");
+  const panel = el("div", { class: "shop-wares" });
   panel.setAttribute("role", "tabpanel");
   panel.id = "shop-wares";
-  const leave = node("button", "shop-leave", "Leave");
+  const leave = el("button", { class: "shop-leave", text: "Leave" });
   leave.type = "button";
   leave.addEventListener("click", () => {
     if (shown) answer(shown.leave);
   });
 
   const tabButtons = TABS.map(({ id, label }) => {
-    const item = node("button", "shop-tab", label);
+    const item = el("button", { class: "shop-tab", text: label });
     item.type = "button";
     item.id = `shop-tab-${id}`;
     item.setAttribute("role", "tab");
@@ -73,15 +63,15 @@ export function shopPanel(
   element.append(head, tabList, panel, leave);
 
   const card = (ware: ShopCard, index: number): HTMLElement => {
-    const item = node("article", "ware");
+    const item = el("article", { class: "ware" });
     item.dataset.item = ware.item;
     item.style.setProperty("--i", String(index));
     const verb = tab === "buy" ? "Buy" : "Sell";
-    const trade = node("button", "ware-trade");
+    const trade = el("button", { class: "ware-trade" });
     trade.type = "button";
     trade.append(
-      node("span", "", verb),
-      node("span", "ware-price", ware.price),
+      el("span", { text: verb }),
+      el("span", { class: "ware-price", text: ware.price }),
     );
     trade.setAttribute("aria-label", `${verb} ${ware.name} for ${ware.price}`);
     trade.disabled = ware.option === null;
@@ -95,9 +85,11 @@ export function shopPanel(
       });
     }
     item.append(
-      node("h4", "", ware.name),
-      ...(ware.summary ? [node("p", "ware-summary", ware.summary)] : []),
-      ...(ware.note ? [node("p", "ware-note", ware.note)] : []),
+      el("h4", { text: ware.name }),
+      ...(ware.summary
+        ? [el("p", { class: "ware-summary", text: ware.summary })]
+        : []),
+      ...(ware.note ? [el("p", { class: "ware-note", text: ware.note })] : []),
       trade,
     );
     return item;
@@ -118,11 +110,11 @@ export function shopPanel(
       ...(wares.length > 0
         ? wares.map(card)
         : [
-            node(
-              "p",
-              "ware-none",
-              tab === "buy" ? "Nothing left to buy." : "Nothing they'll buy.",
-            ),
+            el("p", {
+              class: "ware-none",
+              text:
+                tab === "buy" ? "Nothing left to buy." : "Nothing they'll buy.",
+            }),
           ]),
     );
   };
