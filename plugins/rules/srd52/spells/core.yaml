@@ -9474,7 +9474,28 @@
     60 feet away from itself. Healing Touch (Celestial Only; Recharges after a
     Long Rest). One creature within 5 feet of the steed regains a number of Hit
     Points equal to 2d8 plus the spell’s level."
-  automation: text
+  automation: full
+  # shortcut: the steed stays between fights until it dies, and it's the one form its stat block plays.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "self": true },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "summon",
+                "companion": "phb:companion/otherworldly-steed",
+                "duration": "instantaneous",
+                "range": 30,
+                "lasting": true,
+              },
+            ],
+        },
+    }
 - id: srd52:spell/fire-bolt
   name: Fire Bolt
   level: 0

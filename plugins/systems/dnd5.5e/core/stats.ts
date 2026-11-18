@@ -3118,6 +3118,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       partial.spellAbility,
       partial.passives,
     ),
+    // A known spell that gives a lasting companion, as Homunculus Servant's, gives it as a feature would.
+    passives: [...partial.passives, ...spellCompanions(knownSpells, access)],
     maxHp: partial.maxHp + passiveBonus(partial, "maxHp"),
     initiative: partial.initiative + passiveBonus(partial, "initiative"),
     speed: Math.max(
@@ -3172,6 +3174,26 @@ function itemPools(actor: Actor, access: ContentAccess): ResourceDef[] {
     }
   }
   return [...pools.values()];
+}
+
+// shortcut: as with a familiar, knowing the spell is enough, with no slot or casting time spent between fights.
+function spellCompanions(
+  knownSpells: ReadonlySet<string>,
+  access: ContentAccess,
+): Passive[] {
+  return [...knownSpells].flatMap((spellId) => {
+    const spell = SpellSchema.safeParse(access.content(spellId)).data;
+    return spell?.companion
+      ? [
+          {
+            kind: "lastingCompanion" as const,
+            ...spell.companion,
+            free: true as const,
+            level: spell.level,
+          },
+        ]
+      : [];
+  });
 }
 
 const chosenForm = (passive: Passive | undefined): string | undefined =>

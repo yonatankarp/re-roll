@@ -38,21 +38,40 @@ function grants(
   stats: Stats,
   access: ContentAccess,
 ): Omit<Held, "hp">[] {
-  return stats.passives.flatMap((passive) => {
+  return stats.passives.flatMap((passive): Omit<Held, "hp">[] => {
     if (passive.kind !== "lastingCompanion") return [];
-    const companion = lookup(access, CompanionSchema, passive.companion);
-    const play = companion.play;
+    const numbers = {
+      feature: passive.companion,
+      companion: passive.companion,
+      proficiency: stats.proficiency,
+      spellAttack: spellAttackBonus(stats),
+      spellDc: spellSaveDc(stats),
+      ...(passive.free ? { free: true as const } : {}),
+    };
+    // Create Homunculus's: a monster's stat block as it's printed.
+    if (passive.monster) {
+      const monster = MonsterSchema.safeParse(
+        access.content(passive.companion),
+      ).data;
+      return monster
+        ? [{ ...numbers, maxHp: monster.hp, monster: true as const }]
+        : [];
+    }
+    const companion = CompanionSchema.safeParse(
+      access.content(passive.companion),
+    ).data;
+    const play = companion?.play;
     if (!play) return [];
     const ac = play.owner?.ac && evaluateFormula(play.owner.ac, stats);
+    const level = passive.level ?? play.level;
     return [
       {
-        feature: passive.companion,
-        companion: passive.companion,
-        maxHp: play.owner ? evaluateFormula(play.owner.hp, stats) : play.hp,
+        ...numbers,
+        maxHp: play.owner
+          ? evaluateFormula(play.owner.hp, stats)
+          : play.hp + play.hpPerLevel * Math.max(0, level - play.level),
         ...(ac ? { ac } : {}),
-        proficiency: stats.proficiency,
-        spellAttack: spellAttackBonus(stats),
-        spellDc: spellSaveDc(stats),
+        ...(passive.level ? { level } : {}),
       },
     ];
   });
@@ -78,7 +97,8 @@ export function companionFoundEvents(
           held.ac !== found.ac ||
           held.spellAttack !== found.spellAttack ||
           held.spellDc !== found.spellDc ||
-          held.proficiency !== found.proficiency);
+          held.proficiency !== found.proficiency ||
+          held.level !== found.level);
       const due =
         !held ||
         (when !== "fight" && changed) ||
@@ -116,7 +136,14 @@ export function companionActors(
     );
     const worn = gear.length > 0 ? { gear } : {};
     return (owner.companions ?? []).flatMap((held) => {
-      if (held.hp <= 0 || (!held.free && !given.has(held.feature))) return [];
+      // A Find Steed steed stays until it dies; anything else only while a feature or known spell gives it.
+      if (held.hp <= 0) return [];
+      if (
+        !given.has(held.feature) &&
+        !(held.free && held.level !== undefined)
+      ) {
+        return [];
+      }
       const slug = held.companion.slice(held.companion.lastIndexOf("/") + 1);
       // Find Greater Steed's mount: a monster's stat block, called by its owner.
       if (held.monster) {

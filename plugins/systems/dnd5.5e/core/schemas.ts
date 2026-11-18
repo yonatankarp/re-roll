@@ -3653,6 +3653,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("lastingCompanion"),
     companion: ContentIdSchema,
+    // a monster's stat block, as Create Homunculus's; needing no command, and with a spell's level for its numbers,
+    // as Homunculus Servant's
+    monster: z.literal(true).optional(),
+    free: z.literal(true).optional(),
+    level: z.number().int().min(1).max(9).optional(),
   }),
   // A spell the bearer casts on itself also lands on its lasting companions within `within` feet, as Share Spells.
   z.strictObject({
@@ -4730,6 +4735,14 @@ export const SpellSchema = ContentEntrySchema.extend({
   // Why a spell with no activation needs none: it takes longer than a turn to cast ("castingTime"), or does
   // nothing a grid fight plays, such as travel, senses, talk or downtime ("utility").
   outOfCombat: z.enum(["castingTime", "utility"]).optional(),
+  // Knowing it gives the caster a lasting companion, as a feature's `lastingCompanion` passive would, with the spell's
+  // level for its numbers, as Homunculus Servant's (combat/companions.ts).
+  companion: z
+    .strictObject({
+      companion: ContentIdSchema,
+      monster: z.literal(true).optional(),
+    })
+    .optional(),
   // Knowing it gives the caster a familiar in this monster's form, which joins each fight (combat/familiar.ts).
   // shortcut: the form is the one given here rather than the caster's choice, and its type is Fey.
   familiar: z.strictObject({ form: ContentIdSchema }).optional(),
