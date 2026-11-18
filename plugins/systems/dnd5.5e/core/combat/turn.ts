@@ -1118,7 +1118,6 @@ export const turnFrames = {
   }),
 };
 
-
 // Heroism: Temporary Hit Points as the bearer's turn starts, from its caster's numbers, the best of them.
 function turnTempHpEvents(actor: Actor, context: Context): SystemEvent[] {
   const gains = actor.activeEffects.flatMap(({ modifier, casterId }) =>
