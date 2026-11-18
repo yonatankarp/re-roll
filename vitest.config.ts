@@ -11,6 +11,27 @@ export default defineConfig({
       include: ["{engine,plugins,app}/**/*.{ts,js}"],
       exclude: ["app/desktop/src-tauri/**"], // Rust build output, once the app is built
       reporter: ["text-summary", "html"],
+      // Just under the numbers of November 2026. Raise them as coverage grows; CI's coverage job reports a miss.
+      thresholds: {
+        "engine/run/**": {
+          statements: 100,
+          branches: 100,
+          functions: 100,
+          lines: 100,
+        },
+        "engine/kernel/**": {
+          statements: 100,
+          branches: 100,
+          functions: 100,
+          lines: 100,
+        },
+        "plugins/systems/dnd5.5e/core/combat{.ts,/**}": {
+          statements: 100,
+          branches: 100,
+          functions: 100,
+          lines: 100,
+        },
+      },
     },
     projects: [
       {
