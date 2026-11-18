@@ -89,7 +89,7 @@ import {
   type Targeting,
 } from "../schemas.ts";
 import { bossAction } from "../legendary.ts";
-import { currentShape } from "../forms.ts";
+import { currentShape, formOf } from "../forms.ts";
 import { aimScore, aimSquares, caughtBy } from "../targeting.ts";
 import { breathAgainEvents } from "./water.ts";
 
@@ -750,13 +750,25 @@ export const SPLITS = "splits";
 
 // A creature's size, as its index in SIZES.
 export function sizeOf(actor: Actor, access: ContentAccess): number {
-  return Math.max(
-    0,
-    printedSize(actor, access) - (actor.resourcesSpent[SPLITS] ?? 0),
-  );
+  let size = printedSize(actor, access) - (actor.resourcesSpent[SPLITS] ?? 0);
+  // Enlarge/Reduce or Large Form: a size set, then grown or shrunk.
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind === "size" && modifier.set) {
+      size = SIZES.indexOf(modifier.set);
+    }
+  }
+  for (const { modifier } of actor.activeEffects) {
+    if (modifier.kind === "size") size += modifier.grow ?? 0;
+  }
+  return Math.min(SIZES.length - 1, Math.max(0, size));
 }
 
 function printedSize(actor: Actor, access: ContentAccess): number {
+  // A form's own size, as a Wild Shape Beast's.
+  const form = formOf(actor);
+  if (form) {
+    return SIZES.indexOf(lookup(access, MonsterSchema, form).size ?? "medium");
+  }
   if (actor.source.kind === "monster") {
     const monster = lookup(access, MonsterSchema, actor.source.statBlockId);
     const size = currentShape(monster, actor)?.size ?? monster.size;
@@ -837,6 +849,15 @@ export function canAfford(
   const limits = limitsOf(actor);
   // Befuddlement: no spells at all.
   if (limits.noSpells && action.spellLevel !== null) return false;
+  // Gaseous Form: no attack of any kind.
+  if (
+    limits.noAttacks &&
+    (resolution.kind === "attack" ||
+      (resolution.kind === "automatic" &&
+        resolution.effects.some((effect) => effect.kind === "weaponAttack")))
+  ) {
+    return false;
+  }
   if (limits.cantripsOnly && (action.spellLevel ?? 0) > 0) return false;
   // Abjure Foes: having moved this turn, it takes no action or Bonus Action.
   if (
@@ -888,6 +909,9 @@ function gatesOpen(action: KnownAction, actor: Actor, stats: Stats): boolean {
   }
   if (activation.afterBonusAction && actor.budget.bonusAction) return false;
   if (activation.while && !underEffect(actor, activation.while)) return false;
+  if (activation.whileAspect && !hasAspect(actor, activation.whileAspect)) {
+    return false;
+  }
   if (
     activation.minLevel &&
     (stats.classLevels[activation.minLevel.class] ?? 0) <
@@ -948,6 +972,12 @@ export const usedKey = (feature: string, label?: string): string =>
 
 // Whether an effect of one of these features' activations is on the actor, or it concentrates on one of these
 // spells, as a Rage for Travel along the Tree or Divine Fury.
+// Starry Form's constellation, or another transformation's option, the bearer has taken.
+export const hasAspect = (actor: Actor, name: string): boolean =>
+  actor.activeEffects.some(
+    ({ modifier }) => modifier.kind === "aspect" && modifier.name === name,
+  );
+
 export function underEffect(actor: Actor, ids: readonly string[]): boolean {
   return ids.some(
     (id) =>

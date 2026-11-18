@@ -191,7 +191,9 @@ const ActiveEffectSchema = z.strictObject({
     z.strictObject({
       kind: z.literal("form"),
       monster: ContentIdSchema,
-      keep: z.array(z.enum(["mind", "spells"])).optional(), // what it keeps of its own (stats.ts)
+      keep: z.array(z.enum(["mind", "spells", "features"])).optional(), // what it keeps of its own (stats.ts)
+      ac: z.number().int().optional(), // its AC is at least this, as with Circle Forms
+      lasting: z.literal(true).optional(), // running out of Temporary Hit Points doesn't end it, as Wild Shape
     }),
     // Riding its caster as a mount (combat/mounts.ts).
     z.strictObject({ kind: z.literal("riding") }),

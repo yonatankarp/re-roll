@@ -564,6 +564,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     uses: z.number().int().min(1).optional(),
     unarmed: z.literal(true).optional(), // only with an Unarmed Strike, as a Potion of Pugilism's
   }),
+  // The bearer's size: `set` to this one, or `grow` categories larger (smaller when negative), as Enlarge/Reduce or
+  // Large Form (combat/queries.ts sizeOf).
+  z.strictObject({
+    kind: z.literal("size"),
+    set: SizeSchema.optional(),
+    grow: z.number().int().min(-2).max(2).optional(),
+  }),
   // Limits on what the bearer can do on its turns, as Slow gives: `oneAction` is an action or a Bonus Action, not
   // both; `noActions` neither; `oneAttack` one attack with the Attack action; `speed` halves, doubles or stops its
   // Speed; `spellFailure` is the percent chance a spell with a Somatic component fails.
@@ -578,6 +585,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     speed: z.enum(["half", "double", "none"]).optional(),
     spellFailure: z.number().int().min(1).max(100).optional(),
     noSpells: z.literal(true).optional(), // it can't cast spells, as Befuddlement's
+    noAttacks: z.literal(true).optional(), // it can't attack, as in Gaseous Form
     cantripsOnly: z.literal(true).optional(), // it casts no spell but a cantrip, as after Arcane Deflection
     speedMax: z.number().int().min(0).optional(), // its Speed is at most this many feet, as Power Word Pain's
     // only one of moving, an action and a Bonus Action on its turns, as Abjure Foes' or Devious Strikes' Daze
@@ -887,6 +895,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("mark"),
     curse: z.literal(true).optional(),
   }),
+  // Which of a transformation's options the bearer has taken, by name, for what holds only `whileAspect` it lasts, as
+  // Starry Form's Archer, Chalice or Dragon.
+  z.strictObject({ kind: z.literal("aspect"), name: z.string().min(1) }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
 
@@ -1281,14 +1292,43 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
         maxSize: z
           .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
           .optional(),
+        noFly: z.literal(true).optional(), // only a form without a Fly Speed, as Wild Shape's before level 8
+        // The highest Challenge Rating by the bearer's level in `class`: the last of `tiers` it has reached (a
+        // form with a Fly Speed only from a tier with `fly`), as Wild Shape's, or the level divided by `per`, as
+        // Circle Forms'.
+        byLevel: z
+          .strictObject({
+            class: ContentIdSchema,
+            tiers: z
+              .array(
+                z.strictObject({
+                  level: z.number().int().min(1),
+                  maxCr: z.number().min(0),
+                  fly: z.literal(true).optional(),
+                }),
+              )
+              .min(1)
+              .optional(),
+            per: z.number().int().min(1).optional(),
+          })
+          .optional(),
       })
       .optional(),
-    // What the creature keeps of its own: its Intelligence, Wisdom and Charisma ("mind"), and its spellcasting.
+    // What the creature keeps of its own: its Intelligence, Wisdom and Charisma ("mind"), its spellcasting, and its
+    // features, feats and skill and save proficiencies ("features"), as Wild Shape keeps them.
     keep: z
-      .array(z.enum(["mind", "spells"]))
+      .array(z.enum(["mind", "spells", "features"]))
       .min(1)
       .optional(),
     tempHp: z.boolean().default(true), // the form's Hit Points as Temporary Hit Points
+    // this many Temporary Hit Points instead, as Wild Shape's Druid level, with `tempHpPlus` more than the form's
+    tempHpAmount: AmountSchema.optional(),
+    tempHpPlus: z.number().int().min(1).optional(), // as Hardy Transformation's 20
+    // it doesn't end when its Temporary Hit Points run out, nor take what's left of them when it ends, as Wild Shape
+    lasting: z.literal(true).optional(),
+    // the form's AC is at least this, worked out as it's taken, as Circle Forms' 13 plus the Wisdom modifier
+    acFloor: FormulaSchema.optional(),
+    untilIncapacitated: z.literal(true).optional(), // it ends once the bearer is Incapacitated, as Wild Shape does
   }),
   // Ends every spell of this level or lower that is on the target, as Dispel Magic does.
   z.strictObject({
@@ -1448,6 +1488,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // The target's Concentration ends, as entering a Rage does.
   z.strictObject({ kind: z.literal("endConcentration") }),
+  // The target's effects from these features' activations end, as leaving Wild Shape or taking another Starry Form.
+  z.strictObject({
+    kind: z.literal("endOwn"),
+    features: z.array(ContentIdSchema).min(1),
+  }),
   // The triggering Critical Hit is a normal hit instead, as Sentinel at Death's Door makes it.
   z.strictObject({ kind: z.literal("noCritical") }),
   // The melee attack that missed the bearer hits another creature of its choice within 5 feet of it instead, as
@@ -1824,6 +1869,8 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
       )
       .min(1)
       .optional(),
+    // A creature of the caster's side fails it by choice, as a willing target of Polymorph.
+    willing: z.literal(true).optional(),
     // Only a target its damage leaves with this many Hit Points or fewer saves, as Banishing Smite's.
     hpAtMost: z.number().int().min(1).optional(),
     // A target with this many Hit Points or fewer dies outright instead, without a save, as Wail of the Banshee's 50.
@@ -2200,6 +2247,7 @@ export const ActivationSchema = z.strictObject({
   // only while an effect of one of these features' activations is on the bearer, as Travel along the Tree in a Rage,
   // or while it concentrates on one of these spells, as Telekinetic Master's attack
   while: z.array(ContentIdSchema).min(1).optional(),
+  whileAspect: z.string().min(1).optional(), // only while the bearer has this `aspect`, as Starry Form's Archer's arrows
   // Only between fights, from the character sheet (camp.ts), as a spell that takes an hour to cast, as Raise Dead,
   // which needs a scene with time to rest, or "scene" for one in any scene, as Knock on a scene's lock (explore.ts).
   outOfCombat: z.union([z.literal(true), z.literal("scene")]).optional(),
@@ -2295,6 +2343,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // only while an effect of one of these features' activations is on the bearer, as Stride of the Elements' Speeds
     // in Elemental Attunement
     while: z.array(ContentIdSchema).min(1).optional(),
+    whileAspect: z.string().min(1).optional(), // only while the bearer has this `aspect`, as Starry Form's Dragon's
     concentrating: z.literal(true).optional(), // only while the bearer concentrates on a spell, as Durable Magic
   }),
   // Saves against the bearer's spells that deal one of these types have Disadvantage, as Storm's Strength.
@@ -3399,6 +3448,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("spellOverload"), resource: z.string() }),
   // Once on its turn, a melee hit after moving 10 feet closer to the target adds 1d8, as Charger's Charge Attack.
   z.strictObject({ kind: z.literal("chargeAttack") }),
+  // The bearer can cast spells in a form that keeps its features, as Beast Spells in Wild Shape, only of these
+  // schools when `school` names them, as Transmute Spells (stats.ts deriveStats).
+  z.strictObject({
+    kind: z.literal("formSpells"),
+    school: z.array(SpellSchoolSchema).min(1).optional(),
+  }),
   // Casting a spell that deals this type puts these effects on the bearer, as Flames of Phlegethos' flames.
   // With `school` instead, casting a spell of that school with an action and a spell slot does, as Bewitching
   // Magic's Misty Step after an Enchantment spell. With `uses`, casting one of these spells does, as Hunter's Rime's

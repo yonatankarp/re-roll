@@ -12,12 +12,24 @@ export function formOf(actor: Actor): string | null {
   return null;
 }
 
-// What a creature in another's form keeps of its own, as Shapechange's spellcasting.
-export function formKept(actor: Actor): readonly ("mind" | "spells")[] {
+type FormModifier = Extract<
+  Actor["activeEffects"][number]["modifier"],
+  { kind: "form" }
+>;
+
+// The form's own modifier, with what it keeps and its AC floor.
+export function formModifier(actor: Actor): FormModifier | null {
   for (const { modifier } of actor.activeEffects) {
-    if (modifier.kind === "form") return modifier.keep ?? [];
+    if (modifier.kind === "form") return modifier;
   }
-  return [];
+  return null;
+}
+
+// What a creature in another's form keeps of its own, as Shapechange's spellcasting.
+export function formKept(
+  actor: Actor,
+): readonly ("mind" | "spells" | "features")[] {
+  return formModifier(actor)?.keep ?? [];
 }
 
 // "CR 1/4 (XP 50; PB +2)" in the stat block's text.
@@ -57,6 +69,7 @@ interface FormBlock {
   readonly hp: number;
   readonly type: string;
   readonly size: number;
+  readonly fly: boolean;
 }
 
 const blocksBySource = new WeakMap<object, readonly FormBlock[]>();
@@ -80,6 +93,7 @@ function formBlocks(access: ContentAccess): readonly FormBlock[] {
               hp: monster.hp,
               type: monster.creatureType?.toLowerCase() ?? "",
               size: SIZE_ORDER.indexOf(monster.size ?? "medium"),
+              fly: (monster.speeds?.fly ?? 0) > 0,
             },
           ]
         : [];
@@ -103,15 +117,40 @@ export function formsFor(
   if (immutable(target, access)) return [];
   const { forms } = effect;
   const types = forms ? forms.types : ["beast"];
-  const limit = forms?.maxCr ?? levelOrChallenge(target, access);
+  const tiered = forms?.byLevel && levelLimit(forms.byLevel, target);
+  const limit =
+    tiered?.maxCr ?? forms?.maxCr ?? levelOrChallenge(target, access);
   const size = forms?.maxSize ? SIZE_ORDER.indexOf(forms.maxSize) : 5;
+  const flies = !forms?.noFly && (!tiered || tiered.fly);
   return formBlocks(access).filter(
     (block) =>
       block.cr <= limit &&
       block.size <= size &&
+      (flies || !block.fly) &&
       (!types || types.includes(block.type)) &&
       !forms?.except?.includes(block.type),
   );
+}
+
+type ByLevel = NonNullable<NonNullable<Polymorph["forms"]>["byLevel"]>;
+
+// Wild Shape's Beast Shapes table, and with Circle Forms the Druid level divided by 3 where that's higher.
+function levelLimit(
+  rule: ByLevel,
+  target: Actor,
+): { readonly maxCr: number; readonly fly: boolean } {
+  const level =
+    target.source.kind === "character"
+      ? (target.source.build?.levels.filter(
+          ({ classId }) => classId === rule.class,
+        ).length ?? 0)
+      : 0;
+  const tier = rule.tiers?.findLast((item) => item.level <= level);
+  const per = rule.per === undefined ? 0 : Math.floor(level / rule.per);
+  return {
+    maxCr: Math.max(tier?.maxCr ?? 0, per),
+    fly: tier?.fly === true,
+  };
 }
 
 // The form a hostile caster gives: the weakest Beast the target's level or Challenge Rating allows, or null.
@@ -130,11 +169,11 @@ export function settleForms(before: DndState, after: DndState): DndState {
   for (const [id, actor] of Object.entries(after.actors)) {
     const old = before.actors[id];
     if (!old || old === actor) continue;
-    const had = formOf(old) !== null;
-    const has = formOf(actor) !== null;
-    if (had && !has && actor.tempHp > 0) {
+    const had = formModifier(old);
+    const has = formModifier(actor);
+    if (had && !has && !had.lasting && actor.tempHp > 0) {
       actors = { ...actors, [id]: { ...actor, tempHp: 0 } };
-    } else if (has && actor.tempHp <= 0 && old.tempHp > 0) {
+    } else if (has && !has.lasting && actor.tempHp <= 0 && old.tempHp > 0) {
       actors = {
         ...actors,
         [id]: {

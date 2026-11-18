@@ -1751,6 +1751,13 @@ export function lingersFor(
 }
 
 // A timed spell's minutes, and a turn of the target's, are counted in rounds by its `lasts` (lastsFor).
+// A creature in no form, or in one this caster gave it, can take a new one, as using Wild Shape again.
+const ownForm = (target: Actor, caster: Actor): boolean =>
+  target.activeEffects.every(
+    ({ modifier, casterId }) =>
+      modifier.kind !== "form" || casterId === caster.id,
+  );
+
 export function effectEnds(
   duration: Duration,
 ): "concentration" | "casterNextTurn" | "casterNextTurnEnd" | "spellDuration" {
@@ -2702,6 +2709,7 @@ export function leafEvents(
               target,
               form,
               effectEnds(effect.duration),
+              context,
             ),
           );
         }
@@ -3086,6 +3094,29 @@ export function leafEvents(
             .filter((hit) => hit.amount !== 0);
           if (hits.length === 0) continue;
           events.push(...dealEvents(foe, hits, false, context, caster).events);
+        }
+        break;
+      }
+      case "endOwn": {
+        // Leaving Wild Shape, or a Starry Form giving way to another: what those activations put on the target.
+        const ended = new Set<string>();
+        for (const own of target.activeEffects) {
+          const key = `${own.sourceId}|${own.casterId}`;
+          if (
+            !ended.has(key) &&
+            effect.features.some((id) =>
+              own.sourceId.startsWith(`feature:${id}:`),
+            )
+          ) {
+            ended.add(key);
+            events.push(
+              dndEvent(`${NS}:effectEnded`, {
+                actor: target.id,
+                sourceId: own.sourceId,
+                casterId: own.casterId,
+              }),
+            );
+          }
         }
         break;
       }
@@ -4631,7 +4662,7 @@ export function resolveAction(
           const choice =
             effect.kind === "polymorph" &&
             target.side === actor.side &&
-            formOf(target) === null
+            ownForm(target, actor)
               ? formFrame(
                   effect,
                   spellSource(action),
@@ -4777,7 +4808,9 @@ export function resolveAction(
         // shortcut: cover counts from the caster, even for a sphere whose centre is elsewhere.
         const { saved: rolledSave, events: saveEvents } = spared.has(target.id)
           ? { saved: true, events: [] }
-          : edges.includes("succeed") || edges.includes("fail")
+          : edges.includes("succeed") ||
+              edges.includes("fail") ||
+              (resolution.willing && target.side === actor.side)
             ? { saved: edges.includes("succeed"), events: [] }
             : rollSave(
                 target,
