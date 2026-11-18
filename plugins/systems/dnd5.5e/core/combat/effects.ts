@@ -63,6 +63,7 @@ import {
   type Formula,
   ItemSchema,
   type LeafEffect,
+  LeafEffectSchema,
   type Modifier,
   MonsterSchema,
   type Passive,
@@ -730,6 +731,9 @@ function enduredEvents(
           (own.resources[trait.resource] ?? 0) ||
         trait.except?.includes(hit.type) ||
         (trait.notCritical && hit.critical) ||
+        (trait.reaction && (!bearer.budget.reaction || isDown(bearer))) ||
+        (trait.within !== undefined &&
+          distanceFeet(bearer.position, target.position) > trait.within) ||
         (trait.while &&
           !bearer.activeEffects.some(({ sourceId }) =>
             trait.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
@@ -758,6 +762,14 @@ function enduredEvents(
           actor: bearer.id,
           resource: trait.resource,
         }),
+        ...(trait.reaction
+          ? [
+              dndEvent(`${NS}:budgetSpent`, {
+                actor: bearer.id,
+                kind: "reaction",
+              }),
+            ]
+          : []),
         // For a reaction right after it, as Orcish Fury's attack (combat/reactions.ts).
         dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key: ENDURED }),
         ...(trait.burst
@@ -3097,6 +3109,49 @@ export function leafEvents(
         }
         break;
       }
+      case "choose": {
+        // Alter Self's options: the player picks; a companion or monster takes the first, which for a foe is the one
+        // meant for foes, as Enlarge/Reduce's Reduce.
+        const foe = target.side !== caster.side;
+        const ordered = [
+          ...effect.options.filter((item) => item.foe === true && foe),
+          ...effect.options.filter((item) => !(item.foe === true && foe)),
+        ];
+        const answer =
+          caster.id === PLAYER_ACTOR && context.ask
+            ? context.ask({
+                id: `${NS}:choose:${target.id}:${sourceId}`,
+                actor: caster.id,
+                prompt:
+                  target.id === caster.id
+                    ? "Which do you choose?"
+                    : `Which do you choose for ${target.name}?`,
+                options: ordered.map(({ name }, index) => ({
+                  id: String(index),
+                  label: name,
+                })),
+              })
+            : "0";
+        const option = ordered[Number(answer)] ?? ordered[0];
+        events.push(
+          ...leafEvents(
+            (option?.modifiers ?? []).map((modifier) =>
+              LeafEffectSchema.parse({
+                kind: "modifier",
+                modifier,
+                duration: effect.duration,
+              }),
+            ),
+            sourceId,
+            caster,
+            target,
+            context,
+            save,
+            slotLevel,
+          ),
+        );
+        break;
+      }
       case "endOwn": {
         // Leaving Wild Shape, or a Starry Form giving way to another: what those activations put on the target.
         const ended = new Set<string>();
@@ -3929,7 +3984,10 @@ export function rollSave(
   // Trance of Order: a d20 of 9 or lower counts as 10.
   const roll = {
     ...rolled0,
-    natural: Math.max(rolled0.natural, d20Floor(target, stats)),
+    natural: Math.max(
+      rolled0.natural,
+      d20Floor(target, stats, conditions.includes("concentration")),
+    ),
   };
   const base =
     saveBonus(stats, ability) +
@@ -4272,6 +4330,7 @@ export function resolveAction(
           effect.kind === "applyCondition" ||
           effect.kind === "zone" ||
           effect.kind === "polymorph" ||
+          effect.kind === "choose" ||
           effect.kind === "summon") &&
         typeof effect.duration === "object" &&
         "concentration" in effect.duration,

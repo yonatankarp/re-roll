@@ -2181,7 +2181,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         !passive.while ||
         actor.activeEffects.some(({ sourceId }) =>
           passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
-        )),
+        )) &&
+      (passive.kind !== "aura" ||
+        !passive.whileAspect ||
+        hasAspect(actor, passive.whileAspect)),
   );
   const castingAbility = featSpellAbilities(
     build,

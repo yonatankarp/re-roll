@@ -2507,7 +2507,31 @@
     creature’s size. The creature’s statistics become those of the object, and
     the creature has no memory of time spent in this form after the spell ends
     and it returns to normal.
-  automation: text
+  automation: partial
+  # shortcut: a creature into another creature only; objects wait on re-roll#144.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "creatures": 1, "range": 30, "side": "any" },
+      "resolution":
+        {
+          "kind": "save",
+          "ability": "wis",
+          "dc": { "base": 0, "add": [{ "kind": "spellSaveDc" }] },
+          "willing": true,
+          "damage": [],
+          "onSuccessDamage": "none",
+          "onFail":
+            [
+              {
+                "kind": "polymorph",
+                "duration": { "concentration": true, "minutes": 60 },
+                "forms": {},
+              },
+            ],
+          "onSuccess": [],
+        },
+    }
 - id: srd52:spell/unseen-servant
   name: Unseen Servant
   level: 1
@@ -5391,7 +5415,28 @@
     first form into which it shape-shifts. These Temporary Hit Points vanish if
     any remain when the spell ends. The transformation lasts for the duration or
     until the target ends it as a Bonus Action.
-  automation: text
+  automation: full
+  # shortcut: the targets keep their first forms for the spell's duration.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "creatures": 8, "range": 30, "side": "ally" },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "polymorph",
+                "duration": { "minutes": 1440 },
+                "forms": { "types": ["beast"], "maxCr": 4, "maxSize": "large" },
+                "keep": ["mind"],
+                "tempHp": true,
+              },
+            ],
+        },
+    }
 - id: srd52:spell/antipathy-sympathy
   name: Antipathy/Sympathy
   level: 8
@@ -7570,7 +7615,48 @@
     feature, you retain it too. Upon shape-shifting, you determine whether your
     equipment drops to the ground or changes in size and shape to fit the new
     form while you’re in it.
-  automation: text
+  automation: full
+  # shortcut: it keeps the caster's spellcasting and mind but not its other proficiencies.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "self": true },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "polymorph",
+                "duration": { "concentration": true, "minutes": 60 },
+                "forms": { "except": ["construct", "undead"] },
+                "keep": ["mind", "spells"],
+                "tempHp": true,
+              },
+            ],
+        },
+    }
+  lasting:
+    {
+      "cost": ["action"],
+      "targeting": { "self": true },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "polymorph",
+                "duration": { "minutes": 60 },
+                "forms": { "except": ["construct", "undead"] },
+                "keep": ["mind", "spells"],
+                "tempHp": false,
+              },
+            ],
+        },
+    }
 - id: srd52:spell/shining-smite
   name: Shining Smite
   level: 2
@@ -9205,7 +9291,91 @@
     dropped, used, or otherwise interacted with. Finally, the target can’t
     attack or cast spells. Using a Higher-Level Spell Slot. You can target one
     additional creature for each spell slot level above 3.
-  automation: text
+  automation: full
+  # shortcut: its walking Speed stays, and it doesn't pass through others' spaces.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "creatures": 1, "range": "touch", "side": "ally" },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "modifier",
+                "modifier":
+                  {
+                    "kind": "movementMode",
+                    "mode": "fly",
+                    "feet": 10,
+                    "hover": true,
+                  },
+                "duration": { "concentration": true, "minutes": 60 },
+                "untilIncapacitated": true,
+              },
+              {
+                "kind": "modifier",
+                "modifier": { "kind": "resistance", "damage": "bludgeoning" },
+                "duration": { "concentration": true, "minutes": 60 },
+                "untilIncapacitated": true,
+              },
+              {
+                "kind": "modifier",
+                "modifier": { "kind": "resistance", "damage": "piercing" },
+                "duration": { "concentration": true, "minutes": 60 },
+                "untilIncapacitated": true,
+              },
+              {
+                "kind": "modifier",
+                "modifier": { "kind": "resistance", "damage": "slashing" },
+                "duration": { "concentration": true, "minutes": 60 },
+                "untilIncapacitated": true,
+              },
+              {
+                "kind": "modifier",
+                "modifier":
+                  { "kind": "conditionImmunity", "condition": "prone" },
+                "duration": { "concentration": true, "minutes": 60 },
+                "untilIncapacitated": true,
+              },
+              {
+                "kind": "modifier",
+                "modifier":
+                  { "kind": "advantage", "on": "saves", "ability": "str" },
+                "duration": { "concentration": true, "minutes": 60 },
+                "untilIncapacitated": true,
+              },
+              {
+                "kind": "modifier",
+                "modifier":
+                  { "kind": "advantage", "on": "saves", "ability": "dex" },
+                "duration": { "concentration": true, "minutes": 60 },
+                "untilIncapacitated": true,
+              },
+              {
+                "kind": "modifier",
+                "modifier":
+                  { "kind": "advantage", "on": "saves", "ability": "con" },
+                "duration": { "concentration": true, "minutes": 60 },
+                "untilIncapacitated": true,
+              },
+              {
+                "kind": "modifier",
+                "modifier":
+                  {
+                    "kind": "actionLimit",
+                    "noAttacks": true,
+                    "noSpells": true,
+                  },
+                "duration": { "concentration": true, "minutes": 60 },
+                "untilIncapacitated": true,
+              },
+            ],
+        },
+    }
+  upcast: { "perSlotLevel": { "addTargets": 1 } }
 - id: srd52:spell/glibness
   name: Glibness
   level: 8
@@ -9927,7 +10097,29 @@
     anatomy of its new form, and it can’t speak or cast spells. The target’s
     gear melds into the new form. The creature can’t use or otherwise benefit
     from any of that equipment.
-  automation: text
+  automation: full
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "creatures": 1, "range": 60, "side": "any" },
+      "resolution":
+        {
+          "kind": "save",
+          "ability": "wis",
+          "dc": { "base": 0, "add": [{ "kind": "spellSaveDc" }] },
+          "willing": true,
+          "damage": [],
+          "onSuccessDamage": "none",
+          "onFail":
+            [
+              {
+                "kind": "polymorph",
+                "duration": { "concentration": true, "minutes": 60 },
+              },
+            ],
+          "onSuccess": [],
+        },
+    }
 - id: srd52:spell/prestidigitation
   name: Prestidigitation
   level: 0
@@ -10649,7 +10841,72 @@
     of the type in parentheses instead of dealing the normal damage for your
     Unarmed Strike, and you use your spellcasting ability modifier for the
     attack and damage rolls rather than using Strength.
-  automation: text
+  automation: full
+  # shortcut: Natural Weapons strike with a spell attack of their own, and the option stays until the spell ends.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "self": true },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "choose",
+                "duration": { "concentration": true, "minutes": 60 },
+                "options":
+                  [
+                    {
+                      "name": "Aquatic Adaptation",
+                      "modifiers":
+                        [
+                          { "kind": "movementMode", "mode": "swim" },
+                          { "kind": "waterBreathing" },
+                          { "kind": "aspect", "name": "Aquatic Adaptation" },
+                        ],
+                    },
+                    {
+                      "name": "Change Appearance",
+                      "modifiers":
+                        [{ "kind": "aspect", "name": "Change Appearance" }],
+                    },
+                    {
+                      "name": "Natural Weapons",
+                      "modifiers":
+                        [{ "kind": "aspect", "name": "Natural Weapons" }],
+                    },
+                  ],
+              },
+            ],
+        },
+    }
+  lasting:
+    {
+      "cost": ["action"],
+      "whileAspect": "Natural Weapons",
+      "targeting": { "creatures": 1, "range": 5, "side": "enemy" },
+      "resolution":
+        {
+          "kind": "attack",
+          "attack": { "type": "spell" },
+          "damage":
+            [
+              {
+                "amount":
+                  {
+                    "dice": "1d6",
+                    "bonus": { "base": 0, "add": [{ "kind": "spellMod" }] },
+                  },
+                "type": "slashing",
+                "types": ["slashing", "piercing", "bludgeoning"],
+              },
+            ],
+          "onHit": [],
+          "onMiss": [],
+        },
+    }
 - id: srd52:spell/animate-objects
   name: Animate Objects
   level: 5
@@ -11401,7 +11658,77 @@
     Strength saving throws. The target’s attacks with its reduced weapons or
     Unarmed Strikes deal 1d4 less damage on a hit (this can’t reduce the damage
     below 1).
-  automation: text
+  automation: full
+  # shortcut: only creatures, not objects.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "creatures": 1, "range": 30, "side": "any" },
+      "resolution":
+        {
+          "kind": "save",
+          "ability": "con",
+          "dc": { "base": 0, "add": [{ "kind": "spellSaveDc" }] },
+          "willing": true,
+          "damage": [],
+          "onSuccessDamage": "none",
+          "onSuccess": [],
+          "onFail":
+            [
+              {
+                "kind": "choose",
+                "duration": { "concentration": true, "minutes": 1 },
+                "options":
+                  [
+                    {
+                      "name": "Enlarge",
+                      "modifiers":
+                        [
+                          { "kind": "size", "grow": 1 },
+                          {
+                            "kind": "advantage",
+                            "on": "checks",
+                            "ability": "str",
+                          },
+                          {
+                            "kind": "advantage",
+                            "on": "saves",
+                            "ability": "str",
+                          },
+                          {
+                            "kind": "damageBonus",
+                            "amount": { "dice": "1d4" },
+                          },
+                        ],
+                    },
+                    {
+                      "name": "Reduce",
+                      "foe": true,
+                      "modifiers":
+                        [
+                          { "kind": "size", "grow": -1 },
+                          {
+                            "kind": "disadvantage",
+                            "on": "checks",
+                            "ability": "str",
+                          },
+                          {
+                            "kind": "disadvantage",
+                            "on": "saves",
+                            "ability": "str",
+                          },
+                          {
+                            "kind": "damageBonus",
+                            "amount": { "dice": "1d4" },
+                            "subtract": true,
+                          },
+                        ],
+                    },
+                  ],
+              },
+            ],
+        },
+    }
 - id: srd52:spell/expeditious-retreat
   name: Expeditious Retreat
   level: 1

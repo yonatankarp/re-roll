@@ -21,7 +21,7 @@ import { HIT_DICE, spellOfSource } from "./ids.ts";
 import { hitDieRoll } from "../trait-rules.ts";
 import { leafEvents, rollSave } from "./effects.ts";
 import { teleportFrame } from "./movement.ts";
-import type { Context } from "./queries.ts";
+import { type Context, hasAspect } from "./queries.ts";
 
 // The Arcana Unleashed adepts' riders on casting a spell of their school (passive `schoolCast`).
 
@@ -170,6 +170,17 @@ export function fueledDamage(
   };
 }
 
+// A spell that restores Hit Points, whatever else it does, for Starry Form's Chalice.
+const healing = (
+  resolution: KnownAction["activation"]["resolution"],
+): boolean =>
+  (resolution.kind === "automatic"
+    ? resolution.effects
+    : resolution.kind === "attack"
+      ? resolution.onHit
+      : [...resolution.onFail, ...resolution.onSuccess]
+  ).some((effect) => effect.kind === "heal");
+
 // Flames of Phlegethos: casting a spell that deals the type puts the rider's effects on the caster. Bewitching
 // Magic: casting one of the school with an action and a slot does, its teleport landing where the caster picks.
 export function castRiders(
@@ -198,16 +209,31 @@ export function castRiders(
     ) {
       return [];
     }
-    const fits = passive.uses
-      ? passive.uses.some(
-          (id) =>
-            action.id === `spell:${id}` || action.id.startsWith(`spell:${id}:`),
-        )
-      : passive.school
-        ? slotLevel !== undefined &&
-          (cost.includes("action") || passive.slotted === true) &&
-          passive.school.some((item) => item === school)
-        : passive.damage !== undefined && types.has(passive.damage);
+    if (passive.whileAspect && !hasAspect(actor, passive.whileAspect)) {
+      return [];
+    }
+    const level =
+      passive.level && (stats.classLevels[passive.level.class] ?? 0);
+    if (
+      passive.level &&
+      ((level ?? 0) < (passive.level.min ?? 1) ||
+        (level ?? 0) > (passive.level.max ?? 20))
+    ) {
+      return [];
+    }
+    const fits = passive.heals
+      ? slotLevel !== undefined && healing(resolution)
+      : passive.uses
+        ? passive.uses.some(
+            (id) =>
+              action.id === `spell:${id}` ||
+              action.id.startsWith(`spell:${id}:`),
+          )
+        : passive.school
+          ? slotLevel !== undefined &&
+            (cost.includes("action") || passive.slotted === true) &&
+            passive.school.some((item) => item === school)
+          : passive.damage !== undefined && types.has(passive.damage);
     return fits ? [passive] : [];
   });
   // Simbul's Synostodweomer: a slot spell rolls as many Hit Point Dice as the slot's level.

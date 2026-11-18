@@ -1090,6 +1090,9 @@ export function extraFits(
   const { state } = context;
   const turn = turnId(state.combat);
   if (passive.ownTurn && turn !== attacker.id) return false;
+  if (passive.whileAspect && !hasAspect(attacker, passive.whileAspect)) {
+    return false;
+  }
   if (passive.firstRound && (state.combat?.round ?? 1) > 1) return false;
   if (passive.while?.some((id) => !underEffect(attacker, [id]))) return false;
   if (passive.against && !markedBy(target, attacker, passive.against)) {

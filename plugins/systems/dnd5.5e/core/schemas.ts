@@ -487,6 +487,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     skills: z.array(SkillSchema).min(1).optional(),
     proficient: z.literal(true).optional(),
     all: z.literal(true).optional(), // every D20 Test: attack rolls and saves too, as Trance of Order's 10
+    concentration: z.literal(true).optional(), // saves to keep Concentration too, as Starry Form's Dragon
   }),
   // Attack rolls against the bearer can't have Advantage, with `able` only while it isn't Incapacitated, as Elusive.
   z.strictObject({
@@ -1488,6 +1489,21 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // The target's Concentration ends, as entering a Rage does.
   z.strictObject({ kind: z.literal("endConcentration") }),
+  // The caster picks one of these sets of modifiers for the target, for `duration`, as Alter Self's options or
+  // Enlarge/Reduce's (combat/effects.ts). The player is asked; anyone else takes the first.
+  z.strictObject({
+    kind: z.literal("choose"),
+    duration: DurationSchema,
+    options: z
+      .array(
+        z.strictObject({
+          name: z.string().min(1),
+          modifiers: z.array(ModifierSchema).min(1),
+          foe: z.literal(true).optional(), // offered first, and taken, for a target of the other side, as Reduce
+        }),
+      )
+      .min(2),
+  }),
   // The target's effects from these features' activations end, as leaving Wild Shape or taking another Starry Form.
   z.strictObject({
     kind: z.literal("endOwn"),
@@ -2356,8 +2372,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("aura"),
     // only while an effect of one of these features' activations is on the bearer, as Power of the Wilds' Lion in a
-    // Rage
+    // Rage, and with `whileAspect` only while it has that aspect, as Celestial Revelation's Inner Radiance
     while: z.array(ContentIdSchema).min(1).optional(),
+    whileAspect: z.string().min(1).optional(),
     name: z.string().min(1),
     zone: ZoneKindSchema.default("area"),
     radius: z.number().int().min(5),
@@ -2432,6 +2449,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // only against a creature under an effect of the bearer's from one of these spells or features, as Guided
     // Precision's Faerie Fire
     against: z.array(ContentIdSchema).min(1).optional(),
+    whileAspect: z.string().min(1).optional(), // only with this aspect, as Wondrous Alteration's Natural Weapons
   }),
   z.strictObject({ kind: z.literal("packTactics") }),
   // Moving through other creatures' spaces or through walls, as a swarm, a ghost's Incorporeal Movement or Halfling
@@ -2448,6 +2466,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     terrain: z.boolean().default(false),
     // only while an effect of one of these features' activations is on it, as Cloak of Shadows' shroud
     while: z.array(ContentIdSchema).min(1).optional(),
+    whileAspect: z.string().min(1).optional(), // only while it has this aspect, as Revelation in Flesh's Wormlike Movement
   }),
   // A longer Long Jump, as a frog's Standing Leap (`feet` 20, `runUp` 0) or Athlete's Jumping (`runUp` 5): its feet
   // after a run-up of `runUp` feet, instead of the Strength score after 10.
@@ -2591,6 +2610,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
       .optional(),
     exhaustion: z.number().int().min(1).optional(),
     allies: z.literal(true).optional(),
+    // it takes the bearer's Reaction, for a creature within `within` feet of it, as Rage of the Gods' Revivification
+    reaction: z.literal(true).optional(),
+    within: z.number().int().min(5).optional(),
   }),
   // An attacker of these types must pass a Wisdom save against the bearer's spell save DC or lose its attack; passing,
   // or being attacked by the bearer, frees it of this until a Long Rest, as Among the Dead's undead.
@@ -2670,7 +2692,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     resource: z.string().optional(), // each use spends one, as Timely Retreat's
   }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
-  z.strictObject({ kind: z.literal("concentrationAdvantage") }),
+  z.strictObject({
+    kind: z.literal("concentrationAdvantage"),
+    whileAspect: z.string().min(1).optional(), // only with this aspect, as Wondrous Alteration's with Natural Weapons
+  }),
   // A creature leaving the bearer's reach can be answered with a one-target spell of one action instead of an
   // Opportunity Attack, as with War Caster's Reactive Spell.
   z.strictObject({ kind: z.literal("reactiveSpell") }),
@@ -3458,11 +3483,22 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // With `school` instead, casting a spell of that school with an action and a spell slot does, as Bewitching
   // Magic's Misty Step after an Enchantment spell. With `uses`, casting one of these spells does, as Hunter's Rime's
   // Temporary Hit Points with Hunter's Mark, and `onTargets` go on the spell's targets, as its hold on the marked.
+  // With `heals`, casting a spell with a slot that restores Hit Points does, as Starry Form's Chalice, `whileAspect`
+  // only while the bearer has that aspect and `level` only between these levels in a class.
   z.strictObject({
     kind: z.literal("castRider"),
     damage: DamageTypeSchema.optional(),
     school: z.array(SpellSchoolSchema).min(1).optional(),
     uses: z.array(ContentIdSchema).min(1).optional(),
+    heals: z.literal(true).optional(),
+    whileAspect: z.string().min(1).optional(),
+    level: z
+      .strictObject({
+        class: ContentIdSchema,
+        min: z.number().int().min(1).optional(),
+        max: z.number().int().min(1).optional(),
+      })
+      .optional(),
     effects: z.array(LeafEffectSchema).default([]),
     // One of these the caster may pick once the spell is done, as Steps of the Fey's Refreshing or Taunting Step
     // (combat/school.ts): `effects` on the caster or one creature of its side within `within` feet of it, or `foes`

@@ -37,6 +37,8 @@ export function formEvents(
   const old = target.activeEffects.find(
     ({ modifier }) => modifier.kind === "form",
   );
+  // Reshaping a form the caster gave keeps what it hangs on, as Shapechange's Magic action keeps its Concentration.
+  const kept = old?.casterId === caster.id ? old : undefined;
   const events = [
     ...(old
       ? [
@@ -50,7 +52,7 @@ export function formEvents(
     dndEvent(`${NS}:effectAdded`, {
       actor: target.id,
       effect: {
-        sourceId,
+        sourceId: kept?.sourceId ?? sourceId,
         casterId: caster.id,
         modifier: {
           kind: "form",
@@ -59,7 +61,8 @@ export function formEvents(
           ...(ac ? { ac } : {}),
           ...(effect.lasting ? { lasting: true } : {}),
         },
-        ends,
+        ends: kept?.ends ?? ends,
+        ...(kept?.lasts ? { lasts: kept.lasts } : {}),
         ...(effect.untilIncapacitated ? { untilIncapacitated: true } : {}),
       },
     }),
