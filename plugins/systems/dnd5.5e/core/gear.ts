@@ -106,6 +106,20 @@ export function gainRolls(
       if (pool.rolled && !rolled.has(pool.id)) {
         set(pool.id, rollDiceNotation(pool.rolled, context.dice));
       }
+      // A Rod of Absorption holds only some of its energy as it's found.
+      if (pool.startsWith && !(actor.resourcesSpent[pool.id] ?? 0)) {
+        const empty =
+          pool.max.base - rollDiceNotation(pool.startsWith, context.dice);
+        if (empty > 0) {
+          events.push(
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: actor.id,
+              resource: pool.id,
+              amount: empty,
+            }),
+          );
+        }
+      }
     }
     const split = "split" in item ? item.split : undefined;
     if (!split || split.rows.every((row) => rolled.has(row.resource))) continue;

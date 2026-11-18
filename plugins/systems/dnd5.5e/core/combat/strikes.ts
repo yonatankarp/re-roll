@@ -10,6 +10,7 @@ import {
   findAction,
   fitsType,
   hitFits,
+  itemFits,
 } from "./queries.ts";
 
 // Strike options picked before a hit's dice are rolled: Cunning Strike's give up Sneak Attack dice (`trigger.forgo`),
@@ -65,7 +66,7 @@ export function sneakDice(
 }
 
 function optionsFor(
-  kind: "forgo" | "forgoAdvantage" | "gainsAdvantage",
+  kind: "forgo" | "forgoAdvantage" | "gainsAdvantage" | "critical",
   hit: Struck,
   budget: number,
   context: Context,
@@ -85,8 +86,11 @@ function optionsFor(
             kind === "forgo"
               ? trigger?.forgo !== undefined && trigger.forgo <= budget
               : kind === "gainsAdvantage"
-                ? trigger?.gainsAdvantage === true
-                : trigger?.forgoAdvantage === true;
+                ? trigger?.gainsAdvantage === true ||
+                  trigger?.fixedRoll !== undefined
+                : kind === "critical"
+                  ? trigger?.critical === true
+                  : trigger?.forgoAdvantage === true;
           return (
             fits &&
             !chosen.includes(action.id) &&
@@ -99,6 +103,7 @@ function optionsFor(
               attacker,
               context,
             ) &&
+            itemFits(action, hitWith, context) &&
             fitsType(target, targeting, context, attacker)
           );
         });
@@ -202,6 +207,30 @@ export function forgoAdvantageFrame(
   );
 }
 
+// A Namer's Needle's Named Target asked as a hit lands that isn't a Critical Hit, or null with nothing to ask.
+export function criticalFrame(
+  hit: Struck & { readonly critical: boolean },
+  context: Context,
+): Frame | null {
+  if (hit.critical) return null;
+  const attacker = actorOf(context.state, hit.attacker);
+  const stats = deriveStats(attacker, context);
+  if (!stats.actions.some(({ activation }) => activation.trigger?.critical)) {
+    return null;
+  }
+  const { options } = optionsFor("critical", hit, 0, context);
+  if (options.length === 0) return null;
+  const target = actorOf(context.state, hit.target);
+  return askFor(
+    hit,
+    attacker,
+    options,
+    `${attacker.name} hits ${target.name}. Make it a Critical Hit?`,
+    frame("criticalChosen", hit),
+    () => "",
+  );
+}
+
 // A Martialist's Trip's question before an attack roll without Advantage, or null when nothing gives it.
 export function gainAdvantageFrame(
   attack: Struck,
@@ -211,7 +240,11 @@ export function gainAdvantageFrame(
   const attacker = actorOf(state, attack.attacker);
   const stats = deriveStats(attacker, context);
   if (
-    !stats.actions.some(({ activation }) => activation.trigger?.gainsAdvantage)
+    !stats.actions.some(
+      ({ activation }) =>
+        activation.trigger?.gainsAdvantage === true ||
+        activation.trigger?.fixedRoll !== undefined,
+    )
   ) {
     return null;
   }
@@ -222,7 +255,7 @@ export function gainAdvantageFrame(
     attack,
     attacker,
     options,
-    `${attacker.name} attacks ${target.name}. Use a strike for Advantage?`,
+    `${attacker.name} attacks ${target.name}. Use something before the roll?`,
     frame("advantageGained", attack),
     () => "",
   );

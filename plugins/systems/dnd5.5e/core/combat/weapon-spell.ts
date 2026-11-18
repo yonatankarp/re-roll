@@ -54,6 +54,7 @@ export function weaponAttackResult(
         attacker: actor.id,
         actionId: weapon.id,
         target: target.id,
+        spell: sourceId,
       }),
     ),
   };

@@ -82,6 +82,7 @@ import {
 } from "./cast-options.ts";
 import { withWeaponRiders } from "./weapon-riders.ts";
 import {
+  GRANTED_PREFIX,
   ITEM_PREFIX,
   THROW_PREFIX,
   WEAPON_PREFIX,
@@ -301,11 +302,17 @@ export function ownAbilities(
 // An entry with versions counts as its first, as with its bonuses.
 function withItemAbilities(
   scores: AbilityScores,
-  items: readonly Extract<z.infer<typeof ItemSchema>, { type: "magicItem" }>[],
+  items: readonly Extract<
+    z.infer<typeof ItemSchema>,
+    { type: "magicItem" | "weapon" }
+  >[],
+  attuned: readonly string[] = [],
 ): AbilityScores {
   const raised = { ...scores };
-  const changes = items.flatMap(
-    (item) => item.abilities ?? item.variants?.[0]?.abilities ?? [],
+  const changes = items.flatMap((item) =>
+    item.type === "weapon"
+      ? (item.abilities ?? [])
+      : (item.abilities ?? item.variants?.[0]?.abilities ?? []),
   );
   // Setting comes after raising, so a set score is what the item says, unless the raised one is higher.
   for (const change of changes) {
@@ -319,6 +326,20 @@ function withItemAbilities(
   for (const change of changes) {
     if ("set" in change) {
       raised[change.ability] = Math.max(raised[change.ability], change.set);
+    }
+  }
+  // Might of Giants: more on top, with the other item attuned.
+  for (const change of changes) {
+    if (
+      "boost" in change &&
+      attuned.some((id) =>
+        change.attunedTo.some((to) => id === to || id.startsWith(`${to}--`)),
+      )
+    ) {
+      raised[change.ability] = Math.min(
+        change.max,
+        raised[change.ability] + change.boost,
+      );
     }
   }
   return raised;
@@ -886,7 +907,7 @@ function storedCasts(
 // A worn item's own activations (ChargedSchema `activations`), named after it, as a Pearl of Power's.
 function itemUses(itemId: string, item: Item, actor: Actor): KnownAction[] {
   const uses = "activations" in item ? (item.activations ?? []) : [];
-  return uses.flatMap(({ name, activation, whileCharged }, index) =>
+  return uses.flatMap(({ name, activation, whileCharged, rolled }, index) =>
     whileCharged && !charged(actor, item, whileCharged)
       ? []
       : [
@@ -895,6 +916,7 @@ function itemUses(itemId: string, item: Item, actor: Actor): KnownAction[] {
             name: uses.length > 1 ? `${name} (${item.name})` : name,
             activation,
             spellLevel: null,
+            ...(rolled ? { rolled: true as const } : {}),
           },
         ],
   );
@@ -1737,6 +1759,7 @@ function bestAmmunition(
       readonly name: string;
       readonly attack: number;
       readonly damage: number;
+      readonly item: Item;
     }
   | undefined {
   const bonus = (item: Item, to: string): number =>
@@ -1756,8 +1779,30 @@ function bestAmmunition(
       name: item.name,
       attack: bonus(item, "attack"),
       damage: bonus(item, "damage"),
+      item,
     }))
     .sort((a, b) => b.attack - a.attack)[0];
+}
+
+// A weapon firing a piece of magic ammunition takes its riders on the hit, as Walloping Ammunition's save: damage of
+// no type of its own is the weapon's.
+function firing(weapon: Weapon, ammunition: Item | undefined): Weapon {
+  if (ammunition?.type !== "magicItem") return weapon;
+  const { hitDamage, hitSave, hitEffects } = ammunition;
+  const typed = (hitDamage ?? []).map(({ type, weaponDie: _die, ...rest }) => ({
+    ...rest,
+    type: type ?? weapon.damage.type,
+  }));
+  return {
+    ...weapon,
+    ...(typed.length > 0
+      ? { hitDamage: [...(weapon.hitDamage ?? []), ...typed] }
+      : {}),
+    ...(hitSave && !weapon.hitSave ? { hitSave } : {}),
+    ...(hitEffects
+      ? { hitEffects: [...(weapon.hitEffects ?? []), ...hitEffects] }
+      : {}),
+  };
 }
 
 // The Unarmed Strike every character can make: a Strength attack it's proficient with, dealing 1 plus its
@@ -1847,6 +1892,7 @@ export function weaponActivation(
   proficient = true,
   damageBonus = 0,
   itemBonus = 0,
+  classIds: readonly string[] = [], // the wielder's classes, for a weapon's `classAbility`
 ): Activation {
   const ranged = weapon.properties.includes("ammunition");
   const finesse = weapon.properties.includes("finesse");
@@ -1855,6 +1901,16 @@ export function weaponActivation(
     (finesse && abilityModifier(abilities.dex) > abilityModifier(abilities.str))
       ? "dex"
       : "str";
+  // A Lute of Thunderous Thumping's Bard swings it with Charisma, its damage still with Strength.
+  const { classAbility } = weapon;
+  const rolledWith =
+    classAbility &&
+    !ranged &&
+    classIds.some((id) => id.endsWith(`/${classAbility.class}`)) &&
+    abilityModifier(abilities[classAbility.ability]) >
+      abilityModifier(abilities[ability])
+      ? classAbility.ability
+      : ability;
   // shortcut: an Ammunition weapon without its range in the data reaches 80 feet with no long range.
   const range = ranged ? (weapon.range ?? { normal: 80, long: 80 }) : null;
   const reach = !ranged && weapon.properties.includes("reach");
@@ -1870,7 +1926,7 @@ export function weaponActivation(
       kind: "attack",
       attack: {
         type: "weapon",
-        ability,
+        ability: rolledWith,
         ...(proficient ? {} : { proficient }),
         ...(itemBonus > 0 ? { itemBonus } : {}),
         ...(range && range.normal < range.long
@@ -1890,10 +1946,32 @@ export function weaponActivation(
         },
         ...(weapon.hitDamage ?? []),
       ],
-      onHit: [],
+      onHit: weapon.hitEffects ?? [],
       onMiss: [],
+      ...(weapon.hitSave ? { onHitSave: weapon.hitSave } : {}),
+      ...(weapon.natural20 ? { natural20: weapon.natural20 } : {}),
+      ...(weapon.breaksConcentration ? { breaksConcentration: true } : {}),
+      ...(weapon.vs ? { vs: weapon.vs } : {}),
+      ...(weapon.sworn?.item
+        ? { sworn: { item: weapon.sworn.item, damage: weapon.sworn.damage } }
+        : {}),
     },
   };
+}
+
+// A magic weapon whose magic doesn't work, unattuned or in an Antimagic Field: no damage or riders of its magic's.
+function plainWeapon(weapon: Weapon): Weapon {
+  const plain = { ...weapon };
+  delete plain.hitDamage;
+  delete plain.hitSave;
+  delete plain.hitEffects;
+  delete plain.natural20;
+  delete plain.breaksConcentration;
+  delete plain.vs;
+  delete plain.thrown;
+  delete plain.classAbility;
+  delete plain.sworn;
+  return plain;
 }
 
 // Throwing a Thrown weapon: its melee attack made at range, with Disadvantage past its normal range.
@@ -1901,6 +1979,7 @@ function thrownActivation(
   melee: Activation,
   range: NonNullable<Weapon["range"]>,
   passives: readonly Passive[],
+  thrown?: Weapon["thrown"], // a magic weapon's own throw, as a Hammer of Thunderbolts' hurl
 ): Activation {
   const { resolution } = melee;
   if (resolution.kind !== "attack") return melee;
@@ -1912,29 +1991,36 @@ function thrownActivation(
   const longShots = passives.some(({ kind }) => kind === "longShots");
   return {
     ...melee,
+    ...(thrown?.resource
+      ? { cost: [...melee.cost, { resource: thrown.resource }] }
+      : {}),
     targeting: { creatures: 1, range: range.long, side: "enemy" },
     resolution: {
       ...resolution,
+      ...(thrown?.hitSave ? { onHitSave: thrown.hitSave } : {}),
       attack: {
         ...resolution.attack,
         ...(longShots || range.normal >= range.long
           ? {}
           : { normalRange: range.normal }),
       },
-      damage: resolution.damage.map((damage, index) =>
-        index === 0 && bonus > 0
-          ? {
-              ...damage,
-              amount: {
-                ...damage.amount,
-                bonus: {
-                  base: (damage.amount.bonus?.base ?? 0) + bonus,
-                  add: damage.amount.bonus?.add ?? [],
+      damage: [
+        ...resolution.damage.map((damage, index) =>
+          index === 0 && bonus > 0
+            ? {
+                ...damage,
+                amount: {
+                  ...damage.amount,
+                  bonus: {
+                    base: (damage.amount.bonus?.base ?? 0) + bonus,
+                    add: damage.amount.bonus?.add ?? [],
+                  },
                 },
-              },
-            }
-          : damage,
-      ),
+              }
+            : damage,
+        ),
+        ...(thrown?.damage ?? []),
+      ],
     },
   };
 }
@@ -2006,6 +2092,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const working = worn.flatMap(([itemId, item]) =>
     item.type === "magicItem" && works(itemId, item) ? [item] : [],
   );
+  // A magic weapon's own scores too, as a Thunderous Greatclub's Strength 20.
+  const scoring = worn.flatMap(([itemId, item]) =>
+    (item.type === "magicItem" || item.type === "weapon") && works(itemId, item)
+      ? [item]
+      : [],
+  );
   // Every worn item's passives, magic weapons and armor made from plain ones too (variants.ts). An entry with
   // versions counts as its first, as its bonuses do.
   const itemPassives = worn.flatMap(([itemId, item]) =>
@@ -2024,7 +2116,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       : [],
   );
   const abilities = withEffectScores(
-    withItemAbilities(ownAbilities(actor, build), working),
+    withItemAbilities(ownAbilities(actor, build), scoring, attuned),
     actor,
   );
 
@@ -2378,7 +2470,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
               kinds.some((kind) => bonus.weapons.includes(kind)),
           )
           .reduce((total, bonus) => total + bonus.amount, 0);
-      const { hitDamage, ...unchanged } = weapon;
+      // Its magic's damage and riders only while it works.
+      const unchanged = works(itemId, item) ? weapon : plainWeapon(weapon);
       // A Keyholes Dagger attacks as the form of its own its version allows that hits hardest, with Strength or
       // Dexterity. shortcut: it keeps its own mastery, and it changes back to throw.
       const plain = weapon.forms
@@ -2389,7 +2482,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ? bestAmmunition(worn, works)
         : undefined;
       const activation = weaponActivation(
-        works(itemId, item) && hitDamage ? { ...plain, hitDamage } : plain,
+        firing(plain, shot?.item),
         abilities,
         martialTraining ||
           fromFeatures.passives.some(
@@ -2399,6 +2492,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           classes.some((def) => weaponProficient(def, weapon)),
         own("damage") + scoped("damage") + (shot?.damage ?? 0),
         own("attack") - magic.attack + scoped("attack") + (shot?.attack ?? 0),
+        Object.keys(classLevels),
       );
       actions.push({
         id: `${WEAPON_PREFIX}${itemId}`,
@@ -2416,7 +2510,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         actions.push({
           id: `${THROW_PREFIX}${itemId}`,
           name: `Throw ${item.name}`,
-          activation: thrownActivation(activation, range, traits),
+          activation: thrownActivation(
+            activation,
+            range,
+            traits,
+            works(itemId, item) ? weapon.thrown : undefined,
+          ),
           spellLevel: null,
         });
       }
@@ -2473,6 +2572,14 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }),
   );
 
+  const zoned =
+    "state" in access && access.state
+      ? zoneModifiers(actor, access.state as DndState)
+      : [];
+  const freeing = [
+    ...actor.activeEffects.map(({ modifier }) => modifier),
+    ...zoned,
+  ].flatMap((modifier) => (modifier.kind === "freeSpells" ? [modifier] : []));
   for (const spellId of untrainedArmor ? [] : knownSpells) {
     const spell: Spell = lookup(access, SpellSchema, spellId);
     const lasting =
@@ -2499,12 +2606,27 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       const bonusDc = given
         ? classDc[given.slice(given.lastIndexOf("/") + 1)]
         : undefined;
+      // A Candle of Invocation's light: a level 1 spell a Cleric or Druid prepared takes no slot.
+      const free =
+        given !== undefined &&
+        freeing.some(
+          (modifier) =>
+            spell.level >= 1 &&
+            spell.level <= modifier.maxLevel &&
+            modifier.classes.includes(given.slice(given.lastIndexOf("/") + 1)),
+        );
       const bumped = bonusDc ? withDcBonus(activation, bonusDc) : activation;
       const cast = ability ? castWith(bumped, ability) : bumped;
+      const typed = type ? retyped(cast, type) : cast;
       actions.push({
         id: `spell:${spellId}`,
         name: spell.name,
-        activation: type ? retyped(cast, type) : cast,
+        activation: free
+          ? {
+              ...typed,
+              cost: typed.cost.filter((cost) => cost !== "slot"),
+            }
+          : typed,
         spellLevel: spell.level,
         upcast: spell.upcast,
         ...(lasting ? { concentrates: true as const } : {}),
@@ -3608,6 +3730,7 @@ function withEffectActions(
     if (modifier.kind !== "grantedAction") continue;
     const giver = grantedBy(sourceId, access);
     if (!giver) continue;
+    // A cantrip's action grows with the bearer's level, as Produce Flame's hurl.
     const scaled =
       giver.spell?.upcast && giver.spell.granted
         ? scaleActivation(
@@ -3615,21 +3738,28 @@ function withEffectActions(
             giver.spell.upcast.perSlotLevel,
             (level ?? giver.spell.level) - giver.spell.level,
           )
-        : giver.activation;
+        : giver.spell?.level === 0 && giver.spell.cantrip
+          ? scaleActivation(
+              giver.activation,
+              giver.spell.cantrip.perTier,
+              cantripTier(stats.level),
+            )
+          : giver.activation;
     const { resolution } = scaled;
-    const retypedAction = retyped(
+    const dcSet =
       resolution.kind === "save" && modifier.dc !== undefined
         ? {
             ...scaled,
             resolution: { ...resolution, dc: { base: modifier.dc, add: [] } },
           }
-        : scaled,
-      modifier.damage,
-    );
+        : scaled;
+    const retypedAction = modifier.damage
+      ? retyped(dcSet, modifier.damage)
+      : dcSet;
     const uses = modifier.uses;
     if (uses !== undefined) resources[grantedKey(sourceId)] = uses;
     granted.push({
-      id: `granted:${sourceId}`,
+      id: `${GRANTED_PREFIX}${sourceId}`,
       name: giver.name,
       activation:
         uses === undefined
@@ -3691,9 +3821,13 @@ function grantedBy(
       readonly spell?: Spell;
     }
   | undefined {
-  if (sourceId.startsWith(ITEM_PREFIX)) {
-    const item = lookup(access, ItemSchema, sourceId.slice(ITEM_PREFIX.length));
-    return item.type === "magicItem" && item.granted
+  // An item's, from using it up or from one of its activations, as a Staff of the Adder's snake head.
+  const itemId = sourceId.startsWith(ITEM_PREFIX)
+    ? sourceId.slice(ITEM_PREFIX.length)
+    : itemUseOf(sourceId);
+  if (itemId) {
+    const item = lookup(access, ItemSchema, itemId);
+    return "granted" in item && item.granted
       ? { name: item.name, activation: item.granted }
       : undefined;
   }
@@ -3846,10 +3980,16 @@ export function attackBonus(
   const { attack } = resolution;
   const exhaustion = 2 * stats.exhaustion + stats.ordeal;
   if (attack.flatBonus !== undefined) return attack.flatBonus - exhaustion;
+  // A Finesse weapon a feature or spell makes, as Shadow Blade's, uses the better of Strength and Dexterity.
   const ability =
     attack.type === "spell"
       ? (attack.ability ?? stats.spellAbility)
-      : attack.ability;
+      : (attack.ability ??
+        (attack.finesse
+          ? modifierFor(stats, "dex") > modifierFor(stats, "str")
+            ? "dex"
+            : "str"
+          : undefined));
   const proficiency = attack.proficient === false ? 0 : stats.proficiency;
   const item =
     attack.type === "spell"
@@ -4105,7 +4245,7 @@ function classTiered(
   );
 }
 
-function cantripTier(level: number): number {
+export function cantripTier(level: number): number {
   return level >= 17 ? 3 : level >= 11 ? 2 : level >= 5 ? 1 : 0;
 }
 
@@ -4244,12 +4384,28 @@ export function scaleActivation(
       const { modifier } = effect;
       switch (modifier.kind) {
         // An extra hit's damage grows too, as Conjure Minor Elementals'.
+        // Flame Arrows' quiver holds more pieces with `addBonus`.
         case "hitDamage": {
           const [hit] = damage([modifier.damage]);
           return hit
-            ? { ...effect, modifier: { ...modifier, damage: hit } }
+            ? {
+                ...effect,
+                modifier: {
+                  ...modifier,
+                  damage: hit,
+                  ...(addBonus && modifier.uses !== undefined
+                    ? { uses: modifier.uses + addBonus * steps }
+                    : {}),
+                },
+              }
             : effect;
         }
+        // Booming Blade's thunder for moving grows with its cantrip tier.
+        case "moveDamage":
+          return {
+            ...effect,
+            modifier: { ...modifier, damage: damage(modifier.damage) },
+          };
         // A flat bonus grows only by `addBonus`, as Elemental Weapon's +1 to hit or Aid's Hit Point maximum.
         case "bonus":
           return addBonus && modifier.amount.dice === undefined
@@ -4388,9 +4544,39 @@ export function rollAmount(
   const rolled = notation
     ? amount.reroll
       ? rollRerolling(notation, rolling, diceMultiplier, amount.reroll)
-      : rollDiceNotation(notation, rolling, diceMultiplier)
+      : amount.explode
+        ? rollExploding(
+            notation,
+            rolling,
+            diceMultiplier,
+            evaluateFormula(amount.explode, stats),
+          )
+        : rollDiceNotation(notation, rolling, diceMultiplier)
     : 0;
   return rolled + (amount.bonus ? evaluateFormula(amount.bonus, stats) : 0);
+}
+
+// Each die showing its highest face, the added ones too, adds another die, at most `most` more, as Sorcerous Burst's.
+export function rollExploding(
+  notation: string,
+  dice: Dice,
+  multiplier: number,
+  most: number,
+): number {
+  const [count = "0", sides = "0"] = notation.split("d");
+  let left = Number(count) * multiplier;
+  let added = 0;
+  let total = 0;
+  while (left > 0) {
+    left -= 1;
+    const face = dice.roll(Number(sides));
+    total += face;
+    if (face === Number(sides) && added < most) {
+      added += 1;
+      left += 1;
+    }
+  }
+  return total;
 }
 
 export function damageResponses(
