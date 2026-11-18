@@ -4478,10 +4478,7 @@ export function exhaustionOf(actor: Actor): number {
       (sum, { modifier }) =>
         modifier.kind === "exhausted"
           ? sum +
-            Math.min(
-              modifier.levels,
-              Math.max(0, (modifier.upTo ?? 6) - sum),
-            )
+            Math.min(modifier.levels, Math.max(0, (modifier.upTo ?? 6) - sum))
           : sum,
       actor.exhaustion,
     ),

@@ -6031,6 +6031,8 @@ export function resolveAction(
       break;
     }
     case "attack": {
+      // A spell attack that leaves something held by Concentration begins it, as Spiritual Weapon's force.
+      beginConcentration([...resolution.onHit, ...resolution.onMiss]);
       const thrown: Frame[] = [];
       for (const target of targets) {
         for (const actionId of attackRoutine(action, actor, stats)) {

@@ -448,8 +448,20 @@
       kind: automatic
       damage: []
       effects:
-        - { kind: zone, zone: area, radius: 10, part: 0, duration: { concentration: true, minutes: 10 } }
-        - { kind: zone, zone: area, radius: 5, part: 1, duration: { concentration: true, minutes: 10 } }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 10,
+            part: 0,
+            duration: { concentration: true, minutes: 10 },
+          }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 5,
+            part: 1,
+            duration: { concentration: true, minutes: 10 },
+          }
     areas:
       - side: enemy
         when: turnEnd
@@ -495,15 +507,32 @@
   automation: full
   activation:
     cost: [action, slot]
-    targeting: { area: { shape: emanation, radius: 10 }, range: self, side: enemy }
-    alsoSelf: [{ kind: modifier, modifier: { kind: bonusDisengage }, duration: { concentration: true, minutes: 10 } }]
+    targeting:
+      { area: { shape: emanation, radius: 10 }, range: self, side: enemy }
+    alsoSelf:
+      [
+        {
+          kind: modifier,
+          modifier: { kind: bonusDisengage },
+          duration: { concentration: true, minutes: 10 },
+        },
+      ]
     resolution:
       kind: save
       ability: wis
       dc: { add: [{ kind: spellSaveDc }] }
       damage: [{ amount: { dice: 5d8 }, type: force }]
       onSuccessDamage: half
-      onFail: [{ kind: zone, zone: area, radius: 10, follows: true, duration: { concentration: true, minutes: 10 } }]
+      onFail:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 10,
+            follows: true,
+            duration: { concentration: true, minutes: 10 },
+          },
+        ]
       onSuccess: []
     area:
       side: enemy
@@ -1590,13 +1619,48 @@
       effects:
         - kind: modifier
           duration: { concentration: true, minutes: 60 }
-          modifier: { kind: hitDamage, dealtBy: caster, damage: { amount: { dice: 1d6 }, type: necrotic } }
-        - { kind: modifier, option: Strength, modifier: { kind: disadvantage, on: checks, ability: str }, duration: { concentration: true, minutes: 60 } }
-        - { kind: modifier, option: Dexterity, modifier: { kind: disadvantage, on: checks, ability: dex }, duration: { concentration: true, minutes: 60 } }
-        - { kind: modifier, option: Constitution, modifier: { kind: disadvantage, on: checks, ability: con }, duration: { concentration: true, minutes: 60 } }
-        - { kind: modifier, option: Intelligence, modifier: { kind: disadvantage, on: checks, ability: int }, duration: { concentration: true, minutes: 60 } }
-        - { kind: modifier, option: Wisdom, modifier: { kind: disadvantage, on: checks, ability: wis }, duration: { concentration: true, minutes: 60 } }
-        - { kind: modifier, option: Charisma, modifier: { kind: disadvantage, on: checks, ability: cha }, duration: { concentration: true, minutes: 60 } }
+          modifier:
+            {
+              kind: hitDamage,
+              dealtBy: caster,
+              damage: { amount: { dice: 1d6 }, type: necrotic },
+            }
+        - {
+            kind: modifier,
+            option: Strength,
+            modifier: { kind: disadvantage, on: checks, ability: str },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Dexterity,
+            modifier: { kind: disadvantage, on: checks, ability: dex },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Constitution,
+            modifier: { kind: disadvantage, on: checks, ability: con },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Intelligence,
+            modifier: { kind: disadvantage, on: checks, ability: int },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Wisdom,
+            modifier: { kind: disadvantage, on: checks, ability: wis },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Charisma,
+            modifier: { kind: disadvantage, on: checks, ability: cha },
+            duration: { concentration: true, minutes: 60 },
+          }
   lasting:
     cost: [bonusAction]
     remark: true
@@ -1607,13 +1671,48 @@
       effects:
         - kind: modifier
           duration: { concentration: true, minutes: 60 }
-          modifier: { kind: hitDamage, dealtBy: caster, damage: { amount: { dice: 1d6 }, type: necrotic } }
-        - { kind: modifier, option: Strength, modifier: { kind: disadvantage, on: checks, ability: str }, duration: { concentration: true, minutes: 60 } }
-        - { kind: modifier, option: Dexterity, modifier: { kind: disadvantage, on: checks, ability: dex }, duration: { concentration: true, minutes: 60 } }
-        - { kind: modifier, option: Constitution, modifier: { kind: disadvantage, on: checks, ability: con }, duration: { concentration: true, minutes: 60 } }
-        - { kind: modifier, option: Intelligence, modifier: { kind: disadvantage, on: checks, ability: int }, duration: { concentration: true, minutes: 60 } }
-        - { kind: modifier, option: Wisdom, modifier: { kind: disadvantage, on: checks, ability: wis }, duration: { concentration: true, minutes: 60 } }
-        - { kind: modifier, option: Charisma, modifier: { kind: disadvantage, on: checks, ability: cha }, duration: { concentration: true, minutes: 60 } }
+          modifier:
+            {
+              kind: hitDamage,
+              dealtBy: caster,
+              damage: { amount: { dice: 1d6 }, type: necrotic },
+            }
+        - {
+            kind: modifier,
+            option: Strength,
+            modifier: { kind: disadvantage, on: checks, ability: str },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Dexterity,
+            modifier: { kind: disadvantage, on: checks, ability: dex },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Constitution,
+            modifier: { kind: disadvantage, on: checks, ability: con },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Intelligence,
+            modifier: { kind: disadvantage, on: checks, ability: int },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Wisdom,
+            modifier: { kind: disadvantage, on: checks, ability: wis },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Charisma,
+            modifier: { kind: disadvantage, on: checks, ability: cha },
+            duration: { concentration: true, minutes: 60 },
+          }
   upcast:
     perSlotLevel:
       durations:
@@ -1652,7 +1751,12 @@
       effects:
         - kind: modifier
           duration: { concentration: true, minutes: 60 }
-          modifier: { kind: hitDamage, dealtBy: caster, damage: { amount: { dice: 1d6 }, type: force } }
+          modifier:
+            {
+              kind: hitDamage,
+              dealtBy: caster,
+              damage: { amount: { dice: 1d6 }, type: force },
+            }
   lasting:
     cost: [bonusAction]
     remark: true
@@ -1663,7 +1767,12 @@
       effects:
         - kind: modifier
           duration: { concentration: true, minutes: 60 }
-          modifier: { kind: hitDamage, dealtBy: caster, damage: { amount: { dice: 1d6 }, type: force } }
+          modifier:
+            {
+              kind: hitDamage,
+              dealtBy: caster,
+              damage: { amount: { dice: 1d6 }, type: force },
+            }
   upcast:
     perSlotLevel:
       durations:
@@ -1981,7 +2090,12 @@
       onSuccessDamage: half
       onFail:
         - { kind: revertShape }
-        - { kind: zone, zone: dim, radius: 5, duration: { concentration: true, minutes: 1 } }
+        - {
+            kind: zone,
+            zone: dim,
+            radius: 5,
+            duration: { concentration: true, minutes: 1 },
+          }
       onSuccess: []
     area:
       when: turnEnd
@@ -3236,9 +3350,31 @@
     resolution:
       kind: attack
       attack: { type: spell }
-      damage: [{ amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } }, type: force }]
-      onHit: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
-      onMiss: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+      damage:
+        [
+          {
+            amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } },
+            type: force,
+          },
+        ]
+      onHit:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
+      onMiss:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
   lasting:
     cost: [bonusAction]
     anchor: { moves: 30 }
@@ -3246,7 +3382,13 @@
     resolution:
       kind: attack
       attack: { type: spell }
-      damage: [{ amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } }, type: force }]
+      damage:
+        [
+          {
+            amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } },
+            type: force,
+          },
+        ]
       onHit: []
       onMiss: []
 - id: srd52:spell/awaken
@@ -3604,8 +3746,20 @@
       kind: automatic
       damage: []
       effects:
-        - { kind: zone, zone: light, radius: 10, part: 0, duration: { concentration: true, minutes: 10 } }
-        - { kind: zone, zone: area, radius: 10, part: 1, duration: { concentration: true, minutes: 10 } }
+        - {
+            kind: zone,
+            zone: light,
+            radius: 10,
+            part: 0,
+            duration: { concentration: true, minutes: 10 },
+          }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 10,
+            part: 1,
+            duration: { concentration: true, minutes: 10 },
+          }
     areas:
       - side: ally
         when: turnEnd
@@ -3617,7 +3771,10 @@
           kind: automatic
           damage: []
           effects:
-            - { kind: heal, amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } } }
+            - {
+                kind: heal,
+                amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } },
+              }
       - side: enemy
         when: turnEnd
         enters: true
@@ -4219,14 +4376,30 @@
     resolution:
       kind: automatic
       damage: []
-      effects: [{ kind: zone, zone: light, radius: 10, dim: 10, follows: true, duration: { concentration: true, minutes: 10 } }]
+      effects:
+        [
+          {
+            kind: zone,
+            zone: light,
+            radius: 10,
+            dim: 10,
+            follows: true,
+            duration: { concentration: true, minutes: 10 },
+          },
+        ]
   lasting:
     cost: [action]
     targeting: { creatures: 1, range: 5, side: enemy }
     resolution:
       kind: attack
       attack: { type: spell }
-      damage: [{ amount: { dice: 3d6, bonus: { add: [{ kind: spellMod }] } }, type: fire }]
+      damage:
+        [
+          {
+            amount: { dice: 3d6, bonus: { add: [{ kind: spellMod }] } },
+            type: fire,
+          },
+        ]
       onHit: []
       onMiss: []
   upcast:
@@ -4515,11 +4688,27 @@
       damage: [{ amount: { dice: 2d8 }, type: fire }]
       onSuccessDamage: full
       onFail:
-        - { kind: modifier, modifier: { kind: disadvantage, on: attacks }, duration: { until: yourNextTurnStart } }
-        - { kind: modifier, modifier: { kind: disadvantage, on: checks }, duration: { until: yourNextTurnStart } }
-        - { kind: modifier, modifier: { kind: mark }, duration: { concentration: true, minutes: 1 } }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: attacks },
+            duration: { until: yourNextTurnStart },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: checks },
+            duration: { until: yourNextTurnStart },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: mark },
+            duration: { concentration: true, minutes: 1 },
+          }
       onSuccess:
-        - { kind: modifier, modifier: { kind: mark }, duration: { concentration: true, minutes: 1 } }
+        - {
+            kind: modifier,
+            modifier: { kind: mark },
+            duration: { concentration: true, minutes: 1 },
+          }
   lasting:
     cost: [bonusAction]
     targeting: { creatures: 1, range: 60, side: enemy, afflicted: Heat Metal }
@@ -4530,8 +4719,16 @@
       damage: [{ amount: { dice: 2d8 }, type: fire }]
       onSuccessDamage: full
       onFail:
-        - { kind: modifier, modifier: { kind: disadvantage, on: attacks }, duration: { until: yourNextTurnStart } }
-        - { kind: modifier, modifier: { kind: disadvantage, on: checks }, duration: { until: yourNextTurnStart } }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: attacks },
+            duration: { until: yourNextTurnStart },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: checks },
+            duration: { until: yourNextTurnStart },
+          }
       onSuccess: []
   upcast:
     perSlotLevel:
@@ -5843,8 +6040,19 @@
       damage: [{ amount: { dice: 6d8 }, type: radiant }]
       onSuccessDamage: half
       onFail:
-        - { kind: applyCondition, condition: blinded, duration: { until: yourNextTurnStart } }
-        - { kind: zone, zone: sunlight, radius: 30, dim: 30, follows: true, duration: { concentration: true, minutes: 1 } }
+        - {
+            kind: applyCondition,
+            condition: blinded,
+            duration: { until: yourNextTurnStart },
+          }
+        - {
+            kind: zone,
+            zone: sunlight,
+            radius: 30,
+            dim: 30,
+            follows: true,
+            duration: { concentration: true, minutes: 1 },
+          }
       onSuccess: []
   lasting:
     cost: [action]
@@ -5855,7 +6063,14 @@
       dc: { add: [{ kind: spellSaveDc }] }
       damage: [{ amount: { dice: 6d8 }, type: radiant }]
       onSuccessDamage: half
-      onFail: [{ kind: applyCondition, condition: blinded, duration: { until: yourNextTurnStart } }]
+      onFail:
+        [
+          {
+            kind: applyCondition,
+            condition: blinded,
+            duration: { until: yourNextTurnStart },
+          },
+        ]
       onSuccess: []
 - id: srd52:spell/teleport
   name: Teleport
@@ -7547,7 +7762,11 @@
           kind: automatic
           damage: []
           effects:
-            - { kind: modifier, modifier: { kind: grantedAction, uses: 1 }, duration: { minutes: 1 } }
+            - {
+                kind: modifier,
+                modifier: { kind: grantedAction, uses: 1 },
+                duration: { minutes: 1 },
+              }
   granted:
     label: Throw the globe
     cost: [action]
@@ -9927,9 +10146,36 @@
     resolution:
       kind: attack
       attack: { type: spell }
-      damage: [{ amount: { dice: 3d12, bonus: { add: [{ kind: spellMod }] } }, type: psychic }]
-      onHit: [{ kind: applyCondition, condition: frightened, duration: { until: yourNextTurnStart } }, { kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 10 } }]
-      onMiss: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 10 } }]
+      damage:
+        [
+          {
+            amount: { dice: 3d12, bonus: { add: [{ kind: spellMod }] } },
+            type: psychic,
+          },
+        ]
+      onHit:
+        [
+          {
+            kind: applyCondition,
+            condition: frightened,
+            duration: { until: yourNextTurnStart },
+          },
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 10 },
+          },
+        ]
+      onMiss:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 10 },
+          },
+        ]
   lasting:
     cost: [bonusAction]
     anchor: { moves: 30 }
@@ -9937,8 +10183,21 @@
     resolution:
       kind: attack
       attack: { type: spell }
-      damage: [{ amount: { dice: 3d12, bonus: { add: [{ kind: spellMod }] } }, type: psychic }]
-      onHit: [{ kind: applyCondition, condition: frightened, duration: { until: yourNextTurnStart } }]
+      damage:
+        [
+          {
+            amount: { dice: 3d12, bonus: { add: [{ kind: spellMod }] } },
+            type: psychic,
+          },
+        ]
+      onHit:
+        [
+          {
+            kind: applyCondition,
+            condition: frightened,
+            duration: { until: yourNextTurnStart },
+          },
+        ]
       onMiss: []
   upcast:
     perSlotLevel:
@@ -10122,7 +10381,15 @@
     resolution:
       kind: automatic
       damage: []
-      effects: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+      effects:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
   lasting:
     label: Detonate
     cost: []
@@ -10635,8 +10902,20 @@
       kind: automatic
       damage: []
       effects:
-        - { kind: zone, zone: area, radius: 5, duration: { concentration: true, minutes: 1 } }
-        - { kind: zone, zone: light, radius: 20, dim: 20, bare: true, duration: { concentration: true, minutes: 1 } }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 5,
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: zone,
+            zone: light,
+            radius: 20,
+            dim: 20,
+            bare: true,
+            duration: { concentration: true, minutes: 1 },
+          }
     area:
       when: turnEnd
       whenMoved: true
@@ -11978,9 +12257,31 @@
     resolution:
       kind: attack
       attack: { type: spell }
-      damage: [{ amount: { dice: 1d8, bonus: { add: [{ kind: spellMod }] } }, type: force }]
-      onHit: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
-      onMiss: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+      damage:
+        [
+          {
+            amount: { dice: 1d8, bonus: { add: [{ kind: spellMod }] } },
+            type: force,
+          },
+        ]
+      onHit:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
+      onMiss:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
   lasting:
     cost: [bonusAction]
     anchor: { moves: 20 }
@@ -11988,7 +12289,13 @@
     resolution:
       kind: attack
       attack: { type: spell }
-      damage: [{ amount: { dice: 1d8, bonus: { add: [{ kind: spellMod }] } }, type: force }]
+      damage:
+        [
+          {
+            amount: { dice: 1d8, bonus: { add: [{ kind: spellMod }] } },
+            type: force,
+          },
+        ]
       onHit: []
       onMiss: []
   upcast:
@@ -12035,8 +12342,17 @@
       damage: [{ amount: { dice: 2d6 }, type: thunder }]
       onSuccessDamage: none
       onFail:
-        - { kind: applyCondition, condition: deafened, duration: { concentration: true, minutes: 1 } }
-        - { kind: zone, zone: fog, radius: 300, duration: { concentration: true, minutes: 1 } }
+        - {
+            kind: applyCondition,
+            condition: deafened,
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: zone,
+            zone: fog,
+            radius: 300,
+            duration: { concentration: true, minutes: 1 },
+          }
       onSuccess: []
     area:
       terrain: ground
@@ -12662,13 +12978,36 @@
     cost: [action, slot]
     anchor: { moves: 120 }
     targeting: { creatures: 1, range: 125, side: enemy }
-    alsoSelf: [{ kind: modifier, modifier: { kind: spheres }, duration: { concentration: true, minutes: 1 } }]
+    alsoSelf:
+      [
+        {
+          kind: modifier,
+          modifier: { kind: spheres },
+          duration: { concentration: true, minutes: 1 },
+        },
+      ]
     resolution:
       kind: attack
       attack: { type: spell }
       damage: [{ amount: { dice: 5d8 }, type: force }]
-      onHit: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
-      onMiss: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+      onHit:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
+      onMiss:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
     shapes:
       - name: Clenched Fist
       - name: Forceful Hand
@@ -12678,8 +13017,21 @@
           dc: { add: [{ kind: spellSaveDc }] }
           onFail:
             - { kind: forcedMove, feet: 20, direction: away, maxSize: huge }
-            - { kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }
-          onSuccess: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+            - {
+                kind: zone,
+                zone: area,
+                radius: 0,
+                duration: { concentration: true, minutes: 1 },
+              }
+          onSuccess:
+            [
+              {
+                kind: zone,
+                zone: area,
+                radius: 0,
+                duration: { concentration: true, minutes: 1 },
+              },
+            ]
       - name: Grasping Hand
         resolution:
           kind: save
@@ -12691,16 +13043,39 @@
               maxSize: huge
               duration: { concentration: true, minutes: 1 }
               escape: { ability: str, skill: athletics }
-            - { kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }
-          onSuccess: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+            - {
+                kind: zone,
+                zone: area,
+                radius: 0,
+                duration: { concentration: true, minutes: 1 },
+              }
+          onSuccess:
+            [
+              {
+                kind: zone,
+                zone: area,
+                radius: 0,
+                duration: { concentration: true, minutes: 1 },
+              },
+            ]
       - name: Interposing Hand
         self: true
         resolution:
           kind: automatic
           damage: []
           effects:
-            - { kind: modifier, modifier: { kind: bonus, to: ac, amount: { bonus: { base: 2 } } }, duration: { until: yourNextTurnStart } }
-            - { kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }
+            - {
+                kind: modifier,
+                modifier:
+                  { kind: bonus, to: ac, amount: { bonus: { base: 2 } } },
+                duration: { until: yourNextTurnStart },
+              }
+            - {
+                kind: zone,
+                zone: area,
+                radius: 0,
+                duration: { concentration: true, minutes: 1 },
+              }
   upcast:
     perSlotLevel:
       addDice: 2d8
@@ -12725,7 +13100,8 @@
           kind: save
           ability: str
           dc: { add: [{ kind: spellSaveDc }] }
-          onFail: [{ kind: forcedMove, feet: 20, direction: away, maxSize: huge }]
+          onFail:
+            [{ kind: forcedMove, feet: 20, direction: away, maxSize: huge }]
           onSuccess: []
       - label: Grasping Hand
         cost: [bonusAction]
@@ -12744,10 +13120,17 @@
           onSuccess: []
       - label: Crush
         cost: [bonusAction]
-        targeting: { creatures: 1, range: 120, side: enemy, afflicted: Arcane Hand }
+        targeting:
+          { creatures: 1, range: 120, side: enemy, afflicted: Arcane Hand }
         resolution:
           kind: automatic
-          damage: [{ amount: { dice: 4d6, bonus: { add: [{ kind: spellMod }] } }, type: bludgeoning }]
+          damage:
+            [
+              {
+                amount: { dice: 4d6, bonus: { add: [{ kind: spellMod }] } },
+                type: bludgeoning,
+              },
+            ]
           effects: []
 - id: srd52:spell/augury
   name: Augury
@@ -15466,7 +15849,11 @@
       dc: { add: [{ kind: spellSaveDc }] }
       onFail:
         - { kind: forcedMove, feet: 30, direction: away, maxSize: huge }
-        - { kind: applyCondition, condition: restrained, duration: { until: yourNextTurnEnd } }
+        - {
+            kind: applyCondition,
+            condition: restrained,
+            duration: { until: yourNextTurnEnd },
+          }
       onSuccess: []
   lasting:
     cost: [action]
@@ -15477,7 +15864,11 @@
       dc: { add: [{ kind: spellSaveDc }] }
       onFail:
         - { kind: forcedMove, feet: 30, direction: away, maxSize: huge }
-        - { kind: applyCondition, condition: restrained, duration: { until: yourNextTurnEnd } }
+        - {
+            kind: applyCondition,
+            condition: restrained,
+            duration: { until: yourNextTurnEnd },
+          }
       onSuccess: []
 - id: srd52:spell/thunderwave
   name: Thunderwave

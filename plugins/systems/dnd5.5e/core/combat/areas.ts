@@ -374,8 +374,20 @@ export function carriedEvents(
       );
     if (!held || !item.position) return [];
     const at = {
-      x: Math.max(0, Math.min((grid?.width ?? Infinity) - 1, item.position.x + to.x - from.x)),
-      y: Math.max(0, Math.min((grid?.height ?? Infinity) - 1, item.position.y + to.y - from.y)),
+      x: Math.max(
+        0,
+        Math.min(
+          (grid?.width ?? Infinity) - 1,
+          item.position.x + to.x - from.x,
+        ),
+      ),
+      y: Math.max(
+        0,
+        Math.min(
+          (grid?.height ?? Infinity) - 1,
+          item.position.y + to.y - from.y,
+        ),
+      ),
     };
     return [dndEvent(`${NS}:moved`, { actor: item.id, to: at, feet: 0 })];
   });
@@ -460,10 +472,9 @@ export function runZoneTick(
         Math.max(0, (state.combat?.round ?? 0) - (found.since ?? 0) - 1),
       )
     ];
-  const zone =
-    step && found.area
-      ? { ...found, area: { ...found.area, resolution: step } }
-      : found;
+  const zone = step
+    ? { ...found, area: { ...found.area, resolution: step } }
+    : found;
   const targets = payload.targets.flatMap((id) => {
     const target = state.actors[id];
     return target &&

@@ -4533,7 +4533,9 @@ export const FeatureSchema = ContentEntrySchema.extend({
   redice: z.record(ContentIdSchema, DiceSchema).optional(),
   // These spells do these too, with the options their effects name, as Eldritch Hex's Disadvantage on saves of the
   // ability chosen for Hex (stats.ts).
-  addsTo: z.record(ContentIdSchema, z.array(LeafEffectSchema).min(1)).optional(),
+  addsTo: z
+    .record(ContentIdSchema, z.array(LeafEffectSchema).min(1))
+    .optional(),
   // Each leveled spell in `spells` can also be cast once per Long Rest without a slot, as with Fey Touched, or each
   // as its own entry says, as Drow High Magic's at-will Detect Magic beside its once-a-day spells.
   freeCast: z

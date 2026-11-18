@@ -87,12 +87,7 @@ import {
   rollSave,
   zoneEvents,
 } from "./effects.ts";
-import {
-  anchorAt,
-  anchorLeaves,
-  anchorMoved,
-  anchorSquare,
-} from "./anchor.ts";
+import { anchorAt, anchorLeaves, anchorMoved, anchorSquare } from "./anchor.ts";
 import { metamagicCast, quickens } from "../metamagic.ts";
 import { castOptionCast } from "../cast-options.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
@@ -643,6 +638,12 @@ const TELEPORT_ANYWHERE = 1000;
 
 // Holy Weapon's burst ends the spell that gave it: the caster's Concentration on it, or the effect itself.
 function dismissed(action: KnownAction, actor: Actor): SystemEvent[] {
+  // A held spell's own action that ends it, as Delayed Blast Fireball's bead set off.
+  if (action.activation.dismisses && action.id.startsWith("lasting:")) {
+    return actor.concentratingOn !== null
+      ? [dndEvent(`${NS}:concentrationEnded`, { actor: actor.id })]
+      : [];
+  }
   if (!action.activation.dismisses || !action.id.startsWith(GRANTED_PREFIX)) {
     return [];
   }
