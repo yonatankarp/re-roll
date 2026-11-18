@@ -2527,7 +2527,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         )) &&
       (passive.kind !== "aura" ||
         !passive.whileAspect ||
-        hasAspect(actor, passive.whileAspect)),
+        hasAspect(actor, passive.whileAspect)) &&
+      (passive.kind !== "aura" ||
+        !passive.without?.some((id) => featureIds.has(id))),
   );
   const castingAbility = new Map([
     ...answerAbilities,
@@ -5020,4 +5022,23 @@ export function damageResponses(
     passive.kind === "absorb" ? passive.damage : [],
   );
   return { adjustments: [], resistances, vulnerabilities, immunities, absorbs };
+}
+
+// Profane Casting: a spell of these schools the bearer casts without its components.
+export function bareSpell(
+  actor: Actor,
+  school: string,
+  access: ContentAccess,
+): boolean {
+  return deriveStats(actor, access).passives.some(
+    (passive) =>
+      passive.kind === "noComponents" &&
+      passive.school.some((item) => item === school) &&
+      (!passive.while ||
+        passive.while.some((id) =>
+          actor.activeEffects.some(({ sourceId }) =>
+            sourceId.startsWith(`feature:${id}:`),
+          ),
+        )),
+  );
 }

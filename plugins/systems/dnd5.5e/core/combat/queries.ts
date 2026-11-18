@@ -1103,6 +1103,13 @@ export function extraFits(
   if (passive.whileAspect && !hasAspect(attacker, passive.whileAspect)) {
     return false;
   }
+  // Ominous Strikes: only against a Frightened creature.
+  if (
+    passive.targetCondition &&
+    !hasCondition(target, passive.targetCondition)
+  ) {
+    return false;
+  }
   if (passive.firstRound && (state.combat?.round ?? 1) > 1) return false;
   if (passive.while?.some((id) => !underEffect(attacker, [id]))) return false;
   if (passive.against && !markedBy(target, attacker, passive.against)) {

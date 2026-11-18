@@ -19,7 +19,12 @@ import {
   NS,
 } from "./state.ts";
 import { distanceFeet, type Square, squareKey, wallSet } from "./grid.ts";
-import { deriveStats, type KnownAction, type Stats } from "./stats.ts";
+import {
+  bareSpell,
+  deriveStats,
+  type KnownAction,
+  type Stats,
+} from "./stats.ts";
 import { spellOf } from "./combat/dispel.ts";
 import { spellOfSource } from "./combat/ids.ts";
 import { lightAt } from "./sight.ts";
@@ -656,7 +661,12 @@ export function silencedSpells(
   return (action) => {
     const spell = spellOf(action.id, actor, access);
     if (!spell) return false;
-    return kinds.has("all") || (!elsewhere && /\bV\b/.test(spell.components));
+    return (
+      kinds.has("all") ||
+      (!elsewhere &&
+        /\bV\b/.test(spell.components) &&
+        !bareSpell(actor, spell.school, access))
+    );
   };
 }
 

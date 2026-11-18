@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { PLAYER_ACTOR } from "../engine/kernel/events.ts";
 import {
+  dealEvents,
   leafEvents,
   resolveAction,
 } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
@@ -15,8 +17,12 @@ import {
   applyDndEvent,
   dndEvent,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
-import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
-import { hero, settle, trait } from "./feat-fixtures.ts";
+import {
+  bareSpell,
+  deriveStats,
+} from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { d20Floor } from "../plugins/systems/dnd5.5e/core/trait-rules.ts";
+import { contextOf, hero, scripted, settle, trait } from "./feat-fixtures.ts";
 import { at, block, monster, onMap, runWith } from "./senses-fixtures.ts";
 
 // Made-up forms and traits for shape-changing (#146): ids and mechanics only.
@@ -97,6 +103,47 @@ const FIXTURES = [
       kind: "modifier",
       modifier: { kind: "resistance", damage: "cold" },
       whileAspect: "Dragon",
+    },
+  ]),
+  trait(
+    "zealot",
+    [
+      {
+        kind: "dropToOne",
+        resource: "rage",
+        allies: true,
+        reaction: true,
+        within: 30,
+        hp: { base: 7 },
+      },
+    ],
+    { resources: [{ id: "rage", max: { base: 2 }, recharge: [] }] },
+  ),
+  trait("dragon", [
+    {
+      kind: "modifier",
+      modifier: {
+        kind: "checkFloor",
+        value: 10,
+        ability: "int",
+        concentration: true,
+      },
+    },
+  ]),
+  trait("profane", [{ kind: "noComponents", school: ["necromancy"] }]),
+  trait("necrosis", [
+    {
+      kind: "extraDamage",
+      oneDieOf: "slashing",
+      when: "always",
+      type: "necrotic",
+    },
+    {
+      kind: "extraDamage",
+      dice: "1d4",
+      when: "always",
+      type: "psychic",
+      targetCondition: "frightened",
     },
   ]),
   trait("misty", [], {
@@ -294,5 +341,134 @@ describe("transformations", () => {
         { ...run, state, dice },
       ).map((event) => event.kind),
     ).toEqual([`${NS}:effectEnded`]);
+  });
+});
+
+describe("choices, lost bearers and hit riders", () => {
+  const options = {
+    kind: "choose" as const,
+    duration: { minutes: 1 },
+    options: [
+      { name: "Enlarge", modifiers: [{ kind: "size" as const, grow: 1 }] },
+      {
+        name: "Reduce",
+        foe: true as const,
+        modifiers: [{ kind: "size" as const, grow: -1 }],
+      },
+    ],
+  };
+
+  it("takes the first option for a friend and the one meant for foes for a foe, when nobody is asked", async () => {
+    const run = await runWith(FIXTURES);
+    const caster = at(monster("caster", "foe", "party"), 0, 0);
+    const friend = at(monster("friend", "foe", "party"), 1, 0);
+    const foe = at(monster("baddie", "foe"), 2, 0);
+    const state = onMap(["..."], [caster, friend, foe]);
+    const grew = (target: Actor) =>
+      leafEvents([options], "test", caster, target, {
+        ...run,
+        state,
+        dice,
+      }).reduce(applyDndEvent, state).actors[target.id];
+    expect(sizeOf(grew(friend) ?? none(), run)).toBe(3);
+    expect(sizeOf(grew(foe) ?? none(), run)).toBe(1);
+  });
+
+  it("turns its bearer into a monster of the other side, sooner the more it's tempted", async () => {
+    const run = await runWith(FIXTURES);
+    const bearer = at(hero([]), 0, 0);
+    const doom = {
+      kind: "becomeMonster" as const,
+      monster: "test:monster/foe",
+      chance: 50,
+      counter: "doom",
+    };
+    let state: DndState = onMap([".."], [bearer]);
+    const once = (roll: number) => {
+      const context = { ...run, state, dice: scripted([roll]).dice };
+      const self = state.actors[PLAYER_ACTOR] ?? none();
+      state = leafEvents([doom], "test", self, self, context).reduce(
+        applyDndEvent,
+        state,
+      );
+    };
+    once(60);
+    expect(state.actors[`${PLAYER_ACTOR}:lost`]).toBeUndefined();
+    once(60);
+    const lost = state.actors[`${PLAYER_ACTOR}:lost`] ?? none();
+    expect(lost.side).toBe("enemy");
+    expect(lost.position).toEqual({ x: 0, y: 0 });
+  });
+
+  it("lets a bearer spend its Reaction to hold an ally in reach at its Hit Points, and floors its Concentration saves", async () => {
+    const run = await runWith(FIXTURES);
+    const zealot = at(hero(["zealot", "dragon"]), 0, 0);
+    const near = at({ ...hero([], { id: "near" }), hp: 3 }, 1, 0);
+    const far = at({ ...hero([], { id: "far" }), hp: 3 }, 8, 0);
+    const state = onMap([".........."], [zealot, near, far]);
+    const context = { ...run, state, dice };
+    const hp = (target: Actor) =>
+      dealEvents(
+        target,
+        [{ amount: 5, type: "slashing" }],
+        false,
+        context,
+      ).events.reduce(applyDndEvent, state).actors[target.id]?.hp;
+    expect(hp(near)).toBe(7);
+    expect(hp(far)).toBe(0);
+    const stats = deriveStats(zealot, run);
+    expect(d20Floor(zealot, stats, true)).toBe(10);
+    expect(d20Floor(zealot, stats)).toBe(1);
+    expect(bareSpell(hero(["profane"]), "necromancy", run)).toBe(true);
+    expect(bareSpell(hero(["profane"]), "evocation", run)).toBe(false);
+  });
+
+  it("adds a die of the hit's own damage, and damage against a Frightened target only", async () => {
+    const run = await runWith(FIXTURES);
+    const attacker = at(hero(["necrosis"]), 0, 0);
+    const hit = (frightened: boolean) => {
+      const foe = at(
+        {
+          ...hero([], { id: "foe" }),
+          side: "enemy" as const,
+          hp: 40,
+          activeEffects: frightened
+            ? [
+                {
+                  sourceId: "test",
+                  casterId: "x",
+                  modifier: {
+                    kind: "condition" as const,
+                    condition: "frightened" as const,
+                  },
+                  ends: "spellDuration" as const,
+                },
+              ]
+            : [],
+        },
+        1,
+        0,
+      );
+      const result = run.system.frames[`${NS}:applyHit`]?.run(
+        {
+          attacker: PLAYER_ACTOR,
+          actionId: "weapon:srd52:item/longsword",
+          target: "foe",
+          critical: false,
+          hadAdvantage: false,
+          total: 20,
+          natural: 15,
+        },
+        contextOf(run, [attacker, foe], scripted([]).dice),
+      );
+      return (result?.events ?? []).flatMap((event) =>
+        event.kind === `${NS}:damaged` && "payload" in event
+          ? [(event.payload as { type: string }).type]
+          : [],
+      );
+    };
+    expect(hit(false)).toContain("necrotic");
+    expect(hit(false)).not.toContain("psychic");
+    expect(hit(true)).toContain("psychic");
   });
 });

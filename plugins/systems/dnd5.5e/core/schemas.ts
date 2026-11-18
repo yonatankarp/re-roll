@@ -499,6 +499,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("noAdvantageAgainst"),
     able: z.literal(true).optional(),
+    within: z.number().int().min(5).optional(), // only from attackers this near, as Wildhunt's 30 feet
   }),
   // The first creature to hit the bearer on a turn saves with `ability` against the bearer's spell save DC or
   // misses, as Unbreakable Majesty; with `before`, it saves as it attacks, and on a failure the attack is lost, and
@@ -905,6 +906,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("mark"),
     curse: z.literal(true).optional(),
   }),
+  // Its Exhaustion can't increase while it lasts, as Iron Body's.
+  z.strictObject({ kind: z.literal("noExhaustion") }),
   // Which of a transformation's options the bearer has taken, by name, for what holds only `whileAspect` it lasts, as
   // Starry Form's Archer, Chalice or Dragon.
   z.strictObject({ kind: z.literal("aspect"), name: z.string().min(1) }),
@@ -1518,9 +1521,19 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
           name: z.string().min(1),
           modifiers: z.array(ModifierSchema).min(1),
           foe: z.literal(true).optional(), // offered first, and taken, for a target of the other side, as Reduce
+          tempHp: AmountSchema.optional(), // Temporary Hit Points with it, as Guardian of Nature's Great Tree
         }),
       )
       .min(2),
+  }),
+  // The target is lost to its side, turned for good into this monster fighting for the other one, as swallowing an
+  // Orb of Damara (combat/effects.ts). With `chance`, only that percent for each time before plus this one, counted
+  // by spending a use of `counter`, as the Crown of Horns' 10 percent more each use.
+  z.strictObject({
+    kind: z.literal("becomeMonster"),
+    monster: ContentIdSchema,
+    chance: z.number().int().min(1).max(100).optional(),
+    counter: z.string().min(1).optional(),
   }),
   // The target's effects from these features' activations end, as leaving Wild Shape or taking another Starry Form.
   z.strictObject({
@@ -2393,6 +2406,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // Rage, and with `whileAspect` only while it has that aspect, as Celestial Revelation's Inner Radiance
     while: z.array(ContentIdSchema).min(1).optional(),
     whileAspect: z.string().min(1).optional(),
+    // only while the bearer has none of these features, as Unnerving Aura before Rot and Violence's takes its place
+    without: z.array(ContentIdSchema).min(1).optional(),
     name: z.string().min(1),
     zone: ZoneKindSchema.default("area"),
     radius: z.number().int().min(5),
@@ -2468,6 +2483,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // Precision's Faerie Fire
     against: z.array(ContentIdSchema).min(1).optional(),
     whileAspect: z.string().min(1).optional(), // only with this aspect, as Wondrous Alteration's Natural Weapons
+    targetCondition: ConditionSchema.optional(), // only against a creature with this condition, as Ominous Strikes'
+    // one more die of the hit's own damage of this type, as Dreaded Necrosis' Necrotic die
+    oneDieOf: DamageTypeSchema.optional(),
   }),
   z.strictObject({ kind: z.literal("packTactics") }),
   // Moving through other creatures' spaces or through walls, as a swarm, a ghost's Incorporeal Movement or Halfling
@@ -3088,6 +3106,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // The bearer's spells cast with a slot need no Somatic component, as with a Spell Duelist's Trophy's Helping Hand.
   z.strictObject({ kind: z.literal("noSomatic") }),
+  // The bearer's spells of these schools need no Verbal or Somatic component, so Silence or Slow doesn't hold them
+  // back, while an effect of one of `while`'s features' activations is on it, as Superior Dread's Profane Casting.
+  // shortcut: any of its spells of the school counts, not only its Warlock spells.
+  z.strictObject({
+    kind: z.literal("noComponents"),
+    school: z.array(SpellSchoolSchema).min(1),
+    while: z.array(ContentIdSchema).min(1).optional(),
+  }),
   // A 1 on a damage die of the bearer's spells counts as a 2, as a Robe of Thayan Arcana's Empowered Magic or
   // Spell-Fueling Armor's Potent Spellcasting.
   z.strictObject({ kind: z.literal("empoweredSpells") }),
@@ -3906,6 +3932,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("extraMastery"),
     with: HitKindSchema,
     masteries: z.array(WeaponMasterySchema).min(1),
+    // only while an effect of one of these features' activations is on the bearer, as Strangling Roots in Wrath of
+    // the Wild, and then on any turn
+    while: z.array(ContentIdSchema).min(1).optional(),
   }),
   // A hit with a mastered weapon can use one of these mastery properties in place of the weapon's own, as Tactical
   // Master's Push, Sap or Slow (actions.ts runMasteryHit).

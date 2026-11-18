@@ -3159,7 +3159,11 @@ export function leafEvents(
           effect.clear
             ? target.exhaustion > 0
             : effect.levels &&
-              !hasPassive(deriveStats(target, context), "noExhaustion")
+              !hasPassive(deriveStats(target, context), "noExhaustion") &&
+              // Iron Body's living metal, while it lasts
+              !target.activeEffects.some(
+                ({ modifier }) => modifier.kind === "noExhaustion",
+              )
         ) {
           events.push(
             dndEvent(`${NS}:exhaustionChanged`, {
@@ -3310,13 +3314,18 @@ export function leafEvents(
         const option = ordered[Number(answer)] ?? ordered[0];
         events.push(
           ...leafEvents(
-            (option?.modifiers ?? []).map((modifier) =>
-              LeafEffectSchema.parse({
-                kind: "modifier",
-                modifier,
-                duration: effect.duration,
-              }),
-            ),
+            [
+              ...(option?.modifiers ?? []).map((modifier) =>
+                LeafEffectSchema.parse({
+                  kind: "modifier",
+                  modifier,
+                  duration: effect.duration,
+                }),
+              ),
+              ...(option?.tempHp
+                ? [{ kind: "tempHp" as const, amount: option.tempHp }]
+                : []),
+            ],
             sourceId,
             caster,
             target,
@@ -3324,6 +3333,56 @@ export function leafEvents(
             save,
             slotLevel,
           ),
+        );
+        break;
+      }
+      case "becomeMonster": {
+        if (isDead(target)) break;
+        const before = effect.counter
+          ? (target.resourcesSpent[effect.counter] ?? 0)
+          : 0;
+        if (effect.counter) {
+          events.push(
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: target.id,
+              resource: effect.counter,
+            }),
+          );
+        }
+        if (
+          effect.chance !== undefined &&
+          context.dice.roll(100) > effect.chance * (before + 1)
+        ) {
+          break;
+        }
+        // shortcut: with the monster's book not loaded, nothing happens.
+        const monster = MonsterSchema.safeParse(
+          context.content(effect.monster),
+        ).data;
+        if (!monster) break;
+        events.push(
+          dndEvent(`${NS}:damaged`, {
+            actor: target.id,
+            amount: Math.max(0, target.hp) + target.tempHp,
+            type: "psychic",
+            critical: false,
+            massive: true,
+          }),
+          { kind: "actorDefeated", actor: target.id },
+          dndEvent(`${NS}:summoned`, {
+            actor: {
+              ...freshActor({
+                id: `${target.id}:lost`,
+                name: monster.name,
+                side: target.side === "party" ? "enemy" : "party",
+                source: { kind: "monster", statBlockId: effect.monster },
+                hp: monster.hp,
+                inventory: [],
+              }),
+              ...(target.position ? { position: target.position } : {}),
+            },
+            after: target.id,
+          }),
         );
         break;
       }

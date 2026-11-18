@@ -1082,7 +1082,7 @@ export function runAttackRoll(
   // Brutal Strike's options take the roll's Advantage away.
   const forgoes = (payload.strikes ?? []).length > 0 && !payload.advantaged;
   const advantage =
-    !unadvantaged(target, targetStats) &&
+    !unadvantaged(target, targetStats, attacker) &&
     (payload.advantaged === true ||
       (!forgoes &&
         (packed ||
@@ -2389,9 +2389,18 @@ function landHit(
         );
       }
     }
+    // Dreaded Necrosis: one more die of the hit's own damage of that type, and nothing without it.
+    const ownDie = passive.oneDieOf
+      ? /d(\d+)/.exec(
+          resolution.damage.find(({ type }) => type === passive.oneDieOf)
+            ?.amount.dice ?? "",
+        )?.[1]
+      : undefined;
+    if (passive.oneDieOf && !ownDie) return;
     // Cunning Strike's options give up some of Sneak Attack's dice before they're rolled.
-    const dice_ =
-      passive.diceCount === SNEAK_DICE
+    const dice_ = ownDie
+      ? `1d${ownDie}`
+      : passive.diceCount === SNEAK_DICE
         ? fewerDice(passive.dice, payload.forgone ?? 0)
         : passive.dice;
     // Murderous Intent: a Sneak Attack die below its floor counts as the floor.
@@ -3026,14 +3035,17 @@ function retaliated(
 }
 
 // Elusive or Trance of Order: attack rolls against the bearer can't have Advantage.
-function unadvantaged(target: Actor, stats: Stats): boolean {
+function unadvantaged(target: Actor, stats: Stats, attacker: Actor): boolean {
   return [
     ...target.activeEffects.map(({ modifier }) => modifier),
     ...passiveModifiers(stats.passives),
   ].some(
     (modifier) =>
       modifier.kind === "noAdvantageAgainst" &&
-      (!modifier.able || !hasCondition(target, ...INCAPACITATING)),
+      (!modifier.able || !hasCondition(target, ...INCAPACITATING)) &&
+      // Wildhunt's: only attackers this near
+      (modifier.within === undefined ||
+        distanceFeet(attacker.position, target.position) <= modifier.within),
   );
 }
 

@@ -1118,6 +1118,9 @@ export function makeJudge(context: Context, side: Actor): Judge {
               Math.max(threat(target), meanFoeThreat * 0.5)
           : 0;
       }
+      // Losing a friend to a monster's side for good is never worth it, as swallowing an Orb of Damara.
+      case "becomeMonster":
+        return foe ? 0 : -1000 * Math.max(1, meanFoeThreat);
       // A foe in a weak Beast's shape has lost most of what it does, like an Incapacitated one, until its
       // borrowed Hit Points run out.
       // A friend in a stronger shape deals more each round it lasts, with the form's Hit Points to spend first.
