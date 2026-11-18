@@ -953,7 +953,7 @@ const SaveRolledSchema = z.strictObject({
 const LegendaryActionTakenSchema = z.strictObject({
   actor: z.string(),
   name: z.string(),
-  cost: z.number().int(),
+  cost: z.number().int().min(0), // the rules never spend less; a negative count can't be folded
   key: z.string().optional(),
 });
 const LairActionTakenSchema = z.strictObject({
@@ -1044,7 +1044,7 @@ export const EVENT_SCHEMAS = {
   }),
   [`${NS}:cloneStarted`]: z.strictObject({
     actor: z.string(),
-    days: z.number().int(),
+    days: z.number().int().min(0), // as the clone count it sets
   }),
   // Dead, it wakes in its finished clone with these Hit Points.
   [`${NS}:cloneAwakened`]: z.strictObject({

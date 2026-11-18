@@ -10,6 +10,7 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
   - Then run CI on the branch with `gh workflow run ci.yml --ref <branch>`. A branch push alone doesn't start CI.
   - Merge into `main` only when that run passes. Watch it with `gh run list --branch <branch>`.
 - The pre-commit hook runs `npm run typecheck` (four tsc projects) and `npm run lint`.
+- Book-gated tests (every `*-books.test.ts`, the phb half of `tests/class-features.test.ts`, and the book parts of others) skip without `books/`, so public CI never runs them. `npm run test:books` runs the unit suite with `books/` loaded and fails if it's missing. The private books repo's "Book tests" workflow (`books/.github/workflows/test-books.yml`) runs it on GitHub-hosted runners against re-roll's `main`: on every push to the books repo's `main`, weekly on Mondays, and on dispatch (`gh workflow run test-books.yml -R yonatankarp/re-roll-books`). Its last result is at `gh run list -R yonatankarp/re-roll-books -w test-books.yml`. Never run it on a self-hosted runner. Run `npm run test:books` locally too when you change something book tests cover.
 - `npm run check-pack` and the balance sims need `books/`, which CI can't see, so run them locally. Before starting a sim, check that total CPU is under 700% (`ps -A -o %cpu | awk '{s+=$1} END {print s}'`).
 - `npm run ui` serves the game at http://127.0.0.1:5199/ with `strictPort`. A second checkout or worktree needs `npm run ui -- --port <other>`.
 - `npm run test:ui` is a Playwright smoke test in Chromium. It runs against its own `npm run ui` on a free port, and CI runs it as the `ui` job.
@@ -20,6 +21,7 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - Events and frames are append-only, since saves store them and load by folding them:
   - New payload fields are optional or have a default, so older saves still parse.
   - Never rename or remove an event kind or a frame kind, or reshape its payload. Add a new kind instead and keep the old handler.
+  - `tests/fixtures/kinds.json` locks every kind and each event's payload fields (`tests/save-kinds.test.ts`). Add a new kind to its `kinds`, to `notInGoldens` until a golden save holds it, and an event's fields to `fields`, with `?` on optional ones.
   - Payloads carry outcomes (the rolled damage, the item found), never inputs that a reducer re-derives from the rules, so a rules change can't rewrite history.
   - A change that can't follow these rules raises `SAVE_FORMAT_VERSION` and adds an entry to `migrations` in `engine/run/save.ts`.
   - The golden saves in `tests/fixtures/saves/` (`*.json`) are frozen and must keep loading. Never regenerate one to make its test pass. A snapshot (`*.state.json`) may be rewritten with `node tests/golden-saves.ts --snapshots` after you review its diff, when the state changed on purpose.

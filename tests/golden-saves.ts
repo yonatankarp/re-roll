@@ -20,11 +20,18 @@ interface Golden {
   readonly name: string;
   readonly adventure: string;
   readonly prefer: readonly string[]; // option ids containing these are picked first, in this order
+  readonly choose?: Readonly<Record<string, string>>; // the exact option picked for a decision id, before prefer
+  readonly seed?: string;
   readonly stop: (state: GameState, pending: Decision) => boolean;
 }
 
 const inCombat = (state: GameState): boolean =>
   Boolean((state.system as { combat?: unknown }).combat);
+
+const carried = (state: GameState, actor: string): readonly string[] =>
+  (state.system as { actors: Record<string, { inventory: string[] }> }).actors[
+    actor
+  ]?.inventory ?? [];
 
 const GOLDENS: readonly Golden[] = [
   {
@@ -52,6 +59,63 @@ const GOLDENS: readonly Golden[] = [
     prefer: ["fighter", "done", "rest:short"],
     stop: (_, pending) => pending.id.includes(":shortRest:"),
   },
+  {
+    name: "wizard-reaction", // a goblin's attack waits on the wizard's Shield
+    adventure: "goblin-ambush",
+    prefer: ["pregen/wizard", "done"],
+    stop: (_, pending) => pending.id === "dnd5.5e:reaction:player",
+  },
+  {
+    name: "level-up", // the wizard picks the spells level 2 gives
+    adventure: "goblin-ambush",
+    prefer: ["pregen/wizard", "done"],
+    stop: (_, pending) => pending.id.includes(":build:player:2:spells"),
+  },
+  {
+    name: "shop", // a dagger bought from Tam, still at the counter
+    adventure: "goblin-ambush",
+    prefer: ["pregen/wizard", "done"],
+    choose: { "scene:camp": "2", "dnd5.5e:shop:0": "buy:srd52:item/dagger" },
+    stop: (_, pending) => pending.id === "dnd5.5e:shop:1",
+  },
+  {
+    name: "long-rest", // back on the road after a night's sleep
+    adventure: "goblin-ambush",
+    prefer: ["pregen/wizard", "done"],
+    choose: { "scene:road": "rest:long" },
+    stop: (state, pending) =>
+      pending.id === "scene:road" && state.story.restedIn !== undefined,
+  },
+  {
+    name: "death-saves", // the wizard down, one death save made
+    adventure: "goblin-ambush",
+    seed: "golden-7", // a fight the wizard loses
+    prefer: ["pregen/wizard", "done"],
+    stop: (_, pending) => pending.id === "dnd5.5e:deathSave:player:2",
+  },
+  {
+    name: "haunted-house", // the caretaker won over and a secret told
+    adventure: "haunted-house",
+    prefer: ["pregen/cleric", "done"],
+    choose: { "scene:hallway": "1" },
+    stop: (_, pending) => pending.id === "scene:cellar-door",
+  },
+  {
+    name: "haunted-house-dread", // the dread clock run up and its beat fired
+    adventure: "haunted-house",
+    prefer: ["pregen/cleric", "done"],
+    choose: { "scene:hallway": "0" },
+    stop: (_, pending) => pending.id === "scene:cellar-door",
+  },
+  {
+    name: "camp-potion", // a potion drunk at camp
+    adventure: "goblin-ambush",
+    prefer: ["pregen/wizard", "done"],
+    choose: { "scene:camp": "drink:srd52:item/potion-of-healing" },
+    stop: (state, pending) =>
+      pending.id === "scene:camp" &&
+      !carried(state, "player").includes("srd52:item/potion-of-healing"),
+  },
 ];
 
 const MAX_ANSWERS = 120;
@@ -73,8 +137,9 @@ for (const golden of GOLDENS) {
     }
     continue;
   }
-  const tactics = createDice(rngFromSeed(`${SEED}:tactics`));
-  const started = startRun(run, SEED);
+  const seed = golden.seed ?? SEED;
+  const tactics = createDice(rngFromSeed(`${seed}:tactics`));
+  const started = startRun(run, seed);
   let state = started.state;
   const log: LogEntry[] = [
     { input: { kind: "start" }, events: started.events },
@@ -86,20 +151,25 @@ for (const golden of GOLDENS) {
     }
     if (count > 0 && golden.stop(state, pending)) break;
     const decision = pending;
-    const preferred = golden.prefer
-      .map((part) =>
-        decision.options.find((option) => option.id.includes(part)),
-      )
-      .find((option) => option !== undefined);
+    const chosen = golden.choose?.[decision.id];
+    const preferred = chosen
+      ? decision.options.find((option) => option.id === chosen)
+      : golden.prefer
+          .map((part) =>
+            decision.options.find((option) => option.id.includes(part)),
+          )
+          .find((option) => option !== undefined);
     // Fights are played with the system's own tactics, so the hero lives long enough to rest.
-    const optionId = run.system.tactical?.(decision)
-      ? run.system.decidePolicy(decision, {
-          state: state.system,
-          dice: tactics,
-          content: run.content,
-          contentIds: run.contentIds,
-        })
-      : (preferred ?? decision.options[0])?.id;
+    const optionId = chosen
+      ? preferred?.id
+      : run.system.tactical?.(decision)
+        ? run.system.decidePolicy(decision, {
+            state: state.system,
+            dice: tactics,
+            content: run.content,
+            contentIds: run.contentIds,
+          })
+        : (preferred ?? decision.options[0])?.id;
     if (optionId === undefined)
       throw new Error(`${decision.id} has no options`);
     const input: Input = { kind: "answer", decisionId: decision.id, optionId };
@@ -110,7 +180,7 @@ for (const golden of GOLDENS) {
     pending = outcome.pending;
   }
   await mkdir(GOLDEN_FOLDER, { recursive: true });
-  const save = createSave(registry, golden.adventure, SEED, log);
+  const save = createSave(registry, golden.adventure, seed, log);
   await writeFile(savePath, `${JSON.stringify(save)}\n`);
   await writeFile(statePath, `${JSON.stringify(state)}\n`);
   console.log(`${golden.name}: ${String(log.length)} inputs`);
