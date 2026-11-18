@@ -580,10 +580,14 @@ export function silencedSpells(
     ),
   );
   if (kinds.size === 0) return null;
+  // A voice thrown elsewhere, as through a Spell-Slinger's Puppet, isn't silenced.
+  const elsewhere = actor.activeEffects.some(
+    ({ modifier }) => modifier.kind === "voiceElsewhere",
+  );
   return (action) => {
     const spell = spellOf(action.id, actor, access);
     if (!spell) return false;
-    return kinds.has("all") || /\bV\b/.test(spell.components);
+    return kinds.has("all") || (!elsewhere && /\bV\b/.test(spell.components));
   };
 }
 

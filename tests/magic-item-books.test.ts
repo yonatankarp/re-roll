@@ -435,3 +435,32 @@ describe.skipIf(!BOOKS)("the book's single-use items and riders", () => {
     );
   });
 });
+
+// A sample of #141's magic item activations, as the books encode them.
+describe.skipIf(!BOOKS)("the book's magic item activations", () => {
+  const ids = (actor: Actor) =>
+    deriveStats(actor, run).actions.map((action) => action.id);
+  it("offers a Ring of the Ram's three blasts, a Gem of Brightness's beam and a Staff of the Adder's snake head", () => {
+    const ram = "dmg:item/ring-of-the-ram";
+    expect(ids(wearing([ram]))).toEqual(
+      expect.arrayContaining([`use:${ram}:0`, `use:${ram}:1`, `use:${ram}:2`]),
+    );
+    const gem = "dmg:item/gem-of-brightness";
+    expect(ids(wearing([gem]))).toContain(`use:${gem}:0`);
+    const adder = "dmg:item/staff-of-the-adder";
+    expect(ids(wearing([adder]))).toContain(`use:${adder}:0`);
+  });
+
+  it("makes a Javelin of Lightning, and gives a Rod of Absorption its Reaction and slots", () => {
+    expect(
+      run.content("dmg:item/javelin-of-lightning--1--javelin"),
+    ).toMatchObject({
+      type: "weapon",
+      altTypes: ["lightning"],
+    });
+    const rod = "dmg:item/rod-of-absorption";
+    expect(ids(wearing([rod], "wizard"))).toEqual(
+      expect.arrayContaining([`use:${rod}:0`, `use:${rod}:1`]),
+    );
+  });
+});

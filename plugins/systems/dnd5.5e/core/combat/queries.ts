@@ -899,6 +899,9 @@ export function hitFits(
   const { resolution } = hitWith.activation;
   if (resolution.kind !== "attack") return false;
   if (kind === "attack") return true;
+  if (kind === "meleeSpell") {
+    return resolution.attack.type === "spell" && isMelee(hitWith);
+  }
   if (resolution.attack.type !== "weapon") return false;
   if (kind === "finesseOrRanged") {
     return carriesExtraDice(attacker, hitWith, access);

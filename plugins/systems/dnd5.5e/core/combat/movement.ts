@@ -524,6 +524,12 @@ export function teleportSquares(
   const grid = state.combat?.grid;
   const from = actor.position;
   if (!grid || !from) return [];
+  // Dimensional Shackles hold it where it is.
+  if (
+    actor.activeEffects.some(({ modifier }) => modifier.kind === "anchored")
+  ) {
+    return [];
+  }
   if (movement > 0 && speedLeft(actor, deriveStats(actor, access)) < movement) {
     return [];
   }

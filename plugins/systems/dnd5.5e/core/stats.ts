@@ -871,7 +871,7 @@ function storedCasts(
 // A worn item's own activations (ChargedSchema `activations`), named after it, as a Pearl of Power's.
 function itemUses(itemId: string, item: Item, actor: Actor): KnownAction[] {
   const uses = "activations" in item ? (item.activations ?? []) : [];
-  return uses.flatMap(({ name, activation, whileCharged }, index) =>
+  return uses.flatMap(({ name, activation, whileCharged, rolled }, index) =>
     whileCharged && !charged(actor, item, whileCharged)
       ? []
       : [
@@ -880,6 +880,7 @@ function itemUses(itemId: string, item: Item, actor: Actor): KnownAction[] {
             name: uses.length > 1 ? `${name} (${item.name})` : name,
             activation,
             spellLevel: null,
+            ...(rolled ? { rolled: true as const } : {}),
           },
         ],
   );
@@ -2210,6 +2211,14 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }),
   );
 
+  const zoned =
+    "state" in access && access.state
+      ? zoneModifiers(actor, access.state as DndState)
+      : [];
+  const freeing = [
+    ...actor.activeEffects.map(({ modifier }) => modifier),
+    ...zoned,
+  ].flatMap((modifier) => (modifier.kind === "freeSpells" ? [modifier] : []));
   for (const spellId of untrainedArmor ? [] : knownSpells) {
     const spell: Spell = lookup(access, SpellSchema, spellId);
     const lasting =
@@ -2236,12 +2245,27 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       const bonusDc = given
         ? classDc[given.slice(given.lastIndexOf("/") + 1)]
         : undefined;
+      // A Candle of Invocation's light: a level 1 spell a Cleric or Druid prepared takes no slot.
+      const free =
+        given !== undefined &&
+        freeing.some(
+          (modifier) =>
+            spell.level >= 1 &&
+            spell.level <= modifier.maxLevel &&
+            modifier.classes.includes(given.slice(given.lastIndexOf("/") + 1)),
+        );
       const bumped = bonusDc ? withDcBonus(activation, bonusDc) : activation;
       const cast = ability ? castWith(bumped, ability) : bumped;
+      const typed = type ? retyped(cast, type) : cast;
       actions.push({
         id: `spell:${spellId}`,
         name: spell.name,
-        activation: type ? retyped(cast, type) : cast,
+        activation: free
+          ? {
+              ...typed,
+              cost: typed.cost.filter((cost) => cost !== "slot"),
+            }
+          : typed,
         spellLevel: spell.level,
         upcast: spell.upcast,
         ...(lasting ? { concentrates: true as const } : {}),
@@ -3388,9 +3412,13 @@ function grantedBy(
       readonly spell?: Spell;
     }
   | undefined {
-  if (sourceId.startsWith(ITEM_PREFIX)) {
-    const item = lookup(access, ItemSchema, sourceId.slice(ITEM_PREFIX.length));
-    return item.type === "magicItem" && item.granted
+  // An item's, from using it up or from one of its activations, as a Staff of the Adder's snake head.
+  const itemId = sourceId.startsWith(ITEM_PREFIX)
+    ? sourceId.slice(ITEM_PREFIX.length)
+    : itemUseOf(sourceId);
+  if (itemId) {
+    const item = lookup(access, ItemSchema, itemId);
+    return "granted" in item && item.granted
       ? { name: item.name, activation: item.granted }
       : undefined;
   }

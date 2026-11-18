@@ -81,6 +81,7 @@ function version(
     ...(resources.length > 0 ? { resources } : {}),
     ...(parent.lastCharge ? { lastCharge: parent.lastCharge } : {}),
     ...(activations.length > 0 ? { activations } : {}),
+    ...(parent.granted ? { granted: parent.granted } : {}),
   };
   const bonus = variant.bonuses?.[0]?.amount;
   const plus = bonus !== undefined && /, \+1\b/.test(parent.name);
@@ -195,6 +196,7 @@ function version(
       ...(parent.abilities ? { abilities: parent.abilities } : {}),
       ...riders(parent),
       ...(natural20 ? { natural20 } : {}),
+      ...(parent.altTypes ? { altTypes: parent.altTypes } : {}),
     };
   } else if (base.type === "armor") {
     item = {

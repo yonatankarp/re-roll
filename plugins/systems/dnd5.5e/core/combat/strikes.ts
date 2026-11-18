@@ -86,7 +86,8 @@ function optionsFor(
             kind === "forgo"
               ? trigger?.forgo !== undefined && trigger.forgo <= budget
               : kind === "gainsAdvantage"
-                ? trigger?.gainsAdvantage === true
+                ? trigger?.gainsAdvantage === true ||
+                  trigger?.fixedRoll !== undefined
                 : kind === "critical"
                   ? trigger?.critical === true
                   : trigger?.forgoAdvantage === true;
@@ -239,7 +240,11 @@ export function gainAdvantageFrame(
   const attacker = actorOf(state, attack.attacker);
   const stats = deriveStats(attacker, context);
   if (
-    !stats.actions.some(({ activation }) => activation.trigger?.gainsAdvantage)
+    !stats.actions.some(
+      ({ activation }) =>
+        activation.trigger?.gainsAdvantage === true ||
+        activation.trigger?.fixedRoll !== undefined,
+    )
   ) {
     return null;
   }
@@ -250,7 +255,7 @@ export function gainAdvantageFrame(
     attack,
     attacker,
     options,
-    `${attacker.name} attacks ${target.name}. Use a strike for Advantage?`,
+    `${attacker.name} attacks ${target.name}. Use something before the roll?`,
     frame("advantageGained", attack),
     () => "",
   );

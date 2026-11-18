@@ -1218,6 +1218,10 @@ export function protectedMount(
 
 // Several hits on one target, reported in turn so each one sees the HP the last one left.
 // Tyro of the Gauntlet's Stand as One: an ally within 5 feet spends its Reaction to keep the target from being moved.
+// The item an `item:` action spends, or null.
+const itemFrom = (sourceId: string): string | null =>
+  sourceId.startsWith(ITEM_PREFIX) ? sourceId.slice(ITEM_PREFIX.length) : null;
+
 // A Staff of Power's Retributive Strike: the staff breaks, and its charges left blast its bearer and those near.
 export function retributionEvents(
   bearer: Actor,
@@ -1936,6 +1940,54 @@ export function leafEvents(
         if (itemId) {
           events.push(...retributionEvents(target, itemId, effect, context));
         }
+        break;
+      }
+      // An Arcane Battery: the target's daily item with the most charges spent gets some back.
+      case "rechargeItem": {
+        const pools = [...new Set(target.inventory)].flatMap((id) => {
+          const item = ItemSchema.safeParse(context.content(id)).data;
+          return item
+            ? chargesOf(item).resources.filter((pool) =>
+                pool.recharge.some((entry) => entry.on === "dawn"),
+              )
+            : [];
+        });
+        const [most] = pools
+          .map((pool) => ({
+            pool,
+            spent: target.resourcesSpent[pool.id] ?? 0,
+          }))
+          .sort((a, b) => b.spent - a.spent);
+        if (most && most.spent > 0) {
+          events.push(
+            dndEvent(`${NS}:resourceRestored`, {
+              actor: target.id,
+              resource: most.pool.id,
+              amount: Math.min(
+                most.spent,
+                Math.max(1, rollAmount(effect.amount, stats, context.dice)),
+              ),
+            }),
+          );
+        }
+        break;
+      }
+      // A Horn of Blasting may explode in its user's hands.
+      case "mishap": {
+        const itemId = itemUseOf(sourceId) ?? itemFrom(sourceId);
+        if (!itemId || context.dice.roll(100) > effect.chance) break;
+        events.push(
+          dndEvent(`${NS}:itemUsed`, { actor: caster.id, item: itemId }),
+          ...dealEvents(
+            caster,
+            effect.damage.map((hit) => ({
+              amount: rollAmount(hit.amount, stats, context.dice),
+              type: hit.type,
+            })),
+            false,
+            context,
+          ).events,
+        );
         break;
       }
       case "untilLongRest": {
@@ -2783,6 +2835,7 @@ export function leafEvents(
       case "moveZone":
       case "weaponAttack":
       case "copySpell":
+      case "retypeHit":
         // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit, and
         // a teleport's square by its own decision and a zone once for the whole spell (resolveAction).
         break;

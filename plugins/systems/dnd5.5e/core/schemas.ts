@@ -730,6 +730,18 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("confused"),
     spell: z.literal(true).optional(),
   }),
+  // No teleporting or travel to another plane, as with Dimensional Shackles on.
+  z.strictObject({ kind: z.literal("anchored") }),
+  // Spells of `maxLevel` or lower, of one of these classes' lists, cast without a slot while it lasts, as a Candle of
+  // Invocation's light for a Cleric or Druid.
+  z.strictObject({
+    kind: z.literal("freeSpells"),
+    maxLevel: z.number().int().min(1).max(9),
+    classes: z.array(z.string().min(1)).min(1),
+  }),
+  // The bearer speaks from elsewhere, so Silence round it stops none of its Verbal spells, as through a Spell-Slinger's
+  // Puppet. shortcut: the voice is always somewhere the Silence isn't.
+  z.strictObject({ kind: z.literal("voiceElsewhere") }),
   // The item whose activation gave it is a Thrown weapon of this range that comes back once thrown, as a
   // Martialist's Quarterstaff's Throw (stats.ts imbuedRange).
   z.strictObject({
@@ -832,6 +844,21 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     maxLevel: z
       .union([z.number().int().min(1).max(9), z.literal("halfSlot")])
       .optional(),
+  }),
+  // The target's magic item carried whose charges come back at dawn, the one with most spent, regains `amount` of
+  // them, as from an Arcane Battery.
+  z.strictObject({ kind: z.literal("rechargeItem"), amount: AmountSchema }),
+  // The hit that set the reaction off deals one of these types in place of its first damage's, as a Brooch of the
+  // Elements makes it (combat/attack.ts retypedHit).
+  z.strictObject({
+    kind: z.literal("retypeHit"),
+    types: z.array(DamageTypeSchema).min(2),
+  }),
+  // A `chance` percent the item used breaks, dealing this to its user, as a Horn of Blasting's explosion.
+  z.strictObject({
+    kind: z.literal("mishap"),
+    chance: z.number().int().min(1).max(100),
+    damage: z.array(DamageSchema).min(1),
   }),
   // The item used's `untilLongRest` passives, which the target keeps until it finishes a Long Rest, in a fight or out
   // of one, as a Potion of Vitality's highest Hit Point Dice.
@@ -1643,6 +1670,7 @@ export const HitKindSchema = z.enum([
   "heavy",
   "heavyOrVersatile",
   "finesseOrRanged",
+  "meleeSpell", // a melee spell attack, as a Spell Duelist's Trophy's Dispelling Touch
   "attack",
 ]);
 export type HitKind = z.infer<typeof HitKindSchema>;
@@ -1730,6 +1758,9 @@ export const ActivationSchema = z.strictObject({
       // With `afterHit`, a strike option chosen before an attack roll without Advantage, which then has it, as a
       // Martialist's Quarterstaff's Trip (combat/strikes.ts). shortcut: its cost is paid only on a hit.
       gainsAdvantage: z.literal(true).optional(),
+      // With `afterHit`, an option chosen before an attack roll without Advantage whose d20 then shows this, unrolled,
+      // as a Clockwork Amulet's 10. Its cost is paid as it's picked.
+      fixedRoll: z.number().int().min(1).max(20).optional(),
       // With `afterHit`, only once the hit has dealt Sneak Attack damage, as Wails from the Grave.
       sneakAttack: z.literal(true).optional(),
       // With `afterHit`, offered only right after an `afterHit` activation of this feature or spell lands on the same
@@ -1826,6 +1857,9 @@ export const ActivationSchema = z.strictObject({
       falls: z.literal(true).optional(),
       // Taken when an ally within `within` spends Heroic Inspiration, as with Tireless Reveler.
       inspirationSpent: z.literal(true).optional(),
+      // Taken when a creature the bearer can see within `within` hits a target with an attack roll, before its
+      // damage, as with a Brooch of the Elements. It's taken only when it changes that damage for the bearer's side.
+      hitDamages: z.literal(true).optional(),
       // Taken right after Initiative is rolled, as with Alert's Initiative Swap.
       initiative: z.literal(true).optional(),
       // Taken only when its owner's `commandFamiliar` effect calls for it, never on its own.
@@ -1876,6 +1910,9 @@ export const ActivationSchema = z.strictObject({
   // Once its attacks are made, the bearer teleports to a square within this many feet of the first creature it aimed
   // at, as Steel Wind Strike. shortcut: the first such creature, not the one the player picks.
   teleportAfter: z.number().int().min(5).optional(),
+  // What its user gets every time it's taken, whatever it does to its targets, as a Robe of Scintillating Colors'
+  // Disadvantage on attacks against its wearer or a Horn of Blasting's chance to explode (combat/actions.ts).
+  userEffects: z.array(LeafEffectSchema).min(1).optional(),
   // only while an effect of one of these features' activations is on the bearer, as Travel along the Tree in a Rage,
   // or while it concentrates on one of these spells, as Telekinetic Master's attack
   while: z.array(ContentIdSchema).min(1).optional(),
@@ -2380,6 +2417,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("energyMastery"),
     damage: DamageTypeSchema,
   }),
+  // The bearer's spells cast with a slot need no Somatic component, as with a Spell Duelist's Trophy's Helping Hand.
+  z.strictObject({ kind: z.literal("noSomatic") }),
   // A 1 on a damage die of the bearer's spells counts as a 2, as a Robe of Thayan Arcana's Empowered Magic.
   z.strictObject({ kind: z.literal("empoweredSpells") }),
   // Damage of these types the bearer deals ignores Resistance, as with the Boon of Irresistible Offense.
@@ -3049,6 +3088,9 @@ export const ResourceDefSchema = z.strictObject({
   // (combat/effects.ts payCosts). Until then they count at their least.
   // shortcut: a second item with the same pool keeps the first one's roll.
   rolled: DiceSchema.optional(),
+  // Uses it holds as it's found, as a Rod of Absorption's 1d10 levels of energy, the rest of `max` spent then
+  // (gear.ts gainRolls). shortcut: as with `rolled`, one come by other than as treasure or bought starts full.
+  startsWith: DiceSchema.optional(),
   recharge: z.array(
     z.strictObject({
       // "initiative" comes back as a fight starts, as Boon of Fate's Improve Fate does.
@@ -3524,6 +3566,9 @@ export type ItemCast = z.infer<typeof ItemCastSchema>;
 // Quarterstaff.
 export const ChargedSchema = {
   resources: z.array(ResourceDefSchema).min(1).optional(),
+  // An action its user can take while a `grantedAction` its activation gave lasts, as a Potion of Fire Breath's or a
+  // Staff of the Adder's snake head.
+  granted: ActivationSchema.optional(),
   // Pieces rolled as the item is found, each a type its own d`die` row names, counted into that row's pool, as a
   // Necklace of Prayer Beads' 1d4 + 2 beads of six types (gear.ts gainRolls).
   // shortcut: they're rolled when it's found as treasure or bought; one come by any other way has none.
@@ -3567,6 +3612,8 @@ export const ChargedSchema = {
         activation: ActivationSchema,
         // only while this pool of its own has a use left, as a Helm of Brilliance's flames while it has a fire opal
         whileCharged: z.string().min(1).optional(),
+        // taken only when a `randomAction` picks it by its name, as a Rival Coin's heads or tails
+        rolled: z.literal(true).optional(),
       }),
     )
     .min(1)
@@ -3673,6 +3720,8 @@ export const WeaponSchema = ItemBaseSchema.extend({
   attunement: z.literal(true).optional(), // its bonuses work only while attuned, as a Keyholes Dagger's
   returning: z.literal(true).optional(), // back in hand once thrown, as a Returning Weapon
   forms: z.array(z.string().min(1)).min(1).optional(), // its magic item's, as a Keyholes Dagger's
+  // types its own damage can take instead, the one the target resists least, as a Javelin of Lightning's Lightning
+  altTypes: z.array(DamageTypeSchema).min(1).optional(),
   passives: z.array(PassiveSchema).min(1).optional(), // its magic item's, as Frost Brand's Resistance to Fire
   hitDamage: z.array(DamageSchema).min(1).optional(), // its magic item's, as Frost Brand's 1d6 Cold
   abilities: z.array(ItemAbilitySchema).min(1).optional(), // its magic item's, as a Thunderous Greatclub's Strength
@@ -3804,6 +3853,9 @@ const MagicItemSchema = ItemBaseSchema.extend({
   // Weapons a magic weapon made from it changes into as it attacks, by their names after the plugin, attacking with
   // Strength or Dexterity in any of them, as a Keyholes Dagger's Handaxe or Mace, carried the same way (stats.ts).
   forms: z.array(z.string().min(1)).min(1).optional(),
+  // Types a magic weapon made from it can deal its own damage as, the one the target resists least, as a Javelin of
+  // Lightning's Lightning in place of Piercing, carried the same way.
+  altTypes: z.array(DamageTypeSchema).min(1).optional(),
   // A magic weapon that comes back once thrown, as a Returning Weapon, carried the same way.
   returning: z.literal(true).optional(),
   // Damage a magic weapon made from it adds on a hit, as Frost Brand's 1d6 Cold, carried the same way.
@@ -3824,8 +3876,6 @@ const MagicItemSchema = ItemBaseSchema.extend({
   verb: z.string().min(1).optional(),
   // What an `untilLongRest` effect of its activation gives, as a Potion of Vitality's highest Hit Point Dice.
   untilLongRest: z.array(PassiveSchema).min(1).optional(),
-  // An action its user can take while a `grantedAction` its activation gave lasts, as a Potion of Fire Breath's.
-  granted: ActivationSchema.optional(),
   // Casting a spell its bearer doesn't know, from a class's list (by its name after the plugin), behind an
   // Intelligence (Arcana) check of `dc` (plus the spell's level with `perLevel`), as a Hat of Wizardry's (stats.ts
   // unknownSpells): cantrips, or spells of a level its slots reach, spending one; with `action` only those cast with
