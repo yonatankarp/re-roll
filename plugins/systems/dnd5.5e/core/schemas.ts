@@ -605,6 +605,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     noReactions: z.literal(true).optional(),
     noOpportunityAttacks: z.literal(true).optional(), // as Shocking Grasp's
     noDisengage: z.literal(true).optional(), // as Hunter's Rime's on a creature Hunter's Mark marks
+    noDash: z.literal(true).optional(), // it can't take the Dash action, as Uncertain Footing's
     oneAttack: z.literal(true).optional(),
     speed: z.enum(["half", "double", "none"]).optional(),
     spellFailure: z.number().int().min(1).max(100).optional(),
@@ -986,7 +987,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("halfCover") }),
   // A save for half damage the bearer makes with Dexterity deals none on a success and half on a failure, as Evasion,
   // given by an area, as Aura of Evasion's (trait-rules.ts evades).
-  z.strictObject({ kind: z.literal("evasion") }),
+  // Its own `anySave` and `magical` cover every save, or only saves against magic, as Elminster's Elusion.
+  z.strictObject({
+    kind: z.literal("evasion"),
+    anySave: z.literal(true).optional(),
+    magical: z.literal(true).optional(),
+  }),
   // The bearer's Hit Point maximum can't be reduced, as in Aura of Life (combat/effects.ts).
   z.strictObject({ kind: z.literal("keepMaxHp") }),
   // Advantage on Death Saving Throws, as an Exalted Champion's allies near it (combat/actions.ts).
@@ -995,6 +1001,23 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // (combat/reactions.ts inspiredSwing): added to a failed D20 test it makes a success, and with the giver's
   // `combatInspiration`, to AC against a hit it makes a miss for the bearer's Reaction, or to a hit's damage.
   z.strictObject({ kind: z.literal("inspired"), amount: AmountSchema }),
+  // Healing the bearer regains its dice's highest numbers, as Beacon of Hope's (combat/effects.ts).
+  z.strictObject({ kind: z.literal("healedMax") }),
+  // As each of the bearer's turns starts it gains these Temporary Hit Points, worked out from its caster's numbers, as
+  // Heroism's spellcasting modifier (combat/turn.ts).
+  z.strictObject({ kind: z.literal("turnTempHp"), amount: AmountSchema }),
+  // At the end of each of its turns the bearer rolls a d6, and on a 4 or more it's shut away (`sealed`) until its next
+  // turn starts, as Blink's Ethereal Plane (combat/turn.ts).
+  z.strictObject({ kind: z.literal("blink") }),
+  // Each time the bearer takes damage, its caster takes as much, as Warding Bond's (combat/effects.ts).
+  z.strictObject({ kind: z.literal("bonded") }),
+  // The bearer loses any Resistance to this type, and the first time each turn it takes damage of it, it takes
+  // `amount` more, as Elemental Bane's (combat/effects.ts, stats.ts).
+  z.strictObject({
+    kind: z.literal("bane"),
+    damage: DamageTypeSchema,
+    amount: AmountSchema,
+  }),
   // A ward of `count` dice of `die`: when the bearer takes damage, as many as the damage needs are spent and rolled,
   // and it takes that much less, as Bastion of Law's d8s (combat/effects.ts reducedHit).
   z.strictObject({

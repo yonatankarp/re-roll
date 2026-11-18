@@ -5087,7 +5087,17 @@ export function damageResponses(
   const absorbs = stats.passives.flatMap((passive) =>
     passive.kind === "absorb" ? passive.damage : [],
   );
-  return { adjustments: [], resistances, vulnerabilities, immunities, absorbs };
+  // Elemental Bane: no Resistance to its type.
+  const baned = actor.activeEffects.flatMap(({ modifier }) =>
+    modifier.kind === "bane" ? [modifier.damage] : [],
+  );
+  return {
+    adjustments: [],
+    resistances: resistances.filter((type) => !baned.includes(type)),
+    vulnerabilities,
+    immunities,
+    absorbs,
+  };
 }
 
 // Profane Casting: a spell of these schools the bearer casts without its components.

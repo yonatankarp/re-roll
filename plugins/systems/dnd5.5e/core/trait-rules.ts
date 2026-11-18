@@ -170,35 +170,42 @@ export function traitSaveAdvantage(
 }
 
 // Evasion: a save for half damage the bearer can still dodge, unless it's Incapacitated.
-// Aura of Evasion's area gives it, and a Leading Evasion bearer within 5 feet shares it.
+// Aura of Evasion's area gives it, an effect does, as Elminster's Elusion on saves against magic, and a Leading
+// Evasion bearer within 5 feet shares it.
 export function evades(
   target: Actor,
   ability: Ability,
   access: ContentAccess & { readonly state?: DndState },
+  magical = false, // a save against a spell or magic
 ): boolean {
   const { state } = access;
+  const given = [
+    ...target.activeEffects.map(({ modifier }) => modifier),
+    ...(state ? zoneModifiers(target, state, access) : []),
+  ].some(
+    (modifier) =>
+      modifier.kind === "evasion" &&
+      (modifier.anySave === true || ability === "dex") &&
+      (!modifier.magical || magical),
+  );
+  const leading = (leader: Actor): boolean =>
+    leader.id !== target.id &&
+    leader.side === target.side &&
+    !hasCondition(leader, ...INCAPACITATING) &&
+    distanceFeet(leader.position, target.position) <= 5 &&
+    deriveStats(leader, access).passives.some(
+      (passive) => passive.kind === "evasion" && passive.leading,
+    );
   return (
     !hasCondition(target, ...INCAPACITATING) &&
-    (deriveStats(target, access).passives.some(
-      (passive) =>
-        passive.kind === "evasion" && (passive.anySave || ability === "dex"),
-    ) ||
+    (given ||
+      deriveStats(target, access).passives.some(
+        (passive) =>
+          passive.kind === "evasion" && (passive.anySave || ability === "dex"),
+      ) ||
       (ability === "dex" &&
         (leapsAside(target, access) ||
-          (state !== undefined &&
-            (zoneModifiers(target, state, access).some(
-              (modifier) => modifier.kind === "evasion",
-            ) ||
-              Object.values(state.actors).some(
-                (leader) =>
-                  leader.id !== target.id &&
-                  leader.side === target.side &&
-                  !hasCondition(leader, ...INCAPACITATING) &&
-                  distanceFeet(leader.position, target.position) <= 5 &&
-                  deriveStats(leader, access).passives.some(
-                    (passive) => passive.kind === "evasion" && passive.leading,
-                  ),
-              ))))))
+          Object.values(state?.actors ?? {}).some(leading))))
   );
 }
 
