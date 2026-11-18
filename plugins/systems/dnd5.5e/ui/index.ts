@@ -508,7 +508,10 @@ function equipmentRows(
           ...(changes && (wornCount > 0 || wearable)
             ? {
                 option:
-                  wornCount < count && wearable
+                  // A spare of the armor or Shield worn would only change places with it (gear.ts).
+                  wornCount < count &&
+                  wearable &&
+                  (item.type === "weapon" || wornCount === 0)
                     ? { id: `equip:${id}`, label: "Equip", hint: GEAR_HINT }
                     : { id: `stow:${id}`, label: "Stow", hint: GEAR_HINT },
               }
