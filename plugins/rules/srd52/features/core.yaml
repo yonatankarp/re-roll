@@ -209,7 +209,8 @@
   text: "As a Bonus Action, give yourself Advantage on your next attack if you haven't moved this turn."
   automation: full
   activations:
-    - cost: [bonusAction]
+    - label: Steady Aim
+      cost: [bonusAction]
       unmoved: true
       targeting: { self: true }
       resolution:

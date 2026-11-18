@@ -396,8 +396,9 @@ export function castRiders(
       : passive.spends || passive.cantrip || passive.fromFeat
         ? true
         : passive.school
-          ? slotLevel !== undefined &&
-            (cost.includes("action") || passive.slotted === true) &&
+          ? (passive.anySpell === true ||
+              (slotLevel !== undefined &&
+                (cost.includes("action") || passive.slotted === true))) &&
             passive.school.some((item) => item === school)
           : passive.mends
             ? heals(action) || cures(action)
