@@ -77,6 +77,7 @@ import {
   slotLevelFor,
   squareName,
   targetCount,
+  touchCourier,
 } from "./queries.ts";
 import {
   aimSquare,
@@ -394,6 +395,16 @@ export function castAction(
     ? picked.map((id) => actorOf(state, id))
     : (apart ?? resolveTargets(targetId, action, actor, context));
   const caught = [...aimed, ...sharedWith(actor, action, aimed, context)];
+  // A touch the familiar delivers spends its Reaction.
+  const couriers = [
+    ...new Set(
+      aimed.flatMap((target) =>
+        reaches(action, actor, target)
+          ? []
+          : [touchCourier(action, actor, target, state)?.id ?? ""],
+      ),
+    ),
+  ].filter((id) => id !== "");
   const riders = castRiders(actor, action, slotLevel, context, caught);
   const result: SystemResult =
     projectiles !== undefined && resolution.kind !== "save"
@@ -424,6 +435,9 @@ export function castAction(
   return {
     events: [
       ...payCosts(action, actor, context, slotLevel),
+      ...couriers.map((id) =>
+        dndEvent(`${NS}:budgetSpent`, { actor: id, kind: "reaction" }),
+      ),
       ...timeStopEnds(actor, caught),
       ...schoolCastEvents(actor, action, slotLevel, context),
       ...riders.events,

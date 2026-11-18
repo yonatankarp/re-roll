@@ -19,6 +19,7 @@ import {
   grantedKey,
   saveBonus,
   scoreFloor,
+  spellAttackBonus,
   spellSaveDc,
   type Stats,
   maybeLookup,
@@ -65,6 +66,7 @@ import {
   type Formula,
   ItemSchema,
   type LeafEffect,
+  type Monster,
   LeafEffectSchema,
   type Modifier,
   MonsterSchema,
@@ -3725,10 +3727,14 @@ function commandedResult(
   context: Context,
 ): SystemResult {
   const familiar = commandedFamiliar(effect, owner, context.state);
+  // "Attack": its first attack its owner can command, as Pact of the Chain's.
   const action =
     familiar &&
-    deriveStats(familiar, context).actions.find(
-      (item) => item.name === effect.action,
+    deriveStats(familiar, context).actions.find((item) =>
+      effect.action === "Attack"
+        ? item.activation.resolution.kind === "attack" &&
+          item.activation.trigger?.commanded === true
+        : item.name === effect.action,
     );
   if (!familiar || !action) return {};
   const result = resolveAction(
@@ -6142,6 +6148,35 @@ function animatedEvents(
   const made = Object.keys(context.state.actors).filter((key) =>
     key.startsWith(`${actor.id}:animated-`),
   ).length;
+  // Find Greater Steed: its maker keeps the mount, to bring it to later fights.
+  const stats = deriveStats(actor, context);
+  const kept =
+    effect.lasting && actor.source.kind !== "monster"
+      ? [
+          dndEvent(`${NS}:companionFound`, {
+            actor: actor.id,
+            feature: id,
+            companion: id,
+            maxHp: monster.hp,
+            proficiency: stats.proficiency,
+            spellAttack: spellAttackBonus(stats),
+            spellDc: spellSaveDc(stats),
+            free: true,
+            monster: true,
+          }),
+        ]
+      : [];
+  return [...kept, ...animatedSummons(effect, actor, monster, id, open, made)];
+}
+
+function animatedSummons(
+  effect: Extract<LeafEffect, { kind: "animate" }>,
+  actor: Actor,
+  monster: Monster,
+  id: string,
+  open: readonly Square[],
+  made: number,
+): SystemEvent[] {
   return open.slice(0, effect.count).map((square, index) =>
     dndEvent(`${NS}:summoned`, {
       actor: {
@@ -6155,6 +6190,10 @@ function animatedEvents(
             ...(effect.lacks.length > 0 ? { lacks: effect.lacks } : {}),
             // a character's beasts die at 0 Hit Points, as monsters do, and leave with the fight
             ...(actor.source.kind === "monster" ? {} : { calledBy: actor.id }),
+            // Find Greater Steed's mount stays between fights.
+            ...(effect.lasting && actor.source.kind !== "monster"
+              ? { lasting: { feature: id } }
+              : {}),
           },
           hp: monster.hp,
           inventory: [],

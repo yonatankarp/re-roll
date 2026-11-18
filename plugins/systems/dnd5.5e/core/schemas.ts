@@ -1692,6 +1692,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     range: z.number().int().min(5),
     count: FormulaSchema.default({ base: 1, add: [] }),
     dc: FormulaSchema.default({ base: 0, add: [{ kind: "spellSaveDc" }] }),
+    // it stays between fights as its caster's lasting companion, until it dies or a new one replaces it, as Find
+    // Steed's steed (combat/companions.ts)
+    lasting: z.literal(true).optional(),
   }),
   // A strong wind: it ends the gas and vapour zones in its area, as Gust of Wind does Fog Cloud.
   // With `zones`, it ends the spells' zones of those kinds in its area instead, as Sunburst does Darkness.
@@ -1864,6 +1867,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     count: z.number().int().min(1).default(1),
     range: z.number().int().min(5),
     lacks: z.array(z.string().min(1)).default([]),
+    // it stays between fights as its maker's lasting companion, as Find Greater Steed's mount (combat/companions.ts)
+    lasting: z.literal(true).optional(),
   }),
   // The target spends its Reaction on one melee attack against a foe in its reach, as a gnoll pack lord's Incite
   // Rampage.
@@ -3633,6 +3638,15 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("saveDisadvantage"),
     conditions: z.array(ConditionSchema).min(1),
   }),
+  // Mounting or getting off a mount costs only 5 feet of movement, as Born to the Saddle (combat/mounts.ts).
+  z.strictObject({ kind: z.literal("quickMount") }),
+  // The bearer's lasting companions have these passives, as a mount wearing Horseshoes of Speed.
+  z.strictObject({
+    kind: z.literal("companionGear"),
+    passives: z.array(z.lazy((): z.ZodType => PassiveSchema)).min(1),
+  }),
+  // The bearer's familiar takes this form, as one of Pact of the Chain's special forms picked as a variant.
+  z.strictObject({ kind: z.literal("familiarForm"), form: ContentIdSchema }),
   // The bearer has this companion for good: it's found before the first fight and again after a Long Rest once it
   // has died, and fights beside the bearer, acting right after it and taking only the Dodge action unless commanded
   // (combat/companions.ts), as a Steel Defender or a Primal Companion.
@@ -4435,6 +4449,10 @@ export const FeatureSchema = ContentEntrySchema.extend({
   familiar: z
     .strictObject({
       hp: FormulaSchema.optional(),
+      // its attacks are Reactions its owner commands, as Pact of the Chain's (combat/effects.ts commandFamiliar)
+      attacks: z.literal(true).optional(),
+      damageTypes: z.array(DamageTypeSchema).min(1).optional(), // to pick for its attacks, as Necrotic or Radiant
+      ownerDc: z.literal(true).optional(), // its saves use its owner's spell save DC
       passives: z.array(PassiveSchema).default([]),
       actions: z
         .array(

@@ -1,5 +1,10 @@
 import type { ContentAccess, SystemEvent } from "#sdk";
-import { CompanionSchema, FeatureSchema } from "../schemas.ts";
+import {
+  CompanionSchema,
+  FeatureSchema,
+  MonsterSchema,
+  PassiveSchema,
+} from "../schemas.ts";
 import {
   type Actor,
   dndEvent,
@@ -101,10 +106,42 @@ export function companionActors(
     const boons = stats.features.filter(
       (id) => FeatureSchema.safeParse(access.content(id)).data?.companion,
     );
+    // Horseshoes of Speed on its mount.
+    const gear = stats.passives.flatMap((passive) =>
+      passive.kind === "companionGear"
+        ? passive.passives.flatMap(
+            (item) => PassiveSchema.safeParse(item).data ?? [],
+          )
+        : [],
+    );
+    const worn = gear.length > 0 ? { gear } : {};
     return (owner.companions ?? []).flatMap((held) => {
-      if (held.hp <= 0 || !given.has(held.feature)) return [];
-      const companion = lookup(access, CompanionSchema, held.companion);
+      if (held.hp <= 0 || (!held.free && !given.has(held.feature))) return [];
       const slug = held.companion.slice(held.companion.lastIndexOf("/") + 1);
+      // Find Greater Steed's mount: a monster's stat block, called by its owner.
+      if (held.monster) {
+        const monster = MonsterSchema.safeParse(
+          access.content(held.companion),
+        ).data;
+        if (!monster) return [];
+        return [
+          freshActor({
+            id: `${owner.id}:companion:${slug}`,
+            name: `${owner.name}'s ${monster.name}`,
+            side: owner.side,
+            source: {
+              kind: "monster",
+              statBlockId: held.companion,
+              calledBy: owner.id,
+              lasting: { feature: held.feature },
+              ...worn,
+            },
+            hp: held.hp,
+            inventory: [],
+          }),
+        ];
+      }
+      const companion = lookup(access, CompanionSchema, held.companion);
       return [
         freshActor({
           id: `${owner.id}:companion:${slug}`,
@@ -113,15 +150,19 @@ export function companionActors(
           source: {
             kind: "summon",
             companion: held.companion,
-            level: companion.play?.level ?? 1,
+            level: held.level ?? companion.play?.level ?? 1,
             casterId: owner.id,
             sourceId: `companion:${held.feature}`,
             concentration: false,
             proficiency: held.proficiency,
             spellAttack: held.spellAttack,
             spellDc: held.spellDc,
-            lasting: { feature: held.feature },
+            lasting: {
+              feature: held.feature,
+              ...(held.free ? { free: true as const } : {}),
+            },
             ...(boons.length > 0 ? { boons } : {}),
+            ...worn,
             maxHp: held.maxHp,
             ...(held.ac !== undefined ? { ac: held.ac } : {}),
           },
@@ -135,14 +176,20 @@ export function companionActors(
 
 // A lasting companion's owner, or null for any other creature.
 export function companionOwner(actor: Actor): string | null {
-  return actor.source.kind === "summon" && actor.source.lasting
-    ? actor.source.casterId
+  const { source } = actor;
+  if (source.kind === "summon" && source.lasting) return source.casterId;
+  return source.kind === "monster" && source.lasting
+    ? (source.calledBy ?? null)
     : null;
 }
 
 // A lasting companion takes only the Dodge action, unless its owner commanded it or is Incapacitated.
 export function awaitsCommand(actor: Actor, owner: Actor | undefined): boolean {
   if (companionOwner(actor) === null) return false;
+  // A steed from a spell, as Find Steed's, acts as its owner's mount, needing no command.
+  if (actor.source.kind !== "summon" || actor.source.lasting?.free) {
+    return false;
+  }
   if (!owner || isDead(owner) || hasCondition(owner, ...INCAPACITATING)) {
     return false;
   }

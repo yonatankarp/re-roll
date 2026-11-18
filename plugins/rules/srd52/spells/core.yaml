@@ -6590,8 +6590,10 @@
     space anything it was wearing or carrying. One Familiar Only. You can’t have
     more than one familiar at a time. If you cast this spell while you have a
     familiar, you instead cause it to adopt a new eligible form."
-  automation: text
+  automation: full
+  # shortcut: the familiar is an owl unless a feature picks another form, and it joins every fight once known.
   outOfCombat: castingTime
+  familiar: { "form": "phb:monster/owl" }
 - id: srd52:spell/fireball
   name: Fireball
   level: 3

@@ -425,6 +425,9 @@ const ActorSchema = z.strictObject({
       statBlockId: ContentIdSchema,
       // the creature that animated, raised or called it, so it dies at 0 Hit Points as a monster does
       calledBy: z.string().optional(),
+      // a lasting companion of `calledBy`'s from this feature or spell, as Find Greater Steed's mount
+      lasting: z.strictObject({ feature: z.string() }).optional(),
+      gear: z.array(PassiveSchema).optional(), // what its owner's gear gives it, as Horseshoes of Speed
       // A character's familiar in a fight (combat/familiar.ts): its owner, its Hit Point maximum as found, the
       // owner's features that give it something, and the owner's numbers those read, such as its spell save DC.
       familiarOf: z
@@ -450,8 +453,12 @@ const ActorSchema = z.strictObject({
       spellDc: z.number().int(), // the caster's spell save DC
       // A lasting companion of its caster's, from this feature or spell: it stays between fights (combat/companions.ts),
       // with the Hit Point maximum and AC worked out from its owner as it was found.
-      lasting: z.strictObject({ feature: z.string() }).optional(),
+      // `free`: one it needn't be commanded, as Find Steed's
+      lasting: z
+        .strictObject({ feature: z.string(), free: z.literal(true).optional() })
+        .optional(),
       boons: z.array(ContentIdSchema).optional(), // its owner's features that give it something (Feature `companion`)
+      gear: z.array(PassiveSchema).optional(), // what its owner's gear gives it, as Horseshoes of Speed
       maxHp: z.number().int().optional(),
       ac: z.number().int().optional(),
     }),
@@ -524,6 +531,9 @@ const ActorSchema = z.strictObject({
         proficiency: z.number().int(),
         spellAttack: z.number().int(),
         spellDc: z.number().int(),
+        level: z.number().int().optional(), // a spell's companion's slot level
+        free: z.literal(true).optional(), // from a spell, which needs no feature and no command, as Find Steed's
+        monster: z.literal(true).optional(), // `companion` names a monster's stat block, as Find Greater Steed's
       }),
     )
     .optional(),
@@ -918,6 +928,9 @@ const CompanionFoundSchema = z.strictObject({
   proficiency: z.number().int(),
   spellAttack: z.number().int(),
   spellDc: z.number().int(),
+  level: z.number().int().optional(),
+  free: z.literal(true).optional(),
+  monster: z.literal(true).optional(),
 });
 
 const SummonedSchema = z.strictObject({
@@ -1651,9 +1664,21 @@ function endCombat(state: DndState): DndState {
       }));
     }
     const { source } = actor;
-    if (source.kind !== "summon" || !source.lasting) return after;
+    const owned =
+      source.kind === "summon"
+        ? source.casterId
+        : source.kind === "monster"
+          ? source.calledBy
+          : undefined;
+    if (
+      (source.kind !== "summon" && source.kind !== "monster") ||
+      !source.lasting ||
+      owned === undefined
+    ) {
+      return after;
+    }
     const { feature } = source.lasting;
-    return updateActor(after, source.casterId, (item) => ({
+    return updateActor(after, owned, (item) => ({
       ...item,
       companions: (item.companions ?? []).map((entry) =>
         entry.feature === feature

@@ -16,6 +16,7 @@ import {
   forAttacker,
   hasCondition,
   INCAPACITATING,
+  familiarOwner,
   isDead,
   isDown,
   mountOf,
@@ -1267,9 +1268,40 @@ export function inReach(
           action.activation.afterTargets === undefined ||
           !actor.usedThisTurn.includes(attackedKey(item.id)),
       )
-      .filter((item) => reaches(action, actor, item))
-      .filter((item) => !behindTotalCover(state, actor, item))
+      .filter(
+        (item) =>
+          reaches(action, actor, item) ||
+          touchCourier(action, actor, item, state) !== null,
+      )
+      .filter(
+        (item) =>
+          !behindTotalCover(state, actor, item) ||
+          touchCourier(action, actor, item, state) !== null,
+      )
       .filter((item) => !walledApart(actor, item, action, state, access))
+  );
+}
+
+// Find Familiar: the familiar within 100 feet that delivers a touch spell to a creature beside it, with its Reaction.
+export function touchCourier(
+  action: KnownAction,
+  actor: Actor,
+  target: Actor,
+  state: DndState,
+): Actor | null {
+  const { targeting } = action.activation;
+  if (action.spellLevel === null || !("range" in targeting)) return null;
+  if (targeting.range !== "touch") return null;
+  return (
+    Object.values(state.actors).find(
+      (item) =>
+        familiarOwner(item) === actor.id &&
+        !isDown(item) &&
+        item.budget.reaction &&
+        !hasCondition(item, ...INCAPACITATING) &&
+        distanceFeet(actor.position, item.position) <= 100 &&
+        distanceFeet(item.position, target.position) <= 5,
+    ) ?? null
   );
 }
 
