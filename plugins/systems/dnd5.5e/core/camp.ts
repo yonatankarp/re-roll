@@ -21,6 +21,7 @@ import {
   type Modifier,
   SKILL_ABILITIES,
   SpeciesSchema,
+  type Spell,
   SpellSchema,
 } from "./schemas.ts";
 import { carriedWeight, carryingCapacity } from "./carry.ts";
@@ -354,6 +355,36 @@ function targetsOf(
   );
 }
 
+// Each class list's level 1+ ritual spells, found once for the content.
+const ritualsByList = new WeakMap<
+  ContentAccess["content"],
+  Map<string, readonly Spell[]>
+>();
+function listRituals(list: string, access: ContentAccess): readonly Spell[] {
+  let byList = ritualsByList.get(access.content);
+  if (!byList) {
+    byList = new Map();
+    ritualsByList.set(access.content, byList);
+  }
+  const known = byList.get(list);
+  if (known) return known;
+  const named = new Set(
+    maybeLookup(access, ClassSchema, list)?.spellList ?? [],
+  );
+  const found = access.contentIds().flatMap((id) => {
+    if (!id.includes(":spell/")) return [];
+    const spell = maybeLookup(access, SpellSchema, id);
+    return spell?.ritual &&
+      spell.activation &&
+      spell.level >= 1 &&
+      (named.has(id) || spell.classes.includes(list))
+      ? [spell]
+      : [];
+  });
+  byList.set(list, found);
+  return found;
+}
+
 // Ritual spells a Ritual Adept casts from its list without having them prepared, of levels it has slots for.
 // shortcut: the spellbook is the Wizard list, as it isn't kept apart from it (swap.ts says the same).
 function ritualsOnHand(
@@ -366,33 +397,23 @@ function ritualsOnHand(
   if (lists.length === 0) return [];
   const highest = stats.slots.findLastIndex((count) => count > 0) + 1;
   const known = new Set(stats.actions.map((action) => action.id));
-  const named = new Set(
-    lists.flatMap(
-      (list) => maybeLookup(access, ClassSchema, list)?.spellList ?? [],
+  return lists.flatMap((list) =>
+    listRituals(list, access).flatMap((spell): KnownAction[] =>
+      spell.activation &&
+      spell.level <= highest &&
+      !known.has(`spell:${spell.id}`)
+        ? [
+            {
+              id: `spell:${spell.id}`,
+              name: spell.name,
+              activation: spell.activation,
+              spellLevel: spell.level,
+              upcast: spell.upcast,
+            },
+          ]
+        : [],
     ),
   );
-  return access.contentIds().flatMap((id): KnownAction[] => {
-    if (!id.includes(":spell/") || known.has(`spell:${id}`)) return [];
-    const spell = maybeLookup(access, SpellSchema, id);
-    if (
-      !spell?.ritual ||
-      !spell.activation ||
-      spell.level < 1 ||
-      spell.level > highest ||
-      !(named.has(id) || spell.classes.some((item) => lists.includes(item)))
-    ) {
-      return [];
-    }
-    return [
-      {
-        id: `spell:${id}`,
-        name: spell.name,
-        activation: spell.activation,
-        spellLevel: spell.level,
-        upcast: spell.upcast,
-      },
-    ];
-  });
 }
 
 function castable(
