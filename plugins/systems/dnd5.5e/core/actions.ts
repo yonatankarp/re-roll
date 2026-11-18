@@ -1790,6 +1790,14 @@ export function runTactic(
           () => "medicine",
           context,
         );
+        // Understanding of Death: Heroic Inspiration for the help, once a Long Rest.
+        const own = deriveStats(actor, context);
+        const inspired = own.passives.find(
+          (passive) =>
+            passive.kind === "stabilizeInspiration" &&
+            (actor.resourcesSpent[passive.resource] ?? 0) <
+              (own.resources[passive.resource] ?? 0),
+        );
         return {
           events: [
             ...paid,
@@ -1797,6 +1805,16 @@ export function runTactic(
             ...rolled.events,
             ...(rolled.success
               ? [dndEvent(`${NS}:stabilized`, { actor: helped.id })]
+              : []),
+            ...(inspired?.kind === "stabilizeInspiration" &&
+            !actor.heroicInspiration
+              ? [
+                  dndEvent(`${NS}:resourceSpent`, {
+                    actor: actor.id,
+                    resource: inspired.resource,
+                  }),
+                  dndEvent(`${NS}:inspirationGranted`, { actor: actor.id }),
+                ]
               : []),
           ],
           frames: done,

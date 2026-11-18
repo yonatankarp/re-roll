@@ -263,6 +263,10 @@ function spentElsewhere(resource: string, featureId: string, stats: Stats) {
   );
 }
 
+// Features whose picks are choices their class or subclass level asks (Mystic Arcanum, Magical Discoveries).
+const LEVEL_CHOICES =
+  /-(mystic-arcanum|magical-discoveries|magical-mastery|arcane-mastery|arcane-initiate|arcane-archer-lore|primal-lore|divine-magic)$/;
+
 const OUT_OF_COMBAT = "out of combat only: skills, tools or languages";
 const SLOT_RECOVERY = "needs a way to regain spell slots";
 
@@ -286,7 +290,6 @@ const WAITING_ON: Readonly<Record<string, string>> = {
   "rogue-thieves-cant": OUT_OF_COMBAT,
   "sorcerer-sorcerous-restoration": SLOT_RECOVERY,
   "warlock-magical-cunning": SLOT_RECOVERY,
-  "wizard-ritual-adept": OUT_OF_COMBAT,
   "wizard-arcane-recovery": SLOT_RECOVERY,
   "wizard-scholar": OUT_OF_COMBAT,
   "wizard-memorize-spell": "needs prepared spells swapped on a Short Rest",
@@ -337,6 +340,21 @@ export function classify(
     ),
   ].length;
   if (spells > 0) reasons.push(`always-prepared spells: ${String(spells)}`);
+  if (feature.variants) {
+    reasons.push(`level choice: ${String(feature.variants.length)} variants`);
+  }
+  if (feature.widens) reasons.push("wider spell lists");
+  if (feature.freeCastsFrom)
+    reasons.push("free casts of another feature's spells");
+  if (feature.whileActive) {
+    reasons.push(
+      `passive while active: ${counted(feature.whileActive.passives.map(({ kind }) => kind))}`,
+    );
+  }
+  if (LEVEL_CHOICES.test(feature.id)) reasons.push("level choice: spells");
+  if (/-metamagic-[a-z]+-spell$/.test(feature.id)) {
+    reasons.push("Metamagic option (metamagic.ts)");
+  }
   if (reasons.length === feature.resources.length) {
     return {
       name: feature.name,

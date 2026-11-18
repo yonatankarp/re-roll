@@ -5,23 +5,33 @@ import {
   type SystemEvent,
 } from "#sdk";
 import { z } from "zod";
-import { ClassSchema, type Passive, SpellSchema } from "../schemas.ts";
+import {
+  ClassSchema,
+  type LeafEffect,
+  type Passive,
+  SpellSchema,
+} from "../schemas.ts";
 import { type Actor, dndEvent, frame, isDown, NS } from "../state.ts";
+import { finalDamage } from "../rules.ts";
 import { distanceFeet } from "../grid.ts";
 import {
+  atSlotLevel,
+  damageResponses,
   deriveStats,
   evaluateFormula,
   type KnownAction,
   lookup,
+  modifierFor,
+  rollAmount,
   spellModifier,
   spellSaveDc,
   type Stats,
 } from "../stats.ts";
 import { HIT_DICE, spellOfSource } from "./ids.ts";
 import { hitDieRoll } from "../trait-rules.ts";
-import { leafEvents, rollSave } from "./effects.ts";
+import { dealEvents, leafEvents, rollSave, typeAgainst } from "./effects.ts";
 import { teleportFrame } from "./movement.ts";
-import type { Context } from "./queries.ts";
+import { type Context, enemies } from "./queries.ts";
 
 // The Arcana Unleashed adepts' riders on casting a spell of their school (passive `schoolCast`).
 
@@ -38,6 +48,84 @@ export function schoolOf(
   return SpellSchema.safeParse(context.content(id)).data?.school ?? null;
 }
 
+// Whether the spell is one picked for this feat, as Aberrant Dragonmark's level 1 spell.
+function featSpell(actor: Actor, featId: string, actionId: string): boolean {
+  const spell = spellOfSource(actionId);
+  const build = actor.source.kind === "character" ? actor.source.build : null;
+  return (
+    spell !== null &&
+    (build?.levels ?? []).some((entry) =>
+      entry.answers.some(
+        (answer) =>
+          answer.kind === "spells" &&
+          answer.feat === featId &&
+          answer.values.includes(spell),
+      ),
+    )
+  );
+}
+
+// Hit Point Dice spent as a spell is cast (castRider `hitDice`): Aberrant Surge's even Temporary Hit Points or odd
+// Force damage, or Mark of Inspiration's both.
+function hitDiceSurge(
+  actor: Actor,
+  surge: NonNullable<Extract<Passive, { kind: "castRider" }>["hitDice"]>,
+  stats: Stats,
+  context: Context,
+): SystemEvent[] {
+  const { total, events } = spendHitDice(actor, surge.count, context);
+  if (events.length === 0) return [];
+  const [foe] = enemies(context.state, actor)
+    .filter(
+      (item) =>
+        !isDown(item) &&
+        distanceFeet(item.position, actor.position) <= surge.within,
+    )
+    .sort((a, b) => a.hp - b.hp);
+  const shield = (amount: number): SystemEvent[] =>
+    amount > actor.tempHp
+      ? [dndEvent(`${NS}:tempHpGained`, { actor: actor.id, amount })]
+      : [];
+  const strike = (target: Actor): SystemEvent[] =>
+    dealEvents(
+      target,
+      [
+        {
+          amount: finalDamage(total, "force", damageResponses(target, context)),
+          type: "force",
+        },
+      ],
+      false,
+      context,
+    ).events;
+  if (surge.parity) {
+    return [
+      ...events,
+      ...(total % 2 === 0 ? shield(total) : strike(foe ?? actor)),
+    ];
+  }
+  return [
+    ...events,
+    ...shield(total + modifierFor(stats, "con")),
+    ...(foe ? strike(foe) : []),
+  ];
+}
+
+// The once-a-turn use a cast rider spends, by what it rides on.
+function riderKey(passive: Extract<Passive, { kind: "castRider" }>): string {
+  return `castRider:${passive.spends ?? ""}:${(passive.types ?? []).join(",")}:${passive.without?.join(",") ?? ""}`;
+}
+
+// Fueled Spellfire: a spell dealing one of the types also takes Hit Point Dice once a turn.
+function fueledType(stats: Stats, action: KnownAction): boolean {
+  const types = action.activation.resolution.damage.map(({ type }) => type);
+  return stats.passives.some(
+    (passive) =>
+      passive.kind === "fueledSpell" &&
+      passive.types.some((type) => types.includes(type)),
+  );
+}
+
 function riding(stats: Stats, school: string | null, rider: Rider): boolean {
   return stats.passives.some(
     (passive) =>
@@ -48,7 +136,7 @@ function riding(stats: Stats, school: string | null, rider: Rider): boolean {
 }
 
 // Up to this many of the actor's unspent Hit Point Dice, rolled and spent.
-function spendHitDice(
+export function spendHitDice(
   actor: Actor,
   count: number,
   context: Context,
@@ -155,7 +243,10 @@ export function fueledDamage(
   if (
     action.spellLevel === null ||
     actor.usedThisTurn.includes(FUELED) ||
-    !riding(stats, schoolOf(action.id, context), "fueled")
+    !(
+      riding(stats, schoolOf(action.id, context), "fueled") ||
+      fueledType(stats, action)
+    )
   ) {
     return { bonus: 0, events: [] };
   }
@@ -168,6 +259,27 @@ export function fueledDamage(
       dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key: FUELED }),
     ],
   };
+}
+
+function effectsOf(action: KnownAction): readonly LeafEffect[] {
+  const { resolution } = action.activation;
+  return resolution.kind === "automatic"
+    ? resolution.effects
+    : resolution.kind === "save"
+      ? [...resolution.onFail, ...resolution.onSuccess]
+      : resolution.onHit;
+}
+
+// Whether a spell restores Hit Points.
+function heals(action: KnownAction): boolean {
+  return effectsOf(action).some((effect) => effect.kind === "heal");
+}
+
+// Whether a spell ends a condition.
+function cures(action: KnownAction): boolean {
+  return effectsOf(action).some(
+    (effect) => effect.kind === "removeCondition" || effect.kind === "cure",
+  );
 }
 
 // Flames of Phlegethos: casting a spell that deals the type puts the rider's effects on the caster. Bewitching
@@ -198,16 +310,44 @@ export function castRiders(
     ) {
       return [];
     }
+    if (passive.slot && slotLevel === undefined) return [];
+    if (passive.cantrip && action.spellLevel !== 0) return [];
+    if (passive.fromFeat && !featSpell(actor, passive.fromFeat, action.id)) {
+      return [];
+    }
+    if (passive.oncePerTurn && actor.usedThisTurn.includes(riderKey(passive))) {
+      return [];
+    }
+    if (passive.without?.some((id) => stats.features.includes(id))) return [];
+    if (
+      passive.spends &&
+      !cost.some(
+        (item) =>
+          typeof item === "object" &&
+          "resource" in item &&
+          item.resource === passive.spends,
+      )
+    ) {
+      return [];
+    }
     const fits = passive.uses
       ? passive.uses.some(
           (id) =>
             action.id === `spell:${id}` || action.id.startsWith(`spell:${id}:`),
         )
-      : passive.school
-        ? slotLevel !== undefined &&
-          (cost.includes("action") || passive.slotted === true) &&
-          passive.school.some((item) => item === school)
-        : passive.damage !== undefined && types.has(passive.damage);
+      : passive.spends || passive.cantrip || passive.fromFeat
+        ? true
+        : passive.school
+          ? slotLevel !== undefined &&
+            (cost.includes("action") || passive.slotted === true) &&
+            passive.school.some((item) => item === school)
+          : passive.mends
+            ? heals(action) || cures(action)
+            : passive.heals
+              ? heals(action) && targets.some((item) => item.id !== actor.id)
+              : passive.types
+                ? passive.types.some((type) => types.has(type))
+                : passive.damage !== undefined && types.has(passive.damage);
     return fits ? [passive] : [];
   });
   // Simbul's Synostodweomer: a slot spell rolls as many Hit Point Dice as the slot's level.
@@ -240,28 +380,105 @@ export function castRiders(
   return {
     events: [
       ...mended,
-      ...rides.flatMap(({ effects, onTargets, resource, toAlly }) => [
-        ...(resource
-          ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
-          : []),
-        ...leafEvents(
-          effects,
-          `castRider:${action.id}`,
-          actor,
-          toAlly ? (hurtAlly(actor, toAlly, context) ?? actor) : actor,
-          context,
-          undefined,
-          slotLevel,
-        ),
-        // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
-        ...(onTargets
-          ? targets.flatMap((target) =>
-              target.id === actor.id
-                ? []
-                : leafEvents(onTargets, action.id, actor, target, context),
+      ...rides.flatMap((ride) => {
+        const { effects, onTargets, resource, nearby } = ride;
+        const near = nearby
+          ? enemies(context.state, actor).filter(
+              (foe) =>
+                !isDown(foe) &&
+                distanceFeet(foe.position, actor.position) <= nearby.within,
             )
-          : []),
-      ]),
+          : [];
+        const struck = nearby?.one
+          ? [...near].sort((a, b) => a.hp - b.hp).slice(0, 1)
+          : near;
+        return [
+          ...(resource
+            ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
+            : []),
+          ...(ride.oncePerTurn
+            ? [
+                dndEvent(`${NS}:oncePerTurnUsed`, {
+                  actor: actor.id,
+                  key: riderKey(ride),
+                }),
+              ]
+            : []),
+          ...(nearby?.otherwise && struck.length === 0
+            ? leafEvents(
+                nearby.otherwise,
+                `castRider:${action.id}`,
+                actor,
+                actor,
+                context,
+              )
+            : []),
+          // Heart of the Storm: the foes round the caster take its damage, in the type each resists least.
+          ...(nearby
+            ? struck.flatMap(
+                (foe) =>
+                  dealEvents(
+                    foe,
+                    nearby.damage.map((item) => {
+                      const type = item.types
+                        ? typeAgainst(item.types, damageResponses(foe, context))
+                        : item.type;
+                      return {
+                        amount: finalDamage(
+                          rollAmount(item.amount, stats, context.dice),
+                          type,
+                          damageResponses(foe, context),
+                        ),
+                        type,
+                      };
+                    }),
+                    false,
+                    context,
+                  ).events,
+              )
+            : []),
+          ...leafEvents(
+            atSlotLevel(effects, slotLevel ?? 0),
+            `castRider:${action.id}`,
+            actor,
+            ride.toAlly
+              ? (hurtAlly(actor, ride.toAlly, context) ?? actor)
+              : actor,
+            context,
+            undefined,
+            slotLevel,
+          ),
+          // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
+          ...(onTargets
+            ? targets.flatMap((target) =>
+                target.id === actor.id
+                  ? []
+                  : leafEvents(
+                      ride.slotCaps
+                        ? onTargets.map((effect) =>
+                            effect.kind === "dispel"
+                              ? {
+                                  ...effect,
+                                  maxLevel: Math.min(
+                                    effect.maxLevel,
+                                    slotLevel ?? 0,
+                                  ),
+                                }
+                              : effect,
+                          )
+                        : onTargets,
+                      action.id,
+                      actor,
+                      target,
+                      context,
+                    ),
+              )
+            : []),
+          ...(ride.hitDice
+            ? hitDiceSurge(actor, ride.hitDice, stats, context)
+            : []),
+        ];
+      }),
     ],
     frames: rides.flatMap(({ effects, choices }) => [
       ...(choices ? riderChoiceFrame(actor, choices, action, context) : []),

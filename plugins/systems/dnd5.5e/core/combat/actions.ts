@@ -27,6 +27,8 @@ import {
   type Actor,
   ATTACK_ACTION,
   CAST_ACTION,
+  CAST_LEVELED,
+  QUICKENED,
   LEVELED_CAST,
   MAGIC_ACTION,
   SLOT_CAST_ACTION,
@@ -40,6 +42,7 @@ import {
 } from "../state.ts";
 import { distanceFeet, type Square, squareKey } from "../grid.ts";
 import {
+  castsSilently,
   deriveStats,
   evaluateFormula,
   type KnownAction,
@@ -83,7 +86,8 @@ import {
   resolveTargets,
   rollSave,
 } from "./effects.ts";
-import { keepsHidden, metamagicCast } from "../metamagic.ts";
+import { metamagicCast, quickens } from "../metamagic.ts";
+import { castOptionCast } from "../cast-options.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
 import { spellFumble, timeStopEnds } from "./durations.ts";
 import { castRiders, schoolCastEvents } from "./school.ts";
@@ -433,6 +437,23 @@ export function castAction(
             }),
           ]
         : []),
+      // Quickened Spell can't share a turn with another level 1+ spell (metamagic.ts).
+      ...(action.spellLevel !== null && action.spellLevel > 0
+        ? [
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: actor.id,
+              key: CAST_LEVELED,
+            }),
+          ]
+        : []),
+      ...(quickens(actor, actionId)
+        ? [
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: actor.id,
+              key: QUICKENED,
+            }),
+          ]
+        : []),
       ...actionKindMarks(actor, action, slotLevel, context, caught),
       // What it does to its bearer whatever its targets, as Step of the Wind's Dash while carrying an ally.
       ...(action.activation.alsoSelf
@@ -448,7 +469,8 @@ export function castAction(
       ...(foiled?.events ?? []),
       ...lightAttackEvents(actor, actionId, context),
       // An attack gives a hidden creature away once it's rolled, with the hiding's Advantage.
-      ...(resolution.kind === "attack" || keepsHidden(actor, actionId)
+      ...(resolution.kind === "attack" ||
+      castsSilently(actor, action, deriveStats(actor, context), context)
         ? []
         : castRevealEvents(
             actor,
@@ -489,6 +511,7 @@ export function castAction(
           ]
         : []),
       ...metamagicCast(actor, actionId),
+      ...castOptionCast(actor, actionId, slotLevel),
       // Used up once its darts or rolls are done, since they look the action up again.
       ...(actionId.startsWith(ITEM_PREFIX)
         ? [

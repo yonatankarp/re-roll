@@ -562,6 +562,8 @@ function sorcerer(level = 1, fields: Partial<Actor> = {}): Actor {
                 "test:spell/burst",
                 "test:spell/charm",
                 "test:spell/mend",
+                // A cantrip carries a turn on past a Quickened spell, which bars another level 1+ one.
+                "srd52:spell/fire-bolt",
               ],
             },
           ],
