@@ -53,6 +53,7 @@ import {
   runTactic,
   tacticalPolicy,
   withTactics,
+  attuneSaveHandlers,
   castCheckFrames,
 } from "./actions.ts";
 import {
@@ -529,6 +530,7 @@ export const dnd55e = defineSystem<DndState>({
     ...legendaryFrames,
     ...actionFrames,
     ...castCheckFrames,
+    ...attuneSaveHandlers,
     ...movementFrames,
     ...fallingFrames,
     ...formFrames,

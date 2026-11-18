@@ -12,7 +12,12 @@ import { HIT_DICE, itemUseOf, parseOption } from "../core/combat/ids.ts";
 import { squareKey } from "../core/grid.ts";
 import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
-import { canUse, foundText, sceneGearActions } from "../core/gear.ts";
+import {
+  attunementLimit,
+  canUse,
+  foundText,
+  sceneGearActions,
+} from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
 import { partySight, revealedSquares, unseenFoe } from "../core/fog.ts";
 import { coins } from "../core/shop.ts";
@@ -46,7 +51,6 @@ import {
   type Actor,
   type DndState,
   EVENT_SCHEMAS,
-  MAX_ATTUNED,
   equipped,
   isDead,
   isDown,
@@ -535,9 +539,9 @@ function equipmentRows(
                       id: `attune:${id}`,
                       label: "Attune",
                       hint:
-                        attuned.length < MAX_ATTUNED
+                        attuned.length < attunementLimit(stats)
                           ? ATTUNE_HINT
-                          : `Already attuned to ${String(MAX_ATTUNED)} items`,
+                          : `Already attuned to ${String(attunementLimit(stats))} items`,
                     },
               }
             : {}),
@@ -558,7 +562,10 @@ function equipmentRows(
                 hint: actor.hp >= stats.maxHp ? FULL_HINT : DRINK_HINT,
               },
             }
-          : changes && item.type === "magicItem" && item.study
+          : changes &&
+              item.type === "magicItem" &&
+              item.study &&
+              item.study.ability !== "any"
             ? {
                 option: { id: `study:${id}`, label: "Study", hint: STUDY_HINT },
               }
@@ -584,7 +591,7 @@ function equipmentRows(
       ? [
           {
             label: "Attunement",
-            value: `${String(attuned.length)} of ${String(MAX_ATTUNED)}`,
+            value: `${String(attuned.length)} of ${String(attunementLimit(stats))}`,
           },
         ]
       : []),

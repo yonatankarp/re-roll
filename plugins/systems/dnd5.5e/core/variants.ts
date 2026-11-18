@@ -82,6 +82,12 @@ function version(
     ...(parent.lastCharge ? { lastCharge: parent.lastCharge } : {}),
     ...(activations.length > 0 ? { activations } : {}),
     ...(parent.granted ? { granted: parent.granted } : {}),
+    ...("curse" in variant && variant.curse
+      ? { curse: variant.curse }
+      : parent.curse
+        ? { curse: parent.curse }
+        : {}),
+    ...(parent.attuneBy ? { attuneBy: parent.attuneBy } : {}),
   };
   const bonus = variant.bonuses?.[0]?.amount;
   const plus = bonus !== undefined && /, \+1\b/.test(parent.name);

@@ -730,6 +730,9 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("confused"),
     spell: z.literal(true).optional(),
   }),
+  // In a fury (passive `fury`): on its turns it attacks the nearest creature it reaches, friend or foe, or with `at`
+  // that creature until either drops (combat/madness.ts).
+  z.strictObject({ kind: z.literal("furious"), at: z.string().optional() }),
   // No teleporting or travel to another plane, as with Dimensional Shackles on.
   z.strictObject({ kind: z.literal("anchored") }),
   // Spells of `maxLevel` or lower, of one of these classes' lists, cast without a slot while it lasts, as a Candle of
@@ -2492,6 +2495,16 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     at: z.number().int().min(2),
     within: z.number().int().min(5),
   }),
+  // Spending a magic item's charges rolls a d6, and a 6 keeps them, as Use Magic Device's (combat/effects.ts payCosts).
+  z.strictObject({ kind: z.literal("chargeSaver") }),
+  // Reads any Spell Scroll with this ability, cantrips and level 1 spells reliably and a higher one behind a check of
+  // it with Arcana of 10 plus the spell's level, whose failure wastes the scroll, as Use Magic Device's (stats.ts).
+  z.strictObject({ kind: z.literal("anyScroll"), ability: AbilitySchema }),
+  // Attuned to up to this many magic items at once, as an Artificer's Magic Item Adept's four (gear.ts).
+  z.strictObject({
+    kind: z.literal("attunementSlots"),
+    count: z.number().int().min(4),
+  }),
   // This much off the price of nonmagical items the bearer buys, as with Crafter.
   z.strictObject({
     kind: z.literal("shopDiscount"),
@@ -2680,6 +2693,28 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("saveDisadvantage"),
     conditions: z.array(ConditionSchema).min(1),
+  }),
+  // Resistance to the damage of ranged weapon attacks, as a Shield of Missile Attraction's (combat/attack.ts).
+  z.strictObject({ kind: z.literal("missileResistance") }),
+  // A ranged weapon attack aimed at another creature within this many feet of the bearer targets the bearer instead,
+  // as a Shield of Missile Attraction's curse (combat/attack.ts).
+  z.strictObject({
+    kind: z.literal("missileMagnet"),
+    within: z.number().int().min(5),
+  }),
+  // Disadvantage on attack rolls with weapons other than this item and those made from it, as a Berserker Axe's curse
+  // (combat/attack.ts).
+  z.strictObject({ kind: z.literal("soleWeapon"), item: ContentIdSchema }),
+  // Damaged by another creature in a fight, a failed save of `ability` against `dc` sends the bearer into a fury: on
+  // its turns it attacks the nearest creature it reaches, friend or foe, until it starts a turn with none within 60
+  // feet, as a Berserker Axe's wielder, or with `damager` the creature that damaged it, until either drops or it's out
+  // of reach as a turn starts, as a Sword of Vengeance's (combat/madness.ts). shortcut: the damager is the creature
+  // whose turn it is, and the fury's attack is one, its other attacks the bearer's own choice.
+  z.strictObject({
+    kind: z.literal("fury"),
+    ability: AbilitySchema,
+    dc: z.number().int().min(1),
+    damager: z.literal(true).optional(),
   }),
   // Starting its turn Bloodied, a 6 on a d6 makes it berserk until it isn't Bloodied: it attacks the nearest creature
   // it can see, friend or foe, as a flesh golem's Berserk (combat/turn.ts).
@@ -3498,6 +3533,25 @@ const ItemBaseSchema = ContentEntrySchema.extend({
   weightLb: z.number().min(0).optional(),
 });
 
+// A curse attuning to an item puts on its bearer, until Remove Curse ends that Attunement, or with `wish` only a Wish
+// spell (gear.ts): with `bound` the Attunement can't be ended nor the item stowed, as a Berserker Axe kept within reach,
+// and `passives` work while attuned, worn or not, as Armor of Vulnerability's Vulnerabilities.
+export const CurseSchema = z.strictObject({
+  bound: z.literal(true).optional(),
+  passives: z.array(PassiveSchema).min(1).optional(),
+  wish: z.literal(true).optional(),
+});
+
+// Who can attune to an item, as a Talisman of Pure Good's Cleric or Paladin: a creature with a level in one of
+// `classes`, or of one of `species` (both by their names after the plugin) or `creatureTypes`, or attuned to one of
+// `attunedTo`, as Whelm's Dwarf or bearer of a Belt of Dwarvenkind (gear.ts).
+export const AttuneBySchema = z.strictObject({
+  classes: z.array(z.string().min(1)).min(1).optional(),
+  species: z.array(z.string().min(1)).min(1).optional(),
+  creatureTypes: z.array(z.string().min(1)).min(1).optional(),
+  attunedTo: z.array(ContentIdSchema).min(1).optional(),
+});
+
 const MagicBonusSchema = z.strictObject({
   to: z.enum([
     "attack",
@@ -3718,6 +3772,8 @@ export const WeaponSchema = ItemBaseSchema.extend({
   baseWeapon: ContentIdSchema.optional(),
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   attunement: z.literal(true).optional(), // its bonuses work only while attuned, as a Keyholes Dagger's
+  curse: CurseSchema.optional(), // its magic item's
+  attuneBy: AttuneBySchema.optional(),
   returning: z.literal(true).optional(), // back in hand once thrown, as a Returning Weapon
   forms: z.array(z.string().min(1)).min(1).optional(), // its magic item's, as a Keyholes Dagger's
   // types its own damage can take instead, the one the target resists least, as a Javelin of Lightning's Lightning
@@ -3751,6 +3807,8 @@ export const ArmorSchema = ItemBaseSchema.extend({
   // From its magic item: its bonuses and passives work only while attuned, and its passives, as Armor of Resistance's.
   attunement: z.literal(true).optional(),
   passives: z.array(PassiveSchema).min(1).optional(),
+  curse: CurseSchema.optional(), // its magic item's
+  attuneBy: AttuneBySchema.optional(),
   ...ChargedSchema,
 }).strict();
 export type Armor = z.infer<typeof ArmorSchema>;
@@ -3761,6 +3819,8 @@ const ShieldItemSchema = ItemBaseSchema.extend({
   baseArmor: ContentIdSchema.optional(), // a magic Shield's plain one, as a +1 Shield's (variants.ts)
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
   attunement: z.literal(true).optional(), // as armor's
+  curse: CurseSchema.optional(), // its magic item's
+  attuneBy: AttuneBySchema.optional(),
   passives: z.array(PassiveSchema).min(1).optional(),
   ...ChargedSchema,
 }).strict();
@@ -3823,6 +3883,19 @@ const MagicItemSchema = ItemBaseSchema.extend({
   rarity: z.union([RaritySchema, z.literal("varies")]),
   attunement: z.boolean(),
   attunementBy: z.string().min(1).optional(),
+  attuneBy: AttuneBySchema.optional(), // what `attunementBy` asks, as the engine checks it
+  curse: CurseSchema.optional(),
+  // A save attuning to it calls for, whose failure is the attuner's end, as the Wand of Orcus's Constitution save
+  // (actions.ts attuneSave): a creature of one of `unless` makes none, and a success takes `saved`, as the wand's 10d6
+  // Necrotic. Weapons and armor made from it take it from the item.
+  attuneSave: z
+    .strictObject({
+      ability: AbilitySchema,
+      dc: z.number().int().min(1),
+      unless: z.array(z.string().min(1)).min(1).optional(),
+      saved: z.array(DamageSchema).default([]),
+    })
+    .optional(),
   text: z.string().min(1),
   automation: AutomationSchema,
   bonuses: z.array(MagicBonusSchema).min(1).optional(),
@@ -3831,11 +3904,22 @@ const MagicItemSchema = ItemBaseSchema.extend({
   passives: z.array(PassiveSchema).min(1).optional(),
   // A score studying it raises for good, as a Manual of Bodily Health's Constitution by 2 to a maximum of 30.
   // Studying spends its magic, so the item is gone after.
+  // An item needing Attunement is studied only while attuned to it. With `any` the score is the reader's choice, as
+  // the Book of Vile Darkness's; `lower` takes from the reader's lowest other score down to `min`; `keep` leaves the
+  // item, studied once; and `passives` are the reader's for good after, as the Book of Exalted Deeds' Halo (gear.ts).
   study: z
     .strictObject({
-      ability: AbilitySchema,
+      ability: z.union([AbilitySchema, z.literal("any")]),
       raise: z.number().int().min(1),
       max: z.number().int().min(1),
+      lower: z
+        .strictObject({
+          amount: z.number().int().min(1),
+          min: z.number().int().min(1),
+        })
+        .optional(),
+      keep: z.literal(true).optional(),
+      passives: z.array(PassiveSchema).min(1).optional(),
     })
     .optional(),
   // Skills its bearer picks one of to be proficient in while it works, changed only where the party could rest, as an
@@ -3957,6 +4041,7 @@ const MagicItemSchema = ItemBaseSchema.extend({
           .optional(),
         hitDamage: z.array(DamageSchema).min(1).optional(), // added too
         hitSave: OnHitSaveSchema.optional(), // in place of the item's own, as Ammunition of Slaying's for one type
+        curse: CurseSchema.optional(), // in place of the item's own, as Armor of Vulnerability's for its type
       }),
     )
     .min(1)

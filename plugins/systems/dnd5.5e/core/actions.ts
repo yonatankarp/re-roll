@@ -86,6 +86,7 @@ import { finalDamage, rollD20 } from "./rules.ts";
 import {
   ABILITY_NAMES,
   type Ability,
+  ItemSchema,
   type Skill,
   type WeaponMastery,
   WeaponMasterySchema,
@@ -112,6 +113,7 @@ import {
   checkBonus,
   damageResponses,
   deriveStats,
+  lookup,
   modifierFor,
   rollAmount,
   saveBonus,
@@ -288,6 +290,53 @@ const checkName = ({
   skill
     ? `${ABILITY_NAMES[ability]} (${capitalized(skill)})`
     : ABILITY_NAMES[ability];
+// The save attuning to an item calls for (MagicItemSchema `attuneSave`, gear.ts), made as the Attunement starts: a
+// failure is the attuner's end, as the Wand of Orcus's death or the Book of Vile Darkness's Larva, and a success takes
+// the item's damage. Its rolls are carried by the events.
+export const attuneSaveHandlers = {
+  [`${NS}:attuneSave`]: frameHandler({
+    schema: z.strictObject({ actor: z.string(), item: z.string() }),
+    run: ({ actor: actorId, item }, context: Context): SystemResult => {
+      const actor = actorOf(context.state, actorId);
+      const magic = lookup(context, ItemSchema, item.split("--")[0] ?? item);
+      if (magic.type !== "magicItem" || !magic.attuneSave) {
+        throw new Error(`${item} asks no save to attune`);
+      }
+      const { ability, dc, unless, saved } = magic.attuneSave;
+      const stats = deriveStats(actor, context);
+      if (stats.creatureType && unless?.includes(stats.creatureType)) {
+        return {};
+      }
+      const save = rollSave(actor, ability, dc, context, true);
+      if (!save.saved) {
+        return {
+          events: [
+            ...save.events,
+            dndEvent(`${NS}:damaged`, {
+              actor: actor.id,
+              amount: Math.max(0, actor.hp) + actor.tempHp,
+              type: "necrotic",
+              critical: false,
+              massive: true,
+            }),
+            { kind: "actorDefeated", actor: actor.id },
+          ],
+        };
+      }
+      const hits = saved.map((damage) => ({
+        amount: rollAmount(damage.amount, stats, context.dice),
+        type: damage.type,
+      }));
+      return {
+        events: [
+          ...save.events,
+          ...dealEvents(actor, hits, false, context).events,
+        ],
+      };
+    },
+  }),
+};
+
 // The check an action needs as it's taken (KnownAction `castCheck`), as reading a Spell Scroll above the reader's
 // level: a failure pays for it and wastes it, an item with it, and a success takes it.
 export const castCheckFrames = {
