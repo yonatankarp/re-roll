@@ -1,6 +1,6 @@
 import { prisonEvents } from "./fear.ts";
 import { z } from "zod";
-import { placedFlag, zonesOf } from "../zones.ts";
+import { deflection, placedFlag, zoneGrants, zonesOf } from "../zones.ts";
 import { concentrationBonus } from "./school.ts";
 import {
   type Actor,
@@ -74,6 +74,8 @@ import {
   type Roll,
   rollOnTable,
   rollResponder,
+  heldDie,
+  inspiredSwing,
   slotRefund,
   strikeAction,
 } from "./reactions.ts";
@@ -94,6 +96,7 @@ import {
   scaleActivation,
   spellSaveDc,
   type Stats,
+  scaledDice,
 } from "../stats.ts";
 import { finalDamage, halved, rollD20 } from "../rules.ts";
 import {
@@ -612,7 +615,14 @@ function rollWindow(
   let bonus = held.bonus;
   for (;;) {
     const found = rollResponder(current, passed, context);
-    if (!found) return { events, natural: current.natural, bonus };
+    if (!found) {
+      const inspired = inspiredSwing(current, context);
+      return {
+        events: [...events, ...inspired.events],
+        natural: current.natural,
+        bonus: bonus + inspired.bonus,
+      };
+    }
     const { reactor, action } = found;
     if (reactor.id === PLAYER_ACTOR) {
       const rolled = {
@@ -1231,6 +1241,10 @@ export function runAttackRoll(
     ) ||
     crowded ||
     longRange ||
+    // Ranged weapon attacks through a wind or a wall of water, as Wall of Water's.
+    (ranged &&
+      resolution.attack.type === "weapon" &&
+      deflection(state, attacker.position, target.position) !== null) ||
     underwaterHampered(attacker, action, resolution, context) ||
     // Speedy or Boots of Speed: an Opportunity Attack, one made on the target's own turn, has Disadvantage.
     (inOwnTurn(target, context) &&
@@ -3613,9 +3627,20 @@ function hitRiders(
   const events: SystemEvent[] = [];
   const sided = (casterId: string) =>
     state.actors[casterId]?.side === attacker.side;
-  const carried = [
+  const carried: {
+    readonly effect: Pick<
+      Actor["activeEffects"][number],
+      "modifier" | "sourceId" | "casterId"
+    >;
+    readonly by: string;
+  }[] = [
     ...attacker.activeEffects.map((effect) => ({ effect, by: "bearer" })),
     ...target.activeEffects.map((effect) => ({ effect, by: "caster" })),
+    // What an aura the attacker stands in gives its hits, as Crusader's Mantle's Radiant.
+    ...zoneGrants(attacker, state, context).map(({ modifier, zone }) => ({
+      effect: { modifier, sourceId: zone.sourceId, casterId: zone.owner },
+      by: "bearer",
+    })),
   ];
   const damage = carried.flatMap(({ effect, by }) => {
     const { modifier, sourceId, casterId } = effect;
@@ -3649,8 +3674,46 @@ function hitRiders(
     const type = modifier.types
       ? typeAgainst(modifier.types, responses)
       : modifier.damage.type;
-    return [{ ...modifier.damage, type }];
+    // A die another creature gave is its size, as Commander's Strike's Superiority Die.
+    const giver = state.actors[casterId];
+    const { amount } = modifier.damage;
+    return [
+      {
+        ...modifier.damage,
+        type,
+        ...(giver &&
+        giver.id !== attacker.id &&
+        (amount.dieSize || amount.diceCount)
+          ? {
+              amount: {
+                ...amount,
+                dice:
+                  scaledDice(amount, deriveStats(giver, context).scaling) ??
+                  amount.dice,
+                dieSize: undefined,
+                diceCount: undefined,
+              },
+            }
+          : {}),
+      },
+    ];
   });
+  // Combat Inspiration's Offense: the attacker's Bardic Inspiration die, at its giver's size, added to the hit.
+  const held = heldDie(attacker, context);
+  const first = resolution.damage[0];
+  if (
+    held &&
+    first &&
+    held.stats.passives.some(({ kind }) => kind === "combatInspiration")
+  ) {
+    events.push(held.spent);
+    damage.push({
+      amount: {
+        dice: scaledDice(held.amount, held.stats.scaling) ?? held.amount.dice,
+      },
+      type: first.type,
+    });
+  }
   return { damage, events };
 }
 

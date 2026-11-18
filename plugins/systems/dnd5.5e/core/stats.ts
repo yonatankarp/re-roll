@@ -40,6 +40,7 @@ import {
   ActivationSchema,
   type FreeCast,
   type Amount,
+  type AreaEffect,
   type Condition,
   ArmorSchema,
   BackgroundSchema,
@@ -217,6 +218,9 @@ export interface Stats {
   // that spell with.
   readonly familiar?: { readonly form: string; readonly ability: Ability };
 }
+
+// Character builds whose features give an aura, filled in as their stats are derived.
+export const auraBuilds = new WeakMap<object, boolean>();
 
 export function passiveModifiers(
   passives: readonly Passive[],
@@ -1572,12 +1576,13 @@ function castsAs(
   passives: readonly Passive[],
 ): KnownAction[] {
   const quick = passives.flatMap((passive) =>
-    passive.kind === "castsAs" ? passive.spells : [],
+    passive.kind === "castsAs" ? (passive.spells ?? ["*"]) : [],
   );
   if (quick.length === 0) return [...actions];
+  // With no spells named, every spell, as Elder Champion's Swift Spells.
   return actions.map((action) => {
     const spell = spellOfSource(action.id);
-    return spell !== null && quick.includes(spell)
+    return spell !== null && (quick.includes(spell) || quick.includes("*"))
       ? {
           ...action,
           activation: {
@@ -1780,6 +1785,18 @@ function withRiders(
     const extra = riders.flatMap(({ effects }) => effects);
     const damage = riders.flatMap(({ damage: more }) => more ?? []);
     const own = riders.flatMap(({ self }) => self ?? []);
+    const allies = riders.flatMap(({ allies: rider }) =>
+      rider ? [rider] : [],
+    );
+    if (allies.length > 0) {
+      action = {
+        ...action,
+        activation: {
+          ...action.activation,
+          alsoAllies: [...(action.activation.alsoAllies ?? []), ...allies],
+        },
+      };
+    }
     if (own.length > 0) {
       action = {
         ...action,
@@ -2490,6 +2507,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     swaps,
     grantedBy,
   );
+  // Whether any of its features gives an aura, active or not, so zones skip a character without one (core/zones.ts).
+  if (actor.source.kind === "character" && actor.source.build) {
+    auraBuilds.set(
+      actor.source.build,
+      [
+        ...fromFeatures.passives,
+        ...fromFeatures.gated.flatMap((gate) => gate.passives),
+      ].some((passive) => passive.kind === "aura"),
+    );
+  }
   // A feature's passives that hold only while an effect of its activations is on the bearer (`whileActive`).
   for (const gate of fromFeatures.gated) {
     if (
@@ -2541,24 +2568,25 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       hasAspect(actor, passive.whileAspect)) &&
     ((passive.kind !== "modifier" && passive.kind !== "weaponRider") ||
       passive.armor === undefined ||
-      (passive.armor === "noHeavy" ? !heavy : !armored));
-  // Durable Magic's bonuses hold only while the bearer concentrates, and Power of the Wilds' Lion aura only in a Rage.
+      (passive.armor === "noHeavy" ? !heavy : !armored)) &&
+    // Power of the Wilds' Lion aura only in a Rage, as Holy Nimbus's only once it's used.
+    (passive.kind !== "aura" ||
+      !passive.while ||
+      actor.activeEffects.some(({ sourceId }) =>
+        passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+      )) &&
+    (passive.kind !== "aura" ||
+      !passive.whileAspect ||
+      hasAspect(actor, passive.whileAspect)) &&
+    (passive.kind !== "aura" ||
+      !passive.without?.some((id) => featureIds.has(id)));
+  // Durable Magic's bonuses hold only while the bearer concentrates.
   const traits = [...itemPassives, ...kept, ...fromFeatures.passives].filter(
     (passive) =>
       fits(passive) &&
       (passive.kind !== "modifier" ||
         !passive.concentrating ||
-        actor.concentratingOn !== null) &&
-      (passive.kind !== "aura" ||
-        !passive.while ||
-        actor.activeEffects.some(({ sourceId }) =>
-          passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
-        )) &&
-      (passive.kind !== "aura" ||
-        !passive.whileAspect ||
-        hasAspect(actor, passive.whileAspect)) &&
-      (passive.kind !== "aura" ||
-        !passive.without?.some((id) => featureIds.has(id))),
+        actor.concentratingOn !== null),
   );
   const castingAbility = new Map([
     ...answerAbilities,
@@ -3079,7 +3107,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     creatureType: species.creatureType.toLowerCase(),
     initiative:
       abilityModifier(abilities.dex) -
-      2 * actor.exhaustion -
+      2 * exhaustionOf(actor) -
       (actor.ordeal ?? 0),
     // Proficiency Bonus as a scaling key, for dice that number it, as Healing Hands' d4s.
     scaling: {
@@ -3113,7 +3141,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ],
     pactMagic: [...featureIds].some(isPactMagic),
     untrainedArmor,
-    exhaustion: actor.exhaustion,
+    exhaustion: exhaustionOf(actor),
     ordeal: actor.ordeal ?? 0,
     itemBonuses: magic,
     speeds: {},
@@ -3146,7 +3174,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         !traits.some((passive) => passive.kind === "armorStrength")
           ? 10
           : 0) -
-        5 * actor.exhaustion,
+        5 * exhaustionOf(actor),
     ),
     resources: Object.fromEntries(
       partial.resourceDefs.map((resource) => [
@@ -3654,7 +3682,10 @@ function statBlockStats(
       flatBonus: 0,
       passives,
     }),
-    speed: Math.max(0, (shape?.speed ?? monster.speed) - 5 * actor.exhaustion),
+    speed: Math.max(
+      0,
+      (shape?.speed ?? monster.speed) - 5 * exhaustionOf(actor),
+    ),
     savingThrows: monster.saves,
     skills: [],
     expertise: [],
@@ -3695,13 +3726,14 @@ function statBlockStats(
     ),
     routines,
     creatureType: monster.creatureType?.toLowerCase(),
-    initiative: monster.initiative - 2 * actor.exhaustion - (actor.ordeal ?? 0),
+    initiative:
+      monster.initiative - 2 * exhaustionOf(actor) - (actor.ordeal ?? 0),
     scaling: {},
     features: monster.features,
     resourceDefs: fromFeatures.resources,
     pactMagic: false,
     untrainedArmor: false,
-    exhaustion: actor.exhaustion,
+    exhaustion: exhaustionOf(actor),
     ordeal: actor.ordeal ?? 0,
     itemBonuses: {
       attack: 0,
@@ -3713,7 +3745,9 @@ function statBlockStats(
     speeds: Object.fromEntries(
       (["fly", "climb", "burrow", "swim"] as const).flatMap((mode) => {
         const feet = monster.speeds?.[mode];
-        return feet ? [[mode, Math.max(0, feet - 5 * actor.exhaustion)]] : [];
+        return feet
+          ? [[mode, Math.max(0, feet - 5 * exhaustionOf(actor))]]
+          : [];
       }),
     ),
   };
@@ -4340,6 +4374,18 @@ function changedWeapon(
   };
 }
 
+// Its levels of Exhaustion, with those that last only while an effect does, as Sickening Radiance's.
+export function exhaustionOf(actor: Actor): number {
+  return Math.min(
+    6,
+    actor.activeEffects.reduce(
+      (sum, { modifier }) =>
+        modifier.kind === "exhausted" ? sum + modifier.levels : sum,
+      actor.exhaustion,
+    ),
+  );
+}
+
 // A spell's flat Speed or Hit Point maximum increase, as with Longstrider or Aid, counted once per source.
 // shortcut: Hit Points above the maximum aren't taken away when the increase ends.
 function effectBonus(
@@ -4478,7 +4524,7 @@ export function checkBonus(
         ? Math.floor(stats.proficiency / 2)
         : 0) +
     stats.itemBonuses.checks -
-    2 * actor.exhaustion -
+    2 * exhaustionOf(actor) -
     (actor.ordeal ?? 0)
   );
 }
@@ -4929,9 +4975,15 @@ export function scaleActivation(
   };
   // What an area it leaves does later grows with the slot too, as Spirit Guardians' damage does, and so does
   // what strikes in a hit's place, as Lightning Arrow's.
-  const { area, trigger } = activation;
+  const { area, areas, trigger } = activation;
+  const grown = (item: AreaEffect): AreaEffect => ({
+    ...item,
+    ...(item.resolution ? { resolution: scaled(item.resolution) } : {}),
+    ...(item.holding ? { holding: scaled(item.holding) } : {}),
+  });
   return {
     ...activation,
+    ...(areas ? { areas: areas.map(grown) } : {}),
     ...(trigger?.replacesHit
       ? { trigger: { ...trigger, replacesHit: damage(trigger.replacesHit) } }
       : {}),
@@ -4983,7 +5035,10 @@ export function rollAmount(
           )
         : rollDiceNotation(notation, rolling, diceMultiplier)
     : 0;
-  return rolled + (amount.bonus ? evaluateFormula(amount.bonus, stats) : 0);
+  return (
+    rolled * (amount.times ?? 1) +
+    (amount.bonus ? evaluateFormula(amount.bonus, stats) : 0)
+  );
 }
 
 // Each die showing its highest face, the added ones too, adds another die, at most `most` more, as Sorcerous Burst's.
@@ -5043,9 +5098,8 @@ export function damageResponses(
   for (const modifier of [
     ...actor.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
-    // What the spells' areas it stands in give it, as Silence's Immunity to Thunder damage. Monster auras grant
-    // none, so their stat blocks aren't read on every hit.
-    ...(access.state ? zoneModifiers(actor, access.state) : []),
+    // What the areas it stands in give it, as Silence's Immunity to Thunder damage or Aura of Warding's Resistances.
+    ...(access.state ? zoneModifiers(actor, access.state, access) : []),
   ]) {
     if (modifier.kind === "resistance") resistances.push(modifier.damage);
     if (modifier.kind === "vulnerability")

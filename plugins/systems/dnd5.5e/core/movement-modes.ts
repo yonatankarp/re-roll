@@ -80,7 +80,16 @@ export function unhindered(
 ): boolean {
   return modifiersOf(actor, stats).some(
     (modifier) =>
-      modifier.kind === "unhindered" && (!slipping || !modifier.terrainOnly),
+      modifier.kind === "unhindered" &&
+      modifier.ice !== true &&
+      (!slipping || !modifier.terrainOnly),
+  );
+}
+
+// Whether ice and snow cost it no extra movement, as with Winter Strider.
+export function stridesIce(actor: Actor, stats: Stats): boolean {
+  return modifiersOf(actor, stats).some(
+    (modifier) => modifier.kind === "unhindered" && modifier.ice === true,
   );
 }
 

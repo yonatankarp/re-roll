@@ -33,6 +33,7 @@ import {
 import { HIT_DICE, spellOfSource } from "./ids.ts";
 import { hitDieRoll } from "../trait-rules.ts";
 import {
+  alliesRiderEvents,
   channelEvents,
   dealEvents,
   leafEvents,
@@ -618,6 +619,15 @@ export function castRiders(
           ...(ride.hitDice
             ? hitDiceSurge(actor, ride.hitDice, stats, context)
             : []),
+          // On the caster's allies near it, as Unicorn Spirit's healing.
+          ...(ride.allies
+            ? alliesRiderEvents(
+                [ride.allies],
+                `castRider:${action.id}`,
+                actor,
+                context,
+              )
+            : []),
         ];
       }),
     ],
@@ -776,7 +786,16 @@ function riderChoiceFrame(
   action: KnownAction,
   context: Context,
 ): Frame[] {
+  const stats = deriveStats(actor, context);
   const options = choices.flatMap((choice, index) => {
+    if (
+      choice.resource &&
+      (stats.resources[choice.resource] ?? 0) -
+        (actor.resourcesSpent[choice.resource] ?? 0) <=
+        0
+    ) {
+      return [];
+    }
     if (choice.foes?.one) {
       return Object.values(context.state.actors)
         .filter(
@@ -841,16 +860,27 @@ export const riderChoiceFrames = {
       const [index = "", targetId] = payload.answer.split("|");
       const choice = payload.choices[Number(index)] as Choice | undefined;
       if (!choice) throw new Error(`${payload.answer} isn't offered`);
+      const spent = choice.resource
+        ? [
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: caster.id,
+              resource: choice.resource,
+            }),
+          ]
+        : [];
       if (!choice.foes) {
         const target = context.state.actors[targetId ?? caster.id] ?? caster;
         return {
-          events: leafEvents(
-            choice.effects,
-            payload.sourceId,
-            caster,
-            target,
-            context,
-          ),
+          events: [
+            ...spent,
+            ...leafEvents(
+              choice.effects,
+              payload.sourceId,
+              caster,
+              target,
+              context,
+            ),
+          ],
         };
       }
       const { save, effects } = choice.foes;
@@ -876,7 +906,7 @@ export const riderChoiceFrames = {
             : leafEvents(effects, payload.sourceId, caster, foe, context)),
         ];
       });
-      return { events };
+      return { events: [...spent, ...events] };
     },
   }),
 };

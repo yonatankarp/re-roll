@@ -37,6 +37,8 @@ import {
   weaponItemId,
 } from "./combat/ids.ts";
 import { walkSpeed } from "./tactics.ts";
+import { zoneModifiers } from "./zones.ts";
+import { distanceFeet } from "./grid.ts";
 import { schoolOf } from "./combat/school.ts";
 
 // What a save is against, for a passive with `from` (SaveFromSchema): the creature behind it and the spell's school.
@@ -168,18 +170,35 @@ export function traitSaveAdvantage(
 }
 
 // Evasion: a save for half damage the bearer can still dodge, unless it's Incapacitated.
+// Aura of Evasion's area gives it, and a Leading Evasion bearer within 5 feet shares it.
 export function evades(
   target: Actor,
   ability: Ability,
-  access: ContentAccess,
+  access: ContentAccess & { readonly state?: DndState },
 ): boolean {
+  const { state } = access;
   return (
     !hasCondition(target, ...INCAPACITATING) &&
     (deriveStats(target, access).passives.some(
       (passive) =>
         passive.kind === "evasion" && (passive.anySave || ability === "dex"),
     ) ||
-      (ability === "dex" && leapsAside(target, access)))
+      (ability === "dex" &&
+        (leapsAside(target, access) ||
+          (state !== undefined &&
+            (zoneModifiers(target, state, access).some(
+              (modifier) => modifier.kind === "evasion",
+            ) ||
+              Object.values(state.actors).some(
+                (leader) =>
+                  leader.id !== target.id &&
+                  leader.side === target.side &&
+                  !hasCondition(leader, ...INCAPACITATING) &&
+                  distanceFeet(leader.position, target.position) <= 5 &&
+                  deriveStats(leader, access).passives.some(
+                    (passive) => passive.kind === "evasion" && passive.leading,
+                  ),
+              ))))))
   );
 }
 

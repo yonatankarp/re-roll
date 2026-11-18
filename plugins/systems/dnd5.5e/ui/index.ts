@@ -30,7 +30,7 @@ import { creation, featureInPlay } from "./creation.ts";
 import { sheetCreation } from "./creation-sheet.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
 import type { AreaView, BoardExtra, FightMap } from "./board-data.ts";
-import { believes, zonesOf } from "../core/zones.ts";
+import { believes, squaresOf, zonesOf } from "../core/zones.ts";
 import { dndCue } from "./cues.ts";
 import { GLOSSARY_TERMS } from "../core/glossary.ts";
 import { playing } from "../core/variant-rules.ts";
@@ -416,7 +416,7 @@ function areaViews(state: DndState, access: ContentAccess): AreaView[] {
     }
     return [
       {
-        key: `${zone.owner}|${zone.sourceId}|${zone.zone}|${String(zone.radius)}`,
+        key: `${zone.owner}|${zone.sourceId}|${zone.zone}|${String(zone.radius)}|${String(zone.part ?? "")}`,
         kind: zone.zone,
         x: zone.at.x,
         y: zone.at.y,
@@ -429,6 +429,9 @@ function areaViews(state: DndState, access: ContentAccess): AreaView[] {
         foe,
         ...(zone.blocks ? { blocks: [...zone.blocks] } : {}),
         ...(zone.walls ? { walls: zone.walls } : {}),
+        ...(zone.shape && !zone.blocks
+          ? { cells: [...squaresOf(zone, state)] }
+          : {}),
       },
     ];
   });
@@ -648,6 +651,14 @@ function sheets(rawState: unknown, access: ContentAccess, here?: SceneHere) {
   );
   const player = actors[PLAYER_ACTOR];
   if (player?.source.kind !== "character" || !player.source.build) return [];
+  // A ritual cast from the list without being prepared, as Ritual Adept's, has no spell row of its own.
+  const own = new Set(deriveStats(player, access).actions.map(({ id }) => id));
+  const rituals = between.filter(
+    ({ args }) =>
+      args.caster === PLAYER_ACTOR &&
+      args.slot === undefined &&
+      !own.has(String(args.action)),
+  );
   return [
     player,
     ...Object.values(actors).filter((actor) => actor.id !== PLAYER_ACTOR),
@@ -665,6 +676,7 @@ function sheets(rawState: unknown, access: ContentAccess, here?: SceneHere) {
             actor.id === PLAYER_ACTOR ? companions : [],
             actor.id === PLAYER_ACTOR ? upcasts : [],
             actor.id === PLAYER_ACTOR ? uses : [],
+            actor.id === PLAYER_ACTOR ? rituals : [],
           ),
         ]
       : [],
@@ -680,6 +692,7 @@ function sheetOf(
   companions: readonly SceneAction[] = [], // the companions' ones, on the player's sheet
   upcasts: readonly SceneAction[] = [], // the player's own with a higher slot
   uses: readonly SceneAction[] = [], // items used between choices, on the player's sheet
+  rituals: readonly SceneAction[] = [], // rituals cast from the list without being prepared
 ) {
   const stats = deriveStats(player, access);
   const subclasses = build.levels
@@ -803,6 +816,14 @@ function sheetOf(
             },
           ]
         : []),
+      {
+        title: "Rituals",
+        rows: rituals.map(({ id, label }) => ({
+          label,
+          value: "",
+          option: { id, label: "Cast" },
+        })),
+      },
       {
         title: "Higher slots",
         rows: upcasts.map(({ id, label }) => ({
