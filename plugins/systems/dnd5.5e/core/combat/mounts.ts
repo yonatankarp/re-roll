@@ -26,6 +26,8 @@ export const MOUNTED = "mounted"; // the riding effect's source
 const STEED_ACTIONS = ["dash", "disengage", "dodge"] as const;
 
 function halfOf(stats: Stats): number {
+  // Born to the Saddle: only 5 feet.
+  if (stats.passives.some(({ kind }) => kind === "quickMount")) return 5;
   return Math.ceil(stats.speed / 10) * 5;
 }
 

@@ -5,7 +5,6 @@ import {
   deriveStats,
   evaluateFormula,
   type KnownAction,
-  lookup,
   type Stats,
 } from "../stats.ts";
 import { teleportSquares } from "./movement.ts";
@@ -23,8 +22,11 @@ export function summonedActors(
   context: Context,
   slotLevel?: number,
 ): readonly Actor[] {
-  const companion = lookup(context, CompanionSchema, effect.companion);
-  if (!companion.play) return [];
+  // shortcut: with the companion's book not loaded, as the SRD's Find Steed's PHB steed, nothing comes.
+  const companion = CompanionSchema.safeParse(
+    context.content(effect.companion),
+  ).data;
+  if (!companion?.play) return [];
   const level = slotLevel ?? action.spellLevel ?? companion.play.level;
   const spellDc = evaluateFormula(effect.dc, stats);
   const count = Math.max(1, evaluateFormula(effect.count, stats));
@@ -56,6 +58,10 @@ export function summonedActors(
           stats.itemBonuses.spellDc +
           stats.itemBonuses.spellAttack,
         spellDc,
+        // Find Steed: one steed for good, kept between fights.
+        ...(effect.lasting
+          ? { lasting: { feature: companion.id, free: true as const } }
+          : {}),
       },
       hp: 1,
       inventory: [],
@@ -88,10 +94,43 @@ export function summonEvents(
     context,
     slotLevel,
   ).slice(0, squares.length);
-  return actors.map((actor, index) =>
-    dndEvent(`${NS}:summoned`, {
-      actor: { ...actor, position: squares[index] ?? null },
-      after: index === 0 ? caster.id : (actors[index - 1]?.id ?? caster.id),
+  const kept = effect.lasting
+    ? lastingFound(
+        summonedActors(effect, action, caster, stats, context, slotLevel)[0],
+        caster,
+        context,
+      )
+    : [];
+  return [
+    ...kept,
+    ...actors.map((actor, index) =>
+      dndEvent(`${NS}:summoned`, {
+        actor: { ...actor, position: squares[index] ?? null },
+        after: index === 0 ? caster.id : (actors[index - 1]?.id ?? caster.id),
+      }),
+    ),
+  ];
+}
+
+// The caster keeps a lasting summon's numbers, to bring it to later fights, whether or not it found room now.
+function lastingFound(
+  actor: Actor | undefined,
+  caster: Actor,
+  context: Context,
+): SystemEvent[] {
+  if (actor?.source.kind !== "summon" || !actor.source.lasting) return [];
+  const { source } = actor;
+  return [
+    dndEvent(`${NS}:companionFound`, {
+      actor: caster.id,
+      feature: source.lasting?.feature ?? source.companion,
+      companion: source.companion,
+      maxHp: deriveStats(actor, context).maxHp,
+      proficiency: source.proficiency,
+      spellAttack: source.spellAttack,
+      spellDc: source.spellDc,
+      level: source.level,
+      free: true,
     }),
-  );
+  ];
 }

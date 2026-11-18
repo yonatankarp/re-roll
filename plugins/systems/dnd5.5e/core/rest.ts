@@ -31,6 +31,7 @@ import {
 import { hitDieHealing, hitDieRoll } from "./trait-rules.ts";
 import { gearOptions } from "./gear.ts";
 import { familiarFoundEvents } from "./combat/familiar.ts";
+import { companionFoundEvents } from "./combat/companions.ts";
 import { ClassSchema, type LeafEffect, type ResourceDef } from "./schemas.ts";
 import {
   type Stats,
@@ -653,6 +654,7 @@ function runFinishRest(
       ...(rest === "long" ? foretelling(members, context) : []),
       ...(rest === "long" ? afterLongRest(members, context) : []),
       ...familiarFoundEvents(members, context, rest),
+      ...companionFoundEvents(members, context, rest),
       dndEvent(`${NS}:restFinished`, {
         rest,
         ...(hours < REST_HOURS[rest] ? { hours } : {}),

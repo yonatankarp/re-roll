@@ -78,6 +78,7 @@ import {
   slotLevelFor,
   squareName,
   targetCount,
+  touchCourier,
 } from "./queries.ts";
 import {
   aimSquare,
@@ -413,8 +414,19 @@ export function castAction(
     : (apart ?? resolveTargets(targetId, action, actor, context));
   // Sanctuary: a damaging spell aimed at a warded foe is lost on it unless the caster makes the save.
   const sanctuary = sanctuarySaves(actor, action, aimed, context);
-  const caught = aimed.filter((item) => !sanctuary.lost.includes(item.id));
+  const kept = aimed.filter((item) => !sanctuary.lost.includes(item.id));
   passedSaves.push(...sanctuary.events);
+  const caught = [...kept, ...sharedWith(actor, action, kept, context)];
+  // A touch the familiar delivers spends its Reaction.
+  const couriers = [
+    ...new Set(
+      aimed.flatMap((target) =>
+        reaches(action, actor, target)
+          ? []
+          : [touchCourier(action, actor, target, state)?.id ?? ""],
+      ),
+    ),
+  ].filter((id) => id !== "");
   const riders = castRiders(actor, action, slotLevel, context, caught);
   // An object the spell keeps goes to the first creature it acts on, or is placed there as the spell is cast.
   const anchored = anchoredEvents(actor, action, caught, slotLevel, context);
@@ -447,6 +459,9 @@ export function castAction(
   return {
     events: [
       ...payCosts(action, actor, context, slotLevel),
+      ...couriers.map((id) =>
+        dndEvent(`${NS}:budgetSpent`, { actor: id, kind: "reaction" }),
+      ),
       ...anchored,
       ...timeStopEnds(actor, caught),
       ...schoolCastEvents(actor, action, slotLevel, context),
@@ -970,6 +985,31 @@ export const actionFrames = {
       ),
   }),
 };
+
+// Share Spells: a spell its caster casts on itself alone also lands on its lasting companions within reach.
+function sharedWith(
+  actor: Actor,
+  action: KnownAction,
+  aimed: readonly Actor[],
+  context: Context,
+): Actor[] {
+  if (action.spellLevel === null || !("self" in action.activation.targeting)) {
+    return [];
+  }
+  if (aimed.length !== 1 || aimed[0]?.id !== actor.id) return [];
+  const share = deriveStats(actor, context).passives.find(
+    (passive) => passive.kind === "shareSpells",
+  );
+  if (share?.kind !== "shareSpells") return [];
+  return Object.values(context.state.actors).filter(
+    (item) =>
+      item.source.kind === "summon" &&
+      item.source.lasting !== undefined &&
+      item.source.casterId === actor.id &&
+      !isDown(item) &&
+      distanceFeet(actor.position, item.position) <= share.within,
+  );
+}
 
 // Sanctuary against a damaging spell aimed at creatures, not an area: the caster saves against each warded foe's ward,
 // and on a failure the spell is lost on that one.
