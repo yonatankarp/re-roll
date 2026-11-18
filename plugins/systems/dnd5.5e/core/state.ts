@@ -655,6 +655,7 @@ export const StateSchema = z.strictObject({
       index: z.number().int(),
       round: z.number().int(),
       canFlee: z.boolean().optional(),
+      standOffWins: z.literal(true).optional(), // canFlee is only the story's default retreat
       defeatContinues: z.boolean().optional(),
       grid: GridSchema.optional(),
       walls: z.array(z.string()).optional(), // squares no one can enter, as "x,y"
@@ -729,6 +730,7 @@ const CombatStartedSchema = z.strictObject({
   monsters: z.array(ActorSchema),
   order: z.array(z.string()),
   canFlee: z.boolean().optional(),
+  standOffWins: z.literal(true).optional(),
   defeatContinues: z.boolean().optional(),
   grid: GridSchema.optional(),
   positions: z.record(z.string(), SquareSchema).optional(),
@@ -2093,6 +2095,7 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           index: 0,
           round: 1,
           ...(data.canFlee ? { canFlee: true } : {}),
+          ...(data.standOffWins ? { standOffWins: true } : {}),
           ...(data.defeatContinues ? { defeatContinues: true } : {}),
           ...(data.grid ? { grid: data.grid } : {}),
           ...(data.walls ? { walls: data.walls } : {}),

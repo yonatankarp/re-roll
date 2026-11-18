@@ -409,8 +409,12 @@ function runApplyEffects(
       );
       if (!encounter) throw new Error(`Unknown encounter ${effect.encounter}`);
       const outcomes = run.adventure.encounterOutcomes[encounter.id];
+      const canFlee = fleeEffects(run, state, encounter.id) !== undefined;
       const result = run.system.startEncounter(encounter, context, {
-        canFlee: outcomes?.onFlee !== undefined,
+        canFlee,
+        ...(canFlee && outcomes?.onFlee === undefined
+          ? { standOffWins: true }
+          : {}),
         defeatContinues: outcomes?.onDefeat !== undefined,
       });
       assertOwnEvents(run, result.events);
@@ -418,7 +422,7 @@ function runApplyEffects(
         events: result.events ?? [],
         frames: [
           ...(result.frames ?? []),
-          ...(outcomes
+          ...(outcomes || canFlee
             ? [
                 {
                   kind: "story:afterEncounter",
@@ -483,6 +487,20 @@ function runApplyEffects(
   }
 }
 
+// Where fleeing leads: the encounter's own onFlee, else back to the scene the party came from.
+// A fight with neither, such as one in the opening scene, can't be fled.
+function fleeEffects(
+  run: RunContext,
+  state: GameState,
+  encounter: string,
+): readonly StoryEffect[] | undefined {
+  const previous = state.story.previousScene;
+  return (
+    run.adventure.encounterOutcomes[encounter]?.onFlee ??
+    (previous === undefined ? undefined : [{ kind: "goto", scene: previous }])
+  );
+}
+
 // What the choice planned next assumes a win, so only a win carries on with it,
 // merged so that the outcome's goto replaces the choice's own.
 function runAfterEncounter(
@@ -495,7 +513,9 @@ function runAfterEncounter(
     case "defeat":
       return { frames: [effectsFrame(outcomes?.onDefeat ?? [])] };
     case "flee":
-      return { frames: [effectsFrame(outcomes?.onFlee ?? [])] };
+      return {
+        frames: [effectsFrame(fleeEffects(run, state, encounter) ?? [])],
+      };
     default:
       return {
         frames: [effectsFrame([...effects, ...(outcomes?.onVictory ?? [])])],

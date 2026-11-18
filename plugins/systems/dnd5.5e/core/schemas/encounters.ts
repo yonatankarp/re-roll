@@ -112,21 +112,32 @@ export const LootSchema = z.strictObject({
 });
 export type Loot = z.infer<typeof LootSchema>;
 
-export const EncounterSchema = z.strictObject({
-  id: z.string().min(1),
-  battlemap: BattlemapSchema.optional(),
-  monsters: z
-    .array(
-      z.strictObject({
-        monster: ContentIdSchema,
-        count: z.number().int().min(1).default(1),
-      }),
-    )
-    .min(1),
-  loot: LootSchema.optional(), // found when the party wins
-  lair: z.boolean().optional(), // fought in a monster's lair: lair actions and its "in Lair" numbers
-  sunlight: z.literal(true).optional(), // fought outdoors in daylight, outside the map's shade (d) and darkness (x)
-});
+export const EncounterSchema = z
+  .strictObject({
+    id: z.string().min(1),
+    battlemap: BattlemapSchema.optional(),
+    monsters: z
+      .array(
+        z.strictObject({
+          monster: ContentIdSchema,
+          count: z.number().int().min(1).default(1),
+        }),
+      )
+      .min(1),
+    loot: LootSchema.optional(), // found when the party wins
+    lair: z.boolean().optional(), // fought in a monster's lair: lair actions and its "in Lair" numbers
+    sunlight: z.literal(true).optional(), // fought outdoors in daylight, outside the map's shade (d) and darkness (x)
+  })
+  .superRefine(({ battlemap, monsters }, context) => {
+    const count = monsters.reduce((sum, { count }) => sum + count, 0);
+    if (battlemap && battlemap.monsters.length < count) {
+      context.addIssue({
+        code: "custom",
+        path: ["battlemap", "monsters"],
+        message: `has ${String(battlemap.monsters.length)} start squares for ${String(count)} monsters`,
+      });
+    }
+  });
 
 // XP an encounter may be worth per character, by character level. Nothing reads this yet.
 export const EncounterBudgetSchema = ContentEntrySchema.extend({

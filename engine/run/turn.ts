@@ -88,6 +88,9 @@ export function applyEvent(
         story: {
           ...story,
           scene: event.scene,
+          ...(story.scene !== null && story.scene !== event.scene
+            ? { previousScene: story.scene }
+            : {}),
           visits: {
             ...story.visits,
             [event.scene]: (story.visits?.[event.scene] ?? 0) + 1,

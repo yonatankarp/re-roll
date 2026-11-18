@@ -1155,6 +1155,38 @@ describe("encounter outcomes", () => {
     ).not.toContain("story:afterEncounter");
   });
 
+  it("retreats to the scene the party came from when an encounter has no onFlee", async () => {
+    const seen: EncounterOptions[] = [];
+    const scenes = `
+- id: start
+  text: Start.
+  choices:
+    - { label: Walk, effects: [{ kind: goto, scene: road }] }
+- id: road
+  text: Road.
+  choices:
+    - label: Fight
+      effects:
+        - { kind: startEncounter, encounter: fight }
+        - { kind: setFlag, flag: won }
+        - { kind: goto, scene: safe }
+- { id: safe, text: Safe. }
+`;
+    const { run } = await loadInline(
+      { "encounters.yaml": "- { id: fight }\n", "scenes.yaml": scenes },
+      fightsEndWith("flee", seen),
+    );
+    const walked = choose(run, startRun(run, "s"), "0");
+    expect(walked.state.story.previousScene).toBe("start");
+    const fled = choose(run, walked, "0");
+    expect(seen).toEqual([
+      { canFlee: true, standOffWins: true, defeatContinues: false },
+    ]);
+    expect(fled.state.story.scene).toBe("start");
+    expect(fled.state.story.flags.won).toBeUndefined();
+    // No replaysExactly: this system flees every fight, so a bot walks back and forth forever.
+  });
+
   it("clears an old outcome when a later fight is won", async () => {
     const { run } = await loadInline(
       {
