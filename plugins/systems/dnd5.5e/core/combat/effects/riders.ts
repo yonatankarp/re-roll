@@ -120,18 +120,30 @@ export function alliesRiderEvents(
   const spent: Record<string, number> = {};
   const frames: Frame[] = [];
   // An ally's reaction, as a Banneret's Rallying Surge gives, is taken as the forced reactions are; the rest are leaves.
-  const onAlly = (effects: readonly LeafEffect[], ally: Actor): SystemEvent[] =>
-    effects.flatMap((effect) => {
+  const onAlly = (
+    effects: readonly LeafEffect[],
+    ally: Actor,
+  ): SystemEvent[] => [
+    ...leafEvents(
+      effects.filter(
+        (effect) =>
+          effect.kind !== "reactionMove" && effect.kind !== "reactionAttack",
+      ),
+      sourceId,
+      actor,
+      ally,
+      context,
+    ),
+    ...effects.flatMap((effect) => {
       if (effect.kind === "reactionMove") {
         return reactionMove(ally, context, effect, actor);
       }
-      if (effect.kind === "reactionAttack") {
-        const struck = reactionAttack(ally, context);
-        frames.push(...struck.frames);
-        return struck.events;
-      }
-      return leafEvents([effect], sourceId, actor, ally, context);
-    });
+      if (effect.kind !== "reactionAttack") return [];
+      const struck = reactionAttack(ally, context);
+      frames.push(...struck.frames);
+      return struck.events;
+    }),
+  ];
   const events = riders.flatMap((rider) => {
     if (rider.without?.some((id) => stats.features.includes(id))) return [];
     const effects = [

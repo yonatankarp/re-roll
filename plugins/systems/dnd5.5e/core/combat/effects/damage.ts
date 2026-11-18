@@ -614,16 +614,25 @@ export function dealEvents(
   let dealt = 0;
   for (const given of hits) {
     const current = state.actors[target.id] ?? target;
+    // Damage it's immune to or absorbs sets off nothing that would lessen or add to it.
+    const cancelled =
+      given.response?.immunities?.includes(given.type) === true ||
+      given.response?.absorbs?.includes(given.type) === true;
+    const none = { amount: 0, events: [] };
     // Elemental Bane: the first damage of its type each turn deals more.
-    const baned = baneExtra(current, given, { ...context, state });
+    const baned = cancelled
+      ? none
+      : baneExtra(current, given, { ...context, state });
     const hit = { ...given, amount: given.amount + baned.amount };
-    const reduced = reducedHit(
-      current,
-      hit.amount,
-      hit.type,
-      { ...context, state },
-      magical,
-    );
+    const reduced = cancelled
+      ? { amount: hit.amount, events: [] }
+      : reducedHit(
+          current,
+          hit.amount,
+          hit.type,
+          { ...context, state },
+          magical,
+        );
     const resisted = resistedHit(
       current,
       reduced.amount,

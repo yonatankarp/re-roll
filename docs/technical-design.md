@@ -1060,8 +1060,8 @@ The plugin registers frames such as `dnd5.5e:resolveAttack`, `dnd5.5e:applyDamag
 
 - **Legendary actions:** right after another creature's turn, each monster with a use left may take one. `runFinishTurn` splits off `runAdvanceTurn` (frame `dnd5.5e:advanceTurn`) so they run between turns. A legendary move toward a target never provokes Opportunity Attacks.
 - **Legendary Resistance** turns a failed save into a success while uses remain. "Per day" is per fight, since a monster exists for one fight.
-- **Lair actions:** an encounter's `lair` takes them on initiative count 20, losing ties.
-- **Surprise:** an encounter's `surprise` (`party` or `enemies`), or the story effect `dnd5.5e:surprise`, such as after a Stealth check, makes that side roll initiative with disadvantage. The story's word beats the encounter's.
+- **Lair actions:** an encounter's `lair` takes them on initiative count 20, losing ties, and gives every monster in it its in-lair numbers (legendary action uses, Legendary Resistance).
+- **Surprise:** the story effect `dnd5.5e:surprise` (`party` or `enemies`), such as after a Stealth check, makes that side roll initiative with disadvantage in the next fight.
 - **Fleeing:** when the encounter allows it, the player may flee on their turn. Every foe that can reach them gets an Opportunity Attack first, unless they Disengaged, and the party gets away if the player is still standing. Companions run with the player and draw no attacks.
 - **Stand-offs:** after 10 rounds in which nobody takes damage (`STAND_OFF_ROUNDS`, counted in `calmRounds`), the fight ends at the next round: the party withdraws (`flee`) where the encounter allows fleeing, and otherwise the story goes on as after a win, without treasure. A fight can't then run for ever while no decision comes, as when the player is down and stable. As a fight starts, `openedCorners` (`core/grid.ts`) also opens any wall corner that is the party's only way out of its start squares, kept as `openCorners` in `combatStarted`.
 

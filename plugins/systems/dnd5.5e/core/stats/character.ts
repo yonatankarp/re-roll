@@ -700,23 +700,25 @@ export function characterStats(actor: Actor, access: ContentAccess): Stats {
       const shot = weapon.properties.includes("ammunition")
         ? bestAmmunition(worn, works)
         : undefined;
-      const activation = weaponActivation(
-        firing(plain, shot?.item),
-        abilities,
-        martialTraining ||
-          fromFeatures.passives.some(
-            (passive) =>
-              passive.kind === "martialTraining" &&
-              trainedWith(passive, weapon),
-          ) ||
-          kinds.some((kind) => weaponTraining.has(kind)) ||
-          classes.some((def) => weaponProficient(def, weapon)),
-        own("damage") + scoped("damage") + (shot?.damage ?? 0),
-        own("attack") - magic.attack + scoped("attack") + (shot?.attack ?? 0),
-        Object.keys(classLevels),
-        // shortcut: hands aren't tracked, so any weapon is held in both without a Shield.
-        !holdsShield,
-      );
+      const swung = (twoHanded: boolean) =>
+        weaponActivation(
+          firing(plain, shot?.item),
+          abilities,
+          martialTraining ||
+            fromFeatures.passives.some(
+              (passive) =>
+                passive.kind === "martialTraining" &&
+                trainedWith(passive, weapon),
+            ) ||
+            kinds.some((kind) => weaponTraining.has(kind)) ||
+            classes.some((def) => weaponProficient(def, weapon)),
+          own("damage") + scoped("damage") + (shot?.damage ?? 0),
+          own("attack") - magic.attack + scoped("attack") + (shot?.attack ?? 0),
+          Object.keys(classLevels),
+          twoHanded,
+        );
+      // shortcut: hands aren't tracked, so any weapon is swung in both without a Shield; a throw takes one.
+      const activation = swung(!holdsShield);
       actions.push({
         id: `${WEAPON_PREFIX}${itemId}`,
         name: shot ? `${item.name} (${shot.name})` : item.name,
@@ -734,7 +736,7 @@ export function characterStats(actor: Actor, access: ContentAccess): Stats {
           id: `${THROW_PREFIX}${itemId}`,
           name: `Throw ${item.name}`,
           activation: thrownActivation(
-            activation,
+            swung(false),
             range,
             traits,
             works(itemId, item) ? weapon.thrown : undefined,

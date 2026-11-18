@@ -2,7 +2,10 @@ import { PLAYER_ACTOR } from "#sdk";
 import { describe, expect, it } from "vitest";
 import { loadAdventure } from "../app/cli/load-adventure.ts";
 import type { RunContext } from "../engine/run/turn.ts";
-import { runAfterAction } from "../plugins/systems/dnd5.5e/core/combat.ts";
+import {
+  runAfterAction,
+  startCombat,
+} from "../plugins/systems/dnd5.5e/core/combat.ts";
 import { payCosts } from "../plugins/systems/dnd5.5e/core/combat/effects/costs.ts";
 import { dealEvents } from "../plugins/systems/dnd5.5e/core/combat/effects/damage.ts";
 import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects/leaf.ts";
@@ -42,6 +45,19 @@ function pregen(run: RunContext, id: string, fields: Partial<Actor> = {}) {
       inventory: [...equipment],
     }),
     ...fields,
+  };
+}
+
+function withContent(
+  run: RunContext,
+  entries: readonly { readonly id: string }[],
+): RunContext {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  return {
+    ...run,
+    content: (id) => byId.get(id) ?? run.content(id),
+    contentIds: () =>
+      [...run.contentIds(), ...entries.map((entry) => entry.id)].sort(),
   };
 }
 
@@ -273,5 +289,92 @@ describe("check-pack's effect positions", () => {
     expect(lintEntry(dropped)).toEqual([
       "effect reactionAttack at passives.0.effects.0 is never read there",
     ]);
+  });
+});
+
+describe("damage it's immune to", () => {
+  it("sets off no once-a-turn cut", async () => {
+    const run = await goblin();
+    const fighter = pregen(run, "srd52:pregen/fighter", {
+      hp: 30,
+      activeEffects: [
+        {
+          sourceId: "test:cut",
+          casterId: PLAYER_ACTOR,
+          modifier: {
+            kind: "damageReduction",
+            damage: "fire",
+            amount: { bonus: { base: 3, add: [] } },
+          },
+          ends: "spellDuration",
+        },
+      ],
+    });
+    const { events, dealt } = dealEvents(
+      fighter,
+      [{ amount: 10, type: "fire", response: { immunities: ["fire"] } }],
+      false,
+      inCombat(run, [fighter]),
+    );
+    expect(dealt).toBe(0);
+    expect(events).toEqual([]);
+  });
+});
+
+describe("a thrown Versatile weapon", () => {
+  it("keeps its one-handed die", async () => {
+    const spear = {
+      id: "test:item/spear",
+      name: "Spear",
+      type: "weapon",
+      category: "simple",
+      damage: { dice: "1d6", type: "piercing" },
+      properties: ["thrown", "versatile"],
+      mastery: "sap",
+      range: { normal: 20, long: 60 },
+    };
+    const run = withContent(await goblin(), [spear]);
+    const fighter = pregen(run, "srd52:pregen/fighter", {
+      inventory: [spear.id],
+    });
+    const dice = (id: string) => {
+      const resolution = deriveStats(fighter, run).actions.find(
+        (action) => action.id === id,
+      )?.activation.resolution;
+      return resolution?.kind === "attack"
+        ? resolution.damage[0]?.amount.dice
+        : undefined;
+    };
+    expect(dice(`weapon:${spear.id}`)).toBe("1d8");
+    expect(dice(`throw:${spear.id}`)).toBe("1d6");
+  });
+});
+
+describe("a fight's surroundings", () => {
+  it("are the effects the story put the party in", async () => {
+    const gust = {
+      id: "test:environmental-effect/gust",
+      name: "Gust",
+      text: "Test.",
+      source: "Test",
+      automation: "full",
+    };
+    const run = withContent(await goblin(), [gust]);
+    const fighter = pregen(run, "srd52:pregen/fighter");
+    const context = inCombat(run, [fighter]);
+    const { events = [] } = startCombat(
+      {
+        id: "e",
+        monsters: [{ monster: "srd52:monster/goblin-warrior", count: 1 }],
+      },
+      {
+        ...context,
+        state: { ...context.state, combat: null, ambient: [gust.id] },
+      },
+      { canFlee: false, defeatContinues: false },
+    );
+    expect(
+      events.find((event) => event.kind === `${NS}:combatStarted`),
+    ).toMatchObject({ payload: { environment: { ids: [gust.id] } } });
   });
 });
