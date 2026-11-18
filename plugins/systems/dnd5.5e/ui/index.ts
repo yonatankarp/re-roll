@@ -648,6 +648,14 @@ function sheets(rawState: unknown, access: ContentAccess, here?: SceneHere) {
   );
   const player = actors[PLAYER_ACTOR];
   if (player?.source.kind !== "character" || !player.source.build) return [];
+  // A ritual cast from the list without being prepared, as Ritual Adept's, has no spell row of its own.
+  const own = new Set(deriveStats(player, access).actions.map(({ id }) => id));
+  const rituals = between.filter(
+    ({ args }) =>
+      args.caster === PLAYER_ACTOR &&
+      args.slot === undefined &&
+      !own.has(String(args.action)),
+  );
   return [
     player,
     ...Object.values(actors).filter((actor) => actor.id !== PLAYER_ACTOR),
@@ -665,6 +673,7 @@ function sheets(rawState: unknown, access: ContentAccess, here?: SceneHere) {
             actor.id === PLAYER_ACTOR ? companions : [],
             actor.id === PLAYER_ACTOR ? upcasts : [],
             actor.id === PLAYER_ACTOR ? uses : [],
+            actor.id === PLAYER_ACTOR ? rituals : [],
           ),
         ]
       : [],
@@ -680,6 +689,7 @@ function sheetOf(
   companions: readonly SceneAction[] = [], // the companions' ones, on the player's sheet
   upcasts: readonly SceneAction[] = [], // the player's own with a higher slot
   uses: readonly SceneAction[] = [], // items used between choices, on the player's sheet
+  rituals: readonly SceneAction[] = [], // rituals cast from the list without being prepared
 ) {
   const stats = deriveStats(player, access);
   const subclasses = build.levels
@@ -803,6 +813,14 @@ function sheetOf(
             },
           ]
         : []),
+      {
+        title: "Rituals",
+        rows: rituals.map(({ id, label }) => ({
+          label,
+          value: "",
+          option: { id, label: "Cast" },
+        })),
+      },
       {
         title: "Higher slots",
         rows: upcasts.map(({ id, label }) => ({

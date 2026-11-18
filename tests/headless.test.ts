@@ -214,7 +214,7 @@ describe("headless play of goblin-ambush", () => {
     await expect(play.act(MOVE)).rejects.toThrow("isn't one of the choices");
     await play.choose("human fighter"); // labels ignore case
     expect(play.screen().decision).toBe("scene:road");
-    await expect(play.choose(9)).rejects.toThrow("no choice 9");
+    await expect(play.choose(99)).rejects.toThrow("no choice 99");
 
     // Story options have ids "0" and "1": a string is always an id, a number a place on screen.
     const other = await driver();
