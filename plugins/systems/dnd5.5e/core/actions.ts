@@ -1483,6 +1483,7 @@ export function runTactic(
   ): SystemEvent[] => {
     const { escape } = held;
     if (!escape) return [];
+    if (escape.free) return escapedEvents(freed, held);
     const rolled = abilityCheck(
       by,
       escape.skill,

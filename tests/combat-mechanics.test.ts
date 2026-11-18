@@ -415,14 +415,15 @@ describe("lingering damage", () => {
     expect(damageOf(settle(run, onA, [endTurn], LOW).events, "a")).toEqual([3]);
   });
 
+  // Aimed at the creature, or for a ringed wall so that it stands in the wall itself.
   it.each([
-    ["cloudkill", 9, ["fog"]],
-    ["insect-plague", 9, ["area"]],
-    ["incendiary-cloud", 15, ["fog"]],
-    ["wall-of-fire", 7, ["area", "wall"]],
+    ["cloudkill", 9, ["fog"], 5],
+    ["insect-plague", 9, ["haze"], 5],
+    ["incendiary-cloud", 15, ["fog"], 5],
+    ["wall-of-fire", 7, ["area", "wall"], 7],
   ])(
     "leaves %s as an area that hurts whoever ends a turn in it",
-    async (slug, level, zone) => {
+    async (slug, level, zone, aim) => {
       const run = arenaRun(await base(), {});
       const at = (item: Actor, x: number): Actor => ({
         ...item,
@@ -441,7 +442,7 @@ describe("lingering damage", () => {
       const cast = settle(
         run,
         start,
-        [act(PLAYER_ACTOR, `spell:${spell(slug)}|@5,0`)],
+        [act(PLAYER_ACTOR, `spell:${spell(slug)}|@${String(aim)},0`)],
         LOW,
       );
       expect(damageOf(cast.events, "a")).toHaveLength(1);

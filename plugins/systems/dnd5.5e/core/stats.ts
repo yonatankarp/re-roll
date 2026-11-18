@@ -40,6 +40,7 @@ import {
   ActivationSchema,
   type FreeCast,
   type Amount,
+  type AreaEffect,
   type Condition,
   ArmorSchema,
   BackgroundSchema,
@@ -3082,7 +3083,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     creatureType: species.creatureType.toLowerCase(),
     initiative:
       abilityModifier(abilities.dex) -
-      2 * actor.exhaustion -
+      2 * exhaustionOf(actor) -
       (actor.ordeal ?? 0),
     // Proficiency Bonus as a scaling key, for dice that number it, as Healing Hands' d4s.
     scaling: {
@@ -3116,7 +3117,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ],
     pactMagic: [...featureIds].some(isPactMagic),
     untrainedArmor,
-    exhaustion: actor.exhaustion,
+    exhaustion: exhaustionOf(actor),
     ordeal: actor.ordeal ?? 0,
     itemBonuses: magic,
     speeds: {},
@@ -3149,7 +3150,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         !traits.some((passive) => passive.kind === "armorStrength")
           ? 10
           : 0) -
-        5 * actor.exhaustion,
+        5 * exhaustionOf(actor),
     ),
     resources: Object.fromEntries(
       partial.resourceDefs.map((resource) => [
@@ -3657,7 +3658,10 @@ function statBlockStats(
       flatBonus: 0,
       passives,
     }),
-    speed: Math.max(0, (shape?.speed ?? monster.speed) - 5 * actor.exhaustion),
+    speed: Math.max(
+      0,
+      (shape?.speed ?? monster.speed) - 5 * exhaustionOf(actor),
+    ),
     savingThrows: monster.saves,
     skills: [],
     expertise: [],
@@ -3698,13 +3702,14 @@ function statBlockStats(
     ),
     routines,
     creatureType: monster.creatureType?.toLowerCase(),
-    initiative: monster.initiative - 2 * actor.exhaustion - (actor.ordeal ?? 0),
+    initiative:
+      monster.initiative - 2 * exhaustionOf(actor) - (actor.ordeal ?? 0),
     scaling: {},
     features: monster.features,
     resourceDefs: fromFeatures.resources,
     pactMagic: false,
     untrainedArmor: false,
-    exhaustion: actor.exhaustion,
+    exhaustion: exhaustionOf(actor),
     ordeal: actor.ordeal ?? 0,
     itemBonuses: {
       attack: 0,
@@ -3716,7 +3721,9 @@ function statBlockStats(
     speeds: Object.fromEntries(
       (["fly", "climb", "burrow", "swim"] as const).flatMap((mode) => {
         const feet = monster.speeds?.[mode];
-        return feet ? [[mode, Math.max(0, feet - 5 * actor.exhaustion)]] : [];
+        return feet
+          ? [[mode, Math.max(0, feet - 5 * exhaustionOf(actor))]]
+          : [];
       }),
     ),
   };
@@ -4343,6 +4350,18 @@ function changedWeapon(
   };
 }
 
+// Its levels of Exhaustion, with those that last only while an effect does, as Sickening Radiance's.
+export function exhaustionOf(actor: Actor): number {
+  return Math.min(
+    6,
+    actor.activeEffects.reduce(
+      (sum, { modifier }) =>
+        modifier.kind === "exhausted" ? sum + modifier.levels : sum,
+      actor.exhaustion,
+    ),
+  );
+}
+
 // A spell's flat Speed or Hit Point maximum increase, as with Longstrider or Aid, counted once per source.
 // shortcut: Hit Points above the maximum aren't taken away when the increase ends.
 function effectBonus(
@@ -4481,7 +4500,7 @@ export function checkBonus(
         ? Math.floor(stats.proficiency / 2)
         : 0) +
     stats.itemBonuses.checks -
-    2 * actor.exhaustion -
+    2 * exhaustionOf(actor) -
     (actor.ordeal ?? 0)
   );
 }
@@ -4932,9 +4951,15 @@ export function scaleActivation(
   };
   // What an area it leaves does later grows with the slot too, as Spirit Guardians' damage does, and so does
   // what strikes in a hit's place, as Lightning Arrow's.
-  const { area, trigger } = activation;
+  const { area, areas, trigger } = activation;
+  const grown = (item: AreaEffect): AreaEffect => ({
+    ...item,
+    ...(item.resolution ? { resolution: scaled(item.resolution) } : {}),
+    ...(item.holding ? { holding: scaled(item.holding) } : {}),
+  });
   return {
     ...activation,
+    ...(areas ? { areas: areas.map(grown) } : {}),
     ...(trigger?.replacesHit
       ? { trigger: { ...trigger, replacesHit: damage(trigger.replacesHit) } }
       : {}),

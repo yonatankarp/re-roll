@@ -1,4 +1,4 @@
-import { damageBurstFrames } from "./areas.ts";
+import { burnFrames, damageBurstFrames } from "./areas.ts";
 import { z } from "zod";
 import { blockedSquares } from "../zones.ts";
 import {
@@ -1323,6 +1323,7 @@ export function afterDamage(
     ...concentration,
     ...reactFrames({ kind: "damaged", actor: target.id, ...cause }, context),
     ...damageBurstFrames(target, cause.types ?? [], context),
+    ...burnFrames(target, cause.types ?? [], context),
   ];
 }
 

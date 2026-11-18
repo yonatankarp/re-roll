@@ -55,6 +55,7 @@ export const FRAME_KINDS = [
   "lingeringTick",
   "sunlightTick",
   "damageBurst",
+  "burnAway",
   "masteryHit",
   "masteryMiss",
   "metamagic",
@@ -227,6 +228,13 @@ const ActiveEffectSchema = z.strictObject({
       reveals: z.literal(true).optional(), // light: no benefit from the Invisible condition in its Bright Light
       dc: z.number().int().optional(), // an image: the Investigation DC to see through it
       decoy: z.literal(true).optional(), // an image of its caster, which hides nothing
+      part: z.number().int().optional(), // which of its spell's areas it is, when it leaves several that act
+      shape: z.enum(["ring", "line"]).optional(), // round when left out
+      dir: z // a line's direction: it runs from `at` toward the square this far from it
+        .strictObject({ x: z.number().int(), y: z.number().int() })
+        .optional(),
+      width: z.number().int().optional(), // a line's, in feet
+      uses: z.number().int().optional(), // the times it acts in all before it ends
     }),
     // What an action anyone can take, such as Dodge, or a weapon mastery, leaves behind (core/tactics.ts).
     z.strictObject({
@@ -283,6 +291,7 @@ const ActiveEffectSchema = z.strictObject({
       ability: AbilitySchema,
       skill: SkillSchema.optional(),
       dc: z.number().int(),
+      free: z.literal(true).optional(), // no check: the action frees it
     })
     .optional(),
   failExhaustion: z.literal(true).optional(),
