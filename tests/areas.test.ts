@@ -497,6 +497,135 @@ describe("durations counted in rounds", () => {
     // A turn that never comes, as a dead caster's, still lets it run out once the next round begins.
     expect(expiredEvents(at(12), "foe", "start")).toHaveLength(1);
   });
+
+  // #213
+  type Held = Actor["activeEffects"][number];
+  const held = (
+    ends: Held["ends"],
+    casterId: string,
+    sourceId: string = ends,
+  ): Held => ({
+    sourceId,
+    casterId,
+    modifier: { kind: "condition", condition: "stunned" },
+    ends,
+  });
+  const sources = (state: DndState, id: string): string[] =>
+    actor(state, id).activeEffects.map(({ sourceId }) => sourceId);
+
+  it("ends an effect tied to its caster's turn once a dead caster's turn is passed over, in an old save too", async () => {
+    const run = await arena();
+    const start = fight(
+      hero(run, 0, 0),
+      { ...monster("dead", "zombie", 1, 0), hp: 0 },
+      monster("foe", "zombie", 2, 0),
+    );
+    // As a save made before the fix holds them: the caster died rounds ago and they stayed.
+    const stuck: DndState = {
+      ...start,
+      combat: start.combat ? { ...start.combat, round: 6 } : null,
+      actors: {
+        ...start.actors,
+        [PLAYER_ACTOR]: {
+          ...actor(start, PLAYER_ACTOR),
+          activeEffects: [
+            held("casterNextTurn", "dead"),
+            held("casterNextTurnEnd", "dead"),
+            held("casterTurnEnd", "dead"),
+            held("spellDuration", "dead"),
+            held("casterNextTurn", "foe", "living"),
+            held("casterNextTurn", "nobody", "outside"),
+          ],
+        },
+      },
+    };
+    const passed = apply(stuck, [dndEvent(`${NS}:turnAdvanced`, {})]);
+    expect(passed.combat?.index).toBe(2);
+    expect(sources(passed, PLAYER_ACTOR)).toEqual(["spellDuration", "outside"]);
+    // One whose caster has no place in the order ends as the next round begins.
+    const round = apply(passed, [dndEvent(`${NS}:turnAdvanced`, {})]);
+    expect(round.combat?.round).toBe(7);
+    expect(sources(round, PLAYER_ACTOR)).toEqual(["spellDuration"]);
+  });
+
+  it("keeps Prone from an instantaneous effect past its caster's next turn", async () => {
+    const run = await arena();
+    const state = fight(hero(run, 0, 0), monster("foe", "zombie", 1, 0));
+    const prone = apply(
+      state,
+      leafEvents(
+        [
+          {
+            kind: "applyCondition",
+            condition: "prone",
+            duration: "instantaneous",
+          } as LeafEffect,
+        ],
+        "spell:test",
+        actor(state, PLAYER_ACTOR),
+        actor(state, "foe"),
+        contextOf(run, state, LOW),
+      ),
+    );
+    expect(actor(prone, "foe").activeEffects[0]?.ends).toBe("spellDuration");
+    const round = apply(prone, [
+      dndEvent(`${NS}:turnAdvanced`, {}),
+      dndEvent(`${NS}:turnAdvanced`, {}),
+    ]);
+    expect(round.combat).toMatchObject({ index: 0, round: 2 });
+    expect(hasCondition(actor(round, "foe"), "prone")).toBe(true);
+  });
+
+  it("gives a one-minute effect cast on another's turn its full ten rounds", async () => {
+    const run = await arena();
+    const start = fight(monster("foe", "zombie", 1, 0), hero(run, 0, 0));
+    const events = leafEvents(
+      [effect({ kind: "hasted" }, { minutes: 1 })],
+      "spell:test",
+      actor(start, PLAYER_ACTOR),
+      actor(start, PLAYER_ACTOR),
+      contextOf(run, start, LOW),
+    );
+    const after = apply(start, events);
+    // Cast on the foe's turn, before the caster's own this round: it ends as the foe's turn starts in round 11.
+    expect(actor(after, PLAYER_ACTOR).activeEffects[0]?.lasts).toEqual({
+      actor: "foe",
+      round: 11,
+      at: "start",
+    });
+    const at = (round: number): DndState => ({
+      ...after,
+      combat: after.combat ? { ...after.combat, round } : null,
+    });
+    expect(expiredEvents(at(10), PLAYER_ACTOR, "start")).toEqual([]);
+    expect(expiredEvents(at(11), "foe", "start")).toHaveLength(1);
+  });
+
+  it("ends Concentration as the turn ends for one a condition added directly has Incapacitated", async () => {
+    const run = await arena();
+    const start = fight(hero(run, 0, 0), monster("foe", "zombie", 1, 0));
+    const focused = (effects: Held[]): DndState => ({
+      ...start,
+      actors: {
+        ...start.actors,
+        foe: {
+          ...actor(start, "foe"),
+          concentratingOn: "spell:bless",
+          activeEffects: effects,
+        },
+      },
+    });
+    const stunned = settle(
+      run,
+      focused([held("spellDuration", PLAYER_ACTOR)]),
+      [frameOf("endTurn")],
+      LOW,
+    );
+    expect(kinds(stunned.events)).toContain(`${NS}:concentrationEnded`);
+    expect(actor(stunned.state, "foe").concentratingOn).toBeNull();
+    const free = settle(run, focused([]), [frameOf("endTurn")], LOW);
+    expect(kinds(free.events)).not.toContain(`${NS}:concentrationEnded`);
+  });
 });
 
 describe("auras", () => {
@@ -731,11 +860,25 @@ describe("Slow and Haste", () => {
     ]);
     const tired = apply(
       ended,
-      turnStartEvents(actor(ended, PLAYER_ACTOR), ended),
+      turnStartEvents(
+        { ...actor(ended, PLAYER_ACTOR), concentratingOn: "spell:bless" },
+        ended,
+        context,
+      ),
     );
     expect(hasCondition(actor(tired, PLAYER_ACTOR), "incapacitated")).toBe(
       true,
     );
+    // The lethargy is Incapacitated, which ends Concentration (#213).
+    expect(
+      kinds(
+        turnStartEvents(
+          { ...actor(ended, PLAYER_ACTOR), concentratingOn: "spell:bless" },
+          ended,
+          context,
+        ),
+      ),
+    ).toContain(`${NS}:concentrationEnded`);
   });
 });
 

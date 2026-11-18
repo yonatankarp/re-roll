@@ -92,6 +92,7 @@ import { regurgitationEvents, releasedSwallows } from "./swallow.ts";
 import {
   expiredEvents,
   extraTurnEvents,
+  focusLost,
   turnStartEvents,
 } from "./durations.ts";
 import {
@@ -498,6 +499,15 @@ export function runFinishTurn(context: Context): SystemResult {
   const events: SystemEvent[] = [
     ...(actor ? outOfCover(actor, context) : []),
     ...lightAndWakeEnds(actor, context),
+    // shortcut: Concentration lost to a condition some other rule gave is checked as each turn ends, not the moment
+    // the condition comes.
+    ...Object.values(state.actors).flatMap((bearer) =>
+      focusLost(
+        bearer,
+        INCAPACITATING.filter((condition) => hasCondition(bearer, condition)),
+        context,
+      ),
+    ),
     ...suffocationEvents(actor, context),
     ...(actor ? blinkEvents(actor, context) : []),
   ];
@@ -655,6 +665,7 @@ export function runFinishTurn(context: Context): SystemResult {
               : { lingers: holder.lingers }),
           },
         }),
+        ...focusLost(target, [worse.condition], context),
       );
     }
   }
@@ -742,7 +753,7 @@ export function runAdvanceTurn(
     ...(next ? turnSaveEvents(next, { ...context, state: after }) : []),
     ...(next ? shakeOffEvents(next, { ...context, state: after }, true) : []),
     ...(next ? reverseGravityEvents(next, { ...context, state: after }) : []),
-    ...(next ? turnStartEvents(next, after) : []),
+    ...(next ? turnStartEvents(next, after, context) : []),
     ...(next ? turnTempHpEvents(next, { ...context, state: after }) : []),
     ...(next ? regenerationEvents(next, context) : []),
     ...(next ? uncommandedEvents(next, after) : []),
