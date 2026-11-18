@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { systems } from "../app/systems.ts";
 import { loadRun, scanPlugins } from "../engine/run/loader.ts";
@@ -15,8 +15,10 @@ import { createNodeStorage } from "../engine/platform/node/storage.ts";
 // loading, players' saves of that kind stop loading too, so fix the code or add a migration.
 // A snapshot (.state.json) may be rewritten with `node tests/golden-saves.ts --snapshots` when the
 // state changed shape on purpose, after reviewing its diff.
-const GOLDENS = ["mid-creation", "after-loot", "mid-combat", "mid-rest"];
 const FOLDER = "tests/fixtures/saves";
+const GOLDENS = (await readdir(FOLDER))
+  .filter((name) => name.endsWith(".json") && !name.endsWith(".state.json"))
+  .map((name) => name.slice(0, -".json".length));
 
 async function open(adventure: string) {
   const storage = await createNodeStorage(process.cwd());

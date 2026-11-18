@@ -1,6 +1,6 @@
 import type { ContentAccess, SystemEvent } from "#sdk";
 import { resistancesLeft } from "../core/legendary.ts";
-import { EVENT_SCHEMAS, turnId } from "../core/state.ts";
+import { deathSaveOutcome, EVENT_SCHEMAS, turnId } from "../core/state.ts";
 import { unseenFoe } from "../core/fog.ts";
 import { parseState } from "./parse-state.ts";
 import { deriveStats, evaluateFormula, scaledDice } from "../core/stats.ts";
@@ -51,6 +51,7 @@ export type DndCue =
       readonly kind: "deathSave";
       readonly actor: string;
       readonly natural: number;
+      readonly success: boolean; // by its total, with bonuses and penalties
     }
   | {
       readonly kind: "check";
@@ -228,7 +229,13 @@ function cueOf(
       const save = EVENT_SCHEMAS["dnd5.5e:deathSaveRolled"].parse(
         event.payload,
       );
-      return { kind: "deathSave", actor: save.actor, natural: save.natural };
+      const counts = save.counts ?? save.natural;
+      return {
+        kind: "deathSave",
+        actor: save.actor,
+        natural: save.natural,
+        success: deathSaveOutcome(counts, save.total ?? counts).success,
+      };
     }
     case "dnd5.5e:damaged": {
       const hurt = EVENT_SCHEMAS["dnd5.5e:damaged"].parse(event.payload);

@@ -11,6 +11,7 @@ import {
   type Stats,
 } from "../../stats.ts";
 import {
+  exhaustionEvents,
   type Actor,
   applyDndEvent,
   cannotHeal,
@@ -171,7 +172,7 @@ function severedEvents(
       actor: target.id,
       resource: passive.resource,
     }),
-    dndEvent(`${NS}:exhaustionChanged`, { actor: target.id, levels: 1 }),
+    ...exhaustionEvents(target, 1),
     dndEvent(`${NS}:summoned`, {
       actor: {
         ...freshActor({
@@ -468,12 +469,7 @@ function enduredEvents(
             ]
           : []),
         ...(trait.exhaustion
-          ? [
-              dndEvent(`${NS}:exhaustionChanged`, {
-                actor: target.id,
-                levels: trait.exhaustion,
-              }),
-            ]
+          ? [...exhaustionEvents(target, trait.exhaustion)]
           : []),
         ...trait.effects.map((modifier) =>
           dndEvent(`${NS}:effectAdded`, {

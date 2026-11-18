@@ -218,8 +218,11 @@ export function startCombat(
       const edge = {
         advantage:
           ((rallier !== undefined || warned) && actor.side === "party") ||
-          hasPassive(stats, "initiativeAdvantage"),
-        disadvantage: Boolean(surprised) && actor.side === caught,
+          hasPassive(stats, "initiativeAdvantage") ||
+          hasCondition(actor, "invisible"),
+        disadvantage:
+          (Boolean(surprised) && actor.side === caught) ||
+          hasCondition(actor, ...INCAPACITATING),
         rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
       };
       const first = rollD20(context.dice, edge).natural;

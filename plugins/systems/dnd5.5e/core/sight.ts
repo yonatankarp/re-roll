@@ -499,3 +499,38 @@ export function umbralTo(
     Math.max(senses.blindsight, senses.truesight, senses.devilsSight),
   );
 }
+
+// The creatures it's Frightened of that stand on the map. A fear with no such source, as one from a place or out of a
+// fight, has none.
+export function fearSources(actor: Actor, state: DndState): readonly Actor[] {
+  return actor.activeEffects.flatMap(({ modifier, casterId }) => {
+    const source = state.actors[casterId];
+    return modifier.kind === "condition" &&
+      modifier.condition === "frightened" &&
+      state.combat &&
+      source &&
+      source.id !== actor.id &&
+      source.position &&
+      !isDead(source)
+      ? [source]
+      : [];
+  });
+}
+
+// Frightened with its source of fear in line of sight, which gives Disadvantage on its checks and attacks. A fear with
+// no source on the map always counts.
+export function frightenedInSight(actor: Actor, state: DndState): boolean {
+  return actor.activeEffects.some(({ modifier, casterId }) => {
+    if (modifier.kind !== "condition" || modifier.condition !== "frightened") {
+      return false;
+    }
+    const source = state.actors[casterId];
+    if (!state.combat || !source || source.id === actor.id || !actor.position)
+      return true;
+    return (
+      source.position !== null &&
+      !isDead(source) &&
+      !behindTotalCover(state, actor, source)
+    );
+  });
+}

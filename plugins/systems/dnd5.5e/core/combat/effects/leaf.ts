@@ -15,6 +15,7 @@ import {
 } from "../../stats.ts";
 import { regainCap, regainEvents, shortRestFor } from "../../rest.ts";
 import {
+  exhaustionEvents,
   type Actor,
   cannotHeal,
   dndEvent,
@@ -1300,10 +1301,10 @@ export function leafEvents(
               )
         ) {
           events.push(
-            dndEvent(`${NS}:exhaustionChanged`, {
-              actor: target.id,
-              levels: effect.clear ? -target.exhaustion : (effect.levels ?? 0),
-            }),
+            ...exhaustionEvents(
+              target,
+              effect.clear ? -target.exhaustion : (effect.levels ?? 0),
+            ),
           );
         }
         break;

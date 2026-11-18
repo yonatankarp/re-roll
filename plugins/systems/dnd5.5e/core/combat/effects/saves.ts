@@ -12,6 +12,7 @@ import {
   hasCondition,
   INCAPACITATING,
   isDown,
+  unconscious,
   NS,
 } from "../../state.ts";
 import { type SystemEvent } from "#sdk";
@@ -110,7 +111,8 @@ export function rollSave(
 ): { readonly saved: boolean; readonly events: SystemEvent[] } {
   if (
     (ability === "str" || ability === "dex") &&
-    hasCondition(target, "paralyzed", "petrified", "stunned", "unconscious")
+    (hasCondition(target, "paralyzed", "petrified", "stunned") ||
+      unconscious(target))
   ) {
     return { saved: false, events: [] };
   }
@@ -141,7 +143,7 @@ export function rollSave(
         magical,
       ) ||
       (magical && hasPassive(stats, "magicResistance")) ||
-      (ability === "dex" && dodging(target)) ||
+      (ability === "dex" && dodging(target, stats)) ||
       traitSaveAdvantage(
         stats,
         ability,

@@ -224,7 +224,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
         grapplesOn(target).some(({ casterId }) => casterId === attacker.id));
     const down =
       crowded ||
-      dodging(target) ||
+      dodging(target, stats(target)) ||
       grappledAwayFrom(attacker, target) ||
       (hasCondition(target, "prone") && !close) ||
       hasFlag(attacker, "disadvantage", "attacks", own) ||
