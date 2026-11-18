@@ -173,7 +173,7 @@ function plural(count: number, word: string): string {
 }
 
 function fontOptions(actor: Actor, stats: Stats): Decision["options"] {
-  if (!stats.features.some((id) => id.endsWith("-font-of-magic"))) return [];
+  if (!stats.features.some((id) => id.endsWith("font-of-magic"))) return [];
   if (stats.resources[SORCERY_POINTS] === undefined) return [];
   const spentPoints = actor.resourcesSpent[SORCERY_POINTS] ?? 0;
   const slotsLeft = (level: number): number =>

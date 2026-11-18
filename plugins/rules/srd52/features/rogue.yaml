@@ -1,0 +1,200 @@
+- id: srd52:feature/evasion
+  name: Evasion
+  text: You can nimbly dodge out of the way of certain dangers. When you’re subjected to an effect that allows you to make a Dexterity saving throw to take only half damage, you instead take no damage if you succeed on the saving throw and only half damage if you fail. You can’t use this feature if you have the Incapacitated condition.
+  automation: full
+  passives:
+    - kind: evasion
+- id: srd52:feature/reliable-talent
+  name: Reliable Talent
+  text: Whenever you make an ability check that uses one of your skill or tool proficiencies, you can treat a d20 roll of 9 or lower as a 10.
+  automation: full
+  passives:
+    - kind: modifier
+      modifier:
+        kind: checkFloor
+        value: 10
+        proficient: true
+- id: srd52:feature/improved-cunning-strike
+  name: Improved Cunning Strike
+  text: You can use up to two Cunning Strike effects when you deal Sneak Attack damage, paying the die cost for each effect.
+  automation: full
+  passives:
+    - kind: strikeEffects
+      count: 2
+- id: srd52:feature/devious-strikes
+  name: Devious Strikes
+  text: "You’ve practiced new ways to use your Sneak Attack deviously. The following effects are now among your Cunning Strike options. Daze (Cost: 2d6). The target must succeed on a Constitution saving throw, or on its next turn, it can do only one of the following: move or take an action or a Bonus Action. Knock Out (Cost: 6d6). The target must succeed on a Constitution saving throw, or it has the Unconscious condition for 1 minute or until it takes any damage. The Unconscious target repeats the save at the end of each of its turns, ending the effect on itself on a success. Obscure (Cost: 3d6). The target must succeed on a Dexterity saving throw, or it has the Blinded condition until the end of its next turn."
+  automation: full
+  activations:
+    - label: Daze
+      cost: []
+      trigger:
+        afterHit: weapon
+        forgo: 2
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          base: 8
+          add:
+            - kind: proficiency
+            - kind: abilityMod
+              ability: dex
+        onFail:
+          - kind: modifier
+            modifier:
+              kind: actionLimit
+              oneThing: true
+            duration:
+              until: itsNextTurnEnd
+    - label: Knock Out
+      cost: []
+      trigger:
+        afterHit: weapon
+        forgo: 6
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          base: 8
+          add:
+            - kind: proficiency
+            - kind: abilityMod
+              ability: dex
+        onFail:
+          - kind: applyCondition
+            condition: unconscious
+            duration:
+              minutes: 1
+            repeatSave: true
+            endsOnDamage: true
+    - label: Obscure
+      cost: []
+      trigger:
+        afterHit: weapon
+        forgo: 3
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: proficiency
+            - kind: abilityMod
+              ability: dex
+        onFail:
+          - kind: applyCondition
+            condition: blinded
+            duration:
+              until: itsNextTurnEnd
+- id: srd52:feature/slippery-mind
+  name: Slippery Mind
+  text: Your cunning mind is exceptionally difficult to control. You gain proficiency in Wisdom and Charisma saving throws.
+  automation: full
+  passives:
+    - kind: saveProficiency
+      abilities:
+        - wis
+        - cha
+- id: srd52:feature/elusive
+  name: Elusive
+  text: You’re so evasive that attackers rarely gain the upper hand against you. No attack roll can have Advantage against you unless you have the Incapacitated condition.
+  automation: full
+  passives:
+    - kind: modifier
+      modifier:
+        kind: noAdvantageAgainst
+        able: true
+- id: srd52:feature/stroke-of-luck
+  name: Stroke of Luck
+  text: You have a marvelous knack for succeeding when you need to. If you fail a D20 Test, you can turn the roll into a 20. Once you use this feature, you can’t use it again until you finish a Short or Long Rest.
+  automation: full
+  resources:
+    - id: stroke-of-luck
+      max:
+        base: 1
+      recharge:
+        - on: shortRest
+          amount: all
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - resource: stroke-of-luck
+      trigger:
+        rolled:
+          rolls:
+            - attack
+            - save
+            - check
+          by: self
+          when: failed
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: replaceRoll
+            value: 20
+- id: srd52:feature/supreme-sneak
+  name: Supreme Sneak
+  text: "You gain the following Cunning Strike option. Stealth Attack (Cost: 1d6). If you have the Hide action’s Invisible condition, this attack doesn’t end that condition on you if you end the turn behind Three-Quarters Cover or Total Cover."
+  automation: full
+  activations:
+    - label: Stealth Attack
+      cost: []
+      trigger:
+        afterHit: weapon
+        forgo: 1
+      keepsHidden: true
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+      resolution:
+        kind: automatic
+        effects: []
+- id: srd52:feature/use-magic-device
+  name: Use Magic Device
+  text: You’ve learned how to maximize use of magic items, granting you the following benefits. Attunement. You can attune to up to four magic items at once. Charges. Whenever you use a magic item property that expends charges, roll 1d6. On a roll of 6, you use the property without expending the charges. Scrolls. You can use any Spell Scroll, using Intelligence as your spellcasting ability for the spell. If the spell is a cantrip or a level 1 spell, you can cast it reliably. If the scroll contains a higher-level spell, you must first succeed on an Intelligence (Arcana) check (DC 10 plus the spell’s level). On a successful check, you cast the spell from the scroll. On a failed check, the scroll disintegrates.
+  automation: full
+  passives:
+    - kind: attunementSlots
+      count: 4
+    - kind: chargeSaver
+    - kind: anyScroll
+      ability: int
+- id: srd52:feature/thief-s-reflexes
+  name: Thief’s Reflexes
+  text: |-
+    You are adept at laying ambushes and quickly escaping danger. You can take two turns during the first round of any combat. You take your first turn at your normal Initiative and your second turn at your Initiative minus 10.
+
+    Sorcerer Core Sorcerer Traits Primary Ability
+
+    Choose 2: Arcana, Deception, Insight, Intimidation, Persuasion, or Religion
+
+    Weapon Proficiencies Simple weapons Armor Training
+
+    Choose A or B: (A) Spear, 2 Daggers, Arcane Focus (crystal), Dungeoneer’s Pack, and 28 GP; or (B) 50 GP
+
+    Becoming a Sorcerer … As a Level 1 Character • Gain all the traits in the Core Sorcerer Traits table. • Gain the Sorcerer’s level 1 features, which are listed in the Sorcerer Features table.
+
+    • Gain the Hit Point Die from the Core Sorcerer Traits table. • Gain the Sorcerer’s level 1 features, which are listed in the Sorcerer Features table. See the multiclassing rules in “Character Creation” to determine your available spell slots.
+
+    As a Sorcerer, you gain the following class features when you reach the specified Sorcerer levels. These features are listed in the Sorcerer Features table.
+  automation: full
+  passives:
+    - kind: secondTurn
+      minus: 10

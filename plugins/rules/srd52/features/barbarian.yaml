@@ -1,0 +1,506 @@
+- id: srd52:feature/rage
+  name: Rage
+  text: |-
+    You can imbue yourself with a primal power called Rage, a force that grants you extraordinary might and resilience. You can enter it as a Bonus Action if you aren’t wearing Heavy armor. You can enter your Rage the number of times shown for your Barbarian level in the Rages column of the Barbarian Features table. You regain one expended use when you finish a Short Rest, and you regain all expended uses when you finish a Long Rest.
+
+    While active, your Rage follows the rules below. Damage Resistance. You have Resistance to Bludgeoning, Piercing, and Slashing damage. Rage Damage. When you make an attack using Strength—with either a weapon or an Unarmed Strike—and deal damage to the target, you gain a bonus to the damage that increases as you gain levels as a Barbarian, as shown in the Rage Damage column of the Barbarian Features table. Strength Advantage. You have Advantage on Strength checks and Strength saving throws. No Concentration or Spells. You can’t maintain Concentration, and you can’t cast spells. Duration. The Rage lasts until the end of your next turn, and it ends early if you don Heavy armor or have the Incapacitated condition. If your Rage is still active on your next turn, you can extend the Rage for another round by doing one of the following: • Make an attack roll against an enemy. • Force an enemy to make a saving throw. • Take a Bonus Action to extend your Rage.
+
+    Each time the Rage is extended, it lasts until the end of your next turn. You can maintain a Rage for up to 10 minutes.
+  automation: full
+  resources:
+    - id: rage
+      max:
+        base: 0
+        add:
+          - kind: scaling
+            key: rages
+      recharge:
+        - on: shortRest
+          amount: 1
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - bonusAction
+        - resource: rage
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            modifier:
+              kind: resistance
+              damage: bludgeoning
+            duration:
+              minutes: 10
+          - kind: modifier
+            modifier:
+              kind: resistance
+              damage: piercing
+            duration:
+              minutes: 10
+          - kind: modifier
+            modifier:
+              kind: resistance
+              damage: slashing
+            duration:
+              minutes: 10
+          - kind: modifier
+            modifier:
+              kind: damageBonus
+              ability: str
+              amount:
+                bonus:
+                  add:
+                    - kind: scaling
+                      key: rageDamage
+            duration:
+              minutes: 10
+          - kind: modifier
+            modifier:
+              kind: advantage
+              on: checks
+              ability: str
+            duration:
+              minutes: 10
+          - kind: modifier
+            modifier:
+              kind: advantage
+              on: saves
+              ability: str
+            duration:
+              minutes: 10
+          - kind: modifier
+            modifier:
+              kind: actionLimit
+              noSpells: true
+            duration:
+              minutes: 10
+          - kind: endConcentration
+- id: srd52:feature/unarmored-defense
+  name: Unarmored Defense
+  text: While you aren’t wearing any armor, your base Armor Class equals 10 plus your Dexterity and Constitution modifiers. You can use a Shield and still gain this benefit.
+  automation: full
+  passives:
+    - kind: modifier
+      modifier:
+        kind: acFormula
+        unarmored: true
+        formula:
+          base: 10
+          add:
+            - kind: abilityMod
+              ability: dex
+            - kind: abilityMod
+              ability: con
+- id: srd52:feature/danger-sense
+  name: Danger Sense
+  text: You gain an uncanny sense of when things aren’t as they should be, giving you an edge when you dodge perils. You have Advantage on Dexterity saving throws unless you have the Incapacitated condition.
+  automation: full
+  passives:
+    - kind: saveAdvantage
+      abilities:
+        - dex
+      notWhile: incapacitated
+- id: srd52:feature/reckless-attack
+  name: Reckless Attack
+  text: |-
+    You can throw aside all concern for defense to attack with increased ferocity. When you make your first attack roll on your turn, you can decide to attack recklessly. Doing so gives you Advantage on attack rolls using Strength until the start of your next
+
+    turn, but attack rolls against you have Advantage during that time.
+  automation: full
+  activations:
+    - cost: []
+      oncePerTurn: true
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            modifier:
+              kind: advantage
+              on: attacks
+              ability: str
+            duration:
+              until: yourNextTurnStart
+          - kind: modifier
+            modifier:
+              kind: advantage
+              on: attacksAgainst
+            duration:
+              until: yourNextTurnStart
+      beforeAction: true
+- id: srd52:feature/barbarian-subclass
+  name: Barbarian Subclass
+  text: You gain a Barbarian subclass of your choice. The Path of the Berserker subclass is detailed after this class’s description. A subclass is a specialization that grants you features at certain Barbarian levels. For the rest of your career, you gain each of your subclass’s features that are of your Barbarian level or lower.
+  automation: full
+- id: srd52:feature/primal-knowledge
+  name: Primal Knowledge
+  text: "You gain proficiency in another skill of your choice from the skill list available to Barbarians at level 1. In addition, while your Rage is active, you can channel primal power when you attempt certain tasks; whenever you make an ability check using one of the following skills, you can make it as a Strength check even if it normally uses a different ability: Acrobatics, Intimidation, Perception, Stealth, or Survival. When you use this ability, your Strength represents primal power coursing through you, honing your agility, bearing, and senses."
+  automation: full
+  passives:
+    - kind: checkAbility
+      ability: str
+      skills:
+        - acrobatics
+        - intimidation
+        - perception
+        - stealth
+        - survival
+      while:
+        - srd52:feature/rage
+- id: srd52:feature/fast-movement
+  name: Fast Movement
+  text: Your speed increases by 10 feet while you aren’t wearing Heavy armor.
+  automation: full
+  passives:
+    - kind: modifier
+      modifier:
+        kind: bonus
+        to: speed
+        amount:
+          bonus:
+            base: 10
+      armor: noHeavy
+- id: srd52:feature/feral-instinct
+  name: Feral Instinct
+  text: Your instincts are so honed that you have Advantage on Initiative rolls.
+  automation: full
+  passives:
+    - kind: initiativeAdvantage
+- id: srd52:feature/instinctive-pounce
+  name: Instinctive Pounce
+  text: As part of the Bonus Action you take to enter your Rage, you can move up to half your Speed.
+  automation: full
+  passives:
+    - kind: activationRider
+      feature: srd52:feature/rage
+      effects:
+        - kind: dash
+          half: true
+- id: srd52:feature/brutal-strike
+  name: Brutal Strike
+  text: |-
+    If you use Reckless Attack, you can forgo any Advantage on one Strength-based attack roll of your choice on your turn. The chosen attack roll mustn’t have Disadvantage. If the chosen attack roll hits, the target takes an extra 1d10 damage of the same type dealt by the weapon or Unarmed Strike, and you can cause one Brutal Strike effect of your choice. You have the following effect options. Forceful Blow. The target is pushed 15 feet straight away from you. You can then move up to half your Speed straight toward the target without provoking Opportunity Attacks.
+
+    Hamstring Blow. The target’s Speed is reduced by 15 feet until the start of your next turn. A target can be affected by only one Hamstring Blow at a time— the most recent one.
+  automation: full
+  hitType: true
+  classTiers:
+    class: srd52:class/barbarian
+    at:
+      - 17
+    step:
+      addDice: 1d10
+  activations:
+    - label: Forceful Blow
+      cost: []
+      oncePerTurn: brutal-strike
+      while:
+        - srd52:feature/reckless-attack
+      trigger:
+        afterHit: strength
+        forgoAdvantage: true
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+      resolution:
+        kind: automatic
+        effects:
+          - kind: forcedMove
+            feet: 15
+            direction: away
+        damage:
+          - amount:
+              dice: 1d10
+            type: bludgeoning
+      selfEffects:
+        - kind: dash
+          half: true
+          safe: true
+    - label: Hamstring Blow
+      cost: []
+      oncePerTurn: brutal-strike
+      while:
+        - srd52:feature/reckless-attack
+      trigger:
+        afterHit: strength
+        forgoAdvantage: true
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            modifier:
+              kind: bonus
+              to: speed
+              amount:
+                bonus:
+                  base: 15
+              subtract: true
+            duration:
+              until: yourNextTurnStart
+        damage:
+          - amount:
+              dice: 1d10
+            type: bludgeoning
+- id: srd52:feature/relentless-rage
+  name: Relentless Rage
+  text: Your Rage can keep you fighting despite grievous wounds. If you drop to 0 Hit Points while your Rage is active and don’t die outright, you can make a DC 10 Constitution saving throw. If you succeed, your Hit Points instead change to a number equal to twice your Barbarian level. Each time you use this feature after the first, the DC increases by 5. When you finish a Short or Long Rest, the DC resets to 10.
+  automation: full
+  resources:
+    - id: relentless-rage
+      max:
+        base: 10
+      recharge:
+        - on: shortRest
+          amount: all
+        - on: longRest
+          amount: all
+  passives:
+    - kind: dropToOne
+      resource: relentless-rage
+      while:
+        - srd52:feature/rage
+      save:
+        ability: con
+        dc: 10
+        step: 5
+      hp:
+        add:
+          - kind: classLevel
+            class: srd52:class/barbarian
+            times: 2
+- id: srd52:feature/improved-brutal-strike
+  name: Improved Brutal Strike
+  text: You have honed new ways to attack furiously. The following effects are now among your Brutal Strike options. Staggering Blow. The target has Disadvantage on the next saving throw it makes, and it can’t make Opportunity Attacks until the start of your next turn. Sundering Blow. Before the start of your next turn, the next attack roll made by another creature against the target gains a +5 bonus to the roll. An attack roll can gain only one Sundering Blow bonus.
+  automation: full
+  hitType: true
+  classTiers:
+    class: srd52:class/barbarian
+    at:
+      - 17
+    step:
+      addDice: 1d10
+  activations:
+    - label: Staggering Blow
+      cost: []
+      oncePerTurn: brutal-strike
+      while:
+        - srd52:feature/reckless-attack
+      trigger:
+        afterHit: strength
+        forgoAdvantage: true
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            modifier:
+              kind: disadvantage
+              on: saves
+              once: true
+            duration:
+              until: yourNextTurnStart
+          - kind: modifier
+            modifier:
+              kind: actionLimit
+              noOpportunityAttacks: true
+            duration:
+              until: yourNextTurnStart
+        damage:
+          - amount:
+              dice: 1d10
+            type: bludgeoning
+    - label: Sundering Blow
+      cost: []
+      oncePerTurn: brutal-strike
+      while:
+        - srd52:feature/reckless-attack
+      trigger:
+        afterHit: strength
+        forgoAdvantage: true
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            modifier:
+              kind: bonus
+              to: attacksAgainst
+              amount:
+                bonus:
+                  base: 5
+              once: true
+            duration:
+              until: yourNextTurnStart
+        damage:
+          - amount:
+              dice: 1d10
+            type: bludgeoning
+- id: srd52:feature/persistent-rage
+  name: Persistent Rage
+  text: When you roll Initiative, you can regain all expended uses of Rage. After you regain uses of Rage in this way, you can’t do so again until you finish a Long Rest. In addition, your Rage is so fierce that it now lasts for 10 minutes without you needing to do anything to extend it from round to round. Your Rage ends early if you have the Unconscious condition (not just the Incapacitated condition) or don Heavy armor.
+  automation: full
+  resources:
+    - id: persistent-rage
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+    - id: rage
+      max:
+        base: 0
+        add:
+          - kind: scaling
+            key: rages
+      recharge:
+        - on: initiative
+          amount: all
+          uses: persistent-rage
+- id: srd52:feature/improved-brutal-strike-17
+  name: Improved Brutal Strike
+  text: You have honed new ways to attack furiously. The following effects are now among your Brutal Strike options. Staggering Blow. The target has Disadvantage on the next saving throw it makes, and it can’t make Opportunity Attacks until the start of your next turn. Sundering Blow. Before the start of your next turn, the next attack roll made by another creature against the target gains a +5 bonus to the roll. An attack roll can gain only one Sundering Blow bonus.
+  automation: full
+  passives:
+    - kind: strikeEffects
+      count: 2
+- id: srd52:feature/indomitable-might
+  name: Indomitable Might
+  text: If your total for a Strength check or Strength saving throw is less than your Strength score, you can use that score in place of the total.
+  automation: full
+  passives:
+    - kind: scoreFloor
+      ability: str
+- id: srd52:feature/primal-champion
+  name: Primal Champion
+  text: |-
+    You embody primal power. Your Strength and Constitution scores increase by 4, to a maximum of 25.
+
+    Barbarian Subclass: Path of the Berserker Channel Rage into Violent Fury
+
+    Barbarians who walk the Path of the Berserker direct their Rage primarily toward violence. Their path is one of untrammeled fury, and they thrill in the chaos of battle as they allow their Rage to seize and empower them.
+  automation: full
+  passives:
+    - kind: scoreIncrease
+      abilities:
+        - str
+        - con
+      amount: 4
+      max: 25
+- id: srd52:feature/frenzy
+  name: Frenzy
+  text: If you use Reckless Attack while your Rage is active, you deal extra damage to the first target you hit on your turn with a Strength-based attack. To determine the extra damage, roll a number of d6s equal to your Rage Damage bonus, and add them together. The damage has the same type as the weapon or Unarmed Strike used for the attack.
+  automation: full
+  passives:
+    - kind: extraDamage
+      dice: 1d6
+      diceCount: rageDamage
+      when: always
+      with: strength
+      oncePerTurn: true
+      ownTurn: true
+      while:
+        - srd52:feature/rage
+        - srd52:feature/reckless-attack
+- id: srd52:feature/mindless-rage
+  name: Mindless Rage
+  text: You have Immunity to the Charmed and Frightened conditions while your Rage is active. If you’re Charmed or Frightened when you enter your Rage, the condition ends on you.
+  automation: full
+  passives:
+    - kind: activationRider
+      feature: srd52:feature/rage
+      effects:
+        - kind: modifier
+          modifier:
+            kind: conditionImmunity
+            condition: charmed
+          duration:
+            minutes: 10
+        - kind: modifier
+          modifier:
+            kind: conditionImmunity
+            condition: frightened
+          duration:
+            minutes: 10
+        - kind: removeCondition
+          condition: charmed
+        - kind: removeCondition
+          condition: frightened
+- id: srd52:feature/retaliation
+  name: Retaliation
+  text: When you take damage from a creature that is within 5 feet of you, you can take a Reaction to make one melee attack against that creature, using a weapon or an Unarmed Strike.
+  automation: full
+  activations:
+    - cost:
+        - reaction
+      trigger:
+        damaged: true
+        within: 5
+      targeting:
+        creatures: 1
+        range: 5
+        side: enemy
+      resolution:
+        kind: automatic
+        effects:
+          - kind: strike
+- id: srd52:feature/intimidating-presence
+  name: Intimidating Presence
+  text: As a Bonus Action, you can strike terror into others with your menacing presence and primal power. When you do so, each creature of your choice in a 30-foot Emanation originating from you must make a Wisdom saving throw (DC 8 plus your Strength modifier and Proficiency Bonus). On a failed save, a creature has the Frightened condition for 1 minute. At the end of each of the Frightened creature’s turns, the creature repeats the save, ending the effect on itself on a success. Once you use this feature, you can’t use it again until you finish a Long Rest unless you expend a use of your Rage (no action required) to restore your use of it.
+  automation: full
+  resources:
+    - id: intimidating-presence
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - bonusAction
+        - resource: intimidating-presence
+      targeting:
+        area:
+          shape: emanation
+          radius: 30
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: wis
+        dc:
+          base: 8
+          add:
+            - kind: proficiency
+            - kind: abilityMod
+              ability: str
+        onFail:
+          - kind: applyCondition
+            condition: frightened
+            duration:
+              minutes: 1
+            repeatSave: true
+    - cost:
+        - resource: rage
+      label: a use back
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: regain
+            resource: intimidating-presence

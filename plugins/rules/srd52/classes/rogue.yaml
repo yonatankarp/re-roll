@@ -1,0 +1,226 @@
+- id: srd52:class/rogue
+  name: Rogue
+  hitDie: d8
+  primaryAbilities:
+    - dex
+  savingThrows:
+    - dex
+    - int
+  weapons:
+    - simple
+    - martial
+  martialWeaponProperties:
+    - finesse
+    - light
+  armor:
+    - light
+  tools:
+    - srd52:item/thieves-tools
+  swaps:
+    weaponMastery: prepare
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/expertise
+        - srd52:feature/sneak-attack
+        - srd52:feature/thieves-cant
+        - srd52:feature/weapon-mastery
+      choices:
+        - kind: skills
+          id: skills
+          count: 4
+          from:
+            - acrobatics
+            - athletics
+            - deception
+            - insight
+            - intimidation
+            - investigation
+            - perception
+            - persuasion
+            - sleightOfHand
+            - stealth
+        - kind: skills
+          id: expertise
+          count: 2
+          from:
+            - acrobatics
+            - animalHandling
+            - arcana
+            - athletics
+            - deception
+            - history
+            - insight
+            - intimidation
+            - investigation
+            - medicine
+            - nature
+            - perception
+            - performance
+            - persuasion
+            - religion
+            - sleightOfHand
+            - stealth
+            - survival
+          expertise: proficient
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 1
+    - level: 2
+      grants:
+        - srd52:feature/cunning-action
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 1
+    - level: 3
+      grants:
+        - srd52:feature/rogue-subclass
+        - srd52:feature/steady-aim
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 2
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 2
+    - level: 5
+      grants:
+        - srd52:feature/cunning-strike
+        - srd52:feature/uncanny-dodge
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 3
+    - level: 6
+      grants:
+        - srd52:feature/expertise
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 3
+      choices:
+        - kind: skills
+          id: expertise
+          count: 2
+          from:
+            - acrobatics
+            - animalHandling
+            - arcana
+            - athletics
+            - deception
+            - history
+            - insight
+            - intimidation
+            - investigation
+            - medicine
+            - nature
+            - perception
+            - performance
+            - persuasion
+            - religion
+            - sleightOfHand
+            - stealth
+            - survival
+          expertise: proficient
+    - level: 7
+      grants:
+        - srd52:feature/evasion
+        - srd52:feature/reliable-talent
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 4
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 4
+    - level: 9
+      grants: []
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 5
+    - level: 10
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 5
+    - level: 11
+      grants:
+        - srd52:feature/improved-cunning-strike
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 6
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 6
+    - level: 13
+      grants: []
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 7
+    - level: 14
+      grants:
+        - srd52:feature/devious-strikes
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 7
+    - level: 15
+      grants:
+        - srd52:feature/slippery-mind
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 8
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 8
+    - level: 17
+      grants: []
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 9
+    - level: 18
+      grants:
+        - srd52:feature/elusive
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 9
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 10
+    - level: 20
+      grants:
+        - srd52:feature/stroke-of-luck
+      slots: []
+      scaling:
+        weaponMastery: 2
+        sneakAttackD6: 10

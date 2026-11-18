@@ -1,0 +1,17 @@
+- id: srd52:subclass/thief
+  name: Thief
+  class: srd52:class/rogue
+  levels:
+    - level: 3
+      grants:
+        - srd52:feature/fast-hands
+        - srd52:feature/second-story-work
+    - level: 9
+      grants:
+        - srd52:feature/supreme-sneak
+    - level: 13
+      grants:
+        - srd52:feature/use-magic-device
+    - level: 17
+      grants:
+        - srd52:feature/thief-s-reflexes

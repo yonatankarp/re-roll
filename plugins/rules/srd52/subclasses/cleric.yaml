@@ -1,0 +1,15 @@
+- id: srd52:subclass/life-domain
+  name: Life Domain
+  class: srd52:class/cleric
+  levels:
+    - level: 3
+      grants:
+        - srd52:feature/disciple-of-life
+        - srd52:feature/life-domain-spells
+        - srd52:feature/preserve-life
+    - level: 6
+      grants:
+        - srd52:feature/blessed-healer
+    - level: 17
+      grants:
+        - srd52:feature/supreme-healing

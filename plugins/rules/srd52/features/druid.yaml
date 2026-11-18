@@ -1,0 +1,620 @@
+- id: srd52:feature/druidic
+  name: Druidic
+  text: |-
+    You know Druidic, the secret language of Druids. While learning this ancient tongue, you also unlocked the magic of communicating with animals; you always have the Speak with Animals spell prepared. You can use Druidic to leave hidden messages. You and others who know Druidic automatically spot such a message. Others spot the message’s presence
+
+    with a successful DC 15 Intelligence (Investigation) check but can’t decipher it without magic.
+  automation: full
+  spells:
+    "1":
+      - srd52:spell/speak-with-animals
+  passives:
+    - kind: languages
+      languages:
+        - druidic
+- id: srd52:feature/primal-order
+  name: Primal Order
+  text: You have dedicated yourself to one of the following sacred roles of your choice. Magician. You know one extra cantrip from the Druid spell list. In addition, your mystical connection to nature gives you a bonus to your Intelligence (Arcana or Nature) checks. The bonus equals your Wisdom modifier (minimum bonus of +1). Warden. Trained for battle, you gain proficiency with Martial weapons and training with Medium armor.
+  automation: full
+  variants:
+    - id: magician
+      name: Magician
+      passives:
+        - kind: modifier
+          modifier:
+            kind: bonus
+            to: checks
+            skill: arcana
+            amount:
+              bonus:
+                add:
+                  - kind: abilityMod
+                    ability: wis
+                min: 1
+        - kind: modifier
+          modifier:
+            kind: bonus
+            to: checks
+            skill: nature
+            amount:
+              bonus:
+                add:
+                  - kind: abilityMod
+                    ability: wis
+                min: 1
+      choices:
+        - kind: spells
+          id: cantrip
+          count: 1
+          maxLevel: 0
+          list: srd52:class/druid
+    - id: warden
+      name: Warden
+      passives:
+        - kind: martialTraining
+        - kind: armorTraining
+          armor:
+            - medium
+- id: srd52:feature/wild-shape
+  name: Wild Shape
+  text: |-
+    The power of nature allows you to assume the form of an animal. As a Bonus Action, you shape-shift into a Beast form that you have learned for this feature (see “Known Forms” below). You stay in that form for a number of hours equal to half your Druid level or until you use Wild Shape again, have the Incapacitated condition, or die. You can also leave the form early as a Bonus Action. Number of Uses. You can use Wild Shape twice. You regain one expended use when you finish a Short Rest, and you regain all expended uses when you finish a Long Rest. You gain additional uses when you reach certain Druid levels, as shown in the Wild Shape column of the Druid Features table. Known Forms. You know four Beast forms for this feature, chosen from among Beast stat blocks that have a maximum Challenge Rating of 1/4 and that lack a Fly Speed (see “Animals” in “Monsters” for stat block options). The Rat, Riding Horse, Spider, and Wolf are recommended. Whenever you finish a Long Rest, you can replace one of your known forms with another eligible form. When you reach certain Druid levels, your number of known forms and the maximum Challenge Rating for those forms increases, as shown in the Beast Shapes table. In addition, starting at level 8, you can adopt a form that has a Fly Speed. When choosing known forms, you may look in other sources for eligible Beasts if the Game Master permits you to do so.
+
+    Rules While Shape-Shifted. While in a form, you retain your personality, memories, and ability to speak, and the following rules apply:
+
+    Temporary Hit Points. When you assume a Wild Shape form, you gain a number of Temporary Hit Points equal to your Druid level. Game Statistics. Your game statistics are replaced by the Beast’s stat block, but you retain your creature type; Hit Points; Hit Point Dice; Intelligence, Wisdom, and Charisma scores; class features; languages; and feats. You also retain your skill and saving throw proficiencies and use your Proficiency Bonus for them, in addition to gaining the proficiencies of the creature. If a skill or saving throw modifier in the Beast’s stat block is higher than yours, use the one in the stat block. No Spellcasting. You can’t cast spells, but shapeshifting doesn’t break your Concentration or otherwise interfere with a spell you’ve already cast. Objects. Your ability to handle objects is determined by the form’s limbs rather than your own. In addition, you choose whether your equipment falls in your space, merges into your new form, or is worn by it. Worn equipment functions as normal, but the GM decides whether it’s practical for the new form to wear a piece of equipment based on the creature’s size and shape. Your equipment doesn’t change size or shape to match the new form, and any equipment that the new form can’t wear must either fall to the ground or merge with the form. Equipment that merges with the form has no effect while you’re in that form.
+  automation: full
+  resources:
+    - id: wild-shape
+      max:
+        base: 0
+        add:
+          - kind: scaling
+            key: wildShape
+      recharge:
+        - on: shortRest
+          amount: 1
+        - on: longRest
+          amount: all
+  activations:
+    - label: Wild Shape
+      cost:
+        - bonusAction
+        - resource: wild-shape
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: polymorph
+            duration:
+              minutes: 60
+            forms:
+              types:
+                - beast
+              byLevel:
+                class: srd52:class/druid
+                tiers:
+                  - level: 2
+                    maxCr: 0.25
+                  - level: 4
+                    maxCr: 0.5
+                  - level: 8
+                    maxCr: 1
+                    fly: true
+            keep:
+              - mind
+              - features
+            tempHpAmount:
+              bonus:
+                add:
+                  - kind: classLevel
+                    class: srd52:class/druid
+            lasting: true
+            untilIncapacitated: true
+    - label: Leave Wild Shape
+      cost:
+        - bonusAction
+      while:
+        - srd52:feature/wild-shape
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: endOwn
+            features:
+              - srd52:feature/wild-shape
+- id: srd52:feature/wild-companion
+  name: Wild Companion
+  text: You can summon a nature spirit that assumes an animal form to aid you. As a Magic action, you can expend a spell slot or a use of Wild Shape to cast the Find Familiar spell without Material components. When you cast the spell in this way, the familiar is Fey and disappears when you finish a Long Rest.
+  automation: full
+  spells:
+    "1":
+      - srd52:spell/find-familiar
+- id: srd52:feature/druid-subclass
+  name: Druid Subclass
+  text: You gain a Druid subclass of your choice. The Circle of the Land subclass is detailed after this class’s description. A subclass is a specialization that grants you features at certain Druid levels. For the rest of your career, you gain each of your subclass’s features that are of your Druid level or lower.
+  automation: full
+- id: srd52:feature/wild-resurgence
+  name: Wild Resurgence
+  text: Once on each of your turns, if you have no uses of Wild Shape left, you can give yourself one use by expending a spell slot (no action required). In addition, you can expend one use of Wild Shape (no action required) to give yourself a level 1 spell slot, but you can’t do so again until you finish a Long Rest.
+  automation: full
+  resources:
+    - id: wild-resurgence-turn
+      max:
+        base: 1
+      recharge:
+        - on: turnStart
+          amount: all
+    - id: wild-resurgence
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - slot
+        - resource: wild-resurgence-turn
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: regain
+            resource: wild-shape
+    - cost:
+        - resource: wild-shape
+        - resource: wild-resurgence
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: regain
+            resource: slot:1
+- id: srd52:feature/elemental-fury
+  name: Elemental Fury
+  text: The might of the elements flows through you. You gain one of the following options of your choice. Potent Spellcasting. Add your Wisdom modifier to the damage you deal with any Druid cantrip. Primal Strike. Once on each of your turns when you hit a creature with an attack roll using a weapon or a Beast form’s attack in Wild Shape, you can cause the target to take an extra 1d8 Cold, Fire, Lightning, or Thunder damage (choose when you hit).
+  automation: full
+  variants:
+    - id: potent-spellcasting
+      name: Potent Spellcasting
+      passives:
+        - kind: cantripRider
+          list: srd52:class/druid
+          damage:
+            add:
+              - kind: abilityMod
+                ability: wis
+    - id: primal-strike
+      name: Primal Strike
+      passives:
+        - kind: extraDamage
+          dice: 1d8
+          types:
+            - cold
+            - fire
+            - lightning
+            - thunder
+          when: always
+          with: weapon
+          oncePerTurn: true
+          ownTurn: true
+- id: srd52:feature/improved-elemental-fury
+  name: Improved Elemental Fury
+  text: The option you chose for Elemental Fury grows more powerful, as detailed below. Potent Spellcasting. When you cast a Druid cantrip with a range of 10 feet or greater, the spell’s range increases by 300 feet. Primal Strike. The extra damage of your Primal Strike increases to 2d8.
+  automation: full
+  follows: srd52:feature/elemental-fury
+  variants:
+    - id: potent-spellcasting
+      name: Potent Spellcasting
+      passives:
+        - kind: cantripRider
+          list: srd52:class/druid
+          range: 300
+    - id: primal-strike
+      name: Primal Strike
+      passives:
+        - kind: extraDamage
+          dice: 1d8
+          types:
+            - cold
+            - fire
+            - lightning
+            - thunder
+          when: always
+          with: weapon
+          oncePerTurn: true
+          ownTurn: true
+- id: srd52:feature/beast-spells
+  name: Beast Spells
+  text: While using Wild Shape, you can cast spells in Beast form, except for any spell that has a Material component with a cost specified or that consumes its Material component.
+  automation: full
+  passives:
+    - kind: formSpells
+- id: srd52:feature/archdruid
+  name: Archdruid
+  text: The vitality of nature constantly blooms within you, granting you the following benefits. Evergreen Wild Shape. Whenever you roll Initiative and have no uses of Wild Shape left, you regain one expended use of it. Nature Magician. You can convert uses of Wild Shape into a spell slot (no action required). Choose a number of your unexpended uses of Wild Shape and convert them into a single spell slot, with each use contributing 2 spell levels. For example, if you convert two uses of Wild Shape, you produce a level 4 spell slot. Once you use this benefit, you can’t do so again until you finish a Long Rest. Longevity. The primal magic that you wield causes you to age more slowly. For every ten years that pass, your body ages only one year.
+  automation: full
+  resources:
+    - id: wild-shape
+      max:
+        base: 0
+        add:
+          - kind: scaling
+            key: wildShape
+      recharge:
+        - on: initiative
+          amount: 1
+          upTo: 1
+    - id: nature-magician
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - label: Nature Magician (1)
+      cost:
+        - resource: wild-shape
+        - resource: nature-magician
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: regain
+            resource: slot:2
+    - label: Nature Magician (2)
+      cost:
+        - resource: wild-shape
+          count: 2
+        - resource: nature-magician
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: regain
+            resource: slot:4
+    - label: Nature Magician (3)
+      cost:
+        - resource: wild-shape
+          count: 3
+        - resource: nature-magician
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: regain
+            resource: slot:6
+    - label: Nature Magician (4)
+      cost:
+        - resource: wild-shape
+          count: 4
+        - resource: nature-magician
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: regain
+            resource: slot:8
+- id: srd52:feature/circle-of-the-land-spells
+  name: Circle of the Land Spells
+  text: |-
+    Whenever you finish a Long Rest, choose one type of land: arid, polar, temperate, or tropical. Consult the table below that corresponds to the chosen type; you have the spells listed for your Druid level and lower prepared.
+
+    Blur, Burning Hands, Fire Bolt
+
+    Fog Cloud, Hold Person, Ray of Frost
+
+    Misty Step, Shocking Grasp, Sleep
+
+    Acid Splash, Ray of Sickness, Web
+  automation: full
+  variants:
+    - id: arid
+      name: Arid
+      spells:
+        "3":
+          - srd52:spell/blur
+          - srd52:spell/burning-hands
+          - srd52:spell/fire-bolt
+        "5":
+          - srd52:spell/fireball
+        "7":
+          - srd52:spell/blight
+        "9":
+          - srd52:spell/wall-of-stone
+    - id: polar
+      name: Polar
+      spells:
+        "3":
+          - srd52:spell/fog-cloud
+          - srd52:spell/hold-person
+          - srd52:spell/ray-of-frost
+        "5":
+          - srd52:spell/sleet-storm
+        "7":
+          - srd52:spell/ice-storm
+        "9":
+          - srd52:spell/cone-of-cold
+    - id: temperate
+      name: Temperate
+      spells:
+        "3":
+          - srd52:spell/misty-step
+          - srd52:spell/shocking-grasp
+          - srd52:spell/sleep
+        "5":
+          - srd52:spell/lightning-bolt
+        "7":
+          - srd52:spell/freedom-of-movement
+        "9":
+          - srd52:spell/tree-stride
+    - id: tropical
+      name: Tropical
+      spells:
+        "3":
+          - srd52:spell/acid-splash
+          - srd52:spell/ray-of-sickness
+          - srd52:spell/web
+        "5":
+          - srd52:spell/stinking-cloud
+        "7":
+          - srd52:spell/polymorph
+        "9":
+          - srd52:spell/insect-plague
+  variantSwap: longRest
+- id: srd52:feature/land-s-aid
+  name: Land’s Aid
+  text: As a Magic action, you can expend a use of your Wild Shape and choose a point within 60 feet of yourself. Vitality-giving flowers and life-draining thorns appear for a moment in a 10-foot-radius Sphere centered on that point. Each creature of your choice in the Sphere must make a Constitution saving throw against your spell save DC, taking 2d6 Necrotic damage on a failed save or half as much damage on a successful one. One creature of your choice in that area regains 2d6 Hit Points. The damage and healing increase by 1d6 when you reach Druid levels 10 (3d6) and 14 (4d6).
+  automation: full
+  classTiers:
+    class: srd52:class/druid
+    at:
+      - 10
+      - 14
+    step:
+      addDice: 1d6
+  activations:
+    - cost:
+        - action
+        - resource: wild-shape
+      targeting:
+        area:
+          shape: sphere
+          radius: 10
+        range: 60
+        side: enemy
+      resolution:
+        kind: save
+        ability: con
+        dc:
+          add:
+            - kind: spellSaveDc
+        damage:
+          - amount:
+              dice: 2d6
+            type: necrotic
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
+        chosen:
+          - kind: heal
+            amount:
+              dice: 2d6
+- id: srd52:feature/natural-recovery
+  name: Natural Recovery
+  text: You can cast one of the level 1+ spells that you have prepared from your Circle Spells feature without expending a spell slot, and you must finish a Long Rest before you do so again. In addition, when you finish a Short Rest, you can choose expended spell slots to recover. The spell slots can have a combined level that is equal to or less than half your Druid level (round up), and none of them can be level 6+. For example, if you’re a level 6 Druid, you can recover up to three levels’ worth of spell slots. You can recover a level 3 spell slot, a level 2 and a level 1 spell slot, or three level 1 spell slots. Once you recover spell slots with this feature, you can’t do so again until you finish a Long Rest.
+  automation: full
+  resources:
+    - id: natural-recovery-spell
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+    - id: natural-recovery
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+  passives:
+    - kind: slotRecovery
+      levels:
+        add:
+          - kind: classLevel
+            class: srd52:class/druid
+            half: true
+            roundUp: true
+      resource: natural-recovery
+  freeCastsFrom:
+    feature: srd52:feature/circle-of-the-land-spells
+    resource: natural-recovery-spell
+- id: srd52:feature/nature-s-ward
+  name: Nature’s Ward
+  text: You are immune to the Poisoned condition, and you have Resistance to a damage type associated with your current land choice in the Circle Spells feature, as shown in the Nature’s Ward table.
+  automation: full
+  variantSwap: shortRest
+  passives:
+    - kind: modifier
+      modifier:
+        kind: conditionImmunity
+        condition: poisoned
+  variants:
+    - id: arid
+      name: Arid
+      passives:
+        - kind: modifier
+          modifier:
+            kind: resistance
+            damage: fire
+    - id: polar
+      name: Polar
+      passives:
+        - kind: modifier
+          modifier:
+            kind: resistance
+            damage: cold
+    - id: temperate
+      name: Temperate
+      passives:
+        - kind: modifier
+          modifier:
+            kind: resistance
+            damage: lightning
+    - id: tropical
+      name: Tropical
+      passives:
+        - kind: modifier
+          modifier:
+            kind: resistance
+            damage: poison
+- id: srd52:feature/nature-s-sanctuary
+  name: Nature’s Sanctuary
+  text: As a Magic action, you can expend a use of your Wild Shape and cause spectral trees and vines to appear in a 15-foot Cube on the ground within 120 feet of yourself. They last there for 1 minute or until you have the Incapacitated condition or die. You and your allies have Half Cover while in that area, and your allies gain the current Resistance of your Nature’s Ward while there. As a Bonus Action, you can move the Cube up to 60 feet to ground within 120 feet of yourself.
+  automation: full
+  follows: srd52:feature/nature-s-ward
+  variants:
+    - id: arid
+      name: Arid
+      activations:
+        - label: Nature's Sanctuary
+          cost:
+            - action
+            - resource: wild-shape
+          targeting:
+            area:
+              shape: cube
+              radius: 15
+            range: 120
+            side: ally
+          resolution:
+            kind: automatic
+            effects:
+              - kind: zone
+                zone: area
+                radius: 5
+                duration:
+                  minutes: 1
+          area:
+            side: ally
+            awake: true
+            moves: 60
+            moveWith: bonusAction
+            places:
+              - kind: bonus
+                to: ac
+                amount:
+                  bonus:
+                    base: 2
+              - kind: resistance
+                damage: fire
+    - id: polar
+      name: Polar
+      activations:
+        - label: Nature's Sanctuary
+          cost:
+            - action
+            - resource: wild-shape
+          targeting:
+            area:
+              shape: cube
+              radius: 15
+            range: 120
+            side: ally
+          resolution:
+            kind: automatic
+            effects:
+              - kind: zone
+                zone: area
+                radius: 5
+                duration:
+                  minutes: 1
+          area:
+            side: ally
+            awake: true
+            moves: 60
+            moveWith: bonusAction
+            places:
+              - kind: bonus
+                to: ac
+                amount:
+                  bonus:
+                    base: 2
+              - kind: resistance
+                damage: cold
+    - id: temperate
+      name: Temperate
+      activations:
+        - label: Nature's Sanctuary
+          cost:
+            - action
+            - resource: wild-shape
+          targeting:
+            area:
+              shape: cube
+              radius: 15
+            range: 120
+            side: ally
+          resolution:
+            kind: automatic
+            effects:
+              - kind: zone
+                zone: area
+                radius: 5
+                duration:
+                  minutes: 1
+          area:
+            side: ally
+            awake: true
+            moves: 60
+            moveWith: bonusAction
+            places:
+              - kind: bonus
+                to: ac
+                amount:
+                  bonus:
+                    base: 2
+              - kind: resistance
+                damage: lightning
+    - id: tropical
+      name: Tropical
+      activations:
+        - label: Nature's Sanctuary
+          cost:
+            - action
+            - resource: wild-shape
+          targeting:
+            area:
+              shape: cube
+              radius: 15
+            range: 120
+            side: ally
+          resolution:
+            kind: automatic
+            effects:
+              - kind: zone
+                zone: area
+                radius: 5
+                duration:
+                  minutes: 1
+          area:
+            side: ally
+            awake: true
+            moves: 60
+            moveWith: bonusAction
+            places:
+              - kind: bonus
+                to: ac
+                amount:
+                  bonus:
+                    base: 2
+              - kind: resistance
+                damage: poison

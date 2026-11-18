@@ -1,0 +1,208 @@
+- id: srd52:class/fighter
+  name: Fighter
+  hitDie: d10
+  primaryAbilities:
+    - str
+    - dex
+  savingThrows:
+    - str
+    - con
+  weapons:
+    - simple
+    - martial
+  armor:
+    - light
+    - medium
+    - heavy
+    - shield
+  swaps:
+    weaponMastery: longRest
+  levels:
+    - level: 1
+      grants:
+        - srd52:feature/fighting-style
+        - srd52:feature/second-wind
+        - srd52:feature/weapon-mastery
+      choices:
+        - kind: skills
+          id: skills
+          count: 2
+          from:
+            - acrobatics
+            - animalHandling
+            - athletics
+            - history
+            - insight
+            - intimidation
+            - persuasion
+            - perception
+            - survival
+      slots: []
+      scaling:
+        secondWind: 2
+        weaponMastery: 3
+    - level: 2
+      grants:
+        - srd52:feature/action-surge
+        - srd52:feature/tactical-mind
+      slots: []
+      scaling:
+        secondWind: 2
+        weaponMastery: 3
+        actionSurge: 1
+    - level: 3
+      grants:
+        - srd52:feature/fighter-subclass
+      slots: []
+      scaling:
+        secondWind: 2
+        weaponMastery: 3
+        actionSurge: 1
+    - level: 4
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        secondWind: 3
+        weaponMastery: 4
+        actionSurge: 1
+    - level: 5
+      grants:
+        - srd52:feature/extra-attack
+        - srd52:feature/tactical-shift
+      slots: []
+      scaling:
+        secondWind: 3
+        weaponMastery: 4
+        actionSurge: 1
+    - level: 6
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        secondWind: 3
+        weaponMastery: 4
+        actionSurge: 1
+    - level: 7
+      grants: []
+      slots: []
+      scaling:
+        secondWind: 3
+        weaponMastery: 4
+        actionSurge: 1
+    - level: 8
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        secondWind: 3
+        weaponMastery: 4
+        actionSurge: 1
+    - level: 9
+      grants:
+        - srd52:feature/indomitable
+        - srd52:feature/tactical-master
+      slots: []
+      scaling:
+        indomitable: 1
+        secondWind: 3
+        weaponMastery: 4
+        actionSurge: 1
+    - level: 10
+      grants: []
+      slots: []
+      scaling:
+        indomitable: 1
+        secondWind: 4
+        weaponMastery: 5
+        actionSurge: 1
+    - level: 11
+      grants:
+        - srd52:feature/two-extra-attacks
+      slots: []
+      scaling:
+        indomitable: 1
+        secondWind: 4
+        weaponMastery: 5
+        actionSurge: 1
+    - level: 12
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        indomitable: 1
+        secondWind: 4
+        weaponMastery: 5
+        actionSurge: 1
+    - level: 13
+      grants:
+        - srd52:feature/indomitable
+        - srd52:feature/studied-attacks
+      slots: []
+      scaling:
+        indomitable: 2
+        secondWind: 4
+        weaponMastery: 5
+        actionSurge: 1
+    - level: 14
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        indomitable: 2
+        secondWind: 4
+        weaponMastery: 5
+        actionSurge: 1
+    - level: 15
+      grants: []
+      slots: []
+      scaling:
+        indomitable: 2
+        secondWind: 4
+        weaponMastery: 5
+        actionSurge: 1
+    - level: 16
+      grants:
+        - srd52:feature/ability-score-improvement
+      slots: []
+      scaling:
+        indomitable: 2
+        secondWind: 4
+        weaponMastery: 6
+        actionSurge: 1
+    - level: 17
+      grants:
+        - srd52:feature/action-surge
+        - srd52:feature/indomitable
+      slots: []
+      scaling:
+        indomitable: 3
+        secondWind: 4
+        weaponMastery: 6
+        actionSurge: 2
+    - level: 18
+      grants: []
+      slots: []
+      scaling:
+        indomitable: 3
+        secondWind: 4
+        weaponMastery: 6
+        actionSurge: 2
+    - level: 19
+      grants:
+        - srd52:feature/epic-boon
+      slots: []
+      scaling:
+        indomitable: 3
+        secondWind: 4
+        weaponMastery: 6
+        actionSurge: 2
+    - level: 20
+      grants:
+        - srd52:feature/three-extra-attacks
+      slots: []
+      scaling:
+        indomitable: 3
+        secondWind: 4
+        weaponMastery: 6
+        actionSurge: 2
