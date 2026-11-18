@@ -161,7 +161,12 @@ export function withEdge(
   const disadvantage =
     other.hostile === true &&
     about.includes("influence") &&
-    !stats.passives.some(({ kind }) => kind === "cunningSpeaker");
+    !stats.passives.some(
+      (passive) =>
+        passive.kind === "cunningSpeaker" &&
+        (!passive.skills ||
+          (skill !== undefined && passive.skills.includes(skill))),
+    );
   return { advantage, disadvantage };
 }
 

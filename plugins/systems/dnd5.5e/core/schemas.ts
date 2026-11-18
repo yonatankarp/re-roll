@@ -4210,8 +4210,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("languages"),
     languages: z.array(z.string().regex(/^[a-z][a-z-]*$/)).min(1),
   }),
-  // No Disadvantage on a check to influence a Hostile creature, as Boon of Communication's Cunning Speaker.
-  z.strictObject({ kind: z.literal("cunningSpeaker") }),
+  // No Disadvantage on a check to influence a Hostile creature, as Boon of Communication's Cunning Speaker, or only on
+  // checks with these skills, as Street Justice's Tough Talk with Intimidation.
+  z.strictObject({
+    kind: z.literal("cunningSpeaker"),
+    skills: z.array(SkillSchema).min(1).optional(),
+  }),
   // As its turn starts, this damage to one creature it grapples, as Unarmed Fighting's 1d4.
   z.strictObject({
     kind: z.literal("grappleDamage"),
