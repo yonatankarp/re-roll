@@ -93,7 +93,7 @@ export interface Move {
 // A lasting area on the map, as the board draws it: a cloud, an aura, light, or a wall's squares.
 export interface AreaView {
   readonly key: string; // the same area keeps its key as it moves
-  readonly kind: string; // darkness, fog, thorns, light, dim, sunlight, area or wall
+  readonly kind: string; // darkness, fog, thorns, light, dim, sunlight, area, wall or image
   readonly x: number; // its centre square
   readonly y: number;
   readonly reach: number; // squares from the centre to its edge

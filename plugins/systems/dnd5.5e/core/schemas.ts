@@ -958,6 +958,18 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   }),
   // Its Exhaustion can't increase while it lasts, as Iron Body's.
   z.strictObject({ kind: z.literal("noExhaustion") }),
+  // The bearer has seen through the illusion of `source` its `caster` made (core/zones.ts).
+  z.strictObject({
+    kind: z.literal("discerned"),
+    source: z.string(),
+    caster: z.string(),
+  }),
+  // Disguised: it looks like someone else, which a Study with Investigation against `dc` sees through, and in a
+  // scene its Deception checks have Advantage (core/explore.ts), as Disguise Self's.
+  z.strictObject({
+    kind: z.literal("disguise"),
+    dc: z.number().int().min(1).optional(),
+  }),
   // Which of a transformation's options the bearer has taken, by name, for what holds only `whileAspect` it lasts, as
   // Starry Form's Archer, Chalice or Dragon.
   z.strictObject({ kind: z.literal("aspect"), name: z.string().min(1) }),
@@ -996,6 +1008,8 @@ export const ZoneKindSchema = z.enum([
   "wall",
   // Light one step dimmer in it, Bright Light Dim and Dim Light Darkness, as round Shadow of Moil's caster.
   "shade",
+  // An illusion: it hides what's in it from whoever hasn't seen through it, as Silent Image's (core/zones.ts).
+  "image",
 ]);
 export type ZoneKind = z.infer<typeof ZoneKindSchema>;
 
@@ -1217,6 +1231,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     whileTempHp: z.literal(true).optional(), // ends once the bearer has no Temporary Hit Points, as Armor of Agathys
     endsInLight: z.literal(true).optional(), // as an applyCondition's
     untilIncapacitated: z.literal(true).optional(), // as an applyCondition's
+    // The creature can take the Study action to end it with an Investigation check against the save's DC, as
+    // Phantasmal Force's phantasm (actions.ts).
+    studyEnds: z.literal(true).optional(),
     // The caster picks the modifier's damage type from these as it casts (combat/damage-choice.ts), as with
     // Protection from Energy. A cast's lists of the same length are picked together, by place, as Fire Shield's
     // warm or chill shield sets both its Resistance and its flames.
@@ -1370,6 +1387,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     ownerSees: z.literal(true).optional(),
     // light: creatures in its Bright Light can't benefit from the Invisible condition, as a Lantern of Revealing's
     reveals: z.literal(true).optional(),
+    // an image: the Investigation DC to see through it, the caster's spell save DC when left out
+    dc: z.number().int().min(1).optional(),
+    // an image of its caster that hides nothing, whose eyes the caster sees through, as Invoke Duplicity's
+    decoy: z.literal(true).optional(),
   }),
   // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
   // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe. A caster
@@ -1607,6 +1628,23 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     monster: ContentIdSchema,
     chance: z.number().int().min(1).max(100).optional(),
     counter: z.string().min(1).optional(),
+  }),
+  // The caster senses how many illusions, creatures in a shape not their own and disguises are within `feet`, but
+  // nothing more about them, as Unerring Eye (combat/effects.ts).
+  z.strictObject({
+    kind: z.literal("senseDeceptions"),
+    feet: z.number().int().min(5),
+  }),
+  // An object of the caster's illusions from spells cast with a slot becomes real for `minutes`, a wall where its
+  // image stands, as Illusory Reality.
+  z.strictObject({
+    kind: z.literal("realImage"),
+    minutes: z.number().int().min(1),
+  }),
+  // The caster swaps places with its image of one of these features or spells, as Trickster's Transposition.
+  z.strictObject({
+    kind: z.literal("swapImage"),
+    sources: z.array(ContentIdSchema).min(1),
   }),
   // The target's effects from these features' activations end, as leaving Wild Shape or taking another Starry Form.
   z.strictObject({
@@ -3615,6 +3653,17 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("saveDisadvantage"),
     conditions: z.array(ConditionSchema).min(1),
   }),
+  // Checks to see through the bearer's illusions have Disadvantage, as Illusion Adept's.
+  z.strictObject({ kind: z.literal("subtleIllusions") }),
+  // While disguised, Advantage on Deception and Performance checks in a scene, as Actor's Impersonation.
+  z.strictObject({ kind: z.literal("impersonation") }),
+  // Attack rolls against a creature within 5 feet of the bearer's image of itself have Advantage, the bearer's own
+  // once it's within 5 feet of that creature too, and with `allies` its allies' as well, as Invoke Duplicity's
+  // Distract and Improved Duplicity's Shared Distraction (combat/attack.ts).
+  z.strictObject({
+    kind: z.literal("distract"),
+    allies: z.literal(true).optional(),
+  }),
   // Gains no Exhaustion levels, as a Book of Vile Darkness's Tireless Form (combat/effects.ts).
   z.strictObject({ kind: z.literal("noExhaustion") }),
   // Disadvantage on attack rolls against creatures of these types and on saves against what they call for, as Demon
@@ -3896,6 +3945,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     school: z.array(SpellSchoolSchema).min(1).optional(),
     uses: z.array(ContentIdSchema).min(1).optional(),
     heals: z.literal(true).optional(),
+    // with `school`, any spell of it, a cantrip or one cast without an action too, as Arcane Artist's Inspiring Magic
+    anySpell: z.literal(true).optional(),
     selfToo: z.literal(true).optional(), // with `heals`, healing the caster counts too, as Starry Form's Chalice
     whileAspect: z.string().min(1).optional(),
     level: z
@@ -5660,6 +5711,16 @@ const EnvironmentRowSchema = z.strictObject({
 
 export const EnvironmentalEffectSchema = GlossaryEntrySchema.extend({
   automation: AutomationSchema.default("text"),
+  // A scene check against it names it as a dungeon feature's would (environment.ts featureCheck), as seeing through a
+  // Mirage with Investigation.
+  check: z
+    .strictObject({
+      skill: SkillSchema.optional(),
+      ability: AbilitySchema,
+      tool: ContentIdSchema.optional(),
+      about: AboutSchema,
+    })
+    .optional(),
   weather: WeatherSchema.optional(), // the weather it is, as Extreme Cold's cold
   exposure: ExposureSchema.optional(),
   // In a fight fought in it, or a scene spent in it, every creature not of an `except` type has these passives, as

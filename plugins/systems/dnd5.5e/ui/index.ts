@@ -30,7 +30,7 @@ import { creation, featureInPlay } from "./creation.ts";
 import { sheetCreation } from "./creation-sheet.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
 import type { AreaView, BoardExtra, FightMap } from "./board-data.ts";
-import { zonesOf } from "../core/zones.ts";
+import { believes, zonesOf } from "../core/zones.ts";
 import { dndCue } from "./cues.ts";
 import { GLOSSARY_TERMS } from "../core/glossary.ts";
 import { playing } from "../core/variant-rules.ts";
@@ -421,7 +421,11 @@ function areaViews(state: DndState, access: ContentAccess): AreaView[] {
         x: zone.at.x,
         y: zone.at.y,
         reach: Math.floor(zone.radius / 5),
-        name: zone.name ?? sourceName(access, zone.sourceId),
+        // A foe's illusion the player hasn't seen through gives nothing away.
+        name:
+          zone.zone === "image" && foe && believes(zone, state, PLAYER_ACTOR)
+            ? "something"
+            : (zone.name ?? sourceName(access, zone.sourceId)),
         foe,
         ...(zone.blocks ? { blocks: [...zone.blocks] } : {}),
         ...(zone.walls ? { walls: zone.walls } : {}),
@@ -1286,6 +1290,12 @@ function describe(
       return data.source
         ? `${name(data.actor)} gets past it with ${sourceName(access, data.source)}.`
         : `${name(data.actor)} gets past it.`;
+    }
+    case "dnd5.5e:deceptionSensed": {
+      const data = EVENT_SCHEMAS["dnd5.5e:deceptionSensed"].parse(payload);
+      return data.count === 0
+        ? `${name(data.actor)} senses nothing trying to fool it nearby.`
+        : `${name(data.actor)} senses ${String(data.count)} ${data.count === 1 ? "thing" : "things"} trying to fool it nearby.`;
     }
     case "dnd5.5e:toolMissing": {
       const data = EVENT_SCHEMAS["dnd5.5e:toolMissing"].parse(payload);
