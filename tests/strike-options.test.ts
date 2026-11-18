@@ -330,9 +330,9 @@ describe("strike options", () => {
       dice,
     );
     expect(done.decisions[0]?.id).toBe(`${NS}:strike:${PLAYER_ACTOR}`);
-    // One d20, as the roll went without its Advantage, and Brutal Strike's d10.
+    // One d20, as the roll went without its Advantage, and Brutal Strike's d10 beside the two-handed longsword's.
     expect(counts[20]).toBe(1);
-    expect(counts[10]).toBe(1);
+    expect(counts[10]).toBe(2);
     // The bearer's own move after the blow.
     expect(
       done.state.actors[PLAYER_ACTOR]?.activeEffects.some(

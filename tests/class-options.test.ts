@@ -1306,9 +1306,9 @@ describe("Battle Master maneuvers", () => {
       [`feature:${maneuver("trip")}:0|a`],
     );
     const damaged = payloads(done.events, "damaged");
-    // The longsword's 1d8 + 4 is 12, then the d8 die at its highest, also slashing.
+    // The longsword's 1d10 (two-handed, with no Shield) + 4 is 14, then the d8 die at its highest, also slashing.
     expect(damaged.map((item) => [item.amount, item.type])).toEqual([
-      [12, "slashing"],
+      [14, "slashing"],
       [8, "slashing"],
     ]);
     expect(
