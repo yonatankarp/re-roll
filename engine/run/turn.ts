@@ -1,8 +1,10 @@
+import { own } from "../kernel/own.ts";
 import { type Adventure } from "../story/adventure.ts";
-import { COMPANION_COUNT, rollCompanions } from "../story/companions.ts";
+import { DEFAULT_PARTY_SIZE, rollCompanions } from "../story/companions.ts";
 import {
   DIRECTOR_FRAME,
   type RunContext,
+  SCENE_DECISION_PREFIX,
   STORY_FRAME_PREFIX,
   assertOwnEvents,
   type StoryResult,
@@ -90,7 +92,7 @@ export function applyEvent(
           scene: event.scene,
           visits: {
             ...story.visits,
-            [event.scene]: (story.visits?.[event.scene] ?? 0) + 1,
+            [event.scene]: (own(story.visits, event.scene) ?? 0) + 1,
           },
         },
       };
@@ -324,7 +326,7 @@ function settle(
         : [],
     );
     if (top && top.kind !== AWAIT_FRAME && !isStoryFrame(top)) {
-      const definition = run.system.frames[top.kind];
+      const definition = own(run.system.frames, top.kind);
       if (!definition) throw new Error(`Unknown frame ${top.kind}`);
       handle(true, (dice, current) => {
         const result = definition.run(
@@ -383,7 +385,7 @@ export function resolveSettings(
 ): Readonly<Record<string, string>> {
   return Object.fromEntries(
     (run.system.settings ?? []).map((setting) => {
-      const value = chosen[setting.id];
+      const value = own(chosen, setting.id);
       return [
         setting.id,
         value !== undefined &&
@@ -401,8 +403,10 @@ export function startRun(
   settings: Readonly<Record<string, string>> = {},
 ): StepResult {
   const world = createDice(rngFromSeed(`${seed}:world`));
-  const profiles = rollCompanions(world);
-  if (profiles.length !== COMPANION_COUNT) {
+  const { party } = run.adventure;
+  const count = (party?.size ?? DEFAULT_PARTY_SIZE) - 1;
+  const profiles = rollCompanions(world, count, party?.companions);
+  if (profiles.length !== count) {
     throw new Error("Not enough companions to fill the party");
   }
   const partyIds = [PLAYER_ACTOR, ...profiles.map((profile) => profile.id)];
@@ -438,7 +442,7 @@ export function startRun(
   }
 
   const state: GameState = {
-    rng: { world: world.state(), play: rngFromSeed(`${seed}:play`) },
+    rng: { play: rngFromSeed(`${seed}:play`) },
     partyIds,
     companions: Object.fromEntries(
       profiles.map((profile) => [profile.id, profile]),
@@ -460,6 +464,16 @@ export function wouldEnd(
   optionId: string,
   certain = false,
 ): boolean {
+  // Only a scene's own choices lead on; its rests and the system's actions come back to it, so they aren't tried.
+  if (decision.id.startsWith(SCENE_DECISION_PREFIX)) {
+    const scene = run.adventure.scenes.find(
+      ({ id }) => id === state.story.scene,
+    );
+    const isChoice = scene?.choices.some(
+      (choice, index) => (choice.id ?? String(index)) === optionId,
+    );
+    if (!isChoice) return false;
+  }
   const tried = step(run, state, {
     kind: "answer",
     decisionId: decision.id,

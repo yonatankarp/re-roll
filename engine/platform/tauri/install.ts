@@ -14,8 +14,10 @@ import { ALLOWED_EXTENSIONS, extensionOf } from "../../run/loader.ts";
 // or a book laid out like the content folder: adventures/<id>, rules/<id>, worlds/<id>, assets/<book>, library/<book>.
 
 const MANIFEST = "plugin.yaml";
-// shortcut: each file is unpacked into memory on its own, but the zip itself is held whole; stream it if zips grow past this.
+// shortcut: files are unpacked a batch at a time, but the zip itself is held whole; stream it if zips grow past this.
 export const MAX_UNPACKED_BYTES = 4 * 1024 ** 3;
+// Each pass over the zip reads every entry's header, so files are unpacked many at once, up to this much.
+export const BATCH_BYTES = 64 * 1024 ** 2;
 
 export const PART_FOLDERS = [
   "adventures",
@@ -243,6 +245,28 @@ export function planInstall(
   return { parts };
 }
 
+// Entries in order, grouped so each group unpacks to at most BATCH_BYTES, or is one larger file alone.
+export function batches(
+  entries: readonly string[],
+  sizes: ReadonlyMap<string, number>,
+): Set<string>[] {
+  const groups: Set<string>[] = [];
+  let current = new Set<string>();
+  let bytes = 0;
+  for (const entry of entries) {
+    const size = sizes.get(entry) ?? 0;
+    if (current.size > 0 && bytes + size > BATCH_BYTES) {
+      groups.push(current);
+      current = new Set();
+      bytes = 0;
+    }
+    current.add(entry);
+    bytes += size;
+  }
+  if (current.size > 0) groups.push(current);
+  return groups;
+}
+
 // The plugins a plan installs, or else its folders, for the notice.
 export function describePlan(plan: InstallPlan): string {
   const plugins = plan.parts.filter(({ folder }) => isPluginFolder(folder));
@@ -261,19 +285,30 @@ export async function installPlan(
   call: typeof invoke = invoke,
 ): Promise<boolean> {
   const encoder = new TextEncoder();
+  const sizes = entriesOf(zip);
   for (const { folder, name } of plan.parts)
     await call("content_install_begin", { folder, name });
   for (const { folder, name, files } of plan.parts) {
-    for (const [entry, path] of files) {
-      // The path heads the body, up to a newline, so the bytes go raw rather than as JSON numbers.
-      const head = encoder.encode(
-        `${folder}/${name}${path ? `/${path}` : ""}\n`,
+    for (const batch of batches([...files.keys()], sizes)) {
+      const unpacked = new Map(
+        Object.entries(
+          unzipSync(zip, { filter: (entry) => batch.has(entry.name) }),
+        ),
       );
-      const file = readEntry(zip, entry);
-      const body = new Uint8Array(head.length + file.length);
-      body.set(head);
-      body.set(file, head.length);
-      await call("content_install_file", body);
+      for (const entry of batch) {
+        const file = unpacked.get(entry);
+        if (!file) throw new Error(`${entry} is missing from the zip`);
+        unpacked.delete(entry); // so the batch's memory goes as it is written
+        const path = files.get(entry) ?? "";
+        // The path heads the body, up to a newline, so the bytes go raw rather than as JSON numbers.
+        const head = encoder.encode(
+          `${folder}/${name}${path ? `/${path}` : ""}\n`,
+        );
+        const body = new Uint8Array(head.length + file.length);
+        body.set(head);
+        body.set(file, head.length);
+        await call("content_install_file", body);
+      }
     }
   }
   let replaced = false;

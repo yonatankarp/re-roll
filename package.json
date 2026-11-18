@@ -23,7 +23,6 @@
     "test:ui": "playwright test",
     "check-pack": "node app/cli/check-pack.ts",
     "check-pack:fixtures": "node tests/check-fixtures.ts",
-    "prep:eval": "node tests/prep-eval.ts",
     "bot:fixtures": "node tests/bot-fixtures.ts",
     "bot": "node app/cli/bot.ts",
     "bot:check": "node app/cli/bot.ts 200 --check",
