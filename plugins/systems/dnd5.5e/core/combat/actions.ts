@@ -1,3 +1,4 @@
+import { zoneModifiers } from "../zones.ts";
 import { z } from "zod";
 import { knownFoes } from "../fog.ts";
 import {
@@ -80,6 +81,7 @@ import {
 } from "./queries.ts";
 import {
   aimSquare,
+  alliesRiderEvents,
   leafEvents,
   payCosts,
   resolveAction,
@@ -186,9 +188,14 @@ export function deathSaveEvents(actor: Actor, context: Context): SystemEvent[] {
   {
     const stats = deriveStats(actor, context);
     const { natural } = rollD20(dice, {
-      advantage: stats.passives.some(
-        (passive) => passive.kind === "deathSaveAdvantage" && !passive.worse,
-      ),
+      advantage:
+        stats.passives.some(
+          (passive) => passive.kind === "deathSaveAdvantage" && !passive.worse,
+        ) ||
+        [
+          ...actor.activeEffects.map(({ modifier }) => modifier),
+          ...zoneModifiers(actor, context.state, context),
+        ].some((modifier) => modifier.kind === "deathSaveAdvantage"),
       disadvantage: stats.passives.some(
         (passive) => passive.kind === "deathSaveAdvantage" && passive.worse,
       ),
@@ -461,6 +468,14 @@ export function castAction(
             action.activation.alsoSelf,
             action.id,
             actor,
+            actor,
+            context,
+          )
+        : []),
+      ...(action.activation.alsoAllies
+        ? alliesRiderEvents(
+            action.activation.alsoAllies,
+            action.id,
             actor,
             context,
           )

@@ -15,12 +15,6 @@ const scaling = (key: string) => ({ add: [{ kind: "scaling", key }] });
 const selfOnly = { self: true };
 const untilNextTurn = { until: "yourNextTurnStart" };
 
-const BARDIC_INSPIRATION_USES = {
-  base: 0,
-  add: [{ kind: "abilityMod", ability: "cha" }],
-  min: 1,
-};
-
 const RULES: Readonly<Record<string, Rules>> = {
   // shortcut: any attack gains Advantage, not only Strength ones.
   "phb:feature/barbarian-reckless-attack": {
@@ -63,38 +57,6 @@ const RULES: Readonly<Record<string, Rules>> = {
           kind: "bonus",
           to: "speed",
           amount: { bonus: { base: 10 } },
-        },
-      },
-    ],
-  },
-  // shortcut: the die adds to the ally's next attack roll, not to any failed d20 test.
-  "phb:feature/bard-bardic-inspiration": {
-    automation: "partial",
-    resources: [
-      {
-        id: "bardic-inspiration",
-        max: BARDIC_INSPIRATION_USES,
-        recharge: [{ on: "longRest", amount: "all" }],
-      },
-    ],
-    activations: [
-      {
-        cost: ["bonusAction", { resource: "bardic-inspiration" }],
-        targeting: { creatures: 1, range: 60, side: "ally" },
-        resolution: {
-          kind: "automatic",
-          effects: [
-            {
-              kind: "modifier",
-              modifier: {
-                kind: "bonus",
-                to: "attacks",
-                once: true,
-                amount: { dice: "1d6", dieSize: "bardicDie" },
-              },
-              duration: { minutes: 60 },
-            },
-          ],
         },
       },
     ],

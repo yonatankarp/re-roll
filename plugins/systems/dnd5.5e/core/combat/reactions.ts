@@ -1,4 +1,4 @@
-import { damageBurstFrames } from "./areas.ts";
+import { burnFrames, damageBurstFrames } from "./areas.ts";
 import { z } from "zod";
 import { blockedSquares } from "../zones.ts";
 import {
@@ -164,12 +164,80 @@ export interface Edge {
   readonly disadvantage: boolean;
 }
 
+// A Bardic Inspiration die a creature holds, with its giver's numbers.
+export function heldDie(holder: Actor, context: Context) {
+  const effect = holder.activeEffects.find(
+    ({ modifier }) => modifier.kind === "inspired",
+  );
+  if (effect?.modifier.kind !== "inspired") return null;
+  const giver = context.state.actors[effect.casterId] ?? holder;
+  return {
+    effect,
+    amount: effect.modifier.amount,
+    stats: deriveStats(giver, context),
+    spent: dndEvent(`${NS}:effectEnded`, {
+      actor: holder.id,
+      sourceId: effect.sourceId,
+      casterId: effect.casterId,
+    }),
+  };
+}
+
+const MOST = { roll: (sides: number) => sides, below: () => 0 };
+
+// Bardic Inspiration, once nothing else answers a roll: the roller's die added to a failed D20 test it can turn into
+// a success, or with its giver's Combat Inspiration, an attack's target's die added to its AC against a hit it can
+// turn into a miss, spending the target's Reaction. Either is spent only where it turns the roll.
+export function inspiredSwing(
+  roll: Roll,
+  context: Context,
+): { readonly events: SystemEvent[]; readonly bonus: number } {
+  const none = { events: [], bonus: 0 };
+  if (!roll.success) {
+    if (roll.kind === "attack" && roll.natural === 1) return none;
+    const held = heldDie(roll.roller, context);
+    if (
+      !held ||
+      roll.total + rollAmount(held.amount, held.stats, MOST) < roll.goal
+    ) {
+      return none;
+    }
+    return {
+      events: [held.spent],
+      bonus: rollAmount(held.amount, held.stats, context.dice),
+    };
+  }
+  const target = roll.against;
+  if (roll.kind !== "attack" || !target || roll.critical) return none;
+  const held = heldDie(target, context);
+  if (
+    !held ||
+    !target.budget.reaction ||
+    hasCondition(target, ...INCAPACITATING) ||
+    !held.stats.passives.some(({ kind }) => kind === "combatInspiration") ||
+    roll.total - rollAmount(held.amount, held.stats, MOST) >= roll.goal
+  ) {
+    return none;
+  }
+  return {
+    events: [
+      held.spent,
+      dndEvent(`${NS}:budgetSpent`, {
+        actor: target.id,
+        kind: "reaction",
+        label: "Combat Inspiration",
+      }),
+    ],
+    bonus: -rollAmount(held.amount, held.stats, context.dice),
+  };
+}
+
 // Whether the bearer wants this roll to succeed: its own side's roll, or else a foe's attack on someone else.
 function wantsSuccess(bearer: Actor, roll: Roll): boolean {
   return roll.roller.side === bearer.side;
 }
 
-function matchesRoll(
+export function matchesRoll(
   bearer: Actor,
   trigger: Trigger,
   roll: Roll,
@@ -216,6 +284,7 @@ function matchesRoll(
   }
   if (rolled.edged && !roll.edged) return false;
   if (rolled.when === "failed" && roll.success) return false;
+  if (rolled.when === "succeeded" && !roll.success) return false;
   return (
     near(bearer, subject, trigger.within) && sees(bearer, subject, context)
   );
@@ -512,7 +581,18 @@ export function settleRoll(
   let bonus = 0;
   for (;;) {
     const found = rollResponder(current, passed, context);
-    if (!found) break;
+    if (!found) {
+      const inspired = inspiredSwing(current, context);
+      if (inspired.events.length > 0) {
+        events.push(...inspired.events);
+        bonus += inspired.bonus;
+        current = {
+          ...current,
+          ...judge(current.natural, bonus),
+        };
+      }
+      break;
+    }
     passed.push(found.reactor.id);
     if (
       found.reactor.id === PLAYER_ACTOR &&
@@ -1322,6 +1402,7 @@ export function afterDamage(
     ...concentration,
     ...reactFrames({ kind: "damaged", actor: target.id, ...cause }, context),
     ...damageBurstFrames(target, cause.types ?? [], context),
+    ...burnFrames(target, cause.types ?? [], context),
   ];
 }
 

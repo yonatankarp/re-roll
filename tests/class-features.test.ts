@@ -378,7 +378,7 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
     expect(options?.some((item) => /dash/i.test(item.label))).toBe(true);
   });
 
-  it("Bardic Inspiration adds its die to an ally's next attack roll only", () => {
+  it("Bardic Inspiration gives an ally a die it keeps through a hit", () => {
     const bard = hero("bard", 1);
     const ally = { ...hero("fighter", 1), id: "ally", name: "Ally" };
     const start = fight(bard, ally, monster("a"));
@@ -393,22 +393,28 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
         "bardic-inspiration"
       ],
     ).toBe(1);
-    const totals = (state: DndState) =>
-      payloads(
-        settle(run, state, [attack("ally", weaponOf(ally), "a")], dice(10))
-          .events,
-        "rollReported",
-      )[0]?.total;
-    const first = settle(
+    const holds = (state: DndState) =>
+      actorIn(state, "ally").activeEffects.some(
+        ({ modifier }) => modifier.kind === "inspired",
+      );
+    expect(holds(inspired.state)).toBe(true);
+    // A natural 20 needs no help, so the die stays for a roll that does.
+    const hit = settle(
       run,
       inspired.state,
       [attack("ally", weaponOf(ally), "a")],
-      dice(10),
+      dice(20),
     );
-    expect(payloads(first.events, "rollReported")[0]?.total).toBe(
-      Number(totals(start)) + 6,
+    expect(holds(hit.state)).toBe(true);
+    // A 3 misses the Dummy's AC 10; the die (rolled at its highest) makes it a hit, and is spent.
+    const missed = settle(
+      run,
+      inspired.state,
+      [attack("ally", weaponOf(ally), "a")],
+      dice(3),
     );
-    expect(totals(first.state)).toBe(totals(start));
+    expect(payloads(missed.events, "rollReported")[0]?.success).toBe(true);
+    expect(holds(missed.state)).toBe(false);
   });
 
   it("Channel Divinity turns undead and spends a use", () => {
