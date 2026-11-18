@@ -12,7 +12,9 @@ import {
   SpeciesSchema,
   SpellSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import { formsFor } from "../plugins/systems/dnd5.5e/core/forms.ts";
 import { lookup } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { hero } from "./feat-fixtures.ts";
 import { BOOK_ROOTS } from "./depth.ts";
 
 // A sample of #182's older books' entries as the books encode them: what plays, and what links to its 2024 version.
@@ -81,5 +83,14 @@ describe.skipIf(!BOOKS)("the books' older entries (#182)", () => {
     };
     expect(toll.reprint).toBe("phb:spell/toll-the-dead");
     expect(toll.classes).toEqual([]);
+  });
+
+  it("drives the Apparatus of Kwalish as its own stat block", () => {
+    const forms = formsFor(
+      { forms: { ids: ["dmg:monster/apparatus-of-kwalish"] } },
+      hero([]),
+      run,
+    );
+    expect(forms.map((item) => item.hp)).toEqual([200]);
   });
 });

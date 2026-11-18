@@ -74,6 +74,29 @@ interface FormBlock {
 
 const blocksBySource = new WeakMap<object, readonly FormBlock[]>();
 
+// A stat block as a form, with a Challenge Rating unless `anyCr`.
+function formBlock(
+  id: string,
+  access: ContentAccess,
+  anyCr = false,
+): readonly FormBlock[] {
+  const monster = MonsterSchema.safeParse(access.content(id)).data;
+  const cr = monster ? (challengeOf(monster) ?? (anyCr ? 0 : null)) : null;
+  return monster && cr !== null
+    ? [
+        {
+          id,
+          name: monster.name,
+          cr,
+          hp: monster.hp,
+          type: monster.creatureType?.toLowerCase() ?? "",
+          size: SIZE_ORDER.indexOf(monster.size ?? "medium"),
+          fly: (monster.speeds?.fly ?? 0) > 0,
+        },
+      ]
+    : [];
+}
+
 // Every stat block in the loaded content with a Challenge Rating, weakest first, read once per content.
 function formBlocks(access: ContentAccess): readonly FormBlock[] {
   const known = blocksBySource.get(access.content);
@@ -81,23 +104,7 @@ function formBlocks(access: ContentAccess): readonly FormBlock[] {
   const list = access
     .contentIds()
     .filter((id) => id.includes(":monster/"))
-    .flatMap((id) => {
-      const monster = MonsterSchema.safeParse(access.content(id)).data;
-      const cr = monster ? challengeOf(monster) : null;
-      return monster && cr !== null
-        ? [
-            {
-              id,
-              name: monster.name,
-              cr,
-              hp: monster.hp,
-              type: monster.creatureType?.toLowerCase() ?? "",
-              size: SIZE_ORDER.indexOf(monster.size ?? "medium"),
-              fly: (monster.speeds?.fly ?? 0) > 0,
-            },
-          ]
-        : [];
-    })
+    .flatMap((id) => formBlock(id, access))
     .sort((a, b) => a.cr - b.cr || a.hp - b.hp || (a.id < b.id ? -1 : 1));
   blocksBySource.set(access.content, list);
   return list;
@@ -116,6 +123,7 @@ export function formsFor(
 ): readonly FormBlock[] {
   if (immutable(target, access)) return [];
   const { forms } = effect;
+  if (forms?.ids) return forms.ids.flatMap((id) => formBlock(id, access, true));
   const types = forms ? forms.types : ["beast"];
   const tiered = forms?.byLevel && levelLimit(forms.byLevel, target);
   const limit =

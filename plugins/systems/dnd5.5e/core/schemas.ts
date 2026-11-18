@@ -1420,6 +1420,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
           .enum(["tiny", "small", "medium", "large", "huge", "gargantuan"])
           .optional(),
         noFly: z.literal(true).optional(), // only a form without a Fly Speed, as Wild Shape's before level 8
+        // only these stat blocks, whatever their Challenge Rating, as the Apparatus of Kwalish its pilot drives
+        ids: z.array(ContentIdSchema).min(1).optional(),
         // The highest Challenge Rating by the bearer's level in `class`: the last of `tiers` it has reached (a
         // form with a Fly Speed only from a tier with `fly`), as Wild Shape's, or the level divided by `per`, as
         // Circle Forms'.

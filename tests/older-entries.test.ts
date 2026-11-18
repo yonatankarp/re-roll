@@ -9,6 +9,7 @@ import {
   ClassSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import { type Actor, NS } from "../plugins/systems/dnd5.5e/core/state.ts";
+import { formsFor } from "../plugins/systems/dnd5.5e/core/forms.ts";
 import { deriveStats, lookup } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { hero, scripted, settle, testRun } from "./feat-fixtures.ts";
 
@@ -78,5 +79,26 @@ describe("older books' entries (#182)", () => {
       ).decisions.some((item) => item.id.startsWith(`${NS}:afterHit:`));
     expect(offered(true)).toBe(true);
     expect(offered(false)).toBe(false);
+  });
+
+  it("turns its pilot only into the stat blocks it names, with no Challenge Rating, as the Apparatus of Kwalish", async () => {
+    const run = await testRun();
+    const barrel = {
+      id: "test:monster/barrel",
+      name: "Barrel",
+      ac: 20,
+      hp: 200,
+      speed: 30,
+      abilities: { str: 10, dex: 10, con: 10, int: 10, wis: 10, cha: 10 },
+      proficiency: 0,
+      initiative: 0,
+      actions: [],
+    };
+    const access = {
+      ...run,
+      content: (id: string) => (id === barrel.id ? barrel : run.content(id)),
+    };
+    const forms = formsFor({ forms: { ids: [barrel.id] } }, hero([]), access);
+    expect(forms.map((item) => [item.id, item.hp])).toEqual([[barrel.id, 200]]);
   });
 });
