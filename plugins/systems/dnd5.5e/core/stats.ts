@@ -2561,24 +2561,25 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       hasAspect(actor, passive.whileAspect)) &&
     ((passive.kind !== "modifier" && passive.kind !== "weaponRider") ||
       passive.armor === undefined ||
-      (passive.armor === "noHeavy" ? !heavy : !armored));
-  // Durable Magic's bonuses hold only while the bearer concentrates, and Power of the Wilds' Lion aura only in a Rage.
+      (passive.armor === "noHeavy" ? !heavy : !armored)) &&
+    // Power of the Wilds' Lion aura only in a Rage, as Holy Nimbus's only once it's used.
+    (passive.kind !== "aura" ||
+      !passive.while ||
+      actor.activeEffects.some(({ sourceId }) =>
+        passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+      )) &&
+    (passive.kind !== "aura" ||
+      !passive.whileAspect ||
+      hasAspect(actor, passive.whileAspect)) &&
+    (passive.kind !== "aura" ||
+      !passive.without?.some((id) => featureIds.has(id)));
+  // Durable Magic's bonuses hold only while the bearer concentrates.
   const traits = [...itemPassives, ...kept, ...fromFeatures.passives].filter(
     (passive) =>
       fits(passive) &&
       (passive.kind !== "modifier" ||
         !passive.concentrating ||
-        actor.concentratingOn !== null) &&
-      (passive.kind !== "aura" ||
-        !passive.while ||
-        actor.activeEffects.some(({ sourceId }) =>
-          passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
-        )) &&
-      (passive.kind !== "aura" ||
-        !passive.whileAspect ||
-        hasAspect(actor, passive.whileAspect)) &&
-      (passive.kind !== "aura" ||
-        !passive.without?.some((id) => featureIds.has(id))),
+        actor.concentratingOn !== null),
   );
   const castingAbility = new Map([
     ...answerAbilities,
