@@ -90,6 +90,7 @@ export const FRAME_KINDS = [
   "useAction",
   "useItem",
   "castCheck",
+  "attuneSave",
   "zoneTick",
   "chooseDamageType",
   "chooseZoneType",
@@ -463,6 +464,8 @@ const ActorSchema = z.strictObject({
   attuned: z.array(ContentIdSchema).optional(), // magic items attuned to, at most MAX_ATTUNED
   // Ability scores raised for good, as by studying a Manual of Bodily Health. Missing when none has been.
   raised: z.partialRecord(AbilitySchema, z.number().int()).optional(),
+  // Items studied whose study gives passives for good or is made once, as a Book of Exalted Deeds. Missing until one.
+  studied: z.array(ContentIdSchema).optional(),
   xp: z.number().int().optional(), // only the player's is tracked, and the party levels together
   // Where the creature stands in a fight, null outside one. Saves from before the grid have none.
   position: SquareSchema.nullable().default(null),
@@ -707,6 +710,10 @@ const AbilityRaisedSchema = z.strictObject({
   actor: z.string(),
   ability: AbilitySchema,
   amount: z.number().int(),
+  item: ContentIdSchema,
+});
+const ItemStudiedSchema = z.strictObject({
+  actor: z.string(),
   item: ContentIdSchema,
 });
 const MovedSchema = z.strictObject({
@@ -955,6 +962,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:treasureFound`]: TreasureFoundSchema,
   [`${NS}:goldSpent`]: GoldSpentSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
+  [`${NS}:itemStudied`]: ItemStudiedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
   [`${NS}:abilityRaised`]: AbilityRaisedSchema,
   [`${NS}:poolRolled`]: PoolRolledSchema,
@@ -2403,6 +2411,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         rolledPools: { ...actor.rolledPools, [data.resource]: data.amount },
+      }));
+    }
+    case `${NS}:itemStudied`: {
+      const data = payload(ItemStudiedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        studied: [...(actor.studied ?? []), data.item],
       }));
     }
     case `${NS}:abilityRaised`: {

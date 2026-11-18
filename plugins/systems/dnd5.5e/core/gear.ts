@@ -1,5 +1,6 @@
 import {
   type ContentAccess,
+  type Frame,
   PLAYER_ACTOR,
   type SceneAction,
   type SystemContext,
@@ -10,7 +11,17 @@ import {
   storyEffect,
 } from "#sdk";
 import { z } from "zod";
-import { ClassSchema, ItemSchema, type Loot, LootSchema } from "./schemas.ts";
+import {
+  ABILITIES,
+  ABILITY_NAMES,
+  type Ability,
+  AbilitySchema,
+  ClassSchema,
+  type Item,
+  ItemSchema,
+  type Loot,
+  LootSchema,
+} from "./schemas.ts";
 import {
   type Actor,
   type DndState,
@@ -166,6 +177,47 @@ export function canUse(
   }
 }
 
+// How many magic items a character can be attuned to at once: three, or more by a feature, as Magic Item Adept's four.
+export function attunementLimit(stats: Stats): number {
+  return Math.max(
+    MAX_ATTUNED,
+    ...stats.passives.map((passive) =>
+      passive.kind === "attunementSlots" ? passive.count : 0,
+    ),
+  );
+}
+
+// Whether a curse holds the actor to an item it's attuned to: no ending that Attunement, nor stowing or selling it.
+export function boundTo(
+  actor: Actor,
+  itemId: string,
+  access: ContentAccess,
+): boolean {
+  if (!(actor.attuned ?? []).includes(itemId)) return false;
+  const item = itemOf(access, itemId);
+  return "curse" in item && item.curse?.bound === true;
+}
+
+// Whether the actor is one an item lets attune to it, as a Talisman of Pure Good only a Cleric or Paladin.
+export function canAttune(actor: Actor, item: Item, stats: Stats): boolean {
+  const by = "attuneBy" in item ? item.attuneBy : undefined;
+  if (!by) return true;
+  const named = (id: string, names: readonly string[] | undefined) =>
+    names?.some((name) => id.endsWith(`/${name}`)) === true;
+  const build = effectiveBuild(actor);
+  return (
+    Object.keys(stats.classLevels).some((id) => named(id, by.classes)) ||
+    (build !== null && named(build.speciesId, by.species)) ||
+    (stats.creatureType !== undefined &&
+      by.creatureTypes?.includes(stats.creatureType) === true) ||
+    (actor.attuned ?? []).some(
+      (id) =>
+        by.attunedTo?.some((to) => id === to || id.startsWith(`${to}--`)) ===
+        true,
+    )
+  );
+}
+
 // What can be put on, taken off, attuned or let go, as during a Short Rest, which attuning takes.
 // With `found`, only putting on what was just found, so the moment stays short. Armor and shields the
 // character isn't trained with aren't offered, as they'd only hinder; any weapon can be swung.
@@ -184,13 +236,16 @@ export function gearOptions(
       const attunement =
         !found && "attunement" in item && item.attunement
           ? attuned.includes(id)
-            ? [
-                {
-                  id: `unattune:${id}`,
-                  label: `End attunement to ${item.name}`,
-                },
-              ]
-            : attuned.length < MAX_ATTUNED
+            ? boundTo(actor, id, access)
+              ? []
+              : [
+                  {
+                    id: `unattune:${id}`,
+                    label: `End attunement to ${item.name}`,
+                  },
+                ]
+            : attuned.length < attunementLimit(stats) &&
+                canAttune(actor, item, stats)
               ? [{ id: `attune:${id}`, label: `Attune to ${item.name}` }]
               : []
           : [];
@@ -202,7 +257,7 @@ export function gearOptions(
           ...((actor.stowed ?? []).includes(id) && wearable && !same
             ? [{ id: `equip:${id}`, label: `Equip ${item.name}` }]
             : []),
-          ...(worn.includes(id) && !found
+          ...(worn.includes(id) && !found && !boundTo(actor, id, access)
             ? [{ id: `stow:${id}`, label: `Stow ${item.name}` }]
             : []),
           ...attunement,
@@ -223,6 +278,9 @@ export function changed(
   const id = answer.slice(split + 1);
   const stowed = actor.stowed ?? [];
   const attuned = actor.attuned ?? [];
+  if ((verb === "stow" || verb === "unattune") && boundTo(actor, id, access)) {
+    throw new Error(`A curse holds ${id}`);
+  }
   switch (verb) {
     case "equip": {
       const { type } = itemOf(access, id);
@@ -236,16 +294,38 @@ export function changed(
     }
     case "stow":
       return { stowed: [...stowed, id], attuned };
-    case "attune":
-      if (attuned.length >= MAX_ATTUNED) {
-        throw new Error(`Already attuned to ${String(MAX_ATTUNED)} items`);
+    case "attune": {
+      const stats = deriveStats(actor, access);
+      const limit = attunementLimit(stats);
+      if (attuned.length >= limit) {
+        throw new Error(`Already attuned to ${String(limit)} items`);
+      }
+      if (!canAttune(actor, itemOf(access, id), stats)) {
+        throw new Error(`${id} won't take this attunement`);
       }
       return { stowed, attuned: [...attuned, id] };
+    }
     case "unattune":
       return { stowed, attuned: attuned.filter((item) => item !== id) };
     default:
       throw new Error(`Unknown gear choice ${answer}`);
   }
+}
+
+// The save attuning to an item calls for, as the Wand of Orcus's, read off the magic item a weapon is made from.
+export function attuneSaveFrames(
+  actor: Actor,
+  answer: string,
+  access: ContentAccess,
+): Frame[] {
+  if (!answer.startsWith("attune:")) return [];
+  const item = answer.slice("attune:".length);
+  const magic = ItemSchema.safeParse(
+    access.content(item.split("--")[0] ?? item),
+  ).data;
+  return magic?.type === "magicItem" && magic.attuneSave
+    ? [frame("attuneSave", { actor: actor.id, item })]
+    : [];
 }
 
 export function foundText(found: Loot, access: ContentAccess): string[] {
@@ -274,7 +354,7 @@ function runGearStep(
         actor: actor.id,
         prompt: found
           ? `Found: ${foundText(found, context).join(", ") || "nothing of value"}.`
-          : `Change your gear. You are attuned to ${String(attuned.length)} of ${String(MAX_ATTUNED)} items.`,
+          : `Change your gear. You are attuned to ${String(attuned.length)} of ${String(attunementLimit(deriveStats(actor, context)))} items.`,
         // "Done" comes last, which is also what the bot picks when it has no reason to change anything.
         options: [...options, { id: DONE, label: found ? "Carry on" : "Done" }],
         resume: frame("gearAnswer", { step, ...(found ? { found } : {}) }),
@@ -299,6 +379,7 @@ function runGearAnswer(
       }),
     ],
     frames: [
+      ...attuneSaveFrames(actor, answer, context),
       frame("gearStep", { step: step + 1, ...(found ? { found } : {}) }),
     ],
   };
@@ -370,17 +451,20 @@ export function sceneGearActions(
     }),
     ...[...new Set(actor.inventory)].flatMap((id) => {
       const item = itemOf(access, id);
-      return studyGain(actor, item) > 0
-        ? [
-            {
-              id: `study:${id}`,
-              label: `Study ${item.name}`,
-              effect: `${NS}:study`,
-              args: { item: id },
-              rest: true,
-            },
-          ]
-        : [];
+      if (item.type !== "magicItem" || !item.study) return [];
+      const { ability: printed } = item.study;
+      return (printed === "any" ? ABILITIES : [printed])
+        .filter((ability) => studyGain(actor, item, ability) > 0)
+        .map((ability) => ({
+          id: printed === "any" ? `study:${id}:${ability}` : `study:${id}`,
+          label:
+            printed === "any"
+              ? `Study ${item.name}: ${ABILITY_NAMES[ability]}`
+              : `Study ${item.name}`,
+          effect: `${NS}:study`,
+          args: { item: id, ...(printed === "any" ? { ability } : {}) },
+          rest: true,
+        }));
     }),
   ];
 }
@@ -565,36 +649,77 @@ const StoreSchema = z.object({
   slot: z.number().int().min(1).max(9),
 });
 
-// How much studying the item raises the character's own score, which may be nothing once at its maximum.
-function studyGain(actor: Actor, item: z.infer<typeof ItemSchema>): number {
+// How much studying the item raises the character's own score, which may be nothing once at its maximum, once
+// studied where it's studied once, or while not attuned to it where it needs Attunement.
+function studyGain(
+  actor: Actor,
+  item: z.infer<typeof ItemSchema>,
+  ability: Ability,
+): number {
   const build = effectiveBuild(actor);
   if (item.type !== "magicItem" || !item.study || !build) return 0;
-  const { ability, raise, max } = item.study;
+  const { raise, max, keep, passives } = item.study;
+  if ((keep || passives) && (actor.studied ?? []).includes(item.id)) return 0;
+  if (item.attunement && !(actor.attuned ?? []).includes(item.id)) return 0;
   const score = ownAbilities(actor, build)[ability];
   return Math.max(0, Math.min(raise, max - score));
 }
 
-// Studying a Manual or Tome: the score it raises, by as much as it rose, and the item, whose magic is spent.
-// shortcut: the 48 hours over six days pass with a rest, as attuning's hour does.
-function study(id: string, context: Context): SystemResult {
+// Studying a Manual or Tome: the score it raises, by as much as it rose, and the item, whose magic is spent, unless
+// it's kept. One that lowers another score lowers the reader's lowest other one, as far as it goes.
+// shortcut: the 48 hours over six days pass with a rest, as attuning's hour does, and so do a book's 80.
+function study(
+  id: string,
+  chosen: Ability | undefined,
+  context: Context,
+): SystemResult {
   const actor = player(context.state);
   const item = itemOf(context, id);
-  const amount = studyGain(actor, item);
-  if (item.type !== "magicItem" || !item.study || amount === 0) {
+  const build = effectiveBuild(actor);
+  if (item.type !== "magicItem" || !item.study || !build) {
+    throw new Error(`${actor.id} can't study ${id}`);
+  }
+  const ability = item.study.ability === "any" ? chosen : item.study.ability;
+  const amount = ability ? studyGain(actor, item, ability) : 0;
+  if (!ability || amount === 0) {
     throw new Error(`${actor.id} can't study ${id}`);
   }
   if (!actor.inventory.includes(id)) {
     throw new Error(`${actor.id} has no ${id} to study`);
   }
+  const { lower, keep, passives } = item.study;
+  const own = ownAbilities(actor, build);
+  const lowest = lower
+    ? ABILITIES.filter((other) => other !== ability).reduce((low, other) =>
+        own[other] < own[low] ? other : low,
+      )
+    : undefined;
+  const lowered =
+    lower && lowest ? Math.min(lower.amount, own[lowest] - lower.min) : 0;
   return {
     events: [
       dndEvent(`${NS}:abilityRaised`, {
         actor: actor.id,
-        ability: item.study.ability,
+        ability,
         amount,
         item: id,
       }),
-      dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: id }),
+      ...(lowest && lowered > 0
+        ? [
+            dndEvent(`${NS}:abilityRaised`, {
+              actor: actor.id,
+              ability: lowest,
+              amount: -lowered,
+              item: id,
+            }),
+          ]
+        : []),
+      ...(keep || passives
+        ? [dndEvent(`${NS}:itemStudied`, { actor: actor.id, item: id })]
+        : []),
+      ...(keep
+        ? []
+        : [dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: id })]),
     ],
   };
 }
@@ -632,6 +757,7 @@ export const gearEffects = {
             ...changed(actor, answer, context),
           }),
         ],
+        frames: attuneSaveFrames(actor, answer, context),
       };
     },
   }),
@@ -671,9 +797,10 @@ export const gearEffects = {
     apply: storeSpell,
   }),
   [`${NS}:study`]: storyEffect({
-    schema: z.object({ item: z.string() }),
+    schema: z.object({ item: z.string(), ability: AbilitySchema.optional() }),
     references: ({ item }) => [item],
-    apply: ({ item }, context: Context) => study(item, context),
+    apply: ({ item, ability }, context: Context) =>
+      study(item, ability, context),
   }),
   // `goldEach` is paid to every living party member, as "150 GP each", so the total follows the party's size then.
   [`${NS}:treasure`]: storyEffect({
