@@ -3530,6 +3530,7 @@ export function leafEvents(
       case "reactionMove":
       case "randomAction":
       case "rollTable":
+      case "escape":
       case "raiseCorpse":
       case "reduceDamage":
       case "acAgainstHit":
@@ -5131,6 +5132,10 @@ export function resolveAction(
               events.push(...rolled.events);
               frames.push(...rolled.frames);
             }
+          }
+          // Teleport's getaway: the fight ends as a flight, where the story lets the party flee.
+          if (effect.kind === "escape" && context.state.combat?.canFlee) {
+            frames.push(frame("escape", { actor: actor.id }));
           }
           if (effect.kind === "channel" && effect.pick) {
             const table = tableOf(effect.from, context);

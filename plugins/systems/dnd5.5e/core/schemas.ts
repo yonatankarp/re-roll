@@ -639,7 +639,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     noLethargy: z.literal(true).optional(),
   }),
   // Shut away where nothing reaches it and it reaches nothing, as in Otiluke's Resilient Sphere, a Forcecage box
-  // or Maze. With `escape` it can spend its action on that check to end the effect, as Maze's DC 20 Intelligence.
+  // or Maze, or on the Ethereal Plane with Etherealness. With `escape` it can spend its action on that check to end the effect, as Maze's DC 20 Intelligence.
   z.strictObject({
     kind: z.literal("sealed"),
     escape: z
@@ -652,6 +652,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     // it can teleport out after a save of this ability against its caster's spell save DC, as from a Forcecage
     teleportSave: AbilitySchema.optional(),
     rolls: z.literal(true).optional(), // it moves at half Speed, its prison with it, as Resilient Sphere's
+    // it spends an action to end the effect at will, as one on the Ethereal Plane with Etherealness comes back
+    leave: z.literal(true).optional(),
   }),
   // Shut in a cage that stops it walking out but lets sight, attacks and spells through its bars, as Forcecage's
   // cage, whose walls are its caster's zone. It can teleport out after this save against the caster's spell save DC.
@@ -881,6 +883,17 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // Each spell the bearer casts deals it `dice` Necrotic damage for each of the spell's levels, which nothing reduces,
   // as Wish's stress (combat/school.ts).
   z.strictObject({ kind: z.literal("castRecoil"), dice: DiceSchema }),
+  // A ward readied between a scene's choices, set off as the next fight there starts (combat/start.ts wardsSet): with
+  // `alert` the party isn't surprised, as with Alarm or a Faithful Hound; `activation` (an ActivationSchema, parsed as
+  // it's used) is resolved by the bearer at the first foe in the Initiative order, or at itself with `self` targeting,
+  // as a Glyph of Warding's explosion or a Magic Circle's zone. It lasts until the next scene (lingering 0).
+  z.strictObject({
+    kind: z.literal("prepared"),
+    alert: z.literal(true).optional(),
+    activation: z.unknown().optional(),
+  }),
+  // A shelter round the party, as Leomund's Tiny Hut: the harm the place does to a rest stays outside (environment.ts).
+  z.strictObject({ kind: z.literal("sheltered") }),
   // In a fury (passive `fury`): on its turns it attacks the nearest creature it reaches, friend or foe, or with `at`
   // that creature until either drops (combat/madness.ts).
   z.strictObject({ kind: z.literal("furious"), at: z.string().optional() }),
@@ -1038,6 +1051,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("retypeHit"),
     types: z.array(DamageTypeSchema).min(2),
   }),
+  // The party gets away from the fight, as with Teleport or Plane Shift, where the encounter can be fled; anywhere else
+  // it does nothing (combat/effects.ts, legendary.ts runEscape).
+  z.strictObject({ kind: z.literal("escape") }),
   // The oldest item the caster replicated vanishes, giving back a spell slot of level 1 for a Common item or 2 for
   // another, as Magic Item Tinker's Drain (combat/effects.ts).
   z.strictObject({ kind: z.literal("drainReplicated") }),

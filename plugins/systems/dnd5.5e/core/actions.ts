@@ -1194,6 +1194,12 @@ export function tacticOptions(
         label: `Try to escape (${ABILITY_NAMES[ability]}, ${capitalized(skill)}, DC ${String(dc)})`,
       });
     }
+    if (seal.modifier.kind === "sealed" && seal.modifier.leave) {
+      options.push({
+        id: encodeOption(BREAK_OUT, seal.casterId, seal.sourceId),
+        label: "Come back",
+      });
+    }
     return options;
   }
   // Everyone else's turns are played by tacticalPolicy, so they're offered only what it can pick, which also
@@ -1912,8 +1918,23 @@ export function runTactic(
       const seal = actor.activeEffects.find(
         (item) => item.sourceId === detail && item.casterId === targetId,
       );
-      if (seal?.modifier.kind !== "sealed" || !seal.modifier.escape) {
+      if (seal?.modifier.kind !== "sealed") {
         throw new Error(`${actor.id} isn't sealed away by ${targetId}`);
+      }
+      // Etherealness ends at will.
+      if (!seal.modifier.escape) {
+        if (!seal.modifier.leave) throw new Error(`${actor.id} can't leave`);
+        return {
+          events: [
+            spend("action"),
+            dndEvent(`${NS}:effectEnded`, {
+              actor: actor.id,
+              sourceId: seal.sourceId,
+              casterId: seal.casterId,
+            }),
+          ],
+          frames: done,
+        };
       }
       const { ability, dc, skill } = seal.modifier.escape;
       const rolled = abilityCheck(

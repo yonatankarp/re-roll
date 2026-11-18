@@ -365,6 +365,7 @@ export interface SceneAction {
 // fits what's here, as a spell that opens a lock where a check is about one.
 export interface SceneHere {
   readonly checks: readonly unknown[];
+  readonly fights?: boolean; // a choice open here starts a fight, so a ward readied now can go off in it
 }
 
 export interface SystemDefinition<S> {
