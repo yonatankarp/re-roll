@@ -35,6 +35,8 @@ import {
   rollDiceNotation,
 } from "./stats.ts";
 import { finalDamage } from "./rules.ts";
+import { speedsOf } from "./movement-modes.ts";
+import { UNDERWATER_PASSIVES } from "./combat/water.ts";
 import { carriedWeight } from "./carry.ts";
 import { SIZES, sizeOf } from "./combat/queries.ts";
 import { leafEvents, rollSave } from "./combat/effects.ts";
@@ -103,10 +105,13 @@ export function environmentPassives(
   access: ContentAccess,
 ): readonly Passive[] {
   const { state } = access as { state?: DndState };
-  return environmentIds(state, access).flatMap((id) => {
+  const placed = environmentIds(state, access).flatMap((id) => {
     const effect = effectOf(access, id);
     return effect.except?.includes(creatureType ?? "") ? [] : effect.passives;
   });
+  return state?.combat?.underwater
+    ? [...placed, ...UNDERWATER_PASSIVES]
+    : placed;
 }
 
 // What an encounter's effects make of its fight, merged, as it starts (combat/start.ts).
@@ -251,13 +256,9 @@ function exposureEvents(
   });
 }
 
-// A Swim Speed, which Deep Water's saves skip.
-// shortcut: only a stat block's is read, as a character's species Swim Speed isn't kept.
+// A Swim Speed, which Deep Water's saves skip: a stat block's, or one a trait, item or spell gives.
 function swims(actor: Actor, access: ContentAccess): boolean {
-  if (actor.source.kind !== "monster") return false;
-  const entry = access.content(actor.source.statBlockId) as
-    { speeds?: { swim?: number } } | undefined;
-  return (entry?.speeds?.swim ?? 0) > 0;
+  return speedsOf(actor, deriveStats(actor, access)).has("swim");
 }
 
 // Medium or Heavy armor worn, which some exposures' saves weigh.

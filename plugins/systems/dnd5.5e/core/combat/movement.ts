@@ -11,6 +11,7 @@ import {
   isDown,
   NS,
   frame,
+  turnId,
 } from "../state.ts";
 import {
   awaitDecision,
@@ -52,12 +53,13 @@ import {
   distanceFeet,
   parseSquare,
   rangeFeet,
+  reachableSquares,
   type Square,
   squareKey,
 } from "../grid.ts";
 import { seeing } from "../sight.ts";
 import { hasTactic } from "../tactics.ts";
-import { STAY } from "./ids.ts";
+import { ALL, FANCY_FOOTWORK, STAY } from "./ids.ts";
 import { grapplesOn } from "./grapple.ts";
 import { heightOf } from "./falling.ts";
 import { limitsOf } from "./durations.ts";
@@ -164,6 +166,11 @@ export function provokers(
       isDown(foe) ||
       sealed(foe) ||
       limitsOf(foe).noOpportunityAttacks === true || // Shocking Grasp
+      // Fancy Footwork: a creature the mover attacked in melee this turn
+      foe.activeEffects.some(
+        ({ sourceId, casterId }) =>
+          sourceId === FANCY_FOOTWORK && casterId === actor.id,
+      ) ||
       hasCondition(foe, ...INCAPACITATING) ||
       (disengaged && !hasPassive(deriveStats(foe, access), "sentinel"))
     ) {
@@ -284,7 +291,7 @@ function canOpportune(
   access: ContentAccess,
 ): boolean {
   if (foe.budget.reaction) return true;
-  const turn = state.combat?.order[state.combat.index];
+  const turn = turnId(state.combat);
   return (
     turn !== foe.id &&
     !foe.usedThisTurn.includes(vigilantKey(state)) &&
@@ -571,8 +578,224 @@ export function runFinishMove(
       }),
       ...fogBoundEvents(arrived, context),
       ...(fields ? placedEvents(applyDndEvent(context.state, moved)) : []),
+      ...carriedEvents(walker, { x: payload.x, y: payload.y }, context),
+      ...beenEvents(walker, { x: payload.x, y: payload.y }, context),
     ],
   };
+}
+
+// Open squares within `near` feet of `centre`, nearest first, that no one stands on and no wall fills.
+function besideSquares(
+  state: DndState,
+  centre: Square,
+  near: number,
+  taken: ReadonlySet<string>,
+): Square[] {
+  const grid = state.combat?.grid;
+  if (!grid) return [];
+  const blocked = blockingSet(state, "walking");
+  const squares: Square[] = [];
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      const square = { x, y };
+      const key = squareKey(square);
+      if (
+        !blocked.has(key) &&
+        !taken.has(key) &&
+        distanceFeet(square, centre) <= near
+      ) {
+        squares.push(square);
+      }
+    }
+  }
+  return squares.sort(
+    (a, b) => distanceFeet(a, centre) - distanceFeet(b, centre),
+  );
+}
+
+function occupiedKeys(state: DndState, except: readonly string[]): Set<string> {
+  return new Set(
+    Object.values(state.actors).flatMap((item) =>
+      item.position && !isDead(item) && !except.includes(item.id)
+        ? [squareKey(item.position)]
+        : [],
+    ),
+  );
+}
+
+const BEEN = "been:";
+
+// The squares it stood on this turn, for a teleport that only goes back to one.
+function retraced(actor: Actor): Square[] {
+  return actor.usedThisTurn
+    .flatMap((key) =>
+      key.startsWith(BEEN) ? [parseSquare(key.slice(BEEN.length))] : [],
+    )
+    .flatMap((square) => (square ? [square] : []));
+}
+
+// Boots of the Winding Path's wearer: each square it stands on this turn is kept, for the teleport back.
+function beenEvents(
+  walker: Actor,
+  to: Square,
+  context: Context,
+): SystemEvent[] {
+  const winding = deriveStats(walker, context).actions.some((action) => {
+    const { resolution } = action.activation;
+    return (
+      resolution.kind === "automatic" &&
+      resolution.effects.some(
+        (effect) => effect.kind === "teleport" && effect.retrace,
+      )
+    );
+  });
+  if (!winding) return [];
+  return [walker.position, to].flatMap((square) =>
+    square && !walker.usedThisTurn.includes(`${BEEN}${squareKey(square)}`)
+      ? [
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: walker.id,
+            key: `${BEEN}${squareKey(square)}`,
+          }),
+        ]
+      : [],
+  );
+}
+
+// Heightened Focus's Step of the Wind: the ally it carries lands beside it after each move, provoking nothing.
+function carriedEvents(
+  walker: Actor,
+  to: Square,
+  context: Context,
+): SystemEvent[] {
+  const { state } = context;
+  const events: SystemEvent[] = [];
+  const taken = occupiedKeys(state, [walker.id]);
+  taken.add(squareKey(to));
+  for (const { modifier } of walker.activeEffects) {
+    if (modifier.kind !== "carrying") continue;
+    const carried = state.actors[modifier.actor];
+    if (!carried?.position || isDown(carried)) continue;
+    if (distanceFeet(carried.position, to) <= 5) continue;
+    taken.delete(squareKey(carried.position));
+    const [square] = besideSquares(state, to, 5, taken);
+    if (!square) continue;
+    taken.add(squareKey(square));
+    events.push(
+      dndEvent(`${NS}:moved`, { actor: carried.id, to: square, feet: 0 }),
+    );
+  }
+  return events;
+}
+
+// Who may come along on a teleport: the action's own `bring`, or a rider's for its spell or feature.
+function bringRule(
+  actor: Actor,
+  actionId: string | undefined,
+  context: Context,
+): { count: number; within: number; near: number } | null {
+  if (!actionId) return null;
+  const stats = deriveStats(actor, context);
+  const action = stats.actions.find((item) => item.id === actionId);
+  const { resolution } = action?.activation ?? {};
+  const own =
+    resolution?.kind === "automatic"
+      ? resolution.effects.find((effect) => effect.kind === "teleport")?.bring
+      : undefined;
+  if (own) return own;
+  for (const passive of stats.passives) {
+    if (
+      passive.kind === "teleportRider" &&
+      passive.actions.some(
+        (id) =>
+          actionId === `spell:${id}` ||
+          actionId.startsWith(`spell:${id}:`) ||
+          actionId.startsWith(`feature:${id}:`),
+      )
+    ) {
+      return passive.bring;
+    }
+  }
+  return null;
+}
+
+const NO_ONE = "none";
+
+// After a teleport that may bring allies, the teleporter picks who comes: one of them for a single place, or everyone
+// in reach for more. "No one" is first, so the tactics bring none unless asked.
+function bringFrame(
+  actor: Actor,
+  from: Square,
+  to: Square,
+  rule: { count: number; within: number; near: number },
+  context: Context,
+): Frame | null {
+  const allies = Object.values(context.state.actors).filter(
+    (item) =>
+      item.id !== actor.id &&
+      item.side === actor.side &&
+      item.position !== null &&
+      !isDown(item) &&
+      !hasCondition(item, ...INCAPACITATING) &&
+      distanceFeet(item.position, from) <= rule.within,
+  );
+  if (allies.length === 0) return null;
+  const options =
+    rule.count === 1 || allies.length === 1
+      ? allies.map((item) => ({ id: item.id, label: `Bring ${item.name}` }))
+      : [
+          {
+            id: ALL,
+            label: `Bring up to ${String(rule.count)} allies near you`,
+          },
+        ];
+  return awaitDecision({
+    id: `${NS}:bring:${actor.id}:${String(actor.moved)}`,
+    actor: actor.id,
+    prompt: `Who comes along with ${actor.name}?`,
+    options: [{ id: NO_ONE, label: "No one" }, ...options],
+    resume: frame("bringAlong", {
+      actor: actor.id,
+      x: to.x,
+      y: to.y,
+      near: rule.near,
+      count: rule.count,
+      allies: allies.map((item) => item.id),
+    }),
+  });
+}
+
+export const BringAlongSchema = z.object({
+  actor: z.string(),
+  x: z.number(),
+  y: z.number(),
+  near: z.number(),
+  count: z.number(),
+  allies: z.array(z.string()),
+  answer: z.string(),
+});
+
+// The allies picked land on open squares within reach of the teleporter's new square, nearest first.
+export function runBringAlong(
+  payload: z.infer<typeof BringAlongSchema>,
+  context: Context,
+): SystemResult {
+  if (payload.answer === NO_ONE) return {};
+  const picked =
+    payload.answer === ALL
+      ? payload.allies.slice(0, payload.count)
+      : payload.allies.filter((id) => id === payload.answer);
+  const { state } = context;
+  const to = { x: payload.x, y: payload.y };
+  const taken = occupiedKeys(state, picked);
+  const events: SystemEvent[] = [];
+  for (const id of picked) {
+    const [square] = besideSquares(state, to, payload.near, taken);
+    if (!square) continue;
+    taken.add(squareKey(square));
+    events.push(dndEvent(`${NS}:moved`, { actor: id, to: square, feet: 0 }));
+  }
+  return { events };
 }
 
 // Where a teleport or a jump of `feet` can land: open squares on the map the actor can see, nearest a foe first.
@@ -584,6 +807,8 @@ export function teleportSquares(
   state: DndState,
   access: ContentAccess,
   near?: Near, // only squares this close to another creature, as Pursuit's
+  fly = false, // flown to round walls instead, as Tempestuous Magic's 10 feet
+  retrace = false, // only back to a square it stood on this turn, as Boots of the Winding Path's
 ): readonly Square[] {
   const close = near ? state.actors[near.actor]?.position : undefined;
   const grid = state.combat?.grid;
@@ -594,6 +819,28 @@ export function teleportSquares(
     actor.activeEffects.some(({ modifier }) => modifier.kind === "anchored")
   ) {
     return [];
+  }
+  // Boots of the Winding Path: only back to a square it stood on this turn.
+  if (retrace) {
+    const taken = occupiedKeys(state, [actor.id]);
+    return retraced(actor).filter(
+      (square) =>
+        !taken.has(squareKey(square)) &&
+        distanceFeet(square, from) <= feet &&
+        (square.x !== from.x || square.y !== from.y),
+    );
+  }
+  if (fly) {
+    const occupied = occupiedKeys(state, [actor.id]);
+    return reachableSquares(
+      from,
+      feet,
+      grid,
+      blockingSet(state, "walking"),
+      occupied,
+    )
+      .map(({ square }) => square)
+      .filter((square) => square.x !== from.x || square.y !== from.y);
   }
   if (movement > 0 && speedLeft(actor, deriveStats(actor, access)) < movement) {
     return [];
@@ -643,6 +890,8 @@ export function teleportFrame(
   provokes = true,
   near?: Near,
   actionId?: string, // the action it's part of, for what happens round it (aroundTeleport)
+  fly = false,
+  retrace = false,
 ): Frame {
   const squares = teleportSquares(
     actor,
@@ -651,6 +900,8 @@ export function teleportFrame(
     context.state,
     context,
     near,
+    fly,
+    retrace,
   );
   return awaitDecision({
     id: `${NS}:teleportTo:${actor.id}:${String(actor.moved)}`,
@@ -670,6 +921,8 @@ export function teleportFrame(
       ...(provokes ? {} : { provokes }),
       ...(near ? { near } : {}),
       ...(actionId ? { actionId } : {}),
+      ...(fly ? { fly } : {}),
+      ...(retrace ? { retrace } : {}),
     }),
   });
 }
@@ -724,6 +977,16 @@ function aroundTeleport(
       ...dealt,
       ...leafEvents(
         [
+          // Warping Implosion: pulled straight toward the space left.
+          ...(around.pull
+            ? [
+                {
+                  kind: "forcedMove" as const,
+                  feet: around.within,
+                  direction: "toward" as const,
+                },
+              ]
+            : []),
           ...around.conditions.map((condition) => ({
             kind: "applyCondition" as const,
             condition,
@@ -753,6 +1016,8 @@ export const TeleportSchema = z.object({
   provokes: z.boolean().optional(), // false for movement spent that provokes nothing, as Portal Step's
   near: NearSchema.optional(),
   actionId: z.string().optional(),
+  fly: z.boolean().optional(),
+  retrace: z.boolean().optional(),
   answer: z.string(),
 });
 
@@ -772,6 +1037,8 @@ export function runTeleport(
     state,
     context,
     payload.near,
+    payload.fly === true,
+    payload.retrace === true,
   );
   if (!open.some((square) => squareKey(square) === payload.answer)) {
     throw new Error(`${actor.name} can't land on ${payload.answer}`);
@@ -780,6 +1047,11 @@ export function runTeleport(
   const events: SystemEvent[] = [
     ...aroundTeleport(actor, payload.actionId, to, context),
   ];
+  const rule = bringRule(actor, payload.actionId, context);
+  const bring =
+    rule && actor.position
+      ? bringFrame(actor, actor.position, to, rule, context)
+      : null;
   const frames: Frame[] = [];
   for (const { foe, melee } of jump && payload.provokes !== false
     ? provokers(actor, to, state, context, [to])
@@ -798,6 +1070,7 @@ export function runTeleport(
         y: to.y,
         feet: payload.movement,
       }),
+      ...(bring ? [bring] : []),
       ...(actor.position
         ? [frame("afterMove", { actor: actor.id, ...actor.position })]
         : []),
@@ -811,6 +1084,10 @@ export const movementFrames = {
   [`${NS}:teleport`]: frameHandler({
     schema: TeleportSchema,
     run: runTeleport,
+  }),
+  [`${NS}:bringAlong`]: frameHandler({
+    schema: BringAlongSchema,
+    run: runBringAlong,
   }),
   [`${NS}:finishMove`]: frameHandler({
     schema: FinishMoveSchema,

@@ -38,6 +38,8 @@ import { fearFrames } from "./combat/fear.ts";
 import { environmentEffects } from "./environment.ts";
 import { sceneCheck } from "./explore.ts";
 import { optionFrames } from "./combat/options.ts";
+import { riderChoiceFrames } from "./combat/school.ts";
+import { redirectFrames } from "./combat/reactions.ts";
 import { wishFrames } from "./combat/wish.ts";
 import { reactionFrames } from "./combat/reactions.ts";
 import { turnFrames } from "./combat/turn.ts";
@@ -55,6 +57,7 @@ import {
   withTactics,
   attuneSaveHandlers,
   castCheckFrames,
+  hideFrames,
 } from "./actions.ts";
 import {
   parseClassesFromHtml,
@@ -539,6 +542,9 @@ export const dnd55e = defineSystem<DndState>({
     ...confusionFrames,
     ...fearFrames,
     ...optionFrames,
+    ...riderChoiceFrames,
+    ...redirectFrames,
+    ...hideFrames,
     ...wishFrames,
     ...reactionFrames,
     ...attackFrames,

@@ -4,7 +4,7 @@ import type { Actor } from "./state.ts";
 import type { Passive } from "./schemas.ts";
 import { passiveModifiers, type Stats } from "./stats.ts";
 
-export type Mode = "walk" | "fly" | "climb" | "burrow";
+export type Mode = "walk" | "fly" | "climb" | "burrow" | "swim";
 
 function modifiersOf(actor: Actor, stats: Stats) {
   return [
@@ -27,6 +27,25 @@ export function speedsOf(
     if (modifier.kind !== "movementMode") continue;
     const feet = modifier.feet ?? stats.speed * (modifier.times ?? 1);
     speeds.set(modifier.mode, Math.max(speeds.get(modifier.mode) ?? 0, feet));
+  }
+  // Earthbind: no Speed of that kind.
+  for (const modifier of modifiersOf(actor, stats)) {
+    if (modifier.kind !== "grounded") continue;
+    const feet = speeds.get(modifier.mode);
+    if (modifier.feet === undefined || feet === undefined) {
+      speeds.delete(modifier.mode);
+    } else speeds.set(modifier.mode, Math.min(feet, modifier.feet));
+  }
+  // A Speed bonus that goes to the other Speeds it has too, as Superior Mobility's, onto those of feet of their own.
+  for (const modifier of passiveModifiers(stats.passives)) {
+    if (modifier.kind !== "bonus" || modifier.to !== "speed") continue;
+    const amount = modifier.amount.bonus?.base ?? 0;
+    for (const mode of modifier.modes ?? []) {
+      const feet = speeds.get(mode);
+      if (feet !== undefined && feet !== stats.speed) {
+        speeds.set(mode, feet + amount);
+      }
+    }
   }
   return speeds;
 }
@@ -52,10 +71,23 @@ export function climbsCeilings(actor: Actor, stats: Stats): boolean {
   );
 }
 
-// Whether Difficult Terrain costs it nothing extra, as with Freedom of Movement.
-export function unhindered(actor: Actor, stats: Stats): boolean {
+// Whether Difficult Terrain costs it nothing extra, as with Freedom of Movement, and with `slipping` whether it can also
+// slip a grapple for 5 feet of movement.
+export function unhindered(
+  actor: Actor,
+  stats: Stats,
+  slipping = false,
+): boolean {
   return modifiersOf(actor, stats).some(
-    (modifier) => modifier.kind === "unhindered",
+    (modifier) =>
+      modifier.kind === "unhindered" && (!slipping || !modifier.terrainOnly),
+  );
+}
+
+// Whether it walks on water as on ground, as with Water Walk.
+export function walksOnWater(actor: Actor, stats: Stats): boolean {
+  return modifiersOf(actor, stats).some(
+    (modifier) => modifier.kind === "waterWalk",
   );
 }
 
@@ -66,15 +98,26 @@ export function bestSpeed(actor: Actor, stats: Stats): number {
 // A flyer goes over the ground, and a burrower under it. shortcut: the map has no heights, so a climber is taken to
 // go up and over what slows a walker too; give squares a height if a map needs climbing told apart.
 export function crossesDifficult(mode: Mode): boolean {
-  return mode !== "walk";
+  return mode !== "walk" && mode !== "swim";
 }
 
-export type Through = Omit<Extract<Passive, { kind: "moveThrough" }>, "kind">;
+export type Through = Omit<
+  Extract<Passive, { kind: "moveThrough" }>,
+  "kind" | "while"
+>;
 
-// Everything its traits let it move through, together.
-export function throughOf(stats: Stats): Through {
+// Everything its traits let it move through, together; one held to a feature's effect only while that's on it.
+export function throughOf(stats: Stats, actor?: Actor): Through {
   const all = stats.passives.flatMap((passive) =>
-    passive.kind === "moveThrough" ? [passive] : [],
+    passive.kind === "moveThrough" &&
+    (!passive.while ||
+      passive.while.some((id) =>
+        actor?.activeEffects.some(({ sourceId }) =>
+          sourceId.startsWith(`feature:${id}:`),
+        ),
+      ))
+      ? [passive]
+      : [],
   );
   const creatures = all.some((item) => item.creatures === "any")
     ? "any"

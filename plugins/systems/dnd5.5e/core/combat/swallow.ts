@@ -1,5 +1,12 @@
 import { type ContentAccess, type SystemEvent } from "#sdk";
-import { type Actor, dndEvent, type DndState, isDown, NS } from "../state.ts";
+import {
+  type Actor,
+  dndEvent,
+  type DndState,
+  isDown,
+  NS,
+  turnId,
+} from "../state.ts";
 import { lookup } from "../stats.ts";
 import { MonsterSchema } from "../schemas.ts";
 import { distanceFeet, nearestOpen, type Square, squareKey } from "../grid.ts";
@@ -118,8 +125,7 @@ function exitEvents(
   exit: number,
   state: DndState,
 ): SystemEvent[] {
-  const { order = [], index = 0 } = state.combat ?? {};
-  const own = order[index] === held.id;
+  const own = turnId(state.combat) === held.id;
   const at = to ?? held.position;
   if (own || exit === 0) {
     return at && (to || exit > 0)

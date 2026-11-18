@@ -42,6 +42,7 @@ import {
   isDead,
   isDown,
   frame,
+  turnId,
 } from "./state.ts";
 import { type KnownAction, deriveStats } from "./stats.ts";
 
@@ -128,9 +129,15 @@ const DISABLING: readonly string[] = [
   "restrained",
 ];
 
+// The conditions a save's failure applies, with "polymorph" for one that changes the target's shape, which
+// Transmuted Anatomy's Advantage looks for.
 export function conditionsApplied(effects: readonly LeafEffect[]): string[] {
   return effects.flatMap((effect) =>
-    effect.kind === "applyCondition" ? [effect.condition] : [],
+    effect.kind === "applyCondition"
+      ? [effect.condition]
+      : effect.kind === "polymorph"
+        ? ["polymorph"]
+        : [],
   );
 }
 
@@ -370,7 +377,7 @@ export function betweenTurns(
   const after = applyDndEvent(before, dndEvent(`${NS}:turnAdvanced`, {}));
   const { combat } = before;
   if (!combat) return [];
-  const ended = combat.order[combat.index];
+  const ended = turnId(combat);
   const legendary = combat.order.flatMap((id) => {
     const actor = before.actors[id];
     return id !== ended && canAct(actor) && legendOf(actor, access).legendary

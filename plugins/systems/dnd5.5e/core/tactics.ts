@@ -56,7 +56,7 @@ export function walkSpeed(actor: Actor, stats: Stats): number {
   const limited = limitsOf(actor).speed;
   // A Ring of Free Action keeps an effect from halving or stopping its Speed.
   const limit =
-    hasSteadySpeed(stats) && limited !== "double" ? undefined : limited;
+    hasSteadySpeed(stats, actor) && limited !== "double" ? undefined : limited;
   // Shut away, it goes nowhere, unless it rolls its prison along, as in Resilient Sphere, at half Speed.
   const seals = actor.activeEffects.flatMap(({ modifier }) =>
     modifier.kind === "sealed" ? [modifier] : [],
@@ -121,6 +121,28 @@ export function revealEvents(actor: Actor): SystemEvent[] {
         }),
       ]
     : [];
+}
+
+// Sneaky Casting: a spell cast or spell attack made from hiding keeps it hidden while it ends the turn behind
+// Three-Quarters or Total Cover (combat/turn.ts outOfCover); anything else gives it away.
+export function castRevealEvents(
+  actor: Actor,
+  spell: boolean,
+  passives: readonly { readonly kind: string }[],
+): SystemEvent[] {
+  if (
+    spell &&
+    hasTactic(actor, "hidden") &&
+    passives.some((passive) => passive.kind === "sneakyCasting")
+  ) {
+    return [
+      dndEvent(`${NS}:oncePerTurnUsed`, {
+        actor: actor.id,
+        key: STEALTH_ATTACK,
+      }),
+    ];
+  }
+  return revealEvents(actor);
 }
 
 export function weaponOf(

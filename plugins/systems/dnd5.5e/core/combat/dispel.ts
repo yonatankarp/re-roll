@@ -129,6 +129,11 @@ export function dispellable(
 }
 
 // Darkness dispels the light of a spell of level 2 or lower whose area overlaps it.
+const casterOf = (
+  context: { readonly state: DndState },
+  id: string,
+): Actor | undefined => context.state.actors[id];
+
 export function snuffedLights(
   at: Square,
   radius: number,
@@ -136,10 +141,17 @@ export function snuffedLights(
 ): SystemEvent[] {
   return Object.values(context.state.actors).flatMap((actor) =>
     actor.activeEffects.flatMap(({ modifier, sourceId, casterId, level }) =>
-      modifier.kind === "zone" &&
-      (modifier.zone === "light" || modifier.zone === "dim") &&
-      distanceFeet(modifier.at, at) <= modifier.radius + radius &&
-      (level ?? spellLevelOf(sourceId, actor, context) ?? 9) <= 2
+      ((modifier.kind === "zone" &&
+        (modifier.zone === "light" || modifier.zone === "dim") &&
+        distanceFeet(modifier.at, at) <=
+          modifier.radius + (modifier.dim ?? 0) + radius) ||
+        // the light a spell makes a creature shed, as Faerie Fire's
+        (modifier.kind === "sheds" &&
+          distanceFeet(actor.position, at) <=
+            modifier.feet + (modifier.dim ?? 0) + radius)) &&
+      (level ??
+        spellLevelOf(sourceId, casterOf(context, casterId), context) ??
+        9) <= 2
         ? [
             dndEvent(`${NS}:effectEnded`, {
               actor: actor.id,
