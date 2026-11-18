@@ -65,6 +65,7 @@ import {
   type Formula,
   ItemSchema,
   type LeafEffect,
+  LeafEffectSchema,
   type Modifier,
   MonsterSchema,
   type Passive,
@@ -184,6 +185,7 @@ import {
   areaPool,
   attackRoutine,
   type Context,
+  charmersOf,
   currentActor,
   enemies,
   exemptFrom,
@@ -749,6 +751,9 @@ function enduredEvents(
             (own.resources[trait.resource] ?? 0)) ||
         trait.except?.includes(hit.type) ||
         (trait.notCritical && hit.critical) ||
+        (trait.reaction && (!bearer.budget.reaction || isDown(bearer))) ||
+        (trait.within !== undefined &&
+          distanceFeet(bearer.position, target.position) > trait.within) ||
         (trait.while &&
           !bearer.activeEffects.some(({ sourceId }) =>
             trait.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
@@ -791,6 +796,14 @@ function enduredEvents(
                 resource: trait.resource,
               }),
             ]),
+        ...(trait.reaction
+          ? [
+              dndEvent(`${NS}:budgetSpent`, {
+                actor: bearer.id,
+                kind: "reaction",
+              }),
+            ]
+          : []),
         // For a reaction right after it, as Orcish Fury's attack (combat/reactions.ts).
         dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key: ENDURED }),
         ...(trait.burst
@@ -1816,6 +1829,13 @@ export function lingersFor(
 }
 
 // A timed spell's minutes, and a turn of the target's, are counted in rounds by its `lasts` (lastsFor).
+// A creature in no form, or in one this caster gave it, can take a new one, as using Wild Shape again.
+const ownForm = (target: Actor, caster: Actor): boolean =>
+  target.activeEffects.every(
+    ({ modifier, casterId }) =>
+      modifier.kind !== "form" || casterId === caster.id,
+  );
+
 export function effectEnds(
   duration: Duration,
 ): "concentration" | "casterNextTurn" | "casterNextTurnEnd" | "spellDuration" {
@@ -2621,6 +2641,7 @@ export function leafEvents(
                   : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
+              ...(effect.saveOnDamage && save ? { saveOnDamage: save } : {}),
               ...(effect.endsInLight ? { endsInLight: true as const } : {}),
               ...(effect.untilIncapacitated
                 ? { untilIncapacitated: true as const }
@@ -2646,11 +2667,16 @@ export function leafEvents(
             }),
           );
         }
-        if (effect.modifier.kind === "actionLimit") {
+        if (
+          effect.modifier.kind === "actionLimit" ||
+          effect.modifier.kind === "pacified"
+        ) {
           events.push(
             ...limitEvents(
               target,
-              effect.modifier,
+              effect.modifier.kind === "pacified"
+                ? { noActions: true, noReactions: true, speed: "none" }
+                : effect.modifier,
               currentActor(context.state)?.id === target.id,
             ),
           );
@@ -2799,6 +2825,7 @@ export function leafEvents(
         break;
       }
       case "removeCondition": {
+        if (effect.option) break; // given once its option is picked (combat/options.ts)
         const clung = clingSave(target, effect.condition, context);
         events.push(...clung.events);
         if (clung.held) break;
@@ -2918,6 +2945,7 @@ export function leafEvents(
               target,
               form,
               effectEnds(effect.duration),
+              context,
             ),
           );
         }
@@ -3235,7 +3263,11 @@ export function leafEvents(
           effect.clear
             ? target.exhaustion > 0
             : effect.levels &&
-              !hasPassive(deriveStats(target, context), "noExhaustion")
+              !hasPassive(deriveStats(target, context), "noExhaustion") &&
+              // Iron Body's living metal, while it lasts
+              !target.activeEffects.some(
+                ({ modifier }) => modifier.kind === "noExhaustion",
+              )
         ) {
           events.push(
             dndEvent(`${NS}:exhaustionChanged`, {
@@ -3267,6 +3299,8 @@ export function leafEvents(
         if (
           !isDead(target) &&
           target.hp <= effect.hpAtMost &&
+          (effect.chance === undefined ||
+            context.dice.roll(100) <= effect.chance) &&
           (!effect.creatureTypes ||
             exemptFrom(
               effect.creatureTypes,
@@ -3287,6 +3321,7 @@ export function leafEvents(
         }
         break;
       case "drop":
+        if (effect.option) break; // given once its option is picked (combat/options.ts)
         events.push(...dropEvents(target, context));
         break;
       case "sendAway":
@@ -3357,6 +3392,127 @@ export function leafEvents(
             .filter((hit) => hit.amount !== 0);
           if (hits.length === 0) continue;
           events.push(...dealEvents(foe, hits, false, context, caster).events);
+        }
+        break;
+      }
+      case "choose": {
+        // Alter Self's options: the player picks; a companion or monster takes the first, which for a foe is the one
+        // meant for foes, as Enlarge/Reduce's Reduce.
+        const foe = target.side !== caster.side;
+        const ordered = [
+          ...effect.options.filter((item) => item.foe === true && foe),
+          ...effect.options.filter((item) => !(item.foe === true && foe)),
+        ];
+        const answer =
+          caster.id === PLAYER_ACTOR && context.ask
+            ? context.ask({
+                id: `${NS}:choose:${target.id}:${sourceId}`,
+                actor: caster.id,
+                prompt:
+                  target.id === caster.id
+                    ? "Which do you choose?"
+                    : `Which do you choose for ${target.name}?`,
+                options: ordered.map(({ name }, index) => ({
+                  id: String(index),
+                  label: name,
+                })),
+              })
+            : "0";
+        const option = ordered[Number(answer)] ?? ordered[0];
+        events.push(
+          ...leafEvents(
+            [
+              ...(option?.modifiers ?? []).map((modifier) =>
+                LeafEffectSchema.parse({
+                  kind: "modifier",
+                  modifier,
+                  duration: effect.duration,
+                }),
+              ),
+              ...(option?.tempHp
+                ? [{ kind: "tempHp" as const, amount: option.tempHp }]
+                : []),
+            ],
+            sourceId,
+            caster,
+            target,
+            context,
+            save,
+            slotLevel,
+          ),
+        );
+        break;
+      }
+      case "becomeMonster": {
+        if (isDead(target)) break;
+        const before = effect.counter
+          ? (target.resourcesSpent[effect.counter] ?? 0)
+          : 0;
+        if (effect.counter) {
+          events.push(
+            dndEvent(`${NS}:resourceSpent`, {
+              actor: target.id,
+              resource: effect.counter,
+            }),
+          );
+        }
+        if (
+          effect.chance !== undefined &&
+          context.dice.roll(100) > effect.chance * (before + 1)
+        ) {
+          break;
+        }
+        // shortcut: with the monster's book not loaded, nothing happens.
+        const monster = MonsterSchema.safeParse(
+          context.content(effect.monster),
+        ).data;
+        if (!monster) break;
+        events.push(
+          dndEvent(`${NS}:damaged`, {
+            actor: target.id,
+            amount: Math.max(0, target.hp) + target.tempHp,
+            type: "psychic",
+            critical: false,
+            massive: true,
+          }),
+          { kind: "actorDefeated", actor: target.id },
+          dndEvent(`${NS}:summoned`, {
+            actor: {
+              ...freshActor({
+                id: `${target.id}:lost`,
+                name: monster.name,
+                side: target.side === "party" ? "enemy" : "party",
+                source: { kind: "monster", statBlockId: effect.monster },
+                hp: monster.hp,
+                inventory: [],
+              }),
+              ...(target.position ? { position: target.position } : {}),
+            },
+            after: target.id,
+          }),
+        );
+        break;
+      }
+      case "endOwn": {
+        // Leaving Wild Shape, or a Starry Form giving way to another: what those activations put on the target.
+        const ended = new Set<string>();
+        for (const own of target.activeEffects) {
+          const key = `${own.sourceId}|${own.casterId}`;
+          if (
+            !ended.has(key) &&
+            effect.features.some((id) =>
+              own.sourceId.startsWith(`feature:${id}:`),
+            )
+          ) {
+            ended.add(key);
+            events.push(
+              dndEvent(`${NS}:effectEnded`, {
+                actor: target.id,
+                sourceId: own.sourceId,
+                casterId: own.casterId,
+              }),
+            );
+          }
         }
         break;
       }
@@ -4171,7 +4327,10 @@ export function rollSave(
   // Trance of Order: a d20 of 9 or lower counts as 10.
   const roll = {
     ...rolled0,
-    natural: Math.max(rolled0.natural, d20Floor(target, stats)),
+    natural: Math.max(
+      rolled0.natural,
+      d20Floor(target, stats, conditions.includes("concentration")),
+    ),
   };
   const base =
     saveBonus(stats, ability) +
@@ -4517,6 +4676,7 @@ export function resolveAction(
           effect.kind === "applyCondition" ||
           effect.kind === "zone" ||
           effect.kind === "polymorph" ||
+          effect.kind === "choose" ||
           effect.kind === "summon") &&
         typeof effect.duration === "object" &&
         "concentration" in effect.duration,
@@ -4909,7 +5069,7 @@ export function resolveAction(
           const choice =
             effect.kind === "polymorph" &&
             target.side === actor.side &&
-            formOf(target) === null
+            ownForm(target, actor)
               ? formFrame(
                   effect,
                   spellSource(action),
@@ -5116,7 +5276,8 @@ export function resolveAction(
             sizeOf(target, context) >= SIZES.indexOf(edge.minSize)) &&
           (!edge.maxScore ||
             met.abilities[edge.maxScore.ability] <= edge.maxScore.score) &&
-          (!edge.immuneTo || immuneToCondition(met, edge.immuneTo))
+          (!edge.immuneTo || immuneToCondition(met, edge.immuneTo)) &&
+          (!edge.charmedByCaster || charmersOf(target).has(actor.id))
             ? [edge.roll]
             : [],
         );
@@ -5125,7 +5286,9 @@ export function resolveAction(
         // shortcut: cover counts from the caster, even for a sphere whose centre is elsewhere.
         const { saved: rolledSave, events: saveEvents } = spared.has(target.id)
           ? { saved: true, events: [] }
-          : edges.includes("succeed") || edges.includes("fail")
+          : edges.includes("succeed") ||
+              edges.includes("fail") ||
+              (resolution.willing && target.side === actor.side)
             ? { saved: edges.includes("succeed"), events: [] }
             : rollSave(
                 target,
@@ -5283,6 +5446,23 @@ export function resolveAction(
           if (now && distanceFeet(actor.position, now.position) <= within) {
             applyRolled(target, damage(target), scaled);
           }
+        }
+        // A willing ally of Polymorph's that fails it by choice: the caster picks its form.
+        for (const effect of turned || saved ? [] : resolution.onFail) {
+          const choice =
+            effect.kind === "polymorph" &&
+            target.side === actor.side &&
+            ownForm(target, actor)
+              ? formFrame(
+                  effect,
+                  spellSource(action),
+                  actor,
+                  target,
+                  effectEnds(effect.duration),
+                  context,
+                )
+              : null;
+          if (choice) frames.push(choice);
         }
         // Detonate: an explosion round the target once its own save is done (combat/spell-riders.ts).
         if (resolution.burst) {

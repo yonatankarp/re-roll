@@ -72,6 +72,7 @@ import {
   type Context,
   currentActor,
   hasPassive,
+  pacified,
 } from "./queries.ts";
 import {
   burstEvents,
@@ -181,15 +182,22 @@ function fightOver(context: Context): SystemResult {
   const { state } = context;
   if (!state.combat) return {};
   const fighters = state.combat.order.map((id) => actorOf(state, id));
+  // A foe under the party's control counts as beaten, and a friend under a foe's still fights for the party, its
+  // control able to end.
+  const ownSide = (actor: Actor): Actor["side"] => actor.ownSide ?? actor.side;
   // A foe shut away for longer than a stand-off takes counts as beaten, so a fight never waits out a Maze or a
   // Forcecage; a shorter prison, as Resilient Sphere's minute, is waited out.
   const enemyStanding = fighters.some(
     (actor) =>
-      actor.side === "enemy" && !isDown(actor) && !shutAway(actor, state),
+      actor.side === "enemy" &&
+      ownSide(actor) === "enemy" &&
+      !isDown(actor) &&
+      !pacified(actor) &&
+      !shutAway(actor, state),
   );
   const partyFree = fighters.some(
     (actor) =>
-      actor.side === "party" && !isDown(actor) && !shutAway(actor, state),
+      ownSide(actor) === "party" && !isDown(actor) && !shutAway(actor, state),
   );
   // With the whole party shut away, its foes wait it out: the time passes, and what holds them ends.
   if (!partyFree && enemyStanding) {
@@ -213,7 +221,9 @@ function fightOver(context: Context): SystemResult {
   // A familiar can't fight on alone.
   const partyStanding = fighters.some(
     (actor) =>
-      actor.side === "party" && !isDown(actor) && familiarOwner(actor) === null,
+      ownSide(actor) === "party" &&
+      !isDown(actor) &&
+      familiarOwner(actor) === null,
   );
   // The story follows the player's character, so their death ends the run even if companions win.
   const playerDead = isDead(actorOf(state, PLAYER_ACTOR));
@@ -298,7 +308,16 @@ export function runLingeringTick(
       modifier.when === payload.when,
   );
   if (effect?.modifier.kind !== "lingeringDamage" || isDead(target)) return {};
-  const { damage, save, once } = effect.modifier;
+  const { damage, save, once, near } = effect.modifier;
+  if (
+    near !== undefined &&
+    distanceFeet(
+      target.position,
+      state.actors[effect.casterId]?.position ?? null,
+    ) > near
+  ) {
+    return {};
+  }
   const stats = deriveStats(state.actors[effect.casterId] ?? target, context);
   const { saved, events: rolled } = save
     ? rollSave(

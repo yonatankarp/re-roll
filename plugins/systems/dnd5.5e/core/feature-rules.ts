@@ -104,39 +104,6 @@ const RULES: Readonly<Record<string, Rules>> = {
       },
     ],
   },
-  // shortcut: no beast form, only the Temporary Hit Points.
-  "phb:feature/druid-wild-shape": {
-    automation: "partial",
-    resources: [
-      {
-        id: "wild-shape",
-        max: { base: 0, ...scaling("wildShape") },
-        recharge: [
-          { on: "shortRest", amount: 1 },
-          { on: "longRest", amount: "all" },
-        ],
-      },
-    ],
-    activations: [
-      {
-        cost: ["bonusAction", { resource: "wild-shape" }],
-        targeting: selfOnly,
-        resolution: {
-          kind: "automatic",
-          effects: [
-            {
-              kind: "tempHp",
-              amount: {
-                bonus: {
-                  add: [{ kind: "classLevel", class: "phb:class/druid" }],
-                },
-              },
-            },
-          ],
-        },
-      },
-    ],
-  },
   "phb:feature/fighter-champion-improved-critical": improvedCritical(19),
   "phb:feature/fighter-champion-superior-critical": improvedCritical(18),
   "srd52:feature/improved-critical": improvedCritical(19),

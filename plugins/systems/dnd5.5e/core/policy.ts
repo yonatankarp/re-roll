@@ -632,6 +632,7 @@ export function choosePolicy(decision: Decision, context: Context): string {
   if (decision.id.startsWith(`${NS}:inspiration:`)) return first.id;
   if (decision.id.startsWith(`${NS}:deathSave:`)) return first.id;
   if (decision.id.startsWith(`${NS}:form:`)) return first.id; // the strongest form
+  if (decision.id.startsWith(`${NS}:choose:`)) return first.id; // a transformation's first option
   if (decision.id.startsWith(`${NS}:wish:`)) return first.id; // the highest level
   if (decision.id.startsWith(`${NS}:tablePick:`)) return first.id; // a row not harmful, listed first
   if (decision.id.startsWith(`${NS}:shape:`)) return first.id; // as written, as Forcecage's box
@@ -643,7 +644,14 @@ export function choosePolicy(decision: Decision, context: Context): string {
       ? first.id
       : (decision.options.find(({ id }) => id === "sap") ?? first).id;
   }
-  if (decision.id.startsWith(`${NS}:option:`)) return first.id; // as listed, the strongest first
+  // As listed, the strongest first, and the last, the kindest, for a friend, as Calm Emotions' calm.
+  if (decision.id.startsWith(`${NS}:option:`)) {
+    const target = state.actors[decision.id.slice(`${NS}:option:`.length)];
+    const caster = state.actors[decision.actor];
+    return caster !== undefined && target?.side === caster.side
+      ? (decision.options.at(-1) ?? first).id
+      : first.id;
+  }
   if (decision.id.startsWith(`${NS}:damageType:`)) {
     return damageTypePolicy(decision, context);
   }

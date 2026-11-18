@@ -33,7 +33,9 @@ import { type Context, currentActor, moveSquares } from "./queries.ts";
 
 export const fleeingFrom = (actor: Actor): ActiveEffect | undefined =>
   actor.activeEffects.find(
-    (effect) => effect.flee && effect.modifier.kind === "condition",
+    (effect) =>
+      (effect.flee !== undefined && effect.modifier.kind === "condition") ||
+      effect.modifier.kind === "compelled",
   );
 
 // Whether `viewer` can't see `target`: Blinded, behind total cover, or in darkness or a zone it can't see into.
@@ -57,7 +59,8 @@ const ended = (actor: Actor, effect: ActiveEffect): SystemEvent =>
   });
 
 // As its turn starts a fleeing creature takes the Dash action, when it can act, and spends its movement getting as far
-// from the caster as it can. Turn Undead's ends first if its caster is Incapacitated or dead.
+// from the caster as it can. Turn Undead's ends first if its caster is Incapacitated or dead. A compelled one
+// (Modifier `compelled`) Dashes only with `dash`, and may go toward the caster instead.
 // shortcut: the flight provokes no Opportunity Attacks, as a push doesn't, and goes to the farthest square it can walk
 // to rather than by the safest route. One with nowhere to go takes no Dodge, as Arcane Abjuration's would, and Turn
 // Undead's end with its caster down is checked only as the turned creature's turn starts.
@@ -75,8 +78,14 @@ export function runFleeTurn(context: Context): SystemResult {
   ) {
     return effect.flee?.casterDown ? { events: [ended(actor, effect)] } : {};
   }
+  const compelled =
+    effect.modifier.kind === "compelled" ? effect.modifier : undefined;
   const events: SystemEvent[] = [];
-  if (actor.budget.action && !hasCondition(actor, ...INCAPACITATING)) {
+  if (
+    (!compelled || compelled.dash) &&
+    actor.budget.action &&
+    !hasCondition(actor, ...INCAPACITATING)
+  ) {
     events.push(
       dndEvent(`${NS}:budgetSpent`, { actor: actor.id, kind: "action" }),
       dndEvent(`${NS}:effectAdded`, {
@@ -96,12 +105,14 @@ export function runFleeTurn(context: Context): SystemResult {
   }
   const after = events.reduce(applyDndEvent, state);
   const moving = after.actors[actor.id] ?? actor;
+  // How far it wants to be from the caster: the farther the better, or the nearer going toward it.
   const away = (square: { x: number; y: number } | null): number =>
-    distanceFeet(caster.position, square);
+    distanceFeet(caster.position, square) * (compelled?.toward ? -1 : 1);
   const [farthest] = [
     ...moveSquares(moving, after, deriveStats(moving, context), context),
   ].sort((a, b) => away(b.square) - away(a.square) || a.feet - b.feet);
-  if (farthest && away(farthest.square) > away(actor.position)) {
+  const moved = farthest && away(farthest.square) > away(actor.position);
+  if (moved) {
     events.push(
       dndEvent(`${NS}:moved`, {
         actor: actor.id,
@@ -110,8 +121,46 @@ export function runFleeTurn(context: Context): SystemResult {
       }),
     );
   }
+  const at = moved ? farthest.square : actor.position;
+  if (
+    compelled?.endsTurn &&
+    (!compelled.toward || distanceFeet(caster.position, at) <= 5)
+  ) {
+    events.push(
+      ...turnOver(
+        events.reduce(applyDndEvent, state).actors[actor.id] ?? actor,
+      ),
+    );
+  }
   return { events };
 }
+
+// Nothing more this turn: no action, Bonus Action or movement left, as Command's Grovel ends the turn.
+function turnOver(actor: Actor): SystemEvent[] {
+  return [
+    ...(actor.budget.action
+      ? [dndEvent(`${NS}:budgetSpent`, { actor: actor.id, kind: "action" })]
+      : []),
+    ...(actor.budget.bonusAction
+      ? [
+          dndEvent(`${NS}:budgetSpent`, {
+            actor: actor.id,
+            kind: "bonusAction",
+          }),
+        ]
+      : []),
+    dndEvent(`${NS}:effectAdded`, {
+      actor: actor.id,
+      effect: {
+        sourceId: COMPELLED,
+        casterId: actor.id,
+        modifier: { kind: "actionLimit", noActions: true, speed: "none" },
+        ends: "casterTurnEnd",
+      },
+    }),
+  ];
+}
+const COMPELLED = "compelled";
 
 // Whether a fleeing creature's repeat save is made as this turn ends: Fear's only out of the caster's sight.
 export function repeatsNow(

@@ -8,7 +8,7 @@ import {
   encumbrance,
 } from "./carry.ts";
 import { ENCUMBRANCE, variantOn } from "./variant-rules.ts";
-import { pactWeaponId } from "./combat/queries.ts";
+import { hasAspect, pactWeaponId } from "./combat/queries.ts";
 import {
   type Actor,
   type DndState,
@@ -18,7 +18,13 @@ import {
   turnId,
 } from "./state.ts";
 import { lightAt } from "./sight.ts";
-import { currentShape, formKept, formOf, usableIn } from "./forms.ts";
+import {
+  currentShape,
+  formKept,
+  formModifier,
+  formOf,
+  usableIn,
+} from "./forms.ts";
 import {
   ALL_SKILLS,
   type Item,
@@ -740,6 +746,18 @@ function itemCasts(
               : `${spell.name}, level ${String(at)} (${item.name})`,
           activation: {
             ...numbered,
+            ...(cast.doom
+              ? {
+                  userEffects: [
+                    ...(numbered.userEffects ?? []),
+                    {
+                      kind: "slay" as const,
+                      hpAtMost: Number.MAX_SAFE_INTEGER,
+                      chance: cast.doom,
+                    },
+                  ],
+                }
+              : {}),
             cost: [
               ...activation.cost
                 .map((cost) =>
@@ -2512,6 +2530,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           sourceId.startsWith(`feature:${id}:`),
         ),
       )) &&
+    (passive.kind !== "modifier" ||
+      !passive.whileAspect ||
+      hasAspect(actor, passive.whileAspect)) &&
     ((passive.kind !== "modifier" && passive.kind !== "weaponRider") ||
       passive.armor === undefined ||
       (passive.armor === "noHeavy" ? !heavy : !armored));
@@ -2526,7 +2547,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         !passive.while ||
         actor.activeEffects.some(({ sourceId }) =>
           passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
-        )),
+        )) &&
+      (passive.kind !== "aura" ||
+        !passive.whileAspect ||
+        hasAspect(actor, passive.whileAspect)) &&
+      (passive.kind !== "aura" ||
+        !passive.without?.some((id) => featureIds.has(id))),
   );
   const castingAbility = new Map([
     ...answerAbilities,
@@ -3749,6 +3775,43 @@ export function immuneToCondition(stats: Stats, condition: Condition): boolean {
   );
 }
 
+// What a form that keeps the bearer's features takes from it, as Wild Shape's: its class features, feats and
+// resources, its skill and save proficiencies with the better Proficiency Bonus, and its own level for formulas.
+// shortcut: species traits are kept too, and passives baked into the bearer's own AC and Speed don't carry over.
+function keptFeatures(
+  own: Stats,
+  shaped: Stats,
+  actor: Actor,
+  access: ContentAccess,
+  acFloor?: number,
+) {
+  return {
+    ac: Math.max(shaped.ac, acFloor ?? 0),
+    proficiency: Math.max(shaped.proficiency, own.proficiency),
+    level: own.level,
+    classLevels: own.classLevels,
+    scaling: own.scaling,
+    features: own.features,
+    savingThrows: [...new Set([...shaped.savingThrows, ...own.savingThrows])],
+    skills: [...new Set([...shaped.skills, ...own.skills])],
+    expertise: own.expertise,
+    resources: { ...shaped.resources, ...own.resources },
+    resourceDefs: [...shaped.resourceDefs, ...own.resourceDefs],
+    passives: [...shaped.passives, ...own.passives],
+    // the form's attacks take the bearer's riders, as Improved Circle Forms' Radiant
+    actions: [
+      ...withWeaponRiders(
+        shaped.actions,
+        own.passives,
+        actor,
+        access,
+        shaped.abilities,
+      ),
+      ...own.actions.filter(({ id }) => id.startsWith("feature:")),
+    ],
+  };
+}
+
 export function deriveStats(actor: Actor, access: ContentAccess): Stats {
   const own =
     actor.source.kind === "monster"
@@ -3759,7 +3822,12 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
   // A form's stat block replaces the creature's own, but it keeps its creature type and Hit Point maximum, and with
   // Shapechange its Intelligence, Wisdom and Charisma and its spellcasting.
   const form = formOf(actor);
-  const keep = formKept(actor);
+  const kept = formKept(actor);
+  // Beast Spells: spells cast in a form that keeps the bearer's features, of these schools when it names them.
+  const formSpells = kept.includes("features")
+    ? own.passives.find((passive) => passive.kind === "formSpells")
+    : undefined;
+  const keep = formSpells ? [...kept, "spells" as const] : kept;
   const shaped = form
     ? monsterStats(
         { ...actor, source: { kind: "monster", statBlockId: form } },
@@ -3781,17 +3849,36 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
               },
             }
           : {}),
+        ...(keep.includes("features")
+          ? keptFeatures(own, shaped, actor, access, formModifier(actor)?.ac)
+          : {}),
         ...(keep.includes("spells")
           ? {
               actions: [
-                ...shaped.actions,
-                ...own.actions.filter(({ spellLevel }) => spellLevel !== null),
+                ...(keep.includes("features")
+                  ? keptFeatures(own, shaped, actor, access).actions
+                  : shaped.actions),
+                ...own.actions.filter(
+                  ({ id, spellLevel }) =>
+                    spellLevel !== null &&
+                    (formSpells?.kind !== "formSpells" ||
+                      !formSpells.school ||
+                      formSpells.school.some(
+                        (school) =>
+                          SpellSchema.safeParse(
+                            access.content(spellOfSource(id) ?? ""),
+                          ).data?.school === school,
+                      )),
+                ),
               ],
               spellAbility: own.spellAbility,
               slots: own.slots,
               pactMagic: own.pactMagic,
               proficiency: Math.max(shaped.proficiency, own.proficiency),
             }
+          : {}),
+        ...(formModifier(actor)?.ac !== undefined && !keep.includes("features")
+          ? { ac: Math.max(shaped.ac, formModifier(actor)?.ac ?? 0) }
           : {}),
       }
     : own;
@@ -4960,4 +5047,23 @@ export function damageResponses(
     passive.kind === "absorb" ? passive.damage : [],
   );
   return { adjustments: [], resistances, vulnerabilities, immunities, absorbs };
+}
+
+// Profane Casting: a spell of these schools the bearer casts without its components.
+export function bareSpell(
+  actor: Actor,
+  school: string,
+  access: ContentAccess,
+): boolean {
+  return deriveStats(actor, access).passives.some(
+    (passive) =>
+      passive.kind === "noComponents" &&
+      passive.school.some((item) => item === school) &&
+      (!passive.while ||
+        passive.while.some((id) =>
+          actor.activeEffects.some(({ sourceId }) =>
+            sourceId.startsWith(`feature:${id}:`),
+          ),
+        )),
+  );
 }

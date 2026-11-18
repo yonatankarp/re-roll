@@ -11,15 +11,17 @@ import {
   type ActiveEffect,
   type Actor,
   dndEvent,
-  type DndState,
   frame,
   NS,
 } from "../state.ts";
 import { formsFor, type Polymorph } from "../forms.ts";
+import { deriveStats, evaluateFormula, rollAmount } from "../stats.ts";
+import type { Context } from "./queries.ts";
 
 // Polymorph's family on the grid: the form a caster chooses for itself or an ally, and the events that give it.
 
-// The form's effect and its Temporary Hit Points; a creature that can't cast in it stops concentrating.
+// The form's effect and its Temporary Hit Points; a creature that can't cast in it stops concentrating, unless
+// the form keeps its features, as Wild Shape doesn't break Concentration.
 export function formEvents(
   effect: Polymorph,
   sourceId: string,
@@ -27,28 +29,55 @@ export function formEvents(
   target: Actor,
   form: { readonly id: string; readonly hp: number },
   ends: ActiveEffect["ends"],
+  context: Context,
 ): SystemEvent[] {
+  const stats = deriveStats(caster, context);
+  const ac = effect.acFloor && evaluateFormula(effect.acFloor, stats);
+  // A new shape replaces the one it's in, as using Wild Shape again or Shapechange's Magic action.
+  const old = target.activeEffects.find(
+    ({ modifier }) => modifier.kind === "form",
+  );
+  // Reshaping a form the caster gave keeps what it hangs on, as Shapechange's Magic action keeps its Concentration.
+  const kept = old?.casterId === caster.id ? old : undefined;
   const events = [
+    ...(old
+      ? [
+          dndEvent(`${NS}:effectEnded`, {
+            actor: target.id,
+            sourceId: old.sourceId,
+            casterId: old.casterId,
+          }),
+        ]
+      : []),
     dndEvent(`${NS}:effectAdded`, {
       actor: target.id,
       effect: {
-        sourceId,
+        sourceId: kept?.sourceId ?? sourceId,
         casterId: caster.id,
         modifier: {
           kind: "form",
           monster: form.id,
           ...(effect.keep ? { keep: effect.keep } : {}),
+          ...(ac ? { ac } : {}),
+          ...(effect.lasting ? { lasting: true } : {}),
         },
-        ends,
+        ends: kept?.ends ?? ends,
+        ...(kept?.lasts ? { lasts: kept.lasts } : {}),
+        ...(effect.untilIncapacitated ? { untilIncapacitated: true } : {}),
       },
     }),
   ];
-  if (effect.tempHp) {
-    events.push(
-      dndEvent(`${NS}:tempHpGained`, { actor: target.id, amount: form.hp }),
-    );
+  const amount = effect.tempHpAmount
+    ? rollAmount(effect.tempHpAmount, stats, context.dice)
+    : form.hp + (effect.tempHpPlus ?? 0);
+  if (effect.tempHp && amount > 0) {
+    events.push(dndEvent(`${NS}:tempHpGained`, { actor: target.id, amount }));
   }
-  if (target.concentratingOn !== null && !effect.keep?.includes("spells")) {
+  if (
+    target.concentratingOn !== null &&
+    !effect.keep?.includes("spells") &&
+    !effect.keep?.includes("features")
+  ) {
     events.push(dndEvent(`${NS}:concentrationEnded`, { actor: target.id }));
   }
   return events;
@@ -108,7 +137,7 @@ const ChooseFormSchema = z.object({
 export const formFrames = {
   [`${NS}:chooseForm`]: frameHandler({
     schema: ChooseFormSchema,
-    run: (payload, context: ContentAccess & { readonly state: DndState }) => {
+    run: (payload, context: Context) => {
       const { effect } = payload;
       const caster = context.state.actors[payload.caster];
       const target = context.state.actors[payload.target];
@@ -126,6 +155,7 @@ export const formFrames = {
           target,
           form,
           payload.ends,
+          context,
         ),
       };
     },

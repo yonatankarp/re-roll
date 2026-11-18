@@ -1,6 +1,6 @@
 import type { ContentAccess, Dice, SystemEvent } from "#sdk";
 import type { Duration, Modifier } from "../schemas.ts";
-import { deriveStats, type KnownAction } from "../stats.ts";
+import { bareSpell, deriveStats, type KnownAction } from "../stats.ts";
 import { spellOf } from "./dispel.ts";
 import {
   type ActiveEffect,
@@ -105,6 +105,9 @@ export function limitsOf(actor: Actor): Omit<Limit, "kind"> {
   let limit: Omit<Limit, "kind"> = {};
   for (const { modifier } of actor.activeEffects) {
     if (modifier.kind === "actionLimit") limit = { ...limit, ...modifier };
+    if (modifier.kind === "pacified") {
+      limit = { ...limit, noActions: true, noReactions: true, speed: "none" };
+    }
   }
   return limit;
 }
@@ -231,6 +234,7 @@ export function spellFumble(
   if (spellFailure === undefined) return null;
   const spell = spellOf(action.id, actor, context);
   if (!spell || !/\bS\b/.test(spell.components)) return null;
+  if (bareSpell(actor, spell.school, context)) return null;
   // A Spell Duelist's Trophy lets a spell cast with a slot go without its gestures.
   if (
     action.activation.cost.includes("slot") &&
