@@ -1122,7 +1122,7 @@ describe("playing a D&D adventure", () => {
     }
     expect(wins).toBeGreaterThan(0);
     expect(defeats).toBeGreaterThan(0);
-  }, 60_000); // many full playthroughs alongside other test files, which took 20-33 s on CI with coverage
+  }, 120_000); // many full playthroughs alongside other test files, which took up to 68 s on CI with coverage
 
   it("plays like a player when asked: builds with the system, rests and keeps going past endings", async () => {
     const run = await goblin();
