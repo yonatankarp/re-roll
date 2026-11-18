@@ -39,6 +39,7 @@ import {
   lookup,
   type Stats,
   traitCantrips,
+  maybeLookup,
 } from "./stats.ts";
 
 // Picks a feat, species or class lets the character change after a Long Rest, as Weapon Master's weapons, or once a level,
@@ -88,7 +89,7 @@ function fitsChoice(
   if (choice.kind === "option") return choice.from.includes(value);
   if (choice.kind !== "spells") return true;
   if (choice.from && !choice.from.includes(value)) return false;
-  const spell = SpellSchema.safeParse(access.content(value)).data;
+  const spell = maybeLookup(access, SpellSchema, value);
   if (!spell) return true;
   const lists = choice.list ? [choice.list, ...(choice.lists ?? [])] : [];
   const listed =
@@ -97,9 +98,7 @@ function fitsChoice(
     lists.some(
       (list) =>
         spell.classes.includes(list) ||
-        ClassSchema.safeParse(access.content(list)).data?.spellList?.includes(
-          value,
-        ),
+        maybeLookup(access, ClassSchema, list)?.spellList?.includes(value),
     );
   if (!listed) return false;
   const { level } = spell;
@@ -125,11 +124,11 @@ function classPicks(
         subclasses[entry.classId] = answer.values[0];
       }
     }
-    const classDef = ClassSchema.safeParse(access.content(entry.classId)).data;
+    const classDef = maybeLookup(access, ClassSchema, entry.classId);
     if (!classDef) return [];
     const subclassId = subclasses[entry.classId];
     const subclass = subclassId
-      ? SubclassSchema.safeParse(access.content(subclassId)).data
+      ? maybeLookup(access, SubclassSchema, subclassId)
       : undefined;
     const rules = { ...subclass?.spellcasting?.swaps, ...classDef.swaps };
     let next = 0;
@@ -228,7 +227,7 @@ function classPicks(
     );
     // An option's own choices that can be picked again, as Pact of the Tome's after a rest.
     const fromOptions = options.flatMap((id) => {
-      const feature = FeatureSchema.safeParse(access.content(id)).data;
+      const feature = maybeLookup(access, FeatureSchema, id);
       return (feature?.choices ?? []).flatMap((choice): Swappable[] => {
         const found = answerFor(choice);
         return found && choice.kind === "spells" && choice.swap
@@ -337,7 +336,7 @@ export function swappable(
     stats.slots.findLastIndex((count) => count > 0) + 1,
   );
   const traits = stats.features.flatMap((id): Swappable[] => {
-    const feature = FeatureSchema.safeParse(access.content(id)).data;
+    const feature = maybeLookup(access, FeatureSchema, id);
     if (!feature?.swapCantrip) return [];
     const key = `trait:${id}`;
     return [
@@ -420,7 +419,7 @@ function knowsElsewhere(
       (id) =>
         !except.includes(id) &&
         Object.values(
-          FeatureSchema.safeParse(access.content(id)).data?.spells ?? {},
+          maybeLookup(access, FeatureSchema, id)?.spells ?? {},
         ).some((ids) => ids.includes(spell)),
     )
   );

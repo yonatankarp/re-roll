@@ -19,6 +19,7 @@ import {
   scoreFloor,
   spellSaveDc,
   type Stats,
+  maybeLookup,
 } from "../stats.ts";
 import { metamagicSaves } from "../metamagic.ts";
 import { regainCap, regainEvents, shortRestFor } from "../rest.ts";
@@ -1859,7 +1860,7 @@ function spellHealing(
     slotLevel !== undefined &&
     !/:free(:|$)/.test(sourceId) &&
     castFrom(sourceId) === null;
-  const known = SpellSchema.safeParse(context.content(spell)).data;
+  const known = maybeLookup(context, SpellSchema, spell);
   return stats.passives.reduce(
     (sum, passive) =>
       passive.kind === "spellHealing" &&

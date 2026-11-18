@@ -37,6 +37,7 @@ import {
   lookup,
   onList,
   rollDiceNotation,
+  maybeLookup,
 } from "./stats.ts";
 import { BACK } from "./targeting.ts";
 import { TACTIC } from "./tactics.ts";
@@ -240,7 +241,7 @@ function castOptionChoices(
 }[] {
   const options = castOptionsOf(
     stats.features.flatMap((id) => {
-      const feature = FeatureSchema.safeParse(access.content(id)).data;
+      const feature = maybeLookup(access, FeatureSchema, id);
       return feature ? [feature] : [];
     }),
   );
@@ -252,7 +253,7 @@ function castOptionChoices(
     const spells = stats.actions.filter((action) => {
       const spellId = spellOfSource(action.id);
       if (spellId === null || action.activation.trigger) return false;
-      const spell = SpellSchema.safeParse(access.content(spellId)).data;
+      const spell = maybeLookup(access, SpellSchema, spellId);
       return (
         fitsOption(option, action, spell, (list) =>
           onList(spellId, spell, list, access),
@@ -553,7 +554,7 @@ function runCastOptionSpent(
   const stats = deriveStats(actor, context);
   const options = castOptionsOf(
     stats.features.flatMap((id) => {
-      const feature = FeatureSchema.safeParse(context.content(id)).data;
+      const feature = maybeLookup(context, FeatureSchema, id);
       return feature ? [feature] : [];
     }),
   );

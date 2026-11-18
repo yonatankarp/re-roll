@@ -42,6 +42,7 @@ import {
   itemHealing,
   lookup,
   scaleActivation,
+  maybeLookup,
 } from "./stats.ts";
 import {
   canAfford,
@@ -233,10 +234,7 @@ function helps(
 // Whether the action is a spell that can be cast as a Ritual, with time to spare between fights.
 function ritual(action: KnownAction, access: ContentAccess): boolean {
   const id = spellOfSource(action.id);
-  return (
-    id !== null &&
-    SpellSchema.safeParse(access.content(id)).data?.ritual === true
-  );
+  return id !== null && maybeLookup(access, SpellSchema, id)?.ritual === true;
 }
 
 // The action with only what it costs between fights: its slot, uses and gold, not an action of a turn. A ritual
@@ -355,13 +353,12 @@ function ritualsOnHand(
   const known = new Set(stats.actions.map((action) => action.id));
   const named = new Set(
     lists.flatMap(
-      (list) =>
-        ClassSchema.safeParse(access.content(list)).data?.spellList ?? [],
+      (list) => maybeLookup(access, ClassSchema, list)?.spellList ?? [],
     ),
   );
   return access.contentIds().flatMap((id): KnownAction[] => {
     if (!id.includes(":spell/") || known.has(`spell:${id}`)) return [];
-    const spell = SpellSchema.safeParse(access.content(id)).data;
+    const spell = maybeLookup(access, SpellSchema, id);
     if (
       !spell?.ritual ||
       !spell.activation ||

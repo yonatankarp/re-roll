@@ -57,6 +57,7 @@ import {
   doesSomething,
   lookup,
   weaponProficient,
+  maybeLookup,
 } from "./stats.ts";
 import { startingTools } from "./tools.ts";
 
@@ -541,7 +542,7 @@ export function widening(
     .filter((item) => item.level <= level)
     .flatMap((item) => item.grants);
   const all = grants.flatMap((id) => {
-    const widens = FeatureSchema.safeParse(access.content(id)).data?.widens;
+    const widens = maybeLookup(access, FeatureSchema, id)?.widens;
     return widens ? [widens] : [];
   });
   return {
@@ -688,7 +689,7 @@ function meetsPrerequisite(
           ),
       ) ||
       answered(base, "subclass").some(
-        (id) => SubclassSchema.safeParse(access.content(id)).data?.spellcasting,
+        (id) => maybeLookup(access, SubclassSchema, id)?.spellcasting,
       )) &&
     (needs.armor === undefined ||
       classes.some(({ armor }) => armor.some((kind) => kind === needs.armor)))
@@ -854,7 +855,7 @@ export function choiceOptions(
         : undefined;
       const picked = sibling ? draft.picks[sibling]?.[0] : undefined;
       const school = picked
-        ? SpellSchema.safeParse(access.content(picked)).data?.school
+        ? maybeLookup(access, SpellSchema, picked)?.school
         : undefined;
       const levelFits = (spell: Spell) =>
         choice.maxLevel === 0 || (choice.cantrips && spell.level === 0)

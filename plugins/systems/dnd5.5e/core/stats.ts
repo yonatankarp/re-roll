@@ -75,6 +75,7 @@ import {
 } from "./metamagic.ts";
 import { withInvocations } from "./invocations.ts";
 import {
+  CAST_OPTION_PREFIX,
   castOptionsOf,
   waitingOptions,
   withCastOptions,
@@ -110,6 +111,24 @@ export function lookup<T>(
   }
   if (!bySchema.has(schema)) bySchema.set(schema, schema.parse(entry));
   return bySchema.get(schema) as T;
+}
+
+// A content entry parsed once, as `lookup` does, or undefined when it's missing or doesn't fit the schema.
+const maybeParsed = new WeakMap<object, Map<z.ZodType, unknown>>();
+export function maybeLookup<T>(
+  access: Pick<ContentAccess, "content">,
+  schema: z.ZodType<T>,
+  id: string,
+): T | undefined {
+  const entry = access.content(id);
+  if (!entry || typeof entry !== "object") return undefined;
+  let bySchema = maybeParsed.get(entry);
+  if (!bySchema) {
+    bySchema = new Map<z.ZodType, unknown>();
+    maybeParsed.set(entry, bySchema);
+  }
+  if (!bySchema.has(schema)) bySchema.set(schema, schema.safeParse(entry).data);
+  return bySchema.get(schema) as T | undefined;
 }
 
 export function abilityModifier(score: number): number {
@@ -1249,11 +1268,10 @@ function collectFeatureData(
     });
   }
   for (const id of featureIds) {
-    const from = FeatureSchema.safeParse(access.content(id)).data
-      ?.freeCastsFrom;
+    const from = maybeLookup(access, FeatureSchema, id)?.freeCastsFrom;
     if (!from) continue;
     for (const spell of ownSpells.get(from.feature) ?? []) {
-      const known = SpellSchema.safeParse(access.content(spell)).data;
+      const known = maybeLookup(access, SpellSchema, spell);
       const level = known?.level;
       if (from.schools && !(known && from.schools.includes(known.school))) {
         continue;
@@ -1348,7 +1366,7 @@ export function castsSilently(
   if (keepsHidden(actor, action.id)) return true;
   const spellId = spellOfSource(action.id);
   if (spellId === null) return false;
-  const spell = SpellSchema.safeParse(access.content(spellId)).data;
+  const spell = maybeLookup(access, SpellSchema, spellId);
   return stats.passives.some(
     (passive) =>
       passive.kind === "silentCasting" &&
@@ -1390,7 +1408,7 @@ function withSpellTypes(
     const spellId = spellOfSource(action.id);
     const { resolution } = action.activation;
     if (spellId === null || resolution.damage.length === 0) return action;
-    const spell = SpellSchema.safeParse(access.content(spellId)).data;
+    const spell = maybeLookup(access, SpellSchema, spellId);
     const fitting = changes.filter(
       ({ passive }) =>
         !passive.list || onList(spellId, spell, passive.list, access),
@@ -1529,7 +1547,7 @@ function withSpellDamage(
   return actions.map((action) => {
     const spellId = spellOfSource(action.id);
     if (action.spellLevel === null || spellId === null) return action;
-    const spell = SpellSchema.safeParse(access.content(spellId)).data;
+    const spell = maybeLookup(access, SpellSchema, spellId);
     let { resolution, cost } = action.activation;
     const keys: string[] = [];
     for (const { passive, key } of bonuses) {
@@ -1599,9 +1617,7 @@ export function onList(
 ): boolean {
   return (
     (spell?.classes.includes(list) ?? false) ||
-    (ClassSchema.safeParse(access.content(list)).data?.spellList?.includes(
-      spellId,
-    ) ??
+    (maybeLookup(access, ClassSchema, list)?.spellList?.includes(spellId) ??
       false)
   );
 }
@@ -2681,17 +2697,24 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         abilityModifier(abilities.cha),
         freeOption(actor, fromFeatures.passives),
       ),
-      waitingOptions(
-        actor,
-        castOptionsOf(
-          [...featureIds].flatMap((id) => {
-            const feature = FeatureSchema.safeParse(access.content(id)).data;
-            return feature
-              ? [withVariant(featureRules(feature), variants)]
-              : [];
-          }),
-        ),
-      ),
+      // Only an actor with a cast option waiting looks its features over for them.
+      actor.activeEffects.some(({ sourceId }) =>
+        sourceId.startsWith(CAST_OPTION_PREFIX),
+      )
+        ? waitingOptions(
+            actor,
+            castOptionsOf(
+              [...featureIds].flatMap((id) => {
+                const feature = FeatureSchema.safeParse(
+                  access.content(id),
+                ).data;
+                return feature
+                  ? [withVariant(featureRules(feature), variants)]
+                  : [];
+              }),
+            ),
+          )
+        : [],
       scaleActivation,
     ),
     multiattack:
