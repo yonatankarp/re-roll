@@ -12,7 +12,14 @@ import { HIT_DICE, itemUseOf, parseOption } from "../core/combat/ids.ts";
 import { squareKey } from "../core/grid.ts";
 import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
-import { canUse, foundText, sceneGearActions } from "../core/gear.ts";
+import {
+  attunementLimit,
+  boundTo,
+  canAttune,
+  canUse,
+  foundText,
+  sceneGearActions,
+} from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
 import { partySight, revealedSquares, unseenFoe } from "../core/fog.ts";
 import { coins } from "../core/shop.ts";
@@ -46,7 +53,6 @@ import {
   type Actor,
   type DndState,
   EVENT_SCHEMAS,
-  MAX_ATTUNED,
   equipped,
   isDead,
   isDown,
@@ -505,7 +511,10 @@ function equipmentRows(
           looks: [id],
           value: wornCount === 0 ? "In pack" : "Equipped",
           // Putting on a spare comes first, as between choices. Untrained armor isn't offered, as it would only hinder.
-          ...(changes && (wornCount > 0 || wearable)
+          // A curse holds it, so it can't be stowed.
+          ...(changes &&
+          (wornCount > 0 || wearable) &&
+          !(wornCount === count && boundTo(actor, id, access))
             ? {
                 option:
                   // A spare of the armor or Shield worn would only change places with it (gear.ts).
@@ -522,12 +531,13 @@ function equipmentRows(
     }
     if (item.type === "magicItem" && item.attunement) {
       const on = attuned.includes(id);
+      const held = on && boundTo(actor, id, access);
       return [
         {
           label,
           looks: [id],
-          value: on ? "Attuned" : "Not attuned",
-          ...(changes
+          value: held ? "Attuned (cursed)" : on ? "Attuned" : "Not attuned",
+          ...(changes && !held
             ? {
                 option: on
                   ? {
@@ -538,10 +548,11 @@ function equipmentRows(
                   : {
                       id: `attune:${id}`,
                       label: "Attune",
-                      hint:
-                        attuned.length < MAX_ATTUNED
+                      hint: !canAttune(actor, item, stats)
+                        ? `Requires attunement by ${item.attunementBy ?? "another"}`
+                        : attuned.length < attunementLimit(stats)
                           ? ATTUNE_HINT
-                          : `Already attuned to ${String(MAX_ATTUNED)} items`,
+                          : `Already attuned to ${String(attunementLimit(stats))} items`,
                     },
               }
             : {}),
@@ -562,7 +573,10 @@ function equipmentRows(
                 hint: actor.hp >= stats.maxHp ? FULL_HINT : DRINK_HINT,
               },
             }
-          : changes && item.type === "magicItem" && item.study
+          : changes &&
+              item.type === "magicItem" &&
+              item.study &&
+              item.study.ability !== "any"
             ? {
                 option: { id: `study:${id}`, label: "Study", hint: STUDY_HINT },
               }
@@ -588,7 +602,7 @@ function equipmentRows(
       ? [
           {
             label: "Attunement",
-            value: `${String(attuned.length)} of ${String(MAX_ATTUNED)}`,
+            value: `${String(attuned.length)} of ${String(attunementLimit(stats))}`,
           },
         ]
       : []),

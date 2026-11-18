@@ -277,13 +277,20 @@ export function payCosts(
           }),
         );
       }
-      events.push(
-        dndEvent(`${NS}:resourceSpent`, {
-          actor: actor.id,
-          resource: cost.resource,
-          ...(cost.count ? { amount: cost.count } : {}),
-        }),
-      );
+      // Use Magic Device: a 6 on a d6 keeps a magic item's charges.
+      const kept =
+        hasPassive(deriveStats(actor, context), "chargeSaver") &&
+        itemCharge(actor, cost.resource, context) &&
+        context.dice.roll(6) === 6;
+      if (!kept) {
+        events.push(
+          dndEvent(`${NS}:resourceSpent`, {
+            actor: actor.id,
+            resource: cost.resource,
+            ...(cost.count ? { amount: cost.count } : {}),
+          }),
+        );
+      }
     }
   }
   // A stored spell leaves the item it's cast from.
@@ -300,6 +307,19 @@ export function payCosts(
     }
   }
   return [...events, ...lastCharge(actor, action, context)];
+}
+
+// Whether a pool is one of a carried magic item's charges.
+function itemCharge(actor: Actor, resource: string, context: Context): boolean {
+  return [...new Set(actor.inventory)].some((id) => {
+    const item = lookup(context, ItemSchema, id);
+    return [
+      ...("resources" in item ? (item.resources ?? []) : []),
+      ...(item.type === "magicItem"
+        ? (item.variants ?? []).flatMap((entry) => entry.resources ?? [])
+        : []),
+    ].some((def) => def.id === resource);
+  });
 }
 
 // Spending a charged item's last charge rolls a d20, and on a 1 the item is gone, or left as the plain item it
@@ -830,13 +850,31 @@ function killEvents(fallen: Actor, context: Context): SystemEvent[] {
         : bearer;
       if (!to) return [];
       const dice = hitDiceOf(fallen, context);
+      const fallenStats = passive.fallenMaxHp
+        ? deriveStats(fallen, context)
+        : undefined;
+      if (
+        fallenStats &&
+        ["construct", "undead"].includes(fallenStats.creatureType ?? "")
+      ) {
+        return [];
+      }
       const effects = passive.fallenHitDice
         ? passive.effects.map((effect) =>
             effect.kind === "heal"
               ? { ...effect, amount: { bonus: { base: dice, add: [] } } }
               : effect,
           )
-        : passive.effects;
+        : fallenStats
+          ? passive.effects.map((effect) =>
+              effect.kind === "tempHp"
+                ? {
+                    ...effect,
+                    amount: { bonus: { base: fallenStats.maxHp, add: [] } },
+                  }
+                : effect,
+            )
+          : passive.effects;
       return [
         ...(passive.oncePerTurn
           ? [
@@ -1407,6 +1445,43 @@ export function tempHpBonus(stats: Stats): number {
   );
 }
 
+// A Berserker Axe's fury: another creature's damage calls for a save, failed into a fury (combat/madness.ts).
+function furyEvents(target: Actor, context: Context): SystemEvent[] {
+  const damager = currentActor(context.state);
+  if (
+    target.hp <= 0 ||
+    !damager ||
+    damager.id === target.id ||
+    target.activeEffects.some(({ modifier }) => modifier.kind === "furious")
+  ) {
+    return [];
+  }
+  const fury = deriveStats(target, context).passives.find(
+    (passive) => passive.kind === "fury",
+  );
+  if (fury?.kind !== "fury") return [];
+  const save = rollSave(target, fury.ability, fury.dc, context, true);
+  return [
+    ...save.events,
+    ...(save.saved
+      ? []
+      : [
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: {
+              sourceId: "fury",
+              casterId: target.id,
+              modifier: {
+                kind: "furious",
+                ...(fury.damager ? { at: damager.id } : {}),
+              },
+              ends: "spellDuration",
+            },
+          }),
+        ]),
+  ];
+}
+
 export function dealEvents(
   target: Actor,
   hits: readonly { readonly amount: number; readonly type: Damage["type"] }[],
@@ -1462,6 +1537,8 @@ export function dealEvents(
   }
   // Dragon Fear: damage lets the target repeat the save that ends the effect.
   const hurt = state.actors[target.id];
+  if (hurt && dealt > 0)
+    events.push(...furyEvents(hurt, { ...context, state }));
   // Killer's Fortune: a foe dropping gives the bearer's next attack Advantage.
   if (hurt && hurt.hp <= 0 && target.hp > 0) {
     for (const bearer of Object.values(state.actors)) {
@@ -1937,8 +2014,31 @@ export function leafEvents(
   const unhealed = healingStopped(target, context.state, context);
   for (const effect of effects) {
     switch (effect.kind) {
+      case "recoil": {
+        const type = deriveStats(target, context).creatureType;
+        if (
+          effect.creatureTypes &&
+          !effect.creatureTypes.includes(type ?? "")
+        ) {
+          break;
+        }
+        const hits = effect.damage.map((damage) => ({
+          amount: rollAmount(damage.amount, stats, context.dice),
+          type: damage.type,
+        }));
+        events.push(...dealEvents(caster, hits, false, context).events);
+        break;
+      }
       case "heal": {
         if (unhealed || cannotHeal(target)) break;
+        if (
+          effect.creatureTypes &&
+          !effect.creatureTypes.includes(
+            deriveStats(target, context).creatureType ?? "",
+          )
+        ) {
+          break;
+        }
         const max = deriveStats(target, context).maxHp + raisedMax;
         const room = Math.max(
           0,
@@ -2115,6 +2215,21 @@ export function leafEvents(
               actor: target.id,
               sourceId: rest.join("|"),
               casterId,
+            }),
+          );
+        }
+        // It also ends its Attunement to a cursed item, unless only a Wish can (gear.ts), the item now let go.
+        const attuned = target.attuned ?? [];
+        const kept = attuned.filter((id) => {
+          const item = lookup(context, ItemSchema, id);
+          return !("curse" in item) || !item.curse || item.curse.wish === true;
+        });
+        if (kept.length < attuned.length) {
+          events.push(
+            dndEvent(`${NS}:gearChanged`, {
+              actor: target.id,
+              stowed: target.stowed ?? [],
+              attuned: kept,
             }),
           );
         }
@@ -2868,7 +2983,14 @@ export function leafEvents(
         events.push(...splashEvents(effect, caster, target, context));
         break;
       case "exhaustion":
-        if (effect.clear ? target.exhaustion > 0 : effect.levels) {
+        // A Book of Vile Darkness's Tireless Form gains no levels.
+        // shortcut: only levels from spells, attacks and items are held off, not a rest's or the weather's.
+        if (
+          effect.clear
+            ? target.exhaustion > 0
+            : effect.levels &&
+              !hasPassive(deriveStats(target, context), "noExhaustion")
+        ) {
           events.push(
             dndEvent(`${NS}:exhaustionChanged`, {
               actor: target.id,
@@ -3750,6 +3872,12 @@ export function rollSave(
         ability,
       ) ||
       (ability === "dex" && hasCondition(target, "restrained")) ||
+      stats.passives.some(
+        (passive) =>
+          passive.kind === "foeDisadvantage" &&
+          source?.creatureType !== undefined &&
+          passive.creatureTypes.includes(source.creatureType),
+      ) ||
       stats.passives.some(
         (passive) =>
           passive.kind === "saveDisadvantage" &&

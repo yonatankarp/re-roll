@@ -1903,6 +1903,21 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ]
       : [],
   );
+  // What studying a book gave for good, as the Book of Exalted Deeds' Halo, the book itself gone or not (gear.ts).
+  for (const itemId of actor.studied ?? []) {
+    const item = lookup(access, ItemSchema, itemId);
+    if (item.type === "magicItem")
+      itemPassives.push(...(item.study?.passives ?? []));
+  }
+  // A curse works while its bearer stays attuned to the item, worn or not, as Armor of Vulnerability's (gear.ts).
+  if (!antimagic) {
+    for (const itemId of attuned) {
+      const item = ItemSchema.safeParse(access.content(itemId)).data;
+      if (item && "curse" in item) {
+        itemPassives.push(...(item.curse?.passives ?? []));
+      }
+    }
+  }
   const abilities = withEffectScores(
     withItemAbilities(ownAbilities(actor, build), scoring, attuned),
     actor,
@@ -2170,21 +2185,26 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const armorTypes: string[] = [];
   const flatBonus = magic.ac;
   let shield = 0;
+  let heldAc = 0; // a magic weapon's own bonus to AC, as the Wand of Orcus's +3 while held
   let shielded = false;
   const actions: KnownAction[] = [];
+  // Use Magic Device: any Spell Scroll read with Intelligence.
+  const anyScroll = traits.find((trait) => trait.kind === "anyScroll");
+  const reader =
+    untrainedArmor || (!caster?.spellcasting && !anyScroll)
+      ? undefined
+      : {
+          classes: caster?.spellcasting ? Object.keys(classLevels) : [],
+          ability:
+            caster?.spellcasting?.ability ??
+            (anyScroll?.kind === "anyScroll" ? anyScroll.ability : "int"),
+          highest: slots.findLastIndex((count) => count > 0) + 1,
+          ...(anyScroll?.kind === "anyScroll"
+            ? { anyScroll: anyScroll.ability }
+            : {}),
+        };
   for (const [itemId, item] of worn) {
-    const usable = itemAction(
-      itemId,
-      item,
-      access,
-      untrainedArmor || !caster?.spellcasting
-        ? undefined
-        : {
-            classes: Object.keys(classLevels),
-            ability: caster.spellcasting.ability,
-            highest: slots.findLastIndex((count) => count > 0) + 1,
-          },
-    );
+    const usable = itemAction(itemId, item, access, reader);
     if (usable) {
       actions.push(
         item.type === "gear"
@@ -2234,6 +2254,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       }
     } else if (item.type === "weapon") {
       const weapon = WeaponSchema.parse(item);
+      heldAc = Math.max(heldAc, ownAc(weapon.bonuses, !works(itemId, item)));
       // A magic weapon's own bonus, or the best from a magic weapon carried beside it, never both.
       const own = (to: "attack" | "damage"): number =>
         Math.max(
@@ -2499,7 +2520,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     maxHp,
     ac: bestAc(actor, abilities, {
       armorBases,
-      flatBonus: flatBonus + shield,
+      flatBonus: flatBonus + shield + heldAc,
       passives: traits,
       armorTypes,
       shielded,
@@ -2787,6 +2808,7 @@ function itemAction(
         readonly classes: readonly string[];
         readonly ability: Ability;
         readonly highest: number;
+        readonly anyScroll?: Ability; // any scroll, by Use Magic Device
       }
     | undefined,
 ): KnownAction | null {
@@ -2841,9 +2863,10 @@ function itemAction(
     if (!spell.activation || !doesSomething(spell.activation.resolution)) {
       return null;
     }
-    const activation = reader
-      ? spell.activation
-      : withItemNumbers(spell.activation, 13, 5);
+    const activation =
+      reader && reader.classes.length > 0
+        ? spell.activation
+        : withItemNumbers(spell.activation, 13, 5);
     return {
       id: `item:${itemId}`,
       name: `${spell.name} (${item.name})`,
@@ -2861,10 +2884,11 @@ function itemAction(
   // slots they have takes a check of their spellcasting ability first, whose failure wastes the scroll.
   if (item.type !== "magicItem" || !item.spell || !reader) return null;
   const spell = lookup(access, SpellSchema, item.spell);
+  const listed = onClassList(spell, reader.classes);
   if (
     !spell.activation ||
     !doesSomething(spell.activation.resolution) ||
-    !onClassList(spell, reader.classes)
+    (!listed && reader.anyScroll === undefined)
   ) {
     return null;
   }
@@ -2881,11 +2905,19 @@ function itemAction(
       ),
     },
     spellLevel: spell.level,
-    ...(spell.level > Math.max(reader.highest, 0)
-      ? {
-          castCheck: { ability: reader.ability, dc: 10 + spell.level },
-        }
-      : {}),
+    ...(listed
+      ? spell.level > Math.max(reader.highest, 0)
+        ? { castCheck: { ability: reader.ability, dc: 10 + spell.level } }
+        : {}
+      : spell.level > 1
+        ? {
+            castCheck: {
+              ability: reader.anyScroll ?? reader.ability,
+              skill: "arcana" as const,
+              dc: 10 + spell.level,
+            },
+          }
+        : {}),
   };
 }
 

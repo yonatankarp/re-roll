@@ -58,6 +58,59 @@ const stunned = (actor: Actor): SystemEvent =>
     },
   });
 
+// A fury's turn (passive `fury`): the nearest creature it reaches attacked if that's a friend, a foe left to the turn's
+// own choice as the berserk's is, or the creature it's set on attacked while it reaches it. It ends as a turn starts
+// with no one within 60 feet, or the one it's set on down or out of reach.
+function furyStart(
+  actor: Actor,
+  action: KnownAction | undefined,
+  context: Context,
+): { readonly events: SystemEvent[]; readonly frames: Frame[] } | null {
+  const fury = actor.activeEffects.find(
+    ({ modifier }) => modifier.kind === "furious",
+  )?.modifier;
+  if (fury?.kind !== "furious") return null;
+  const ended = {
+    events: [
+      dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId: "fury" }),
+    ],
+    frames: [],
+  };
+  const others = Object.values(context.state.actors).filter(
+    (item) => item.id !== actor.id && item.position !== null && !isDown(item),
+  );
+  const reached = action ? withinReach(actor, action, context) : [];
+  if (fury.at !== undefined) {
+    const foe = reached.find((item) => item.id === fury.at);
+    return foe && action
+      ? {
+          events: [
+            dndEvent(`${NS}:budgetSpent`, { actor: actor.id, kind: "action" }),
+          ],
+          frames: [attackAt(actor, action, foe)],
+        }
+      : ended;
+  }
+  if (
+    !others.some((item) => distanceFeet(actor.position, item.position) <= 60)
+  ) {
+    return ended;
+  }
+  const [closest] = [...reached].sort(
+    (a, b) =>
+      distanceFeet(actor.position, a.position) -
+      distanceFeet(actor.position, b.position),
+  );
+  return closest?.side === actor.side && action
+    ? {
+        events: [
+          dndEvent(`${NS}:budgetSpent`, { actor: actor.id, kind: "action" }),
+        ],
+        frames: [attackAt(actor, action, closest)],
+      }
+    : { events: [], frames: [] };
+}
+
 export function madnessStart(
   actor: Actor,
   context: Context,
@@ -79,6 +132,8 @@ export function madnessStart(
       frames: struck && action ? [attackAt(actor, action, struck)] : [],
     };
   }
+  const fury = furyStart(actor, action, context);
+  if (fury) return fury;
   const stats = deriveStats(actor, context);
   if (!hasPassive(stats, "berserk")) return { events: [], frames: [] };
   const bloodied = actor.hp * 2 <= stats.maxHp;

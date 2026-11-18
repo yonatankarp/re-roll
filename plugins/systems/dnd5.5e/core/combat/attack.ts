@@ -1150,6 +1150,33 @@ export function runAttackRoll(
   }
   // An Arrow-Catching Shield: an ally beside the target takes a ranged attack on itself.
   const ranged = attackKind(payload, context).ranged;
+  // A Shield of Missile Attraction's curse draws a ranged weapon attack aimed near its bearer.
+  const magnet =
+    held ||
+    !ranged ||
+    resolution.attack.type !== "weapon" ||
+    hasPassive(targetStats, "missileMagnet")
+      ? undefined
+      : Object.values(state.actors).find(
+          (other) =>
+            other.id !== target.id &&
+            other.id !== attacker.id &&
+            other.position !== null &&
+            !isDown(other) &&
+            // shortcut: a bearer farther than 30 feet off draws nothing, which spares the look at every creature
+            distanceFeet(other.position, target.position) <= 30 &&
+            deriveStats(other, context).passives.some(
+              (passive) =>
+                passive.kind === "missileMagnet" &&
+                distanceFeet(other.position, target.position) <= passive.within,
+            ),
+        );
+  if (magnet) {
+    return {
+      events: [],
+      frames: [frame("attackRoll", { ...payload, target: magnet.id })],
+    };
+  }
   const drawn = held
     ? null
     : guardFor(target, attacker, "allyAttacked", context, {
@@ -1171,8 +1198,25 @@ export function runAttackRoll(
     !sworn &&
     normalRange !== undefined &&
     distanceFeet(attacker.position, target.position) > normalRange;
+  // A Berserker Axe's curse: any other weapon attacks with Disadvantage.
+  const wielded = weaponItemId(action.id);
+  const otherWeapon =
+    wielded !== "" &&
+    stats.passives.some(
+      (passive) =>
+        passive.kind === "soleWeapon" &&
+        wielded !== passive.item &&
+        !wielded.startsWith(`${passive.item}--`),
+    );
   const hampered =
     shielded !== null ||
+    otherWeapon ||
+    stats.passives.some(
+      (passive) =>
+        passive.kind === "foeDisadvantage" &&
+        targetStats.creatureType !== undefined &&
+        passive.creatureTypes.includes(targetStats.creatureType),
+    ) ||
     crowded ||
     longRange ||
     underwaterHampered(attacker, action, resolution, context) ||
@@ -2259,9 +2303,23 @@ function landHit(
     stats,
     action.id,
   );
-  const responses = payload.overcomes
-    ? { ...piercedResponses, resistances: [], immunities: [] }
+  // A Shield of Missile Attraction resists a ranged weapon attack's damage.
+  const missile =
+    resolution.attack.type === "weapon" &&
+    meleeReach(action) === null &&
+    hasPassive(deriveStats(target, context), "missileResistance");
+  const shielded = missile
+    ? {
+        ...piercedResponses,
+        resistances: [
+          ...piercedResponses.resistances,
+          ...resolution.damage.map((item) => item.type),
+        ],
+      }
     : piercedResponses;
+  const responses = payload.overcomes
+    ? { ...shielded, resistances: [], immunities: [] }
+    : shielded;
 
   // Magic ammunition is no longer magical once it hits.
   const events: SystemEvent[] = [

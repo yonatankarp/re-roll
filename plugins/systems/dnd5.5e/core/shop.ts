@@ -12,7 +12,7 @@ import { z } from "zod";
 import { type Item, ItemSchema } from "./schemas.ts";
 import { type DndState, NS, dndEvent, frame, isDead } from "./state.ts";
 import { deriveStats, lookup } from "./stats.ts";
-import { gainRolls } from "./gear.ts";
+import { boundTo, gainRolls } from "./gear.ts";
 
 type Context = SystemContext<DndState>;
 
@@ -147,7 +147,7 @@ export function shopOptions(
   const sells = [...new Set(player?.inventory ?? [])].flatMap((id) => {
     const item = itemOf(access, id);
     const price = sellPriceCp(item);
-    return price === null
+    return price === null || (player && boundTo(player, id, access))
       ? []
       : [
           {
