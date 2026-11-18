@@ -3124,7 +3124,7 @@
     communication is possible over any distance, though it can’t extend to other
     planes of existence.
   # no rules effect in play: what it says, sends or tells is the story's.
-  automation: full
+  automation: text
 - id: srd52:spell/time-stop
   name: Time Stop
   level: 9
@@ -9286,7 +9286,7 @@
     spell also ends if you cast this spell again or if the Tiny replica chest is
     destroyed. If the spell ends and the larger chest is on the Ethereal Plane,
     the chest remains there for you or someone else to find.
-  automation: full
+  automation: text
   # A chest hidden on the Ethereal Plane holds nothing a fight or check uses.
 - id: srd52:spell/shapechange
   name: Shapechange
@@ -11787,6 +11787,8 @@
       creatures: 1
       range: 60
       side: enemy
+      creatureTypes:
+        - humanoid
     resolution:
       kind: save
       ability: wis

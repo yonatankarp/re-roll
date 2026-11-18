@@ -254,7 +254,11 @@ function buildReferences(pregen: z.infer<typeof PregenSchema>): string[] {
     ...pregen.build.levels.flatMap((level) => [
       level.classId,
       ...level.answers.flatMap((answer) =>
-        answer.kind === "skills" || !("values" in answer) ? [] : answer.values,
+        answer.kind === "skills" || !("values" in answer)
+          ? []
+          : answer.kind === "variant"
+            ? [answer.feature] // its values name the feature's variants, not content
+            : answer.values,
       ),
     ]),
   ];

@@ -418,7 +418,8 @@ describe("Hit Point bands, sending away and slaying (#149)", () => {
     const content = await run();
     const caster = at(hero([], { id: "caster" }), 0, 0);
     const imp = at(foe("imp", 10, "test:monster/fiend"), 2, 0);
-    const goblin = at(foe("goblin"), 3, 0);
+    // A commoner, since the SRD's goblins are Fey.
+    const goblin = at(foe("goblin", 7, "srd52:monster/commoner"), 3, 0);
     const context = onGrid(
       content,
       [caster, imp, goblin],

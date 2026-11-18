@@ -1,5 +1,7 @@
 - id: "srd52:monster/goblin-warrior"
   name: Goblin Warrior
+  size: small
+  creatureType: fey
   ac: 15
   hp: 10
   speed: 30
@@ -7,6 +9,7 @@
   proficiency: 2
   initiative: 2
   passives:
+    - { kind: bonusTactics, tactics: [disengage, hide] } # Nimble Escape
     - { kind: extraDamage, dice: 1d4, when: advantage }
   actions:
     - name: Scimitar
@@ -27,22 +30,10 @@
           attack: { type: weapon, flatBonus: 4 }
           damage:
             [{ amount: { dice: 1d6, bonus: { base: 2 } }, type: piercing }]
-    # Nimble Escape, as Hide. Disengage does nothing without a map.
-    # shortcut: the Stealth check is a plain Dexterity roll, and hiding lasts until this goblin's next turn rather than its next attack, until skills can be rolled here.
-    - name: Nimble Escape
-      activation:
-        cost: [bonusAction]
-        targeting: { self: true }
-        resolution:
-          kind: save
-          ability: dex
-          dc: { base: 15 }
-          onSuccess:
-            - kind: applyCondition
-              condition: invisible
-              duration: { until: yourNextTurnStart }
 - id: "srd52:monster/goblin-boss"
   name: Goblin Boss
+  size: small
+  creatureType: fey
   ac: 17
   hp: 21
   speed: 30
@@ -50,6 +41,9 @@
   proficiency: 2
   initiative: 2
   multiattack: 2
+  passives:
+    - { kind: bonusTactics, tactics: [disengage, hide] } # Nimble Escape
+    - { kind: extraDamage, dice: 1d4, when: advantage }
   actions:
     - name: Scimitar
       activation:
@@ -69,8 +63,16 @@
           attack: { type: weapon, flatBonus: 4 }
           damage:
             [{ amount: { dice: 1d6, bonus: { base: 2 } }, type: piercing }]
+    - name: Redirect Attack
+      activation:
+        cost: [reaction]
+        trigger: { attacked: true }
+        targeting: { self: true }
+        resolution: { kind: automatic, effects: [{ kind: redirect }] }
 - id: "srd52:monster/commoner"
   name: Commoner
+  size: medium
+  creatureType: humanoid
   ac: 10
   hp: 4
   speed: 30
@@ -101,6 +103,7 @@
     - { kind: modifier, modifier: { kind: vulnerability, damage: bludgeoning } }
     - { kind: modifier, modifier: { kind: immunity, damage: poison } }
     - { kind: conditionImmunity, condition: poisoned }
+    - { kind: noExhaustion }
   actions:
     - name: Shortsword
       activation:
@@ -135,6 +138,7 @@
     - { kind: modifier, modifier: { kind: immunity, damage: poison } }
     - { kind: conditionImmunity, condition: poisoned }
     - { kind: undeadFortitude }
+    - { kind: noExhaustion }
   actions:
     - name: Slam
       activation:
@@ -160,6 +164,7 @@
     - { kind: modifier, modifier: { kind: immunity, damage: poison } }
     - { kind: conditionImmunity, condition: charmed }
     - { kind: conditionImmunity, condition: poisoned }
+    - { kind: noExhaustion }
   actions:
     - name: Bite
       activation:

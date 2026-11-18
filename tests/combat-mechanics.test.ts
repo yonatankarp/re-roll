@@ -123,6 +123,7 @@ function countingD20s(dice: Dice): { dice: Dice; d20s: () => number } {
 }
 
 const spell = (slug: string): string => `srd52:spell/${slug}`;
+const PERSON = "srd52:monster/person"; // a Humanoid, for Hold Person
 
 function arenaRun(
   base: RunContext,
@@ -143,6 +144,9 @@ function arenaRun(
       })),
     },
     "srd52:monster/dummy": dummy("srd52:monster/dummy", {}),
+    "srd52:monster/person": dummy("srd52:monster/person", {
+      creatureType: "humanoid",
+    }),
     ...extra,
   };
   return {
@@ -1208,9 +1212,9 @@ describe("choosing targets and aiming areas", () => {
     const run = arenaRun(await base(), {});
     const state = fight(
       hero(run, { spells: ["hold-person"], level: 3 }),
-      monster("a"),
-      monster("b"),
-      monster("c"),
+      monster("a", PERSON),
+      monster("b", PERSON),
+      monster("c", PERSON),
     );
     const ids = nextDndDecision(state, run)?.options.map((item) => item.id);
     expect(ids).toContain(`${hold}|a`);
@@ -1714,9 +1718,9 @@ describe("scaling by level and slot", () => {
     const run = arenaRun(await base(), {});
     const state = fight(
       hero(run, { spells: ["hold-person"] }),
-      monster("a"),
-      monster("b"),
-      monster("c", "srd52:monster/dummy", 400),
+      monster("a", PERSON),
+      monster("b", PERSON),
+      monster("c", PERSON, 400),
     );
     const cast = settle(
       run,
@@ -1792,31 +1796,6 @@ describe("monster traits", () => {
     expect(rolls(fight(wolf, hero(run)))).toBe(1);
     expect(rolls(fight(wolf, monster("friend"), hero(run)))).toBe(2);
     expect(rolls(fight(wolf, monster("fallen", WOLF, 0), hero(run)))).toBe(1);
-  });
-
-  it("lets a goblin hide as a Bonus Action, on a passed DC 15 roll", async () => {
-    const run = await base();
-    const goblin = monster("g", "srd52:monster/goblin-warrior");
-    const decision = nextDndDecision(fight(goblin, hero(run)), run);
-    const hide = decision?.options.find((option) => option.id.endsWith("|g"));
-    if (!hide) throw new Error("The goblin has no Nimble Escape");
-    const hidden = settle(
-      run,
-      fight(goblin, hero(run)),
-      [act("g", hide.id)],
-      HIGH,
-    );
-    expect(actor(hidden.state, "g").activeEffects[0]?.modifier).toEqual({
-      kind: "condition",
-      condition: "invisible",
-    });
-    const seen = settle(
-      run,
-      fight(goblin, hero(run)),
-      [act("g", hide.id)],
-      LOW,
-    );
-    expect(actor(seen.state, "g").activeEffects).toEqual([]);
   });
 
   it("lets Undead Fortitude keep a monster at 1 HP on a passed save", async () => {

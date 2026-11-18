@@ -189,12 +189,12 @@ describe("armor and weapon training", () => {
       }),
     ]);
     const fighter = pregen(run, "srd52:pregen/fighter");
-    expect(deriveStats(fighter, run).ac).toBe(18);
+    expect(deriveStats(fighter, run).ac).toBe(19); // Chain Mail, a Shield and Defense
     const twice = {
       ...fighter,
       inventory: [...fighter.inventory, "test:item/kite-shield"],
     };
-    expect(deriveStats(twice, run).ac).toBe(18);
+    expect(deriveStats(twice, run).ac).toBe(19);
   });
 
   it("slows a wearer too weak for heavy armor by 10 feet", async () => {

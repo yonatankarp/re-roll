@@ -8,29 +8,36 @@
     id: "srd52:feat/grappler",
     name: Grappler,
     category: general,
-    text: "Increase Strength or Dexterity by 1, and you grapple and punch more effectively.",
+    text: "Increase Strength or Dexterity by 1. You have Advantage on attack rolls against a creature Grappled by you.",
+    abilityIncrease: [str, dex],
+    prerequisite: { abilities: [str, dex], min: 13 },
+    grants: ["srd52:feature/grappler"],
   }
 - {
     id: "srd52:feat/archery",
     name: Archery,
     category: fightingStyle,
     text: "You gain a +2 bonus to attack rolls with Ranged weapons.",
+    grants: ["srd52:feature/archery"],
   }
 - {
     id: "srd52:feat/defense",
     name: Defense,
     category: fightingStyle,
     text: "While wearing armor, you gain a +1 bonus to Armor Class.",
+    grants: ["srd52:feature/defense"],
   }
 - {
     id: "srd52:feat/great-weapon-fighting",
     name: Great Weapon Fighting,
     category: fightingStyle,
     text: "Treat any 1 or 2 on a two-handed weapon's damage die as a 3.",
+    grants: ["srd52:feature/great-weapon-fighting"],
   }
 - {
     id: "srd52:feat/two-weapon-fighting",
     name: Two-Weapon Fighting,
     category: fightingStyle,
+    # No grants: the off-hand attack reads this feat's id (actions/bonus-attacks.ts).
     text: "Add your ability modifier to the damage of the extra attack from a Light weapon.",
   }
