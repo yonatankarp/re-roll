@@ -56,6 +56,7 @@ import {
   withTactics,
   abilityCheck,
   castCheckFrames,
+  hideFrames,
 } from "./actions.ts";
 import {
   parseClassesFromHtml,
@@ -548,6 +549,7 @@ export const dnd55e = defineSystem<DndState>({
     ...optionFrames,
     ...riderChoiceFrames,
     ...redirectFrames,
+    ...hideFrames,
     ...wishFrames,
     ...reactionFrames,
     ...attackFrames,

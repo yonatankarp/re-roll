@@ -135,7 +135,6 @@ import { fueledDamage } from "./school.ts";
 import { conditionsApplied, legendaryResistance } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { headDamageEvents } from "./heads.ts";
-import { canHide, hideEvents } from "../actions.ts";
 import {
   lastsFor,
   lethargyEffect,
@@ -2516,11 +2515,7 @@ export function leafEvents(
         }
         break;
       }
-      case "hide":
-        if (canHide(target, context.state, context)) {
-          events.push(...hideEvents(target, context));
-        }
-        break;
+      case "hide": // its own frame, after the rest (actions.ts hideFrames)
       case "carry":
         if (target.id !== caster.id) {
           events.push(
@@ -3926,6 +3921,10 @@ export function resolveAction(
   switch (resolution.kind) {
     case "automatic": {
       beginConcentration(resolution.effects);
+      // The Hide action as part of another, as Shrouding Spells', comes once the rest is done (actions.ts).
+      if (resolution.effects.some((effect) => effect.kind === "hide")) {
+        frames.push(frame("hideNow", { actor: actor.id }));
+      }
       for (const effect of resolution.effects) {
         if (effect.kind === "moveZone" && aim) {
           const moved = movedZone(effect.source, actor, aim, context);

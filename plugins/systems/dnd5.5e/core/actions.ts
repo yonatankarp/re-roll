@@ -603,14 +603,20 @@ export function hideEvents(actor: Actor, context: Context): SystemEvent[] {
   ];
 }
 
-// Whether the Hide action as part of another can be taken here, as Shrouding Spells' after a spell.
-export function canHide(
-  actor: Actor,
-  state: DndState,
-  access: ContentAccess,
-): boolean {
-  return !hasTactic(actor, "hidden") && hiddenFromAll(actor, state, access);
-}
+// The Hide action as part of another, where it could Hide, as Shrouding Spells' after a spell.
+export const hideFrames = {
+  [`${NS}:hideNow`]: frameHandler({
+    schema: z.object({ actor: z.string() }),
+    run: (payload, context: Context) => {
+      const actor = context.state.actors[payload.actor];
+      return actor &&
+        !hasTactic(actor, "hidden") &&
+        hiddenFromAll(actor, context.state, context)
+        ? { events: hideEvents(actor, context) }
+        : {};
+    },
+  }),
+};
 
 function dashBonus(stats: Stats): number {
   return stats.passives.reduce(

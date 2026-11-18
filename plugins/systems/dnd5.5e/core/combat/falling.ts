@@ -308,7 +308,7 @@ function catcher(
       if (!trigger?.falls || !canAfford(action, bearer, stats)) continue;
       const within = trigger.within ?? 60;
       const slow = slowFallOf(action);
-      const own = "self" in action.activation.targeting; // Slow Fall catches only its bearer
+      const own = slowFallReduce(action) !== undefined; // Slow Fall eases only its bearer
       const caught = falling
         .filter(
           (item) =>
