@@ -954,6 +954,11 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // Which of a transformation's options the bearer has taken, by name, for what holds only `whileAspect` it lasts, as
   // Starry Form's Archer, Chalice or Dragon.
   z.strictObject({ kind: z.literal("aspect"), name: z.string().min(1) }),
+  // Levels of Exhaustion that last only while the effect does, as Sickening Radiance's (stats.ts exhaustionOf).
+  z.strictObject({
+    kind: z.literal("exhausted"),
+    levels: z.number().int().min(1).max(6),
+  }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
 
@@ -2143,6 +2148,8 @@ export const AreaEffectSchema = z.strictObject({
   // the ground, as Earthquake's tremor
   flying: z.literal(true).optional(),
   ground: z.literal(true).optional(),
+  // a fall that ends in it deals half damage, as in Control Winds' updraft (combat/falling.ts)
+  softFalls: z.literal(true).optional(),
   // no fog, smoke or other gas hides a square in it, as Warding Wind hedges them out (core/zones.ts obscuring)
   clearsFog: z.literal(true).optional(),
   targets: z.number().int().min(1).optional(),
@@ -2579,6 +2586,13 @@ export type SaveFrom = z.infer<typeof SaveFromSchema>;
 const WhileBloodied = z.literal(true).optional();
 
 export const PassiveSchema = z.discriminatedUnion("kind", [
+  // What the bearer's casting of one of these spells adds to the area it leaves, as Grasping Mist's lower Speed for
+  // foes in its Fog Cloud (combat/effects.ts).
+  z.strictObject({
+    kind: z.literal("areaRider"),
+    spells: z.array(ContentIdSchema).min(1),
+    area: AreaEffectSchema,
+  }),
   z.strictObject({
     kind: z.literal("modifier"),
     modifier: ModifierSchema,

@@ -3770,7 +3770,26 @@ function zoneEvents(
   )?.choose;
   const type = element ? leastResisted(element, actor, context) : undefined;
   // An area as it goes on the map: its DCs fixed, its element picked, and widened by a higher slot.
-  const settle = (printed: AreaEffect | undefined) => {
+  // What the caster's features add to this spell's area, as Grasping Mist's to Fog Cloud.
+  const spellId = spellOfSource(action.id);
+  const riders = stats.passives.flatMap((passive) =>
+    passive.kind === "areaRider" &&
+    spellId !== null &&
+    passive.spells.includes(spellId)
+      ? [passive.area]
+      : [],
+  );
+  const settle = (written: AreaEffect | undefined) => {
+    const printed =
+      riders.length > 0
+        ? riders.reduce<AreaEffect>(
+            (sum, rider) => {
+              const places = [...(sum.places ?? []), ...(rider.places ?? [])];
+              return { ...sum, ...rider, ...(places.length > 0 ? { places } : {}) };
+            },
+            written ?? {},
+          )
+        : written;
     // A higher slot widens what the area shields, as Globe of Invulnerability's.
     const area =
       printed?.shieldGrows && printed.spellShield !== undefined

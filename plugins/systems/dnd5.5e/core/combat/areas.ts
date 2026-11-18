@@ -466,7 +466,17 @@ export function runZoneTick(
           )
       : []),
   ];
-  const result = resolveAction(action, owner, acting, context, zone.level);
+  // What it pushes or pulls goes from its middle, as Maelstrom's pull toward its centre, unless it moves with its owner.
+  const resolution = action.activation.resolution;
+  const moves = [
+    ...(resolution.kind === "save"
+      ? [...resolution.onFail, ...resolution.onSuccess]
+      : resolution.kind === "automatic"
+        ? resolution.effects
+        : []),
+  ].some((effect) => effect.kind === "forcedMove");
+  const from = moves && !zone.follows ? { ...owner, position: zone.at } : owner;
+  const result = resolveAction(action, from, acting, context, zone.level);
   const events = [
     ...timeStopEnds(owner, acting),
     ...marks,
