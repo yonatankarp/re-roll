@@ -97,16 +97,23 @@ const at = (state: DndState) => ({
   contentIds: run.contentIds,
 });
 
+// The actor of this id in the state.
+function who(state: DndState, id: string): Actor {
+  const actor = state.actors[id];
+  if (!actor) throw new Error(`no ${id}`);
+  return actor;
+}
+
 describe.skipIf(!BOOKS)("auras and support for allies from the books", () => {
   it("Aura of Protection adds the Paladin's Charisma modifier to an ally's saves within 10 feet, 30 from level 18", () => {
     const aura = "phb:feature/paladin-aura-of-protection";
     const ally = bearer([], "phb:class/fighter", 3, "ally");
     const near = row([bearer([aura]), ally], 2);
-    expect(rollBonus(near.actors.ally!, "saves", at(near))).toBe(3);
+    expect(rollBonus(who(near, "ally"), "saves", at(near))).toBe(3);
     const far = row([bearer([aura]), ally], 5);
-    expect(rollBonus(far.actors.ally!, "saves", at(far))).toBe(0);
+    expect(rollBonus(who(far, "ally"), "saves", at(far))).toBe(0);
     const wide = row([bearer([aura], "phb:class/paladin", 18), ally], 5);
-    expect(rollBonus(wide.actors.ally!, "saves", at(wide))).toBe(3);
+    expect(rollBonus(who(wide, "ally"), "saves", at(wide))).toBe(3);
   });
 
   it("Holy Nimbus fills the aura with sunlight only once it's used", () => {

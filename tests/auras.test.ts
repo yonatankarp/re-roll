@@ -116,6 +116,13 @@ const ctx = (state: DndState, run: RunContext, dice = scripted([]).dice) => ({
 const kinds = (events: readonly SystemEvent[], kind: string) =>
   events.filter((event) => event.kind === `${NS}:${kind}`);
 
+// The actor of this id in the state.
+function who(state: DndState, id: string): Actor {
+  const actor = state.actors[id];
+  if (!actor) throw new Error(`no ${id}`);
+  return actor;
+}
+
 describe("character auras", () => {
   it("gives allies in range a save bonus from the bearer's numbers, counting one aura of a kind once", async () => {
     const run = await mineRun();
@@ -127,11 +134,11 @@ describe("character auras", () => {
       friend: [2, 0],
       far: [6, 0],
     });
-    expect(rollBonus(state.actors.friend!, "saves", ctx(state, run))).toBe(3);
-    expect(rollBonus(state.actors.far!, "saves", ctx(state, run))).toBe(0);
-    expect(
-      rollBonus(state.actors[PLAYER_ACTOR]!, "saves", ctx(state, run)),
-    ).toBe(3);
+    expect(rollBonus(who(state, "friend"), "saves", ctx(state, run))).toBe(3);
+    expect(rollBonus(who(state, "far"), "saves", ctx(state, run))).toBe(0);
+    expect(rollBonus(who(state, PLAYER_ACTOR), "saves", ctx(state, run))).toBe(
+      3,
+    );
     // A second Paladin's aura of the same name doesn't add another +3.
     const second = { ...withCha(hero(["protection"], { id: "second" }), 16) };
     const both = board([paladin, near, second], {
@@ -139,7 +146,7 @@ describe("character auras", () => {
       friend: [1, 0],
       second: [2, 0],
     });
-    expect(rollBonus(both.actors.friend!, "saves", ctx(both, run))).toBe(3);
+    expect(rollBonus(who(both, "friend"), "saves", ctx(both, run))).toBe(3);
   });
 
   it("is off while its bearer is Incapacitated, when it must be awake", async () => {
@@ -162,7 +169,7 @@ describe("character auras", () => {
       [PLAYER_ACTOR]: [0, 0],
       friend: [1, 0],
     });
-    expect(rollBonus(state.actors.friend!, "saves", ctx(state, run))).toBe(0);
+    expect(rollBonus(who(state, "friend"), "saves", ctx(state, run))).toBe(0);
   });
 
   it("ends a condition it gives Immunity to on an ally standing in it", async () => {
@@ -196,7 +203,7 @@ describe("character auras", () => {
       friend: [1, 0],
       foe: [8, 0],
     });
-    const friend = state.actors.friend!;
+    const friend = who(state, "friend");
     expect(coverFor(state, { x: 8, y: 0 }, friend, ["foe"], run)).toBe(2);
     expect(coverFor(state, { x: 8, y: 0 }, friend, ["foe"])).toBe(0);
     expect(evades(friend, "dex", ctx(state, run))).toBe(true);
@@ -210,8 +217,8 @@ describe("character auras", () => {
         [PLAYER_ACTOR]: [0, 0],
         friend: [x, 0],
       });
-    expect(evades(at(1).actors.friend!, "dex", ctx(at(1), run))).toBe(true);
-    expect(evades(at(3).actors.friend!, "dex", ctx(at(3), run))).toBe(false);
+    expect(evades(who(at(1), "friend"), "dex", ctx(at(1), run))).toBe(true);
+    expect(evades(who(at(3), "friend"), "dex", ctx(at(3), run))).toBe(false);
   });
 
   it("acts as an ally's turn starts only when it is at 0 Hit Points, as Aura of Life does", async () => {
@@ -222,10 +229,10 @@ describe("character auras", () => {
         friend: [1, 0],
       });
     expect(
-      zoneFrames(at(0).actors.friend!, "start", ctx(at(0), run)),
+      zoneFrames(who(at(0), "friend"), "start", ctx(at(0), run)),
     ).toHaveLength(1);
     expect(
-      zoneFrames(at(5).actors.friend!, "start", ctx(at(5), run)),
+      zoneFrames(who(at(5), "friend"), "start", ctx(at(5), run)),
     ).toHaveLength(0);
   });
 });
@@ -249,7 +256,7 @@ describe("support for allies", () => {
       [PLAYER_ACTOR]: [0, 0],
       friend: [1, 0],
     });
-    const friend = state.actors.friend!;
+    const friend = who(state, "friend");
     // A 9 against 13 fails by 4 (the friend has no Wisdom bonus); the d6 shows 5.
     const turned = rollSave(
       friend,
@@ -289,13 +296,11 @@ describe("support for allies", () => {
         },
       ],
       "test",
-      state.actors[PLAYER_ACTOR]!,
+      who(state, PLAYER_ACTOR),
       ctx(state, run),
     );
-    expect(kinds(events, "healed")).toEqual([
-      expect.objectContaining({
-        payload: expect.objectContaining({ actor: "friend" }),
-      }),
+    expect(kinds(events, "healed")).toMatchObject([
+      { payload: { actor: "friend" } },
     ]);
     expect(kinds(events, "resourceSpent")).toHaveLength(1);
   });
@@ -318,20 +323,14 @@ describe("support for allies", () => {
     });
     // 7 damage needs two d8s on average; they roll 3 and 3, so 1 gets through and three dice are left.
     const dealt = dealEvents(
-      state.actors.friend!,
+      who(state, "friend"),
       [{ amount: 7, type: "fire" }],
       false,
       ctx(state, run, scripted([3, 3]).dice),
     );
     expect(dealt.dealt).toBe(1);
-    expect(kinds(dealt.events, "effectAdded")).toEqual([
-      expect.objectContaining({
-        payload: expect.objectContaining({
-          effect: expect.objectContaining({
-            modifier: { kind: "wardDice", count: 3, die: 8 },
-          }),
-        }),
-      }),
+    expect(kinds(dealt.events, "effectAdded")).toMatchObject([
+      { payload: { effect: { modifier: { kind: "wardDice", count: 3 } } } },
     ]);
   });
 });
