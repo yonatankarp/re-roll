@@ -20,6 +20,7 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - Events and frames are append-only, since saves store them and load by folding them:
   - New payload fields are optional or have a default, so older saves still parse.
   - Never rename or remove an event kind or a frame kind, or reshape its payload. Add a new kind instead and keep the old handler.
+  - `tests/fixtures/kinds.json` locks every kind. Add a new kind to its `kinds`, and to `notInGoldens` until a golden save holds it (`tests/save-kinds.test.ts`).
   - Payloads carry outcomes (the rolled damage, the item found), never inputs that a reducer re-derives from the rules, so a rules change can't rewrite history.
   - A change that can't follow these rules raises `SAVE_FORMAT_VERSION` and adds an entry to `migrations` in `engine/run/save.ts`.
   - The golden saves in `tests/fixtures/saves/` (`*.json`) are frozen and must keep loading. Never regenerate one to make its test pass. A snapshot (`*.state.json`) may be rewritten with `node tests/golden-saves.ts --snapshots` after you review its diff, when the state changed on purpose.
