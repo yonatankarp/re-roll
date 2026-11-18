@@ -30,6 +30,8 @@ export const ContentEntrySchema = z.object({
   replaces: ContentIdSchema.optional(),
   // Another entry of the same kind whose fields fill every one this entry leaves out, so twins share one encoding.
   playsAs: ContentIdSchema.optional(),
+  // An older edition's entry that the edition the game plays reprints: this one is reference text linked to that one.
+  reprint: ContentIdSchema.optional(),
   // The library headings this entry describes, by heading id ("phb/0123-section#heading"), for coverage.
   library: z.array(z.string()).optional(),
 });
@@ -38,6 +40,7 @@ export interface ContentEntry {
   readonly id: string;
   readonly replaces?: string | undefined;
   readonly playsAs?: string | undefined;
+  readonly reprint?: string | undefined;
   readonly library?: readonly string[] | undefined;
 }
 

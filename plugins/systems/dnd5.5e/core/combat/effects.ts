@@ -165,7 +165,7 @@ import {
   limitEvents,
   timeStopEnds,
 } from "./durations.ts";
-import { movedFrames } from "./areas.ts";
+import { carriedEvents, movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
 import { reincarnateEvents } from "../reincarnate.ts";
 import {
@@ -1567,8 +1567,11 @@ export function dealEvents(
   let { state } = context;
   const events: SystemEvent[] = [];
   let dealt = 0;
-  for (const hit of hits) {
+  for (const given of hits) {
     const current = state.actors[target.id] ?? target;
+    // Elemental Bane: the first damage of its type each turn deals more.
+    const baned = baneExtra(current, given, { ...context, state });
+    const hit = { ...given, amount: given.amount + baned.amount };
     const reduced = reducedHit(
       current,
       hit.amount,
@@ -1598,11 +1601,26 @@ export function dealEvents(
             state,
           })
         : [];
+    // Warding Bond: its caster takes as much.
+    const bonded =
+      amount > 0
+        ? current.activeEffects.flatMap(({ modifier, casterId }) => {
+            const caster = state.actors[casterId];
+            return modifier.kind === "bonded" &&
+              caster &&
+              caster.id !== current.id &&
+              !isDown(caster)
+              ? damageEvents(caster, amount, type, false, { ...context, state })
+              : [];
+          })
+        : [];
     for (const event of [
+      ...baned.events,
       ...reduced.events,
       ...lessened.events,
       ...damageEvents(current, amount, type, critical, { ...context, state }),
       ...mirrored,
+      ...bonded,
     ]) {
       events.push(event);
       if (state.actors[target.id]) state = applyDndEvent(state, event);
@@ -2303,7 +2321,10 @@ export function leafEvents(
         const divine = sourceId.includes("channel-divinity");
         const dice =
           (target.hp <= 0 && hasPassive(stats, "maxHealingAtZero")) ||
-          ((spell !== null || divine) && hasPassive(stats, "maxHealingDice"))
+          ((spell !== null || divine) && hasPassive(stats, "maxHealingDice")) ||
+          target.activeEffects.some(
+            ({ modifier }) => modifier.kind === "healedMax",
+          )
             ? HIGHEST
             : healDice;
         const pool = effect.pool
@@ -2682,6 +2703,7 @@ export function leafEvents(
                   : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
+              ...(effect.endsOn ? { endsOn: effect.endsOn } : {}),
               ...(effect.saveOnDamage && save ? { saveOnDamage: save } : {}),
               ...(effect.endsInLight ? { endsInLight: true as const } : {}),
               ...(effect.untilIncapacitated
@@ -2736,7 +2758,13 @@ export function leafEvents(
           target.activeEffects.some(
             ({ modifier }) =>
               modifier.kind === "conditionImmunity" &&
-              modifier.condition === effect.condition,
+              modifier.condition === effect.condition &&
+              (!modifier.creatureTypes ||
+                modifier.creatureTypes.includes(
+                  (
+                    deriveStats(caster, context).creatureType ?? ""
+                  ).toLowerCase(),
+                )),
           ) ||
           (effect.web &&
             hasPassive(deriveStats(target, context), "webWalker")) ||
@@ -3185,7 +3213,9 @@ export function leafEvents(
             ? pushTo(
                 effect.direction === "random"
                   ? randomFrom(target, context.dice.roll(4))
-                  : caster.position,
+                  : effect.fromObject
+                    ? (objectAt(caster, sourceId) ?? caster.position)
+                    : caster.position,
                 target,
                 brace.feet,
                 context.state,
@@ -3345,6 +3375,10 @@ export function leafEvents(
         events.push(...beheadEvents(effect, caster, target, context));
         break;
       case "slay":
+        if (warded(target)) {
+          events.push(...wardBroken(target));
+          break;
+        }
         if (
           !isDead(target) &&
           target.hp <= effect.hpAtMost &&
@@ -3670,6 +3704,27 @@ export function leafEvents(
           );
         }
         break;
+      case "revertShape": {
+        // shortcut: it can shape-shift again at once, rather than only once out of the light.
+        const ended = new Set<string>();
+        for (const own of target.activeEffects) {
+          const key = `${own.sourceId}|${own.casterId}`;
+          if (
+            (own.modifier.kind === "form" || own.modifier.kind === "shape") &&
+            !ended.has(key)
+          ) {
+            ended.add(key);
+            events.push(
+              dndEvent(`${NS}:effectEnded`, {
+                actor: target.id,
+                sourceId: own.sourceId,
+                casterId: own.casterId,
+              }),
+            );
+          }
+        }
+        break;
+      }
       case "note":
       case "disperse":
       case "animate":
@@ -3762,14 +3817,16 @@ function commandedResult(
 
 // The zones a spell leaves, once for the whole cast, where the area was aimed or round the caster, whoever it
 // caught. Its area's save DC is fixed as cast; a wall rings the area with squares no one can pass.
-function zoneEvents(
+export function zoneEvents(
   effects: readonly LeafEffect[],
   action: KnownAction,
   actor: Actor,
   context: Context,
   aim: Square | undefined,
   slotLevel: number | undefined,
+  placing = false, // an anchored action's object, which combat/actions.ts places where it goes
 ): SystemEvent[] {
+  if (action.activation.anchor && !placing) return [];
   const at = aim ?? actor.position;
   if (!at) return [];
   const stats = deriveStats(actor, context);
@@ -3847,13 +3904,30 @@ function zoneEvents(
     const uses =
       kept.uses === undefined
         ? undefined
-        : kept.uses + (usesPerSlot ?? 0) * above;
+        : Math.max(
+            kept.usesAtLeast ?? 1,
+            kept.uses +
+              (usesPerSlot ?? 0) * above +
+              (kept.usesMod
+                ? evaluateFormula(
+                    { base: 0, add: [{ kind: "spellMod" }] },
+                    stats,
+                  )
+                : 0),
+          );
     return {
       area: area
         ? {
             ...kept,
             ...(resolution ? { resolution } : {}),
             ...(holding ? { holding } : {}),
+            ...(kept.schedule
+              ? {
+                  schedule: kept.schedule.map(
+                    (step) => retyped(fixed(step), type) ?? step,
+                  ),
+                }
+              : {}),
             ...(kept.foilsSpells
               ? {
                   foilsSpells: {
@@ -3936,15 +4010,24 @@ function zoneEvents(
         : action.activation.areas?.[effect.part],
     );
     // A new cast starts its counts afresh: what an earlier one dealt or used up.
+    const spell = spellOfSource(spellSource(action)) ?? "";
     const counts = [
-      ...(uses !== undefined && !effect.bare ? [":used"] : []),
-      ...(area?.maxDamage !== undefined && !effect.bare ? [":dealt"] : []),
-    ].flatMap((suffix) =>
-      actor.resourcesSpent[`${spellSource(action)}${suffix}`]
+      ...(uses !== undefined && !effect.bare
+        ? [`${spellSource(action)}:used`]
+        : []),
+      ...(area?.maxDamage !== undefined && !effect.bare
+        ? [`${spellSource(action)}:dealt`]
+        : []),
+      // Spirit Lantern's fragments are gone with the spell it was cast before.
+      ...(area?.gathers
+        ? [`spheres:${spell}`, `spheres:${spell}:gathered`]
+        : []),
+    ].flatMap((resource) =>
+      actor.resourcesSpent[resource]
         ? [
             dndEvent(`${NS}:resourceRestored`, {
               actor: actor.id,
-              resource: `${spellSource(action)}${suffix}`,
+              resource,
             }),
           ]
         : [],
@@ -3991,6 +4074,9 @@ function zoneEvents(
             ...(line ? { dir: line.dir } : {}),
             ...(effect.width ? { width: effect.width } : {}),
             ...(uses === undefined || effect.bare ? {} : { uses }),
+            ...(context.state.combat
+              ? { since: context.state.combat.round }
+              : {}),
             name: action.name,
           },
           ends: effectEnds(effect.duration),
@@ -4065,6 +4151,59 @@ function fissureEvents(
     );
   }
   return events;
+}
+
+// An area that acts on those in it as it appears, as Conjure Celestial's light: its tick on each creature it covers.
+function appearFrames(
+  action: KnownAction,
+  actor: Actor,
+  events: readonly SystemEvent[],
+  context: Context,
+): Frame[] {
+  if (
+    !action.activation.area?.appears &&
+    !action.activation.areas?.some((area) => area.appears)
+  ) {
+    return [];
+  }
+  const state = events.reduce(applyDndEvent, context.state);
+  const far = { x: -1000, y: -1000 };
+  return zonesOf(state, context)
+    .filter(
+      (zone) =>
+        zone.owner === actor.id &&
+        zone.sourceId === spellSource(action) &&
+        zone.area?.appears,
+    )
+    .flatMap((zone) => movedFrames(zone, far, { ...context, state }));
+}
+
+// Where a caster's spell object stands, for an action of that spell (combat/anchor.ts), as Grasping Vine's vine.
+function objectAt(caster: Actor, sourceId: string): Square | null {
+  const source = sourceId.startsWith("lasting:")
+    ? `spell:${sourceId.slice("lasting:".length)}`
+    : sourceId;
+  for (const effect of caster.activeEffects) {
+    if (effect.sourceId === source && effect.modifier.kind === "zone") {
+      return effect.modifier.at;
+    }
+  }
+  return null;
+}
+
+// Half the damage an action deals comes back to its user as Hit Points, as Vampiric Touch's.
+export function siphoned(
+  action: KnownAction,
+  user: Actor,
+  dealt: number,
+  stats: Stats,
+): SystemEvent[] {
+  if (!action.activation.siphon || dealt <= 0 || isDead(user)) return [];
+  const missing = stats.maxHp - Math.max(user.hp, 0);
+  const amount = Math.min(Math.floor(dealt / 2), missing);
+  return amount > 0
+    ? [dndEvent(`${NS}:healed`, { actor: user.id, amount, max: stats.maxHp })]
+    : [];
 }
 
 // A Robe of Eyes' wearer within its reach of a spell's sunlight is Blinded for a minute, saving at each turn's end.
@@ -4312,6 +4451,9 @@ function movedZone(
   return {
     events: [
       dndEvent(`${NS}:zoneMoved`, { actor: actor.id, sourceId: source, to }),
+      ...zones.flatMap((zone) =>
+        carriedEvents(zone, zone.at, to, context.state),
+      ),
     ],
     frames: zones.flatMap((zone) =>
       movedFrames({ ...zone, at: to }, zone.at, context),
@@ -5005,6 +5147,10 @@ export function resolveAction(
 
   const beginConcentration = (effects: readonly LeafEffect[]): void => {
     if (!usesConcentration(effects) && !action.concentrates) return;
+    // What a held spell lets its caster do keeps that spell's Concentration, as Witch Bolt's later lightning.
+    if (action.id.startsWith("lasting:") || action.id.startsWith("spheres:")) {
+      return;
+    }
     // An area acting later, at no cost, keeps the Concentration its spell began, as Conjure Elemental's spirit
     // restraining. A recast still begins it anew.
     if (
@@ -5059,6 +5205,7 @@ export function resolveAction(
     lastDealt = result.dealt;
     events.push(
       ...result.events,
+      ...siphoned(action, actor, result.dealt, stats),
       ...insideDamageEvents(actor, target, result.dealt),
       ...duelDamaged(actor, target, result.dealt, context.state),
     );
@@ -5290,6 +5437,7 @@ export function resolveAction(
           slotLevel,
         ),
       );
+      frames.push(...appearFrames(action, actor, events, context));
       const element = zoneTypeFrame(
         resolution.effects,
         spellSource(action),
@@ -5306,6 +5454,10 @@ export function resolveAction(
           target.hp > 0 &&
           target.hp <= slay.hpAtMost
         ) {
+          if (warded(target)) {
+            events.push(...wardBroken(target));
+            continue;
+          }
           events.push(
             dndEvent(`${NS}:damaged`, {
               actor: target.id,
@@ -5566,7 +5718,8 @@ export function resolveAction(
         if (
           resolution.slayAtMost !== undefined &&
           struck.hp > 0 &&
-          struck.hp <= resolution.slayAtMost
+          struck.hp <= resolution.slayAtMost &&
+          !warded(struck)
         ) {
           events.push(
             dndEvent(`${NS}:damaged`, {
@@ -5684,8 +5837,14 @@ export function resolveAction(
           action.spellLevel === null
             ? undefined
             : spellOf(action.id, actor, context)?.school;
+        // A spell's own, as Holy Star of Mystra's mote, turns spells the same way.
+        const held = target.activeEffects.flatMap(({ modifier }) =>
+          modifier.kind === "spellTurning"
+            ? [{ ...modifier, schools: undefined, resource: undefined }]
+            : [],
+        );
         const turning = saved
-          ? deriveStats(target, context).passives.find(
+          ? [...deriveStats(target, context).passives, ...held].find(
               (passive) =>
                 passive.kind === "spellTurning" &&
                 action.spellLevel !== null &&
@@ -5709,7 +5868,12 @@ export function resolveAction(
         }
         const evaded =
           resolution.onSuccessDamage === "half" &&
-          (evades(target, resolution.ability, context) ||
+          (evades(
+            target,
+            resolution.ability,
+            context,
+            action.spellLevel !== null,
+          ) ||
             (action.spellLevel !== null &&
               zonesOn(target, context.state, context).some(
                 (zone) => zone.area?.magicWard,
@@ -5958,6 +6122,8 @@ export function resolveAction(
       break;
     }
     case "attack": {
+      // A spell attack that leaves something held by Concentration begins it, as Spiritual Weapon's force.
+      beginConcentration([...resolution.onHit, ...resolution.onMiss]);
       const thrown: Frame[] = [];
       for (const target of targets) {
         for (const actionId of attackRoutine(action, actor, stats)) {
@@ -6528,4 +6694,46 @@ export function alliesRiderEvents(
       ),
     ];
   });
+}
+
+// Death Ward: an effect that would kill its bearer outright without damage is negated, and the ward ends.
+// shortcut: a Wail of the Banshee it negates still calls for the save its other targets make.
+const warded = (target: Actor): boolean =>
+  target.activeEffects.some(({ modifier }) => modifier.kind === "deathWard");
+const wardBroken = (target: Actor): SystemEvent[] =>
+  target.activeEffects
+    .filter(({ modifier }) => modifier.kind === "deathWard")
+    .map(({ sourceId }) =>
+      dndEvent(`${NS}:effectEnded`, { actor: target.id, sourceId }),
+    );
+
+// Elemental Bane's extra damage on the first hit of its type on a turn, from its caster's numbers.
+function baneExtra(
+  target: Actor,
+  hit: { readonly amount: number; readonly type: Damage["type"] },
+  context: Context,
+): { amount: number; events: SystemEvent[] } {
+  const { combat } = context.state;
+  const turn = `@${String(combat?.round ?? 0)}:${String(combat?.index ?? 0)}`;
+  let amount = 0;
+  const events: SystemEvent[] = [];
+  for (const { modifier, sourceId, casterId } of target.activeEffects) {
+    const key = `bane:${sourceId}${turn}`;
+    if (
+      modifier.kind !== "bane" ||
+      modifier.damage !== hit.type ||
+      hit.amount <= 0 ||
+      target.usedThisTurn.includes(key)
+    ) {
+      continue;
+    }
+    const caster = context.state.actors[casterId] ?? target;
+    amount += rollAmount(
+      modifier.amount,
+      deriveStats(caster, context),
+      context.dice,
+    );
+    events.push(dndEvent(`${NS}:oncePerTurnUsed`, { actor: target.id, key }));
+  }
+  return { amount, events };
 }

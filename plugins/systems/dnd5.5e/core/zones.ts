@@ -67,6 +67,7 @@ export interface Zone {
   readonly dir?: Square | undefined; // a line runs from `at` toward `at` plus this
   readonly width?: number | undefined; // a line's, in feet
   readonly uses?: number | undefined; // the times it acts in all before it ends
+  readonly since?: number | undefined; // the round it was placed in
 }
 
 // The key a zone's own frames and marks go by: its owner, its spell and which of the spell's areas it is.
@@ -141,6 +142,7 @@ function castZones(state: DndState): readonly Zone[] {
               dir: modifier.dir,
               width: modifier.width,
               uses: modifier.uses,
+              since: modifier.since,
             },
           ];
         }),

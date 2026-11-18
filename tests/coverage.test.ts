@@ -189,6 +189,28 @@ describe("the structural rule", () => {
     ]);
   });
 
+  it("links an older book's heading to its reprint where a rule names that edition", () => {
+    const old = (texts: string[], rules: CoverageFile["rules"]) =>
+      classifyBook(
+        {
+          book: "ob",
+          edition: "old",
+          coverage: { rules },
+          headings: texts.map((text) => heading("0001-a.md", 2, text)),
+        },
+        index,
+        new Map(),
+      ).map((verdict) => verdict.entity ?? verdict.kind);
+    // Its own edition's Rage first, then the new Bard; with no reprint edition named, the Bard is missing.
+    expect(
+      old(
+        ["Rage", "Bard", "Nowhere"],
+        [{ match: "any", reprints: "new", is: "class" }],
+      ),
+    ).toEqual(["old:spell/rage", "hb:class/bard", "class"]);
+    expect(old(["Bard"], [{ is: "class" }])).toEqual(["class"]);
+  });
+
   it("links a family with one stat block, and names a mapped site", () => {
     const rules: CoverageFile["rules"] = [
       {
@@ -267,10 +289,20 @@ describe("the coverage report", () => {
       "- id: hb:spell/gloom\n  name: Gloom\n  library: [hb/0002-gloom, hb/0009-gone]\n",
     "books/rules/hb/rulings/gloom-at-noon.yaml":
       "- id: hb:ruling/gloom-at-noon\n  name: Gloom at noon?\n  about: [hb:spell/gloom, hb:spell/none]\n",
+    "books/rules/ob/plugin.yaml":
+      "id: ob\nkind: rules\nversion: 1.0.0\nsdk: ^1\nsystem: sys@^1\nedition: old\ndistribution: private\n",
+    "books/rules/ob/spells/gloom.yaml":
+      "- id: ob:spell/gloom\n  name: Gloom\n  reprint: hb:spell/gloom\n- id: ob:spell/bane\n  name: Bane\n  reprint: ob:spell/gloom\n",
     "books/rules/hb/conditions/dizzy.yaml":
       "- id: hb:condition/dizzy\n  name: Dizzy\n",
     "books/library/hb/0001-intro.md": "# Chapter 1: Intro\n",
     "books/library/hb/0002-gloom.md": "## Shadows\n### Bane\n",
+    // An adventure's own stat blocks link only by their library: Bane names no heading, so it isn't matched.
+    "books/adventures/adv/plugin.yaml":
+      "id: adv\nkind: adventure\nversion: 1.0.0\nsdk: ^1\nsystem: sys@^1\ndistribution: private\n",
+    "books/adventures/adv/monsters/local.yaml":
+      "- id: adv:monster/bane\n  name: Bane\n- id: adv:monster/shade\n  name: Shade\n  library: [hb/0002-gloom#bane]\n",
+    "books/library/ob/0001-gloom.md": "# Gloom\n## Bane\n",
     "books/coverage/hb.yaml":
       "rules:\n  - { levels: [3], is: deity }\nlinks:\n  hb/0002-gloom#nothing: [hb:spell/none]\n",
   };
@@ -286,7 +318,7 @@ describe("the coverage report", () => {
   // A glossary kind whose entities the system's own values name.
   const system = {
     id: "sys",
-    edition: () => "new",
+    edition: (manifest: { edition?: string }) => manifest.edition ?? "new",
     contentKinds: {
       conditions: {
         idPrefix: "condition",
@@ -305,9 +337,10 @@ describe("the coverage report", () => {
       [system],
     );
     expect(formatCoverage(report)).toEqual([
-      "Library coverage, 1 books, 3 headings: 1 linked, 1 structural, 1 missing",
-      "  hb: 3 headings: 1 linked, 1 structural, 1 missing (deity 1)",
-      "Missing by kind: deity 1",
+      "Library coverage, 2 books, 5 headings: 4 linked, 1 structural, 0 missing",
+      "  hb: 3 headings: 2 linked, 1 structural, 0 missing",
+      "  ob: 2 headings: 2 linked (2 to a reprint), 0 structural, 0 missing",
+      "Missing by kind: none",
     ]);
     expect(report.issues.map((issue) => issue.message)).toEqual([
       'condition "gone", which the system plays, has no entity in any book',
@@ -315,6 +348,7 @@ describe("the coverage report", () => {
       "links hb/0002-gloom#nothing to hb:spell/none, which no entity has",
       "hb:spell/gloom names library heading hb/0009-gone, which no book has",
       "hb:ruling/gloom-at-noon rules on hb:spell/none, which no entity has",
+      "ob:spell/bane's reprint ob:spell/gloom is no spell of another edition",
     ]);
     expect(
       report.entities.find((item) => item.id === "hb:condition/dizzy")?.lore,

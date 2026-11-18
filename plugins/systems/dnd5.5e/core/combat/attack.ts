@@ -186,6 +186,7 @@ import {
   damageRiders,
   dealEvents,
   leafEvents,
+  siphoned,
   payCosts,
   protectedMount,
   reactionMove,
@@ -2703,6 +2704,7 @@ function landHit(
     ...spellHitEvents(payload.spell, attacker, target, stats, context),
     ...oncePerTurnHit(resolution, action, attacker, target, context),
     ...drained(resolution, attacker, target, dealt.dealt, stats, context),
+    ...siphoned(action, attacker, dealt.dealt, stats),
     ...feast(attacker, target, stats, context),
     ...retaliated(attacker, target, action, context, dealt.dealt),
     ...halted(attacker, target, stats, context),
@@ -2843,7 +2845,15 @@ function landHit(
             : {}),
         }),
       ),
-      ...(smitesFor(action, attacker, target, stats, context).length > 0
+      ...(smitesFor(
+        action,
+        attacker,
+        target,
+        stats,
+        context,
+        undefined,
+        payload.critical,
+      ).length > 0
         ? [
             frame("afterHit", {
               attacker: attacker.id,
@@ -2983,11 +2993,24 @@ function retaliated(
   const stats = deriveStats(target, context);
   const onceKey = `retaliate:${attacker.id}`;
   const near = distanceFeet(attacker.position, target.position);
+  // An aura's strikes back are worked out from its owner's numbers, as Holy Aura's save DC.
+  const giver = new Map<Actor["activeEffects"][number]["modifier"], Actor>(
+    zoneGrants(target, context.state, context).map(({ modifier, zone }) => [
+      modifier,
+      context.state.actors[zone.owner] ?? target,
+    ]),
+  );
+  const attackerType = (
+    deriveStats(attacker, context).creatureType ?? ""
+  ).toLowerCase();
   const backs = [
     ...target.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
+    ...giver.keys(),
   ].flatMap((modifier) =>
     modifier.kind === "retaliate" &&
+    (!modifier.creatureTypes ||
+      modifier.creatureTypes.includes(attackerType)) &&
     (modifier.within !== undefined
       ? near <= modifier.within
       : close || modifier.anyAttack === true) &&
@@ -3018,7 +3041,42 @@ function retaliated(
         ]
       : []),
   ]);
+  // Holy Aura: a save against the giver's DC, or the attacker gets the effects.
+  const struck = backs.flatMap((back) => {
+    if (!back.condition) return [];
+    const by = giver.get(back) ?? target;
+    const rolled = back.save
+      ? rollSave(
+          attacker,
+          back.save.ability,
+          evaluateFormula(back.save.dc, deriveStats(by, context)),
+          context,
+          true,
+        )
+      : { saved: false, events: [] };
+    return [
+      ...rolled.events,
+      ...(rolled.saved
+        ? []
+        : leafEvents(
+            [
+              {
+                kind: "applyCondition",
+                condition: back.condition,
+                duration: { until: "itsNextTurnEnd" },
+                repeatSave: false,
+                endsOnDamage: false,
+              },
+            ],
+            `retaliate:${by.id}`,
+            by,
+            attacker,
+            context,
+          )),
+    ];
+  });
   const events = [
+    ...struck,
     ...(backs.some(({ oncePerTurn }) => oncePerTurn)
       ? [
           dndEvent(`${NS}:oncePerTurnUsed`, {
@@ -3991,6 +4049,7 @@ function smitesFor(
   stats: Stats,
   context: Context,
   following?: string,
+  critical = false,
 ): readonly KnownAction[] {
   if (hitWith.activation.resolution.kind !== "attack") return [];
   return stats.actions.filter((action) => {
@@ -4005,6 +4064,7 @@ function smitesFor(
       !trigger.forgoAdvantage && // picked before the roll
       !trigger.gainsAdvantage &&
       trigger.fixedRoll === undefined &&
+      (!trigger.onCritical || critical) &&
       canAfford(action, attacker, stats) &&
       hitFits(trigger.afterHit, hitWith, attacker, context) &&
       itemFits(action, hitWith, context) &&
@@ -4133,6 +4193,7 @@ export function runAfterHit(
     stats,
     context,
     payload.following,
+    payload.critical,
   ).flatMap((action) =>
     action.activation.trigger?.near === undefined
       ? fitsType(target, action.activation.targeting, context, attacker)
