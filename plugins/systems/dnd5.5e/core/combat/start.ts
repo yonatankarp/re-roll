@@ -131,6 +131,13 @@ export function startCombat(
       (passive) => passive.kind === "initiativeAdvantage" && passive.allies,
     ),
   );
+  // Adventurer's Atlas: its dice added to the Initiative of the bearer and the allies holding its maps.
+  // shortcut: every party member holds one, rather than up to 1 plus the bearer's Intelligence modifier.
+  const atlas = party.flatMap((actor) =>
+    deriveStats(actor, context).passives.flatMap((passive) =>
+      passive.kind === "partyInitiative" ? [passive.dice] : [],
+    ),
+  )[0];
   // Ambush: a die of its resource added to Initiative, spent.
   // shortcut: it's spent on every Initiative while one is left, where the player would choose when.
   const dieSpent: SystemEvent[] = [];
@@ -180,7 +187,13 @@ export function startCombat(
       return {
         id: actor.id,
         position,
-        total: natural + stats.initiative + initiativeDie(actor, stats),
+        total:
+          natural +
+          stats.initiative +
+          initiativeDie(actor, stats) +
+          (atlas && actor.side === "party"
+            ? rollDiceNotation(atlas, context.dice)
+            : 0),
       };
     },
   );

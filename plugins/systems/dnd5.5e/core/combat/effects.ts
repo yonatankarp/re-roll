@@ -730,11 +730,25 @@ function enduredEvents(
   for (const bearer of bearers) {
     const own = deriveStats(bearer, context);
     for (const trait of own.passives) {
+      // Soul of Artifice's Cheat Death: its Uncommon and Rare replicated items, in place of a use.
+      const artifice =
+        trait.kind === "dropToOne" && trait.replicated !== undefined
+          ? (bearer.replicated ?? []).filter((id) => {
+              const item = ItemSchema.safeParse(context.content(id)).data;
+              return (
+                item !== undefined &&
+                "rarity" in item &&
+                (item.rarity === "uncommon" || item.rarity === "rare")
+              );
+            })
+          : [];
       if (
         trait.kind !== "dropToOne" ||
         (bearer !== target && !trait.allies) ||
-        (bearer.resourcesSpent[trait.resource] ?? 0) >=
-          (own.resources[trait.resource] ?? 0) ||
+        (trait.replicated !== undefined
+          ? artifice.length === 0
+          : (bearer.resourcesSpent[trait.resource] ?? 0) >=
+            (own.resources[trait.resource] ?? 0)) ||
         trait.except?.includes(hit.type) ||
         (trait.notCritical && hit.critical) ||
         (trait.reaction && (!bearer.budget.reaction || isDown(bearer))) ||
@@ -760,14 +774,28 @@ function enduredEvents(
         rolled.push(...save.events);
         if (!save.saved) continue;
       }
-      const hp = trait.hp
-        ? Math.min(stats.maxHp, Math.max(1, evaluateFormula(trait.hp, own)))
-        : 1;
+      const hp = trait.replicated
+        ? Math.min(stats.maxHp, trait.replicated * artifice.length)
+        : trait.hp
+          ? Math.min(stats.maxHp, Math.max(1, evaluateFormula(trait.hp, own)))
+          : 1;
       const endured = [
-        dndEvent(`${NS}:resourceSpent`, {
-          actor: bearer.id,
-          resource: trait.resource,
-        }),
+        ...(trait.replicated
+          ? [
+              ...artifice.map((item) =>
+                dndEvent(`${NS}:itemUsed`, { actor: bearer.id, item }),
+              ),
+              dndEvent(`${NS}:itemReplicated`, {
+                actor: bearer.id,
+                vanished: artifice,
+              }),
+            ]
+          : [
+              dndEvent(`${NS}:resourceSpent`, {
+                actor: bearer.id,
+                resource: trait.resource,
+              }),
+            ]),
         ...(trait.reaction
           ? [
               dndEvent(`${NS}:budgetSpent`, {
@@ -2157,6 +2185,28 @@ export function leafEvents(
   const unhealed = healingStopped(target, context.state, context);
   for (const effect of effects) {
     switch (effect.kind) {
+      // Magic Item Tinker's Drain: the oldest replicated item gone, a slot back by its rarity.
+      // shortcut: the slot doesn't vanish at the next Long Rest.
+      case "drainReplicated": {
+        const [oldest] = caster.replicated ?? [];
+        if (!oldest) break;
+        const item = ItemSchema.safeParse(context.content(oldest)).data;
+        const level =
+          item && "rarity" in item && item.rarity === "common" ? 1 : 2;
+        events.push(
+          dndEvent(`${NS}:itemUsed`, { actor: caster.id, item: oldest }),
+          dndEvent(`${NS}:itemReplicated`, {
+            actor: caster.id,
+            vanished: [oldest],
+          }),
+          dndEvent(`${NS}:resourceRestored`, {
+            actor: caster.id,
+            resource: `slot:${String(level)}`,
+            amount: 1,
+          }),
+        );
+        break;
+      }
       case "channel": {
         if (effect.pick) break; // picked by a decision (resolveAction)
         const sides = stats.scaling[effect.dieSize] ?? 6;

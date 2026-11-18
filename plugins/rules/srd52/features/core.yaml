@@ -477,12 +477,15 @@
 - id: "srd52:feature/memorize-spell"
   name: Memorize Spell
   text: "When you finish a Short Rest, you can swap one prepared spell for another in your spellbook."
-  automation: text
+  automation: full
+  passives:
+    - { kind: memorize, class: wizard }
 
 - id: "srd52:feature/evocation-savant"
   name: Evocation Savant
   text: "You add two Evocation spells to your spellbook for free, and another with each new spell level."
-  automation: text
+  automation: full
+  # The spellbook is the whole Wizard list here (swap.ts), so the free spells are already in it.
 
 - id: "srd52:feature/potent-cantrip"
   name: Potent Cantrip

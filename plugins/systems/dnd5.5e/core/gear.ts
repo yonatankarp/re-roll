@@ -344,6 +344,130 @@ export function changed(
   }
 }
 
+// Replicate Magic Item: a plan made where the party could rest, while a use is left, or with Magic Item Tinker's
+// Transmute the oldest made turned into it.
+function replicateActions(actor: Actor, access: ContentAccess): SceneAction[] {
+  const stats = deriveStats(actor, access);
+  const left = (resource: string) =>
+    (stats.resources[resource] ?? 0) - (actor.resourcesSpent[resource] ?? 0) >
+    0;
+  const transmute = stats.passives.find(
+    (passive) => passive.kind === "replicateTransmute",
+  );
+  return stats.passives.flatMap((passive) => {
+    if (passive.kind !== "replicate") return [];
+    const level = Object.entries(stats.classLevels).reduce(
+      (most, [id, count]) =>
+        id.endsWith(`/${passive.class}`) ? Math.max(most, count) : most,
+      0,
+    );
+    const made = actor.replicated ?? [];
+    return passive.plans
+      .filter((plan) => plan.level <= level && access.content(plan.item))
+      .flatMap(({ item: id }) => {
+        const item = itemOf(access, id);
+        return [
+          ...(left(passive.resource) && !made.includes(id)
+            ? [
+                {
+                  id: `replicate:${id}`,
+                  label: `Replicate ${item.name}`,
+                  effect: `${NS}:replicate`,
+                  args: { item: id },
+                  rest: true as const,
+                },
+              ]
+            : []),
+          ...(transmute?.kind === "replicateTransmute" &&
+          left(transmute.resource) &&
+          made.length > 0 &&
+          !made.includes(id)
+            ? [
+                {
+                  id: `transmute:${id}`,
+                  label: `Transmute into ${item.name}`,
+                  effect: `${NS}:replicate`,
+                  args: { item: id, transmute: true },
+                },
+              ]
+            : []),
+        ];
+      });
+  });
+}
+
+// Making a replicated item: it's carried, attuned where it needs it and there's room, and the oldest made goes
+// once there are more than the cap, or the one transmuted.
+function replicate(
+  id: string,
+  transmute: boolean,
+  context: Context,
+): SystemResult {
+  const actor = player(context.state);
+  const stats = deriveStats(actor, context);
+  const rule = stats.passives.find((passive) => passive.kind === "replicate");
+  const turn = stats.passives.find(
+    (passive) => passive.kind === "replicateTransmute",
+  );
+  if (
+    rule?.kind !== "replicate" ||
+    (transmute && turn?.kind !== "replicateTransmute")
+  ) {
+    throw new Error(`${actor.id} can't replicate ${id}`);
+  }
+  const made = actor.replicated ?? [];
+  const cap =
+    (stats.scaling[rule.cap] ?? 0) +
+    stats.passives.reduce(
+      (sum, passive) =>
+        passive.kind === "replicateExtra" ? sum + passive.count : sum,
+      0,
+    );
+  const vanished = transmute
+    ? made.slice(0, 1)
+    : made.slice(0, Math.max(0, made.length + 1 - cap));
+  const item = itemOf(context, id);
+  const attuned = actor.attuned ?? [];
+  const attunes =
+    "attunement" in item &&
+    item.attunement === true &&
+    attuned.length - vanished.filter((gone) => attuned.includes(gone)).length <
+      attunementLimit(stats);
+  return {
+    events: [
+      dndEvent(`${NS}:resourceSpent`, {
+        actor: actor.id,
+        resource:
+          transmute && turn?.kind === "replicateTransmute"
+            ? turn.resource
+            : rule.resource,
+      }),
+      ...vanished.map((gone) =>
+        dndEvent(`${NS}:itemUsed`, { actor: actor.id, item: gone }),
+      ),
+      dndEvent(`${NS}:itemReplicated`, { actor: actor.id, item: id, vanished }),
+      dndEvent(`${NS}:treasureFound`, {
+        actor: actor.id,
+        gold: 0,
+        items: [id],
+        stowed: [],
+      }),
+      ...(attunes
+        ? [
+            dndEvent(`${NS}:gearChanged`, {
+              actor: actor.id,
+              stowed: actor.stowed ?? [],
+              attuned: [
+                ...attuned.filter((other) => !vanished.includes(other)),
+                id,
+              ],
+            }),
+          ]
+        : []),
+    ],
+  };
+}
+
 // The save attuning to an item calls for, as the Wand of Orcus's, read off the magic item a weapon is made from.
 export function attuneSaveFrames(
   actor: Actor,
@@ -437,6 +561,7 @@ export function sceneGearActions(
   const rows = new Set<string>();
   const full = actor.hp >= deriveStats(actor, access).maxHp;
   return [
+    ...replicateActions(actor, access),
     ...gearOptions(actor, access)
       .filter(({ id }) => {
         const item = id.slice(id.indexOf(":") + 1);
@@ -827,6 +952,12 @@ export const gearEffects = {
     schema: StoreSchema,
     references: ({ item, spell }) => [item, spell],
     apply: storeSpell,
+  }),
+  [`${NS}:replicate`]: storyEffect({
+    schema: z.object({ item: z.string(), transmute: z.boolean().optional() }),
+    references: ({ item }) => [item],
+    apply: ({ item, transmute }, context: Context) =>
+      replicate(item, transmute === true, context),
   }),
   [`${NS}:study`]: storyEffect({
     schema: z.object({ item: z.string(), ability: AbilitySchema.optional() }),
