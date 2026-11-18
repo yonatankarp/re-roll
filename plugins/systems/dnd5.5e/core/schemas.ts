@@ -1005,6 +1005,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("retypeHit"),
     types: z.array(DamageTypeSchema).min(2),
   }),
+  // The oldest item the caster replicated vanishes, giving back a spell slot of level 1 for a Common item or 2 for
+  // another, as Magic Item Tinker's Drain (combat/effects.ts).
+  z.strictObject({ kind: z.literal("drainReplicated") }),
   // A roll on the table the content entry `from` holds (its `table`, TableSchema), as a Wand of Wonder's effects
   // (combat/reactions.ts tableRoll), aimed at the action's target.
   // With `channeled` the face kept by `channel` is used, and the channeled effect ends.
@@ -2599,6 +2602,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("dropToOne"),
     resource: z.string(),
+    // the bearer's Uncommon and Rare replicated items vanish instead of a use, and it's left with this many Hit Points
+    // for each, as Soul of Artifice's Cheat Death
+    replicated: z.number().int().min(1).optional(),
     effects: z.array(ModifierSchema).default([]),
     hp: FormulaSchema.optional(),
     while: z.array(ContentIdSchema).min(1).optional(),
@@ -3161,6 +3167,37 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Reads any Spell Scroll with this ability, cantrips and level 1 spells reliably and a higher one behind a check of
   // it with Arcana of 10 plus the spell's level, whose failure wastes the scroll, as Use Magic Device's (stats.ts).
   z.strictObject({ kind: z.literal("anyScroll"), ability: AbilitySchema }),
+  // Magic items made where the party could rest, from these plans, each `level` or more in `class` (by name after the
+  // plugin), spending a use of `resource`, as Replicate Magic Item (gear.ts replicateActions): with more of them made
+  // than `cap` (a scaling key, as `magicItems`, plus `extra`) the oldest vanishes, and with `transmute` one made can
+  // become another, spending that resource instead, as Magic Item Tinker's Transmute. An item needing Attunement is
+  // attuned as it's made, where there's room. shortcut: every plan the level allows is known.
+  z.strictObject({
+    kind: z.literal("replicate"),
+    class: z.string().min(1),
+    resource: z.string().min(1),
+    cap: z.string().min(1),
+    plans: z
+      .array(
+        z.strictObject({
+          item: ContentIdSchema,
+          level: z.number().int().min(1),
+        }),
+      )
+      .min(1),
+  }),
+  // These dice added to the Initiative of the bearer and its allies, as Adventurer's Atlas's maps (combat/start.ts).
+  z.strictObject({ kind: z.literal("partyInitiative"), dice: DiceSchema }),
+  // More items a `replicate` makes before the oldest vanishes, as Improved Armorer's one more.
+  z.strictObject({
+    kind: z.literal("replicateExtra"),
+    count: z.number().int().min(1),
+  }),
+  // A replicated item turned into another plan, spending a use of `resource`, as Magic Item Tinker's Transmute.
+  z.strictObject({
+    kind: z.literal("replicateTransmute"),
+    resource: z.string().min(1),
+  }),
   // A Short Rest lets the bearer change its prepared spells of this class (by name after the plugin) again, as Memorize
   // Spell (rest.ts, swap.ts). shortcut: every pick it changes after a Long Rest, not only one.
   z.strictObject({ kind: z.literal("memorize"), class: z.string().min(1) }),

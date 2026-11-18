@@ -469,6 +469,8 @@ const ActorSchema = z.strictObject({
   attuned: z.array(ContentIdSchema).optional(), // magic items attuned to, at most MAX_ATTUNED
   // Ability scores raised for good, as by studying a Manual of Bodily Health. Missing when none has been.
   raised: z.partialRecord(AbilitySchema, z.number().int()).optional(),
+  // Magic items made with a `replicate` passive, oldest first (gear.ts). Missing until one is.
+  replicated: z.array(ContentIdSchema).optional(),
   // The passives rolled for an item as it was found, by the item's id (MagicItemSchema `properties`). Missing until one.
   itemProperties: z.record(z.string(), z.array(PassiveSchema)).optional(),
   // Items studied whose study gives passives for good or is made once, as a Book of Exalted Deeds. Missing until one.
@@ -720,6 +722,11 @@ const AbilityRaisedSchema = z.strictObject({
   ability: AbilitySchema,
   amount: z.number().int(),
   item: ContentIdSchema,
+});
+const ItemReplicatedSchema = z.strictObject({
+  actor: z.string(),
+  item: ContentIdSchema.optional(), // the one made, if any
+  vanished: z.array(ContentIdSchema).default([]), // those gone from the list (and the pack, by itemUsed)
 });
 const PropertiesRolledSchema = z.strictObject({
   actor: z.string(),
@@ -978,6 +985,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemStudied`]: ItemStudiedSchema,
   [`${NS}:propertiesRolled`]: PropertiesRolledSchema,
+  [`${NS}:itemReplicated`]: ItemReplicatedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
   [`${NS}:abilityRaised`]: AbilityRaisedSchema,
   [`${NS}:poolRolled`]: PoolRolledSchema,
@@ -2437,6 +2445,20 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         ...actor,
         rolledPools: { ...actor.rolledPools, [data.resource]: data.amount },
       }));
+    }
+    case `${NS}:itemReplicated`: {
+      const data = payload(ItemReplicatedSchema, event);
+      return updateActor(state, data.actor, (actor) => {
+        const kept = [...(actor.replicated ?? [])];
+        for (const gone of data.vanished) {
+          const at = kept.indexOf(gone);
+          if (at >= 0) kept.splice(at, 1);
+        }
+        return {
+          ...actor,
+          replicated: [...kept, ...(data.item ? [data.item] : [])],
+        };
+      });
     }
     case `${NS}:propertiesRolled`: {
       const data = payload(PropertiesRolledSchema, event);
