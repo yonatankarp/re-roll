@@ -23,6 +23,7 @@ import {
   frameHandler,
 } from "#sdk";
 import {
+  exhaustionEvents,
   type Actor,
   type ActiveEffect,
   applyDndEvent,
@@ -577,9 +578,7 @@ export function runFinishTurn(context: Context): SystemResult {
       !resisted &&
       rescued.length === 0
     ) {
-      events.push(
-        dndEvent(`${NS}:exhaustionChanged`, { actor: target.id, levels: 1 }),
-      );
+      events.push(...exhaustionEvents(target, 1));
     }
     const holder =
       target.activeEffects.find(

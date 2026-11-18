@@ -62,7 +62,7 @@ import {
   throughOf,
   walksOnWater,
 } from "../movement-modes.ts";
-import { behindTotalCover, difficultSquares } from "../sight.ts";
+import { behindTotalCover, difficultSquares, fearSources } from "../sight.ts";
 import {
   encodeOption,
   spellOfSource,
@@ -633,12 +633,24 @@ export function moveSquares(
     }
     return best;
   };
-  const plain = search(1);
+  // Prone and not standing, it crawls: each foot costs 1 extra foot.
+  // shortcut: crawling doubles a difficult square's cost rather than adding 1 foot to it.
+  const crawl = hasCondition(actor, "prone") ? 1 : 0;
+  const plain = search(1 + crawl);
   const holds = heldBy(actor, state, access).filter(
     ({ held }) => !isDead(held),
   );
-  // Compelled Duel keeps its target within reach of the caster.
-  const tooFar = leashed(actor, state);
+  // Compelled Duel keeps its target within reach of the caster, and a Frightened creature can't move closer to the
+  // source of its fear.
+  // shortcut: only the square it ends on is measured, not each one on the way.
+  const leash = leashed(actor, state);
+  const fears = fearSources(actor, state);
+  const tooFar = (square: Square): boolean =>
+    leash(square) ||
+    fears.some(
+      ({ position }) =>
+        distanceFeet(square, position) < distanceFeet(from, position),
+    );
   if (holds.length === 0) {
     return [...plain.values()].filter(({ square }) => !tooFar(square));
   }
@@ -648,7 +660,9 @@ export function moveSquares(
     return size === 0 || own - size >= 2;
   };
   const dragging =
-    hasPassive(stats, "abduct") || holds.every(light) ? plain : search(2);
+    hasPassive(stats, "abduct") || holds.every(light)
+      ? plain
+      : search(2 + crawl);
   return [...plain.values()]
     .map((walk) => {
       const near = holds.every(

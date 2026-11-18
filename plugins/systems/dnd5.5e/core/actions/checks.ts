@@ -4,6 +4,7 @@ import { familiarHelpUse } from "../combat/familiar.ts";
 import { luckyEdge } from "../combat/queries.ts";
 import { settleRoll } from "../combat/reactions.ts";
 import { rollD20 } from "../rules.ts";
+import { frightenedInSight } from "../sight.ts";
 import { type Ability, ABILITY_NAMES, type Skill } from "../schemas.ts";
 import { type Actor, dndEvent, hasCondition, NS } from "../state.ts";
 import { checkBonus, deriveStats, scoreFloor, type Stats } from "../stats.ts";
@@ -129,7 +130,8 @@ export function abilityCheck(
         context,
         ability,
       ) ||
-      hasCondition(actor, "poisoned", "frightened"),
+      hasCondition(actor, "poisoned") ||
+      frightenedInSight(actor, context.state),
   };
   const lucky = luckyEdge(actor, stats, edge.advantage, edge.disadvantage);
   if (lucky) edge.disadvantage = false;

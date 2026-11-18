@@ -921,6 +921,7 @@ const DeathSaveSchema = z.strictObject({
   actor: z.string(),
   natural: z.number().int(),
   counts: z.number().int().optional(), // the roll it counts as, as Survivor's 18 for a 20; the natural when left out
+  total: z.number().int().optional(), // with its bonuses and penalties, as Exhaustion's; `counts` when left out
 });
 const RollReportSchema = z.strictObject({
   actor: z.string(),
@@ -1024,6 +1025,8 @@ export const EVENT_SCHEMAS = {
   [`${NS}:actionRegained`]: ActorOnlySchema,
   [`${NS}:reactionRegained`]: ActorOnlySchema,
   [`${NS}:exhaustionChanged`]: ExhaustionChangedSchema,
+  // The sixth level of Exhaustion: it dies, its Hit Points gone and its death saves failed.
+  [`${NS}:exhaustedToDeath`]: ActorOnlySchema,
   [`${NS}:resourceSpent`]: ResourceSpentSchema,
   [`${NS}:resourceRestored`]: ResourceRestoredSchema,
   [`${NS}:oncePerTurnUsed`]: OncePerTurnSchema,
@@ -1346,6 +1349,11 @@ export function cannotHeal(actor: Actor): boolean {
   );
 }
 
+// Unconscious, or dying at 0 Hit Points, which leaves it Unconscious as well.
+export function unconscious(actor: Actor): boolean {
+  return hasCondition(actor, "unconscious") || isDown(actor);
+}
+
 export function isDown(actor: Actor): boolean {
   return actor.hp <= 0 && fightingOn(actor) === null;
 }
@@ -1394,7 +1402,28 @@ export function familiarOwner(actor: Actor): string | null {
     : null;
 }
 
+// Levels of Exhaustion gained (or lost, below 0), from `from` levels, and death on reaching the sixth.
+// shortcut: levels that last only while an effect does (stats/bonuses.ts exhaustionOf) never kill.
+export function exhaustionEvents(
+  actor: Actor,
+  levels: number,
+  from = actor.exhaustion,
+): SystemEvent[] {
+  const changed = dndEvent(`${NS}:exhaustionChanged`, {
+    actor: actor.id,
+    levels,
+  });
+  return from < 6 && from + levels >= 6 && !isDead(actor)
+    ? [
+        changed,
+        dndEvent(`${NS}:exhaustedToDeath`, { actor: actor.id }),
+        { kind: "actorDefeated", actor: actor.id },
+      ]
+    : [changed];
+}
+
 export function isDead(actor: Actor): boolean {
+  if (actor.exhaustion >= 6) return true;
   if (actor.hp > 0) return false;
   return (
     actor.side === "enemy" ||
@@ -1885,17 +1914,37 @@ function applyDamage(
   };
 }
 
-function applyDeathSave(actor: Actor, natural: number): Actor {
-  if (natural === 20) {
+// What a Death Saving Throw comes to: the roll it counts as brings it back on a 20 and fails twice on a 1, whatever
+// is added; otherwise its total succeeds at 10 or more.
+export function deathSaveOutcome(
+  counts: number,
+  total: number,
+): {
+  readonly revived: boolean;
+  readonly success: boolean;
+  readonly failures: number;
+} {
+  if (counts === 20) return { revived: true, success: true, failures: 0 };
+  if (counts === 1) return { revived: false, success: false, failures: 2 };
+  return total >= 10
+    ? { revived: false, success: true, failures: 0 }
+    : { revived: false, success: false, failures: 1 };
+}
+
+function applyDeathSave(
+  actor: Actor,
+  outcome: ReturnType<typeof deathSaveOutcome>,
+): Actor {
+  if (outcome.revived) {
     return { ...actor, hp: 1, deathSaves: { successes: 0, failures: 0 } };
   }
   const { successes, failures } = actor.deathSaves;
   return {
     ...actor,
-    deathSaves:
-      natural >= 10
-        ? { successes: successes + 1, failures }
-        : { successes, failures: failures + (natural === 1 ? 2 : 1) },
+    deathSaves: {
+      successes: successes + (outcome.success ? 1 : 0),
+      failures: failures + outcome.failures,
+    },
   };
 }
 
@@ -2259,6 +2308,17 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
         exhaustion: Math.min(6, Math.max(0, actor.exhaustion + data.levels)),
       }));
     }
+    case `${NS}:exhaustedToDeath`:
+      return updateActor(
+        state,
+        payload(ActorOnlySchema, event).actor,
+        (actor) => ({
+          ...actor,
+          hp: 0,
+          tempHp: 0,
+          deathSaves: { successes: 0, failures: 3 },
+        }),
+      );
     case `${NS}:resourceSpent`: {
       const data = payload(ResourceSpentSchema, event);
       return updateActor(state, data.actor, (actor) => ({
@@ -2508,7 +2568,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
     case `${NS}:deathSaveRolled`: {
       const data = payload(DeathSaveSchema, event);
       return updateActor(state, data.actor, (actor) =>
-        applyDeathSave(actor, data.counts ?? data.natural),
+        applyDeathSave(
+          actor,
+          deathSaveOutcome(
+            data.counts ?? data.natural,
+            data.total ?? data.counts ?? data.natural,
+          ),
+        ),
       );
     }
     case `${NS}:stabilized`:

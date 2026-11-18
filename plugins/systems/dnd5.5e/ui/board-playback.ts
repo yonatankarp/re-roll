@@ -203,7 +203,7 @@ export async function play(ctx: BoardContext, cue: DndCue): Promise<void> {
         { x: at.x, y: at.y - 50 },
         cue.natural,
         "Death save · DC 10",
-        `Death save: ${cue.natural >= 10 ? "Success" : "Failed"}`,
+        `Death save: ${cue.success ? "Success" : "Failed"}`,
         cue.actor === PLAYER_ACTOR,
       );
       await wait(ctx, ms);
