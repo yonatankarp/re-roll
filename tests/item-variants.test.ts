@@ -458,7 +458,6 @@ describe("magic armor, flat bonuses and ability scores", () => {
       name: "+2 Chain Mail",
       type: "armor",
       base: 16,
-      baseArmor: "srd52:item/chain-mail",
       bonuses: [{ to: "ac", amount: 2 }],
     });
     expect(registry.content(CHAIN)).not.toHaveProperty("costCp");

@@ -1,6 +1,5 @@
 import { type Context, dealEvents, enemies, meleeReach } from "../combat.ts";
 import { distanceFeet } from "../grid.ts";
-import { finalDamage } from "../rules.ts";
 import {
   dndEvent,
   frame,
@@ -56,11 +55,8 @@ export function runAfterMove(
       ...dealEvents(
         mover,
         brambles.modifier.damage.map(({ amount, type }) => ({
-          amount: finalDamage(
-            rollAmount(amount, casterStats, context.dice),
-            type,
-            responses,
-          ),
+          amount: rollAmount(amount, casterStats, context.dice),
+          response: responses,
           type,
         })),
         false,

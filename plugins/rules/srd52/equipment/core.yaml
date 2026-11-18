@@ -76,6 +76,7 @@
     base: 16,
     addDex: false,
     strength: 13,
+    stealthDisadvantage: true,
   }
 - {
     id: "srd52:item/leather-armor",
@@ -97,6 +98,7 @@
     base: 14,
     addDex: true,
     maxDex: 2,
+    stealthDisadvantage: true,
   }
 - {
     id: "srd52:item/shield",

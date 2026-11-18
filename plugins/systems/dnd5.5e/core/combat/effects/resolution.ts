@@ -30,7 +30,7 @@ import {
   type SystemEvent,
   type SystemResult,
 } from "#sdk";
-import { finalDamage, halved } from "../../rules.ts";
+import { halved } from "../../rules.ts";
 import {
   type Damage,
   type DamageType,
@@ -346,15 +346,12 @@ export function resolveAction(
     const result = dealEvents(
       target,
       damage.map(({ total, type }) => ({
-        amount: finalDamage(
-          scale(total),
-          type,
-          piercing(
-            damageResponses(target, context),
-            mastered,
-            stats,
-            action.id,
-          ),
+        amount: scale(total),
+        response: piercing(
+          damageResponses(target, context),
+          mastered,
+          stats,
+          action.id,
         ),
         type,
       })),

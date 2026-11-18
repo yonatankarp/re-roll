@@ -1123,7 +1123,8 @@ describe("item riders (#180, #199)", () => {
         : undefined;
     };
     expect(damage("test:item/keyholes--1--dagger")).toBe("1d6");
-    expect(damage("test:item/keyholes--2--dagger")).toBe("1d8");
+    // a Versatile form, held in both hands with no Shield
+    expect(damage("test:item/keyholes--2--dagger")).toBe("1d10");
   });
 
   it("rerolls a natural 1 on a save once, and the Lucky Foot is gone", async () => {

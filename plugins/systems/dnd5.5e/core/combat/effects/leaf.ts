@@ -31,7 +31,6 @@ import {
   SURGED,
 } from "../../state.ts";
 import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
-import { finalDamage } from "../../rules.ts";
 import {
   type Ability,
   ItemSchema,
@@ -142,6 +141,51 @@ function inHpBand(
   );
 }
 
+// Kinds the handler that reads an activation's own effects acts on, and leafEvents passes over: a reaction's
+// reduced damage worked out as it holds up the hit, a teleport's square by its own decision, a zone once for the
+// whole spell (resolveAction). Placed anywhere else they'd do nothing, which check-pack reports (lint.ts).
+export const READ_ELSEWHERE = [
+  "disperse",
+  "reactionAttack",
+  "reactionMove",
+  "randomAction",
+  "rollTable",
+  "escape",
+  "reduceDamage",
+  "acAgainstHit",
+  "commandFamiliar",
+  "teleport",
+  "zone",
+  "summon",
+  "counter",
+  "reroll",
+  "rollBonus",
+  "replaceRoll",
+  "succeed",
+  "strike",
+  "redirect",
+  "drawAttack",
+  "negateHit",
+  "redirectMiss",
+  "noCritical",
+  "stealSpell",
+  "stickWeapon",
+  "slowFall",
+  "split",
+  "swapInitiative",
+  "resistTrigger",
+  "forcedAttack",
+  "moveZone",
+  "weaponAttack",
+  "copySpell",
+  "retypeHit",
+] as const satisfies readonly LeafEffect["kind"][];
+
+const readElsewhere = (
+  effect: LeafEffect,
+): effect is Extract<LeafEffect, { kind: (typeof READ_ELSEWHERE)[number] }> =>
+  (READ_ELSEWHERE as readonly string[]).includes(effect.kind);
+
 export function leafEvents(
   effects: readonly LeafEffect[],
   sourceId: string,
@@ -206,6 +250,7 @@ export function leafEvents(
       );
   const unhealed = healingStopped(target, context.state, context);
   for (const effect of effects) {
+    if (readElsewhere(effect)) continue;
     switch (effect.kind) {
       // Magic Item Tinker's Drain: the oldest replicated item gone, a slot back by its rarity.
       // shortcut: the slot doesn't vanish at the next Long Rest.
@@ -262,6 +307,7 @@ export function leafEvents(
         const hits = effect.damage.map((damage) => ({
           amount: rollAmount(damage.amount, stats, context.dice),
           type: damage.type,
+          response: damageResponses(caster, context),
         }));
         events.push(...dealEvents(caster, hits, false, context).events);
         break;
@@ -421,6 +467,7 @@ export function leafEvents(
             effect.damage.map((hit) => ({
               amount: rollAmount(hit.amount, stats, context.dice),
               type: hit.type,
+              response: damageResponses(caster, context),
             })),
             false,
             context,
@@ -1417,11 +1464,8 @@ export function leafEvents(
           // none dealt, as with an Intelligence modifier of 0 or less, sets nothing off
           const hits = damage
             .map(({ amount, type }) => ({
-              amount: finalDamage(
-                rollAmount(amount, stats, context.dice),
-                type,
-                responses,
-              ),
+              amount: rollAmount(amount, stats, context.dice),
+              response: responses,
               type,
             }))
             .filter((hit) => hit.amount !== 0);
@@ -1778,44 +1822,15 @@ export function leafEvents(
         }
         break;
       }
-      case "note":
-      case "disperse":
-      case "reactionAttack":
-      case "reactionMove":
-      case "randomAction":
-      case "rollTable":
-      case "escape":
-      case "reduceDamage":
-      case "acAgainstHit":
-      case "commandFamiliar":
-      case "teleport":
-      case "zone":
-      case "summon":
-      case "counter":
-      case "reroll":
-      case "rollBonus":
-      case "replaceRoll":
-      case "succeed":
-      case "strike":
-      case "redirect":
-      case "drawAttack":
-      case "negateHit":
-      case "redirectMiss":
-      case "noCritical":
-      case "stealSpell":
-      case "stickWeapon":
-      case "slowFall":
-      case "split":
-      case "swapInitiative":
       case "inspiration":
-      case "resistTrigger":
-      case "forcedAttack":
-      case "moveZone":
-      case "weaponAttack":
-      case "copySpell":
-      case "retypeHit":
-        // A note is only for reading. Reduced damage is worked out by the reaction that holds up the hit, and
-        // a teleport's square by its own decision and a zone once for the whole spell (resolveAction).
+        if (!target.heroicInspiration) {
+          events.push(
+            dndEvent(`${NS}:inspirationGranted`, { actor: target.id }),
+          );
+        }
+        break;
+      case "note":
+        // An author's note on what isn't automated, only for reading.
         break;
       default:
         effect satisfies never;
@@ -1876,11 +1891,8 @@ function beheadEvents(
     ...dealEvents(
       target,
       effect.damage.map(({ amount, type }) => ({
-        amount: finalDamage(
-          rollAmount(amount, stats, context.dice),
-          type,
-          responses,
-        ),
+        amount: rollAmount(amount, stats, context.dice),
+        response: responses,
         type,
       })),
       false,
@@ -1914,14 +1926,12 @@ function splashEvents(
   const responses = damageResponses(other, context);
   const tiers = cantripTier(stats.level);
   const hits = effect.damage.map(({ amount, type }, index) => ({
-    amount: finalDamage(
+    amount:
       rollAmount(amount, stats, context.dice) +
-        (index === 0 && effect.perTier && tiers > 0
-          ? rollDiceNotation(effect.perTier, context.dice, tiers)
-          : 0),
-      type,
-      responses,
-    ),
+      (index === 0 && effect.perTier && tiers > 0
+        ? rollDiceNotation(effect.perTier, context.dice, tiers)
+        : 0),
+    response: responses,
     type,
   }));
   return dealEvents(other, hits, false, context).events;

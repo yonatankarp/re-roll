@@ -446,11 +446,8 @@ export function runMove(
     const dealt = dealEvents(
       victim,
       hits.map(({ amount, type }) => ({
-        amount: finalDamage(
-          rollAmount(amount, stats, context.dice),
-          type,
-          responses,
-        ),
+        amount: rollAmount(amount, stats, context.dice),
+        response: responses,
         type,
       })),
       false,
@@ -514,7 +511,7 @@ export function runMove(
         const amount = rollAmount(stride.damage, stats, context.dice);
         const dealt = dealEvents(
           foe,
-          [{ amount: finalDamage(amount, type, responses), type }],
+          [{ amount: amount, response: responses, type }],
           false,
           { ...context, state: now },
           actor,
@@ -1043,7 +1040,11 @@ function aroundTeleport(
       : null;
     const hits = (around.damage ?? []).map(({ amount, type }) => {
       const rolled = rollAmount(amount, stats, context.dice);
-      return { amount: save?.saved ? Math.floor(rolled / 2) : rolled, type };
+      return {
+        amount: save?.saved ? Math.floor(rolled / 2) : rolled,
+        type,
+        response: damageResponses(target, context),
+      };
     });
     const dealt =
       hits.length > 0 ? dealEvents(target, hits, false, context).events : [];

@@ -19,7 +19,6 @@ import {
   passiveModifiers,
   rollAmount,
 } from "../stats.ts";
-import { finalDamage } from "../rules.ts";
 import { distanceFeet } from "../grid.ts";
 import { behindTotalCover, seeing } from "../sight.ts";
 import { levelOrChallenge } from "../forms.ts";
@@ -416,11 +415,8 @@ export function prisonEvents(actor: Actor, context: Context): SystemEvent[] {
   const { events } = dealEvents(
     actor,
     cell.modifier.damage.map(({ amount, type }) => ({
-      amount: finalDamage(
-        rollAmount(amount, stats, context.dice),
-        type,
-        damageResponses(actor, context),
-      ),
+      amount: rollAmount(amount, stats, context.dice),
+      response: damageResponses(actor, context),
       type,
     })),
     false,

@@ -469,7 +469,7 @@ describe("feats and traits that act on their own", () => {
         { ...SWING, attacker: PLAYER_ACTOR, target: "foe" },
         contextOf(run, actors, dice),
       );
-      return counts[8];
+      return counts[10]; // a longsword in both hands rolls a d10
     };
     expect(d8s(true)).toBe(2);
     expect(d8s(false)).toBe(1);

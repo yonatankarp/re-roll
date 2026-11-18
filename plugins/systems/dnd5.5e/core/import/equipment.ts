@@ -72,7 +72,7 @@ function parseArmor(
   return {
     slug,
     notes: [stealth]
-      .filter((item) => item !== "—")
+      .filter((item) => item !== "—" && !/^Disadvantage$/i.test(item))
       .map((item) => `not held: ${item}`),
     entry: {
       ...common,
@@ -82,6 +82,7 @@ function parseArmor(
       addDex: ac.includes("Dex modifier"),
       ...(maxDex ? { maxDex: Number(maxDex) } : {}),
       ...(minStrength ? { strength: Number(minStrength) } : {}),
+      ...(/^Disadvantage$/i.test(stealth) ? { stealthDisadvantage: true } : {}),
     },
   };
 }

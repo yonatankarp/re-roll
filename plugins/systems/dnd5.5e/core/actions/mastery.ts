@@ -16,7 +16,6 @@ import {
 import { afterDamage } from "../combat/reactions.ts";
 import { knownFoes } from "../fog.ts";
 import { distanceFeet } from "../grid.ts";
-import { finalDamage } from "../rules.ts";
 import {
   type Ability,
   type WeaponMastery,
@@ -275,7 +274,8 @@ export function runMasteryMiss(
     target,
     [
       {
-        amount: finalDamage(amount, type, damageResponses(target, context)),
+        amount: amount,
+        response: damageResponses(target, context),
         type,
       },
     ],

@@ -286,7 +286,7 @@ describe("support for allies", () => {
       friend: [2, 0],
       fine: [3, 0],
     });
-    const events = alliesRiderEvents(
+    const { events } = alliesRiderEvents(
       [
         {
           within: 30,

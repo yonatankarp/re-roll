@@ -59,6 +59,7 @@ export const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("abilities"),
     increases: AbilityIncreaseSchema,
+    max: z.literal(30).optional(), // an Epic Boon's, in place of 20
   }),
   z.strictObject({
     kind: z.literal("spellAbility"),

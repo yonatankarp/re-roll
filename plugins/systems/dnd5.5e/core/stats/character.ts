@@ -152,6 +152,12 @@ const HEAVILY_ENCUMBERED = (["checks", "attacks", "saves"] as const).flatMap(
     })),
 );
 
+// Armor such as Chain Mail: Disadvantage on Dexterity (Stealth) checks.
+const STEALTH_DISADVANTAGE: Passive = {
+  kind: "modifier",
+  modifier: { kind: "disadvantage", on: "checks", skills: ["stealth"] },
+};
+
 export function characterStats(actor: Actor, access: ContentAccess): Stats {
   const build = effectiveBuild(actor);
   if (!build) throw new Error(`${actor.id} has no character build`);
@@ -180,21 +186,29 @@ export function characterStats(actor: Actor, access: ContentAccess): Stats {
   );
   // Every worn item's passives, magic weapons and armor made from plain ones too (variants.ts). An entry with
   // versions counts as its first, as its bonuses do.
-  const itemPassives = worn.flatMap(([itemId, item]) =>
-    works(itemId, item)
-      ? [
-          ...("passives" in item ? (item.passives ?? []) : []),
-          ...(item.type === "magicItem"
-            ? (item.whileCharged ?? []).flatMap((entry) =>
-                charged(actor, item, entry.resource) ? entry.passives : [],
-              )
-            : []),
-          ...(item.type === "magicItem"
-            ? (item.variants?.[0]?.passives ?? [])
-            : []),
-        ]
-      : [],
-  );
+  const itemPassives: Passive[] = [
+    ...worn.flatMap(([itemId, item]) =>
+      works(itemId, item)
+        ? [
+            ...("passives" in item ? (item.passives ?? []) : []),
+            ...(item.type === "magicItem"
+              ? (item.whileCharged ?? []).flatMap((entry) =>
+                  charged(actor, item, entry.resource) ? entry.passives : [],
+                )
+              : []),
+            ...(item.type === "magicItem"
+              ? (item.variants?.[0]?.passives ?? [])
+              : []),
+          ]
+        : [],
+    ),
+    // Armor that hampers Stealth does whether its magic works or not.
+    ...(worn.some(
+      ([, item]) => item.type === "armor" && item.stealthDisadvantage,
+    )
+      ? [STEALTH_DISADVANTAGE]
+      : []),
+  ];
   // An item's rolled properties, while it works, as an artifact's random ones (gear.ts gainRolls).
   for (const [itemId, item] of worn) {
     if (works(itemId, item)) {
@@ -586,6 +600,7 @@ export function characterStats(actor: Actor, access: ContentAccess): Stats {
   let shield = 0;
   let heldAc = 0; // a magic weapon's own bonus to AC, as the Wand of Orcus's +3 while held
   let shielded = false;
+  const holdsShield = worn.some(([, item]) => item.type === "shield");
   const actions: KnownAction[] = [];
   // Use Magic Device: any Spell Scroll read with Intelligence.
   const anyScroll = traits.find((trait) => trait.kind === "anyScroll");
@@ -685,21 +700,25 @@ export function characterStats(actor: Actor, access: ContentAccess): Stats {
       const shot = weapon.properties.includes("ammunition")
         ? bestAmmunition(worn, works)
         : undefined;
-      const activation = weaponActivation(
-        firing(plain, shot?.item),
-        abilities,
-        martialTraining ||
-          fromFeatures.passives.some(
-            (passive) =>
-              passive.kind === "martialTraining" &&
-              trainedWith(passive, weapon),
-          ) ||
-          kinds.some((kind) => weaponTraining.has(kind)) ||
-          classes.some((def) => weaponProficient(def, weapon)),
-        own("damage") + scoped("damage") + (shot?.damage ?? 0),
-        own("attack") - magic.attack + scoped("attack") + (shot?.attack ?? 0),
-        Object.keys(classLevels),
-      );
+      const swung = (twoHanded: boolean) =>
+        weaponActivation(
+          firing(plain, shot?.item),
+          abilities,
+          martialTraining ||
+            fromFeatures.passives.some(
+              (passive) =>
+                passive.kind === "martialTraining" &&
+                trainedWith(passive, weapon),
+            ) ||
+            kinds.some((kind) => weaponTraining.has(kind)) ||
+            classes.some((def) => weaponProficient(def, weapon)),
+          own("damage") + scoped("damage") + (shot?.damage ?? 0),
+          own("attack") - magic.attack + scoped("attack") + (shot?.attack ?? 0),
+          Object.keys(classLevels),
+          twoHanded,
+        );
+      // shortcut: hands aren't tracked, so any weapon is swung in both without a Shield; a throw takes one.
+      const activation = swung(!holdsShield);
       actions.push({
         id: `${WEAPON_PREFIX}${itemId}`,
         name: shot ? `${item.name} (${shot.name})` : item.name,
@@ -717,7 +736,7 @@ export function characterStats(actor: Actor, access: ContentAccess): Stats {
           id: `${THROW_PREFIX}${itemId}`,
           name: `Throw ${item.name}`,
           activation: thrownActivation(
-            activation,
+            swung(false),
             range,
             traits,
             works(itemId, item) ? weapon.thrown : undefined,

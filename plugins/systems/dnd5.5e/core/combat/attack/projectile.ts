@@ -5,7 +5,6 @@ import { behindTotalCover } from "../../sight.ts";
 import { type SystemResult } from "#sdk";
 import { afterDamage } from "../reactions.ts";
 import { damageResponses, deriveStats, rollAmount } from "../../stats.ts";
-import { finalDamage } from "../../rules.ts";
 import {
   actorOf,
   charmersOf,
@@ -60,7 +59,8 @@ export function runProjectile(
   const { events, dealt } = dealEvents(
     target,
     resolution.damage.map(({ amount, type }) => ({
-      amount: finalDamage(rollAmount(amount, stats, dice), type, responses),
+      amount: rollAmount(amount, stats, dice),
+      response: responses,
       type,
     })),
     false,

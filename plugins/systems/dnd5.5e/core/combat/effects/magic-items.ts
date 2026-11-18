@@ -16,7 +16,6 @@ import {
   frame,
 } from "../../state.ts";
 import { type Frame, PLAYER_ACTOR, type SystemEvent } from "#sdk";
-import { finalDamage } from "../../rules.ts";
 import { type Damage, type LeafEffect, type Passive } from "../../schemas.ts";
 import { distanceFeet } from "../../grid.ts";
 import { playerTakes } from "../reactions.ts";
@@ -167,7 +166,13 @@ export function retributionEvents(
     events.push(
       ...dealEvents(
         bearer,
-        [{ amount: effect.self * left, type: "force" }],
+        [
+          {
+            amount: effect.self * left,
+            type: "force",
+            response: damageResponses(bearer, context),
+          },
+        ],
         false,
         context,
       ).events,
@@ -255,11 +260,8 @@ export function backfireEvents(
             other,
             [
               {
-                amount: finalDamage(
-                  gems,
-                  passive.type,
-                  damageResponses(other, context),
-                ),
+                amount: gems,
+                response: damageResponses(other, context),
                 type: passive.type,
               },
             ],

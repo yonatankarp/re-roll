@@ -24,7 +24,6 @@ import {
   lookup,
   rollAmount,
 } from "../stats.ts";
-import { finalDamage } from "../rules.ts";
 import { distanceFeet, type Square, squareKey } from "../grid.ts";
 import { lightAt } from "../sight.ts";
 import { timeStopEnds } from "./durations.ts";
@@ -963,11 +962,8 @@ export function runSunlightTick(
     passive.kind === "lightSensitive" &&
     inHarmfulLight(target, passive.light, context.state, context)
       ? passive.damage.map(({ amount, type }) => ({
-          amount: finalDamage(
-            rollAmount(amount, stats, context.dice),
-            type,
-            responses,
-          ),
+          amount: rollAmount(amount, stats, context.dice),
+          response: responses,
           type,
         }))
       : [],
