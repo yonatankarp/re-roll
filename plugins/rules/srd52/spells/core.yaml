@@ -1615,7 +1615,8 @@
     you can hear. You can cast this spell through solid objects if you are
     familiar with the target and know it is beyond the barrier. Magical silence;
     1 foot of stone, metal, or wood; or a thin sheet of lead blocks the spell.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/mirage-arcane
   name: Mirage Arcane
@@ -2212,7 +2213,8 @@
     a creature can block your ability to reach it again with this spell for 8
     hours. If you try to send another message during that time, you learn that
     you are blocked, and the spell fails.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/shield-of-faith
   name: Shield of Faith
@@ -2522,7 +2524,8 @@
     telepathically through the bond whether or not they share a language. The
     communication is possible over any distance, though it can’t extend to other
     planes of existence.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
 - id: srd52:spell/time-stop
   name: Time Stop
   level: 9
@@ -2828,7 +2831,8 @@
     destination before the spell ends, the message is lost, and the Beast
     returns to where you cast the spell. Using a Higher-Level Spell Slot. The
     spell’s duration increases by 48 hours for each spell slot level above 2.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/antimagic-field
   name: Antimagic Field
@@ -3178,8 +3182,22 @@
     see, but you must be touching the surface on which the words are written. It
     takes about 1 minute to read one page of text. This spell doesn’t decode
     symbols or secret messages.
-  automation: text
-  outOfCombat: utility
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: comprehension
+          duration:
+            minutes: 60
 - id: srd52:spell/conjure-celestial
   name: Conjure Celestial
   level: 7
@@ -8084,8 +8102,27 @@
     companionship, but at minimum, a Beast can give you information about nearby
     locations and monsters, including whatever it has perceived within the past
     day.
-  automation: text
-  outOfCombat: utility
+  # shortcut: it helps one check with an animal, as talking with it does, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - beast
+            aid: advantage
+            once: true
+          duration:
+            minutes: 10
 - id: srd52:spell/spirit-guardians
   name: Spirit Guardians
   level: 3
@@ -8304,8 +8341,23 @@
     communicates by speaking or signing, any creature that knows at least one
     language can understand it if that creature can hear the speech or see the
     signing.
-  automation: text
-  outOfCombat: utility
+  # shortcut: it's cast on the caster.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: comprehension
+          duration:
+            minutes: 60
 - id: srd52:spell/true-seeing
   name: True Seeing
   level: 6
@@ -9308,7 +9360,8 @@
     the messenger can deliver a message of no more than ten words, and then the
     target makes a Wisdom saving throw. On a failed save, the target gains no
     benefit from its rest, and it takes 3d6 Psychic damage when it wakes up.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
   outOfCombat: castingTime
 - id: srd52:spell/enhance-ability
   name: Enhance Ability
@@ -10798,7 +10851,8 @@
     soul to its body, only its animating spirit. Thus, the corpse can’t learn
     new information, doesn’t comprehend anything that has happened since it
     died, and can’t speculate about future events.
-  automation: text
+  # no rules effect in play: what it says, sends or tells is the story's.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/spiritual-weapon
   name: Spiritual Weapon
@@ -11155,8 +11209,27 @@
     a creature succeeds or fails on this save. An affected creature is aware of
     the spell and can avoid answering questions to which it would normally
     respond with a lie. Such a creature can be evasive yet must be truthful.
-  automation: text
-  outOfCombat: utility
+  # shortcut: it helps one Insight check, as a creature that can't lie does, then ends.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      self: true
+    outOfCombat: scene
+    resolution:
+      kind: automatic
+      effects:
+        - kind: modifier
+          modifier:
+            kind: sceneAid
+            about:
+              - truth
+            aid: advantage
+            once: true
+          duration:
+            minutes: 10
 - id: srd52:spell/alter-self
   name: Alter Self
   level: 2
@@ -13757,7 +13830,8 @@
     about, but they can move their branches, tendrils, and stalks for you. If a
     Plant creature is in the area, you can communicate with it as if you shared
     a common language.
-  automation: text
+  # no rules effect in play: no map marks which Difficult Terrain is plant growth, and what plants tell is the story's.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/starry-wisp
   name: Starry Wisp
