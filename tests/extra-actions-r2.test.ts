@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { runBringAlong } from "../plugins/systems/dnd5.5e/core/combat/movement.ts";
+import { rollRewards } from "../plugins/systems/dnd5.5e/core/combat/reactions.ts";
 import {
   attackedKey,
   canAfford,
@@ -45,6 +46,31 @@ const FIXTURES = [
   trait("bonded", [{ kind: "warBond" }]),
   trait("floored", [
     { kind: "modifier", modifier: { kind: "speedFloor", feet: 50 } },
+  ]),
+  // Indomitable Teleport's shape: a reroll of a failed save that also teleports once the save succeeds.
+  trait("blink", [], {
+    activations: [
+      {
+        cost: [],
+        trigger: { rolled: { rolls: ["save"], by: "self", when: "failed" } },
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [{ kind: "reroll" }, { kind: "teleport", feet: 30 }],
+        },
+      },
+    ],
+  }),
+  // Aura of Malevolence's shape: damage round the bearer from one feature that goes through Resistance.
+  trait("malice", [
+    {
+      kind: "overcomeResistance",
+      damage: ["fire"],
+      sources: ["test:feature/burst"],
+    },
+  ]),
+  trait("fireproof", [
+    { kind: "modifier", modifier: { kind: "resistance", damage: "fire" } },
   ]),
 ];
 
@@ -180,5 +206,68 @@ describe("turns and movement", () => {
     expect(disarm(hero([]))).toContain(`${NS}:weaponThrown`);
     expect(disarm(hero(["bonded"]))).toEqual([]);
     expect(deriveStats(hero(["floored"]), run).speed).toBe(50);
+  });
+});
+
+describe("riders on rolls and auras", () => {
+  it("teleports after a reroll that succeeds, as far from foes as it can, and not after one that fails", async () => {
+    const run = await runWith(FIXTURES);
+    const bearer = at(hero(["blink"], { id: "npc" }), 1, 0);
+    const foe = at(monster("f1", "foe"), 0, 0);
+    const state = onMap(["........."], [bearer, foe]);
+    const context = { ...run, state, dice: { below: () => 0, roll: () => 1 } };
+    const action = deriveStats(bearer, run).actions.find((item) =>
+      item.id.startsWith("feature:test:feature/blink:"),
+    );
+    if (!action) throw new Error("no blink action");
+    expect(
+      rollRewards(bearer, action, bearer, undefined, false, context),
+    ).toEqual([]);
+    const [moved] = rollRewards(
+      bearer,
+      action,
+      bearer,
+      undefined,
+      true,
+      context,
+    );
+    expect(moved).toMatchObject({ kind: `${NS}:moved` });
+    expect((moved as { payload?: unknown } | undefined)?.payload).toMatchObject(
+      { actor: "npc", to: { x: 7, y: 0 } },
+    );
+  });
+
+  it("deals a feature's damage through Resistance when the bearer overcomes it for that feature", async () => {
+    const run = await runWith(FIXTURES);
+    const foe: Actor = {
+      ...at(hero(["fireproof"], { id: "foe" }), 1, 0),
+      side: "enemy",
+    };
+    const blast = [
+      {
+        kind: "foesTake" as const,
+        creatures: 5,
+        range: 10,
+        damage: [
+          { amount: { bonus: { base: 10, add: [] } }, type: "fire" as const },
+        ],
+      },
+    ];
+    const dealt = (traits: readonly string[], source: string) => {
+      const bearer = at(hero(traits), 0, 0);
+      const state = onMap([".."], [bearer, foe]);
+      const context = {
+        ...run,
+        state,
+        dice: { below: () => 0, roll: () => 1 },
+      };
+      const event = leafEvents(blast, source, bearer, bearer, context).find(
+        (item) => item.kind === `${NS}:damaged`,
+      ) as { payload: { amount: number } } | undefined;
+      return event?.payload.amount;
+    };
+    expect(dealt([], "feature:test:feature/burst:0")).toBe(5);
+    expect(dealt(["malice"], "feature:test:feature/burst:0")).toBe(10);
+    expect(dealt(["malice"], "feature:test:feature/other:0")).toBe(5);
   });
 });

@@ -2944,7 +2944,13 @@ export function leafEvents(
           )
           .slice(0, creatures);
         for (const foe of foes) {
-          const responses = damageResponses(foe, context);
+          // the bearer's Resistance-piercing for this source, as Aura of Malevolence's with Bloodthirst
+          const responses = piercing(
+            damageResponses(foe, context),
+            [],
+            stats,
+            sourceId,
+          );
           events.push(
             ...dealEvents(
               foe,
