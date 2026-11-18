@@ -2856,13 +2856,28 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
             sourceId === `lasting:${spellId}`),
       )?.level;
       const step = spell.upcast?.perSlotLevel;
+      const scaled =
+        step && cast !== undefined && cast > spell.level
+          ? scaleActivation(lasting, step, cast - spell.level)
+          : lasting;
+      // Delayed Blast Fireball's bead: a die more for each round since it formed.
+      const state = (access as ContentAccess & { readonly state?: DndState })
+        .state;
+      const since = actor.activeEffects.find(
+        ({ sourceId, modifier }) =>
+          sourceId === `spell:${spellId}` && modifier.kind === "zone",
+      )?.modifier;
+      const rounds =
+        lasting.growsBy && since?.kind === "zone" && since.since !== undefined
+          ? (state?.combat?.round ?? since.since) - since.since
+          : 0;
       actions.push({
         id: `lasting:${spellId}`,
         name: spell.name,
         activation:
-          step && cast !== undefined && cast > spell.level
-            ? scaleActivation(lasting, step, cast - spell.level)
-            : lasting,
+          lasting.growsBy && rounds > 0
+            ? scaleActivation(scaled, { addDice: lasting.growsBy }, rounds)
+            : scaled,
         spellLevel: null,
       });
     }
@@ -4082,10 +4097,18 @@ function withEffectActions(
       const spell = lookup(access, SpellSchema, spellId);
       if (!spell.spheres) continue;
       const key = `spheres:${spellId}`;
-      resources[key] =
-        spell.spheres.count +
-        spell.spheres.perSlot *
-          Math.max(0, (level ?? spell.level) - spell.level);
+      const { gathered, countMod, count, perSlot } = spell.spheres;
+      // Spirit Lantern: as many as it has gathered, up to the caster's spellcasting modifier (an item's count).
+      const most =
+        countMod && !castFrom(sourceId)
+          ? Math.max(
+              1,
+              evaluateFormula({ base: 0, add: [{ kind: "spellMod" }] }, stats),
+            )
+          : count;
+      resources[key] = gathered
+        ? Math.min(most, actor.resourcesSpent[`${key}:gathered`] ?? 0)
+        : count + perSlot * Math.max(0, (level ?? spell.level) - spell.level);
       spell.spheres.actions.forEach((activation, index) => {
         granted.push({
           id: `spheres:${sourceId}:${String(index)}`,

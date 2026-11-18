@@ -388,7 +388,16 @@ export function castAction(
   }
   const passedSaves = pained?.events ?? [];
   const picked = typeof target === "string" ? null : target;
-  const targetId = typeof target === "string" ? target : ALL;
+  // An area spread from a spell's object goes off where the object is, as Delayed Blast Fireball's bead.
+  const object =
+    action.activation.anchor && "area" in action.activation.targeting
+      ? anchorAt(actor, action)
+      : null;
+  const targetId = object
+    ? `@${String(object.x)},${String(object.y)}`
+    : typeof target === "string"
+      ? target
+      : ALL;
   const { projectiles, resolution, distinct } = action.activation;
   // Each at a different creature: one apiece, the most hurt first, when they aren't picked.
   const apart =

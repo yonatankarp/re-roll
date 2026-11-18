@@ -315,8 +315,11 @@ export function reaches(
   const { targeting } = action.activation;
   if ("self" in targeting) return true;
   // Done from an object the spell keeps, as Spiritual Weapon's force: from wherever it can get to.
+  // An area from it spreads where it stands (combat/actions.ts), as Delayed Blast Fireball's bead.
   if (action.activation.anchor) {
-    return anchorReaches(actor, action, target.position);
+    return (
+      "area" in targeting || anchorReaches(actor, action, target.position)
+    );
   }
   // From inside a swallower, it's the one creature within reach.
   const inside = swallowerOf(actor);

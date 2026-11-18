@@ -3913,15 +3913,24 @@ export function zoneEvents(
         : action.activation.areas?.[effect.part],
     );
     // A new cast starts its counts afresh: what an earlier one dealt or used up.
+    const spell = spellOfSource(spellSource(action)) ?? "";
     const counts = [
-      ...(uses !== undefined && !effect.bare ? [":used"] : []),
-      ...(area?.maxDamage !== undefined && !effect.bare ? [":dealt"] : []),
-    ].flatMap((suffix) =>
-      actor.resourcesSpent[`${spellSource(action)}${suffix}`]
+      ...(uses !== undefined && !effect.bare
+        ? [`${spellSource(action)}:used`]
+        : []),
+      ...(area?.maxDamage !== undefined && !effect.bare
+        ? [`${spellSource(action)}:dealt`]
+        : []),
+      // Spirit Lantern's fragments are gone with the spell it was cast before.
+      ...(area?.gathers
+        ? [`spheres:${spell}`, `spheres:${spell}:gathered`]
+        : []),
+    ].flatMap((resource) =>
+      actor.resourcesSpent[resource]
         ? [
             dndEvent(`${NS}:resourceRestored`, {
               actor: actor.id,
-              resource: `${spellSource(action)}${suffix}`,
+              resource,
             }),
           ]
         : [],
@@ -3968,8 +3977,8 @@ export function zoneEvents(
             ...(line ? { dir: line.dir } : {}),
             ...(effect.width ? { width: effect.width } : {}),
             ...(uses === undefined || effect.bare ? {} : { uses }),
-            ...(area?.schedule && !effect.bare
-              ? { since: context.state.combat?.round ?? 0 }
+            ...(context.state.combat
+              ? { since: context.state.combat.round }
               : {}),
             name: action.name,
           },
@@ -4045,6 +4054,21 @@ function fissureEvents(
     );
   }
   return events;
+}
+
+// Half the damage an action deals comes back to its user as Hit Points, as Vampiric Touch's.
+export function siphoned(
+  action: KnownAction,
+  user: Actor,
+  dealt: number,
+  stats: Stats,
+): SystemEvent[] {
+  if (!action.activation.siphon || dealt <= 0 || isDead(user)) return [];
+  const missing = stats.maxHp - Math.max(user.hp, 0);
+  const amount = Math.min(Math.floor(dealt / 2), missing);
+  return amount > 0
+    ? [dndEvent(`${NS}:healed`, { actor: user.id, amount, max: stats.maxHp })]
+    : [];
 }
 
 // A Robe of Eyes' wearer within its reach of a spell's sunlight is Blinded for a minute, saving at each turn's end.
@@ -5043,6 +5067,7 @@ export function resolveAction(
     lastDealt = result.dealt;
     events.push(
       ...result.events,
+      ...siphoned(action, actor, result.dealt, stats),
       ...insideDamageEvents(actor, target, result.dealt),
       ...duelDamaged(actor, target, result.dealt, context.state),
     );

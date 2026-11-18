@@ -2188,6 +2188,8 @@ export const AreaEffectSchema = z.strictObject({
   // the ground, as Earthquake's tremor
   flying: z.literal(true).optional(),
   ground: z.literal(true).optional(),
+  // a foe that dies in it fills one of its spell's `spheres`, as Spirit Lantern's Dim Light gathers soul fragments
+  gathers: z.literal(true).optional(),
   // it acts on a creature its owner moves it onto, and stops there for the turn, as Flaming Sphere rolled into a foe
   whenMoved: z.literal(true).optional(),
   // the creatures it holds with a condition move with it, as Whirlwind's
@@ -2606,6 +2608,11 @@ export const ActivationSchema = z.strictObject({
       reach: z.number().int().min(5).default(5),
     })
     .optional(),
+  // These dice more to its damage for each round since its spell's zone was placed, as Delayed Blast
+  // Fireball's bead growing at each of its caster's turn ends (stats.ts).
+  growsBy: DiceSchema.optional(),
+  // Its user regains Hit Points equal to half the damage it deals, as Vampiric Touch's (combat/effects.ts siphoned).
+  siphon: z.literal(true).optional(),
   // A spell's `lasting` action only while no creature but its caster bears what the spell put on it, so its mark
   // moves to a new creature once the old one drops, as Hunter's Mark's (stats.ts).
   remark: z.literal(true).optional(),
@@ -4831,6 +4838,10 @@ export const SpellSchema = ContentEntrySchema.extend({
       count: z.number().int().min(1),
       perSlot: z.number().int().min(0).default(0),
       actions: z.array(ActivationSchema).min(1),
+      // It starts empty, and each foe that dies in its zone fills one, up to `count`, or the caster's spellcasting
+      // modifier with `countMod` (cast from an item, `count`), as Spirit Lantern's soul fragments (combat/areas.ts).
+      gathered: z.literal(true).optional(),
+      countMod: z.literal(true).optional(),
     })
     .optional(),
   // What its `randomAction` picks from, each named by its label, as Prismatic Spray's rays.

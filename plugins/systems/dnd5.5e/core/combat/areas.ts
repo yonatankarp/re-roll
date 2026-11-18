@@ -603,8 +603,36 @@ export const BURST = "death-burst";
 
 // A creature that has just died bursts where it fell, once, as a flaming skeleton or a balor does. The burst
 // comes before the fight is judged over, so the last foe's explosion still lands.
+// A foe dead in an area that gathers fills one of its spell's spheres, as a soul fragment flying into Spirit Lantern.
+export const GATHERED = "soul-gathered";
+export function gatherEvents(state: DndState): SystemEvent[] {
+  const gathering = zonesOf(state).filter((zone) => zone.area?.gathers);
+  if (gathering.length === 0) return [];
+  return Object.values(state.actors).flatMap((dead) => {
+    if (!isDead(dead) || !dead.position || dead.resourcesSpent[GATHERED]) {
+      return [];
+    }
+    const zone = gathering.find(
+      (item) =>
+        inZone(item, dead.position) &&
+        state.actors[item.owner]?.side !== dead.side,
+    );
+    if (!zone) return [];
+    const spell = zone.sourceId.replace(/^spell:/, "");
+    return [
+      dndEvent(`${NS}:resourceSpent`, { actor: dead.id, resource: GATHERED }),
+      dndEvent(`${NS}:resourceSpent`, {
+        actor: zone.owner,
+        resource: `spheres:${spell}:gathered`,
+      }),
+    ];
+  });
+}
+
 export function burstResult(context: Context): SystemResult | null {
   const { state } = context;
+  const gathered = gatherEvents(state);
+  if (gathered.length > 0) return { events: gathered, frames: [CHECK_END] };
   for (const actor of Object.values(state.actors)) {
     if (!isDead(actor) || !actor.position || actor.resourcesSpent[BURST]) {
       continue;
