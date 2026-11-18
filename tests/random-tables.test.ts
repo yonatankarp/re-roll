@@ -19,6 +19,10 @@ import {
 } from "../plugins/systems/dnd5.5e/core/state.ts";
 import { gainRolls } from "../plugins/systems/dnd5.5e/core/gear.ts";
 import {
+  LeafEffectSchema,
+  SpellSchema,
+} from "../plugins/systems/dnd5.5e/core/schemas.ts";
+import {
   deriveStats,
   type KnownAction,
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
@@ -307,6 +311,26 @@ describe("random tables and open-ended effects (#177)", () => {
         contextOf(run, [holder], scripted([]).dice),
       ),
     ).toEqual([]);
+  });
+
+  it("gives Wish its Instant Health and a stress whose effects parse", async () => {
+    const run = await tableRun();
+    const wish = SpellSchema.parse(run.content("srd52:spell/wish"));
+    const resolution = wish.activation?.resolution;
+    const copy =
+      resolution?.kind === "automatic"
+        ? resolution.effects.find((effect) => effect.kind === "copySpell")
+        : undefined;
+    expect(copy?.kind === "copySpell" && copy.extras?.[0]?.name).toBe(
+      "Instant Health",
+    );
+    if (copy?.kind !== "copySpell") throw new Error("No copy");
+    for (const effects of [
+      ...(copy.extras ?? []).map((extra) => extra.effects),
+      copy.stress ?? [],
+    ]) {
+      expect(() => LeafEffectSchema.array().parse(effects)).not.toThrow();
+    }
   });
 
   it("keeps a channeled spirit until it's unleashed at a creature, then ends it", async () => {

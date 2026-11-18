@@ -5348,13 +5348,13 @@
             - {
                 kind: modifier,
                 modifier: { kind: castRecoil, dice: 1d10 },
-                duration: longRest,
+                duration: { until: longRest },
               }
             - {
                 kind: modifier,
                 modifier:
                   { kind: setScore, ability: str, score: 3, exact: true },
-                duration: longRest,
+                duration: { until: longRest },
               }
 - id: srd52:spell/aid
   name: Aid
