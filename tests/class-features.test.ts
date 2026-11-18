@@ -11,11 +11,12 @@ import { loadAdventure } from "../app/cli/load-adventure.ts";
 import type { Dice } from "../engine/kernel/dice.ts";
 import { AWAIT_FRAME } from "../engine/kernel/system.ts";
 import type { RunContext } from "../engine/run/turn.ts";
+import { type Context } from "../plugins/systems/dnd5.5e/core/combat.ts";
 import {
-  type Context,
-  nextDndDecision,
-} from "../plugins/systems/dnd5.5e/core/combat.ts";
-import { PregenSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
+  ClassSchema,
+  PregenSchema,
+  SubclassSchema,
+} from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
   type Actor,
   type DndState,
@@ -23,8 +24,9 @@ import {
   applyDndEvent,
   freshActor,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
-import { deriveStats } from "../plugins/systems/dnd5.5e/core/stats.ts";
-import { bookRun, classify, levelTo } from "./class-features.ts";
+import { deriveStats, lookup } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { formOf } from "../plugins/systems/dnd5.5e/core/forms.ts";
+import { auditClass, bookRun, classify, levelTo } from "./class-features.ts";
 
 // Spot checks of each class's signature features in a fight, on characters built through the real level-up
 // decisions. A feature that doesn't work yet is an `it.fails`, so it turns red once someone makes it work.
@@ -370,12 +372,13 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
     expect(hit(true)).toBe(hit(false));
   });
 
-  // The bonus-action Dash, Disengage and Hide need those standard actions first.
-  it.fails("Cunning Action offers a bonus-action Dash", () => {
+  // The system's turn decision adds the standard actions, Cunning Action's among them, to combat's own options.
+  it("Cunning Action offers a bonus-action Dash", () => {
     const rogue = hero("rogue", 2);
     const spent = { ...rogue, budget: { ...rogue.budget, action: false } };
-    const options = nextDndDecision(fight(spent, monster("a")), run)?.options;
-    expect(options?.some((item) => /dash/i.test(item.label))).toBe(true);
+    expect(turnOptions(run, fight(spent, monster("a")))).toContain(
+      "tactic:bonus-dash",
+    );
   });
 
   it("Bardic Inspiration gives an ally a die it keeps through a hit", () => {
@@ -485,7 +488,8 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
     );
   });
 
-  it.fails("Wild Shape takes on a beast's form", () => {
+  // The 2024 Wild Shape keeps the druid's creature type, while the form's stat block gives its actions.
+  it("Wild Shape takes on a beast's form but keeps the druid's creature type", () => {
     const druid = hero("druid", 2);
     const done = settle(
       run,
@@ -493,9 +497,14 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
       [act(PLAYER_ACTOR, `${feature("druid-wild-shape")}|${PLAYER_ACTOR}`)],
       dice(),
     );
-    expect(
-      deriveStats(actorIn(done.state, PLAYER_ACTOR), run).creatureType,
-    ).toBe("beast");
+    const shaped = actorIn(done.state, PLAYER_ACTOR);
+    const form = formOf(shaped);
+    expect(form).toMatch(/^phb:monster\//);
+    const stats = deriveStats(shaped, run);
+    expect(stats.creatureType).toBe(deriveStats(druid, run).creatureType);
+    expect(stats.actions.some(({ id }) => id.startsWith("monster:"))).toBe(
+      true,
+    );
   });
 
   it("Metamagic is offered in a fight, with 2 Sorcery Points at level 2", () => {
@@ -807,5 +816,35 @@ describe("class feature rules on SRD characters", () => {
       )[0]?.critical;
     expect(crit(plain)).toBe(false);
     expect(crit(champion)).toBe(true);
+  });
+});
+
+// Every class and subclass the loaded content ships, srd52's without books and the phb's with them, levelled 1 to 20
+// through the real decisions, with each feature it gains classified.
+const loaded = await bookRun();
+const ofKind = (kind: string) =>
+  loaded.run
+    .contentIds()
+    .filter((id) => id.startsWith(`${loaded.book}:${kind}/`));
+const builds = ofKind("class").flatMap((classId) => {
+  const classDef = lookup(loaded.run, ClassSchema, classId);
+  const own = ofKind("subclass")
+    .map((id) => lookup(loaded.run, SubclassSchema, id))
+    .filter((item) => item.class === classId && item.edition === undefined);
+  return (own.length > 0 ? own : [null]).map((subclass) => ({
+    name: subclass ? `${classDef.name} (${subclass.name})` : classDef.name,
+    classDef,
+    subclass,
+  }));
+});
+
+describe(`every ${loaded.book} class levels to 20`, () => {
+  it("ships classes", () => {
+    expect(builds.length).toBeGreaterThan(0);
+  });
+  it.each(builds)("$name", ({ classDef, subclass }) => {
+    const rows = auditClass(loaded.run, classDef, subclass);
+    expect(rows.some((row) => row.level === 1)).toBe(true);
+    if (subclass) expect(rows.some((row) => row.subclass !== null)).toBe(true);
   });
 });
