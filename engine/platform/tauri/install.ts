@@ -11,7 +11,7 @@ import { ALLOWED_EXTENSIONS, extensionOf } from "../../run/loader.ts";
 // The zip is checked here; main.rs checks each path again before it writes.
 //
 // A zip is either one plugin (its files at the top, or in one folder, as zipping a plugin's folder makes)
-// or a book laid out like the content folder: adventures/<id>, rules/<id>, assets/<book>, library/<book>.
+// or a book laid out like the content folder: adventures/<id>, rules/<id>, worlds/<id>, assets/<book>, library/<book>.
 
 const MANIFEST = "plugin.yaml";
 // shortcut: each file is unpacked into memory on its own, but the zip itself is held whole; stream it if zips grow past this.
@@ -20,17 +20,25 @@ export const MAX_UNPACKED_BYTES = 4 * 1024 ** 3;
 export const PART_FOLDERS = [
   "adventures",
   "rules",
+  "worlds",
   "assets",
   "library",
 ] as const;
 export type PartFolder = (typeof PART_FOLDERS)[number];
-const KIND_FOLDERS = { adventure: "adventures", rules: "rules" } as const;
+const KIND_FOLDERS = {
+  adventure: "adventures",
+  rules: "rules",
+  world: "worlds",
+} as const;
+const isPluginFolder = (folder: PartFolder): boolean =>
+  (Object.values(KIND_FOLDERS) as PartFolder[]).includes(folder);
 
 // Data only, so nothing installed can run. Keep in step with PART_FILE_TYPES in src-tauri/src/main.rs.
 // Assets are pictures and their index, as the session reads them; the library is a book's text and its index.
 const FILE_TYPES: Readonly<Record<PartFolder, ReadonlySet<string>>> = {
   adventures: ALLOWED_EXTENSIONS,
   rules: ALLOWED_EXTENSIONS,
+  worlds: ALLOWED_EXTENSIONS,
   assets: new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".json"]),
   library: new Set([".md", ".json"]),
 };
@@ -213,7 +221,7 @@ export function planInstall(
         throw new Error(`${entry} isn't a file type ${folder}/ may hold.`);
       total += entries.get(entry) ?? 0;
     }
-    if (folder !== "adventures" && folder !== "rules") continue;
+    if (!isPluginFolder(folder)) continue;
     const manifest = [...files].find(([, path]) => path === MANIFEST)?.[0];
     if (manifest === undefined)
       throw new Error(`${where} has no ${MANIFEST}, so it isn't a plugin.`);
@@ -237,9 +245,7 @@ export function planInstall(
 
 // The plugins a plan installs, or else its folders, for the notice.
 export function describePlan(plan: InstallPlan): string {
-  const plugins = plan.parts.filter(
-    ({ folder }) => folder === "adventures" || folder === "rules",
-  );
+  const plugins = plan.parts.filter(({ folder }) => isPluginFolder(folder));
   return (plugins.length > 0 ? plugins : plan.parts)
     .map(({ name }) => name)
     .join(", ");

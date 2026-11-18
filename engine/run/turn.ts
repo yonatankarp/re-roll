@@ -26,7 +26,7 @@ import {
   isNarrativeEvent,
 } from "../kernel/events.ts";
 import { z } from "zod";
-import type { Registry } from "./loader.ts";
+import { type Registry, systemOf } from "./loader.ts";
 import {
   type Answer,
   Asked,
@@ -49,7 +49,7 @@ export function createRunContext(
   const adventure: Adventure | undefined = registry.adventure(adventureId);
   if (!adventure) throw new Error(`Adventure "${adventureId}" is not loaded`);
   return {
-    system: registry.system,
+    system: systemOf(registry),
     adventure,
     content: registry.content,
     contentIds: registry.contentIds,

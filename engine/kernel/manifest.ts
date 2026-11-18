@@ -19,12 +19,10 @@ export const SystemRequirementSchema = z
     return { id: text.slice(0, at), range: text.slice(at + 1) };
   });
 
-export const PluginManifestSchema = z.strictObject({
+const shared = {
   id: PluginIdSchema,
-  kind: z.enum(["rules", "adventure"]),
   version: z.string().regex(VERSION_PATTERN, "must be x.y.z"),
   sdk: CaretRangeSchema,
-  system: SystemRequirementSchema,
   requires: z
     .array(
       z.strictObject({ plugin: PluginIdSchema, version: CaretRangeSchema }),
@@ -33,9 +31,19 @@ export const PluginManifestSchema = z.strictObject({
   distribution: z.enum(["shipped", "private"]),
   // The edition of its system the plugin follows. Each system ranks editions, and says what an unset one means.
   edition: z.string().optional(),
-  // Adventures only: plugins whose entries win over others of the same name in this adventure's runs, highest first.
-  precedence: z.array(PluginIdSchema).optional(),
   attribution: z.string().optional(),
-});
+};
+
+// A world plugin holds lore (#206): engine-owned world kinds that any system can load, so it names no system.
+export const PluginManifestSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    ...shared,
+    kind: z.enum(["rules", "adventure"]),
+    system: SystemRequirementSchema,
+    // Adventures only: plugins whose entries win over others of the same name in this adventure's runs, highest first.
+    precedence: z.array(PluginIdSchema).optional(),
+  }),
+  z.strictObject({ ...shared, kind: z.literal("world") }),
+]);
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>;

@@ -384,7 +384,10 @@ export async function checkCoverage(
   const editionOf = (plugin: string): string | undefined => {
     const manifest = catalog.plugins.get(plugin)?.manifest;
     if (!manifest) return undefined;
-    const system = systems.find((item) => item.id === manifest.system.id);
+    const system =
+      manifest.kind === "world"
+        ? undefined
+        : systems.find((item) => item.id === manifest.system.id);
     return system?.edition?.(manifest) ?? manifest.edition ?? "";
   };
 

@@ -2,7 +2,13 @@
 // books/ also holds importer working files (sources, import, audit), which the game never reads.
 // Keep BOOK_FOLDERS in step with the fs scope in app/desktop/src-tauri/src/main.rs.
 
-export const BOOK_FOLDERS = ["adventures", "rules", "assets", "library"];
+export const BOOK_FOLDERS = [
+  "adventures",
+  "rules",
+  "worlds",
+  "assets",
+  "library",
+];
 
 export interface ContentPath {
   readonly folder: string;

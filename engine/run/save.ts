@@ -11,7 +11,7 @@ import {
   InputSchema,
   isNamespacedEvent,
 } from "../kernel/events.ts";
-import type { Registry } from "./loader.ts";
+import { type Registry, systemOf } from "./loader.ts";
 import {
   AWAIT_FRAME,
   REPLAY_FRAME,
@@ -93,7 +93,10 @@ export function createSave(
 ): SaveFile {
   return {
     formatVersion: SAVE_FORMAT_VERSION,
-    system: { id: registry.system.id, version: registry.system.version },
+    system: {
+      id: systemOf(registry).id,
+      version: systemOf(registry).version,
+    },
     plugins: registry.plugins.map((plugin) => ({
       id: plugin.id,
       version: plugin.version,
@@ -152,10 +155,10 @@ export function loadSave(
     return { ok: false, error: `Invalid save file: ${parsed.error.message}` };
   }
   const save = parsed.data;
-  if (save.system.id !== registry.system.id) {
+  if (save.system.id !== run.system.id) {
     return {
       ok: false,
-      error: `This save uses the "${save.system.id}" system, not "${registry.system.id}"`,
+      error: `This save uses the "${save.system.id}" system, not "${run.system.id}"`,
     };
   }
 

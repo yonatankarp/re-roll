@@ -145,6 +145,24 @@ describe("planInstall", () => {
     ).toBe("rules");
   });
 
+  it("puts a world plugin, which names no system, in worlds/", () => {
+    const world =
+      "id: phb-world\nkind: world\nversion: 1.0.0\nsdk: ^1\ndistribution: private\n";
+    const plan = planInstall(
+      zip({
+        "rules/phb/plugin.yaml": manifest("phb", "rules"),
+        "worlds/phb-world/plugin.yaml": world,
+        "worlds/phb-world/places/x.yaml": "[]",
+      }),
+      none,
+    );
+    expect(plan.parts.map(({ folder, name }) => `${folder}/${name}`)).toEqual([
+      "rules/phb",
+      "worlds/phb-world",
+    ]);
+    expect(describePlan(plan)).toBe("phb, phb-world");
+  });
+
   it("refuses a zip that isn't valid game data", () => {
     const refused =
       (files: Record<string, string>, known = none) =>

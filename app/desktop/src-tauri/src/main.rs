@@ -22,7 +22,7 @@ type Content = Result<Roots, String>;
 
 // books/ also holds importer working files the game never reads, so only its game folders are in.
 // Keep in step with BOOK_FOLDERS in engine/platform/browser/content-path.ts.
-const BOOK_FOLDERS: [&str; 4] = ["adventures", "rules", "assets", "library"];
+const BOOK_FOLDERS: [&str; 5] = ["adventures", "rules", "worlds", "assets", "library"];
 
 // dunce, because std's canonicalize gives Windows a \\?\ path in which "/" isn't a separator.
 fn canonical(path: PathBuf, what: &str) -> Result<PathBuf, String> {
@@ -196,9 +196,10 @@ fn save_remove(app: AppHandle, name: String) -> Result<(), String> {
 // These write only inside the content folder's game folders, and check every path again here.
 // Each part is a folder, such as rules/phb or assets/phb, or one of SHARED_FILES.
 // Keep the file types in step with FILE_TYPES there: data only, so nothing installed can run.
-const PART_FILE_TYPES: [(&str, &[&str]); 4] = [
+const PART_FILE_TYPES: [(&str, &[&str]); 5] = [
     ("adventures", &PLUGIN_FILE_TYPES),
     ("rules", &PLUGIN_FILE_TYPES),
+    ("worlds", &PLUGIN_FILE_TYPES),
     ("assets", &["png", "jpg", "jpeg", "webp", "gif", "json"]),
     ("library", &["md", "json"]),
 ];

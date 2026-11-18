@@ -14,6 +14,7 @@ import {
   type Registry,
   loadRun,
   scanPlugins,
+  systemOf,
 } from "../run/loader.ts";
 import {
   type LogEntry,
@@ -732,8 +733,9 @@ export function createGame({
       throw new Error(loaded.issues.map(formatIssue).join("\n"));
     }
     const { registry } = loaded;
-    const ui = uis.find((item) => item.systemId === registry.system.id);
-    if (!ui) throw new Error(`No UI for the ${registry.system.id} system`);
+    const { id: systemId } = systemOf(registry);
+    const ui = uis.find((item) => item.systemId === systemId);
+    if (!ui) throw new Error(`No UI for the ${systemId} system`);
     return {
       registry,
       ui,
