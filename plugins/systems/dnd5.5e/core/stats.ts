@@ -2284,6 +2284,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const classLevels: Record<string, number> = {};
   const skills = new Set<Skill>(background.skills);
   const expertise = new Set<Skill>();
+  // what a skill choice adds to checks with the skills picked, as Enchanting Conversationalist's
+  const skillBonuses: { skill: Skill; bonus: Formula }[] = [];
   const knownSpells = new Set<string>();
   const spellClass = new Map<string, string>(); // the class whose levels gave each known spell
   const freeSpells = new Map<string, FreeCast[]>(); // also cast without a slot
@@ -2338,6 +2340,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
             ? expertise
             : skills
           ).add(skill);
+          if (answer.bonus) skillBonuses.push({ skill, bonus: answer.bonus });
         }
       } else if (answer.kind === "spells") {
         for (const spell of answer.values) {
@@ -2975,6 +2978,15 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     passives: [
       ...itemPassives.filter(fits),
       ...kept,
+      ...skillBonuses.map(({ skill, bonus }) => ({
+        kind: "modifier" as const,
+        modifier: {
+          kind: "bonus" as const,
+          to: "checks" as const,
+          skill,
+          amount: { bonus },
+        },
+      })),
       ...fromFeatures.passives
         .filter(fits)
         .map((passive) =>
