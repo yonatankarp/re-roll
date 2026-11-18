@@ -339,7 +339,7 @@ function settle(
 
     const waiting = waitingDecision(run, state);
     if (waiting) {
-      if (waiting.actor === PLAYER_ACTOR) {
+      if (waiting.actor === PLAYER_ACTOR && !waiting.policy) {
         return { state, events, pending: waiting };
       }
       handle(false, (dice, current) => {

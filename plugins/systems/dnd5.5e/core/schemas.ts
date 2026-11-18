@@ -536,6 +536,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("lingeringDamage"),
     when: z.enum(["turnStart", "turnEnd"]),
     damage: z.array(DamageSchema).min(1),
+    near: z.number().int().min(5).optional(), // only while within this many feet of the caster, as Transfix's
     save: z
       .strictObject({
         ability: AbilitySchema,
@@ -863,6 +864,23 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // In a fury (passive `fury`): on its turns it attacks the nearest creature it reaches, friend or foe, or with `at`
   // that creature until either drops (combat/madness.ts).
   z.strictObject({ kind: z.literal("furious"), at: z.string().optional() }),
+  // Under its caster's control, as Dominate Person's: while it lasts the bearer fights on the caster's side and plays by
+  // that side's tactics, a player's character too (state.ts settleSides).
+  // shortcut: the caster's orders are its side's tactics, with no orders given by hand.
+  z.strictObject({ kind: z.literal("controlled") }),
+  // Out of the fight, as Calm Emotions' Indifferent or a Suggestion to stop fighting: no action, Bonus Action or
+  // Reaction and no moving (combat/durations.ts), the party's tactics leave it be, and a fight with no foe left but
+  // such is won (combat/turn.ts).
+  z.strictObject({ kind: z.literal("pacified") }),
+  // As each of its turns starts the bearer spends its movement going away from the caster, or `toward` it until
+  // within 5 feet, Dashing first with `dash`; with `endsTurn` it then does nothing more that turn, which `toward` ends
+  // only once within 5 feet, as Command's Approach and Flee (combat/fear.ts).
+  z.strictObject({
+    kind: z.literal("compelled"),
+    toward: z.literal(true).optional(),
+    dash: z.literal(true).optional(),
+    endsTurn: z.literal(true).optional(),
+  }),
   // No teleporting or travel to another plane, as with Dimensional Shackles on.
   z.strictObject({ kind: z.literal("anchored") }),
   // Spells of `maxLevel` or lower, of one of these classes' lists, cast without a slot while it lasts, as a Candle of
@@ -1105,6 +1123,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("removeCondition"),
     condition: ConditionSchema,
+    option: z.string().min(1).optional(), // as an applyCondition's, as Calm Emotions' calm
   }),
   z.strictObject({
     kind: z.literal("modifier"),
@@ -1115,6 +1134,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     hpAtMost: z.number().int().min(1).optional(),
     hpAbove: z.number().int().min(1).optional(),
     endsOnDamage: z.literal(true).optional(), // as Hypnotic Pattern's Speed 0
+    saveOnDamage: z.literal(true).optional(), // taking damage repeats its save, as Enemies Abound's
     // A save at the end of each of its turns that ends it, as an applyCondition's, for an effect that came with none,
     // as Power Word Pain's (2014).
     endSave: z
@@ -1541,7 +1561,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // Only a raising whose targeting has `dust` brings it back, as True Resurrection.
   z.strictObject({ kind: z.literal("disintegrate") }),
   // The target drops what it holds, as from Fear (combat/fear.ts).
-  z.strictObject({ kind: z.literal("drop") }),
+  z.strictObject({
+    kind: z.literal("drop"),
+    option: z.string().min(1).optional(), // as an applyCondition's, as Command's Drop
+  }),
   // The target is sent off to another plane, gone from the fight for good: only one of these lowercase types with
   // `creatureTypes`, as Divine Word's Celestials and Fiends, and with `crByLevel` only one whose Challenge Rating is at
   // most the one for the caster's level in `class`, as Arcane Abjuration's banishing (combat/fear.ts).
@@ -1626,6 +1649,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("slay"),
     hpAtMost: z.number().int().min(1),
+    chance: z.number().int().min(1).max(100).optional(), // only this many percent of the time, as the Eye of Vecna's doom
     creatureTypes: z.array(z.string()).min(1).optional(), // only these types, as a Mace of Smiting's Construct
   }),
   // A concentrating target saves with Constitution against this DC or its Concentration ends, as a Thunderous
@@ -1830,6 +1854,8 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
             .optional(),
           // a creature immune to this condition, as Mental Prison's that can't be Charmed
           immuneTo: ConditionSchema.optional(),
+          // a creature its caster has Charmed, as Mantle of Majesty's Command fails on
+          charmedByCaster: z.literal(true).optional(),
           // "immune" leaves the creature out altogether, as Cause Fear's Constructs and Undead
           roll: z.enum([
             "advantage",
@@ -3634,7 +3660,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     effects: z.array(LeafEffectSchema).default([]),
     // One of these the caster may pick once the spell is done, as Steps of the Fey's Refreshing or Taunting Step
     // (combat/school.ts): `effects` on the caster or one creature of its side within `within` feet of it, or `foes`
-    // effects on each foe within that far of where it cast the spell, after this save against its spell save DC.
+    // effects on each foe within that far of where it cast the spell, after this save against its spell save DC, or
+    // with `one` on one foe of the caster's choice that near it, as Beguiling Magic's.
     choices: z
       .array(
         z.strictObject({
@@ -3645,6 +3672,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
             .strictObject({
               save: AbilitySchema.optional(),
               effects: z.array(LeafEffectSchema).min(1),
+              one: z.literal(true).optional(),
             })
             .optional(),
         }),
@@ -4444,6 +4472,9 @@ const ItemCastSchema = z.strictObject({
   // Each use after the first since its pool came back has this many percent more chance to fail, tearing the item
   // apart, as a Wind Fan's 20.
   tears: z.number().int().min(1).max(100).optional(),
+  // This many percent chance with each cast that its caster dies outright, as the Eye of Vecna's 5, Vecna tearing
+  // its soul away.
+  doom: z.number().int().min(1).max(100).optional(),
   bonusAction: z.literal(true).optional(), // cast as a Bonus Action, as a Necklace of Prayer Beads' beads
   charges: z.number().int().min(0).default(1), // 0 casts it whenever
   resource: z.string().min(1).optional(),

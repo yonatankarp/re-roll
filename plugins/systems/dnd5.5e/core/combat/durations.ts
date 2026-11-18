@@ -105,6 +105,9 @@ export function limitsOf(actor: Actor): Omit<Limit, "kind"> {
   let limit: Omit<Limit, "kind"> = {};
   for (const { modifier } of actor.activeEffects) {
     if (modifier.kind === "actionLimit") limit = { ...limit, ...modifier };
+    if (modifier.kind === "pacified") {
+      limit = { ...limit, noActions: true, noReactions: true, speed: "none" };
+    }
   }
   return limit;
 }

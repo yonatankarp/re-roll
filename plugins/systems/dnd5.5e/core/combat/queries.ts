@@ -734,6 +734,10 @@ export function withUpcasts(
 }
 
 // A Charmed creature can't target its charmer with attacks or harmful magic.
+// Out of the fight (Modifier `pacified`).
+export const pacified = (actor: Actor): boolean =>
+  actor.activeEffects.some(({ modifier }) => modifier.kind === "pacified");
+
 export function charmersOf(actor: Actor): ReadonlySet<string> {
   return new Set(
     actor.activeEffects.flatMap(({ modifier, casterId }) =>

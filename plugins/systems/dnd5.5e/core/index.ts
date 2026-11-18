@@ -55,6 +55,7 @@ import {
   runTactic,
   tacticalPolicy,
   withTactics,
+  controlledChoice,
   attuneSaveHandlers,
   castCheckFrames,
   hideFrames,
@@ -691,10 +692,13 @@ export const dnd55e = defineSystem<DndState>({
   applyEvent: applyDndEvent,
   // The engine hands these the state and the access apart, so the access gets the state for the variant rules.
   nextDecision: (state, access) =>
-    withTactics(
-      nextDndDecision(state, playing(state, access)),
+    controlledChoice(
+      withTactics(
+        nextDndDecision(state, playing(state, access)),
+        state,
+        playing(state, access),
+      ),
       state,
-      playing(state, access),
     ),
   rests: availableRests,
   // Going to another scene takes about an hour, so the party's dead lie dead longer, past Revivify's minute, and
