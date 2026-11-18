@@ -38,12 +38,12 @@
 - id: "srd52:feature/weapon-mastery"
   name: Weapon Mastery
   text: "You can use the mastery properties of chosen weapons."
-  automation: text
+  automation: full
 
 - id: "srd52:feature/expertise"
   name: Expertise
   text: "You gain Expertise in two skills you are proficient in."
-  automation: text
+  automation: full
 
 - id: "srd52:feature/thieves-cant"
   name: Thieves' Cant
@@ -58,7 +58,36 @@
 - id: "srd52:feature/divine-order"
   name: Divine Order
   text: "You dedicate yourself to a sacred role of your choice."
-  automation: text
+  automation: full
+  variants:
+    - id: protector
+      name: Protector
+      passives:
+        - { kind: martialTraining }
+        - { kind: armorTraining, armor: [heavy] }
+    - id: thaumaturge
+      name: Thaumaturge
+      passives:
+        - kind: modifier
+          modifier:
+            kind: bonus
+            to: checks
+            skill: arcana
+            amount:
+              { bonus: { add: [{ kind: abilityMod, ability: wis }], min: 1 } }
+        - kind: modifier
+          modifier:
+            kind: bonus
+            to: checks
+            skill: religion
+            amount:
+              { bonus: { add: [{ kind: abilityMod, ability: wis }], min: 1 } }
+      choices:
+        - kind: spells
+          id: cantrip
+          count: 1
+          maxLevel: 0
+          list: srd52:class/cleric
 
 - id: "srd52:feature/ritual-adept"
   name: Ritual Adept
@@ -93,7 +122,9 @@
 - id: "srd52:feature/human-traits"
   name: Human Traits
   text: "Resourceful, Skillful and Versatile."
-  automation: text
+  automation: full
+  passives:
+    - { kind: restInspiration, rests: [long] }
 
 - id: "srd52:feature/savage-attacker"
   name: Savage Attacker
@@ -126,12 +157,80 @@
 - id: "srd52:feature/dwarf-traits"
   name: Dwarf Traits
   text: "Darkvision, Dwarven Resilience, Dwarven Toughness and Stonecunning."
-  automation: text
+  automation: full
+  passives:
+    - { kind: seesInDarkness, feet: 120 }
+    - { kind: modifier, modifier: { kind: resistance, damage: poison } }
+    - { kind: saveAdvantage, conditions: [poisoned] }
+    - kind: modifier
+      modifier:
+        kind: bonus
+        to: maxHp
+        amount: { bonus: { add: [{ kind: level }] } }
+  resources:
+    - id: stonecunning
+      max: { add: [{ kind: proficiency }] }
+      recharge: [{ on: longRest, amount: all }]
+  activations:
+    - cost: [bonusAction, { resource: stonecunning }]
+      targeting: { self: true }
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            duration: { minutes: 10 }
+            modifier: { kind: tremorsense, feet: 60 }
 
 - id: "srd52:feature/elf-traits"
   name: Elf Traits
   text: "Darkvision, Elven Lineage, Fey Ancestry, Keen Senses and Trance."
-  automation: text
+  automation: full
+  passives:
+    - { kind: seesInDarkness, feet: 60 }
+    - { kind: saveAdvantage, conditions: [charmed] }
+    - { kind: restHours, hours: 4 }
+    - { kind: spellImmunity, spells: [srd52:spell/sleep] }
+
+- id: "srd52:feature/elf-drow-lineage"
+  name: Drow
+  text: "Darkvision to 120 feet, Dancing Lights, then Faerie Fire at level 3 and Darkness at level 5, each once a Long Rest without a slot."
+  automation: full
+  spells:
+    {
+      "1": ["srd52:spell/dancing-lights"],
+      "3": ["srd52:spell/faerie-fire"],
+      "5": ["srd52:spell/darkness"],
+    }
+  freeCast: true
+  passives: [{ kind: seesInDarkness, feet: 120 }]
+
+- id: "srd52:feature/elf-high-elf-lineage"
+  name: High Elf
+  text: "Prestidigitation, swapped for another Wizard cantrip after a Long Rest, then Detect Magic at level 3 and Misty Step at level 5, each once a Long Rest without a slot."
+  automation: full
+  swapCantrip: ["srd52:class/wizard"]
+  spells:
+    {
+      "1": ["srd52:spell/prestidigitation"],
+      "3": ["srd52:spell/detect-magic"],
+      "5": ["srd52:spell/misty-step"],
+    }
+  freeCast: true
+
+- id: "srd52:feature/elf-wood-elf-lineage"
+  name: Wood Elf
+  text: "Speed 35 feet, Druidcraft, then Longstrider at level 3 and Pass without Trace at level 5, each once a Long Rest without a slot."
+  automation: full
+  spells:
+    {
+      "1": ["srd52:spell/druidcraft"],
+      "3": ["srd52:spell/longstrider"],
+      "5": ["srd52:spell/pass-without-trace"],
+    }
+  freeCast: true
+  passives:
+    - kind: modifier
+      modifier: { kind: bonus, to: speed, amount: { bonus: { base: 5 } } }
 
 - id: "srd52:feature/ability-score-improvement"
   name: Ability Score Improvement
@@ -180,7 +279,8 @@
 - id: "srd52:feature/improved-critical"
   name: Improved Critical
   text: "Your weapon attacks score a Critical Hit on a roll of 19 or 20."
-  automation: text
+  automation: full
+  passives: [{ kind: criticalRange, from: 19 }]
 
 - id: "srd52:feature/remarkable-athlete"
   name: Remarkable Athlete
@@ -468,7 +568,7 @@
 - id: "srd52:feature/scholar"
   name: Scholar
   text: "You gain Expertise in one of your scholarly skills, such as Arcana or History."
-  automation: text
+  automation: full
 
 - id: "srd52:feature/wizard-subclass"
   name: Wizard Subclass

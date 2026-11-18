@@ -50,6 +50,7 @@ import {
   FeatSchema,
   type Feature,
   FeatureSchema,
+  SkillSchema,
   type Formula,
   type LeafEffect,
   ItemSchema,
@@ -1819,6 +1820,19 @@ function withRiders(
   });
 }
 
+// Whether a Martial Training passive covers this weapon: ranged ones have Ammunition, as a weapon attack reads them.
+function trainedWith(
+  passive: Extract<Passive, { kind: "martialTraining" }>,
+  weapon: Weapon,
+): boolean {
+  const ranged = weapon.properties.includes("ammunition");
+  return (
+    (!passive.ranged || ranged) &&
+    (!passive.melee || !ranged) &&
+    !passive.without?.some((property) => weapon.properties.includes(property))
+  );
+}
+
 export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
   if (!classDef.weapons.includes(weapon.category)) return false;
   const limit = classDef.martialWeaponProperties;
@@ -2275,6 +2289,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     freeSpells.set(spell, [...(freeSpells.get(spell) ?? []), how]);
   const swaps = actor.swaps ?? {};
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
+  const pickedTools: string[] = []; // tools a choice gave
+  const pickedWeapons: string[] = []; // kinds of weapons a choice gave proficiency with
   const featureIds = new Set<string>(species.traits);
   const grantedBy = new Map<string, string>(); // the class whose level granted a feature
   const answerAbilities = new Map<string, Ability>(); // spells a class choice gives with its own ability
@@ -2317,11 +2333,20 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     scaling = { ...scaling, ...levelData.scaling };
     for (const answer of entry.answers) {
       if (answer.kind === "skills") {
+        // Expertise comes with proficiency, as Blessings of Knowledge gives both.
         for (const skill of answer.values) {
-          (answer.expertise || (answer.orExpertise && skills.has(skill))
-            ? expertise
-            : skills
-          ).add(skill);
+          if (answer.expertise || (answer.orExpertise && skills.has(skill))) {
+            expertise.add(skill);
+          }
+          skills.add(skill);
+        }
+      } else if (answer.kind === "weapons") {
+        pickedWeapons.push(...answer.values);
+      } else if (answer.kind === "tools") {
+        for (const value of answer.values) {
+          const skill = SkillSchema.safeParse(value);
+          if (skill.success) skills.add(skill.data);
+          else pickedTools.push(value);
         }
       } else if (answer.kind === "spells") {
         for (const spell of answer.values) {
@@ -2378,6 +2403,19 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
   slots = multiclassSlots(Object.values(casters)) ?? slots;
+  // Scores a feature raises past 20, as Primal Champion's Strength and Constitution.
+  for (const id of featureIds) {
+    for (const passive of maybeLookup(access, FeatureSchema, id)?.passives ??
+      []) {
+      if (passive.kind !== "scoreIncrease") continue;
+      for (const ability of passive.abilities) {
+        abilities[ability] = Math.max(
+          abilities[ability],
+          Math.min(passive.max, abilities[ability] + passive.amount),
+        );
+      }
+    }
+  }
 
   const [firstLevel] = build.levels;
   if (!firstLevel) throw new Error(`${actor.id} has no levels`);
@@ -2389,7 +2427,6 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   );
 
   // shortcut: training comes from every class taken, while a multiclass really gets only some of a later class's.
-  // shortcut: a Protector cleric's or Warden druid's training isn't given, since the order chosen isn't recorded as its own feature.
   const classes = Object.keys(classLevels).map((id) =>
     lookup(access, ClassSchema, id),
   );
@@ -2412,12 +2449,6 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const martialTraining = [...featIds].some((id) =>
     id.endsWith("/martial-weapon-training"),
   );
-  const untrainedArmor = worn.some(
-    ([, item]) =>
-      item.type === "armor" &&
-      !item.anyTraining &&
-      !trained.has(item.armorType),
-  );
   const tooHeavy = worn.some(
     ([, item]) => item.type === "armor" && abilities.str < (item.strength ?? 0),
   );
@@ -2436,9 +2467,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ([, item]) => item.type === "armor" || item.type === "shield",
   );
   const weaponBonuses: { to: string; amount: number; weapons: string[] }[] = [];
-  const weaponTraining = new Set(
-    working.flatMap((item) => item.weaponTraining ?? []),
-  );
+  const weaponTraining = new Set([
+    ...working.flatMap((item) => item.weaponTraining ?? []),
+    ...pickedWeapons.map((id) => id.slice(id.lastIndexOf("/") + 1)),
+  ]);
   const classDc: Record<string, number> = {}; // DC bonuses for one class's spells, by its name after the plugin
   for (const item of working) {
     if (item.ammunition) continue; // its bonus goes only to the shot that fires it
@@ -2483,6 +2515,28 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     variants,
     swaps,
     grantedBy,
+  );
+  // Training and proficiencies features give, as Forge Domain's Heavy armor or Survivalist's skills.
+  for (const passive of fromFeatures.passives) {
+    if (passive.kind === "armorTraining") {
+      for (const armor of passive.armor) trained.add(armor);
+    } else if (passive.kind === "weaponTraining") {
+      for (const kind of passive.weapons) weaponTraining.add(kind);
+    } else if (passive.kind === "skillProficiency") {
+      for (const skill of passive.skills) {
+        skills.add(skill);
+        if (passive.expertise) expertise.add(skill);
+      }
+    }
+  }
+  if (pickedTools.length > 0) {
+    fromFeatures.passives.push({ kind: "toolProficiency", tools: pickedTools });
+  }
+  const untrainedArmor = worn.some(
+    ([, item]) =>
+      item.type === "armor" &&
+      !item.anyTraining &&
+      !trained.has(item.armorType),
   );
   // A feature's passives that hold only while an effect of its activations is on the bearer (`whileActive`).
   for (const gate of fromFeatures.gated) {
@@ -2675,7 +2729,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         abilities,
         martialTraining ||
           fromFeatures.passives.some(
-            ({ kind }) => kind === "martialTraining",
+            (passive) =>
+              passive.kind === "martialTraining" &&
+              trainedWith(passive, weapon),
           ) ||
           kinds.some((kind) => weaponTraining.has(kind)) ||
           classes.some((def) => weaponProficient(def, weapon)),

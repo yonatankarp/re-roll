@@ -12,6 +12,7 @@ import {
   controllingRider,
   dndEvent,
   type DndState,
+  effectiveBuild,
   equipped,
   forAttacker,
   hasCondition,
@@ -1017,6 +1018,21 @@ export function pactWeaponId(
   });
 }
 
+const kindOf = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
+
+// The kinds of weapons a character picked as Monk weapons, as a Kensei's weapons.
+function monkWeaponsOf(actor: Actor): ReadonlySet<string> {
+  return new Set(
+    (effectiveBuild(actor)?.levels ?? []).flatMap((entry) =>
+      entry.answers.flatMap((answer) =>
+        answer.kind === "weapons" && answer.monk
+          ? answer.values.map(kindOf)
+          : [],
+      ),
+    ),
+  );
+}
+
 // Whether a hit with this action is one a rider of this kind answers (schemas.ts HitKindSchema).
 // A magic weapon's own strike option answers only a hit with that weapon, as a Staff of Striking's charges as a
 // Quarterstaff; any other item's answers any hit its trigger allows.
@@ -1067,8 +1083,10 @@ export function hitFits(
       return (
         unarmed ||
         (weapon !== undefined &&
-          isMelee(hitWith) &&
-          (weapon.category === "simple" || weapon.properties.includes("light")))
+          ((isMelee(hitWith) &&
+            (weapon.category === "simple" ||
+              weapon.properties.includes("light"))) ||
+            monkWeaponsOf(attacker).has(kindOf(weapon.baseWeapon ?? id))))
       );
     case "magicWeapon":
       return weapon?.baseWeapon !== undefined;

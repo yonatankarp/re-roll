@@ -2837,6 +2837,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("pactWeapon"),
     damage: z.array(DamageSchema).default([]),
+    // only a weapon without these properties, as Hex Warrior's that isn't Two-Handed (invocations.ts)
+    without: z.array(WeaponPropertySchema).min(1).optional(),
   }),
   // Dash, Disengage or Hide as a Bonus Action, as with Cunning Action or a goblin's Nimble Escape.
   z.strictObject({
@@ -4119,8 +4121,52 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     alone: z.literal(true).optional(),
     against: z.array(ContentIdSchema).min(1).optional(),
   }),
-  // Training with Martial weapons, as Battle Ready's Weapon Knowledge.
-  z.strictObject({ kind: z.literal("martialTraining") }),
+  // Training with Martial weapons, as Battle Ready's Weapon Knowledge: only ranged or melee ones, and none with a
+  // property in `without`, as a Bladesinger's Melee Martial weapons that aren't Two-Handed or Heavy (stats.ts).
+  z.strictObject({
+    kind: z.literal("martialTraining"),
+    ranged: z.literal(true).optional(),
+    melee: z.literal(true).optional(),
+    without: z.array(WeaponPropertySchema).min(1).optional(),
+  }),
+  // Proficiency with these kinds of weapons, by the id's name after the plugin, as College of Swords' scimitar.
+  z.strictObject({
+    kind: z.literal("weaponTraining"),
+    weapons: z.array(z.string().min(1)).min(1),
+  }),
+  // Training with these armor types, as Forge Domain's Heavy armor (stats.ts).
+  z.strictObject({
+    kind: z.literal("armorTraining"),
+    armor: z.array(z.enum(["light", "medium", "heavy", "shield"])).min(1),
+  }),
+  // Proficiency in these skills, and with `expertise` Expertise in them too, as Survivalist's Nature and Survival.
+  z.strictObject({
+    kind: z.literal("skillProficiency"),
+    skills: z.array(SkillSchema).min(1),
+    expertise: z.literal(true).optional(),
+  }),
+  // Checks with these skills can use this ability instead, when it's better, while an effect of one of `while`'s
+  // features is on the bearer, as Primal Knowledge's Strength in a Rage (actions.ts abilityCheck).
+  z.strictObject({
+    kind: z.literal("checkAbility"),
+    ability: AbilitySchema,
+    skills: z.array(SkillSchema).min(1),
+    while: z.array(ContentIdSchema).min(1).optional(),
+  }),
+  // As a fight starts, while `resource` lasts, it spends one and gives Heroic Inspiration to as many of the party as
+  // its Proficiency Bonus, as Purple Dragon Rook's Rallying Cry (combat/start.ts).
+  // shortcut: the bearer and those without Heroic Inspiration first, all within 30 feet as a party starts together.
+  z.strictObject({
+    kind: z.literal("initiativeRally"),
+    resource: z.string().min(1),
+  }),
+  // These scores rise by `amount`, to at most `max`, as Primal Champion's Strength and Constitution (stats.ts).
+  z.strictObject({
+    kind: z.literal("scoreIncrease"),
+    abilities: z.array(AbilitySchema).min(1),
+    amount: z.number().int().min(1),
+    max: z.number().int().min(1).max(30),
+  }),
   // Mounted Combatant: while it rides, Advantage against an unmounted creature within 5 feet of its mount and smaller
   // than the mount; its mount takes no damage on a successful Dexterity save for half; and a hit on its mount can be
   // made to hit it instead (combat/attack.ts, trait-rules.ts).
@@ -4294,6 +4340,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
       step: ScaleStepSchema,
     })
     .optional(),
+  // Items it gives as it's gained, as Assassin's Tools' Disguise Kit and Poisoner's Kit (character.ts advanceEvents).
+  items: z.array(ContentIdSchema).min(1).optional(),
   // Spells it always gives, from the level in the key: the level of the class that granted it, else the character's.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
   // Passives it gives only while an effect of these features' activations is on the bearer, as Crown of Spellfire's
@@ -4384,6 +4432,8 @@ export const FeatureSchema = ContentEntrySchema.extend({
         spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
         // Labels of the followed feature's activations these take the place of, as Perfected Armor's bigger weapons.
         replaces: z.array(z.string().min(1)).min(1).optional(),
+        // Asked once it's picked, as a Thaumaturge's extra Cleric cantrip or a Fighting Style's feat (character.ts).
+        choices: z.lazy(() => z.array(ChoiceDefSchema)).optional(),
       }),
     )
     .min(2)
@@ -4458,9 +4508,37 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     kind: z.literal("weaponMastery"),
     id: z.string(),
     count: z.number().int().min(1),
+    melee: z.literal(true).optional(), // only melee weapons, as a Barbarian's
     // Picked again after a Long Rest, as Weapon Master's weapons (swap.ts).
     swap: z.literal("longRest").optional(),
   }),
+  // Proficiency with kinds of Simple or Martial weapons picked: only melee or ranged ones (by Ammunition), none with a
+  // property in `without`, and these too, as a Kensei's weapons, which with `monk` are Monk weapons for the character.
+  z.strictObject({
+    kind: z.literal("weapons"),
+    id: z.string(),
+    count: z.number().int().min(1),
+    melee: z.literal(true).optional(),
+    ranged: z.literal(true).optional(),
+    without: z.array(WeaponPropertySchema).min(1).optional(),
+    also: z.array(ContentIdSchema).min(1).optional(),
+    monk: z.literal(true).optional(),
+  }),
+  // Tool proficiencies: from these tools, or with `artisan` any Artisan's Tools, else any tool, and with `skills` one of
+  // these skills instead, as Khoravar's Skill Versatility. With `instead` it asks one only for each of those tools the
+  // character already has, as Tools of the Trade's other Artisan's Tools.
+  z.strictObject({
+    kind: z.literal("tools"),
+    id: z.string(),
+    count: z.number().int().min(1),
+    from: z.array(ContentIdSchema).min(1).optional(),
+    artisan: z.literal(true).optional(),
+    skills: z.array(SkillSchema).min(1).optional(),
+    instead: z.array(ContentIdSchema).min(1).optional(),
+    // Picked again after a Long Rest, or after any rest, as Whispers of the Dead's (swap.ts).
+    swap: z.enum(["longRest", "shortRest"]).optional(),
+  }),
+
   z.strictObject({
     kind: z.literal("spells"),
     id: z.string(),
@@ -4525,6 +4603,7 @@ export const ClassSwapsSchema = z.strictObject({
   cantrips: SwapWhenSchema.optional(),
   spells: SwapWhenSchema.optional(),
   options: SwapWhenSchema.optional(),
+  weaponMastery: SwapWhenSchema.optional(), // its Weapon Mastery's weapons, as a Fighter's one after a Long Rest
 });
 export type ClassSwaps = z.infer<typeof ClassSwapsSchema>;
 
@@ -4561,6 +4640,8 @@ export const SubclassSchema = ContentEntrySchema.extend({
   class: ContentIdSchema,
   // Printed for the 2014 rules, whose levels don't line up with these classes, so character creation doesn't offer it.
   edition: z.literal("2014").optional(),
+  // Only a character of one of these species takes it, as the Battlerager's dwarves.
+  requires: z.array(ContentIdSchema).min(1).optional(),
   // Spellcasting the subclass gives a class without its own, from `list`'s spells, as an Eldritch Knight's Wizard
   // spells. Its levels' `slots` and `cantrips` and `preparedSpells` scaling then ask for picks as a class's do.
   spellcasting: z
@@ -5415,6 +5496,18 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
     values: z.array(ContentIdSchema),
     feat: ContentIdSchema.optional(), // the feat that asked, when it can be swapped
   }),
+  z.strictObject({
+    kind: z.literal("weapons"),
+    values: z.array(ContentIdSchema),
+    monk: z.literal(true).optional(), // from a choice with `monk`
+  }),
+  // Tools by id, and skills from a choice with `skills`.
+  z.strictObject({
+    kind: z.literal("tools"),
+    values: z.array(z.string().min(1)),
+    feat: ContentIdSchema.optional(), // the feat or species that asked, when it can be swapped
+  }),
+
   z.strictObject({
     kind: z.literal("subclass"),
     values: z.array(ContentIdSchema).length(1),

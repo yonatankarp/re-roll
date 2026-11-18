@@ -475,10 +475,34 @@ function failChance(
 }
 
 // An ability check, in a fight or a scene. Help's Advantage on a check is used up by it.
+// The ability a check with this skill uses: another a feature allows, when it's better, as Primal Knowledge's
+// Strength in a Rage.
+function checkAbilityOf(
+  actor: Actor,
+  stats: Stats,
+  skill: Skill | undefined,
+  printed: Ability,
+): Ability {
+  if (skill === undefined) return printed;
+  return stats.passives.reduce<Ability>(
+    (best, passive) =>
+      passive.kind === "checkAbility" &&
+      passive.skills.includes(skill) &&
+      (!passive.while ||
+        actor.activeEffects.some(({ sourceId }) =>
+          passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+        )) &&
+      stats.abilities[passive.ability] > stats.abilities[best]
+        ? passive.ability
+        : best,
+    printed,
+  );
+}
+
 export function abilityCheck(
   actor: Actor,
   skill: Skill | undefined,
-  ability: Ability,
+  printed: Ability,
   dc: number,
   label: (success: boolean) => string,
   context: Context,
@@ -491,6 +515,7 @@ export function abilityCheck(
   events: SystemEvent[];
 } {
   const stats = deriveStats(actor, context);
+  const ability = checkAbilityOf(actor, stats, skill, printed);
   const befriended = familiarHelpUse(actor, stats, skill, context.state);
   const edge = {
     advantage:

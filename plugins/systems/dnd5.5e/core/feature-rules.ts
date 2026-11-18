@@ -21,11 +21,6 @@ const BARDIC_INSPIRATION_USES = {
   min: 1,
 };
 
-const improvedCritical = (from: number): Rules => ({
-  automation: "full",
-  passives: [{ kind: "criticalRange", from }],
-});
-
 const RULES: Readonly<Record<string, Rules>> = {
   // shortcut: any attack gains Advantage, not only Strength ones.
   "phb:feature/barbarian-reckless-attack": {
@@ -104,9 +99,6 @@ const RULES: Readonly<Record<string, Rules>> = {
       },
     ],
   },
-  "phb:feature/fighter-champion-improved-critical": improvedCritical(19),
-  "phb:feature/fighter-champion-superior-critical": improvedCritical(18),
-  "srd52:feature/improved-critical": improvedCritical(19),
   // shortcut: armor and shields aren't checked.
   "phb:feature/monk-unarmored-movement": {
     automation: "partial",
