@@ -169,15 +169,15 @@ export function withInvocations(
   access: ContentAccess,
   bonded?: string, // the weapon Pact of the Blade bonds with (combat/queries.ts pactWeaponId)
 ): KnownAction[] {
-  const held = ItemSchema.safeParse(access.content(bonded ?? "")).data;
   // Hex Warrior's Charisma only with a weapon that isn't Two-Handed.
+  const properties = (): readonly string[] => {
+    const held = ItemSchema.safeParse(access.content(bonded ?? "")).data;
+    return held?.type === "weapon" ? held.properties : [];
+  };
   const pacts = passives.filter(
     (item): item is PactWeapon =>
       item.kind === "pactWeapon" &&
-      !item.without?.some(
-        (property) =>
-          held?.type === "weapon" && held.properties.includes(property),
-      ),
+      !item.without?.some((property) => properties().includes(property)),
   );
   const riders = passives.filter(
     (item): item is CantripRider => item.kind === "cantripRider",

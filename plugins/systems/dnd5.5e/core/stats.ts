@@ -1084,7 +1084,7 @@ function featSpellAbilities(
   const bySpell = new Map<string, Ability>();
   const featureSpells = (ids: readonly string[], ability: Ability) => {
     for (const grant of ids) {
-      const feature = FeatureSchema.safeParse(access.content(grant)).data;
+      const feature = maybeLookup(access, FeatureSchema, grant);
       const own = feature && swappedSpells(grant, feature, swaps, access);
       for (const spells of [
         own,
