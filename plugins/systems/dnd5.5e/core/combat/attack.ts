@@ -3662,7 +3662,29 @@ function hitRiders(
     const type = modifier.types
       ? typeAgainst(modifier.types, responses)
       : modifier.damage.type;
-    return [{ ...modifier.damage, type }];
+    // A die another creature gave is its size, as Commander's Strike's Superiority Die.
+    const giver = state.actors[casterId];
+    const { amount } = modifier.damage;
+    return [
+      {
+        ...modifier.damage,
+        type,
+        ...(giver &&
+        giver.id !== attacker.id &&
+        (amount.dieSize || amount.diceCount)
+          ? {
+              amount: {
+                ...amount,
+                dice:
+                  scaledDice(amount, deriveStats(giver, context).scaling) ??
+                  amount.dice,
+                dieSize: undefined,
+                diceCount: undefined,
+              },
+            }
+          : {}),
+      },
+    ];
   });
   // Combat Inspiration's Offense: the attacker's Bardic Inspiration die, at its giver's size, added to the hit.
   const held = heldDie(attacker, context);

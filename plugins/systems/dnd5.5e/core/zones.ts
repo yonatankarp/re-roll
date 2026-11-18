@@ -384,7 +384,6 @@ export function affects(
   ) {
     return false;
   }
-  if (area.downed && actor.hp > 0) return false;
   if (
     area.frightened &&
     !actor.activeEffects.some(

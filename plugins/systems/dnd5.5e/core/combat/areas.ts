@@ -106,6 +106,7 @@ export function zoneFrames(
     if (area.when === occupant) {
       if (seen.has(key) || !inZone(zone, actor.position)) continue;
       if (!affects(zone, actor, state, context)) continue;
+      if (area.downed && actor.hp > 0) continue;
       seen.add(key);
       frames.push(
         frame("zoneTick", {
@@ -421,6 +422,7 @@ export function runZoneTick(
     return target &&
       inZone(zone, target.position) &&
       affects(zone, target, state, context) &&
+      !(zone.area?.downed && target.hp > 0) &&
       !caught(zone, target, state)
       ? [target]
       : [];

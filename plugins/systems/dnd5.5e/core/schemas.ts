@@ -2116,7 +2116,7 @@ export const AreaEffectSchema = z.strictObject({
   // it also acts on a creature that walks into it, and on each creature only once a turn, as Spirit Guardians
   enters: z.literal(true).optional(),
   bloodied: z.literal(true).optional(), // only on Bloodied creatures, as a Dead Three scion's Culling Aura
-  downed: z.literal(true).optional(), // only on creatures at 0 Hit Points, as Aura of Life's 1 Hit Point
+  downed: z.literal(true).optional(), // its `when` resolution only on creatures at 0 Hit Points, as Aura of Life's
   frightened: z.literal(true).optional(), // only on creatures its owner has Frightened, as Aura of Conquest
   // a success against a spell or magic that halves damage takes none, as Circle of Power
   magicWard: z.literal(true).optional(),
@@ -2793,6 +2793,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("restInspiration"),
     rests: z.array(z.enum(["short", "long"])).min(1),
     allies: z.boolean().default(false),
+    count: FormulaSchema.optional(), // at most this many allies, as Musician's Proficiency Bonus
   }),
   // Dropping to 1 Hit Point instead of 0 while the resource lasts, as with Relentless Endurance.
   // With `effects` it gains these as it does, for the rest of the fight, as Boon of Misty Escape's Gaseous Form.
