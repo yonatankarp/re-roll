@@ -1,6 +1,7 @@
 import { configDefaults, defineConfig } from "vitest/config";
 
 // unit: the fast suite over shipped content. soak: the same tests at full depth, with the books where present.
+// books: the unit suite with books/ required and loaded.
 export default defineConfig({
   test: {
     exclude: [...configDefaults.exclude, ".claude/**"],
@@ -41,6 +42,17 @@ export default defineConfig({
       {
         extends: true,
         test: { name: "soak", env: { RE_ROLL_SOAK: "1" } },
+      },
+      // npm run test:books: the unit depth with books/ loaded, so the book-gated tests run (the books repo's CI).
+      {
+        extends: true,
+        test: {
+          name: "books",
+          env: { RE_ROLL_ROOTS: "plugins,books", RE_ROLL_BOOKS: "1" },
+          // Short failure messages and diffs, so a failing assertion can't print a page of book text into a log.
+          chaiConfig: { truncateThreshold: 80 },
+          diff: { expand: false, truncateThreshold: 20 },
+        },
       },
     ],
   },

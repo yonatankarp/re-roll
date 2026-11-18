@@ -17,6 +17,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run --project unit",
     "test:soak": "vitest run --project soak",
+    "test:books": "vitest run --project books",
     "test:coverage": "vitest run --project unit --coverage",
     "check-bundle": "node app/cli/check-bundle.ts",
     "test:ui": "playwright test",
