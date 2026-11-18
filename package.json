@@ -20,6 +20,7 @@
     "test:books": "vitest run --project books",
     "test:coverage": "vitest run --project unit --coverage",
     "check-bundle": "node app/cli/check-bundle.ts",
+    "notices": "node app/cli/notices.ts",
     "test:ui": "playwright test",
     "check-pack": "node app/cli/check-pack.ts",
     "check-pack:fixtures": "node tests/check-fixtures.ts",

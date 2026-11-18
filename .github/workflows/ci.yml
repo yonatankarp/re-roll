@@ -103,6 +103,9 @@ jobs:
         with:
           workspaces: app/desktop/src-tauri
       - run: npm ci
+      # The bundle ships THIRD_PARTY_NOTICES.md; it must list today's lockfiles. Once, since it reads no OS.
+      - if: runner.os == 'Linux'
+        run: npm run notices -- --check
       # The Tauri context reads the built frontend at compile time.
       - run: npm run ui:build
       - run: cargo clippy --locked --all-targets -- -D warnings
