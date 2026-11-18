@@ -1,6 +1,7 @@
 import { afterDamage, reactFrames } from "./reactions.ts";
 import { deathSaveEvents } from "./actions.ts";
 import { duelStrayed } from "./duel.ts";
+import { castingTurn } from "./casting.ts";
 import { confusedBy } from "./confusion.ts";
 import {
   groundedEvents,
@@ -724,6 +725,8 @@ export function runAdvanceTurn(
   const grappled = next
     ? grappleDamage(next, { ...context, state: after })
     : { events: [], frames: [] };
+  // A spell being cast over several turns takes this turn's action too (combat/casting.ts).
+  const casting = next ? castingTurn(next) : { events: [], frames: [] };
   const events = [
     ...finished,
     ...expired,
@@ -742,6 +745,7 @@ export function runAdvanceTurn(
     ...(next ? turnTempHpEvents(next, { ...context, state: after }) : []),
     ...(next ? regenerationEvents(next, context) : []),
     ...grappled.events,
+    ...casting.events,
     ...(next ? sharedTempHp(next, { ...context, state: after }) : []),
     ...(next ? turnInspiration(next, { ...context, state: after }) : []),
     ...(next ? fogBoundEvents(next, { ...context, state: after }) : []),
@@ -758,6 +762,7 @@ export function runAdvanceTurn(
     ? [
         ...drifted.frames,
         ...grappled.frames,
+        ...casting.frames,
         ...mad.frames,
         ...lingeringFrames(next, "turnStart"),
         ...sunlightFrames(next, starts),

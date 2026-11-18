@@ -5055,6 +5055,9 @@ export const SpellSchema = ContentEntrySchema.extend({
   text: z.string().min(1),
   automation: AutomationSchema,
   activation: ActivationSchema.optional(),
+  // In a fight it takes the action of this many turns in a row to cast, concentrating throughout, as a spell of a
+  // minute's casting does (Longer Casting Times, combat/casting.ts).
+  castRounds: z.number().int().min(2).optional(),
   // An action its caster can take while concentrating on it, as Flame Blade's attack or Heat Metal's Bonus Action.
   lasting: ActivationSchema.optional(),
   // What it does outside a fight that its fight's activation doesn't, as Freezing Sphere's frozen water, cast only

@@ -16351,9 +16351,99 @@
     though, the creature must succeed on a Strength (Athletics) check against
     your spell save DC to move at all. If it fails the check, it can’t move. A
     creature that moves out of the wall falls to the ground.
-  automation: text
-  # A minute to cast, which a fight can spend only through Longer Casting Times (re-roll#205).
-  outOfCombat: castingTime
+  automation: full
+  # A minute's casting: in a fight, ten turns' actions in a row (Longer Casting Times, re-roll#205). Cast across the
+  # point aimed at, the wave then rolls 50 feet away from its caster as each of its turns starts.
+  # shortcut: a creature caught in it is held (Restrained) until it breaks free with Athletics, rather than checking to
+  # move at all, and isn't dropped as it leaves.
+  castRounds: 10
+  activation:
+    cost: [action, slot]
+    targeting:
+      {
+        area: { shape: wall, radius: 300, width: 50 },
+        range: 5280,
+        side: enemy,
+      }
+    resolution:
+      kind: save
+      ability: str
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 6d10 }, type: bludgeoning }]
+      onSuccessDamage: half
+      onFail:
+        - kind: zone
+          zone: area
+          shape: line
+          radius: 300
+          width: 50
+          duration: { concentration: true, minutes: 0.6 }
+      onSuccess: []
+    area:
+      drifts: 50
+      carries: true
+      when: ownerTurnStart
+      schedule:
+        - kind: save
+          ability: str
+          dc: { add: [{ kind: spellSaveDc }] }
+          edges: [{ minSize: gargantuan, roll: immune }]
+          damage: [{ amount: { dice: 5d10 }, type: bludgeoning }]
+          onSuccessDamage: none
+          onFail:
+            - kind: applyCondition
+              condition: restrained
+              duration: { concentration: true, minutes: 0.6 }
+              escape: { ability: str, skill: athletics }
+          onSuccess: []
+        - kind: save
+          ability: str
+          dc: { add: [{ kind: spellSaveDc }] }
+          edges: [{ minSize: gargantuan, roll: immune }]
+          damage: [{ amount: { dice: 4d10 }, type: bludgeoning }]
+          onSuccessDamage: none
+          onFail:
+            - kind: applyCondition
+              condition: restrained
+              duration: { concentration: true, minutes: 0.6 }
+              escape: { ability: str, skill: athletics }
+          onSuccess: []
+        - kind: save
+          ability: str
+          dc: { add: [{ kind: spellSaveDc }] }
+          edges: [{ minSize: gargantuan, roll: immune }]
+          damage: [{ amount: { dice: 3d10 }, type: bludgeoning }]
+          onSuccessDamage: none
+          onFail:
+            - kind: applyCondition
+              condition: restrained
+              duration: { concentration: true, minutes: 0.6 }
+              escape: { ability: str, skill: athletics }
+          onSuccess: []
+        - kind: save
+          ability: str
+          dc: { add: [{ kind: spellSaveDc }] }
+          edges: [{ minSize: gargantuan, roll: immune }]
+          damage: [{ amount: { dice: 2d10 }, type: bludgeoning }]
+          onSuccessDamage: none
+          onFail:
+            - kind: applyCondition
+              condition: restrained
+              duration: { concentration: true, minutes: 0.6 }
+              escape: { ability: str, skill: athletics }
+          onSuccess: []
+        - kind: save
+          ability: str
+          dc: { add: [{ kind: spellSaveDc }] }
+          edges: [{ minSize: gargantuan, roll: immune }]
+          damage: [{ amount: { dice: 1d10 }, type: bludgeoning }]
+          onSuccessDamage: none
+          onFail:
+            - kind: applyCondition
+              condition: restrained
+              duration: { concentration: true, minutes: 0.6 }
+              escape: { ability: str, skill: athletics }
+          onSuccess: []
 - id: srd52:spell/wall-of-fire
   name: Wall of Fire
   level: 4

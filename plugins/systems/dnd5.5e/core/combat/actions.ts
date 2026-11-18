@@ -33,6 +33,7 @@ import {
   LEVELED_CAST,
   MAGIC_ACTION,
   SLOT_CAST_ACTION,
+  applyDndEvent,
   dndEvent,
   fightingOn,
   hasCondition,
@@ -90,6 +91,7 @@ import {
   zoneEvents,
 } from "./effects.ts";
 import { anchorAt, anchorLeaves, anchorMoved, anchorSquare } from "./anchor.ts";
+import { beginCasting, castRoundsOf } from "./casting.ts";
 import { metamagicCast, quickens } from "../metamagic.ts";
 import { castOptionCast } from "../cast-options.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
@@ -312,10 +314,16 @@ export function castAction(
   uncountered = false, // a foe has already had its chance to counter it, and any check it needs was made
   shape?: string, // the shape picked for a spell that has several, as Forcecage's cage or box
   checked = false, // the check it needs was made and passed (actions.ts castCheckFrames)
+  paid = false, // a cast over several turns, paid as it began (combat/casting.ts)
 ): SystemResult {
   const { state } = context;
   const slotLevel = slotLevelFor(actor, actionId, slot, context);
   const found = findAction(actor, actionId, context, slotLevel);
+  // A spell that takes a minute or more is begun now and resolved on a later turn (Longer Casting Times).
+  const rounds = paid ? undefined : castRoundsOf(found, actor, context);
+  if (rounds !== undefined && shape === undefined && !found.activation.shapes) {
+    return beginCasting(actor, found, slot, target, rounds, slotLevel, context);
+  }
   const cast = {
     actor: actor.id,
     actionId,
@@ -446,7 +454,7 @@ export function castAction(
         );
   return {
     events: [
-      ...payCosts(action, actor, context, slotLevel),
+      ...(paid ? [] : payCosts(action, actor, context, slotLevel)),
       ...anchored,
       ...timeStopEnds(actor, caught),
       ...schoolCastEvents(actor, action, slotLevel, context),
@@ -956,6 +964,35 @@ export const actionFrames = {
     run: runPickTargets,
   }),
   [`${NS}:aimArea`]: frameHandler({ schema: AimSchema, run: runAimArea }),
+  // A spell cast over several turns takes effect, unpaid now, its Concentration in place of the casting's.
+  [`${NS}:castCompleted`]: frameHandler({
+    schema: z.object({ actor: z.string() }),
+    run: (payload, context: Context) => {
+      const actor = actorOf(context.state, payload.actor);
+      const casting = actor.activeEffects.find(
+        ({ modifier }) => modifier.kind === "casting",
+      );
+      if (casting?.modifier.kind !== "casting") return {};
+      const { actionId, target, slot } = casting.modifier;
+      const ended = dndEvent(`${NS}:concentrationEnded`, { actor: actor.id });
+      const state = applyDndEvent(context.state, ended);
+      const result = castAction(
+        actorOf(state, actor.id),
+        actionId,
+        slot,
+        target,
+        { ...context, state },
+        true,
+        undefined,
+        true,
+        true,
+      );
+      return {
+        events: [ended, ...(result.events ?? [])],
+        frames: result.frames ?? [],
+      };
+    },
+  }),
   [`${NS}:chooseShape`]: frameHandler({
     schema: ShapeSchema,
     run: (payload, context: Context) =>
