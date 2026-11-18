@@ -856,7 +856,7 @@ export function createGame({
   };
 
   const removeSave = async (path: string): Promise<void> => {
-    if (!storage.remove) throw new Error("Saves can't be deleted here");
+    if (!storage.remove) throw new PlayerError("Saves can't be deleted here.");
     await storage.remove(path);
     const { times, details } = await readRecords();
     for (const [record, entries] of [

@@ -1048,7 +1048,8 @@ summary {
 
 .rolls .empty,
 .leads .empty,
-.menu .empty {
+.menu .empty,
+.book .empty {
   color: var(--muted);
   font-style: italic;
 }

@@ -74,18 +74,27 @@ function openMenu(
   if (options.length === 0) {
     const token = ctx.tokens.get(id);
     const player = ctx.tokens.get(PLAYER_ACTOR);
-    // A foe with nothing to do to it, on the player's turn, says why rather than only its name.
+    // A foe with nothing to do to it, on the player's turn, says why rather than only its name: out of
+    // reach while an attack on another foe is still on offer, or else no attack left.
     if (
       token &&
       player &&
       token.side !== player.side &&
       playerOptions(ctx).length > 0
     ) {
+      const canAttack = playerOptions(ctx).some((option) => {
+        const target = parseOption(option.id)[1]?.replace(AIM, "");
+        return (
+          target !== undefined && ctx.tokens.get(target)?.side === token.side
+        );
+      });
       ctx.menu.replaceChildren(
         el(
           "p",
           "dnd-menu-note",
-          `${token.name} is out of reach. Move closer first.`,
+          canAttack
+            ? `${token.name} is out of reach. Move closer first.`
+            : "You have no attack left this turn.",
         ),
       );
       placeMenu(ctx, anchor);
@@ -121,6 +130,7 @@ function openMenu(
 // Beside the token, kept inside the board by the menu's own width, however narrow the board is.
 function placeMenu(ctx: BoardContext, anchor: HTMLElement): void {
   ctx.menu.hidden = false;
+  ctx.menu.style.left = "0px"; // measured from the left, where it has the whole board's width
   const box = ctx.board.getBoundingClientRect();
   const at = anchor.getBoundingClientRect();
   const width = ctx.menu.offsetWidth;

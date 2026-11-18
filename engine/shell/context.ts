@@ -11,7 +11,7 @@ export const CANT_OPEN = "This adventure couldn't be opened.";
 export const CANT_LOAD =
   "This save couldn't be opened. It may be damaged, or from an older version of the adventure.";
 export const SOMETHING_WRONG =
-  "That didn't work. Try again, or go back to the menu and load your last save.";
+  "That didn't work. Try again; Details says what went wrong.";
 const BUSY_AFTER_MS = 300; // a step quicker than this shows no overlay, so it doesn't flicker
 
 // A system's own encounter view, such as a combat board, keyed by system id. It draws its own DOM in the slot,

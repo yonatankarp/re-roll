@@ -27,6 +27,7 @@ import type { Storage } from "../../engine/kernel/storage.ts";
 import { scanPlugins } from "../../engine/run/loader.ts";
 import { createGame } from "../../engine/shell/session.ts";
 import { button, el } from "../../engine/shell/dom.ts";
+import { PlayerError } from "../../engine/shell/player-error.ts";
 import { mountShell } from "../../engine/shell/shell.ts";
 import { mountDndBoard } from "../../plugins/systems/dnd5.5e/ui/board.ts";
 import { dndUi } from "../../plugins/systems/dnd5.5e/ui/index.ts";
@@ -76,7 +77,16 @@ async function installZip(zip: Uint8Array): Promise<string> {
   const known = new Map(
     [...catalog.plugins].map(([id, plugin]) => [id, plugin.root]),
   );
-  const plan = planInstall(zip, known);
+  // What's wrong with a zip is said for the player, such as that it isn't a plugin.
+  const plan = (() => {
+    try {
+      return planInstall(zip, known);
+    } catch (error) {
+      throw new PlayerError(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  })();
   const replaced = await installPlan(zip, plan);
   const installed = describePlan(plan);
   if (
