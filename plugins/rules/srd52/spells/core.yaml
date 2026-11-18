@@ -5324,7 +5324,9 @@
     doing nothing more than light activity, your remaining recovery time
     decreases by 2 days. Finally, there is a 33 percent chance that you are
     unable to cast Wish ever again if you suffer this stress."
-  automation: partial
+  automation: full
+  # Its copy and Instant Health play. shortcut: Resistance, Spell Immunity, Roll Redo, Object Creation, Sudden
+  # Learning and Reshape Reality aren't offered; the stress lasts until a Long Rest, and Wish is never lost to it.
   activation:
     cost:
       - action
@@ -5336,6 +5338,24 @@
       effects:
         - kind: copySpell
           maxLevel: 8
+          extras:
+            - name: Instant Health
+              allies: true
+              effects:
+                - { kind: heal, amount: { bonus: { base: 0 } }, full: true }
+                - { kind: cure, conditions: [charmed, petrified] }
+          stress:
+            - {
+                kind: modifier,
+                modifier: { kind: castRecoil, dice: 1d10 },
+                duration: { until: longRest },
+              }
+            - {
+                kind: modifier,
+                modifier:
+                  { kind: setScore, ability: str, score: 3, exact: true },
+                duration: { until: longRest },
+              }
 - id: srd52:spell/aid
   name: Aid
   level: 2
@@ -12407,7 +12427,7 @@
     condition ends, and the creature teleports to another plane of existence
     (GM’s choice). Special. The target is struck by two rays. Roll twice,
     rerolling any 8."
-  automation: partial
+  automation: full
   activation:
     cost:
       - action

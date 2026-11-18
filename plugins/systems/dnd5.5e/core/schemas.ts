@@ -860,6 +860,16 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("confused"),
     spell: z.literal(true).optional(),
   }),
+  // A face rolled on the table `from` holds, kept until it's unleashed by a `rollTable` with `channeled`, as a
+  // spirit channeled with Spirits from Beyond (combat/effects.ts).
+  z.strictObject({
+    kind: z.literal("channeled"),
+    from: ContentIdSchema,
+    face: z.number().int().min(1),
+  }),
+  // Each spell the bearer casts deals it `dice` Necrotic damage for each of the spell's levels, which nothing reduces,
+  // as Wish's stress (combat/school.ts).
+  z.strictObject({ kind: z.literal("castRecoil"), dice: DiceSchema }),
   // In a fury (passive `fury`): on its turns it attacks the nearest creature it reaches, friend or foe, or with `at`
   // that creature until either drops (combat/madness.ts).
   z.strictObject({ kind: z.literal("furious"), at: z.string().optional() }),
@@ -888,6 +898,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("setScore"),
     ability: AbilitySchema,
     score: z.number().int().min(1),
+    exact: z.literal(true).optional(), // lowering a higher score too, as Wish's stress Strength of 3
   }),
   // No rule of its own: a curse, a mark or a hold that another of its giver's actions looks for (a targeting's
   // `afflicted`), as a nightmare's Haunter's Spear curse.
@@ -993,6 +1004,24 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("retypeHit"),
     types: z.array(DamageTypeSchema).min(2),
+  }),
+  // A roll on the table the content entry `from` holds (its `table`, TableSchema), as a Wand of Wonder's effects
+  // (combat/reactions.ts tableRoll), aimed at the action's target.
+  // With `channeled` the face kept by `channel` is used, and the channeled effect ends.
+  z.strictObject({
+    kind: z.literal("rollTable"),
+    from: ContentIdSchema,
+    channeled: z.literal(true).optional(),
+  }),
+  // A face of the table `from` holds, rolled on a d`dieSize` (a scaling key, as `bardicDie`) and kept on the target
+  // until a rest or until it's unleashed, as Spirits from Beyond's spirit; with `pick` the bearer picks the face, as
+  // Controlled Channeling. A new one replaces the one kept. shortcut: with a pick of two (`tableTwice`), the higher
+  // face is kept, or on doubles the highest the die allows, as Mystical Connection.
+  z.strictObject({
+    kind: z.literal("channel"),
+    from: ContentIdSchema,
+    dieSize: z.string().min(1),
+    pick: z.literal(true).optional(),
   }),
   // Damage to the one taking the action, with `creatureTypes` only when the target is one of these, as Blackrazor's
   // 1d10 Necrotic to its wielder for hitting an Undead or a Book of Vile Darkness's Vile Speech to its reader.
@@ -1587,9 +1616,28 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   }),
   // The caster picks another spell of this level or lower that plays on the grid, and it takes effect without its
   // costs, as Wish's (combat/wish.ts).
+  // With `classes`, only spells of these classes' lists (by name after the plugin), and with `noReaction` none cast
+  // as a Reaction, as Divine Intervention's Cleric spells; with `spells` only these, as Greater Divine Intervention's
+  // Wish.
   z.strictObject({
     kind: z.literal("copySpell"),
     maxLevel: z.number().int().min(0).max(9),
+    classes: z.array(z.string().min(1)).min(1).optional(),
+    noReaction: z.literal(true).optional(),
+    spells: z.array(ContentIdSchema).min(1).optional(),
+    // Other choices beside a copied spell, as Wish's Instant Health: `effects` on the caster, and with `allies` on
+    // each of its allies standing too; `stress` puts these on the caster after, as Wish's stress (combat/wish.ts).
+    extras: z
+      .array(
+        z.strictObject({
+          name: z.string().min(1),
+          effects: z.array(z.unknown()).min(1), // leaf effects, parsed as used (combat/wish.ts)
+          allies: z.literal(true).optional(),
+        }),
+      )
+      .min(1)
+      .optional(),
+    stress: z.array(z.unknown()).min(1).optional(), // leaf effects too
   }),
   // A corpse of these types within `range` rises as this monster on the bearer's side, as a wraith's Create Specter.
   // A dying creature becomes Stable, as with Spare the Dying.
@@ -2000,6 +2048,40 @@ export const TargetingSchema = z.union([
 ]);
 export type Targeting = z.infer<typeof TargetingSchema>;
 
+// A table rolled on (combat/reactions.ts tableRoll), as Mythal Ward's or the Wild Magic Surge table. The row the die
+// lands on is resolved at the bearer (`self`), the creature that set it off (`source`), the creature the roll is aimed
+// at (`target`), and with `within` each creature that near the bearer. `perSpellLevel` multiplies its damage dice by
+// the level of the spell that set it off; `negate` makes that spell do nothing to the bearer. A row's `spell` is cast
+// at its targets with `dc`, `attack` and `level` (the bearer's own numbers when left out), and a row's `table` is
+// rolled on in turn, as a surge's d10 of spells. `harmful` rows are the ones a pick of two avoids (tactics.ts).
+// shortcut: an area spell from a row hits only the row's targets.
+const TableRowSchema = z.strictObject({
+  min: z.number().int().min(1),
+  max: z.number().int().min(1),
+  targets: z.array(z.enum(["self", "source", "target"])).default([]),
+  within: z.number().int().min(5).optional(),
+  perSpellLevel: z.literal(true).optional(),
+  negate: z.literal(true).optional(),
+  harmful: z.literal(true).optional(),
+  resolution: ResolutionSchema.optional(),
+  spell: ContentIdSchema.optional(),
+  dc: z.number().int().min(1).optional(),
+  attack: z.number().int().optional(),
+  level: z.number().int().min(0).max(9).optional(),
+});
+const InnerTableSchema = z.strictObject({
+  die: z.number().int().min(2),
+  rows: z.array(TableRowSchema).min(1),
+});
+export const TableSchema = z.strictObject({
+  die: z.number().int().min(2),
+  rows: z
+    .array(TableRowSchema.extend({ table: InnerTableSchema.optional() }))
+    .min(1),
+});
+export type Table = z.infer<typeof TableSchema>;
+export type TableRow = z.infer<typeof TableRowSchema>;
+
 export const ActivationSchema = z.strictObject({
   cost: z.array(CostSchema),
   trigger: z
@@ -2253,28 +2335,8 @@ export const ActivationSchema = z.strictObject({
     )
     .min(2)
     .optional(),
-  // Rolled on as the reaction is taken, as Mythal Ward's table (combat/reactions.ts rollOnTable). The row the die
-  // lands on is resolved at the bearer (`self`), the creature that set it off (`source`), and with `within` each
-  // creature that near the bearer. `perSpellLevel` multiplies its damage dice by the level of the spell that set it
-  // off; `negate` makes that spell do nothing to the bearer.
-  table: z
-    .strictObject({
-      die: z.number().int().min(2),
-      rows: z
-        .array(
-          z.strictObject({
-            min: z.number().int().min(1),
-            max: z.number().int().min(1),
-            targets: z.array(z.enum(["self", "source"])).default([]),
-            within: z.number().int().min(5).optional(),
-            perSpellLevel: z.literal(true).optional(),
-            negate: z.literal(true).optional(),
-            resolution: ResolutionSchema.optional(),
-          }),
-        )
-        .min(1),
-    })
-    .optional(),
+  // Rolled on as the reaction is taken, as Mythal Ward's table (combat/reactions.ts rollOnTable).
+  table: TableSchema.optional(),
 });
 export type Activation = z.infer<typeof ActivationSchema>;
 
@@ -3099,6 +3161,8 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // Reads any Spell Scroll with this ability, cantrips and level 1 spells reliably and a higher one behind a check of
   // it with Arcana of 10 plus the spell's level, whose failure wastes the scroll, as Use Magic Device's (stats.ts).
   z.strictObject({ kind: z.literal("anyScroll"), ability: AbilitySchema }),
+  // Rolling on the table `from` holds, the bearer rolls twice and picks, as Controlled Chaos (combat/school.ts).
+  z.strictObject({ kind: z.literal("tableTwice"), from: ContentIdSchema }),
   // Attuned to up to this many magic items at once, as an Artificer's Magic Item Adept's four (gear.ts).
   z.strictObject({
     kind: z.literal("attunementSlots"),
@@ -3655,6 +3719,22 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     resource: z.string().optional(), // spending a use, only while one is left, as Defy Death's after Spare the Dying
     // with `school`, a spell of any casting time cast with a slot, as Arcane Ward's Abjuration spells
     slotted: z.literal(true).optional(),
+    // A spell of one of these classes' lists (by name after the plugin) cast with a slot, as a Sorcerer spell for
+    // Wild Magic Surge; with `chance` only when a d`die` shows `at` or more, once a turn, as its d20 of 20, and with
+    // `chance` and no `classes` any slot spell, as in a Wild Magic Zone.
+    classes: z.array(z.string().min(1)).min(1).optional(),
+    chance: z
+      .strictObject({
+        die: z.number().int().min(2),
+        at: z.number().int().min(1),
+      })
+      .optional(),
+    // the table the content entry `from` holds is rolled on, aimed at the spell's first target (combat/school.ts),
+    // or with `pick` the caster picks its row, any but the last, as Tamed Surge
+    rollTable: ContentIdSchema.optional(),
+    pick: z.literal(true).optional(),
+    // only while this resource has a use spent, which it gives back, as Tides of Chaos regained by a Sorcerer spell
+    refills: z.string().min(1).optional(),
     // its `effects` go to the most hurt of the bearer's allies of these types within `within` instead, as Undead
     // Vitality's healing of an Undead
     toAlly: z
@@ -3963,6 +4043,7 @@ export const FeatureSchema = ContentEntrySchema.extend({
   passives: z.array(PassiveSchema).default([]),
   activations: z.array(ActivationSchema).default([]),
   resources: z.array(ResourceDefSchema).default([]),
+  table: TableSchema.optional(), // a table it rolls on, which `rollTable` names it for, as Wild Magic Surge's
   fromLevel: z.number().int().min(1).max(20).optional(), // the character level it starts working at
   // Dice added to its activations at character levels 5, 11 and 17, as a cantrip's are.
   perTier: ScaleStepSchema.optional(),
@@ -4725,6 +4806,22 @@ const MagicItemSchema = ItemBaseSchema.extend({
   attunement: z.boolean(),
   attunementBy: z.string().min(1).optional(),
   attuneBy: AttuneBySchema.optional(), // what `attunementBy` asks, as the engine checks it
+  table: TableSchema.optional(), // a table it rolls on, which `rollTable` names it for, as a Wand of Wonder's
+  // Rolls made on these roll tables as it's found, `count` of each, whose rows' passives work while it does, as an
+  // artifact's random properties or a Moonblade's runes (gear.ts gainRolls). shortcut: one come by other than as
+  // treasure or bought has none.
+  properties: z
+    .array(
+      z.strictObject({
+        table: ContentIdSchema,
+        count: z.strictObject({
+          base: z.number().int().min(0).default(0),
+          dice: DiceSchema.optional(),
+        }),
+      }),
+    )
+    .min(1)
+    .optional(),
   curse: CurseSchema.optional(),
   // A save attuning to it calls for, whose failure is the attuner's end, as the Wand of Orcus's Constitution save
   // (actions.ts attuneSave): a creature of one of `unless` makes none, and a success takes `saved`, as the wand's 10d6
@@ -4814,6 +4911,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
       perLevel: z.literal(true).optional(),
       resource: z.string().min(1),
       keepOnFailure: z.literal(true).optional(),
+      // a failure rolls on the item's own `table`, as a Hat of Many Spells' random effects
+      failTable: z.literal(true).optional(),
     })
     .optional(),
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds
@@ -5457,6 +5556,9 @@ export const RollTableSchema = ContentEntrySchema.extend({
         min: z.number().int().min(1),
         max: z.number().int().min(1),
         cells: z.array(z.string()),
+        // what the row gives an item it's rolled for, while the item works, as an artifact's random property
+        // (MagicItemSchema `properties`)
+        passives: z.array(PassiveSchema).min(1).optional(),
       }),
     )
     .min(1),

@@ -30,6 +30,7 @@ import {
 } from "./combat.ts";
 import { ITEM_PREFIX, encodeOption, parseOption } from "./combat/ids.ts";
 import { CastCheckSchema, castAction } from "./combat/actions.ts";
+import { tableOf, tableRoll } from "./combat/reactions.ts";
 import { actorOf, findAction, slotLevelFor } from "./combat/queries.ts";
 import { opportunity, provokers, teleportSquares } from "./combat/movement.ts";
 import { familiarHelpUse } from "./combat/familiar.ts";
@@ -399,12 +400,31 @@ export const castCheckFrames = {
             },
           }
         : action;
+      // A Hat of Many Spells' failure rolls on its table instead.
+      const table = check.table ? tableOf(check.table, context) : undefined;
+      const random = table
+        ? tableRoll(
+            table,
+            action,
+            actor,
+            undefined,
+            context.state.actors[
+              typeof cast.target === "string"
+                ? cast.target
+                : (cast.target[0] ?? "")
+            ],
+            action.spellLevel ?? 0,
+            context,
+          )
+        : { events: [], frames: [] };
       return {
         events: [
           ...rolled.events,
           ...payCosts(paid, actor, context, slotLevel),
+          ...random.events,
         ],
         frames: [
+          ...random.frames,
           ...(cast.actionId.startsWith(ITEM_PREFIX) || check.breaks
             ? [
                 frame("useItem", {

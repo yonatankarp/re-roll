@@ -21,6 +21,7 @@ import {
   ItemSchema,
   type Loot,
   LootSchema,
+  RollTableSchema,
 } from "./schemas.ts";
 import {
   type Actor,
@@ -131,6 +132,37 @@ export function gainRolls(
           );
         }
       }
+    }
+    // An artifact's random properties, its rows' passives carried by the event.
+    if (
+      item.type === "magicItem" &&
+      item.properties &&
+      actor.itemProperties?.[id] === undefined
+    ) {
+      const passives = item.properties.flatMap(({ table: tableId, count }) => {
+        const table = RollTableSchema.safeParse(context.content(tableId)).data;
+        if (!table) return [];
+        const times =
+          count.base +
+          (count.dice ? rollDiceNotation(count.dice, context.dice) : 0);
+        return Array.from({ length: times }).flatMap(() => {
+          const face = rollDiceNotation(
+            table.die.startsWith("d") ? `1${table.die}` : table.die,
+            context.dice,
+          );
+          return (
+            table.rows.find((row) => face >= row.min && face <= row.max)
+              ?.passives ?? []
+          );
+        });
+      });
+      events.push(
+        dndEvent(`${NS}:propertiesRolled`, {
+          actor: actor.id,
+          item: id,
+          passives,
+        }),
+      );
     }
     const split = "split" in item ? item.split : undefined;
     if (!split || split.rows.every((row) => rolled.has(row.resource))) continue;

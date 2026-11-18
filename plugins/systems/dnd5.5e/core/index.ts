@@ -38,7 +38,7 @@ import { fearFrames } from "./combat/fear.ts";
 import { environmentEffects } from "./environment.ts";
 import { sceneCheck } from "./explore.ts";
 import { optionFrames } from "./combat/options.ts";
-import { riderChoiceFrames } from "./combat/school.ts";
+import { riderChoiceFrames, tablePickFrames } from "./combat/school.ts";
 import { redirectFrames } from "./combat/reactions.ts";
 import { wishFrames } from "./combat/wish.ts";
 import { reactionFrames } from "./combat/reactions.ts";
@@ -543,6 +543,7 @@ export const dnd55e = defineSystem<DndState>({
     ...fearFrames,
     ...optionFrames,
     ...riderChoiceFrames,
+    ...tablePickFrames,
     ...redirectFrames,
     ...hideFrames,
     ...wishFrames,
@@ -741,7 +742,7 @@ export const dnd55e = defineSystem<DndState>({
   // Building steps (class, scores, subclass, spells, feats) are made as a companion's are, and a rest's
   // Hit Dice and gear as a careful player would.
   tactical: (decision) =>
-    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|strike|inspiration|deathSave|build|metamagic|precision|damageType|focus|wish|mastery|missReroll):/.test(
+    /^dnd5\.5e:(turn|moveTo|targets|aim|reaction|afterHit|strike|inspiration|deathSave|build|metamagic|precision|damageType|focus|wish|mastery|missReroll|tablePick):/.test(
       decision.id,
     ) || isGearDecision(decision),
 });

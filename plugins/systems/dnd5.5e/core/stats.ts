@@ -161,6 +161,7 @@ export interface KnownAction {
     readonly keep?: string; // a resource a failure doesn't spend
     readonly chance?: number; // in place of the check, the percent chance it fails, as a Wind Fan's tearing
     readonly breaks?: string; // the item a failure destroys
+    readonly table?: string; // the content whose table a failure rolls on, as a Hat of Many Spells
   };
   readonly onceKeys?: readonly string[]; // once-a-turn uses its cast spends, as a `spellDamage` bonus (combat/actions.ts)
   readonly saveDice?: string; // dice taken off each target's first save, as Modify Magic's Tenacious Spell (cast-options.ts)
@@ -394,12 +395,15 @@ function withDcBonus(activation: Activation, bonus: number): Activation {
   ) as Activation;
 }
 
-// Scores an effect on the character sets while it lasts, as a Potion of Giant Strength's, never lowering one.
+// Scores an effect on the character sets while it lasts, as a Potion of Giant Strength's, never lowering one unless
+// `exact`, as Wish's stress Strength of 3.
 function withEffectScores(scores: AbilityScores, actor: Actor): AbilityScores {
   const set = { ...scores };
   for (const { modifier } of actor.activeEffects) {
     if (modifier.kind === "setScore") {
-      set[modifier.ability] = Math.max(set[modifier.ability], modifier.score);
+      set[modifier.ability] = modifier.exact
+        ? modifier.score
+        : Math.max(set[modifier.ability], modifier.score);
     }
   }
   return set;
@@ -640,7 +644,7 @@ export function spellNamed(
 }
 
 // A spell cast with an item's own numbers, as a Wand of Web's DC 13, rather than with the bearer's.
-function withItemNumbers(
+export function withItemNumbers(
   activation: Activation,
   dc: number | undefined,
   attack: number | undefined,
@@ -897,6 +901,7 @@ function unknownSpells(
           skill: "arcana",
           dc: rule.dc + (rule.perLevel ? spell.level : 0),
           ...(rule.keepOnFailure ? { keep: rule.resource } : {}),
+          ...(rule.failTable ? { table: itemId } : {}),
         },
       },
     ];
@@ -2215,6 +2220,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         ]
       : [],
   );
+  // An item's rolled properties, while it works, as an artifact's random ones (gear.ts gainRolls).
+  for (const [itemId, item] of worn) {
+    if (works(itemId, item)) {
+      itemPassives.push(...(actor.itemProperties?.[itemId] ?? []));
+    }
+  }
   // What studying a book gave for good, as the Book of Exalted Deeds' Halo, the book itself gone or not (gear.ts).
   for (const itemId of actor.studied ?? []) {
     const item = lookup(access, ItemSchema, itemId);
