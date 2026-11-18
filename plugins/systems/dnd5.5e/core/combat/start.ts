@@ -45,6 +45,11 @@ import { type Context, hasPassive } from "./queries.ts";
 import { DAMAGE_TO_PARTY } from "./effects.ts";
 import { damageToPartyFor } from "../worth.ts";
 import { familiarActors, familiarFoundEvents } from "./familiar.ts";
+import {
+  companionActors,
+  companionFoundEvents,
+  companionOwner,
+} from "./companions.ts";
 
 export function startCombat(
   encounter: {
@@ -109,12 +114,17 @@ export function startCombat(
   }
 
   // Familiars are found before the fight, and join it beside their owners, without counting towards its size.
-  const found = familiarFoundEvents(party, context, "fight");
+  // Lasting companions too, as a Steel Defender, which then act right after their owners.
+  const found = [
+    ...familiarFoundEvents(party, context, "fight"),
+    ...companionFoundEvents(party, context, "fight"),
+  ];
   const foundState = found.reduce(applyDndEvent, context.state);
-  const familiars = familiarActors(
-    party.flatMap((actor) => foundState.actors[actor.id] ?? []),
-    { ...context, state: foundState },
-  );
+  const owners = party.flatMap((actor) => foundState.actors[actor.id] ?? []);
+  const familiars = [
+    ...familiarActors(owners, { ...context, state: foundState }),
+    ...companionActors(owners, context),
+  ];
 
   // The story's word on surprise, such as from a Stealth check, beats the encounter's own.
   const surprised = context.state.surprise ?? encounter.surprise;
@@ -201,7 +211,10 @@ export function startCombat(
   const sorted = rolled.sort(
     (a, b) => b.total - a.total || a.position - b.position,
   );
-  const order = sorted.map((item) => item.id);
+  const order = afterOwners(
+    sorted.map((item) => item.id),
+    familiars,
+  );
   // Thief's Reflexes: a second turn in the first round, before the first creature whose Initiative is lower than
   // its own less ten, or at the round's end.
   const fighters = [...party, ...familiars, ...monsters];
@@ -394,4 +407,25 @@ export function initiativeRecharge(
     }
   }
   return events;
+}
+
+// A lasting companion acts right after its owner, whatever it rolled.
+function afterOwners(
+  order: readonly string[],
+  joined: readonly Actor[],
+): string[] {
+  const following = new Map(
+    joined.flatMap((actor) => {
+      const owner = companionOwner(actor);
+      return owner ? [[actor.id, owner] as const] : [];
+    }),
+  );
+  return order
+    .filter((id) => !following.has(id))
+    .flatMap((id) => [
+      id,
+      ...[...following].flatMap(([companion, owner]) =>
+        owner === id ? [companion] : [],
+      ),
+    ]);
 }

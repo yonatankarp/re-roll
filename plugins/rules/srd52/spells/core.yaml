@@ -7309,7 +7309,7 @@
     feet. Otherwise, that creature dies. When the spell ends, the container is
     destroyed.
   automation: full
-  # shortcut: the possession is cast as an action in a fight, as if the soul already waited in its container; the host fights for the caster until the fight ends, and the caster's body lies Incapacitated meanwhile.
+  # shortcut: the possession is cast as an action in a fight, as if the soul already waited in its container; the host fights for the caster until the fight ends, and the caster's own body still acts.
   activation:
     {
       "cost": ["action", "slot"],
@@ -7320,16 +7320,6 @@
           "side": "enemy",
           "creatureTypes": ["humanoid"],
         },
-      "alsoSelf":
-        [
-          {
-            "kind": "applyCondition",
-            "condition": "incapacitated",
-            "duration": { "minutes": 60 },
-            "repeatSave": false,
-            "endsOnDamage": false,
-          },
-        ],
       "resolution":
         {
           "kind": "save",

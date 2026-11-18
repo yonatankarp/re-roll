@@ -1,3 +1,4 @@
+import { companionOwner } from "./companions.ts";
 import { prisonEvents } from "./fear.ts";
 import { z } from "zod";
 import { placedFlag, zonesOf } from "../zones.ts";
@@ -2829,7 +2830,8 @@ function landHit(
             : {}),
         }),
       ),
-      ...(smitesFor(action, attacker, target, stats, context).length > 0
+      ...(smitesFor(action, attacker, target, stats, context).length > 0 ||
+      companionSmites(attacker, target, context)
         ? [
             frame("afterHit", {
               attacker: attacker.id,
@@ -4086,6 +4088,29 @@ export function runAfterHit(
             ),
         ),
   );
+  // A lasting companion's hit: what its owner can add, as Arcane Jolt.
+  const ownerId = companionOwner(attacker);
+  const owner = ownerId ? state.actors[ownerId] : undefined;
+  const ownerOptions =
+    owner && !isDown(target) && !isDown(attacker)
+      ? ownerSmites(owner, target, context)
+      : [];
+  if (ownerOptions.length > 0 && owner) {
+    return {
+      frames: [
+        awaitDecision({
+          id: `${NS}:companionHit:${owner.id}`,
+          actor: owner.id,
+          prompt: `${attacker.name} hits ${target.name}. Add something to the hit?`,
+          options: [...ownerOptions, { id: DECLINE, label: "Not this time" }],
+          resume: frame("companionSmite", {
+            owner: owner.id,
+            target: target.id,
+          }),
+        }),
+      ],
+    };
+  }
   if (isDown(target) || isDown(attacker) || options.length === 0) return {};
   return {
     frames: [
@@ -4101,6 +4126,67 @@ export function runAfterHit(
 }
 
 export const SmiteSchema = AfterHitSchema.extend({ answer: z.string() });
+
+// Whether a lasting companion's owner has something to add to its hit.
+function companionSmites(
+  attacker: Actor,
+  target: Actor,
+  context: Context,
+): boolean {
+  const ownerId = companionOwner(attacker);
+  const owner = ownerId ? context.state.actors[ownerId] : undefined;
+  return owner !== undefined && ownerSmites(owner, target, context).length > 0;
+}
+
+// The owner's activations it can add to its lasting companion's hit, as Arcane Jolt's.
+function ownerSmites(
+  owner: Actor,
+  target: Actor,
+  context: Context,
+): { id: string; label: string }[] {
+  const stats = deriveStats(owner, context);
+  return stats.actions.flatMap((action) =>
+    action.activation.trigger?.afterHit !== undefined &&
+    action.activation.trigger.alsoCompanion === true &&
+    canAfford(action, owner, stats) &&
+    fitsType(target, action.activation.targeting, context, owner)
+      ? [{ id: action.id, label: action.name }]
+      : [],
+  );
+}
+
+const CompanionSmiteSchema = z.object({
+  owner: z.string(),
+  target: z.string(),
+  answer: z.string(),
+});
+
+// The owner pays for what it adds to its companion's hit, which lands on the creature hit.
+function runCompanionSmite(
+  payload: z.infer<typeof CompanionSmiteSchema>,
+  context: Context,
+): SystemResult {
+  if (payload.answer === DECLINE) return {};
+  const owner = actorOf(context.state, payload.owner);
+  const target = actorOf(context.state, payload.target);
+  const action = findAction(owner, payload.answer, context);
+  const done = resolveAction(action, owner, [target], context);
+  return {
+    events: [
+      ...payCosts(action, owner, context),
+      ...(action.activation.oncePerTurn
+        ? [
+            dndEvent(`${NS}:oncePerTurnUsed`, {
+              actor: owner.id,
+              key: onceKey(action),
+            }),
+          ]
+        : []),
+      ...(done.events ?? []),
+    ],
+    frames: [...(done.frames ?? [])],
+  };
+}
 
 export function runSmite(
   payload: z.infer<typeof SmiteSchema>,
@@ -4383,6 +4469,10 @@ export const attackFrames = {
     run: runAfterHit,
   }),
   [`${NS}:smite`]: frameHandler({ schema: SmiteSchema, run: runSmite }),
+  [`${NS}:companionSmite`]: frameHandler({
+    schema: CompanionSmiteSchema,
+    run: runCompanionSmite,
+  }),
   [`${NS}:missRider`]: frameHandler({ schema: HitSchema, run: runMissRider }),
   [`${NS}:strikeChosen`]: frameHandler({
     schema: StrikeChosenSchema,

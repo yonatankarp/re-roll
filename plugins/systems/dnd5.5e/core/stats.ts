@@ -3567,6 +3567,23 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
         return resolution;
     }
   };
+  // What its owner's features give a lasting companion, as Bestial Fury's second Beast's Strike.
+  const boons = (source.boons ?? []).flatMap((id) => {
+    const given = FeatureSchema.safeParse(access.content(id)).data?.companion;
+    return given ? [given] : [];
+  });
+  const replaced = new Set(boons.flatMap(({ replaces }) => replaces ?? []));
+  const retyped = boons.flatMap(({ damageTypes }) => damageTypes ?? []);
+  const withTypes = (resolution: Resolution): Resolution =>
+    retyped.length === 0 || resolution.kind !== "attack"
+      ? resolution
+      : {
+          ...resolution,
+          damage: resolution.damage.map((item) => ({
+            ...item,
+            types: [...new Set([...(item.types ?? [item.type]), ...retyped])],
+          })),
+        };
   const stats = statBlockStats(
     actor,
     {
@@ -3574,8 +3591,9 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
       name: companion.name,
       ...(companion.size ? { size: companion.size } : {}),
       abilities: companion.abilities,
-      ac: play.ac + play.acPerLevel * above,
-      hp: play.hp + play.hpPerLevel * above,
+      // a lasting companion's, worked out from its owner as it was found
+      ac: source.ac ?? play.ac + play.acPerLevel * above,
+      hp: source.maxHp ?? play.hp + play.hpPerLevel * above,
       speed: play.speed,
       ...(play.speeds ? { speeds: play.speeds } : {}),
       proficiency: source.proficiency,
@@ -3583,22 +3601,38 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
       initiative: 0, // it goes right after its caster
       ...(play.creatureType ? { creatureType: play.creatureType } : {}),
       features: [],
-      passives: play.passives,
-      multiattack: play.halfLevelAttacks
-        ? Math.max(1, Math.floor(source.level / 2))
-        : play.multiattack,
-      actions: play.actions.map((action) => ({
+      passives: [
+        ...play.passives,
+        ...boons.flatMap(({ passives }) => passives),
+      ],
+      multiattack: Math.max(
+        play.halfLevelAttacks
+          ? Math.max(1, Math.floor(source.level / 2))
+          : play.multiattack,
+        ...boons.map(({ multiattack }) => multiattack ?? 0),
+      ),
+      actions: [
+        ...play.actions.filter(({ name }) => !replaced.has(name)),
+        ...boons.flatMap(({ actions }) => actions),
+      ].map((action) => ({
         ...action,
         activation: {
           ...action.activation,
-          resolution: casterNumbers(action.activation.resolution),
+          resolution: withTypes(casterNumbers(action.activation.resolution)),
         },
       })),
     },
     access,
   );
-  // Damage "plus the spell's level" reads it as a scaling key.
-  return { ...stats, scaling: { spellLevel: source.level } };
+  // Damage "plus the spell's level" reads it as a scaling key, and "plus your Intelligence modifier" as its caster's
+  // spellcasting modifier, as a Steel Defender's.
+  return {
+    ...stats,
+    scaling: {
+      spellLevel: source.level,
+      ownerMod: source.spellAttack - source.proficiency,
+    },
+  };
 }
 
 function statBlockStats(

@@ -149,7 +149,7 @@ import {
   weaponOf,
 } from "./tactics.ts";
 import { fogged, knownFoes, partySight } from "./fog.ts";
-import { hasteActing } from "./combat/durations.ts";
+import { hasteActing, limitsOf } from "./combat/durations.ts";
 import { discernEvent, placedFlag, believes, zonesOf } from "./zones.ts";
 import {
   STRIKE,
@@ -1147,6 +1147,12 @@ export function tacticOptions(
   if (!state.combat || isDown(actor) || hasCondition(actor, ...INCAPACITATING))
     return [];
   const stats = deriveStats(actor, access);
+  // An uncommanded Steel Defender or Primal Companion only Dodges.
+  if (limitsOf(actor).dodgeOnly) {
+    return [
+      { id: DODGE, label: "Dodge (attacks against you have Disadvantage)" },
+    ];
+  }
   const options: { id: string; label: string }[] = [];
   const half = halfSpeed(stats);
   // Prone that Hideous Laughter keeps it in can't be ended by standing.

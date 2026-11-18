@@ -3445,6 +3445,37 @@ export function leafEvents(
         );
         break;
       }
+      case "commandCompanion": {
+        // A Steel Defender or a Primal Companion may act on its next turn, which comes right after its owner's.
+        for (const companion of Object.values(context.state.actors)) {
+          if (
+            companion.source.kind !== "summon" ||
+            !companion.source.lasting ||
+            companion.source.casterId !== caster.id ||
+            isDown(companion)
+          ) {
+            continue;
+          }
+          events.push(
+            dndEvent(`${NS}:effectAdded`, {
+              actor: companion.id,
+              effect: {
+                sourceId: sourceId,
+                casterId: caster.id,
+                modifier: { kind: "commanded" },
+                ends: "casterNextTurn",
+                ...lastsFor(
+                  { until: "yourNextTurnStart" },
+                  caster,
+                  companion,
+                  context.state,
+                ),
+              },
+            }),
+          );
+        }
+        break;
+      }
       case "senseDeceptions": {
         // Unerring Eye: only that something is trying to fool it, not what.
         const near = (at: Square | null): boolean =>

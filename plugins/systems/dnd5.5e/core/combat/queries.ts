@@ -863,6 +863,15 @@ export function canAfford(
   const limits = limitsOf(actor);
   // Befuddlement: no spells at all.
   if (limits.noSpells && action.spellLevel !== null) return false;
+  // An uncommanded Steel Defender: no action or Bonus Action but the Dodge, a tactic of its own.
+  if (
+    limits.dodgeOnly &&
+    action.activation.cost.some(
+      (cost) => cost === "action" || cost === "bonusAction",
+    )
+  ) {
+    return false;
+  }
   // Gaseous Form: no attack of any kind.
   if (
     limits.noAttacks &&

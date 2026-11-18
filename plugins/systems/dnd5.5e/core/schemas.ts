@@ -595,6 +595,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     spellFailure: z.number().int().min(1).max(100).optional(),
     noSpells: z.literal(true).optional(), // it can't cast spells, as Befuddlement's
     noAttacks: z.literal(true).optional(), // it can't attack, as in Gaseous Form
+    dodgeOnly: z.literal(true).optional(), // its only action is Dodge, as an uncommanded Steel Defender's
     cantripsOnly: z.literal(true).optional(), // it casts no spell but a cantrip, as after Arcane Deflection
     speedMax: z.number().int().min(0).optional(), // its Speed is at most this many feet, as Power Word Pain's
     // only one of moving, an action and a Bonus Action on its turns, as Abjure Foes' or Devious Strikes' Daze
@@ -935,6 +936,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     kind: z.literal("mark"),
     curse: z.literal(true).optional(),
   }),
+  // A lasting companion its owner commanded this turn, which may take more than the Dodge action.
+  z.strictObject({ kind: z.literal("commanded") }),
   // Its Exhaustion can't increase while it lasts, as Iron Body's.
   z.strictObject({ kind: z.literal("noExhaustion") }),
   // The bearer has seen through the illusion of `source` its `caster` made (core/zones.ts).
@@ -1620,6 +1623,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("realImage"),
     minutes: z.number().int().min(1),
   }),
+  // The caster's lasting companions may take an action on their next turn, as with a Bonus Action to command a Steel
+  // Defender (combat/companions.ts).
+  z.strictObject({ kind: z.literal("commandCompanion") }),
   // The caster swaps places with its image of one of these features or spells, as Trickster's Transposition.
   z.strictObject({
     kind: z.literal("swapImage"),
@@ -2245,6 +2251,9 @@ export const ActivationSchema = z.strictObject({
       // With `afterHit`, a strike option chosen before the damage is rolled, giving up this many of the hit's Sneak
       // Attack dice, as Cunning Strike's Poison (combat/strikes.ts). It's offered only when Sneak Attack lands.
       forgo: z.number().int().min(1).optional(),
+      // With `afterHit`, also offered when the bearer's lasting companion hits, the bearer paying for it, as Arcane
+      // Jolt on a Steel Defender's hit (combat/attack.ts companionSmite).
+      alsoCompanion: z.literal(true).optional(),
       // With `afterHit`, a strike option chosen before an attack roll that has Advantage, which then has none, as
       // Brutal Strike's (combat/strikes.ts).
       forgoAdvantage: z.literal(true).optional(),
@@ -3624,6 +3633,18 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("saveDisadvantage"),
     conditions: z.array(ConditionSchema).min(1),
   }),
+  // The bearer has this companion for good: it's found before the first fight and again after a Long Rest once it
+  // has died, and fights beside the bearer, acting right after it and taking only the Dodge action unless commanded
+  // (combat/companions.ts), as a Steel Defender or a Primal Companion.
+  z.strictObject({
+    kind: z.literal("lastingCompanion"),
+    companion: ContentIdSchema,
+  }),
+  // A spell the bearer casts on itself also lands on its lasting companions within `within` feet, as Share Spells.
+  z.strictObject({
+    kind: z.literal("shareSpells"),
+    within: z.number().int().min(5),
+  }),
   // Checks to see through the bearer's illusions have Disadvantage, as Illusion Adept's.
   z.strictObject({ kind: z.literal("subtleIllusions") }),
   // While disguised, Advantage on Deception and Performance checks in a scene, as Actor's Impersonation.
@@ -4423,6 +4444,25 @@ export const FeatureSchema = ContentEntrySchema.extend({
           }),
         )
         .default([]),
+    })
+    .optional(),
+  // What it gives its bearer's lasting companions (combat/companions.ts): passives, actions (replacing those it
+  // names), a Multiattack of this many, and these damage types to pick for its attacks, as Exceptional Training's
+  // Force or Bestial Fury's second Beast's Strike.
+  companion: z
+    .strictObject({
+      passives: z.array(PassiveSchema).default([]),
+      actions: z
+        .array(
+          z.strictObject({
+            name: z.string().min(1),
+            activation: ActivationSchema,
+          }),
+        )
+        .default([]),
+      replaces: z.array(z.string().min(1)).min(1).optional(),
+      multiattack: z.number().int().min(2).optional(),
+      damageTypes: z.array(DamageTypeSchema).min(1).optional(),
     })
     .optional(),
 }).strict();
@@ -5379,6 +5419,11 @@ export const CompanionSchema = ContentEntrySchema.extend({
       hpPerLevel: z.number().int().default(0),
       // Its Multiattack makes half the spell's level in attacks, rounded down.
       halfLevelAttacks: z.boolean().default(false),
+      // A lasting companion's numbers from its owner's, worked out as it's found (combat/companions.ts), as a Steel
+      // Defender's 5 plus five times the Artificer level and AC 12 plus the Intelligence modifier.
+      owner: z
+        .strictObject({ hp: FormulaSchema, ac: FormulaSchema.optional() })
+        .optional(),
     })
     .strict()
     .optional(),

@@ -390,9 +390,10 @@ export function castAction(
           .sort((a, b) => a.hp - b.hp)
           .slice(0, projectiles ?? 1)
       : null;
-  const caught = picked
+  const aimed = picked
     ? picked.map((id) => actorOf(state, id))
     : (apart ?? resolveTargets(targetId, action, actor, context));
+  const caught = [...aimed, ...sharedWith(actor, action, aimed, context)];
   const riders = castRiders(actor, action, slotLevel, context, caught);
   const result: SystemResult =
     projectiles !== undefined && resolution.kind !== "save"
@@ -900,3 +901,28 @@ export const actionFrames = {
       ),
   }),
 };
+
+// Share Spells: a spell its caster casts on itself alone also lands on its lasting companions within reach.
+function sharedWith(
+  actor: Actor,
+  action: KnownAction,
+  aimed: readonly Actor[],
+  context: Context,
+): Actor[] {
+  if (action.spellLevel === null || !("self" in action.activation.targeting)) {
+    return [];
+  }
+  if (aimed.length !== 1 || aimed[0]?.id !== actor.id) return [];
+  const share = deriveStats(actor, context).passives.find(
+    (passive) => passive.kind === "shareSpells",
+  );
+  if (share?.kind !== "shareSpells") return [];
+  return Object.values(context.state.actors).filter(
+    (item) =>
+      item.source.kind === "summon" &&
+      item.source.lasting !== undefined &&
+      item.source.casterId === actor.id &&
+      !isDown(item) &&
+      distanceFeet(actor.position, item.position) <= share.within,
+  );
+}
