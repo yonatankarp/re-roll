@@ -636,6 +636,7 @@ function originChoices(
   ];
   return [
     ...species,
+    ...prefixed("background", background.choices),
     ...backgroundFeat,
     ...feats.flatMap((id, index) =>
       owned(
