@@ -17,7 +17,11 @@ import {
   applyDndEvent,
   NS,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
-import type { KnownAction } from "../plugins/systems/dnd5.5e/core/stats.ts";
+import { gainRolls } from "../plugins/systems/dnd5.5e/core/gear.ts";
+import {
+  deriveStats,
+  type KnownAction,
+} from "../plugins/systems/dnd5.5e/core/stats.ts";
 import {
   contextOf,
   hero,
@@ -100,6 +104,38 @@ const CONTENT = [
       ],
     },
   ),
+  {
+    id: "test:table/props",
+    name: "Props",
+    die: "d4",
+    columns: ["Property"],
+    rows: [
+      { min: 1, max: 2, cells: ["x"] },
+      {
+        min: 3,
+        max: 4,
+        cells: ["y"],
+        passives: [
+          {
+            kind: "modifier",
+            modifier: { kind: "conditionImmunity", condition: "poisoned" },
+          },
+        ],
+      },
+    ],
+    source: "Test",
+  },
+  {
+    id: "test:item/relic",
+    name: "Relic",
+    type: "magicItem",
+    category: "wondrousItem",
+    rarity: "artifact",
+    attunement: false,
+    text: "Test.",
+    automation: "full",
+    properties: [{ table: "test:table/props", count: { base: 2 } }],
+  },
 ];
 
 async function tableRun(): Promise<RunContext> {
@@ -240,6 +276,37 @@ describe("random tables and open-ended effects (#177)", () => {
     expect(ids).toContain("srd52:spell/cure-wounds");
     expect(ids).not.toContain("srd52:spell/fireball");
     expect(ids).not.toContain("srd52:spell/shield");
+  });
+
+  it("rolls an artifact's properties as it's found, their passives working while it's worn", async () => {
+    const run = await tableRun();
+    const finder = caster([]);
+    const events = gainRolls(
+      finder,
+      ["test:item/relic"],
+      contextOf(run, [finder], scripted([1, 3]).dice),
+    );
+    const found = events.reduce(
+      applyDndEvent,
+      contextOf(
+        run,
+        [{ ...finder, inventory: ["test:item/relic"] }],
+        scripted([]).dice,
+      ).state,
+    );
+    const holder = found.actors[PLAYER_ACTOR] ?? finder;
+    expect(holder.itemProperties?.["test:item/relic"]).toHaveLength(1);
+    expect(deriveStats(holder, run).passives).toContainEqual({
+      kind: "modifier",
+      modifier: { kind: "conditionImmunity", condition: "poisoned" },
+    });
+    expect(
+      gainRolls(
+        holder,
+        ["test:item/relic"],
+        contextOf(run, [holder], scripted([]).dice),
+      ),
+    ).toEqual([]);
   });
 
   it("keeps a channeled spirit until it's unleashed at a creature, then ends it", async () => {
