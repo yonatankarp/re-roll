@@ -1,4 +1,4 @@
-import { setEffectsVolume, diceSound } from "./sound.ts";
+import { diceSound } from "./sound.ts";
 import {
   type BoardContext,
   type Token,
@@ -36,10 +36,7 @@ function waitForThrow(ctx: BoardContext, prompt: HTMLElement): Promise<void> {
           ctx.throwNow = null;
           prompt.classList.remove("waiting");
           ctx.board.classList.remove("awaiting");
-          if (ctx.host.sound?.() === true) {
-            setEffectsVolume(ctx.host.volume?.() ?? 1);
-            diceSound();
-          }
+          if (ctx.host.sound?.() === true) diceSound();
           resolve();
         };
       });

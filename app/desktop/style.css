@@ -235,12 +235,19 @@ h3 {
   animation: fade 0.2s ease;
 }
 
-.top .notice {
+.notice {
   color: #8fce9b;
 }
 
-.top .notice.error {
+.notice.error {
   color: #ff8f7a;
+}
+
+/* While a drawer or panel is open the notice is inside it, hung from the top of the window instead. */
+dialog > .notice {
+  position: fixed;
+  top: 0;
+  z-index: 1001;
 }
 
 button {

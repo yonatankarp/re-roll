@@ -1,13 +1,14 @@
 import { loadSettings } from "./sound-settings.ts";
 
 // The shell's own sound: one Web Audio graph for ambience and narration, under a master volume.
-// A system's effects (such as dice) play themselves, told the volume through the board host.
+// A system's effects (such as dice) play into `effects`, so the one volume rules every sound.
 // Without Web Audio everything stays silent.
 
 export interface ShellAudio {
   readonly context: AudioContext;
   readonly ambience: GainNode; // ambience plays into this
   readonly narration: GainNode; // and narration into this
+  readonly effects: GainNode; // and a system's own sounds, such as dice, into this
 }
 
 let audio: ShellAudio | null = null;
@@ -25,8 +26,10 @@ function unlock(): void {
       const ambience = context.createGain();
       const narration = context.createGain();
       ambience.connect(master);
+      const effects = context.createGain();
       narration.connect(master);
-      audio = { context, ambience, narration };
+      effects.connect(master);
+      audio = { context, ambience, narration, effects };
     }
     if (audio.context.state === "suspended") {
       audio.context.resume().catch(() => undefined);

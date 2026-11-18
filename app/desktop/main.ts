@@ -29,7 +29,11 @@ import { createGame } from "../../engine/shell/session.ts";
 import { mountShell } from "../../engine/shell/shell.ts";
 import { mountDndBoard } from "../../plugins/systems/dnd5.5e/ui/board.ts";
 import { dndUi } from "../../plugins/systems/dnd5.5e/ui/index.ts";
-import { coinSound } from "../../plugins/systems/dnd5.5e/ui/sound.ts";
+import {
+  coinSound,
+  setEffectsOutput,
+} from "../../plugins/systems/dnd5.5e/ui/sound.ts";
+import { shellAudio } from "../../engine/shell/audio.ts";
 import { systems } from "../systems.ts";
 
 // CC BY-SA 4.0 asks for the title, the authors, the source and the licence.
@@ -167,6 +171,8 @@ function offerDesktopStore(storage: Storage): void {
 }
 
 async function start(page: HTMLElement): Promise<void> {
+  // The board's sounds play through the shell's audio, under the player's one volume.
+  setEffectsOutput(() => shellAudio()?.effects ?? null);
   const storage = withSaveFiles(
     isTauri() ? createTauriReader() : createContentReader(),
     isTauri() ? await desktopSaves() : await webSaves(),

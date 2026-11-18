@@ -79,7 +79,6 @@ export interface BoardHost {
   readonly imageUrl: (path: string) => string | Promise<string | null> | null;
   readonly answer: (...optionIds: readonly string[]) => void;
   readonly sound?: () => boolean;
-  readonly volume?: () => number;
 }
 
 export interface Move {

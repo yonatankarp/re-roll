@@ -16,7 +16,7 @@ import {
   tokenFor,
 } from "./board-tokens.ts";
 import type { DndCue } from "./cues.ts";
-import { cueSound, setEffectsVolume } from "./sound.ts";
+import { cueSound } from "./sound.ts";
 
 // Plays the cues one at a time: each kind of moment is animated for as long as PACE gives it.
 
@@ -81,10 +81,7 @@ export async function play(ctx: BoardContext, cue: DndCue): Promise<void> {
       cue.kind === "check" ||
       cue.kind === "deathSave") &&
     cue.actor === PLAYER_ACTOR;
-  if (!fast(ctx) && !ownRoll && ctx.host.sound?.() === true) {
-    setEffectsVolume(ctx.host.volume?.() ?? 1);
-    cueSound(cue);
-  }
+  if (!fast(ctx) && !ownRoll && ctx.host.sound?.() === true) cueSound(cue);
   const ms = PACE[cue.kind];
   switch (cue.kind) {
     case "start":

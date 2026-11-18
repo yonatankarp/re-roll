@@ -40,5 +40,6 @@ export interface GamePage {
   hudShown: number; // the latest HUD update, so a stale one never lands
   linesShown: number;
   tickerShown: number; // the latest ticker update, so a stale one never lands
+  tickerScene: string | null; // the scene the ticker's lines came in, so they don't follow into the next
   choiceShown: number; // the same, for revealing the choices
 }

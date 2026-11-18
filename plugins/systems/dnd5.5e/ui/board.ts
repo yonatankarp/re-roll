@@ -21,6 +21,7 @@ import { play } from "./board-playback.ts";
 import { wireZoom } from "./board-zoom.ts";
 import { parseState } from "./parse-state.ts";
 import { injectStyle } from "./board-style.ts";
+import { stopEffects } from "./sound.ts";
 import { dicePanel } from "./dice-panel.ts";
 import {
   artFor,
@@ -324,6 +325,14 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
       return ctx.playing || ctx.queue.length > 0
         ? new Promise((resolve) => ctx.waiting.push(resolve))
         : Promise.resolve();
+    },
+    // What was queued is dropped and what is playing ends at once, in silence.
+    dispose(): void {
+      ctx.queue.length = 0;
+      ctx.skipping = true;
+      ctx.throwNow?.();
+      ctx.wake?.();
+      stopEffects();
     },
     update(received: ShellUpdate): void {
       // This plugin's own ui/index.ts and ui/cues.ts wrote the parts the shell leaves unknown.

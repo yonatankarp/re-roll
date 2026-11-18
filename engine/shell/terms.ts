@@ -167,6 +167,7 @@ export function wireTerms(ctx: ShellContext): void {
     );
     others.hidden = rest.length === 0;
     more.onclick = () => {
+      if (ctx.root.inert) return; // another step is running, and two must never overlap
       hide();
       ctx.act(async () => {
         const books = await ctx.game.listBooks();
@@ -184,6 +185,9 @@ export function wireTerms(ctx: ShellContext): void {
     anchor = target;
     pinned ||= options.pin;
     if (options.focus) opener ??= document.activeElement as HTMLElement;
+    // Inside the open drawer the term is in, since all outside a modal dialog is inert and under it.
+    const home = target.closest("dialog[open]") ?? document.body;
+    if (pop.parentElement !== home) home.append(pop);
     pop.hidden = false;
     place();
     if (options.focus) more.focus();
@@ -361,6 +365,8 @@ export function wireTerms(ctx: ShellContext): void {
     true,
   );
   addEventListener("resize", hide);
+  // A drawer closing takes its term with it. "close" doesn't bubble, so it's caught on the way down.
+  document.addEventListener("close", hide, true);
   document.addEventListener(
     "scroll",
     (event) => {

@@ -299,6 +299,16 @@ export function showGame(ctx: ShellContext): void {
       plate.element,
     ),
   );
+  // The one teardown, run when another screen takes this one's place, whichever it is: nothing of this
+  // screen plays, sounds or listens on.
+  const left = new MutationObserver(() => {
+    if (stage.isConnected) return;
+    left.disconnect();
+    plate.close();
+    page.board?.dispose?.();
+    sound.dispose();
+  });
+  left.observe(ctx.screen, { childList: true });
   ctx.keys = {
     owner: stage,
     handle: (event) => {
@@ -330,7 +340,6 @@ export function showGame(ctx: ShellContext): void {
       page.board = factory(combatGridSlot, {
         imageUrl: (path) => ctx.game.imageUrl(path),
         sound: sound.effects,
-        volume: sound.volume,
         answer: (...optionIds) => {
           ctx.act(async () => {
             for (const optionId of optionIds) await ctx.game.answer(optionId);
@@ -502,6 +511,7 @@ export function showGame(ctx: ShellContext): void {
     hudShown: 0,
     linesShown: 0,
     tickerShown: 0,
+    tickerScene: null,
     choiceShown: 0,
   };
   draw();

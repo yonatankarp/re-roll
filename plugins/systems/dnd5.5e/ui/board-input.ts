@@ -248,19 +248,36 @@ export function wireInput(ctx: BoardContext): void {
       under?.classList.add("hover");
       showRoute(ctx, under);
     };
-    const up = (event: PointerEvent): void => {
+    // `at` is where it was let go; a cancelled or lost pointer has none, and so answers nothing.
+    const end = (at: PointerEvent | null): void => {
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", cancel);
+      token.removeEventListener("lostpointercapture", cancel);
+      if (token.hasPointerCapture(down.pointerId))
+        token.releasePointerCapture(down.pointerId);
       token.classList.remove("dragging");
       token.style.translate = "";
+      for (const cell of ctx.cells.children) cell.classList.remove("hover");
       showRoute(ctx, null);
-      if (!moving) return;
+      if (!moving || !at) return;
       ctx.dragged = true;
-      const cell = cellAt(event);
+      const cell = cellAt(at);
       if (cell) answerCell(ctx, cell);
     };
+    const cancel = (): void => {
+      end(null);
+    };
+    // Captured, so the drag ends on this token even when the pointer is let go outside the window.
+    try {
+      token.setPointerCapture(down.pointerId);
+    } catch {
+      // Not a live pointer, such as a scripted one; the window still hears it.
+    }
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", cancel);
+    token.addEventListener("lostpointercapture", cancel);
   });
 
   // Focus says where the cursor is, starting on the player's own square.

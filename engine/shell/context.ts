@@ -74,6 +74,21 @@ export function say(
   detail = "",
 ): void {
   clearTimeout(ctx.sayTimer);
+  // All outside an open modal dialog is inert and dimmed, so there the notice is shown inside it,
+  // and goes back under the bar when the dialog closes.
+  const top = ctx.root.querySelector(".top");
+  const modal = text
+    ? [...ctx.root.querySelectorAll<HTMLDialogElement>("dialog[open]")]
+        .filter((dialog) => dialog.matches(":modal"))
+        .at(-1)
+    : undefined;
+  const home = modal ?? top;
+  if (home && ctx.notice.parentElement !== home) {
+    home.append(ctx.notice);
+    modal?.addEventListener("close", () => top?.append(ctx.notice), {
+      once: true,
+    });
+  }
   ctx.notice.setAttribute("role", isError ? "alert" : "status");
   ctx.notice.replaceChildren(
     ...(text ? [el("span", { text })] : []),
