@@ -1,0 +1,19 @@
+name: Linux webview libraries
+description: Installs the libraries Tauri builds against on Linux, keeping the downloaded packages in a cache.
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/apt-archives
+        # shortcut: the key never changes, so packages Ubuntu has since updated are downloaded on every run; bump v1 when the install gets slow again.
+        key: apt-webview-${{ runner.os }}-${{ runner.arch }}-v1
+    - shell: bash
+      run: |
+        mkdir -p ~/apt-archives/partial
+        sudo apt-get update
+        sudo apt-get install -y -o Dir::Cache::Archives="$HOME/apt-archives" \
+          libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+        # apt leaves root-only files behind, which the cache step couldn't read.
+        sudo rm -rf ~/apt-archives/lock ~/apt-archives/partial
+        sudo chown -R "$USER" ~/apt-archives
