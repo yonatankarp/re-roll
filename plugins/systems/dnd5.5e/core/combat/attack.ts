@@ -1151,6 +1151,8 @@ export function runAttackRoll(
             other.id !== attacker.id &&
             other.position !== null &&
             !isDown(other) &&
+            // shortcut: a bearer farther than 30 feet off draws nothing, which spares the look at every creature
+            distanceFeet(other.position, target.position) <= 30 &&
             deriveStats(other, context).passives.some(
               (passive) =>
                 passive.kind === "missileMagnet" &&
