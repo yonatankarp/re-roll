@@ -23,6 +23,8 @@ import {
   gearOptions,
   sceneGearActions,
 } from "../plugins/systems/dnd5.5e/core/gear.ts";
+import { recovered } from "../plugins/systems/dnd5.5e/core/rest.ts";
+import { FeatureSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import {
   damageResponses,
   deriveStats,
@@ -468,6 +470,11 @@ describe.skipIf(!BOOKS)("the book's magic item activations", () => {
   });
 });
 
+const lookupFeature = (slug: string) =>
+  FeatureSchema.parse(
+    run.content(`eberron-forge-of-the-artificer:feature/${slug}`),
+  ).resources;
+
 // A sample of #143's curses and attunement rules, as the books encode them.
 describe.skipIf(!BOOKS)("the book's cursed and attuned items", () => {
   it("curses a Berserker Axe's bearer and lets only a Cleric or Paladin attune to a Talisman of Pure Good", () => {
@@ -489,6 +496,20 @@ describe.skipIf(!BOOKS)("the book's cursed and attuned items", () => {
       );
     expect(options("fighter")).not.toContain(`attune:${talisman}`);
     expect(options("cleric")).toContain(`attune:${talisman}`);
+  });
+
+  it("gives an Artificer with Advanced Artifice a use of Flash of Genius back on a Short Rest", () => {
+    const stats = {
+      ...deriveStats(wearing([]), run),
+      resources: { "flash-of-genius": 3 },
+      resourceDefs: [
+        ...lookupFeature("artificer-flash-of-genius"),
+        ...lookupFeature("artificer-advanced-artifice"),
+      ],
+    };
+    expect(recovered({ "flash-of-genius": 3 }, stats, "short")).toEqual({
+      "flash-of-genius": 2,
+    });
   });
 
   it("gives a Wand of Orcus's Mace +3 to AC and its attunement save, and Armor of Vulnerability its curse", () => {
