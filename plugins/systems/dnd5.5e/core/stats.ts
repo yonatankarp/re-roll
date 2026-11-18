@@ -604,7 +604,7 @@ export function spellNamed(
 }
 
 // A spell cast with an item's own numbers, as a Wand of Web's DC 13, rather than with the bearer's.
-function withItemNumbers(
+export function withItemNumbers(
   activation: Activation,
   dc: number | undefined,
   attack: number | undefined,

@@ -1982,6 +1982,40 @@ export const TargetingSchema = z.union([
 ]);
 export type Targeting = z.infer<typeof TargetingSchema>;
 
+// A table rolled on (combat/reactions.ts tableRoll), as Mythal Ward's or the Wild Magic Surge table. The row the die
+// lands on is resolved at the bearer (`self`), the creature that set it off (`source`), the creature the roll is aimed
+// at (`target`), and with `within` each creature that near the bearer. `perSpellLevel` multiplies its damage dice by
+// the level of the spell that set it off; `negate` makes that spell do nothing to the bearer. A row's `spell` is cast
+// at its targets with `dc`, `attack` and `level` (the bearer's own numbers when left out), and a row's `table` is
+// rolled on in turn, as a surge's d10 of spells. `harmful` rows are the ones a pick of two avoids (tactics.ts).
+// shortcut: an area spell from a row hits only the row's targets.
+const TableRowSchema = z.strictObject({
+  min: z.number().int().min(1),
+  max: z.number().int().min(1),
+  targets: z.array(z.enum(["self", "source", "target"])).default([]),
+  within: z.number().int().min(5).optional(),
+  perSpellLevel: z.literal(true).optional(),
+  negate: z.literal(true).optional(),
+  harmful: z.literal(true).optional(),
+  resolution: ResolutionSchema.optional(),
+  spell: ContentIdSchema.optional(),
+  dc: z.number().int().min(1).optional(),
+  attack: z.number().int().optional(),
+  level: z.number().int().min(0).max(9).optional(),
+});
+const InnerTableSchema = z.strictObject({
+  die: z.number().int().min(2),
+  rows: z.array(TableRowSchema).min(1),
+});
+export const TableSchema = z.strictObject({
+  die: z.number().int().min(2),
+  rows: z
+    .array(TableRowSchema.extend({ table: InnerTableSchema.optional() }))
+    .min(1),
+});
+export type Table = z.infer<typeof TableSchema>;
+export type TableRow = z.infer<typeof TableRowSchema>;
+
 export const ActivationSchema = z.strictObject({
   cost: z.array(CostSchema),
   trigger: z
@@ -2235,28 +2269,8 @@ export const ActivationSchema = z.strictObject({
     )
     .min(2)
     .optional(),
-  // Rolled on as the reaction is taken, as Mythal Ward's table (combat/reactions.ts rollOnTable). The row the die
-  // lands on is resolved at the bearer (`self`), the creature that set it off (`source`), and with `within` each
-  // creature that near the bearer. `perSpellLevel` multiplies its damage dice by the level of the spell that set it
-  // off; `negate` makes that spell do nothing to the bearer.
-  table: z
-    .strictObject({
-      die: z.number().int().min(2),
-      rows: z
-        .array(
-          z.strictObject({
-            min: z.number().int().min(1),
-            max: z.number().int().min(1),
-            targets: z.array(z.enum(["self", "source"])).default([]),
-            within: z.number().int().min(5).optional(),
-            perSpellLevel: z.literal(true).optional(),
-            negate: z.literal(true).optional(),
-            resolution: ResolutionSchema.optional(),
-          }),
-        )
-        .min(1),
-    })
-    .optional(),
+  // Rolled on as the reaction is taken, as Mythal Ward's table (combat/reactions.ts rollOnTable).
+  table: TableSchema.optional(),
 });
 export type Activation = z.infer<typeof ActivationSchema>;
 
