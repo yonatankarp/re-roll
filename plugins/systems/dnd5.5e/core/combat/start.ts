@@ -19,6 +19,8 @@ import {
   applyDndEvent,
   dndEvent,
   freshActor,
+  hasCondition,
+  INCAPACITATING,
   isDead,
   NS,
 } from "../state.ts";
@@ -141,9 +143,15 @@ export function startCombat(
   // Ambush: a die of its resource added to Initiative, spent.
   // shortcut: it's spent on every Initiative while one is left, where the player would choose when.
   const dieSpent: SystemEvent[] = [];
-  const initiativeDie = (actor: Actor, stats: Stats): number => {
+  const initiativeDie = (
+    actor: Actor,
+    stats: Stats,
+    allies = false,
+  ): number => {
     for (const passive of stats.passives) {
       if (passive.kind !== "initiativeDie") continue;
+      if ((passive.allies === true) !== allies) continue;
+      if (allies && hasCondition(actor, ...INCAPACITATING)) continue;
       const left =
         (stats.resources[passive.resource] ?? 0) -
         (actor.resourcesSpent[passive.resource] ?? 0);
@@ -164,6 +172,13 @@ export function startCombat(
     }
     return 0;
   };
+  // Tandem Footwork: one bearer's die, rolled once, for the whole party.
+  // shortcut: every ally gains it, as the party isn't placed yet to measure 30 feet.
+  let tandem = 0;
+  for (const actor of party) {
+    tandem = initiativeDie(actor, deriveStats(actor, context), true);
+    if (tandem > 0) break;
+  }
   const rolled = [...party, ...familiars, ...monsters].map(
     (actor, position) => {
       const stats = deriveStats(actor, context);
@@ -191,6 +206,7 @@ export function startCombat(
           natural +
           stats.initiative +
           initiativeDie(actor, stats) +
+          (actor.side === "party" ? tandem : 0) +
           (atlas && actor.side === "party"
             ? rollDiceNotation(atlas, context.dice)
             : 0),

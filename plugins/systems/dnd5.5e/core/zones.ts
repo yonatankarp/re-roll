@@ -20,6 +20,7 @@ import {
 } from "./state.ts";
 import { distanceFeet, type Square, squareKey, wallSet } from "./grid.ts";
 import {
+  auraBuilds,
   bareSpell,
   deriveStats,
   type KnownAction,
@@ -143,12 +144,16 @@ function castZones(state: DndState): readonly Zone[] {
 }
 
 // A sealed-away creature's areas reach nothing outside, and one Incapacitated loses those it must be awake for. A
-// character's come only from what it carries, as a Holy Avenger's.
+// character's come from its features, as Aura of Protection, or from what it carries, as a Holy Avenger's.
 function auraZones(state: DndState, access: ContentAccess): readonly Zone[] {
   return Object.values(state.actors).flatMap((actor): Zone[] => {
     if (!actor.position) return [];
     if (isDead(actor) || sealed(actor)) return [];
-    if (actor.source.kind === "character" && !carriesAura(actor, access)) {
+    if (
+      actor.source.kind === "character" &&
+      !carriesAura(actor, access) &&
+      !featureAura(actor, access)
+    ) {
       return [];
     }
     const at = actor.position;
@@ -202,6 +207,16 @@ function carriesAura(actor: Actor, access: ContentAccess): boolean {
       aura(entry.passives)
     );
   });
+}
+
+// Whether a character's features give it an aura, worked out once for its build, which doesn't change in a fight.
+function featureAura(actor: Actor, access: ContentAccess): boolean {
+  const build = actor.source.kind === "character" ? actor.source.build : null;
+  if (!build) return false;
+  const known = auraBuilds.get(build);
+  if (known !== undefined) return known;
+  statsOf(actor, access);
+  return auraBuilds.get(build) === true;
 }
 
 export function zonesOf(
@@ -298,6 +313,32 @@ export function placedConditionEvents(state: DndState): SystemEvent[] {
   });
 }
 
+// A condition an area's Immunity covers ends on a creature standing in it, as Aura of Courage's Frightened, checked
+// where Antimagic Field's are.
+// shortcut: the condition ends for good, rather than holding off only while the creature is there.
+export function zoneCureEvents(
+  state: DndState,
+  access: ContentAccess,
+): SystemEvent[] {
+  if (!state.combat) return [];
+  return Object.values(state.actors).flatMap((actor): SystemEvent[] => {
+    const had = actor.activeEffects.flatMap(({ modifier }) =>
+      modifier.kind === "condition" ? [modifier.condition] : [],
+    );
+    if (had.length === 0) return [];
+    const immune = new Set(
+      zoneModifiers(actor, state, access).flatMap((modifier) =>
+        modifier.kind === "conditionImmunity" ? [modifier.condition] : [],
+      ),
+    );
+    return [...new Set(had)]
+      .filter((condition) => immune.has(condition))
+      .map((condition) =>
+        dndEvent(`${NS}:conditionRemoved`, { actor: actor.id, condition }),
+      );
+  });
+}
+
 export const sealed = (actor: Actor): boolean =>
   actor.activeEffects.some(({ modifier }) => modifier.kind === "sealed");
 
@@ -342,6 +383,7 @@ export function affects(
   ) {
     return false;
   }
+  if (area.downed && actor.hp > 0) return false;
   if (area.grappling && !grappleBetween(owner, actor)) return false;
   if (area.creatureTypes || area.exceptTypes) {
     const type = access ? statsOf(actor, access).creatureType : undefined;
@@ -379,8 +421,18 @@ export function zoneModifiers(
   state: DndState,
   access?: ContentAccess,
 ): readonly Modifier[] {
-  return zonesOn(actor, state, access).flatMap(
-    (zone) => zone.area?.grants ?? [],
+  return zoneGrants(actor, state, access).map(({ modifier }) => modifier);
+}
+
+// The same, with the zone each comes from, whose owner's numbers its amounts are worked out from, as Aura of
+// Protection's Charisma modifier.
+export function zoneGrants(
+  actor: Actor,
+  state: DndState,
+  access?: ContentAccess,
+): readonly { readonly modifier: Modifier; readonly zone: Zone }[] {
+  return zonesOn(actor, state, access).flatMap((zone) =>
+    (zone.area?.grants ?? []).map((modifier) => ({ modifier, zone })),
   );
 }
 

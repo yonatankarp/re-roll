@@ -952,6 +952,19 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // Which of a transformation's options the bearer has taken, by name, for what holds only `whileAspect` it lasts, as
   // Starry Form's Archer, Chalice or Dragon.
   z.strictObject({ kind: z.literal("aspect"), name: z.string().min(1) }),
+  // The bearer has at least Half Cover against everything, as Bulwark of Force's or Smite of Protection's (sight.ts).
+  z.strictObject({ kind: z.literal("halfCover") }),
+  // A save for half damage the bearer makes with Dexterity deals none on a success and half on a failure, as Evasion,
+  // given by an area, as Aura of Evasion's (trait-rules.ts evades).
+  z.strictObject({ kind: z.literal("evasion") }),
+  // The bearer's Hit Point maximum can't be reduced, as in Aura of Life (combat/effects.ts).
+  z.strictObject({ kind: z.literal("keepMaxHp") }),
+  // Advantage on Death Saving Throws, as an Exalted Champion's allies near it (combat/actions.ts).
+  z.strictObject({ kind: z.literal("deathSaveAdvantage") }),
+  // A Bardic Inspiration die the bearer holds, its size the giver's, spent once where it turns a roll
+  // (combat/reactions.ts inspiredSwing): added to a failed D20 test it makes a success, and with the giver's
+  // `combatInspiration`, to AC against a hit it makes a miss for the bearer's Reaction, or to a hit's damage.
+  z.strictObject({ kind: z.literal("inspired"), amount: AmountSchema }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
 
@@ -1885,6 +1898,29 @@ const LeafEffectsSchema = z.array(LeafEffectSchema).default([]);
 // Nesting stops at one level on purpose: a small model can only produce non-recursive output reliably.
 // Each of the caster's foes within `radius` of a target saves or takes `damage`, half on a success with `half`: Ice
 // Knife's shard round an attack's target, or Jolt to Life's lightning round the creature it revives.
+// Effects on the bearer's allies within `within` feet, whatever an activation's targets, as Rallying Cry's healing
+// with Second Wind: the `count` most hurt of them (all when left out). With `resource` it spends a use and does nothing
+// without one, as Group Recovery's once a Short Rest; never while the bearer has one of `without`, as Group Recovery's
+// 30 feet once Inspiring Commander's 60 take their place; `with` adds effects while it has that feature, as Team
+// Tactics' Advantage (combat/actions.ts).
+export const AlliesRiderSchema = z.strictObject({
+  within: z.number().int().min(5),
+  count: FormulaSchema.optional(),
+  effects: z.array(LeafEffectSchema).min(1),
+  resource: z.string().min(1).optional(),
+  without: z.array(ContentIdSchema).min(1).optional(),
+  with: z
+    .array(
+      z.strictObject({
+        feature: ContentIdSchema,
+        effects: z.array(LeafEffectSchema).min(1),
+      }),
+    )
+    .min(1)
+    .optional(),
+});
+export type AlliesRider = z.infer<typeof AlliesRiderSchema>;
+
 const BurstSchema = z.strictObject({
   radius: z.number().int().min(5),
   ability: AbilitySchema,
@@ -2069,6 +2105,7 @@ export const AreaEffectSchema = z.strictObject({
   // it also acts on a creature that walks into it, and on each creature only once a turn, as Spirit Guardians
   enters: z.literal(true).optional(),
   bloodied: z.literal(true).optional(), // only on Bloodied creatures, as a Dead Three scion's Culling Aura
+  downed: z.literal(true).optional(), // only on creatures at 0 Hit Points, as Aura of Life's 1 Hit Point
   // a success against a spell or magic that halves damage takes none, as Circle of Power
   magicWard: z.literal(true).optional(),
   // spellShield blocks one level higher for each slot level above the spell's, as Globe of Invulnerability
@@ -2432,6 +2469,7 @@ export const ActivationSchema = z.strictObject({
   // Effects on the bearer too, whatever its targets, as the Dash and Disengage of Heightened Focus's Step of the Wind
   // carrying an ally.
   alsoSelf: z.array(LeafEffectSchema).min(1).optional(),
+  alsoAllies: z.array(AlliesRiderSchema).min(1).optional(), // as an `activationRider`'s `allies` give it
   // Taking it ends the spell that granted it, as Holy Weapon's burst of radiance.
   dismisses: z.literal(true).optional(),
   // Once its attacks are made, the bearer teleports to a square within this many feet of the first creature it aimed
@@ -2662,9 +2700,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   }),
   // A save for half damage deals none on a success and half on a failure, as with Evasion. `anySave` makes it every
   // save, as a displacer beast's Avoidance does, instead of Dexterity saves only.
+  // With `leading`, creatures of the bearer's side within 5 feet of it evade so too, as Leading Evasion.
+  // shortcut: whether the bearer makes the same save isn't asked.
   z.strictObject({
     kind: z.literal("evasion"),
     anySave: z.boolean().default(false),
+    leading: z.literal(true).optional(),
   }),
   // Advantage on attack rolls while Bloodied, against a target missing Hit Points, or against a Frightened or Charmed
   // one, as Treacherous Allure's.
@@ -3784,12 +3825,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     save: z.strictObject({ ability: AbilitySchema, dc: FormulaSchema }),
     effects: z.array(LeafEffectSchema).min(1),
   }),
-  // One of `resource`'s dice rolled and added to the bearer's Initiative, as Ambush's Superiority Die.
+  // One of `resource`'s dice rolled and added to the bearer's Initiative, as Ambush's Superiority Die, and with
+  // `allies` to its allies' too, as Tandem Footwork's Bardic Inspiration die (combat/start.ts).
   z.strictObject({
     kind: z.literal("initiativeDie"),
     bonusDice: DiceSchema,
     dieSize: z.string().optional(),
     resource: z.string().min(1),
+    allies: z.literal(true).optional(),
   }),
   // Advantage on checks to escape a grapple, as Vampire Hunter's Adroit Escape.
   z.strictObject({ kind: z.literal("escapeAdvantage") }),
@@ -3994,7 +4037,11 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     self: z.array(LeafEffectSchema).min(1).optional(),
     damage: z.array(DamageSchema).min(1).optional(),
     while: z.array(ContentIdSchema).min(1).optional(),
+    allies: AlliesRiderSchema.optional(), // effects on the bearer's allies near it, as Rallying Cry's
   }),
+  // The Bardic Inspiration dice the bearer gives can go to AC against a hit or to a hit's damage, as Combat
+  // Inspiration (combat/reactions.ts inspiredSwing, combat/attack.ts).
+  z.strictObject({ kind: z.literal("combatInspiration") }),
   // A Long Rest leaves one of this item with the bearer, as Vampire's Plaything's Decanting.
   z.strictObject({ kind: z.literal("restItem"), item: ContentIdSchema }),
   // A Reaction keeps an ally within 5 feet from being pushed or pulled, as Tyro of the Gauntlet's Stand as One.

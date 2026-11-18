@@ -121,6 +121,7 @@ import {
   placedFlag,
   sealed,
   zoneImmune,
+  zoneModifiers,
   zonesOf,
   zonesOn,
 } from "../zones.ts";
@@ -5601,11 +5602,15 @@ export function resolveAction(
             );
         if (picked) frames.push(picked);
         // Harm: the damage taken comes off the Hit Point maximum too.
+        // Aura of Life keeps the maximum whole.
         if (
           !saved &&
           !turned &&
           lastDealt > 0 &&
-          resolution.onFail.some((effect) => effect.kind === "drainMaxHp")
+          resolution.onFail.some((effect) => effect.kind === "drainMaxHp") &&
+          !zoneModifiers(target, context.state, context).some(
+            (modifier) => modifier.kind === "keepMaxHp",
+          )
         ) {
           const now = events.reduce(applyDndEvent, context.state).actors[
             target.id

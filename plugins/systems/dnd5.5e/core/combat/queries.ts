@@ -33,7 +33,7 @@ import {
   scaleActivation,
   type Stats,
 } from "../stats.ts";
-import type { HitKind, Passive, Skill } from "../schemas.ts";
+import type { HitKind, Modifier, Passive, Skill } from "../schemas.ts";
 import { toolKeyOf, toolOf } from "../tools.ts";
 import {
   distanceFeet,
@@ -76,7 +76,7 @@ import {
   inZone,
   sealed,
   slowingKeys,
-  zoneModifiers,
+  zoneGrants,
   zonesOn,
 } from "../zones.ts";
 import { spellLevelOf } from "./dispel.ts";
@@ -247,23 +247,36 @@ export function rollBonus(
     total += modifier.subtract ? -rolled : rolled;
   }
   const stats = deriveStats(actor, context);
-  // What a zone it stands in grants, as Pass without Trace's +10 to Stealth.
-  const placed = context.state.combat
-    ? zoneModifiers(actor, context.state, context)
-    : [];
-  for (const modifier of [...passiveModifiers(stats.passives), ...placed]) {
-    if (
-      modifier.kind === "bonus" &&
-      modifier.to === to &&
-      !modifier.concentration &&
-      (!modifier.weapon || weapon) &&
-      (!modifier.skill || modifier.skill === skill) &&
-      (!modifier.tool || usesTool(modifier.tool, tool, context)) &&
-      (!modifier.ability || modifier.ability === ability)
-    ) {
+  const fits = (modifier: Modifier): boolean =>
+    modifier.kind === "bonus" &&
+    modifier.to === to &&
+    !modifier.concentration &&
+    (!modifier.weapon || weapon) &&
+    (!modifier.skill || modifier.skill === skill) &&
+    (!modifier.tool || usesTool(modifier.tool, tool, context)) &&
+    (!modifier.ability || modifier.ability === ability);
+  for (const modifier of passiveModifiers(stats.passives)) {
+    if (modifier.kind === "bonus" && fits(modifier)) {
       total += rollAmount(modifier.amount, stats, context.dice);
     }
   }
+  // What a zone it stands in grants, as Pass without Trace's +10 to Stealth, worked out from the zone owner's
+  // numbers, as Aura of Protection's Charisma modifier. Two of the same aura count once, the better one.
+  const best = new Map<string, number>();
+  for (const { modifier, zone } of context.state.combat
+    ? zoneGrants(actor, context.state, context)
+    : []) {
+    if (modifier.kind !== "bonus" || !fits(modifier)) continue;
+    const owner = context.state.actors[zone.owner] ?? actor;
+    const rolled = rollAmount(
+      modifier.amount,
+      owner === actor ? stats : deriveStats(owner, context),
+      context.dice,
+    );
+    const key = `${zone.sourceId}|${modifier.to}`;
+    best.set(key, Math.max(best.get(key) ?? -Infinity, rolled));
+  }
+  for (const value of best.values()) total += value;
   return total;
 }
 

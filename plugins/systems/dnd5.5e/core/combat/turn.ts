@@ -104,6 +104,7 @@ import {
   antimagicEvents,
   healingStopped,
   placedConditionEvents,
+  zoneCureEvents,
 } from "../zones.ts";
 import { madnessStart } from "./madness.ts";
 import { headsLeft, headsOf, regrowEvents } from "./heads.ts";
@@ -731,6 +732,7 @@ export function runAdvanceTurn(
     ...(next ? fogBoundEvents(next, { ...context, state: after }) : []),
     ...antimagicEvents(after),
     ...placedConditionEvents(after),
+    ...zoneCureEvents(after, context),
     ...drifted.events,
     ...reactiveEvents(after, context),
   ];

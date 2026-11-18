@@ -153,8 +153,9 @@ const caught = (zone: Zone, actor: Actor, state: DndState): boolean =>
   zone.area?.enters === true &&
   actor.usedThisTurn.includes(caughtKey(zone, state));
 
-const entering = (state: DndState): readonly Zone[] =>
-  zonesOf(state).filter(
+// Auras too, as Aura of Alacrity's, so `access` comes along.
+const entering = (state: DndState, access: ContentAccess): readonly Zone[] =>
+  zonesOf(state, access).filter(
     (zone) =>
       zone.layers !== undefined ||
       (zone.area?.enters === true && zone.area.resolution !== undefined),
@@ -197,7 +198,7 @@ export function areaEntry(
   context: ContentAccess & { readonly state: DndState },
 ): { readonly index: number; readonly zones: readonly Zone[] } | null {
   const { state } = context;
-  const zones = entering(state).filter((zone) =>
+  const zones = entering(state, context).filter((zone) =>
     entersOn(zone, walker, context),
   );
   if (zones.length === 0) return null;
@@ -244,7 +245,7 @@ export function entryFrames(
   const { state } = context;
   const tick = (zone: Zone, targets: readonly string[]): Frame =>
     frame("zoneTick", { owner: zone.owner, sourceId: zone.sourceId, targets });
-  const swept = entering(state).flatMap((zone) => {
+  const swept = entering(state, context).flatMap((zone) => {
     if (!zone.follows || zone.owner !== walker.id || !from) return [];
     const before = { ...zone, at: from };
     const after = { ...zone, at: to };

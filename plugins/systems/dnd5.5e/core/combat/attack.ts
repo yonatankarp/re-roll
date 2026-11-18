@@ -1,6 +1,6 @@
 import { prisonEvents } from "./fear.ts";
 import { z } from "zod";
-import { placedFlag, zonesOf } from "../zones.ts";
+import { placedFlag, zoneGrants, zonesOf } from "../zones.ts";
 import { concentrationBonus } from "./school.ts";
 import {
   type Actor,
@@ -74,6 +74,8 @@ import {
   type Roll,
   rollOnTable,
   rollResponder,
+  heldDie,
+  inspiredSwing,
   slotRefund,
   strikeAction,
 } from "./reactions.ts";
@@ -94,6 +96,7 @@ import {
   scaleActivation,
   spellSaveDc,
   type Stats,
+  scaledDice,
 } from "../stats.ts";
 import { finalDamage, halved, rollD20 } from "../rules.ts";
 import {
@@ -612,7 +615,14 @@ function rollWindow(
   let bonus = held.bonus;
   for (;;) {
     const found = rollResponder(current, passed, context);
-    if (!found) return { events, natural: current.natural, bonus };
+    if (!found) {
+      const inspired = inspiredSwing(current, context);
+      return {
+        events: [...events, ...inspired.events],
+        natural: current.natural,
+        bonus: bonus + inspired.bonus,
+      };
+    }
     const { reactor, action } = found;
     if (reactor.id === PLAYER_ACTOR) {
       const rolled = {
@@ -3605,9 +3615,20 @@ function hitRiders(
   const events: SystemEvent[] = [];
   const sided = (casterId: string) =>
     state.actors[casterId]?.side === attacker.side;
-  const carried = [
+  const carried: {
+    readonly effect: Pick<
+      Actor["activeEffects"][number],
+      "modifier" | "sourceId" | "casterId"
+    >;
+    readonly by: string;
+  }[] = [
     ...attacker.activeEffects.map((effect) => ({ effect, by: "bearer" })),
     ...target.activeEffects.map((effect) => ({ effect, by: "caster" })),
+    // What an aura the attacker stands in gives its hits, as Crusader's Mantle's Radiant.
+    ...zoneGrants(attacker, state, context).map(({ modifier, zone }) => ({
+      effect: { modifier, sourceId: zone.sourceId, casterId: zone.owner },
+      by: "bearer",
+    })),
   ];
   const damage = carried.flatMap(({ effect, by }) => {
     const { modifier, sourceId, casterId } = effect;
@@ -3643,6 +3664,22 @@ function hitRiders(
       : modifier.damage.type;
     return [{ ...modifier.damage, type }];
   });
+  // Combat Inspiration's Offense: the attacker's Bardic Inspiration die, at its giver's size, added to the hit.
+  const held = heldDie(attacker, context);
+  const first = resolution.damage[0];
+  if (
+    held &&
+    first &&
+    held.stats.passives.some(({ kind }) => kind === "combatInspiration")
+  ) {
+    events.push(held.spent);
+    damage.push({
+      amount: {
+        dice: scaledDice(held.amount, held.stats.scaling) ?? held.amount.dice,
+      },
+      type: first.type,
+    });
+  }
   return { damage, events };
 }
 

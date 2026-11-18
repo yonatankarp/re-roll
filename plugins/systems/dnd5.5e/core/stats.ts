@@ -218,6 +218,9 @@ export interface Stats {
   readonly familiar?: { readonly form: string; readonly ability: Ability };
 }
 
+// Character builds whose features give an aura, filled in as their stats are derived.
+export const auraBuilds = new WeakMap<object, boolean>();
+
 export function passiveModifiers(
   passives: readonly Passive[],
 ): readonly Modifier[] {
@@ -1780,6 +1783,18 @@ function withRiders(
     const extra = riders.flatMap(({ effects }) => effects);
     const damage = riders.flatMap(({ damage: more }) => more ?? []);
     const own = riders.flatMap(({ self }) => self ?? []);
+    const allies = riders.flatMap(({ allies: rider }) =>
+      rider ? [rider] : [],
+    );
+    if (allies.length > 0) {
+      action = {
+        ...action,
+        activation: {
+          ...action.activation,
+          alsoAllies: [...(action.activation.alsoAllies ?? []), ...allies],
+        },
+      };
+    }
     if (own.length > 0) {
       action = {
         ...action,
@@ -2484,6 +2499,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     swaps,
     grantedBy,
   );
+  // Whether any of its features gives an aura, active or not, so zones skip a character without one (core/zones.ts).
+  if (actor.source.kind === "character" && actor.source.build) {
+    auraBuilds.set(
+      actor.source.build,
+      [
+        ...fromFeatures.passives,
+        ...fromFeatures.gated.flatMap((gate) => gate.passives),
+      ].some((passive) => passive.kind === "aura"),
+    );
+  }
   // A feature's passives that hold only while an effect of its activations is on the bearer (`whileActive`).
   for (const gate of fromFeatures.gated) {
     if (
@@ -5034,9 +5059,8 @@ export function damageResponses(
   for (const modifier of [
     ...actor.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
-    // What the spells' areas it stands in give it, as Silence's Immunity to Thunder damage. Monster auras grant
-    // none, so their stat blocks aren't read on every hit.
-    ...(access.state ? zoneModifiers(actor, access.state) : []),
+    // What the areas it stands in give it, as Silence's Immunity to Thunder damage or Aura of Warding's Resistances.
+    ...(access.state ? zoneModifiers(actor, access.state, access) : []),
   ]) {
     if (modifier.kind === "resistance") resistances.push(modifier.damage);
     if (modifier.kind === "vulnerability")

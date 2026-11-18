@@ -1,3 +1,4 @@
+import { zoneModifiers } from "../zones.ts";
 import { z } from "zod";
 import { knownFoes } from "../fog.ts";
 import {
@@ -39,6 +40,7 @@ import {
   isDown,
   NS,
   frame,
+  isDead,
 } from "../state.ts";
 import { distanceFeet, type Square, squareKey } from "../grid.ts";
 import {
@@ -77,6 +79,7 @@ import {
   slotLevelFor,
   squareName,
   targetCount,
+  allies,
 } from "./queries.ts";
 import {
   aimSquare,
@@ -186,9 +189,14 @@ export function deathSaveEvents(actor: Actor, context: Context): SystemEvent[] {
   {
     const stats = deriveStats(actor, context);
     const { natural } = rollD20(dice, {
-      advantage: stats.passives.some(
-        (passive) => passive.kind === "deathSaveAdvantage" && !passive.worse,
-      ),
+      advantage:
+        stats.passives.some(
+          (passive) => passive.kind === "deathSaveAdvantage" && !passive.worse,
+        ) ||
+        [
+          ...actor.activeEffects.map(({ modifier }) => modifier),
+          ...zoneModifiers(actor, context.state, context),
+        ].some((modifier) => modifier.kind === "deathSaveAdvantage"),
       disadvantage: stats.passives.some(
         (passive) => passive.kind === "deathSaveAdvantage" && passive.worse,
       ),
@@ -464,6 +472,9 @@ export function castAction(
             actor,
             context,
           )
+        : []),
+      ...(action.activation.alsoAllies
+        ? alliesRiderEvents(action, actor, context)
         : []),
       ...passedSaves,
       ...(foiled?.events ?? []),
@@ -900,3 +911,63 @@ export const actionFrames = {
       ),
   }),
 };
+
+// What an activation does to the bearer's allies near it, whatever its targets, as Rallying Cry's healing with Second
+// Wind: the most hurt first, up to each rider's count.
+function alliesRiderEvents(
+  action: KnownAction,
+  actor: Actor,
+  context: Context,
+): SystemEvent[] {
+  const stats = deriveStats(actor, context);
+  const spent: Record<string, number> = {};
+  return (action.activation.alsoAllies ?? []).flatMap((rider) => {
+    if (rider.without?.some((id) => stats.features.includes(id))) return [];
+    const effects = [
+      ...rider.effects,
+      ...(rider.with ?? []).flatMap((more) =>
+        stats.features.includes(more.feature) ? more.effects : [],
+      ),
+    ];
+    const near = allies(context.state, actor)
+      .filter(
+        (ally) =>
+          ally.id !== actor.id &&
+          !isDead(ally) &&
+          distanceFeet(actor.position, ally.position) <= rider.within,
+      )
+      .sort(
+        (a, b) =>
+          a.hp / deriveStats(a, context).maxHp -
+          b.hp / deriveStats(b, context).maxHp,
+      )
+      .slice(
+        0,
+        rider.count
+          ? Math.max(1, evaluateFormula(rider.count, stats))
+          : Infinity,
+      );
+    if (near.length === 0) return [];
+    const costs: SystemEvent[] = [];
+    if (rider.resource) {
+      const left =
+        (stats.resources[rider.resource] ?? 0) -
+        (actor.resourcesSpent[rider.resource] ?? 0) -
+        (spent[rider.resource] ?? 0);
+      if (left <= 0) return [];
+      spent[rider.resource] = (spent[rider.resource] ?? 0) + 1;
+      costs.push(
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: actor.id,
+          resource: rider.resource,
+        }),
+      );
+    }
+    return [
+      ...costs,
+      ...near.flatMap((ally) =>
+        leafEvents(effects, action.id, actor, ally, context),
+      ),
+    ];
+  });
+}
