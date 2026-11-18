@@ -55,6 +55,7 @@ import {
   buildAbilities,
   deriveStats,
   doesSomething,
+  featureOf,
   lookup,
   weaponProficient,
   maybeLookup,
@@ -1117,7 +1118,7 @@ export function choiceOptions(
       };
     }
     case "variant": {
-      const feature = lookup(access, FeatureSchema, choice.feature);
+      const feature = featureOf(access, choice.feature);
       const had = new Set([
         ...(base?.levels ?? []).flatMap((entry) =>
           entry.answers.flatMap((answer) =>
@@ -1369,7 +1370,7 @@ function nextStep(
   );
 }
 
-function answersOf(
+export function answersOf(
   choices: readonly ChoiceDef[],
   picks: Draft["picks"],
 ): readonly unknown[] {

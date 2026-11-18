@@ -51,6 +51,7 @@ import {
   FeatSchema,
   type Feature,
   FeatureSchema,
+  CharacterOptionSchema,
   SkillSchema,
   type Formula,
   type LeafEffect,
@@ -139,6 +140,52 @@ export function maybeLookup<T>(
   }
   if (!bySchema.has(schema)) bySchema.set(schema, schema.safeParse(entry).data);
   return bySchema.get(schema) as T | undefined;
+}
+
+// A feature, or a granted character option read as one (#192): a supernatural gift's or survivor talent's mechanics.
+const optionFeatures = new WeakMap<object, Feature>();
+export function featureOf(
+  access: Pick<ContentAccess, "content">,
+  id: string,
+): Feature {
+  const feature = maybeLookup(access, FeatureSchema, id);
+  if (feature) return feature;
+  const option = maybeLookup(access, CharacterOptionSchema, id);
+  if (!option) return lookup(access, FeatureSchema, id);
+  const known = optionFeatures.get(option);
+  if (known) return known;
+  const made = FeatureSchema.parse({
+    id: option.id,
+    name: option.name,
+    text: option.text || option.name,
+    automation: option.automation,
+    passives: option.passives,
+    activations: option.activations,
+    resources: option.resources,
+    ...(option.spells ? { spells: option.spells } : {}),
+    ...(option.freeCast ? { freeCast: option.freeCast } : {}),
+    ...(option.castsOnly ? { castsOnly: option.castsOnly } : {}),
+    ...(option.variants ? { variants: option.variants } : {}),
+  });
+  optionFeatures.set(option, made);
+  return made;
+}
+
+// Circle casting options (#192): any of the party's casters can cast with one while another joins (class-options.ts).
+// Read once per content.
+const circleBy = new WeakMap<ContentAccess["content"], readonly Feature[]>();
+export function circleOptions(access: ContentAccess): readonly Feature[] {
+  const known = circleBy.get(access.content);
+  if (known) return known;
+  const found = access
+    .contentIds()
+    .filter((id) => id.includes(":circle-casting-option/"))
+    .map((id) => featureOf(access, id))
+    .filter((feature) =>
+      feature.passives.some((passive) => passive.kind === "castOption"),
+    );
+  circleBy.set(access.content, found);
+  return found;
 }
 
 export function abilityModifier(score: number): number {
@@ -516,7 +563,9 @@ function freeCastActions(
                   : [
                       typeof how === "object" && how.perLevel && slot > 1
                         ? { resource: id, count: slot }
-                        : { resource: id },
+                        : typeof how === "object" && how.count
+                          ? { resource: id, count: how.count }
+                          : { resource: id },
                     ]),
               ],
             },
@@ -1316,7 +1365,7 @@ function collectFeatureData(
   // Activations a later feature's variant takes the place of, by the feature they're on (`replaces`).
   const replaced = new Map<string, Set<string>>();
   for (const id of featureIds) {
-    const feature = lookup(access, FeatureSchema, id);
+    const feature = featureOf(access, id);
     const labels = pickedVariants(feature, variants).flatMap(
       (item) => item.replaces ?? [],
     );
@@ -1339,10 +1388,7 @@ function collectFeatureData(
     }
   }
   for (const id of featureIds) {
-    const feature = withVariant(
-      featureRules(lookup(access, FeatureSchema, id)),
-      variants,
-    );
+    const feature = withVariant(featureRules(featureOf(access, id)), variants);
     if ((feature.fromLevel ?? 1) > level) continue;
     Object.assign(retype, feature.retype);
     Object.assign(redice, feature.redice);
@@ -1407,7 +1453,7 @@ function collectFeatureData(
     });
   }
   for (const id of featureIds) {
-    const from = maybeLookup(access, FeatureSchema, id)?.freeCastsFrom;
+    const from = featureOf(access, id).freeCastsFrom;
     if (!from) continue;
     for (const spell of ownSpells.get(from.feature) ?? []) {
       const known = maybeLookup(access, SpellSchema, spell);
@@ -2352,6 +2398,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const pickedTools: string[] = []; // tools a choice gave
   const pickedWeapons: string[] = []; // kinds of weapons a choice gave proficiency with
   const featureIds = new Set<string>(species.traits);
+  // Options a story granted, as a Blessing or a survivor talent, read as features but not listed among them (#192).
+  const granted = [...new Set(actor.granted ?? [])].filter((id) =>
+    access.content(id),
+  );
   const grantedBy = new Map<string, string>(); // the class whose level granted a feature
   const answerAbilities = new Map<string, Ability>(); // spells a class choice gives with its own ability
   const variants: Record<string, string[]> = {}; // the variants picked, by feature
@@ -2468,9 +2518,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   }
   slots = multiclassSlots(Object.values(casters)) ?? slots;
   // Scores a feature raises past 20, as Primal Champion's Strength and Constitution.
-  for (const id of featureIds) {
-    for (const passive of maybeLookup(access, FeatureSchema, id)?.passives ??
-      []) {
+  for (const id of [...featureIds, ...granted]) {
+    for (const passive of featureOf(access, id).passives) {
       if (passive.kind !== "scoreIncrease") continue;
       for (const ability of passive.abilities) {
         abilities[ability] = Math.max(
@@ -2571,7 +2620,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   }
   const fromFeatures = collectFeatureData(
     access,
-    [...featureIds],
+    [...featureIds, ...granted],
     level,
     slots.findLastIndex((count) => count > 0) + 1,
     featIds,
@@ -2651,6 +2700,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ([, item]) => item.type === "armor" && item.armorType === "heavy",
   );
   const fits = (passive: Passive): boolean =>
+    // only while the bearer has a condition, as Adrenaline Surge's Frightened
+    (!("whileCondition" in passive) ||
+      !passive.whileCondition ||
+      hasCondition(actor, passive.whileCondition)) &&
     (passive.kind !== "modifier" ||
       !passive.while ||
       passive.while.some((id) =>
@@ -3216,16 +3269,17 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       )
         ? waitingOptions(
             actor,
-            castOptionsOf(
-              [...featureIds].flatMap((id) => {
-                const feature = FeatureSchema.safeParse(
-                  access.content(id),
-                ).data;
+            castOptionsOf([
+              ...[...featureIds, ...granted].flatMap((id) => {
+                const feature = access.content(id)
+                  ? featureOf(access, id)
+                  : undefined;
                 return feature
                   ? [withVariant(featureRules(feature), variants)]
                   : [];
               }),
-            ),
+              ...circleOptions(access),
+            ]),
           )
         : [],
       scaleActivation,

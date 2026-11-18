@@ -189,6 +189,14 @@ export const OPTION_KINDS = {
   "beast-shape-lists": "beast-shape-list",
   "variant-rules": "variant-rule",
 } as const;
+// The option kinds a story grants to a character (#192), which carry mechanics.
+export const GRANTED_KINDS = {
+  "supernatural-gifts": OPTION_KINDS["supernatural-gifts"],
+  "epic-destinies": OPTION_KINDS["epic-destinies"],
+  "survivor-talents": OPTION_KINDS["survivor-talents"],
+  "circle-casting-options": OPTION_KINDS["circle-casting-options"],
+  "beast-shape-lists": OPTION_KINDS["beast-shape-lists"],
+} as const;
 
 // A family heading (Bandits, Black Dragons): the stat blocks and families it holds or, for a group, lists.
 export const MonsterFamilySchema = GlossaryEntrySchema.extend({
@@ -1202,7 +1210,11 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // The item used's `untilLongRest` passives, which the target keeps until it finishes a Long Rest, in a fight or out
   // of one, as a Potion of Vitality's highest Hit Point Dice.
   // shortcut: "24 hours" lasts until the next Long Rest, the only clock between scenes.
-  z.strictObject({ kind: z.literal("untilLongRest") }),
+  // With `item`, that item's instead of the source's own, as a Charm of Vitality's Potion of Vitality (#192).
+  z.strictObject({
+    kind: z.literal("untilLongRest"),
+    item: ContentIdSchema.optional(),
+  }),
   // Items handed to the target, `count` of them worked out from the caster's numbers, as the potions Tasha's
   // Bubbling Cauldron makes, none of an item no loaded book has. shortcut: they come at once rather than a Bonus Action each, and stay after a recast.
   z.strictObject({
@@ -2901,6 +2913,10 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     // only against a creature under an effect of the bearer's from one of these spells or features, as Guided
     // Precision's Faerie Fire
     against: z.array(ContentIdSchema).min(1).optional(),
+    // only against a creature of one of these types or kin, as a Charm of the Slayer's dragons (combat/queries.ts)
+    only: z.array(z.string().min(1)).min(1).optional(),
+    // only while the bearer has this condition, as Adrenaline Surge's Frightened (stats.ts)
+    whileCondition: ConditionSchema.optional(),
     whileAspect: z.string().min(1).optional(), // only with this aspect, as Wondrous Alteration's Natural Weapons
     targetCondition: ConditionSchema.optional(), // only against a creature with this condition, as Ominous Strikes'
     // one more die of the hit's own damage of this type, as Dreaded Necrosis' Necrotic die
@@ -3154,6 +3170,7 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     half: z.literal(true).optional(), // its Dash adds half its Speed, as a troll's Charge
     safe: z.literal(true).optional(), // its Dash provokes no Opportunity Attacks, as a warrior commander's Tactical Charge
     resource: z.string().optional(), // each use spends one, as Timely Retreat's
+    whileCondition: ConditionSchema.optional(), // only while the bearer has this condition, as Adrenaline Surge's
   }),
   // Advantage on saves to keep Concentration, as with Eldritch Mind.
   z.strictObject({
@@ -3231,6 +3248,36 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
         type: DamageTypeSchema,
       })
       .optional(),
+    // A Circle casting option (#192): offered while another of the party's casters within 30 feet can join, each
+    // spending its Reaction, and with `slot` a spell slot ("spellLevel": one at least the spell's level). What
+    // follows grows with how many join: `range` feet more each up to `max` (a spell with a range), `area` feet more
+    // on its area's size, `prolong` minutes more from the first row whose `from` they reach (a spell lasting a minute
+    // or more), `goldOff` gold off its costly component; `spare` keeps the caster's side out of its area, and
+    // `share` gives Advantage on Constitution saves while the spell lasts, as the casters share its Concentration.
+    // shortcut: the others join at once, with their Reactions, rather than with their Magic actions before the
+    // caster's next turn.
+    circle: z
+      .strictObject({ slot: z.enum(["any", "spellLevel"]).optional() })
+      .optional(),
+    range: z
+      .strictObject({
+        perCaster: z.number().int().min(5),
+        max: z.number().int().min(5),
+      })
+      .optional(),
+    area: z.number().int().min(5).optional(),
+    prolong: z
+      .array(
+        z.strictObject({
+          from: z.number().int().min(1),
+          minutes: z.number().int().min(1),
+        }),
+      )
+      .min(1)
+      .optional(),
+    goldOff: z.number().int().min(1).optional(),
+    spare: z.literal(true).optional(),
+    share: z.literal(true).optional(),
   }),
   // The bearer's spells that deal damage may deal these types instead, the one a target resists least (DamageSchema
   // `types`), as Psychic Spells' Psychic for Warlock spells (`list`); `oncePerTurn` once a turn, as Grave Touched's
@@ -4588,6 +4635,7 @@ export const FreeCastSchema = z.union([
     whileIn: z.enum(["shadows", "sunlight"]).optional(),
     // cast with a Bonus Action in place of an action, a cantrip too, as Spellfire Spark's Sacred Flame
     bonusAction: z.literal(true).optional(),
+    count: z.number().int().min(2).optional(), // as many of `resource`, as a Charm of Restoration's 2 for Greater Restoration
   }),
 ]);
 export type FreeCast = z.infer<typeof FreeCastSchema>;
@@ -4851,6 +4899,24 @@ export const FeatureSchema = ContentEntrySchema.extend({
     .optional(),
 }).strict();
 export type Feature = z.infer<typeof FeatureSchema>;
+
+// A character option a story grants (#192): a supernatural gift, an epic destiny, a survivor talent, a Circle casting
+// option or a list of beast shapes. Its text is the book's; what it does is a feature's (stats.ts featureOf).
+export const CharacterOptionSchema = GlossaryEntrySchema.extend({
+  automation: AutomationSchema.default("text"),
+  passives: z.array(PassiveSchema).default([]),
+  activations: z.array(ActivationSchema).default([]),
+  resources: z.array(ResourceDefSchema).default([]),
+  spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  freeCast: FeatureSchema.shape.freeCast,
+  castsOnly: FeatureSchema.shape.castsOnly, // spells it casts only by its free cast, as a Charm's
+  // Options printed inside it, one picked as it's granted, as Resilience's ability.
+  variants: FeatureSchema.shape.variants,
+  choices: z.lazy(() => z.array(ChoiceDefSchema)).default([]), // asked as it's granted
+  beasts: z.array(ContentIdSchema).min(1).optional(), // a list of beast shapes' Beasts
+  underwater: z.literal(true).optional(), // the list for a fight underwater, the only place a fight names
+}).strict();
+export type CharacterOption = z.infer<typeof CharacterOptionSchema>;
 
 export const ChoiceDefSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("subclass"), id: z.string() }),
@@ -5878,7 +5944,7 @@ const AbilityIncreaseSchema = z.partialRecord(
   z.number().int().min(1).max(2),
 );
 
-const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
+export const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("skills"),
     values: z.array(SkillSchema),

@@ -4,6 +4,7 @@ import {
   AbilitySchema,
   type CharacterBuild,
   CharacterBuildSchema,
+  ChoiceAnswerSchema,
   ConditionSchema,
   DamageSchema,
   DamageTypeSchema,
@@ -47,6 +48,8 @@ export const FRAME_KINDS = [
   "finishTurn",
   "gearAnswer",
   "gearStep",
+  "grantAnswer",
+  "grantStep",
   "inspiration",
   "lairAction",
   "lairTurn",
@@ -519,6 +522,10 @@ const ActorSchema = z.strictObject({
   itemProperties: z.record(z.string(), z.array(PassiveSchema)).optional(),
   // Items studied whose study gives passives for good or is made once, as a Book of Exalted Deeds. Missing until one.
   studied: z.array(ContentIdSchema).optional(),
+  // Character options a story granted, as a supernatural gift or a survivor talent (#192), and the picks they asked,
+  // read as the first level's (effectiveBuild). Missing until one is.
+  granted: z.array(ContentIdSchema).optional(),
+  grantedAnswers: z.array(ChoiceAnswerSchema).optional(),
   xp: z.number().int().optional(), // only the player's is tracked, and the party levels together
   // Where the creature stands in a fight, null outside one. Saves from before the grid have none.
   position: SquareSchema.nullable().default(null),
@@ -800,6 +807,11 @@ const ItemStudiedSchema = z.strictObject({
   actor: z.string(),
   item: ContentIdSchema,
 });
+const OptionGrantedSchema = z.strictObject({
+  actor: z.string(),
+  option: ContentIdSchema,
+  answers: z.array(ChoiceAnswerSchema).default([]), // the picks it asked, each naming the option as its `feat`
+});
 const MovedSchema = z.strictObject({
   actor: z.string(),
   to: SquareSchema,
@@ -1067,6 +1079,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:goldSpent`]: GoldSpentSchema,
   [`${NS}:gearChanged`]: GearChangedSchema,
   [`${NS}:itemStudied`]: ItemStudiedSchema,
+  [`${NS}:optionGranted`]: OptionGrantedSchema,
   [`${NS}:propertiesRolled`]: PropertiesRolledSchema,
   [`${NS}:itemReplicated`]: ItemReplicatedSchema,
   [`${NS}:itemUsed`]: ItemUsedSchema,
@@ -1150,7 +1163,20 @@ export function freshActor(
 
 // A character's build with the answers picked again after a Long Rest in place of the first ones (swap.ts).
 export function effectiveBuild(actor: Actor): CharacterBuild | null {
-  const printed = actor.source.kind === "character" ? actor.source.build : null;
+  const own = actor.source.kind === "character" ? actor.source.build : null;
+  // Picks granted options asked count as the first level's, after its own (#192).
+  const extra = actor.grantedAnswers ?? [];
+  const printed =
+    own && extra.length > 0
+      ? {
+          ...own,
+          levels: own.levels.map((entry, level) =>
+            level === 0
+              ? { ...entry, answers: [...entry.answers, ...extra] }
+              : entry,
+          ),
+        }
+      : own;
   const { swaps, reincarnated } = actor;
   // Reincarnate's body: its species, without the old one's picks and with the new one's (reincarnate.ts).
   const build =
@@ -2608,6 +2634,21 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         itemProperties: { ...actor.itemProperties, [data.item]: data.passives },
+      }));
+    }
+    case `${NS}:optionGranted`: {
+      const data = payload(OptionGrantedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        granted: [...(actor.granted ?? []), data.option],
+        ...(data.answers.length > 0
+          ? {
+              grantedAnswers: [
+                ...(actor.grantedAnswers ?? []),
+                ...data.answers,
+              ],
+            }
+          : {}),
       }));
     }
     case `${NS}:itemStudied`: {

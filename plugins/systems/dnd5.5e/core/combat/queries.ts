@@ -1189,6 +1189,18 @@ export function extraFits(
   if (passive.against && !markedBy(target, attacker, passive.against)) {
     return false;
   }
+  if (
+    passive.only &&
+    !exemptFrom(passive.only, target, deriveStats(target, context))
+  ) {
+    return false;
+  }
+  if (
+    passive.whileCondition &&
+    !hasCondition(attacker, passive.whileCondition)
+  ) {
+    return false;
+  }
   const advantaged =
     passive.when === "advantage" || passive.when === "advantageOrAlly";
   const kind = passive.with ?? (advantaged ? "finesseOrRanged" : "attack");
