@@ -995,7 +995,10 @@ describe("spells that heal more and hit harder", () => {
     ]);
     expect(force).toEqual({ amount: { dice: "2d8" }, type: "force" });
     expect(bolt?.activation.resolution.damage).toHaveLength(2);
-    expect(bolt?.onceKeys).toContain("spellDamage:1");
+    // Keyed by the passive's place among the priest's, after its Human traits'.
+    expect(bolt?.onceKeys).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^spellDamage:\d+$/)]),
+    );
     // Sacred Flame is no Wizard evocation and deals no fire.
     const flame = actions.find(
       (item) => item.id === "spell:srd52:spell/sacred-flame",

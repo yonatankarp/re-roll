@@ -3719,7 +3719,7 @@ describe("battle map ground, cover and light", () => {
             },
           }
         : player;
-    expect(darkvisionOf(dwarf, run)).toBe(60);
+    expect(darkvisionOf(dwarf, run)).toBe(120); // the SRD Dwarf's Darkvision
 
     const dark = onMap(["....."], [at(player, 0, 0), at(seer, 1, 0)], "dark");
     expect(seeing(player, { x: 1, y: 0 }, dark, run)).toBe("none");
