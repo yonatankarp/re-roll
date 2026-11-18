@@ -65,13 +65,14 @@ export function focusFrame(
   caster: Actor,
   target: Actor,
   slotLevel?: number,
+  asker = caster.id, // who answers: the player, for a companion's cast between fights (camp.ts)
 ): Frame | null {
   const chosen = picking(effects);
   const [first] = chosen;
   if (!first) return null;
   return awaitDecision({
     id: `${NS}:focus:${target.id}`,
-    actor: caster.id,
+    actor: asker,
     prompt: `Which ${AbilitySchema.safeParse(first.pick[0]).success ? "ability" : "skill"} for ${target.name}?`,
     options: first.pick.map((focus) => ({ id: focus, label: label(focus) })),
     resume: frame("chooseFocus", {

@@ -57,6 +57,7 @@ import {
   lookup,
   weaponProficient,
 } from "./stats.ts";
+import { startingTools } from "./tools.ts";
 
 export { weaponProficient };
 
@@ -1320,7 +1321,15 @@ export function finishedCharacter(
     side: "party",
     source: { kind: "character", build },
     hp: 1,
-    inventory: [...startingGear(classDef, buildAbilities(build), access)],
+    inventory: [
+      ...startingGear(classDef, buildAbilities(build), access),
+      ...startingTools(
+        classDef,
+        BackgroundSchema.safeParse(access.content(build.backgroundId)).data
+          ?.tool,
+        access,
+      ),
+    ],
   });
   return { ...actor, hp: deriveStats(actor, access).maxHp };
 }

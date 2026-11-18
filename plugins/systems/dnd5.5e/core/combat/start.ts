@@ -1,6 +1,7 @@
 import {
   environmentConditionEvents,
   fightEnvironment,
+  uncalmed,
 } from "../environment.ts";
 import {
   initiativeMoveFrames,
@@ -21,7 +22,14 @@ import {
   isDead,
   NS,
 } from "../state.ts";
-import { deriveStats, lookup, rollAmount } from "../stats.ts";
+import {
+  deriveStats,
+  lookup,
+  rollAmount,
+  rollDiceNotation,
+  scaledDice,
+  type Stats,
+} from "../stats.ts";
 import { canUse, rechargeAmount } from "../rest.ts";
 import { rollD20 } from "../rules.ts";
 import {
@@ -123,6 +131,32 @@ export function startCombat(
       (passive) => passive.kind === "initiativeAdvantage" && passive.allies,
     ),
   );
+  // Ambush: a die of its resource added to Initiative, spent.
+  // shortcut: it's spent on every Initiative while one is left, where the player would choose when.
+  const dieSpent: SystemEvent[] = [];
+  const initiativeDie = (actor: Actor, stats: Stats): number => {
+    for (const passive of stats.passives) {
+      if (passive.kind !== "initiativeDie") continue;
+      const left =
+        (stats.resources[passive.resource] ?? 0) -
+        (actor.resourcesSpent[passive.resource] ?? 0);
+      if (left <= 0) continue;
+      dieSpent.push(
+        dndEvent(`${NS}:resourceSpent`, {
+          actor: actor.id,
+          resource: passive.resource,
+        }),
+      );
+      return rollDiceNotation(
+        scaledDice(
+          { dice: passive.bonusDice, dieSize: passive.dieSize },
+          stats.scaling,
+        ) ?? passive.bonusDice,
+        context.dice,
+      );
+    }
+    return 0;
+  };
   const rolled = [...party, ...familiars, ...monsters].map(
     (actor, position) => {
       const stats = deriveStats(actor, context);
@@ -143,7 +177,11 @@ export function startCombat(
       );
       const natural =
         first <= low ? rollD20(context.dice, edge).natural : first;
-      return { id: actor.id, position, total: natural + stats.initiative };
+      return {
+        id: actor.id,
+        position,
+        total: natural + stats.initiative + initiativeDie(actor, stats),
+      };
     },
   );
   // Ties keep their listed order, so the result is the same on every machine.
@@ -206,7 +244,9 @@ export function startCombat(
     ? openedCorners(walls, grid, startsOf(party), startsOf(monsters))
     : [];
 
-  const environment = fightEnvironment(encounter.environment, context);
+  // What the party's magic calms, as Control Weather a storm, doesn't come into the fight.
+  const around = uncalmed(encounter.environment, context.state, context);
+  const environment = fightEnvironment(around, context);
   const started = {
     encounter: encounter.id,
     monsters,
@@ -260,12 +300,9 @@ export function startCombat(
         ...started,
         ...(lowered ? { damageToParty: share } : {}),
       }),
+      ...dieSpent,
       ...party.flatMap((actor) => initiativeRecharge(actor, context)),
-      ...environmentConditionEvents(
-        encounter.environment,
-        [...party, ...monsters],
-        context,
-      ),
+      ...environmentConditionEvents(around, [...party, ...monsters], context),
     ],
     // Alert's Initiative Swap comes first. With nobody on 20 or more, the lair acts before anyone.
     frames: [

@@ -156,6 +156,7 @@ import {
   slotToSpend,
   within5,
   withUpcasts,
+  luckyEdge,
 } from "./queries.ts";
 import {
   actingEnds,
@@ -1114,12 +1115,16 @@ export function runAttackRoll(
       ? null
       : gainAdvantageFrame({ ...payload, target: target.id }, context);
   if (trip) return { frames: [trip] };
-  const edge = held ?? { advantage, disadvantage };
+  // Drunkard's Luck cancels Disadvantage on a fresh roll, for its resource.
+  const lucky = held
+    ? null
+    : luckyEdge(attacker, stats, advantage, disadvantage);
+  const edge = held ?? { advantage, disadvantage: disadvantage && !lucky };
   const first = held
     ? { natural: held.natural }
     : rollD20(dice, {
         advantage,
-        disadvantage,
+        disadvantage: edge.disadvantage,
         rerollOnes: hasPassive(stats, "rerollOnes"),
         thirdDie: ability !== "str" && hasPassive(stats, "elvenAccuracy"),
       });
@@ -1202,7 +1207,10 @@ export function runAttackRoll(
     context,
   );
   if ("frames" in window) {
-    return { events: [...guarded, ...window.events], frames: window.frames };
+    return {
+      events: [...(lucky ?? []), ...guarded, ...window.events],
+      frames: window.frames,
+    };
   }
   const roll = { natural: window.natural };
   const total = judge(roll.natural, window.bonus).total;
@@ -1233,9 +1241,11 @@ export function runAttackRoll(
   });
   // An effect like Guiding Bolt's lasts only until the next attack roll it applies to.
   const spent = [
+    ...(lucky ?? []),
     ...duelBroken(attacker, [target], state),
     ...guarded,
     ...window.events,
+    ...naturalOneEvents(attacker, roll.natural, context),
     ...(aimed
       ? [
           dndEvent(`${NS}:oncePerTurnUsed`, {
@@ -1245,7 +1255,6 @@ export function runAttackRoll(
         ]
       : []),
     ...onceEnded(attacker, "attacks"),
-    ...naturalOneEvents(attacker, roll.natural, context),
     // Fancy Footwork: the creature it attacks in melee can't make Opportunity Attacks against it this turn.
     ...(isMelee(action) && hasPassive(stats, "fancyFootwork")
       ? [

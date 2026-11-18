@@ -239,9 +239,11 @@ export interface SystemUi {
   readonly systemId: string;
   readonly about: string;
   // The player's first, then the rest of the party; empty until the player has a character.
+  // `here` is the scene the party is in, which the system fits its scene actions to (SceneHere).
   readonly sheets: (
     state: unknown,
     access: ContentAccess,
+    here?: { readonly checks: readonly unknown[] },
   ) => readonly SheetView[];
   // encounter looks up the adventure's encounter by id, as the system parsed it.
   readonly combat: (

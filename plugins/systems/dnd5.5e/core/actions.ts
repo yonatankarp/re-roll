@@ -51,6 +51,7 @@ import {
   hitFits,
   inReach,
   sizeOf,
+  luckyEdge,
 } from "./combat/queries.ts";
 import { moveOf, reachesFrom } from "./policy.ts";
 import { blindedTo, coverFor, lightAt, seeing } from "./sight.ts";
@@ -388,6 +389,7 @@ export function abilityCheck(
   label: (success: boolean) => string,
   context: Context,
   advantage = false, // from a trait, as Powerful Build gives to escape a grapple
+  tool?: { readonly id: string; readonly proficient: boolean }, // a tool check's (core/explore.ts)
   disadvantage = false, // from the creature it's made against, as a Cloak of Elvenkind's wearer
 ): {
   readonly success: boolean;
@@ -434,14 +436,19 @@ export function abilityCheck(
       ) ||
       hasCondition(actor, "poisoned", "frightened"),
   };
+  const lucky = luckyEdge(actor, stats, edge.advantage, edge.disadvantage);
+  if (lucky) edge.disadvantage = false;
   const first = rollD20(context.dice, {
     ...edge,
     rerollOnes: stats.passives.some(({ kind }) => kind === "rerollOnes"),
   });
   const base =
-    checkBonus(stats, actor, { ability, ...(skill ? { skill } : {}) }) +
-    rollBonus(actor, "checks", context, skill, ability);
-  const floor = checkFloor(actor, stats, ability, skill);
+    checkBonus(stats, actor, {
+      ability,
+      ...(skill ? { skill } : {}),
+      ...(tool?.proficient ? { toolProficient: true } : {}),
+    }) + rollBonus(actor, "checks", context, skill, ability, false, tool?.id);
+  const floor = checkFloor(actor, stats, ability, skill, tool?.proficient);
   const least = scoreFloor(stats, ability);
   const totalOf = (natural: number, bonus: number) =>
     Math.max(Math.max(natural, floor) + base + bonus, least);
@@ -478,6 +485,7 @@ export function abilityCheck(
     success,
     total,
     events: [
+      ...(lucky ?? []),
       ...(befriended ? [befriended] : []),
       ...settled.events,
       ...rescue.events,
@@ -490,7 +498,6 @@ export function abilityCheck(
         success,
         label: label(success),
       }),
-      ...naturalOneEvents(actor, roll.natural, context),
       ...(helped
         ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId: HELP })]
         : []),
@@ -500,6 +507,7 @@ export function abilityCheck(
           ? [dndEvent(`${NS}:effectEnded`, { actor: actor.id, sourceId })]
           : [],
       ),
+      ...naturalOneEvents(actor, roll.natural, context),
     ],
   };
 }
@@ -1577,6 +1585,7 @@ export function runTactic(
           () => "perception",
           context,
           keen !== null,
+          undefined,
           cloaked,
         );
       const plain = hidden.filter(({ cloaked }) => !cloaked);

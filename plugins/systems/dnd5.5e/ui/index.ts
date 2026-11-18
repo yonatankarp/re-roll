@@ -3,6 +3,7 @@ import {
   type Decision,
   PLAYER_ACTOR,
   type SceneAction,
+  type SceneHere,
   type SystemEvent,
 } from "#sdk";
 import { z } from "zod";
@@ -607,12 +608,12 @@ function carryRow(carried: number, capacity: number) {
   };
 }
 
-function sheets(rawState: unknown, access: ContentAccess) {
+function sheets(rawState: unknown, access: ContentAccess, here?: SceneHere) {
   const state = parseState(rawState);
   const { actors, gold } = state;
   // What can be used between fights now (camp.ts): the player's own from its spell or feature's row, and the
   // companions' from the player's sheet, as only the player's sheet answers.
-  const between = sceneCastActions(state, access);
+  const between = sceneCastActions(state, access, here);
   const uses = sceneGearActions(state, access).filter(({ effect }) =>
     ["dnd5.5e:coat", "dnd5.5e:storeSpell", "dnd5.5e:pickItemSkill"].includes(
       effect,
@@ -790,7 +791,7 @@ function sheetOf(
         })),
       },
       {
-        title: "Companions' healing",
+        title: "Companions' help",
         rows: companions.map(({ id, label }) => ({
           label,
           value: "",
@@ -1263,6 +1264,16 @@ function describe(
       const data = EVENT_SCHEMAS["dnd5.5e:rested"].parse(payload);
       return `${name(data.actor)} finishes a ${data.rest} rest.`;
     }
+    case "dnd5.5e:obstacleCleared": {
+      const data = EVENT_SCHEMAS["dnd5.5e:obstacleCleared"].parse(payload);
+      return data.source
+        ? `${name(data.actor)} gets past it with ${sourceName(access, data.source)}.`
+        : `${name(data.actor)} gets past it.`;
+    }
+    case "dnd5.5e:toolMissing": {
+      const data = EVENT_SCHEMAS["dnd5.5e:toolMissing"].parse(payload);
+      return `${name(data.actor)} has no ${nameOf(access, data.tool)} to do it with.`;
+    }
     case "dnd5.5e:rollReported":
       return describeRoll(
         state,
@@ -1437,8 +1448,8 @@ export const dndUi = {
   roll,
   systemId: "dnd5.5e",
   about: "Compatible with fifth edition.",
-  sheets: (rawState: unknown, access: ContentAccess) =>
-    sheets(rawState, playing(rawState, access)),
+  sheets: (rawState: unknown, access: ContentAccess, here?: SceneHere) =>
+    sheets(rawState, playing(rawState, access), here),
   combat: (
     rawState: unknown,
     access: ContentAccess,

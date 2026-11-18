@@ -35,7 +35,8 @@ import { damageChoiceFrames } from "./combat/damage-choice.ts";
 import { checkChoiceFrames } from "./combat/check-choice.ts";
 import { confusionFrames } from "./combat/confusion.ts";
 import { fearFrames } from "./combat/fear.ts";
-import { environmentEffects, featureCheck } from "./environment.ts";
+import { environmentEffects } from "./environment.ts";
+import { sceneCheck } from "./explore.ts";
 import { optionFrames } from "./combat/options.ts";
 import { riderChoiceFrames } from "./combat/school.ts";
 import { redirectFrames } from "./combat/reactions.ts";
@@ -54,7 +55,6 @@ import {
   runTactic,
   tacticalPolicy,
   withTactics,
-  abilityCheck,
   castCheckFrames,
   hideFrames,
 } from "./actions.ts";
@@ -140,7 +140,6 @@ import {
   PoisonSchema,
   PregenSchema,
   RollTableSchema,
-  SKILL_ABILITIES,
   ALL_SKILLS,
   CREATURE_TYPES,
   ConditionSchema,
@@ -169,13 +168,7 @@ import { afterActionEvents } from "./combat/durations.ts";
 import { deriveStats, lookup } from "./stats.ts";
 import { withReveal } from "./fog.ts";
 import { actingEnds } from "./combat/effects.ts";
-import {
-  SKILLS_WITH_DIFFERENT_ABILITIES,
-  VARIANT_SETTINGS,
-  chosenVariants,
-  playing,
-  variantOn,
-} from "./variant-rules.ts";
+import { VARIANT_SETTINGS, chosenVariants, playing } from "./variant-rules.ts";
 
 // Every step ends by revealing what the party sees once its events land, so the fog clears as it happens.
 function revealing(
@@ -671,39 +664,20 @@ export const dnd55e = defineSystem<DndState>({
   },
   // Scene checks are made by the player's character, with the same roll as a check in a fight.
   resolveCheck: (check, context) => {
-    const parsed = featureCheck(CheckSchema.parse(check), context);
-    if ("feature" in parsed)
-      throw new Error("A feature check resolves to a skill");
     const player = context.state.actors[PLAYER_ACTOR];
     if (!player) throw new Error("The player has no character");
-    // A skill paired with another ability adds the skill's proficiency only with Skills with Different Abilities, and
-    // is that ability's plain check without it.
-    const paired =
-      "skill" in parsed &&
-      parsed.ability !== undefined &&
-      parsed.ability !== SKILL_ABILITIES[parsed.skill];
-    const skill =
-      "skill" in parsed &&
-      (!paired || variantOn(context, SKILLS_WITH_DIFFERENT_ABILITIES))
-        ? parsed.skill
-        : undefined;
-    const ability =
-      "skill" in parsed
-        ? (parsed.ability ?? SKILL_ABILITIES[parsed.skill])
-        : parsed.ability;
-    const rolled = abilityCheck(
-      player,
-      skill,
-      ability,
-      parsed.dc,
-      () => skill ?? ability,
-      context,
+    const rolled = sceneCheck(player, CheckSchema.parse(check), context);
+    // A check the character couldn't even try, without the tool it needs, gives the GM nothing to work with.
+    const tried = !rolled.events.some(
+      (event) => event.kind === `${NS}:toolMissing`,
     );
     return {
       outcome: rolled.success ? "success" : "failure",
       events: [
         ...rolled.events,
-        ...(rolled.success ? [] : ([{ kind: "gmOpportunity" }] as const)),
+        ...(rolled.success || !tried
+          ? []
+          : ([{ kind: "gmOpportunity" }] as const)),
       ],
     };
   },
@@ -746,12 +720,12 @@ export const dnd55e = defineSystem<DndState>({
         : []),
     ];
   },
-  sceneActions: (state, bare) => {
+  sceneActions: (state, bare, here) => {
     const access = playing(state, bare);
     return [
       ...sceneGearActions(state, access),
       ...sceneSwapActions(state, access),
-      ...sceneCastActions(state, access),
+      ...sceneCastActions(state, access, here),
     ];
   },
   decidePolicy: (decision, context) =>
