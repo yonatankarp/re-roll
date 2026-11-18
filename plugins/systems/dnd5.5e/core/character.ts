@@ -190,14 +190,25 @@ export function backgroundIncreaseStep(
           ],
     ),
   );
-  const even = encodeIncrease(abilities.map((ability) => [ability, 1]));
+  // +1 to three of them: the three a background lists, or any three for an older book's, which lists all six.
+  const evens = abilities.flatMap((first, i) =>
+    abilities
+      .slice(i + 1)
+      .flatMap((second, j) =>
+        abilities
+          .slice(i + j + 2)
+          .map((third) =>
+            encodeIncrease([first, second, third].map((item) => [item, 1])),
+          ),
+      ),
+  );
   const [best, next] = abilityPriority(classDef).filter((ability) =>
     abilities.includes(ability),
   );
   return {
     key: "increase",
     prompt: "Raise the ability scores your background allows.",
-    options: [...pairs, even].map((id) => ({
+    options: [...pairs, ...evens].map((id) => ({
       id,
       label: describeIncrease(id),
     })),
@@ -240,7 +251,7 @@ function originStep(
       options: namedContent(access, "background", BackgroundSchema).map(
         (item) => ({
           id: item.id,
-          label: `${item.name} (${item.abilities.join(", ").toUpperCase()})`,
+          label: `${item.name} (${item.abilities.length === ABILITIES.length ? "any" : item.abilities.join(", ").toUpperCase()})`,
         }),
       ),
       apply: (current, backgroundId) => ({ ...current, backgroundId }),
@@ -591,8 +602,8 @@ export const BACKGROUND_FEAT = "background-feat";
 // The feat a background gave: the one picked in its place, or the one it names.
 export function backgroundFeatOf(
   draft: Draft,
-  background: { readonly feat: string },
-): string {
+  background: { readonly feat?: string | undefined },
+): string | undefined {
   return draft.picks[BACKGROUND_FEAT]?.[0] ?? background.feat;
 }
 
@@ -608,19 +619,28 @@ function originChoices(
   const speciesDef = lookup(access, SpeciesSchema, draft.speciesId);
   const species = owned(speciesDef, prefixed("species", speciesDef.choices));
   const background = lookup(access, BackgroundSchema, draft.backgroundId);
-  // A background that gives its feat or one of a category asks which, as Haunted One does with a Dark Gift.
-  const backgroundFeat: ChoiceDef[] = background.featOr
-    ? [{ kind: "feat", id: BACKGROUND_FEAT, category: background.featOr }]
-    : [];
+  // A background that gives its feat or one of a category asks which, as Haunted One does with a Dark Gift, and an
+  // older book's, which names none, asks for an Origin feat.
+  const backgroundFeat: ChoiceDef[] =
+    background.featOr || !background.feat
+      ? [
+          {
+            kind: "feat",
+            id: BACKGROUND_FEAT,
+            category: background.featOr ?? "origin",
+          },
+        ]
+      : [];
   // A feat picked here, such as a Human's Versatile origin feat, asks its own choices too.
   const feats = [
-    backgroundFeatOf(draft, background),
+    ...[backgroundFeatOf(draft, background) ?? []].flat(),
     ...species.flatMap((choice) =>
       choice.kind === "feat" ? (draft.picks[choice.id] ?? []) : [],
     ),
   ];
   return [
     ...species,
+    ...prefixed("background", background.choices),
     ...backgroundFeat,
     ...feats.flatMap((id, index) =>
       owned(
@@ -770,9 +790,9 @@ function heldTools(
     ...[...classes].flatMap(
       (id) => ClassSchema.safeParse(access.content(id)).data?.tools ?? [],
     ),
-    ...[background ? toolByName(background.tool, access) : undefined].flatMap(
-      (id) => (id ? [id] : []),
-    ),
+    ...[
+      background?.tool ? toolByName(background.tool, access) : undefined,
+    ].flatMap((id) => (id ? [id] : [])),
     ...answered(base, "tools"),
     ...Object.values(draft.picks).flat(),
   ];
@@ -836,7 +856,8 @@ export function choiceOptions(
     case "feat": {
       const forBackground = choice.id === BACKGROUND_FEAT;
       const had = taken("feats");
-      if (!forBackground) had.add(background.feat);
+      const ownFeat = backgroundFeatOf(draft, background);
+      if (!forBackground && ownFeat) had.add(ownFeat);
       const all = namedContent(access, "feat", FeatSchema);
       const categoryOf = (id: string) =>
         FeatSchema.safeParse(access.content(id)).data?.category;
@@ -869,7 +890,7 @@ export function choiceOptions(
           !versioned(item) &&
           (!had.has(item.id) || item.text.includes("Repeatable")),
       );
-      if (forBackground) {
+      if (forBackground && background.feat) {
         // The feat the background names comes first and is the default.
         const named = lookup(access, FeatSchema, background.feat);
         return {
@@ -986,7 +1007,7 @@ export function choiceOptions(
       const list = choice.listOf
         ? versionList(
             choice.listOf,
-            [...taken("feats"), background.feat],
+            [...taken("feats"), ...[background.feat ?? []].flat()],
             access,
           )
         : choice.list;

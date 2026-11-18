@@ -2324,8 +2324,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           (id) => lookup(access, FeatSchema, id).category === background.featOr,
         ),
     );
-  if (!replaced) {
-    for (const id of lookup(access, FeatSchema, background.feat).grants) {
+  // An older book's background names no feat: the Origin feat picked for it is in the first level's answers.
+  const ownFeats =
+    replaced || background.feat === undefined ? [] : [background.feat];
+  for (const feat of ownFeats) {
+    for (const id of lookup(access, FeatSchema, feat).grants) {
       featureIds.add(id);
     }
   }
@@ -2580,7 +2583,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   }
   for (const pick of latePicks(
     swaps,
-    new Set([...featIds, ...(replaced ? [] : [background.feat])]),
+    new Set([...featIds, ...ownFeats]),
     access,
   )) {
     for (const spell of pick.spells) {
@@ -2642,13 +2645,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const castingAbility = new Map([
     ...answerAbilities,
     ...fromFeatures.abilities,
-    ...featSpellAbilities(
-      build,
-      replaced ? [] : [background.feat],
-      species,
-      access,
-      swaps,
-    ),
+    ...featSpellAbilities(build, ownFeats, species, access, swaps),
   ]);
   const armorBases: number[] = [];
   const armorTypes: string[] = [];

@@ -2843,7 +2843,15 @@ function landHit(
             : {}),
         }),
       ),
-      ...(smitesFor(action, attacker, target, stats, context).length > 0
+      ...(smitesFor(
+        action,
+        attacker,
+        target,
+        stats,
+        context,
+        undefined,
+        payload.critical,
+      ).length > 0
         ? [
             frame("afterHit", {
               attacker: attacker.id,
@@ -4039,6 +4047,7 @@ function smitesFor(
   stats: Stats,
   context: Context,
   following?: string,
+  critical = false,
 ): readonly KnownAction[] {
   if (hitWith.activation.resolution.kind !== "attack") return [];
   return stats.actions.filter((action) => {
@@ -4053,6 +4062,7 @@ function smitesFor(
       !trigger.forgoAdvantage && // picked before the roll
       !trigger.gainsAdvantage &&
       trigger.fixedRoll === undefined &&
+      (!trigger.onCritical || critical) &&
       canAfford(action, attacker, stats) &&
       hitFits(trigger.afterHit, hitWith, attacker, context) &&
       itemFits(action, hitWith, context) &&
@@ -4181,6 +4191,7 @@ export function runAfterHit(
     stats,
     context,
     payload.following,
+    payload.critical,
   ).flatMap((action) =>
     action.activation.trigger?.near === undefined
       ? fitsType(target, action.activation.targeting, context, attacker)
