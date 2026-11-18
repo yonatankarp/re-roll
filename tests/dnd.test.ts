@@ -1142,19 +1142,20 @@ describe("playing a D&D adventure", () => {
     // The village ends the adventure early, and another choice is always open there.
     expect(report.endings.village).toBeUndefined();
 
-    const answers = Array.from({ length: 12 }, (_, index) =>
-      playRun(run, `bot-${String(index)}`, options).inputs.flatMap((input) =>
-        input.kind === "answer" ? [input] : [],
-      ),
-    ).flat();
-    expect(answers.some((input) => input.optionId.startsWith("rest:"))).toBe(
-      true,
+    // One pinned seed that rests and creates a character, whose build steps the system answers (#209). The
+    // report above played it already, so this is one more game, not twelve.
+    const answers = playRun(run, "bot-0", options).inputs.flatMap((input) =>
+      input.kind === "answer" ? [input] : [],
     );
-    // Someone creates a character, and the system answers its build steps.
+    expect(
+      answers.some((input) => input.optionId.startsWith("rest:")),
+      REPIN,
+    ).toBe(true);
     expect(
       answers.some((input) => input.decisionId.startsWith("dnd5.5e:build:")),
+      REPIN,
     ).toBe(true);
-  }, 120_000); // many full playthroughs alongside other test files, which took up to 46 s on CI (#204)
+  }, 120_000); // many full playthroughs alongside other test files, which took over 120 s on CI's macOS runner (#209)
 
   it("clears monsters and the combat when a fight is won", async () => {
     const run = await goblin();
