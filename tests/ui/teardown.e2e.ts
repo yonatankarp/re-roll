@@ -58,13 +58,13 @@ test("leaving for the menu while the board plays ends its sounds", async ({
   await page.locator(".dnd-token.active").click();
   await page.locator(".dnd-menu button", { hasText: /^End/ }).click();
   await expect(page.locator(".dnd-board.playing")).toBeVisible();
-  const during = await sounds();
+  // The fight was heard at all. Waited for, as the first attack's sound can come a moment after play starts.
+  await expect.poll(sounds).toBeGreaterThan(0);
   await page.getByText("Menu", { exact: true }).click();
   await page.getByRole("button", { name: "Main menu" }).click();
   await expect(
     page.getByRole("button", { name: "Ambush on the Old Road", exact: true }),
   ).toBeVisible();
-  expect(during).toBeGreaterThan(0); // the fight was heard at all
 
   // Long enough for the goblins' whole turn, had it played on.
   const after = await sounds();
