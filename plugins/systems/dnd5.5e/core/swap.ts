@@ -235,7 +235,7 @@ function classPicks(
                 choice,
                 found,
                 when,
-                `${classDef.name} ${group === "weaponMastery" ? "weapon masteries" : group}`,
+                `${classDef.name} ${choice.kind === "tools" ? "proficiencies" : group === "weaponMastery" ? "weapon masteries" : group}`,
               ),
             ]
           : [];

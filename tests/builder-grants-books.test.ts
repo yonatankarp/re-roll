@@ -17,6 +17,7 @@ import { hitFits } from "../plugins/systems/dnd5.5e/core/combat/queries.ts";
 import {
   type ChoiceDef,
   ClassSchema,
+  SubclassSchema,
 } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 import type { Actor } from "../plugins/systems/dnd5.5e/core/state.ts";
 import { deriveStats, lookup } from "../plugins/systems/dnd5.5e/core/stats.ts";
@@ -168,6 +169,46 @@ describe.skipIf(!BOOKS)("the books' builder grants and passives", () => {
         "phb:item/disguise-kit",
         "phb:item/poisoner-s-kit",
       ]),
+    );
+  });
+
+  it("asks a College of Swords bard for Dueling or Two-Weapon Fighting, and gives a Kensei its Shot and Parry", () => {
+    const swords = lookup(
+      run,
+      SubclassSchema,
+      "xanathars-guide:subclass/bard-college-of-swords",
+    );
+    const style = swords.levels
+      .find((level) => level.level === 3)
+      ?.choices.find((choice) => choice.id === "fighting-style");
+    expect(style).toMatchObject({
+      kind: "option",
+      from: [
+        "phb:feature/feat-dueling",
+        "phb:feature/feat-two-weapon-fighting",
+      ],
+    });
+    const monk = levelTo(run, "phb:class/monk", null, 3);
+    const kensei = withAnswers(monk, [
+      {
+        kind: "features",
+        values: [
+          "xanathars-guide:feature/monk-way-of-the-kensei-path-of-the-kensei",
+        ],
+      },
+    ]);
+    const stats = deriveStats(kensei, run);
+    const shot = stats.actions.find((action) =>
+      action.id.startsWith(
+        "feature:xanathars-guide:feature/monk-way-of-the-kensei-path-of-the-kensei:",
+      ),
+    );
+    expect(shot?.activation.cost).toEqual(["bonusAction"]);
+    expect(stats.passives).toContainEqual(
+      expect.objectContaining({
+        kind: "activationRider",
+        feature: "phb:feature/monk-martial-arts",
+      }),
     );
   });
 
