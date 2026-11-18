@@ -29,7 +29,7 @@ export function soundControls(
   readonly dialog: HTMLDialogElement;
   readonly narration: HTMLElement;
   readonly effects: () => boolean;
-  readonly volume: () => number;
+  readonly dispose: () => void; // the game screen has gone, so it falls silent at once
   readonly update: (view: GameView) => void;
   readonly follow: (camp: HTMLDialogElement) => void; // campfire sound while it's open
 } {
@@ -40,19 +40,8 @@ export function soundControls(
   let camping = false;
   let decision: string | null = null;
 
-  let watch: ReturnType<typeof setInterval> | undefined;
-  // Silent once the game screen has gone, such as back to the menu, which sends no update.
-  const gone = (): boolean => {
-    if (narration.controls.isConnected) return false;
-    clearInterval(watch);
-    narration.stop();
-    ambience.play("none");
-    return true;
-  };
-
   const apply = (): void => {
-    if (!view || gone()) return;
-    watch ??= setInterval(gone, 1000);
+    if (!view) return;
     ambience.play(
       !settings.ambience ? "none" : camping ? "campfire" : view.ambience,
     );
@@ -176,7 +165,11 @@ export function soundControls(
     dialog,
     narration: narration.controls,
     effects: () => settings.effects,
-    volume: () => settings.volume,
+    dispose() {
+      view = null; // so nothing starts again
+      narration.stop();
+      ambience.play("none");
+    },
     update(next) {
       view = next;
       apply();

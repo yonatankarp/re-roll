@@ -206,7 +206,6 @@ export interface BoardHost {
   // Several ids answer the decisions that follow one another, such as Move and then a square.
   readonly answer: (...optionIds: readonly string[]) => void;
   readonly sound?: () => boolean; // whether the player has sound on
-  readonly volume?: () => number; // the player's master volume, 0 to 1
 }
 
 export interface BoardUpdate {
@@ -225,6 +224,7 @@ export interface BoardUpdate {
 export interface Board {
   readonly update: (update: BoardUpdate) => void;
   readonly settled?: () => Promise<void>; // once what it was given has finished playing
+  readonly dispose?: () => void; // the screen has gone: nothing more plays, sounds or listens
 }
 
 // One die roll for the roll history, such as "Sera · Longsword → Goblin · 14 + 5 = 19 vs AC 15 ✓".

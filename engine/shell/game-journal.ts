@@ -63,7 +63,14 @@ export function drawJournal(
       enter(page.ticker);
       page.why.update(view);
     });
+  } else if (!firstDraw && view.scene !== page.tickerScene) {
+    // A new scene with no news of its own: the last scene's result doesn't follow the party into it.
+    page.tickerShown += 1;
+    page.ticker.replaceChildren();
+    page.why.update(null);
+    page.levelUp.hidden = true;
   }
+  page.tickerScene = view.scene;
   page.about.replaceChildren(
     el("summary", { text: "About" }),
     el("p", { text: `Re-roll. ${view.about}` }),

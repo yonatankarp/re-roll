@@ -6,37 +6,34 @@ import type { DndCue } from "./cues.ts";
 
 const VOLUME = 0.15;
 
-let audio: { readonly context: AudioContext; readonly out: GainNode } | null =
-  null;
+// Where the sounds go. The app gives the shell's own effects node, so the player's one volume rules every
+// sound; until it does, nothing plays.
+let output: () => AudioNode | null = () => null;
+let mix: GainNode | null = null; // the effects' own level, on the output it was made for
 let hiss: AudioBuffer | null = null; // a second of white noise, made once
-let level = 1; // the player's master volume
 
-export function setEffectsVolume(volume: number): void {
-  level = volume;
-  if (audio) audio.out.gain.value = VOLUME * level;
+export function setEffectsOutput(get: () => AudioNode | null): void {
+  output = get;
 }
 
-// Browsers start audio only from a gesture, so the context is made, or woken, on one.
-function unlock(): void {
+// Cuts off what is sounding, such as when the board goes away.
+export function stopEffects(): void {
+  mix?.disconnect();
+  mix = null;
+}
+
+function mixer(): GainNode | null {
   try {
-    if (!audio) {
-      const context = new AudioContext();
-      const out = context.createGain();
-      out.gain.value = VOLUME * level;
-      out.connect(context.destination);
-      audio = { context, out };
+    const to = output();
+    if (!to) return null;
+    if (mix?.context !== to.context) {
+      mix = to.context.createGain();
+      mix.gain.value = VOLUME;
+      mix.connect(to);
     }
-    if (audio.context.state === "suspended") {
-      audio.context.resume().catch(() => undefined);
-    }
+    return mix;
   } catch {
-    // No Web Audio here, so the game stays silent.
-  }
-}
-
-if (typeof window !== "undefined") {
-  for (const type of ["pointerdown", "click", "keydown"]) {
-    window.addEventListener(type, unlock, { capture: true, passive: true });
+    return null; // no Web Audio here, so the game stays silent
   }
 }
 
@@ -49,8 +46,9 @@ function tone(
   length: number,
   peak: number,
 ): void {
-  if (!audio) return;
-  const { context, out } = audio;
+  const out = mixer();
+  if (!out) return;
+  const { context } = out;
   const start = context.currentTime + at;
   const osc = context.createOscillator();
   const gain = context.createGain();
@@ -74,8 +72,9 @@ function noise(
   length: number,
   peak: number,
 ): void {
-  if (!audio) return;
-  const { context, out } = audio;
+  const out = mixer();
+  if (!out) return;
+  const { context } = out;
   if (!hiss) {
     hiss = context.createBuffer(1, context.sampleRate, context.sampleRate);
     const samples = hiss.getChannelData(0);

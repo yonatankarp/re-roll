@@ -228,8 +228,14 @@ export function drawDecision(
   page.options.hidden = view.shop !== null;
   page.shop.update(view.shop);
   // The next choice waits for the board to finish, so it can't be picked under a die still to throw.
-  if (!firstDraw && page.board?.settled && cues.length > 0) {
-    const shownChoice = ++page.choiceShown;
+  // A draw that comes while an earlier one still waits takes the wait over, so the earlier one's card
+  // never lands on this one's.
+  const shownChoice = ++page.choiceShown;
+  if (
+    !firstDraw &&
+    page.board?.settled &&
+    (cues.length > 0 || page.stage.classList.contains("settling"))
+  ) {
     const quick = page.quickQuestion;
     page.prompt.inert = page.options.inert = true;
     page.stage.classList.add("settling");
@@ -245,7 +251,8 @@ export function drawDecision(
         quick ||
         !focused ||
         focused === document.body ||
-        !focused.checkVisibility()
+        // Older WebKit has no checkVisibility, and then focus stays where it is.
+        ("checkVisibility" in focused && !focused.checkVisibility())
       ) {
         page.firstFocus().focus();
       }

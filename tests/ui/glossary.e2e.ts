@@ -145,5 +145,23 @@ test("explains a term in a fight and opens its book section", async ({
   await expect(pop).toBeHidden();
   await expect(dodging).toBeFocused();
 
+  // On the character sheet, a modal drawer, the answer opens inside the drawer, where More can be
+  // reached, and Escape puts away the answer before the drawer.
+  await page.getByRole("button", { name: "Open the character sheet" }).click();
+  const drawer = page.locator("dialog.drawer[open]");
+  const onSheet = drawer.locator(".term[data-term='action:dodge']").first();
+  await onSheet.focus();
+  await page.keyboard.press("Enter");
+  await expect(drawer.locator(".term-pop")).toBeVisible();
+  await expect(pop.getByRole("button", { name: "More" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(pop).toBeHidden();
+  await expect(drawer).toBeVisible();
+  await onSheet.click();
+  await pop.getByRole("button", { name: "More" }).click();
+  await expect(page.locator(".book-text")).toContainText(
+    "A second fixture line.",
+  );
+
   expect(errors).toEqual([]);
 });
