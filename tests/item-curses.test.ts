@@ -297,7 +297,9 @@ describe("curses, sentient items and attunement (#143)", () => {
       item: "test:item/deadly",
     });
     const failed = settle(run, [bearer], [attune], scripted([2]).dice);
-    expect(kinds(failed.events)).toContain("actorDefeated");
+    expect(kinds(failed.events)).toEqual(
+      expect.arrayContaining(["actorDefeated", "partyDefeated"]),
+    );
     const saved = settle(run, [bearer], [attune], scripted([19, 3, 4]).dice);
     expect(kinds(saved.events)).not.toContain("actorDefeated");
     expect(payloads(saved.events, "damaged")[0]).toMatchObject({ amount: 7 });

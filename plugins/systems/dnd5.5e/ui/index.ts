@@ -14,6 +14,8 @@ import { OFFHAND, isTactic } from "../core/actions.ts";
 import { carriedWeight, carryingCapacity } from "../core/carry.ts";
 import {
   attunementLimit,
+  boundTo,
+  canAttune,
   canUse,
   foundText,
   sceneGearActions,
@@ -508,7 +510,10 @@ function equipmentRows(
           looks: [id],
           value: wornCount === 0 ? "In pack" : "Equipped",
           // Putting on a spare comes first, as between choices. Untrained armor isn't offered, as it would only hinder.
-          ...(changes && (wornCount > 0 || wearable)
+          // A curse holds it, so it can't be stowed.
+          ...(changes &&
+          (wornCount > 0 || wearable) &&
+          !(wornCount === count && boundTo(actor, id, access))
             ? {
                 option:
                   wornCount < count && wearable
@@ -522,12 +527,13 @@ function equipmentRows(
     }
     if (item.type === "magicItem" && item.attunement) {
       const on = attuned.includes(id);
+      const held = on && boundTo(actor, id, access);
       return [
         {
           label,
           looks: [id],
-          value: on ? "Attuned" : "Not attuned",
-          ...(changes
+          value: held ? "Attuned (cursed)" : on ? "Attuned" : "Not attuned",
+          ...(changes && !held
             ? {
                 option: on
                   ? {
@@ -538,8 +544,9 @@ function equipmentRows(
                   : {
                       id: `attune:${id}`,
                       label: "Attune",
-                      hint:
-                        attuned.length < attunementLimit(stats)
+                      hint: !canAttune(actor, item, stats)
+                        ? `Requires attunement by ${item.attunementBy ?? "another"}`
+                        : attuned.length < attunementLimit(stats)
                           ? ATTUNE_HINT
                           : `Already attuned to ${String(attunementLimit(stats))} items`,
                     },

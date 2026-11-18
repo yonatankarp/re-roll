@@ -320,6 +320,10 @@ export const attuneSaveHandlers = {
               massive: true,
             }),
             { kind: "actorDefeated", actor: actor.id },
+            // The story follows the player's character, so its end is the run's, as in a fight.
+            ...(actor.id === PLAYER_ACTOR
+              ? [{ kind: "partyDefeated" as const }]
+              : []),
           ],
         };
       }
