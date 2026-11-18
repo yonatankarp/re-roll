@@ -5,6 +5,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PLAYER_ACTOR } from "#sdk";
+import { PLUGIN_ROOTS } from "../app/cli/load-adventure.ts";
 import { systems } from "../app/systems.ts";
 import type { GameState } from "../engine/kernel/events.ts";
 import { loadRun, scanPlugins } from "../engine/run/loader.ts";
@@ -402,7 +403,7 @@ export function auditClass(
 export async function bookRun(): Promise<{ run: RunContext; book: string }> {
   const saves = await mkdtemp(join(tmpdir(), "class-audit-"));
   const storage = await createPlayStorage(process.cwd(), saves);
-  const catalog = await scanPlugins(storage, ["plugins", "books"]);
+  const catalog = await scanPlugins(storage, PLUGIN_ROOTS);
   for (const book of ["phb", "srd52"]) {
     if (!catalog.plugins.has(book)) continue;
     const loaded = await loadRun(storage, catalog, systems, [
