@@ -1002,6 +1002,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("exhausted"),
     levels: z.number().int().min(1).max(6),
+    upTo: z.number().int().min(1).max(6).optional(), // it never takes the total past this, as Waves of Exhaustion's 4
   }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
@@ -1287,6 +1288,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("forcedMove"),
     feet: z.number(),
     direction: z.enum(["away", "toward", "random"]),
+    // from the spell's object instead of the caster, as Grasping Vine's pull toward the vine (combat/anchor.ts)
+    fromObject: z.literal(true).optional(),
     maxSize: SizeSchema.optional(),
     largerBy: z.number().int().min(0).optional(), // only a target at most this many sizes larger than the caster
     option: z.string().min(1).optional(), // as an applyCondition's, as Telekinetic Thrust's push or Prone
@@ -2203,6 +2206,8 @@ export const AreaEffectSchema = z.strictObject({
   ground: z.literal(true).optional(),
   // a foe that dies in it fills one of its spell's `spheres`, as Spirit Lantern's Dim Light gathers soul fragments
   gathers: z.literal(true).optional(),
+  // it acts on those in it as it appears, as Conjure Celestial's light shines on each creature it's cast over
+  appears: z.literal(true).optional(),
   // it acts on a creature its owner moves it onto, and stops there for the turn, as Flaming Sphere rolled into a foe
   whenMoved: z.literal(true).optional(),
   // the creatures it holds with a condition move with it, as Whirlwind's

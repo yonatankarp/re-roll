@@ -439,7 +439,37 @@
     throw. On a failed save, the creature takes 3d10 Slashing damage. A creature
     makes this save only once per turn. Using a Higher-Level Spell Slot. The
     damage increases by 1d10 for each spell slot level above 3.
-  automation: text
+  automation: full
+  # shortcut: the Advantage on Strength saves near the pack is its caster's allies' too.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 10 }, range: 60, side: enemy }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - { kind: zone, zone: area, radius: 10, part: 0, duration: { concentration: true, minutes: 10 } }
+        - { kind: zone, zone: area, radius: 5, part: 1, duration: { concentration: true, minutes: 10 } }
+    areas:
+      - side: enemy
+        when: turnEnd
+        enters: true
+        appears: true
+        moves: 30
+        moveWith: free
+        resolution:
+          kind: save
+          ability: dex
+          dc: { add: [{ kind: spellSaveDc }] }
+          damage: [{ amount: { dice: 3d10 }, type: slashing }]
+          onSuccessDamage: none
+          onFail: []
+          onSuccess: []
+      - side: ally
+        grants: [{ kind: advantage, on: saves, ability: str }]
+  upcast:
+    perSlotLevel:
+      addDice: 1d10
 - id: srd52:spell/conjure-woodland-beings
   name: Conjure Woodland Beings
   level: 4
@@ -462,7 +492,34 @@
     you can take the Disengage action as a Bonus Action for the spell’s
     duration. Using a Higher-Level Spell Slot. The damage increases by 1d8 for
     each spell slot level above 4.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: emanation, radius: 10 }, range: self, side: enemy }
+    alsoSelf: [{ kind: modifier, modifier: { kind: bonusDisengage }, duration: { concentration: true, minutes: 10 } }]
+    resolution:
+      kind: save
+      ability: wis
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 5d8 }, type: force }]
+      onSuccessDamage: half
+      onFail: [{ kind: zone, zone: area, radius: 10, follows: true, duration: { concentration: true, minutes: 10 } }]
+      onSuccess: []
+    area:
+      side: enemy
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: save
+        ability: wis
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 5d8 }, type: force }]
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
 - id: srd52:spell/control-water
   name: Control Water
   level: 4
@@ -1523,30 +1580,46 @@
     take a Bonus Action on a later turn to curse a new creature. Using a
     Higher-Level Spell Slot. Your Concentration can last longer with a spell
     slot of level 2 (up to 4 hours), 3–4 (up to 8 hours), or 5+ (24 hours).
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - bonusAction
-      - slot
-    targeting:
-      creatures: 1
-      range: 90
-      side: enemy
+    cost: [bonusAction, slot]
+    targeting: { creatures: 1, range: 90, side: enemy }
     resolution:
       kind: automatic
       damage: []
       effects:
         - kind: modifier
-          duration:
-            concentration: true
-            minutes: 60
-          modifier:
-            kind: hitDamage
-            dealtBy: caster
-            damage:
-              amount:
-                dice: 1d6
-              type: necrotic
+          duration: { concentration: true, minutes: 60 }
+          modifier: { kind: hitDamage, dealtBy: caster, damage: { amount: { dice: 1d6 }, type: necrotic } }
+        - { kind: modifier, option: Strength, modifier: { kind: disadvantage, on: checks, ability: str }, duration: { concentration: true, minutes: 60 } }
+        - { kind: modifier, option: Dexterity, modifier: { kind: disadvantage, on: checks, ability: dex }, duration: { concentration: true, minutes: 60 } }
+        - { kind: modifier, option: Constitution, modifier: { kind: disadvantage, on: checks, ability: con }, duration: { concentration: true, minutes: 60 } }
+        - { kind: modifier, option: Intelligence, modifier: { kind: disadvantage, on: checks, ability: int }, duration: { concentration: true, minutes: 60 } }
+        - { kind: modifier, option: Wisdom, modifier: { kind: disadvantage, on: checks, ability: wis }, duration: { concentration: true, minutes: 60 } }
+        - { kind: modifier, option: Charisma, modifier: { kind: disadvantage, on: checks, ability: cha }, duration: { concentration: true, minutes: 60 } }
+  lasting:
+    cost: [bonusAction]
+    remark: true
+    targeting: { creatures: 1, range: 90, side: enemy }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          duration: { concentration: true, minutes: 60 }
+          modifier: { kind: hitDamage, dealtBy: caster, damage: { amount: { dice: 1d6 }, type: necrotic } }
+        - { kind: modifier, option: Strength, modifier: { kind: disadvantage, on: checks, ability: str }, duration: { concentration: true, minutes: 60 } }
+        - { kind: modifier, option: Dexterity, modifier: { kind: disadvantage, on: checks, ability: dex }, duration: { concentration: true, minutes: 60 } }
+        - { kind: modifier, option: Constitution, modifier: { kind: disadvantage, on: checks, ability: con }, duration: { concentration: true, minutes: 60 } }
+        - { kind: modifier, option: Intelligence, modifier: { kind: disadvantage, on: checks, ability: int }, duration: { concentration: true, minutes: 60 } }
+        - { kind: modifier, option: Wisdom, modifier: { kind: disadvantage, on: checks, ability: wis }, duration: { concentration: true, minutes: 60 } }
+        - { kind: modifier, option: Charisma, modifier: { kind: disadvantage, on: checks, ability: cha }, duration: { concentration: true, minutes: 60 } }
+  upcast:
+    perSlotLevel:
+      durations:
+        - { at: 1, duration: { concentration: true, minutes: 240 } }
+        - { at: 2, duration: { concentration: true, minutes: 480 } }
+        - { at: 4, duration: { concentration: true, minutes: 1440 } }
 - id: srd52:spell/hunter-s-mark
   name: Hunter’s Mark
   level: 1
@@ -1567,30 +1640,35 @@
     move the mark to a new creature you can see within range. Using a
     Higher-Level Spell Slot. Your Concentration can last longer with a spell
     slot of level 3–4 (up to 8 hours) or 5+ (up to 24 hours).
-  automation: partial
+  automation: full
+  # Its Advantage on checks to find the quarry changes nothing in a fight, where the quarry is in sight or hidden by
+  # its own Stealth.
   activation:
-    cost:
-      - bonusAction
-      - slot
-    targeting:
-      creatures: 1
-      range: 90
-      side: enemy
+    cost: [bonusAction, slot]
+    targeting: { creatures: 1, range: 90, side: enemy }
     resolution:
       kind: automatic
       damage: []
       effects:
         - kind: modifier
-          duration:
-            concentration: true
-            minutes: 60
-          modifier:
-            kind: hitDamage
-            dealtBy: caster
-            damage:
-              amount:
-                dice: 1d6
-              type: force
+          duration: { concentration: true, minutes: 60 }
+          modifier: { kind: hitDamage, dealtBy: caster, damage: { amount: { dice: 1d6 }, type: force } }
+  lasting:
+    cost: [bonusAction]
+    remark: true
+    targeting: { creatures: 1, range: 90, side: enemy }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          duration: { concentration: true, minutes: 60 }
+          modifier: { kind: hitDamage, dealtBy: caster, damage: { amount: { dice: 1d6 }, type: force } }
+  upcast:
+    perSlotLevel:
+      durations:
+        - { at: 2, duration: { concentration: true, minutes: 480 } }
+        - { at: 4, duration: { concentration: true, minutes: 1440 } }
 - id: srd52:spell/illusory-script
   name: Illusory Script
   level: 1
@@ -1891,35 +1969,19 @@
     ends its turn there. A creature makes this save only once per turn. Using a
     Higher-Level Spell Slot. The damage increases by 1d10 for each spell slot
     level above 2.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: sphere
-        radius: 5
-      range: 120
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 5 }, range: 120, side: enemy }
     resolution:
       kind: save
       ability: con
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 2d10
-          type: radiant
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 2d10 }, type: radiant }]
       onSuccessDamage: half
       onFail:
-        - kind: zone
-          zone: dim
-          radius: 5
-          duration:
-            concentration: true
-            minutes: 1
+        - { kind: revertShape }
+        - { kind: zone, zone: dim, radius: 5, duration: { concentration: true, minutes: 1 } }
       onSuccess: []
     area:
       when: turnEnd
@@ -1928,15 +1990,10 @@
       resolution:
         kind: save
         ability: con
-        dc:
-          add:
-            - kind: spellSaveDc
-        damage:
-          - amount:
-              dice: 2d10
-            type: radiant
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 2d10 }, type: radiant }]
         onSuccessDamage: half
-        onFail: []
+        onFail: [{ kind: revertShape }]
         onSuccess: []
   upcast:
     perSlotLevel:
@@ -3171,7 +3228,27 @@
     equal to 4d12 plus your spellcasting ability modifier. On your later turns,
     you can take a Bonus Action to move the sword up to 30 feet to a spot you
     can see and repeat the attack against the same target or a different one.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    anchor: { moves: 60 }
+    targeting: { creatures: 1, range: 65, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } }, type: force }]
+      onHit: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+      onMiss: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+  lasting:
+    cost: [bonusAction]
+    anchor: { moves: 30 }
+    targeting: { creatures: 1, range: 35, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } }, type: force }]
+      onHit: []
+      onMiss: []
 - id: srd52:spell/awaken
   name: Awaken
   level: 5
@@ -3313,7 +3390,33 @@
     you control over that storm instead of creating a new one. Under such
     conditions, the spell’s damage increases by 1d10. Using a Higher-Level Spell
     Slot. The damage increases by 1d10 for each spell slot level above 3.
-  automation: text
+  automation: full
+  # shortcut: no fight is fought out in a storm it could take over, so it never deals the storm's extra die.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 5 }, range: 120, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 3d10 }, type: lightning }]
+      onSuccessDamage: half
+      onFail: []
+      onSuccess: []
+  lasting:
+    cost: [action]
+    targeting: { area: { shape: sphere, radius: 5 }, range: 120, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 3d10 }, type: lightning }]
+      onSuccessDamage: half
+      onFail: []
+      onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d10
 - id: srd52:spell/chill-touch
   name: Chill Touch
   level: 0
@@ -3492,7 +3595,44 @@
     lights. A creature can be affected by this spell only once per turn. Using a
     Higher-Level Spell Slot. The healing and damage increase by 1d12 for each
     spell slot level above 7."
-  automation: text
+  automation: full
+  # Healing Light goes on its caster's side and Searing Light on the rest.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 10 }, range: 90, side: enemy }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - { kind: zone, zone: light, radius: 10, part: 0, duration: { concentration: true, minutes: 10 } }
+        - { kind: zone, zone: area, radius: 10, part: 1, duration: { concentration: true, minutes: 10 } }
+    areas:
+      - side: ally
+        when: turnEnd
+        enters: true
+        appears: true
+        moves: 30
+        moveWith: free
+        resolution:
+          kind: automatic
+          damage: []
+          effects:
+            - { kind: heal, amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } } }
+      - side: enemy
+        when: turnEnd
+        enters: true
+        appears: true
+        resolution:
+          kind: save
+          ability: dex
+          dc: { add: [{ kind: spellSaveDc }] }
+          damage: [{ amount: { dice: 6d12 }, type: radiant }]
+          onSuccessDamage: half
+          onFail: []
+          onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d12
 - id: srd52:spell/contact-other-plane
   name: Contact Other Plane
   level: 5
@@ -4071,7 +4211,27 @@
     ability modifier. The flaming blade sheds Bright Light in a 10-foot radius
     and Dim Light for an additional 10 feet. Using a Higher-Level Spell Slot.
     The damage increases by 1d6 for each spell slot level above 2.
-  automation: text
+  automation: full
+  # The blade stays in hand for the spell.
+  activation:
+    cost: [bonusAction, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      damage: []
+      effects: [{ kind: zone, zone: light, radius: 10, dim: 10, follows: true, duration: { concentration: true, minutes: 10 } }]
+  lasting:
+    cost: [action]
+    targeting: { creatures: 1, range: 5, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 3d6, bonus: { add: [{ kind: spellMod }] } }, type: fire }]
+      onHit: []
+      onMiss: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d6
 - id: srd52:spell/fly
   name: Fly
   level: 3
@@ -4343,7 +4503,39 @@
     has Disadvantage on attack rolls and ability checks until the start of your
     next turn. Using a Higher-Level Spell Slot. The damage increases by 1d8 for
     each spell slot level above 2.
-  automation: text
+  automation: full
+  # The metal is the target's armor or weapon, taken to be one it can't drop, so a failed save hampers it instead.
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 2d8 }, type: fire }]
+      onSuccessDamage: full
+      onFail:
+        - { kind: modifier, modifier: { kind: disadvantage, on: attacks }, duration: { until: yourNextTurnStart } }
+        - { kind: modifier, modifier: { kind: disadvantage, on: checks }, duration: { until: yourNextTurnStart } }
+        - { kind: modifier, modifier: { kind: mark }, duration: { concentration: true, minutes: 1 } }
+      onSuccess:
+        - { kind: modifier, modifier: { kind: mark }, duration: { concentration: true, minutes: 1 } }
+  lasting:
+    cost: [bonusAction]
+    targeting: { creatures: 1, range: 60, side: enemy, afflicted: Heat Metal }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 2d8 }, type: fire }]
+      onSuccessDamage: full
+      onFail:
+        - { kind: modifier, modifier: { kind: disadvantage, on: attacks }, duration: { until: yourNextTurnStart } }
+        - { kind: modifier, modifier: { kind: disadvantage, on: checks }, duration: { until: yourNextTurnStart } }
+      onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
 - id: srd52:spell/hideous-laughter
   name: Hideous Laughter
   level: 1
@@ -5640,40 +5832,31 @@
     radiance. For the duration, a mote of brilliant radiance shines above you.
     It sheds Bright Light in a 30-foot radius and Dim Light for an additional 30
     feet. This light is sunlight.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: line
-        radius: 60
-      range: self
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: line, radius: 60 }, range: self, side: enemy }
     resolution:
       kind: save
       ability: con
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 6d8
-          type: radiant
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 6d8 }, type: radiant }]
       onSuccessDamage: half
       onFail:
-        - kind: applyCondition
-          condition: blinded
-          duration:
-            until: yourNextTurnStart
-        - kind: zone
-          zone: sunlight
-          radius: 30
-          duration:
-            concentration: true
-            minutes: 1
-          follows: true
+        - { kind: applyCondition, condition: blinded, duration: { until: yourNextTurnStart } }
+        - { kind: zone, zone: sunlight, radius: 30, dim: 30, follows: true, duration: { concentration: true, minutes: 1 } }
+      onSuccess: []
+  lasting:
+    cost: [action]
+    targeting: { area: { shape: line, radius: 60 }, range: self, side: enemy }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 6d8 }, type: radiant }]
+      onSuccessDamage: half
+      onFail: [{ kind: applyCondition, condition: blinded, duration: { until: yourNextTurnStart } }]
+      onSuccess: []
 - id: srd52:spell/teleport
   name: Teleport
   level: 7
@@ -5839,7 +6022,30 @@
     ends, you can make the attack again on each of your turns as a Magic action,
     targeting the same creature or a different one. Using a Higher-Level Spell
     Slot. The damage increases by 1d6 for each spell slot level above 3.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    siphon: true
+    targeting: { creatures: 1, range: 5, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 3d6 }, type: necrotic }]
+      onHit: []
+      onMiss: []
+  lasting:
+    cost: [action]
+    siphon: true
+    targeting: { creatures: 1, range: 5, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 3d6 }, type: necrotic }]
+      onHit: []
+      onMiss: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d6
 - id: srd52:spell/wall-of-ice
   name: Wall of Ice
   level: 6
@@ -7319,33 +7525,44 @@
     minute, if the globe hasn’t already shattered, it explodes. Using a
     Higher-Level Spell Slot. The damage increases by 1d6 for each spell slot
     level above 6.
+  automation: full
+  # Held, the globe is its caster's to throw within the minute. shortcut: a held globe left unthrown doesn't burst on
+  # its own after the minute, nor is it given to another to throw.
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: sphere
-        radius: 60
-      range: 300
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 60 }, range: 300, side: enemy }
     resolution:
       kind: save
       ability: con
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 10d6
-          type: cold
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 10d6 }, type: cold }]
+      onSuccessDamage: half
+      onFail: []
+      onSuccess: []
+    shapes:
+      - name: Fire the globe
+      - name: Hold the globe
+        self: true
+        resolution:
+          kind: automatic
+          damage: []
+          effects:
+            - { kind: modifier, modifier: { kind: grantedAction, uses: 1 }, duration: { minutes: 1 } }
+  granted:
+    label: Throw the globe
+    cost: [action]
+    targeting: { area: { shape: sphere, radius: 60 }, range: 40, side: enemy }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 10d6 }, type: cold }]
       onSuccessDamage: half
       onFail: []
       onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d6
-  automation: partial
   scene:
     cost:
       - action
@@ -9702,7 +9919,30 @@
     space you can see within 30 feet of the space it left and make the attack
     against a creature within 5 feet of it. Using a Higher-Level Spell Slot. The
     damage increases by 1d12 for each spell slot level above 6.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    anchor: { moves: 60 }
+    targeting: { creatures: 1, range: 65, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 3d12, bonus: { add: [{ kind: spellMod }] } }, type: psychic }]
+      onHit: [{ kind: applyCondition, condition: frightened, duration: { until: yourNextTurnStart } }, { kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 10 } }]
+      onMiss: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 10 } }]
+  lasting:
+    cost: [bonusAction]
+    anchor: { moves: 30 }
+    targeting: { creatures: 1, range: 35, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 3d12, bonus: { add: [{ kind: spellMod }] } }, type: psychic }]
+      onHit: [{ kind: applyCondition, condition: frightened, duration: { until: yourNextTurnStart } }]
+      onMiss: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d12
 - id: srd52:spell/contingency
   name: Contingency
   level: 6
@@ -9872,7 +10112,36 @@
     flammable objects in the explosion that aren’t being worn or carried start
     burning. Using a Higher-Level Spell Slot. The base damage increases by 1d6
     for each spell slot level above 7.
-  automation: text
+  automation: full
+  # Its caster sets the bead off by ending the spell, its damage grown by a die each round since it formed.
+  # shortcut: it goes off only that way, not when Concentration breaks or the minute runs out, and no creature
+  # touches or throws the bead.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 20 }, range: 150, side: enemy }
+    resolution:
+      kind: automatic
+      damage: []
+      effects: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+  lasting:
+    label: Detonate
+    cost: []
+    oncePerTurn: true
+    dismisses: true
+    anchor: { moves: 0, reach: 20 }
+    growsBy: 1d6
+    targeting: { area: { shape: sphere, radius: 20 }, range: 150, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 12d6 }, type: fire }]
+      onSuccessDamage: half
+      onFail: []
+      onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d6
 - id: srd52:spell/detect-thoughts
   name: Detect Thoughts
   level: 2
@@ -10357,38 +10626,30 @@
     Light in a 20-foot radius and Dim Light for an additional 20 feet. Using a
     Higher-Level Spell Slot. The damage increases by 1d6 for each spell slot
     level above 2.
-  automation: partial
+  automation: full
+  # It rolls over low barriers and narrow pits as a creature walks, and no flammable object lies on a battle map.
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: sphere
-        radius: 5
-      range: 60
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 5 }, range: 60, side: enemy }
     resolution:
       kind: automatic
       damage: []
       effects:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 2d6
-                type: fire
-            save:
-              ability: dex
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+        - { kind: zone, zone: area, radius: 5, duration: { concentration: true, minutes: 1 } }
+        - { kind: zone, zone: light, radius: 20, dim: 20, bare: true, duration: { concentration: true, minutes: 1 } }
+    area:
+      when: turnEnd
+      whenMoved: true
+      moves: 30
+      moveWith: bonusAction
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 2d6 }, type: fire }]
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d6
@@ -11709,7 +11970,30 @@
     Action on your later turns, you can move the force up to 20 feet and repeat
     the attack against a creature within 5 feet of it. Using a Higher-Level
     Spell Slot. The damage increases by 1d8 for every slot level above 2.
-  automation: text
+  automation: full
+  activation:
+    cost: [bonusAction, slot]
+    anchor: { moves: 60 }
+    targeting: { creatures: 1, range: 65, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 1d8, bonus: { add: [{ kind: spellMod }] } }, type: force }]
+      onHit: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+      onMiss: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+  lasting:
+    cost: [bonusAction]
+    anchor: { moves: 20 }
+    targeting: { creatures: 1, range: 25, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 1d8, bonus: { add: [{ kind: spellMod }] } }, type: force }]
+      onHit: []
+      onMiss: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
 - id: srd52:spell/storm-of-vengeance
   name: Storm of Vengeance
   level: 9
@@ -11738,7 +12022,44 @@
     there takes 1d6 Cold damage. Until the spell ends, the area is Difficult
     Terrain and Heavily Obscured, ranged attacks with weapons are impossible
     there, and strong wind blows through the area.
-  automation: text
+  automation: full
+  # Its cloud covers the whole battle map. shortcut: its six bolts are the six creatures nearest its centre, and so
+  # are those the other turns strike, six at most; the strong wind changes nothing more than the rest does.
+  activation:
+    cost: [action]
+    targeting: { area: { shape: sphere, radius: 300 }, range: 300, side: enemy }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 2d6 }, type: thunder }]
+      onSuccessDamage: none
+      onFail:
+        - { kind: applyCondition, condition: deafened, duration: { concentration: true, minutes: 1 } }
+        - { kind: zone, zone: fog, radius: 300, duration: { concentration: true, minutes: 1 } }
+      onSuccess: []
+    area:
+      terrain: ground
+      deflects: miss
+      when: ownerTurnStart
+      targets: 6
+      schedule:
+        - kind: automatic
+          damage: [{ amount: { dice: 4d6 }, type: acid }]
+          effects: []
+        - kind: save
+          ability: dex
+          dc: { add: [{ kind: spellSaveDc }] }
+          damage: [{ amount: { dice: 10d6 }, type: lightning }]
+          onSuccessDamage: half
+          onFail: []
+          onSuccess: []
+        - kind: automatic
+          damage: [{ amount: { dice: 2d6 }, type: bludgeoning }]
+          effects: []
+        - kind: automatic
+          damage: [{ amount: { dice: 1d6 }, type: cold }]
+          effects: []
 - id: srd52:spell/symbol
   name: Symbol
   level: 7
@@ -12333,7 +12654,101 @@
     its space counts as Difficult Terrain for your enemies. Using a Higher-Level
     Spell Slot. The damage of the Clenched Fist increases by 2d8 and the damage
     of the Grasping Hand increases by 2d6 for each spell slot level above 5."
-  automation: text
+  automation: full
+  # Nothing in play attacks the hand, so it lasts the spell. shortcut: the Forceful Hand pushes 20 feet, as for a
+  # spellcasting modifier of 3, and doesn't follow; the Interposing Hand's Half Cover is +2 AC until its caster's next
+  # turn; the slot doesn't raise the later fist's or crush's damage.
+  activation:
+    cost: [action, slot]
+    anchor: { moves: 120 }
+    targeting: { creatures: 1, range: 125, side: enemy }
+    alsoSelf: [{ kind: modifier, modifier: { kind: spheres }, duration: { concentration: true, minutes: 1 } }]
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 5d8 }, type: force }]
+      onHit: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+      onMiss: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+    shapes:
+      - name: Clenched Fist
+      - name: Forceful Hand
+        resolution:
+          kind: save
+          ability: str
+          dc: { add: [{ kind: spellSaveDc }] }
+          onFail:
+            - { kind: forcedMove, feet: 20, direction: away, maxSize: huge }
+            - { kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }
+          onSuccess: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+      - name: Grasping Hand
+        resolution:
+          kind: save
+          ability: dex
+          dc: { add: [{ kind: spellSaveDc }] }
+          onFail:
+            - kind: applyCondition
+              condition: grappled
+              maxSize: huge
+              duration: { concentration: true, minutes: 1 }
+              escape: { ability: str, skill: athletics }
+            - { kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }
+          onSuccess: [{ kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }]
+      - name: Interposing Hand
+        self: true
+        resolution:
+          kind: automatic
+          damage: []
+          effects:
+            - { kind: modifier, modifier: { kind: bonus, to: ac, amount: { bonus: { base: 2 } } }, duration: { until: yourNextTurnStart } }
+            - { kind: zone, zone: area, radius: 0, duration: { concentration: true, minutes: 1 } }
+  upcast:
+    perSlotLevel:
+      addDice: 2d8
+  spheres:
+    count: 10
+    actions:
+      - label: Clenched Fist
+        cost: [bonusAction]
+        anchor: { moves: 60 }
+        targeting: { creatures: 1, range: 65, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: spell }
+          damage: [{ amount: { dice: 5d8 }, type: force }]
+          onHit: []
+          onMiss: []
+      - label: Forceful Hand
+        cost: [bonusAction]
+        anchor: { moves: 60 }
+        targeting: { creatures: 1, range: 65, side: enemy }
+        resolution:
+          kind: save
+          ability: str
+          dc: { add: [{ kind: spellSaveDc }] }
+          onFail: [{ kind: forcedMove, feet: 20, direction: away, maxSize: huge }]
+          onSuccess: []
+      - label: Grasping Hand
+        cost: [bonusAction]
+        anchor: { moves: 60 }
+        targeting: { creatures: 1, range: 65, side: enemy }
+        resolution:
+          kind: save
+          ability: dex
+          dc: { add: [{ kind: spellSaveDc }] }
+          onFail:
+            - kind: applyCondition
+              condition: grappled
+              maxSize: huge
+              duration: { concentration: true, minutes: 1 }
+              escape: { ability: str, skill: athletics }
+          onSuccess: []
+      - label: Crush
+        cost: [bonusAction]
+        targeting: { creatures: 1, range: 120, side: enemy, afflicted: Arcane Hand }
+        resolution:
+          kind: automatic
+          damage: [{ amount: { dice: 4d6, bonus: { add: [{ kind: spellMod }] } }, type: bludgeoning }]
+          effects: []
 - id: srd52:spell/augury
   name: Augury
   level: 2
@@ -15040,7 +15455,30 @@
     up to 30 feet in any direction within the spell’s range. You can exert fine
     control on objects with your telekinetic grip, such as manipulating a simple
     tool,
-  automation: text
+  automation: full
+  # A creature is moved straight away from its caster, not lifted; no object on a battle map is worth moving.
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: str
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - { kind: forcedMove, feet: 30, direction: away, maxSize: huge }
+        - { kind: applyCondition, condition: restrained, duration: { until: yourNextTurnEnd } }
+      onSuccess: []
+  lasting:
+    cost: [action]
+    targeting: { creatures: 1, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: str
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - { kind: forcedMove, feet: 30, direction: away, maxSize: huge }
+        - { kind: applyCondition, condition: restrained, duration: { until: yourNextTurnEnd } }
+      onSuccess: []
 - id: srd52:spell/thunderwave
   name: Thunderwave
   level: 1

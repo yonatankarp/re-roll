@@ -2910,8 +2910,12 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
             sourceId === `lasting:${spellId}`),
       )?.level;
       const step = spell.upcast?.perSlotLevel;
+      // An upcast for the first damage only, as Witch Bolt's, leaves the later damage alone.
       const scaled =
-        step && cast !== undefined && cast > spell.level
+        step &&
+        !("initial" in step && step.initial) &&
+        cast !== undefined &&
+        cast > spell.level
           ? scaleActivation(lasting, step, cast - spell.level)
           : lasting;
       // Delayed Blast Fireball's bead: a die more for each round since it formed.
@@ -4472,7 +4476,13 @@ export function exhaustionOf(actor: Actor): number {
     6,
     actor.activeEffects.reduce(
       (sum, { modifier }) =>
-        modifier.kind === "exhausted" ? sum + modifier.levels : sum,
+        modifier.kind === "exhausted"
+          ? sum +
+            Math.min(
+              modifier.levels,
+              Math.max(0, (modifier.upTo ?? 6) - sum),
+            )
+          : sum,
       actor.exhaustion,
     ),
   );

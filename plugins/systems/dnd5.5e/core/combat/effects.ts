@@ -3143,7 +3143,9 @@ export function leafEvents(
             ? pushTo(
                 effect.direction === "random"
                   ? randomFrom(target, context.dice.roll(4))
-                  : caster.position,
+                  : effect.fromObject
+                    ? (objectAt(caster, sourceId) ?? caster.position)
+                    : caster.position,
                 target,
                 brace.feet,
                 context.state,
@@ -4075,6 +4077,44 @@ function fissureEvents(
     );
   }
   return events;
+}
+
+// An area that acts on those in it as it appears, as Conjure Celestial's light: its tick on each creature it covers.
+function appearFrames(
+  action: KnownAction,
+  actor: Actor,
+  events: readonly SystemEvent[],
+  context: Context,
+): Frame[] {
+  if (
+    !action.activation.area?.appears &&
+    !action.activation.areas?.some((area) => area.appears)
+  ) {
+    return [];
+  }
+  const state = events.reduce(applyDndEvent, context.state);
+  const far = { x: -1000, y: -1000 };
+  return zonesOf(state, context)
+    .filter(
+      (zone) =>
+        zone.owner === actor.id &&
+        zone.sourceId === spellSource(action) &&
+        zone.area?.appears,
+    )
+    .flatMap((zone) => movedFrames(zone, far, { ...context, state }));
+}
+
+// Where a caster's spell object stands, for an action of that spell (combat/anchor.ts), as Grasping Vine's vine.
+function objectAt(caster: Actor, sourceId: string): Square | null {
+  const source = sourceId.startsWith("lasting:")
+    ? `spell:${sourceId.slice("lasting:".length)}`
+    : sourceId;
+  for (const effect of caster.activeEffects) {
+    if (effect.sourceId === source && effect.modifier.kind === "zone") {
+      return effect.modifier.at;
+    }
+  }
+  return null;
 }
 
 // Half the damage an action deals comes back to its user as Hit Points, as Vampiric Touch's.
@@ -5320,6 +5360,7 @@ export function resolveAction(
           slotLevel,
         ),
       );
+      frames.push(...appearFrames(action, actor, events, context));
       const element = zoneTypeFrame(
         resolution.effects,
         spellSource(action),
