@@ -745,10 +745,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("steadySpeed") }),
   // Difficult Terrain costs it no extra movement, and it escapes a grapple with 5 feet of movement, as with Freedom of
   // Movement.
-  // With `terrainOnly` it's only the Difficult Terrain, as Speedy's Dash over it.
+  // With `terrainOnly` it's only the Difficult Terrain, as Speedy's Dash over it, and with `ice` only Difficult
+  // Terrain of ice or snow, as Boots of the Winterlands' Winter Strider.
   z.strictObject({
     kind: z.literal("unhindered"),
     terrainOnly: z.literal(true).optional(),
+    ice: z.literal(true).optional(),
   }),
   // Once on each of its turns it can jump up to `feet` for only `movement` feet of its movement, as with the Jump spell
   // or Boots of Striding and Springing (stats.ts jumpActions).
@@ -1007,6 +1009,11 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     count: z.number().int().min(1),
     die: z.number().int().min(2),
   }),
+  // Levels of Exhaustion that last only while the effect does, as Sickening Radiance's (stats.ts exhaustionOf).
+  z.strictObject({
+    kind: z.literal("exhausted"),
+    levels: z.number().int().min(1).max(6),
+  }),
 ]);
 export type Modifier = z.infer<typeof ModifierSchema>;
 
@@ -1044,6 +1051,8 @@ export const ZoneKindSchema = z.enum([
   "shade",
   // An illusion: it hides what's in it from whoever hasn't seen through it, as Silent Image's (core/zones.ts).
   "image",
+  // Lightly Obscured, as Web's strands: seen only dimly however bright (core/sight.ts seeing).
+  "haze",
 ]);
 export type ZoneKind = z.infer<typeof ZoneKindSchema>;
 
@@ -1202,6 +1211,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
         ability: AbilitySchema,
         skill: SkillSchema.optional(),
         dc: z.number().int().min(1).optional(),
+        free: z.literal(true).optional(), // the action frees it with no check, as pulling free of Transmute Rock's mud
       })
       .optional(),
     failExhaustion: z.literal(true).optional(), // each failed repeat save gives a level of Exhaustion
@@ -1431,6 +1441,19 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     dc: z.number().int().min(1).optional(),
     // an image of its caster that hides nothing, whose eyes the caster sees through, as Invoke Duplicity's
     decoy: z.literal(true).optional(),
+    // it does what its activation's `areas` entry of this index says instead of its `area`
+    part: z.number().int().min(0).optional(),
+    // its shape when not round: "ring" the squares `radius` away (a wall's own space, as Blade Barrier's ring), "line"
+    // a line `radius` long and `width` wide from its caster toward the point aimed at, as Wall of Sand or Gust of Wind
+    shape: z.enum(["ring", "line"]).optional(),
+    width: z.number().int().min(5).optional(),
+    // this radius instead while its caster has this feature, as Aquatic Affinity's 10-foot Wrath of the Sea
+    wider: z
+      .strictObject({
+        feature: ContentIdSchema,
+        radius: z.number().int().min(5),
+      })
+      .optional(),
   }),
   // The target takes the shape of the weakest Beast its level or Challenge Rating allows, with that form's Hit
   // Points as Temporary Hit Points, until they run out or the spell ends, as Polymorph does on a foe. A caster
@@ -2134,6 +2157,17 @@ export const ResolutionSchema = z.discriminatedUnion("kind", [
     // the damage lands only on a target that ends this near the caster once its effects are done, as Lightning Lure's
     damageWithin: z.number().int().min(5).optional(),
     burst: BurstSchema.optional(), // a save round each target once its own is done, as Detonate's explosion
+    // Fissures open under `count` of the foes caught (the caster's choice: the healthiest), each making the same save
+    // again or falling `depth` feet into one, as Earthquake's (combat/effects.ts)
+    fissure: z
+      .strictObject({
+        count: z.union([z.number().int().min(1), DiceSchema]),
+        depth: z.union([
+          z.number().int().min(10),
+          z.strictObject({ dice: DiceSchema, times: z.number().int().min(1) }),
+        ]),
+      })
+      .optional(),
   }),
 ]);
 export type Resolution = z.infer<typeof ResolutionSchema>;
@@ -2170,10 +2204,43 @@ export const AreaEffectSchema = z.strictObject({
   // while a creature has a condition from it, it acts only on that one, with this as that creature's turns start,
   // as Conjure Elemental's spirit holding the one it Restrained
   holding: ResolutionSchema.optional(),
-  // a spell cast in it fails and is wasted unless the caster makes this save, as a haunting revenant's Haunted Zone
+  // a spell cast in it fails and is wasted unless the caster makes this save, as a haunting revenant's Haunted Zone,
+  // against the zone's caster's spell save DC as cast when `dc` is left out, as Spellfire Storm's
   foilsSpells: z
-    .strictObject({ ability: AbilitySchema, dc: z.number().int().min(1) })
+    .strictObject({
+      ability: AbilitySchema,
+      dc: z.number().int().min(1).optional(),
+    })
     .optional(),
+  // Difficult Terrain on the ground, which a flyer crosses freely, as Grease's or Entangle's; "ice" is ice or snow, as
+  // Sleet Storm's, which Boots of the Winterlands ignore (core/sight.ts difficultSquares)
+  terrain: z.enum(["ground", "ice"]).optional(),
+  // each foot moved in it costs this many feet, as Plant Growth's 4 (core/combat/queries.ts groundFor)
+  cost: z.number().int().min(3).max(4).optional(),
+  // each foot moved in it toward its owner costs 2, as against Gust of Wind's blast
+  headwind: z.literal(true).optional(),
+  // modifiers those it affects have while in it, as Grasping Mist's Speed 5 feet lower (core/zones.ts)
+  places: z.array(ModifierSchema).min(1).optional(),
+  // it acts this many times in all (each creature it acts on counts one), then ends, as Cordon of Arrows' four
+  // pieces of ammunition, with `usesPerSlot` more for each slot level above the spell's
+  uses: z.number().int().min(1).optional(),
+  usesPerSlot: z.number().int().min(1).optional(),
+  // it burns away once fire damage is dealt to a creature in it, dealing this to each creature in it, as Web's
+  // flammable strands (combat/areas.ts)
+  burns: z.array(DamageSchema).min(1).optional(),
+  // its squares give cover to a creature behind them, as Blade Barrier's Three-Quarters Cover (core/sight.ts)
+  cover: z.enum(["half", "threeQuarters"]).optional(),
+  // ranged weapon attacks that pass into, out of or through it miss, as past Wind Wall, or have Disadvantage, as
+  // through Wall of Water (combat/attack.ts)
+  deflects: z.enum(["miss", "disadvantage"]).optional(),
+  // its resolution acts only on creatures flying in it, as Control Winds' downdraft, or with `ground` only on those on
+  // the ground, as Earthquake's tremor
+  flying: z.literal(true).optional(),
+  ground: z.literal(true).optional(),
+  // a fall that ends in it deals half damage, as in Control Winds' updraft (combat/falling.ts)
+  softFalls: z.literal(true).optional(),
+  // no fog, smoke or other gas hides a square in it, as Warding Wind hedges them out (core/zones.ts obscuring)
+  clearsFog: z.literal(true).optional(),
   targets: z.number().int().min(1).optional(),
   grants: z.array(ModifierSchema).min(1).optional(),
   noHealing: z.literal(true).optional(), // no Hit Points regained in it, as Life Suppression
@@ -2262,7 +2329,17 @@ export const TargetingSchema = z.union([
   }),
   z.strictObject({
     area: z.strictObject({
-      shape: z.enum(["sphere", "cone", "cube", "line", "emanation"]),
+      // "wall": a line `radius` long across the way to the point aimed at, centred there, as Wall of Sand's, and
+      // "ring" the squares `radius` from it, a ring wall's own space, as Wall of Fire's
+      shape: z.enum([
+        "sphere",
+        "cone",
+        "cube",
+        "line",
+        "emanation",
+        "wall",
+        "ring",
+      ]),
       radius: z.number(),
       width: z.number().int().min(10).optional(), // a line this many feet wide, as Festering Blast's 10, not 5
     }),
@@ -2561,6 +2638,9 @@ export const ActivationSchema = z.strictObject({
   targeting: TargetingSchema,
   resolution: ResolutionSchema,
   area: AreaEffectSchema.optional(), // what the zone its resolution leaves does later
+  // what its zones with a `part` do instead, by index, so one spell leaves areas that act differently, as Hunger of
+  // Hadar's cold at turn start and acid at turn end
+  areas: z.array(AreaEffectSchema).min(1).optional(),
   // Shapes the caster picks between as it casts, as Forcecage's cage or box (combat/actions.ts): the first is the
   // resolution as written, and another's `effects` take the place of an automatic resolution's effects.
   shapes: z
@@ -2604,6 +2684,13 @@ export type SaveFrom = z.infer<typeof SaveFromSchema>;
 const WhileBloodied = z.literal(true).optional();
 
 export const PassiveSchema = z.discriminatedUnion("kind", [
+  // What the bearer's casting of one of these spells adds to the area it leaves, as Grasping Mist's lower Speed for
+  // foes in its Fog Cloud (combat/effects.ts).
+  z.strictObject({
+    kind: z.literal("areaRider"),
+    spells: z.array(ContentIdSchema).min(1),
+    area: AreaEffectSchema,
+  }),
   z.strictObject({
     kind: z.literal("modifier"),
     modifier: ModifierSchema,

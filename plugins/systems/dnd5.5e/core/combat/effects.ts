@@ -64,6 +64,7 @@ import {
   type Duration,
   type Formula,
   ItemSchema,
+  type AreaEffect,
   type LeafEffect,
   LeafEffectSchema,
   type Modifier,
@@ -111,6 +112,7 @@ import {
   distanceFeet,
   inArea,
   parseSquare,
+  lineFrom,
   pushTo,
   type Square,
   squareKey,
@@ -121,6 +123,8 @@ import {
   inZone,
   placedFlag,
   sealed,
+  squaresOf,
+  type Zone,
   zoneImmune,
   zoneModifiers,
   zonesOf,
@@ -2791,6 +2795,7 @@ export function leafEvents(
                         ? { skill: effect.escape.skill }
                         : {}),
                       dc: effect.escape.dc ?? save?.dc ?? 10,
+                      ...(effect.escape.free ? { free: true as const } : {}),
                     },
                   }
                 : {}),
@@ -3791,12 +3796,6 @@ function zoneEvents(
     }
   }
   const above = Math.max(0, (slotLevel ?? 0) - (action.spellLevel ?? 0));
-  const printed = action.activation.area;
-  // A higher slot widens what the area shields, as Globe of Invulnerability's.
-  const area =
-    printed?.shieldGrows && printed.spellShield !== undefined
-      ? { ...printed, spellShield: Math.min(9, printed.spellShield + above) }
-      : printed;
   // Its saves' DCs are fixed as cast.
   const fixed = (printed: Resolution | undefined): Resolution | undefined =>
     printed?.kind === "save"
@@ -3810,22 +3809,101 @@ function zoneEvents(
       Extract<LeafEffect, { kind: "zone" }> | undefined
   )?.choose;
   const type = element ? leastResisted(element, actor, context) : undefined;
-  const resolution = retyped(fixed(area?.resolution), type);
-  const holding = retyped(fixed(area?.holding), type);
-  // A wall's layers go on the wall alone, their DCs fixed too.
-  const { layers, ...kept } = area ?? {};
-  const fixedLayers = layers?.flatMap((layer) => fixed(layer) ?? []);
+  // An area as it goes on the map: its DCs fixed, its element picked, and widened by a higher slot.
+  // What the caster's features add to this spell's area, as Grasping Mist's to Fog Cloud.
+  const spellId = spellOfSource(action.id);
+  const riders = stats.passives.flatMap((passive) =>
+    passive.kind === "areaRider" &&
+    spellId !== null &&
+    passive.spells.includes(spellId)
+      ? [passive.area]
+      : [],
+  );
+  const settle = (written: AreaEffect | undefined) => {
+    const printed =
+      riders.length > 0
+        ? riders.reduce<AreaEffect>((sum, rider) => {
+            const places = [...(sum.places ?? []), ...(rider.places ?? [])];
+            return {
+              ...sum,
+              ...rider,
+              ...(places.length > 0 ? { places } : {}),
+            };
+          }, written ?? {})
+        : written;
+    // A higher slot widens what the area shields, as Globe of Invulnerability's.
+    const area =
+      printed?.shieldGrows && printed.spellShield !== undefined
+        ? { ...printed, spellShield: Math.min(9, printed.spellShield + above) }
+        : printed;
+    const resolution = retyped(fixed(area?.resolution), type);
+    const holding = retyped(fixed(area?.holding), type);
+    // A wall's layers go on the wall alone, their DCs fixed too.
+    const { layers, usesPerSlot, ...kept } = area ?? {};
+    const fixedLayers = layers?.flatMap((layer) => fixed(layer) ?? []);
+    const uses =
+      kept.uses === undefined
+        ? undefined
+        : kept.uses + (usesPerSlot ?? 0) * above;
+    return {
+      area: area
+        ? {
+            ...kept,
+            ...(resolution ? { resolution } : {}),
+            ...(holding ? { holding } : {}),
+            ...(kept.foilsSpells
+              ? {
+                  foilsSpells: {
+                    ...kept.foilsSpells,
+                    dc: kept.foilsSpells.dc ?? spellSaveDc(stats),
+                  },
+                }
+              : {}),
+          }
+        : undefined,
+      layers: fixedLayers,
+      uses,
+    };
+  };
   for (const effect of effects) {
     if (effect.kind !== "zone") continue;
-    // A higher slot widens it, as Fog Cloud's 20 feet a level.
-    const radius = effect.radius + (effect.perSlot ?? 0) * above;
-    const key = `${effect.zone}|${String(radius)}`;
+    // A higher slot widens it, as Fog Cloud's 20 feet a level, and a feature can, as Aquatic Affinity.
+    const widened =
+      effect.wider && stats.features.includes(effect.wider.feature)
+        ? effect.wider.radius
+        : effect.radius;
+    const radius = widened + (effect.perSlot ?? 0) * above;
+    const key = `${effect.zone}|${String(radius)}|${String(effect.part ?? "")}`;
     if (placed.has(key)) continue;
     placed.add(key);
     if (effect.zone === "darkness") {
       events.push(...snuffedLights(at, radius, context));
     }
     const centre = effect.follows ? (actor.position ?? at) : at;
+    // A line runs out from its caster, or, cast farther off, across the way to where it's aimed.
+    const line =
+      effect.shape === "line" && actor.position
+        ? lineFrom(
+            actor.position,
+            at,
+            radius,
+            !effect.follows &&
+              "range" in targeting &&
+              targeting.range !== "self",
+          )
+        : null;
+    const origin = line?.at ?? centre;
+    const shaped: Zone = {
+      zone: effect.zone,
+      at: origin,
+      radius,
+      owner: actor.id,
+      sourceId: spellSource(action),
+      follows: effect.follows === true,
+      shape: effect.shape,
+      dir: line?.dir,
+      width: effect.width,
+    };
     // Time Stop ends once an area its caster leaves during it covers another creature.
     events.push(
       ...timeStopEnds(
@@ -3834,7 +3912,7 @@ function zoneEvents(
           (other) =>
             other.position !== null &&
             !isDead(other) &&
-            distanceFeet(other.position, centre) <= radius,
+            inZone(shaped, other.position),
         ),
       ),
     );
@@ -3843,9 +3921,33 @@ function zoneEvents(
     }
     const wall =
       effect.zone === "wall"
-        ? wallRing(centre, radius, context, effect.walls !== "sight")
+        ? wallRing(
+            shaped,
+            context,
+            effect.walls !== "sight" && effect.shape !== "line",
+          )
         : null;
+    const { area, layers, uses } = settle(
+      effect.part === undefined
+        ? action.activation.area
+        : action.activation.areas?.[effect.part],
+    );
+    // A new cast starts its counts afresh: what an earlier one dealt or used up.
+    const counts = [
+      ...(uses !== undefined && !effect.bare ? [":used"] : []),
+      ...(area?.maxDamage !== undefined && !effect.bare ? [":dealt"] : []),
+    ].flatMap((suffix) =>
+      actor.resourcesSpent[`${spellSource(action)}${suffix}`]
+        ? [
+            dndEvent(`${NS}:resourceRestored`, {
+              actor: actor.id,
+              resource: `${spellSource(action)}${suffix}`,
+            }),
+          ]
+        : [],
+    );
     events.push(
+      ...counts,
       ...(wall?.pushed ?? []),
       ...(wall && effect.escape
         ? wallEscapes(
@@ -3866,22 +3968,14 @@ function zoneEvents(
           modifier: {
             kind: "zone",
             zone: effect.zone,
-            at: centre,
+            at: origin,
             radius,
             ...(effect.damage ? { damage: effect.damage } : {}),
             ...(effect.follows ? { follows: true as const } : {}),
-            ...(area && !effect.bare
-              ? {
-                  area: {
-                    ...kept,
-                    ...(resolution ? { resolution } : {}),
-                    ...(holding ? { holding } : {}),
-                  },
-                }
-              : {}),
+            ...(area && !effect.bare ? { area } : {}),
             ...(wall ? { blocks: wall.squares } : {}),
             ...(wall && effect.walls ? { walls: effect.walls } : {}),
-            ...(wall && fixedLayers ? { layers: fixedLayers } : {}),
+            ...(wall && layers ? { layers } : {}),
             ...(effect.dim ? { dim: effect.dim } : {}),
             ...(effect.ownerSees ? { ownerSees: true as const } : {}),
             ...(effect.reveals ? { reveals: true as const } : {}),
@@ -3889,12 +3983,82 @@ function zoneEvents(
               ? { dc: effect.dc ?? spellSaveDc(stats) }
               : {}),
             ...(effect.decoy ? { decoy: true as const } : {}),
+            ...(effect.part === undefined ? {} : { part: effect.part }),
+            ...(effect.shape ? { shape: effect.shape } : {}),
+            ...(line ? { dir: line.dir } : {}),
+            ...(effect.width ? { width: effect.width } : {}),
+            ...(uses === undefined || effect.bare ? {} : { uses }),
             name: action.name,
           },
           ends: effectEnds(effect.duration),
           ...lastsFor(effect.duration, actor, actor, context.state),
         },
       }),
+    );
+  }
+  return events;
+}
+
+// Fissures opening under the healthiest foes caught, as Earthquake's: each saves again or falls in, taking the fall
+// and spending its next turn's movement climbing out.
+// shortcut: a fissure is under one creature, not a line across the area, and climbing out takes one turn's movement.
+function fissureEvents(
+  fissure: NonNullable<Extract<Resolution, { kind: "save" }>["fissure"]>,
+  ability: Ability,
+  dc: number,
+  action: KnownAction,
+  actor: Actor,
+  targets: readonly Actor[],
+  frames: Frame[],
+  context: Context,
+): SystemEvent[] {
+  const roll = (dice: string): number => {
+    const [count, sides] = dice.split("d").map(Number);
+    let total = 0;
+    for (let die = 0; die < (count ?? 0); die += 1) {
+      total += context.dice.roll(sides ?? 1);
+    }
+    return total;
+  };
+  const count =
+    typeof fissure.count === "number" ? fissure.count : roll(fissure.count);
+  const depth =
+    typeof fissure.depth === "number"
+      ? fissure.depth
+      : roll(fissure.depth.dice) * fissure.depth.times;
+  const foes = targets
+    .flatMap((item) => {
+      const now = context.state.actors[item.id];
+      return now && !isDead(now) && now.side !== actor.side ? [now] : [];
+    })
+    .sort((a, b) => b.hp - a.hp)
+    .slice(0, count);
+  const events: SystemEvent[] = [];
+  for (const foe of foes) {
+    const save = rollSave(
+      foe,
+      ability,
+      dc,
+      context,
+      action.spellLevel !== null,
+    );
+    events.push(...save.events);
+    if (save.saved) continue;
+    frames.push(frame("fall", { actors: [foe.id], feet: depth }));
+    events.push(
+      ...leafEvents(
+        [
+          LeafEffectSchema.parse({
+            kind: "modifier",
+            modifier: { kind: "actionLimit", speed: "none" },
+            duration: { until: "itsNextTurnEnd" },
+          }),
+        ],
+        spellSource(action),
+        actor,
+        foe,
+        context,
+      ),
     );
   }
   return events;
@@ -4213,17 +4377,18 @@ function wallEscapes(
   return events;
 }
 
-// A wall's squares: the edge of the area round `centre`. A creature standing on one that stops walking is pushed one
-// square in, and where there's no room it stays, leaving a gap; one that only stops sight, as fire, it stands in.
+// A wall's squares: the edge of the area round its centre, or the whole of a ring or a line. A creature standing on
+// one that stops walking is pushed one square in, and where there's no room it stays, leaving a gap; one that only
+// stops sight, as fire, it stands in.
 function wallRing(
-  centre: Square,
-  radius: number,
+  zone: Zone,
   context: Context,
   pushes: boolean,
 ): { readonly squares: string[]; readonly pushed: SystemEvent[] } {
   const { state } = context;
   const grid = state.combat?.grid;
   if (!grid) return { squares: [], pushed: [] };
+  const centre = zone.at;
   const taken = new Map(
     Object.values(state.actors).flatMap((item) =>
       item.position && !isDead(item)
@@ -4237,30 +4402,31 @@ function wallRing(
   ]);
   const squares: string[] = [];
   const pushed: SystemEvent[] = [];
-  const reach = Math.floor(radius / 5);
-  for (let x = centre.x - reach; x <= centre.x + reach; x += 1) {
-    for (let y = centre.y - reach; y <= centre.y + reach; y += 1) {
-      const square = { x, y };
-      const outside = x < 0 || y < 0 || x >= grid.width || y >= grid.height;
-      if (outside || distanceFeet(centre, square) !== radius) continue;
-      const key = squareKey(square);
-      if (walls.has(key)) continue;
-      const standing = pushes ? taken.get(key) : undefined;
-      if (standing) {
-        const inward = {
-          x: x - Math.sign(x - centre.x),
-          y: y - Math.sign(y - centre.y),
-        };
-        const inwardKey = squareKey(inward);
-        if (taken.has(inwardKey) || walls.has(inwardKey)) continue;
-        taken.delete(key);
-        taken.set(inwardKey, standing);
-        pushed.push(
-          dndEvent(`${NS}:moved`, { actor: standing.id, to: inward, feet: 0 }),
-        );
-      }
-      squares.push(key);
+  const onWall = (square: Square): boolean =>
+    zone.shape
+      ? inZone(zone, square)
+      : distanceFeet(centre, square) === zone.radius;
+  for (const key of squaresOf(
+    { ...zone, shape: zone.shape ?? "ring" },
+    state,
+  )) {
+    const square = parseSquare(key);
+    if (!square || !onWall(square) || walls.has(key)) continue;
+    const standing = pushes ? taken.get(key) : undefined;
+    if (standing) {
+      const inward = {
+        x: square.x - Math.sign(square.x - centre.x),
+        y: square.y - Math.sign(square.y - centre.y),
+      };
+      const inwardKey = squareKey(inward);
+      if (taken.has(inwardKey) || walls.has(inwardKey)) continue;
+      taken.delete(key);
+      taken.set(inwardKey, standing);
+      pushed.push(
+        dndEvent(`${NS}:moved`, { actor: standing.id, to: inward, feet: 0 }),
+      );
     }
+    squares.push(key);
   }
   return { squares, pushed };
 }
@@ -4685,7 +4851,12 @@ export function resolveTargets(
     if (aim && actor.position) {
       // Total cover from where it spreads keeps a creature out of it.
       const centre =
-        shape === "sphere" || shape === "cube" ? aim : actor.position;
+        shape === "sphere" ||
+        shape === "cube" ||
+        shape === "wall" ||
+        shape === "ring"
+          ? aim
+          : actor.position;
       // Creatures of the caster's choice in it are only its side, as Conjure Barrage's.
       const chosen = targeting.choice
         ? new Set(side.map((item) => item.id))
@@ -5766,6 +5937,20 @@ export function resolveAction(
             ),
           );
         }
+      }
+      if (resolution.fissure) {
+        events.push(
+          ...fissureEvents(
+            resolution.fissure,
+            resolution.ability,
+            dc,
+            action,
+            actor,
+            targets,
+            frames,
+            { ...context, state: events.reduce(applyDndEvent, context.state) },
+          ),
+        );
       }
       break;
     }

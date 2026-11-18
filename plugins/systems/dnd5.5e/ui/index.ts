@@ -30,7 +30,7 @@ import { creation, featureInPlay } from "./creation.ts";
 import { sheetCreation } from "./creation-sheet.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
 import type { AreaView, BoardExtra, FightMap } from "./board-data.ts";
-import { believes, zonesOf } from "../core/zones.ts";
+import { believes, squaresOf, zonesOf } from "../core/zones.ts";
 import { dndCue } from "./cues.ts";
 import { GLOSSARY_TERMS } from "../core/glossary.ts";
 import { playing } from "../core/variant-rules.ts";
@@ -416,7 +416,7 @@ function areaViews(state: DndState, access: ContentAccess): AreaView[] {
     }
     return [
       {
-        key: `${zone.owner}|${zone.sourceId}|${zone.zone}|${String(zone.radius)}`,
+        key: `${zone.owner}|${zone.sourceId}|${zone.zone}|${String(zone.radius)}|${String(zone.part ?? "")}`,
         kind: zone.zone,
         x: zone.at.x,
         y: zone.at.y,
@@ -429,6 +429,9 @@ function areaViews(state: DndState, access: ContentAccess): AreaView[] {
         foe,
         ...(zone.blocks ? { blocks: [...zone.blocks] } : {}),
         ...(zone.walls ? { walls: zone.walls } : {}),
+        ...(zone.shape && !zone.blocks
+          ? { cells: [...squaresOf(zone, state)] }
+          : {}),
       },
     ];
   });
