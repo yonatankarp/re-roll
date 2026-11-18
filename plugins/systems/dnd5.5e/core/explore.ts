@@ -206,7 +206,9 @@ export function toolProficiencies(
       ...Object.keys(stats.classLevels).flatMap(
         (id) => lookup(access, ClassSchema, id).tools ?? [],
       ),
-      ...(background ? [toolByName(background.tool, access) ?? []].flat() : []),
+      ...(background?.tool
+        ? [toolByName(background.tool, access) ?? []].flat()
+        : []),
       ...stats.passives.flatMap((passive) =>
         passive.kind === "toolProficiency" ? passive.tools : [],
       ),

@@ -261,7 +261,9 @@ function recommendedBackground(classDef: ClassDef, access: ContentAccess) {
       0,
     );
   let best: { id: string; worth: number } | null = null;
+  // An older book's background, which lists all six abilities, is left for the player to pick.
   for (const item of namedContent(access, "background", BackgroundSchema)) {
+    if (!item.feat || item.abilities.length !== 3) continue;
     const value = worth(item.abilities, item.feat);
     if (!best || value > best.worth) best = { id: item.id, worth: value };
   }

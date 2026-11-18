@@ -357,7 +357,7 @@ export function swappable(
   });
   const background = lookup(access, BackgroundSchema, build.backgroundId);
   const feats = new Set([
-    background.feat,
+    ...[background.feat ?? []].flat(),
     ...build.levels.flatMap((entry) =>
       entry.answers.flatMap((answer) =>
         answer.kind === "feats" ? answer.values : [],

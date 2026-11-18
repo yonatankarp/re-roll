@@ -361,7 +361,7 @@ export const dnd55e = defineSystem<DndState>({
     backgrounds: contentKind({
       idPrefix: "background",
       schema: BackgroundSchema,
-      references: (item) => [item.feat],
+      references: (item) => (item.feat ? [item.feat] : []),
     }),
     feats: contentKind({
       idPrefix: "feat",

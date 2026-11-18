@@ -1765,7 +1765,9 @@ describe("parsing a character book page", () => {
         ClassSchema.parse(item.entry).levels.flatMap((level) => level.grants),
       ),
       ...species.flatMap((item) => SpeciesSchema.parse(item.entry).traits),
-      ...backgrounds.map((item) => BackgroundSchema.parse(item.entry).feat),
+      ...backgrounds.flatMap(
+        (item) => BackgroundSchema.parse(item.entry).feat ?? [],
+      ),
     ];
     expect(references.length).toBeGreaterThan(5);
     expect(references.filter((id) => !ids.has(id))).toEqual([]);
