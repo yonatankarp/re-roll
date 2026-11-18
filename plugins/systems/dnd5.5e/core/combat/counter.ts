@@ -71,6 +71,7 @@ function counterOf(
   level: number,
   alone: boolean,
   context: Context,
+  teleport = false, // a teleport that isn't a spell, which only Magic-User's Nemesis foils
 ): KnownAction | null {
   if (!foe.budget.reaction || isDown(foe)) return null;
   if (hasCondition(foe, ...INCAPACITATING)) return null;
@@ -84,12 +85,16 @@ function counterOf(
       const limits = outright(action);
       return (
         trigger?.spellCast === true &&
+        (!teleport || trigger.teleports === true) &&
         "range" in targeting &&
         distanceFeet(foe.position, caster.position) <=
           rangeFeet(targeting.range) &&
         canAfford(action, foe, stats) &&
         (limits?.maxLevel === undefined || level <= limits.maxLevel) &&
-        (!limits?.gains || (alone && level > 0)) &&
+        (!limits?.gains ||
+          (alone &&
+            level > 0 &&
+            roomFor(foe, action, limits, level, context))) &&
         (limits?.levels === undefined ||
           limits.gains === true ||
           (level > 0 &&
@@ -110,7 +115,12 @@ export function counterWindow(
   slotLevel: number | undefined,
   context: Context,
 ): Frame | null {
-  if (!isSpell(action, caster, context)) return null;
+  const { resolution } = action.activation;
+  const teleport =
+    !isSpell(action, caster, context) &&
+    resolution.kind === "automatic" &&
+    resolution.effects.some((effect) => effect.kind === "teleport");
+  if (!isSpell(action, caster, context) && !teleport) return null;
   const level =
     slotLevel ??
     action.spellLevel ??
@@ -119,7 +129,7 @@ export function counterWindow(
   for (const foe of enemies(context.state, caster)) {
     const aimed = typeof cast.target === "string" ? [cast.target] : cast.target;
     const alone = aimed.length > 0 && aimed.every((id) => id === foe.id);
-    const counter = counterOf(foe, caster, level, alone, context);
+    const counter = counterOf(foe, caster, level, alone, context, teleport);
     if (!counter) continue;
     const options = [
       { id: counter.id, label: `${counter.name} (${caster.name})` },
@@ -198,7 +208,9 @@ export function runCounterspell(
     resolution.kind === "save"
       ? evaluateFormula(resolution.dc, deriveStats(counterer, context))
       : 0;
-  const save = rollSave(caster, "con", dc, context, true);
+  // Counterspell's Constitution, or the counter's own, as Magic-User's Nemesis's Wisdom.
+  const ability = resolution.kind === "save" ? resolution.ability : "con";
+  const save = rollSave(caster, ability, dc, context, true);
   const paid = payCosts(counter, counterer, context);
   if (save.saved) {
     const result = cast(rest, context);
@@ -219,6 +231,30 @@ export function runCounterspell(
     events: [...paid, ...save.events, ...payCosts(wasted, caster, context)],
     frames: [CHECK_END, frame("afterAction", { actor: caster.id })],
   };
+}
+
+// Whether an absorbing item holds this many more levels, or breaks past its maximum as a Staff of the Magi does.
+// A Rod of Absorption with no room lets the spell through.
+function roomFor(
+  foe: Actor,
+  counter: KnownAction,
+  limits: Extract<LeafEffect, { kind: "counter" }>,
+  level: number,
+  context: Context,
+): boolean {
+  if (!limits.levels) return true;
+  if ((foe.resourcesSpent[limits.levels] ?? 0) >= level) return true;
+  const itemId = itemUseOf(counter.id);
+  const item = itemId
+    ? ItemSchema.safeParse(context.content(itemId)).data
+    : undefined;
+  return (item && "activations" in item ? (item.activations ?? []) : []).some(
+    ({ activation }) =>
+      activation.resolution.kind === "automatic" &&
+      activation.resolution.effects.some(
+        (effect) => effect.kind === "retribution",
+      ),
+  );
 }
 
 // A Staff of the Magi's absorbed spell: its levels back as charges, and past its maximum, the staff breaks as its

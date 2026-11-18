@@ -160,6 +160,7 @@ export function hasFlag(
       (!("spellAttacks" in modifier) || !modifier.spellAttacks) &&
       (!("concentration" in modifier) || !modifier.concentration) &&
       (!("casterSpells" in modifier) || !modifier.casterSpells) &&
+      // Escape the Horde's is the Opportunity Attack's to weigh (combat/attack.ts).
       (!("opportunity" in modifier) || !modifier.opportunity) &&
       (!("attackers" in modifier) ||
         !modifier.attackers ||
@@ -229,6 +230,7 @@ export function rollBonus(
   for (const effect of actor.activeEffects) {
     const { modifier } = effect;
     if (modifier.kind !== "bonus" || modifier.to !== to) continue;
+    if (modifier.concentration) continue; // Concentration saves count it (combat/school.ts)
     if (modifier.weapon && !weapon) continue;
     if (modifier.skill && modifier.skill !== skill) continue;
     if (modifier.tool && !usesTool(modifier.tool, tool, context)) continue;
@@ -252,6 +254,7 @@ export function rollBonus(
     if (
       modifier.kind === "bonus" &&
       modifier.to === to &&
+      !modifier.concentration &&
       (!modifier.weapon || weapon) &&
       (!modifier.skill || modifier.skill === skill) &&
       (!modifier.tool || usesTool(modifier.tool, tool, context)) &&
@@ -684,7 +687,10 @@ export function slotToSpend(
   actor: Actor,
   stats: Stats,
 ): number | null {
-  const lowest = action.spellLevel ?? 1;
+  const lowest = Math.max(
+    action.spellLevel ?? 1,
+    action.activation.minSlot ?? 1,
+  );
   for (let level = lowest; level <= stats.slots.length; level += 1) {
     const spent = actor.resourcesSpent[`slot:${String(level)}`] ?? 0;
     if (spent < (stats.slots[level - 1] ?? 0)) return level;
@@ -831,6 +837,7 @@ export function canAfford(
   const limits = limitsOf(actor);
   // Befuddlement: no spells at all.
   if (limits.noSpells && action.spellLevel !== null) return false;
+  if (limits.cantripsOnly && (action.spellLevel ?? 0) > 0) return false;
   // Abjure Foes: having moved this turn, it takes no action or Bonus Action.
   if (
     limits.oneThing &&
@@ -989,6 +996,9 @@ export function hitFits(
   const { resolution } = hitWith.activation;
   if (resolution.kind !== "attack") return false;
   if (kind === "attack") return true;
+  if (kind === "meleeSpell") {
+    return resolution.attack.type === "spell" && isMelee(hitWith);
+  }
   if (resolution.attack.type !== "weapon") return false;
   if (kind === "finesseOrRanged") {
     return carriesExtraDice(attacker, hitWith, access);

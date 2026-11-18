@@ -339,11 +339,14 @@ describe("encoded spells", () => {
     });
   });
 
-  it("expresses Shield as a reaction, and marks it partly automated", async () => {
+  it("expresses Shield as a reaction to a hit or to Magic Missile, fully automated", async () => {
     const parsed = spell(await goblin(), "shield");
-    expect(parsed.automation).toBe("partial");
+    expect(parsed.automation).toBe("full");
     expect(parsed.activation?.cost).toEqual(["reaction", "slot"]);
     expect(parsed.activation?.trigger?.hitByAttack).toBe(true);
+    expect(parsed.activation?.trigger?.targetedBySpell).toBe(
+      "srd52:spell/magic-missile",
+    );
   });
 
   it("builds a Longsword attack from weapon data", async () => {
@@ -1119,7 +1122,7 @@ describe("playing a D&D adventure", () => {
     }
     expect(wins).toBeGreaterThan(0);
     expect(defeats).toBeGreaterThan(0);
-  }, 60_000); // many full playthroughs alongside other test files, which took 20-33 s on CI with coverage
+  }, 120_000); // 120 fights alongside other test files, which took up to 65 s on CI's ubuntu runner
 
   it("plays like a player when asked: builds with the system, rests and keeps going past endings", async () => {
     const run = await goblin();

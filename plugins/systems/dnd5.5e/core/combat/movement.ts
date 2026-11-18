@@ -11,6 +11,7 @@ import {
   isDown,
   NS,
   frame,
+  turnId,
 } from "../state.ts";
 import {
   awaitDecision,
@@ -161,7 +162,7 @@ export function provokers(
   return enemies(state, actor).flatMap((foe) => {
     if (
       dragged.has(foe.id) ||
-      !foe.budget.reaction ||
+      !canOpportune(foe, state, access) ||
       isDown(foe) ||
       sealed(foe) ||
       limitsOf(foe).noOpportunityAttacks === true || // Shocking Grasp
@@ -185,12 +186,14 @@ export function provokers(
             : heightOf(actor)) - heightOf(foe),
         ),
       );
+    // Hold the Line: a step that stays inside the reach provokes too.
+    const holds = hasPassive(deriveStats(foe, access), "holdTheLine");
     const leaves = (reach: number): boolean =>
       steps.some(
         (_, index) =>
           index + 1 < steps.length &&
           far(index) <= reach &&
-          far(index + 1) > reach,
+          (far(index + 1) > reach || holds),
       );
     const actions = deriveStats(foe, access).actions;
     // A bare Unarmed Strike isn't worth the Reaction to one that has another use for it, as Shield.
@@ -259,7 +262,12 @@ export function opportunity(
   }
   return {
     events: [
-      dndEvent(`${NS}:budgetSpent`, { actor: foe.id, kind: "reaction" }),
+      foe.budget.reaction
+        ? dndEvent(`${NS}:budgetSpent`, { actor: foe.id, kind: "reaction" })
+        : dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: foe.id,
+            key: vigilantKey(context.state),
+          }),
     ],
     frames: [
       frame("attackRoll", {
@@ -269,6 +277,26 @@ export function opportunity(
       }),
     ],
   };
+}
+
+// Vigilant Defender's special reaction is spent for this one turn of the fight.
+const vigilantKey = (state: DndState): string =>
+  `vigilant@${String(state.combat?.round ?? 0)}:${String(state.combat?.index ?? 0)}`;
+
+// Whether a foe can still make an Opportunity Attack: its Reaction, or Vigilant Defender's once on another's turn.
+// shortcut: the special reaction is open whenever the Reaction is spent, even when it was spent on this same turn.
+function canOpportune(
+  foe: Actor,
+  state: DndState,
+  access: ContentAccess,
+): boolean {
+  if (foe.budget.reaction) return true;
+  const turn = turnId(state.combat);
+  return (
+    turn !== foe.id &&
+    !foe.usedThisTurn.includes(vigilantKey(state)) &&
+    hasPassive(deriveStats(foe, access), "vigilantDefender")
+  );
 }
 
 // The first step of a walk that enters the reach of an enemy's reaction to that, as Polearm Master's, or null.
@@ -408,6 +436,44 @@ export function runMove(
         entered.has(squareKey(other.position))
       ) {
         hurt(other, burn);
+      }
+    }
+  }
+  // Destructive Stride: each foe the walk comes beside takes it, once a turn.
+  const strides = actor.activeEffects.flatMap(({ modifier }) =>
+    modifier.kind === "strideDamage" ? [modifier] : [],
+  );
+  if (strides.length > 0) {
+    const stats = deriveStats(actor, context);
+    for (const foe of enemies(state, actor)) {
+      const key = `stride:${foe.id}`;
+      if (
+        !foe.position ||
+        isDown(foe) ||
+        actor.usedThisTurn.includes(key) ||
+        !step.path.some((square) => distanceFeet(square, foe.position) <= 5)
+      ) {
+        continue;
+      }
+      events.push(dndEvent(`${NS}:oncePerTurnUsed`, { actor: actor.id, key }));
+      const responses = damageResponses(foe, context);
+      for (const stride of strides) {
+        const type =
+          [...stride.types].sort(
+            (a, b) =>
+              finalDamage(10, a, responses) - finalDamage(10, b, responses),
+          )[stride.types.length - 1] ?? stride.types[0];
+        if (!type) continue;
+        const amount = rollAmount(stride.damage, stats, context.dice);
+        const dealt = dealEvents(
+          foe,
+          [{ amount: finalDamage(amount, type, responses), type }],
+          false,
+          { ...context, state: now },
+          actor,
+        );
+        now = dealt.events.reduce(applyDndEvent, now);
+        events.push(...dealt.events);
       }
     }
   }
@@ -748,6 +814,12 @@ export function teleportSquares(
   const grid = state.combat?.grid;
   const from = actor.position;
   if (!grid || !from) return [];
+  // Dimensional Shackles hold it where it is.
+  if (
+    actor.activeEffects.some(({ modifier }) => modifier.kind === "anchored")
+  ) {
+    return [];
+  }
   // Boots of the Winding Path: only back to a square it stood on this turn.
   if (retrace) {
     const taken = occupiedKeys(state, [actor.id]);

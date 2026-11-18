@@ -22,6 +22,7 @@ import {
 } from "./state.ts";
 import {
   type Stats,
+  damageResponses,
   deriveStats,
   evaluateFormula,
   lookup,
@@ -146,6 +147,12 @@ export function traitSaveAdvantage(
         (!passive.bloodied || bloodied) &&
         (!passive.while ||
           (target !== undefined && hasCondition(target, passive.while))) &&
+        // Danger Sense: never while Incapacitated.
+        (!passive.notWhile ||
+          target === undefined ||
+          !(passive.notWhile === "incapacitated"
+            ? hasCondition(target, ...INCAPACITATING)
+            : hasCondition(target, passive.notWhile))) &&
         (passive.shapeChange
           ? conditions.includes("polymorph")
           : coversSave(passive, ability, conditions, source))) ||
@@ -352,6 +359,7 @@ export function armoredReduction(
   stats: Stats,
   type: DamageType,
   access: ContentAccess,
+  amount = 0,
 ): number {
   const worn = new Set(
     equipped(target).flatMap((id) => {
@@ -364,7 +372,13 @@ export function armoredReduction(
       passive.kind === "armoredReduction" &&
       worn.has(passive.armor) &&
       passive.damage.includes(type)
-        ? total + evaluateFormula(passive.amount, stats)
+        ? total +
+          // Saint of Forge and Fire: Resistance, unless the bearer resists the type already.
+          (passive.halve
+            ? damageResponses(target, access).resistances.includes(type)
+              ? 0
+              : Math.ceil(amount / 2)
+            : evaluateFormula(passive.amount, stats))
         : total,
     0,
   );
@@ -646,6 +660,19 @@ export function rescuedCheck(
     };
   }
   return { bonus: 0, events: [] };
+}
+
+// Trance of Order: the least any D20 Test's d20 counts as.
+export function d20Floor(actor: Actor, stats: Stats): number {
+  return Math.max(
+    1,
+    ...[
+      ...actor.activeEffects.map(({ modifier }) => modifier),
+      ...passiveModifiers(stats.passives),
+    ].flatMap((modifier) =>
+      modifier.kind === "checkFloor" && modifier.all ? [modifier.value] : [],
+    ),
+  );
 }
 
 // Reliable Talent or Glibness: the least a check's d20 roll counts as.
