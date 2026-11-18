@@ -565,7 +565,11 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
       ).status,
     ).toBe("working");
     expect(
-      classify("phb:feature/rogue-thieves-cant", stats, run),
+      classify(
+        "phb:feature/rogue-assassin-assassin-s-tools",
+        deriveStats(hero("rogue", 3, "phb:subclass/rogue-assassin"), run),
+        run,
+      ),
     ).toMatchObject({ status: "text-only" });
   });
 
