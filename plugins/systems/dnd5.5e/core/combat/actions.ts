@@ -1,3 +1,4 @@
+import { zoneModifiers } from "../zones.ts";
 import { z } from "zod";
 import { knownFoes } from "../fog.ts";
 import {
@@ -80,12 +81,15 @@ import {
 } from "./queries.ts";
 import {
   aimSquare,
+  alliesRiderEvents,
   leafEvents,
   payCosts,
   resolveAction,
   resolveTargets,
   rollSave,
+  zoneEvents,
 } from "./effects.ts";
+import { anchorAt, anchorLeaves, anchorMoved, anchorSquare } from "./anchor.ts";
 import { metamagicCast, quickens } from "../metamagic.ts";
 import { castOptionCast } from "../cast-options.ts";
 import { counterFrame, counterWindow } from "./counter.ts";
@@ -186,9 +190,14 @@ export function deathSaveEvents(actor: Actor, context: Context): SystemEvent[] {
   {
     const stats = deriveStats(actor, context);
     const { natural } = rollD20(dice, {
-      advantage: stats.passives.some(
-        (passive) => passive.kind === "deathSaveAdvantage" && !passive.worse,
-      ),
+      advantage:
+        stats.passives.some(
+          (passive) => passive.kind === "deathSaveAdvantage" && !passive.worse,
+        ) ||
+        [
+          ...actor.activeEffects.map(({ modifier }) => modifier),
+          ...zoneModifiers(actor, context.state, context),
+        ].some((modifier) => modifier.kind === "deathSaveAdvantage"),
       disadvantage: stats.passives.some(
         (passive) => passive.kind === "deathSaveAdvantage" && passive.worse,
       ),
@@ -381,7 +390,16 @@ export function castAction(
   }
   const passedSaves = pained?.events ?? [];
   const picked = typeof target === "string" ? null : target;
-  const targetId = typeof target === "string" ? target : ALL;
+  // An area spread from a spell's object goes off where the object is, as Delayed Blast Fireball's bead.
+  const object =
+    action.activation.anchor && "area" in action.activation.targeting
+      ? anchorAt(actor, action)
+      : null;
+  const targetId = object
+    ? `@${String(object.x)},${String(object.y)}`
+    : typeof target === "string"
+      ? target
+      : ALL;
   const { projectiles, resolution, distinct } = action.activation;
   // Each at a different creature: one apiece, the most hurt first, when they aren't picked.
   const apart =
@@ -390,10 +408,16 @@ export function castAction(
           .sort((a, b) => a.hp - b.hp)
           .slice(0, projectiles ?? 1)
       : null;
-  const caught = picked
+  const aimed = picked
     ? picked.map((id) => actorOf(state, id))
     : (apart ?? resolveTargets(targetId, action, actor, context));
+  // Sanctuary: a damaging spell aimed at a warded foe is lost on it unless the caster makes the save.
+  const sanctuary = sanctuarySaves(actor, action, aimed, context);
+  const caught = aimed.filter((item) => !sanctuary.lost.includes(item.id));
+  passedSaves.push(...sanctuary.events);
   const riders = castRiders(actor, action, slotLevel, context, caught);
+  // An object the spell keeps goes to the first creature it acts on, or is placed there as the spell is cast.
+  const anchored = anchoredEvents(actor, action, caught, slotLevel, context);
   const result: SystemResult =
     projectiles !== undefined && resolution.kind !== "save"
       ? {
@@ -423,6 +447,7 @@ export function castAction(
   return {
     events: [
       ...payCosts(action, actor, context, slotLevel),
+      ...anchored,
       ...timeStopEnds(actor, caught),
       ...schoolCastEvents(actor, action, slotLevel, context),
       ...riders.events,
@@ -461,6 +486,14 @@ export function castAction(
             action.activation.alsoSelf,
             action.id,
             actor,
+            actor,
+            context,
+          )
+        : []),
+      ...(action.activation.alsoAllies
+        ? alliesRiderEvents(
+            action.activation.alsoAllies,
+            action.id,
             actor,
             context,
           )
@@ -531,6 +564,32 @@ export function castAction(
 // shortcut: an attack roll left waiting on a reaction lands later and gives nothing.
 // What Sudden Strike, Blink Steps, Spell Subterfuge or Tempestuous Magic wait on, marked only for a creature with
 // such an activation, so the turns of everyone else are kept as before.
+// The events that bring an anchored action's object to its first target: moved there, or placed as it's cast.
+function anchoredEvents(
+  actor: Actor,
+  action: KnownAction,
+  caught: readonly Actor[],
+  slotLevel: number | undefined,
+  context: Context,
+): SystemEvent[] {
+  const grid = context.state.combat?.grid;
+  const first = caught[0]?.position;
+  if (!action.activation.anchor || !grid || !first) return [];
+  const to = anchorSquare(actor, action, first, grid);
+  if (!to) return [];
+  return anchorAt(actor, action)
+    ? anchorMoved(actor, action, to)
+    : zoneEvents(
+        anchorLeaves(action.activation.resolution),
+        action,
+        actor,
+        context,
+        to,
+        slotLevel,
+        true,
+      );
+}
+
 function actionKindMarks(
   actor: Actor,
   action: KnownAction,
@@ -598,6 +657,12 @@ const TELEPORT_ANYWHERE = 1000;
 
 // Holy Weapon's burst ends the spell that gave it: the caster's Concentration on it, or the effect itself.
 function dismissed(action: KnownAction, actor: Actor): SystemEvent[] {
+  // A held spell's own action that ends it, as Delayed Blast Fireball's bead set off.
+  if (action.activation.dismisses && action.id.startsWith("lasting:")) {
+    return actor.concentratingOn !== null
+      ? [dndEvent(`${NS}:concentrationEnded`, { actor: actor.id })]
+      : [];
+  }
   if (!action.activation.dismisses || !action.id.startsWith(GRANTED_PREFIX)) {
     return [];
   }
@@ -631,7 +696,12 @@ function withShape(action: KnownAction, shape: string): KnownAction {
   if (chosen.resolution) {
     return {
       ...action,
-      activation: { ...action.activation, resolution: chosen.resolution },
+      activation: {
+        ...action.activation,
+        resolution: chosen.resolution,
+        // a shape kept for later goes on its caster, as Freezing Sphere's globe held to throw
+        ...(chosen.self ? { targeting: { self: true as const } } : {}),
+      },
     };
   }
   if (!chosen.effects || resolution.kind !== "automatic") return action;
@@ -900,3 +970,43 @@ export const actionFrames = {
       ),
   }),
 };
+
+// Sanctuary against a damaging spell aimed at creatures, not an area: the caster saves against each warded foe's ward,
+// and on a failure the spell is lost on that one.
+// shortcut: the caster doesn't pick a new target; the spell goes on at the others.
+function sanctuarySaves(
+  caster: Actor,
+  action: KnownAction,
+  targets: readonly Actor[],
+  context: Context,
+): { readonly lost: readonly string[]; readonly events: SystemEvent[] } {
+  const { targeting, resolution } = action.activation;
+  if (
+    action.spellLevel === null ||
+    !("creatures" in targeting) ||
+    resolution.kind === "attack" ||
+    resolution.damage.length === 0
+  ) {
+    return { lost: [], events: [] };
+  }
+  const lost: string[] = [];
+  const events: SystemEvent[] = [];
+  for (const target of targets) {
+    const ward = target.activeEffects.find(
+      ({ modifier }) => modifier.kind === "sanctuary" && !modifier.lasting,
+    );
+    if (ward?.modifier.kind !== "sanctuary" || target.side === caster.side) {
+      continue;
+    }
+    const save = rollSave(
+      caster,
+      ward.modifier.ability ?? "wis",
+      ward.modifier.dc ?? 10,
+      context,
+      true,
+    );
+    events.push(...save.events);
+    if (!save.saved) lost.push(target.id);
+  }
+  return { lost, events };
+}

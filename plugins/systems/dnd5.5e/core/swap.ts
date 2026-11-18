@@ -55,6 +55,7 @@ const KINDS = {
   weaponMastery: "weaponMastery",
   features: "option",
   spells: "spells",
+  tools: "tools",
 } as const;
 const KEEP = "keep";
 const ADD = "+"; // the "pick" dropped when a late pick adds one
@@ -74,6 +75,8 @@ interface Swappable {
 const ANSWER_KINDS: Partial<Record<ChoiceDef["kind"], string>> = {
   spells: "spells",
   option: "features",
+  weaponMastery: "weaponMastery",
+  tools: "tools",
 };
 
 // A class's own picks, matched to the choices its levels ask in order, that its `swaps` (or its subclass's
@@ -210,18 +213,31 @@ function classPicks(
         const group =
           choice.kind === "option"
             ? "options"
-            : choice.kind === "spells" && choice.maxLevel === 0
-              ? "cantrips"
-              : "spells";
+            : choice.kind === "weaponMastery"
+              ? "weaponMastery"
+              : choice.kind === "spells" && choice.maxLevel === 0
+                ? "cantrips"
+                : "spells";
         const stated =
-          choice.kind === "spells" && choice.swap ? choice.swap : undefined;
+          (choice.kind === "spells" || choice.kind === "tools") && choice.swap
+            ? choice.swap
+            : undefined;
         const when =
           stated ??
-          (choice.id === group || choice.kind === "option"
+          (choice.id === group ||
+          choice.kind === "option" ||
+          choice.kind === "weaponMastery"
             ? rules[group]
             : undefined);
         return when
-          ? [swap(choice, found, when, `${classDef.name} ${group}`)]
+          ? [
+              swap(
+                choice,
+                found,
+                when,
+                `${classDef.name} ${choice.kind === "tools" ? "proficiencies" : group === "weaponMastery" ? "weapon masteries" : group}`,
+              ),
+            ]
           : [];
       },
     );
@@ -235,7 +251,22 @@ function classPicks(
           : [];
       });
     });
-    return [...own, ...fromOptions];
+    // A variant's own choices that can be picked again, as Blessed Warrior's cantrips at each Paladin level.
+    const fromVariants = entry.answers.flatMap((answer): Swappable[] => {
+      if (answer.kind !== "variant") return [];
+      const feature = maybeLookup(access, FeatureSchema, answer.feature);
+      return answer.values.flatMap((id) =>
+        (
+          feature?.variants?.find((item) => item.id === id)?.choices ?? []
+        ).flatMap((choice): Swappable[] => {
+          const found = answerFor(choice);
+          return found && choice.kind === "spells" && choice.swap
+            ? [swap(choice, found, choice.swap, feature?.name ?? id)]
+            : [];
+        }),
+      );
+    });
+    return [...own, ...fromOptions, ...fromVariants];
   });
 }
 
@@ -303,7 +334,7 @@ export function swappable(
               (item) =>
                 item.kind === kind &&
                 "swap" in item &&
-                item.swap === "longRest" &&
+                (item.swap === "longRest" || item.swap === "shortRest") &&
                 (item.kind !== "skills" ||
                   Boolean(item.expertise) ===
                     (answer.kind === "skills" && answer.expertise === true)),
@@ -320,9 +351,10 @@ export function swappable(
           owner: owner.name,
           choices: [choice],
           values: answer.values,
+          // "shortRest" is offered whenever the party is between fights, as Whispers of the Dead's after any rest.
           open: mark
             ? level > at + 1 && !swapped.includes(mark)
-            : !swapped.includes(key),
+            : choice.swap === "shortRest" || !swapped.includes(key),
           ...(mark ? { mark } : {}),
         },
       ];
@@ -357,7 +389,7 @@ export function swappable(
   });
   const background = lookup(access, BackgroundSchema, build.backgroundId);
   const feats = new Set([
-    background.feat,
+    ...[background.feat ?? []].flat(),
     ...build.levels.flatMap((entry) =>
       entry.answers.flatMap((answer) =>
         answer.kind === "feats" ? answer.values : [],

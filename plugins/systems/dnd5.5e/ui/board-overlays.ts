@@ -69,8 +69,9 @@ export function showAreas(ctx: BoardContext, areas: readonly AreaView[]): void {
   const live = new Set<string>();
   const grid = ctx.grid;
   for (const area of grid ? areas : []) {
-    const pieces = area.blocks
-      ? area.blocks.flatMap((key) => {
+    const cells = area.blocks ?? area.cells;
+    const pieces = cells
+      ? cells.flatMap((key) => {
           const match = SQUARE.exec(key);
           return match
             ? [

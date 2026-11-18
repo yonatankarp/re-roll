@@ -248,7 +248,7 @@ describe("character creation", () => {
     expect(spellSaveDc(stats)).toBe(13); // 8 + 2 + 3
     expect(stats.slots).toEqual([2]);
     expect(stats.skills).toEqual(expect.arrayContaining(["arcana", "history"]));
-    expect(stats.skills).toHaveLength(4);
+    expect(stats.skills).toHaveLength(5); // the class's two, the background's two and the Elf's Keen Senses
 
     // Asked one at a time, with what's already taken no longer on offer.
     const skills = asked.filter((item) => item.id.includes(":skills-"));
@@ -596,8 +596,9 @@ describe("levelling up", () => {
 
   it("shows a level's picks as cards with their details, without the creation steps", async () => {
     const run = storyRun(await goblin(), [[levelUp]]);
+    // Past Scholar's Expertise, the level's first pick, to its prepared spell.
     const { state } = drive(run, "level-cards", WIZARD, (decision) =>
-      decision.id.startsWith("dnd5.5e:build:player:2:"),
+      decision.id.startsWith("dnd5.5e:build:player:2:spells"),
     );
     const decision = pendingDecision(run, state);
     if (!decision) throw new Error("No level-up pick");

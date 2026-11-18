@@ -40,6 +40,7 @@ import {
   ActivationSchema,
   type FreeCast,
   type Amount,
+  type AreaEffect,
   type Condition,
   ArmorSchema,
   BackgroundSchema,
@@ -50,6 +51,7 @@ import {
   FeatSchema,
   type Feature,
   FeatureSchema,
+  SkillSchema,
   type Formula,
   type LeafEffect,
   ItemSchema,
@@ -217,6 +219,9 @@ export interface Stats {
   // that spell with.
   readonly familiar?: { readonly form: string; readonly ability: Ability };
 }
+
+// Character builds whose features give an aura, filled in as their stats are derived.
+export const auraBuilds = new WeakMap<object, boolean>();
 
 export function passiveModifiers(
   passives: readonly Passive[],
@@ -1088,7 +1093,7 @@ function featSpellAbilities(
   const bySpell = new Map<string, Ability>();
   const featureSpells = (ids: readonly string[], ability: Ability) => {
     for (const grant of ids) {
-      const feature = FeatureSchema.safeParse(access.content(grant)).data;
+      const feature = maybeLookup(access, FeatureSchema, grant);
       const own = feature && swappedSpells(grant, feature, swaps, access);
       for (const spells of [
         own,
@@ -1126,6 +1131,37 @@ function featSpellAbilities(
     if (ability) for (const spell of pick.spells) bySpell.set(spell, ability);
   }
   return bySpell;
+}
+
+// A feature's changes to a spell: its hit damage's die (Foe Slayer) and effects it adds (Eldritch Hex).
+function spellChanged(
+  activation: Activation,
+  dice: string | undefined,
+  adds: readonly LeafEffect[] | undefined,
+): Activation {
+  const { resolution } = activation;
+  if (resolution.kind !== "automatic" || (!dice && !adds)) return activation;
+  const effects = resolution.effects.map((effect): LeafEffect =>
+    dice &&
+    effect.kind === "modifier" &&
+    effect.modifier.kind === "hitDamage" &&
+    effect.modifier.damage.amount.dice
+      ? {
+          ...effect,
+          modifier: {
+            ...effect.modifier,
+            damage: {
+              ...effect.modifier.damage,
+              amount: { ...effect.modifier.damage.amount, dice },
+            },
+          },
+        }
+      : effect,
+  );
+  return {
+    ...activation,
+    resolution: { ...resolution, effects: [...effects, ...(adds ?? [])] },
+  };
 }
 
 // Cold Fire Magic: a spell's damage takes another type.
@@ -1263,6 +1299,8 @@ function collectFeatureData(
   spells: string[];
   free: [string, FreeCast][];
   retype: Record<string, DamageType>;
+  redice: Record<string, string>;
+  addsTo: Record<string, readonly LeafEffect[]>;
   abilities: ReadonlyMap<string, Ability>;
   gated: readonly NonNullable<Feature["whileActive"]>[];
 } {
@@ -1275,6 +1313,8 @@ function collectFeatureData(
   const spells = featureIds.flatMap((id) => grantedSpells(id, levelFor(id)));
   const free: [string, FreeCast][] = [];
   const retype: Record<string, DamageType> = {};
+  const redice: Record<string, string> = {};
+  const addsTo: Record<string, readonly LeafEffect[]> = {};
   const ownSpells = new Map<string, readonly string[]>(); // each feature's own spells, by feature
   const gated: NonNullable<Feature["whileActive"]>[] = []; // passives only while an effect is on the bearer
   const abilities = new Map<string, Ability>(); // a feature's spells cast with its own ability
@@ -1310,6 +1350,10 @@ function collectFeatureData(
     );
     if ((feature.fromLevel ?? 1) > level) continue;
     Object.assign(retype, feature.retype);
+    Object.assign(redice, feature.redice);
+    for (const [spell, effects] of Object.entries(feature.addsTo ?? {})) {
+      addsTo[spell] = [...(addsTo[spell] ?? []), ...effects];
+    }
     passives.push(...feature.passives);
     if (feature.whileActive) gated.push(feature.whileActive);
     resources.push(...feature.resources);
@@ -1394,6 +1438,8 @@ function collectFeatureData(
     spells,
     free,
     retype,
+    redice,
+    addsTo,
     abilities,
     gated,
   };
@@ -1577,12 +1623,13 @@ function castsAs(
   passives: readonly Passive[],
 ): KnownAction[] {
   const quick = passives.flatMap((passive) =>
-    passive.kind === "castsAs" ? passive.spells : [],
+    passive.kind === "castsAs" ? (passive.spells ?? ["*"]) : [],
   );
   if (quick.length === 0) return [...actions];
+  // With no spells named, every spell, as Elder Champion's Swift Spells.
   return actions.map((action) => {
     const spell = spellOfSource(action.id);
-    return spell !== null && quick.includes(spell)
+    return spell !== null && (quick.includes(spell) || quick.includes("*"))
       ? {
           ...action,
           activation: {
@@ -1785,6 +1832,18 @@ function withRiders(
     const extra = riders.flatMap(({ effects }) => effects);
     const damage = riders.flatMap(({ damage: more }) => more ?? []);
     const own = riders.flatMap(({ self }) => self ?? []);
+    const allies = riders.flatMap(({ allies: rider }) =>
+      rider ? [rider] : [],
+    );
+    if (allies.length > 0) {
+      action = {
+        ...action,
+        activation: {
+          ...action.activation,
+          alsoAllies: [...(action.activation.alsoAllies ?? []), ...allies],
+        },
+      };
+    }
     if (own.length > 0) {
       action = {
         ...action,
@@ -1822,6 +1881,19 @@ function withRiders(
           },
         };
   });
+}
+
+// Whether a Martial Training passive covers this weapon: ranged ones have Ammunition, as a weapon attack reads them.
+function trainedWith(
+  passive: Extract<Passive, { kind: "martialTraining" }>,
+  weapon: Weapon,
+): boolean {
+  const ranged = weapon.properties.includes("ammunition");
+  return (
+    (!passive.ranged || ranged) &&
+    (!passive.melee || !ranged) &&
+    !passive.without?.some((property) => weapon.properties.includes(property))
+  );
 }
 
 export function weaponProficient(classDef: ClassDef, weapon: Weapon): boolean {
@@ -2282,6 +2354,8 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     freeSpells.set(spell, [...(freeSpells.get(spell) ?? []), how]);
   const swaps = actor.swaps ?? {};
   const raisedSaves = new Set<Ability>(); // proficient from a feat such as Resilient
+  const pickedTools: string[] = []; // tools a choice gave
+  const pickedWeapons: string[] = []; // kinds of weapons a choice gave proficiency with
   const featureIds = new Set<string>(species.traits);
   const grantedBy = new Map<string, string>(); // the class whose level granted a feature
   const answerAbilities = new Map<string, Ability>(); // spells a class choice gives with its own ability
@@ -2296,8 +2370,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
           (id) => lookup(access, FeatSchema, id).category === background.featOr,
         ),
     );
-  if (!replaced) {
-    for (const id of lookup(access, FeatSchema, background.feat).grants) {
+  // An older book's background names no feat: the Origin feat picked for it is in the first level's answers.
+  const ownFeats =
+    replaced || background.feat === undefined ? [] : [background.feat];
+  for (const feat of ownFeats) {
+    for (const id of lookup(access, FeatSchema, feat).grants) {
       featureIds.add(id);
     }
   }
@@ -2324,12 +2401,21 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     scaling = { ...scaling, ...levelData.scaling };
     for (const answer of entry.answers) {
       if (answer.kind === "skills") {
+        // Expertise comes with proficiency, as Blessings of Knowledge gives both.
         for (const skill of answer.values) {
-          (answer.expertise || (answer.orExpertise && skills.has(skill))
-            ? expertise
-            : skills
-          ).add(skill);
+          if (answer.expertise || (answer.orExpertise && skills.has(skill))) {
+            expertise.add(skill);
+          }
+          skills.add(skill);
           if (answer.bonus) skillBonuses.push({ skill, bonus: answer.bonus });
+        }
+      } else if (answer.kind === "weapons") {
+        pickedWeapons.push(...answer.values);
+      } else if (answer.kind === "tools") {
+        for (const value of answer.values) {
+          const skill = SkillSchema.safeParse(value);
+          if (skill.success) skills.add(skill.data);
+          else pickedTools.push(value);
         }
       } else if (answer.kind === "spells") {
         for (const spell of answer.values) {
@@ -2386,6 +2472,19 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     }
   }
   slots = multiclassSlots(Object.values(casters)) ?? slots;
+  // Scores a feature raises past 20, as Primal Champion's Strength and Constitution.
+  for (const id of featureIds) {
+    for (const passive of maybeLookup(access, FeatureSchema, id)?.passives ??
+      []) {
+      if (passive.kind !== "scoreIncrease") continue;
+      for (const ability of passive.abilities) {
+        abilities[ability] = Math.max(
+          abilities[ability],
+          Math.min(passive.max, abilities[ability] + passive.amount),
+        );
+      }
+    }
+  }
 
   const [firstLevel] = build.levels;
   if (!firstLevel) throw new Error(`${actor.id} has no levels`);
@@ -2397,7 +2496,6 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   );
 
   // shortcut: training comes from every class taken, while a multiclass really gets only some of a later class's.
-  // shortcut: a Protector cleric's or Warden druid's training isn't given, since the order chosen isn't recorded as its own feature.
   const classes = Object.keys(classLevels).map((id) =>
     lookup(access, ClassSchema, id),
   );
@@ -2420,12 +2518,6 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const martialTraining = [...featIds].some((id) =>
     id.endsWith("/martial-weapon-training"),
   );
-  const untrainedArmor = worn.some(
-    ([, item]) =>
-      item.type === "armor" &&
-      !item.anyTraining &&
-      !trained.has(item.armorType),
-  );
   const tooHeavy = worn.some(
     ([, item]) => item.type === "armor" && abilities.str < (item.strength ?? 0),
   );
@@ -2444,9 +2536,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ([, item]) => item.type === "armor" || item.type === "shield",
   );
   const weaponBonuses: { to: string; amount: number; weapons: string[] }[] = [];
-  const weaponTraining = new Set(
-    working.flatMap((item) => item.weaponTraining ?? []),
-  );
+  const weaponTraining = new Set([
+    ...working.flatMap((item) => item.weaponTraining ?? []),
+    ...pickedWeapons.map((id) => id.slice(id.lastIndexOf("/") + 1)),
+  ]);
   const classDc: Record<string, number> = {}; // DC bonuses for one class's spells, by its name after the plugin
   for (const item of working) {
     if (item.ammunition) continue; // its bonus goes only to the shot that fires it
@@ -2492,6 +2585,38 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     swaps,
     grantedBy,
   );
+  // Training and proficiencies features give, as Forge Domain's Heavy armor or Survivalist's skills.
+  for (const passive of fromFeatures.passives) {
+    if (passive.kind === "armorTraining") {
+      for (const armor of passive.armor) trained.add(armor);
+    } else if (passive.kind === "weaponTraining") {
+      for (const kind of passive.weapons) weaponTraining.add(kind);
+    } else if (passive.kind === "skillProficiency") {
+      for (const skill of passive.skills) {
+        skills.add(skill);
+        if (passive.expertise) expertise.add(skill);
+      }
+    }
+  }
+  if (pickedTools.length > 0) {
+    fromFeatures.passives.push({ kind: "toolProficiency", tools: pickedTools });
+  }
+  const untrainedArmor = worn.some(
+    ([, item]) =>
+      item.type === "armor" &&
+      !item.anyTraining &&
+      !trained.has(item.armorType),
+  );
+  // Whether any of its features gives an aura, active or not, so zones skip a character without one (core/zones.ts).
+  if (actor.source.kind === "character" && actor.source.build) {
+    auraBuilds.set(
+      actor.source.build,
+      [
+        ...fromFeatures.passives,
+        ...fromFeatures.gated.flatMap((gate) => gate.passives),
+      ].some((passive) => passive.kind === "aura"),
+    );
+  }
   // A feature's passives that hold only while an effect of its activations is on the bearer (`whileActive`).
   for (const gate of fromFeatures.gated) {
     if (
@@ -2504,7 +2629,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   }
   for (const pick of latePicks(
     swaps,
-    new Set([...featIds, ...(replaced ? [] : [background.feat])]),
+    new Set([...featIds, ...ownFeats]),
     access,
   )) {
     for (const spell of pick.spells) {
@@ -2543,35 +2668,30 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       hasAspect(actor, passive.whileAspect)) &&
     ((passive.kind !== "modifier" && passive.kind !== "weaponRider") ||
       passive.armor === undefined ||
-      (passive.armor === "noHeavy" ? !heavy : !armored));
-  // Durable Magic's bonuses hold only while the bearer concentrates, and Power of the Wilds' Lion aura only in a Rage.
+      (passive.armor === "noHeavy" ? !heavy : !armored)) &&
+    // Power of the Wilds' Lion aura only in a Rage, as Holy Nimbus's only once it's used.
+    (passive.kind !== "aura" ||
+      !passive.while ||
+      actor.activeEffects.some(({ sourceId }) =>
+        passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
+      )) &&
+    (passive.kind !== "aura" ||
+      !passive.whileAspect ||
+      hasAspect(actor, passive.whileAspect)) &&
+    (passive.kind !== "aura" ||
+      !passive.without?.some((id) => featureIds.has(id)));
+  // Durable Magic's bonuses hold only while the bearer concentrates.
   const traits = [...itemPassives, ...kept, ...fromFeatures.passives].filter(
     (passive) =>
       fits(passive) &&
       (passive.kind !== "modifier" ||
         !passive.concentrating ||
-        actor.concentratingOn !== null) &&
-      (passive.kind !== "aura" ||
-        !passive.while ||
-        actor.activeEffects.some(({ sourceId }) =>
-          passive.while?.some((id) => sourceId.startsWith(`feature:${id}:`)),
-        )) &&
-      (passive.kind !== "aura" ||
-        !passive.whileAspect ||
-        hasAspect(actor, passive.whileAspect)) &&
-      (passive.kind !== "aura" ||
-        !passive.without?.some((id) => featureIds.has(id))),
+        actor.concentratingOn !== null),
   );
   const castingAbility = new Map([
     ...answerAbilities,
     ...fromFeatures.abilities,
-    ...featSpellAbilities(
-      build,
-      replaced ? [] : [background.feat],
-      species,
-      access,
-      swaps,
-    ),
+    ...featSpellAbilities(build, ownFeats, species, access, swaps),
   ]);
   const armorBases: number[] = [];
   const armorTypes: string[] = [];
@@ -2683,7 +2803,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         abilities,
         martialTraining ||
           fromFeatures.passives.some(
-            ({ kind }) => kind === "martialTraining",
+            (passive) =>
+              passive.kind === "martialTraining" &&
+              trainedWith(passive, weapon),
           ) ||
           kinds.some((kind) => weaponTraining.has(kind)) ||
           classes.some((def) => weaponProficient(def, weapon)),
@@ -2767,10 +2889,19 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     : freeCastActions(freeSpells, access, level);
   actions.push(
     ...freeCasts.map(({ action }) => {
-      const ability = castingAbility.get(spellOfSource(action.id) ?? "");
-      return ability
-        ? { ...action, activation: castWith(action.activation, ability) }
-        : action;
+      const spellId = spellOfSource(action.id) ?? "";
+      const ability = castingAbility.get(spellId);
+      const type = fromFeatures.retype[spellId];
+      // A free cast takes the features' changes to the spell too, as Cold Fire Magic's cold Flame Blade.
+      const changed = spellChanged(
+        type ? retyped(action.activation, type) : action.activation,
+        fromFeatures.redice[spellId],
+        fromFeatures.addsTo[spellId],
+      );
+      return {
+        ...action,
+        activation: ability ? castWith(changed, ability) : changed,
+      };
     }),
   );
 
@@ -2819,7 +2950,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         );
       const bumped = bonusDc ? withDcBonus(activation, bonusDc) : activation;
       const cast = ability ? castWith(bumped, ability) : bumped;
-      const typed = type ? retyped(cast, type) : cast;
+      const typed = spellChanged(
+        type ? retyped(cast, type) : cast,
+        fromFeatures.redice[spellId],
+        fromFeatures.addsTo[spellId],
+      );
       actions.push({
         id: `spell:${spellId}`,
         name: spell.name,
@@ -2849,12 +2984,49 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     if (
       lasting &&
       spellOfSource(actor.concentratingOn ?? "") === spellId &&
-      !castFrom(actor.concentratingOn ?? "")
+      !castFrom(actor.concentratingOn ?? "") &&
+      !(lasting.remark && stillMarked(actor, spellId, access))
     ) {
+      // It grows with the slot the spell was cast with, as Witch Bolt's or Flaming Sphere's later damage.
+      const cast = actor.activeEffects.find(
+        ({ sourceId, level }) =>
+          level !== undefined &&
+          (sourceId === actor.concentratingOn ||
+            sourceId === `lasting:${spellId}`),
+      )?.level;
+      const step = spell.upcast?.perSlotLevel;
+      // An upcast for the first damage only, as Witch Bolt's, leaves the later damage alone.
+      const scaled =
+        step &&
+        !("initial" in step && step.initial) &&
+        cast !== undefined &&
+        cast > spell.level
+          ? scaleActivation(lasting, step, cast - spell.level)
+          : lasting;
+      // Delayed Blast Fireball's bead: a die more for each round since it formed.
+      const state = (access as ContentAccess & { readonly state?: DndState })
+        .state;
+      const since = actor.activeEffects.find(
+        ({ sourceId, modifier }) =>
+          sourceId === `spell:${spellId}` && modifier.kind === "zone",
+      )?.modifier;
+      const rounds =
+        lasting.growsBy && since?.kind === "zone" && since.since !== undefined
+          ? (state?.combat?.round ?? since.since) - since.since
+          : 0;
+      const grown =
+        lasting.growsBy && rounds > 0
+          ? scaleActivation(scaled, { addDice: lasting.growsBy }, rounds)
+          : scaled;
+      const retypedTo = fromFeatures.retype[spellId];
       actions.push({
         id: `lasting:${spellId}`,
         name: spell.name,
-        activation: lasting,
+        activation: spellChanged(
+          retypedTo ? retyped(grown, retypedTo) : grown,
+          fromFeatures.redice[spellId],
+          fromFeatures.addsTo[spellId],
+        ),
         spellLevel: null,
       });
     }
@@ -3087,7 +3259,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     creatureType: species.creatureType.toLowerCase(),
     initiative:
       abilityModifier(abilities.dex) -
-      2 * actor.exhaustion -
+      2 * exhaustionOf(actor) -
       (actor.ordeal ?? 0),
     // Proficiency Bonus as a scaling key, for dice that number it, as Healing Hands' d4s.
     scaling: {
@@ -3121,7 +3293,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ],
     pactMagic: [...featureIds].some(isPactMagic),
     untrainedArmor,
-    exhaustion: actor.exhaustion,
+    exhaustion: exhaustionOf(actor),
     ordeal: actor.ordeal ?? 0,
     itemBonuses: magic,
     speeds: {},
@@ -3154,7 +3326,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         !traits.some((passive) => passive.kind === "armorStrength")
           ? 10
           : 0) -
-        5 * actor.exhaustion,
+        5 * exhaustionOf(actor),
     ),
     resources: Object.fromEntries(
       partial.resourceDefs.map((resource) => [
@@ -3674,7 +3846,10 @@ function statBlockStats(
       flatBonus: 0,
       passives,
     }),
-    speed: Math.max(0, (shape?.speed ?? monster.speed) - 5 * actor.exhaustion),
+    speed: Math.max(
+      0,
+      (shape?.speed ?? monster.speed) - 5 * exhaustionOf(actor),
+    ),
     savingThrows: monster.saves,
     skills: [],
     expertise: [],
@@ -3715,13 +3890,14 @@ function statBlockStats(
     ),
     routines,
     creatureType: monster.creatureType?.toLowerCase(),
-    initiative: monster.initiative - 2 * actor.exhaustion - (actor.ordeal ?? 0),
+    initiative:
+      monster.initiative - 2 * exhaustionOf(actor) - (actor.ordeal ?? 0),
     scaling: {},
     features: monster.features,
     resourceDefs: fromFeatures.resources,
     pactMagic: false,
     untrainedArmor: false,
-    exhaustion: actor.exhaustion,
+    exhaustion: exhaustionOf(actor),
     ordeal: actor.ordeal ?? 0,
     itemBonuses: {
       attack: 0,
@@ -3733,7 +3909,9 @@ function statBlockStats(
     speeds: Object.fromEntries(
       (["fly", "climb", "burrow", "swim"] as const).flatMap((mode) => {
         const feet = monster.speeds?.[mode];
-        return feet ? [[mode, Math.max(0, feet - 5 * actor.exhaustion)]] : [];
+        return feet
+          ? [[mode, Math.max(0, feet - 5 * exhaustionOf(actor))]]
+          : [];
       }),
     ),
   };
@@ -4080,10 +4258,18 @@ function withEffectActions(
       const spell = lookup(access, SpellSchema, spellId);
       if (!spell.spheres) continue;
       const key = `spheres:${spellId}`;
-      resources[key] =
-        spell.spheres.count +
-        spell.spheres.perSlot *
-          Math.max(0, (level ?? spell.level) - spell.level);
+      const { gathered, countMod, count, perSlot } = spell.spheres;
+      // Spirit Lantern: as many as it has gathered, up to the caster's spellcasting modifier (an item's count).
+      const most =
+        countMod && !castFrom(sourceId)
+          ? Math.max(
+              1,
+              evaluateFormula({ base: 0, add: [{ kind: "spellMod" }] }, stats),
+            )
+          : count;
+      resources[key] = gathered
+        ? Math.min(most, actor.resourcesSpent[`${key}:gathered`] ?? 0)
+        : count + perSlot * Math.max(0, (level ?? spell.level) - spell.level);
       spell.spheres.actions.forEach((activation, index) => {
         granted.push({
           id: `spheres:${sourceId}:${String(index)}`,
@@ -4360,6 +4546,42 @@ function changedWeapon(
   };
 }
 
+// Whether a creature other than the caster still bears what its spell, or that spell's lasting action, put on it, so
+// the spell's mark doesn't move yet, as Hunter's Mark's.
+function stillMarked(
+  actor: Actor,
+  spellId: string,
+  access: ContentAccess,
+): boolean {
+  const state = (access as ContentAccess & { readonly state?: DndState }).state;
+  if (!state) return false;
+  const sources = new Set([`spell:${spellId}`, `lasting:${spellId}`]);
+  return Object.values(state.actors).some(
+    (item) =>
+      item.id !== actor.id &&
+      item.hp > 0 &&
+      item.activeEffects.some(
+        ({ sourceId, casterId }) =>
+          casterId === actor.id && sources.has(sourceId),
+      ),
+  );
+}
+
+// Its levels of Exhaustion, with those that last only while an effect does, as Sickening Radiance's.
+export function exhaustionOf(actor: Actor): number {
+  return Math.min(
+    6,
+    actor.activeEffects.reduce(
+      (sum, { modifier }) =>
+        modifier.kind === "exhausted"
+          ? sum +
+            Math.min(modifier.levels, Math.max(0, (modifier.upTo ?? 6) - sum))
+          : sum,
+      actor.exhaustion,
+    ),
+  );
+}
+
 // A spell's flat Speed or Hit Point maximum increase, as with Longstrider or Aid, counted once per source.
 // shortcut: Hit Points above the maximum aren't taken away when the increase ends.
 function effectBonus(
@@ -4498,7 +4720,7 @@ export function checkBonus(
         ? Math.floor(stats.proficiency / 2)
         : 0) +
     stats.itemBonuses.checks -
-    2 * actor.exhaustion -
+    2 * exhaustionOf(actor) -
     (actor.ordeal ?? 0)
   );
 }
@@ -4949,9 +5171,15 @@ export function scaleActivation(
   };
   // What an area it leaves does later grows with the slot too, as Spirit Guardians' damage does, and so does
   // what strikes in a hit's place, as Lightning Arrow's.
-  const { area, trigger } = activation;
+  const { area, areas, trigger } = activation;
+  const grown = (item: AreaEffect): AreaEffect => ({
+    ...item,
+    ...(item.resolution ? { resolution: scaled(item.resolution) } : {}),
+    ...(item.holding ? { holding: scaled(item.holding) } : {}),
+  });
   return {
     ...activation,
+    ...(areas ? { areas: areas.map(grown) } : {}),
     ...(trigger?.replacesHit
       ? { trigger: { ...trigger, replacesHit: damage(trigger.replacesHit) } }
       : {}),
@@ -5003,7 +5231,10 @@ export function rollAmount(
           )
         : rollDiceNotation(notation, rolling, diceMultiplier)
     : 0;
-  return rolled + (amount.bonus ? evaluateFormula(amount.bonus, stats) : 0);
+  return (
+    rolled * (amount.times ?? 1) +
+    (amount.bonus ? evaluateFormula(amount.bonus, stats) : 0)
+  );
 }
 
 // Each die showing its highest face, the added ones too, adds another die, at most `most` more, as Sorcerous Burst's.
@@ -5063,9 +5294,8 @@ export function damageResponses(
   for (const modifier of [
     ...actor.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
-    // What the spells' areas it stands in give it, as Silence's Immunity to Thunder damage. Monster auras grant
-    // none, so their stat blocks aren't read on every hit.
-    ...(access.state ? zoneModifiers(actor, access.state) : []),
+    // What the areas it stands in give it, as Silence's Immunity to Thunder damage or Aura of Warding's Resistances.
+    ...(access.state ? zoneModifiers(actor, access.state, access) : []),
   ]) {
     if (modifier.kind === "resistance") resistances.push(modifier.damage);
     if (modifier.kind === "vulnerability")
@@ -5075,7 +5305,17 @@ export function damageResponses(
   const absorbs = stats.passives.flatMap((passive) =>
     passive.kind === "absorb" ? passive.damage : [],
   );
-  return { adjustments: [], resistances, vulnerabilities, immunities, absorbs };
+  // Elemental Bane: no Resistance to its type.
+  const baned = actor.activeEffects.flatMap(({ modifier }) =>
+    modifier.kind === "bane" ? [modifier.damage] : [],
+  );
+  return {
+    adjustments: [],
+    resistances: resistances.filter((type) => !baned.includes(type)),
+    vulnerabilities,
+    immunities,
+    absorbs,
+  };
 }
 
 // Profane Casting: a spell of these schools the bearer casts without its components.

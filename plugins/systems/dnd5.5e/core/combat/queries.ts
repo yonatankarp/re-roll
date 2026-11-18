@@ -12,6 +12,7 @@ import {
   controllingRider,
   dndEvent,
   type DndState,
+  effectiveBuild,
   equipped,
   forAttacker,
   hasCondition,
@@ -33,7 +34,7 @@ import {
   scaleActivation,
   type Stats,
 } from "../stats.ts";
-import type { HitKind, Passive, Skill } from "../schemas.ts";
+import type { HitKind, Modifier, Passive, Skill } from "../schemas.ts";
 import { toolKeyOf, toolOf } from "../tools.ts";
 import {
   distanceFeet,
@@ -46,6 +47,7 @@ import {
 import { aloftMode, heightOf } from "./falling.ts";
 import { speedOf } from "../tactics.ts";
 import { heldBy } from "./grapple.ts";
+import { anchorReaches } from "./anchor.ts";
 import {
   climbsCeilings,
   crossesDifficult,
@@ -53,6 +55,7 @@ import {
   unhindered,
   type Mode,
   speedsOf,
+  stridesIce,
   type Through,
   throughOf,
   walksOnWater,
@@ -70,15 +73,21 @@ import { swallowerOf } from "./swallow.ts";
 import { hasteActing, limitsOf } from "./durations.ts";
 import { ownZoneAction } from "./areas.ts";
 import {
+  affects,
   barredKeys,
   blockedSquares,
+  deflection,
   blockingSet,
   inZone,
   sealed,
+  iceKeys,
   slowingKeys,
-  zoneModifiers,
+  stepCost,
+  zoneGrants,
+  zonesOf,
   zonesOn,
 } from "../zones.ts";
+import { everySquare } from "../environment.ts";
 import { spellLevelOf } from "./dispel.ts";
 import { canRegain, regainCap } from "../rest.ts";
 import {
@@ -249,23 +258,36 @@ export function rollBonus(
     total += modifier.subtract ? -rolled : rolled;
   }
   const stats = deriveStats(actor, context);
-  // What a zone it stands in grants, as Pass without Trace's +10 to Stealth.
-  const placed = context.state.combat
-    ? zoneModifiers(actor, context.state, context)
-    : [];
-  for (const modifier of [...passiveModifiers(stats.passives), ...placed]) {
-    if (
-      modifier.kind === "bonus" &&
-      modifier.to === to &&
-      !modifier.concentration &&
-      (!modifier.weapon || weapon) &&
-      (!modifier.skill || modifier.skill === skill) &&
-      (!modifier.tool || usesTool(modifier.tool, tool, context)) &&
-      (!modifier.ability || modifier.ability === ability)
-    ) {
+  const fits = (modifier: Modifier): boolean =>
+    modifier.kind === "bonus" &&
+    modifier.to === to &&
+    !modifier.concentration &&
+    (!modifier.weapon || weapon) &&
+    (!modifier.skill || modifier.skill === skill) &&
+    (!modifier.tool || usesTool(modifier.tool, tool, context)) &&
+    (!modifier.ability || modifier.ability === ability);
+  for (const modifier of passiveModifiers(stats.passives)) {
+    if (modifier.kind === "bonus" && fits(modifier)) {
       total += rollAmount(modifier.amount, stats, context.dice);
     }
   }
+  // What a zone it stands in grants, as Pass without Trace's +10 to Stealth, worked out from the zone owner's
+  // numbers, as Aura of Protection's Charisma modifier. Two of the same aura count once, the better one.
+  const best = new Map<string, number>();
+  for (const { modifier, zone } of context.state.combat
+    ? zoneGrants(actor, context.state, context)
+    : []) {
+    if (modifier.kind !== "bonus" || !fits(modifier)) continue;
+    const owner = context.state.actors[zone.owner] ?? actor;
+    const rolled = rollAmount(
+      modifier.amount,
+      owner === actor ? stats : deriveStats(owner, context),
+      context.dice,
+    );
+    const key = `${zone.sourceId}|${modifier.to}`;
+    best.set(key, Math.max(best.get(key) ?? -Infinity, rolled));
+  }
+  for (const value of best.values()) total += value;
   return total;
 }
 
@@ -306,6 +328,11 @@ export function reaches(
 ): boolean {
   const { targeting } = action.activation;
   if ("self" in targeting) return true;
+  // Done from an object the spell keeps, as Spiritual Weapon's force: from wherever it can get to.
+  // An area from it spreads where it stands (combat/actions.ts), as Delayed Blast Fireball's bead.
+  if (action.activation.anchor) {
+    return "area" in targeting || anchorReaches(actor, action, target.position);
+  }
   // From inside a swallower, it's the one creature within reach.
   const inside = swallowerOf(actor);
   if (inside !== undefined)
@@ -424,6 +451,7 @@ export function groundFor(
   readonly overTerrain: boolean; // crosses difficult terrain at no extra cost, however it moves
   readonly water: ReadonlySet<string>; // squares to swim in
   readonly waterWalks: boolean; // walks over water as on ground, as with Water Walk
+  readonly cost: ((from: Square, to: Square) => number) | null; // dearer steps, as through Plant Growth
 } {
   const through = throughOf(stats, actor);
   // shortcut: going through walls means the map's own; a wall a spell raises stops it as it does anyone.
@@ -470,14 +498,27 @@ export function groundFor(
   return {
     blocked,
     occupied,
-    terrain: difficultSquares(state),
+    terrain: striderTerrain(actor, stats, state),
     costly,
     walls: blockingSet(state, "walking"),
     squeeze: through.squeeze,
     overTerrain: through.terrain || unhindered(actor, stats),
     water: new Set(state.combat?.terrain?.water ?? []),
     waterWalks: walksOnWater(actor, stats),
+    cost: stepCost(actor, state, access),
   };
+}
+
+// The ground's Difficult Terrain as `actor` meets it: without ice and snow for one with Winter Strider.
+function striderTerrain(
+  actor: Actor,
+  stats: Stats,
+  state: DndState,
+): ReadonlySet<string> {
+  const terrain = difficultSquares(state);
+  if (!stridesIce(actor, stats)) return terrain;
+  const icy = new Set([...iceKeys(state), ...everySquare(state)]);
+  return new Set([...terrain].filter((key) => !icy.has(key)));
 }
 
 // The squares that aren't water, where a swimmer can't go on its Swim Speed.
@@ -580,7 +621,7 @@ export function moveSquares(
           ? new Set([...rough, ...ground.water])
           : rough,
         ground.walls,
-        { squeeze: ground.squeeze, jump },
+        { squeeze: ground.squeeze, jump, cost: ground.cost },
       );
       for (const item of found) {
         const key = squareKey(item.square);
@@ -1019,6 +1060,21 @@ export function pactWeaponId(
   });
 }
 
+const kindOf = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
+
+// The kinds of weapons a character picked as Monk weapons, as a Kensei's weapons.
+function monkWeaponsOf(actor: Actor): ReadonlySet<string> {
+  return new Set(
+    (effectiveBuild(actor)?.levels ?? []).flatMap((entry) =>
+      entry.answers.flatMap((answer) =>
+        answer.kind === "weapons" && answer.monk
+          ? answer.values.map(kindOf)
+          : [],
+      ),
+    ),
+  );
+}
+
 // Whether a hit with this action is one a rider of this kind answers (schemas.ts HitKindSchema).
 // A magic weapon's own strike option answers only a hit with that weapon, as a Staff of Striking's charges as a
 // Quarterstaff; any other item's answers any hit its trigger allows.
@@ -1069,8 +1125,10 @@ export function hitFits(
       return (
         unarmed ||
         (weapon !== undefined &&
-          isMelee(hitWith) &&
-          (weapon.category === "simple" || weapon.properties.includes("light")))
+          ((isMelee(hitWith) &&
+            (weapon.category === "simple" ||
+              weapon.properties.includes("light"))) ||
+            monkWeaponsOf(attacker).has(kindOf(weapon.baseWeapon ?? id))))
       );
     case "magicWeapon":
       return weapon?.baseWeapon !== undefined;
@@ -1277,6 +1335,31 @@ export function walledApart(
   access: ContentAccess,
 ): boolean {
   if (actor.id !== target.id && (sealed(actor) || sealed(target))) return true;
+  const { resolution } = action.activation;
+  const reach = resolution.kind === "attack" ? meleeReach(action) : null;
+  // A ranged weapon attack past a wind that turns it aside misses, so it isn't made, as past Wind Wall.
+  if (
+    resolution.kind === "attack" &&
+    resolution.attack.type === "weapon" &&
+    reach === null &&
+    deflection(state, actor.position, target.position) === "miss"
+  ) {
+    return true;
+  }
+  // A barrier it can't pass it can't reach through either, but with a Reach weapon, as Antilife Shell's.
+  if (
+    reach !== null &&
+    reach <= 5 &&
+    zonesOf(state, access).some(
+      (zone) =>
+        zone.area?.barrier &&
+        inZone(zone, target.position) &&
+        !inZone(zone, actor.position) &&
+        affects(zone, actor, state, access),
+    )
+  ) {
+    return true;
+  }
   const guarding = zonesOn(target, state, access).filter(
     (zone) =>
       zone.area?.noSpells === "all" ||

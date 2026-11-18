@@ -57,6 +57,19 @@ const FIXTURES = [
   },
   trait("luck", [{ kind: "rerollOnes" }]),
   trait("savage", [{ kind: "savageAttacker" }]),
+  // A weapon die more on a melee Critical Hit only, as Savage Attacks (#182).
+  trait("crit-die", [], {
+    activations: [
+      {
+        label: "Crit Die",
+        cost: [],
+        weaponDie: true,
+        trigger: { afterHit: "meleeWeapon", onCritical: true },
+        targeting: { creatures: 1, range: 5, side: "enemy" },
+        resolution: { kind: "automatic", effects: [] },
+      },
+    ],
+  }),
   trait("defy-death", [{ kind: "deathSaveAdvantage" }]),
   trait("great-weapon", [{ kind: "greatWeaponFighting" }]),
   trait("adept", [{ kind: "energyMastery", damage: "fire" }]),
@@ -877,6 +890,16 @@ const FIXTURES = [
     text: "Test.",
     ...extra,
   })),
+  // An older book's background: any abilities, an Origin feat of choice, a skill choice and no tool (#182).
+  {
+    id: "test:background/older",
+    name: "Older",
+    abilities: ["str", "dex", "con", "int", "wis", "cha"],
+    skills: ["history"],
+    choices: [
+      { kind: "skills", id: "skills", count: 1, from: ["arcana", "nature"] },
+    ],
+  },
   {
     id: "test:background/haunted",
     name: "Haunted",

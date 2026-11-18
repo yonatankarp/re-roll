@@ -1,6 +1,6 @@
 import { prisonEvents } from "./fear.ts";
 import { z } from "zod";
-import { placedFlag, zonesOf } from "../zones.ts";
+import { deflection, placedFlag, zoneGrants, zonesOf } from "../zones.ts";
 import { concentrationBonus } from "./school.ts";
 import {
   type Actor,
@@ -74,6 +74,8 @@ import {
   type Roll,
   rollOnTable,
   rollResponder,
+  heldDie,
+  inspiredSwing,
   slotRefund,
   strikeAction,
 } from "./reactions.ts";
@@ -94,6 +96,7 @@ import {
   scaleActivation,
   spellSaveDc,
   type Stats,
+  scaledDice,
 } from "../stats.ts";
 import { finalDamage, halved, rollD20 } from "../rules.ts";
 import {
@@ -183,6 +186,7 @@ import {
   damageRiders,
   dealEvents,
   leafEvents,
+  siphoned,
   payCosts,
   protectedMount,
   reactionMove,
@@ -612,7 +616,14 @@ function rollWindow(
   let bonus = held.bonus;
   for (;;) {
     const found = rollResponder(current, passed, context);
-    if (!found) return { events, natural: current.natural, bonus };
+    if (!found) {
+      const inspired = inspiredSwing(current, context);
+      return {
+        events: [...events, ...inspired.events],
+        natural: current.natural,
+        bonus: bonus + inspired.bonus,
+      };
+    }
     const { reactor, action } = found;
     if (reactor.id === PLAYER_ACTOR) {
       const rolled = {
@@ -1231,6 +1242,10 @@ export function runAttackRoll(
     ) ||
     crowded ||
     longRange ||
+    // Ranged weapon attacks through a wind or a wall of water, as Wall of Water's.
+    (ranged &&
+      resolution.attack.type === "weapon" &&
+      deflection(state, attacker.position, target.position) !== null) ||
     underwaterHampered(attacker, action, resolution, context) ||
     // Speedy or Boots of Speed: an Opportunity Attack, one made on the target's own turn, has Disadvantage.
     (inOwnTurn(target, context) &&
@@ -2689,6 +2704,7 @@ function landHit(
     ...spellHitEvents(payload.spell, attacker, target, stats, context),
     ...oncePerTurnHit(resolution, action, attacker, target, context),
     ...drained(resolution, attacker, target, dealt.dealt, stats, context),
+    ...siphoned(action, attacker, dealt.dealt, stats),
     ...feast(attacker, target, stats, context),
     ...retaliated(attacker, target, action, context, dealt.dealt),
     ...halted(attacker, target, stats, context),
@@ -2829,7 +2845,15 @@ function landHit(
             : {}),
         }),
       ),
-      ...(smitesFor(action, attacker, target, stats, context).length > 0
+      ...(smitesFor(
+        action,
+        attacker,
+        target,
+        stats,
+        context,
+        undefined,
+        payload.critical,
+      ).length > 0
         ? [
             frame("afterHit", {
               attacker: attacker.id,
@@ -2969,11 +2993,24 @@ function retaliated(
   const stats = deriveStats(target, context);
   const onceKey = `retaliate:${attacker.id}`;
   const near = distanceFeet(attacker.position, target.position);
+  // An aura's strikes back are worked out from its owner's numbers, as Holy Aura's save DC.
+  const giver = new Map<Actor["activeEffects"][number]["modifier"], Actor>(
+    zoneGrants(target, context.state, context).map(({ modifier, zone }) => [
+      modifier,
+      context.state.actors[zone.owner] ?? target,
+    ]),
+  );
+  const attackerType = (
+    deriveStats(attacker, context).creatureType ?? ""
+  ).toLowerCase();
   const backs = [
     ...target.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
+    ...giver.keys(),
   ].flatMap((modifier) =>
     modifier.kind === "retaliate" &&
+    (!modifier.creatureTypes ||
+      modifier.creatureTypes.includes(attackerType)) &&
     (modifier.within !== undefined
       ? near <= modifier.within
       : close || modifier.anyAttack === true) &&
@@ -3004,7 +3041,42 @@ function retaliated(
         ]
       : []),
   ]);
+  // Holy Aura: a save against the giver's DC, or the attacker gets the effects.
+  const struck = backs.flatMap((back) => {
+    if (!back.condition) return [];
+    const by = giver.get(back) ?? target;
+    const rolled = back.save
+      ? rollSave(
+          attacker,
+          back.save.ability,
+          evaluateFormula(back.save.dc, deriveStats(by, context)),
+          context,
+          true,
+        )
+      : { saved: false, events: [] };
+    return [
+      ...rolled.events,
+      ...(rolled.saved
+        ? []
+        : leafEvents(
+            [
+              {
+                kind: "applyCondition",
+                condition: back.condition,
+                duration: { until: "itsNextTurnEnd" },
+                repeatSave: false,
+                endsOnDamage: false,
+              },
+            ],
+            `retaliate:${by.id}`,
+            by,
+            attacker,
+            context,
+          )),
+    ];
+  });
   const events = [
+    ...struck,
     ...(backs.some(({ oncePerTurn }) => oncePerTurn)
       ? [
           dndEvent(`${NS}:oncePerTurnUsed`, {
@@ -3605,9 +3677,20 @@ function hitRiders(
   const events: SystemEvent[] = [];
   const sided = (casterId: string) =>
     state.actors[casterId]?.side === attacker.side;
-  const carried = [
+  const carried: {
+    readonly effect: Pick<
+      Actor["activeEffects"][number],
+      "modifier" | "sourceId" | "casterId"
+    >;
+    readonly by: string;
+  }[] = [
     ...attacker.activeEffects.map((effect) => ({ effect, by: "bearer" })),
     ...target.activeEffects.map((effect) => ({ effect, by: "caster" })),
+    // What an aura the attacker stands in gives its hits, as Crusader's Mantle's Radiant.
+    ...zoneGrants(attacker, state, context).map(({ modifier, zone }) => ({
+      effect: { modifier, sourceId: zone.sourceId, casterId: zone.owner },
+      by: "bearer",
+    })),
   ];
   const damage = carried.flatMap(({ effect, by }) => {
     const { modifier, sourceId, casterId } = effect;
@@ -3641,8 +3724,46 @@ function hitRiders(
     const type = modifier.types
       ? typeAgainst(modifier.types, responses)
       : modifier.damage.type;
-    return [{ ...modifier.damage, type }];
+    // A die another creature gave is its size, as Commander's Strike's Superiority Die.
+    const giver = state.actors[casterId];
+    const { amount } = modifier.damage;
+    return [
+      {
+        ...modifier.damage,
+        type,
+        ...(giver &&
+        giver.id !== attacker.id &&
+        (amount.dieSize || amount.diceCount)
+          ? {
+              amount: {
+                ...amount,
+                dice:
+                  scaledDice(amount, deriveStats(giver, context).scaling) ??
+                  amount.dice,
+                dieSize: undefined,
+                diceCount: undefined,
+              },
+            }
+          : {}),
+      },
+    ];
   });
+  // Combat Inspiration's Offense: the attacker's Bardic Inspiration die, at its giver's size, added to the hit.
+  const held = heldDie(attacker, context);
+  const first = resolution.damage[0];
+  if (
+    held &&
+    first &&
+    held.stats.passives.some(({ kind }) => kind === "combatInspiration")
+  ) {
+    events.push(held.spent);
+    damage.push({
+      amount: {
+        dice: scaledDice(held.amount, held.stats.scaling) ?? held.amount.dice,
+      },
+      type: first.type,
+    });
+  }
   return { damage, events };
 }
 
@@ -3928,6 +4049,7 @@ function smitesFor(
   stats: Stats,
   context: Context,
   following?: string,
+  critical = false,
 ): readonly KnownAction[] {
   if (hitWith.activation.resolution.kind !== "attack") return [];
   return stats.actions.filter((action) => {
@@ -3942,6 +4064,7 @@ function smitesFor(
       !trigger.forgoAdvantage && // picked before the roll
       !trigger.gainsAdvantage &&
       trigger.fixedRoll === undefined &&
+      (!trigger.onCritical || critical) &&
       canAfford(action, attacker, stats) &&
       hitFits(trigger.afterHit, hitWith, attacker, context) &&
       itemFits(action, hitWith, context) &&
@@ -4070,6 +4193,7 @@ export function runAfterHit(
     stats,
     context,
     payload.following,
+    payload.critical,
   ).flatMap((action) =>
     action.activation.trigger?.near === undefined
       ? fitsType(target, action.activation.targeting, context, attacker)

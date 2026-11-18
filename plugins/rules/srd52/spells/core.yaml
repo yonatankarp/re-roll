@@ -113,7 +113,7 @@
     through it. An affected creature can cast spells or make attacks with Ranged
     or Reach weapons through the barrier. If you move so that an affected
     creature is forced to pass through the barrier, the spell ends.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -176,7 +176,36 @@
     in the aura, you and your allies have Resistance to Necrotic damage, and
     your Hit Point maximums can’t be reduced. If an ally with 0 Hit Points
     starts its turn in the aura, that ally regains 1 Hit Point.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting:
+      { area: { shape: emanation, radius: 30 }, range: self, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: zone,
+            zone: area,
+            radius: 30,
+            follows: true,
+            duration: { concentration: true, minutes: 10 },
+          }
+    area:
+      {
+        side: ally,
+        self: true,
+        grants: [{ kind: resistance, damage: necrotic }, { kind: keepMaxHp }],
+        when: turnStart,
+        downed: true,
+        resolution:
+          {
+            kind: automatic,
+            damage: [],
+            effects: [{ kind: heal, amount: { bonus: { base: 1 } } }],
+          },
+      }
 - id: srd52:spell/beacon-of-hope
   name: Beacon of Hope
   level: 3
@@ -194,7 +223,30 @@
     Choose any number of creatures within range. For the duration, each target
     has Advantage on Wisdom saving throws and Death Saving Throws and regains
     the maximum number of Hit Points possible from any healing.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting:
+      { area: { shape: emanation, radius: 30 }, range: self, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: advantage, on: saves, ability: wis },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: deathSaveAdvantage },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: healedMax },
+            duration: { concentration: true, minutes: 1 },
+          }
 - id: srd52:spell/bless
   name: Bless
   level: 1
@@ -439,7 +491,49 @@
     throw. On a failed save, the creature takes 3d10 Slashing damage. A creature
     makes this save only once per turn. Using a Higher-Level Spell Slot. The
     damage increases by 1d10 for each spell slot level above 3.
-  automation: text
+  automation: full
+  # shortcut: the Advantage on Strength saves near the pack is its caster's allies' too.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 10 }, range: 60, side: enemy }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: zone,
+            zone: area,
+            radius: 10,
+            part: 0,
+            duration: { concentration: true, minutes: 10 },
+          }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 5,
+            part: 1,
+            duration: { concentration: true, minutes: 10 },
+          }
+    areas:
+      - side: enemy
+        when: turnEnd
+        enters: true
+        appears: true
+        moves: 30
+        moveWith: free
+        resolution:
+          kind: save
+          ability: dex
+          dc: { add: [{ kind: spellSaveDc }] }
+          damage: [{ amount: { dice: 3d10 }, type: slashing }]
+          onSuccessDamage: none
+          onFail: []
+          onSuccess: []
+      - side: ally
+        grants: [{ kind: advantage, on: saves, ability: str }]
+  upcast:
+    perSlotLevel:
+      addDice: 1d10
 - id: srd52:spell/conjure-woodland-beings
   name: Conjure Woodland Beings
   level: 4
@@ -462,7 +556,51 @@
     you can take the Disengage action as a Bonus Action for the spell’s
     duration. Using a Higher-Level Spell Slot. The damage increases by 1d8 for
     each spell slot level above 4.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting:
+      { area: { shape: emanation, radius: 10 }, range: self, side: enemy }
+    alsoSelf:
+      [
+        {
+          kind: modifier,
+          modifier: { kind: bonusDisengage },
+          duration: { concentration: true, minutes: 10 },
+        },
+      ]
+    resolution:
+      kind: save
+      ability: wis
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 5d8 }, type: force }]
+      onSuccessDamage: half
+      onFail:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 10,
+            follows: true,
+            duration: { concentration: true, minutes: 10 },
+          },
+        ]
+      onSuccess: []
+    area:
+      side: enemy
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: save
+        ability: wis
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 5d8 }, type: force }]
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
 - id: srd52:spell/control-water
   name: Control Water
   level: 4
@@ -815,7 +953,38 @@
     and is buried in the rubble, requiring a DC 20 Strength (Athletics) check as
     an action to escape. On a successful save, the creature takes half as much
     damage only.
-  automation: text
+  automation: full
+  # No structure stands on a battle map, so none takes the tremor's damage or collapses.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 100 }, range: 500, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - { kind: applyCondition, condition: prone, duration: instantaneous }
+        - { kind: endConcentration }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 100,
+            duration: { concentration: true, minutes: 1 },
+          }
+      onSuccess: []
+      fissure: { count: 1d6, depth: { dice: 1d10, times: 10 } }
+    area:
+      terrain: ground
+      ground: true
+      when: ownerTurnEnd
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        onFail:
+          - { kind: applyCondition, condition: prone, duration: instantaneous }
+          - { kind: endConcentration }
+        onSuccess: []
 - id: srd52:spell/ensnaring-strike
   name: Ensnaring Strike
   level: 1
@@ -1182,8 +1351,36 @@
     immediate future. For the duration, the target has Advantage on D20 Tests,
     and other creatures have Disadvantage on attack rolls against it. The spell
     ends early if you cast it again.
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  activation:
+    cost: [slot]
+    outOfCombat: true
+    oneTarget: true
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: advantage, on: attacks },
+            duration: { minutes: 480 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: advantage, on: saves },
+            duration: { minutes: 480 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: advantage, on: checks },
+            duration: { minutes: 480 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: attacksAgainst },
+            duration: { minutes: 480 },
+          }
 - id: srd52:spell/geas
   name: Geas
   level: 5
@@ -1492,30 +1689,116 @@
     take a Bonus Action on a later turn to curse a new creature. Using a
     Higher-Level Spell Slot. Your Concentration can last longer with a spell
     slot of level 2 (up to 4 hours), 3–4 (up to 8 hours), or 5+ (24 hours).
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - bonusAction
-      - slot
-    targeting:
-      creatures: 1
-      range: 90
-      side: enemy
+    cost: [bonusAction, slot]
+    targeting: { creatures: 1, range: 90, side: enemy }
     resolution:
       kind: automatic
       damage: []
       effects:
         - kind: modifier
-          duration:
-            concentration: true
-            minutes: 60
+          duration: { concentration: true, minutes: 60 }
           modifier:
-            kind: hitDamage
-            dealtBy: caster
-            damage:
-              amount:
-                dice: 1d6
-              type: necrotic
+            {
+              kind: hitDamage,
+              dealtBy: caster,
+              damage: { amount: { dice: 1d6 }, type: necrotic },
+            }
+        - {
+            kind: modifier,
+            option: Strength,
+            modifier: { kind: disadvantage, on: checks, ability: str },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Dexterity,
+            modifier: { kind: disadvantage, on: checks, ability: dex },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Constitution,
+            modifier: { kind: disadvantage, on: checks, ability: con },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Intelligence,
+            modifier: { kind: disadvantage, on: checks, ability: int },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Wisdom,
+            modifier: { kind: disadvantage, on: checks, ability: wis },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Charisma,
+            modifier: { kind: disadvantage, on: checks, ability: cha },
+            duration: { concentration: true, minutes: 60 },
+          }
+  lasting:
+    cost: [bonusAction]
+    remark: true
+    targeting: { creatures: 1, range: 90, side: enemy }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          duration: { concentration: true, minutes: 60 }
+          modifier:
+            {
+              kind: hitDamage,
+              dealtBy: caster,
+              damage: { amount: { dice: 1d6 }, type: necrotic },
+            }
+        - {
+            kind: modifier,
+            option: Strength,
+            modifier: { kind: disadvantage, on: checks, ability: str },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Dexterity,
+            modifier: { kind: disadvantage, on: checks, ability: dex },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Constitution,
+            modifier: { kind: disadvantage, on: checks, ability: con },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Intelligence,
+            modifier: { kind: disadvantage, on: checks, ability: int },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Wisdom,
+            modifier: { kind: disadvantage, on: checks, ability: wis },
+            duration: { concentration: true, minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            option: Charisma,
+            modifier: { kind: disadvantage, on: checks, ability: cha },
+            duration: { concentration: true, minutes: 60 },
+          }
+  upcast:
+    perSlotLevel:
+      durations:
+        - { at: 1, duration: { concentration: true, minutes: 240 } }
+        - { at: 2, duration: { concentration: true, minutes: 480 } }
+        - { at: 4, duration: { concentration: true, minutes: 1440 } }
 - id: srd52:spell/hunter-s-mark
   name: Hunter’s Mark
   level: 1
@@ -1536,30 +1819,45 @@
     move the mark to a new creature you can see within range. Using a
     Higher-Level Spell Slot. Your Concentration can last longer with a spell
     slot of level 3–4 (up to 8 hours) or 5+ (up to 24 hours).
-  automation: partial
+  automation: full
+  # Its Advantage on checks to find the quarry changes nothing in a fight, where the quarry is in sight or hidden by
+  # its own Stealth.
   activation:
-    cost:
-      - bonusAction
-      - slot
-    targeting:
-      creatures: 1
-      range: 90
-      side: enemy
+    cost: [bonusAction, slot]
+    targeting: { creatures: 1, range: 90, side: enemy }
     resolution:
       kind: automatic
       damage: []
       effects:
         - kind: modifier
-          duration:
-            concentration: true
-            minutes: 60
+          duration: { concentration: true, minutes: 60 }
           modifier:
-            kind: hitDamage
-            dealtBy: caster
-            damage:
-              amount:
-                dice: 1d6
-              type: force
+            {
+              kind: hitDamage,
+              dealtBy: caster,
+              damage: { amount: { dice: 1d6 }, type: force },
+            }
+  lasting:
+    cost: [bonusAction]
+    remark: true
+    targeting: { creatures: 1, range: 90, side: enemy }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - kind: modifier
+          duration: { concentration: true, minutes: 60 }
+          modifier:
+            {
+              kind: hitDamage,
+              dealtBy: caster,
+              damage: { amount: { dice: 1d6 }, type: force },
+            }
+  upcast:
+    perSlotLevel:
+      durations:
+        - { at: 2, duration: { concentration: true, minutes: 480 } }
+        - { at: 4, duration: { concentration: true, minutes: 1440 } }
 - id: srd52:spell/illusory-script
   name: Illusory Script
   level: 1
@@ -1860,35 +2158,24 @@
     ends its turn there. A creature makes this save only once per turn. Using a
     Higher-Level Spell Slot. The damage increases by 1d10 for each spell slot
     level above 2.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: sphere
-        radius: 5
-      range: 120
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 5 }, range: 120, side: enemy }
     resolution:
       kind: save
       ability: con
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 2d10
-          type: radiant
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 2d10 }, type: radiant }]
       onSuccessDamage: half
       onFail:
-        - kind: zone
-          zone: dim
-          radius: 5
-          duration:
-            concentration: true
-            minutes: 1
+        - { kind: revertShape }
+        - {
+            kind: zone,
+            zone: dim,
+            radius: 5,
+            duration: { concentration: true, minutes: 1 },
+          }
       onSuccess: []
     area:
       when: turnEnd
@@ -1897,15 +2184,10 @@
       resolution:
         kind: save
         ability: con
-        dc:
-          add:
-            - kind: spellSaveDc
-        damage:
-          - amount:
-              dice: 2d10
-            type: radiant
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 2d10 }, type: radiant }]
         onSuccessDamage: half
-        onFail: []
+        onFail: [{ kind: revertShape }]
         onSuccess: []
   upcast:
     perSlotLevel:
@@ -2095,7 +2377,8 @@
     failed save, the condition ends, and the creature teleports to another plane
     of existence (GM’s choice). Additional Effects: This layer is destroyed by
     Dispel Magic."
-  automation: partial
+  automation: full
+  # Nothing in play aims at a wall, so its layers aren't destroyed; it blocks sight, so nothing is aimed through it.
   activation:
     cost:
       - action
@@ -2296,7 +2579,46 @@
     Strength-based D20 Tests for the duration. During that time, it also
     subtracts 1d8 from all its damage rolls. The target repeats the save at the
     end of each of its turns, ending the spell on a success.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: attacks, ability: str },
+            duration: { concentration: true, minutes: 1 },
+            repeatSave: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: saves, ability: str },
+            duration: { concentration: true, minutes: 1 },
+            repeatSave: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: checks, ability: str },
+            duration: { concentration: true, minutes: 1 },
+            repeatSave: true,
+          }
+        - {
+            kind: modifier,
+            modifier:
+              { kind: damageBonus, amount: { dice: 1d8 }, subtract: true },
+            duration: { concentration: true, minutes: 1 },
+            repeatSave: true,
+          }
+      onSuccess:
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: attacks, once: true },
+            duration: { until: yourNextTurnStart },
+          }
 - id: srd52:spell/remove-curse
   name: Remove Curse
   level: 3
@@ -2917,7 +3239,8 @@
     be dispelled by Dispel Magic. A Disintegrate spell destroys the wall
     instantly, however. The wall also extends into the Ethereal Plane and blocks
     ethereal travel through the wall.
-  automation: partial
+  automation: full
+  # Nothing in play aims at a wall, so no Disintegrate destroys it.
   activation:
     cost:
       - action
@@ -2993,7 +3316,26 @@
     are deflected upward and miss automatically. Boulders hurled by Giants or
     siege engines, and similar projectiles, are unaffected. Creatures in gaseous
     form can’t pass through it.
-  automation: text
+  automation: full
+  # Its Small flyers and gaseous creatures that can't pass, and a giant's boulder it doesn't stop, are left out.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: wall, radius: 50 }, range: 120, side: enemy }
+    resolution:
+      kind: save
+      ability: str
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 4d8 }, type: bludgeoning }]
+      onSuccessDamage: half
+      onFail:
+        - { kind: disperse }
+        - kind: zone
+          zone: area
+          shape: line
+          radius: 50
+          duration: { concentration: true, minutes: 1 }
+      onSuccess: []
+    area: { deflects: miss, clearsFog: true }
 - id: srd52:spell/acid-splash
   name: Acid Splash
   level: 0
@@ -3090,7 +3432,8 @@
     suppressed counts against its duration. Dispel Magic has no effect on the
     aura, and the auras created by different Antimagic Field spells don’t
     nullify each other.
-  automation: partial
+  automation: full
+  # Spells, magic items' properties and activations, and teleports into or out of it are all held off.
   activation:
     cost:
       - action
@@ -3134,7 +3477,55 @@
     equal to 4d12 plus your spellcasting ability modifier. On your later turns,
     you can take a Bonus Action to move the sword up to 30 feet to a spot you
     can see and repeat the attack against the same target or a different one.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    anchor: { moves: 60 }
+    targeting: { creatures: 1, range: 65, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage:
+        [
+          {
+            amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } },
+            type: force,
+          },
+        ]
+      onHit:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
+      onMiss:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
+  lasting:
+    cost: [bonusAction]
+    anchor: { moves: 30 }
+    targeting: { creatures: 1, range: 35, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage:
+        [
+          {
+            amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } },
+            type: force,
+          },
+        ]
+      onHit: []
+      onMiss: []
 - id: srd52:spell/awaken
   name: Awaken
   level: 5
@@ -3276,7 +3667,33 @@
     you control over that storm instead of creating a new one. Under such
     conditions, the spell’s damage increases by 1d10. Using a Higher-Level Spell
     Slot. The damage increases by 1d10 for each spell slot level above 3.
-  automation: text
+  automation: full
+  # shortcut: no fight is fought out in a storm it could take over, so it never deals the storm's extra die.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 5 }, range: 120, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 3d10 }, type: lightning }]
+      onSuccessDamage: half
+      onFail: []
+      onSuccess: []
+  lasting:
+    cost: [action]
+    targeting: { area: { shape: sphere, radius: 5 }, range: 120, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 3d10 }, type: lightning }]
+      onSuccessDamage: half
+      onFail: []
+      onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d10
 - id: srd52:spell/chill-touch
   name: Chill Touch
   level: 0
@@ -3455,7 +3872,59 @@
     lights. A creature can be affected by this spell only once per turn. Using a
     Higher-Level Spell Slot. The healing and damage increase by 1d12 for each
     spell slot level above 7."
-  automation: text
+  automation: full
+  # Healing Light goes on its caster's side and Searing Light on the rest.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 10 }, range: 90, side: enemy }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: zone,
+            zone: light,
+            radius: 10,
+            part: 0,
+            duration: { concentration: true, minutes: 10 },
+          }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 10,
+            part: 1,
+            duration: { concentration: true, minutes: 10 },
+          }
+    areas:
+      - side: ally
+        when: turnEnd
+        enters: true
+        appears: true
+        moves: 30
+        moveWith: free
+        resolution:
+          kind: automatic
+          damage: []
+          effects:
+            - {
+                kind: heal,
+                amount: { dice: 4d12, bonus: { add: [{ kind: spellMod }] } },
+              }
+      - side: enemy
+        when: turnEnd
+        enters: true
+        appears: true
+        resolution:
+          kind: save
+          ability: dex
+          dc: { add: [{ kind: spellSaveDc }] }
+          damage: [{ amount: { dice: 6d12 }, type: radiant }]
+          onSuccessDamage: half
+          onFail: []
+          onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d12
 - id: srd52:spell/contact-other-plane
   name: Contact Other Plane
   level: 5
@@ -3875,7 +4344,27 @@
     can take an action to make a Strength (Athletics) check against your spell
     save DC. On a success, it frees itself from the grasping plants and is no
     longer Restrained by them.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: cube, radius: 20 }, range: 90, side: enemy }
+    resolution:
+      kind: save
+      ability: str
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - kind: applyCondition
+          condition: restrained
+          duration: { concentration: true, minutes: 1 }
+          escape: { ability: str, skill: athletics }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 10,
+            duration: { concentration: true, minutes: 1 },
+          }
+      onSuccess: []
+    area: { terrain: ground }
 - id: srd52:spell/fabricate
   name: Fabricate
   level: 4
@@ -4014,7 +4503,43 @@
     ability modifier. The flaming blade sheds Bright Light in a 10-foot radius
     and Dim Light for an additional 10 feet. Using a Higher-Level Spell Slot.
     The damage increases by 1d6 for each spell slot level above 2.
-  automation: text
+  automation: full
+  # The blade stays in hand for the spell.
+  activation:
+    cost: [bonusAction, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        [
+          {
+            kind: zone,
+            zone: light,
+            radius: 10,
+            dim: 10,
+            follows: true,
+            duration: { concentration: true, minutes: 10 },
+          },
+        ]
+  lasting:
+    cost: [action]
+    targeting: { creatures: 1, range: 5, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage:
+        [
+          {
+            amount: { dice: 3d6, bonus: { add: [{ kind: spellMod }] } },
+            type: fire,
+          },
+        ]
+      onHit: []
+      onMiss: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d6
 - id: srd52:spell/fly
   name: Fly
   level: 3
@@ -4286,7 +4811,63 @@
     has Disadvantage on attack rolls and ability checks until the start of your
     next turn. Using a Higher-Level Spell Slot. The damage increases by 1d8 for
     each spell slot level above 2.
-  automation: text
+  automation: full
+  # The metal is the target's armor or weapon, taken to be one it can't drop, so a failed save hampers it instead.
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 2d8 }, type: fire }]
+      onSuccessDamage: full
+      onFail:
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: attacks },
+            duration: { until: yourNextTurnStart },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: checks },
+            duration: { until: yourNextTurnStart },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: mark },
+            duration: { concentration: true, minutes: 1 },
+          }
+      onSuccess:
+        - {
+            kind: modifier,
+            modifier: { kind: mark },
+            duration: { concentration: true, minutes: 1 },
+          }
+  lasting:
+    cost: [bonusAction]
+    targeting: { creatures: 1, range: 60, side: enemy, afflicted: Heat Metal }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 2d8 }, type: fire }]
+      onSuccessDamage: full
+      onFail:
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: attacks },
+            duration: { until: yourNextTurnStart },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: disadvantage, on: checks },
+            duration: { until: yourNextTurnStart },
+          }
+      onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
 - id: srd52:spell/hideous-laughter
   name: Hideous Laughter
   level: 1
@@ -5026,7 +5607,8 @@
     radius centered on a point within range become enriched for 365 days. The
     plants yield twice the normal amount of food when harvested. They can
     benefit from only one Plant Growth per year.
-  automation: partial
+  automation: full
+  # The areas it spares are left out: it covers its whole Sphere.
   activation:
     cost:
       - action
@@ -5047,7 +5629,7 @@
           duration:
             text: Until dispelled
     area:
-      difficult: true
+      cost: 4
   scene:
     cost:
       - action
@@ -5165,7 +5747,54 @@
     the target is already possessed, Charmed, or Frightened by such a creature,
     the target has Advantage on any new saving throw against the relevant
     effect.
-  automation: text
+  automation: full
+  # shortcut: possession isn't held off, and the Advantage holds on saves against Charmed or Frightened from any source.
+  activation:
+    cost: [action, slot, { gold: 25 }]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: disadvantage,
+                on: attacksAgainst,
+                attackers:
+                  [aberration, celestial, elemental, fey, fiend, undead],
+              },
+            duration: { concentration: true, minutes: 10 },
+          }
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: conditionImmunity,
+                condition: charmed,
+                creatureTypes:
+                  [aberration, celestial, elemental, fey, fiend, undead],
+              },
+            duration: { concentration: true, minutes: 10 },
+          }
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: conditionImmunity,
+                condition: frightened,
+                creatureTypes:
+                  [aberration, celestial, elemental, fey, fiend, undead],
+              },
+            duration: { concentration: true, minutes: 10 },
+          }
+        - {
+            kind: modifier,
+            modifier:
+              { kind: advantage, on: saves, conditions: [charmed, frightened] },
+            duration: { concentration: true, minutes: 10 },
+          }
 - id: srd52:spell/ray-of-frost
   name: Ray of Frost
   level: 0
@@ -5506,7 +6135,19 @@
     when the spell is cast must take a Search action and succeed on a Wisdom
     (Perception or Survival) check against your spell save DC to recognize the
     terrain as hazardous before entering it.
-  automation: text
+  automation: full
+  # The camouflage changes only whether a creature knows to walk round the spikes.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 20 }, range: 150, side: enemy }
+    resolution:
+      kind: automatic
+      effects:
+        - kind: zone
+          zone: thorns
+          radius: 20
+          duration: { concentration: true, minutes: 10 }
+          damage: [{ amount: { dice: 2d4 }, type: piercing }]
 - id: srd52:spell/stone-shape
   name: Stone Shape
   level: 4
@@ -5571,40 +6212,49 @@
     radiance. For the duration, a mote of brilliant radiance shines above you.
     It sheds Bright Light in a 30-foot radius and Dim Light for an additional 30
     feet. This light is sunlight.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: line
-        radius: 60
-      range: self
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: line, radius: 60 }, range: self, side: enemy }
     resolution:
       kind: save
       ability: con
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 6d8
-          type: radiant
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 6d8 }, type: radiant }]
       onSuccessDamage: half
       onFail:
-        - kind: applyCondition
-          condition: blinded
-          duration:
-            until: yourNextTurnStart
-        - kind: zone
-          zone: sunlight
-          radius: 30
-          duration:
-            concentration: true
-            minutes: 1
-          follows: true
+        - {
+            kind: applyCondition,
+            condition: blinded,
+            duration: { until: yourNextTurnStart },
+          }
+        - {
+            kind: zone,
+            zone: sunlight,
+            radius: 30,
+            dim: 30,
+            follows: true,
+            duration: { concentration: true, minutes: 1 },
+          }
+      onSuccess: []
+  lasting:
+    cost: [action]
+    targeting: { area: { shape: line, radius: 60 }, range: self, side: enemy }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 6d8 }, type: radiant }]
+      onSuccessDamage: half
+      onFail:
+        [
+          {
+            kind: applyCondition,
+            condition: blinded,
+            duration: { until: yourNextTurnStart },
+          },
+        ]
+      onSuccess: []
 - id: srd52:spell/teleport
   name: Teleport
   level: 7
@@ -5770,7 +6420,30 @@
     ends, you can make the attack again on each of your turns as a Magic action,
     targeting the same creature or a different one. Using a Higher-Level Spell
     Slot. The damage increases by 1d6 for each spell slot level above 3.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    siphon: true
+    targeting: { creatures: 1, range: 5, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 3d6 }, type: necrotic }]
+      onHit: []
+      onMiss: []
+  lasting:
+    cost: [action]
+    siphon: true
+    targeting: { creatures: 1, range: 5, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 3d6 }, type: necrotic }]
+      onHit: []
+      onMiss: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d6
 - id: srd52:spell/wall-of-ice
   name: Wall of Ice
   level: 6
@@ -5803,7 +6476,29 @@
     Higher-Level Spell Slot. The damage the wall deals when it appears increases
     by 2d6 and the damage from passing through the sheet of frigid air increases
     by 1d6 for each spell slot level above 6.
-  automation: text
+  automation: full
+  # A dome round the point aimed at. Nothing in play attacks a wall, so its sections stand and their sheets of frigid
+  # air never form.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: ring, radius: 10 }, range: 120, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 10d6 }, type: cold }]
+      onSuccessDamage: half
+      onFail:
+        - {
+            kind: zone,
+            zone: wall,
+            radius: 10,
+            duration: { concentration: true, minutes: 10 },
+          }
+      onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 2d6
 - id: srd52:spell/water-walk
   name: Water Walk
   level: 3
@@ -6533,7 +7228,7 @@
     damage of the spirit’s type. On a successful save, the target isn’t
     Restrained by the spirit. Using a Higher-Level Spell Slot. The damage
     increases by 1d8 for each spell slot level above 5."
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -6760,7 +7455,19 @@
     still in effect when the target is subjected to an effect that would kill it
     instantly without dealing damage, that effect is negated against the target,
     and the spell ends.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: deathWard },
+            duration: { minutes: 480 },
+          }
 - id: srd52:spell/detect-poison-and-disease
   name: Detect Poison and Disease
   level: 1
@@ -6824,7 +7531,70 @@
     succeed on a Charisma saving throw or be sent back to its home plane if it
     isn’t there already. If they aren’t on their home plane, Undead are sent to
     the Shadowfell, and Fey are sent to the Feywild.
-  automation: text
+  automation: full
+  # shortcut: Break Enchantment ends Charmed and Frightened whatever caused them, and possession isn't played.
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: disadvantage,
+                on: attacksAgainst,
+                attackers: [celestial, elemental, fey, fiend, undead],
+              },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: spheres },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: regain,
+            resource: "spheres:srd52:spell/dispel-evil-and-good",
+            count: all,
+          }
+  spheres:
+    count: 1
+    actions:
+      - label: Break Enchantment
+        cost: [action]
+        dismisses: true
+        targeting: { creatures: 1, range: touch, side: ally }
+        resolution:
+          {
+            kind: automatic,
+            effects:
+              [
+                { kind: removeCondition, condition: charmed },
+                { kind: removeCondition, condition: frightened },
+              ],
+          }
+      - label: Dismissal
+        cost: [action]
+        dismisses: true
+        targeting:
+          {
+            creatures: 1,
+            range: 5,
+            side: enemy,
+            creatureTypes: [celestial, elemental, fey, fiend, undead],
+          }
+        resolution:
+          {
+            kind: save,
+            ability: cha,
+            dc: { add: [{ kind: spellSaveDc }] },
+            damage: [],
+            onFail: [{ kind: sendAway }],
+            onSuccess: [],
+          }
 - id: srd52:spell/divine-smite
   name: Divine Smite
   level: 1
@@ -7228,33 +7998,48 @@
     minute, if the globe hasn’t already shattered, it explodes. Using a
     Higher-Level Spell Slot. The damage increases by 1d6 for each spell slot
     level above 6.
+  automation: full
+  # Held, the globe is its caster's to throw within the minute. shortcut: a held globe left unthrown doesn't burst on
+  # its own after the minute, nor is it given to another to throw.
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: sphere
-        radius: 60
-      range: 300
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 60 }, range: 300, side: enemy }
     resolution:
       kind: save
       ability: con
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 10d6
-          type: cold
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 10d6 }, type: cold }]
+      onSuccessDamage: half
+      onFail: []
+      onSuccess: []
+    shapes:
+      - name: Fire the globe
+      - name: Hold the globe
+        self: true
+        resolution:
+          kind: automatic
+          damage: []
+          effects:
+            - {
+                kind: modifier,
+                modifier: { kind: grantedAction, uses: 1 },
+                duration: { minutes: 1 },
+              }
+  granted:
+    label: Throw the globe
+    cost: [action]
+    targeting: { area: { shape: sphere, radius: 60 }, range: 40, side: enemy }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 10d6 }, type: cold }]
       onSuccessDamage: half
       onFail: []
       onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d6
-  automation: partial
   scene:
     cost:
       - action
@@ -7331,7 +8116,29 @@
     a Dexterity saving throw or have the Prone condition. A creature that enters
     the area or ends its turn there must also succeed on that save or fall
     Prone.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: cube, radius: 10 }, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - { kind: applyCondition, condition: prone, duration: instantaneous }
+        - { kind: zone, zone: area, radius: 5, duration: { minutes: 1 } }
+      onSuccess: []
+    area:
+      terrain: ground
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        onFail:
+          [{ kind: applyCondition, condition: prone, duration: instantaneous }]
+        onSuccess: []
 - id: srd52:spell/guidance
   name: Guidance
   level: 0
@@ -7581,7 +8388,8 @@
     turn there. A creature makes this save only once per turn. The cloud moves
     10 feet away from you in a direction you choose at the start of each of your
     turns.
-  automation: partial
+  automation: full
+  # shortcut: the cloud drifts away from its caster rather than the way it chooses.
   activation:
     cost:
       - action
@@ -7960,25 +8768,25 @@
     anything that would sense its emotions or alignment, read its thoughts, or
     magically detect its location, and no spell—not even Wish—can gather
     information about the target, observe it remotely, or control its mind.
-  automation: partial
+  automation: full
+  # Nothing in play senses, reads or scries a creature, so the rest of its protection has nothing to stop.
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      creatures: 1
-      range: touch
-      side: ally
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
       damage: []
       effects:
-        - kind: modifier
-          modifier:
-            kind: immunity
-            damage: psychic
-          duration:
-            minutes: 1440
+        - {
+            kind: modifier,
+            modifier: { kind: immunity, damage: psychic },
+            duration: { minutes: 1440 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: conditionImmunity, condition: charmed },
+            duration: { minutes: 1440 },
+          }
 - id: srd52:spell/mislead
   name: Mislead
   level: 5
@@ -8205,27 +9013,25 @@
   text: You touch a creature and end the Poisoned condition on it. For the
     duration, the target has Advantage on saving throws to avoid or end the
     Poisoned condition, and it has Resistance to Poison damage.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      creatures: 1
-      range: touch
-      side: ally
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
       damage: []
       effects:
-        - kind: removeCondition
-          condition: poisoned
-        - kind: modifier
-          modifier:
-            kind: resistance
-            damage: poison
-          duration:
-            minutes: 60
+        - { kind: removeCondition, condition: poisoned }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: poison },
+            duration: { minutes: 60 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: advantage, on: saves, conditions: [poisoned] },
+            duration: { minutes: 60 },
+          }
 - id: srd52:spell/regenerate
   name: Regenerate
   level: 7
@@ -8625,28 +9431,21 @@
     creature takes half as much damage. A creature makes this save only once per
     turn. Using a Higher-Level Spell Slot. The damage increases by 1d8 for each
     spell slot level above 3.
-  automation: partial
+  automation: full
+  # Radiant or Necrotic by the caster's alignment: the one its foes resist least.
   activation:
-    cost:
-      - action
-      - slot
+    cost: [action, slot]
     targeting:
-      area:
-        shape: emanation
-        radius: 15
-      range: self
-      side: enemy
+      { area: { shape: emanation, radius: 15 }, range: self, side: enemy }
     resolution:
       kind: automatic
-      damage: []
       effects:
         - kind: zone
           zone: area
           radius: 15
-          duration:
-            concentration: true
-            minutes: 10
           follows: true
+          choose: [radiant, necrotic]
+          duration: { concentration: true, minutes: 10 }
     area:
       side: enemy
       when: turnEnd
@@ -8655,13 +9454,8 @@
       resolution:
         kind: save
         ability: wis
-        dc:
-          add:
-            - kind: spellSaveDc
-        damage:
-          - amount:
-              dice: 3d8
-            type: radiant
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 3d8 }, type: radiant }]
         onSuccessDamage: half
         onFail: []
         onSuccess: []
@@ -8965,7 +9759,8 @@
     maintain your Concentration on this spell for its full duration, the wall
     becomes permanent and can’t be dispelled. Otherwise, the wall disappears
     when the spell ends.
-  automation: partial
+  automation: full
+  # Nothing in play attacks a wall, so its panels stand; a fight ends long before it could become permanent.
   activation:
     cost:
       - action
@@ -9013,7 +9808,44 @@
     your spell save DC. If it succeeds, it is no longer Restrained. The webs are
     flammable. Any 5-foot Cube of webs exposed to fire burns away in 1 round,
     dealing 2d4 Fire damage to any creature that starts its turn in the fire.
-  automation: text
+  automation: full
+  # The webs are taken to be anchored, as across a floor or between walls.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: cube, radius: 20 }, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - kind: applyCondition
+          condition: restrained
+          web: true
+          duration: { concentration: true, minutes: 60 }
+          escape: { ability: str, skill: athletics }
+        - {
+            kind: zone,
+            zone: haze,
+            radius: 10,
+            duration: { concentration: true, minutes: 60 },
+          }
+      onSuccess: []
+    area:
+      terrain: ground
+      when: turnStart
+      enters: true
+      burns: [{ amount: { dice: 2d4 }, type: fire }]
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        onFail:
+          - kind: applyCondition
+            condition: restrained
+            web: true
+            duration: { concentration: true, minutes: 60 }
+            escape: { ability: str, skill: athletics }
+        onSuccess: []
 - id: srd52:spell/word-of-recall
   name: Word of Recall
   level: 6
@@ -9270,69 +10102,44 @@
     only once per turn. A Restrained creature can take an action to make a
     Strength (Athletics) check against your spell save DC, ending the condition
     on itself on a success.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: cube
-        radius: 20
-      range: 90
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: cube, radius: 20 }, range: 90, side: enemy }
     resolution:
       kind: save
       ability: str
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 3d6
-          type: bludgeoning
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 3d6 }, type: bludgeoning }]
       onSuccessDamage: none
       onFail:
         - kind: applyCondition
           condition: restrained
-          duration:
-            concentration: true
-            minutes: 1
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 3d6
-                type: bludgeoning
-            save:
-              ability: str
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: none
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 3d6
-                type: bludgeoning
-            save:
-              ability: str
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: none
+          duration: { concentration: true, minutes: 1 }
+          escape: { ability: str, skill: athletics }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 10,
+            duration: { concentration: true, minutes: 1 },
+          }
+      onSuccess: []
+    area:
+      terrain: ground
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: save
+        ability: str
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 3d6 }, type: bludgeoning }]
+        onSuccessDamage: none
+        onFail:
+          - kind: applyCondition
+            condition: restrained
+            duration: { concentration: true, minutes: 1 }
+            escape: { ability: str, skill: athletics }
+        onSuccess: []
 - id: srd52:spell/blink
   name: Blink
   level: 3
@@ -9358,7 +10165,19 @@
     your choice that you can see within 10 feet of the space you left. If no
     unoccupied space is available within that range, you appear in the nearest
     unoccupied space.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { self: true }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: blink },
+            duration: { minutes: 1 },
+          }
 - id: srd52:spell/chain-lightning
   name: Chain Lightning
   level: 6
@@ -9588,7 +10407,70 @@
     space you can see within 30 feet of the space it left and make the attack
     against a creature within 5 feet of it. Using a Higher-Level Spell Slot. The
     damage increases by 1d12 for each spell slot level above 6.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    anchor: { moves: 60 }
+    targeting: { creatures: 1, range: 65, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage:
+        [
+          {
+            amount: { dice: 3d12, bonus: { add: [{ kind: spellMod }] } },
+            type: psychic,
+          },
+        ]
+      onHit:
+        [
+          {
+            kind: applyCondition,
+            condition: frightened,
+            duration: { until: yourNextTurnStart },
+          },
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 10 },
+          },
+        ]
+      onMiss:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 10 },
+          },
+        ]
+  lasting:
+    cost: [bonusAction]
+    anchor: { moves: 30 }
+    targeting: { creatures: 1, range: 35, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage:
+        [
+          {
+            amount: { dice: 3d12, bonus: { add: [{ kind: spellMod }] } },
+            type: psychic,
+          },
+        ]
+      onHit:
+        [
+          {
+            kind: applyCondition,
+            condition: frightened,
+            duration: { until: yourNextTurnStart },
+          },
+        ]
+      onMiss: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d12
 - id: srd52:spell/contingency
   name: Contingency
   level: 6
@@ -9758,7 +10640,44 @@
     flammable objects in the explosion that aren’t being worn or carried start
     burning. Using a Higher-Level Spell Slot. The base damage increases by 1d6
     for each spell slot level above 7.
-  automation: text
+  automation: full
+  # Its caster sets the bead off by ending the spell, its damage grown by a die each round since it formed.
+  # shortcut: it goes off only that way, not when Concentration breaks or the minute runs out, and no creature
+  # touches or throws the bead.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 20 }, range: 150, side: enemy }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
+  lasting:
+    label: Detonate
+    cost: []
+    oncePerTurn: true
+    dismisses: true
+    anchor: { moves: 0, reach: 20 }
+    growsBy: 1d6
+    targeting: { area: { shape: sphere, radius: 20 }, range: 150, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 12d6 }, type: fire }]
+      onSuccessDamage: half
+      onFail: []
+      onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d6
 - id: srd52:spell/detect-thoughts
   name: Detect Thoughts
   level: 2
@@ -10243,38 +11162,42 @@
     Light in a 20-foot radius and Dim Light for an additional 20 feet. Using a
     Higher-Level Spell Slot. The damage increases by 1d6 for each spell slot
     level above 2.
-  automation: partial
+  automation: full
+  # It rolls over low barriers and narrow pits as a creature walks, and no flammable object lies on a battle map.
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: sphere
-        radius: 5
-      range: 60
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 5 }, range: 60, side: enemy }
     resolution:
       kind: automatic
       damage: []
       effects:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 1
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 2d6
-                type: fire
-            save:
-              ability: dex
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+        - {
+            kind: zone,
+            zone: area,
+            radius: 5,
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: zone,
+            zone: light,
+            radius: 20,
+            dim: 20,
+            bare: true,
+            duration: { concentration: true, minutes: 1 },
+          }
+    area:
+      when: turnEnd
+      whenMoved: true
+      moves: 30
+      moveWith: bonusAction
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 2d6 }, type: fire }]
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
   upcast:
     perSlotLevel:
       addDice: 1d6
@@ -10648,8 +11571,38 @@
     Resistance to Poison damage, and it has Immunity to the Frightened and
     Poisoned conditions. Its Hit Point maximum also increases by 2d10, and it
     gains the same number of Hit Points.
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  # shortcut: the Hit Points gained are rolled apart from the maximum's rise.
+  activation:
+    cost: [slot, { gold: 1000 }]
+    outOfCombat: true
+    targeting:
+      { area: { shape: emanation, radius: 30 }, range: self, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: poison },
+            duration: { minutes: 1440 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: conditionImmunity, condition: frightened },
+            duration: { minutes: 1440 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: conditionImmunity, condition: poisoned },
+            duration: { minutes: 1440 },
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: bonus, to: maxHp, amount: { dice: 2d10 } },
+            duration: { minutes: 1440 },
+          }
+        - { kind: heal, amount: { dice: 2d10 } }
 - id: srd52:spell/hold-person
   name: Hold Person
   level: 2
@@ -10713,31 +11666,27 @@
     the Cylinder into Difficult Terrain until the end of your next turn. Using a
     Higher-Level Spell Slot. The Bludgeoning damage increases by 1d10 for each
     spell slot level above 4.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: sphere
-        radius: 20
-      range: 300
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 20 }, range: 300, side: enemy }
     resolution:
       kind: save
       ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
+      dc: { add: [{ kind: spellSaveDc }] }
       damage:
-        - amount:
-            dice: 2d10
-          type: bludgeoning
-        - amount:
-            dice: 4d6
-          type: cold
+        - { amount: { dice: 2d10 }, type: bludgeoning }
+        - { amount: { dice: 4d6 }, type: cold }
       onSuccessDamage: half
+      onFail:
+        - {
+            kind: zone,
+            zone: area,
+            radius: 20,
+            duration: { until: yourNextTurnEnd },
+          }
+      onSuccess: []
+    area: { terrain: ice }
   upcast:
     perSlotLevel:
       addDice: 1d10
@@ -11386,7 +12335,20 @@
     attack or spell. This spell doesn’t protect the warded creature from areas
     of effect. The spell ends if the warded creature makes an attack roll, casts
     a spell, or deals damage.
-  automation: text
+  automation: full
+  activation:
+    cost: [bonusAction, slot]
+    targeting: { creatures: 1, range: 30, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: sanctuary },
+            duration: { minutes: 1 },
+            endsOn: spell,
+          }
 - id: srd52:spell/see-invisibility
   name: See Invisibility
   level: 2
@@ -11526,7 +12488,31 @@
     is Difficult Terrain. When a creature enters the Cylinder for the first time
     on a turn or starts its turn there, it must succeed on a Dexterity saving
     throw or have the Prone condition and lose Concentration.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 20 }, range: 150, side: enemy }
+    resolution:
+      kind: automatic
+      effects:
+        - {
+            kind: zone,
+            zone: fog,
+            radius: 20,
+            duration: { concentration: true, minutes: 1 },
+          }
+    area:
+      terrain: ice
+      when: turnStart
+      enters: true
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        onFail:
+          - { kind: applyCondition, condition: prone, duration: instantaneous }
+          - { kind: endConcentration }
+        onSuccess: []
 - id: srd52:spell/speak-with-dead
   name: Speak with Dead
   level: 3
@@ -11576,7 +12562,58 @@
     Action on your later turns, you can move the force up to 20 feet and repeat
     the attack against a creature within 5 feet of it. Using a Higher-Level
     Spell Slot. The damage increases by 1d8 for every slot level above 2.
-  automation: text
+  automation: full
+  activation:
+    cost: [bonusAction, slot]
+    anchor: { moves: 60 }
+    targeting: { creatures: 1, range: 65, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage:
+        [
+          {
+            amount: { dice: 1d8, bonus: { add: [{ kind: spellMod }] } },
+            type: force,
+          },
+        ]
+      onHit:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
+      onMiss:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
+  lasting:
+    cost: [bonusAction]
+    anchor: { moves: 20 }
+    targeting: { creatures: 1, range: 25, side: enemy }
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage:
+        [
+          {
+            amount: { dice: 1d8, bonus: { add: [{ kind: spellMod }] } },
+            type: force,
+          },
+        ]
+      onHit: []
+      onMiss: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
 - id: srd52:spell/storm-of-vengeance
   name: Storm of Vengeance
   level: 9
@@ -11605,7 +12642,53 @@
     there takes 1d6 Cold damage. Until the spell ends, the area is Difficult
     Terrain and Heavily Obscured, ranged attacks with weapons are impossible
     there, and strong wind blows through the area.
-  automation: text
+  automation: full
+  # Its cloud covers the whole battle map. shortcut: its six bolts are the six creatures nearest its centre, and so
+  # are those the other turns strike, six at most; the strong wind changes nothing more than the rest does.
+  activation:
+    cost: [action]
+    targeting: { area: { shape: sphere, radius: 300 }, range: 300, side: enemy }
+    resolution:
+      kind: save
+      ability: con
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 2d6 }, type: thunder }]
+      onSuccessDamage: none
+      onFail:
+        - {
+            kind: applyCondition,
+            condition: deafened,
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: zone,
+            zone: fog,
+            radius: 300,
+            duration: { concentration: true, minutes: 1 },
+          }
+      onSuccess: []
+    area:
+      terrain: ground
+      deflects: miss
+      when: ownerTurnStart
+      targets: 6
+      schedule:
+        - kind: automatic
+          damage: [{ amount: { dice: 4d6 }, type: acid }]
+          effects: []
+        - kind: save
+          ability: dex
+          dc: { add: [{ kind: spellSaveDc }] }
+          damage: [{ amount: { dice: 10d6 }, type: lightning }]
+          onSuccessDamage: half
+          onFail: []
+          onSuccess: []
+        - kind: automatic
+          damage: [{ amount: { dice: 2d6 }, type: bludgeoning }]
+          effects: []
+        - kind: automatic
+          damage: [{ amount: { dice: 1d6 }, type: cold }]
+          effects: []
 - id: srd52:spell/symbol
   name: Symbol
   level: 7
@@ -11878,7 +12961,39 @@
     creature makes this save only once per turn. Using a Higher-Level Spell
     Slot. Both types of damage increase by 1d8 for each spell slot level above
     6.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: wall, radius: 60 }, range: 120, side: enemy }
+    resolution:
+      kind: save
+      ability: dex
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 7d8 }, type: piercing }]
+      onSuccessDamage: half
+      onFail:
+        - kind: zone
+          zone: wall
+          shape: line
+          radius: 60
+          walls: sight
+          duration: { concentration: true, minutes: 10 }
+      onSuccess: []
+    area:
+      cost: 4
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 7d8 }, type: slashing }]
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
+  upcast:
+    perSlotLevel:
+      addDice: 1d8
 - id: srd52:spell/weird
   name: Weird
   level: 9
@@ -12168,7 +13283,168 @@
     its space counts as Difficult Terrain for your enemies. Using a Higher-Level
     Spell Slot. The damage of the Clenched Fist increases by 2d8 and the damage
     of the Grasping Hand increases by 2d6 for each spell slot level above 5."
-  automation: text
+  automation: full
+  # Nothing in play attacks the hand, so it lasts the spell. shortcut: the Forceful Hand pushes 20 feet, as for a
+  # spellcasting modifier of 3, and doesn't follow; the Interposing Hand's Half Cover is +2 AC until its caster's next
+  # turn; the slot doesn't raise the later fist's or crush's damage.
+  activation:
+    cost: [action, slot]
+    anchor: { moves: 120 }
+    targeting: { creatures: 1, range: 125, side: enemy }
+    alsoSelf:
+      [
+        {
+          kind: modifier,
+          modifier: { kind: spheres },
+          duration: { concentration: true, minutes: 1 },
+        },
+      ]
+    resolution:
+      kind: attack
+      attack: { type: spell }
+      damage: [{ amount: { dice: 5d8 }, type: force }]
+      onHit:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
+      onMiss:
+        [
+          {
+            kind: zone,
+            zone: area,
+            radius: 0,
+            duration: { concentration: true, minutes: 1 },
+          },
+        ]
+    shapes:
+      - name: Clenched Fist
+      - name: Forceful Hand
+        resolution:
+          kind: save
+          ability: str
+          dc: { add: [{ kind: spellSaveDc }] }
+          onFail:
+            - { kind: forcedMove, feet: 20, direction: away, maxSize: huge }
+            - {
+                kind: zone,
+                zone: area,
+                radius: 0,
+                duration: { concentration: true, minutes: 1 },
+              }
+          onSuccess:
+            [
+              {
+                kind: zone,
+                zone: area,
+                radius: 0,
+                duration: { concentration: true, minutes: 1 },
+              },
+            ]
+      - name: Grasping Hand
+        resolution:
+          kind: save
+          ability: dex
+          dc: { add: [{ kind: spellSaveDc }] }
+          onFail:
+            - kind: applyCondition
+              condition: grappled
+              maxSize: huge
+              duration: { concentration: true, minutes: 1 }
+              escape: { ability: str, skill: athletics }
+            - {
+                kind: zone,
+                zone: area,
+                radius: 0,
+                duration: { concentration: true, minutes: 1 },
+              }
+          onSuccess:
+            [
+              {
+                kind: zone,
+                zone: area,
+                radius: 0,
+                duration: { concentration: true, minutes: 1 },
+              },
+            ]
+      - name: Interposing Hand
+        self: true
+        resolution:
+          kind: automatic
+          damage: []
+          effects:
+            - {
+                kind: modifier,
+                modifier:
+                  { kind: bonus, to: ac, amount: { bonus: { base: 2 } } },
+                duration: { until: yourNextTurnStart },
+              }
+            - {
+                kind: zone,
+                zone: area,
+                radius: 0,
+                duration: { concentration: true, minutes: 1 },
+              }
+  upcast:
+    perSlotLevel:
+      addDice: 2d8
+  spheres:
+    count: 10
+    actions:
+      - label: Clenched Fist
+        cost: [bonusAction]
+        anchor: { moves: 60 }
+        targeting: { creatures: 1, range: 65, side: enemy }
+        resolution:
+          kind: attack
+          attack: { type: spell }
+          damage: [{ amount: { dice: 5d8 }, type: force }]
+          onHit: []
+          onMiss: []
+      - label: Forceful Hand
+        cost: [bonusAction]
+        anchor: { moves: 60 }
+        targeting: { creatures: 1, range: 65, side: enemy }
+        resolution:
+          kind: save
+          ability: str
+          dc: { add: [{ kind: spellSaveDc }] }
+          onFail:
+            [{ kind: forcedMove, feet: 20, direction: away, maxSize: huge }]
+          onSuccess: []
+      - label: Grasping Hand
+        cost: [bonusAction]
+        anchor: { moves: 60 }
+        targeting: { creatures: 1, range: 65, side: enemy }
+        resolution:
+          kind: save
+          ability: dex
+          dc: { add: [{ kind: spellSaveDc }] }
+          onFail:
+            - kind: applyCondition
+              condition: grappled
+              maxSize: huge
+              duration: { concentration: true, minutes: 1 }
+              escape: { ability: str, skill: athletics }
+          onSuccess: []
+      - label: Crush
+        cost: [bonusAction]
+        targeting:
+          { creatures: 1, range: 120, side: enemy, afflicted: Arcane Hand }
+        resolution:
+          kind: automatic
+          damage:
+            [
+              {
+                amount: { dice: 4d6, bonus: { add: [{ kind: spellMod }] } },
+                type: bludgeoning,
+              },
+            ]
+          effects: []
 - id: srd52:spell/augury
   name: Augury
   level: 2
@@ -12226,25 +13502,18 @@
   text: You touch a willing creature. Until the spell ends, the target’s skin
     assumes a bark-like appearance, and the target has an Armor Class of 17 if
     its AC is lower than that.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - bonusAction
-      - slot
-    targeting:
-      creatures: 1
-      range: touch
-      side: ally
+    cost: [bonusAction, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
       effects:
-        - kind: modifier
-          duration:
-            minutes: 60
-          modifier:
-            kind: acFormula
-            formula:
-              base: 17
+        - {
+            kind: modifier,
+            duration: { minutes: 60 },
+            modifier: { kind: acFormula, formula: { base: 17 } },
+          }
 - id: srd52:spell/blade-barrier
   name: Blade Barrier
   level: 6
@@ -12267,64 +13536,37 @@
     a failed save or half as much damage on a successful one. A creature also
     makes that save if it enters the wall’s space or ends it turn there. A
     creature makes that save only once per turn.
-  automation: partial
+  automation: full
+  # The straight wall, across the point aimed at.
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: line
-        radius: 100
-      range: 90
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: wall, radius: 100 }, range: 90, side: enemy }
     resolution:
       kind: save
       ability: dex
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 6d10
-          type: force
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 6d10 }, type: force }]
       onSuccessDamage: half
       onFail:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 6d10
-                type: force
-            save:
-              ability: dex
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
-      onSuccess:
-        - kind: modifier
-          duration:
-            concentration: true
-            minutes: 10
-          modifier:
-            kind: lingeringDamage
-            when: turnEnd
-            damage:
-              - amount:
-                  dice: 6d10
-                type: force
-            save:
-              ability: dex
-              dc:
-                add:
-                  - kind: spellSaveDc
-              onSuccess: half
+        - kind: zone
+          zone: area
+          shape: line
+          radius: 100
+          duration: { concentration: true, minutes: 10 }
+      onSuccess: []
+    area:
+      cover: threeQuarters
+      terrain: ground
+      when: turnEnd
+      enters: true
+      resolution:
+        kind: save
+        ability: dex
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 6d10 }, type: force }]
+        onSuccessDamage: half
+        onFail: []
+        onSuccess: []
 - id: srd52:spell/blur
   name: Blur
   level: 2
@@ -13156,38 +14398,35 @@
     you hits you with a melee attack roll, the shield erupts with flame. The
     attacker takes 2d8 Fire damage from a warm shield or 2d8 Cold damage from a
     chill shield.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      self: true
+    cost: [action, slot]
+    targeting: { self: true }
     resolution:
       kind: automatic
       damage: []
       effects:
-        - kind: modifier
-          modifier:
-            kind: resistance
-            damage: cold
-          duration:
-            minutes: 10
-          choose:
-            - cold
-            - fire
-        - kind: modifier
-          modifier:
-            kind: retaliate
-            damage:
-              - amount:
-                  dice: 2d8
-                type: fire
-          duration:
-            minutes: 10
-          choose:
-            - fire
-            - cold
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: cold },
+            duration: { minutes: 10 },
+            choose: [cold, fire],
+          }
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: retaliate,
+                damage: [{ amount: { dice: 2d8 }, type: fire }],
+              },
+            duration: { minutes: 10 },
+            choose: [fire, cold],
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: sheds, light: light, feet: 10, dim: 10 },
+            duration: { minutes: 10 },
+          }
 - id: srd52:spell/flesh-to-stone
   name: Flesh to Stone
   level: 6
@@ -13285,7 +14524,7 @@
     the creature doesn’t exit the cage and wastes the spell or effect. The cage
     also extends into the Ethereal Plane, blocking ethereal travel. This spell
     can’t be dispelled by Dispel Magic.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -13472,7 +14711,38 @@
     area. It causes protected flames, such as those of lanterns, to dance wildly
     and has a 50 percent chance to extinguish them. As a Bonus Action on your
     later turns, you can change the direction in which the Line blasts from you.
-  automation: text
+  automation: full
+  # shortcut: the Line keeps the direction it was cast in as its caster moves; it isn't turned with a Bonus Action.
+  # Candles and lanterns it snuffs change nothing in a fight.
+  activation:
+    cost: [action, slot]
+    targeting:
+      { area: { shape: line, radius: 60, width: 10 }, range: self, side: enemy }
+    resolution:
+      kind: save
+      ability: str
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - { kind: forcedMove, feet: 15, direction: away }
+        - { kind: disperse }
+        - kind: zone
+          zone: area
+          shape: line
+          radius: 60
+          width: 10
+          follows: true
+          duration: { concentration: true, minutes: 1 }
+      onSuccess: []
+    area:
+      headwind: true
+      disperses: true
+      when: turnEnd
+      resolution:
+        kind: save
+        ability: str
+        dc: { add: [{ kind: spellSaveDc }] }
+        onFail: [{ kind: forcedMove, feet: 15, direction: away }]
+        onSuccess: []
 - id: srd52:spell/heal
   name: Heal
   level: 6
@@ -13535,7 +14805,31 @@
     Points equal to your spellcasting ability modifier at the start of each of
     its turns. Using a Higher-Level Spell Slot. You can target one additional
     creature for each spell slot level above 1.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: conditionImmunity, condition: frightened },
+            duration: { concentration: true, minutes: 1 },
+          }
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: turnTempHp,
+                amount: { bonus: { add: [{ kind: spellMod }] } },
+              },
+            duration: { concentration: true, minutes: 1 },
+          }
+  upcast:
+    perSlotLevel:
+      addTargets: 1
 - id: srd52:spell/holy-aura
   name: Holy Aura
   level: 8
@@ -13555,7 +14849,38 @@
     when a Fiend or an Undead hits an affected creature with a melee attack
     roll, the attacker must succeed on a Constitution saving throw or have the
     Blinded condition until the end of its next turn.
-  automation: text
+  automation: full
+  activation:
+    cost: [action, slot]
+    targeting:
+      { area: { shape: emanation, radius: 30 }, range: self, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: zone,
+            zone: area,
+            radius: 30,
+            follows: true,
+            duration: { concentration: true, minutes: 1 },
+          }
+    area:
+      {
+        side: ally,
+        self: true,
+        grants:
+          [
+            { kind: advantage, on: saves },
+            { kind: disadvantage, on: attacksAgainst },
+            {
+              kind: retaliate,
+              creatureTypes: [fiend, undead],
+              save: { ability: con, dc: { add: [{ kind: spellSaveDc }] } },
+              condition: blinded,
+            },
+          ],
+      }
 - id: srd52:spell/identify
   name: Identify
   level: 1
@@ -13617,50 +14942,33 @@
     time on a turn or ends its turn there. A creature makes this save only once
     per turn. Using a Higher-Level Spell Slot. The damage increases by 1d10 for
     each spell slot level above 5.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      area:
-        shape: sphere
-        radius: 20
-      range: 300
-      side: enemy
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 20 }, range: 300, side: enemy }
     resolution:
       kind: save
       ability: con
-      dc:
-        add:
-          - kind: spellSaveDc
-      damage:
-        - amount:
-            dice: 4d10
-          type: piercing
+      dc: { add: [{ kind: spellSaveDc }] }
+      damage: [{ amount: { dice: 4d10 }, type: piercing }]
       onSuccessDamage: half
       onFail:
-        - kind: zone
-          zone: area
-          radius: 20
-          duration:
-            concentration: true
-            minutes: 10
+        - {
+            kind: zone,
+            zone: haze,
+            radius: 20,
+            duration: { concentration: true, minutes: 10 },
+          }
       onSuccess: []
     area:
       when: turnEnd
       enters: true
-      difficult: true
+      terrain: ground
       resolution:
         kind: save
         ability: con
-        dc:
-          add:
-            - kind: spellSaveDc
-        damage:
-          - amount:
-              dice: 4d10
-            type: piercing
+        dc: { add: [{ kind: spellSaveDc }] }
+        damage: [{ amount: { dice: 4d10 }, type: piercing }]
         onSuccessDamage: half
         onFail: []
         onSuccess: []
@@ -13766,28 +15074,25 @@
   text: You touch a willing creature who isn’t wearing armor. Until the spell
     ends, the target’s base AC becomes 13 plus its Dexterity modifier. The spell
     ends early if the target dons armor.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - action
-      - slot
-    targeting:
-      creatures: 1
-      range: touch
-      side: ally
+    cost: [action, slot]
+    targeting: { creatures: 1, range: touch, side: ally }
     resolution:
       kind: automatic
+      damage: []
       effects:
-        - kind: modifier
-          duration:
-            minutes: 480
-          modifier:
-            kind: acFormula
-            formula:
-              base: 13
-              add:
-                - kind: abilityMod
-                  ability: dex
+        - {
+            kind: modifier,
+            modifier:
+              {
+                kind: acFormula,
+                formula:
+                  { base: 13, add: [{ kind: abilityMod, ability: dex }] },
+                unarmored: true,
+              },
+            duration: { minutes: 480 },
+          }
 - id: srd52:spell/magic-mouth
   name: Magic Mouth
   level: 2
@@ -14457,7 +15762,33 @@
     or object reaches the Cylinder’s top without striking anything, it hovers
     there for the duration. When the spell ends, affected objects and creatures
     fall downward.
-  automation: text
+  automation: full
+  # There are no ceilings on a battle map to strike.
+  activation:
+    cost: [action, slot]
+    targeting: { area: { shape: sphere, radius: 50 }, range: 100, side: enemy }
+    resolution:
+      kind: automatic
+      effects:
+        - kind: lift
+          feet: 100
+          duration: { concentration: true, minutes: 1 }
+          grab: { ability: dex, dc: { add: [{ kind: spellSaveDc }] } }
+        - {
+            kind: zone,
+            zone: area,
+            radius: 50,
+            duration: { concentration: true, minutes: 1 },
+          }
+    area:
+      enters: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: lift
+            feet: 100
+            duration: { concentration: true, minutes: 1 }
+            grab: { ability: dex, dc: { add: [{ kind: spellSaveDc }] } }
 - id: srd52:spell/scorching-ray
   name: Scorching Ray
   level: 2
@@ -14863,7 +16194,38 @@
     up to 30 feet in any direction within the spell’s range. You can exert fine
     control on objects with your telekinetic grip, such as manipulating a simple
     tool,
-  automation: text
+  automation: full
+  # A creature is moved straight away from its caster, not lifted; no object on a battle map is worth moving.
+  activation:
+    cost: [action, slot]
+    targeting: { creatures: 1, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: str
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - { kind: forcedMove, feet: 30, direction: away, maxSize: huge }
+        - {
+            kind: applyCondition,
+            condition: restrained,
+            duration: { until: yourNextTurnEnd },
+          }
+      onSuccess: []
+  lasting:
+    cost: [action]
+    targeting: { creatures: 1, range: 60, side: enemy }
+    resolution:
+      kind: save
+      ability: str
+      dc: { add: [{ kind: spellSaveDc }] }
+      onFail:
+        - { kind: forcedMove, feet: 30, direction: away, maxSize: huge }
+        - {
+            kind: applyCondition,
+            condition: restrained,
+            duration: { until: yourNextTurnEnd },
+          }
+      onSuccess: []
 - id: srd52:spell/thunderwave
   name: Thunderwave
   level: 1
@@ -15010,6 +16372,7 @@
     your spell save DC to move at all. If it fails the check, it can’t move. A
     creature that moves out of the wall falls to the ground.
   automation: text
+  # A minute to cast, which a fight can spend only through Longer Casting Times (re-roll#205).
   outOfCombat: castingTime
 - id: srd52:spell/wall-of-fire
   name: Wall of Fire
@@ -15036,14 +16399,15 @@
     on a turn or ends its turn there. The other side of the wall deals no
     damage. Using a Higher-Level Spell Slot. The damage increases by 1d8 for
     each spell slot level above 4.
-  automation: partial
+  automation: full
+  # The ringed wall: its burning side is the inside.
   activation:
     cost:
       - action
       - slot
     targeting:
       area:
-        shape: sphere
+        shape: ring
         radius: 10
       range: 120
       side: enemy
@@ -15108,7 +16472,113 @@
     amount of damage. The spell ends if you drop to 0 Hit Points or if you and
     the target become separated by more than 60 feet. It also ends if the spell
     is cast again on either of the connected creatures.
-  automation: text
+  automation: full
+  # shortcut: it doesn't end when the two are more than 60 feet apart.
+  activation:
+    cost: [action, slot]
+    oneTarget: true
+    targeting: { creatures: 1, range: touch, side: ally }
+    resolution:
+      kind: automatic
+      damage: []
+      effects:
+        - {
+            kind: modifier,
+            modifier: { kind: bonus, to: ac, amount: { bonus: { base: 1 } } },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier:
+              { kind: bonus, to: saves, amount: { bonus: { base: 1 } } },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: bonded },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: acid },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: bludgeoning },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: cold },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: fire },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: force },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: lightning },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: necrotic },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: piercing },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: poison },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: psychic },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: radiant },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: slashing },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
+        - {
+            kind: modifier,
+            modifier: { kind: resistance, damage: thunder },
+            duration: { minutes: 60 },
+            casterIncapacitated: true,
+          }
 - id: srd52:spell/wind-walk
   name: Wind Walk
   level: 6
