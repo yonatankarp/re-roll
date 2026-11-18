@@ -59,7 +59,7 @@ import {
   weaponProficient,
   maybeLookup,
 } from "./stats.ts";
-import { startingTools } from "./tools.ts";
+import { everyTool, startingTools, toolByName, toolKeyOf } from "./tools.ts";
 
 export { weaponProficient };
 
@@ -415,11 +415,15 @@ function askedAt(
     inferred.push({ kind: "skills", id: "skills", count: 2, from: ALL_SKILLS });
   }
   for (const grant of data.grants) {
+    // A Fighting Style with an option beside its feat asks which as a variant, whose own choice is the feat.
+    const styled = Boolean(
+      FeatureSchema.safeParse(access.content(grant)).data?.variants,
+    );
     if (grant.endsWith("subclass")) {
       inferred.push({ kind: "subclass", id: "subclass" });
     } else if (grant.endsWith("ability-score-improvement")) {
       inferred.push({ kind: "feat", id: "feat", category: "general" });
-    } else if (grant.endsWith("fighting-style")) {
+    } else if (grant.endsWith("fighting-style") && !styled) {
       inferred.push({
         kind: "feat",
         id: "fighting-style",
@@ -747,6 +751,55 @@ function skillLabel(skill: string): string {
   return `${spaced.charAt(0).toUpperCase()}${spaced.slice(1)}`;
 }
 
+// The tools the character is proficient with before this step: its classes', its background's and those picked.
+// shortcut: tools a feature gives aren't counted.
+function heldTools(
+  draft: Draft,
+  base: CharacterBuild | null,
+  classDef: ClassDef,
+  access: ContentAccess,
+): readonly string[] {
+  const background = BackgroundSchema.safeParse(
+    access.content(base?.backgroundId ?? draft.backgroundId ?? ""),
+  ).data;
+  const classes = new Set([
+    classDef.id,
+    ...(base?.levels ?? []).map((entry) => entry.classId),
+  ]);
+  return [
+    ...[...classes].flatMap(
+      (id) => ClassSchema.safeParse(access.content(id)).data?.tools ?? [],
+    ),
+    ...[background ? toolByName(background.tool, access) : undefined].flatMap(
+      (id) => (id ? [id] : []),
+    ),
+    ...answered(base, "tools"),
+    ...Object.values(draft.picks).flat(),
+  ];
+}
+
+// How many picks a choice asks: one for each of its `instead` tools already held, for a choice of tools.
+function choiceCount(
+  choice: ChoiceDef,
+  draft: Draft,
+  base: CharacterBuild | null,
+  classDef: ClassDef,
+  access: ContentAccess,
+): number {
+  if (choice.kind === "tools" && choice.instead) {
+    const held = new Set(
+      heldTools(draft, base, classDef, access).map((id) =>
+        toolKeyOf(id, access),
+      ),
+    );
+    const overlap = choice.instead.filter((id) =>
+      held.has(toolKeyOf(id, access)),
+    ).length;
+    return Math.min(choice.count, overlap);
+  }
+  return "count" in choice ? choice.count : 1;
+}
+
 export function choiceOptions(
   choice: ChoiceDef,
   draft: Draft,
@@ -770,7 +823,14 @@ export function choiceOptions(
           SubclassSchema,
           (item) => !item.edition,
         )
-          .filter((item) => item.class === classDef.id)
+          .filter(
+            (item) =>
+              item.class === classDef.id &&
+              (item.requires?.includes(
+                base?.speciesId ?? draft.speciesId ?? "",
+              ) ??
+                true),
+          )
           .map((item) => ({ id: item.id, label: item.name })),
       };
     case "feat": {
@@ -846,6 +906,57 @@ export function choiceOptions(
         options: known.map((id) => ({ id, label: skillLabel(id) })),
       };
     }
+    case "weapons": {
+      const had = taken("weapons");
+      return {
+        what: "a kind of weapon",
+        options: namedContent(access, "item", ItemSchema).flatMap((item) => {
+          if (item.type !== "weapon" || had.has(item.id)) return [];
+          const ranged = item.properties.includes("ammunition");
+          const fits =
+            (choice.also?.includes(item.id) ?? false) ||
+            ((!choice.melee || !ranged) &&
+              (!choice.ranged || ranged) &&
+              !choice.without?.some((property) =>
+                item.properties.includes(property),
+              ));
+          return fits ? [{ id: item.id, label: item.name }] : [];
+        }),
+      };
+    }
+    case "tools": {
+      const had = new Set(
+        heldTools(draft, base, classDef, access).map((id) =>
+          toolKeyOf(id, access),
+        ),
+      );
+      const listed = choice.from?.map((id) => toolKeyOf(id, access));
+      const given = new Set(choice.instead?.map((id) => toolKeyOf(id, access)));
+      const tools = everyTool(access).filter((tool) => {
+        const key = toolKeyOf(tool.id, access);
+        return (
+          !had.has(key) &&
+          !given.has(key) &&
+          (listed ? listed.includes(key) : !choice.artisan || tool.artisan)
+        );
+      });
+      const skills = taken("skills");
+      return {
+        what: choice.skills ? "a skill or a tool" : "a tool",
+        options: [
+          ...(choice.skills ?? [])
+            .filter(
+              (skill) =>
+                !skills.has(skill) && !background.skills.includes(skill),
+            )
+            .map((id) => ({ id, label: skillLabel(id) })),
+          ...tools.map((tool) => ({
+            id: tool.id,
+            label: lookup(access, ItemSchema, tool.id).name,
+          })),
+        ],
+      };
+    }
     case "weaponMastery": {
       const had = taken("weaponMastery");
       return {
@@ -853,6 +964,8 @@ export function choiceOptions(
         options: namedContent(access, "item", ItemSchema).flatMap((item) =>
           item.type === "weapon" &&
           weaponProficient(classDef, item) &&
+          // shortcut: a weapon without Ammunition counts as melee, a Dart too.
+          (!choice.melee || !item.properties.includes("ammunition")) &&
           !had.has(item.id)
             ? [{ id: item.id, label: item.name }]
             : [],
@@ -1119,22 +1232,35 @@ function stepChoices(
         )
       : [],
   );
-  const featChoices = [...choices, ...optionChoices].flatMap((choice) =>
-    choice.kind === "feat"
-      ? (draft.picks[choice.id] ?? []).flatMap((id, index) =>
-          owned(
-            lookup(access, FeatSchema, id),
-            lookup(access, FeatSchema, id).choices.map((own) => ({
-              ...own,
-              id: `${choice.id}:feat${String(index)}-${own.id}`,
-            })),
-          ),
-        )
-      : [],
+  // A variant picked here asks its own choices too, as a Thaumaturge's cantrip, under `<choice>:<variant>-`.
+  const variantChoices = choices.flatMap((choice) => {
+    if (choice.kind !== "variant") return [];
+    const { variants = [] } = lookup(access, FeatureSchema, choice.feature);
+    return (draft.picks[choice.id] ?? []).flatMap((id) =>
+      (variants.find((item) => item.id === id)?.choices ?? []).map((own) => ({
+        ...own,
+        id: `${choice.id}:${id}-${own.id}`,
+      })),
+    );
+  });
+  const featChoices = [...choices, ...optionChoices, ...variantChoices].flatMap(
+    (choice) =>
+      choice.kind === "feat"
+        ? (draft.picks[choice.id] ?? []).flatMap((id, index) =>
+            owned(
+              lookup(access, FeatSchema, id),
+              lookup(access, FeatSchema, id).choices.map((own) => ({
+                ...own,
+                id: `${choice.id}:feat${String(index)}-${own.id}`,
+              })),
+            ),
+          )
+        : [],
   );
   return [
     ...choices,
     ...optionChoices,
+    ...variantChoices,
     ...featChoices,
     ...originChoices(draft, base, access),
   ];
@@ -1149,7 +1275,7 @@ export function classStep(
   const level = (base?.levels.length ?? 0) + 1;
   for (const choice of stepChoices(draft, base, classDef, level, access)) {
     const picked = draft.picks[choice.id] ?? [];
-    const count = "count" in choice ? choice.count : 1;
+    const count = choiceCount(choice, draft, base, classDef, access);
     if (picked.length < count) {
       const { what, options, prefer } = choiceOptions(
         choice,
@@ -1283,6 +1409,20 @@ function answersOf(
         ];
       case "variant":
         return [{ kind: "variant", feature: choice.feature, values }];
+      case "weapons":
+        return [
+          { kind: "weapons", values, ...(choice.monk ? { monk: true } : {}) },
+        ];
+      case "tools":
+        return [
+          {
+            kind: "tools",
+            values,
+            ...(choiceOwners.has(choice)
+              ? { feat: choiceOwners.get(choice) }
+              : {}),
+          },
+        ];
       case "feat": {
         const [increase] = picks[`${choice.id}:increase`] ?? [];
         return [
@@ -1464,7 +1604,12 @@ export function finishedCharacter(
       ),
     ],
   });
-  return { ...actor, hp: deriveStats(actor, access).maxHp };
+  const stats = deriveStats(actor, access);
+  return {
+    ...actor,
+    hp: stats.maxHp,
+    inventory: [...actor.inventory, ...featureItems(stats.features, access)],
+  };
 }
 
 // Built by the same steps the player answers. Companions avoid repeating a class while there are others to take.
@@ -1505,6 +1650,16 @@ function actorBuild(actor: Actor): CharacterBuild | null {
   return actor.source.kind === "character" ? actor.source.build : null;
 }
 
+// Items features give as they're gained, as Assassin's Tools' kits.
+function featureItems(
+  features: readonly string[],
+  access: ContentAccess,
+): readonly string[] {
+  return features.flatMap(
+    (id) => FeatureSchema.safeParse(access.content(id)).data?.items ?? [],
+  );
+}
+
 function advanceEvents(
   actor: Actor,
   draft: Draft,
@@ -1521,8 +1676,13 @@ function advanceEvents(
     },
   };
   // A higher Constitution raises every earlier level too, so the difference is what counts.
-  const gained =
-    deriveStats(raised, access).maxHp - deriveStats(actor, access).maxHp;
+  const before = deriveStats(actor, access);
+  const after = deriveStats(raised, access);
+  const gained = after.maxHp - before.maxHp;
+  const items = featureItems(
+    after.features.filter((id) => !before.features.includes(id)),
+    access,
+  );
   return [
     dndEvent(`${NS}:characterAdvanced`, {
       actor: actor.id,
@@ -1530,6 +1690,16 @@ function advanceEvents(
       hp: actor.hp + gained,
     }),
     { kind: "levelGained", actor: actor.id },
+    ...(items.length > 0
+      ? [
+          dndEvent(`${NS}:treasureFound`, {
+            actor: actor.id,
+            gold: 0,
+            items: [...items],
+            stowed: [],
+          }),
+        ]
+      : []),
   ];
 }
 

@@ -31,6 +31,7 @@ import {
   hasCondition,
   INCAPACITATING,
   isDead,
+  isDown,
   NS,
 } from "../state.ts";
 import {
@@ -346,6 +347,7 @@ export function startCombat(
         ...(lowered ? { damageToParty: share } : {}),
       }),
       ...dieSpent,
+      ...rallyEvents(party, context),
       ...party.flatMap((actor) => initiativeRecharge(actor, context)),
       ...environmentConditionEvents(around, [...party, ...monsters], context),
     ],
@@ -433,6 +435,43 @@ export function initiativeRecharge(
     }
   }
   return events;
+}
+
+// Rallying Cry: as a fight starts, a use spent gives Heroic Inspiration to as many of the party as the bearer's
+// Proficiency Bonus, the bearer and those without it first (schemas.ts initiativeRally).
+function rallyEvents(party: readonly Actor[], context: Context): SystemEvent[] {
+  const inspired = new Set(
+    party.flatMap((actor) => (actor.heroicInspiration ? [actor.id] : [])),
+  );
+  return party.flatMap((actor) => {
+    const stats = deriveStats(actor, context);
+    const rally = stats.passives.find(
+      (passive) => passive.kind === "initiativeRally",
+    );
+    if (
+      rally?.kind !== "initiativeRally" ||
+      isDown(actor) ||
+      hasCondition(actor, ...INCAPACITATING) ||
+      (stats.resources[rally.resource] ?? 0) -
+        (actor.resourcesSpent[rally.resource] ?? 0) <=
+        0
+    ) {
+      return [];
+    }
+    const chosen = [actor, ...party.filter((other) => other !== actor)]
+      .filter((other) => !isDown(other) && !inspired.has(other.id))
+      .slice(0, stats.proficiency);
+    for (const other of chosen) inspired.add(other.id);
+    return [
+      dndEvent(`${NS}:resourceSpent`, {
+        actor: actor.id,
+        resource: rally.resource,
+      }),
+      ...chosen.map((other) =>
+        dndEvent(`${NS}:inspirationGranted`, { actor: other.id }),
+      ),
+    ];
+  });
 }
 
 // The wards the party readied in this scene go off as the fight starts: each `prepared` activation at the first foe in

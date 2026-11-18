@@ -5,6 +5,34 @@
   size: medium
   speed: 30
   traits: ["srd52:feature/human-traits"]
+  choices:
+    - {
+        kind: skills,
+        id: skillful,
+        count: 1,
+        from:
+          [
+            acrobatics,
+            animalHandling,
+            arcana,
+            athletics,
+            deception,
+            history,
+            insight,
+            intimidation,
+            investigation,
+            medicine,
+            nature,
+            perception,
+            performance,
+            persuasion,
+            religion,
+            sleightOfHand,
+            stealth,
+            survival,
+          ],
+      }
+    - { kind: feat, id: versatile, category: origin }
 - id: "srd52:species/dwarf"
   name: Dwarf
   text: "Raised from the earth in ages past, Dwarves are as tough as the stone they shape."
@@ -19,3 +47,20 @@
   size: medium
   speed: 30
   traits: ["srd52:feature/elf-traits"]
+  choices:
+    - kind: option
+      id: elven-lineage
+      count: 1
+      from:
+        [
+          "srd52:feature/elf-drow-lineage",
+          "srd52:feature/elf-high-elf-lineage",
+          "srd52:feature/elf-wood-elf-lineage",
+        ]
+    - {
+        kind: skills,
+        id: keen-senses,
+        count: 1,
+        from: [insight, perception, survival],
+      }
+    - { kind: spellAbility, id: spellcasting, from: [int, wis, cha] }
