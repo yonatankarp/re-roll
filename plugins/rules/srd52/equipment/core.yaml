@@ -30,6 +30,7 @@
     damage: { dice: 1d6, type: piercing },
     properties: [ammunition, twoHanded],
     mastery: vex,
+    range: { normal: 80, long: 320 },
   }
 - {
     id: "srd52:item/mace",

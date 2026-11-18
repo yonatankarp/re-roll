@@ -485,14 +485,14 @@ describe("magic armor, flat bonuses and ability scores", () => {
   });
 
   it("wears magic armor and a Shield for their AC, unless magic is suppressed", () => {
-    // Chain Mail 16 and a Shield's 2.
+    // Chain Mail 16, a Shield's 2 and the pregen's Defense.
     expect(
       deriveStats(wearing(["srd52:item/chain-mail", "srd52:item/shield"]), run)
         .ac,
-    ).toBe(18);
+    ).toBe(19);
     const magic = wearing([CHAIN, SHIELD]);
-    expect(deriveStats(magic, run).ac).toBe(16 + 2 + 2 + 1);
-    expect(deriveStats({ ...magic, suppressed: [] }, run).ac).toBe(18);
+    expect(deriveStats(magic, run).ac).toBe(16 + 2 + 2 + 1 + 1);
+    expect(deriveStats({ ...magic, suppressed: [] }, run).ac).toBe(19);
   });
 
   it("swaps the worn armor for magic armor put on", () => {
@@ -592,10 +592,10 @@ describe("magic items' passives while worn or attuned", () => {
     });
     // Its AC bonus and passives work only once attuned.
     const unattuned = wearing([PLATE]);
-    expect(deriveStats(unattuned, run).ac).toBe(16);
+    expect(deriveStats(unattuned, run).ac).toBe(17); // with the pregen's Defense
     expect(resists(unattuned)).toEqual([]);
     const attuned = wearing([PLATE], [PLATE]);
-    expect(deriveStats(attuned, run).ac).toBe(17);
+    expect(deriveStats(attuned, run).ac).toBe(18);
     expect(resists(attuned)).toEqual(["cold", "fire"]);
     expect(resists({ ...attuned, suppressed: [] })).toEqual([]);
     expect(gearOptions(unattuned, run)).toContainEqual({

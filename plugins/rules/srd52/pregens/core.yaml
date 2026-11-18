@@ -1,3 +1,4 @@
+# Each build is what character creation makes of the same picks, gear included (tests/srd-data.test.ts).
 - id: "srd52:pregen/fighter"
   name: Human Fighter
   build:
@@ -8,21 +9,28 @@
     levels:
       - classId: "srd52:class/fighter"
         hitPointGain: 10
-        answers:
-          [
+        answers: [
             { kind: skills, values: [perception, survival] },
+            { kind: feats, values: ["srd52:feat/defense"] }, # Fighting Style
             {
               kind: weaponMastery,
               values:
                 [
                   "srd52:item/longsword",
-                  "srd52:item/shortsword",
+                  "srd52:item/shortbow",
                   "srd52:item/dagger",
                 ],
             },
+            { kind: skills, values: [insight] }, # Skillful
+            { kind: feats, values: ["srd52:feat/alert"] }, # Versatile
           ]
   equipment:
-    ["srd52:item/longsword", "srd52:item/chain-mail", "srd52:item/shield"]
+    [
+      "srd52:item/longsword",
+      "srd52:item/shortbow",
+      "srd52:item/chain-mail",
+      "srd52:item/shield",
+    ]
 
 - id: "srd52:pregen/rogue"
   name: Human Rogue
@@ -34,19 +42,26 @@
     levels:
       - classId: "srd52:class/rogue"
         hitPointGain: 8
-        answers:
-          [
+        answers: [
             {
               kind: skills,
               values: [perception, acrobatics, deception, investigation],
             },
+            { kind: skills, values: [stealth, perception], expertise: true },
             {
               kind: weaponMastery,
               values: ["srd52:item/shortsword", "srd52:item/shortbow"],
             },
+            { kind: skills, values: [insight] }, # Skillful
+            { kind: feats, values: ["srd52:feat/savage-attacker"] }, # Versatile
           ]
   equipment:
-    ["srd52:item/shortsword", "srd52:item/shortbow", "srd52:item/leather-armor"]
+    [
+      "srd52:item/shortsword",
+      "srd52:item/shortbow",
+      "srd52:item/leather-armor",
+      "srd52:item/thieves-tools",
+    ]
 
 - id: "srd52:pregen/cleric"
   name: Human Cleric
@@ -58,21 +73,43 @@
     levels:
       - classId: "srd52:class/cleric"
         hitPointGain: 8
-        answers:
-          [
+        answers: [
             { kind: skills, values: [medicine, persuasion] },
             {
               kind: spells,
               values:
                 [
                   "srd52:spell/sacred-flame",
-                  "srd52:spell/cure-wounds",
-                  "srd52:spell/healing-word",
-                  "srd52:spell/bless",
+                  "srd52:spell/guidance",
+                  "srd52:spell/light",
                 ],
             },
+            {
+              kind: spells,
+              values:
+                [
+                  "srd52:spell/bless",
+                  "srd52:spell/cure-wounds",
+                  "srd52:spell/healing-word",
+                  "srd52:spell/guiding-bolt",
+                ],
+            },
+            {
+              kind: variant,
+              feature: "srd52:feature/divine-order",
+              values: [thaumaturge],
+            },
+            { kind: spells, values: ["srd52:spell/spare-the-dying"] }, # Thaumaturge's cantrip
+            { kind: skills, values: [perception] }, # Skillful
+            { kind: feats, values: ["srd52:feat/alert"] }, # Versatile
           ]
-  equipment: ["srd52:item/mace", "srd52:item/scale-mail", "srd52:item/shield"]
+  equipment:
+    [
+      "srd52:item/mace",
+      "srd52:item/shortbow",
+      "srd52:item/scale-mail",
+      "srd52:item/shield",
+    ]
 
 - id: "srd52:pregen/wizard"
   name: Human Wizard
@@ -84,18 +121,28 @@
     levels:
       - classId: "srd52:class/wizard"
         hitPointGain: 6
-        answers:
-          [
-            { kind: skills, values: [investigation, perception] },
+        answers: [
+            { kind: skills, values: [investigation, insight] },
             {
               kind: spells,
               values:
                 [
                   "srd52:spell/fire-bolt",
+                  "srd52:spell/ray-of-frost",
+                  "srd52:spell/light",
+                ],
+            },
+            {
+              kind: spells,
+              values:
+                [
                   "srd52:spell/magic-missile",
                   "srd52:spell/shield",
                   "srd52:spell/sleep",
+                  "srd52:spell/mage-armor",
                 ],
             },
+            { kind: skills, values: [perception] }, # Skillful
+            { kind: feats, values: ["srd52:feat/alert"] }, # Versatile
           ]
-  equipment: ["srd52:item/quarterstaff", "srd52:item/dagger"]
+  equipment: ["srd52:item/dagger", "srd52:item/shortbow"]

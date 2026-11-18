@@ -282,7 +282,9 @@ describe("the session's rules terms", () => {
     );
     expect(await game.terms()).toEqual([]); // no game yet
     await game.start("goblin-ambush", "glossary-test", {});
-    expect(await game.terms()).toEqual([
+    // The terms the index doesn't cover fall to the shipped entries, kept apart below.
+    const fromBooks = (await game.terms()).filter(({ book }) => book !== "");
+    expect(fromBooks).toEqual([
       {
         id: "condition:blinded",
         words: ["blinded", "Blinded"],
@@ -372,7 +374,7 @@ describe("the session's rules terms", () => {
         ]);
   });
 
-  it("gives none without the owner's index, or with another system's", async () => {
+  it("gives only the shipped rules' own entries without the owner's index, or with another system's", async () => {
     for (const glossary of [
       null,
       "not json",
@@ -380,7 +382,17 @@ describe("the session's rules terms", () => {
     ]) {
       const game = await gameWith(glossary);
       await game.start("goblin-ambush", "glossary-test", {});
-      expect(await game.terms()).toEqual([]);
+      const terms = await game.terms();
+      // Every condition the engine plays, and Exhaustion, from the SRD (#215).
+      expect(terms.map(({ id }) => id).sort()).toEqual(
+        [
+          ...ConditionSchema.options.map((name) => `condition:${name}`),
+          "rule:exhaustion",
+        ].sort(),
+      );
+      const prone = terms.find(({ id }) => id === "condition:prone");
+      expect([prone?.book, prone?.file]).toEqual(["", ""]);
+      expect(prone?.text).toMatch(/^### Prone\n\nWhile you have the Prone/);
     }
   });
 });

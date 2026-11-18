@@ -146,7 +146,7 @@ describe("treasure and gold", () => {
     );
     expect(player.stowed).toEqual([SCALE]);
     // The fighter's own Chain Mail is still what counts.
-    expect(deriveStats(player, run).ac).toBe(18);
+    expect(deriveStats(player, run).ac).toBe(19);
     const found = asked.filter((item) => item.id.startsWith(`${NS}:found:`));
     expect(found.map((item) => item.prompt)).toEqual([
       "Found: 12 gp, Scale Mail.",
@@ -207,7 +207,7 @@ describe("equipping and attuning", () => {
   it("swaps armor and changes AC", async () => {
     const run = await storyRun([treasure(0, [SCALE])]);
     const before = playerOf(dnd(play(run, "srd52:pregen/fighter").state));
-    expect(deriveStats(before, run).ac).toBe(18); // Chain Mail and a Shield
+    expect(deriveStats(before, run).ac).toBe(19); // Chain Mail, a Shield and Defense
 
     const { state } = play(run, "srd52:pregen/fighter", (decision) =>
       decision.options.some((option) => option.id === `equip:${SCALE}`)
@@ -216,7 +216,7 @@ describe("equipping and attuning", () => {
     );
     const after = playerOf(dnd(state));
     expect(after.stowed).toEqual(["srd52:item/chain-mail"]);
-    expect(deriveStats(after, run).ac).toBe(17); // Scale Mail, Dex +1, and the Shield
+    expect(deriveStats(after, run).ac).toBe(18); // Scale Mail, Dex +1, the Shield and Defense
   });
 
   it("doesn't offer armor the character isn't trained with", async () => {
@@ -350,7 +350,7 @@ describe("equipping and attuning", () => {
     );
     const player = playerOf(dnd(state));
     expect(player.attuned).toEqual([RING]);
-    expect(deriveStats(player, run).ac).toBe(19);
+    expect(deriveStats(player, run).ac).toBe(20);
     expect(asked.some((item) => item.id.startsWith(`${NS}:gear:`))).toBe(true);
   });
 });

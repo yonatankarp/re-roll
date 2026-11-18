@@ -322,6 +322,7 @@ export interface TermEntry {
   readonly book: string;
   readonly file: string;
   readonly entity?: string; // its file in the book's rules plugin, as "conditions/prone.yaml"
+  readonly text?: string; // the shipped rules' own entry for it, where no book explains it (then book and file are "")
 }
 
 // "Goblin Warrior", "goblin-warrior" and "srd52:monster/goblin-warrior" all find the same picture.
@@ -1159,10 +1160,12 @@ export function createGame({
       return index[file] ?? [];
     },
 
-    // The current system's terms that a book in the library explains, or none without the owner's books.
+    // The current system's terms that a book in the library explains. A term no book explains, or any term without
+    // the owner's books, takes the run's own entry for it where the shipped rules have one (#215).
     async terms(): Promise<readonly TermEntry[]> {
       const ui = current?.ui;
-      if (!ui?.terms) return [];
+      const run = current?.run;
+      if (!ui?.terms || !run) return [];
       glossaryText ??= storage
         .list(LIBRARY)
         .then((entries) =>
@@ -1173,18 +1176,33 @@ export function createGame({
         )
         .catch(() => null);
       const text = await glossaryText;
-      if (!text) return [];
-      let glossary;
+      let indexed: z.infer<typeof GlossarySchema>["terms"] = {};
       try {
-        glossary = GlossarySchema.parse(JSON.parse(text));
+        const glossary = GlossarySchema.parse(JSON.parse(text ?? ""));
+        if (glossary.system === ui.systemId) indexed = glossary.terms;
       } catch {
-        return [];
+        // No index, or one that can't be read: only the shipped entries explain.
       }
-      if (glossary.system !== ui.systemId) return [];
-      return ui.terms.flatMap((term) => {
-        const at = glossary.terms[term.id];
-        if (!at || !BARE_NAME.test(at.book) || !BARE_NAME.test(at.file))
-          return [];
+      const ids = run.contentIds();
+      return ui.terms.flatMap((term): TermEntry[] => {
+        const at = indexed[term.id];
+        if (!at || !BARE_NAME.test(at.book) || !BARE_NAME.test(at.file)) {
+          const id = ids.find((item) => item.endsWith(`:${term.entity ?? ""}`));
+          const entry = (id ? run.content(id) : undefined) as
+            { name?: unknown; text?: unknown } | undefined;
+          return typeof entry?.name === "string" &&
+            typeof entry.text === "string"
+            ? [
+                {
+                  id: term.id,
+                  words: term.words,
+                  book: "",
+                  file: "",
+                  text: `### ${entry.name}\n\n${entry.text}`,
+                },
+              ]
+            : [];
+        }
         const { book, file, entity } = at;
         return [
           {

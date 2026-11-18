@@ -207,7 +207,7 @@ describe("derived stats", () => {
     expect(stats.abilities.str).toBe(17); // base 15, Soldier +2
     expect(stats.abilities.con).toBe(15); // base 14, Soldier +1
     expect(stats.maxHp).toBe(12); // d10 maximum of 10, Con +2
-    expect(stats.ac).toBe(18); // Chain Mail 16, Shield +2
+    expect(stats.ac).toBe(19); // Chain Mail 16, Shield +2, Defense +1
     expect(stats.resources["second-wind"]).toBe(2);
     expect(stats.skills).toContain("athletics"); // from Soldier
     expect(stats.skills).toContain("perception"); // from a class choice

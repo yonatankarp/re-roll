@@ -136,6 +136,39 @@
   passives:
     - { kind: savageAttacker }
 
+- id: "srd52:feature/grappler"
+  name: Grappler
+  text: "You have Advantage on attack rolls against a creature Grappled by you."
+  automation: partial
+  # shortcut: Punch and Grab isn't given (an Unarmed Strike either damages or grapples), and Fast Wrestler has
+  # nothing to waive, as nothing drags a grappled creature yet.
+  passives:
+    - { kind: grappledAdvantage }
+
+- id: "srd52:feature/archery"
+  name: Archery
+  text: "You gain a +2 bonus to attack rolls you make with Ranged weapons."
+  automation: full
+  passives:
+    - { kind: weaponRider, with: rangedWeapon, attack: 2 }
+
+- id: "srd52:feature/defense"
+  name: Defense
+  text: "While you're wearing Light, Medium, or Heavy armor, you gain a +1 bonus to Armor Class."
+  automation: full
+  passives:
+    - kind: modifier
+      modifier:
+        { kind: bonus, to: ac, armor: any, amount: { bonus: { base: 1 } } }
+
+- id: "srd52:feature/great-weapon-fighting"
+  name: Great Weapon Fighting
+  text: "When you roll damage for a Melee weapon you hold in two hands, treat any 1 or 2 on a damage die as a 3."
+  automation: partial
+  # shortcut: a Versatile weapon held in two hands doesn't count (trait-rules.ts).
+  passives:
+    - { kind: greatWeaponFighting }
+
 - id: "srd52:feature/alert"
   name: Alert
   text: "Add your Proficiency Bonus to Initiative, and you may swap Initiative with an ally."

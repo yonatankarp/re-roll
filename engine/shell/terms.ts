@@ -140,12 +140,15 @@ export function wireTerms(ctx: ShellContext): void {
     const mine = ++shown;
     // The book's entity for the term, or its section where an older index names none.
     const { book, file, entity } = entry;
-    const key = `${book}/${entity ?? file}`;
+    const key =
+      entry.text === undefined ? `${book}/${entity ?? file}` : entry.id;
     const read =
       sections.get(key) ??
-      (entity
-        ? ctx.game.readTerm(book, entity)
-        : ctx.game.readSection(book, file));
+      (entry.text !== undefined
+        ? Promise.resolve(entry.text)
+        : entity
+          ? ctx.game.readTerm(book, entity)
+          : ctx.game.readSection(book, file));
     sections.set(key, read);
     const text = await read.catch(() => "");
     const now = redrawn(target, box);
@@ -166,6 +169,7 @@ export function wireTerms(ctx: ShellContext): void {
       ),
     );
     others.hidden = rest.length === 0;
+    more.hidden = entry.text !== undefined; // no book to open
     more.onclick = () => {
       hide();
       ctx.act(async () => {

@@ -286,6 +286,7 @@ export interface SystemUi {
   readonly terms?: readonly {
     readonly id: string;
     readonly words: readonly string[];
+    readonly entity?: string; // the content entry that explains it, without its plugin, as "condition/prone"
   }[];
   // Turns an event into plain data for the board to animate, given the state either side of it.
   readonly cue?: (

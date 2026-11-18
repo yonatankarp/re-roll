@@ -1,5 +1,7 @@
 - id: "goblin-ambush:monster/chief"
   name: Goblin Chief
+  size: small
+  creatureType: fey
   ac: 15
   hp: 15
   speed: 30
