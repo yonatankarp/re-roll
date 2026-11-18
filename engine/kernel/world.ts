@@ -69,6 +69,11 @@ export const WORLD_KINDS: Readonly<Record<string, ContentKind>> = {
   rulings: contentKind({ idPrefix: "ruling", schema: RulingSchema }),
 };
 
+// Lore: every world kind but rulings, which rule on one system's books and stay in its plugins. Lore lives in
+// world plugins, which name no system, so any system can load it (#206).
+export const isLore = (folder: string): boolean =>
+  Object.hasOwn(WORLD_KINDS, folder) && folder !== "rulings";
+
 // A system's kinds can't take a world kind's folder or id prefix, so a world id means one thing.
 export function worldClashes(
   kinds: Readonly<Record<string, ContentKind>>,

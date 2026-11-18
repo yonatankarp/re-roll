@@ -20,7 +20,7 @@ import {
   type GameSystem,
   SDK_VERSION,
 } from "../kernel/system.ts";
-import { WORLD_KINDS, worldClashes } from "../kernel/world.ts";
+import { WORLD_KINDS, isLore, worldClashes } from "../kernel/world.ts";
 
 // An allowlist, because a denylist would miss formats such as .mjs, .wasm or a script-bearing .svg.
 export const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -550,8 +550,7 @@ export async function loadRun(
         issues.push({ plugin, file: `${record.root}/${file}`, message });
         continue;
       }
-      // Lore loads under any system, so it lives in world plugins (#206). Rulings rule on one system's books.
-      if (!isWorld && world && folder !== "rulings") {
+      if (!isWorld && isLore(folder)) {
         const message = `content folder "${folder}" is lore, which belongs in a world plugin`;
         issues.push({ plugin, file: `${record.root}/${file}`, message });
         continue;
