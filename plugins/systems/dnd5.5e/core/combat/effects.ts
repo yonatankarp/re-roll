@@ -836,13 +836,31 @@ function killEvents(fallen: Actor, context: Context): SystemEvent[] {
         : bearer;
       if (!to) return [];
       const dice = hitDiceOf(fallen, context);
+      const fallenStats = passive.fallenMaxHp
+        ? deriveStats(fallen, context)
+        : undefined;
+      if (
+        fallenStats &&
+        ["construct", "undead"].includes(fallenStats.creatureType ?? "")
+      ) {
+        return [];
+      }
       const effects = passive.fallenHitDice
         ? passive.effects.map((effect) =>
             effect.kind === "heal"
               ? { ...effect, amount: { bonus: { base: dice, add: [] } } }
               : effect,
           )
-        : passive.effects;
+        : fallenStats
+          ? passive.effects.map((effect) =>
+              effect.kind === "tempHp"
+                ? {
+                    ...effect,
+                    amount: { bonus: { base: fallenStats.maxHp, add: [] } },
+                  }
+                : effect,
+            )
+          : passive.effects;
       return [
         ...(passive.oncePerTurn
           ? [
@@ -1920,8 +1938,31 @@ export function leafEvents(
   const unhealed = healingStopped(target, context.state, context);
   for (const effect of effects) {
     switch (effect.kind) {
+      case "recoil": {
+        const type = deriveStats(target, context).creatureType;
+        if (
+          effect.creatureTypes &&
+          !effect.creatureTypes.includes(type ?? "")
+        ) {
+          break;
+        }
+        const hits = effect.damage.map((damage) => ({
+          amount: rollAmount(damage.amount, stats, context.dice),
+          type: damage.type,
+        }));
+        events.push(...dealEvents(caster, hits, false, context).events);
+        break;
+      }
       case "heal": {
         if (unhealed || cannotHeal(target)) break;
+        if (
+          effect.creatureTypes &&
+          !effect.creatureTypes.includes(
+            deriveStats(target, context).creatureType ?? "",
+          )
+        ) {
+          break;
+        }
         const max = deriveStats(target, context).maxHp + raisedMax;
         const room = Math.max(
           0,
@@ -2820,7 +2861,14 @@ export function leafEvents(
         events.push(...splashEvents(effect, caster, target, context));
         break;
       case "exhaustion":
-        if (effect.clear ? target.exhaustion > 0 : effect.levels) {
+        // A Book of Vile Darkness's Tireless Form gains no levels.
+        // shortcut: only levels from spells, attacks and items are held off, not a rest's or the weather's.
+        if (
+          effect.clear
+            ? target.exhaustion > 0
+            : effect.levels &&
+              !hasPassive(deriveStats(target, context), "noExhaustion")
+        ) {
           events.push(
             dndEvent(`${NS}:exhaustionChanged`, {
               actor: target.id,
@@ -3472,6 +3520,12 @@ export function rollSave(
         ability,
       ) ||
       (ability === "dex" && hasCondition(target, "restrained")) ||
+      stats.passives.some(
+        (passive) =>
+          passive.kind === "foeDisadvantage" &&
+          source?.creatureType !== undefined &&
+          passive.creatureTypes.includes(source.creatureType),
+      ) ||
       stats.passives.some(
         (passive) =>
           passive.kind === "saveDisadvantage" &&

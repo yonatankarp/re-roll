@@ -810,6 +810,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("heal"),
     amount: AmountSchema,
+    creatureTypes: z.array(z.string().min(1)).min(1).optional(), // only these, as Blackrazor's healing of an Undead
     full: z.literal(true).optional(),
     divided: z.literal(true).optional(),
     half: z.literal(true).optional(),
@@ -856,6 +857,13 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("retypeHit"),
     types: z.array(DamageTypeSchema).min(2),
+  }),
+  // Damage to the one taking the action, with `creatureTypes` only when the target is one of these, as Blackrazor's
+  // 1d10 Necrotic to its wielder for hitting an Undead or a Book of Vile Darkness's Vile Speech to its reader.
+  z.strictObject({
+    kind: z.literal("recoil"),
+    damage: z.array(DamageSchema).min(1),
+    creatureTypes: z.array(z.string().min(1)).min(1).optional(),
   }),
   // A `chance` percent the item used breaks, dealing this to its user, as a Horn of Blasting's explosion.
   z.strictObject({
@@ -2694,6 +2702,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("saveDisadvantage"),
     conditions: z.array(ConditionSchema).min(1),
   }),
+  // Gains no Exhaustion levels, as a Book of Vile Darkness's Tireless Form (combat/effects.ts).
+  z.strictObject({ kind: z.literal("noExhaustion") }),
+  // Disadvantage on attack rolls against creatures of these types and on saves against what they call for, as Demon
+  // Armor's curse against demons (combat/attack.ts, combat/effects.ts rollSave).
+  z.strictObject({
+    kind: z.literal("foeDisadvantage"),
+    creatureTypes: z.array(z.string().min(1)).min(1),
+  }),
   // Resistance to the damage of ranged weapon attacks, as a Shield of Missile Attraction's (combat/attack.ts).
   z.strictObject({ kind: z.literal("missileResistance") }),
   // A ranged weapon attack aimed at another creature within this many feet of the bearer targets the bearer instead,
@@ -2895,6 +2911,9 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     reaction: z.literal(true).optional(),
     ally: z.literal(true).optional(),
     fallenHitDice: z.literal(true).optional(),
+    // Temporary Hit Points it gives are the foe's Hit Point maximum, as Blackrazor's for a soul it devours, never
+    // from a Construct or an Undead
+    fallenMaxHp: z.literal(true).optional(),
     oncePerTurn: z.literal(true).optional(),
     // only a foe under an effect of the bearer's from one of these, as Hexblade's Curse's healing
     marked: z.array(ContentIdSchema).min(1).optional(),

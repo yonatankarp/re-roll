@@ -1798,8 +1798,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   // A curse works while its bearer stays attuned to the item, worn or not, as Armor of Vulnerability's (gear.ts).
   if (!antimagic) {
     for (const itemId of attuned) {
-      const item = lookup(access, ItemSchema, itemId);
-      if ("curse" in item) itemPassives.push(...(item.curse?.passives ?? []));
+      const item = ItemSchema.safeParse(access.content(itemId)).data;
+      if (item && "curse" in item) {
+        itemPassives.push(...(item.curse?.passives ?? []));
+      }
     }
   }
   const abilities = withEffectScores(
@@ -2041,6 +2043,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const armorBases: number[] = [];
   const flatBonus = magic.ac;
   let shield = 0;
+  let heldAc = 0; // a magic weapon's own bonus to AC, as the Wand of Orcus's +3 while held
   const actions: KnownAction[] = [];
   // Use Magic Device: any Spell Scroll read with Intelligence.
   const anyScroll = traits.find((trait) => trait.kind === "anyScroll");
@@ -2106,6 +2109,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       }
     } else if (item.type === "weapon") {
       const weapon = WeaponSchema.parse(item);
+      heldAc = Math.max(heldAc, ownAc(weapon.bonuses, !works(itemId, item)));
       // A magic weapon's own bonus, or the best from a magic weapon carried beside it, never both.
       const own = (to: "attack" | "damage"): number =>
         Math.max(
@@ -2366,7 +2370,7 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     maxHp,
     ac: bestAc(actor, abilities, {
       armorBases,
-      flatBonus: flatBonus + shield,
+      flatBonus: flatBonus + shield + heldAc,
       passives: traits,
     }),
     speed: encumberedSpeed(species.speed - 10 * (load ?? 0), carried, capacity),

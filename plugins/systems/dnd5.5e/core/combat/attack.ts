@@ -1061,6 +1061,12 @@ export function runAttackRoll(
   const hampered =
     shielded !== null ||
     otherWeapon ||
+    stats.passives.some(
+      (passive) =>
+        passive.kind === "foeDisadvantage" &&
+        targetStats.creatureType !== undefined &&
+        passive.creatureTypes.includes(targetStats.creatureType),
+    ) ||
     crowded ||
     longRange ||
     swornElsewhere(attacker, action, resolution, context) ||

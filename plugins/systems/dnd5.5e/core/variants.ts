@@ -131,9 +131,12 @@ function version(
     delete item.variants;
     return item;
   }
-  // A staff is wielded as a Quarterstaff, as a Staff of Striking is.
+  // A staff is wielded as a Quarterstaff, as a Staff of Striking is, and a wand as the weapon it names, as the Wand of
+  // Orcus as a Mace.
   const types =
-    parent.category === "weapon" || parent.category === "staff"
+    parent.category === "weapon" ||
+    parent.category === "staff" ||
+    parent.category === "wand"
       ? ["weapon"]
       : parent.category === "armor"
         ? ["armor", "shield"]
