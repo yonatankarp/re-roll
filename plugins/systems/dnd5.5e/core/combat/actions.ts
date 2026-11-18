@@ -34,6 +34,7 @@ import {
   MAGIC_ACTION,
   SLOT_CAST_ACTION,
   applyDndEvent,
+  deathSaveOutcome,
   dndEvent,
   fightingOn,
   hasCondition,
@@ -76,6 +77,7 @@ import {
   usedKey,
   moveSquares,
   reaches,
+  rollBonus,
   slotLevelFor,
   squareName,
   targetCount,
@@ -219,16 +221,28 @@ export function deathSaveEvents(actor: Actor, context: Context): SystemEvent[] {
             ),
       natural,
     );
+    // A saving throw: what adds to every save counts, and Exhaustion and coming back from the dead take off.
+    const total =
+      counts +
+      stats.itemBonuses.savingThrows -
+      2 * stats.exhaustion -
+      stats.ordeal +
+      rollBonus(actor, "saves", context);
+    const outcome = deathSaveOutcome(counts, total);
     const events: SystemEvent[] = [
       dndEvent(`${NS}:deathSaveRolled`, {
         actor: actor.id,
         natural,
         ...(counts === natural ? {} : { counts }),
+        ...(total === counts ? {} : { total }),
       }),
     ];
-    const failuresAfter =
-      actor.deathSaves.failures + (counts < 10 ? (counts === 1 ? 2 : 1) : 0);
-    if (counts !== 20 && failuresAfter >= 3 && !fightingOn(actor)?.delayDeath) {
+    const failuresAfter = actor.deathSaves.failures + outcome.failures;
+    if (
+      !outcome.revived &&
+      failuresAfter >= 3 &&
+      !fightingOn(actor)?.delayDeath
+    ) {
       events.push({ kind: "actorDefeated", actor: actor.id });
     }
     // Defy Death: a success heals, once.
@@ -238,7 +252,7 @@ export function deathSaveEvents(actor: Actor, context: Context): SystemEvent[] {
         (actor.resourcesSpent[passive.resource] ?? 0) <
           (stats.resources[passive.resource] ?? 0),
     );
-    if (counts >= 10 && heal?.kind === "deathSaveHeal") {
+    if (outcome.success && heal?.kind === "deathSaveHeal") {
       events.push(
         dndEvent(`${NS}:resourceSpent`, {
           actor: actor.id,
