@@ -50,7 +50,7 @@ import {
   rollDiceNotation,
 } from "../stats.ts";
 import { z } from "zod";
-import { finalDamage, halved } from "../rules.ts";
+import { halved } from "../rules.ts";
 import { betweenTurns, legendaryResistance } from "../legendary.ts";
 import { turnInspiration, turnRecharge } from "../class-rules.ts";
 import { ConditionSchema, MonsterSchema } from "../schemas.ts";
@@ -74,6 +74,7 @@ import {
   type Context,
   currentActor,
   hasPassive,
+  moveSquares,
   pacified,
 } from "./queries.ts";
 import {
@@ -257,7 +258,7 @@ export function runAfterAction(
   if (!state.combat) return {};
   const actor = actorOf(state, payload.actor);
   const stats = deriveStats(actor, context);
-  // The turn carries on only while something other than ending it is still possible.
+  // The turn carries on only while something other than ending it is still possible, a step with Speed left too.
   const canContinue =
     stats.actions.some(
       (action) =>
@@ -266,7 +267,8 @@ export function runAfterAction(
         !quickenedBars(action, actor),
     ) ||
     (actor.budget.bonusAction &&
-      stats.passives.some((passive) => passive.kind === "bonusTactics"));
+      stats.passives.some((passive) => passive.kind === "bonusTactics")) ||
+    moveSquares(actor, state, stats, context).length > 0;
   return canContinue &&
     !isDown(actor) &&
     !hasCondition(actor, ...INCAPACITATING)
@@ -352,26 +354,23 @@ export function runLingeringTick(
   const { events, dealt } = dealEvents(
     target,
     damage.map(({ amount, type }) => ({
-      amount: finalDamage(
-        scale(
-          rollAmount(
-            amount,
-            stats,
-            masteredDice(
-              dice,
-              type,
-              caster
-                ? flooredTypes(stats, effect.sourceId.startsWith("spell:"))
-                : mastered,
-              caster
-                ? rerolledTypes(stats, effect.sourceId.startsWith("spell:"))
-                : [],
-            ),
+      amount: scale(
+        rollAmount(
+          amount,
+          stats,
+          masteredDice(
+            dice,
+            type,
+            caster
+              ? flooredTypes(stats, effect.sourceId.startsWith("spell:"))
+              : mastered,
+            caster
+              ? rerolledTypes(stats, effect.sourceId.startsWith("spell:"))
+              : [],
           ),
         ),
-        type,
-        responses,
       ),
+      response: responses,
       type,
     })),
     false,
@@ -825,11 +824,8 @@ function grappleDamage(
     held,
     [
       {
-        amount: finalDamage(
-          rollDiceNotation(passive.dice, context.dice),
-          passive.type,
-          damageResponses(held, context),
-        ),
+        amount: rollDiceNotation(passive.dice, context.dice),
+        response: damageResponses(held, context),
         type: passive.type,
       },
     ],

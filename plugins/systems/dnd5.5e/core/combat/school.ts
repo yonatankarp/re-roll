@@ -13,7 +13,6 @@ import {
   type Table,
 } from "../schemas.ts";
 import { type Actor, dndEvent, frame, isDown, NS } from "../state.ts";
-import { finalDamage } from "../rules.ts";
 import { distanceFeet } from "../grid.ts";
 import {
   atSlotLevel,
@@ -102,7 +101,8 @@ function hitDiceSurge(
       target,
       [
         {
-          amount: finalDamage(total, "force", damageResponses(target, context)),
+          amount: total,
+          response: damageResponses(target, context),
           type: "force",
         },
       ],
@@ -566,11 +566,8 @@ export function castRiders(
                         ? typeAgainst(item.types, damageResponses(foe, context))
                         : item.type;
                       return {
-                        amount: finalDamage(
-                          rollAmount(item.amount, stats, context.dice),
-                          type,
-                          damageResponses(foe, context),
-                        ),
+                        amount: rollAmount(item.amount, stats, context.dice),
+                        response: damageResponses(foe, context),
                         type,
                       };
                     }),

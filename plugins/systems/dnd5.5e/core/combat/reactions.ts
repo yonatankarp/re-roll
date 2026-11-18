@@ -47,7 +47,7 @@ import {
   type Stats,
   withItemNumbers,
 } from "../stats.ts";
-import { finalDamage, rollD20 } from "../rules.ts";
+import { rollD20 } from "../rules.ts";
 import {
   DECLINE,
   ITEM_PREFIX,
@@ -1799,11 +1799,13 @@ export function counterBeforeSave(
       ...dealEvents(
         caster,
         resolution.damage.map(({ amount, type }) => ({
-          amount: finalDamage(
-            rollAmount(amount, stats, context.dice, natural === 20 ? 2 : 1),
-            type,
-            responses,
+          amount: rollAmount(
+            amount,
+            stats,
+            context.dice,
+            natural === 20 ? 2 : 1,
           ),
+          response: responses,
           type,
         })),
         natural === 20,
@@ -2204,7 +2206,7 @@ export function inspirationEchoes(
     return action
       ? [
           ...payCosts(action, bearer, context),
-          dndEvent(`${NS}:inspirationGranted`, { actor: bearer.id }),
+          ...leafEvents(effectsOf(action), action.id, bearer, bearer, context),
         ]
       : [];
   });

@@ -9,6 +9,7 @@ import {
   LEVELED_CAST,
   MAGIC_ACTION,
   SLOT_CAST_ACTION,
+  SLOT_SPENT,
   controllingRider,
   dndEvent,
   type DndState,
@@ -883,6 +884,12 @@ export function quickenedBars(action: KnownAction, actor: Actor): boolean {
   );
 }
 
+// An Action or a Bonus Action, which only its user's own turn has.
+export const onOwnTurn = (action: KnownAction): boolean =>
+  action.activation.cost.some(
+    (cost) => cost === "action" || cost === "bonusAction",
+  );
+
 export function canAfford(
   action: KnownAction,
   actor: Actor,
@@ -949,7 +956,14 @@ export function canAfford(
       if (cost === "action") return actor.budget.action;
       if (cost === "bonusAction") return actor.budget.bonusAction;
       if (cost === "reaction") return actor.budget.reaction;
-      if (cost === "slot") return slotToSpend(action, actor, stats) !== null;
+      // One spell slot a turn. shortcut: only between an Action and a Bonus Action, which share their user's own turn;
+      // a reaction's slot on that turn isn't counted, since a reaction off it would need the turn's identity here.
+      if (cost === "slot") {
+        return (
+          slotToSpend(action, actor, stats) !== null &&
+          !(onOwnTurn(action) && used.includes(SLOT_SPENT))
+        );
+      }
       if ("gold" in cost) return true; // the party's purse is checked where it's offered (goldFor)
       return (
         (actor.resourcesSpent[cost.resource] ?? 0) + (cost.count ?? 1) <=

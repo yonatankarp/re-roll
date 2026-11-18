@@ -30,7 +30,6 @@ import {
   SURGED,
 } from "../../state.ts";
 import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
-import { finalDamage } from "../../rules.ts";
 import {
   type Ability,
   ItemSchema,
@@ -1416,11 +1415,8 @@ export function leafEvents(
           // none dealt, as with an Intelligence modifier of 0 or less, sets nothing off
           const hits = damage
             .map(({ amount, type }) => ({
-              amount: finalDamage(
-                rollAmount(amount, stats, context.dice),
-                type,
-                responses,
-              ),
+              amount: rollAmount(amount, stats, context.dice),
+              response: responses,
               type,
             }))
             .filter((hit) => hit.amount !== 0);
@@ -1777,6 +1773,13 @@ export function leafEvents(
         }
         break;
       }
+      case "inspiration":
+        if (!target.heroicInspiration) {
+          events.push(
+            dndEvent(`${NS}:inspirationGranted`, { actor: target.id }),
+          );
+        }
+        break;
       case "note":
       case "disperse":
       case "reactionAttack":
@@ -1806,7 +1809,6 @@ export function leafEvents(
       case "slowFall":
       case "split":
       case "swapInitiative":
-      case "inspiration":
       case "resistTrigger":
       case "forcedAttack":
       case "moveZone":
@@ -1875,11 +1877,8 @@ function beheadEvents(
     ...dealEvents(
       target,
       effect.damage.map(({ amount, type }) => ({
-        amount: finalDamage(
-          rollAmount(amount, stats, context.dice),
-          type,
-          responses,
-        ),
+        amount: rollAmount(amount, stats, context.dice),
+        response: responses,
         type,
       })),
       false,
@@ -1913,14 +1912,12 @@ function splashEvents(
   const responses = damageResponses(other, context);
   const tiers = cantripTier(stats.level);
   const hits = effect.damage.map(({ amount, type }, index) => ({
-    amount: finalDamage(
+    amount:
       rollAmount(amount, stats, context.dice) +
-        (index === 0 && effect.perTier && tiers > 0
-          ? rollDiceNotation(effect.perTier, context.dice, tiers)
-          : 0),
-      type,
-      responses,
-    ),
+      (index === 0 && effect.perTier && tiers > 0
+        ? rollDiceNotation(effect.perTier, context.dice, tiers)
+        : 0),
+    response: responses,
     type,
   }));
   return dealEvents(other, hits, false, context).events;

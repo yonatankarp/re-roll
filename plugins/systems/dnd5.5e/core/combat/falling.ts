@@ -9,7 +9,6 @@ import {
 } from "#sdk";
 import { distanceFeet, squareKey } from "../grid.ts";
 import { blockingSet, inZone, zonesOf } from "../zones.ts";
-import { finalDamage } from "../rules.ts";
 import type { LeafEffect } from "../schemas.ts";
 import { seeing } from "../sight.ts";
 import {
@@ -420,14 +419,15 @@ export function runFall(
         ? Math.floor(rolled / 2)
         : rolled) - (lessened.get(actor.id) ?? 0),
     );
-    const amount = finalDamage(
-      fallen,
-      "bludgeoning",
-      damageResponses(actor, context),
-    );
     const dealt = dealEvents(
       actor,
-      [{ amount, type: "bludgeoning" }],
+      [
+        {
+          amount: fallen,
+          type: "bludgeoning",
+          response: damageResponses(actor, context),
+        },
+      ],
       false,
       context,
     );

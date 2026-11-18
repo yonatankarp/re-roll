@@ -1,6 +1,6 @@
 import { awaitDecision, type Frame, type SystemResult } from "#sdk";
 import type { z } from "zod";
-import { finalDamage, halved } from "../rules.ts";
+import { halved } from "../rules.ts";
 import { type Actor, applyDndEvent, frame, isDown, NS } from "../state.ts";
 import {
   damageResponses,
@@ -150,7 +150,8 @@ export function runReplaceHit(
     ({ amount, type }) => {
       const total = rollAmount(amount, stats, context.dice);
       return {
-        amount: finalDamage(landed ? total : halved(total), type, responses),
+        amount: landed ? total : halved(total),
+        response: responses,
         type,
       };
     },

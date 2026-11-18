@@ -290,8 +290,8 @@ function landHit(
         ]
       : []),
   ];
-  let totalDealt = 0;
-  const absorbed: { amount: number; type: DamageType }[] = [];
+  // The hit's dice by type, unresisted: Resistance comes after every cut (dealEvents).
+  const rolledByType = new Map<DamageType, number>();
   // The first damage's dice, for Chaos Bolt's type and a leap's matching numbers.
   const faces: number[] = [];
   const printedFirst = resolution.damage[0]?.type;
@@ -512,15 +512,11 @@ function landHit(
     const type =
       rolledType(resolution.damage[0]?.rolledTypes, faces, responses) ??
       printedType;
+    rolledByType.set(type, (rolledByType.get(type) ?? 0) + Math.max(0, rolled));
+    // shortcut: the Temporary Hit Points count the damage before the target's cuts.
     const final = finalDamage(Math.max(0, rolled), type, responses);
-    // Damage it absorbs heals it on its own, rather than taking from the rest of the hit.
-    if (final < 0) absorbed.push({ amount: final, type });
-    else totalDealt += final;
     if (tempHp && final > 0) gained += final;
   });
-  const firstType =
-    rolledType(resolution.damage[0]?.rolledTypes, faces, responses) ??
-    printedFirst;
   if (gained > 0) {
     events.push(
       dndEvent(`${NS}:tempHpGained`, { actor: attacker.id, amount: gained }),
@@ -543,14 +539,14 @@ function landHit(
   );
   events.push(...riders.events);
   const hits = [
-    ...(firstType ? [{ amount: totalDealt, type: firstType }] : []),
-    ...absorbed,
+    ...[...rolledByType].map(([type, amount]) => ({
+      amount,
+      type,
+      response: responses,
+    })),
     ...[...typedExtra, ...riders.damage].map(({ amount, type }) => ({
-      amount: finalDamage(
-        rollAmount(amount, stats, dice, multiplier),
-        type,
-        responses,
-      ),
+      amount: rollAmount(amount, stats, dice, multiplier),
+      response: responses,
       type,
     })),
   ];

@@ -19,7 +19,6 @@ import {
   evaluateFormula,
   rollAmount,
 } from "../../stats.ts";
-import { finalDamage } from "../../rules.ts";
 import { markedBy } from "../../trait-rules.ts";
 import { type Context, isMelee, within5 } from "../queries.ts";
 import { dealEvents, leafEvents, rollSave } from "../effects.ts";
@@ -69,17 +68,15 @@ export function retaliated(
   const responses = damageResponses(attacker, context);
   const hits = backs.flatMap(({ damage, halfDealt }) => [
     ...damage.map(({ amount, type }) => ({
-      amount: finalDamage(
-        rollAmount(amount, stats, context.dice),
-        type,
-        responses,
-      ),
+      amount: rollAmount(amount, stats, context.dice),
+      response: responses,
       type,
     })),
     ...(halfDealt && dealt > 1
       ? [
           {
-            amount: finalDamage(Math.floor(dealt / 2), halfDealt, responses),
+            amount: Math.floor(dealt / 2),
+            response: responses,
             type: halfDealt,
           },
         ]

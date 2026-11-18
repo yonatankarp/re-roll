@@ -100,22 +100,25 @@ export function bestMentalAbility(abilities: AbilityScores): Ability {
   );
 }
 
-// Ability scores after every increase, never above 20.
+// Ability scores after every increase, never above 20, or 30 for an Epic Boon's.
 export function buildAbilities(build: CharacterBuild): AbilityScores {
   const abilities = { ...build.baseAbilities };
   const increases = [
-    build.backgroundIncrease,
+    { increases: build.backgroundIncrease, max: 20 },
     ...build.levels.flatMap((entry) =>
       entry.answers.flatMap((answer) =>
-        answer.kind === "abilities" ? [answer.increases] : [],
+        answer.kind === "abilities"
+          ? [{ increases: answer.increases, max: answer.max ?? 20 }]
+          : [],
       ),
     ),
   ];
-  for (const increase of increases) {
+  for (const { increases: increase, max } of increases) {
     for (const ability of ABILITIES) {
-      abilities[ability] = Math.min(
-        20,
-        abilities[ability] + (increase[ability] ?? 0),
+      const score = abilities[ability];
+      abilities[ability] = Math.max(
+        score,
+        Math.min(max, score + (increase[ability] ?? 0)),
       );
     }
   }

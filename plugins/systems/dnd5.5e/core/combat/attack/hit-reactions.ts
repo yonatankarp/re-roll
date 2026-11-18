@@ -18,7 +18,6 @@ import {
   evaluateFormula,
   rollAmount,
 } from "../../stats.ts";
-import { finalDamage } from "../../rules.ts";
 import { type Damage } from "../../schemas.ts";
 import {
   actorOf,
@@ -294,6 +293,7 @@ export function passedOn(
       type: item.type,
       amount:
         Math.max(0, item.amount) - Math.max(0, lessened[index]?.amount ?? 0),
+      response: damageResponses(kin, context),
     }));
     const dealt = dealEvents(kin, taken, false, context);
     events.push(...dealt.events);
@@ -353,11 +353,8 @@ export function passedOn(
               amount,
             }))
             .map(({ amount, type }) => ({
-              amount: finalDamage(
-                rollAmount(amount, stats, context.dice),
-                type,
-                responses,
-              ),
+              amount: rollAmount(amount, stats, context.dice),
+              response: responses,
               type,
             })),
           false,

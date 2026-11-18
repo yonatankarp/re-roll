@@ -18,8 +18,11 @@ export function bestAc(
 ): number {
   const dex = abilityModifier(abilities.dex);
   const armorTypes = context.armorTypes ?? [];
-  // Only one way of calculating AC applies at a time, so the best one is used.
-  const bases = [10 + dex, ...context.armorBases];
+  // Only one way of calculating AC applies at a time, so the best one is used. 10 + Dex is AC without armor.
+  const bases = [
+    ...(armorTypes.length === 0 ? [10 + dex] : []),
+    ...context.armorBases,
+  ];
   const fixed = passiveModifiers(context.passives);
   // shortcut: Mage Armor's rule about not wearing armor isn't checked, since the best calculation wins anyway.
   for (const modifier of [
