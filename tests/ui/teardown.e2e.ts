@@ -1,4 +1,4 @@
-import { type Page, expect, test } from "@playwright/test";
+import { type Page, expect, test } from "./fixtures.ts";
 
 // What the game screen leaves behind (issue #217): nothing of the board sounds once the player has gone
 // back to the menu, and a drag the browser cancelled never moves the fighter.

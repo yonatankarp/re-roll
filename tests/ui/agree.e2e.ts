@@ -2,7 +2,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Page, expect, test } from "@playwright/test";
+import { type Page, expect, test } from "./fixtures.ts";
 import { openHeadless } from "../../app/cli/headless-game.ts";
 import { playUntil } from "./onward.ts";
 import { savedFiles } from "./saved-files.ts";

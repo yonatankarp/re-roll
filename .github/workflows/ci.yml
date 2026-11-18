@@ -110,11 +110,16 @@ jobs:
       - run: cargo test --locked
         working-directory: app/desktop/src-tauri
 
-  # A Playwright smoke test of the game in Chromium, against npm run ui.
+  # The Playwright tests of the built game under the desktop app's CSP, in Chromium (WebView2's engine)
+  # and WebKit (macOS and Linux webviews), side by side.
   ui:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -125,14 +130,14 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ matrix.browser }}-${{ hashFiles('package-lock.json') }}
       # With the browser cached this only installs its system libraries.
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:ui
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: npm run test:ui -- --project=${{ matrix.browser }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
-          name: playwright-traces
+          name: playwright-traces-${{ matrix.browser }}
           path: test-results/
           retention-days: 7
 

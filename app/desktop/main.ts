@@ -1,3 +1,5 @@
+// First, before any module parses with zod.
+import "./zod-jitless.ts";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
