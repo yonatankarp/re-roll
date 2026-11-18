@@ -315,7 +315,7 @@ describe("playing through the shell's session", () => {
     await pick(game, "Force the lock");
     const after = game.view();
     expect(after.rolls.at(-1)).toMatchObject({
-      actor: "Human Fighter",
+      actor: "Hollis Brand",
       label: "Athletics check",
       step: after.steps - 1,
     });
@@ -502,7 +502,7 @@ describe("playing through the shell's session", () => {
     await chooseCharacter(game, "Fighter");
 
     const [sheet, companion] = game.view().sheets;
-    expect(sheet?.title).toContain("Fighter");
+    expect(sheet?.title).toBe("Hollis Brand");
     expect(sheet?.sections.map((section) => section.title)).toContain(
       "Abilities",
     );
@@ -528,8 +528,13 @@ describe("playing through the shell's session", () => {
         expect(
           view.combat.combatants.filter((actor) => actor.active),
         ).toHaveLength(1);
+        // The party's HP in numbers, a foe's in how hurt it looks.
         for (const actor of view.combat.combatants) {
-          expect(actor.details[0]).toMatch(/^HP -?\d+ of [1-9]/);
+          expect(actor.details[0]).toMatch(
+            actor.side === "Ally"
+              ? /^HP -?\d+ of [1-9]/
+              : /^(Unhurt|Wounded|Bloodied|Down)$/,
+          );
         }
         savedPath = await game.save("mid-fight");
         const before = game.view();
@@ -668,8 +673,8 @@ describe("playing through the shell's session", () => {
       });
       expect(newest).toMatchObject({
         scene: "The Old Road",
-        character: "Human Fighter",
-        characterKind: null, // the pregen's name already says it
+        character: "Hollis Brand",
+        characterKind: "Human Fighter", // the ready hero has a name of its own
         ago: "just now",
         current: false,
       });

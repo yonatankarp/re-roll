@@ -1,5 +1,6 @@
 import { type Game, type GameView, sheetChanges } from "./session.ts";
 import type { SheetView } from "./system-ui.ts";
+import { button, el } from "./dom.ts";
 
 // The rest between scenes: a campfire button in the top bar, and a dimmed camp scene that asks
 // which rest, plays any questions the rest asks (such as spending Hit Dice), then shows what came back.
@@ -7,34 +8,16 @@ import type { SheetView } from "./system-ui.ts";
 
 const NIGHTFALL_MS = 900; // how long the fire burns before the summary, so the time passing is felt
 
-function node<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className: string,
-  text = "",
-): HTMLElementTagNameMap[K] {
-  const item = document.createElement(tag);
-  if (className) item.className = className;
-  item.textContent = text;
-  return item;
-}
-
-function action(label: string, onClick: () => void): HTMLButtonElement {
-  const item = node("button", "", label);
-  item.type = "button";
-  item.addEventListener("click", onClick);
-  return item;
-}
-
 // Each party member whose sheet changed, with a line per change.
 function recovered(
   before: readonly SheetView[],
   after: readonly SheetView[],
 ): HTMLElement[] {
   return sheetChanges(before, after).map(({ title, changes }) => {
-    const line = node("li", "");
+    const line = el("li");
     line.append(
-      node("strong", "", title),
-      ...changes.map((text) => node("span", "", text)),
+      el("strong", { text: title }),
+      ...changes.map((text) => el("span", { text: text })),
     );
     return line;
   });
@@ -75,10 +58,10 @@ export function campfire(
   readonly dialog: HTMLDialogElement;
   readonly update: (view: GameView) => void;
 } {
-  const body = node("div", "campfire-body");
-  const dialog = node("dialog", "campfire");
+  const body = el("div", { class: "campfire-body" });
+  const dialog = el("dialog", { class: "campfire" });
   dialog.setAttribute("aria-label", "Camp");
-  const fire = node("div", "campfire-fire");
+  const fire = el("div", { class: "campfire-fire" });
   fire.innerHTML = CAMP_FIRE;
   dialog.append(fire, body);
   let played = false; // whether an answer went into the game, so "Saved" only shows when it's true
@@ -116,8 +99,8 @@ export function campfire(
 
   const show = (heading: string, text: string, ...children: Node[]): void => {
     body.replaceChildren(
-      node("h2", "", heading),
-      ...(text ? [node("p", "", text)] : []),
+      el("h2", { text: heading }),
+      ...(text ? [el("p", { text: text })] : []),
       ...children,
     );
     requestAnimationFrame(() => body.querySelector("button")?.focus());
@@ -131,17 +114,17 @@ export function campfire(
     }[],
     pick: (id: string) => void,
   ): HTMLElement => {
-    const list = node("div", "options");
+    const list = el("div", { class: "options" });
     list.append(
       ...options.map((item) => {
-        const choice = action(item.label, () => {
+        const choice = button(item.label, () => {
           pick(item.id);
         });
         choice.dataset.choice = item.id;
         if (item.detail) {
           choice.replaceChildren(
-            node("strong", "", item.label),
-            node("small", "", item.detail),
+            el("strong", { text: item.label }),
+            el("small", { text: item.detail }),
           );
         }
         return choice;
@@ -173,24 +156,24 @@ export function campfire(
     show("Resting", "The fire burns low.");
     setTimeout(() => {
       const lines = recovered(before, game.view().sheets);
-      const summary = node("ul", "campfire-recovered");
+      const summary = el("ul", { class: "campfire-recovered" });
       summary.append(...lines);
       resting = false;
       show(
         "Rested",
         lines.length > 0 ? "" : "There was nothing to recover.",
         ...(lines.length > 0 ? [summary] : []),
-        action("Break camp", breakCamp),
+        button("Break camp", breakCamp),
       );
     }, NIGHTFALL_MS);
   };
 
-  const button = action("", () => {
+  const restButton = button("", () => {
     const view = game.view();
     const sceneDecision = view.decision?.id ?? "";
     played = false;
     resting = false;
-    const notNow = action("Not now", breakCamp);
+    const notNow = button("Not now", breakCamp);
     notNow.className = "quiet";
     // With no rest to take, the camp says why, so the reason isn't only in a tooltip.
     if (view.rests.length === 0) {
@@ -220,18 +203,18 @@ export function campfire(
     );
     dialog.showModal();
   });
-  button.className = "campfire-button";
-  button.setAttribute("aria-label", "Rest");
-  button.innerHTML = FIRE_ICON;
+  restButton.className = "campfire-button";
+  restButton.setAttribute("aria-label", "Rest");
+  restButton.innerHTML = FIRE_ICON;
 
   return {
-    button,
+    button: restButton,
     dialog,
     // Dimmed rather than hidden, so the bar doesn't shift when rests come and go, and still pressable to say why.
     update: (view) => {
       const none = view.rests.length === 0;
-      button.setAttribute("aria-disabled", String(none));
-      button.title = none ? restReason(view) : "Rest";
+      restButton.setAttribute("aria-disabled", String(none));
+      restButton.title = none ? restReason(view) : "Rest";
     },
   };
 }

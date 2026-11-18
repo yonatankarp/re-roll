@@ -50,6 +50,7 @@ export interface BoardDom {
   readonly routeCost: HTMLElement;
   readonly menu: HTMLElement;
   readonly pickBar: HTMLElement; // while choosing targets or aiming an area: how many are chosen, Cast and Back
+  readonly legend: HTMLElement; // what the map's marks mean, only those on it now
 }
 
 export interface BoardState {

@@ -85,6 +85,13 @@
   --leather-ink: #eee5ce;
   --callout: #fdf1dc; /* a set-apart box, such as the level-up, between gold rules */
   --callout-rule: #e69a28;
+  /* On the leather bar, the same in both themes. */
+  --leather-gold: #c9ad6a;
+  --leather-good: #8fce9b;
+  --leather-error: #ff8f7a;
+  --badge: #9c2b1b;
+  --badge-ink: #fff;
+  --warn: #c99a2e;
   --font-body: "Bookinsanity", Georgia, "Times New Roman", serif;
   --font-head: "Mr Eaves Small Caps", Georgia, serif;
   --font-title: "Nodesto Caps Condensed", Georgia, serif;
@@ -236,11 +243,11 @@ h3 {
 }
 
 .notice {
-  color: #8fce9b;
+  color: var(--leather-good);
 }
 
 .notice.error {
-  color: #ff8f7a;
+  color: var(--leather-error);
 }
 
 /* While a drawer or panel is open the notice is inside it, hung from the top of the window instead. */
@@ -742,10 +749,45 @@ summary {
 }
 
 .book-text {
-  margin: 0;
-  font: inherit;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.book-text > :first-child {
+  margin-top: 0;
+}
+
+.book-text :is(h3, h4, h5, h6) {
+  margin: 1em 0 0.25em;
+  font-family: var(--font-head);
+  color: var(--accent);
+}
+
+.book-text blockquote {
+  margin: 0.5em 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--callout-rule);
+  background: var(--callout);
+}
+
+.book-table {
+  overflow-x: auto;
+}
+
+.book-text table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font: 0.9rem/1.4 var(--font-ui);
+}
+
+.book-text :is(th, td) {
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.book-text th {
+  font-family: var(--font-caps);
 }
 
 .book-rulings {
@@ -841,8 +883,8 @@ summary {
   border-radius: 999px;
   font: bold 0.75rem/1.6 var(--font-caps);
   letter-spacing: 0.04em;
-  color: #fff;
-  background: #9c2b1b;
+  color: var(--badge-ink);
+  background: var(--badge);
 }
 
 .meter i {
@@ -853,7 +895,7 @@ summary {
 }
 
 .meter i[data-level="mid"] {
-  background: #c99a2e;
+  background: var(--warn);
 }
 
 .meter i[data-level="low"] {
@@ -1005,7 +1047,8 @@ summary {
 }
 
 .rolls .empty,
-.leads .empty {
+.leads .empty,
+.menu .empty {
   color: var(--muted);
   font-style: italic;
 }
@@ -1514,7 +1557,7 @@ button:active {
 }
 
 .hud-stat small {
-  color: #c9ad6a; /* gold on the leather bar, in both themes */
+  color: var(--leather-gold);
 }
 
 .menu h2,
@@ -1596,14 +1639,14 @@ button:active {
 /* Action panels and stat boxes look like the books' stat blocks: tinted paper between gold bars. */
 .group-panel,
 .box {
-  background: #fdf1dc;
+  background: var(--callout);
   border: 1px solid var(--edge);
   box-shadow: 0 2px 6px rgb(60 40 10 / 18%);
 }
 
 .group-panel {
-  border-top: 4px solid #e69a28;
-  border-bottom: 4px solid #e69a28;
+  border-top: 4px solid var(--callout-rule);
+  border-bottom: 4px solid var(--callout-rule);
   border-radius: 4px;
 }
 
@@ -1648,8 +1691,8 @@ button:active {
 }
 
 .log {
-  background: #fdf1dc;
-  border-color: #d4b97f;
+  background: var(--callout);
+  border-color: var(--line);
 }
 
 .log li.scene {
@@ -1679,16 +1722,8 @@ button:active {
 }
 
 @media (prefers-color-scheme: dark) {
-  .group-panel,
-  .box,
   .log {
-    background: #2c2319;
     border-color: var(--edge);
-  }
-
-  .group-panel {
-    border-top-color: #a8701e;
-    border-bottom-color: #a8701e;
   }
 
   .dnd-board {
@@ -1806,7 +1841,7 @@ button:active {
 /* "Saved" fades in after each autosave, then away. */
 .saved {
   align-self: center;
-  color: #c9ad6a;
+  color: var(--leather-gold);
   font: 0.85rem var(--font-caps);
   letter-spacing: 0.03em;
   opacity: 0;
@@ -1917,7 +1952,7 @@ button:active {
   box-shadow:
     inset 0 0 0 2px var(--accent),
     0 2px 8px rgb(60 40 10 / 20%);
-  background: #fdf1dc;
+  background: var(--callout);
 }
 
 /* Variant rules, folded under the main settings. */
@@ -1946,12 +1981,6 @@ button:active {
   color: var(--accent-ink);
   background: var(--accent);
   border-color: var(--accent);
-}
-
-@media (prefers-color-scheme: dark) {
-  .setting-card[aria-checked="true"] {
-    background: #2c2319;
-  }
 }
 
 /* Making a character: the steps as a row of tabs, the choices as cards, and the character so far beside them. */
@@ -2725,7 +2754,7 @@ button:active {
   color: var(--muted);
 }
 
-.save-delete.armed {
+button.armed {
   color: var(--accent-ink);
   background: var(--error);
   border-color: var(--error);
@@ -2928,11 +2957,11 @@ button:active {
   place-items: center;
   padding: 14px 10px;
   font: 1.9rem/1 var(--font-title);
-  color: #e0b062;
+  color: #e0b062; /* gold leaf on a leather cover, in both themes */
   text-align: center;
   text-wrap: balance;
-  border: 2px solid #c9ad6a;
-  outline: 1px solid #c9ad6a;
+  border: 2px solid var(--leather-gold);
+  outline: 1px solid var(--leather-gold);
   outline-offset: -7px;
 }
 
@@ -3045,6 +3074,12 @@ button:active {
 
 /* A narrow window keeps the fight's choices in a tray along the bottom, over the page. */
 @media (max-width: 959px) {
+  .play.in-combat {
+    --map-reserve: calc(
+      330px + var(--tray, 70px)
+    ); /* the bar, the title, the zoom buttons and the tray */
+  }
+
   .play.in-combat .rail > .options:not(:empty) {
     position: sticky;
     bottom: 0;
@@ -3487,7 +3522,7 @@ button:active {
   .setting-card[aria-checked="true"],
   .save-current,
   .hud-down,
-  .save-delete.armed {
+  button.armed {
     forced-color-adjust: none;
     color: HighlightText;
     background: Highlight;

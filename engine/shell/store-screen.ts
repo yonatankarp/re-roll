@@ -10,7 +10,8 @@ import {
   verifyDownload,
 } from "./store.ts";
 import type { ShellContext } from "./context.ts";
-import { button, el } from "./dom.ts";
+import { PlayerError } from "./player-error.ts";
+import { button, confirmButton, el } from "./dom.ts";
 
 // The Store: books and adventures from GitHub repos the player adds, public or private.
 // Only the desktop app can download and install, so it hands its host in and the browser shows no Store.
@@ -77,7 +78,7 @@ async function loadIndex(store: StoreHost, repo: string): Promise<Loaded> {
   } catch (error) {
     return {
       repo,
-      error: error instanceof Error ? error.message : String(error),
+      error: `This store couldn't be read. Check the repo's name, and add a token if it's private. (${error instanceof Error ? error.message : String(error)})`,
     };
   }
 }
@@ -123,7 +124,7 @@ export async function showStore(
             if (done.length === 0) throw error;
             const reason =
               error instanceof Error ? error.message : String(error);
-            throw new Error(
+            throw new PlayerError(
               `Installed ${done.join(", ")}, but not ${step.pkg.title}: ${reason} Restart the game to use what was installed.`,
             );
           }
@@ -158,7 +159,7 @@ export async function showStore(
             }),
           ]
         : []),
-      button("Remove this store", () => {
+      confirmButton("Remove", `the store ${repo} and its token`, () => {
         ctx.act(async () => {
           await store.forgetToken(repo);
           await save({
@@ -240,7 +241,7 @@ export async function showStore(
       ...(state.repos.length === 0
         ? [
             el("p", {
-              text: "Add a GitHub repo that publishes a store, such as one made with npm run store:pack, to install its books and adventures.",
+              text: "No stores yet. A store is a GitHub repo that offers books and adventures to install. Add one below with the name its owner gave you, such as owner/repo.",
             }),
           ]
         : sections),

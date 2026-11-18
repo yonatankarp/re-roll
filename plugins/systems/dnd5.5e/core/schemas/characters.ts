@@ -91,7 +91,8 @@ export const CharacterBuildSchema = z.strictObject({
 export type CharacterBuild = z.infer<typeof CharacterBuildSchema>;
 
 export const PregenSchema = ContentEntrySchema.extend({
-  name: z.string().min(1),
+  name: z.string().min(1), // what it is, as the picker offers it, such as "Human Fighter"
+  hero: z.string().min(1).optional(), // the character's own name, once picked
   build: CharacterBuildSchema,
   equipment: z.array(ContentIdSchema),
 }).strict();

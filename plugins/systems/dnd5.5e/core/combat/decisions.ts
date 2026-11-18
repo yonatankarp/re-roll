@@ -24,6 +24,7 @@ import {
 import { distanceFeet } from "../grid.ts";
 import { lightAt } from "../sight.ts";
 import { deriveStats, lookup } from "../stats.ts";
+import { healthNote } from "../wounds.ts";
 import { commandedFamiliar } from "./effects.ts";
 import { AIM_AREA, PICK } from "../targeting.ts";
 import { fleeOptions } from "../legendary.ts";
@@ -141,7 +142,7 @@ function turnOptions(
         for (const target of candidates) {
           options.push({
             id: id(target.id),
-            label: `${action.name}: ${target.name} (${String(target.hp)} HP)${note}`,
+            label: `${action.name}: ${target.name} (${healthNote(target, access)})${note}`,
           });
         }
       }

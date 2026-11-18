@@ -1,5 +1,5 @@
 import { type Game, type SaveChoice, stepsText } from "./session.ts";
-import { button, el, picture } from "./dom.ts";
+import { button, confirmButton, el, picture } from "./dom.ts";
 
 // The Load screen: one card per save, newest first, each with its own Delete.
 
@@ -86,35 +86,11 @@ function card(
       ? `Damaged save ${save.label}`
       : `Load ${save.label}${who ? `, ${who}` : ""}${current ? ", the game in progress" : ""}`,
   );
-  // A second press confirms, which also works where the webview has no confirm dialog.
-  let armed = false;
-  const disarm = (): void => {
-    armed = false;
-    del.textContent = "Delete";
-    del.classList.remove("armed");
-    del.setAttribute("aria-label", `Delete ${save.label}`);
-  };
   const item = el("li", { class: "save-card" }, open);
-  const del = button("Delete", () => {
-    if (!armed) {
-      armed = true;
-      del.textContent = "Really delete?";
-      del.classList.add("armed");
-      del.setAttribute("aria-label", `Confirm delete ${save.label}`);
-      return;
-    }
+  const del = confirmButton("Delete", save.label, () => {
     remove(save, item);
   });
-  del.className = "save-delete";
-  disarm();
-  del.addEventListener("blur", disarm);
-  // Esc takes back an armed Delete; otherwise it goes on to the screen, where it means Back.
-  del.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && armed) {
-      event.stopPropagation();
-      disarm();
-    }
-  });
+  del.classList.add("save-delete");
   item.append(del);
   return item;
 }

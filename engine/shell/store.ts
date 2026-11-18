@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { StoreIndex, StorePackage } from "./store-index.ts";
+import { PlayerError } from "./player-error.ts";
 
 // The Store's own logic, apart from the screen and the downloads: which repos the player added, what
 // came from where, what a package needs first, and whether a download is the file the index promised.
@@ -54,7 +55,7 @@ export async function verifyDownload(
   pkg: StorePackage,
 ): Promise<void> {
   if (bytes.length !== pkg.size || (await sha256(bytes)) !== pkg.sha256)
-    throw new Error(
+    throw new PlayerError(
       `${pkg.title} didn't download as the store lists it. Try again, or ask the store's owner to pack it again.`,
     );
 }
@@ -117,7 +118,7 @@ export function installOrder(
         if (have.has(needed) || own.has(needed)) continue;
         const provider = providerOf(needed, step.repo);
         if (!provider)
-          throw new Error(
+          throw new PlayerError(
             `${step.pkg.title} needs ${needed}, which none of your stores has.`,
           );
         visit(provider);

@@ -221,7 +221,7 @@ describe("character creation", () => {
     const driven = drive(storyRun(run, []), "pregen", [
       [/chooseCharacter/, "srd52:pregen/rogue"],
     ]);
-    expect(actorIn(driven.state).name).toBe("Human Rogue");
+    expect(actorIn(driven.state).name).toBe("Nell Tanner");
     expect(driven.asked).toHaveLength(1);
   });
 

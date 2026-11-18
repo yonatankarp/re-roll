@@ -25,6 +25,37 @@ import {
 // The first player turn of the first fight says how the map works, until the player uses it.
 const HOW_TO = "Click a square to move, or a foe to attack";
 
+// The key to the marks on the map now, each with a swatch drawn as the mark is, so none needs a hover to read.
+const LEGEND = [
+  ["dnd-cell risky", "Gives a foe an Opportunity Attack"],
+  ["dnd-ground-square difficult", "Difficult terrain"],
+  ["dnd-ground-square half", "Half cover"],
+  ["dnd-ground-square threeQuarters", "Three-quarters cover"],
+  ["dnd-ground-square dim", "Dim light"],
+  ["dnd-ground-square dark", "Darkness"],
+  ["dnd-ground-square water", "Water"],
+] as const;
+
+export function showLegend(ctx: BoardContext): void {
+  const shown = LEGEND.filter(([mark]) =>
+    (mark.startsWith("dnd-cell") ? ctx.cells : ctx.ground).querySelector(
+      `.${mark.replace(/ /g, ".")}`,
+    ),
+  );
+  const key = shown.map(([mark]) => mark).join("|");
+  if (ctx.legend.dataset.shown === key) return;
+  ctx.legend.dataset.shown = key;
+  ctx.legend.replaceChildren(
+    ...shown.map(([mark, text]) => {
+      const swatch = el("span", `dnd-swatch ${mark}`);
+      swatch.setAttribute("aria-hidden", "true");
+      const item = el("li", "");
+      item.append(swatch, text);
+      return item;
+    }),
+  );
+}
+
 // The map's codes as faint marks: hatching for difficult terrain, an outline for cover, shade for dim light
 // and darkness. A map that's dim or dark everywhere is shaded all over.
 // shortcut: a dim square on a dark map shows as dark; mark it lighter when a map needs it.
@@ -54,6 +85,7 @@ export function showGround(ctx: BoardContext, terrain: Terrain | null): void {
       ctx.ground.append(square);
     }
   }
+  showLegend(ctx);
 }
 
 // Lasting areas as tinted patches over the squares each covers, kept by key so one that moves with its creature
@@ -154,7 +186,10 @@ export function showCells(ctx: BoardContext): void {
   ctx.cells.replaceChildren();
   ctx.line.setAttribute("points", "");
   ctx.reachZone.hidden = true;
-  if (!ctx.grid) return;
+  if (!ctx.grid) {
+    showLegend(ctx);
+    return;
+  }
   const options = playerOptions(ctx);
   // Squares still in the fog aren't drawn, so the shading doesn't trace them; the list still offers them.
   const fog = extraOf(ctx.latest).fog;
@@ -204,6 +239,7 @@ export function showCells(ctx: BoardContext): void {
     cell.dataset.y = String(square.y);
     ctx.cells.append(cell);
   }
+  showLegend(ctx);
   if (ctx.playing) return; // the caption is telling what's happening
   if (aiming(ctx) || picking(ctx)) {
     showCaption(ctx, ""); // the bar says what to do, and the caption names who an aim catches

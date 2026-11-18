@@ -30,7 +30,12 @@ import { shop } from "./shop.ts";
 import { creation, featureInPlay } from "./creation.ts";
 import { sheetCreation } from "./creation-sheet.ts";
 import { legendOf, resistancesLeft } from "../core/legendary.ts";
-import type { AreaView, BoardExtra, FightMap } from "./board-data.ts";
+import {
+  type AreaView,
+  type BoardExtra,
+  type FightMap,
+  wounds,
+} from "./board-data.ts";
 import { believes, squaresOf, zonesOf } from "../core/zones.ts";
 import { dndCue } from "./cues.ts";
 import { GLOSSARY_TERMS } from "../core/glossary.ts";
@@ -1127,9 +1132,14 @@ function combat(
           name: actor.name,
           side: actor.side === "party" ? "Ally" : "Enemy",
           active: id === acting,
+          // A foe's hit points are the DM's to know, so the player sees how hurt it looks.
           details: [
-            `HP ${String(actor.hp)} of ${String(deriveStats(actor, access).maxHp)}`,
-            ...(actor.tempHp > 0 ? [`${String(actor.tempHp)} temp HP`] : []),
+            actor.side === "party"
+              ? `HP ${String(actor.hp)} of ${String(deriveStats(actor, access).maxHp)}`
+              : wounds(actor.hp, deriveStats(actor, access).maxHp),
+            ...(actor.tempHp > 0 && actor.side === "party"
+              ? [`${String(actor.tempHp)} temp HP`]
+              : []),
             ...(status ? [status] : []),
             ...conditionsHere(actor),
             ...(actor.concentratingOn

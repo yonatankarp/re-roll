@@ -527,17 +527,13 @@ export const dnd55e = defineSystem<DndState>({
         const sheet = beginSheet(PLAYER_ACTOR, answer, context);
         if (sheet) return sheet;
         const pregen = lookup(context, PregenSchema, answer);
-        const actor = characterActor(
-          PLAYER_ACTOR,
-          pregen.name,
-          answer,
-          context,
-        );
+        const name = pregen.hero ?? pregen.name;
+        const actor = characterActor(PLAYER_ACTOR, name, answer, context);
         return {
           events: [
             dndEvent(`${NS}:characterChosen`, {
               actor: PLAYER_ACTOR,
-              name: pregen.name,
+              name,
               build: pregenBuild(answer, context),
               inventory: pregen.equipment,
               hp: actor.hp,

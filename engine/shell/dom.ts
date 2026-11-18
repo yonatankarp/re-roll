@@ -21,6 +21,41 @@ export function button(label: string, onClick: () => void): HTMLButtonElement {
   return node;
 }
 
+// A button for something that can't be undone: the first press arms it, the second does it. Works where
+// the webview has no confirm dialog. Leaving it, or Esc, takes the press back.
+export function confirmButton(
+  label: string,
+  name: string, // what it acts on, read out, as "Delete Sera's save"
+  onConfirm: () => void,
+): HTMLButtonElement {
+  let armed = false;
+  const disarm = (): void => {
+    armed = false;
+    node.textContent = label;
+    node.classList.remove("armed");
+    node.setAttribute("aria-label", `${label} ${name}`);
+  };
+  const node = button(label, () => {
+    if (!armed) {
+      armed = true;
+      node.textContent = `Really ${label.toLowerCase()}?`;
+      node.classList.add("armed");
+      node.setAttribute("aria-label", `Confirm ${label.toLowerCase()} ${name}`);
+      return;
+    }
+    onConfirm();
+  });
+  disarm();
+  node.addEventListener("blur", disarm);
+  node.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && armed) {
+      event.stopPropagation();
+      disarm();
+    }
+  });
+  return node;
+}
+
 // A picture that is missing or won't load shows nothing at all.
 export function picture(
   game: Game,

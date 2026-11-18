@@ -118,3 +118,5 @@ export interface BoardExtra {
     readonly seen: readonly string[];
   } | null;
 }
+
+export { wounds } from "../core/wounds.ts";

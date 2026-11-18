@@ -81,6 +81,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   // While choosing targets or aiming an area: how many are chosen, Cast and Back.
   const pickBar = el("div", "dnd-pickbar");
   pickBar.hidden = true;
+  const legend = el("ul", "dnd-legend");
   field.append(
     ground,
     areas,
@@ -118,6 +119,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
     fog,
     routeCost,
     menu,
+    legend,
     pickBar,
     cursor: null,
     menuFor: null,
@@ -146,6 +148,7 @@ export function mountDndBoard(slot: HTMLElement, host: BoardHost) {
   }).observe(field);
   wireInput(ctx);
   slot.append(wireZoom(ctx, view));
+  slot.querySelector(".dnd-zoom")?.append(legend);
 
   // Values, arrivals and removals wait until the queue is done, so they don't spoil what's playing.
   const sync = (update: BoardUpdate, settle: boolean): void => {

@@ -26,6 +26,7 @@ import { offerStore } from "../../engine/shell/store-screen.ts";
 import type { Storage } from "../../engine/kernel/storage.ts";
 import { scanPlugins } from "../../engine/run/loader.ts";
 import { createGame } from "../../engine/shell/session.ts";
+import { button, el } from "../../engine/shell/dom.ts";
 import { mountShell } from "../../engine/shell/shell.ts";
 import { mountDndBoard } from "../../plugins/systems/dnd5.5e/ui/board.ts";
 import { dndUi } from "../../plugins/systems/dnd5.5e/ui/index.ts";
@@ -192,7 +193,39 @@ async function start(page: HTMLElement): Promise<void> {
     coinSound,
   );
 }
-void start(root);
+// Saves or content that won't open leave a message and a way to try again, not a blank window.
+start(root).catch((error: unknown) => {
+  console.error("The game couldn't start", error);
+  root.replaceChildren(
+    el(
+      "div",
+      { class: "screen" },
+      el(
+        "section",
+        { class: "menu" },
+        el("h2", { text: "The game couldn't start" }),
+        el("p", {
+          text: "It couldn't open its saves or its content. Try again, or restart the game.",
+        }),
+        el(
+          "details",
+          {},
+          el("summary", { text: "Details" }),
+          el("pre", {
+            text: error instanceof Error ? error.message : String(error),
+          }),
+        ),
+        el(
+          "div",
+          { class: "options" },
+          button("Try again", () => {
+            window.location.reload();
+          }),
+        ),
+      ),
+    ),
+  );
+});
 
 // The macOS window keeps the title it opened with, so it follows the page's, such as "Adventure — Scene".
 if (isTauri()) {

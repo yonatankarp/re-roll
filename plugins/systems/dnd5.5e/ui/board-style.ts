@@ -346,6 +346,26 @@ const BOARD_CSS = `
   cursor: pointer;
 }
 .dnd-zoom button:disabled { opacity: 0.45; cursor: default; }
+.dnd-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0 0 0 8px;
+  padding: 0;
+  list-style: none;
+  font: 0.8rem var(--font-ui, system-ui), sans-serif;
+  color: var(--muted, #5e5240);
+}
+.dnd-legend li { display: inline-flex; align-items: center; gap: 6px; }
+/* A swatch is drawn by the mark's own rule, on the parchment mat's ink, at a fixed size. */
+.dnd-legend .dnd-swatch {
+  position: static;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgb(110 70 10 / 35%);
+  border-radius: 3px;
+}
 .dnd-zoom button:focus-visible { outline: 2px solid #ffd36b; outline-offset: 2px; }
 .dnd-field.gridded::before {
   background:
@@ -752,7 +772,8 @@ const BOARD_CSS = `
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 200px;
+  min-width: min(200px, 100%);
+  max-width: 100%;
   max-height: 60%;
   overflow: auto;
   padding: 4px;
@@ -760,6 +781,12 @@ const BOARD_CSS = `
   border-radius: 8px;
   background: var(--panel);
   box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+}
+.dnd-menu-note {
+  max-width: 220px;
+  margin: 0;
+  padding: 4px 8px;
+  font: italic 0.85rem var(--font-ui, system-ui), sans-serif;
 }
 .dnd-menu button {
   min-height: 32px;

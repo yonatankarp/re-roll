@@ -36,24 +36,45 @@ function drawer(
   return node;
 }
 
-export function showGame(ctx: ShellContext): void {
-  const title = el("h2", { class: "scene-title" });
-  title.tabIndex = -1;
-  const sceneArt = el("div", { class: "scene-art" });
-  let artShown: string | null = null;
-  const plate = artPlate();
+// A recorded reading's address, or null without asking for it when its folder doesn't hold it. Each folder
+// is listed once, so a scene with no recording doesn't log a missing file. A folder that can't be listed
+// leaves the file to be asked for.
+function clipUrl(ctx: ShellContext): (path: string) => Promise<string | null> {
+  const folders = new Map<string, Promise<ReadonlySet<string> | null>>();
+  return async (path) => {
+    const folder = path.slice(0, path.lastIndexOf("/"));
+    let listed = folders.get(folder);
+    if (!listed) {
+      listed = ctx.game
+        .listFiles(folder)
+        .then((paths) => new Set(paths))
+        .catch(() => null);
+      folders.set(folder, listed);
+    }
+    const files = await listed;
+    return files && !files.has(path) ? null : ctx.game.imageUrl(path);
+  };
+}
+
+// The scene's picture. The next scene's turns in over the last one, like a page, and then takes its place.
+// Only a change touches it, so staying in a scene doesn't reload its picture.
+function sceneArtView(ctx: ShellContext): {
+  readonly node: HTMLElement;
+  readonly show: (path: string | null, firstDraw: boolean) => void;
+} {
+  const node = el("div", { class: "scene-art" });
+  let shown: string | null = null;
   // Without motion a new picture takes the old one's place at once.
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  // The next scene's picture turns in over the last one, like a page, and then takes its place.
   const turnTo = (next: HTMLImageElement | null, firstDraw: boolean): void => {
-    const old = [...sceneArt.children];
+    const old = [...node.children];
     if (!next || old.length === 0 || firstDraw) {
-      sceneArt.replaceChildren(...(next ? [next] : []));
-      if (next && !firstDraw) enter(sceneArt);
+      node.replaceChildren(...(next ? [next] : []));
+      if (next && !firstDraw) enter(node);
       return;
     }
     next.classList.add("turning");
-    sceneArt.append(next);
+    node.append(next);
     const settle = (): void => {
       for (const item of old) item.remove();
       next.classList.remove("turning", "turn-in");
@@ -69,9 +90,24 @@ export function showGame(ctx: ShellContext): void {
     );
     next.addEventListener("error", settle, { once: true });
   };
+  return {
+    node,
+    show(path, firstDraw) {
+      if (path === shown) return;
+      shown = path;
+      turnTo(path ? picture(ctx.game, path, "", "art") : null, firstDraw);
+    },
+  };
+}
+
+export function showGame(ctx: ShellContext): void {
+  const title = el("h2", { class: "scene-title" });
+  title.tabIndex = -1;
+  const sceneArt = sceneArtView(ctx);
+  const plate = artPlate();
   const scene = el("p", { class: "scene-text" });
   let sceneShown: string | null = null;
-  const sound = soundControls((path) => ctx.game.imageUrl(path));
+  const sound = soundControls(clipUrl(ctx));
   const ending = el("section", { class: "ending" });
   ending.hidden = true;
   const combat = el("div");
@@ -267,7 +303,7 @@ export function showGame(ctx: ShellContext): void {
     "main",
     { class: "play" },
     title,
-    sceneArt,
+    sceneArt.node,
     scene,
     sound.narration,
     combatGridSlot,
@@ -301,9 +337,16 @@ export function showGame(ctx: ShellContext): void {
   );
   // The one teardown, run when another screen takes this one's place, whichever it is: nothing of this
   // screen plays, sounds or listens on.
+  // A narrow window's tray of choices sits over the page's foot, so the map leaves room for it as it grows,
+  // and the party's row under the map stays in sight.
+  const tray = new ResizeObserver(() => {
+    stage.style.setProperty("--tray", `${String(options.offsetHeight)}px`);
+  });
+  tray.observe(options);
   const left = new MutationObserver(() => {
     if (stage.isConnected) return;
     left.disconnect();
+    tray.disconnect();
     plate.close();
     page.board?.dispose?.();
     sound.dispose();
@@ -414,13 +457,8 @@ export function showGame(ctx: ShellContext): void {
         scene.textContent = view.scene;
         if (!firstDraw) enter(scene);
       }
-      // Only touched on a change, so staying in a scene doesn't reload its picture.
       // A scene with no picture of its own shows its adventure's cover. Only here: the board keeps sceneArt.
-      const banner = view.sceneArt ?? view.cover;
-      if (banner !== artShown) {
-        artShown = banner;
-        turnTo(banner ? picture(ctx.game, banner, "", "art") : null, firstDraw);
-      }
+      sceneArt.show(view.sceneArt ?? view.cover, firstDraw);
       // A chapter opens on its title page, once a run, after the character is made.
       const [chapter] = unseen(
         view.run,
