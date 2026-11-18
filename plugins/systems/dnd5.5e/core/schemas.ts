@@ -4602,6 +4602,8 @@ const MagicItemSchema = ItemBaseSchema.extend({
       perLevel: z.literal(true).optional(),
       resource: z.string().min(1),
       keepOnFailure: z.literal(true).optional(),
+      // a failure rolls on the item's own `table`, as a Hat of Many Spells' random effects
+      failTable: z.literal(true).optional(),
     })
     .optional(),
   spell: ContentIdSchema.optional(), // the spell a Spell Scroll holds

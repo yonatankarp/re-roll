@@ -132,6 +132,7 @@ export interface KnownAction {
     readonly keep?: string; // a resource a failure doesn't spend
     readonly chance?: number; // in place of the check, the percent chance it fails, as a Wind Fan's tearing
     readonly breaks?: string; // the item a failure destroys
+    readonly table?: string; // the content whose table a failure rolls on, as a Hat of Many Spells
   };
   readonly onceKeys?: readonly string[]; // once-a-turn uses its cast spends, as a `spellDamage` bonus (combat/actions.ts)
 }
@@ -864,6 +865,7 @@ function unknownSpells(
           skill: "arcana",
           dc: rule.dc + (rule.perLevel ? spell.level : 0),
           ...(rule.keepOnFailure ? { keep: rule.resource } : {}),
+          ...(rule.failTable ? { table: itemId } : {}),
         },
       },
     ];
