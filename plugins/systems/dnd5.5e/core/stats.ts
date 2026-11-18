@@ -1128,6 +1128,37 @@ function featSpellAbilities(
   return bySpell;
 }
 
+// A feature's changes to a spell: its hit damage's die (Foe Slayer) and effects it adds (Eldritch Hex).
+function spellChanged(
+  activation: Activation,
+  dice: string | undefined,
+  adds: readonly LeafEffect[] | undefined,
+): Activation {
+  const { resolution } = activation;
+  if (resolution.kind !== "automatic" || (!dice && !adds)) return activation;
+  const effects = resolution.effects.map((effect): LeafEffect =>
+    dice &&
+    effect.kind === "modifier" &&
+    effect.modifier.kind === "hitDamage" &&
+    effect.modifier.damage.amount.dice
+      ? {
+          ...effect,
+          modifier: {
+            ...effect.modifier,
+            damage: {
+              ...effect.modifier.damage,
+              amount: { ...effect.modifier.damage.amount, dice },
+            },
+          },
+        }
+      : effect,
+  );
+  return {
+    ...activation,
+    resolution: { ...resolution, effects: [...effects, ...(adds ?? [])] },
+  };
+}
+
 // Cold Fire Magic: a spell's damage takes another type.
 function retyped(activation: Activation, type: DamageType): Activation {
   const { resolution } = activation;
@@ -1263,6 +1294,8 @@ function collectFeatureData(
   spells: string[];
   free: [string, FreeCast][];
   retype: Record<string, DamageType>;
+  redice: Record<string, string>;
+  addsTo: Record<string, readonly LeafEffect[]>;
   abilities: ReadonlyMap<string, Ability>;
   gated: readonly NonNullable<Feature["whileActive"]>[];
 } {
@@ -1275,6 +1308,8 @@ function collectFeatureData(
   const spells = featureIds.flatMap((id) => grantedSpells(id, levelFor(id)));
   const free: [string, FreeCast][] = [];
   const retype: Record<string, DamageType> = {};
+  const redice: Record<string, string> = {};
+  const addsTo: Record<string, readonly LeafEffect[]> = {};
   const ownSpells = new Map<string, readonly string[]>(); // each feature's own spells, by feature
   const gated: NonNullable<Feature["whileActive"]>[] = []; // passives only while an effect is on the bearer
   const abilities = new Map<string, Ability>(); // a feature's spells cast with its own ability
@@ -1310,6 +1345,10 @@ function collectFeatureData(
     );
     if ((feature.fromLevel ?? 1) > level) continue;
     Object.assign(retype, feature.retype);
+    Object.assign(redice, feature.redice);
+    for (const [spell, effects] of Object.entries(feature.addsTo ?? {})) {
+      addsTo[spell] = [...(addsTo[spell] ?? []), ...effects];
+    }
     passives.push(...feature.passives);
     if (feature.whileActive) gated.push(feature.whileActive);
     resources.push(...feature.resources);
@@ -1394,6 +1433,8 @@ function collectFeatureData(
     spells,
     free,
     retype,
+    redice,
+    addsTo,
     abilities,
     gated,
   };
@@ -2843,10 +2884,19 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     : freeCastActions(freeSpells, access, level);
   actions.push(
     ...freeCasts.map(({ action }) => {
-      const ability = castingAbility.get(spellOfSource(action.id) ?? "");
-      return ability
-        ? { ...action, activation: castWith(action.activation, ability) }
-        : action;
+      const spellId = spellOfSource(action.id) ?? "";
+      const ability = castingAbility.get(spellId);
+      const type = fromFeatures.retype[spellId];
+      // A free cast takes the features' changes to the spell too, as Cold Fire Magic's cold Flame Blade.
+      const changed = spellChanged(
+        type ? retyped(action.activation, type) : action.activation,
+        fromFeatures.redice[spellId],
+        fromFeatures.addsTo[spellId],
+      );
+      return {
+        ...action,
+        activation: ability ? castWith(changed, ability) : changed,
+      };
     }),
   );
 
@@ -2895,7 +2945,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         );
       const bumped = bonusDc ? withDcBonus(activation, bonusDc) : activation;
       const cast = ability ? castWith(bumped, ability) : bumped;
-      const typed = type ? retyped(cast, type) : cast;
+      const typed = spellChanged(
+        type ? retyped(cast, type) : cast,
+        fromFeatures.redice[spellId],
+        fromFeatures.addsTo[spellId],
+      );
       actions.push({
         id: `spell:${spellId}`,
         name: spell.name,
@@ -2925,12 +2979,49 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     if (
       lasting &&
       spellOfSource(actor.concentratingOn ?? "") === spellId &&
-      !castFrom(actor.concentratingOn ?? "")
+      !castFrom(actor.concentratingOn ?? "") &&
+      !(lasting.remark && stillMarked(actor, spellId, access))
     ) {
+      // It grows with the slot the spell was cast with, as Witch Bolt's or Flaming Sphere's later damage.
+      const cast = actor.activeEffects.find(
+        ({ sourceId, level }) =>
+          level !== undefined &&
+          (sourceId === actor.concentratingOn ||
+            sourceId === `lasting:${spellId}`),
+      )?.level;
+      const step = spell.upcast?.perSlotLevel;
+      // An upcast for the first damage only, as Witch Bolt's, leaves the later damage alone.
+      const scaled =
+        step &&
+        !("initial" in step && step.initial) &&
+        cast !== undefined &&
+        cast > spell.level
+          ? scaleActivation(lasting, step, cast - spell.level)
+          : lasting;
+      // Delayed Blast Fireball's bead: a die more for each round since it formed.
+      const state = (access as ContentAccess & { readonly state?: DndState })
+        .state;
+      const since = actor.activeEffects.find(
+        ({ sourceId, modifier }) =>
+          sourceId === `spell:${spellId}` && modifier.kind === "zone",
+      )?.modifier;
+      const rounds =
+        lasting.growsBy && since?.kind === "zone" && since.since !== undefined
+          ? (state?.combat?.round ?? since.since) - since.since
+          : 0;
+      const grown =
+        lasting.growsBy && rounds > 0
+          ? scaleActivation(scaled, { addDice: lasting.growsBy }, rounds)
+          : scaled;
+      const retypedTo = fromFeatures.retype[spellId];
       actions.push({
         id: `lasting:${spellId}`,
         name: spell.name,
-        activation: lasting,
+        activation: spellChanged(
+          retypedTo ? retyped(grown, retypedTo) : grown,
+          fromFeatures.redice[spellId],
+          fromFeatures.addsTo[spellId],
+        ),
         spellLevel: null,
       });
     }
@@ -4300,10 +4391,18 @@ function withEffectActions(
       const spell = lookup(access, SpellSchema, spellId);
       if (!spell.spheres) continue;
       const key = `spheres:${spellId}`;
-      resources[key] =
-        spell.spheres.count +
-        spell.spheres.perSlot *
-          Math.max(0, (level ?? spell.level) - spell.level);
+      const { gathered, countMod, count, perSlot } = spell.spheres;
+      // Spirit Lantern: as many as it has gathered, up to the caster's spellcasting modifier (an item's count).
+      const most =
+        countMod && !castFrom(sourceId)
+          ? Math.max(
+              1,
+              evaluateFormula({ base: 0, add: [{ kind: "spellMod" }] }, stats),
+            )
+          : count;
+      resources[key] = gathered
+        ? Math.min(most, actor.resourcesSpent[`${key}:gathered`] ?? 0)
+        : count + perSlot * Math.max(0, (level ?? spell.level) - spell.level);
       spell.spheres.actions.forEach((activation, index) => {
         granted.push({
           id: `spheres:${sourceId}:${String(index)}`,
@@ -4580,13 +4679,37 @@ function changedWeapon(
   };
 }
 
+// Whether a creature other than the caster still bears what its spell, or that spell's lasting action, put on it, so
+// the spell's mark doesn't move yet, as Hunter's Mark's.
+function stillMarked(
+  actor: Actor,
+  spellId: string,
+  access: ContentAccess,
+): boolean {
+  const state = (access as ContentAccess & { readonly state?: DndState }).state;
+  if (!state) return false;
+  const sources = new Set([`spell:${spellId}`, `lasting:${spellId}`]);
+  return Object.values(state.actors).some(
+    (item) =>
+      item.id !== actor.id &&
+      item.hp > 0 &&
+      item.activeEffects.some(
+        ({ sourceId, casterId }) =>
+          casterId === actor.id && sources.has(sourceId),
+      ),
+  );
+}
+
 // Its levels of Exhaustion, with those that last only while an effect does, as Sickening Radiance's.
 export function exhaustionOf(actor: Actor): number {
   return Math.min(
     6,
     actor.activeEffects.reduce(
       (sum, { modifier }) =>
-        modifier.kind === "exhausted" ? sum + modifier.levels : sum,
+        modifier.kind === "exhausted"
+          ? sum +
+            Math.min(modifier.levels, Math.max(0, (modifier.upTo ?? 6) - sum))
+          : sum,
       actor.exhaustion,
     ),
   );

@@ -979,6 +979,15 @@ function bonusTacticCost(
   ) {
     return [];
   }
+  // Conjure Woodland Beings' Disengage as a Bonus Action, likewise.
+  if (
+    tactic === "disengage" &&
+    actor.activeEffects.some(
+      ({ modifier }) => modifier.kind === "bonusDisengage",
+    )
+  ) {
+    return [];
+  }
   let cost: SystemEvent[] | null = null;
   for (const passive of stats.passives) {
     if (passive.kind !== "bonusTactics" || !passive.tactics.includes(tactic)) {
