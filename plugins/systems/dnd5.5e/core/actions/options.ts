@@ -330,6 +330,7 @@ export function tacticOptions(
         modifier.kind === "condition" &&
         modifier.condition === "prone",
     ) &&
+    half > 0 && // with a Speed of 0 it can't right itself
     (!actor.position || speedLeft(actor, stats) >= half)
   ) {
     options.push({

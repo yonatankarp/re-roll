@@ -46,7 +46,14 @@ export function dodging(actor: Actor, stats: Stats): boolean {
   return (
     hasTactic(actor, "dodge") &&
     !hasCondition(actor, "grappled", "restrained", ...INCAPACITATING) &&
-    walkSpeed(actor, stats) > 0
+    // Daze's "move or act" isn't a Speed of 0, so the Dodge it took counts.
+    walkSpeed(
+      {
+        ...actor,
+        budget: { ...actor.budget, action: true, bonusAction: true },
+      },
+      stats,
+    ) > 0
   );
 }
 

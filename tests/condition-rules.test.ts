@@ -162,6 +162,13 @@ describe("condition rules (#214)", () => {
     expect(ids(mover, foe)).toEqual(["foe"]);
     const unseen = { ...mover, activeEffects: [condition("invisible")] };
     expect(ids(unseen, foe)).toEqual([]);
+    const hidden = {
+      ...mover,
+      activeEffects: [
+        effect({ kind: "tactic", tactic: "hidden", value: 15 }, mover.id),
+      ],
+    };
+    expect(ids(hidden, foe)).toEqual([]);
     const blind = { ...foe, activeEffects: [condition("blinded")] };
     expect(ids(mover, blind)).toEqual([]);
   });

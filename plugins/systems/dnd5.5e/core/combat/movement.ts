@@ -179,7 +179,8 @@ export function provokers(
       ) ||
       hasCondition(foe, ...INCAPACITATING) ||
       (disengaged && !hasPassive(deriveStats(foe, access), "sentinel")) ||
-      // An Opportunity Attack is made only on a creature it can see.
+      // An Opportunity Attack is made only on a creature it can see; a hidden one is unseen until found.
+      hasTactic(actor, "hidden") ||
       blindedTo(foe, actor, access) ||
       unseenInvisible(actor, foe, { ...access, state }) ||
       seeing(foe, actor.position, state, access) === "none"
