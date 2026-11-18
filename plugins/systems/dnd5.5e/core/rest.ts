@@ -19,6 +19,7 @@ import {
   dndEvent,
   isDead,
   frame,
+  effectiveBuild,
 } from "./state.ts";
 import { HIT_DICE } from "./combat/ids.ts";
 import {
@@ -636,6 +637,7 @@ function runFinishRest(
             rest,
             maxHp: stats.maxHp,
             resourcesSpent,
+            ...(rest === "short" ? memorized(actor, stats) : {}),
             ...(hampered.keepHp ? { keepHp: true } : {}),
             ...(hampered.exhaustionFloor > 0
               ? { exhaustionFloor: hampered.exhaustionFloor }
@@ -712,6 +714,25 @@ function foretelling(
         ]
       : [];
   });
+}
+
+// Memorize Spell: a Short Rest opens again the swaps of the class's picks made since the Long Rest, by their keys
+// ("<level index>:<answer index>", swap.ts).
+function memorized(actor: Actor, stats: Stats): { swapsBack?: string[] } {
+  const classes = stats.passives.flatMap((passive) =>
+    passive.kind === "memorize" ? [passive.class] : [],
+  );
+  const build = effectiveBuild(actor);
+  if (classes.length === 0 || !build) return {};
+  const back = (actor.swapped ?? []).filter((key) => {
+    const [at] = key.split(":");
+    const entry = /^\d+$/.test(at ?? "") ? build.levels[Number(at)] : undefined;
+    return (
+      entry !== undefined &&
+      classes.some((name) => entry.classId.endsWith(`/${name}`))
+    );
+  });
+  return back.length > 0 ? { swapsBack: back } : {};
 }
 
 // Decanting: a Long Rest leaves the bearer one of the item, put in its pack.
