@@ -21,6 +21,7 @@ import {
   sceneGearActions,
 } from "../core/gear.ts";
 import { coverBonus, coverFor } from "../core/sight.ts";
+import { sceneSwapActions } from "../core/swap.ts";
 import { partySight, revealedSquares, unseenFoe } from "../core/fog.ts";
 import { coins } from "../core/shop.ts";
 import { castId, sceneCastActions } from "../core/camp.ts";
@@ -677,6 +678,7 @@ function sheets(rawState: unknown, access: ContentAccess, here?: SceneHere) {
             actor.id === PLAYER_ACTOR ? upcasts : [],
             actor.id === PLAYER_ACTOR ? uses : [],
             actor.id === PLAYER_ACTOR ? rituals : [],
+            actor.id === PLAYER_ACTOR ? sceneSwapActions(state, access) : [],
           ),
         ]
       : [],
@@ -693,6 +695,7 @@ function sheetOf(
   upcasts: readonly SceneAction[] = [], // the player's own with a higher slot
   uses: readonly SceneAction[] = [], // items used between choices, on the player's sheet
   rituals: readonly SceneAction[] = [], // rituals cast from the list without being prepared
+  swaps: readonly SceneAction[] = [], // picks the player can change or make between scenes (core/swap.ts)
 ) {
   const stats = deriveStats(player, access);
   const subclasses = build.levels
@@ -953,6 +956,28 @@ function sheetOf(
                   detail: feature.text,
                 },
               ]
+            : [];
+        }),
+      },
+      // Picks to change after a rest, or to make between scenes, each answered from its row.
+      {
+        title: "Picks",
+        rows: swaps.map((action) => ({
+          label: action.label,
+          value: "",
+          option: {
+            id: action.id,
+            label: action.label.startsWith("Make") ? "Pick" : "Change",
+          },
+        })),
+      },
+      // Gifts, destinies and talents a story granted (#192).
+      {
+        title: "Granted",
+        rows: (player.granted ?? []).flatMap((id) => {
+          const option = contentText(access, id);
+          return option
+            ? [{ label: option.name, value: "", detail: option.text }]
             : [];
         }),
       },

@@ -2442,9 +2442,12 @@ export function leafEvents(
         break;
       }
       case "untilLongRest": {
-        const item = sourceId.startsWith(ITEM_PREFIX)
-          ? lookup(context, ItemSchema, sourceId.slice(ITEM_PREFIX.length))
-          : undefined;
+        const itemId =
+          effect.item ??
+          (sourceId.startsWith(ITEM_PREFIX)
+            ? sourceId.slice(ITEM_PREFIX.length)
+            : undefined);
+        const item = itemId ? lookup(context, ItemSchema, itemId) : undefined;
         const passives =
           item?.type === "magicItem" ? (item.untilLongRest ?? []) : [];
         if (passives.length > 0) {

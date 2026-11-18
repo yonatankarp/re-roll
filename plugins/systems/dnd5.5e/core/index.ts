@@ -137,6 +137,8 @@ import {
   EnvironmentalEffectSchema,
   GLOSSARY_KINDS,
   OPTION_KINDS,
+  GRANTED_KINDS,
+  CharacterOptionSchema,
   GlossaryEntrySchema,
   LairSchema,
   MonsterFamilySchema,
@@ -176,6 +178,7 @@ import { afterActionEvents } from "./combat/durations.ts";
 import { deriveStats, lookup } from "./stats.ts";
 import { withReveal } from "./fog.ts";
 import { actingEnds } from "./combat/effects.ts";
+import { grantEffects, grantFrames } from "./grant.ts";
 import { VARIANT_SETTINGS, chosenVariants, playing } from "./variant-rules.ts";
 
 // Every step ends by revealing what the party sees once its events land, so the fog clears as it happens.
@@ -225,6 +228,7 @@ const PLAYED: Partial<Record<string, readonly string[]>> = {
 // Text kinds, each entry the glossary's shape: content folder -> id kind.
 function glossaryKinds(
   kinds: Readonly<Record<string, string>> = GLOSSARY_KINDS,
+  schema: z.ZodType<z.infer<typeof GlossaryEntrySchema>> = GlossaryEntrySchema,
 ) {
   return Object.fromEntries(
     Object.entries(kinds).map(([folder, idPrefix]) => {
@@ -233,7 +237,7 @@ function glossaryKinds(
         folder,
         contentKind({
           idPrefix,
-          schema: GlossaryEntrySchema,
+          schema,
           lore: true,
           ...(keys ? { keys } : {}),
         }),
@@ -439,7 +443,9 @@ export const dnd55e = defineSystem<DndState>({
       references: (item) => item.owners,
     }),
     ...glossaryKinds(DOWNTIME_KINDS),
-    ...glossaryKinds(OPTION_KINDS),
+    // Options a story grants carry mechanics (#192); they stay lore, as their names are common words.
+    ...glossaryKinds(GRANTED_KINDS, CharacterOptionSchema),
+    ...glossaryKinds({ "variant-rules": OPTION_KINDS["variant-rules"] }),
   },
   checkSchema: CheckSchema,
   encounters: encounterKind({
@@ -491,6 +497,7 @@ export const dnd55e = defineSystem<DndState>({
     ...restEffects,
     ...gearEffects,
     ...swapEffects,
+    ...grantEffects,
     ...surpriseEffects,
     ...shopEffects,
     ...sceneEffects,
@@ -539,6 +546,7 @@ export const dnd55e = defineSystem<DndState>({
     ...replicateFrames,
     ...wardFrames,
     ...swapFrames,
+    ...grantFrames,
     ...legendaryFrames,
     ...actionFrames,
     ...castCheckFrames,

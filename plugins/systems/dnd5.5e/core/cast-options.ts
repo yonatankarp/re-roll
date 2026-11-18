@@ -25,6 +25,7 @@ export interface Waiting {
   readonly sourceId: string;
   readonly option: CastOption;
   readonly action: string;
+  readonly casters?: number; // a Circle option's other casters who joined
 }
 
 // The bearer's cast options, by the source they wait under.
@@ -57,7 +58,16 @@ export function waitingOptions(
       modifier.kind === "tactic" &&
       modifier.tactic === "metamagic" &&
       modifier.action !== undefined
-      ? [{ sourceId, option: found.option, action: modifier.action }]
+      ? [
+          {
+            sourceId,
+            option: found.option,
+            action: modifier.action,
+            ...(modifier.value === undefined
+              ? {}
+              : { casters: modifier.value }),
+          },
+        ]
       : [];
   });
 }
@@ -91,8 +101,146 @@ export function fitsOption(
     (!option.allies || ("side" in targeting && targeting.side === "ally")) &&
     (!option.upcastTargets ||
       (action.upcast !== undefined &&
-        "addTargets" in action.upcast.perSlotLevel))
+        "addTargets" in action.upcast.perSlotLevel)) &&
+    // A Circle option changes only what the spell has: a range, an area, a duration, a costly component or
+    // Concentration.
+    (!option.range ||
+      ("range" in targeting &&
+        typeof targeting.range === "number" &&
+        targeting.range >= 5)) &&
+    (!option.area || "area" in targeting) &&
+    (!option.prolong || minutesOf(activation) >= 1) &&
+    (!option.goldOff ||
+      cost.some((item) => typeof item === "object" && "gold" in item)) &&
+    (!option.share ||
+      (typeof spell?.duration === "object" &&
+        "concentration" in spell.duration)) &&
+    (!option.spare || "area" in targeting)
   );
+}
+
+// How long a spell's effects last, in minutes: the longest.
+function minutesOf(activation: Activation): number {
+  const { resolution } = activation;
+  const effects =
+    resolution.kind === "automatic"
+      ? resolution.effects
+      : resolution.kind === "save"
+        ? resolution.onFail
+        : resolution.onHit;
+  return Math.max(
+    0,
+    ...effects.map((effect) =>
+      "duration" in effect &&
+      typeof effect.duration === "object" &&
+      "minutes" in effect.duration
+        ? effect.duration.minutes
+        : 0,
+    ),
+  );
+}
+
+const DAY = 24 * 60;
+
+// A Circle option's changes, for this many casters joining (schemas.ts castOption `circle`).
+function circled(
+  activation: Activation,
+  option: CastOption,
+  casters: number,
+): Activation {
+  let next = activation;
+  const { targeting } = next;
+  if (
+    option.range &&
+    "range" in targeting &&
+    typeof targeting.range === "number"
+  ) {
+    next = {
+      ...next,
+      targeting: {
+        ...targeting,
+        range:
+          targeting.range +
+          Math.min(option.range.max, option.range.perCaster * casters),
+      },
+    };
+  }
+  const aimed = next.targeting;
+  if ((option.area || option.spare) && "area" in aimed) {
+    next = {
+      ...next,
+      targeting: {
+        ...aimed,
+        area: {
+          ...aimed.area,
+          radius: aimed.area.radius + (option.area ?? 0) * casters,
+        },
+        ...(option.spare ? { choice: true as const } : {}),
+      },
+    };
+  }
+  const more = option.prolong?.findLast((row) => casters >= row.from)?.minutes;
+  if (more) {
+    const longer = <T extends { kind: string }>(effect: T): T =>
+      "duration" in effect &&
+      typeof effect.duration === "object" &&
+      effect.duration !== null &&
+      "minutes" in effect.duration &&
+      typeof effect.duration.minutes === "number" &&
+      effect.duration.minutes >= 1
+        ? {
+            ...effect,
+            duration: {
+              ...effect.duration,
+              minutes: Math.min(DAY, effect.duration.minutes + more),
+            },
+          }
+        : effect;
+    const { resolution } = next;
+    next = {
+      ...next,
+      resolution:
+        resolution.kind === "automatic"
+          ? { ...resolution, effects: resolution.effects.map(longer) }
+          : resolution.kind === "save"
+            ? {
+                ...resolution,
+                onFail: resolution.onFail.map(longer),
+                onSuccess: resolution.onSuccess.map(longer),
+              }
+            : { ...resolution, onHit: resolution.onHit.map(longer) },
+    };
+  }
+  if (option.goldOff) {
+    const off = option.goldOff * casters;
+    next = {
+      ...next,
+      cost: next.cost.flatMap((item): Activation["cost"] =>
+        typeof item === "object" && "gold" in item
+          ? item.gold - off > 0
+            ? [{ gold: item.gold - off }]
+            : []
+          : [item],
+      ),
+    };
+  }
+  if (option.share) {
+    next = {
+      ...next,
+      userEffects: [
+        ...(next.userEffects ?? []),
+        {
+          kind: "modifier",
+          modifier: { kind: "advantage", on: "saves", ability: "con" },
+          duration: {
+            concentration: true,
+            minutes: Math.max(1, minutesOf(next)),
+          },
+        },
+      ],
+    };
+  }
+  return next;
 }
 
 function changed(
@@ -100,8 +248,9 @@ function changed(
   option: CastOption,
   upcast: KnownAction["upcast"],
   scale: (activation: Activation, step: ScaleStep, times: number) => Activation,
+  casters = 0,
 ): Activation {
-  let next = activation;
+  let next = option.circle ? circled(activation, option, casters) : activation;
   if (option.levels && upcast)
     next = scale(next, upcast.perSlotLevel, option.levels);
   if (option.addTargets) {
@@ -170,7 +319,8 @@ export function withCastOptions(
     const mine = waiting.filter((item) => item.action === action.id);
     if (mine.length === 0) return action;
     const activation = mine.reduce(
-      (current, item) => changed(current, item.option, action.upcast, scale),
+      (current, item) =>
+        changed(current, item.option, action.upcast, scale, item.casters),
       action.activation,
     );
     return {

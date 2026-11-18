@@ -6,10 +6,11 @@ import {
   type SystemEvent,
 } from "#sdk";
 import { z } from "zod";
-import { LeafEffectSchema } from "../schemas.ts";
+import { CharacterOptionSchema, LeafEffectSchema } from "../schemas.ts";
 import {
   type ActiveEffect,
   type Actor,
+  type DndState,
   dndEvent,
   frame,
   NS,
@@ -86,6 +87,19 @@ export function formEvents(
 // shortcut: the caster chooses among the strongest few forms allowed, as a long list of every stat block wouldn't help.
 const FORMS_OFFERED = 8;
 
+// The Beasts of the beast-shape lists for this fight's place: underwater the only one a fight names.
+function beastsHere(access: ContentAccess): ReadonlySet<string> {
+  const state = "state" in access ? (access.state as DndState) : undefined;
+  if (!state?.combat?.underwater) return new Set();
+  return new Set(
+    access.contentIds().flatMap((id) => {
+      if (!id.includes(":beast-shape-list/")) return [];
+      const list = CharacterOptionSchema.safeParse(access.content(id)).data;
+      return list?.underwater ? (list.beasts ?? []) : [];
+    }),
+  );
+}
+
 // The caster picks a form for itself or an ally, the strongest first.
 export function formFrame(
   effect: Polymorph,
@@ -95,9 +109,13 @@ export function formFrame(
   ends: ActiveEffect["ends"],
   access: ContentAccess,
 ): Frame | null {
-  const offered = formsFor(effect, target, access)
-    .toReversed()
-    .slice(0, FORMS_OFFERED);
+  // A beast-shape list for where the fight is, as Xanathar's Underwater list, comes first (#192).
+  const listed = beastsHere(access);
+  const allowed = formsFor(effect, target, access).toReversed();
+  const offered = [
+    ...allowed.filter((block) => listed.has(block.id)),
+    ...allowed.filter((block) => !listed.has(block.id)),
+  ].slice(0, FORMS_OFFERED);
   if (offered.length === 0) return null;
   return awaitDecision({
     id: `${NS}:form:${target.id}`,

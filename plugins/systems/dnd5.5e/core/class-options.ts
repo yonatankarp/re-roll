@@ -10,6 +10,7 @@ import { z } from "zod";
 import { type Context, canAfford } from "./combat.ts";
 import { knownFoes } from "./fog.ts";
 import { inReach } from "./combat/queries.ts";
+import { distanceFeet } from "./grid.ts";
 import { dealEvents } from "./combat/effects.ts";
 import { encodeOption, parseOption, spellOfSource } from "./combat/ids.ts";
 import { FeatureSchema, SpellSchema } from "./schemas.ts";
@@ -34,6 +35,7 @@ import {
   type KnownAction,
   type Stats,
   deriveStats,
+  circleOptions,
   lookup,
   onList,
   rollDiceNotation,
@@ -239,12 +241,13 @@ function castOptionChoices(
   readonly option: CastOption;
   readonly spells: readonly KnownAction[];
 }[] {
-  const options = castOptionsOf(
-    stats.features.flatMap((id) => {
+  const options = castOptionsOf([
+    ...stats.features.flatMap((id) => {
       const feature = maybeLookup(access, FeatureSchema, id);
       return feature ? [feature] : [];
     }),
-  );
+    ...circleOptions(access),
+  ]);
   const busy = new Set(
     waitingOptions(actor, options).map((item) => item.sourceId),
   );
@@ -269,6 +272,9 @@ function castOptionChoices(
           actor,
           stats,
         ) &&
+        (!option.circle ||
+          circleCasters(actor, option, action.spellLevel ?? 0, state, access)
+            .length > 0) &&
         inReach(action, actor, state, access).length > 0
       );
     });
@@ -513,13 +519,82 @@ const CastOptionSchema = z.object({
 });
 
 // Leaves the option waiting on the spell until the end of the turn, as a Metamagic option does.
+// The party's other casters who can join a Circle casting of a spell of this level: within 30 feet, standing, with a
+// Reaction left, and with the slot the option asks for.
+function circleCasters(
+  actor: Actor,
+  option: CastOption,
+  spellLevel: number,
+  state: DndState,
+  access: ContentAccess,
+): { readonly id: string; readonly slot: number | null }[] {
+  const least =
+    option.circle?.slot === "spellLevel" ? Math.max(1, spellLevel) : 1;
+  return Object.values(state.actors).flatMap(
+    (other): { readonly id: string; readonly slot: number | null }[] => {
+      if (
+        other.id === actor.id ||
+        other.side !== actor.side ||
+        other.source.kind !== "character" ||
+        isDown(other) ||
+        hasCondition(other, ...INCAPACITATING) ||
+        !other.budget.reaction ||
+        distanceFeet(actor.position, other.position) > 30
+      ) {
+        return [];
+      }
+      const stats = deriveStats(other, access);
+      const left = (level: number) =>
+        (stats.slots[level - 1] ?? 0) -
+        (other.resourcesSpent[`slot:${String(level)}`] ?? 0);
+      // Spellcasting or Pact Magic shows in its slots.
+      if (!stats.slots.some((count) => count > 0)) return [];
+      if (!option.circle?.slot) return [{ id: other.id, slot: null }];
+      const slot = stats.slots.findIndex(
+        (_, index) => index + 1 >= least && left(index + 1) > 0,
+      );
+      return slot < 0 ? [] : [{ id: other.id, slot: slot + 1 }];
+    },
+  );
+}
+
 function runCastOption(
   payload: z.infer<typeof CastOptionSchema>,
-  _context: Context,
+  context: Context,
 ): SystemResult {
   if (payload.answer === BACK) return {};
+  const actor = context.state.actors[payload.actor];
+  const option = actor
+    ? castOptionsOf(circleOptions(context)).find(
+        (item) => item.sourceId === payload.source,
+      )?.option
+    : undefined;
+  // A Circle option: the others join now, each with its Reaction and any slot, and how many is kept.
+  const joined =
+    actor && option
+      ? circleCasters(
+          actor,
+          option,
+          deriveStats(actor, context).actions.find(
+            (item) => item.id === payload.answer,
+          )?.spellLevel ?? 0,
+          context.state,
+          context,
+        )
+      : [];
   return {
     events: [
+      ...joined.flatMap((other) => [
+        dndEvent(`${NS}:budgetSpent`, { actor: other.id, kind: "reaction" }),
+        ...(other.slot === null
+          ? []
+          : [
+              dndEvent(`${NS}:resourceSpent`, {
+                actor: other.id,
+                resource: `slot:${String(other.slot)}`,
+              }),
+            ]),
+      ]),
       dndEvent(`${NS}:effectAdded`, {
         actor: payload.actor,
         effect: {
@@ -529,6 +604,7 @@ function runCastOption(
             kind: "tactic",
             tactic: "metamagic",
             action: payload.answer,
+            ...(option ? { value: joined.length } : {}),
           },
           ends: "casterTurnEnd",
         },
@@ -552,12 +628,13 @@ function runCastOptionSpent(
   const actor = context.state.actors[payload.actor];
   if (!actor) return {};
   const stats = deriveStats(actor, context);
-  const options = castOptionsOf(
-    stats.features.flatMap((id) => {
+  const options = castOptionsOf([
+    ...stats.features.flatMap((id) => {
       const feature = maybeLookup(context, FeatureSchema, id);
       return feature ? [feature] : [];
     }),
-  );
+    ...circleOptions(context),
+  ]);
   const mine = waitingOptions(actor, options).filter(
     (item) => item.action === payload.action,
   );
