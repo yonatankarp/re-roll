@@ -24,7 +24,9 @@ export default defineConfig({
   testDir: "tests/ui",
   testMatch: "*.e2e.ts", // not *.test.ts or *.spec.ts, which vitest would pick up
   forbidOnly: Boolean(process.env.CI),
+  // A retry tells a flaky test from a broken one, and a test that passes only on its retry still fails the run.
   retries: process.env.CI ? 1 : 0,
+  failOnFlakyTests: Boolean(process.env.CI),
   reporter: process.env.CI ? "github" : "list",
   use: { baseURL: url, trace: "retain-on-failure" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

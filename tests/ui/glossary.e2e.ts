@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { playUntil } from "./onward.ts";
 
 // Explains a rules term in a fight from a made-up library, as the owner's books would, by hover,
 // by "?" on a focused choice, and through More into the book and back.
@@ -63,14 +64,7 @@ test("explains a term in a fight and opens its book section", async ({
     .getByRole("button", { name: /Perception ?\] Check the treeline$/ })
     .click();
   const actions = page.getByRole("button", { name: "Actions", exact: true });
-  const onward = page.getByRole("button", {
-    name: /^(Carry on|Drive them off)$/,
-  });
-  for (let tries = 0; tries < 40 && !(await actions.isVisible()); tries += 1) {
-    if (await onward.first().isVisible()) await onward.first().click();
-    else await page.keyboard.press("Enter");
-    await page.waitForTimeout(300);
-  }
+  await playUntil(page, () => actions.isVisible());
   await actions.click();
 
   const dodge = page.locator(".option > button", { hasText: /^Dodge/ });

@@ -562,12 +562,10 @@ describe("playing through the shell's session", () => {
   });
 
   it("tells a dead character from a fallen party and from a win", async () => {
-    const endings = new Set<string>();
-    for (
-      let seed = 0;
-      seed < 60 && !(endings.has("ending") && endings.has("died"));
-      seed += 1
-    ) {
+    // One pinned seed per ending (#209). When the rules change what a seed does, pin another.
+    const pinned = { 1: "ending", 2: "died" };
+    const endings: Record<string, string> = {};
+    for (const seed of [1, 2]) {
       const game = newGame();
       // On Normal the companions stabilize a dying Wizard, so a death is rare there.
       await game.start("goblin-ambush", `endings-${String(seed)}`, {
@@ -589,17 +587,15 @@ describe("playing through the shell's session", () => {
       const view = game.view();
       // A win is named by its own scene, and shows that scene's text.
       if (view.ended === "ending") expect(view.endingName).toBeTruthy();
-      endings.add(
+      endings[seed] =
         view.ended === "defeat"
           ? view.playerDied
             ? "died"
             : "party"
-          : String(view.ended),
-      );
+          : String(view.ended);
     }
-    expect(endings).toContain("ending");
-    expect(endings).toContain("died");
-  }, 120_000);
+    expect(endings).toEqual(pinned);
+  });
 
   it("keeps an earlier run's autosave when a new run starts", async () => {
     const game = newGame();

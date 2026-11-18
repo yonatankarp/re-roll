@@ -1337,7 +1337,7 @@ describe("the dynamic party", () => {
     });
     expect(report.failures).toEqual([]);
     expect(report.unvisitedScenes).toEqual([]);
-  }, 30_000);
+  });
 });
 
 describe("weapon proficiency limited by property", () => {
