@@ -93,6 +93,7 @@ export const FRAME_KINDS = [
   "useItem",
   "castCheck",
   "attuneSave",
+  "replicatePick", // the plan a replicated item is made from (gear.ts)
   "zoneTick",
   "chooseDamageType",
   "chooseZoneType",

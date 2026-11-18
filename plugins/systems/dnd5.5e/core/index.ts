@@ -97,7 +97,12 @@ import {
   beginSheet,
   sheetFrames,
 } from "./character-sheet.ts";
-import { gearEffects, gearFrames, sceneGearActions } from "./gear.ts";
+import {
+  gearEffects,
+  gearFrames,
+  replicateFrames,
+  sceneGearActions,
+} from "./gear.ts";
 import { sceneSwapActions, swapEffects, swapFrames } from "./swap.ts";
 import { sceneEffects, scenePredicates } from "./scene.ts";
 import { gearPolicy, isGearDecision } from "./policy.ts";
@@ -530,6 +535,7 @@ export const dnd55e = defineSystem<DndState>({
     ...sheetFrames,
     ...restFrames,
     ...gearFrames,
+    ...replicateFrames,
     ...swapFrames,
     ...legendaryFrames,
     ...actionFrames,

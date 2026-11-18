@@ -1,15 +1,21 @@
-import { PLAYER_ACTOR, type SystemEvent } from "#sdk";
+import { type Decision, PLAYER_ACTOR, type SystemEvent } from "#sdk";
 import { describe, expect, it } from "vitest";
 import type { RunContext } from "../engine/run/turn.ts";
 import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { sceneGearActions } from "../plugins/systems/dnd5.5e/core/gear.ts";
 import {
   type Actor,
-  applyDndEvent,
   type DndState,
   NS,
 } from "../plugins/systems/dnd5.5e/core/state.ts";
-import { contextOf, hero, scripted, testRun, trait } from "./feat-fixtures.ts";
+import {
+  contextOf,
+  hero,
+  scripted,
+  settle,
+  testRun,
+  trait,
+} from "./feat-fixtures.ts";
 
 // Features and items of the test's own for #175's crafting and spell preparation: ids and mechanics only.
 const item = (name: string, rarity: string) => ({
@@ -86,14 +92,12 @@ describe("crafting, downtime and spell preparation (#175)", () => {
     };
     const state = between(artificer, run);
     const offers = sceneGearActions(state, run).filter((offer) =>
-      offer.id.startsWith("replicate:"),
+      ["replicate", "transmute"].includes(offer.id),
     );
-    expect(offers.map((offer) => offer.id)).toEqual([
-      "replicate:test:item/cloak",
-    ]);
+    expect(offers.map((offer) => offer.id)).toEqual(["replicate", "transmute"]);
     expect(offers[0]?.rest).toBe(true);
-    const made = run.system.storyEffects[`${NS}:replicate`]?.apply(
-      { item: "test:item/cloak" },
+    const menu = run.system.storyEffects[`${NS}:replicateMenu`]?.apply(
+      {},
       {
         state,
         dice: scripted([]).dice,
@@ -101,11 +105,18 @@ describe("crafting, downtime and spell preparation (#175)", () => {
         contentIds: run.contentIds,
       },
     );
+    const asked = (menu?.frames?.[0]?.payload as { decision: Decision })
+      .decision;
+    expect(asked.options.map((option) => option.id)).toEqual([
+      "test:item/cloak",
+      "done",
+    ]);
+    const made = settle(run, state, menu?.frames ?? [], scripted([]).dice);
     // The test's scaling key `items` is missing, so the cap is 0 and the charm made before goes.
-    expect(kinds(made?.events)).toEqual(
+    expect(kinds(made.events)).toEqual(
       expect.arrayContaining([`${NS}:itemUsed`, `${NS}:treasureFound`]),
     );
-    const after = (made?.events ?? []).reduce(applyDndEvent, state);
+    const after = made.state;
     expect(after.actors[PLAYER_ACTOR]?.replicated).toEqual(["test:item/cloak"]);
     expect(after.actors[PLAYER_ACTOR]?.inventory).not.toContain(
       "test:item/charm",

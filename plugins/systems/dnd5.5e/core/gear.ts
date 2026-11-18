@@ -347,54 +347,101 @@ export function changed(
 // Replicate Magic Item: a plan made where the party could rest, while a use is left, or with Magic Item Tinker's
 // Transmute the oldest made turned into it.
 function replicateActions(actor: Actor, access: ContentAccess): SceneAction[] {
+  const make = replicable(actor, access, false);
+  const turn = replicable(actor, access, true);
+  return [
+    ...(make.length > 0
+      ? [
+          {
+            id: "replicate",
+            label: "Replicate a magic item",
+            effect: `${NS}:replicateMenu`,
+            args: {},
+            rest: true as const,
+          },
+        ]
+      : []),
+    ...(turn.length > 0
+      ? [
+          {
+            id: "transmute",
+            label: "Transmute a replicated item",
+            effect: `${NS}:replicateMenu`,
+            args: { transmute: true },
+          },
+        ]
+      : []),
+  ];
+}
+
+// The plans a replicated item can be made from now, while a use is left, or with Magic Item Tinker's Transmute the
+// oldest made turned into.
+function replicable(
+  actor: Actor,
+  access: ContentAccess,
+  transmute: boolean,
+): string[] {
   const stats = deriveStats(actor, access);
   const left = (resource: string) =>
     (stats.resources[resource] ?? 0) - (actor.resourcesSpent[resource] ?? 0) >
     0;
-  const transmute = stats.passives.find(
+  const turn = stats.passives.find(
     (passive) => passive.kind === "replicateTransmute",
   );
+  const made = actor.replicated ?? [];
   return stats.passives.flatMap((passive) => {
     if (passive.kind !== "replicate") return [];
+    const open = transmute
+      ? turn?.kind === "replicateTransmute" &&
+        left(turn.resource) &&
+        made.length > 0
+      : left(passive.resource);
+    if (!open) return [];
     const level = Object.entries(stats.classLevels).reduce(
       (most, [id, count]) =>
         id.endsWith(`/${passive.class}`) ? Math.max(most, count) : most,
       0,
     );
-    const made = actor.replicated ?? [];
     return passive.plans
-      .filter((plan) => plan.level <= level && access.content(plan.item))
-      .flatMap(({ item: id }) => {
-        const item = itemOf(access, id);
-        return [
-          ...(left(passive.resource) && !made.includes(id)
-            ? [
-                {
-                  id: `replicate:${id}`,
-                  label: `Replicate ${item.name}`,
-                  effect: `${NS}:replicate`,
-                  args: { item: id },
-                  rest: true as const,
-                },
-              ]
-            : []),
-          ...(transmute?.kind === "replicateTransmute" &&
-          left(transmute.resource) &&
-          made.length > 0 &&
-          !made.includes(id)
-            ? [
-                {
-                  id: `transmute:${id}`,
-                  label: `Transmute into ${item.name}`,
-                  effect: `${NS}:replicate`,
-                  args: { item: id, transmute: true },
-                },
-              ]
-            : []),
-        ];
-      });
+      .filter(
+        (plan) =>
+          plan.level <= level &&
+          !made.includes(plan.item) &&
+          access.content(plan.item) !== undefined,
+      )
+      .map((plan) => plan.item);
   });
 }
+
+// A plan picked from all those it can be made from now, or none.
+function replicateMenu(transmute: boolean, context: Context): SystemResult {
+  const actor = player(context.state);
+  const plans = replicable(actor, context, transmute);
+  return {
+    frames: [
+      awaitDecision({
+        id: `${NS}:replicate:${String(actor.inventory.length)}`,
+        actor: actor.id,
+        prompt: transmute
+          ? "Which plan does the oldest replicated item become?"
+          : "Which magic item do you replicate?",
+        options: [
+          ...plans.map((id) => ({ id, label: itemOf(context, id).name })),
+          { id: DONE, label: "Not now" },
+        ],
+        resume: frame("replicatePick", { transmute }),
+      }),
+    ],
+  };
+}
+
+export const replicateFrames = {
+  [`${NS}:replicatePick`]: frameHandler({
+    schema: z.object({ transmute: z.boolean(), answer: z.string() }),
+    run: ({ transmute, answer }, context: Context): SystemResult =>
+      answer === DONE ? {} : replicate(answer, transmute, context),
+  }),
+};
 
 // Making a replicated item: it's carried, attuned where it needs it and there's room, and the oldest made goes
 // once there are more than the cap, or the one transmuted.
@@ -952,6 +999,11 @@ export const gearEffects = {
     schema: StoreSchema,
     references: ({ item, spell }) => [item, spell],
     apply: storeSpell,
+  }),
+  [`${NS}:replicateMenu`]: storyEffect({
+    schema: z.object({ transmute: z.boolean().optional() }),
+    apply: ({ transmute }, context: Context) =>
+      replicateMenu(transmute === true, context),
   }),
   [`${NS}:replicate`]: storyEffect({
     schema: z.object({ item: z.string(), transmute: z.boolean().optional() }),
