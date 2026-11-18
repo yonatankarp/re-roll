@@ -330,7 +330,7 @@ describe.skipIf(!BOOK_ROOTS || !existsSync("books/rules/phb"))(
       expect([stats.ac, second.hp, stats.speed]).toEqual([12, 25, 60]);
       expect(stats.passives).toContainEqual({ kind: "rideable" });
       expect(stats.actions.map(({ name }) => name)).toEqual([
-        "Otherworldly Slam",
+        "Otherworldly Slam (Celestial)",
         "Healing Touch",
       ]);
       const fourth = steed(4);

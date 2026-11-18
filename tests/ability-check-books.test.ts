@@ -180,7 +180,10 @@ describe.skipIf(!BOOKS)("the book's check entries", () => {
     const stats = deriveStats(older, run);
     expect(stats.skills).toEqual(expect.arrayContaining(["arcana", "history"]));
     expect(stats.expertise).toEqual([]);
-    expect(swappable(older, run)).toEqual([]);
+    // The pregen's own class picks, as its Weapon Mastery, stay swappable; the feat offers no late pick.
+    expect(
+      swappable(older, run).filter(({ classId }) => classId === undefined),
+    ).toEqual([]);
   });
 
   it("lets Guidance's caster pick the skill", () => {
