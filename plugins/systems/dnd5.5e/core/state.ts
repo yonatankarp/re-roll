@@ -111,6 +111,10 @@ export const FRAME_KINDS = [
   "reincarnate", // the player picks what a reincarnated body's species asks for (reincarnate.ts)
   "reincarnateAnswer",
   "missReroll", // a missed attack rolled again, or at another creature, as Master Duelist or Curving Shot (class-rules.ts)
+  "bringAlong", // the allies a teleport brings land beside it, as Travel along the Tree's (combat/movement.ts)
+  "riderChoice", // what a spell's cast rider does, picked once it's done, as Steps of the Fey's (combat/school.ts)
+  "redirectHit", // where a missed attack lands instead, as Tipsy Sway's Redirect Attack (combat/reactions.ts)
+  "hideNow", // the Hide action as part of another, as Shrouding Spells' (actions.ts)
 ] as const;
 export type FrameKind = (typeof FRAME_KINDS)[number];
 
@@ -121,6 +125,13 @@ export const LEGENDARY_USE = "legendary";
 export const PICKED_UP = "pickedUp"; // in usedThisTurn: the one free pick-up of a turn
 export const CAST_ACTION = "castAction"; // in usedThisTurn: a spell with a casting time of an action was cast
 export const SURGED = "surged"; // in usedThisTurn: Action Surge's extra action, which can't be a Magic action
+// In usedThisTurn, kept only for a creature with an activation that waits on them (combat/actions.ts): the Attack
+// action taken, the Magic action (a spell cast with an action, or a magic item used) taken, a spell cast with an action
+// and a slot, and a spell of level 1 or higher cast.
+export const ATTACK_ACTION = "attackAction";
+export const MAGIC_ACTION = "magicAction";
+export const SLOT_CAST_ACTION = "slotCastAction";
+export const LEVELED_CAST = "leveledCast";
 export const LEGENDARY_RESISTANCE = "legendaryResistance";
 
 export const TACTICS = [
@@ -183,6 +194,8 @@ const ActiveEffectSchema = z.strictObject({
     }),
     // Riding its caster as a mount (combat/mounts.ts).
     z.strictObject({ kind: z.literal("riding") }),
+    // Carrying a willing ally along as it moves this turn, as Heightened Focus's Step of the Wind (combat/movement.ts).
+    z.strictObject({ kind: z.literal("carrying"), actor: z.string() }),
     // One of its own stat block's other shapes, by name, as a werewolf's wolf form (core/forms.ts).
     z.strictObject({ kind: z.literal("shape"), shape: z.string() }),
     // An area a spell left on the map, kept on its caster (core/zones.ts). With `follows` it is centred on the
@@ -199,6 +212,9 @@ const ActiveEffectSchema = z.strictObject({
       walls: z.enum(["walking", "sight"]).optional(), // what alone its wall stops, when not both
       layers: z.array(ResolutionSchema).optional(), // what walking into its wall does, in order, its DCs as cast
       name: z.string().optional(), // the action that left it
+      dim: z.number().int().optional(), // light: feet of Dim Light beyond its Bright
+      ownerSees: z.literal(true).optional(), // darkness its caster sees through
+      reveals: z.literal(true).optional(), // light: no benefit from the Invisible condition in its Bright Light
     }),
     // What an action anyone can take, such as Dodge, or a weapon mastery, leaves behind (core/tactics.ts).
     z.strictObject({
@@ -227,6 +243,8 @@ const ActiveEffectSchema = z.strictObject({
   endsOnSpell: z.boolean().optional(), // ends when another spell targets the creature
   // ends when the creature attacks or deals damage, also when it casts a spell, or when it acts
   endsOn: z.enum(["attack", "action", "spell"]).optional(),
+  endsInLight: z.literal(true).optional(), // ends as the creature's turn ends in Bright Light
+  untilIncapacitated: z.literal(true).optional(), // ends once the creature is Incapacitated
   // Taking damage gives this save, ending it on a success, as Dragon Fear's.
   saveOnDamage: z
     .strictObject({
@@ -332,6 +350,27 @@ const GridSchema = z.strictObject({
   width: z.number().int(),
   height: z.number().int(),
 });
+const SecondTurnSchema = z.strictObject({
+  actor: z.string(),
+  before: z.string().nullable(),
+});
+
+// Whose turn it is: a creature taking a second turn between others', or the one the order is at.
+export function turnId(
+  combat:
+    | {
+        readonly order: readonly string[];
+        readonly index: number;
+        readonly interlude?: { readonly actor: string } | undefined;
+      }
+    | null
+    | undefined,
+): string | undefined {
+  return combat
+    ? (combat.interlude?.actor ?? combat.order[combat.index])
+    : undefined;
+}
+
 // A battle map's ground, cover and light, as "x,y" squares. Missing in fights on plain maps and older saves.
 export const TerrainSchema = z.strictObject({
   difficult: z.array(z.string()),
@@ -340,6 +379,8 @@ export const TerrainSchema = z.strictObject({
   dim: z.array(z.string()),
   dark: z.array(z.string()),
   light: z.enum(["bright", "dim", "dark"]), // everywhere else
+  // water to swim in, each foot costing double without a Swim Speed (core/combat/queries.ts). Missing in older saves.
+  water: z.array(z.string()).optional(),
 });
 export type Terrain = z.infer<typeof TerrainSchema>;
 // The picture a fight is drawn on, when its encounter has a battle map.
@@ -519,12 +560,24 @@ export const StateSchema = z.strictObject({
       map: FightMapSchema.optional(),
       loot: LootSchema.optional(), // found if the party wins
       lair: LairSchema.optional(),
+      // Second turns in the first round, as Thief's Reflexes': each before `before`'s turn, or at the round's end
+      // with none. Missing in older saves.
+      secondTurns: z.array(SecondTurnSchema).optional(),
+      // A creature taking one of those turns now, between others' turns (`resume` "same" goes back to the turn it came
+      // before, "advance" to the one after it). Missing outside one.
+      interlude: z
+        .strictObject({
+          actor: z.string(),
+          resume: z.enum(["same", "advance"]),
+        })
+        .optional(),
       // The share of damage the party takes this fight, set as it starts. Missing in older saves, which
       // played at the difficulty's own share.
       damageToParty: z.number().optional(),
       // The map is covered until the party sees it (fog.ts). Missing in older saves, whose fights show all of it.
       fog: z.literal(true).optional(),
       sunlight: z.literal(true).optional(), // fought under the sky in daylight (zones.ts)
+      underwater: z.literal(true).optional(), // fought underwater (combat/water.ts)
       environment: FightEnvironmentSchema.optional(), // the environmental effects it's fought in (environment.ts)
       // Weapons thrown and lying where they landed, until picked up. They go back to their throwers as it ends.
       dropped: z.array(DroppedSchema).optional(),
@@ -579,9 +632,11 @@ const CombatStartedSchema = z.strictObject({
   loot: LootSchema.optional(),
   surprised: SurpriseSchema.optional(),
   lair: LairSchema.optional(),
+  secondTurns: z.array(SecondTurnSchema).optional(),
   damageToParty: z.number().optional(),
   fog: z.literal(true).optional(),
   sunlight: z.literal(true).optional(),
+  underwater: z.literal(true).optional(),
   environment: FightEnvironmentSchema.optional(),
   // The party's familiars, who join with Initiative of their own (combat/familiar.ts).
   familiars: z.array(ActorSchema).optional(),
@@ -1279,6 +1334,11 @@ function advanceTurn(state: DndState): DndState {
   if (!combat) return state;
   const count = combat.order.length;
   let { index, round } = combat;
+  const { interlude, ...rest } = combat;
+  // A second turn ending goes back to the turn it came before, unless it came at the round's end.
+  if (interlude?.resume === "same") {
+    return turnStarts(state, rest, index, round, interlude.actor);
+  }
   for (let step = 0; step < count; step += 1) {
     index += 1;
     if (index >= count) {
@@ -1295,11 +1355,52 @@ function advanceTurn(state: DndState): DndState {
       break;
     }
   }
-  const nextId = combat.order[index] ?? "";
+  // Thief's Reflexes: a second turn in the first round, before the turn it comes before, or before the second round.
+  // A creature it came before that's gone from the turns still has it come there, or at the round's end.
+  const due = (rest.secondTurns ?? []).find(
+    ({ before }) =>
+      combat.round === 1 &&
+      (round > 1 || (before !== null && index >= combat.order.indexOf(before))),
+  );
+  const thief = due ? state.actors[due.actor] : undefined;
+  if (due && thief && !isDead(thief)) {
+    const left = (rest.secondTurns ?? []).filter((item) => item !== due);
+    const planned = { ...rest, secondTurns: left };
+    return round > 1
+      ? turnStarts(
+          state,
+          planned,
+          combat.index,
+          combat.round,
+          interlude?.actor,
+          {
+            actor: due.actor,
+            resume: "advance",
+          },
+        )
+      : turnStarts(state, planned, index, round, interlude?.actor, {
+          actor: due.actor,
+          resume: "same",
+        });
+  }
+  return turnStarts(state, rest, index, round, interlude?.actor);
+}
+
+// The turn coming: `index` and `round` in the order, or a second turn between them. `ended` is whoever's turn just
+// ended, when it wasn't the order's at its index.
+function turnStarts(
+  state: DndState,
+  combat: NonNullable<DndState["combat"]>,
+  index: number,
+  round: number,
+  ended?: string,
+  interlude?: { readonly actor: string; readonly resume: "same" | "advance" },
+): DndState {
+  const nextId = interlude?.actor ?? combat.order[index] ?? "";
   // A controlled mount's turn comes with its rider's.
   const nextActor = state.actors[nextId];
   const nextMount = nextActor ? mountOf(nextActor) : null;
-  const endingId = combat.order[combat.index];
+  const endingId = ended ?? combat.order[combat.index];
   const actors = Object.fromEntries(
     Object.entries(state.actors).map(([id, actor]) => [
       id,
@@ -1346,6 +1447,7 @@ function advanceTurn(state: DndState): DndState {
       index,
       round,
       ...(calmRounds > 0 ? { calmRounds } : {}),
+      ...(interlude ? { interlude } : {}),
     },
   };
 }
@@ -1652,11 +1754,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           ...(data.map ? { map: data.map } : {}),
           ...(data.loot ? { loot: data.loot } : {}),
           ...(data.lair ? { lair: data.lair } : {}),
+          ...(data.secondTurns ? { secondTurns: data.secondTurns } : {}),
           ...(data.damageToParty === undefined
             ? {}
             : { damageToParty: data.damageToParty }),
           ...(data.fog ? { fog: true as const } : {}),
           ...(data.sunlight ? { sunlight: true as const } : {}),
+          ...(data.underwater ? { underwater: true as const } : {}),
           ...(data.environment ? { environment: data.environment } : {}),
         },
       };

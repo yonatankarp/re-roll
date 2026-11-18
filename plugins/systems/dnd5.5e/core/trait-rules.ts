@@ -153,7 +153,9 @@ export function traitSaveAdvantage(
           !(passive.notWhile === "incapacitated"
             ? hasCondition(target, ...INCAPACITATING)
             : hasCondition(target, passive.notWhile))) &&
-        coversSave(passive, ability, conditions, source)) ||
+        (passive.shapeChange
+          ? conditions.includes("polymorph")
+          : coversSave(passive, ability, conditions, source))) ||
       (passive.kind === "concentrationAdvantage" &&
         conditions.includes("concentration")),
   );

@@ -9,18 +9,19 @@ import {
   type DndState,
   hasCondition,
   equipped,
-  invisibleTo,
   INCAPACITATING,
   isDead,
   isDown,
   mountOf,
   NS,
   frame,
+  turnId,
 } from "../state.ts";
 import {
   ALL,
   DECLINE,
   encodeOption,
+  FANCY_FOOTWORK,
   parseOption,
   spellOfSource,
   WEAPON_PREFIX,
@@ -39,8 +40,16 @@ import { againstTarget, missFrames, runApplyMiss } from "./spell-riders.ts";
 import { duelBroken, duelDamaged, duelHampers } from "./duel.ts";
 import { distanceFeet } from "../grid.ts";
 import { grapplesOn } from "./grapple.ts";
-import { behindTotalCover, coverAgainst, lightAt, seeing } from "../sight.ts";
+import {
+  behindTotalCover,
+  blindedTo,
+  coverAgainst,
+  lightAt,
+  seeing,
+  unseenInvisible,
+} from "../sight.ts";
 import { insideDamageEvents, swallowerOf } from "./swallow.ts";
+import { beyondUnderwaterRange, underwaterHampered } from "./water.ts";
 import {
   awaitDecision,
   type Dice,
@@ -94,7 +103,7 @@ import {
   HEW_READY,
   HIDE_SOURCE,
   masteryOf,
-  revealEvents,
+  castRevealEvents,
   STEALTH_ATTACK,
   tacticsOf,
 } from "../tactics.ts";
@@ -169,6 +178,7 @@ import {
 } from "./queries.ts";
 import {
   actingEnds,
+  naturalOneEvents,
   concentrationFrame,
   damageRiders,
   dealEvents,
@@ -179,11 +189,12 @@ import {
   resolveAction,
   rollSave,
   typeAgainst,
-  naturalOneEvents,
 } from "./effects.ts";
 
 // A resource spent on the bearer: this attacker is freed of its Among the Dead until a Long Rest.
 const DETERRED = "deterred:";
+const SNEAK_TWICE = "sneak-twice"; // Sudden Strike's second Sneak Attack, spent
+const SNEAK_AT = "sneak-at:"; // the creature dealt the first, for a bearer of Sudden Strike
 // Attack rolls and what follows a hit: reactions, damage, riders, smites and concentration saves.
 
 export const AttackSchema = z.object({
@@ -206,6 +217,7 @@ export const AttackSchema = z.object({
     .optional(),
   passed: z.array(z.string()).optional(), // creatures that already answered the roll or turned it down
   strikes: z.array(z.string()).optional(), // strike options picked in place of the roll's Advantage, as Brutal Strike's
+  hits: z.boolean().optional(), // it hits outright, as a missed attack Redirect Attack turns on another creature
   leapt: z.array(z.string()).optional(), // the creatures a leaping attack struck before this one, as Chromatic Orb's
   spell: z.string().optional(), // the spell source whose weapon attack this is, as Booming Blade's
   overcomes: z.boolean().optional(), // its damage ignores Resistance and Immunity, as a Sword of Answering's answer
@@ -1094,10 +1106,10 @@ export function runAttackRoll(
             ability,
           ) ||
           placedFlag(target, "advantage", "attacksAgainst", state, context) ||
-          invisibleTo(attacker, target) ||
+          unseenInvisible(attacker, target, context) ||
+          blindedTo(target, attacker, context) ||
           hasCondition(
             target,
-            "blinded",
             "paralyzed",
             "petrified",
             "restrained",
@@ -1163,6 +1175,18 @@ export function runAttackRoll(
     shielded !== null ||
     crowded ||
     longRange ||
+    underwaterHampered(attacker, action, resolution, context) ||
+    // Speedy or Boots of Speed: an Opportunity Attack, one made on the target's own turn, has Disadvantage.
+    (inOwnTurn(target, context) &&
+      [
+        ...target.activeEffects.map((effect) => effect.modifier),
+        ...passiveModifiers(targetStats.passives),
+      ].some(
+        (modifier) =>
+          modifier.kind === "disadvantage" &&
+          modifier.on === "attacksAgainst" &&
+          modifier.opportunity === true,
+      )) ||
     swornElsewhere(attacker, action, resolution, context) ||
     unseenTarget ||
     proneFar ||
@@ -1188,15 +1212,9 @@ export function runAttackRoll(
     ) ||
     placedFlag(attacker, "disadvantage", "attacks", state, context, ability) ||
     placedFlag(target, "disadvantage", "attacksAgainst", state, context) ||
-    hasCondition(
-      attacker,
-      "blinded",
-      "frightened",
-      "poisoned",
-      "prone",
-      "restrained",
-    ) ||
-    invisibleTo(target, attacker) ||
+    hasCondition(attacker, "frightened", "poisoned", "prone", "restrained") ||
+    blindedTo(attacker, target, context) ||
+    unseenInvisible(target, attacker, context) ||
     warded(target, targetStats) ||
     // Escape the Horde: an Opportunity Attack is one made on the bearer's own turn.
     (inOwnTurn(target, context) &&
@@ -1365,12 +1383,22 @@ export function runAttackRoll(
         : [],
     ),
   );
+  // Underwater, a ranged weapon misses past its normal range.
+  const drowned = beyondUnderwaterRange(
+    attacker,
+    target,
+    action,
+    resolution,
+    state,
+  );
   const judge = (natural: number, bonus: number) => {
     const sum = natural + base + bonus;
     return {
       total: sum,
-      success: natural >= critFrom || (natural !== 1 && sum >= ac),
-      critical: natural >= critFrom,
+      success:
+        payload.hits === true ||
+        (!drowned && (natural >= critFrom || (natural !== 1 && sum >= ac))),
+      critical: payload.hits !== true && !drowned && natural >= critFrom,
     };
   };
   // Reactions to the roll before it lands, as Bountiful Luck or Second Chance (combat/reactions.ts).
@@ -1447,8 +1475,25 @@ export function runAttackRoll(
     ...actingEnds(attacker, action),
     ...(isMelee(action) ? prisonEvents(attacker, context) : []),
     ...onceEnded(target, "attacksAgainst", attacker.id),
+    // Fancy Footwork: the creature it attacks in melee can't make Opportunity Attacks against it this turn.
+    ...(isMelee(action) && hasPassive(stats, "fancyFootwork")
+      ? [
+          dndEvent(`${NS}:effectAdded`, {
+            actor: target.id,
+            effect: {
+              sourceId: FANCY_FOOTWORK,
+              casterId: attacker.id,
+              modifier: { kind: "mark" },
+              ends: "casterTurnEnd",
+            },
+          }),
+        ]
+      : []),
     ...quiverDrawn(attacker, action, context),
-    ...revealEvents(attacker),
+    // Skulker's Sniper: a miss from hiding doesn't give the attacker away.
+    ...(!hits && hasPassive(stats, "quietMiss")
+      ? []
+      : castRevealEvents(attacker, action.spellLevel !== null, stats.passives)),
     ...unwarded,
     // Attacking lowers the attacker's own Diabolic Ward until its next turn.
     ...(stats.passives.some(
@@ -2246,12 +2291,35 @@ function landHit(
     natural: payload.natural,
   };
   const sneak = { landed: false };
+  // Sudden Strike: once its Bonus Action attack is taken, Sneak Attack a second time, at a creature not dealt it yet.
+  const twice = stats.passives.flatMap((passive) =>
+    passive.kind === "secondSneak" ? [passive.feature] : [],
+  );
+  const again =
+    twice.length > 0 &&
+    !attacker.usedThisTurn.includes(SNEAK_TWICE) &&
+    !attacker.usedThisTurn.includes(`${SNEAK_AT}${target.id}`) &&
+    twice.some((feature) =>
+      attacker.usedThisTurn.includes(`once:feature:${feature}`),
+    );
   stats.passives.forEach((passive, index) => {
     if (passive.kind !== "extraDamage") return;
     const key = `extra:${String(index)}`;
-    if (passive.oncePerTurn && attacker.usedThisTurn.includes(key)) return;
+    const sneaks = passive.diceCount === SNEAK_DICE;
+    const spent = passive.oncePerTurn && attacker.usedThisTurn.includes(key);
+    if (spent && !(sneaks && again)) return;
     if (!extraFits(passive, attacker, target, action, edge, context)) return;
-    if (passive.diceCount === SNEAK_DICE) sneak.landed = true;
+    if (sneaks) {
+      sneak.landed = true;
+      if (twice.length > 0) {
+        events.push(
+          dndEvent(`${NS}:oncePerTurnUsed`, {
+            actor: attacker.id,
+            key: spent ? SNEAK_TWICE : `${SNEAK_AT}${target.id}`,
+          }),
+        );
+      }
+    }
     // Cunning Strike's options give up some of Sneak Attack's dice before they're rolled.
     const dice_ =
       passive.diceCount === SNEAK_DICE
@@ -2821,12 +2889,15 @@ function retaliated(
   const close = isMelee(action) && within5(attacker, target);
   const stats = deriveStats(target, context);
   const onceKey = `retaliate:${attacker.id}`;
+  const near = distanceFeet(attacker.position, target.position);
   const backs = [
     ...target.activeEffects.map((effect) => effect.modifier),
     ...passiveModifiers(stats.passives),
   ].flatMap((modifier) =>
     modifier.kind === "retaliate" &&
-    (close || modifier.anyAttack === true) &&
+    (modifier.within !== undefined
+      ? near <= modifier.within
+      : close || modifier.anyAttack === true) &&
     (!modifier.marked || markedBy(attacker, target, modifier.marked)) &&
     (!modifier.oncePerTurn || !attacker.usedThisTurn.includes(onceKey)) &&
     (!modifier.able || !hasCondition(target, ...INCAPACITATING)) &&
@@ -3129,7 +3200,7 @@ function oncePerTurnHit(
 
 function inOwnTurn(target: Actor, context: Context): boolean {
   const { combat } = context.state;
-  return combat?.order[combat.index] === target.id;
+  return turnId(combat) === target.id;
 }
 
 // Lords' Alliance Agent: once a turn, a Critical Hit gives the nearest ally within 30 feet without Heroic

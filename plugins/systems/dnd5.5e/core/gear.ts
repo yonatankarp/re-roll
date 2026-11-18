@@ -196,8 +196,10 @@ export function gearOptions(
           : [];
       if (WORN_TYPES.has(item.type)) {
         const wearable = item.type === "weapon" || canUse(item, stats, access);
+        // A second suit of the armor worn, or of the Shield held, would only change places with it.
+        const same = item.type !== "weapon" && worn.includes(id);
         return [
-          ...((actor.stowed ?? []).includes(id) && wearable
+          ...((actor.stowed ?? []).includes(id) && wearable && !same
             ? [{ id: `equip:${id}`, label: `Equip ${item.name}` }]
             : []),
           ...(worn.includes(id) && !found

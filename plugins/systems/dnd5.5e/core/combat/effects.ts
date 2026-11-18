@@ -42,6 +42,7 @@ import {
   NS,
   frame,
   SURGED,
+  turnId,
 } from "../state.ts";
 import {
   type ContentAccess,
@@ -145,7 +146,12 @@ import {
 } from "../legendary.ts";
 import { insideDamageEvents } from "./swallow.ts";
 import { headDamageEvents } from "./heads.ts";
-import { lastsFor, lethargyEffect, limitEvents } from "./durations.ts";
+import {
+  lastsFor,
+  lethargyEffect,
+  limitEvents,
+  timeStopEnds,
+} from "./durations.ts";
 import { movedFrames } from "./areas.ts";
 import { liftEvents } from "./falling.ts";
 import { reincarnateEvents } from "../reincarnate.ts";
@@ -154,6 +160,7 @@ import {
   dispelEvents,
   isSpell,
   snuffedLights,
+  spellLevelOf,
   spellOf,
 } from "./dispel.ts";
 import { currentShape, formOf, formsFor, SHAPE, shapeOf } from "../forms.ts";
@@ -782,9 +789,7 @@ export const ENDURED = "endured";
 // A foe that just dropped to 0 Hit Points feeds its enemies' traits, as Dark One's Blessing.
 // shortcut: the creature whose turn it is counts as the one that dropped it, as most damage comes on its own turn.
 function killEvents(fallen: Actor, context: Context): SystemEvent[] {
-  const turn = context.state.combat
-    ? context.state.combat.order[context.state.combat.index]
-    : undefined;
+  const turn = context.state.combat ? turnId(context.state.combat) : undefined;
   return Object.values(context.state.actors).flatMap((bearer) => {
     if (bearer.side === fallen.side || isDown(bearer)) return [];
     const stats = deriveStats(bearer, context);
@@ -1724,14 +1729,14 @@ export function damageRiders(
       return [];
     }
     // A hit during the target's own turn is an Opportunity Attack.
-    if (passive.opportunity && combat?.order[combat.index] !== target.id) {
+    if (passive.opportunity && combat && turnId(combat) !== target.id) {
       return [];
     }
     if (spell && !passive.spells) return [];
     if (passive.critical && !critical) return [];
     if (passive.while && !underEffect(attacker, passive.while)) return [];
     if (passive.firstRound && (combat?.round ?? 1) > 1) return [];
-    if (passive.ownTurn && combat?.order[combat.index] !== attacker.id) {
+    if (passive.ownTurn && combat && turnId(combat) !== attacker.id) {
       return [];
     }
     const key =
@@ -2213,6 +2218,15 @@ export function leafEvents(
       case "dash":
       case "disengage":
       case "dodge": {
+        if (effect.kind !== "dodge") {
+          events.push(
+            ...tacticRiderEvents(
+              target,
+              deriveStats(target, context),
+              effect.kind,
+            ),
+          );
+        }
         const tactic = (
           name: "dash" | "disengage" | "dodge",
           value?: number,
@@ -2278,6 +2292,10 @@ export function leafEvents(
                   : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
+              ...(effect.endsInLight ? { endsInLight: true as const } : {}),
+              ...(effect.untilIncapacitated
+                ? { untilIncapacitated: true as const }
+                : {}),
               ...lingersFor(effect.duration, !context.state.combat),
               ...swallowed,
             },
@@ -2351,6 +2369,10 @@ export function leafEvents(
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
               ...(effect.endsOnSpell ? { endsOnSpell: true } : {}),
               ...(effect.endsOn ? { endsOn: effect.endsOn } : {}),
+              ...(effect.endsInLight ? { endsInLight: true as const } : {}),
+              ...(effect.untilIncapacitated
+                ? { untilIncapacitated: true as const }
+                : {}),
               ...(effect.saveOnDamage && conditionSave
                 ? {
                     saveOnDamage: {
@@ -2652,6 +2674,22 @@ export function leafEvents(
         }
         break;
       }
+      case "hide": // its own frame, after the rest (actions.ts hideFrames)
+      case "carry":
+        if (target.id !== caster.id) {
+          events.push(
+            dndEvent(`${NS}:effectAdded`, {
+              actor: caster.id,
+              effect: {
+                sourceId,
+                casterId: caster.id,
+                modifier: { kind: "carrying", actor: target.id },
+                ends: "casterTurnEnd",
+              },
+            }),
+          );
+        }
+        break;
       case "swapPlaces":
         if (caster.position && target.position && caster.id !== target.id) {
           events.push(
@@ -2693,6 +2731,7 @@ export function leafEvents(
         break;
       // A push or pull is made on the grid as Shove's is, in a straight line.
       case "forcedMove": {
+        if (effect.option) break; // given once its option is picked (combat/options.ts)
         const fits =
           (effect.maxSize === undefined ||
             sizeOf(target, context) <= SIZES.indexOf(effect.maxSize)) &&
@@ -2728,6 +2767,13 @@ export function leafEvents(
       }
       case "disarm": {
         if (isDown(target) || !target.position) break;
+        // War Bond: no disarming while it can act.
+        if (
+          hasPassive(deriveStats(target, context), "warBond") &&
+          !hasCondition(target, ...INCAPACITATING)
+        ) {
+          break;
+        }
         const held = equipped(target).find(
           (id) =>
             ItemSchema.safeParse(context.content(id)).data?.type === "weapon",
@@ -2947,6 +2993,7 @@ export function leafEvents(
       case "redirect":
       case "drawAttack":
       case "negateHit":
+      case "redirectMiss":
       case "noCritical":
       case "stealSpell":
       case "stickWeapon":
@@ -3029,7 +3076,9 @@ function zoneEvents(
   const events: SystemEvent[] = [];
   const { targeting } = action.activation;
   const wind = effects.find((effect) => effect.kind === "disperse");
-  if (wind?.kind === "disperse" && "area" in targeting) {
+  if (wind?.kind === "disperse" && wind.maxLevel !== undefined) {
+    events.push(...overlapEnds(wind, effects, actor, at, context));
+  } else if (wind?.kind === "disperse" && "area" in targeting) {
     const { shape, radius } = targeting.area;
     // shortcut: Sunburst ends any Darkness zone, as a monster's own Darkness is a spell too.
     const ends = (zone: ReturnType<typeof zonesOf>[number]): boolean =>
@@ -3084,6 +3133,21 @@ function zoneEvents(
       events.push(...snuffedLights(at, radius, context));
     }
     const centre = effect.follows ? (actor.position ?? at) : at;
+    // Time Stop ends once an area its caster leaves during it covers another creature.
+    events.push(
+      ...timeStopEnds(
+        actor,
+        Object.values(context.state.actors).filter(
+          (other) =>
+            other.position !== null &&
+            !isDead(other) &&
+            distanceFeet(other.position, centre) <= radius,
+        ),
+      ),
+    );
+    if (effect.zone === "sunlight") {
+      events.push(...dazzled(centre, spellSource(action), actor, context));
+    }
     const wall =
       effect.zone === "wall"
         ? wallRing(centre, radius, context, effect.walls !== "sight")
@@ -3125,6 +3189,9 @@ function zoneEvents(
             ...(wall ? { blocks: wall.squares } : {}),
             ...(wall && effect.walls ? { walls: effect.walls } : {}),
             ...(wall && fixedLayers ? { layers: fixedLayers } : {}),
+            ...(effect.dim ? { dim: effect.dim } : {}),
+            ...(effect.ownerSees ? { ownerSees: true as const } : {}),
+            ...(effect.reveals ? { reveals: true as const } : {}),
             name: action.name,
           },
           ends: effectEnds(effect.duration),
@@ -3134,6 +3201,75 @@ function zoneEvents(
     );
   }
   return events;
+}
+
+// A Robe of Eyes' wearer within its reach of a spell's sunlight is Blinded for a minute, saving at each turn's end.
+function dazzled(
+  centre: Square,
+  sourceId: string,
+  caster: Actor,
+  context: Context,
+): SystemEvent[] {
+  return Object.values(context.state.actors).flatMap((bearer) => {
+    if (!bearer.position || isDead(bearer)) return [];
+    const passive = deriveStats(bearer, context).passives.find(
+      (item) => item.kind === "dazzledBy",
+    );
+    if (
+      passive?.kind !== "dazzledBy" ||
+      distanceFeet(bearer.position, centre) > passive.within
+    ) {
+      return [];
+    }
+    return [
+      dndEvent(`${NS}:effectAdded`, {
+        actor: bearer.id,
+        effect: {
+          sourceId: `${sourceId}:dazzled`,
+          casterId: caster.id,
+          modifier: { kind: "condition", condition: "blinded" },
+          ends: "spellDuration",
+          ...lastsFor({ minutes: 1 }, caster, bearer, context.state),
+          repeatSave: { ability: "con", dc: passive.dc },
+        },
+      }),
+    ];
+  });
+}
+
+// Daylight's sunlight ends Darkness of level 3 or lower that its area overlaps, and the Boon of the Bright Sun's
+// light any spell's Darkness.
+function overlapEnds(
+  wind: Extract<LeafEffect, { kind: "disperse" }>,
+  effects: readonly LeafEffect[],
+  actor: Actor,
+  at: Square,
+  context: Context,
+): SystemEvent[] {
+  const own = effects.flatMap((effect) =>
+    effect.kind === "zone" ? [effect] : [],
+  );
+  const reach = Math.max(0, ...own.map((effect) => effect.radius));
+  const centre = own.some((effect) => effect.follows)
+    ? (actor.position ?? at)
+    : at;
+  const kinds = wind.zones ?? ["fog"];
+  return zonesOf(context.state).flatMap((zone) => {
+    const owner = context.state.actors[zone.owner];
+    const level =
+      zone.level ?? spellLevelOf(zone.sourceId, owner, context) ?? 9;
+    return kinds.includes(zone.zone) &&
+      level <= (wind.maxLevel ?? 9) &&
+      distanceFeet(zone.at, centre) <= zone.radius + reach
+      ? [
+          dndEvent(`${NS}:effectEnded`, {
+            actor: zone.owner,
+            sourceId: zone.sourceId,
+            casterId: zone.owner,
+          }),
+        ]
+      : [];
+  });
 }
 
 // The damage type of `types` its foes in the fight resist least, as a caster picking Conjure Elemental's element.
@@ -3733,6 +3869,29 @@ export function rollSave(
 
 const SAVE_REROLL = "save-reroll";
 
+// What taking the Dash or Disengage action gives its taker until its turn ends, as Speedy's Dash over Difficult Terrain.
+export function tacticRiderEvents(
+  actor: Actor,
+  stats: Stats,
+  tactic: "dash" | "disengage",
+): SystemEvent[] {
+  return stats.passives.flatMap((passive, index) =>
+    passive.kind === "tacticRider" && passive.tactic === tactic
+      ? passive.modifiers.map((modifier) =>
+          dndEvent(`${NS}:effectAdded`, {
+            actor: actor.id,
+            effect: {
+              sourceId: `tactic-rider:${tactic}:${String(index)}`,
+              casterId: actor.id,
+              modifier,
+              ends: "casterTurnEnd",
+            },
+          }),
+        )
+      : [],
+  );
+}
+
 // Set while a natural 1's own save is rolled, so that save doesn't set it off again.
 let echoing = false;
 
@@ -4204,6 +4363,10 @@ export function resolveAction(
   switch (resolution.kind) {
     case "automatic": {
       beginConcentration(resolution.effects);
+      // The Hide action as part of another, as Shrouding Spells', comes once the rest is done (actions.ts).
+      if (resolution.effects.some((effect) => effect.kind === "hide")) {
+        frames.push(frame("hideNow", { actor: actor.id }));
+      }
       for (const effect of resolution.effects) {
         if (effect.kind === "moveZone" && aim) {
           const moved = movedZone(effect.source, actor, aim, context);
@@ -4329,6 +4492,8 @@ export function resolveAction(
                   ? undefined
                   : { actor: actor.id, feet: effect.beside },
                 action.id,
+                effect.fly,
+                effect.retrace,
               ),
             );
           }

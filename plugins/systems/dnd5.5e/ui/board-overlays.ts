@@ -41,6 +41,7 @@ export function showGround(ctx: BoardContext, terrain: Terrain | null): void {
     ["threeQuarters", terrain.threeQuarters, "Three-quarters cover"],
     ["dim", terrain.dim, "Dim light"],
     ["dark", terrain.dark, "Darkness"],
+    ["water", terrain.water ?? [], "Water"],
   ] as const;
   for (const [kind, keys, name] of kinds) {
     for (const key of keys) {

@@ -3,7 +3,11 @@ import { leashed } from "./duel.ts";
 import { knownFoes, knows } from "../fog.ts";
 import {
   type Actor,
+  ATTACK_ACTION,
   CAST_ACTION,
+  LEVELED_CAST,
+  MAGIC_ACTION,
+  SLOT_CAST_ACTION,
   controllingRider,
   dndEvent,
   type DndState,
@@ -17,6 +21,7 @@ import {
   NS,
   frame,
   SURGED,
+  turnId,
 } from "../state.ts";
 import {
   deriveStats,
@@ -49,6 +54,7 @@ import {
   speedsOf,
   type Through,
   throughOf,
+  walksOnWater,
 } from "../movement-modes.ts";
 import { behindTotalCover, difficultSquares } from "../sight.ts";
 import {
@@ -69,6 +75,7 @@ import {
   inZone,
   sealed,
   slowingKeys,
+  zoneModifiers,
   zonesOn,
 } from "../zones.ts";
 import { spellLevelOf } from "./dispel.ts";
@@ -84,6 +91,7 @@ import {
 import { bossAction } from "../legendary.ts";
 import { currentShape } from "../forms.ts";
 import { aimScore, aimSquares, caughtBy } from "../targeting.ts";
+import { breathAgainEvents } from "./water.ts";
 
 // Questions about a fight that change nothing: who is an ally or a foe, what reaches, what an actor can afford.
 
@@ -238,7 +246,11 @@ export function rollBonus(
     total += modifier.subtract ? -rolled : rolled;
   }
   const stats = deriveStats(actor, context);
-  for (const modifier of passiveModifiers(stats.passives)) {
+  // What a zone it stands in grants, as Pass without Trace's +10 to Stealth.
+  const placed = context.state.combat
+    ? zoneModifiers(actor, context.state, context)
+    : [];
+  for (const modifier of [...passiveModifiers(stats.passives), ...placed]) {
     if (
       modifier.kind === "bonus" &&
       modifier.to === to &&
@@ -407,8 +419,10 @@ export function groundFor(
   readonly walls: ReadonlySet<string>;
   readonly squeeze: boolean;
   readonly overTerrain: boolean; // crosses difficult terrain at no extra cost, however it moves
+  readonly water: ReadonlySet<string>; // squares to swim in
+  readonly waterWalks: boolean; // walks over water as on ground, as with Water Walk
 } {
-  const through = throughOf(stats);
+  const through = throughOf(stats, actor);
   // shortcut: going through walls means the map's own; a wall a spell raises stops it as it does anyone.
   const walls = state.combat?.walls ?? [];
   const solid = blockedSquares(state, "walking");
@@ -458,7 +472,25 @@ export function groundFor(
     walls: blockingSet(state, "walking"),
     squeeze: through.squeeze,
     overTerrain: through.terrain || unhindered(actor, stats),
+    water: new Set(state.combat?.terrain?.water ?? []),
+    waterWalks: walksOnWater(actor, stats),
   };
+}
+
+// The squares that aren't water, where a swimmer can't go on its Swim Speed.
+function dryLand(
+  grid: { readonly width: number; readonly height: number },
+  water: ReadonlySet<string>,
+  from: Square,
+): Set<string> {
+  const dry = new Set<string>();
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      const key = squareKey({ x, y });
+      if (!water.has(key) && (x !== from.x || y !== from.y)) dry.add(key);
+    }
+  }
+  return dry;
 }
 
 // The squares with no wall beside them, where a climber has nothing to hold.
@@ -520,19 +552,30 @@ export function moveSquares(
     ground.costly.size === 0
       ? ground.terrain
       : new Set([...ground.terrain, ...ground.costly]);
+  // Water: a walker swims it at double cost, unless it swims as fast as it walks or walks on water; a Swim Speed of
+  // its own keeps to the water (the 2024 rules switch Speeds mid-move; shortcut: each Speed moves on its own here).
+  const swimming = speedsOf(actor, stats).get("swim") ?? 0;
+  const wet =
+    ground.water.size > 0 && !ground.waterWalks && swimming < stats.speed;
+  const dry = ground.water.size > 0 ? dryLand(grid, ground.water, from) : null;
   // Each square at its cheapest, with each foot of movement costing `cost` feet.
   const search = (cost: number): Map<string, Walk> => {
     const best = new Map<string, Walk>();
     for (const [mode, left] of speedsLeft(actor, stats)) {
       const feet = Math.floor(left / cost / SQUARE_FEET) * SQUARE_FEET;
       if (feet <= 0 || (up && mode !== up)) continue;
+      if (mode === "swim" && !dry) continue;
+      const rough =
+        crossesDifficult(mode) || ground.overTerrain ? ground.costly : walking;
       const found = reachableSquares(
         from,
         feet,
         grid,
-        blocked,
+        mode === "swim" && dry ? new Set([...blocked, ...dry]) : blocked,
         ground.occupied,
-        crossesDifficult(mode) || ground.overTerrain ? ground.costly : walking,
+        wet && mode !== "fly" && mode !== "swim"
+          ? new Set([...rough, ...ground.water])
+          : rough,
         ground.walls,
         { squeeze: ground.squeeze, jump },
       );
@@ -778,10 +821,19 @@ export function canAfford(
   const { carrying, afterAction, resolution } = action.activation;
   if (carrying && !actor.inventory.includes(carrying)) return false;
   if (afterAction && actor.budget.action) return false;
+  const used = actor.usedThisTurn;
+  if (afterAction === "attack" && !used.includes(ATTACK_ACTION)) return false;
+  if (
+    afterAction === "attackOrMagic" &&
+    !used.includes(ATTACK_ACTION) &&
+    !used.includes(MAGIC_ACTION)
+  ) {
+    return false;
+  }
   // only while Bloodied, as Unearthly Recovery
   if (action.activation.bloodied && actor.hp * 2 >= stats.maxHp) return false;
   if (action.activation.beforeAction && !actor.budget.action) return false;
-  if (!gatesOpen(action, actor)) return false;
+  if (!gatesOpen(action, actor, stats)) return false;
   const limits = limitsOf(actor);
   // Befuddlement: no spells at all.
   if (limits.noSpells && action.spellLevel !== null) return false;
@@ -821,14 +873,43 @@ export function canAfford(
 
 // What an activation needs this turn beyond its costs: Steady Aim's standing still, Battle Magic's spell, Fleet Step's
 // Bonus Action, Travel along the Tree's Rage, and Action Surge's spent action, once a turn and never for magic.
-function gatesOpen(action: KnownAction, actor: Actor): boolean {
+function gatesOpen(action: KnownAction, actor: Actor, stats: Stats): boolean {
   const { activation } = action;
   const used = actor.usedThisTurn;
   if (activation.unmoved && actor.moved > 0) return false;
   if (activation.oncePerTurn && used.includes(onceKey(action))) return false;
-  if (activation.afterCast && !used.includes(CAST_ACTION)) return false;
+  if (activation.afterCast === true && !used.includes(CAST_ACTION))
+    return false;
+  if (activation.afterCast === "slot" && !used.includes(SLOT_CAST_ACTION)) {
+    return false;
+  }
+  if (activation.afterCast === "leveled" && !used.includes(LEVELED_CAST)) {
+    return false;
+  }
   if (activation.afterBonusAction && actor.budget.bonusAction) return false;
   if (activation.while && !underEffect(actor, activation.while)) return false;
+  if (
+    activation.minLevel &&
+    (stats.classLevels[activation.minLevel.class] ?? 0) <
+      activation.minLevel.level
+  ) {
+    return false;
+  }
+  if (
+    activation.afterTargets !== undefined &&
+    used.filter((key) => key.startsWith(ATTACKED)).length <
+      activation.afterTargets
+  ) {
+    return false;
+  }
+  if (
+    activation.afterUse &&
+    !used.includes(
+      usedKey(activation.afterUse.feature, activation.afterUse.label),
+    )
+  ) {
+    return false;
+  }
   if (
     activation.withAttack &&
     !actor.budget.action &&
@@ -856,6 +937,14 @@ function gatesOpen(action: KnownAction, actor: Actor): boolean {
     cost.includes("action")
   );
 }
+
+// The usedThisTurn mark of a creature attacked this turn, kept for Distant Strike's bearer (combat/actions.ts).
+const ATTACKED = "attacked:";
+export const attackedKey = (id: string): string => `${ATTACKED}${id}`;
+
+// The usedThisTurn mark of an activation of a feature, with its label, used this turn (combat/actions.ts).
+export const usedKey = (feature: string, label?: string): string =>
+  `used:${feature}${label === undefined ? "" : `:${label}`}`;
 
 // Whether an effect of one of these features' activations is on the actor, or it concentrates on one of these
 // spells, as a Rage for Travel along the Tree or Divine Fury.
@@ -969,7 +1058,7 @@ export function extraFits(
   context: Context,
 ): boolean {
   const { state } = context;
-  const turn = state.combat?.order[state.combat.index];
+  const turn = turnId(state.combat);
   if (passive.ownTurn && turn !== attacker.id) return false;
   if (passive.firstRound && (state.combat?.round ?? 1) > 1) return false;
   if (passive.while?.some((id) => !underEffect(attacker, [id]))) return false;
@@ -1092,25 +1181,33 @@ export function inReach(
   if ("self" in targeting) return [actor];
   const charmers = charmersOf(actor);
   const downed = "downed" in targeting && targeting.downed === true;
-  return [
-    ...(targeting.side !== "ally"
-      ? knownFoes(state, actor, access).filter(
-          (item) => isDown(item) === downed && !charmers.has(item.id),
-        )
-      : []),
-    ...(targeting.side !== "enemy"
-      ? allies(state, actor).filter((item) => !downed || isDown(item))
-      : []),
-  ]
-    .filter(
-      (item) =>
-        isDead(item) === ("dead" in targeting && targeting.dead === true) &&
-        deadWithin(item, targeting),
-    )
-    .filter((item) => fitsType(item, targeting, access, actor))
-    .filter((item) => reaches(action, actor, item))
-    .filter((item) => !behindTotalCover(state, actor, item))
-    .filter((item) => !walledApart(actor, item, action, state, access));
+  return (
+    [
+      ...(targeting.side !== "ally"
+        ? knownFoes(state, actor, access).filter(
+            (item) => isDown(item) === downed && !charmers.has(item.id),
+          )
+        : []),
+      ...(targeting.side !== "enemy"
+        ? allies(state, actor).filter((item) => !downed || isDown(item))
+        : []),
+    ]
+      .filter(
+        (item) =>
+          isDead(item) === ("dead" in targeting && targeting.dead === true) &&
+          deadWithin(item, targeting),
+      )
+      .filter((item) => fitsType(item, targeting, access, actor))
+      // Distant Strike's third attack: only at one it hasn't attacked this turn.
+      .filter(
+        (item) =>
+          action.activation.afterTargets === undefined ||
+          !actor.usedThisTurn.includes(attackedKey(item.id)),
+      )
+      .filter((item) => reaches(action, actor, item))
+      .filter((item) => !behindTotalCover(state, actor, item))
+      .filter((item) => !walledApart(actor, item, action, state, access))
+  );
 }
 
 // Whether something keeps `target` out of `actor`'s reach: either is shut away (Resilient Sphere, Maze), the actor
@@ -1332,6 +1429,7 @@ export function combatEnded(
   outcome?: "defeat" | "flee",
 ): SystemEvent[] {
   return [
+    ...breathAgainEvents(state),
     {
       kind: "encounterEnded",
       encounter: state.combat?.encounter ?? "",
@@ -1342,7 +1440,7 @@ export function combatEnded(
 }
 
 export function currentActor(state: DndState): Actor | undefined {
-  const actorId = state.combat?.order[state.combat.index];
+  const actorId = turnId(state.combat);
   return actorId === undefined ? undefined : state.actors[actorId];
 }
 

@@ -15,6 +15,7 @@ import {
   effectiveBuild,
   equipped,
   hasCondition,
+  turnId,
 } from "./state.ts";
 import { lightAt } from "./sight.ts";
 import { currentShape, formKept, formOf, usableIn } from "./forms.ts";
@@ -166,7 +167,7 @@ export interface Stats {
   readonly ordeal: number; // taken from every d20 test after coming back from the dead, as Raise Dead's
   // A stat block's Speeds besides walking. Others come from effects (core/movement-modes.ts).
   readonly speeds: Readonly<
-    Partial<Record<"fly" | "climb" | "burrow", number>>
+    Partial<Record<"fly" | "climb" | "burrow" | "swim", number>>
   >;
   // From magic items worn, and attuned where they need it.
   readonly itemBonuses: Readonly<
@@ -412,7 +413,12 @@ function freeCastActions(
     ];
     return kinds.flatMap((how, index) => {
       if (spell.level === 0 && !quick(how)) return [];
-      const id = typeof how === "object" ? how.resource : `free:${spellId}`;
+      const id =
+        typeof how === "object" && how.resource
+          ? how.resource
+          : `free:${spellId}`;
+      const unlimited =
+        how === "atWill" || (typeof how === "object" && !how.resource);
       const slot =
         typeof how === "object" && how.slotLevel
           ? Object.entries(how.slotLevel)
@@ -435,12 +441,18 @@ function freeCastActions(
         typeof how === "object" && how.minutes !== undefined
           ? unconcentrated(leveled, how.minutes)
           : leveled;
-      const cast =
+      const targeted =
         typeof how === "object" && how.self
           ? { ...lasting, targeting: { self: true as const } }
           : lasting;
+      const cast =
+        typeof how === "object" && how.whileIn
+          ? { ...targeted, whileIn: how.whileIn }
+          : targeted;
       const suffix =
-        index === 0 ? "" : `:${typeof how === "object" ? how.resource : how}`;
+        index === 0
+          ? ""
+          : `:${typeof how === "object" ? (how.resource ?? "free") : how}`;
       return [
         {
           action: {
@@ -454,7 +466,7 @@ function freeCastActions(
                   .map((cost) =>
                     quick(how) && cost === "action" ? "bonusAction" : cost,
                   ),
-                ...(how === "atWill" ? [] : [{ resource: id }]),
+                ...(unlimited ? [] : [{ resource: id }]),
               ],
             },
             spellLevel: slot,
@@ -526,7 +538,7 @@ function freeCastOf(
 ): FreeCast | undefined {
   if (how === undefined || how === true || typeof how === "string") return how;
   return "resource" in how && typeof how.resource === "string"
-    ? (how as FreeCast)
+    ? how
     : (how as Record<string, FreeCast>)[spell];
 }
 
@@ -1101,7 +1113,7 @@ function bestMentalAbility(abilities: AbilityScores): Ability {
 export function ownFirstTurn(actor: Actor, access: ContentAccess): boolean {
   const combat = (access as ContentAccess & { readonly state?: DndState }).state
     ?.combat;
-  return combat?.round === 1 && combat.order[combat.index] === actor.id;
+  return combat?.round === 1 && turnId(combat) === actor.id;
 }
 
 // Whether it's the actor's own turn and it has taken its action, as for Blade Flourish's Speed.
@@ -1109,7 +1121,7 @@ export function ownFirstTurn(actor: Actor, access: ContentAccess): boolean {
 function ownTurnActed(actor: Actor, access: ContentAccess): boolean {
   const combat = (access as ContentAccess & { readonly state?: DndState }).state
     ?.combat;
-  return combat?.order[combat.index] === actor.id && !actor.budget.action;
+  return turnId(combat) === actor.id && !actor.budget.action;
 }
 
 // The variants picked for a feature, or for the feature it follows; with none picked, as many as it gives at first.
@@ -1371,12 +1383,52 @@ function withSpellDamage(
 }
 
 // A feature's activations with the effects other features ride on them, as Tactical Shift's move on Second Wind.
+// Improved Mystic Fighting Style: a spell of the levels and class list named, that takes an action, can also be cast
+// with the passive's costs, as part of the Bonus Action of Flurry of Blows.
+function castWithVariants(
+  actions: readonly KnownAction[],
+  passives: readonly Passive[],
+  access: ContentAccess,
+): readonly KnownAction[] {
+  const ways = passives.flatMap((passive) =>
+    passive.kind === "castWith" ? [passive] : [],
+  );
+  if (ways.length === 0) return actions;
+  const extra = actions.flatMap((action) => {
+    const [, spellId] = /^spell:([^:]+:[^:]+)$/.exec(action.id) ?? [];
+    if (!spellId || action.spellLevel === null) return [];
+    if (!action.activation.cost.includes("action")) return [];
+    const spell = lookup(access, SpellSchema, spellId);
+    return ways.flatMap((way) =>
+      way.levels.includes(action.spellLevel ?? -1) &&
+      spell.classes.includes(way.list)
+        ? [
+            {
+              ...action,
+              id: `${action.id}:with`,
+              name: `${action.name} (${way.label})`,
+              activation: {
+                ...action.activation,
+                cost: [
+                  ...action.activation.cost.filter((cost) => cost !== "action"),
+                  ...way.cost,
+                ],
+              },
+            },
+          ]
+        : [],
+    );
+  });
+  return extra.length === 0 ? actions : [...actions, ...extra];
+}
+
 function withRiders(
   actions: readonly KnownAction[],
   passives: readonly Passive[],
   actor: Actor,
 ): KnownAction[] {
-  return actions.map((action) => {
+  return actions.map((given) => {
+    let action = given;
     const { resolution } = action.activation;
     const riders = passives.flatMap((passive) =>
       passive.kind === "activationRider" &&
@@ -1392,6 +1444,16 @@ function withRiders(
     );
     const extra = riders.flatMap(({ effects }) => effects);
     const damage = riders.flatMap(({ damage: more }) => more ?? []);
+    const own = riders.flatMap(({ self }) => self ?? []);
+    if (own.length > 0) {
+      action = {
+        ...action,
+        activation: {
+          ...action.activation,
+          alsoSelf: [...(action.activation.alsoSelf ?? []), ...own],
+        },
+      };
+    }
     // On a save, whether it succeeds or fails, as Focused Strike's with Stunning Strike.
     if (resolution.kind === "save" && (damage.length > 0 || extra.length > 0)) {
       return {
@@ -2069,9 +2131,25 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
       skills.add(picked as Skill);
     }
   }
+  // A trait that holds only without Heavy armor, or without armor and a Shield, as Fast Movement or Unarmored Movement.
+  const heavy = worn.some(
+    ([, item]) => item.type === "armor" && item.armorType === "heavy",
+  );
+  const fits = (passive: Passive): boolean =>
+    (passive.kind !== "modifier" ||
+      !passive.while ||
+      passive.while.some((id) =>
+        actor.activeEffects.some(({ sourceId }) =>
+          sourceId.startsWith(`feature:${id}:`),
+        ),
+      )) &&
+    ((passive.kind !== "modifier" && passive.kind !== "weaponRider") ||
+      passive.armor === undefined ||
+      (passive.armor === "noHeavy" ? !heavy : !armored));
   // Durable Magic's bonuses hold only while the bearer concentrates, and Power of the Wilds' Lion aura only in a Rage.
   const traits = [...itemPassives, ...kept, ...fromFeatures.passives].filter(
     (passive) =>
+      fits(passive) &&
       (passive.kind !== "modifier" ||
         !passive.concentrating ||
         actor.concentratingOn !== null) &&
@@ -2239,15 +2317,20 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   actions.push(
     ...fromFeatures.actions.map((action) => {
       const { targeting } = action.activation;
-      if (!("creatures" in targeting) || !targeting.creaturesBy) return action;
-      const mod = abilityModifier(abilities[targeting.creaturesBy]);
+      if (!("creatures" in targeting)) return action;
+      const { creaturesBy, creaturesPlus } = targeting;
+      if (!creaturesBy && !creaturesPlus) return action;
+      const by = creaturesBy ? abilityModifier(abilities[creaturesBy]) : 0;
+      const plus = creaturesPlus
+        ? Math.max(0, abilityModifier(abilities[creaturesPlus]))
+        : 0;
       return {
         ...action,
         activation: {
           ...action.activation,
           targeting: {
             ...targeting,
-            creatures: Math.max(targeting.creatures, mod),
+            creatures: Math.max(targeting.creatures, by) + plus,
           },
         },
       };
@@ -2449,13 +2532,15 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     slots,
     resources: {},
     passives: [
-      ...itemPassives,
+      ...itemPassives.filter(fits),
       ...kept,
-      ...fromFeatures.passives.map((passive) =>
-        passive.kind === "extraDamage"
-          ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
-          : passive,
-      ),
+      ...fromFeatures.passives
+        .filter(fits)
+        .map((passive) =>
+          passive.kind === "extraDamage"
+            ? { ...passive, dice: scaledDice(passive, scaling) ?? passive.dice }
+            : passive,
+        ),
       ...(holdsConcentration(actor)
         ? [{ kind: "concentrationAdvantage" as const }]
         : []),
@@ -2479,7 +2564,11 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
         withWeaponRiders(
           withSpellDamage(
             emptyHanded(
-              withRiders(actions, fromFeatures.passives, actor),
+              withRiders(
+                castWithVariants(actions, fromFeatures.passives, access),
+                fromFeatures.passives,
+                actor,
+              ),
               actor,
               access,
             ),
@@ -2641,7 +2730,6 @@ function familiarFrom(
   return {};
 }
 
-// shortcut: a speed bonus doesn't check the armor it needs, such as Fast Movement's.
 function passiveBonus(
   stats: Stats,
   to: "speed" | "initiative" | "maxHp",
@@ -3146,7 +3234,7 @@ function statBlockStats(
       checks: 0,
     },
     speeds: Object.fromEntries(
-      (["fly", "climb", "burrow"] as const).flatMap((mode) => {
+      (["fly", "climb", "burrow", "swim"] as const).flatMap((mode) => {
         const feet = monster.speeds?.[mode];
         return feet ? [[mode, Math.max(0, feet - 5 * actor.exhaustion)]] : [];
       }),
@@ -3266,7 +3354,7 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
       }
     : own;
   // A Ring of Free Action: nothing takes Speed off.
-  const speed = effectBonus(actor, "speed", hasSteadySpeed(stats));
+  const speed = effectBonus(actor, "speed", hasSteadySpeed(stats, actor));
   const maxHp = effectBonus(actor, "maxHp");
   const stuck = new Set(
     actor.activeEffects.flatMap(({ modifier }) =>
@@ -3281,7 +3369,7 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
           ...changed,
           actions: changed.actions.filter((action) => !stuck.has(action.id)),
         };
-  const moving = zoneMoves(actor);
+  const moving = [...zoneMoves(actor), ...jumpActions(actor, stats)];
   const moved =
     moving.length > 0
       ? { ...free, actions: [...free.actions, ...moving] }
@@ -3307,16 +3395,60 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
           ),
         }
       : surrounded;
+  // Boots of Striding and Springing: a Speed of at least 30 feet.
+  const floor = Math.max(
+    0,
+    ...passiveModifiers(placed.passives).flatMap((modifier) =>
+      modifier.kind === "speedFloor" ? [modifier.feet] : [],
+    ),
+  );
+  const floored =
+    floor > placed.speed + speed ? { ...placed, speed: floor - speed } : placed;
   return speed === 0 && maxHp === 0 && loss === 0
-    ? placed
+    ? floored
     : {
-        ...placed,
-        speed: Math.max(0, stats.speed + speed),
+        ...floored,
+        speed: Math.max(0, floored.speed + speed),
         maxHp: Math.max(1, stats.maxHp + maxHp - loss),
       };
 }
 
 export const MOVE_ZONE = "zone-move:";
+export const JUMP_BOOST = "jump-boost";
+
+// A jump farther than walking allows, once a turn, for a little movement, as the Jump spell's 30 feet for 10.
+function jumpActions(actor: Actor, stats: Stats): KnownAction[] {
+  const best = [
+    ...actor.activeEffects.map(({ modifier }) => modifier),
+    ...passiveModifiers(stats.passives),
+  ].reduce<Extract<Modifier, { kind: "jumpBoost" }> | null>(
+    (most, modifier) =>
+      modifier.kind === "jumpBoost" && modifier.feet > (most?.feet ?? 0)
+        ? modifier
+        : most,
+    null,
+  );
+  if (!best) return [];
+  return [
+    {
+      id: JUMP_BOOST,
+      name: `Jump (${String(best.feet)} ft for ${String(best.movement)} ft of movement)`,
+      activation: {
+        cost: [],
+        oncePerTurn: JUMP_BOOST,
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          damage: [],
+          effects: [
+            { kind: "teleport", feet: best.feet, movement: best.movement },
+          ],
+        },
+      },
+      spellLevel: null,
+    },
+  ];
+}
 
 // An action to move an area the bearer keeps, as Moonbeam's Magic action. shortcut: its reach is counted from the
 // bearer, not from where the area stands.
@@ -3332,7 +3464,13 @@ function zoneMoves(actor: Actor): KnownAction[] {
           id: `${MOVE_ZONE}${sourceId}`,
           name: `Move ${modifier.name ?? "the area"}`,
           activation: {
-            cost: ["action"],
+            cost:
+              modifier.area.moveWith === "free"
+                ? []
+                : [modifier.area.moveWith ?? "action"],
+            ...(modifier.area.moveWith === "free"
+              ? { oncePerTurn: `${MOVE_ZONE}${sourceId}` }
+              : {}),
             targeting: {
               area: { shape: "sphere", radius: modifier.radius },
               range: modifier.area.moves,
@@ -3687,8 +3825,14 @@ function effectBonus(
   return total;
 }
 
-export function hasSteadySpeed(stats: Stats): boolean {
-  return stats.passives.some((passive) => passive.kind === "steadySpeed");
+export function hasSteadySpeed(stats: Stats, actor?: Actor): boolean {
+  return (
+    stats.passives.some((passive) => passive.kind === "steadySpeed") ||
+    (actor?.activeEffects.some(
+      ({ modifier }) => modifier.kind === "steadySpeed",
+    ) ??
+      false)
+  );
 }
 
 export function modifierFor(stats: Stats, ability: Ability): number {
@@ -3918,6 +4062,7 @@ export function scaledDice(
     readonly dice?: string | undefined;
     readonly diceCount?: string | undefined;
     readonly dieSize?: string | undefined;
+    readonly dieAtLeast?: string | undefined;
     readonly halfDice?: true | undefined;
   },
   scaling: Readonly<Record<string, number>>,
@@ -3926,7 +4071,11 @@ export function scaledDice(
   const [count = "0", sides = "0"] = source.dice.split("d");
   const dice = Number(scaling[source.diceCount ?? ""] ?? count);
   const rolled = source.halfDice ? Math.ceil(dice / 2) : dice;
-  return `${String(rolled)}d${String(scaling[source.dieSize ?? ""] ?? sides)}`;
+  const size = Math.max(
+    Number(scaling[source.dieSize ?? ""] ?? sides),
+    scaling[source.dieAtLeast ?? ""] ?? 0,
+  );
+  return `${String(rolled)}d${String(size)}`;
 }
 
 // A feature's dice that grow at levels in one class, as Jolt to Life's lightning at Artificer levels 11 and 17.
