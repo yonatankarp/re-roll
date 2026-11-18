@@ -61,6 +61,11 @@ import {
   familiarFoundEvents,
   retinueActors,
 } from "./familiar.ts";
+import {
+  companionActors,
+  companionFoundEvents,
+  companionOwner,
+} from "./companions.ts";
 
 export function startCombat(
   encounter: {
@@ -125,13 +130,16 @@ export function startCombat(
   }
 
   // Familiars are found before the fight, and join it beside their owners, without counting towards its size.
-  const found = familiarFoundEvents(party, context, "fight");
+  // Lasting companions too, as a Steel Defender, which then act right after their owners.
+  const found = [
+    ...familiarFoundEvents(party, context, "fight"),
+    ...companionFoundEvents(party, context, "fight"),
+  ];
   const foundState = found.reduce(applyDndEvent, context.state);
+  const owners = party.flatMap((actor) => foundState.actors[actor.id] ?? []);
   const familiars = [
-    ...familiarActors(
-      party.flatMap((actor) => foundState.actors[actor.id] ?? []),
-      { ...context, state: foundState },
-    ),
+    ...familiarActors(owners, { ...context, state: foundState }),
+    ...companionActors(owners, context),
     // and so do the creatures they keep between fights, as Animate Dead's undead
     ...retinueActors(party, context),
   ];
@@ -242,7 +250,10 @@ export function startCombat(
   const sorted = rolled.sort(
     (a, b) => b.total - a.total || a.position - b.position,
   );
-  const order = sorted.map((item) => item.id);
+  const order = afterOwners(
+    sorted.map((item) => item.id),
+    familiars,
+  );
   // Thief's Reflexes: a second turn in the first round, before the first creature whose Initiative is lower than
   // its own less ten, or at the round's end.
   const fighters = [...party, ...familiars, ...monsters];
@@ -443,6 +454,27 @@ export function initiativeRecharge(
     }
   }
   return events;
+}
+
+// A lasting companion acts right after its owner, whatever it rolled.
+function afterOwners(
+  order: readonly string[],
+  joined: readonly Actor[],
+): string[] {
+  const following = new Map(
+    joined.flatMap((actor) => {
+      const owner = companionOwner(actor);
+      return owner ? [[actor.id, owner] as const] : [];
+    }),
+  );
+  return order
+    .filter((id) => !following.has(id))
+    .flatMap((id) => [
+      id,
+      ...[...following].flatMap(([companion, owner]) =>
+        owner === id ? [companion] : [],
+      ),
+    ]);
 }
 
 // Rallying Cry: as a fight starts, a use spent gives Heroic Inspiration to as many of the party as the bearer's

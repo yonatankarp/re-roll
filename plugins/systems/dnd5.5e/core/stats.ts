@@ -3300,7 +3300,15 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   };
   return {
     ...partial,
-    ...familiarFrom(knownSpells, castingAbility, access, partial.spellAbility),
+    ...familiarFrom(
+      knownSpells,
+      castingAbility,
+      access,
+      partial.spellAbility,
+      partial.passives,
+    ),
+    // A known spell that gives a lasting companion, as Homunculus Servant's, gives it as a feature would.
+    passives: [...partial.passives, ...spellCompanions(knownSpells, access)],
     maxHp: partial.maxHp + passiveBonus(partial, "maxHp"),
     initiative: partial.initiative + passiveBonus(partial, "initiative"),
     speed: Math.max(
@@ -3357,18 +3365,57 @@ function itemPools(actor: Actor, access: ContentAccess): ResourceDef[] {
   return [...pools.values()];
 }
 
+// shortcut: as with a familiar, knowing the spell is enough, with no slot or casting time spent between fights.
+function spellCompanions(
+  knownSpells: ReadonlySet<string>,
+  access: ContentAccess,
+): Passive[] {
+  return [...knownSpells].flatMap((spellId) => {
+    // Only a spell that names a companion is parsed, and through the cache: this runs on every deriveStats.
+    const raw = access.content(spellId);
+    if (!raw || !("companion" in raw)) {
+      return [];
+    }
+    const spell = lookup(access, SpellSchema, spellId);
+    return spell.companion
+      ? [
+          {
+            kind: "lastingCompanion" as const,
+            ...spell.companion,
+            free: true as const,
+            level: spell.level,
+          },
+        ]
+      : [];
+  });
+}
+
+const chosenForm = (passive: Passive | undefined): string | undefined =>
+  passive?.kind === "familiarForm" ? passive.form : undefined;
+
 function familiarFrom(
   knownSpells: ReadonlySet<string>,
   castingAbility: ReadonlyMap<string, Ability>,
   access: ContentAccess,
   spellAbility: Ability | null,
+  passives: readonly Passive[],
 ): Pick<Stats, "familiar"> {
+  // Pact of the Chain's special forms, or another form a feature's variant picks.
+  const chosen = passives.findLast(
+    (passive) => passive.kind === "familiarForm",
+  );
   for (const spellId of knownSpells) {
     const { familiar } = lookup(access, SpellSchema, spellId);
-    if (!familiar) continue;
+    // shortcut: with the form's book not loaded, as the SRD's own owl isn't, there's no familiar.
+    if (
+      !familiar ||
+      access.content(chosenForm(chosen) ?? familiar.form) === undefined
+    ) {
+      continue;
+    }
     return {
       familiar: {
-        form: familiar.form,
+        form: chosen?.kind === "familiarForm" ? chosen.form : familiar.form,
         ability: castingAbility.get(spellId) ?? spellAbility ?? "int",
       },
     };
@@ -3702,18 +3749,63 @@ function monsterStats(actor: Actor, access: ContentAccess): Stats {
   );
   const { familiarOf } = actor.source;
   if (!familiarOf) return stats;
-  // A familiar can't attack, is a Fey, and has what its owner's features give it, reading its owner's numbers.
+  // A familiar can't attack, is a Fey, and has what its owner's features give it, reading its owner's numbers. With
+  // Pact of the Chain its attacks are Reactions its owner commands, dealing the types Investment of the Chain Master
+  // gives, with its owner's save DC.
   const boons = familiarOf.features.flatMap(
     (id) => lookup(access, FeatureSchema, id).familiar ?? [],
   );
+  const attacks = boons.some((boon) => boon.attacks);
+  const types = boons.flatMap((boon) => boon.damageTypes ?? []);
+  const ownerDc = boons.some((boon) => boon.ownerDc);
+  const commanded = (action: KnownAction): KnownAction => {
+    const { resolution } = action.activation;
+    const typed =
+      resolution.kind === "attack" && types.length > 0
+        ? {
+            ...resolution,
+            damage: resolution.damage.map((item) => ({
+              ...item,
+              types: [...new Set([...(item.types ?? [item.type]), ...types])],
+            })),
+          }
+        : resolution;
+    return {
+      ...action,
+      activation: {
+        ...action.activation,
+        cost: ["reaction"],
+        trigger: { commanded: true },
+        resolution: typed,
+      },
+    };
+  };
+  const dc = familiarOf.scaling.spellDc;
+  const withDc = (action: KnownAction): KnownAction =>
+    ownerDc && dc !== undefined && action.activation.resolution.kind === "save"
+      ? {
+          ...action,
+          activation: {
+            ...action.activation,
+            resolution: {
+              ...action.activation.resolution,
+              dc: { base: dc, add: [] },
+            },
+          },
+        }
+      : action;
   return {
     ...stats,
     maxHp: familiarOf.maxHp,
     creatureType: "fey",
     passives: [...stats.passives, ...boons.flatMap((boon) => boon.passives)],
     actions: [
-      ...stats.actions.filter(
-        ({ activation }) => activation.resolution.kind !== "attack",
+      ...stats.actions.flatMap((action) =>
+        action.activation.resolution.kind !== "attack"
+          ? [withDc(action)]
+          : attacks
+            ? [commanded(action)]
+            : [],
       ),
       ...boons.flatMap((boon) =>
         boon.actions.map(({ name, activation }) => ({
@@ -3759,6 +3851,23 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
         return resolution;
     }
   };
+  // What its owner's features give a lasting companion, as Bestial Fury's second Beast's Strike.
+  const boons = (source.boons ?? []).flatMap((id) => {
+    const given = FeatureSchema.safeParse(access.content(id)).data?.companion;
+    return given ? [given] : [];
+  });
+  const replaced = new Set(boons.flatMap(({ replaces }) => replaces ?? []));
+  const retyped = boons.flatMap(({ damageTypes }) => damageTypes ?? []);
+  const withTypes = (resolution: Resolution): Resolution =>
+    retyped.length === 0 || resolution.kind !== "attack"
+      ? resolution
+      : {
+          ...resolution,
+          damage: resolution.damage.map((item) => ({
+            ...item,
+            types: [...new Set([...(item.types ?? [item.type]), ...retyped])],
+          })),
+        };
   const stats = statBlockStats(
     actor,
     {
@@ -3766,8 +3875,9 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
       name: companion.name,
       ...(companion.size ? { size: companion.size } : {}),
       abilities: companion.abilities,
-      ac: (form?.ac ?? play.ac) + play.acPerLevel * above,
-      hp: (form?.hp ?? play.hp) + play.hpPerLevel * above,
+      // a lasting companion's, worked out from its owner as it was found
+      ac: source.ac ?? (form?.ac ?? play.ac) + play.acPerLevel * above,
+      hp: source.maxHp ?? (form?.hp ?? play.hp) + play.hpPerLevel * above,
       speed: form?.speed ?? play.speed,
       ...(speeds ? { speeds } : {}),
       proficiency: source.proficiency,
@@ -3775,30 +3885,46 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
       initiative: 0, // it goes right after its caster
       ...(play.creatureType ? { creatureType: play.creatureType } : {}),
       features: [],
-      passives: [...play.passives, ...(form?.passives ?? [])],
-      multiattack: play.halfLevelAttacks
-        ? Math.max(1, Math.floor(source.level / 2))
-        : play.multiattack,
+      passives: [
+        ...play.passives,
+        ...(form?.passives ?? []),
+        ...boons.flatMap(({ passives }) => passives),
+      ],
+      multiattack: Math.max(
+        play.halfLevelAttacks
+          ? Math.max(1, Math.floor(source.level / 2))
+          : play.multiattack,
+        ...boons.map(({ multiattack }) => multiattack ?? 0),
+      ),
       // an action printed for some forms only is out of reach in the others
-      actions: play.actions
-        .filter(
-          (action) =>
-            !action.shapes || (form && action.shapes.includes(form.name)),
-        )
-        .map(({ shapes: _shapes, ...action }) => ({
-          ...action,
-          activation: {
-            ...action.activation,
-            resolution: casterNumbers(action.activation.resolution),
-          },
-        })),
+      actions: [
+        ...play.actions
+          .filter(
+            ({ name, shapes }) =>
+              !replaced.has(name) &&
+              (!shapes || (form !== undefined && shapes.includes(form.name))),
+          )
+          .map(({ shapes: _shapes, ...action }) => action),
+        ...boons.flatMap(({ actions }) => actions),
+      ].map((action) => ({
+        ...action,
+        activation: {
+          ...action.activation,
+          resolution: withTypes(casterNumbers(action.activation.resolution)),
+        },
+      })),
     },
     access,
   );
-  // Damage "plus the spell's level" reads it as a scaling key.
+  // Damage "plus the spell's level" reads it as a scaling key, and "plus your Intelligence modifier" as its caster's
+  // spellcasting modifier, as a Steel Defender's; its save DC is the caster's, for its auras.
   return {
     ...stats,
-    scaling: { spellLevel: source.level, spellDc: source.spellDc },
+    scaling: {
+      spellLevel: source.level,
+      ownerMod: source.spellAttack - source.proficiency,
+      spellDc: source.spellDc,
+    },
   };
 }
 
@@ -4020,12 +4146,36 @@ function keptFeatures(
 }
 
 export function deriveStats(actor: Actor, access: ContentAccess): Stats {
-  const own =
+  const built =
     actor.source.kind === "monster"
       ? monsterStats(actor, access)
       : actor.source.kind === "summon"
         ? summonStats(actor, access)
         : characterStats(actor, access);
+  // Find Greater Steed's mount: a monster kept as a lasting companion can be ridden.
+  // What its owner's gear gives a lasting companion, as Horseshoes of Speed.
+  const gear =
+    actor.source.kind === "monster" || actor.source.kind === "summon"
+      ? (actor.source.gear ?? [])
+      : [];
+  const base =
+    actor.source.kind === "monster" && actor.source.lasting
+      ? {
+          ...built,
+          passives: [...built.passives, { kind: "rideable" as const }, ...gear],
+        }
+      : gear.length > 0
+        ? { ...built, passives: [...built.passives, ...gear] }
+        : built;
+  // Gear comes after the stat block's own numbers, so its Speed bonus is added here.
+  const own =
+    gear.length > 0
+      ? {
+          ...base,
+          speed:
+            base.speed + passiveBonus({ ...base, passives: gear }, "speed"),
+        }
+      : base;
   // A form's stat block replaces the creature's own, but it keeps its creature type and Hit Point maximum, and with
   // Shapechange its Intelligence, Wisdom and Charisma and its spellcasting.
   const form = formOf(actor);

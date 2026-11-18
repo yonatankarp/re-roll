@@ -20,6 +20,7 @@ import {
   grantedKey,
   saveBonus,
   scoreFloor,
+  spellAttackBonus,
   spellSaveDc,
   type Stats,
   maybeLookup,
@@ -68,6 +69,7 @@ import {
   ItemSchema,
   type AreaEffect,
   type LeafEffect,
+  type Monster,
   LeafEffectSchema,
   type Modifier,
   MonsterSchema,
@@ -3525,6 +3527,37 @@ export function leafEvents(
         );
         break;
       }
+      case "commandCompanion": {
+        // A Steel Defender or a Primal Companion may act on its next turn, which comes right after its owner's.
+        for (const companion of Object.values(context.state.actors)) {
+          if (
+            companion.source.kind !== "summon" ||
+            !companion.source.lasting ||
+            companion.source.casterId !== caster.id ||
+            isDown(companion)
+          ) {
+            continue;
+          }
+          events.push(
+            dndEvent(`${NS}:effectAdded`, {
+              actor: companion.id,
+              effect: {
+                sourceId: sourceId,
+                casterId: caster.id,
+                modifier: { kind: "commanded" },
+                ends: "casterNextTurn",
+                ...lastsFor(
+                  { until: "yourNextTurnStart" },
+                  caster,
+                  companion,
+                  context.state,
+                ),
+              },
+            }),
+          );
+        }
+        break;
+      }
       case "senseDeceptions": {
         // Unerring Eye: only that something is trying to fool it, not what.
         const near = (at: Square | null): boolean =>
@@ -3864,10 +3897,14 @@ function commandedResult(
   context: Context,
 ): SystemResult {
   const familiar = commandedFamiliar(effect, owner, context.state);
+  // "Attack": its first attack its owner can command, as Pact of the Chain's.
   const action =
     familiar &&
-    deriveStats(familiar, context).actions.find(
-      (item) => item.name === effect.action,
+    deriveStats(familiar, context).actions.find((item) =>
+      effect.action === "Attack"
+        ? item.activation.resolution.kind === "attack" &&
+          item.activation.trigger?.commanded === true
+        : item.name === effect.action,
     );
   if (!familiar || !action) return {};
   const result = resolveAction(
@@ -6580,6 +6617,43 @@ function animatedEvents(
   const made = Object.keys(context.state.actors).filter((key) =>
     key.startsWith(`${actor.id}:animated-`),
   ).length;
+  // Manual of Golems: its maker keeps the golem, to bring it to later fights.
+  const stats = deriveStats(actor, context);
+  const kept =
+    effect.lasting && actor.source.kind !== "monster"
+      ? [
+          dndEvent(`${NS}:companionFound`, {
+            actor: actor.id,
+            feature: id,
+            companion: id,
+            maxHp: monster.hp,
+            proficiency: stats.proficiency,
+            spellAttack: spellAttackBonus(stats),
+            spellDc: spellSaveDc(stats),
+            free: true,
+            monster: true,
+          }),
+        ]
+      : [];
+  return [
+    ...kept,
+    ...animatedSummons(effect, actor, monster, id, open, made, context, {
+      sourceId,
+      slotted: slotted ?? false,
+    }),
+  ];
+}
+
+function animatedSummons(
+  effect: Extract<LeafEffect, { kind: "animate" }>,
+  actor: Actor,
+  monster: Monster,
+  id: string,
+  open: readonly Square[],
+  made: number,
+  context: Context,
+  { sourceId, slotted }: { sourceId: string | undefined; slotted: boolean }, // what called them, for how long and what boosts them
+): SystemEvent[] {
   return open.slice(0, effect.count).map((square, index) =>
     dndEvent(`${NS}:summoned`, {
       actor: boosted(
@@ -6600,6 +6674,10 @@ function animatedEvents(
               ...(actor.source.kind === "monster"
                 ? {}
                 : { calledBy: actor.id }),
+              // Find Greater Steed's mount stays between fights.
+              ...(effect.lasting && actor.source.kind !== "monster"
+                ? { lasting: { feature: id } }
+                : {}),
               ...(effect.duration && sourceId
                 ? {
                     lasts: {
@@ -6619,7 +6697,7 @@ function animatedEvents(
         },
         actor,
         sourceId,
-        slotted ?? false,
+        slotted,
         context,
       ),
       after: actor.id,

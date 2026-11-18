@@ -7833,8 +7833,10 @@
     space anything it was wearing or carrying. One Familiar Only. You can’t have
     more than one familiar at a time. If you cast this spell while you have a
     familiar, you instead cause it to adopt a new eligible form."
-  automation: text
+  automation: full
+  # shortcut: the familiar is an owl unless a feature picks another form, and it joins every fight once known.
   outOfCombat: castingTime
+  familiar: { "form": "phb:monster/owl" }
 - id: srd52:spell/fireball
   name: Fireball
   level: 3
@@ -8609,7 +8611,7 @@
     feet. Otherwise, that creature dies. When the spell ends, the container is
     destroyed.
   automation: full
-  # shortcut: the possession is cast as an action in a fight, as if the soul already waited in its container; the host fights for the caster until the fight ends, and the caster's body lies Incapacitated meanwhile.
+  # shortcut: the possession is cast as an action in a fight, as if the soul already waited in its container; the host fights for the caster until the fight ends, and the caster's own body still acts.
   activation:
     {
       "cost": ["action", "slot"],
@@ -8620,16 +8622,6 @@
           "side": "enemy",
           "creatureTypes": ["humanoid"],
         },
-      "alsoSelf":
-        [
-          {
-            "kind": "applyCondition",
-            "condition": "incapacitated",
-            "duration": { "minutes": 60 },
-            "repeatSave": false,
-            "endsOnDamage": false,
-          },
-        ],
       "resolution":
         {
           "kind": "save",
@@ -11099,7 +11091,28 @@
     60 feet away from itself. Healing Touch (Celestial Only; Recharges after a
     Long Rest). One creature within 5 feet of the steed regains a number of Hit
     Points equal to 2d8 plus the spell’s level."
-  automation: text
+  automation: full
+  # shortcut: the steed stays between fights until it dies, and it's the one form its stat block plays.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "self": true },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "summon",
+                "companion": "phb:companion/otherworldly-steed",
+                "duration": "instantaneous",
+                "range": 30,
+                "lasting": true,
+              },
+            ],
+        },
+    }
 - id: srd52:spell/fire-bolt
   name: Fire Bolt
   level: 0
