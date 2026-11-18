@@ -20,7 +20,7 @@ import {
   type GameSystem,
   SDK_VERSION,
 } from "../kernel/system.ts";
-import { WORLD_KINDS, worldClashes } from "../kernel/world.ts";
+import { WORLD_KINDS, isLore, worldClashes } from "../kernel/world.ts";
 
 // An allowlist, because a denylist would miss formats such as .mjs, .wasm or a script-bearing .svg.
 export const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -39,6 +39,7 @@ export const ALLOWED_EXTENSIONS: ReadonlySet<string> = new Set([
 const KIND_FOLDERS = [
   { folder: "rules", kind: "rules" },
   { folder: "adventures", kind: "adventure" },
+  { folder: "worlds", kind: "world" },
 ] as const;
 
 const MANIFEST = "plugin.yaml";
@@ -56,7 +57,7 @@ export interface Catalog {
 }
 
 export interface Registry {
-  readonly system: GameSystem;
+  readonly system: GameSystem | null; // null in a run of world plugins only
   readonly plugins: readonly PluginManifest[]; // in load order
   readonly precedence: readonly string[]; // plugin ids, the one whose entries win first
   readonly contentIds: () => readonly string[]; // in precedence order, then by id
@@ -70,6 +71,12 @@ export interface Registry {
 export type LoadResult =
   | { readonly ok: true; readonly registry: Registry }
   | { readonly ok: false; readonly issues: readonly Issue[] };
+
+// A run that plays an adventure always has a system; only a run of world plugins has none.
+export function systemOf(registry: Registry): GameSystem {
+  if (!registry.system) throw new Error("This run loads no system");
+  return registry.system;
+}
 
 export function extensionOf(path: string): string {
   const name = path.slice(path.lastIndexOf("/") + 1);
@@ -241,12 +248,31 @@ function resolveOrder(
   return order;
 }
 
+// A run's plugins all name one system, apart from world plugins, which name none. A run of world plugins only
+// loads with no system: null then, as when the system can't be resolved, which `issues` tells apart.
 function resolveSystem(
   order: readonly PluginRecord[],
   systems: readonly GameSystem[],
   issues: Issue[],
 ): GameSystem | null {
-  const used = new Set(order.map((record) => record.manifest.system.id));
+  for (const { manifest } of order) {
+    if (!satisfiesCaret(SDK_VERSION, manifest.sdk)) {
+      const message = `needs SDK ${manifest.sdk}, found ${SDK_VERSION}`;
+      issues.push({ plugin: manifest.id, file: null, message });
+    }
+    if (manifest.kind !== "world") continue;
+    for (const { plugin } of manifest.requires) {
+      const kind = order.find((r) => r.manifest.id === plugin)?.manifest.kind;
+      if (kind !== undefined && kind !== "world") {
+        const message = `a world plugin can require only world plugins, not "${plugin}"`;
+        issues.push({ plugin: manifest.id, file: null, message });
+      }
+    }
+  }
+  const bound = order.flatMap(({ manifest }) =>
+    manifest.kind === "world" ? [] : [manifest],
+  );
+  const used = new Set(bound.map((manifest) => manifest.system.id));
   if (used.size !== 1) {
     if (used.size > 1) {
       const message = `a run uses one system, found: ${[...used].sort().join(", ")}`;
@@ -269,7 +295,7 @@ function resolveSystem(
       message,
     });
   }
-  for (const { manifest } of order) {
+  for (const manifest of bound) {
     if (!system) {
       issues.push({
         plugin: manifest.id,
@@ -280,10 +306,6 @@ function resolveSystem(
     }
     if (!satisfiesCaret(system.version, manifest.system.range)) {
       const message = `needs system ${manifest.system.id} ${manifest.system.range}, found ${system.version}`;
-      issues.push({ plugin: manifest.id, file: null, message });
-    }
-    if (!satisfiesCaret(SDK_VERSION, manifest.sdk)) {
-      const message = `needs SDK ${manifest.sdk}, found ${SDK_VERSION}`;
       issues.push({ plugin: manifest.id, file: null, message });
     }
   }
@@ -312,12 +334,12 @@ const compareText = (a: string, b: string): number =>
 function precedenceOrder(
   order: readonly PluginRecord[],
   requested: readonly string[],
-  system: GameSystem,
+  system: GameSystem | null,
   issues: Issue[],
 ): string[] {
   const loaded = new Map(order.map(({ manifest }) => [manifest.id, manifest]));
   for (const manifest of loaded.values()) {
-    if (manifest.precedence && manifest.kind !== "adventure") {
+    if (manifest.kind === "rules" && manifest.precedence) {
       const message = "only an adventure can set precedence";
       issues.push({ plugin: manifest.id, file: null, message });
     }
@@ -325,7 +347,7 @@ function precedenceOrder(
   const adventures = [...requested]
     .sort()
     .flatMap((id) => loaded.get(id) ?? [])
-    .filter((manifest) => manifest.kind === "adventure");
+    .flatMap((manifest) => (manifest.kind === "adventure" ? [manifest] : []));
   const first = adventures.map((manifest) => manifest.id);
   for (const adventure of adventures) {
     for (const id of adventure.precedence ?? []) {
@@ -337,7 +359,7 @@ function precedenceOrder(
     }
   }
   const rank = (manifest: PluginManifest): number =>
-    system.precedence?.(manifest) ?? 0;
+    system?.precedence?.(manifest) ?? 0;
   const rest = [...loaded.values()]
     .filter((manifest) => !first.includes(manifest.id))
     .sort((a, b) => rank(a) - rank(b) || compareText(a.id, b.id));
@@ -451,7 +473,8 @@ export async function loadRun(
   issues.push(...catalog.issues.filter((issue) => selected.has(issue.plugin)));
 
   const system = resolveSystem(order, systems, issues);
-  if (!system) return { ok: false, issues };
+  if (!system && order.some(({ manifest }) => manifest.kind !== "world"))
+    return { ok: false, issues };
   const precedence = precedenceOrder(order, requested, system, issues);
 
   const entries = new Map<string, LoadedEntry>();
@@ -469,7 +492,7 @@ export async function loadRun(
     extensionOf(file) === YAML &&
     !file.startsWith(`${NARRATION_FOLDER}/`) &&
     !Object.hasOwn(WORLD_KINDS, file.split("/")[0] ?? "") &&
-    !system.contentKinds[file.split("/")[0] ?? ""]?.lore;
+    !system?.contentKinds[file.split("/")[0] ?? ""]?.lore;
 
   for (const record of order) {
     const plugin = record.manifest.id;
@@ -484,6 +507,7 @@ export async function loadRun(
       record.files.filter((file) => file.startsWith("assets/")),
     );
     const isAdventure = record.manifest.kind === "adventure";
+    const isWorld = record.manifest.kind === "world";
 
     for (const file of record.files) {
       const slash = file.indexOf("/");
@@ -515,11 +539,19 @@ export async function loadRun(
         continue;
       }
 
-      const kind =
-        system.contentKinds[folder] ??
-        (Object.hasOwn(WORLD_KINDS, folder) ? WORLD_KINDS[folder] : undefined);
+      const world = Object.hasOwn(WORLD_KINDS, folder)
+        ? WORLD_KINDS[folder]
+        : undefined;
+      const kind = isWorld ? world : (system?.contentKinds[folder] ?? world);
       if (!kind) {
-        const message = `unknown content folder "${folder}" for system ${system.id}`;
+        const message = isWorld
+          ? `content folder "${folder}" isn't a world kind, which is all a world plugin holds`
+          : `unknown content folder "${folder}" for system ${system?.id ?? ""}`;
+        issues.push({ plugin, file: `${record.root}/${file}`, message });
+        continue;
+      }
+      if (!isWorld && isLore(folder)) {
+        const message = `content folder "${folder}" is lore, which belongs in a world plugin`;
         issues.push({ plugin, file: `${record.root}/${file}`, message });
         continue;
       }
@@ -539,7 +571,7 @@ export async function loadRun(
       );
     }
 
-    if (isAdventure) {
+    if (isAdventure && system) {
       const result = validateAdventure({
         pluginId: plugin,
         system,
@@ -642,7 +674,7 @@ export async function loadRun(
     const listed = entries.get(resolved)?.entry;
     if (listed) return listed;
     if (!derived.has(resolved)) {
-      const kind = Object.values(system.contentKinds).find(
+      const kind = Object.values(system?.contentKinds ?? {}).find(
         (each) => each.idPrefix === kindPrefixOf(resolved),
       );
       const built = kind?.derive?.(resolved, { content, contentIds });

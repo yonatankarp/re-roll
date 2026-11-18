@@ -21,6 +21,8 @@ export interface Heading {
 export interface Entity {
   readonly id: string; // plugin:kind/name
   readonly plugin: string;
+  // A world plugin's entity belongs to the book whose rules plugin requires it (#206). Unset: its plugin.
+  readonly book?: string;
   readonly kind: string; // the id's kind, such as "spell"
   readonly name: string;
   readonly edition: string;
@@ -148,6 +150,8 @@ export function indexEntities(entities: readonly Entity[]): EntityIndex {
   };
 }
 
+export const bookOf = (entity: Entity): string => entity.book ?? entity.plugin;
+
 export interface MatchScope {
   readonly book: string;
   readonly edition: string;
@@ -162,7 +166,7 @@ export function matchHeading(
   heading: string,
   scope: MatchScope,
 ): Entity | undefined {
-  const sameBook = (entity: Entity) => entity.plugin === scope.book;
+  const sameBook = (entity: Entity) => bookOf(entity) === scope.book;
   const asked = scope.asked || scope.kinds !== null;
   const fits = (entity: Entity) =>
     entity.edition === scope.edition &&
@@ -384,7 +388,10 @@ export async function checkCoverage(
   const editionOf = (plugin: string): string | undefined => {
     const manifest = catalog.plugins.get(plugin)?.manifest;
     if (!manifest) return undefined;
-    const system = systems.find((item) => item.id === manifest.system.id);
+    const system =
+      manifest.kind === "world"
+        ? undefined
+        : systems.find((item) => item.id === manifest.system.id);
     return system?.edition?.(manifest) ?? manifest.edition ?? "";
   };
 
@@ -395,12 +402,22 @@ export async function checkCoverage(
         .map((kind) => kind.idPrefix),
     ),
   );
+  // Each world plugin's book: the rules plugin that requires it, whose library its lore comes from.
+  const owners = new Map<string, string>();
+  for (const [plugin, { manifest }] of [...catalog.plugins].sort(([a], [b]) =>
+    a.localeCompare(b),
+  ))
+    for (const { plugin: needed } of manifest.kind === "rules"
+      ? manifest.requires
+      : [])
+      if (catalog.plugins.get(needed)?.manifest.kind === "world")
+        owners.set(needed, owners.get(needed) ?? plugin);
   const entities: Entity[] = [];
   for (const [plugin, record] of catalog.plugins) {
     // An adventure's own entities, such as a stat block it prints, count only where they name a heading.
     const linkOnly = record.manifest.kind === "adventure";
-    if (record.manifest.kind !== "rules" && !linkOnly) continue;
-    const edition = editionOf(plugin) ?? "";
+    const book = owners.get(plugin);
+    const edition = editionOf(book ?? plugin) ?? "";
     for (const file of record.files) {
       if (!/^[^/]+\/[^/]+\.yaml$/.test(file)) continue;
       const raw: unknown = parse(
@@ -424,6 +441,7 @@ export async function checkCoverage(
         entities.push({
           id: entry.id,
           plugin,
+          ...(book ? { book } : {}),
           kind,
           name: typeof entry.name === "string" ? entry.name : "",
           edition,

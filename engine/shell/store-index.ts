@@ -12,7 +12,7 @@ const Id = z.string().regex(PLUGIN_ID_PATTERN);
 // "<folder>/<name>", such as rules/phb or library/glossary.json.
 const Part = z
   .string()
-  .regex(/^(adventures|rules|assets|library)\/[a-z0-9][a-z0-9.-]*$/);
+  .regex(/^(adventures|rules|worlds|assets|library)\/[a-z0-9][a-z0-9.-]*$/);
 
 // What the publisher writes: each package's id, title and the content folders it installs.
 export const StoreManifestSchema = z.strictObject({
@@ -41,7 +41,7 @@ export const StoreIndexSchema = z.strictObject({
       plugins: z.array(
         z.strictObject({
           id: Id,
-          kind: z.enum(["adventure", "rules"]),
+          kind: z.enum(["adventure", "rules", "world"]),
           version: z.string(),
           distribution: z.enum(["shipped", "private"]),
           requires: z.array(Id),

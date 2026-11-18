@@ -5,6 +5,7 @@ import {
   type Entity,
   type EntityIndex,
   type Verdict,
+  bookOf as entityBook,
   matchHeading,
   singular,
   slug,
@@ -270,7 +271,7 @@ export function subjectsOf(
         asked: false, // by its name, not a feature's that ends with it ("Gloom" for "Deep Gloom")
         adventure: null,
       });
-      return hit?.plugin === book.plugin && hit.kind !== "ruling"
+      return hit && entityBook(hit) === book.plugin && hit.kind !== "ruling"
         ? hit
         : undefined;
     };

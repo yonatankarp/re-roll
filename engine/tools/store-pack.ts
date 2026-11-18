@@ -91,7 +91,7 @@ export async function packStore(root: string): Promise<PackedStore> {
           { level: STORED.test(path) ? 0 : 6, mtime: MTIME },
         ];
       }
-      if (part.startsWith("adventures/") || part.startsWith("rules/")) {
+      if (/^(adventures|rules|worlds)\//.test(part)) {
         const plugin = PluginManifestSchema.parse(
           parse(await readFile(join(root, part, "plugin.yaml"), "utf8")),
         );

@@ -1,17 +1,19 @@
 // Writes an entity for every library heading that coverage says should be one of the engine's text
 // kinds (world lore #127–#129, rulings #130), the D&D rules glossary (#132), monster families and lairs (#133)
 // or the environment, downtime and character option kinds (#134–#136),
-// into the book's own rules plugin, each ruling book's index of the sections its rulings rule on, and each
+// into the book's own rules plugin (lore into its world plugin, #206), each ruling book's index of the sections its rulings rule on, and each
 // book's indexes of the sections its families and lairs link and of its sections' text kinds. Run it from the main checkout, since storage refuses a symlink.
 //   npm run import:world
 // The systems load first: the glossary reaches the D&D modules, which import each other.
 import { systems } from "../systems.ts";
-import { stringify } from "yaml";
+import { parseDocument, stringify } from "yaml";
 import { createNodeStorage } from "../../engine/platform/node/storage.ts";
-import { scanPlugins } from "../../engine/run/loader.ts";
+import { type PluginRecord, scanPlugins } from "../../engine/run/loader.ts";
+import { isLore } from "../../engine/kernel/world.ts";
 import {
   type Entity,
   type Verdict,
+  bookOf as entityBook,
   checkCoverage,
   indexEntities,
   matchHeading,
@@ -121,9 +123,39 @@ for (const entity of report.entities.filter((e) => e.kind === "monster")) {
   inLair.set(entity.id, /\bin Lair\b/.test(text ?? ""));
 }
 
+// A book's lore goes in the world plugin its rules plugin requires, or in a new one named for the book.
+const worldOf = (book: string, record?: PluginRecord): string =>
+  record?.manifest.requires
+    .map(({ plugin }) => plugin)
+    .find((id) => catalog.plugins.get(id)?.manifest.kind === "world") ??
+  `${book}-world`;
+const worldRoot = (record: PluginRecord, world: string): string =>
+  catalog.plugins.get(world)?.root ??
+  `${record.root.slice(0, record.root.lastIndexOf("/rules/"))}/worlds/${world}`;
+// A new world plugin names no system, and its book's rules plugin requires it.
+async function createWorld(record: PluginRecord, world: string) {
+  const { distribution } = record.manifest;
+  await storage.replaceAtomically(
+    `${worldRoot(record, world)}/plugin.yaml`,
+    stringify({
+      id: world,
+      kind: "world",
+      version: "1.0.0",
+      sdk: "^1",
+      distribution,
+    }),
+  );
+  const path = `${record.root}/plugin.yaml`;
+  const manifest = parseDocument((await storage.read(path)) ?? "");
+  if (!manifest.has("requires")) manifest.set("requires", []);
+  manifest.addIn(["requires"], { plugin: world, version: "^1" });
+  await storage.replaceAtomically(path, manifest.toString());
+}
+
 // Each book's drafts, and its families' and lairs' links, from where the book nests them.
 const plans = report.books.map(({ book, edition, verdicts, members }) => {
   const record = catalog.plugins.get(book);
+  const world = worldOf(book, record);
   // A heading linked to another edition's entity is its reprint's reference text, not lore of its own (#182).
   const reprinted = (entity?: string) =>
     entity !== undefined && index.byId.get(entity)?.edition !== edition;
@@ -135,8 +167,12 @@ const plans = report.books.map(({ book, edition, verdicts, members }) => {
         ? { ...v, kind: "reprint" }
         : v,
     ),
-    new Set(record?.files),
+    new Set([
+      ...(record?.files ?? []),
+      ...(catalog.plugins.get(world)?.files ?? []),
+    ]),
     TEXT_KINDS,
+    world,
   );
   const drafted = new Map(
     drafts.map((d) => [d.entry.library?.[0], d.entry.id]),
@@ -164,7 +200,8 @@ const plans = report.books.map(({ book, edition, verdicts, members }) => {
       return hit && visible(hit.id) ? hit.id : undefined;
     },
     people: report.entities.filter(
-      (e) => e.plugin === book && (e.kind === "monster" || e.kind === "npc"),
+      (e) =>
+        entityBook(e) === book && (e.kind === "monster" || e.kind === "npc"),
     ),
   });
   // Where a family's section names its stat blocks only in prose or in another book, the coverage file does.
@@ -174,6 +211,7 @@ const plans = report.books.map(({ book, edition, verdicts, members }) => {
     edition,
     verdicts,
     record,
+    world,
     drafts,
     homeless,
     placed,
@@ -210,7 +248,7 @@ for (const { verdicts } of report.books)
     if (
       status === "linked" &&
       entity !== undefined &&
-      pluginOf(entity) === heading.book &&
+      (index.byId.get(entity)?.book ?? pluginOf(entity)) === heading.book &&
       !sectionOf.has(entity)
     )
       sectionOf.set(entity, heading);
@@ -218,8 +256,17 @@ const counts = new Map<string, number>();
 const rulings: Pick<Entity, "plugin" | "library" | "about">[] =
   report.entities.filter((e) => e.kind === "ruling");
 for (const plan of plans) {
-  const { book, edition, verdicts, record, drafts, homeless, placed, links } =
-    plan;
+  const {
+    book,
+    edition,
+    verdicts,
+    record,
+    world,
+    drafts,
+    homeless,
+    placed,
+    links,
+  } = plan;
   for (const id of homeless) console.warn(`${id}: a keyed area with no place`);
   if (record?.manifest.kind !== "rules") {
     if (drafts.length > 0)
@@ -288,6 +335,11 @@ for (const plan of plans) {
       `${JSON.stringify({ kinds }, null, 2)}\n`,
     );
 
+  if (
+    !catalog.plugins.has(world) &&
+    drafts.some(({ file }) => isLore(file.slice(0, file.indexOf("/"))))
+  )
+    await createWorld(record, world);
   for (const { file, entry } of drafts) {
     if (skipped.has(entry.id)) continue;
     const kind = file.slice(0, file.indexOf("/"));
@@ -308,7 +360,7 @@ for (const plan of plans) {
       rulings.push({ plugin: book, library: entry.library ?? [], about });
     }
     await storage.replaceAtomically(
-      `${record.root}/${file}`,
+      `${isLore(kind) ? worldRoot(record, world) : record.root}/${file}`,
       stringify([written], { lineWidth: 0 }),
     );
     counts.set(kind, (counts.get(kind) ?? 0) + 1);

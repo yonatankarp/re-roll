@@ -356,10 +356,13 @@ describe("the coverage report", () => {
     ).toBe(true);
   });
 
+  // Its lore is in a world plugin, which names no system and counts as the book that requires it.
   it("fails on a heading that is neither linked nor structural", async () => {
     const book = (entities: string): Record<string, string> => ({
-      "books/rules/hb/plugin.yaml": files["books/rules/hb/plugin.yaml"] ?? "",
-      "books/rules/hb/deities/all.yaml": entities,
+      "books/rules/hb/plugin.yaml": `${files["books/rules/hb/plugin.yaml"] ?? ""}requires:\n  - { plugin: hb-world, version: ^1 }\n`,
+      "books/worlds/hb-world/plugin.yaml":
+        "id: hb-world\nkind: world\nversion: 1.0.0\nsdk: ^1\ndistribution: private\n",
+      "books/worlds/hb-world/deities/all.yaml": entities,
       "books/library/hb/0001-gods.md": "# Chapter 1: Gods\n## Gloom\n",
       "books/coverage/hb.yaml": "rules:\n  - { levels: [2], is: deity }\n",
     });
@@ -385,8 +388,17 @@ describe("the coverage report", () => {
       "  hb: 2 headings: 0 linked, 1 structural, 1 missing (deity 1)",
     );
     expect(coverageFails(unlinked)).toBe(true);
-    const linked = await run(book("- id: hb:deity/gloom\n  name: Gloom\n"));
+    const linked = await run(
+      book("- id: hb-world:deity/gloom\n  name: Gloom\n"),
+    );
     expect(coverageFails(linked)).toBe(false);
+    expect(linked.entities).toEqual([
+      expect.objectContaining({
+        plugin: "hb-world",
+        book: "hb",
+        edition: "new",
+      }),
+    ]);
   });
 
   it("reports no books when there is no library", async () => {

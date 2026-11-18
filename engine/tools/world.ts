@@ -1,7 +1,7 @@
 // Drafts world entities (#127–#129) for the library headings coverage says should be one, by code
 // alone: the name is the heading, the text is what the book prints under it, and the links come
 // from where the book nests it (an area in its place, a deity under its pantheon).
-import { WORLD_KINDS, type WorldEntry } from "../kernel/world.ts";
+import { WORLD_KINDS, type WorldEntry, isLore } from "../kernel/world.ts";
 import { STRUCTURAL, type Verdict, slug } from "./coverage.ts";
 
 // The world kinds' folders by id kind. A system's text kinds, such as a rules glossary, come as `more`.
@@ -21,7 +21,7 @@ const kindOf = (id: string): string => /:([^/]+)\//.exec(id)?.[1] ?? "";
 const tailOf = (id: string): string => id.slice(id.indexOf("/") + 1);
 
 export interface WorldDraft {
-  readonly file: string; // "<folder>/<id's name>.yaml", inside the book's rules plugin
+  readonly file: string; // "<folder>/<id's name>.yaml", inside the book's world plugin for lore, else its rules plugin
   readonly entry: WorldEntry;
 }
 
@@ -34,8 +34,9 @@ export function draftWorld(
   book: string,
   source: string,
   verdicts: readonly Verdict[], // the book's, in reading order
-  taken: ReadonlySet<string>, // files the plugin already has
+  taken: ReadonlySet<string>, // files the plugins already have
   more: Readonly<Record<string, string>> = {}, // a system's text kinds: id kind -> folder
+  world: string = book, // the book's world plugin, which holds its lore (#206)
 ): WorldDrafts {
   const FOLDERS = new Map(Object.entries({ ...WORLD_FOLDERS, ...more }));
   const labelled = (kind: string) => Object.hasOwn(more, kind);
@@ -78,9 +79,10 @@ export function draftWorld(
   const homeless: string[] = [];
   verdicts.forEach((verdict, at) => {
     const folder = FOLDERS.get(verdict.kind);
+    const owner = folder !== undefined && isLore(folder) ? world : book;
     // Each book's lore is its own entity, even where another book's has the same name.
     const elsewhere =
-      verdict.status === "linked" && !verdict.entity?.startsWith(`${book}:`);
+      verdict.status === "linked" && !verdict.entity?.startsWith(`${owner}:`);
     if (folder === undefined || (verdict.status !== "missing" && !elsewhere))
       return;
     const { heading, kind } = verdict;
@@ -102,7 +104,7 @@ export function draftWorld(
       tail = `${base}-${String(n)}`;
     const file = `${folder}/${tail}.yaml`;
     used.add(file);
-    const id = `${book}:${kind}/${tail}`;
+    const id = `${owner}:${kind}/${tail}`;
     ids[at] = id;
 
     const pantheon = kind === "deity" ? above(at, "pantheon") : undefined;

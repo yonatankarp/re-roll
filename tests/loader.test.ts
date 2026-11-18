@@ -8,7 +8,7 @@ import { memoryStorage } from "./memory-storage.ts";
 
 interface ManifestOptions {
   readonly kind?: string;
-  readonly system?: string;
+  readonly system?: string | null; // null: none, as a world plugin names
   readonly version?: string;
   readonly sdk?: string;
   readonly requires?: readonly (readonly [string, string])[];
@@ -25,7 +25,7 @@ function manifest(id: string, options: ManifestOptions = {}): string {
     `kind: ${options.kind ?? "rules"}`,
     `version: ${options.version ?? "1.0.0"}`,
     `sdk: "${options.sdk ?? "^1"}"`,
-    `system: "${options.system ?? "d6@^1"}"`,
+    options.system === null ? "" : `system: "${options.system ?? "d6@^1"}"`,
     requires ? `requires:\n${requires}` : "",
     "distribution: shipped",
   ].join("\n");
@@ -293,39 +293,104 @@ describe("content", () => {
     const place = (id: string, extra = ""): string =>
       `- { id: "${id}", name: Ashvale, source: A Book, text: "", ${extra} }\n`;
 
-    it("loads lore into any system's plugins, without changing their hash", async () => {
-      const bare = await load(rules("a"), ["a"]);
-      const result = await load(
-        {
-          ...rules("a"),
-          "plugins/rules/a/places/x.yaml": place("a:place/ashvale"),
-          "plugins/rules/a/areas/x.yaml": place(
-            "a:area/ashvale-1-gate",
-            'place: "a:place/ashvale"',
-          ),
-        },
-        ["a"],
-      );
+    const world = (
+      id: string,
+      options: ManifestOptions = {},
+    ): Record<string, string> => ({
+      [`plugins/worlds/${id}/plugin.yaml`]: manifest(id, {
+        kind: "world",
+        system: null,
+        ...options,
+      }),
+    });
+    const lore = {
+      ...world("w"),
+      "plugins/worlds/w/places/x.yaml": place("w:place/ashvale"),
+      "plugins/worlds/w/areas/x.yaml": place(
+        "w:area/ashvale-1-gate",
+        'place: "w:place/ashvale"',
+      ),
+    };
+
+    it("loads a world plugin with no system", async () => {
+      const storage = memoryStorage(lore);
+      const catalog = await scanPlugins(storage, ["plugins"]);
+      const result = await loadRun(storage, catalog, [], ["w"]);
+      expect(result.ok && result.registry.system).toBeNull();
       expect(
-        result.ok && result.registry.content("a:area/ashvale-1-gate"),
+        result.ok && result.registry.content("w:area/ashvale-1-gate"),
       ).toBeTruthy();
-      expect(result.ok && result.registry.pluginHash("a")).toBe(
-        bare.ok && bare.registry.pluginHash("a"),
+    });
+
+    it("loads lore beside a system's plugins, and leaves it out of the hash", async () => {
+      const a = rules("a", { requires: [["w", "^1"]] });
+      const bare = await load({ ...a, ...world("w") }, ["a"]);
+      const result = await load({ ...a, ...lore }, ["a"]);
+      expect(result.ok && result.registry.system?.id).toBe(d6System.id);
+      expect(
+        result.ok && result.registry.content("w:place/ashvale"),
+      ).toBeTruthy();
+      expect(result.ok && result.registry.pluginHash("w")).toBe(
+        bare.ok && bare.registry.pluginHash("w"),
       );
     });
 
     it("checks lore's links, and that an area has its place", async () => {
       const files = {
-        ...rules("a"),
-        "plugins/rules/a/areas/x.yaml": place("a:area/gate"),
-        "plugins/rules/a/deities/x.yaml": place(
-          "a:deity/x",
-          'pantheon: "a:pantheon/nope"',
+        ...world("w"),
+        "plugins/worlds/w/areas/x.yaml": place("w:area/gate"),
+        "plugins/worlds/w/deities/x.yaml": place(
+          "w:deity/x",
+          'pantheon: "w:pantheon/nope"',
         ),
       };
-      const errors = await errorsOf(files, ["a"]);
+      const errors = await errorsOf(files, ["w"]);
       expect(errors).toContain("0.place");
-      expect(errors).toContain('unknown reference "a:pantheon/nope"');
+      expect(errors).toContain('unknown reference "w:pantheon/nope"');
+    });
+
+    it("keeps lore out of a system's plugins, but not rulings", async () => {
+      const errors = await errorsOf(
+        {
+          ...rules("a"),
+          "plugins/rules/a/places/x.yaml": place("a:place/ashvale"),
+          "plugins/rules/a/rulings/x.yaml": place("a:ruling/x"),
+        },
+        ["a"],
+      );
+      expect(errors).toBe(
+        'content folder "places" is lore, which belongs in a world plugin',
+      );
+    });
+
+    it("keeps a system's kinds out of a world plugin", async () => {
+      const errors = await errorsOf(
+        { ...world("w"), "plugins/worlds/w/tricks/x.yaml": trick("w:trick/x") },
+        ["w"],
+      );
+      expect(errors).toContain(
+        `content folder "tricks" isn't a world kind, which is all a world plugin holds`,
+      );
+    });
+
+    it("refuses a world plugin that names a system", async () => {
+      const files = world("w", { system: "d6@^1" });
+      const storage = memoryStorage(files);
+      const catalog = await scanPlugins(storage, ["plugins"]);
+      expect(catalog.plugins.has("w")).toBe(false);
+      expect(catalog.issues.map((issue) => issue.message).join()).toContain(
+        "system",
+      );
+    });
+
+    it("refuses a world plugin that requires a system's plugin", async () => {
+      const files = {
+        ...world("w", { requires: [["a", "^1"]] }),
+        ...rules("a"),
+      };
+      expect(await errorsOf(files, ["w"])).toContain(
+        'a world plugin can require only world plugins, not "a"',
+      );
     });
 
     it("refuses a system kind that takes a world kind's folder or prefix", async () => {
