@@ -107,4 +107,51 @@ describe.skipIf(!BOOKS)("the books' lasting companions", () => {
     );
     expect(aims.map(({ id }) => id)).toHaveLength(1);
   });
+
+  it("gives an artificer who knows Homunculus Servant its homunculus, with the spell's level in its numbers", () => {
+    const artificer = levelTo(
+      run,
+      "eberron-forge-of-the-artificer:class/artificer",
+      null,
+      3,
+    );
+    if (artificer.source.kind !== "character") throw new Error("no build");
+    const { build } = artificer.source;
+    if (!build) throw new Error("no build");
+    const [first, ...rest] = build.levels;
+    if (!first) throw new Error("no levels");
+    const knowing: Actor = {
+      ...artificer,
+      source: {
+        ...artificer.source,
+        build: {
+          ...build,
+          levels: [
+            {
+              ...first,
+              answers: [
+                ...first.answers,
+                {
+                  kind: "spells",
+                  values: [
+                    "eberron-forge-of-the-artificer:spell/homunculus-servant",
+                  ],
+                },
+              ],
+            },
+            ...rest,
+          ],
+        },
+      },
+    };
+    const servant = companion(knowing);
+    expect(servant?.source).toMatchObject({ kind: "summon", level: 2 });
+    if (!servant) return;
+    const stats = deriveStats(servant, run);
+    expect(stats.maxHp).toBe(15);
+    expect(stats.scaling.spellLevel).toBe(2);
+    expect(stats.actions.some(({ name }) => name === "Force Strike")).toBe(
+      true,
+    );
+  });
 });
