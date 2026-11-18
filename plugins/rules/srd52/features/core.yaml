@@ -48,7 +48,10 @@
 - id: "srd52:feature/thieves-cant"
   name: Thieves' Cant
   text: "You know Thieves' Cant and one other language."
-  automation: text
+  # shortcut: the other language of the rogue's choice isn't asked for.
+  automation: full
+  passives:
+    - { kind: languages, languages: [thieves-cant] }
 
 - id: "srd52:feature/spellcasting"
   name: Spellcasting

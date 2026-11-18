@@ -1365,6 +1365,7 @@ function answersOf(
             values,
             ...(choice.expertise ? { expertise: true } : {}),
             ...(choice.orExpertise ? { orExpertise: true } : {}),
+            ...(choice.bonus ? { bonus: choice.bonus } : {}),
             ...(choiceOwners.has(choice)
               ? { feat: choiceOwners.get(choice) }
               : {}),

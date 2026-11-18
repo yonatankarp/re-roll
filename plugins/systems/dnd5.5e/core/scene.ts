@@ -11,6 +11,7 @@ import { finalDamage, halved } from "./rules.ts";
 import { AbilitySchema, DamageTypeSchema, DiceSchema } from "./schemas.ts";
 import { type Actor, type DndState, NS, dndEvent, isDead } from "./state.ts";
 import { damageResponses, deriveStats, rollDiceNotation } from "./stats.ts";
+import { understands } from "./explore.ts";
 
 // What a scene does to the party outside a fight: a trap or hazard's damage, and paying for something.
 
@@ -169,5 +170,17 @@ export const scenePredicates = {
   [`${NS}:hasGold`]: storyPredicate({
     schema: z.strictObject({ atLeast: z.number().int().min(1) }),
     evaluate: ({ atLeast }, state: DndState) => (state.gold ?? 0) >= atLeast,
+  }),
+  // Someone in the party understands this language, as a choice to read an inscription in it (core/explore.ts).
+  [`${NS}:understands`]: storyPredicate({
+    schema: z.strictObject({ language: z.string().min(1) }),
+    evaluate: ({ language }, state: DndState, access) =>
+      understands(
+        language,
+        Object.values(state.actors).filter(
+          (actor) => actor.side === "party" && !isDead(actor),
+        ),
+        access,
+      ),
   }),
 };

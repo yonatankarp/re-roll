@@ -39,6 +39,7 @@ import { environmentEffects } from "./environment.ts";
 import { sceneCheck } from "./explore.ts";
 import { optionFrames } from "./combat/options.ts";
 import { riderChoiceFrames, tablePickFrames } from "./combat/school.ts";
+import { wardFrames } from "./combat/start.ts";
 import { redirectFrames } from "./combat/reactions.ts";
 import { wishFrames } from "./combat/wish.ts";
 import { reactionFrames } from "./combat/reactions.ts";
@@ -536,6 +537,7 @@ export const dnd55e = defineSystem<DndState>({
     ...restFrames,
     ...gearFrames,
     ...replicateFrames,
+    ...wardFrames,
     ...swapFrames,
     ...legendaryFrames,
     ...actionFrames,

@@ -184,7 +184,12 @@ export interface StoryEffectDef<S> {
 
 export interface StoryPredicateDef<S> {
   readonly schema: z.ZodType;
-  readonly evaluate: (args: unknown, state: S) => boolean;
+  // `access` reads the run's content, for a predicate about what the party's rules give, as knowing a language.
+  readonly evaluate: (
+    args: unknown,
+    state: S,
+    access: ContentAccess,
+  ) => boolean;
 }
 
 export interface FrameDef<S> {
@@ -214,12 +219,12 @@ export function storyEffect<A, S>(definition: {
 
 export function storyPredicate<A, S>(definition: {
   readonly schema: z.ZodType<A>;
-  readonly evaluate: (args: A, state: S) => boolean;
+  readonly evaluate: (args: A, state: S, access: ContentAccess) => boolean;
 }): StoryPredicateDef<S> {
   return {
     schema: definition.schema,
-    evaluate: (args, state) =>
-      definition.evaluate(definition.schema.parse(args), state),
+    evaluate: (args, state, access) =>
+      definition.evaluate(definition.schema.parse(args), state, access),
   };
 }
 
@@ -365,6 +370,7 @@ export interface SceneAction {
 // fits what's here, as a spell that opens a lock where a check is about one.
 export interface SceneHere {
   readonly checks: readonly unknown[];
+  readonly fights?: boolean; // a choice open here starts a fight, so a ward readied now can go off in it
 }
 
 export interface SystemDefinition<S> {

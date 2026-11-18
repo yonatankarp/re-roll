@@ -337,7 +337,9 @@ export type WeaponChange = z.infer<typeof WeaponChangeSchema>;
 
 // What a scene check acts on, so a spell, item or tool that deals with it can help (core/explore.ts): a lock to pick,
 // something stuck or barred to force, a wall or barricade to get through, a climb, water to swim or cross, a gap to
-// leap or balance over, a trap to disarm, something heavy to lift or shove, and a chase to get away from.
+// leap or balance over, a trap to disarm, something heavy to lift or shove, and a chase to get away from; and, read
+// from a check's skill, swaying someone (Persuasion, Deception, Intimidation, Performance: "influence"), seeing through
+// a lie (Insight: "truth") and dealing with an animal (Animal Handling: "beast").
 export const ObstacleSchema = z.enum([
   "lock",
   "stuck",
@@ -348,6 +350,9 @@ export const ObstacleSchema = z.enum([
   "trap",
   "heavy",
   "chase",
+  "influence",
+  "truth",
+  "beast",
 ]);
 export type Obstacle = z.infer<typeof ObstacleSchema>;
 
@@ -406,6 +411,15 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     skills: z.array(SkillSchema).min(1).optional(), // only checks with these skills, as Remarkable Athlete's Athletics
     spellAttacks: z.literal(true).optional(), // attacks only spell attacks, as Innate Sorcery's (combat/attack.ts)
     halfMove: z.literal(true).optional(), // only once it has moved no more than half its Speed this turn, as Steady Eye
+    // checks only with a creature a scene check names (CheckSchema `with`) of these types, of this kin or of this
+    // Challenge Rating or lower, as a Belt of Dwarvenkind's Persuasion with dwarves (core/explore.ts)
+    with: z
+      .strictObject({
+        creatureTypes: z.array(CreatureTypeSchema).min(1).optional(),
+        kin: z.array(z.string().min(1)).min(1).optional(),
+        maxCr: z.number().min(0).optional(),
+      })
+      .optional(),
   }),
   // "attackers" limits attacksAgainst to creatures of these lowercase types, as with Protection from Evil and Good.
   z.strictObject({
@@ -639,7 +653,7 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     noLethargy: z.literal(true).optional(),
   }),
   // Shut away where nothing reaches it and it reaches nothing, as in Otiluke's Resilient Sphere, a Forcecage box
-  // or Maze. With `escape` it can spend its action on that check to end the effect, as Maze's DC 20 Intelligence.
+  // or Maze, or on the Ethereal Plane with Etherealness. With `escape` it can spend its action on that check to end the effect, as Maze's DC 20 Intelligence.
   z.strictObject({
     kind: z.literal("sealed"),
     escape: z
@@ -652,6 +666,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     // it can teleport out after a save of this ability against its caster's spell save DC, as from a Forcecage
     teleportSave: AbilitySchema.optional(),
     rolls: z.literal(true).optional(), // it moves at half Speed, its prison with it, as Resilient Sphere's
+    // it spends an action to end the effect at will, as one on the Ethereal Plane with Etherealness comes back
+    leave: z.literal(true).optional(),
   }),
   // Shut in a cage that stops it walking out but lets sight, attacks and spells through its bars, as Forcecage's
   // cage, whose walls are its caster's zone. It can teleport out after this save against the caster's spell save DC.
@@ -881,6 +897,17 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // Each spell the bearer casts deals it `dice` Necrotic damage for each of the spell's levels, which nothing reduces,
   // as Wish's stress (combat/school.ts).
   z.strictObject({ kind: z.literal("castRecoil"), dice: DiceSchema }),
+  // A ward readied between a scene's choices, set off as the next fight there starts (combat/start.ts wardsSet): with
+  // `alert` the party isn't surprised, as with Alarm or a Faithful Hound; `activation` (an ActivationSchema, parsed as
+  // it's used) is resolved by the bearer at the first foe in the Initiative order, or at itself with `self` targeting,
+  // as a Glyph of Warding's explosion or a Magic Circle's zone. It lasts until the next scene (lingering 0).
+  z.strictObject({
+    kind: z.literal("prepared"),
+    alert: z.literal(true).optional(),
+    activation: z.unknown().optional(),
+  }),
+  // A shelter round the party, as Leomund's Tiny Hut: the harm the place does to a rest stays outside (environment.ts).
+  z.strictObject({ kind: z.literal("sheltered") }),
   // In a fury (passive `fury`): on its turns it attacks the nearest creature it reaches, friend or foe, or with `at`
   // that creature until either drops (combat/madness.ts).
   z.strictObject({ kind: z.literal("furious"), at: z.string().optional() }),
@@ -892,6 +919,8 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
   // Reaction and no moving (combat/durations.ts), the party's tactics leave it be, and a fight with no foe left but
   // such is won (combat/turn.ts).
   z.strictObject({ kind: z.literal("pacified") }),
+  // Understands any language it hears or reads, as Comprehend Languages or Tongues (core/explore.ts understands).
+  z.strictObject({ kind: z.literal("comprehension") }),
   // As each of its turns starts the bearer spends its movement going away from the caster, or `toward` it until
   // within 5 feet, Dashing first with `dash`; with `endsTurn` it then does nothing more that turn, which `toward` ends
   // only once within 5 feet, as Command's Approach and Flee (combat/fear.ts).
@@ -1052,6 +1081,9 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     kind: z.literal("retypeHit"),
     types: z.array(DamageTypeSchema).min(2),
   }),
+  // The party gets away from the fight, as with Teleport or Plane Shift, where the encounter can be fled; anywhere else
+  // it does nothing (combat/effects.ts, legendary.ts runEscape).
+  z.strictObject({ kind: z.literal("escape") }),
   // The oldest item the caster replicated vanishes, giving back a spell slot of level 1 for a Common item or 2 for
   // another, as Magic Item Tinker's Drain (combat/effects.ts).
   z.strictObject({ kind: z.literal("drainReplicated") }),
@@ -4107,6 +4139,14 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
   // The Light property's extra attack with a Light crossbow adds the ability modifier to its damage, as Crossbow
   // Expert's Dual Wielding.
   z.strictObject({ kind: z.literal("crossbowDualWielding") }),
+  // Languages the bearer knows, as Thieves' Cant or a Belt of Dwarvenkind's Dwarvish (core/explore.ts understands).
+  // shortcut: a language "of your choice" isn't asked for; only the named ones are known.
+  z.strictObject({
+    kind: z.literal("languages"),
+    languages: z.array(z.string().regex(/^[a-z][a-z-]*$/)).min(1),
+  }),
+  // No Disadvantage on a check to influence a Hostile creature, as Boon of Communication's Cunning Speaker.
+  z.strictObject({ kind: z.literal("cunningSpeaker") }),
   // As its turn starts, this damage to one creature it grapples, as Unarmed Fighting's 1d4.
   z.strictObject({
     kind: z.literal("grappleDamage"),
@@ -4503,6 +4543,8 @@ export const ChoiceDefSchema = z.discriminatedUnion("kind", [
     orExpertise: z.literal(true).optional(),
     // Picked again after a Long Rest, as Weapon Master's weapons (swap.ts).
     swap: z.literal("longRest").optional(),
+    // added to checks with the skills picked, as Enchanting Conversationalist's Intelligence modifier
+    bonus: FormulaSchema.optional(),
   }),
   z.strictObject({
     kind: z.literal("weaponMastery"),
@@ -5478,6 +5520,7 @@ const ChoiceAnswerSchema = z.discriminatedUnion("kind", [
     expertise: z.literal(true).optional(), // from a choice with `expertise`
     orExpertise: z.literal(true).optional(), // from a choice with `orExpertise`
     feat: ContentIdSchema.optional(), // the feat or species that asked, when it can be swapped
+    bonus: FormulaSchema.optional(), // from a choice with `bonus`
   }),
   z.strictObject({
     kind: z.literal("spells"),
@@ -5691,6 +5734,17 @@ export const EncounterSchema = z.strictObject({
 
 // `about` says what a check acts on, so what deals with that helps (core/explore.ts), as Knock with a lock.
 const AboutSchema = z.array(ObstacleSchema).min(1).optional();
+// The creature a check is made with, for what goes by whom it's made with (Modifier advantage `with`): its type, its
+// kin (a people such as "dwarf"), its Challenge Rating, and whether it's Hostile, which gives Disadvantage on a check to
+// influence it (core/explore.ts).
+const WithSchema = z
+  .strictObject({
+    creatureType: CreatureTypeSchema.optional(),
+    kin: z.string().min(1).optional(),
+    cr: z.number().min(0).optional(),
+    hostile: z.literal(true).optional(),
+  })
+  .optional();
 
 export const CheckSchema = z.union([
   // `ability` pairs the skill with another ability, as a Constitution (Athletics) check (variant-rules.ts).
@@ -5699,6 +5753,7 @@ export const CheckSchema = z.union([
     ability: AbilitySchema.optional(),
     dc: z.number().int(),
     about: AboutSchema,
+    with: WithSchema,
   }),
   z.strictObject({
     ability: AbilitySchema,

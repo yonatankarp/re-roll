@@ -32,6 +32,7 @@ A single-player D&D 5.5e game: an event-sourced TypeScript engine (`engine/`), a
 - Never log in to or download from D&D Beyond.
 - A git worktree has no `books/`. To play-test, symlink `~/Projects/re-roll/books` into it, and only one session at a time may write to the same files there.
 - The manifest field `distribution: private` means not redistributable; it has nothing to do with a folder.
+- The game plays 2024 (5.5e) rules. A 2014 entry that has a 2024 version is reference text linked to that version, so don't encode it again or bend a 2024 schema to fit it. 2014 books include Basic Rules 2014, Xanathar's and Sword Coast Guide. Only 2014 entries with no 2024 version play.
 
 ## Git
 

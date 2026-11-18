@@ -558,9 +558,10 @@ describe.skipIf(!PHB)("signature class features in a fight", () => {
         run,
       ).status,
     ).toBe("working");
+    // Thieves' Cant is a language the Rogue knows (#150).
     expect(
       classify("phb:feature/rogue-thieves-cant", stats, run),
-    ).toMatchObject({ status: "text-only" });
+    ).toMatchObject({ status: "working" });
   });
 
   it("Hunter's Mark is prepared and adds 1d6 to the Ranger's hits on the mark", () => {
