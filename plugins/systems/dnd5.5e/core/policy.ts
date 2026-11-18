@@ -644,7 +644,14 @@ export function choosePolicy(decision: Decision, context: Context): string {
       ? first.id
       : (decision.options.find(({ id }) => id === "sap") ?? first).id;
   }
-  if (decision.id.startsWith(`${NS}:option:`)) return first.id; // as listed, the strongest first
+  // As listed, the strongest first, and the last, the kindest, for a friend, as Calm Emotions' calm.
+  if (decision.id.startsWith(`${NS}:option:`)) {
+    const target = state.actors[decision.id.slice(`${NS}:option:`.length)];
+    const caster = state.actors[decision.actor];
+    return caster !== undefined && target?.side === caster.side
+      ? (decision.options.at(-1) ?? first).id
+      : first.id;
+  }
   if (decision.id.startsWith(`${NS}:damageType:`)) {
     return damageTypePolicy(decision, context);
   }

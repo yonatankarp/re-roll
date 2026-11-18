@@ -22,7 +22,9 @@ const optioned = (effects: readonly LeafEffect[]): LeafEffect[] =>
 const labelOf = (effect: LeafEffect): string | undefined =>
   effect.kind === "applyCondition" ||
   effect.kind === "modifier" ||
-  effect.kind === "forcedMove"
+  effect.kind === "forcedMove" ||
+  effect.kind === "drop" ||
+  effect.kind === "removeCondition"
     ? effect.option
     : undefined;
 
@@ -76,7 +78,9 @@ export const optionFrames = {
       const picked = payload.effects.flatMap((effect): LeafEffect[] =>
         (effect.kind === "applyCondition" ||
           effect.kind === "modifier" ||
-          effect.kind === "forcedMove") &&
+          effect.kind === "forcedMove" ||
+          effect.kind === "drop" ||
+          effect.kind === "removeCondition") &&
         effect.option === payload.answer
           ? [{ ...effect, option: undefined }]
           : [],

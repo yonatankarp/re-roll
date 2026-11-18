@@ -185,6 +185,7 @@ import {
   areaPool,
   attackRoutine,
   type Context,
+  charmersOf,
   currentActor,
   enemies,
   exemptFrom,
@@ -2590,6 +2591,7 @@ export function leafEvents(
                   : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
+              ...(effect.saveOnDamage && save ? { saveOnDamage: save } : {}),
               ...(effect.endsInLight ? { endsInLight: true as const } : {}),
               ...(effect.untilIncapacitated
                 ? { untilIncapacitated: true as const }
@@ -2615,11 +2617,16 @@ export function leafEvents(
             }),
           );
         }
-        if (effect.modifier.kind === "actionLimit") {
+        if (
+          effect.modifier.kind === "actionLimit" ||
+          effect.modifier.kind === "pacified"
+        ) {
           events.push(
             ...limitEvents(
               target,
-              effect.modifier,
+              effect.modifier.kind === "pacified"
+                ? { noActions: true, noReactions: true, speed: "none" }
+                : effect.modifier,
               currentActor(context.state)?.id === target.id,
             ),
           );
@@ -2768,6 +2775,7 @@ export function leafEvents(
         break;
       }
       case "removeCondition": {
+        if (effect.option) break; // given once its option is picked (combat/options.ts)
         const clung = clingSave(target, effect.condition, context);
         events.push(...clung.events);
         if (clung.held) break;
@@ -3241,6 +3249,8 @@ export function leafEvents(
         if (
           !isDead(target) &&
           target.hp <= effect.hpAtMost &&
+          (effect.chance === undefined ||
+            context.dice.roll(100) <= effect.chance) &&
           (!effect.creatureTypes ||
             exemptFrom(
               effect.creatureTypes,
@@ -3261,6 +3271,7 @@ export function leafEvents(
         }
         break;
       case "drop":
+        if (effect.option) break; // given once its option is picked (combat/options.ts)
         events.push(...dropEvents(target, context));
         break;
       case "sendAway":
@@ -5215,7 +5226,8 @@ export function resolveAction(
             sizeOf(target, context) >= SIZES.indexOf(edge.minSize)) &&
           (!edge.maxScore ||
             met.abilities[edge.maxScore.ability] <= edge.maxScore.score) &&
-          (!edge.immuneTo || immuneToCondition(met, edge.immuneTo))
+          (!edge.immuneTo || immuneToCondition(met, edge.immuneTo)) &&
+          (!edge.charmedByCaster || charmersOf(target).has(actor.id))
             ? [edge.roll]
             : [],
         );

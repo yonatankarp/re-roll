@@ -66,7 +66,7 @@
     or one of your allies deals damage to the target, the spells ends. Using a
     Higher-Level Spell Slot. You can target one additional Beast for each spell
     slot level above 1.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -75,6 +75,8 @@
       creatures: 1
       range: 30
       side: enemy
+      creatureTypes:
+        - beast
     resolution:
       kind: save
       ability: wis
@@ -307,7 +309,7 @@
     spell ends, the target knows it was Charmed by you. Using a Higher-Level
     Spell Slot. You can target one additional creature for each spell slot level
     above 1.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -316,21 +318,21 @@
       creatures: 1
       range: 30
       side: enemy
+      creatureTypes:
+        - humanoid
     resolution:
       kind: save
       ability: wis
       dc:
         add:
           - kind: spellSaveDc
-      damage: []
+      advantage: true
       onFail:
         - kind: applyCondition
           condition: charmed
           duration:
             minutes: 60
           endsOnDamage: true
-      onSuccess: []
-      onSuccessDamage: none
   upcast:
     perSlotLevel:
       addTargets: 1
@@ -672,7 +674,8 @@
     protecting itself. You can command the target to take a Reaction but must
     take your own Reaction to do so. Using a Higher-Level Spell Slot. Your
     Concentration can last longer with a level 9 spell slot (up to 8 hours).
-  automation: partial
+  # shortcut: the caster's commands are its side's tactics, and commanding a Reaction isn't offered.
+  automation: full
   activation:
     cost:
       - action
@@ -687,15 +690,20 @@
       dc:
         add:
           - kind: spellSaveDc
-      damage: []
+      advantage: true
       onFail:
         - kind: applyCondition
           condition: charmed
           duration:
             concentration: true
             minutes: 60
-      onSuccess: []
-      onSuccessDamage: none
+          saveOnDamage: true
+        - kind: modifier
+          modifier:
+            kind: controlled
+          duration:
+            concentration: true
+            minutes: 60
 - id: srd52:spell/earthquake
   name: Earthquake
   level: 8
@@ -1107,7 +1115,8 @@
     If you use a level 7 or 8 spell slot, the duration is 365 days. If you use a
     level 9 spell slot, the spell lasts until it is ended by one of the spells
     mentioned above.
-  automation: text
+  # no rules effect in a fight: what it does is the story's.
+  automation: full
   outOfCombat: castingTime
 - id: srd52:spell/glyph-of-warding
   name: Glyph of Warding
@@ -3416,7 +3425,8 @@
     take your own Reaction to do so. Using a Higher-Level Spell Slot. Your
     Concentration can last longer with a spell slot of level 6 (up to 10
     minutes), 7 (up to 1 hour), or 8+ (up to 8 hours).
-  automation: partial
+  # shortcut: the caster's commands are its side's tactics, and commanding a Reaction isn't offered.
+  automation: full
   activation:
     cost:
       - action
@@ -3425,21 +3435,28 @@
       creatures: 1
       range: 60
       side: enemy
+      creatureTypes:
+        - humanoid
     resolution:
       kind: save
       ability: wis
       dc:
         add:
           - kind: spellSaveDc
-      damage: []
-      onSuccessDamage: none
+      advantage: true
       onFail:
         - kind: applyCondition
           condition: charmed
           duration:
             concentration: true
             minutes: 1
-      onSuccess: []
+          saveOnDamage: true
+        - kind: modifier
+          modifier:
+            kind: controlled
+          duration:
+            concentration: true
+            minutes: 1
 - id: srd52:spell/eldritch-blast
   name: Eldritch Blast
   level: 0
@@ -4273,7 +4290,8 @@
     for a target upon completing it. Using a Higher-Level Spell Slot. The
     duration is longer with a spell slot of level 7 (10 days), 8 (30 days), or 9
     (366 days).
-  automation: partial
+  # shortcut: the suggestion is always to stop fighting, which leaves the target out of the fight.
+  automation: full
   activation:
     cost:
       - action
@@ -4288,14 +4306,17 @@
       dc:
         add:
           - kind: spellSaveDc
-      damage: []
-      onSuccessDamage: none
       onFail:
         - kind: applyCondition
           condition: charmed
-          duration:
+          duration: &a6
             minutes: 1440
-      onSuccess: []
+          endsOnDamage: true
+        - kind: modifier
+          modifier:
+            kind: pacified
+          duration: *a6
+          endsOnDamage: true
 - id: srd52:spell/meteor-swarm
   name: Meteor Swarm
   level: 9
@@ -5488,7 +5509,8 @@
     no longer affected by the target. A creature that successfully saves against
     this effect is immune to it for 1 minute, after which it can be affected
     again."
-  automation: text
+  # no rules effect in a fight: what it does is the story's.
+  automation: full
   outOfCombat: castingTime
 - id: srd52:spell/arcanist-s-magic-aura
   name: Arcanist’s Magic Aura
@@ -5760,7 +5782,57 @@
     creatures of your choice that it’s Hostile toward. This indifference ends if
     the target takes damage or witnesses its allies taking damage. When the
     spell ends, the creature’s attitude returns to normal."
-  automation: text
+  # shortcut: the calm takes its targets' Charmed and Frightened away rather than suppressing them.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: sphere
+        radius: 20
+      range: 60
+      side: enemy
+      creatureTypes:
+        - humanoid
+    resolution:
+      kind: save
+      ability: cha
+      dc:
+        add:
+          - kind: spellSaveDc
+      onFail:
+        - kind: modifier
+          modifier:
+            kind: pacified
+          duration:
+            concentration: true
+            minutes: 1
+          endsOnDamage: true
+          option: Indifferent
+        - kind: removeCondition
+          condition: charmed
+          option: Calm
+        - kind: removeCondition
+          condition: frightened
+          option: Calm
+        - kind: modifier
+          modifier:
+            kind: conditionImmunity
+            condition: charmed
+          duration:
+            concentration: true
+            minutes: 1
+          option: Calm
+        - kind: modifier
+          modifier:
+            kind: conditionImmunity
+            condition: frightened
+          duration:
+            concentration: true
+            minutes: 1
+          option: Calm
 - id: srd52:spell/chromatic-orb
   name: Chromatic Orb
   level: 1
@@ -5875,7 +5947,38 @@
     as possible to move in that direction on its next turn, taking the safest
     route. After moving in this way, a target repeats the save, ending the spell
     on itself on a success.
-  automation: text
+  # shortcut: the direction is always away from the caster, set as it's cast, with no Bonus Action to pick another.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      area:
+        shape: emanation
+        radius: 30
+      range: self
+      side: enemy
+      choice: true
+    resolution:
+      kind: save
+      ability: wis
+      dc:
+        add:
+          - kind: spellSaveDc
+      onFail:
+        - kind: applyCondition
+          condition: charmed
+          duration:
+            concentration: true
+            minutes: 1
+          repeatSave: true
+        - kind: modifier
+          modifier:
+            kind: compelled
+          duration:
+            concentration: true
+            minutes: 1
 - id: srd52:spell/conjure-elemental
   name: Conjure Elemental
   level: 5
@@ -6331,7 +6434,8 @@
     you or your companions are fighting automatically succeeds on this save. On
     a failed save, a target has a −10 penalty to Wisdom (Perception) checks and
     Passive Perception until the spell ends.
-  automation: text
+  # no rules effect in a fight, where every foe succeeds; the Perception penalty is the story's.
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/faerie-fire
   name: Faerie Fire
@@ -8610,7 +8714,62 @@
     condition and then ends its turn. Halt. On its turn, the target doesn’t move
     and takes no action or Bonus Action. Using a Higher-Level Spell Slot. You
     can affect one additional creature for each spell slot level above 1."
-  automation: text
+  # shortcut: Drop lets go of what's held as the save fails, not on the target's turn.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 60
+      side: enemy
+    resolution:
+      kind: save
+      ability: wis
+      dc:
+        add:
+          - kind: spellSaveDc
+      onFail:
+        - kind: modifier
+          modifier: &a3
+            kind: actionLimit
+            noActions: true
+            speed: none
+          duration: &a4
+            until: itsNextTurnEnd
+          option: Halt
+        - kind: applyCondition
+          condition: prone
+          duration: instantaneous
+          option: Grovel
+        - kind: modifier
+          modifier: *a3
+          duration: *a4
+          option: Grovel
+        - kind: modifier
+          modifier:
+            kind: compelled
+            toward: true
+            endsTurn: true
+          duration: *a4
+          option: Approach
+        - kind: modifier
+          modifier:
+            kind: compelled
+            dash: true
+            endsTurn: true
+          duration: *a4
+          option: Flee
+        - kind: drop
+          option: Drop
+        - kind: modifier
+          modifier: *a3
+          duration: *a4
+          option: Drop
+  upcast:
+    perSlotLevel:
+      addTargets: 1
 - id: srd52:spell/cone-of-cold
   name: Cone of Cold
   level: 5
@@ -11200,7 +11359,7 @@
     spell ends, the target knows it was Charmed by you. Using a Higher-Level
     Spell Slot. You can target one additional creature for each spell slot level
     above 4.
-  automation: partial
+  automation: full
   activation:
     cost:
       - action
@@ -11215,6 +11374,7 @@
       dc:
         add:
           - kind: spellSaveDc
+      advantage: true
       onFail:
         - kind: applyCondition
           condition: charmed
@@ -11626,7 +11786,38 @@
     do so. Using a Higher-Level Spell Slot. Your Concentration can last longer
     with a spell slot of level 5 (up to 10 minutes), 6 (up to 1 hour), or 7+ (up
     to 8 hours).
-  automation: text
+  # shortcut: the caster's commands are its side's tactics, and commanding a Reaction isn't offered.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 60
+      side: enemy
+      creatureTypes:
+        - beast
+    resolution:
+      kind: save
+      ability: wis
+      dc:
+        add:
+          - kind: spellSaveDc
+      advantage: true
+      onFail:
+        - kind: applyCondition
+          condition: charmed
+          duration:
+            concentration: true
+            minutes: 1
+          saveOnDamage: true
+        - kind: modifier
+          modifier:
+            kind: controlled
+          duration:
+            concentration: true
+            minutes: 1
 - id: srd52:spell/druidcraft
   name: Druidcraft
   level: 0
@@ -12604,7 +12795,38 @@
     target’s memories of an event that took place up to 7 days ago (level 6
     spell slot), 30 days ago (level 7 spell slot), 365 days ago (level 8 spell
     slot), or any time in the creature’s past (level 9 spell slot).
-  automation: text
+  # the memory it changes is the story's.
+  automation: full
+  activation:
+    cost:
+      - action
+      - slot
+    targeting:
+      creatures: 1
+      range: 30
+      side: enemy
+    resolution:
+      kind: save
+      ability: wis
+      dc:
+        add:
+          - kind: spellSaveDc
+      advantage: true
+      onFail:
+        - kind: applyCondition
+          condition: charmed
+          duration:
+            concentration: true
+            minutes: 1
+          endsOnDamage: true
+          endsOnSpell: true
+        - kind: applyCondition
+          condition: incapacitated
+          duration:
+            concentration: true
+            minutes: 1
+          endsOnDamage: true
+          endsOnSpell: true
 - id: srd52:spell/pass-without-trace
   name: Pass without Trace
   level: 2
@@ -12678,7 +12900,8 @@
     where you bound it and remains there until the spell ends. Using a
     Higher-Level Spell Slot. The duration increases with a spell slot of level 6
     (10 days), 7 (30 days), 8 (180 days), and 9 (366 days).
-  automation: text
+  # no rules effect in a fight: what it does is the story's.
+  automation: full
   outOfCombat: castingTime
 - id: srd52:spell/power-word-heal
   name: Power Word Heal
@@ -13360,7 +13583,8 @@
     ability. The suggested activity can continue for the entire duration, but if
     the suggested activity can be completed in a shorter time, the spell ends
     for the target upon completing it.
-  automation: partial
+  # shortcut: the suggestion is always to stop fighting, which leaves the target out of the fight.
+  automation: full
   activation:
     cost:
       - action
@@ -13378,9 +13602,14 @@
       onFail:
         - kind: applyCondition
           condition: charmed
-          duration:
+          duration: &a5
             concentration: true
             minutes: 480
+          endsOnDamage: true
+        - kind: modifier
+          modifier:
+            kind: pacified
+          duration: *a5
           endsOnDamage: true
 - id: srd52:spell/telekinesis
   name: Telekinesis

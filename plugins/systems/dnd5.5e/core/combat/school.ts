@@ -776,6 +776,19 @@ function riderChoiceFrame(
   context: Context,
 ): Frame[] {
   const options = choices.flatMap((choice, index) => {
+    if (choice.foes?.one) {
+      return Object.values(context.state.actors)
+        .filter(
+          (item) =>
+            item.side !== actor.side &&
+            !isDown(item) &&
+            distanceFeet(item.position, actor.position) <= (choice.within ?? 5),
+        )
+        .map((item) => ({
+          id: `${String(index)}|${item.id}`,
+          label: `${choice.name}: ${item.name}`,
+        }));
+    }
     if (choice.foes) {
       return [{ id: String(index), label: choice.name }];
     }
@@ -846,7 +859,9 @@ export const riderChoiceFrames = {
         if (
           foe.side === caster.side ||
           isDown(foe) ||
-          distanceFeet(foe.position, from ?? null) > (choice.within ?? 5)
+          (choice.foes?.one
+            ? foe.id !== targetId
+            : distanceFeet(foe.position, from ?? null) > (choice.within ?? 5))
         ) {
           return [];
         }

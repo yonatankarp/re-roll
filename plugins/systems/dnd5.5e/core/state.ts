@@ -408,6 +408,8 @@ const ActorSchema = z.strictObject({
   id: z.string(),
   name: z.string(),
   side: z.enum(["party", "enemy"]),
+  // The side it fights on when no one controls it, kept while another's does (settleSides).
+  ownSide: z.enum(["party", "enemy"]).optional(),
   source: z.discriminatedUnion("kind", [
     z.strictObject({
       kind: z.literal("character"),
@@ -1503,6 +1505,30 @@ function removeConcentration(state: DndState, casterId: string): DndState {
 
 // A summoned creature vanishes when its caster dies or, for a Concentration spell, stops concentrating on it.
 // It stays in the order at 0 Hit Points, as a dead foe does, so the turn passes it by.
+// A creature under another's control (Modifier `controlled`) fights on its controller's side, and goes back to its own
+// once that ends, however it ends.
+function settleSides(state: DndState): DndState {
+  let { actors } = state;
+  for (const [id, actor] of Object.entries(state.actors)) {
+    const control = actor.activeEffects.find(
+      ({ modifier }) => modifier.kind === "controlled",
+    );
+    if (control) {
+      const side = state.actors[control.casterId]?.side;
+      if (side && side !== actor.side) {
+        actors = {
+          ...actors,
+          [id]: { ...actor, side, ownSide: actor.ownSide ?? actor.side },
+        };
+      }
+    } else if (actor.ownSide) {
+      const { ownSide, ...rest } = actor;
+      actors = { ...actors, [id]: { ...rest, side: ownSide } };
+    }
+  }
+  return actors === state.actors ? state : { ...state, actors };
+}
+
 function settleSummons(state: DndState): DndState {
   let { actors } = state;
   for (const [id, actor] of Object.entries(state.actors)) {
@@ -1660,7 +1686,7 @@ function payload<S extends z.ZodType>(
 }
 
 export function applyDndEvent(state: DndState, event: SystemEvent): DndState {
-  return settleSummons(settleForms(state, applyOne(state, event)));
+  return settleSides(settleSummons(settleForms(state, applyOne(state, event))));
 }
 
 function applyOne(state: DndState, event: SystemEvent): DndState {

@@ -33,6 +33,8 @@ export const DecisionSchema = z.strictObject({
     .optional(),
   // Taking the answer back changes nothing that happened, such as a character's build, so any difficulty allows it.
   revisable: z.literal(true).optional(),
+  // The system's policy answers it even when it's the player's, as while a foe controls the player's character.
+  policy: z.literal(true).optional(),
 });
 export type Decision = Readonly<z.infer<typeof DecisionSchema>>;
 

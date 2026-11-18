@@ -1367,6 +1367,19 @@ function lore(target: Actor, access: ContentAccess): string {
 
 // The turn decision with these actions added after Move and before fleeing and ending the turn, so the
 // choices listed first stay as they were.
+// While another creature controls the player's character, the tactics make its choices in a fight.
+// shortcut: a Reaction is still put to the player.
+export function controlledChoice(
+  decision: Decision | null,
+  state: DndState,
+): Decision | null {
+  return decision?.actor === PLAYER_ACTOR &&
+    state.combat &&
+    state.actors[PLAYER_ACTOR]?.ownSide
+    ? { ...decision, policy: true }
+    : decision;
+}
+
 export function withTactics(
   decision: Decision | null,
   state: DndState,

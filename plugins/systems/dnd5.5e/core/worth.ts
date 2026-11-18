@@ -80,6 +80,7 @@ import {
   slotLevelFor,
   targetCount,
   within5,
+  pacified,
 } from "./combat/queries.ts";
 
 // What a party member's choices in a fight are worth, as a sensible player weighs them. Everything is in one
@@ -902,6 +903,15 @@ export function makeJudge(context: Context, side: Actor): Judge {
             own *
             lasting(span)
           );
+        // Under the caster's control it stops fighting for its side and fights for the caster's.
+        case "controlled":
+          return 1.6 * own * lasting(span);
+        // Driven about on its turns: one that then does nothing more has lost most of the turn.
+        case "compelled":
+          return (modifier.endsTurn ? 0.8 : 0.3) * own * lasting(span);
+        // Its attacks go at whoever is nearest, often its own friends.
+        case "furious":
+          return 0.6 * own * lasting(span);
         default:
           return 0;
       }
@@ -1392,6 +1402,7 @@ export function makeJudge(context: Context, side: Actor): Judge {
   ): number => {
     const { resolution } = action.activation;
     const foe = target.side !== actor.side;
+    if (foe && pacified(target)) return 0; // left be, as harming it would bring it back into the fight
     const dealt = expectedDamage(actor, target, action) * share;
     let total = hurtWorth(target, dealt, foe);
     const leaves = (

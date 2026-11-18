@@ -746,6 +746,18 @@ function itemCasts(
               : `${spell.name}, level ${String(at)} (${item.name})`,
           activation: {
             ...numbered,
+            ...(cast.doom
+              ? {
+                  userEffects: [
+                    ...(numbered.userEffects ?? []),
+                    {
+                      kind: "slay" as const,
+                      hpAtMost: Number.MAX_SAFE_INTEGER,
+                      chance: cast.doom,
+                    },
+                  ],
+                }
+              : {}),
             cost: [
               ...activation.cost
                 .map((cost) =>
