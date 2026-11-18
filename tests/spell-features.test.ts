@@ -369,6 +369,53 @@ const FIXTURES = [
     ],
   },
   {
+    id: "test:feature/spellfire",
+    name: "Spellfire",
+    text,
+    automation: "full",
+    activations: [
+      {
+        cost: ["bonusAction"],
+        targeting: { self: true },
+        resolution: {
+          kind: "automatic",
+          effects: [
+            {
+              kind: "modifier",
+              modifier: {
+                kind: "bonus",
+                to: "speed",
+                amount: { bonus: { base: 5 } },
+              },
+              duration: { minutes: 1 },
+            },
+          ],
+        },
+      },
+    ],
+    passives: [
+      {
+        kind: "castRider",
+        spends: "sorcery-points",
+        oncePerTurn: true,
+        nearby: {
+          within: 30,
+          one: true,
+          damage: [
+            { amount: { bonus: { base: 2, add: [] } }, type: "radiant" },
+          ],
+          otherwise: [
+            { kind: "tempHp", amount: { bonus: { base: 3, add: [] } } },
+          ],
+        },
+      },
+    ],
+    whileActive: {
+      features: ["test:feature/spellfire"],
+      passives: [{ kind: "evasion", anySave: true }],
+    },
+  },
+  {
     id: "test:feature/ritual-adept",
     name: "Ritual Adept",
     text,
@@ -1222,5 +1269,105 @@ describe("a rider round the caster", () => {
       expect.objectContaining({ actor: "near", amount: 3 }),
     ]);
     expect(hit(undefined)).toEqual([]);
+  });
+});
+
+describe("riders on spending points, and passives while an effect lasts", () => {
+  const sorcerer = (effects: Actor["activeEffects"] = []) => ({
+    ...priest([
+      [
+        { kind: "features", values: ["test:feature/spellfire"] },
+        { kind: "spells", values: ["srd52:spell/fire-bolt"] },
+      ],
+    ]),
+    position: { x: 0, y: 0 },
+    activeEffects: effects,
+  });
+  const goblin = (id: string, hp: number, x: number) => ({
+    ...freshActor({
+      id,
+      name: id,
+      side: "enemy" as const,
+      source: {
+        kind: "monster" as const,
+        statBlockId: "srd52:monster/goblin-warrior",
+      },
+      hp,
+      inventory: [],
+    }),
+    position: { x, y: 0 },
+  });
+  const context = (actors: readonly Actor[]) => ({
+    ...run,
+    state: {
+      actors: Object.fromEntries(actors.map((item) => [item.id, item])),
+      combat: {
+        encounter: "arena",
+        order: actors.map((item) => item.id),
+        index: 0,
+        round: 1,
+      },
+    },
+    dice: { below: () => 0, roll: () => 1 },
+  });
+  const kinds = (events: readonly { kind: string }[]) =>
+    events.map((item) => item.kind.replace(`${NS}:`, ""));
+
+  it("strikes the most hurt foe near when a spell spends the points, or else shields the caster", () => {
+    const caster = sorcerer();
+    const bolt = stats(caster).actions.find(
+      (item) => item.id === "spell:srd52:spell/fire-bolt",
+    );
+    if (!bolt) throw new Error("no Fire Bolt");
+    const paid = {
+      ...bolt,
+      activation: {
+        ...bolt.activation,
+        cost: [...bolt.activation.cost, { resource: "sorcery-points" }],
+      },
+    };
+    const near = [goblin("hale", 10, 2), goblin("hurt", 3, 3)];
+    const struck = castRiders(
+      caster,
+      paid,
+      undefined,
+      context([caster, ...near]),
+    );
+    expect(
+      struck.events.flatMap((item) =>
+        item.kind === `${NS}:damaged` && "payload" in item
+          ? [(item.payload as { actor: string }).actor]
+          : [],
+      ),
+    ).toEqual(["hurt"]);
+    expect(kinds(struck.events)).toContain("oncePerTurnUsed");
+    const alone = castRiders(caster, paid, undefined, context([caster]));
+    expect(kinds(alone.events)).toContain("tempHpGained");
+    expect(
+      castRiders(caster, bolt, undefined, context([caster, ...near])).events,
+    ).toEqual([]);
+  });
+
+  it("gives its passives only while its activation's effect lasts", () => {
+    expect(stats(sorcerer()).passives).not.toContainEqual({
+      kind: "evasion",
+      anySave: true,
+    });
+    const lit = sorcerer([
+      {
+        sourceId: "feature:test:feature/spellfire:0",
+        casterId: PLAYER_ACTOR,
+        modifier: {
+          kind: "bonus",
+          to: "speed",
+          amount: { bonus: { base: 5, add: [] } },
+        },
+        ends: "casterTurnEnd",
+      },
+    ]);
+    expect(stats(lit).passives).toContainEqual({
+      kind: "evasion",
+      anySave: true,
+    });
   });
 });

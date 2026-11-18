@@ -865,6 +865,7 @@ function collectFeatureData(
   free: [string, FreeCast][];
   retype: Record<string, DamageType>;
   abilities: ReadonlyMap<string, Ability>;
+  gated: readonly NonNullable<Feature["whileActive"]>[];
 } {
   const passives: Passive[] = [];
   const actions: KnownAction[] = [];
@@ -876,6 +877,7 @@ function collectFeatureData(
   const free: [string, FreeCast][] = [];
   const retype: Record<string, DamageType> = {};
   const ownSpells = new Map<string, readonly string[]>(); // each feature's own spells, by feature
+  const gated: NonNullable<Feature["whileActive"]>[] = []; // passives only while an effect is on the bearer
   const abilities = new Map<string, Ability>(); // a feature's spells cast with its own ability
   // Activations a later feature's variant takes the place of, by the feature they're on (`replaces`).
   const replaced = new Map<string, Set<string>>();
@@ -910,6 +912,7 @@ function collectFeatureData(
     if ((feature.fromLevel ?? 1) > level) continue;
     Object.assign(retype, feature.retype);
     passives.push(...feature.passives);
+    if (feature.whileActive) gated.push(feature.whileActive);
     resources.push(...feature.resources);
     const own: string[] = [];
     for (const [from, ids] of Object.entries(
@@ -982,7 +985,16 @@ function collectFeatureData(
       }
     }
   }
-  return { passives, actions, resources, spells, free, retype, abilities };
+  return {
+    passives,
+    actions,
+    resources,
+    spells,
+    free,
+    retype,
+    abilities,
+    gated,
+  };
 }
 
 // An attack with `emptyHanded` dice rolls them while the bearer holds no weapon or Shield, as Unarmed Fighting's d8.
@@ -1749,6 +1761,16 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     swaps,
     grantedBy,
   );
+  // A feature's passives that hold only while an effect of its activations is on the bearer (`whileActive`).
+  for (const gate of fromFeatures.gated) {
+    if (
+      actor.activeEffects.some(({ sourceId }) =>
+        gate.features.some((id) => sourceId.startsWith(`feature:${id}:`)),
+      )
+    ) {
+      fromFeatures.passives.push(...gate.passives);
+    }
+  }
   for (const pick of latePicks(
     swaps,
     new Set([...featIds, ...(replaced ? [] : [background.feat])]),

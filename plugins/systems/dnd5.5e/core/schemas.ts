@@ -2010,6 +2010,12 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("singOut"),
     spells: z.array(ContentIdSchema).min(1),
   }),
+  // Once a turn, a spell the bearer casts that deals one of these types gets up to two of its Hit Point Dice, rolled,
+  // added to its damage, as Spellfire Adept's Fueled Spellfire with Radiant (combat/school.ts fueledDamage).
+  z.strictObject({
+    kind: z.literal("fueledSpell"),
+    types: z.array(DamageTypeSchema).min(1),
+  }),
   // A 1 on a damage die of the bearer's spell counts as a 2, as Spell-Fueling Armor's Potent Spellcasting.
   z.strictObject({ kind: z.literal("spellDiceFloor") }),
   // A change the bearer can make to a spell as it casts it, paying `cost` (cast-options.ts), as Overchannel's maximum
@@ -2697,13 +2703,22 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("castRider"),
     damage: DamageTypeSchema.optional(),
     types: z.array(DamageTypeSchema).min(1).optional(), // a spell dealing any of these, as Heart of the Storm's
-    // `damage` to each foe within `within` feet of the caster, as Heart of the Storm's eruption
+    // `damage` to each foe within `within` feet of the caster, as Heart of the Storm's eruption, or with `one` to the
+    // most hurt of them, as Spellfire Burst's Radiant Fire; with no foe there, `otherwise` goes on the caster, as
+    // Bolstering Flames' Temporary Hit Points.
     nearby: z
       .strictObject({
         within: z.number().int().min(5),
         damage: z.array(DamageSchema).min(1),
+        one: z.literal(true).optional(),
+        otherwise: z.array(LeafEffectSchema).min(1).optional(),
       })
       .optional(),
+    // a spell whose cost spends this, as Spellfire Burst's Sorcery Points
+    spends: z.string().min(1).optional(),
+    oncePerTurn: z.literal(true).optional(),
+    // only while the bearer has none of these features, as Spellfire Burst before Honed Spellfire takes its place
+    without: z.array(ContentIdSchema).min(1).optional(),
     school: z.array(SpellSchoolSchema).min(1).optional(),
     uses: z.array(ContentIdSchema).min(1).optional(),
     heals: z.literal(true).optional(),
@@ -3001,6 +3016,14 @@ export const FeatureSchema = ContentEntrySchema.extend({
     .optional(),
   // Spells it always gives, from the level in the key: the level of the class that granted it, else the character's.
   spells: z.record(z.string(), z.array(ContentIdSchema)).optional(),
+  // Passives it gives only while an effect of these features' activations is on the bearer, as Crown of Spellfire's
+  // Spell Avoidance while its Innate Sorcery lasts (stats.ts).
+  whileActive: z
+    .strictObject({
+      features: z.array(ContentIdSchema).min(1),
+      passives: z.array(PassiveSchema).min(1),
+    })
+    .optional(),
   // The ability its `spells` are cast with, as Manipulate Elements' Wisdom for a Monk's Elementalism.
   spellAbility: AbilitySchema.optional(),
   // Its class's spell picks (and swaps) may also come from these classes' lists or these spells, as Magical Secrets'

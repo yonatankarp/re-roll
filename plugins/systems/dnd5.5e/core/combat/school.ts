@@ -35,6 +35,21 @@ export function schoolOf(
   return SpellSchema.safeParse(context.content(id)).data?.school ?? null;
 }
 
+// The once-a-turn use a cast rider spends, by what it rides on.
+function riderKey(passive: Extract<Passive, { kind: "castRider" }>): string {
+  return `castRider:${passive.spends ?? ""}:${(passive.types ?? []).join(",")}:${passive.without?.join(",") ?? ""}`;
+}
+
+// Fueled Spellfire: a spell dealing one of the types also takes Hit Point Dice once a turn.
+function fueledType(stats: Stats, action: KnownAction): boolean {
+  const types = action.activation.resolution.damage.map(({ type }) => type);
+  return stats.passives.some(
+    (passive) =>
+      passive.kind === "fueledSpell" &&
+      passive.types.some((type) => types.includes(type)),
+  );
+}
+
 function riding(stats: Stats, school: string | null, rider: Rider): boolean {
   return stats.passives.some(
     (passive) =>
@@ -152,7 +167,10 @@ export function fueledDamage(
   if (
     action.spellLevel === null ||
     actor.usedThisTurn.includes(FUELED) ||
-    !riding(stats, schoolOf(action.id, context), "fueled")
+    !(
+      riding(stats, schoolOf(action.id, context), "fueled") ||
+      fueledType(stats, action)
+    )
   ) {
     return { bonus: 0, events: [] };
   }
@@ -208,20 +226,37 @@ export function castRiders(
       return [];
     }
     if (passive.slot && slotLevel === undefined) return [];
+    if (passive.oncePerTurn && actor.usedThisTurn.includes(riderKey(passive))) {
+      return [];
+    }
+    if (passive.without?.some((id) => stats.features.includes(id))) return [];
+    if (
+      passive.spends &&
+      !cost.some(
+        (item) =>
+          typeof item === "object" &&
+          "resource" in item &&
+          item.resource === passive.spends,
+      )
+    ) {
+      return [];
+    }
     const fits = passive.uses
       ? passive.uses.some(
           (id) =>
             action.id === `spell:${id}` || action.id.startsWith(`spell:${id}:`),
         )
-      : passive.school
-        ? slotLevel !== undefined &&
-          cost.includes("action") &&
-          passive.school.some((item) => item === school)
-        : passive.heals
-          ? heals(action) && targets.some((item) => item.id !== actor.id)
-          : passive.types
-            ? passive.types.some((type) => types.has(type))
-            : passive.damage !== undefined && types.has(passive.damage);
+      : passive.spends
+        ? true
+        : passive.school
+          ? slotLevel !== undefined &&
+            cost.includes("action") &&
+            passive.school.some((item) => item === school)
+          : passive.heals
+            ? heals(action) && targets.some((item) => item.id !== actor.id)
+            : passive.types
+              ? passive.types.some((type) => types.has(type))
+              : passive.damage !== undefined && types.has(passive.damage);
     return fits ? [passive] : [];
   });
   // Simbul's Synostodweomer: a slot spell rolls as many Hit Point Dice as the slot's level.
@@ -254,19 +289,42 @@ export function castRiders(
   return {
     events: [
       ...mended,
-      ...rides.flatMap(({ effects, onTargets, resource, nearby }) => [
-        ...(resource
-          ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
-          : []),
-        // Heart of the Storm: the foes round the caster take its damage, in the type each resists least.
-        ...(nearby
-          ? enemies(context.state, actor)
-              .filter(
-                (foe) =>
-                  !isDown(foe) &&
-                  distanceFeet(foe.position, actor.position) <= nearby.within,
+      ...rides.flatMap((ride) => {
+        const { effects, onTargets, resource, nearby } = ride;
+        const near = nearby
+          ? enemies(context.state, actor).filter(
+              (foe) =>
+                !isDown(foe) &&
+                distanceFeet(foe.position, actor.position) <= nearby.within,
+            )
+          : [];
+        const struck = nearby?.one
+          ? [...near].sort((a, b) => a.hp - b.hp).slice(0, 1)
+          : near;
+        return [
+          ...(resource
+            ? [dndEvent(`${NS}:resourceSpent`, { actor: actor.id, resource })]
+            : []),
+          ...(ride.oncePerTurn
+            ? [
+                dndEvent(`${NS}:oncePerTurnUsed`, {
+                  actor: actor.id,
+                  key: riderKey(ride),
+                }),
+              ]
+            : []),
+          ...(nearby?.otherwise && struck.length === 0
+            ? leafEvents(
+                nearby.otherwise,
+                `castRider:${action.id}`,
+                actor,
+                actor,
+                context,
               )
-              .flatMap(
+            : []),
+          // Heart of the Storm: the foes round the caster take its damage, in the type each resists least.
+          ...(nearby
+            ? struck.flatMap(
                 (foe) =>
                   dealEvents(
                     foe,
@@ -287,23 +345,24 @@ export function castRiders(
                     context,
                   ).events,
               )
-          : []),
-        ...leafEvents(
-          atSlotLevel(effects, slotLevel ?? 0),
-          `castRider:${action.id}`,
-          actor,
-          actor,
-          context,
-        ),
-        // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
-        ...(onTargets
-          ? targets.flatMap((target) =>
-              target.id === actor.id
-                ? []
-                : leafEvents(onTargets, action.id, actor, target, context),
-            )
-          : []),
-      ]),
+            : []),
+          ...leafEvents(
+            atSlotLevel(effects, slotLevel ?? 0),
+            `castRider:${action.id}`,
+            actor,
+            actor,
+            context,
+          ),
+          // On the spell's targets too, ending with it, as Hunter's Rime's hold on the marked.
+          ...(onTargets
+            ? targets.flatMap((target) =>
+                target.id === actor.id
+                  ? []
+                  : leafEvents(onTargets, action.id, actor, target, context),
+              )
+            : []),
+        ];
+      }),
     ],
     frames: rides.flatMap(({ effects }) =>
       effects.flatMap((effect) =>
