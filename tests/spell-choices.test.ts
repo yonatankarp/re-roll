@@ -637,7 +637,12 @@ describe("a damage type picked as the spell is cast", () => {
       "Resistance to Cold, Fire damage to attackers",
       "Resistance to Fire, Cold damage to attackers",
     ]);
-    expect(modifiersOf(cast.state, PLAYER_ACTOR)).toEqual([
+    // Its light comes too, and has no type to pick.
+    expect(
+      modifiersOf(cast.state, PLAYER_ACTOR).filter(
+        ({ kind }) => kind !== "sheds",
+      ),
+    ).toEqual([
       { kind: "resistance", damage: "fire" },
       {
         kind: "retaliate",
