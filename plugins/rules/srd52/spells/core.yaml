@@ -5978,7 +5978,23 @@
     dissipates with no effect, and the action, Bonus Action, or Reaction used to
     cast it is wasted. If that spell was cast with a spell slot, the slot isn’t
     expended.
-  automation: text
+  automation: full
+  activation:
+    {
+      "cost": ["reaction", "slot"],
+      "trigger": { "spellCast": true },
+      "targeting": { "creatures": 1, "range": 60, "side": "enemy" },
+      "resolution":
+        {
+          "kind": "save",
+          "ability": "con",
+          "dc": { "base": 0, "add": [{ "kind": "spellSaveDc" }] },
+          "damage": [],
+          "onSuccessDamage": "none",
+          "onFail": [{ "kind": "counter" }],
+          "onSuccess": [],
+        },
+    }
 - id: srd52:spell/cure-wounds
   name: Cure Wounds
   level: 1
@@ -12637,30 +12653,31 @@
     An imperceptible barrier of magical force protects you. Until the start of
     your next turn, you have a +5 bonus to AC, including against the triggering
     attack, and you take no damage from Magic Missile.
-  automation: partial
+  automation: full
   activation:
-    cost:
-      - reaction
-      - slot
-    trigger:
-      hitByAttack: true
-      targetedBySpell: srd52:spell/magic-missile
-    targeting:
-      self: true
-    resolution:
-      kind: automatic
-      effects:
-        - kind: modifier
-          duration:
-            until: yourNextTurnStart
-          modifier:
-            kind: bonus
-            to: ac
-            amount:
-              bonus:
-                base: 5
-        - kind: note
-          text: Magic Missile immunity is not yet automated
+    {
+      "cost": ["reaction", "slot"],
+      "trigger":
+        { "hitByAttack": true, "targetedBySpell": "srd52:spell/magic-missile" },
+      "targeting": { "self": true },
+      "resolution":
+        {
+          "kind": "automatic",
+          "effects":
+            [
+              {
+                "kind": "modifier",
+                "duration": { "until": "yourNextTurnStart" },
+                "modifier":
+                  {
+                    "kind": "bonus",
+                    "to": "ac",
+                    "amount": { "bonus": { "base": 5 } },
+                  },
+              },
+            ],
+        },
+    }
 - id: srd52:spell/silence
   name: Silence
   level: 2

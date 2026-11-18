@@ -449,7 +449,8 @@ export function recovered(
     const daily =
       key === HIT_DICE ||
       key === SHORT_REST_GIVEN ||
-      key.startsWith("deterred:"); // Among the Dead's freed attackers
+      key.startsWith("deterred:") || // Among the Dead's freed attackers
+      key.startsWith("emissary:"); // Emissary of Redemption's spared none
     if (
       key === MEAL ||
       (rest === "long" ? slot || daily : slot && stats.pactMagic)
@@ -467,6 +468,19 @@ export function recovered(
           ? on === "turnStart" || on === "shortRest" || rest === "long"
           : on === (rest === "long" ? "longRest" : "shortRest");
       if (!applies || !canUse(entry, used, stats) || used(id) === 0) continue;
+      // Lethargy Resilience's 1d4 Long Rests: the count is rolled as the first of them passes, and kept.
+      if (entry.everyDie && dice) {
+        const due = `${id}:due`;
+        const waited = `${id}:waited`;
+        const needs = used(due) || dice.roll(entry.everyDie);
+        if (used(waited) + 1 < needs) {
+          left.set(due, needs);
+          left.set(waited, used(waited) + 1);
+          continue;
+        }
+        left.set(due, 0);
+        left.set(waited, 0);
+      }
       // Cauldron of Rebirth's 7 days: only once that many have passed since the use was spent.
       if (entry.every) {
         const waited = `${id}:waited`;
@@ -607,6 +621,7 @@ function runFinishRest(
       }),
       ...restInspiration(members, rest, context),
       ...(rest === "long" ? restItems(members, context) : []),
+      ...(rest === "long" ? foretelling(members, context) : []),
       ...(rest === "long" ? afterLongRest(members, context) : []),
       ...familiarFoundEvents(members, context, rest),
       dndEvent(`${NS}:restFinished`, {
@@ -647,6 +662,29 @@ function afterLongRest(
     }
   }
   return events;
+}
+
+// Portent: a Long Rest ends with fresh foretelling rolls in place of any left.
+function foretelling(
+  members: readonly Actor[],
+  context: Context,
+): SystemEvent[] {
+  return members.flatMap((actor) => {
+    const count = Math.max(
+      0,
+      ...deriveStats(actor, context).passives.map((passive) =>
+        passive.kind === "foretell" ? passive.count : 0,
+      ),
+    );
+    return count > 0
+      ? [
+          dndEvent(`${NS}:foretold`, {
+            actor: actor.id,
+            rolls: Array.from({ length: count }, () => context.dice.roll(20)),
+          }),
+        ]
+      : [];
+  });
 }
 
 // Decanting: a Long Rest leaves the bearer one of the item, put in its pack.
