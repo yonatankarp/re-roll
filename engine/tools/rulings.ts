@@ -73,6 +73,9 @@ export interface Glossary {
   readonly terms?: ReadonlySet<string>; // more rules terms' names, by slug ("quiet")
   readonly kinds?: ReadonlySet<string>; // the lore kinds that are rules terms, unlike a family; every lore kind when absent
   readonly lower?: ReadonlySet<string>; // kinds a book names in one lower-case word, as "blinded"
+  // Rules terms of other kinds that one lower-case word names too, by singular slug, as "concentration" (#196):
+  // only words that are rarely plain English, unlike "target" or "attack".
+  readonly words?: ReadonlySet<string>;
 }
 const isTerm = (entity: Entity, glossary: Glossary) =>
   entity.lore === true && (glossary.kinds?.has(entity.kind) ?? true);
@@ -172,7 +175,10 @@ export function mentions(
               entity.edition === edition &&
               subject(entity) &&
               (!only || only.includes(entity.kind)) &&
-              (!word || glossary.lower.has(entity.kind)) &&
+              (!word ||
+                glossary.lower.has(entity.kind) ||
+                (glossary.words?.has(singular(key)) === true &&
+                  isTerm(entity, glossary))) &&
               // Lower-case words are a rules term ("opportunity attacks") but never other lore ("magic items").
               (!plain || !entity.lore || isTerm(entity, glossary)) &&
               // A rules term in either number ("short rests"), anything else by its whole name.
