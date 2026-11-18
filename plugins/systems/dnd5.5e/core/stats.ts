@@ -3559,6 +3559,9 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
   const { play } = companion;
   if (!play) throw new Error(`${companion.id} has no numbers to play`);
   const above = Math.max(0, source.level - play.level);
+  const form =
+    play.forms?.find((item) => item.name === source.form) ?? play.forms?.[0];
+  const speeds = form?.speeds ?? play.speeds;
   const casterNumbers = (resolution: Resolution): Resolution => {
     const dc = { base: source.spellDc, add: [] };
     switch (resolution.kind) {
@@ -3586,26 +3589,32 @@ function summonStats(actor: Actor, access: ContentAccess): Stats {
       name: companion.name,
       ...(companion.size ? { size: companion.size } : {}),
       abilities: companion.abilities,
-      ac: play.ac + play.acPerLevel * above,
-      hp: play.hp + play.hpPerLevel * above,
-      speed: play.speed,
-      ...(play.speeds ? { speeds: play.speeds } : {}),
+      ac: (form?.ac ?? play.ac) + play.acPerLevel * above,
+      hp: (form?.hp ?? play.hp) + play.hpPerLevel * above,
+      speed: form?.speed ?? play.speed,
+      ...(speeds ? { speeds } : {}),
       proficiency: source.proficiency,
       saves: play.saves,
       initiative: 0, // it goes right after its caster
       ...(play.creatureType ? { creatureType: play.creatureType } : {}),
       features: [],
-      passives: play.passives,
+      passives: [...play.passives, ...(form?.passives ?? [])],
       multiattack: play.halfLevelAttacks
         ? Math.max(1, Math.floor(source.level / 2))
         : play.multiattack,
-      actions: play.actions.map((action) => ({
-        ...action,
-        activation: {
-          ...action.activation,
-          resolution: casterNumbers(action.activation.resolution),
-        },
-      })),
+      // an action printed for some forms only is out of reach in the others
+      actions: play.actions
+        .filter(
+          (action) =>
+            !action.shapes || (form && action.shapes.includes(form.name)),
+        )
+        .map(({ shapes: _shapes, ...action }) => ({
+          ...action,
+          activation: {
+            ...action.activation,
+            resolution: casterNumbers(action.activation.resolution),
+          },
+        })),
     },
     access,
   );

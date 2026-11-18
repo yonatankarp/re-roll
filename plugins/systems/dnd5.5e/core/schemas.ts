@@ -1723,6 +1723,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     range: z.number().int().min(5),
     count: FormulaSchema.default({ base: 1, add: [] }),
     dc: FormulaSchema.default({ base: 0, add: [{ kind: "spellSaveDc" }] }),
+    form: z.string().min(1).optional(), // one of the companion's forms, by name, picked through the cast's `shapes`
   }),
   // A strong wind: it ends the gas and vapour zones in its area, as Gust of Wind does Fog Cloud.
   // With `zones`, it ends the spells' zones of those kinds in its area instead, as Sunburst does Darkness.
@@ -1889,12 +1890,27 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // `count` of this monster (the bearer's own stat block when left out) come to life in open squares within `range`
   // on the bearer's side, without the actions named in `lacks`, taking their turns right after the bearer's, as a
   // treant's Animate Trees or a priest's Soul Tattoo.
+  // Creatures the caster keeps between fights, `count` of this monster worked out from its numbers (a `slotLevel` term
+  // is the slot's level), joining each fight beside it until they drop or, with `lasts: "longRest"`, the next Long Rest,
+  // as Animate Dead's undead (combat/familiar.ts retinueActors).
+  // shortcut: no corpse or bones are needed, and control isn't reasserted; a Long Rest ends it.
+  z.strictObject({
+    kind: z.literal("retain"),
+    monster: ContentIdSchema,
+    count: FormulaSchema.default({ base: 1, add: [] }),
+    lasts: z.enum(["longRest", "ever"]).default("longRest"),
+  }),
+  // With `duration` they last as long as the spell or item use that called them, vanishing when its Concentration ends,
+  // as an elemental from a Bowl of Commanding Water Elementals; `hostile` puts them on the other side, as a Staff of
+  // the Lost's Minotaurs.
   z.strictObject({
     kind: z.literal("animate"),
     monster: ContentIdSchema.optional(),
     count: z.number().int().min(1).default(1),
     range: z.number().int().min(5),
     lacks: z.array(z.string().min(1)).default([]),
+    duration: DurationSchema.optional(),
+    hostile: z.literal(true).optional(),
   }),
   // The target spends its Reaction on one melee attack against a foe in its reach, as a gnoll pack lord's Incite
   // Rampage.
@@ -1913,6 +1929,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     range: z.number().int().min(5),
     creatureTypes: z.array(CreatureTypeSchema).min(1),
     all: z.boolean().default(false), // every such corpse, not one
+    // only the target, once this action has killed it, as Finger of Death's Humanoid rising as a Zombie
+    slain: z.literal(true).optional(),
   }),
 ]);
 export type LeafEffect = z.infer<typeof LeafEffectSchema>;
@@ -4156,6 +4174,21 @@ export const PassiveSchema = z.discriminatedUnion("kind", [
     kind: z.literal("languages"),
     languages: z.array(z.string().regex(/^[a-z][a-z-]*$/)).min(1),
   }),
+  // What a creature the bearer summons or raises gets as it appears (combat/summon.ts boosted): only one called by a
+  // spell of these schools, cast with a slot with `slot`, or of these types; `tempHp`, with Resistance to all but
+  // Force, Necrotic, Psychic and Radiant damage with `resistant`, as Durable Summons; `hp` more Hit Points, as Undead
+  // Fortitude; and `hitDamage` on its hits, as Withering Strike. They're worked out from the bearer's numbers.
+  // shortcut: `resistant` lasts the fight, not only while the Temporary Hit Points do.
+  z.strictObject({
+    kind: z.literal("summonBoost"),
+    schools: z.array(SpellSchoolSchema).min(1).optional(),
+    slot: z.literal(true).optional(),
+    creatureTypes: z.array(CreatureTypeSchema).min(1).optional(),
+    tempHp: FormulaSchema.optional(),
+    resistant: z.literal(true).optional(),
+    hp: FormulaSchema.optional(),
+    hitDamage: DamageSchema.optional(),
+  }),
   // No Disadvantage on a check to influence a Hostile creature, as Boon of Communication's Cunning Speaker.
   z.strictObject({ kind: z.literal("cunningSpeaker") }),
   // As its turn starts, this damage to one creature it grapples, as Unarmed Fighting's 1d4.
@@ -5434,6 +5467,30 @@ export const CompanionSchema = ContentEntrySchema.extend({
       hpPerLevel: z.number().int().default(0),
       // Its Multiattack makes half the spell's level in attacks, rounded down.
       halfLevelAttacks: z.boolean().default(false),
+      // The forms the caster picks from as it casts (LeafEffect summon `form`), as Summon Undead's Ghostly, Putrid or
+      // Skeletal: each changes these numbers and adds its own traits, and an action whose `shapes` name forms is that
+      // form's alone (stats.ts summonStats). The first is the one when none is named.
+      forms: z
+        .array(
+          z.strictObject({
+            name: z.string().min(1),
+            ac: z.number().int().optional(),
+            hp: z.number().int().optional(),
+            speed: z.number().int().optional(),
+            speeds: z
+              .strictObject({
+                walk: z.number().int(),
+                fly: z.number().int().optional(),
+                swim: z.number().int().optional(),
+                climb: z.number().int().optional(),
+                burrow: z.number().int().optional(),
+              })
+              .optional(),
+            passives: z.array(PassiveSchema).default([]),
+          }),
+        )
+        .min(2)
+        .optional(),
     })
     .strict()
     .optional(),

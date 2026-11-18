@@ -1,6 +1,18 @@
-import type { SystemEvent } from "#sdk";
-import { CompanionSchema, type LeafEffect } from "../schemas.ts";
-import { type Actor, dndEvent, freshActor, NS } from "../state.ts";
+import type { ContentAccess, SystemEvent } from "#sdk";
+import {
+  CompanionSchema,
+  DAMAGE_TYPES,
+  type LeafEffect,
+  type Modifier,
+  SpellSchema,
+} from "../schemas.ts";
+import {
+  type ActiveEffect,
+  type Actor,
+  dndEvent,
+  freshActor,
+  NS,
+} from "../state.ts";
 import {
   deriveStats,
   evaluateFormula,
@@ -56,12 +68,110 @@ export function summonedActors(
           stats.itemBonuses.spellDc +
           stats.itemBonuses.spellAttack,
         spellDc,
+        ...(effect.form ? { form: effect.form } : {}),
       },
       hp: 1,
       inventory: [],
     });
-    return { ...actor, hp: deriveStats(actor, context).maxHp };
+    return boosted(
+      { ...actor, hp: deriveStats(actor, context).maxHp },
+      caster,
+      action.id,
+      action.activation.cost.includes("slot"),
+      context,
+    );
   });
+}
+
+const UNRESISTED = new Set(["force", "necrotic", "psychic", "radiant"]);
+
+// What the caster's `summonBoost` passives give a creature it calls or raises, as it appears, as Durable Summons'
+// Temporary Hit Points or Undead Fortitude's Hit Points.
+export function boosted(
+  summoned: Actor,
+  caster: Actor,
+  source: string | undefined, // the spell's action id, as "spell:phb:spell/animate-dead"
+  slotted: boolean,
+  context: ContentAccess,
+): Actor {
+  if (caster.source.kind !== "character") return summoned;
+  const stats = deriveStats(caster, context);
+  const boosts = stats.passives.flatMap((passive) =>
+    passive.kind === "summonBoost" ? [passive] : [],
+  );
+  if (boosts.length === 0) return summoned;
+  const spellId = source?.match(/^spell:([^:]+:[^:]+)/)?.[1];
+  const spell = spellId
+    ? SpellSchema.safeParse(context.content(spellId)).data
+    : undefined;
+  const type = (
+    deriveStats(summoned, context).creatureType ?? ""
+  ).toLowerCase();
+  const effect = (modifier: Modifier): ActiveEffect => ({
+    sourceId: "summon-boost",
+    casterId: caster.id,
+    modifier,
+    ends: "spellDuration",
+  });
+  let next = summoned;
+  for (const boost of boosts) {
+    if (boost.schools && (!spell || !boost.schools.includes(spell.school))) {
+      continue;
+    }
+    if (boost.slot && !slotted) continue;
+    if (boost.creatureTypes && !boost.creatureTypes.includes(type)) continue;
+    const effects: ActiveEffect[] = [];
+    if (boost.hp) {
+      const more = Math.max(0, evaluateFormula(boost.hp, stats));
+      effects.push(
+        effect({
+          kind: "bonus",
+          to: "maxHp",
+          amount: { bonus: { base: more, add: [] } },
+        }),
+      );
+      next = { ...next, hp: next.hp + more };
+    }
+    if (boost.tempHp) {
+      next = {
+        ...next,
+        tempHp: Math.max(next.tempHp, evaluateFormula(boost.tempHp, stats)),
+      };
+    }
+    if (boost.resistant) {
+      for (const damage of DAMAGE_TYPES) {
+        if (!UNRESISTED.has(damage)) {
+          effects.push(effect({ kind: "resistance", damage }));
+        }
+      }
+    }
+    if (boost.hitDamage) {
+      const { amount, type: damageType } = boost.hitDamage;
+      effects.push(
+        effect({
+          kind: "hitDamage",
+          dealtBy: "bearer",
+          weaponOnly: false,
+          damage: {
+            type: damageType,
+            amount: {
+              ...amount,
+              ...(amount.bonus
+                ? {
+                    bonus: {
+                      base: evaluateFormula(amount.bonus, stats),
+                      add: [],
+                    },
+                  }
+                : {}),
+            },
+          },
+        }),
+      );
+    }
+    next = { ...next, activeEffects: [...next.activeEffects, ...effects] };
+  }
+  return next;
 }
 
 // shortcut: they appear in the open squares within range nearest the foes, rather than where the caster chooses.

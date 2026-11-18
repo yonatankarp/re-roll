@@ -425,6 +425,14 @@ const ActorSchema = z.strictObject({
       statBlockId: ContentIdSchema,
       // the creature that animated, raised or called it, so it dies at 0 Hit Points as a monster does
       calledBy: z.string().optional(),
+      // the spell or item use it lasts as long as, gone when its caster stops concentrating on it (settleSummons)
+      lasts: z
+        .strictObject({
+          casterId: z.string(),
+          sourceId: z.string(),
+          concentration: z.boolean(),
+        })
+        .optional(),
       // A character's familiar in a fight (combat/familiar.ts): its owner, its Hit Point maximum as found, the
       // owner's features that give it something, and the owner's numbers those read, such as its spell save DC.
       familiarOf: z
@@ -448,6 +456,7 @@ const ActorSchema = z.strictObject({
       proficiency: z.number().int(), // the caster's
       spellAttack: z.number().int(), // the caster's spell attack bonus
       spellDc: z.number().int(), // the caster's spell save DC
+      form: z.string().optional(), // the companion's form it was called in
     }),
   ]),
   hp: z.number().int(),
@@ -504,6 +513,18 @@ const ActorSchema = z.strictObject({
       hp: z.number().int(),
       maxHp: z.number().int(),
     })
+    .optional(),
+  // Creatures it keeps between fights, as Animate Dead's undead, each joining every fight beside it with the Hit Points
+  // it kept (combat/familiar.ts retinueActors), until it drops or, with `lasts: "longRest"`, the next Long Rest.
+  retinue: z
+    .array(
+      z.strictObject({
+        key: z.string(),
+        monster: ContentIdSchema,
+        hp: z.number().int(),
+        lasts: z.enum(["longRest", "ever"]),
+      }),
+    )
     .optional(),
   // Taken off its D20 Tests after coming back from the dead, one less each Long Rest, as Raise Dead's. Missing at 0.
   ordeal: z.number().int().optional(),
@@ -886,6 +907,19 @@ const FamiliarFoundSchema = z.strictObject({
   maxHp: z.number().int(),
 });
 
+// Creatures a character keeps between fights join its retinue (LeafEffect `retain`).
+const RetinueGainedSchema = z.strictObject({
+  actor: z.string(),
+  entries: z.array(
+    z.strictObject({
+      key: z.string(),
+      monster: ContentIdSchema,
+      hp: z.number().int(),
+      lasts: z.enum(["longRest", "ever"]),
+    }),
+  ),
+});
+
 const SummonedSchema = z.strictObject({
   actor: ActorSchema,
   after: z.string(),
@@ -1013,6 +1047,7 @@ export const EVENT_SCHEMAS = {
   [`${NS}:legendaryActionTaken`]: LegendaryActionTakenSchema,
   [`${NS}:summoned`]: SummonedSchema,
   [`${NS}:familiarFound`]: FamiliarFoundSchema,
+  [`${NS}:retinueGained`]: RetinueGainedSchema,
   [`${NS}:legendaryResistanceUsed`]: ActorOnlySchema,
   [`${NS}:lairActionTaken`]: LairActionTakenSchema,
   [`${NS}:surpriseSet`]: z.strictObject({ side: SurpriseSchema }),
@@ -1250,6 +1285,9 @@ export function controllingRider(
     ) ?? null
   );
 }
+
+// The id of a creature in a retinue is its keeper's id, this, and its key.
+export const RETINUE = ":retinue:";
 
 // The character whose familiar this is, or null for any other creature.
 export function familiarOwner(actor: Actor): string | null {
@@ -1553,6 +1591,18 @@ function settleSummons(state: DndState): DndState {
   let { actors } = state;
   for (const [id, actor] of Object.entries(state.actors)) {
     const { source } = actor;
+    if (source.kind === "monster" && source.lasts && actor.hp > 0) {
+      const caster = state.actors[source.lasts.casterId];
+      if (
+        !caster ||
+        isDead(caster) ||
+        (source.lasts.concentration &&
+          caster.concentratingOn !== source.lasts.sourceId)
+      ) {
+        actors = { ...actors, [id]: { ...actor, hp: 0, tempHp: 0 } };
+      }
+      continue;
+    }
     if (source.kind !== "summon" || actor.hp <= 0) continue;
     const caster = state.actors[source.casterId];
     const gone =
@@ -1605,16 +1655,29 @@ function endCombat(state: DndState): DndState {
         : after,
     state,
   );
-  // A familiar's Hit Points go back to its owner, to carry into the next fight.
+  // A familiar's Hit Points go back to its owner, to carry into the next fight, and so do a retinue's, which loses
+  // those that dropped.
   const kept = Object.values(gathered.actors).reduce((after, actor) => {
     const owner = familiarOwner(actor);
     const held = owner ? after.actors[owner]?.familiar : undefined;
-    return owner && held
-      ? updateActor(after, owner, (item) => ({
-          ...item,
-          familiar: { ...held, hp: Math.max(0, actor.hp) },
-        }))
-      : after;
+    if (owner && held) {
+      return updateActor(after, owner, (item) => ({
+        ...item,
+        familiar: { ...held, hp: Math.max(0, actor.hp) },
+      }));
+    }
+    const [keeper, key] = actor.id.split(RETINUE);
+    if (key === undefined || !keeper || !after.actors[keeper]) return after;
+    return updateActor(after, keeper, (item) => ({
+      ...item,
+      retinue: (item.retinue ?? []).flatMap((entry) =>
+        entry.key !== key
+          ? [entry]
+          : actor.hp > 0
+            ? [{ ...entry, hp: actor.hp }]
+            : [],
+      ),
+    }));
   }, gathered);
   const actors = Object.fromEntries(
     Object.entries(kept.actors)
@@ -1791,7 +1854,25 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
           rest === "long",
         ),
       };
-      if (rest === "long") return { ...rested, sinceLongRest: hours };
+      if (rest === "long") {
+        return {
+          ...rested,
+          actors: Object.fromEntries(
+            Object.entries(rested.actors).map(([id, actor]) => [
+              id,
+              actor.retinue
+                ? {
+                    ...actor,
+                    retinue: actor.retinue.filter(
+                      ({ lasts }) => lasts !== "longRest",
+                    ),
+                  }
+                : actor,
+            ]),
+          ),
+          sinceLongRest: hours,
+        };
+      }
       return state.sinceLongRest === undefined
         ? rested
         : { ...rested, sinceLongRest: state.sinceLongRest + REST_HOURS.short };
@@ -1939,6 +2020,13 @@ function applyOne(state: DndState, event: SystemEvent): DndState {
       return updateActor(state, data.actor, (actor) => ({
         ...actor,
         familiar: { form: data.form, hp: data.maxHp, maxHp: data.maxHp },
+      }));
+    }
+    case `${NS}:retinueGained`: {
+      const data = payload(RetinueGainedSchema, event);
+      return updateActor(state, data.actor, (actor) => ({
+        ...actor,
+        retinue: [...(actor.retinue ?? []), ...data.entries],
       }));
     }
     case `${NS}:summoned`: {

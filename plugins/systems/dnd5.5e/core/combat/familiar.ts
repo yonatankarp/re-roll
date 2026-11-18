@@ -9,6 +9,7 @@ import {
   isDead,
   isDown,
   NS,
+  RETINUE,
 } from "../state.ts";
 import { distanceFeet } from "../grid.ts";
 import {
@@ -144,4 +145,33 @@ export function familiarActors(
       }),
     ];
   });
+}
+
+// The creatures each member keeps between fights (Actor `retinue`), joining the fight beside it with the Hit Points
+// they kept, under its control.
+export function retinueActors(
+  members: readonly Actor[],
+  context: Context,
+): Actor[] {
+  return members.flatMap((owner) =>
+    isDead(owner)
+      ? []
+      : (owner.retinue ?? [])
+          .filter(({ hp }) => hp > 0)
+          .map((entry) => {
+            const monster = lookup(context, MonsterSchema, entry.monster);
+            return freshActor({
+              id: `${owner.id}${RETINUE}${entry.key}`,
+              name: `${owner.name}'s ${monster.name} ${entry.key.slice(entry.key.lastIndexOf("-") + 1)}`,
+              side: owner.side,
+              source: {
+                kind: "monster",
+                statBlockId: entry.monster,
+                calledBy: owner.id,
+              },
+              hp: entry.hp,
+              inventory: [],
+            });
+          }),
+  );
 }

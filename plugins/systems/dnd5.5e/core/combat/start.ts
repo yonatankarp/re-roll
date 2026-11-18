@@ -53,7 +53,11 @@ import { lairTurns } from "../legendary.ts";
 import { type Context, hasPassive } from "./queries.ts";
 import { DAMAGE_TO_PARTY, resolveAction } from "./effects.ts";
 import { damageToPartyFor } from "../worth.ts";
-import { familiarActors, familiarFoundEvents } from "./familiar.ts";
+import {
+  familiarActors,
+  familiarFoundEvents,
+  retinueActors,
+} from "./familiar.ts";
 
 export function startCombat(
   encounter: {
@@ -120,10 +124,14 @@ export function startCombat(
   // Familiars are found before the fight, and join it beside their owners, without counting towards its size.
   const found = familiarFoundEvents(party, context, "fight");
   const foundState = found.reduce(applyDndEvent, context.state);
-  const familiars = familiarActors(
-    party.flatMap((actor) => foundState.actors[actor.id] ?? []),
-    { ...context, state: foundState },
-  );
+  const familiars = [
+    ...familiarActors(
+      party.flatMap((actor) => foundState.actors[actor.id] ?? []),
+      { ...context, state: foundState },
+    ),
+    // and so do the creatures they keep between fights, as Animate Dead's undead
+    ...retinueActors(party, context),
+  ];
 
   // The story's word on surprise, such as from a Stealth check, beats the encounter's own.
   // Alarm or a Faithful Hound readied in this scene: the party isn't caught unawares.
