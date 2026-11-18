@@ -228,6 +228,11 @@ describe("lasting companions", () => {
     expect(
       tacticOptions(idle, turn(start), run).map(({ label }) => label),
     ).toEqual(["Dodge (attacks against you have Disadvantage)"]);
+    const dodged = {
+      ...idle,
+      budget: { ...idle.budget, action: false },
+    };
+    expect(tacticOptions(dodged, turn(start), run)).toEqual([]);
     const commanded = leafEvents(
       [{ kind: "commandCompanion" }],
       "test",

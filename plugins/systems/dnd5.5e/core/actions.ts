@@ -1147,11 +1147,11 @@ export function tacticOptions(
   if (!state.combat || isDown(actor) || hasCondition(actor, ...INCAPACITATING))
     return [];
   const stats = deriveStats(actor, access);
-  // An uncommanded Steel Defender or Primal Companion only Dodges.
+  // An uncommanded Steel Defender or Primal Companion only Dodges, once its action is free.
   if (limitsOf(actor).dodgeOnly) {
-    return [
-      { id: DODGE, label: "Dodge (attacks against you have Disadvantage)" },
-    ];
+    return actor.budget.action
+      ? [{ id: DODGE, label: "Dodge (attacks against you have Disadvantage)" }]
+      : [];
   }
   const options: { id: string; label: string }[] = [];
   const half = halfSpeed(stats);
