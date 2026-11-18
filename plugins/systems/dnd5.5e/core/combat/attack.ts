@@ -133,8 +133,8 @@ import {
   d20Floor,
   markedBy,
   maximized,
-  masteredTypes,
   flooredTypes,
+  masteredTypes,
   rerolledTypes,
   piercing,
   rescuedSave,
@@ -1138,6 +1138,17 @@ export function runAttackRoll(
           (resolution.attack.shadowAdvantage === true &&
             lightAt(target.position, state, context) !== "bright") ||
           sworn ||
+          // Innate Sorcery: Advantage on spell attacks only.
+          (action.spellLevel !== null &&
+            [
+              ...attacker.activeEffects.map((effect) => effect.modifier),
+              ...passiveModifiers(stats.passives),
+            ].some(
+              (modifier) =>
+                modifier.kind === "advantage" &&
+                modifier.on === "attacks" &&
+                modifier.spellAttacks === true,
+            )) ||
           mountedStrike(attacker, target, stats, context))));
   const held = payload.rolled;
   // Redirect Attack: the target trades places with an ally next to it, who takes the attack instead.
@@ -4253,12 +4264,17 @@ export function runConcentrationSave(
   const held = actor.concentratingOn
     .replace(/^spell:/, "")
     .replace(/:free$/, "");
+  const school = SpellSchema.safeParse(
+    context.content(spellOfSource(actor.concentratingOn) ?? held),
+  ).data?.school;
   if (
     !isDown(actor) &&
     deriveStats(actor, context).passives.some(
       (passive) =>
         passive.kind === "unshakableFocus" &&
-        (!passive.spells || passive.spells.includes(held)),
+        (!passive.spells || passive.spells.includes(held)) &&
+        (!passive.schools ||
+          (school !== undefined && passive.schools.includes(school))),
     )
   ) {
     return {};

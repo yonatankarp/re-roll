@@ -66,6 +66,7 @@ import {
 import {
   actorOf,
   canAfford,
+  quickenedBars,
   CHECK_END,
   combatEnded,
   type Context,
@@ -244,7 +245,10 @@ export function runAfterAction(
   // The turn carries on only while something other than ending it is still possible.
   const canContinue =
     stats.actions.some(
-      (action) => !action.activation.trigger && canAfford(action, actor, stats),
+      (action) =>
+        !action.activation.trigger &&
+        canAfford(action, actor, stats) &&
+        !quickenedBars(action, actor),
     ) ||
     (actor.budget.bonusAction &&
       stats.passives.some((passive) => passive.kind === "bonusTactics"));
@@ -474,6 +478,15 @@ export function runFinishTurn(context: Context): SystemResult {
       sourceId.startsWith("spell:"),
       0,
       repeatSaveConditions(target, sourceId),
+      // Heightened Spell's Disadvantage, kept for as long as the spell holds.
+      target.activeEffects.some(
+        (item) =>
+          item.sourceId === sourceId &&
+          item.casterId === casterId &&
+          item.modifier.kind === "disadvantage" &&
+          item.modifier.on === "saves" &&
+          item.modifier.casterSpells === true,
+      ),
     );
     events.push(...rolled.events);
     const resisted = rolled.saved
