@@ -465,6 +465,13 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     oncePerTurn: z.literal(true).optional(),
     able: z.literal(true).optional(),
     halfDealt: DamageTypeSchema.optional(),
+    // only attackers of these lowercase types, which save against `save` (its DC from the effect's caster) or have
+    // `condition` until the end of their next turn, as Holy Aura's Blinded on a Fiend or an Undead
+    creatureTypes: z.array(z.string()).min(1).optional(),
+    save: z
+      .strictObject({ ability: AbilitySchema, dc: FormulaSchema })
+      .optional(),
+    condition: ConditionSchema.optional(),
   }),
   // A creature of the bearer's foes takes this the first time on a turn its walk comes within 5 feet of it, the type
   // it resists least of `types`, as Elemental Epitome's Destructive Stride (combat/movement.ts).
@@ -481,10 +488,12 @@ export const ModifierSchema = z.discriminatedUnion("kind", [
     spell: ContentIdSchema,
     lost: z.literal(true).optional(),
   }),
-  // Can't gain this condition while it lasts, as Lordly Resolve's bolstered targets.
+  // Can't gain this condition while it lasts, as Lordly Resolve's bolstered targets, or with `creatureTypes` only from
+  // creatures of these lowercase types, as Protection from Evil and Good's.
   z.strictObject({
     kind: z.literal("conditionImmunity"),
     condition: ConditionSchema,
+    creatureTypes: z.array(z.string()).min(1).optional(),
   }),
   // `unarmored` only while the bearer wears no armor, and `noShield` only while it holds no Shield, as Unarmored
   // Defense's.
@@ -1272,6 +1281,7 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
     hpAtMost: z.number().int().min(1).optional(),
     hpAbove: z.number().int().min(1).optional(),
     endsOnDamage: z.literal(true).optional(), // as Hypnotic Pattern's Speed 0
+    endsOn: z.enum(["attack", "action", "spell"]).optional(), // as an applyCondition's, as Sanctuary's
     saveOnDamage: z.literal(true).optional(), // taking damage repeats its save, as Enemies Abound's
     // A save at the end of each of its turns that ends it, as an applyCondition's, for an effect that came with none,
     // as Power Word Pain's (2014).
@@ -1604,6 +1614,8 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("replaceRoll"),
     value: z.number().int().min(1).max(20).optional(),
+    // a 20 on its own side's roll and a 1 on a foe's, as Moment of Prescience
+    extreme: z.literal(true).optional(),
     foretold: z.literal(true).optional(), // one of the bearer's foretelling rolls, as Portent's
   }),
   // The roll succeeds instead, as Noble Scion's Minor Wish.
@@ -1749,8 +1761,10 @@ export const LeafEffectSchema = z.discriminatedUnion("kind", [
   // Resistance to the damage that set the reaction off, as with Elemental Absorption, and with `lasting` to that type
   // for so long, as Superior Hunter's Defense to the end of the turn; `hitDamage` of that type goes on the bearer's
   // next weapon hit, as Absorb Elements' 1d6.
+  // With `immune`, Immunity instead, as Primordial Ward's.
   z.strictObject({
     kind: z.literal("resistTrigger"),
+    immune: z.literal(true).optional(),
     lasting: DurationSchema.optional(),
     hitDamage: AmountSchema.optional(),
   }),
@@ -2426,7 +2440,15 @@ export const ActivationSchema = z.strictObject({
           // "others" is anyone but the bearer, as Bend Luck's
           by: z.enum(["self", "ally", "selfOrAlly", "foe", "any", "others"]),
           when: z
-            .enum(["natural1", "hit", "failed", "hitOrFailed", "any"])
+            // "hitOrFailedOwn" is the bearer's own failed roll or a foe's hit on it, as Moment of Prescience
+            .enum([
+              "natural1",
+              "hit",
+              "failed",
+              "hitOrFailed",
+              "hitOrFailedOwn",
+              "any",
+            ])
             .default("any"),
           magical: z.literal(true).optional(),
           // only a save to avoid or end one of these conditions, as Countercharm's Charmed or Frightened

@@ -2696,6 +2696,7 @@ export function leafEvents(
                   : {}),
               ...(effect.whileTempHp ? { endsWithTempHp: true } : {}),
               ...(effect.endsOnDamage ? { endsOnDamage: true } : {}),
+              ...(effect.endsOn ? { endsOn: effect.endsOn } : {}),
               ...(effect.saveOnDamage && save ? { saveOnDamage: save } : {}),
               ...(effect.endsInLight ? { endsInLight: true as const } : {}),
               ...(effect.untilIncapacitated
@@ -2750,7 +2751,13 @@ export function leafEvents(
           target.activeEffects.some(
             ({ modifier }) =>
               modifier.kind === "conditionImmunity" &&
-              modifier.condition === effect.condition,
+              modifier.condition === effect.condition &&
+              (!modifier.creatureTypes ||
+                modifier.creatureTypes.includes(
+                  (
+                    deriveStats(caster, context).creatureType ?? ""
+                  ).toLowerCase(),
+                )),
           ) ||
           (effect.web &&
             hasPassive(deriveStats(target, context), "webWalker")) ||
@@ -5565,7 +5572,12 @@ export function resolveAction(
         }
         const evaded =
           resolution.onSuccessDamage === "half" &&
-          (evades(target, resolution.ability, context, action.spellLevel !== null) ||
+          (evades(
+            target,
+            resolution.ability,
+            context,
+            action.spellLevel !== null,
+          ) ||
             (action.spellLevel !== null &&
               zonesOn(target, context.state, context).some(
                 (zone) => zone.area?.magicWard,

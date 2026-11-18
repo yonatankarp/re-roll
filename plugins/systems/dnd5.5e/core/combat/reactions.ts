@@ -275,6 +275,15 @@ function matchesRoll(
       return false;
     }
   }
+  if (rolled.when === "hitOrFailedOwn") {
+    const ownFail = self && !roll.success;
+    const hitOn =
+      foe &&
+      roll.kind === "attack" &&
+      roll.success &&
+      roll.against?.id === bearer.id;
+    if (!ownFail && !hitOn) return false;
+  }
   if (rolled.when === "natural1" && roll.natural !== 1) return false;
   if (
     rolled.conditions &&
@@ -325,6 +334,7 @@ function helps(
     if (effect.kind === "replaceRoll" && effect.foretold) {
       return foretoldFor(bearer, roll, want) !== null;
     }
+    if (effect.kind === "replaceRoll" && effect.extreme) return true;
     if (effect.kind === "replaceRoll" && effect.value !== undefined) {
       return want ? effect.value > roll.natural : effect.value < roll.natural;
     }
@@ -403,6 +413,8 @@ export function respond(
           dndEvent(`${NS}:foretoldUsed`, { actor: reactor.id, roll: roll1 }),
         );
       }
+    } else if (effect.kind === "replaceRoll" && effect.extreme) {
+      natural = want ? 20 : 1;
     } else if (effect.kind === "replaceRoll") {
       const die = effect.value ?? context.dice.roll(20);
       if (want ? die > natural : die < natural) natural = die;
@@ -1585,7 +1597,7 @@ function lessen(
   let left = amount;
   for (const effect of effects) {
     if (effect.kind === "resistTrigger") {
-      left = Math.floor(left / 2);
+      left = effect.immune ? 0 : Math.floor(left / 2);
       events.push(
         ...leafEvents(
           [
@@ -1593,7 +1605,12 @@ function lessen(
               ? [
                   {
                     kind: "modifier" as const,
-                    modifier: { kind: "resistance" as const, damage: type },
+                    modifier: {
+                      kind: effect.immune
+                        ? ("immunity" as const)
+                        : ("resistance" as const),
+                      damage: type,
+                    },
                     duration: effect.lasting,
                   },
                 ]
