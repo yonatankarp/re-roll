@@ -66,6 +66,10 @@ import {
 } from "../plugins/systems/dnd5.5e/core/stats.ts";
 import { PregenSchema } from "../plugins/systems/dnd5.5e/core/schemas.ts";
 
+// What a pinned seed's failure says: the rules now play that seed differently, so pin another seed with that outcome.
+const REPIN =
+  "A pinned seed no longer plays out as pinned. Find another seed with that outcome and pin it.";
+
 function deepFreeze<T>(value: T): T {
   if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
     Object.freeze(value);
@@ -1097,10 +1101,14 @@ describe("playing a D&D adventure", () => {
 
   it("really fights: monsters take damage, and fights end in a win or a defeat", async () => {
     const run = await goblin();
-    let wins = 0;
-    let defeats = 0;
-    for (let index = 0; index < 120; index += 1) {
-      const played = playRun(run, `fight-${String(index)}`, {
+    // One pinned seed per outcome (#209). The soak run plays all 120.
+    const pinned = { "fight-0": "win", "fight-39": "defeat" };
+    const seeds = SOAK
+      ? Array.from({ length: 120 }, (_, index) => `fight-${String(index)}`)
+      : Object.keys(pinned);
+    const ended: Record<string, string> = {};
+    for (const seed of seeds) {
+      const played = playRun(run, seed, {
         maxDecisions: 500,
       });
       const events = played.log.flatMap((entry) => entry.events);
@@ -1109,20 +1117,17 @@ describe("playing a D&D adventure", () => {
         true,
       );
       if (played.outcome === "defeat") {
-        defeats += 1;
+        ended[seed] = "defeat";
         expect(events.some((event) => event.kind === "partyDefeated")).toBe(
           true,
         );
         expect(played.state.story.scene).not.toBe("safe-road");
       } else if (events.some((event) => event.kind === "encounterEnded")) {
-        wins += 1;
+        ended[seed] = "win";
       }
-      // Defeats are rare, so the unit run stops at the first seed that has shown both.
-      if (!SOAK && wins > 0 && defeats > 0) break;
     }
-    expect(wins).toBeGreaterThan(0);
-    expect(defeats).toBeGreaterThan(0);
-  }, 120_000); // 120 fights alongside other test files, which took up to 65 s on CI's ubuntu runner
+    expect(ended, REPIN).toMatchObject(pinned);
+  }, 120_000); // the soak run's 120 fights alongside other test files took up to 65 s on CI's ubuntu runner
 
   it("plays like a player when asked: builds with the system, rests and keeps going past endings", async () => {
     const run = await goblin();
@@ -1153,55 +1158,47 @@ describe("playing a D&D adventure", () => {
 
   it("clears monsters and the combat when a fight is won", async () => {
     const run = await goblin();
-    for (let index = 0; index < runs(30, 120); index += 1) {
-      const played = playRun(run, `clear-${String(index)}`, {
-        maxDecisions: 500,
-      });
-      const events = played.log.flatMap((entry) => entry.events);
-      if (
-        played.outcome === "ending" &&
-        events.some((event) => event.kind === "encounterEnded")
-      ) {
-        const dnd = systemState(played.state);
-        expect(dnd.combat).toBeNull();
-        expect(
-          Object.values(dnd.actors).every((actor) => actor.side === "party"),
-        ).toBe(true);
-        return;
-      }
-    }
-    throw new Error("No seed won a fight");
+    const played = playRun(run, "clear-1", { maxDecisions: 500 }); // a pinned seed that wins its fight (#209)
+    const events = played.log.flatMap((entry) => entry.events);
+    expect(
+      played.outcome === "ending" &&
+        events.some((event) => event.kind === "encounterEnded"),
+      REPIN,
+    ).toBe(true);
+    const dnd = systemState(played.state);
+    expect(dnd.combat).toBeNull();
+    expect(
+      Object.values(dnd.actors).every((actor) => actor.side === "party"),
+    ).toBe(true);
   });
 
   it("saves and resumes in the middle of a fight", async () => {
     const { registry, run } = await loadAdventure("goblin-ambush");
-    for (let index = 0; index < 60; index += 1) {
-      const seed = `mid-${String(index)}`;
-      const played = playRun(run, seed, { maxDecisions: 500 });
-      const fighting = played.log.findIndex((entry) =>
-        entry.events.some((event) => event.kind === "encounterStarted"),
-      );
-      if (fighting === -1 || fighting + 2 >= played.log.length) continue;
+    const seed = "mid-1"; // a pinned seed whose fight lasts more than one step (#209)
+    const played = playRun(run, seed, { maxDecisions: 500 });
+    const fighting = played.log.findIndex((entry) =>
+      entry.events.some((event) => event.kind === "encounterStarted"),
+    );
+    expect(fighting !== -1 && fighting + 2 < played.log.length, REPIN).toBe(
+      true,
+    );
 
-      const cut = played.log.slice(0, fighting + 1);
-      const save = createSave(registry, "goblin-ambush", seed, cut);
-      const loaded = loadSave(JSON.stringify(save), registry, run);
-      if (!loaded.ok) throw new Error(loaded.error);
-      const replayed = replayInputs(
-        run,
-        seed,
-        cut.map((entry) => entry.input),
-      );
-      expect(loaded.state).toStrictEqual(replayed.state);
+    const cut = played.log.slice(0, fighting + 1);
+    const save = createSave(registry, "goblin-ambush", seed, cut);
+    const loaded = loadSave(JSON.stringify(save), registry, run);
+    if (!loaded.ok) throw new Error(loaded.error);
+    const replayed = replayInputs(
+      run,
+      seed,
+      cut.map((entry) => entry.input),
+    );
+    expect(loaded.state).toStrictEqual(replayed.state);
 
-      const next = played.log[fighting + 1]?.input;
-      if (next?.kind !== "answer") throw new Error("Expected an answer");
-      const fromSave = step(run, loaded.state, next);
-      if (!fromSave.ok) throw new Error(fromSave.error);
-      expect(fromSave.events).toStrictEqual(played.log[fighting + 1]?.events);
-      return;
-    }
-    throw new Error("No seed had a fight to save in");
+    const next = played.log[fighting + 1]?.input;
+    if (next?.kind !== "answer") throw new Error("Expected an answer");
+    const fromSave = step(run, loaded.state, next);
+    if (!fromSave.ok) throw new Error(fromSave.error);
+    expect(fromSave.events).toStrictEqual(played.log[fighting + 1]?.events);
   });
 
   it("lists adventures through the command-line helper", async () => {
@@ -1523,15 +1520,24 @@ describe("encounter outcomes in real fights", () => {
 
   it("branches on how the fight ended and never after the player dies", async () => {
     const { run } = await outcomesRun();
-    const seen: Record<string, number> = {};
-    for (let index = 0; index < 80; index += 1) {
-      const played = playRun(run, `outcome-${String(index)}`, {
+    // One pinned seed per way out (#209). The soak run plays all 80.
+    const pinned = {
+      "outcome-0": "dead",
+      "outcome-1": "fled",
+      "outcome-6": "road",
+      "outcome-12": "captured",
+    };
+    const seeds = SOAK
+      ? Array.from({ length: 80 }, (_, index) => `outcome-${String(index)}`)
+      : Object.keys(pinned);
+    const ended: Record<string, string> = {};
+    for (const seed of seeds) {
+      const played = playRun(run, seed, {
         maxDecisions: 800,
       });
       const { story } = played.state;
       const dnd = systemState(played.state);
-      const key = played.outcome === "defeat" ? "dead" : (story.scene ?? "");
-      seen[key] = (seen[key] ?? 0) + 1;
+      ended[seed] = played.outcome === "defeat" ? "dead" : (story.scene ?? "");
 
       if (played.outcome === "defeat") {
         const player = dnd.actors[PLAYER_ACTOR];
@@ -1545,14 +1551,9 @@ describe("encounter outcomes in real fights", () => {
         ).toBe(true);
         expect(story.flags.won).toBe(story.scene === "road" ? true : undefined);
       }
-      // The unit run stops once every way out has been seen.
-      if (!SOAK && seen.fled && seen.captured && seen.road) break;
     }
-    expect(seen.fled).toBeGreaterThan(0);
-    expect(seen.captured).toBeGreaterThan(0);
-    expect(seen.road).toBeGreaterThan(0);
-    // 80 fights take about 6 s, and CI's coverage run about five times that.
-  }, 60_000);
+    expect(ended, REPIN).toMatchObject(pinned);
+  });
 
   it("replays exactly, from inputs and from a save", async () => {
     const { registry, run } = await outcomesRun();
