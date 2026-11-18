@@ -52,6 +52,8 @@ export interface Zone {
   readonly dim?: number | undefined; // light: feet of Dim Light beyond its Bright
   readonly ownerSees?: true | undefined; // darkness its owner sees through
   readonly reveals?: true | undefined; // light: no benefit from the Invisible condition in its Bright Light
+  readonly dc?: number | undefined; // an image: the Investigation DC to see through it
+  readonly decoy?: true | undefined; // an image of its owner, which hides nothing
 }
 
 export const AURA = "aura:";
@@ -115,6 +117,8 @@ function castZones(state: DndState): readonly Zone[] {
               dim: modifier.dim,
               ownerSees: modifier.ownerSees,
               reveals: modifier.reveals,
+              dc: modifier.dc,
+              decoy: modifier.decoy,
             },
           ];
         }),
@@ -399,10 +403,12 @@ export function obscuring(
   state: DndState,
   viewer?: string,
   ownDarkness = false,
-): "darkness" | "fog" | undefined {
+): "darkness" | "fog" | "image" | undefined {
   const zones = zonesOf(state).filter(
     (zone) =>
-      (zone.zone === "darkness" || zone.zone === "fog") &&
+      (zone.zone === "darkness" ||
+        zone.zone === "fog" ||
+        (zone.zone === "image" && believes(zone, state, viewer))) &&
       inZone(zone, square) &&
       !(
         zone.zone === "darkness" &&
@@ -412,10 +418,50 @@ export function obscuring(
   );
   return zones.find((zone) => zone.zone === "darkness")
     ? "darkness"
-    : zones[0]
+    : zones.find((zone) => zone.zone === "fog")
       ? "fog"
-      : undefined;
+      : zones[0]
+        ? "image"
+        : undefined;
 }
+
+// An illusion hides what's in it from a viewer that isn't its maker and hasn't seen through it; an image of its
+// maker hides nothing.
+export function believes(
+  zone: Zone,
+  state: DndState,
+  viewer: string | undefined,
+): boolean {
+  if (zone.decoy || viewer === undefined || zone.owner === viewer) {
+    return false;
+  }
+  return !discerns(state.actors[viewer], zone);
+}
+
+// The marker of a creature that has seen through an illusion.
+export const discernEvent = (actor: Actor, zone: Zone): SystemEvent =>
+  dndEvent(`${NS}:effectAdded`, {
+    actor: actor.id,
+    effect: {
+      sourceId: `discern:${zone.sourceId}`,
+      casterId: zone.owner,
+      modifier: {
+        kind: "discerned",
+        source: zone.sourceId,
+        caster: zone.owner,
+      },
+      ends: "spellDuration",
+    },
+  });
+
+// Whether a creature has seen through this illusion: studied it, or walked into it.
+export const discerns = (actor: Actor | undefined, zone: Zone): boolean =>
+  actor?.activeEffects.some(
+    ({ modifier }) =>
+      modifier.kind === "discerned" &&
+      modifier.source === zone.sourceId &&
+      modifier.caster === zone.owner,
+  ) === true;
 
 export const lit = (
   square: Square | null,

@@ -385,10 +385,13 @@ export function seeing(
     obscuring(at, state, viewer.id, senses.ownDarkness) ??
     obscuring(viewer.position, state, viewer.id, senses.ownDarkness);
   if (hidden) {
+    // Truesight sees through Darkness and illusions alike.
     const through =
       hidden === "darkness"
         ? Math.max(senses.truesight, senses.devilsSight)
-        : 0;
+        : hidden === "image"
+          ? senses.truesight
+          : 0;
     return reaches(feet, through) ? "clear" : "none";
   }
   const light = lightAt(at, state, access);

@@ -117,6 +117,7 @@ import {
 import {
   blockedSquares,
   healingStopped,
+  inZone,
   placedFlag,
   sealed,
   zoneImmune,
@@ -2596,6 +2597,7 @@ export function leafEvents(
               ...(effect.untilIncapacitated
                 ? { untilIncapacitated: true as const }
                 : {}),
+              ...(effect.studyEnds && save ? { studyDc: save.dc } : {}),
               ...lingersFor(effect.duration, !context.state.combat),
               ...swallowed,
             },
@@ -3393,6 +3395,104 @@ export function leafEvents(
         );
         break;
       }
+      case "senseDeceptions": {
+        // Unerring Eye: only that something is trying to fool it, not what.
+        const near = (at: Square | null): boolean =>
+          distanceFeet(caster.position, at) <= effect.feet;
+        const images = zonesOf(context.state).filter(
+          (zone) =>
+            zone.zone === "image" && zone.owner !== caster.id && near(zone.at),
+        ).length;
+        const fooling = Object.values(context.state.actors).filter(
+          (item) =>
+            item.id !== caster.id &&
+            !isDead(item) &&
+            near(item.position) &&
+            (formOf(item) !== null ||
+              item.activeEffects.some(
+                ({ modifier }) =>
+                  modifier.kind === "disguise" || modifier.kind === "shape",
+              )),
+        ).length;
+        events.push(
+          dndEvent(`${NS}:deceptionSensed`, {
+            actor: caster.id,
+            count: images + fooling,
+          }),
+        );
+        break;
+      }
+      case "realImage": {
+        // Illusory Reality: a wall over each of the caster's slot-cast images, for a minute.
+        for (const zone of zonesOf(context.state)) {
+          if (
+            zone.zone !== "image" ||
+            zone.decoy ||
+            zone.owner !== caster.id ||
+            zone.level === undefined
+          ) {
+            continue;
+          }
+          const grid = context.state.combat?.grid;
+          const blocks: string[] = [];
+          for (let y = 0; grid && y < grid.height; y += 1) {
+            for (let x = 0; x < grid.width; x += 1) {
+              if (inZone(zone, { x, y })) blocks.push(squareKey({ x, y }));
+            }
+          }
+          events.push(
+            dndEvent(`${NS}:effectAdded`, {
+              actor: caster.id,
+              effect: {
+                sourceId: `real:${zone.sourceId}`,
+                casterId: caster.id,
+                modifier: {
+                  kind: "zone",
+                  zone: "wall",
+                  at: zone.at,
+                  radius: zone.radius,
+                  blocks,
+                  name: zone.name,
+                },
+                ends: "spellDuration",
+                ...lastsFor(
+                  { minutes: effect.minutes },
+                  caster,
+                  caster,
+                  context.state,
+                ),
+              },
+            }),
+          );
+        }
+        break;
+      }
+      case "swapImage": {
+        // Trickster's Transposition: the caster and its image trade squares.
+        const image = caster.activeEffects.find(
+          ({ modifier, sourceId: from }) =>
+            modifier.kind === "zone" &&
+            modifier.zone === "image" &&
+            effect.sources.some(
+              (id) =>
+                from.startsWith(`feature:${id}:`) || from === `spell:${id}`,
+            ),
+        );
+        if (image?.modifier.kind !== "zone" || !caster.position) break;
+        events.push(
+          dndEvent(`${NS}:moved`, {
+            actor: caster.id,
+            to: image.modifier.at,
+            feet: 0,
+          }),
+          dndEvent(`${NS}:zoneMoved`, {
+            actor: caster.id,
+            sourceId: image.sourceId,
+            to: caster.position,
+          }),
+        );
+        break;
+      }
       case "becomeMonster": {
         if (isDead(target)) break;
         const before = effect.counter
@@ -3695,6 +3795,10 @@ function zoneEvents(
             ...(effect.dim ? { dim: effect.dim } : {}),
             ...(effect.ownerSees ? { ownerSees: true as const } : {}),
             ...(effect.reveals ? { reveals: true as const } : {}),
+            ...(effect.zone === "image"
+              ? { dc: effect.dc ?? spellSaveDc(stats) }
+              : {}),
+            ...(effect.decoy ? { decoy: true as const } : {}),
             name: action.name,
           },
           ends: effectEnds(effect.duration),
@@ -5738,7 +5842,8 @@ function rolledModifier(
     (modifier.kind === "sanctuary" ||
       modifier.kind === "grantedAction" ||
       modifier.kind === "castSave" ||
-      modifier.kind === "dodgeSave") &&
+      modifier.kind === "dodgeSave" ||
+      modifier.kind === "disguise") &&
     modifier.dc === undefined
   ) {
     return { ...modifier, dc: spellSaveDc(stats) };

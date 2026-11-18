@@ -270,10 +270,31 @@ export function sceneCheck(
     parsed.dc,
     () => skill ?? ability,
     context,
-    aid?.aid === "advantage" || edge.advantage,
+    aid?.aid === "advantage" || edge.advantage || passes(actor, skill, context),
     tool ? { id: tool.id, proficient: edge.proficient } : undefined,
   );
   return { success: rolled.success, events: [...rolled.events, ...spent] };
+}
+
+// A disguise: Advantage on Deception in a scene, and with Actor's Impersonation on Performance too.
+// shortcut: whatever the check is about, as a scene doesn't say whom the character is passing itself off to.
+function passes(
+  actor: Actor,
+  skill: Skill | undefined,
+  access: ContentAccess,
+): boolean {
+  if (skill !== "deception" && skill !== "performance") return false;
+  if (
+    !actor.activeEffects.some(({ modifier }) => modifier.kind === "disguise")
+  ) {
+    return false;
+  }
+  return (
+    skill === "deception" ||
+    deriveStats(actor, access).passives.some(
+      (passive) => passive.kind === "impersonation",
+    )
+  );
 }
 
 function toolAbility(tool: string, access: ContentAccess): Ability | undefined {

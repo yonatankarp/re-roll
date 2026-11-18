@@ -223,6 +223,8 @@ const ActiveEffectSchema = z.strictObject({
       dim: z.number().int().optional(), // light: feet of Dim Light beyond its Bright
       ownerSees: z.literal(true).optional(), // darkness its caster sees through
       reveals: z.literal(true).optional(), // light: no benefit from the Invisible condition in its Bright Light
+      dc: z.number().int().optional(), // an image: the Investigation DC to see through it
+      decoy: z.literal(true).optional(), // an image of its caster, which hides nothing
     }),
     // What an action anyone can take, such as Dodge, or a weapon mastery, leaves behind (core/tactics.ts).
     z.strictObject({
@@ -253,6 +255,7 @@ const ActiveEffectSchema = z.strictObject({
   endsOn: z.enum(["attack", "action", "spell"]).optional(),
   endsInLight: z.literal(true).optional(), // ends as the creature's turn ends in Bright Light
   untilIncapacitated: z.literal(true).optional(), // ends once the creature is Incapacitated
+  studyDc: z.number().int().optional(), // a Study with Investigation against this ends it, as Phantasmal Force's
   // Taking damage gives this save, ending it on a success, as Dragon Fear's.
   saveOnDamage: z
     .strictObject({
@@ -950,6 +953,11 @@ export const EVENT_SCHEMAS = {
     source: z.string(),
   }),
   // A scene check that needs a tool the creature doesn't have, failed without a roll (core/explore.ts).
+  // Unerring Eye: how many illusions, shapechangers and other deceptions the actor senses near it (log only).
+  [`${NS}:deceptionSensed`]: z.strictObject({
+    actor: z.string(),
+    count: z.number().int().min(0),
+  }),
   [`${NS}:toolMissing`]: z.strictObject({
     actor: z.string(),
     tool: ContentIdSchema,
