@@ -5291,6 +5291,23 @@ export function resolveAction(
             applyRolled(target, damage(target), scaled);
           }
         }
+        // A willing ally of Polymorph's that fails it by choice: the caster picks its form.
+        for (const effect of turned || saved ? [] : resolution.onFail) {
+          const choice =
+            effect.kind === "polymorph" &&
+            target.side === actor.side &&
+            ownForm(target, actor)
+              ? formFrame(
+                  effect,
+                  spellSource(action),
+                  actor,
+                  target,
+                  effectEnds(effect.duration),
+                  context,
+                )
+              : null;
+          if (choice) frames.push(choice);
+        }
         // Detonate: an explosion round the target once its own save is done (combat/spell-riders.ts).
         if (resolution.burst) {
           frames.push(

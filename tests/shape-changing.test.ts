@@ -146,6 +146,23 @@ const FIXTURES = [
       targetCondition: "frightened",
     },
   ]),
+  trait("polymorpher", [], {
+    activations: [
+      {
+        cost: [],
+        targeting: { creatures: 1, range: 60, side: "any" },
+        resolution: {
+          kind: "save",
+          ability: "wis",
+          dc: { base: 30 },
+          willing: true,
+          damage: [],
+          onFail: [{ kind: "polymorph", duration: { minutes: 1 } }],
+          onSuccess: [],
+        },
+      },
+    ],
+  }),
   trait("misty", [], {
     activations: [
       {
@@ -470,5 +487,38 @@ describe("choices, lost bearers and hit riders", () => {
     expect(hit(false)).toContain("necrotic");
     expect(hit(false)).not.toContain("psychic");
     expect(hit(true)).toContain("psychic");
+  });
+});
+
+describe("willing targets", () => {
+  it("lets an ally fail a Polymorph save by choice and has the caster pick its form", async () => {
+    const run = await runWith(FIXTURES);
+    const caster = at(hero(["polymorpher"]), 0, 0);
+    const friend = at({ ...hero([], { id: "friend" }), hp: 10 }, 1, 0);
+    const state = onMap(["..."], [caster, friend]);
+    const action = deriveStats(caster, run).actions.find((item) =>
+      item.id.startsWith("feature:test:feature/polymorpher:"),
+    );
+    if (!action) throw new Error("no polymorph action");
+    const cast = resolveAction(action, caster, [friend], {
+      ...run,
+      state,
+      dice,
+    });
+    expect(
+      (cast.events ?? []).some((event) => event.kind === `${NS}:saveRolled`),
+    ).toBe(false);
+    const started = (cast.events ?? []).reduce(applyDndEvent, state);
+    const chosen = settle(
+      run,
+      started,
+      cast.frames ?? [],
+      dice,
+      () => "test:monster/wolfish",
+    );
+    expect(chosen.decisions[0]?.id).toBe(`${NS}:form:friend`);
+    expect(
+      deriveStats(chosen.state.actors.friend ?? none(), run).abilities.str,
+    ).toBe(18);
   });
 });

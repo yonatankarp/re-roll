@@ -3840,9 +3840,11 @@ export function deriveStats(actor: Actor, access: ContentAccess): Stats {
                     spellLevel !== null &&
                     (formSpells?.kind !== "formSpells" ||
                       !formSpells.school ||
-                      formSpells.school.includes(
-                        lookup(access, SpellSchema, spellOfSource(id) ?? "")
-                          .school,
+                      formSpells.school.some(
+                        (school) =>
+                          SpellSchema.safeParse(
+                            access.content(spellOfSource(id) ?? ""),
+                          ).data?.school === school,
                       )),
                 ),
               ],
