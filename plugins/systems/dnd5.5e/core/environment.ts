@@ -709,7 +709,10 @@ export function curedDiseaseEvents(
 // A check against a dungeon feature takes its skill and ability, at the DC the scene prints.
 export function featureCheck(check: Check, access: ContentAccess): Check {
   if (!("feature" in check)) return check;
-  const feature = lookup(access, DungeonFeatureSchema, check.feature);
+  // A dungeon feature's, or an environmental effect's, as a Mirage's.
+  const feature =
+    DungeonFeatureSchema.safeParse(access.content(check.feature)).data ??
+    lookup(access, EnvironmentalEffectSchema, check.feature);
   if (!feature.check) throw new Error(`${check.feature} has no check`);
   const { skill, ability, tool, about } = feature.check;
   const what = about ? { about } : {};

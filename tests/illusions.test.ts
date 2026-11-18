@@ -7,7 +7,9 @@ import {
 import { distracted } from "../plugins/systems/dnd5.5e/core/combat/attack.ts";
 import { leafEvents } from "../plugins/systems/dnd5.5e/core/combat/effects.ts";
 import { runFinishMove } from "../plugins/systems/dnd5.5e/core/combat/movement.ts";
+import { featureCheck } from "../plugins/systems/dnd5.5e/core/environment.ts";
 import { sceneCheck } from "../plugins/systems/dnd5.5e/core/explore.ts";
+import { blockingSet } from "../plugins/systems/dnd5.5e/core/zones.ts";
 import { seeing } from "../plugins/systems/dnd5.5e/core/sight.ts";
 import {
   type ActiveEffect,
@@ -26,6 +28,14 @@ const FIXTURES = [
   block("seer", { text: "Senses Truesight 60 ft." }),
   trait("actor", [{ kind: "impersonation" }]),
   trait("trickster", [{ kind: "distract" }]),
+  {
+    id: "test:environmental-effect/haze",
+    name: "Haze",
+    source: "Test",
+    text: "Test.",
+    automation: "full",
+    check: { skill: "investigation", ability: "int" },
+  },
 ];
 const dice = { below: () => 0, roll: () => 10 };
 
@@ -173,5 +183,68 @@ describe("disguises", () => {
     expect(d20s(withEffect(hero([]), disguise), "deception")).toBe(2);
     expect(d20s(withEffect(hero([]), disguise), "performance")).toBe(1);
     expect(d20s(withEffect(hero(["actor"]), disguise), "performance")).toBe(2);
+  });
+});
+
+describe("illusions made real and swapped", () => {
+  it("turns a slot-cast image into a wall, swaps a caster with its decoy, and checks a scene's mirage with Investigation", async () => {
+    const run = await runWith(FIXTURES);
+    const wizard = withEffect(
+      withEffect(at(hero([]), 0, 0), {
+        ...image(PLAYER_ACTOR, 3, 0),
+        level: 1,
+      }),
+      {
+        ...image(PLAYER_ACTOR, 5, 0, { decoy: true }),
+        sourceId: "feature:test:feature/duplicity:0",
+      },
+    );
+    const state = onMap(["......."], [wizard]);
+    const context = { ...run, state, dice };
+    const real = leafEvents(
+      [{ kind: "realImage", minutes: 1 }],
+      "test",
+      wizard,
+      wizard,
+      context,
+    ).reduce(applyDndEvent, state);
+    expect(blockingSet(real, "walking").has("3,0")).toBe(true);
+    const swapped = leafEvents(
+      [{ kind: "swapImage", sources: ["test:feature/duplicity"] }],
+      "test",
+      wizard,
+      wizard,
+      context,
+    ).reduce(applyDndEvent, state);
+    expect(swapped.actors[PLAYER_ACTOR]?.position).toEqual({ x: 5, y: 0 });
+    expect(
+      featureCheck(
+        { feature: "test:environmental-effect/haze", dc: 14 },
+        context,
+      ),
+    ).toEqual({ skill: "investigation", ability: "int", dc: 14 });
+  });
+
+  it("gives a disguise its caster's spell save DC", async () => {
+    const run = await runWith(FIXTURES);
+    const caster = at(hero([]), 0, 0);
+    const state = onMap([".."], [caster]);
+    const [added] = leafEvents(
+      [
+        {
+          kind: "modifier",
+          modifier: { kind: "disguise" },
+          duration: { minutes: 60 },
+        },
+      ],
+      "test",
+      caster,
+      caster,
+      { ...run, state, dice },
+    );
+    const effect = (
+      added as { payload?: { effect?: { modifier?: { dc?: unknown } } } }
+    ).payload?.effect?.modifier;
+    expect(typeof effect?.dc).toBe("number");
   });
 });

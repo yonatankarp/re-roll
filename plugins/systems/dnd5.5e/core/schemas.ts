@@ -5619,6 +5619,16 @@ const EnvironmentRowSchema = z.strictObject({
 
 export const EnvironmentalEffectSchema = GlossaryEntrySchema.extend({
   automation: AutomationSchema.default("text"),
+  // A scene check against it names it as a dungeon feature's would (environment.ts featureCheck), as seeing through a
+  // Mirage with Investigation.
+  check: z
+    .strictObject({
+      skill: SkillSchema.optional(),
+      ability: AbilitySchema,
+      tool: ContentIdSchema.optional(),
+      about: AboutSchema,
+    })
+    .optional(),
   weather: WeatherSchema.optional(), // the weather it is, as Extreme Cold's cold
   exposure: ExposureSchema.optional(),
   // In a fight fought in it, or a scene spent in it, every creature not of an `except` type has these passives, as

@@ -7308,8 +7308,46 @@
     the creature’s soul returns to its body if the body is alive and within 100
     feet. Otherwise, that creature dies. When the spell ends, the container is
     destroyed.
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  # shortcut: the possession is cast as an action in a fight, as if the soul already waited in its container; the host fights for the caster until the fight ends, and the caster's body lies Incapacitated meanwhile.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting":
+        {
+          "creatures": 1,
+          "range": 100,
+          "side": "enemy",
+          "creatureTypes": ["humanoid"],
+        },
+      "alsoSelf":
+        [
+          {
+            "kind": "applyCondition",
+            "condition": "incapacitated",
+            "duration": { "minutes": 60 },
+            "repeatSave": false,
+            "endsOnDamage": false,
+          },
+        ],
+      "resolution":
+        {
+          "kind": "save",
+          "ability": "cha",
+          "dc": { "base": 0, "add": [{ "kind": "spellSaveDc" }] },
+          "damage": [],
+          "onSuccessDamage": "none",
+          "onFail":
+            [
+              {
+                "kind": "modifier",
+                "modifier": { "kind": "controlled" },
+                "duration": { "minutes": 60 },
+              },
+            ],
+          "onSuccess": [],
+        },
+    }
 - id: srd52:spell/major-image
   name: Major Image
   level: 3
@@ -11179,7 +11217,10 @@
                     {
                       "name": "Change Appearance",
                       "modifiers":
-                        [{ "kind": "aspect", "name": "Change Appearance" }],
+                        [
+                          { "kind": "aspect", "name": "Change Appearance" },
+                          { "kind": "disguise" },
+                        ],
                     },
                     {
                       "name": "Natural Weapons",
