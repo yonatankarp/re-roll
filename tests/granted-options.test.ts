@@ -38,6 +38,25 @@ const FIXTURES = [
       },
     ],
   },
+  option("surge", {
+    automation: "full",
+    passives: [
+      {
+        kind: "bonusTactics",
+        tactics: ["dash"],
+        whileCondition: "frightened",
+      },
+    ],
+  }),
+  option("protection", {
+    automation: "full",
+    passives: [
+      {
+        kind: "modifier",
+        modifier: { kind: "bonus", to: "ac", amount: { bonus: { base: 1 } } },
+      },
+    ],
+  }),
   option("health", {
     automation: "full",
     passives: [
@@ -182,6 +201,41 @@ describe("character options a story grants (#192)", () => {
     // The companion gains it too, picking without being asked.
     expect(ally.granted).toEqual([id("resilience")]);
     expect(decisions).toHaveLength(2);
+  });
+
+  it("counts an option granted twice once, and a condition's passive only while the condition lasts", () => {
+    const once = grant(party(), { option: id("protection") }).state;
+    const twice = grant(once, { option: id("protection") }).state;
+    const ac = (state: DndState) => {
+      const player = state.actors[PLAYER_ACTOR];
+      if (!player) throw new Error("No player");
+      return deriveStats(player, run).ac;
+    };
+    expect(ac(twice)).toBe(ac(once));
+    expect(ac(once)).toBe(ac(party()) + 1);
+
+    const surged = grant(party(), { option: id("surge") }).state.actors[
+      PLAYER_ACTOR
+    ];
+    if (!surged) throw new Error("No player");
+    const dashes = (actor: typeof surged) =>
+      deriveStats(actor, run).passives.some(
+        (passive) => passive.kind === "bonusTactics",
+      );
+    expect(dashes(surged)).toBe(false);
+    expect(
+      dashes({
+        ...surged,
+        activeEffects: [
+          {
+            sourceId: "test",
+            casterId: "goblin",
+            modifier: { kind: "condition", condition: "frightened" },
+            ends: "spellDuration",
+          },
+        ],
+      }),
+    ).toBe(true);
   });
 
   it("casts a charm's spell with its charges, several at once", () => {

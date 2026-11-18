@@ -2399,7 +2399,9 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const pickedWeapons: string[] = []; // kinds of weapons a choice gave proficiency with
   const featureIds = new Set<string>(species.traits);
   // Options a story granted, as a Blessing or a survivor talent, read as features but not listed among them (#192).
-  const granted = (actor.granted ?? []).filter((id) => access.content(id));
+  const granted = [...new Set(actor.granted ?? [])].filter((id) =>
+    access.content(id),
+  );
   const grantedBy = new Map<string, string>(); // the class whose level granted a feature
   const answerAbilities = new Map<string, Ability>(); // spells a class choice gives with its own ability
   const variants: Record<string, string[]> = {}; // the variants picked, by feature
@@ -2698,6 +2700,10 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
     ([, item]) => item.type === "armor" && item.armorType === "heavy",
   );
   const fits = (passive: Passive): boolean =>
+    // only while the bearer has a condition, as Adrenaline Surge's Frightened
+    (!("whileCondition" in passive) ||
+      !passive.whileCondition ||
+      hasCondition(actor, passive.whileCondition)) &&
     (passive.kind !== "modifier" ||
       !passive.while ||
       passive.while.some((id) =>
@@ -2726,9 +2732,6 @@ function characterStats(actor: Actor, access: ContentAccess): Stats {
   const traits = [...itemPassives, ...kept, ...fromFeatures.passives].filter(
     (passive) =>
       fits(passive) &&
-      (!("whileCondition" in passive) ||
-        !passive.whileCondition ||
-        hasCondition(actor, passive.whileCondition)) &&
       (passive.kind !== "modifier" ||
         !passive.concentrating ||
         actor.concentratingOn !== null),
