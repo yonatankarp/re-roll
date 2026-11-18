@@ -1,70 +1,96 @@
 # Re-roll
 
-A single-player fantasy role-playing game compatible with fifth edition (SRD 5.2). You play one character with a party of companions through an adventure: scenes, choices, checks and turn-based fights on a battle map.
+A single-player fantasy role-playing game on the fifth edition 2024 rules (SRD 5.2). You play one hero with a party of companions through an adventure: read the scene, pick what to do, roll your checks, and fight turn by turn on a battle map. It aims to feel like a night at the table, not a rules tool, and it looks like a page from the Player's Handbook.
 
-Under it is an event-sourced TypeScript engine that knows no game rules. The rules come from a system plugin, and the content from data plugins. Every action is a logged input, so a save replays exactly. The UI runs in a browser or as a [Tauri](https://tauri.app) desktop app on macOS, Windows and Linux.
+It runs as a desktop app on macOS, Windows and Linux, or in your browser.
 
-The design is in [docs/technical-design.md](docs/technical-design.md).
+![A scene: art, the story so far, and numbered choices, some with a skill check](docs/images/scene.webp)
 
-## Prerequisites
+|                                                                                                                                    |                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| ![The adventure library, with the shipped adventures and adventures from your books](docs/images/library.webp)                     | ![Picking a ready hero to play](docs/images/character.webp)               |
+| ![A fight on the battle map: your party at the bottom, the foes at the top, and your move drawn as a path](docs/images/fight.webp) | ![The character sheet in a drawer beside the map](docs/images/sheet.webp) |
 
-- **Node** at the version in [`.nvmrc`](.nvmrc), such as through `nvm install`.
-- **For the desktop app only:** Rust and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS.
-  - **macOS:** the Xcode Command Line Tools (`xcode-select --install`).
-  - **Linux** (Debian or Ubuntu): `sudo apt install libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev patchelf build-essential`.
-  - **Windows:** the Microsoft C++ Build Tools (MSVC) and WebView2, which Windows 10 and 11 usually already have.
-- **For narration only:** `ffmpeg` on your `PATH`.
+## Play it
 
-## Running it
+There are no ready-made downloads yet, so you build it from this repository.
 
-```sh
-npm ci
-npm run ui        # play in the browser at http://127.0.0.1:5199/
-npm run desktop   # the same game in the Tauri window
-npm run play      # play in the terminal, without the UI
-```
+1. Install **Node** at the version in [`.nvmrc`](.nvmrc), for example with `nvm install`.
+2. Get the code and its packages:
 
-`npm run desktop:build` bundles the desktop app for the OS it runs on. [docs/release.md](docs/release.md) covers what a bundle holds, the check that keeps private content out, and the plan for signing and updates.
+   ```sh
+   git clone https://github.com/yonatankarp/re-roll.git
+   cd re-roll
+   npm ci
+   ```
 
-`npm run ui` uses a fixed port. To run a second copy, pass another one: `npm run ui -- --port 5200`.
+3. Start the game:
 
-`npm run play -- <adventure>` starts an adventure, and with no arguments it lists them. Section 12 of the design doc has its options and the scripted JSON mode.
+   ```sh
+   npm run ui        # in your browser, at http://127.0.0.1:5199/
+   npm run desktop   # in its own window, as the desktop app
+   ```
 
-### Checks
+   `npm run ui` uses a fixed port. To run a second copy, pass another one: `npm run ui -- --port 5200`.
+
+The desktop app needs Rust and the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS:
+
+- **macOS:** the Xcode Command Line Tools (`xcode-select --install`).
+- **Linux** (Debian or Ubuntu): `sudo apt install libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev patchelf build-essential`.
+- **Windows:** the Microsoft C++ Build Tools (MSVC) and WebView2, which Windows 10 and 11 usually already have.
+
+`npm run desktop:build` makes an installable app for the OS you run it on. [docs/release.md](docs/release.md) says what it holds.
+
+Two original adventures come with the game, built on the free SRD 5.2 rules:
+
+- **Ambush on the Old Road** (`goblin-ambush`)
+- **The House on Mere Lane** (`haunted-house`)
+
+### Saves
+
+The game saves after every choice, and **Save game** in the menu keeps a save of its own. In the browser and the desktop app, saves live in the page's `localStorage`. Each address has its own, so the game on another `--port` has a separate save list. Clearing site data deletes them.
+
+## Add your own books
+
+Adventures and rules from books you own load beside the shipped ones, and show in the library under **Private, from your books**.
+
+### The Store (desktop app)
+
+**Store** on the desktop app's main menu installs books and adventures from GitHub repos you add, public or private. Type a repo as `owner/repo` or paste its link. A private repo needs a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with read-only access to its **Contents**. The game keeps the token in your system's keychain and uses it only for that repo. Installing a package also installs the packages it needs, and **Update** appears when the store has a newer copy.
+
+### By hand
+
+The desktop app reads your plugins from its content folder. **Open content folder** on the main menu shows it. Copy a plugin into its matching `adventures`, `rules`, `worlds`, `assets` or `library` folder and reopen the menu, or use **Install from a zip**. The zip holds one plugin, or a whole book laid out like the content folder. It replaces older copies of what it installs, and refuses a zip that holds anything but game data. The folder is `plugins` inside the app's data folder:
+
+- **macOS:** `~/Library/Application Support/app.re-roll.desktop/plugins`
+- **Windows:** `%APPDATA%\app.re-roll.desktop\plugins`
+- **Linux:** `~/.local/share/app.re-roll.desktop/plugins`
+
+With `npm run ui` or `npm run desktop` from a checkout, put your content in a `books/` folder at the root of the checkout instead, laid out the same way. It is git-ignored here. Keep it as its own private git repository if you want history, and never commit it to this one. Plugins there carry `distribution: private`, which means they aren't redistributable.
+
+## For developers
+
+Under the game is an event-sourced TypeScript engine that knows no game rules. The rules come from a system plugin (`plugins/systems/dnd5.5e`), and the content from data plugins (`plugins/adventures`, `plugins/rules`). Every action is a logged input, so a save replays exactly. The UI is a Vite app (`app/desktop`) that also ships as a [Tauri](https://tauri.app) app. The design is in [docs/technical-design.md](docs/technical-design.md).
+
+### Commands
 
 ```sh
 npm test
 npm run lint
 npm run typecheck   # four tsc projects, one per layer
 npm run format:check
+npm run test:ui     # a Playwright smoke test in Chromium
 ```
 
-`npm run bot -- [runs] [adventure] [--smart] [--difficulty=story|normal|hard]` plays an adventure many times to find dead ends and measure balance. `npm run check-pack` checks every plugin's content.
+- `npm run play -- <adventure>` plays in the terminal, without the UI. With no arguments it lists the adventures. It saves to `saves/` in the current folder, or under `--saves=<dir>`. Section 12 of the design doc has its options and the scripted JSON mode.
+- `npm run bot -- [runs] [adventure] [--smart] [--difficulty=story|normal|hard]` plays an adventure many times to find dead ends and measure balance.
+- `npm run check-pack` checks every plugin's content.
+- `npm run import` turns your saved book pages into plugins under `books/`. Its subcommands are `parse`, `library`, `extract`, `split`, `draft` and `approve`, and section 11 of the design doc explains them.
+- `npm run narrate -- <adventure>` reads a `books/` adventure's scenes aloud once, with `ffmpeg` on your `PATH`, and keeps the clips beside it. Scenes without a clip are read in the app as they play.
 
-## Content
+### Making a store
 
-Two adventures ship with the game, both original and built on the SRD 5.2 rules in `plugins/rules/srd52`:
-
-- `goblin-ambush`: Ambush on the Old Road
-- `haunted-house`: The House on Mere Lane
-
-### Your own books
-
-Content from books you own goes in a `books/` folder at the root of your checkout. It is git-ignored here, and the game reads it beside `plugins/`. Keep it as its own private git repository if you want history, and never commit it to this one. Plugins there carry `distribution: private`, which means they aren't redistributable.
-
-The built desktop app has no checkout, so it reads your plugins from its content folder instead. **Open content folder** on the main menu shows it. It has the same `adventures`, `rules`, `assets` and `library` folders as `books/`, so copy a plugin into the matching one and reopen the menu. **Install from a zip** does that for you. The zip holds either one plugin, whose `plugin.yaml` picks `adventures` or `rules` and the folder name, or a whole book laid out like the content folder, with any of its `adventures`, `rules`, `assets` and `library` folders. It replaces older copies of what it installs, and refuses a zip that holds anything but game data. The folder is `plugins` inside the app's data folder:
-
-- **macOS:** `~/Library/Application Support/app.re-roll.desktop/plugins`
-- **Windows:** `%APPDATA%\app.re-roll.desktop\plugins`
-- **Linux:** `~/.local/share/app.re-roll.desktop/plugins`
-
-`npm run desktop` still reads `plugins/` and `books/` from your checkout.
-
-### The Store
-
-**Store** on the desktop app's main menu installs books and adventures from GitHub repos you add, as many as you like, public or private. Type a repo as `owner/repo` or paste its link. A private repo needs a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with read-only access to its **Contents**. The game keeps the token in your system's keychain and uses it only for that repo. Installing a package also installs the packages it needs from your stores, and **Update** appears when the store has a newer copy.
-
-A store is a repo laid out like `books/`, with a `store.yaml` that names each package and the folders it installs:
+A store is a GitHub repo laid out like `books/`, with a `store.yaml` that names each package and the folders it installs:
 
 ```yaml
 packages:
@@ -74,8 +100,6 @@ packages:
 ```
 
 `npm run store:pack -- <folder> --out <dir>` checks each package and writes one zip per package and a `store.json` index to `<dir>`. Adding `--publish owner/repo` uploads them to that repo's `store` release with the `gh` CLI. It refuses to publish plugins marked `distribution: private` to a public repo.
-
-`npm run import` turns your saved book pages into plugins under `books/`. Its subcommands are `parse`, `library`, `extract`, `split`, `draft` and `approve`, and section 11 of the design doc explains them. `npm run narrate -- <adventure>` reads a `books/` adventure's scenes aloud once and keeps the clips beside it. Scenes without a clip are read in the app as they play.
 
 ### Narration on each OS
 
@@ -91,18 +115,12 @@ The macOS row was checked on a release build on macOS 27 (Apple silicon). There 
 
 The Windows expectation comes from Chromium on the same Mac. A production browser build started 3 extra WASM threads, 4 in all. A dev build did the same with the app's `script-src` and `worker-src` rules applied. On 4 threads the narrator read about 1.8 to 2.4 times slower than speech, against about 3 times on one thread.
 
-## Saves
-
-- **Browser and desktop:** in the page's `localStorage`, under `saves/`. Each origin has its own, so the game on another `--port` has a separate save list, and so does the desktop app's webview. Clearing site data deletes them.
-- **Terminal:** `npm run play` writes to `saves/` in the current folder, or under `--saves=<dir>`.
-
-Each run has one autosave, written after every choice. Saves from the menu get files of their own. There is no save migration yet, so a save from an older format won't load ([#35](https://github.com/yonatankarp/re-roll/issues/35)).
-
 ## Credits
 
 - **Fonts:** Bookinsanity, Mr Eaves Small Caps, Nodesto Caps Condensed, Scaly Sans and Scaly Sans Caps are Solbera's recreations of the fifth edition book fonts, with fixes by Ryrok, Ners and LUCASTUCIOUS, from [jonathonf/solbera-dnd-fonts](https://github.com/jonathonf/solbera-dnd-fonts). They are licensed under [CC BY-SA 4.0](app/desktop/fonts/LICENSE) and bundled unchanged in `app/desktop/fonts`.
 - **SRD 5.2:** This work includes material from the System Reference Document 5.2 ("SRD 5.2") by Wizards of the Coast LLC, available at https://www.dndbeyond.com/srd. The SRD 5.2 is licensed under the Creative Commons Attribution 4.0 International License, available at https://creativecommons.org/licenses/by/4.0/legalcode.
 - **Narration:** [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), as the ONNX build [onnx-community/Kokoro-82M-v1.0-ONNX](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX), through [kokoro-js](https://github.com/hexgrad/kokoro), all under the Apache 2.0 licence. The app downloads the model from Hugging Face the first time it reads aloud.
+- **Screenshots:** they show adventures loaded from the owner's own books. That art and text belong to their publisher, are not part of this program, and are not covered by its licence.
 
 The game shows every loaded plugin's attribution in About, in the Journal drawer.
 
