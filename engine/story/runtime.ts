@@ -200,14 +200,20 @@ function restsHere(
 // The checks the scene's choices offer now, for the system to fit its actions to.
 export function sceneHere(run: RunContext, state: GameState): SceneHere {
   const scene = state.story.scene && findScene(run, state.story.scene);
+  const open = scene
+    ? scene.choices.filter((choice) =>
+        evaluateCondition(choice.when, run, state),
+      )
+    : [];
+  const fights = open.some((choice) =>
+    ("effects" in choice
+      ? choice.effects
+      : Object.values(choice.results).flat()
+    ).some((effect) => effect.kind === "startEncounter"),
+  );
   return {
-    checks: scene
-      ? scene.choices.flatMap((choice) =>
-          "check" in choice && evaluateCondition(choice.when, run, state)
-            ? [choice.check]
-            : [],
-        )
-      : [],
+    checks: open.flatMap((choice) => ("check" in choice ? [choice.check] : [])),
+    ...(fights ? { fights } : {}),
   };
 }
 
