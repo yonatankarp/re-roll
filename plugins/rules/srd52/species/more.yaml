@@ -1,0 +1,116 @@
+- id: srd52:species/dragonborn
+  name: Dragonborn
+  text: "Creature Type: Humanoid. Size: Medium (about 5–7 feet tall)."
+  creatureType: Humanoid
+  size: medium
+  speed: 30
+  traits:
+    - srd52:feature/dragonborn-draconic-ancestry
+    - srd52:feature/dragonborn-breath-weapon
+    - srd52:feature/dragonborn-damage-resistance
+    - srd52:feature/dragonborn-darkvision
+    - srd52:feature/dragonborn-draconic-flight
+  choices:
+    - kind: option
+      id: draconic-ancestry
+      count: 1
+      from:
+        - srd52:feature/dragonborn-black-dragon-ancestry
+        - srd52:feature/dragonborn-blue-dragon-ancestry
+        - srd52:feature/dragonborn-brass-dragon-ancestry
+        - srd52:feature/dragonborn-bronze-dragon-ancestry
+        - srd52:feature/dragonborn-copper-dragon-ancestry
+        - srd52:feature/dragonborn-gold-dragon-ancestry
+        - srd52:feature/dragonborn-green-dragon-ancestry
+        - srd52:feature/dragonborn-red-dragon-ancestry
+        - srd52:feature/dragonborn-silver-dragon-ancestry
+        - srd52:feature/dragonborn-white-dragon-ancestry
+- id: srd52:species/gnome
+  name: Gnome
+  text: "Creature Type: Humanoid. Size: Small (about 3–4 feet tall)."
+  creatureType: Humanoid
+  size: small
+  speed: 30
+  traits:
+    - srd52:feature/gnome-darkvision
+    - srd52:feature/gnome-gnomish-cunning
+    - srd52:feature/gnome-gnomish-lineage
+  choices:
+    - kind: option
+      id: gnomish-lineage
+      count: 1
+      from:
+        - srd52:feature/gnome-forest-gnome-lineage
+        - srd52:feature/gnome-rock-gnome-lineage
+    - kind: spellAbility
+      id: spellcasting
+      from:
+        - int
+        - wis
+        - cha
+- id: srd52:species/goliath
+  name: Goliath
+  text: "Creature Type: Humanoid. Size: Medium (about 7–8 feet tall)."
+  creatureType: Humanoid
+  size: medium
+  speed: 35
+  traits:
+    - srd52:feature/goliath-giant-ancestry
+    - srd52:feature/goliath-large-form
+    - srd52:feature/goliath-powerful-build
+  choices:
+    - kind: option
+      id: giant-ancestry
+      count: 1
+      from:
+        - srd52:feature/goliath-cloud-giant-ancestry
+        - srd52:feature/goliath-fire-giant-ancestry
+        - srd52:feature/goliath-frost-giant-ancestry
+        - srd52:feature/goliath-hill-giant-ancestry
+        - srd52:feature/goliath-stone-giant-ancestry
+        - srd52:feature/goliath-storm-giant-ancestry
+- id: srd52:species/halfling
+  name: Halfling
+  text: "Creature Type: Humanoid. Size: Small (about 2–3 feet tall)."
+  creatureType: Humanoid
+  size: small
+  speed: 30
+  traits:
+    - srd52:feature/halfling-brave
+    - srd52:feature/halfling-halfling-nimbleness
+    - srd52:feature/halfling-luck
+    - srd52:feature/halfling-naturally-stealthy
+- id: srd52:species/orc
+  name: Orc
+  text: "Creature Type: Humanoid. Size: Medium (about 6–7 feet tall)."
+  creatureType: Humanoid
+  size: medium
+  speed: 30
+  traits:
+    - srd52:feature/orc-adrenaline-rush
+    - srd52:feature/orc-darkvision
+    - srd52:feature/orc-relentless-endurance
+- id: srd52:species/tiefling
+  name: Tiefling
+  text: "Creature Type: Humanoid. Size: Medium (about 4–7 feet tall) or Small (about 3–4 feet tall), chosen when you select this species."
+  creatureType: Humanoid
+  size: medium
+  speed: 30
+  traits:
+    - srd52:feature/tiefling-darkvision
+    - srd52:feature/tiefling-fiendish-legacy
+    - srd52:feature/tiefling-otherworldly-presence
+  choices:
+    - kind: option
+      id: fiendish-legacy
+      count: 1
+      from:
+        - srd52:feature/tiefling-abyssal-legacy
+        - srd52:feature/tiefling-chthonic-legacy
+        - srd52:feature/tiefling-infernal-legacy
+    - kind: spellAbility
+      id: spellcasting
+      from:
+        - int
+        - wis
+        - cha

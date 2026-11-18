@@ -1,0 +1,1155 @@
+- id: srd52:feature/dragonborn-black-dragon-ancestry
+  name: Black Dragon Ancestry
+  text: "Your Draconic Ancestry is the Black dragon: your Breath Weapon and Damage Resistance use Acid damage."
+  automation: full
+  perTier:
+    addDice: 1d10
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: acid
+  resources:
+    - id: breath-weapon
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: cone
+          radius: 15
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: acid
+        onSuccessDamage: half
+      label: cone
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: line
+          radius: 30
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: acid
+        onSuccessDamage: half
+      label: line
+- id: srd52:feature/dragonborn-blue-dragon-ancestry
+  name: Blue Dragon Ancestry
+  text: "Your Draconic Ancestry is the Blue dragon: your Breath Weapon and Damage Resistance use Lightning damage."
+  automation: full
+  perTier:
+    addDice: 1d10
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: lightning
+  resources:
+    - id: breath-weapon
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: cone
+          radius: 15
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: lightning
+        onSuccessDamage: half
+      label: cone
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: line
+          radius: 30
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: lightning
+        onSuccessDamage: half
+      label: line
+- id: srd52:feature/dragonborn-brass-dragon-ancestry
+  name: Brass Dragon Ancestry
+  text: "Your Draconic Ancestry is the Brass dragon: your Breath Weapon and Damage Resistance use Fire damage."
+  automation: full
+  perTier:
+    addDice: 1d10
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: fire
+  resources:
+    - id: breath-weapon
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: cone
+          radius: 15
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: fire
+        onSuccessDamage: half
+      label: cone
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: line
+          radius: 30
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: fire
+        onSuccessDamage: half
+      label: line
+- id: srd52:feature/dragonborn-breath-weapon
+  name: Breath Weapon
+  text: When you take the Attack action on your turn, you can replace one of your attacks with an exhalation of magical energy in either a 15-foot Cone or a 30-foot Line that is 5 feet wide (choose the shape each time). Each creature in that area must make a Dexterity saving throw (DC 8 plus your Constitution modifier and Proficiency Bonus). On a failed save, a creature takes 1d10 damage of the type determined by your Draconic Ancestry trait. On a successful save, a creature takes half as much damage. This damage increases by 1d10 when you reach character levels 5 (2d10), 11 (3d10), and 17 (4d10). You can use this Breath Weapon a number of times equal to your Proficiency Bonus, and you regain all expended uses when you finish a Long Rest.
+  automation: full
+  passives:
+    - kind: attackReplacement
+      resource: breath-weapon
+- id: srd52:feature/dragonborn-bronze-dragon-ancestry
+  name: Bronze Dragon Ancestry
+  text: "Your Draconic Ancestry is the Bronze dragon: your Breath Weapon and Damage Resistance use Lightning damage."
+  automation: full
+  perTier:
+    addDice: 1d10
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: lightning
+  resources:
+    - id: breath-weapon
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: cone
+          radius: 15
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: lightning
+        onSuccessDamage: half
+      label: cone
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: line
+          radius: 30
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: lightning
+        onSuccessDamage: half
+      label: line
+- id: srd52:feature/dragonborn-copper-dragon-ancestry
+  name: Copper Dragon Ancestry
+  text: "Your Draconic Ancestry is the Copper dragon: your Breath Weapon and Damage Resistance use Acid damage."
+  automation: full
+  perTier:
+    addDice: 1d10
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: acid
+  resources:
+    - id: breath-weapon
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: cone
+          radius: 15
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: acid
+        onSuccessDamage: half
+      label: cone
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: line
+          radius: 30
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: acid
+        onSuccessDamage: half
+      label: line
+- id: srd52:feature/dragonborn-damage-resistance
+  name: Damage Resistance
+  text: You have Resistance to the damage type determined by your Draconic Ancestry trait.
+  automation: full
+- id: srd52:feature/dragonborn-darkvision
+  name: Darkvision
+  text: You have Darkvision with a range of 60 feet.
+  automation: full
+  passives:
+    - kind: seesInDarkness
+      feet: 60
+- id: srd52:feature/dragonborn-draconic-ancestry
+  name: Draconic Ancestry
+  text: Your lineage stems from a dragon progenitor. Choose the kind of dragon from the Draconic Ancestors table. Your choice affects your Breath Weapon and Damage Resistance traits as well as your appearance.
+  automation: full
+- id: srd52:feature/dragonborn-draconic-flight
+  name: Draconic Flight
+  text: When you reach character level 5, you can channel draconic magic to give yourself temporary flight. As a Bonus Action, you sprout spectral wings on your back that last for 10 minutes or until you retract the wings (no action required) or have the Incapacitated condition. During that time, you have a Fly Speed equal to your Speed. Your wings appear to be made of the same energy as your Breath Weapon. Once you use this trait, you can’t use it again until you finish a Long Rest.
+  automation: full
+  fromLevel: 5
+  resources:
+    - id: draconic-flight
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - bonusAction
+        - resource: draconic-flight
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            modifier:
+              kind: movementMode
+              mode: fly
+            duration:
+              minutes: 10
+            untilIncapacitated: true
+- id: srd52:feature/dragonborn-gold-dragon-ancestry
+  name: Gold Dragon Ancestry
+  text: "Your Draconic Ancestry is the Gold dragon: your Breath Weapon and Damage Resistance use Fire damage."
+  automation: full
+  perTier:
+    addDice: 1d10
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: fire
+  resources:
+    - id: breath-weapon
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: cone
+          radius: 15
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: fire
+        onSuccessDamage: half
+      label: cone
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: line
+          radius: 30
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: fire
+        onSuccessDamage: half
+      label: line
+- id: srd52:feature/dragonborn-green-dragon-ancestry
+  name: Green Dragon Ancestry
+  text: "Your Draconic Ancestry is the Green dragon: your Breath Weapon and Damage Resistance use Poison damage."
+  automation: full
+  perTier:
+    addDice: 1d10
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: poison
+  resources:
+    - id: breath-weapon
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: cone
+          radius: 15
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: poison
+        onSuccessDamage: half
+      label: cone
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: line
+          radius: 30
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: poison
+        onSuccessDamage: half
+      label: line
+- id: srd52:feature/dragonborn-red-dragon-ancestry
+  name: Red Dragon Ancestry
+  text: "Your Draconic Ancestry is the Red dragon: your Breath Weapon and Damage Resistance use Fire damage."
+  automation: full
+  perTier:
+    addDice: 1d10
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: fire
+  resources:
+    - id: breath-weapon
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: cone
+          radius: 15
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: fire
+        onSuccessDamage: half
+      label: cone
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: line
+          radius: 30
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: fire
+        onSuccessDamage: half
+      label: line
+- id: srd52:feature/dragonborn-silver-dragon-ancestry
+  name: Silver Dragon Ancestry
+  text: "Your Draconic Ancestry is the Silver dragon: your Breath Weapon and Damage Resistance use Cold damage."
+  automation: full
+  perTier:
+    addDice: 1d10
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: cold
+  resources:
+    - id: breath-weapon
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: cone
+          radius: 15
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: cold
+        onSuccessDamage: half
+      label: cone
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: line
+          radius: 30
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: cold
+        onSuccessDamage: half
+      label: line
+- id: srd52:feature/dragonborn-white-dragon-ancestry
+  name: White Dragon Ancestry
+  text: "Your Draconic Ancestry is the White dragon: your Breath Weapon and Damage Resistance use Cold damage."
+  automation: full
+  perTier:
+    addDice: 1d10
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: cold
+  resources:
+    - id: breath-weapon
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: cone
+          radius: 15
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: cold
+        onSuccessDamage: half
+      label: cone
+    - cost:
+        - action
+        - resource: breath-weapon
+      targeting:
+        area:
+          shape: line
+          radius: 30
+        range: self
+        side: enemy
+      resolution:
+        kind: save
+        ability: dex
+        dc:
+          base: 8
+          add:
+            - kind: abilityMod
+              ability: con
+            - kind: proficiency
+        damage:
+          - amount:
+              dice: 1d10
+            type: cold
+        onSuccessDamage: half
+      label: line
+- id: srd52:feature/gnome-darkvision
+  name: Darkvision
+  text: You have Darkvision with a range of 60 feet.
+  automation: full
+  passives:
+    - kind: seesInDarkness
+      feet: 60
+- id: srd52:feature/gnome-forest-gnome-lineage
+  name: Forest Gnome
+  text: You know the Minor Illusion cantrip. You also always have the Speak with Animals spell prepared. You can cast it without a spell slot a number of times equal to your Proficiency Bonus, and you regain all expended uses when you finish a Long Rest. You can also use any spell slots you have to cast the spell.
+  automation: full
+  spells:
+    "1":
+      - srd52:spell/minor-illusion
+      - srd52:spell/speak-with-animals
+  resources:
+    - id: forest-gnome
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  freeCast:
+    resource: forest-gnome
+- id: srd52:feature/gnome-gnomish-cunning
+  name: Gnomish Cunning
+  text: You have Advantage on Intelligence, Wisdom, and Charisma saving throws.
+  automation: full
+  passives:
+    - kind: saveAdvantage
+      abilities:
+        - int
+        - wis
+        - cha
+- id: srd52:feature/gnome-gnomish-lineage
+  name: Gnomish Lineage
+  text: "You are part of a lineage that grants you supernatural abilities. Choose one of the following options; whichever one you choose, Intelligence, Wisdom, or Charisma is your spellcasting ability for the spells you cast with this trait (choose the ability when you select the lineage):"
+  automation: full
+- id: srd52:feature/gnome-rock-gnome-lineage
+  name: Rock Gnome
+  text: You know the Mending and Prestidigitation cantrips. In addition, you can spend 10 minutes casting Prestidigitation to create a Tiny clockwork device (AC 5, 1 HP), such as a toy, fire starter, or music box. When you create the device, you determine its function by choosing one effect from Prestidigitation; the device produces that Darkness er you finish h a different Pass without Trace effect whenever you or another creature takes a Bonus Action to activate it with a touch. If the chosen effect has options within it, you choose one of those options for the device when you create it. For example, if you choose the spell’s ignite-extinguish effect, you determine whether the device ignites or extinguishes fire; the device doesn’t do both. You can have three such devices in existence at a time, and each falls apart 8 hours after its creation or when you dismantle it with a touch as a Utilize action.
+  automation: full
+  spells:
+    "1":
+      - srd52:spell/mending
+      - srd52:spell/prestidigitation
+- id: srd52:feature/goliath-cloud-giant-ancestry
+  name: Cloud’s Jaunt
+  text: Cloud’s Jaunt (Cloud Giant). As a Bonus Action, you magically teleport up to 30 feet to an unoccupied space you can see.
+  automation: full
+  resources:
+    - id: giant-ancestry
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - bonusAction
+        - resource: giant-ancestry
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: teleport
+            feet: 30
+- id: srd52:feature/goliath-fire-giant-ancestry
+  name: Fire’s Burn
+  text: Fire’s Burn (Fire Giant). When you hit a target with an attack roll and deal damage to it, you can also deal 1d10 Fire damage to that target.
+  automation: full
+  resources:
+    - id: giant-ancestry
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - resource: giant-ancestry
+      trigger:
+        afterHit: attack
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+      resolution:
+        kind: automatic
+        damage:
+          - amount:
+              dice: 1d10
+            type: fire
+        effects: []
+- id: srd52:feature/goliath-frost-giant-ancestry
+  name: Frost’s Chill
+  text: Frost’s Chill (Frost Giant). When you hit a target with an attack roll and deal damage to it, you can also deal 1d6 Cold damage to that target and reduce its Speed by 10 feet until the start of your next turn.
+  automation: full
+  resources:
+    - id: giant-ancestry
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - resource: giant-ancestry
+      trigger:
+        afterHit: attack
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+      resolution:
+        kind: automatic
+        damage:
+          - amount:
+              dice: 1d6
+            type: cold
+        effects:
+          - kind: modifier
+            modifier:
+              kind: bonus
+              to: speed
+              amount:
+                bonus:
+                  base: 10
+              subtract: true
+            duration:
+              until: yourNextTurnStart
+- id: srd52:feature/goliath-giant-ancestry
+  name: Giant Ancestry
+  text: "You are descended from Giants. Choose one of the following benefits—a supernatural boon from your ancestry; you can use the chosen benefit a number of times equal to your Proficiency Bonus, and you regain all expended uses when you finish a Long Rest:"
+  automation: full
+- id: srd52:feature/goliath-hill-giant-ancestry
+  name: Hill’s Tumble
+  text: Hill’s Tumble (Hill Giant). When you hit a Large or smaller creature with an attack roll and deal damage to it, you can give that target the Prone condition.
+  automation: full
+  resources:
+    - id: giant-ancestry
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - resource: giant-ancestry
+      trigger:
+        afterHit: attack
+      targeting:
+        creatures: 1
+        range: 120
+        side: enemy
+        maxSize: large
+      resolution:
+        kind: automatic
+        damage: []
+        effects:
+          - kind: applyCondition
+            condition: prone
+            duration:
+              minutes: 1
+- id: srd52:feature/goliath-large-form
+  name: Large Form
+  text: Starting at character level 5, you can change your size to Large as a Bonus Action if you’re in a big enough space. This transformation lasts for 10 minutes or until you end it (no action required). For that duration, you have Advantage on Strength checks, and your Speed increases by 10 feet. Once you use this trait, you can’t use it again until you finish a Long Rest.
+  automation: full
+  fromLevel: 5
+  resources:
+    - id: large-form
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - bonusAction
+        - resource: large-form
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: modifier
+            modifier:
+              kind: advantage
+              on: checks
+              ability: str
+            duration:
+              minutes: 10
+          - kind: modifier
+            modifier:
+              kind: bonus
+              to: speed
+              amount:
+                bonus:
+                  base: 10
+            duration:
+              minutes: 10
+          - kind: modifier
+            modifier:
+              kind: size
+              set: large
+            duration:
+              minutes: 10
+- id: srd52:feature/goliath-powerful-build
+  name: Powerful Build
+  text: You have Advantage on any ability check you make to end the Grappled condition. You also count as one size larger when determining your carrying capacity.
+  automation: full
+  passives:
+    - kind: powerfulBuild
+- id: srd52:feature/goliath-stone-giant-ancestry
+  name: Stone’s Endurance
+  text: Stone’s Endurance (Stone Giant). When you take damage, you can take a Reaction to roll 1d12. Add your Constitution modifier to the number rolled and reduce the damage by that total.
+  automation: full
+  resources:
+    - id: giant-ancestry
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - reaction
+        - resource: giant-ancestry
+      trigger:
+        damaged: true
+        before: true
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: reduceDamage
+            amount:
+              dice: 1d12
+              bonus:
+                add:
+                  - kind: abilityMod
+                    ability: con
+- id: srd52:feature/goliath-storm-giant-ancestry
+  name: Storm’s Thunder
+  text: Storm’s Thunder (Storm Giant). When you take damage from a creature within 60 feet of you, you can take a Reaction to deal 1d8 Thunder damage to that creature.
+  automation: full
+  resources:
+    - id: giant-ancestry
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - reaction
+        - resource: giant-ancestry
+      trigger:
+        damaged: true
+      targeting:
+        creatures: 1
+        range: 60
+        side: enemy
+      resolution:
+        kind: automatic
+        damage:
+          - amount:
+              dice: 1d8
+            type: thunder
+        effects: []
+- id: srd52:feature/halfling-brave
+  name: Brave
+  text: You have Advantage on saving throws you make to avoid or end the Frightened condition.
+  automation: full
+  passives:
+    - kind: saveAdvantage
+      conditions:
+        - frightened
+- id: srd52:feature/halfling-halfling-nimbleness
+  name: Halfling Nimbleness
+  text: You can move through the space of any creature that is a size larger than you, but you can’t stop in the same space.
+  automation: full
+  passives:
+    - kind: moveThrough
+      creatures: larger
+- id: srd52:feature/halfling-luck
+  name: Luck
+  text: When you roll a 1 on the d20 of a D20 Test, you can reroll the die, and you must use the new roll.
+  automation: full
+  passives:
+    - kind: rerollOnes
+- id: srd52:feature/halfling-naturally-stealthy
+  name: Naturally Stealthy
+  text: You can take the Hide action even when you are obscured only by a creature that is at least one size larger than you.
+  automation: full
+  passives:
+    - kind: hideBehindLarger
+- id: srd52:feature/orc-adrenaline-rush
+  name: Adrenaline Rush
+  text: You can take the Dash action as a Bonus Action. When you do so, you gain a number of Temporary Hit Points equal to your Proficiency Bonus. You can use this trait a number of times equal to your Proficiency Bonus, and you regain all expended uses when you finish a Short or Long Rest.
+  automation: full
+  resources:
+    - id: adrenaline-rush
+      max:
+        add:
+          - kind: proficiency
+      recharge:
+        - on: shortRest
+          amount: all
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - bonusAction
+        - resource: adrenaline-rush
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: dash
+          - kind: tempHp
+            amount:
+              bonus:
+                add:
+                  - kind: proficiency
+- id: srd52:feature/orc-darkvision
+  name: Darkvision
+  text: You have Darkvision with a range of 120 feet.
+  automation: full
+  passives:
+    - kind: seesInDarkness
+      feet: 120
+- id: srd52:feature/orc-relentless-endurance
+  name: Relentless Endurance
+  text: When you are reduced to 0 Hit Points but not killed outright, you can drop to 1 Hit Point instead. Once you use this trait, you can’t do so again until you finish a Long Rest.
+  automation: full
+  passives:
+    - kind: dropToOne
+      resource: relentless-endurance
+  resources:
+    - id: relentless-endurance
+      max:
+        base: 1
+      recharge:
+        - on: longRest
+          amount: all
+- id: srd52:feature/tiefling-abyssal-legacy
+  name: Abyssal
+  text: You have Resistance to Poison damage. You also know the Poison Spray cantrip. At character level 3 you learn Ray of Sickness, and at level 5 Hold Person.
+  automation: full
+  spells:
+    "1":
+      - srd52:spell/poison-spray
+    "3":
+      - srd52:spell/ray-of-sickness
+    "5":
+      - srd52:spell/hold-person
+  freeCast: true
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: poison
+- id: srd52:feature/tiefling-chthonic-legacy
+  name: Chthonic
+  text: You have Resistance to Necrotic damage. You also know the Chill Touch cantrip. At character level 3 you learn False Life, and at level 5 Ray of Enfeeblement.
+  automation: full
+  spells:
+    "1":
+      - srd52:spell/chill-touch
+    "3":
+      - srd52:spell/false-life
+    "5":
+      - srd52:spell/ray-of-enfeeblement
+  freeCast: true
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: necrotic
+- id: srd52:feature/tiefling-darkvision
+  name: Darkvision
+  text: You have Darkvision with a range of 60 feet.
+  automation: full
+  passives:
+    - kind: seesInDarkness
+      feet: 60
+- id: srd52:feature/tiefling-fiendish-legacy
+  name: Fiendish Legacy
+  text: You are the recipient of a legacy that grants you supernatural abilities. Choose a legacy from the Fiendish Legacies table. You gain the level 1 benefit of the chosen legacy. When you reach character levels 3 and 5, you learn a higher-level spell, as shown on the table. You always have that spell prepared. You can cast it once without a spell slot, and you regain the ability to cast it in that way when you finish a Long Rest. You can also cast the spell using any spell slots you have of the appropriate level. Intelligence, Wisdom, or Charisma is your spellcasting ability for the spells you cast with this trait (choose the ability when you select the legacy).
+  automation: full
+- id: srd52:feature/tiefling-infernal-legacy
+  name: Infernal
+  text: You have Resistance to Fire damage. You also know the Fire Bolt cantrip. At character level 3 you learn Hellish Rebuke, and at level 5 Darkness.
+  automation: full
+  spells:
+    "1":
+      - srd52:spell/fire-bolt
+    "3":
+      - srd52:spell/hellish-rebuke
+    "5":
+      - srd52:spell/darkness
+  freeCast: true
+  passives:
+    - kind: modifier
+      modifier:
+        kind: resistance
+        damage: fire
+- id: srd52:feature/tiefling-otherworldly-presence
+  name: Otherworldly Presence
+  text: You know the Thaumaturgy cantrip. When you cast it with this trait, the spell uses the same spellcasting ability you use for your Fiendish Legacy trait.
+  automation: full
+  spells:
+    "1":
+      - srd52:spell/thaumaturgy

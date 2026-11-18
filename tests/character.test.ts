@@ -833,17 +833,15 @@ describe("levelling up", () => {
   });
 
   it("stops at the last level the content has", async () => {
-    const run = storyRun(await goblin(), [
-      [levelUp],
-      [levelUp],
-      [levelUp],
-      [levelUp],
-      [levelUp],
-    ]);
+    // One level-up more than the SRD's 20 levels.
+    const run = storyRun(
+      await goblin(),
+      Array.from({ length: 20 }, () => [levelUp]),
+    );
     const { state } = drive(run, "cap", [
       [/chooseCharacter/, "srd52:pregen/fighter"],
     ]);
-    expect(buildOf(actorIn(state)).levels).toHaveLength(5);
+    expect(buildOf(actorIn(state)).levels).toHaveLength(20);
   });
 
   it("gives Extra Attack to weapons and not to spell attacks", async () => {

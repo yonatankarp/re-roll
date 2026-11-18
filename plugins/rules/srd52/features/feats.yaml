@@ -1,0 +1,126 @@
+- id: srd52:feature/skilled
+  name: Skilled
+  text: You gain proficiency in any combination of three skills or tools of your choice. Repeatable. You can take this feat more than once.
+  automation: full
+- id: srd52:feature/boon-of-combat-prowess
+  name: Boon of Combat Prowess
+  text: You gain the following benefits. Ability Score Increase. Increase one ability score of your choice by 1, to a maximum of 30. Peerless Aim. When you miss with an attack roll, you can hit instead. Once you use this benefit, you can’t use it again until the start of your next turn.
+  automation: full
+  passives:
+    - kind: peerlessAim
+- id: srd52:feature/boon-of-dimensional-travel
+  name: Boon of Dimensional Travel
+  text: You gain the following benefits. Ability Score Increase. Increase one ability score of your choice by 1, to a maximum of 30. Blink Steps. Immediately after you take the Attack action or the Magic action, you can teleport up to 30 feet to an unoccupied space you can see.
+  automation: full
+  resources:
+    - id: blink-steps
+      max:
+        base: 1
+      recharge:
+        - on: turnStart
+          amount: all
+  activations:
+    - cost:
+        - resource: blink-steps
+      afterAction: attackOrMagic
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: teleport
+            feet: 30
+- id: srd52:feature/boon-of-fate
+  name: Boon of Fate
+  text: You gain the following benefits. Ability Score Increase. Increase one ability score of your choice by 1, to a maximum of 30. Improve Fate. When you or another creature within 60 feet of you succeeds on or fails a D20 Test, you can roll 2d4 and apply the total rolled as a bonus or penalty to the d20 roll. Once you use this benefit, you can’t use it again until you roll Initiative or finish a Short or Long Rest.
+  automation: full
+  resources:
+    - id: improve-fate
+      max:
+        base: 1
+      recharge:
+        - on: initiative
+          amount: all
+        - on: shortRest
+          amount: all
+        - on: longRest
+          amount: all
+  activations:
+    - cost:
+        - resource: improve-fate
+      trigger:
+        rolled:
+          rolls:
+            - attack
+            - save
+            - check
+          by: any
+        within: 60
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: rollBonus
+            amount:
+              dice: 2d4
+            either: true
+- id: srd52:feature/boon-of-irresistible-offense
+  name: Boon of Irresistible Offense
+  text: You gain the following benefits. Ability Score Increase. Increase your Strength or Dexterity score by 1, to a maximum of 30. Overcome Defenses. The Bludgeoning, Piercing, and Slashing damage you deal always ignores Resistance. Overwhelming Strike. When you roll a 20 on the d20 for an attack roll, you can deal extra damage to the target equal to the ability score increased by this feat. The extra damage’s type is the same as the attack’s type.
+  automation: full
+  passives:
+    - kind: overcomeResistance
+      damage:
+        - bludgeoning
+        - piercing
+        - slashing
+    - kind: extraDamage
+      bonus:
+        add:
+          - kind: abilityScore
+            abilities:
+              - str
+              - dex
+      when: natural20
+      with: attack
+- id: srd52:feature/boon-of-spell-recall
+  name: Boon of Spell Recall
+  text: You gain the following benefits. Ability Score Increase. Increase your Intelligence, Wisdom, or Charisma score by 1, to a maximum of 30. Free Casting. Whenever you cast a spell with a level 1–4 spell slot, roll 1d4. If the number you roll is the same as the slot’s level, the slot isn’t expended.
+  automation: full
+  passives:
+    - kind: slotRecall
+- id: srd52:feature/boon-of-the-night-spirit
+  name: Boon of the Night Spirit
+  text: You gain the following benefits. Ability Score Increase. Increase one ability score of your choice by 1, to a maximum of 30. Merge with Shadows. While within Dim Light or Darkness, you can give yourself the Invisible condition as a Bonus Action. The condition ends on you immediately after you take an action, a Bonus Action, or a Reaction. Shadowy Form. While within Dim Light or Darkness, you have Resistance to all damage except Psychic and Radiant.
+  automation: full
+  activations:
+    - cost:
+        - bonusAction
+      whileIn: shadows
+      targeting:
+        self: true
+      resolution:
+        kind: automatic
+        effects:
+          - kind: applyCondition
+            condition: invisible
+            duration:
+              minutes: 1
+            endsOn: action
+  passives:
+    - kind: resistAll
+      while: shadows
+      except:
+        - psychic
+        - radiant
+- id: srd52:feature/boon-of-truesight
+  name: Boon of Truesight
+  text: You gain the following benefits. Ability Score Increase. Increase one ability score of your choice by 1, to a maximum of 30. Truesight. You have Truesight with a range of 60 feet.
+  automation: full
+  passives:
+    - kind: modifier
+      modifier:
+        kind: sense
+        sense: truesight
+        feet: 60

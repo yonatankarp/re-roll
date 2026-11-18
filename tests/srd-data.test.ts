@@ -73,6 +73,28 @@ describe("shipped feats", () => {
 
   it("each does something: a feature with mechanics, a choice, or code that reads its id", () => {
     const feats = ids("feat").map((id) => lookup(run, FeatSchema, id));
+    // Every SRD 5.2 feat ships (#222), so this covers all of them.
+    expect(feats.map(({ name }) => name)).toEqual(
+      expect.arrayContaining([
+        "Alert",
+        "Magic Initiate",
+        "Savage Attacker",
+        "Skilled",
+        "Ability Score Improvement",
+        "Grappler",
+        "Archery",
+        "Defense",
+        "Great Weapon Fighting",
+        "Two-Weapon Fighting",
+        "Boon of Combat Prowess",
+        "Boon of Dimensional Travel",
+        "Boon of Fate",
+        "Boon of Irresistible Offense",
+        "Boon of Spell Recall",
+        "Boon of the Night Spirit",
+        "Boon of Truesight",
+      ]),
+    );
     // A feat printed once and offered as a version per spell list, as Magic Initiate, is never taken itself.
     const versioned = (entry: (typeof feats)[number]) =>
       feats.some(
