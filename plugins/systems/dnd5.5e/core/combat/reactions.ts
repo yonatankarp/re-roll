@@ -1605,12 +1605,9 @@ function lessen(
               ? [
                   {
                     kind: "modifier" as const,
-                    modifier: {
-                      kind: effect.immune
-                        ? ("immunity" as const)
-                        : ("resistance" as const),
-                      damage: type,
-                    },
+                    modifier: effect.immune
+                      ? { kind: "immunity" as const, damage: type }
+                      : { kind: "resistance" as const, damage: type },
                     duration: effect.lasting,
                   },
                 ]
