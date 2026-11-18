@@ -1,6 +1,6 @@
 import { prisonEvents } from "./fear.ts";
 import { z } from "zod";
-import { placedFlag } from "../zones.ts";
+import { placedFlag, zonesOf } from "../zones.ts";
 import { concentrationBonus } from "./school.ts";
 import {
   type Actor,
@@ -1106,6 +1106,7 @@ export function runAttackRoll(
             ability,
           ) ||
           placedFlag(target, "advantage", "attacksAgainst", state, context) ||
+          distracted(attacker, target, context) ||
           unseenInvisible(attacker, target, context) ||
           blindedTo(target, attacker, context) ||
           hasCondition(
@@ -3032,6 +3033,31 @@ function retaliated(
     );
   }
   return events;
+}
+
+// Invoke Duplicity's Distract: an attack on a creature within 5 feet of the bearer's image of itself, by the bearer
+// within 5 feet of that creature too, or with Shared Distraction by any of its allies.
+// shortcut: the creature distracted needn't see the image.
+export function distracted(
+  attacker: Actor,
+  target: Actor,
+  context: Context,
+): boolean {
+  const near = (at: { x: number; y: number } | null): boolean =>
+    distanceFeet(at, target.position) <= 5;
+  return zonesOf(context.state).some((zone) => {
+    if (zone.zone !== "image" || !zone.decoy || !near(zone.at)) return false;
+    const bearer = context.state.actors[zone.owner];
+    if (bearer?.side !== attacker.side) return false;
+    const distract = deriveStats(bearer, context).passives.find(
+      (passive) => passive.kind === "distract",
+    );
+    if (distract?.kind !== "distract") return false;
+    return (
+      distract.allies === true ||
+      (bearer.id === attacker.id && near(attacker.position))
+    );
+  });
 }
 
 // Elusive or Trance of Order: attack rolls against the bearer can't have Advantage.

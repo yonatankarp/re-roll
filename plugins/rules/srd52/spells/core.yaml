@@ -624,8 +624,26 @@
     touches it would feel nothing. To discern that you are disguised, a creature
     must take the Study action to inspect your appearance and succeed on an
     Intelligence (Investigation) check against your spell save DC.
-  automation: text
+  automation: full
   outOfCombat: utility
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "self": true },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "modifier",
+                "modifier": { "kind": "disguise" },
+                "duration": { "minutes": 60 },
+              },
+            ],
+        },
+    }
 - id: srd52:spell/divination
   name: Divination
   level: 4
@@ -1415,8 +1433,8 @@
     though the language must be one you know. If the spell is dispelled, the
     original script and the illusion both disappear. A creature that has
     Truesight can read the hidden message.
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  outOfCombat: utility
 - id: srd52:spell/instant-summons
   name: Instant Summons
   level: 6
@@ -1627,7 +1645,7 @@
     form; however, all other elements of the illusion remain, so while the
     creature is aware of the illusion’s presence, the creature can still
     physically interact with the illusion.
-  automation: text
+  automation: full
   outOfCombat: castingTime
 - id: srd52:spell/moonbeam
   name: Moonbeam
@@ -1735,7 +1753,38 @@
     such a phantasm can deal 2d8 Psychic damage to the target if it is in the
     phantasm’s area or within 5 feet of the phantasm. The target perceives the
     damage as a type appropriate to the illusion.
-  automation: text
+  automation: full
+  # shortcut: the phantasm's damage comes as the target's turns start, wherever it stands; monsters never Study it.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "creatures": 1, "range": 60, "side": "enemy" },
+      "resolution":
+        {
+          "kind": "save",
+          "ability": "int",
+          "dc": { "base": 0, "add": [{ "kind": "spellSaveDc" }] },
+          "damage": [],
+          "onSuccessDamage": "none",
+          "onFail":
+            [
+              {
+                "kind": "modifier",
+                "modifier":
+                  {
+                    "kind": "lingeringDamage",
+                    "when": "turnStart",
+                    "damage":
+                      [{ "amount": { "dice": "2d8" }, "type": "psychic" }],
+                    "once": false,
+                  },
+                "duration": { "concentration": true, "minutes": 1 },
+                "studyEnds": true,
+              },
+            ],
+          "onSuccess": [],
+        },
+    }
 - id: srd52:spell/plane-shift
   name: Plane Shift
   level: 7
@@ -2232,8 +2281,33 @@
     Intelligence (Investigation) check against your spell save DC. If a creature
     discerns the illusion for what it is, the creature can see through the
     image.
-  automation: text
+  automation: full
   outOfCombat: utility
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting":
+        {
+          "area": { "shape": "cube", "radius": 15 },
+          "range": 60,
+          "side": "enemy",
+        },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "zone",
+                "zone": "image",
+                "radius": 5,
+                "duration": { "concentration": true, "minutes": 10 },
+              },
+            ],
+        },
+      "area": { "moves": 60 },
+    }
 - id: srd52:spell/sorcerous-burst
   name: Sorcerous Burst
   level: 0
@@ -3884,7 +3958,7 @@
     your spell save DC to disbelieve it. If a creature discerns that the terrain
     is illusory, the creature sees a vague image superimposed on the real
     terrain.
-  automation: text
+  automation: full
   outOfCombat: castingTime
 - id: srd52:spell/heat-metal
   name: Heat Metal
@@ -7252,8 +7326,46 @@
     the creature’s soul returns to its body if the body is alive and within 100
     feet. Otherwise, that creature dies. When the spell ends, the container is
     destroyed.
-  automation: text
-  outOfCombat: castingTime
+  automation: full
+  # shortcut: the possession is cast as an action in a fight, as if the soul already waited in its container; the host fights for the caster until the fight ends, and the caster's body lies Incapacitated meanwhile.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting":
+        {
+          "creatures": 1,
+          "range": 100,
+          "side": "enemy",
+          "creatureTypes": ["humanoid"],
+        },
+      "alsoSelf":
+        [
+          {
+            "kind": "applyCondition",
+            "condition": "incapacitated",
+            "duration": { "minutes": 60 },
+            "repeatSave": false,
+            "endsOnDamage": false,
+          },
+        ],
+      "resolution":
+        {
+          "kind": "save",
+          "ability": "cha",
+          "dc": { "base": 0, "add": [{ "kind": "spellSaveDc" }] },
+          "damage": [],
+          "onSuccessDamage": "none",
+          "onFail":
+            [
+              {
+                "kind": "modifier",
+                "modifier": { "kind": "controlled" },
+                "duration": { "minutes": 60 },
+              },
+            ],
+          "onSuccess": [],
+        },
+    }
 - id: srd52:spell/major-image
   name: Major Image
   level: 3
@@ -7286,8 +7398,34 @@
     through the image, and its other sensory qualities become faint to the
     creature. Using a Higher-Level Spell Slot. The spell lasts until dispelled,
     without requiring Concentration, if cast with a level 4+ spell slot.
-  automation: text
+  automation: full
+  # shortcut: a level 4+ slot doesn't make it last without Concentration.
   outOfCombat: utility
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting":
+        {
+          "area": { "shape": "cube", "radius": 25 },
+          "range": 120,
+          "side": "enemy",
+        },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "zone",
+                "zone": "image",
+                "radius": 10,
+                "duration": { "concentration": true, "minutes": 10 },
+              },
+            ],
+        },
+      "area": { "moves": 120 },
+    }
 - id: srd52:spell/maze
   name: Maze
   level: 8
@@ -7388,7 +7526,37 @@
     up to twice your Speed and make it gesture, speak, and behave in whatever
     way you choose. It is intangible and invulnerable. You can see through its
     eyes and hear through its ears as if you were located where it is.
-  automation: text
+  automation: full
+  # shortcut: the double fools no one into attacking it; its eyes let the caster see from where it stands.
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "self": true },
+      "area": { "moves": 60 },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "applyCondition",
+                "condition": "invisible",
+                "duration": { "concentration": true, "minutes": 60 },
+                "repeatSave": false,
+                "endsOnDamage": false,
+                "endsOn": "spell",
+              },
+              {
+                "kind": "zone",
+                "zone": "image",
+                "radius": 0,
+                "decoy": true,
+                "duration": { "concentration": true, "minutes": 60 },
+              },
+            ],
+        },
+    }
 - id: srd52:spell/nondetection
   name: Nondetection
   level: 3
@@ -10409,7 +10577,7 @@
     (Investigation) check against your spell save DC. If a creature discerns the
     illusion for what it is, the creature can see through the image, and any
     noise it makes sounds hollow to the creature.
-  automation: text
+  automation: full
   outOfCombat: utility
 - id: srd52:spell/purify-food-and-drink
   name: Purify Food and Drink
@@ -11122,7 +11290,10 @@
                     {
                       "name": "Change Appearance",
                       "modifiers":
-                        [{ "kind": "aspect", "name": "Change Appearance" }],
+                        [
+                          { "kind": "aspect", "name": "Change Appearance" },
+                          { "kind": "disguise" },
+                        ],
                     },
                     {
                       "name": "Natural Weapons",
@@ -12825,8 +12996,33 @@
     chest—it must be no larger than a 5-foot Cube. The image can’t create sound,
     light, smell, or any other sensory effect. Physical interaction with the
     image reveals it to be an illusion, since things can pass through it.
-  automation: text
+  automation: full
+  # shortcut: only the image plays; a sound changes nothing on the grid.
   outOfCombat: utility
+  activation:
+    {
+      "cost": ["action"],
+      "targeting":
+        {
+          "area": { "shape": "cube", "radius": 5 },
+          "range": 30,
+          "side": "enemy",
+        },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "zone",
+                "zone": "image",
+                "radius": 0,
+                "duration": { "minutes": 1 },
+              },
+            ],
+        },
+    }
 - id: srd52:spell/modify-memory
   name: Modify Memory
   level: 5
@@ -13234,8 +13430,35 @@
     spell save DC. If a creature discerns the illusion for what it is, the
     creature can see through the image, and any noise it makes sounds hollow to
     the creature.
-  automation: text
+  automation: full
+  # shortcut: the copy appears within 120 feet of the caster, and damage doesn't end it.
   outOfCombat: utility
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting":
+        {
+          "area": { "shape": "cube", "radius": 5 },
+          "range": 120,
+          "side": "enemy",
+        },
+      "area": { "moves": 60 },
+      "resolution":
+        {
+          "kind": "automatic",
+          "damage": [],
+          "effects":
+            [
+              {
+                "kind": "zone",
+                "zone": "image",
+                "radius": 0,
+                "decoy": true,
+                "duration": { "concentration": true, "minutes": 1440 },
+              },
+            ],
+        },
+    }
 - id: srd52:spell/raise-dead
   name: Raise Dead
   level: 5
@@ -13400,8 +13623,31 @@
     to examine a target can make an Intelligence (Investigation) check against
     your spell save DC. If it succeeds, it becomes aware that the target is
     disguised.
-  automation: text
+  automation: full
   outOfCombat: utility
+  activation:
+    {
+      "cost": ["action", "slot"],
+      "targeting": { "creatures": 8, "range": 30, "side": "any" },
+      "resolution":
+        {
+          "kind": "save",
+          "ability": "cha",
+          "dc": { "base": 0, "add": [{ "kind": "spellSaveDc" }] },
+          "willing": true,
+          "damage": [],
+          "onSuccessDamage": "none",
+          "onFail":
+            [
+              {
+                "kind": "modifier",
+                "modifier": { "kind": "disguise" },
+                "duration": { "minutes": 480 },
+              },
+            ],
+          "onSuccess": [],
+        },
+    }
 - id: srd52:spell/shield
   name: Shield
   level: 1
