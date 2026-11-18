@@ -105,8 +105,95 @@ export function obstaclesOf(
   check: Check,
   access: ContentAccess,
 ): readonly Obstacle[] {
-  const parsed = featureCheck(check, access);
-  return "about" in parsed ? (parsed.about ?? []) : [];
+  return aboutOf(featureCheck(check, access));
+}
+
+// What a check's skill deals with, as swaying someone with Persuasion.
+const SKILL_OBSTACLES: Partial<Record<Skill, Obstacle>> = {
+  persuasion: "influence",
+  deception: "influence",
+  intimidation: "influence",
+  performance: "influence",
+  insight: "truth",
+  animalHandling: "beast",
+  perception: "hidden",
+  investigation: "hidden",
+  arcana: "lore",
+  history: "lore",
+  nature: "lore",
+  religion: "lore",
+  survival: "way",
+};
+
+// What a check is about: what it says, and what its skill deals with.
+function aboutOf(check: Check): readonly Obstacle[] {
+  const printed = "about" in check ? (check.about ?? []) : [];
+  const read =
+    "skill" in check && check.skill ? SKILL_OBSTACLES[check.skill] : undefined;
+  return read && !printed.includes(read) ? [...printed, read] : printed;
+}
+
+// Advantage on a check with the creature it names, from a modifier that goes by whom it's made with (Modifier
+// advantage `with`), and Disadvantage on one to influence a Hostile creature, unless the bearer has Cunning Speaker.
+export function withEdge(
+  actor: Actor,
+  check: Check,
+  about: readonly Obstacle[],
+  access: ContentAccess,
+): { readonly advantage: boolean; readonly disadvantage: boolean } {
+  const other = "with" in check ? check.with : undefined;
+  if (!other) return { advantage: false, disadvantage: false };
+  const stats = deriveStats(actor, access);
+  const skill = "skill" in check ? check.skill : undefined;
+  const advantage = [
+    ...actor.activeEffects.map(({ modifier }) => modifier),
+    ...stats.passives.flatMap((passive) =>
+      passive.kind === "modifier" ? [passive.modifier] : [],
+    ),
+  ].some(
+    (modifier) =>
+      modifier.kind === "advantage" &&
+      modifier.on === "checks" &&
+      modifier.with !== undefined &&
+      (!modifier.skills ||
+        (skill !== undefined && modifier.skills.includes(skill))) &&
+      (!modifier.with.creatureTypes ||
+        (other.creatureType !== undefined &&
+          modifier.with.creatureTypes.includes(other.creatureType))) &&
+      (!modifier.with.kin ||
+        (other.kin !== undefined && modifier.with.kin.includes(other.kin))) &&
+      (modifier.with.maxCr === undefined ||
+        (other.cr !== undefined && other.cr <= modifier.with.maxCr)),
+  );
+  const disadvantage =
+    other.hostile === true &&
+    about.includes("influence") &&
+    !stats.passives.some(({ kind }) => kind === "cunningSpeaker");
+  return { advantage, disadvantage };
+}
+
+// Whether someone in the party understands this language: knows it, or understands every language while a spell or
+// trait lasts, as Comprehend Languages (the story predicate dnd5.5e:understands).
+export function understands(
+  language: string,
+  party: readonly Actor[],
+  access: ContentAccess,
+): boolean {
+  return party.some((actor) => {
+    const stats = deriveStats(actor, access);
+    return (
+      stats.passives.some(
+        (passive) =>
+          (passive.kind === "languages" &&
+            passive.languages.includes(language)) ||
+          (passive.kind === "modifier" &&
+            passive.modifier.kind === "comprehension"),
+      ) ||
+      actor.activeEffects.some(
+        ({ modifier }) => modifier.kind === "comprehension",
+      )
+    );
+  });
 }
 
 // The tools a character is proficient with, by name (toolKeyOf): its classes', its background's (a choice of kind, as
@@ -198,7 +285,7 @@ export function sceneCheck(
 ): { readonly success: boolean; readonly events: SystemEvent[] } {
   const parsed = featureCheck(check, context);
   if ("feature" in parsed) throw new Error("A feature check resolves first");
-  const about = parsed.about ?? [];
+  const about = aboutOf(parsed);
   const aid = aidFor(actor, about, context);
   const spent = aid?.spent
     ? [
@@ -263,6 +350,7 @@ export function sceneCheck(
       : undefined;
   const tool = toolFor(actor, parsed, about, context);
   const edge = toolEdge(actor, skill, tool, context);
+  const whom = withEdge(actor, parsed, about, context);
   const rolled = abilityCheck(
     actor,
     skill,
@@ -270,8 +358,12 @@ export function sceneCheck(
     parsed.dc,
     () => skill ?? ability,
     context,
-    aid?.aid === "advantage" || edge.advantage || passes(actor, skill, context),
+    aid?.aid === "advantage" ||
+      edge.advantage ||
+      whom.advantage ||
+      passes(actor, skill, context),
     tool ? { id: tool.id, proficient: edge.proficient } : undefined,
+    whom.disadvantage,
   );
   return { success: rolled.success, events: [...rolled.events, ...spent] };
 }
