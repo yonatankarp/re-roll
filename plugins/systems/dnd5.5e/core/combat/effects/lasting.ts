@@ -42,7 +42,8 @@ export const ownForm = (target: Actor, caster: Actor): boolean =>
 export function effectEnds(
   duration: Duration,
 ): "concentration" | "casterNextTurn" | "casterNextTurnEnd" | "spellDuration" {
-  if (typeof duration !== "object") return "casterNextTurn";
+  // What an instantaneous effect leaves stays until something ends it, as Prone until the creature stands.
+  if (typeof duration !== "object") return "spellDuration";
   if ("until" in duration) {
     if (duration.until === "yourNextTurnEnd") return "casterNextTurnEnd";
     return duration.until === "yourNextTurnStart"

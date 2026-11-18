@@ -1580,6 +1580,18 @@ function turnStarts(
   const nextActor = state.actors[nextId];
   const nextMount = nextActor ? mountOf(nextActor) : null;
   const endingId = ended ?? combat.order[combat.index];
+  // The turns that didn't come: the places in the order gone past, as a dead creature's, and as a round begins,
+  // those of a creature with no place in it.
+  const count = combat.order.length;
+  const steps = (round - combat.round) * count + index - combat.index;
+  const passed = new Set(
+    Array.from(
+      { length: Math.min(Math.max(steps - 1, 0), count) },
+      (_, step) => combat.order[(combat.index + 1 + step) % count],
+    ),
+  );
+  const missed = (id: string): boolean =>
+    passed.has(id) || (round > combat.round && !combat.order.includes(id));
   const actors = Object.fromEntries(
     Object.entries(state.actors).map(([id, actor]) => [
       id,
@@ -1594,13 +1606,17 @@ function turnStarts(
         !actor.reposed
           ? { deadRounds: (actor.deadRounds ?? 0) + round - combat.round }
           : {}),
-        // A "until your next turn" effect ends when its caster's turn comes round.
+        // A "until your next turn" effect ends when its caster's turn comes round, or would have.
         activeEffects: actor.activeEffects
           .filter(
             (effect) =>
               (effect.ends !== "casterNextTurn" ||
                 effect.casterId !== nextId) &&
-              (effect.ends !== "casterTurnEnd" || effect.casterId !== endingId),
+              (effect.ends !== "casterTurnEnd" ||
+                effect.casterId !== endingId) &&
+              (effect.ends === "concentration" ||
+                effect.ends === "spellDuration" ||
+                !missed(effect.casterId)),
           )
           .map((effect) =>
             effect.ends === "casterNextTurnEnd" && effect.casterId === nextId

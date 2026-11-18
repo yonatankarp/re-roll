@@ -7,6 +7,7 @@ import {
   type Actor,
   type DndState,
   dndEvent,
+  INCAPACITATING,
   NS,
   turnId,
 } from "../state.ts";
@@ -14,6 +15,7 @@ import {
 // Durations counted in rounds, and the limits Slow and its kin put on a creature's turn.
 
 type Lasts = NonNullable<ActiveEffect["lasts"]>;
+type Condition = (typeof INCAPACITATING)[number];
 
 // The round `actorId`'s next turn starts in, counting from the turn under way.
 function nextTurnRound(state: DndState, actorId: string): number {
@@ -25,7 +27,7 @@ function nextTurnRound(state: DndState, actorId: string): number {
 }
 
 // When an effect with this duration runs out, as the effect's `lasts`, or nothing for one that lasts the fight or
-// ends some other way. A minute is ten rounds, to the start of the caster's turn.
+// ends some other way. A minute is ten rounds.
 export function lastsFor(
   duration: Duration,
   caster: Actor,
@@ -62,13 +64,35 @@ export function lastsFor(
   const rounds = state.combat?.environment?.halfDurations
     ? 5 * duration.minutes
     : 10 * duration.minutes;
+  // It ends where it began, at the start of the turn it was cast on that many rounds later, so one cast on another's
+  // turn, as a Reaction, still lasts its full time.
   return {
     lasts: {
-      actor: caster.id,
-      round: nextTurnRound(state, caster.id) + rounds - 1,
+      actor: turnId(combat) ?? caster.id,
+      round: combat.round + rounds,
       at: "start",
     },
   };
+}
+
+// Being Incapacitated ends Concentration; with Boon of the Iron Mind only Petrified or Unconscious does.
+export function focusLost(
+  target: Actor,
+  conditions: readonly Condition[],
+  access: ContentAccess,
+): SystemEvent[] {
+  return target.concentratingOn !== null &&
+    conditions.some((condition) => INCAPACITATING.includes(condition)) &&
+    (conditions.includes("petrified") ||
+      conditions.includes("unconscious") ||
+      !deriveStats(target, access).passives.some(
+        (passive) =>
+          passive.kind === "unshakableFocus" &&
+          !passive.spells &&
+          !passive.schools,
+      ))
+    ? [dndEvent(`${NS}:concentrationEnded`, { actor: target.id })]
+    : [];
 }
 
 // The effects that run out as `actorId`'s turn starts or ends, and as a turn starts, any whose turn went by
@@ -178,7 +202,11 @@ export function lethargyEffect(
 
 // As a creature's turn starts: Slow's limits again, and once Haste is gone, its lethargy, Incapacitated until
 // the turn ends.
-export function turnStartEvents(actor: Actor, state: DndState): SystemEvent[] {
+export function turnStartEvents(
+  actor: Actor,
+  state: DndState,
+  access: ContentAccess,
+): SystemEvent[] {
   const events = limitEvents(actor, limitsOf(actor), true);
   const waiting = actor.activeEffects.find(
     ({ modifier }) => modifier.kind === "lethargy",
@@ -201,6 +229,7 @@ export function turnStartEvents(actor: Actor, state: DndState): SystemEvent[] {
           },
         },
       }),
+      ...focusLost(actor, ["incapacitated"], access),
     );
   }
   return events;

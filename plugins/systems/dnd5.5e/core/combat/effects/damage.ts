@@ -40,7 +40,7 @@ import { teleportSquares } from "../movement.ts";
 import { beforeDamage } from "../reactions.ts";
 import { spendHitDice } from "../school.ts";
 import { headDamageEvents } from "../heads.ts";
-import { lastsFor } from "../durations.ts";
+import { focusLost, lastsFor } from "../durations.ts";
 import { type Context, currentActor, hasPassive } from "../queries.ts";
 import { rollSave } from "./saves.ts";
 import { killEvents, transferEvents, downedEvents } from "./zero-hp.ts";
@@ -233,6 +233,7 @@ function takenEvents(
           ends: "spellDuration",
         },
       }),
+      ...focusLost(target, ["petrified"], context),
     ];
   }
   // Suppressed Lycanthropy: the creature that drops comes back at once as another, or as itself again.
@@ -755,6 +756,7 @@ export function dealEvents(
             ...lastsFor({ minutes: 1 }, hurt, hurt, state),
           },
         }),
+        ...focusLost(hurt, ["incapacitated"], context),
       );
     }
   }

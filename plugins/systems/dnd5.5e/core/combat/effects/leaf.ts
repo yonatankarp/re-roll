@@ -53,7 +53,12 @@ import { healingStopped, inZone, zoneImmune, zonesOf } from "../../zones.ts";
 import { seeing } from "../../sight.ts";
 import { boosted } from "../summon.ts";
 import { resistancesLeft } from "../../legendary.ts";
-import { lastsFor, lethargyEffect, limitEvents } from "../durations.ts";
+import {
+  focusLost,
+  lastsFor,
+  lethargyEffect,
+  limitEvents,
+} from "../durations.ts";
 import { liftEvents } from "../falling.ts";
 import { reincarnateEvents } from "../../reincarnate.ts";
 import { cureFor, dispelEvents } from "../dispel.ts";
@@ -838,24 +843,10 @@ export function leafEvents(
                 repeatSave: { ability: deficient.ability, dc: deficient.dc },
               },
             }),
+            ...focusLost(target, ["incapacitated"], context),
           );
         }
-        // Being Incapacitated ends Concentration; with Boon of the Iron Mind only Petrified or Unconscious does.
-        if (
-          INCAPACITATING.includes(effect.condition) &&
-          target.concentratingOn !== null &&
-          (["petrified", "unconscious"].includes(effect.condition) ||
-            !deriveStats(target, context).passives.some(
-              (passive) =>
-                passive.kind === "unshakableFocus" &&
-                !passive.spells &&
-                !passive.schools,
-            ))
-        ) {
-          events.push(
-            dndEvent(`${NS}:concentrationEnded`, { actor: target.id }),
-          );
-        }
+        events.push(...focusLost(target, [effect.condition], context));
         events.push(
           ...incapacitatedEvents(target, caster, effect.condition, context),
         );
